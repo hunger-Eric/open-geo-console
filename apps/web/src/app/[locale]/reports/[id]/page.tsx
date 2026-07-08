@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { ReportView } from "@/components/report-view";
+import { StoredReportFallback } from "@/components/stored-report-fallback";
 import { getGeoReport } from "@/db/reports";
 import { getDictionary, isLocale, type Locale } from "@/i18n";
 
@@ -16,10 +17,10 @@ export default async function ReportPage({
   }
 
   const row = await getGeoReport(id);
+  const locale: Locale = rawLocale;
   if (!row) {
-    notFound();
+    return <StoredReportFallback dictionary={getDictionary(locale)} locale={locale} reportId={id} />;
   }
 
-  const locale: Locale = rawLocale;
   return <ReportView dictionary={getDictionary(locale)} locale={locale} report={row.payload} />;
 }

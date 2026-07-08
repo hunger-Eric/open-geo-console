@@ -73,6 +73,9 @@ export interface Dictionary {
     scoreLabel: string;
     scoreDescription: string;
     priorityEmpty: string;
+    loadingReport: string;
+    reportUnavailableTitle: string;
+    reportUnavailableDescription: string;
     metricLabels: Record<"critical" | "warnings" | "pages" | "assets", string>;
     tableHeaders: Record<"url" | "status" | "h1" | "schema" | "text" | "links", string>;
     fields: Record<"present" | "missing" | "yes" | "no" | "error", string>;

@@ -76,6 +76,10 @@ export const en = {
     scoreDescription:
       "A practical score for how easily AI search and answer systems can discover, read, and cite this website.",
     priorityEmpty: "No priority fixes are required from the current scan.",
+    loadingReport: "Loading the saved browser copy of this report.",
+    reportUnavailableTitle: "Report unavailable",
+    reportUnavailableDescription:
+      "This report is not available in server storage or this browser. Generate a new scan to create a fresh report.",
     metricLabels: {
       critical: "Critical",
       warnings: "Warnings",

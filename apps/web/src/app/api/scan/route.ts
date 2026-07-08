@@ -14,7 +14,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       id: saved.id,
       url: saved.url,
-      score: saved.score
+      score: saved.score,
+      report
     });
   } catch (error) {
     return NextResponse.json(

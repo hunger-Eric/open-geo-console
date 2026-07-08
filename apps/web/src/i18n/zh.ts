@@ -74,6 +74,9 @@ export const zh = {
     scoreLabel: "评分",
     scoreDescription: "用于判断 AI 搜索和答案系统是否容易发现、读取并引用该网站。",
     priorityEmpty: "当前扫描未发现需要优先处理的修复项。",
+    loadingReport: "正在读取浏览器中保存的报告副本。",
+    reportUnavailableTitle: "报告不可用",
+    reportUnavailableDescription: "服务端存储和当前浏览器都没有找到这份报告。请重新扫描生成新报告。",
     metricLabels: {
       critical: "严重",
       warnings: "警告",

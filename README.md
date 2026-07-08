@@ -43,7 +43,7 @@ The Vercel project is configured as a monorepo Next.js app:
 - Build command: `npm run build`
 - Output directory: `apps/web/.next`
 
-Vercel serverless runtime uses `/tmp/open-geo-console.sqlite` unless `OPEN_GEO_DB_PATH` is configured, so report storage there is suitable for smoke tests and demos, not durable production persistence.
+Vercel serverless runtime uses `/tmp/open-geo-console.sqlite` unless `OPEN_GEO_DB_PATH` is configured. The scanner also stores the just-created report in the browser so the post-scan report page works in the demo deployment even when serverless functions do not share temp storage.
 
 ## First Case
 

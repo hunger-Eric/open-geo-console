@@ -7,7 +7,7 @@ Build the MVP for a self-hostable open-source AI Search Console for company webs
 ## Current Architecture
 
 - `apps/web` is a Next.js App Router app with SQLite/Drizzle persistence.
-- Local self-hosted SQLite defaults to `.data/open-geo-console.sqlite`; `OPEN_GEO_DB_PATH` overrides it. Vercel/serverless defaults to `/tmp/open-geo-console.sqlite`, which is ephemeral and for demos/smoke tests unless a durable path is configured.
+- Local self-hosted SQLite defaults to `.data/open-geo-console.sqlite`; `OPEN_GEO_DB_PATH` overrides it. Vercel/serverless defaults to `/tmp/open-geo-console.sqlite`, and the scanner caches the just-created report in the browser so the demo deployment can render the immediate report page even when serverless temp storage is isolated.
 - Public UI routes are locale-prefixed: `/en`, `/zh`, `/en/reports/[id]`, `/zh/reports/[id]`, `/en/logs`, and `/zh/logs`; `/` redirects to `/en`.
 - User-visible product copy, report copy, severity labels, actions, empty states, and finding messages live in typed dictionaries under `apps/web/src/i18n`.
 - `packages/geo-auditor` fetches homepage, `robots.txt`, `sitemap.xml`, `llms.txt`, representative pages, and emits stable GEO report JSON.
@@ -30,7 +30,7 @@ Build the MVP for a self-hostable open-source AI Search Console for company webs
 
 - v1 has no auth, billing, teams, multi-tenant SaaS backend, or agency batch scanning.
 - Live scans depend on target site availability and network access; deterministic tests mock fetch.
-- Vercel demo persistence is ephemeral because it uses serverless `/tmp`; use `OPEN_GEO_DB_PATH` or a future durable database adapter for production-grade hosted persistence.
+- Vercel demo persistence is ephemeral because it uses serverless `/tmp`; the browser report fallback supports immediate post-scan testing, but production-grade hosted persistence still needs `OPEN_GEO_DB_PATH` or a future durable database adapter.
 - Log upload is implemented as paste/sample analysis in the app, not file upload storage.
 - v1 does not do IP/ASN verification for crawler identity; bot visibility is based on User-Agent registry matching.
 - PDF export is browser print/PDF first; there is no server-side PDF generator.

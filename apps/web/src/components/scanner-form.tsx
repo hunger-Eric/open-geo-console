@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { ArrowRight, Loader2 } from "lucide-react";
+import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { Dictionary, Locale } from "@/i18n";
 import { localizePath } from "@/i18n";
 
@@ -32,6 +33,7 @@ export function ScannerForm({
       });
       const payload = (await response.json()) as {
         id?: string;
+        report?: GeoAuditReport;
         error?: string;
         errorKey?: keyof Dictionary["errors"];
       };
@@ -41,6 +43,9 @@ export function ScannerForm({
         return;
       }
 
+      if (payload.report) {
+        window.localStorage.setItem(`open-geo-console:report:${payload.id}`, JSON.stringify(payload.report));
+      }
       router.push(localizePath(locale, `/reports/${payload.id}`));
     });
   }
