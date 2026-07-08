@@ -104,23 +104,36 @@ export const zh = {
     assetMissing: "{asset} 未找到，或返回内容为空。"
   },
   logs: {
-    title: "AI 爬虫访问报告",
+    title: "AI Bot 可见性报告",
     description:
-      "粘贴 Nginx combined 日志或 Cloudflare JSONL。MVP 内置示例日志，方便立刻查看报告效果。",
+      "粘贴 Nginx combined 日志或 Cloudflare JSONL，查看哪些可识别 AI bot 真实出现在访问日志中。",
     summary: "概览",
     crawlerGroups: "爬虫分组",
+    operatorSummary: "公司汇总",
+    botCoverageMatrix: "AI Bot 覆盖矩阵",
+    policyHints: "策略与证据说明",
+    detectedEvidence: "已识别路径证据",
     recommendedNginx: "推荐 Nginx 日志配置",
     noKnownCrawlers: "暂未发现已知 AI 爬虫。",
+    noDetectedOperators: "这份日志样本中没有识别到 AI bot 公司。",
     sampleDescription: "示例日志",
     textareaLabel: "访问日志样本",
     missingUserAgentWarning:
       "这份日志没有 User-Agent 字段，因此无法还原历史 AI 爬虫访问。请先开启 User-Agent 记录，再收集后续证据。",
     recommendedNginxIntro: "使用以下 Nginx 日志格式，为后续报告保留 User-Agent 证据。",
+    registryContext: "当前 registry 中有 {total} 条规则，其中 {detected} 条从日志证据中被识别。",
+    robotTokenOnlyNotice:
+      "robots-token-only 条目是 robots.txt 的策略控制项，不代表爬虫已经访问过网站。",
+    docsLink: "来源文档",
+    morePaths: "另有 {count} 个路径",
     metricLabels: {
       lines: "行数",
       parsed: "已解析",
       aiHits: "AI 命中",
-      groups: "分组"
+      groups: "分组",
+      detectedBots: "已识别 bot",
+      detectedOperators: "公司数",
+      registryBots: "规则数"
     },
     fields: {
       operator: "公司",
@@ -128,7 +141,49 @@ export const zh = {
       path: "路径",
       status: "状态码",
       date: "日期",
-      hits: "访问次数"
+      hits: "访问次数",
+      intent: "意图",
+      detectability: "可识别性",
+      latestDate: "最近日期",
+      robotsToken: "Robots token",
+      docs: "来源",
+      paths: "路径"
+    },
+    coverageStatuses: {
+      detected: "已识别",
+      not_seen: "未出现",
+      not_log_detectable: "策略 token",
+      unknown_or_unverified: "需验证"
+    },
+    coverageStatusDescriptions: {
+      detected: "该 bot 以可识别 User-Agent 出现在当前日志中。",
+      not_seen: "该 bot 可以通过日志识别，但未出现在当前样本中。",
+      not_log_detectable: "这是 robots.txt 策略 token，不应当被当作日志访问证据。",
+      unknown_or_unverified: "该规则有可见性参考价值，但在形成确定结论前需要核验来源。"
+    },
+    intentLabels: {
+      training: "训练",
+      search: "搜索",
+      assistant: "助手抓取",
+      preview: "预览",
+      general: "通用抓取"
+    },
+    detectabilityLabels: {
+      "log-detectable": "日志可识别",
+      "robots-token-only": "仅 robots token",
+      "suspected-or-community": "疑似 / 社区观察"
+    },
+    detectabilityDescriptions: {
+      "log-detectable": "只要日志记录了 User-Agent，就可以从访问日志中识别。",
+      "robots-token-only": "用于 robots.txt 策略控制，通常不会作为普通 HTTP User-Agent 出现。",
+      "suspected-or-community": "来自社区观察或间接证据，形成强结论前需要确认。"
+    },
+    policyHintMessages: {
+      "logging-user-agent": "日志缺少 User-Agent，因此无法从历史记录还原 AI bot 访问。",
+      "robots-token-control":
+        "{bot} 通过 robots.txt token {robotsToken} 控制；应展示为策略项，而不是流量证据。",
+      "suspected-verification":
+        "{bot} 标记为疑似或社区观察项。可以作为可见性信号，但对外报告前应先核验来源。"
     },
     hitCount: "{count} 次",
     groupMeta: "{date} · HTTP {status}"

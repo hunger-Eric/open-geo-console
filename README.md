@@ -2,13 +2,15 @@
 
 Open GEO Console is an open-source AI Search Console for company websites.
 
-The MVP follows one product story: scan first, connect logs next. A user enters a company website URL, receives a GEO readiness report, then can upload or sample access logs to see whether AI crawlers such as OpenAI, Anthropic, Perplexity, Google, Microsoft, Meta, ByteDance, Amazon, and Common Crawl visited the site.
+The MVP follows one product story: scan first, connect logs next. A user enters a company website URL, receives a GEO readiness report, then can upload or sample access logs to see whether identifiable AI crawlers such as OpenAI, Anthropic, Perplexity, Google, Microsoft, Meta, ByteDance, Amazon, Apple, and Common Crawl visited the site.
 
 ## What v1 Does
 
 - Generates a GEO audit for a website URL.
 - Checks `robots.txt`, `sitemap.xml`, `llms.txt`, schema, metadata, heading structure, canonical URLs, OpenGraph tags, readable content length, internal links, and HTTP status.
-- Parses Nginx combined/access logs and Cloudflare JSONL into AI crawler visits.
+- Parses Nginx combined/access logs and Cloudflare JSONL into an AI Bot Visibility Report.
+- Marks detected AI bots from access-log User-Agent values and separates them from robots.txt-only policy tokens such as `Google-Extended` and `Applebot-Extended`.
+- Maintains an AI Bot Registry covering OpenAI, Anthropic, Perplexity, Google/Gemini, Microsoft/Copilot, Meta, ByteDance, Amazon, Apple, and Common Crawl.
 - Persists generated reports in local SQLite so `/reports/[id]` can be revisited.
 
 ## Workspaces
@@ -17,6 +19,10 @@ The MVP follows one product story: scan first, connect logs next. A user enters 
 - `packages/crawler-rules` - AI User-Agent rules.
 - `packages/log-parser` - log parsing and aggregation.
 - `packages/geo-auditor` - GEO website audit engine.
+
+## AI Bot Registry
+
+The AI Bot Registry is the source of truth for v1 bot visibility. It records which bots can be detected from logs, which entries are robots.txt policy controls only, and which entries need extra verification because public documentation is incomplete. See `docs/AI-BOT-REGISTRY.md` before adding or changing bot rules.
 
 ## Quick Start
 

@@ -3,6 +3,13 @@ export const locales = ["en", "zh"] as const;
 export type Locale = (typeof locales)[number];
 export type TranslationParams = Record<string, string | number | boolean>;
 export type SeverityKey = "critical" | "warning" | "info";
+export type LogCoverageStatus = "detected" | "not_seen" | "not_log_detectable" | "unknown_or_unverified";
+export type LogIntentKey = "training" | "search" | "assistant" | "preview" | "general";
+export type LogDetectabilityKey = "log-detectable" | "robots-token-only" | "suspected-or-community";
+export type LogPolicyHintType =
+  | "logging-user-agent"
+  | "robots-token-control"
+  | "suspected-verification";
 
 export interface FindingMessage {
   title: string;
@@ -78,14 +85,52 @@ export interface Dictionary {
     description: string;
     summary: string;
     crawlerGroups: string;
+    operatorSummary: string;
+    botCoverageMatrix: string;
+    policyHints: string;
+    detectedEvidence: string;
     recommendedNginx: string;
     noKnownCrawlers: string;
+    noDetectedOperators: string;
     sampleDescription: string;
     textareaLabel: string;
     missingUserAgentWarning: string;
     recommendedNginxIntro: string;
-    metricLabels: Record<"lines" | "parsed" | "aiHits" | "groups", string>;
-    fields: Record<"operator" | "bot" | "path" | "status" | "date" | "hits", string>;
+    registryContext: string;
+    robotTokenOnlyNotice: string;
+    docsLink: string;
+    morePaths: string;
+    metricLabels: Record<
+      | "lines"
+      | "parsed"
+      | "aiHits"
+      | "groups"
+      | "detectedBots"
+      | "detectedOperators"
+      | "registryBots",
+      string
+    >;
+    fields: Record<
+      | "operator"
+      | "bot"
+      | "path"
+      | "status"
+      | "date"
+      | "hits"
+      | "intent"
+      | "detectability"
+      | "latestDate"
+      | "robotsToken"
+      | "docs"
+      | "paths",
+      string
+    >;
+    coverageStatuses: Record<LogCoverageStatus, string>;
+    coverageStatusDescriptions: Record<LogCoverageStatus, string>;
+    intentLabels: Record<LogIntentKey, string>;
+    detectabilityLabels: Record<LogDetectabilityKey, string>;
+    detectabilityDescriptions: Record<LogDetectabilityKey, string>;
+    policyHintMessages: Record<LogPolicyHintType, string>;
     hitCount: string;
     groupMeta: string;
   };

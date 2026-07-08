@@ -106,23 +106,36 @@ export const en = {
     assetMissing: "{asset} was not found or returned an empty response."
   },
   logs: {
-    title: "AI crawler access report",
+    title: "AI Bot Visibility Report",
     description:
-      "Paste Nginx combined logs or Cloudflare JSONL. The MVP ships with a sample log so the report is usable immediately.",
+      "Paste Nginx combined logs or Cloudflare JSONL to see which recognizable AI bots actually appeared in your access logs.",
     summary: "Summary",
     crawlerGroups: "Crawler groups",
+    operatorSummary: "Operator summary",
+    botCoverageMatrix: "AI Bot Coverage Matrix",
+    policyHints: "Policy and evidence notes",
+    detectedEvidence: "Detected path evidence",
     recommendedNginx: "Recommended Nginx logging",
     noKnownCrawlers: "No known AI crawlers found yet.",
+    noDetectedOperators: "No AI bot operators were detected in this log sample.",
     sampleDescription: "Sample log",
     textareaLabel: "Access log sample",
     missingUserAgentWarning:
       "This log does not include User-Agent values, so historical AI crawler access cannot be reconstructed. Enable User-Agent logging before collecting future evidence.",
     recommendedNginxIntro: "Use this Nginx log format to keep User-Agent evidence for future reports.",
+    registryContext: "{detected} of {total} registry entries were detected from log evidence.",
+    robotTokenOnlyNotice:
+      "Robots-token-only entries are policy controls for robots.txt. They are not proof that a crawler visited the site.",
+    docsLink: "Docs",
+    morePaths: "+{count} more paths",
     metricLabels: {
       lines: "Lines",
       parsed: "Parsed",
       aiHits: "AI hits",
-      groups: "Groups"
+      groups: "Groups",
+      detectedBots: "Detected bots",
+      detectedOperators: "Operators",
+      registryBots: "Registry bots"
     },
     fields: {
       operator: "Operator",
@@ -130,7 +143,52 @@ export const en = {
       path: "Path",
       status: "Status",
       date: "Date",
-      hits: "Hits"
+      hits: "Hits",
+      intent: "Intent",
+      detectability: "Detectability",
+      latestDate: "Latest date",
+      robotsToken: "Robots token",
+      docs: "Source",
+      paths: "Paths"
+    },
+    coverageStatuses: {
+      detected: "Detected",
+      not_seen: "Not seen",
+      not_log_detectable: "Policy token",
+      unknown_or_unverified: "Needs verification"
+    },
+    coverageStatusDescriptions: {
+      detected: "This bot appeared in the provided logs with a recognizable User-Agent.",
+      not_seen: "This bot is log-detectable, but it did not appear in the provided sample.",
+      not_log_detectable:
+        "This is a robots.txt policy token and should not be treated as log evidence.",
+      unknown_or_unverified:
+        "This rule is useful for visibility, but the source should be verified before treating absence as evidence."
+    },
+    intentLabels: {
+      training: "Training",
+      search: "Search",
+      assistant: "Assistant fetch",
+      preview: "Preview",
+      general: "General crawl"
+    },
+    detectabilityLabels: {
+      "log-detectable": "Log-detectable",
+      "robots-token-only": "Robots token only",
+      "suspected-or-community": "Suspected / community"
+    },
+    detectabilityDescriptions: {
+      "log-detectable": "Can be detected from access logs when the User-Agent is recorded.",
+      "robots-token-only": "Controls policy in robots.txt; it is not expected as a normal HTTP User-Agent.",
+      "suspected-or-community": "Known from community or indirect evidence; confirm before making hard claims."
+    },
+    policyHintMessages: {
+      "logging-user-agent":
+        "User-Agent is missing, so historical AI bot access cannot be reconstructed from this log.",
+      "robots-token-control":
+        "{bot} is controlled through the robots.txt token {robotsToken}; show it as policy, not traffic evidence.",
+      "suspected-verification":
+        "{bot} is marked as suspected or community-observed. Treat hits as visibility signals and verify the source before reporting a definitive claim."
     },
     hitCount: "{count} hits",
     groupMeta: "{date} · HTTP {status}"
