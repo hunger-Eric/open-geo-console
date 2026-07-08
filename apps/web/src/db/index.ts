@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -29,9 +30,12 @@ export function getDb() {
   return database!;
 }
 
-function getDatabasePath(): string {
+export function getDatabasePath(): string {
   if (process.env.OPEN_GEO_DB_PATH) {
     return process.env.OPEN_GEO_DB_PATH;
+  }
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return path.join(tmpdir(), "open-geo-console.sqlite");
   }
   return path.join(findWorkspaceRoot(process.cwd()), ".data", "open-geo-console.sqlite");
 }
