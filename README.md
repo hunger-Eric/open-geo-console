@@ -33,6 +33,18 @@ npm run dev
 
 Open `http://localhost:3000`, scan a website, then try the sample crawler log report.
 
+By default, local self-hosted reports are stored in `.data/open-geo-console.sqlite`. Set `OPEN_GEO_DB_PATH` to use a different SQLite file.
+
+## Deployment
+
+The Vercel project is configured as a monorepo Next.js app:
+
+- Framework preset: Next.js
+- Build command: `npm run build`
+- Output directory: `apps/web/.next`
+
+Vercel serverless runtime uses `/tmp/open-geo-console.sqlite` unless `OPEN_GEO_DB_PATH` is configured, so report storage there is suitable for smoke tests and demos, not durable production persistence.
+
 ## First Case
 
 The first real test site is `https://me.itheheda.online`. It is intentionally treated as a case study and fixture source, not as part of this repository.
