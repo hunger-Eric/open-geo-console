@@ -1,0 +1,25 @@
+{
+  "name": "open-geo-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.9.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspace apps/web",
+    "test": "vitest run",
+    "codegraph:init": "codegraph init -i"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "latest",
+    "@types/node": "latest",
+    "eslint": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "lint": "eslint",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@open-geo-console/crawler-rules": "*",
+    "@open-geo-console/geo-auditor": "*",
+    "@open-geo-console/log-parser": "*",
+    "better-sqlite3": "latest",
+    "drizzle-orm": "latest",
+    "lucide-react": "latest",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "latest",
+    "@types/better-sqlite3": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "eslint-config-next": "latest",
+    "tailwindcss": "latest"
+  }
+}
