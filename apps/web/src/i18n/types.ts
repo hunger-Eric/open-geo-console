@@ -34,7 +34,8 @@ export interface Dictionary {
     | "printReport"
     | "switchToEnglish"
     | "switchToChinese"
-    | "backToScanner",
+    | "backToScanner"
+    | "importLogs",
     string
   >;
   scanner: {
@@ -136,6 +137,33 @@ export interface Dictionary {
     policyHintMessages: Record<LogPolicyHintType, string>;
     hitCount: string;
     groupMeta: string;
+    simulator: {
+      title: string;
+      description: string;
+      targetUrlLabel: string;
+      runButton: string;
+      runningButton: string;
+      compareButton: string;
+      comparingButton: string;
+      attemptedTitle: string;
+      attemptedDescription: string;
+      comparisonTitle: string;
+      comparisonDescription: string;
+      observedTitle: string;
+      missingTitle: string;
+      noAttempts: string;
+      noObserved: string;
+      noMissing: string;
+      pasteLogsHint: string;
+      simulatedBadge: string;
+      observedBadge: string;
+      missingBadge: string;
+      pendingBadge: string;
+      generatedMeta: string;
+      comparisonSummary: string;
+      fields: Record<"method" | "url" | "path" | "userAgent" | "operator" | "bot", string>;
+      errors: Record<"runFailed" | "matchFailed" | "emptyLogs" | "invalidRun" | "importFailed", string>;
+    };
   };
   severity: Record<SeverityKey, string>;
   findings: Record<string, FindingMessage>;

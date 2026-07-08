@@ -21,7 +21,8 @@ export const zh = {
     printReport: "打印 / PDF",
     switchToEnglish: "English",
     switchToChinese: "中文",
-    backToScanner: "返回体检入口"
+    backToScanner: "返回体检入口",
+    importLogs: "导入日志文件"
   },
   scanner: {
     title: "生成一份可分享的 GEO 体检报告",
@@ -120,7 +121,7 @@ export const zh = {
     noKnownCrawlers: "暂未发现已知 AI 爬虫。",
     noDetectedOperators: "这份日志样本中没有识别到 AI bot 公司。",
     sampleDescription: "示例日志",
-    textareaLabel: "访问日志样本",
+    textareaLabel: "粘贴或导入访问日志",
     missingUserAgentWarning:
       "这份日志没有 User-Agent 字段，因此无法还原历史 AI 爬虫访问。请先开启 User-Agent 记录，再收集后续证据。",
     recommendedNginxIntro: "使用以下 Nginx 日志格式，为后续报告保留 User-Agent 证据。",
@@ -189,7 +190,50 @@ export const zh = {
         "{bot} 标记为疑似或社区观察项。可以作为可见性信号，但对外报告前应先核验来源。"
     },
     hitCount: "{count} 次",
-    groupMeta: "{date} · HTTP {status}"
+    groupMeta: "{date} · HTTP {status}",
+    simulator: {
+      title: "外部 AI 爬虫模拟器",
+      description:
+        "先对首个案例站点运行模拟器，再把生成的尝试请求与下方粘贴或导入的访问日志进行对比。",
+      targetUrlLabel: "首个案例 URL",
+      runButton: "运行模拟器",
+      runningButton: "正在运行模拟器",
+      compareButton: "与导入日志对比",
+      comparingButton: "正在对比日志",
+      attemptedTitle: "模拟抓取尝试",
+      attemptedDescription:
+        "这些只是生成的请求尝试，不代表真实 AI 公司已经访问过该站点。",
+      comparisonTitle: "导入日志中的观测结果",
+      comparisonDescription:
+        "这里会标记当前粘贴日志中是否出现了对应的模拟请求。",
+      observedTitle: "已观测",
+      missingTitle: "未观测",
+      noAttempts: "运行模拟器后会显示尝试请求。",
+      noObserved: "导入日志中暂未观测到这些模拟请求。",
+      noMissing: "所有模拟请求都已在导入日志中观测到。",
+      pasteLogsHint: "请先粘贴或导入访问日志，再进行对比。",
+      simulatedBadge: "模拟抓取尝试",
+      observedBadge: "已在导入日志中观测",
+      missingBadge: "未在导入日志中观测",
+      pendingBadge: "等待日志对比",
+      generatedMeta: "运行 {runId} 生成于 {date}",
+      comparisonSummary: "{observed} 已观测 · {missing} 未观测",
+      fields: {
+        method: "方法",
+        url: "URL",
+        path: "路径",
+        userAgent: "User-Agent",
+        operator: "公司",
+        bot: "Bot"
+      },
+      errors: {
+        runFailed: "暂时无法运行模拟器。请在模拟器 API 可用后重试。",
+        matchFailed: "暂时无法对比这次模拟运行与日志。",
+        emptyLogs: "请先粘贴或导入访问日志，再进行对比。",
+        invalidRun: "模拟器响应中没有可用的运行结果。",
+        importFailed: "无法导入这个日志文件。"
+      }
+    }
   },
   severity: {
     critical: "严重",

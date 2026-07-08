@@ -3,6 +3,7 @@
 ## Current Goal
 
 Build the MVP for a self-hostable open-source AI Search Console for company websites. The first workflow is URL -> GEO report. The second workflow is sample or uploaded access logs -> AI Bot Visibility Report.
+The external AI crawler simulator is a stand-alone Open GEO Console workflow: it can attempt marked HTTP requests, then imported access logs decide which attempts were actually observed.
 
 ## Current Architecture
 
@@ -13,6 +14,7 @@ Build the MVP for a self-hostable open-source AI Search Console for company webs
 - `packages/geo-auditor` fetches homepage, `robots.txt`, `sitemap.xml`, `llms.txt`, representative pages, and emits stable GEO report JSON.
 - `packages/crawler-rules` owns the AI Bot Registry, including log-detectable bots, robots-token-only policy entries, and suspected/community entries.
 - `packages/log-parser` parses Nginx combined/access logs and Cloudflare JSONL, then produces aggregates, bot coverage, operator summaries, and policy hints.
+- The external simulator should use log-detectable crawler registry entries only, append an `ogc_run=<runId>` marker, and reconcile imported logs into attempted vs observed results.
 
 ## Implemented
 
@@ -23,6 +25,7 @@ Build the MVP for a self-hostable open-source AI Search Console for company webs
 - Public case report redesign with executive summary, score meaning, priority fixes, evidence sections, technical appendix, share/copy/print actions, and print-friendly CSS.
 - Stable `GeoFinding.messageKey + params` model with literal persisted finding text preserved only as legacy fallback.
 - AI Bot Visibility direction: v1 marks identifiable AI bots from access-log User-Agent values and keeps robots.txt-only controls separate from detected visits.
+- External simulator contract tests define attempted vs observed behavior, run-marker matching, browser User-Agent exclusion, robots-token-only exclusion, and i18n copy parity.
 - Unit coverage for crawler matching, log parsing, GEO audit findings, and report persistence.
 - README, Apache-2.0 license, project `AGENTS.md`, and sample crawler log fixture.
 
@@ -33,6 +36,8 @@ Build the MVP for a self-hostable open-source AI Search Console for company webs
 - Vercel demo persistence is ephemeral because it uses serverless `/tmp`; the browser report fallback supports immediate post-scan testing, but production-grade hosted persistence still needs `OPEN_GEO_DB_PATH` or a future durable database adapter.
 - Log upload is implemented as paste/sample analysis in the app, not file upload storage.
 - v1 does not do IP/ASN verification for crawler identity; bot visibility is based on User-Agent registry matching.
+- Simulator attempts are not evidence of real AI company traffic. Only imported access logs with recognizable AI crawler User-Agent values and the matching `ogc_run=<runId>` marker are observed evidence for a simulator run.
+- The simulator is not integrated into `https://me.itheheda.online` or `E:\project\personal-website`; that site is only a case study target/fixture source.
 - PDF export is browser print/PDF first; there is no server-side PDF generator.
 
 ## Acceptance Commands

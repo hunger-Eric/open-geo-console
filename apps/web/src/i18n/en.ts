@@ -21,7 +21,8 @@ export const en = {
     printReport: "Print / PDF",
     switchToEnglish: "English",
     switchToChinese: "中文",
-    backToScanner: "Back to scanner"
+    backToScanner: "Back to scanner",
+    importLogs: "Import log file"
   },
   scanner: {
     title: "Generate a shareable GEO report",
@@ -123,7 +124,7 @@ export const en = {
     noKnownCrawlers: "No known AI crawlers found yet.",
     noDetectedOperators: "No AI bot operators were detected in this log sample.",
     sampleDescription: "Sample log",
-    textareaLabel: "Access log sample",
+    textareaLabel: "Paste or import access logs",
     missingUserAgentWarning:
       "This log does not include User-Agent values, so historical AI crawler access cannot be reconstructed. Enable User-Agent logging before collecting future evidence.",
     recommendedNginxIntro: "Use this Nginx log format to keep User-Agent evidence for future reports.",
@@ -195,7 +196,50 @@ export const en = {
         "{bot} is marked as suspected or community-observed. Treat hits as visibility signals and verify the source before reporting a definitive claim."
     },
     hitCount: "{count} hits",
-    groupMeta: "{date} · HTTP {status}"
+    groupMeta: "{date} · HTTP {status}",
+    simulator: {
+      title: "External AI crawler simulator",
+      description:
+        "Run the simulator against the first-case site, then compare the attempted crawl requests with the logs you paste or import below.",
+      targetUrlLabel: "First-case URL",
+      runButton: "Run simulator",
+      runningButton: "Running simulator",
+      compareButton: "Compare with imported logs",
+      comparingButton: "Comparing logs",
+      attemptedTitle: "Simulated crawl attempts",
+      attemptedDescription:
+        "These are generated requests only. They are not proof that an AI company visited the site.",
+      comparisonTitle: "Observed in imported logs",
+      comparisonDescription:
+        "This comparison marks which simulated attempts also appear in the access logs currently pasted here.",
+      observedTitle: "Observed",
+      missingTitle: "Not observed",
+      noAttempts: "Run the simulator to see attempted requests.",
+      noObserved: "No simulated attempts were observed in the imported logs yet.",
+      noMissing: "Every simulated attempt was observed in the imported logs.",
+      pasteLogsHint: "Paste or import access logs before comparing.",
+      simulatedBadge: "Simulated crawl attempt",
+      observedBadge: "Observed in imported logs",
+      missingBadge: "Not observed in imported logs",
+      pendingBadge: "Waiting for log comparison",
+      generatedMeta: "Run {runId} generated {date}",
+      comparisonSummary: "{observed} observed · {missing} not observed",
+      fields: {
+        method: "Method",
+        url: "URL",
+        path: "Path",
+        userAgent: "User-Agent",
+        operator: "Operator",
+        bot: "Bot"
+      },
+      errors: {
+        runFailed: "Unable to run the simulator. Try again after the simulator API is available.",
+        matchFailed: "Unable to compare logs with this simulator run.",
+        emptyLogs: "Paste or import access logs before comparing.",
+        invalidRun: "The simulator response did not include a usable run.",
+        importFailed: "Unable to import this log file."
+      }
+    }
   },
   severity: {
     critical: "Critical",
