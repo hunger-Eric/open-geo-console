@@ -54,7 +54,11 @@ export async function POST(request: Request) {
       await deleteGeoReport(saved.id);
       if (claim.outcome === "rate_limited") {
         return NextResponse.json(
-          { error: "The rolling 24-hour free preview limit has been reached.", retryAfter: claim.retryAfter.toISOString() },
+          {
+            error: "The rolling 24-hour free preview limit has been reached.",
+            errorKey: "freePreviewLimitReached",
+            retryAfter: claim.retryAfter.toISOString()
+          },
           { status: 429 }
         );
       }

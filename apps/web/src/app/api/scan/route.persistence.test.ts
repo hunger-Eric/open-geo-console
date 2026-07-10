@@ -73,4 +73,23 @@ describe("scan API locale persistence", () => {
     expect(await response.json()).toMatchObject({ reportId: "report-1", jobId: null, status: "technical_only" });
     expect(mocks.enqueueScanJob).not.toHaveBeenCalled();
   });
+
+  it("returns a localizable error key when the rolling free limit is reached", async () => {
+    mocks.claimFreeSiteTrial.mockResolvedValue({
+      outcome: "rate_limited",
+      retryAfter: new Date("2026-07-11T10:00:00.000Z")
+    });
+
+    const response = await POST(new Request("https://example.test/api/scan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://example.com", locale: "zh" })
+    }));
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({
+      errorKey: "freePreviewLimitReached",
+      retryAfter: "2026-07-11T10:00:00.000Z"
+    });
+  });
 });

@@ -22,6 +22,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Citation verification that removes unsupported model findings before persistence.
 - PostgreSQL schema for reports, jobs, AI payloads, seven-day page evidence, free trials, rate buckets, access Keys, credit ledger and private report tokens.
 - Thirty-day free preview reuse by registrable site, private-suffix tenant handling, two distinct free sites per HMAC client IP in a rolling 24-hour window, Turnstile, and an exact global AI budget with technical-only fallback.
+- Vercel rate limiting uses the platform's anti-spoofing client-IP header instead of collapsing every visitor into the direct-client fallback; rate-limit errors expose localization keys for Chinese and English UI.
 - HMAC-only Key/token storage; idempotent credit reservation, settlement and system-failure refund; scanner-safe GET plus human POST report-link redemption.
 - Fixed server-side CNY/USD/HKD catalog, Airwallex hosted checkout/Webhooks/refunds, exactly-once paid entitlement/job/outbox creation, encrypted customer email, Resend delivery/Webhooks, one-hour link-reissue limiting, and 20/24-hour SLA automation.
 - Cloudflare Queue push/pull adapters, notification-only outbox reconciliation, worker presence, recorded batch drains, Windows Task Scheduler scripts and Netlify monorepo configuration.

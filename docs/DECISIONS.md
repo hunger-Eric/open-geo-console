@@ -61,3 +61,7 @@ Each report persists one generation locale. Interface switching changes UI chrom
 ## 2026-07-10: The anonymous homepage has no shared report history
 
 Without accounts there is no personal report center. The homepage submits a website and links secondarily to the advanced log tool; users return through copied public preview links or authorized private report links.
+
+## 2026-07-10: Anonymous rate-limit identity is platform-scoped
+
+Vercel requests use `x-vercel-forwarded-for` only when the `VERCEL=1` system marker is present; Vercel overwrites the client header to prevent spoofing. Other deployments ignore forwarded headers unless `TRUST_PROXY_HEADERS=true` is set behind an edge that overwrites them. The fallback identity remains intentionally shared and fail-closed rather than trusting caller-controlled headers.

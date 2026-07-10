@@ -299,5 +299,8 @@ export interface Dictionary {
   };
   severity: Record<SeverityKey, string>;
   findings: Record<string, FindingMessage>;
-  errors: Record<"emptyUrl" | "unsupportedUrl" | "scanFailed" | "humanVerificationRequired", string>;
+  errors: Record<
+    "emptyUrl" | "unsupportedUrl" | "scanFailed" | "humanVerificationRequired" | "freePreviewLimitReached",
+    string
+  >;
 }

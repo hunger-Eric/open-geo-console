@@ -450,6 +450,7 @@ export const en = {
     emptyUrl: "Enter a company website URL.",
     unsupportedUrl: "Only HTTP and HTTPS URLs are supported.",
     scanFailed: "Unable to scan this website.",
-    humanVerificationRequired: "Complete human verification before starting the diagnosis."
+    humanVerificationRequired: "Complete human verification before starting the diagnosis.",
+    freePreviewLimitReached: "The free preview supports two different websites per network in any 24-hour period. Please try again later."
   }
 } satisfies Dictionary;

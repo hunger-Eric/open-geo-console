@@ -1,4 +1,8 @@
 export function getTrustedClientIp(request: Request, environment: NodeJS.ProcessEnv = process.env): string {
+  if (environment.VERCEL === "1") {
+    const vercelIp = request.headers.get("x-vercel-forwarded-for")?.split(",", 1)[0]?.trim();
+    return vercelIp ? normalizeIp(vercelIp) : "untrusted-direct-client";
+  }
   if (environment.TRUST_PROXY_HEADERS !== "true") return "untrusted-direct-client";
   const cloudflareIp = request.headers.get("cf-connecting-ip")?.trim();
   if (cloudflareIp) return normalizeIp(cloudflareIp);

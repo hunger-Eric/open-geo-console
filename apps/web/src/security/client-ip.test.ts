@@ -1,0 +1,43 @@
+import { describe, expect, it } from "vitest";
+import { getTrustedClientIp } from "./client-ip";
+
+describe("getTrustedClientIp", () => {
+  it("uses Vercel's anti-spoofing client IP header on Vercel", () => {
+    const request = new Request("https://example.test", {
+      headers: {
+        "cf-connecting-ip": "198.51.100.9",
+        "x-forwarded-for": "198.51.100.10",
+        "x-vercel-forwarded-for": "203.0.113.7"
+      }
+    });
+
+    expect(getTrustedClientIp(request, { VERCEL: "1" })).toBe("203.0.113.7");
+  });
+
+  it("fails closed on Vercel when the platform header is missing", () => {
+    const request = new Request("https://example.test", {
+      headers: { "x-forwarded-for": "198.51.100.10" }
+    });
+
+    expect(getTrustedClientIp(request, { VERCEL: "1" })).toBe("untrusted-direct-client");
+  });
+
+  it("uses explicitly trusted proxy headers outside Vercel", () => {
+    const request = new Request("https://example.test", {
+      headers: {
+        "cf-connecting-ip": "203.0.113.8",
+        "x-forwarded-for": "198.51.100.10"
+      }
+    });
+
+    expect(getTrustedClientIp(request, { TRUST_PROXY_HEADERS: "true" })).toBe("203.0.113.8");
+  });
+
+  it("does not trust caller-controlled forwarded headers by default", () => {
+    const request = new Request("https://example.test", {
+      headers: { "x-forwarded-for": "203.0.113.9" }
+    });
+
+    expect(getTrustedClientIp(request, {})).toBe("untrusted-direct-client");
+  });
+});

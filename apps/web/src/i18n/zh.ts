@@ -443,6 +443,7 @@ export const zh = {
     emptyUrl: "请输入企业官网 URL。",
     unsupportedUrl: "仅支持 HTTP 和 HTTPS URL。",
     scanFailed: "暂时无法扫描该网站。",
-    humanVerificationRequired: "开始诊断前，请先完成人机验证。"
+    humanVerificationRequired: "开始诊断前，请先完成人机验证。",
+    freePreviewLimitReached: "每个网络地址在任意 24 小时内最多免费分析 2 个不同网站，请稍后再试。"
   }
 } satisfies Dictionary;
