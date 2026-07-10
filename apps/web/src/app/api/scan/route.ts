@@ -9,7 +9,7 @@ import { hmacSecret, requireSecret } from "@/db/secrets";
 import { parseReportLocale } from "@/server/report-locale";
 import { createSafeFetch } from "@/server/safe-fetch";
 import { verifyTurnstile } from "@/security/turnstile";
-import { getTrustedClientIp } from "@/security/client-ip";
+import { getTrustedClientIdentity } from "@/security/client-ip";
 
 export const runtime = "nodejs";
 
@@ -18,7 +18,8 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { url?: string; locale?: string; turnstileToken?: string };
     const locale = parseReportLocale(body.locale);
     if (!locale) throw new Error("Locale must be either en or zh.");
-    const ipAddress = getTrustedClientIp(request);
+    const clientIdentity = getTrustedClientIdentity(request);
+    const ipAddress = clientIdentity.ipAddress;
     const challenge = await verifyTurnstile({ token: body.turnstileToken ?? "", remoteIp: ipAddress });
     if (!challenge.success) {
       return NextResponse.json({ error: "Human verification is required.", errorKey: "humanVerificationRequired" }, { status: 403 });
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
             errorKey: "freePreviewLimitReached",
             retryAfter: claim.retryAfter.toISOString()
           },
-          { status: 429 }
+          { status: 429, headers: { "x-ogc-client-ip-source": clientIdentity.source } }
         );
       }
       return reusedTrialResponse(claim);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTrustedClientIp } from "./client-ip";
+import { getTrustedClientIdentity, getTrustedClientIp } from "./client-ip";
 
 describe("getTrustedClientIp", () => {
   it("uses Vercel's anti-spoofing client IP header on Vercel", () => {
@@ -12,6 +12,7 @@ describe("getTrustedClientIp", () => {
     });
 
     expect(getTrustedClientIp(request, { VERCEL: "1" })).toBe("203.0.113.7");
+    expect(getTrustedClientIdentity(request, { VERCEL: "1" }).source).toBe("vercel");
   });
 
   it("falls back to Vercel's overwritten x-forwarded-for header on legacy deployments", () => {
@@ -52,5 +53,6 @@ describe("getTrustedClientIp", () => {
     });
 
     expect(getTrustedClientIp(request, {})).toBe("untrusted-direct-client");
+    expect(getTrustedClientIdentity(request, {}).source).toBe("fallback");
   });
 });

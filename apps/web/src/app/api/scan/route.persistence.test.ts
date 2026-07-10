@@ -87,6 +87,7 @@ describe("scan API locale persistence", () => {
     }));
 
     expect(response.status).toBe(429);
+    expect(response.headers.get("x-ogc-client-ip-source")).toBe("fallback");
     expect(await response.json()).toMatchObject({
       errorKey: "freePreviewLimitReached",
       retryAfter: "2026-07-11T10:00:00.000Z"
