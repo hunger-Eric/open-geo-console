@@ -13,6 +13,7 @@ export function getDb() {
     const filePath = getDatabasePath();
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     client = new Database(filePath);
+    client.pragma("foreign_keys = ON");
     client.pragma("journal_mode = WAL");
     client.exec(`
       CREATE TABLE IF NOT EXISTS scan_reports (
@@ -22,6 +23,12 @@ export function getDb() {
         score INTEGER,
         payload TEXT NOT NULL,
         created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS report_bot_evidence (
+        report_id TEXT PRIMARY KEY,
+        summary TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (report_id) REFERENCES scan_reports(id) ON DELETE CASCADE
       );
     `);
     database = drizzle(client, { schema });

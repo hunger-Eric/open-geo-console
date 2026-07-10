@@ -1,4 +1,5 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
+import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const scanReports = sqliteTable("scan_reports", {
@@ -11,3 +12,13 @@ export const scanReports = sqliteTable("scan_reports", {
 });
 
 export type ScanReportRow = typeof scanReports.$inferSelect;
+
+export const reportBotEvidence = sqliteTable("report_bot_evidence", {
+  reportId: text("report_id")
+    .primaryKey()
+    .references(() => scanReports.id, { onDelete: "cascade" }),
+  summary: text("summary", { mode: "json" }).$type<BotEvidenceSummary>().notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull()
+});
+
+export type ReportBotEvidenceRow = typeof reportBotEvidence.$inferSelect;

@@ -2,45 +2,41 @@
 
 ## Current Goal
 
-Build the MVP for a self-hostable open-source AI Search Console for company websites. The first workflow is URL -> GEO report. The second workflow is sample or uploaded access logs -> AI Bot Visibility Report.
-The external AI crawler simulator is a stand-alone Open GEO Console workflow: it can attempt marked HTTP requests, then imported access logs decide which attempts were actually observed.
+Ship a self-hostable, unauthenticated Open GEO Console MVP whose primary journey is `scan -> report workspace -> optional AI Bot evidence`. The report is the durable product object; the standalone log analyzer remains an advanced tool.
 
 ## Current Architecture
 
-- `apps/web` is a Next.js App Router app with SQLite/Drizzle persistence.
-- Local self-hosted SQLite defaults to `.data/open-geo-console.sqlite`; `OPEN_GEO_DB_PATH` overrides it. Vercel/serverless defaults to `/tmp/open-geo-console.sqlite`, and the scanner caches the just-created report in the browser so the demo deployment can render the immediate report page even when serverless temp storage is isolated.
-- Public UI routes are locale-prefixed: `/en`, `/zh`, `/en/reports/[id]`, `/zh/reports/[id]`, `/en/logs`, and `/zh/logs`; `/` redirects to `/en`.
-- User-visible product copy, report copy, severity labels, actions, empty states, and finding messages live in typed dictionaries under `apps/web/src/i18n`.
-- `packages/geo-auditor` fetches homepage, `robots.txt`, `sitemap.xml`, `llms.txt`, representative pages, and emits stable GEO report JSON.
-- `packages/crawler-rules` owns the AI Bot Registry, including log-detectable bots, robots-token-only policy entries, and suspected/community entries.
-- `packages/log-parser` parses Nginx combined/access logs and Cloudflare JSONL, then produces aggregates, bot coverage, operator summaries, and policy hints.
-- `apps/web/src/simulator` owns the external simulator domain, its shared API contracts, the typed browser client/controller, and one canonical attempted-vs-observed matcher. Simulator requests use log-detectable crawler registry entries only and append an `ogc_run=<runId>` marker.
+- `apps/web` is a localized Next.js App Router app with SQLite/Drizzle persistence.
+- A report workspace is split into `/[locale]/reports/[id]`, `/issues`, `/bots`, `/technical`, and `/print`. Every workspace route carries the report UUID and target URL.
+- `packages/geo-auditor` owns the GEO scan and score. Log evidence never changes that score.
+- `packages/crawler-rules` owns AI crawler classification.
+- `packages/log-parser` parses Nginx combined logs and Cloudflare JSONL, returns full session analysis, and builds the versioned, share-safe `BotEvidenceSummary`.
+- `apps/web` persists one current evidence summary per report in `report_bot_evidence`. Raw logs, IPs, full paths, and raw User-Agent values are never persisted.
+- Local self-hosted SQLite defaults to `.data/open-geo-console.sqlite`; `OPEN_GEO_DB_PATH` overrides it. The browser fallback is a current-browser continuity copy, not cross-device shared storage.
 
 ## Implemented
 
-- npm workspace monorepo with Git and CodeGraph initialized.
-- Scanner page, `/api/scan`, persisted reports, `/reports/[id]`, sample log analyzer, and `/api/logs/sample`.
-- Vercel production deployment is linked to `open-geo-console.vercel.app`; project settings use the Next.js preset, `npm run build`, and output directory `apps/web/.next`.
-- Bilingual I18n/L10n baseline with `docs/I18N-SPEC.md`, `docs/L10N-SPEC.md`, typed EN/ZH dictionaries, locale helpers, route preservation, dictionary parity tests, and localized finding rendering.
-- Public case report redesign with executive summary, score meaning, priority fixes, evidence sections, technical appendix, share/copy/print actions, and print-friendly CSS.
-- Stable `GeoFinding.messageKey + params` model with literal persisted finding text preserved only as legacy fallback.
-- AI Bot Visibility direction: v1 marks identifiable AI bots from access-log User-Agent values and keeps robots.txt-only controls separate from detected visits.
-- The external simulator now has one strict run/match JSON contract from route to browser, direct domain imports instead of runtime export discovery, one canonical matcher, and contract/client/API tests for malformed payloads and duplicate matching log lines.
-- The log analyzer is split into a small orchestration component plus focused analysis and simulator panels; expensive parsing follows deferred input updates.
-- Default localized date-time formatting uses UTC to keep server and browser renders deterministic and avoid hydration drift.
-- Unit coverage for crawler matching, log parsing, GEO audit findings, and report persistence.
-- README, Apache-2.0 license, project `AGENTS.md`, and sample crawler log fixture.
+- Compact scan homepage with recent reports and an explicitly labeled advanced log tool.
+- Report-centered overview, issues, bot evidence, technical appendix, and print/PDF routes.
+- Overview limited to the score explanation, top three fixes, asset/scan summary, and sanitized bot evidence summary.
+- Issues and technical data paginated at 20 rows; the complete bot registry is separately paginated and hidden by default.
+- Report-scoped log import through `PUT /api/reports/[id]/bot-evidence`, evidence removal through `DELETE`, and SQLite upsert/delete helpers.
+- `BotEvidenceSummary` with `analysisVersion: 1`, deterministic aggregation, sanitized bot/operator rows, and no raw request material.
+- Report-aware simulator target URL; the advanced simulator is collapsed and remains semantically separate from observed log evidence.
+- Compact standalone `/[locale]/logs` mode with an explicit target URL and shared analysis components.
+- Bilingual typed dictionaries, stable locale switching, `aria-current`, `aria-live`, keyboard focus treatment, and mobile grouped-row tables without horizontal page scrolling.
+- Warm neutral/forest/teal visual system based on `docs/design/report-workspace-reference.png`; fixed 8px radii, no page grid, and no ambient card shadows.
+- Deterministic Nginx timestamp parsing, including numeric timezone offsets, so SSR and browser hydration produce identical evidence dates.
+- Design QA artifacts and verdict in the project-root `design-qa.md`.
 
 ## Known Boundaries
 
-- v1 has no auth, billing, teams, multi-tenant SaaS backend, or agency batch scanning.
-- Live scans depend on target site availability and network access; deterministic tests mock fetch.
-- Vercel demo persistence is ephemeral because it uses serverless `/tmp`; the browser report fallback supports immediate post-scan testing, but production-grade hosted persistence still needs `OPEN_GEO_DB_PATH` or a future durable database adapter.
-- Log upload is implemented as paste/sample analysis in the app, not file upload storage.
-- v1 does not do IP/ASN verification for crawler identity; bot visibility is based on User-Agent registry matching.
-- Simulator attempts are not evidence of real AI company traffic. Only imported access logs with recognizable AI crawler User-Agent values and the matching `ogc_run=<runId>` marker are observed evidence for a simulator run.
-- The simulator is not integrated into `https://me.itheheda.online` or `E:\project\personal-website`; that site is only a case study target/fixture source.
-- PDF export is browser print/PDF first; there is no server-side PDF generator.
+- v1 has no auth, billing, teams, or multi-tenant SaaS permissions.
+- Live scans depend on target availability and network access; deterministic tests mock fetch.
+- Vercel `/tmp` SQLite is ephemeral. Browser fallback supports the current browser only and must not be described as shared persistence.
+- Bot identity is User-Agent registry matching; v1 does not verify IP/ASN ownership.
+- Simulator requests are attempts, not evidence. Only imported logs can establish observed access.
+- PDF export uses the browser print dialog; there is no server-side PDF generator.
 
 ## Acceptance Commands
 

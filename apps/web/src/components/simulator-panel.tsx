@@ -18,7 +18,8 @@ export function SimulatorPanel({
   logInput,
   onCompare,
   onRun,
-  run
+  run,
+  sourceUrl
 }: {
   comparison: SimulatorComparisonResult | null;
   dictionary: Dictionary;
@@ -30,6 +31,7 @@ export function SimulatorPanel({
   onCompare: () => void;
   onRun: () => void;
   run: SimulatorRunResponse | null;
+  sourceUrl: string;
 }) {
   const canCompare = Boolean(run) && logInput.trim().length > 0 && !isMatching;
   const comparisonByAttemptId = new Map(
@@ -51,7 +53,7 @@ export function SimulatorPanel({
             <dt className="text-xs uppercase text-[var(--muted)]">
               {dictionary.logs.simulator.targetUrlLabel}
             </dt>
-            <dd className="mt-1 break-all font-mono text-xs">{dictionary.scanner.firstCaseUrl}</dd>
+            <dd className="mt-1 break-all font-mono text-xs">{sourceUrl}</dd>
           </dl>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">

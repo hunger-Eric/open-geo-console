@@ -7,12 +7,15 @@ The MVP follows one product story: scan first, connect logs next. A user enters 
 ## What v1 Does
 
 - Generates a GEO audit for a website URL.
+- Presents each saved audit as a report workspace with overview, issues, AI Bot evidence, technical, and print/PDF views.
 - Checks `robots.txt`, `sitemap.xml`, `llms.txt`, schema, metadata, heading structure, canonical URLs, OpenGraph tags, readable content length, internal links, and HTTP status.
-- Parses Nginx combined/access logs and Cloudflare JSONL into an AI Bot Visibility Report.
+- Parses Nginx combined/access logs and Cloudflare JSONL into an AI Bot Visibility Report, with report-scoped import and a standalone advanced tool.
 - Marks detected AI bots from access-log User-Agent values and separates them from robots.txt-only policy tokens such as `Google-Extended` and `Applebot-Extended`.
 - Provides a stand-alone external AI crawler simulator for Open GEO Console. The simulator is not code integrated into the first case personal website or any customer website.
 - Maintains an AI Bot Registry covering OpenAI, Anthropic, Perplexity, Google/Gemini, Microsoft/Copilot, Meta, ByteDance, Amazon, Apple, and Common Crawl.
-- Persists generated reports in local SQLite so `/reports/[id]` can be revisited.
+- Persists generated reports and one sanitized, replaceable bot evidence summary per report in local SQLite.
+
+Raw access logs, IP addresses, complete request paths, and raw User-Agent values are not persisted. Imported bot evidence is a separate dimension and does not change the GEO score.
 
 ## External AI Crawler Simulator
 
@@ -42,6 +45,8 @@ npm run dev
 
 Open `http://localhost:3000`, scan a website, then try the sample crawler log report.
 
+The saved report opens at `/[locale]/reports/[id]`; use its workspace tabs for issues, report-scoped bot evidence, technical details, and print/PDF output. `/[locale]/logs` remains the standalone advanced log tool.
+
 By default, local self-hosted reports are stored in `.data/open-geo-console.sqlite`. Set `OPEN_GEO_DB_PATH` to use a different SQLite file.
 
 ## Deployment
@@ -53,6 +58,8 @@ The Vercel project is configured as a monorepo Next.js app:
 - Output directory: `apps/web/.next`
 
 Vercel serverless runtime uses `/tmp/open-geo-console.sqlite` unless `OPEN_GEO_DB_PATH` is configured. The scanner also stores the just-created report in the browser so the post-scan report page works in the demo deployment even when serverless functions do not share temp storage.
+
+That browser copy is current-browser fallback only. It is not a cross-device shared report store.
 
 ## First Case
 

@@ -57,19 +57,19 @@ export function ScannerForm({
           value={url}
           onChange={(event) => setUrl(event.target.value)}
           aria-label={dictionary.scanner.urlLabel}
-          className="min-h-12 min-w-0 flex-1 rounded-md border border-[var(--border)] bg-white px-4 text-base text-[var(--foreground)] shadow-sm outline-none transition focus:border-[var(--teal)] focus:ring-4 focus:ring-teal-700/10"
+          className="input-control min-h-12 min-w-0 flex-1 text-base"
           placeholder={dictionary.scanner.urlPlaceholder}
         />
         <button
           type="submit"
           disabled={isPending}
-          className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-md bg-[var(--foreground)] px-5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+          className="button-primary min-h-12 shrink-0 px-5"
         >
           {isPending ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
           {dictionary.actions.generateReport}
         </button>
       </div>
-      {error ? <p className="text-sm text-[var(--red)]">{error}</p> : null}
+      <div aria-live="polite">{error ? <p className="text-sm text-[var(--red)]">{error}</p> : null}</div>
     </form>
   );
 }

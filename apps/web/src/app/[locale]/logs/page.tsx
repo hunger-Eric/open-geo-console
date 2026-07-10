@@ -14,7 +14,7 @@ export default async function LogsPage({
   const dictionary = getDictionary(locale);
 
   return (
-    <main className="mx-auto max-w-7xl px-5 py-8">
+    <main className="mx-auto max-w-6xl px-5 py-8 sm:px-8 sm:py-12">
       <LogAnalyzer dictionary={dictionary} locale={locale} />
     </main>
   );

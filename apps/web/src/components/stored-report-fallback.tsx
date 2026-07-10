@@ -1,26 +1,33 @@
 "use client";
 
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
+import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Dictionary, Locale } from "@/i18n";
 import { localizePath } from "@/i18n";
-import { ReportView } from "./report-view";
+import { ReportView, type ReportWorkspaceSection } from "./report-view";
 
 export function StoredReportFallback({
   dictionary,
   locale,
-  reportId
+  page = 1,
+  reportId,
+  section = "overview"
 }: {
   dictionary: Dictionary;
   locale: Locale;
+  page?: number;
   reportId: string;
+  section?: ReportWorkspaceSection;
 }) {
   const [report, setReport] = useState<GeoAuditReport | null>();
+  const [evidence, setEvidence] = useState<BotEvidenceSummary | null>(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const rawReport = window.localStorage.getItem(`open-geo-console:report:${reportId}`);
+      const rawEvidence = window.localStorage.getItem(`open-geo-console:bot-evidence:${reportId}`);
       if (!rawReport) {
         setReport(null);
         return;
@@ -28,6 +35,7 @@ export function StoredReportFallback({
 
       try {
         setReport(JSON.parse(rawReport) as GeoAuditReport);
+        setEvidence(rawEvidence ? (JSON.parse(rawEvidence) as BotEvidenceSummary) : null);
       } catch {
         setReport(null);
       }
@@ -37,7 +45,17 @@ export function StoredReportFallback({
   }, [reportId]);
 
   if (report) {
-    return <ReportView dictionary={dictionary} locale={locale} report={report} />;
+    return (
+      <ReportView
+        dictionary={dictionary}
+        evidence={evidence}
+        locale={locale}
+        page={page}
+        report={report}
+        reportId={reportId}
+        section={section}
+      />
+    );
   }
 
   return (

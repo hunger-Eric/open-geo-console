@@ -1,0 +1,44 @@
+# Open GEO Console Design QA
+
+## Visual truth and artifacts
+
+- Reference: `docs/design/report-workspace-reference.png`
+- Desktop implementation: `docs/design/qa/report-overview-1440x1024.png`
+- Mobile implementation: `docs/design/qa/report-overview-390x844.png`
+- Chinese locale state: `docs/design/qa/language-toggle-zh-selected-895x919.png`
+- English locale state: `docs/design/qa/language-toggle-en-selected-895x919.png`
+- Tested report: `/zh/reports/9ac935cb-acd3-4611-8ee2-4114185a1706`
+
+The 1440x1024 reference and implementation were reviewed together after the final radius and timestamp fixes. A second focused comparison reviewed the annotated language selector before and after the approved teal-state change.
+
+## Fidelity review
+
+- Typography: passed. The system CJK sans-serif stack, restrained weights, and editorial hierarchy match the selected direction.
+- Spacing and geometry: passed. The implementation preserves the wide reading column, narrow evidence rail, compact repair rows, horizontal tabs, and consistent 8px control/surface radii.
+- Color: passed. Warm neutral surfaces, forest text, teal actions, and text-labelled red/amber severities are consistent and never rely on color alone. The active locale now uses teal with white text; inactive locale text is muted.
+- Assets and icons: passed. Existing Lucide icons are preserved; no placeholder or hand-built graphic assets were introduced.
+- Copy and product semantics: passed. The implementation intentionally shows bot/operator counts instead of a synthetic coverage percentage because log evidence is independent from the GEO score.
+
+The implementation keeps the report URL in a dedicated context block rather than the reference's site selector because v1 has report UUIDs but no separate site entity. This preserves the selected hierarchy without inventing unsupported product state.
+
+## Interaction and responsive QA
+
+- 1440x1024: score, top fixes, and bot evidence entry appear in the first viewport; no horizontal overflow.
+- 1280x720: all three primary overview regions remain within two viewports; no horizontal overflow.
+- 390x844: workspace tabs remain usable, actions wrap, content becomes one column, and page width stays within the viewport.
+- Mobile technical tables use labelled grouped rows; the document does not scroll horizontally.
+- Keyboard focus is visibly outlined; workspace and locale links expose `aria-current`.
+- Import, replace, refresh persistence, registry toggle, delete, and collapsed simulator states were exercised in the browser.
+- Chinese and English locale links both move the active teal state with the route.
+- White on teal contrast is 5.47:1; forest text on white is 16.73:1.
+- Overview, issues, bots, technical, print, and standalone log routes rendered without console errors.
+
+## Comparison history
+
+- P0: none.
+- P1: the standalone log page initially produced an SSR hydration error because malformed Nginx dates fell back to different current timestamps. Fixed with deterministic timezone-aware parsing; post-fix console is clean.
+- P2: shared report surfaces used 12px radii while the selected system specified 8px. Fixed globally and re-captured at 1440x1024.
+- P2: the first locale-color pass changed the background, but the global anchor rule overrode white text. Fixed with scoped `.locale-action` states; both active locales now compute to teal with white text, while inactive text remains muted.
+- P3: the reference includes a cross-site selector and bot coverage percentage. Both were intentionally omitted because the current product has no site entity and log evidence must not affect GEO scoring.
+
+final result: passed
