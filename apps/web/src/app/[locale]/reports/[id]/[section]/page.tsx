@@ -4,7 +4,7 @@ import { StoredReportFallback } from "@/components/stored-report-fallback";
 import { getBotEvidence } from "@/db/bot-evidence";
 import { getGeoReport } from "@/db/reports";
 import { getDictionary, isLocale, type Locale } from "@/i18n";
-import { getVisibleAiReport } from "@/server/visible-ai-report";
+import { getVisibleReportBundle } from "@/server/visible-ai-report";
 
 const sections = ["analysis", "issues", "bots", "technical", "print"] as const;
 
@@ -31,16 +31,18 @@ export default async function ReportWorkspaceSectionPage({
     return <StoredReportFallback dictionary={dictionary} locale={locale} page={page} reportId={id} section={section} />;
   }
 
-  const [evidence, aiReport] = await Promise.all([getBotEvidence(id), getVisibleAiReport(id)]);
+  const [evidence, visible] = await Promise.all([getBotEvidence(id), getVisibleReportBundle(id, row.payload)]);
   return (
     <ReportView
-      aiReport={aiReport}
+      aiReport={visible.aiReport}
+      canPrint={visible.canPrint}
       dictionary={dictionary}
       evidence={evidence?.summary ?? null}
       locale={locale}
       page={page}
-      report={row.payload}
+      report={visible.technicalReport}
       reportId={id}
+      reportTier={visible.tier}
       section={section}
     />
   );

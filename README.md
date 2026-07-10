@@ -7,7 +7,7 @@ Open GEO Console is an open-source AI Search Console for company websites. It co
 1. Enter a company website URL.
 2. Receive a persisted technical GEO report immediately.
 3. A worker discovers the site, asks an OpenAI-compatible model to plan representative pages, fetches real page evidence, and generates a structured AI report.
-4. The free preview analyzes up to 8 pages and exposes three verified findings. A report-credit key unlocks a private deep report of up to 50 pages.
+4. The free preview analyzes the submitted homepage and exposes one verified AI finding. A report-credit key unlocks a private deep report covering every eligible page on small sites or up to 50 representative pages on larger sites.
 5. Access logs can be imported separately to show observed AI crawler visits; log evidence never changes the technical GEO score.
 
 AI findings must cite URLs from the current crawl and quote text present in retained page evidence. Unsupported findings are rejected rather than shown.
@@ -15,7 +15,7 @@ AI findings must cite URLs from the current crawl and quote text present in reta
 ## Capabilities
 
 - Technical checks for `robots.txt`, `sitemap.xml`, `llms.txt`, schema, metadata, headings, canonical URLs, OpenGraph, readable content and HTTP status.
-- AI-planned page sampling after site-wide URL discovery and page-type/template clustering.
+- Homepage-only free analysis plus AI-planned deep page sampling after site-wide URL discovery and page-type/template clustering.
 - OpenAI-compatible model transport with versioned `AiWebsiteReportV1` output and evidence validation.
 - HTTP crawling with DNS-pinned SSRF protection and Playwright fallback for JavaScript-rendered pages.
 - Progressive report jobs with PostgreSQL leases, checkpoints, retries and seven-day source-evidence retention.

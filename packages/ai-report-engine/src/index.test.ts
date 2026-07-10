@@ -149,7 +149,7 @@ describe("OpenAI-compatible client", () => {
 });
 
 describe("page planning", () => {
-  it("deduplicates candidates and enforces free/deep limits", async () => {
+  it("uses the homepage without a model planning call for free and enforces the deep limit", async () => {
     const candidates = Array.from({ length: 60 }, (_, index) => ({
       url: index === 0 ? "https://example.com/" : `https://example.com/blog/${index}`,
       title: `Page ${index}`
@@ -160,17 +160,16 @@ describe("page planning", () => {
     const freeClient = mockClient([{ selected: candidates.map((candidate) => ({ url: candidate.url, reason: "Representative" })) }]);
     const deepClient = mockClient([{ selected: candidates.map((candidate) => ({ url: candidate.url, reason: "Representative" })) }]);
 
-    await expect(planPages(freeClient, { tier: "free", locale: "en", targetUrl: page.url, candidates }))
-      .resolves.toMatchObject({ selected: expect.any(Array) });
     const deep = await planPages(deepClient, { tier: "deep", locale: "en", targetUrl: page.url, candidates });
     expect(deep.selected).toHaveLength(50);
     const free = await planPages(freeClient, { tier: "free", locale: "en", targetUrl: page.url, candidates });
-    expect(free.selected).toHaveLength(8);
+    expect(free.selected).toEqual([expect.objectContaining({ url: page.url, pageType: "home" })]);
+    expect(freeClient.completeJson).not.toHaveBeenCalled();
   });
 
   it("fills an invalid model plan with deterministic representative pages", async () => {
     const result = await planPages(mockClient([{ selected: [{ url: "https://attacker.example/" }] }]), {
-      tier: "free",
+      tier: "deep",
       locale: "en",
       targetUrl: page.url,
       candidates: [{ url: page.url }, { url: "https://example.com/about" }]
@@ -231,7 +230,7 @@ describe("report validation and synthesis", () => {
     expect(() => parseAiWebsiteReportV1({ version: 1 })).toThrow(ReportValidationError);
   });
 
-  it("creates server-owned provenance and limits free reports to three findings", async () => {
+  it("creates server-owned provenance and limits free reports to one finding", async () => {
     const result = await synthesizeWebsiteReport(mockClient([reportModelOutput(4)], "served-model"), {
       targetUrl: page.url,
       tier: "free",
@@ -250,7 +249,7 @@ describe("report validation and synthesis", () => {
       generatedAt: "2026-07-10T00:00:00.000Z"
     });
 
-    expect(result.report.findings).toHaveLength(3);
+    expect(result.report.findings).toHaveLength(1);
     expect(result.report.organizationProfile.ownershipVerification).toBe("not-performed");
     expect(result.report.provenance).toMatchObject({
       reportVersion: 1,
@@ -272,7 +271,7 @@ describe("report validation and synthesis", () => {
 
     const result = await synthesizeWebsiteReport(mockClient([output]), {
       targetUrl: page.url,
-      tier: "free",
+      tier: "deep",
       locale: "en",
       pages: [page],
       pageAnalyses: [],

@@ -22,12 +22,14 @@
 - [x] Add safe site identity, SSRF protection, sitemap/link discovery and representative-page selection.
 - [x] Add OpenAI-compatible page planning, batch analysis, structured synthesis and citation verification.
 - [x] Add persistent PostgreSQL jobs, leases, retries, seven-day crawl evidence and a separate Worker.
-- [x] Add 30-day free-site reuse, three-sites/day anonymous limiting and free 8-page previews.
+- [x] Add 30-day free-site reuse, three-sites/day anonymous limiting and homepage-only free previews.
 - [x] Add HMAC access Keys, idempotent credit ledger, failure refunds and private deep-report links.
 - [x] Add progressive status, AI analysis, deep unlock and print integration in English and Chinese.
 - [x] Validate the OpenAI-compatible transport, structured output and a complete evidence-backed report with MiMo 2.5 Pro.
 - [x] Short-circuit downstream checks for non-2xx pages, aggregate repeated findings by template, and cap score deductions per rule.
 - [x] Split free/deep Worker lanes and expose truthful queue position, wait reason, and active tier in the status UI.
 - [x] Re-scan `shun-express.com` and verify the 10-dead-link rollup in the browser.
+- [x] Restrict free technical and AI analysis to the homepage and one verified AI finding.
+- [x] Store deep multi-page technical reports privately and project legacy public reports to homepage scope.
 - [ ] Rotate the exposed credential before public production deployment.
 - [ ] Implement payment checkout and email-based Key delivery as a separate project phase.

@@ -20,26 +20,40 @@ export type ReportWorkspaceSection = "overview" | "analysis" | "issues" | "bots"
 export function ReportView({
   dictionary,
   aiReport,
+  canPrint,
   evidence,
   locale,
   page = 1,
   report,
   reportId,
+  reportTier,
   section = "overview"
 }: {
   dictionary: Dictionary;
   aiReport?: AiWebsiteReportV1 | null;
+  canPrint: boolean;
   evidence?: BotEvidenceSummary | null;
   locale: Locale;
   page?: number;
   report: GeoAuditReport;
   reportId: string;
+  reportTier: "free" | "deep";
   section?: ReportWorkspaceSection;
 }) {
   const presentation = buildReportPresentation(report, dictionary, locale);
   const overviewHref = localizePath(locale, `/reports/${reportId}`);
 
   if (section === "print") {
+    if (!canPrint) {
+      return (
+        <main className="print-page mx-auto max-w-3xl px-6 py-12">
+          <p className="eyebrow">{dictionary.aiReport.previewLabel}</p>
+          <h1 className="mt-3 text-3xl font-semibold">{dictionary.aiReport.printLockedTitle}</h1>
+          <p className="mt-4 text-sm leading-7 text-[var(--muted)]">{dictionary.aiReport.printLockedDescription}</p>
+          <Link href={overviewHref} className="button-primary mt-7">{dictionary.workspace.backToReport}</Link>
+        </main>
+      );
+    }
     return (
       <ReportPrintView
         aiReport={aiReport}
@@ -83,6 +97,7 @@ export function ReportView({
         </div>
         <ReportActions
           dictionary={dictionary}
+          printEnabled={canPrint}
           printHref={localizePath(locale, `/reports/${reportId}/print`)}
           shareHref={overviewHref}
         />
@@ -112,6 +127,7 @@ export function ReportView({
               presentation={presentation}
               report={report}
               reportId={reportId}
+              reportTier={reportTier}
             />
           </div>
         ) : null}

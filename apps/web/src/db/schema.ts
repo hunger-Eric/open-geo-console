@@ -113,6 +113,7 @@ export const aiReports = pgTable(
     locale: text("locale").notNull(),
     reportVersion: integer("report_version").notNull().default(1),
     payload: jsonb("payload").$type<StoredAiReport>().notNull(),
+    technicalPayload: jsonb("technical_payload").$type<GeoAuditReport>(),
     model: text("model").notNull(),
     promptVersion: text("prompt_version").notNull(),
     contentHash: text("content_hash").notNull(),

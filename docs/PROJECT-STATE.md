@@ -12,7 +12,7 @@ Operate a durable, self-hostable report product whose main journey is `free tech
 - `packages/ai-report-engine` owns OpenAI-compatible transport, page planning, batch analysis, `AiWebsiteReportV1`, synthesis and evidence verification.
 - `packages/crawler-rules` and `packages/log-parser` continue to own AI crawler identity and sanitized access-log evidence.
 
-The web process persists a technical report and enqueues work. A separate Worker uses PostgreSQL leases and checkpoints to execute `discovering → planning → fetching → analyzing → synthesizing`. Free reports analyze up to 8 pages and show three verified findings; deep reports analyze up to 50 pages and are private.
+The web process persists a public homepage technical report and enqueues work. A separate Worker uses PostgreSQL leases and checkpoints to execute `discovering → planning → fetching → analyzing → synthesizing`. Free reports analyze one homepage and show one verified AI finding. Deep reports analyze every eligible page below 50 or select at most 50 pages; their AI and technical payloads are private.
 
 ## Implemented
 
@@ -25,9 +25,11 @@ The web process persists a technical report and enqueues work. A separate Worker
 - HMAC-only Key/token storage; idempotent credit reservation, settlement and system-failure refund; report-specific HttpOnly access links.
 - Progressive status, retry, Key unlock, AI analysis, technical, issues, bot evidence and print/PDF report surfaces in English and Chinese.
 - Legacy SQLite import preserving report UUIDs and sanitized Bot Evidence.
-- Live MiMo 2.5 Pro acceptance against `me.itheheda.online`: 8 pages planned, 7 analyzed, one failed, evidence-validated Chinese preview persisted and rendered without browser console errors.
+- Historical pre-boundary MiMo acceptance against `me.itheheda.online` proved the model transport and evidence validation. The homepage-only contract was subsequently accepted with a live one-page free job, private deep technical persistence, and browser verification of the free/PDF boundary.
 - Non-2xx pages now emit only the HTTP root cause; repeated rule findings are grouped by page template and capped for scoring. The overview rolls template groups into one priority card with at most three representative URLs.
 - Free and deep report jobs have independent Worker lanes. The status API/UI shows real queue position, wait reason, and active tier with completion-driven polling.
+- Free scans fetch only the submitted homepage and the three standard assets. Free AI planning is deterministic and does not call the model planner; public legacy reports are projected to homepage scope.
+- Deep jobs store a separate private technical report beside the deep AI payload. Authorized report routes use it; public routes never replace the homepage report with paid multi-page data.
 - Live regression scan of `shun-express.com` produced a score of 35 with 26 grouped findings instead of the previous score of 0 with 62 repeated findings; the overview correctly summarizes 10 dead links.
 
 ## Known Boundaries

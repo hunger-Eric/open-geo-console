@@ -168,7 +168,7 @@ export async function synthesizeWebsiteReport(
   const tierFindings = input.tier === "free"
     ? [...verified.report.findings]
         .sort((left, right) => severityRank[right.severity] - severityRank[left.severity])
-        .slice(0, 3)
+        .slice(0, 1)
     : verified.report.findings;
 
   return {

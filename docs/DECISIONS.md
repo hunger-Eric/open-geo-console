@@ -24,9 +24,13 @@ The report UI uses a restrained editorial hierarchy, horizontal workspace tabs, 
 
 Technical evidence and scoring remain deterministic. The model plans representative pages, analyzes extracted content and synthesizes a versioned report, but formal findings survive only when their URL and quoted evidence match the current crawl. Technical and AI dimension scores remain separate.
 
-## 2026-07-10: Free previews and deep reports share one engine
+## 2026-07-10: Free previews prove the homepage; deep reports solve the site
 
-Free previews analyze up to 8 pages and expose three verified findings. Deep reports analyze up to 50 pages, reuse unexpired evidence and require one report credit. Same-site free requests reuse a report for 30 days; anonymous clients may create three distinct free-site previews per day.
+Free previews fetch one homepage plus the standard robots/sitemap/llms assets and expose one verified AI finding. They may estimate site size from already fetched homepage links and the root sitemap but never fetch those content pages. Deep reports analyze all eligible pages below 50 or select at most 50 pages, reuse eligible evidence and require one report credit. Same-site free requests reuse a report for 30 days; anonymous clients may create three distinct free-site previews per day.
+
+## 2026-07-10: Paid technical evidence is a private bundle
+
+The public `scan_reports` payload remains a homepage-only technical report. Deep jobs store a separate technical payload beside their private AI report. Authorized routes switch to that bundle; public routes project legacy reports to homepage scope. A paid deep scan never overwrites public storage with multi-page evidence.
 
 ## 2026-07-10: Commercial access uses credits and report-specific tokens
 

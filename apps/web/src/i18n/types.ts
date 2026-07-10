@@ -160,6 +160,13 @@ export interface Dictionary {
     description: string;
     previewLabel: string;
     deepLabel: string;
+    homepageScore: string;
+    homepageScoreDescription: string;
+    homepagePreviewNotice: string;
+    detectedPagesEstimate: string;
+    lockedDeepFeatures: string;
+    printLockedTitle: string;
+    printLockedDescription: string;
     technicalScore: string;
     aiDimensions: string;
     organizationProfile: string;

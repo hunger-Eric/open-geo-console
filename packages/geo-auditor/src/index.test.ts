@@ -5,6 +5,7 @@ import {
   calculateScore,
   createFinding,
   extractSitemapUrls,
+  projectHomepageReport,
   selectRepresentativePages,
   type AuditedPage,
   type GeoFinding,
@@ -83,6 +84,65 @@ describe("geo auditor", () => {
       })
     );
     expect(report.score).toBeLessThan(90);
+  });
+
+  it("audits only the homepage when the page limit is one", async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url === "https://example.com/") {
+        return Promise.resolve(new Response("<html><head><title>Home</title></head><body><h1>Home</h1></body></html>"));
+      }
+      if (url === "https://example.com/sitemap.xml") {
+        return Promise.resolve(new Response("<urlset><url><loc>https://example.com/about</loc></url></urlset>"));
+      }
+      return Promise.resolve(new Response("", { status: 404 }));
+    });
+
+    const report = await auditSite("https://example.com", { fetchImpl: fetchMock as typeof fetch, pageLimit: 1 });
+
+    expect(report.pages.map(({ url }) => url)).toEqual(["https://example.com/"]);
+    expect(fetchMock).not.toHaveBeenCalledWith("https://example.com/about");
+  });
+
+  it("audits an explicit deep page set without adding sitemap pages", async () => {
+    const requested: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      requested.push(url);
+      if (url === "https://example.com/sitemap.xml") {
+        return new Response("<urlset><url><loc>https://example.com/not-planned</loc></url></urlset>");
+      }
+      return new Response("<html><head><title>Page</title></head><body><h1>Page</h1></body></html>");
+    });
+
+    const report = await auditSite("https://example.com", {
+      fetchImpl: fetchMock as typeof fetch,
+      pageUrls: ["https://example.com/", "https://example.com/about"]
+    });
+
+    expect(report.pages.map(({ url }) => url)).toEqual(["https://example.com/", "https://example.com/about"]);
+    expect(requested).not.toContain("https://example.com/not-planned");
+  });
+
+  it("projects legacy reports to a recalculated homepage-only report", () => {
+    const report: Parameters<typeof projectHomepageReport>[0] = {
+      url: "https://example.com/",
+      scannedAt: "2026-07-10T00:00:00.000Z",
+      score: 0,
+      findings: [],
+      recommendations: [],
+      pages: [
+        page("https://example.com/", { hasJsonLd: false }),
+        page("https://example.com/about", { status: 404 })
+      ],
+      machineReadableAssets: availableAssets()
+    };
+
+    const projected = projectHomepageReport(report);
+
+    expect(projected.pages).toHaveLength(1);
+    expect(projected.pages[0]?.url).toBe("https://example.com/");
+    expect(projected.findings.map(({ messageKey }) => messageKey)).toContain("page.missingJsonLd");
+    expect(projected.findings.map(({ messageKey }) => messageKey)).not.toContain("page.badStatus");
+    expect(projected.score).toBeGreaterThan(0);
   });
 
   it("creates keyed findings with params while preserving rendered fallback copy", () => {

@@ -36,6 +36,8 @@ The implementation keeps the report URL in a dedicated context block rather than
 - The completed live MiMo report at `/zh/reports/08015f7a-a374-4714-b24d-d4c9d6876af2/analysis` rendered its organization profile, six dimensions and three cited findings in the in-app browser with no console errors.
 - The `shun-express.com` regression report at `/zh/reports/08f58f73-a303-4252-8034-52ea1baf33a9` renders one overview card for 10 dead links, lists only three representative URLs, and keeps the four template groups on the issues page without horizontal overflow at the desktop viewport.
 - A synthetic queued report rendered queue position 1, the `awaiting_claim` explanation, the active deep tier, and an accessible 0/100 progress bar. The synthetic records were deleted after QA.
+- The homepage-only free report at `/zh/reports/b86bde02-4842-40a9-bbb3-83a62a80c4ea` rendered one audited page, an explicit homepage-score disclaimer, one AI finding, no dimension-detail section, and no horizontal overflow. Its direct `/print` route rendered only the deep-report unlock explanation with no report table or print button.
+- The same live run persisted `plannedPages=1`, `analyzedPages=1`, one free AI finding and no free technical payload. A temporary deep job persisted a private technical payload and settled its test credit; the temporary deep job, ledger and access Key were deleted after verification.
 
 ## Comparison history
 

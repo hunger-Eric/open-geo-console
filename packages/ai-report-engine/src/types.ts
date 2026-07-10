@@ -4,7 +4,7 @@ export const AI_REPORT_PROMPT_VERSION = "ai-website-report-v1" as const;
 export type ReportTier = "free" | "deep";
 
 export const REPORT_TIER_LIMITS: Readonly<Record<ReportTier, number>> = {
-  free: 8,
+  free: 1,
   deep: 50
 };
 

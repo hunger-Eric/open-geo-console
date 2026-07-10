@@ -9,7 +9,7 @@
 | `/[locale]/reports/[id]/issues?page=N` | Severity-grouped findings, 20 per page |
 | `/[locale]/reports/[id]/bots` | Log import, detected bots/operators, paginated registry, and collapsed simulator |
 | `/[locale]/reports/[id]/technical?page=N` | Scanned pages, assets, and technical appendix, 20 per page |
-| `/[locale]/reports/[id]/print` | Complete print/PDF document without workspace navigation |
+| `/[locale]/reports/[id]/print` | Authorized deep-report print/PDF document; free previews render an upgrade explanation |
 | `/[locale]/logs` | Standalone advanced log analysis with an explicit target URL |
 
 ## Summary contract
@@ -43,4 +43,4 @@ Re-importing evidence upserts the row. Deleting evidence removes it. History and
 
 ## Storage authority
 
-PostgreSQL is the report authority for technical reports, AI reports, jobs, access controls and bot evidence. The browser does not retain an authoritative report copy. Deep AI payloads require the report-specific HttpOnly access cookie; free previews remain accessible through their unlisted report UUID.
+PostgreSQL is the report authority for technical reports, AI reports, jobs, access controls and bot evidence. The browser does not retain an authoritative report copy. Public technical reports are projected to the homepage plus standard assets. Deep AI and multi-page technical payloads require the report-specific HttpOnly access cookie; free previews remain accessible through their unlisted report UUID.

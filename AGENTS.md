@@ -29,6 +29,7 @@
 
 - PostgreSQL is the only production report authority; do not restore SQLite or browser-local report persistence.
 - The web process creates jobs and serves reports. The worker is the only process that crawls pages or calls the configured model.
+- Free reports audit only the submitted homepage plus standard assets. Multi-page technical and AI evidence belongs to the authorized private deep bundle.
 - Never persist or log raw model API keys, report-credit keys, report access tokens, or unhashed client IPs.
 
 ## Verification

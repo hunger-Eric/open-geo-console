@@ -59,6 +59,7 @@ export const DATABASE_MIGRATIONS = [
     UNIQUE (report_id, tier)
   )`,
   `CREATE INDEX IF NOT EXISTS ai_reports_job_idx ON ai_reports (job_id)`,
+  `ALTER TABLE ai_reports ADD COLUMN IF NOT EXISTS technical_payload jsonb`,
   `CREATE TABLE IF NOT EXISTS crawl_evidence (
     id text PRIMARY KEY,
     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,

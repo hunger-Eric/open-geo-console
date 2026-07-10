@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import { ensureDatabase, getDb } from "./index";
 import { aiReports, type AiReportRow, type ReportTier, type StoredAiReport } from "./schema";
 
@@ -9,6 +10,7 @@ export interface SaveAiReportInput {
   tier: ReportTier;
   locale: string;
   payload: StoredAiReport;
+  technicalPayload?: GeoAuditReport;
   model: string;
   promptVersion: string;
   contentHash: string;
@@ -26,6 +28,7 @@ export async function saveAiReport(input: SaveAiReportInput): Promise<AiReportRo
       tier: input.tier,
       locale: input.locale,
       payload: input.payload,
+      technicalPayload: input.technicalPayload,
       model: input.model,
       promptVersion: input.promptVersion,
       contentHash: input.contentHash,
@@ -38,6 +41,7 @@ export async function saveAiReport(input: SaveAiReportInput): Promise<AiReportRo
         jobId: input.jobId,
         locale: input.locale,
         payload: input.payload,
+        technicalPayload: input.technicalPayload,
         model: input.model,
         promptVersion: input.promptVersion,
         contentHash: input.contentHash,

@@ -3,7 +3,7 @@ import type { ExtractedPageContent } from "./html";
 import { parseHttpUrl } from "./security";
 
 export const MAX_CANDIDATE_URLS = 500;
-export const FREE_PAGE_LIMIT = 8;
+export const FREE_PAGE_LIMIT = 1;
 export const DEEP_PAGE_LIMIT = 50;
 
 export type CrawlTier = "free" | "deep";

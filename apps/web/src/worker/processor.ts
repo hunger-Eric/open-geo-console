@@ -9,6 +9,7 @@ import {
   type ExtractedPage,
   type PlannedPage
 } from "@open-geo-console/ai-report-engine";
+import { auditSite, type GeoAuditReport } from "@open-geo-console/geo-auditor";
 import { checkpointScanJob, failScanJob, finishScanJob, isBillableCoverage } from "@/db/jobs";
 import { getGeoReport } from "@/db/reports";
 import { saveAiReport } from "@/db/ai-reports";
@@ -20,6 +21,8 @@ import {
 } from "@/db/crawl-evidence";
 import { refundCredit, settleCredit } from "@/db/credits";
 import type { ScanJobRow } from "@/db/schema";
+import { projectFreeAiReport } from "@/report/visibility";
+import { createSafeFetch } from "@/server/safe-fetch";
 import { discoverSite, fetchEvidencePage } from "./crawler-runtime";
 
 interface StoredPageEvidence {
@@ -42,7 +45,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     const client = createConfiguredClient();
 
     await checkpointScanJob(job.id, workerId, { stage: "discovering", progress: 10 });
-    const discovered = await discoverSite(storedReport.url);
+    const discovered = await discoverSite(storedReport.url, job.tier);
 
     await checkpointScanJob(job.id, workerId, {
       stage: "planning",
@@ -89,6 +92,13 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     }
     if (fetched.length === 0) throw new Error("No planned page returned readable evidence.");
 
+    const technicalReport = job.tier === "deep"
+      ? await auditSite(discovered.targetUrl, {
+          fetchImpl: createSafeFetch(),
+          pageUrls: pagePlan.selected.map((page) => page.url)
+        })
+      : undefined;
+
     await checkpointScanJob(job.id, workerId, {
       stage: "analyzing",
       progress: 65,
@@ -112,12 +122,12 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       checkpoint: { pageAnalyses: analyzed.analyses }
     });
     const coverage = {
-      discoveredPages: discovered.deterministicCandidates.length,
+      discoveredPages: discovered.estimatedPages,
       plannedPages: pagePlan.selected.length,
       analyzedPages: analyzed.analyses.length,
       failedPages: failures.length,
       samplingMethod: job.tier === "free"
-        ? "Site-wide discovery followed by an AI-planned sample of up to 8 representative pages."
+        ? "Homepage-only preview. Other detected URLs were estimated but their content was not fetched or analyzed."
         : "Site-wide discovery followed by page-type clustering and an AI-planned sample of up to 50 representative pages.",
       pageTypesCovered: [...new Set(fetched.map((item) => item.page.pageType))],
       limitations: failures.length > 0 ? [`${failures.length} planned page(s) could not be analyzed.`] : []
@@ -130,7 +140,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       pageAnalyses: analyzed.analyses,
       coverage
     });
-    await persistAiReport(job, synthesis.report, fetched);
+    const reportToPersist = job.tier === "free" ? projectFreeAiReport(synthesis.report) : synthesis.report;
+    await persistAiReport(job, reportToPersist, fetched, technicalReport);
 
     const homepageUrl = new URL(discovered.targetUrl).href;
     const billable = isBillableCoverage({
@@ -215,13 +226,19 @@ async function loadOrFetchEvidence(
   return fetched;
 }
 
-async function persistAiReport(job: ScanJobRow, report: AiWebsiteReportV1, pages: StoredPageEvidence[]) {
+async function persistAiReport(
+  job: ScanJobRow,
+  report: AiWebsiteReportV1,
+  pages: StoredPageEvidence[],
+  technicalPayload?: GeoAuditReport
+) {
   await saveAiReport({
     reportId: job.reportId,
     jobId: job.id,
     tier: job.tier,
     locale: job.locale,
     payload: report,
+    technicalPayload,
     model: report.provenance.modelId,
     promptVersion: AI_REPORT_PROMPT_VERSION,
     contentHash: report.provenance.contentHash

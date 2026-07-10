@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       const redirectedExisting = await getActiveFreeSiteTrial(siteKey);
       if (redirectedExisting) return reusedTrialResponse(redirectedExisting);
     }
-    const report = await auditSite(finalUrl, { fetchImpl: safeFetch });
+    const report = await auditSite(finalUrl, { fetchImpl: safeFetch, pageLimit: 1 });
     const saved = await saveGeoReport(finalUrl, report, siteKey);
     let job: Awaited<ReturnType<typeof enqueueScanJob>>;
     let claim: Awaited<ReturnType<typeof claimFreeSiteTrial>>;

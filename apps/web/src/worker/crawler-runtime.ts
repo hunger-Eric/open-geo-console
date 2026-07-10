@@ -27,6 +27,7 @@ export interface DiscoveredSite {
   deterministicCandidates: CrawlPageCandidate[];
   robotsPolicy: RobotsPolicy;
   homepage: ExtractedPageContent;
+  estimatedPages: number;
 }
 
 export interface FetchedEvidencePage {
@@ -37,16 +38,19 @@ export interface FetchedEvidencePage {
   browserRendered: boolean;
 }
 
-export async function discoverSite(targetUrl: string): Promise<DiscoveredSite> {
-  const safeFetch = createSafeFetch();
+export async function discoverSite(
+  targetUrl: string,
+  tier: "free" | "deep" = "deep",
+  fetchImpl: typeof fetch = createSafeFetch()
+): Promise<DiscoveredSite> {
   const root = new URL(targetUrl);
   root.pathname = "/";
   root.search = "";
   root.hash = "";
 
   const [homepageResponse, robotsResponse] = await Promise.all([
-    safeFetch(root, { headers: { "user-agent": CRAWLER_USER_AGENT } }),
-    safeFetch(new URL("/robots.txt", root), { headers: { "user-agent": CRAWLER_USER_AGENT } }).catch(() => null)
+    fetchImpl(root, { headers: { "user-agent": CRAWLER_USER_AGENT } }),
+    fetchImpl(new URL("/robots.txt", root), { headers: { "user-agent": CRAWLER_USER_AGENT } }).catch(() => null)
   ]);
   if (!homepageResponse.ok) throw new Error(`Homepage returned HTTP ${homepageResponse.status}.`);
   const homepageHtml = await homepageResponse.text();
@@ -59,29 +63,41 @@ export async function discoverSite(targetUrl: string): Promise<DiscoveredSite> {
 
   const discovery = new SiteDiscovery(root);
   discovery.addHtmlDocument(homepageHtml, root);
-  const sitemapQueue = [...new Set([...robotsPolicy.sitemaps, new URL("/sitemap.xml", root).href])];
+  const sitemapQueue = tier === "free"
+    ? [new URL("/sitemap.xml", root).href]
+    : [...new Set([...robotsPolicy.sitemaps, new URL("/sitemap.xml", root).href])];
   const visitedSitemaps = new Set<string>();
   while (sitemapQueue.length > 0 && visitedSitemaps.size < MAX_SITEMAP_DOCUMENTS) {
     const sitemapUrl = sitemapQueue.shift()!;
     if (visitedSitemaps.has(sitemapUrl)) continue;
     visitedSitemaps.add(sitemapUrl);
     try {
-      const response = await safeFetch(sitemapUrl, { headers: { "user-agent": CRAWLER_USER_AGENT } });
+      const response = await fetchImpl(sitemapUrl, { headers: { "user-agent": CRAWLER_USER_AGENT } });
       if (!response.ok) continue;
       const nested = discovery.addSitemapDocument(await response.text(), sitemapUrl);
-      for (const url of nested) if (!visitedSitemaps.has(url)) sitemapQueue.push(url);
+      if (tier === "deep") {
+        for (const url of nested) if (!visitedSitemaps.has(url)) sitemapQueue.push(url);
+      }
     } catch {
       // A broken optional sitemap must not discard usable homepage/link discovery.
     }
   }
 
   const metadata = new Map<string, Partial<ExtractedPageContent>>([[root.href, homepage]]);
+  const discoveredEntries = discovery.getUrls().filter((entry) => isAllowedByRobots(entry.url, robotsPolicy));
+  const estimatedPages = Math.max(1, new Set(discoveredEntries.map((entry) => entry.url)).size);
+  const candidateEntries = tier === "free"
+    ? discoveredEntries.filter((entry) => entry.url === root.href)
+    : discoveredEntries;
   const deterministicCandidates = compressCandidates(
     buildPageCandidates(
-      discovery.getUrls().filter((entry) => isAllowedByRobots(entry.url, robotsPolicy)),
+      candidateEntries,
       metadata
     )
   );
+  if (deterministicCandidates.length === 0) {
+    deterministicCandidates.push(...compressCandidates(buildPageCandidates([{ url: root.href, sources: ["seed"] }], metadata)));
+  }
   const candidates: PageCandidate[] = deterministicCandidates.map((candidate) => ({
     url: candidate.url,
     title: candidate.title,
@@ -96,7 +112,8 @@ export async function discoverSite(targetUrl: string): Promise<DiscoveredSite> {
     candidates,
     deterministicCandidates,
     robotsPolicy,
-    homepage
+    homepage,
+    estimatedPages
   };
 }
 

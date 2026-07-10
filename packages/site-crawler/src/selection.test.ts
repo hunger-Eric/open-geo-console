@@ -108,7 +108,7 @@ describe("page classification and sampling", () => {
     expect(new Set(result.map(({ templateKey }) => templateKey)).size).toBe(MAX_CANDIDATE_URLS);
   });
 
-  it("selects at most 8 free and 50 deep pages", () => {
+  it("selects one free and at most 50 deep pages", () => {
     const input = Array.from({ length: 80 }, (_, index) => candidate(index));
     expect(selectPagesForTier(input, "free")).toHaveLength(FREE_PAGE_LIMIT);
     expect(selectPagesForTier(input, "deep")).toHaveLength(DEEP_PAGE_LIMIT);
@@ -126,7 +126,7 @@ describe("page classification and sampling", () => {
       candidate(7, "help"),
       { ...candidate(8, "home"), priority: 2000 }
     ];
-    const selected = selectPagesForTier(input, "free");
+    const selected = selectPagesForTier(input, "deep");
     expect(new Set(selected.map(({ pageType }) => pageType))).toEqual(
       new Set(["home", "product", "about", "pricing", "case-study", "contact", "blog", "help"])
     );

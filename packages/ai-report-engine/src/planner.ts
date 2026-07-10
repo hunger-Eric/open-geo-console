@@ -172,6 +172,22 @@ export async function planPages(
     return { tier: input.tier, selected: [], modelId: client.configuredModel, fallbackUsed: true };
   }
 
+  if (input.tier === "free") {
+    const target = canonicalCandidateUrl(input.targetUrl);
+    const homepage = candidates.find((candidate) => candidate.url === target || candidate.pageType === "home") ?? candidates[0]!;
+    return {
+      tier: input.tier,
+      selected: [{
+        url: homepage.url,
+        pageType: "home",
+        priority: 100,
+        reason: "Homepage-only free preview"
+      }],
+      modelId: client.configuredModel,
+      fallbackUsed: true
+    };
+  }
+
   const compactCandidates = candidates.map((candidate) => ({
     url: candidate.url,
     pageType: candidate.pageType,

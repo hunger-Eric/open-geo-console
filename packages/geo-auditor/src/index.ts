@@ -161,6 +161,8 @@ export interface GeoAuditReport {
 
 export interface AuditSiteOptions {
   fetchImpl?: typeof fetch;
+  pageLimit?: number;
+  pageUrls?: string[];
 }
 
 interface FetchResult {
@@ -190,8 +192,12 @@ export async function auditSite(inputUrl: string, options: AuditSiteOptions = {}
   ]);
 
   const sitemapUrls = sitemapXml.ok ? extractSitemapUrls(sitemapXml.text, root) : [];
-  const representativeUrls = selectRepresentativePages(root, sitemapUrls);
-  const pageResults = await Promise.all(representativeUrls.map((url) => fetchText(url, fetchImpl)));
+  const representativeUrls = options.pageUrls
+    ? normalizeExplicitPageUrls(root, options.pageUrls)
+    : selectRepresentativePages(root, sitemapUrls, options.pageLimit ?? 20);
+  const pageResults = await Promise.all(
+    representativeUrls.map((url) => url === root.href ? home : fetchText(url, fetchImpl))
+  );
   const pages = pageResults.map((result) => analyzePage(result, root));
 
   if (!pages.some((page) => page.url === root.href)) {
@@ -215,6 +221,42 @@ export async function auditSite(inputUrl: string, options: AuditSiteOptions = {}
     pages,
     machineReadableAssets
   };
+}
+
+export function projectHomepageReport(report: GeoAuditReport): GeoAuditReport {
+  const target = new URL(report.url);
+  const homepage = report.pages.find((page) => {
+    try {
+      const url = new URL(page.url);
+      return url.origin === target.origin && url.pathname === target.pathname && url.search === target.search;
+    } catch {
+      return false;
+    }
+  }) ?? report.pages[0];
+  const pages = homepage ? [homepage] : [];
+  const findings = buildFindings(report.url, pages, report.machineReadableAssets);
+
+  return {
+    ...report,
+    score: calculateScore(findings, pages),
+    findings,
+    recommendations: [...new Set(findings.map((finding) => finding.recommendation))],
+    pages
+  };
+}
+
+function normalizeExplicitPageUrls(root: URL, pageUrls: string[]): string[] {
+  const selected = new Set<string>([root.href]);
+  for (const value of pageUrls) {
+    try {
+      const url = new URL(value, root);
+      url.hash = "";
+      if (url.origin === root.origin) selected.add(url.href);
+    } catch {
+      // Invalid planned URLs are ignored rather than fetched.
+    }
+  }
+  return [...selected];
 }
 
 export function selectRepresentativePages(root: URL, sitemapUrls: string[], limit = 20): string[] {

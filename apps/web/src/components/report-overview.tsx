@@ -14,7 +14,8 @@ export function ReportOverview({
   locale,
   presentation,
   report,
-  reportId
+  reportId,
+  reportTier
 }: {
   dictionary: Dictionary;
   evidence: BotEvidenceSummary | null;
@@ -22,6 +23,7 @@ export function ReportOverview({
   presentation: ReportPresentation;
   report: GeoAuditReport;
   reportId: string;
+  reportTier: "free" | "deep";
 }) {
   const topFindings = presentation.priorityFindings.slice(0, 3);
   const issuesHref = localizePath(locale, `/reports/${reportId}/issues`);
@@ -33,13 +35,15 @@ export function ReportOverview({
         <section className="workspace-surface p-6 sm:p-8">
           <div className="grid gap-7 md:grid-cols-[160px_minmax(0,1fr)] md:items-center">
             <div className="flex justify-center md:justify-start">
-              <ScoreRing label={dictionary.report.scoreLabel} score={report.score} />
+              <ScoreRing label={reportTier === "free" ? dictionary.aiReport.homepageScore : dictionary.report.scoreLabel} score={report.score} />
             </div>
             <div>
               <p className="eyebrow">{dictionary.workspace.overviewTitle}</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight">{presentation.scoreMeaning}</h2>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight">
+                {reportTier === "free" ? dictionary.aiReport.homepagePreviewNotice : presentation.scoreMeaning}
+              </h2>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--muted)]">
-                {dictionary.report.scoreDescription}
+                {reportTier === "free" ? dictionary.aiReport.homepageScoreDescription : dictionary.report.scoreDescription}
               </p>
               <div className="mt-5 flex flex-wrap gap-3">
                 <Link href={issuesHref} className="button-primary">
@@ -100,7 +104,7 @@ export function ReportOverview({
       <aside className="workspace-surface h-fit p-6">
         <h2 className="text-lg font-semibold">{dictionary.workspace.overviewTitle}</h2>
         <dl className="mt-4 divide-y divide-[var(--border)] text-sm">
-          <SummaryRow label={dictionary.report.scoreLabel} value={`${formatNumber(locale, report.score)} / 100`} />
+          <SummaryRow label={reportTier === "free" ? dictionary.aiReport.homepageScore : dictionary.report.scoreLabel} value={`${formatNumber(locale, report.score)} / 100`} />
           <SummaryRow label={dictionary.report.metricLabels.critical} value={formatNumber(locale, presentation.criticalCount)} />
           <SummaryRow label={dictionary.report.metricLabels.warnings} value={formatNumber(locale, presentation.warningCount)} />
           <SummaryRow label={dictionary.report.metricLabels.pages} value={formatNumber(locale, report.pages.length)} />

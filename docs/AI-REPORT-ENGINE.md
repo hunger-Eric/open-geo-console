@@ -7,7 +7,7 @@ The deterministic and model-generated report dimensions are deliberately separat
 1. `geo-auditor` fetches technical evidence and calculates the reproducible GEO score.
 2. The web API normalizes a registrable `siteKey`, enforces the free-trial policy, persists the technical report, and enqueues a job.
 3. `site-crawler` safely resolves public destinations, discovers up to 50,000 URLs, clusters at most 500 candidates, and extracts page evidence.
-4. `ai-report-engine` asks the configured OpenAI-compatible model to plan up to 8 free or 50 deep pages, analyze page batches, and synthesize `AiWebsiteReportV1`.
+4. Free jobs deterministically analyze only the homepage without a model planning call. Deep jobs ask the configured OpenAI-compatible model to plan every eligible page on small sites or up to 50 representative pages, then analyze batches and synthesize `AiWebsiteReportV1`.
 5. The engine verifies every formal citation against fetched URL/text evidence. Unsupported findings are discarded.
 6. The Worker persists the final report, stores only required evidence excerpts long-term, and completes or refunds the credit transaction.
 
@@ -37,7 +37,7 @@ The Worker owns crawling and model calls. Web requests never run deep analysis i
 - discovery/planning/analysis coverage and limitations;
 - model, prompt, language, generation-time and content-hash provenance.
 
-The free tier returns at most three verified findings. The deep payload is private and is returned only when the report-specific HttpOnly cookie validates.
+The free tier returns one verified homepage finding. Its technical score covers only the homepage and the standard robots/sitemap/llms assets. The deep AI and technical payloads are private and are returned only when the report-specific HttpOnly cookie validates.
 
 ## Persistence
 
@@ -45,7 +45,7 @@ PostgreSQL tables:
 
 - `scan_reports`, `report_bot_evidence` — technical report and sanitized log evidence.
 - `scan_jobs` — leased task state and checkpoints.
-- `ai_reports` — one current free and one current deep AI report per technical report.
+- `ai_reports` — one current free and one current deep AI report per technical report; deep rows may include a private full technical payload.
 - `crawl_evidence` — normalized page content, hashes and excerpts; full normalized content expires after seven days.
 - `free_site_trials`, `anonymous_rate_buckets` — 30-day site dedupe and three-sites/day anonymous limit.
 - `access_keys`, `credit_ledger` — HMAC-only keys and idempotent credit transactions.
@@ -81,7 +81,7 @@ Validates the report-specific token, writes an HttpOnly, SameSite=Lax cookie, an
 
 Run web and both Worker lanes as separate processes sharing `DATABASE_URL`. For local development, copy `.env.example` to `apps/web/.env.local`; Next.js and the Node operator/Worker scripts read that file. Install Chromium with `npm run browser:install`. Only trust proxy IP headers when the deployment proxy overwrites them.
 
-The deterministic auditor treats a non-2xx response as the root cause for that page and does not run downstream H1, Schema, canonical, metadata, or readability checks. Findings are grouped by rule, page type, and normalized template, with at most three representative URLs. The overview rolls template groups into one rule-level priority card. Score deductions are capped per rule so repeated pages cannot erase the complete score by themselves.
+The free deterministic auditor fetches the homepage plus `/robots.txt`, `/sitemap.xml`, and `/llms.txt`; it does not fetch sitemap entries or homepage link targets. A deep job runs a separate private technical audit over its planned pages. The auditor treats a non-2xx response as the root cause for that page and does not run downstream H1, Schema, canonical, metadata, or readability checks. Findings are grouped by rule, page type, and normalized template, with at most three representative URLs. The overview rolls template groups into one rule-level priority card. Score deductions are capped per rule so repeated pages cannot erase the complete score by themselves.
 
 - `OGC_AI_TIMEOUT_MS` is the per-model-call timeout. Long structured synthesis should normally use `180000` milliseconds.
 - `OGC_ALLOW_BENCHMARK_NETWORK=true` permits only `198.18.0.0/15` for sandbox environments that route public DNS through that benchmark range. It is a local escape hatch and must remain false in production; all other private, metadata and reserved ranges stay blocked.
@@ -101,4 +101,4 @@ npm run test:ai-live
 
 If a task remains queued, use the status endpoint to distinguish jobs ahead, an active task in that lane, and a task waiting to be claimed. Then confirm the matching free/deep Worker is running and sees the same database. If AI calls fail, run `npm run ai:probe` and verify the provider's exact model identifier. If dynamic pages fail, install Chromium and inspect Worker browser-launch errors. Do not log provider responses that may contain sensitive customer content.
 
-The 2026-07-10 live acceptance used `mimo-v2.5-pro` against `me.itheheda.online`: 8 pages were planned, 7 analyzed, one failed, and the Chinese free report completed with three verified findings. This is runtime evidence, not a fixture or mock result.
+Before the homepage-only commercial boundary was introduced, the 2026-07-10 live acceptance used `mimo-v2.5-pro` against `me.itheheda.online`: 8 pages were planned, 7 analyzed, and one failed. That record is historical runtime evidence, not the current free-tier contract.

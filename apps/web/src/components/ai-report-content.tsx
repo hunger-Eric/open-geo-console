@@ -35,7 +35,7 @@ export function AiReportContent({
   locale: Locale;
   report: AiWebsiteReportV1;
 }) {
-  const findings = report.tier === "free" ? report.findings.slice(0, 3) : report.findings;
+  const findings = report.tier === "free" ? report.findings.slice(0, 1) : report.findings;
   const isDeep = report.tier === "deep";
 
   return (
@@ -61,7 +61,12 @@ export function AiReportContent({
           <div className="min-w-56 rounded-lg bg-[var(--subtle)] p-4 text-sm">
             <p className="font-semibold">{dictionary.aiReport.coverage}</p>
             <dl className="mt-3 space-y-2 text-[var(--muted)]">
-              <SummaryValue label={locale === "zh" ? "发现 URL" : "URLs discovered"} value={report.coverage.discoveredPages} />
+              <SummaryValue
+                label={isDeep
+                  ? (locale === "zh" ? "发现 URL" : "URLs discovered")
+                  : (locale === "zh" ? "检测 URL（未分析）" : "Detected URLs (not analyzed)")}
+                value={report.coverage.discoveredPages}
+              />
               <SummaryValue label={locale === "zh" ? "计划页面" : "Pages planned"} value={report.coverage.plannedPages} />
               <SummaryValue label={locale === "zh" ? "已分析" : "Pages analyzed"} value={report.coverage.analyzedPages} />
             </dl>
@@ -69,6 +74,20 @@ export function AiReportContent({
         </div>
       </section>
 
+      {!isDeep ? (
+        <section className="workspace-surface border border-[var(--teal)]/20 p-6 sm:p-8">
+          <h2 className="text-xl font-semibold">{dictionary.aiReport.homepagePreviewNotice}</h2>
+          {report.coverage.discoveredPages > 1 ? (
+            <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
+              {dictionary.aiReport.detectedPagesEstimate.replace("{count}", String(report.coverage.discoveredPages))}
+            </p>
+          ) : null}
+          <p className="mt-3 text-sm leading-7 text-[var(--muted)]">{dictionary.aiReport.lockedDeepFeatures}</p>
+        </section>
+      ) : null}
+
+      {isDeep ? (
+        <>
       <section className="workspace-surface p-6 sm:p-8">
         <h2 className="text-xl font-semibold">{dictionary.aiReport.executiveSummary}</h2>
         <p className="mt-3 max-w-4xl text-sm leading-7 text-[var(--muted)]">{report.executiveSummary.overview}</p>
@@ -79,6 +98,10 @@ export function AiReportContent({
         </div>
       </section>
 
+        </>
+      ) : null}
+
+      {isDeep ? (
       <section className="workspace-surface overflow-hidden">
         <div className="border-b border-[var(--border)] px-6 py-5 sm:px-8">
           <h2 className="text-xl font-semibold">{dictionary.aiReport.aiDimensions}</h2>
@@ -98,6 +121,7 @@ export function AiReportContent({
           ))}
         </div>
       </section>
+      ) : null}
 
       <section className="workspace-surface overflow-hidden">
         <div className="border-b border-[var(--border)] px-6 py-5 sm:px-8">
@@ -157,7 +181,9 @@ export function AiReportContent({
 
       <section className="workspace-surface p-6 sm:p-8">
         <h2 className="text-xl font-semibold">{dictionary.aiReport.coverage}</h2>
-        <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{report.coverage.samplingMethod}</p>
+        <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
+          {isDeep ? report.coverage.samplingMethod : dictionary.aiReport.homepagePreviewNotice}
+        </p>
         {report.coverage.limitations.length > 0 ? (
           <ul className="mt-4 space-y-2 text-sm text-[var(--muted)]">
             {report.coverage.limitations.map((limitation) => <li key={limitation}>— {limitation}</li>)}
