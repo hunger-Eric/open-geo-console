@@ -347,7 +347,7 @@ Workers pull the appropriate Cloudflare Queue at a configurable interval with a 
 - Queue outage leaves durable jobs and Outbox rows intact.
 - Queue duplication cannot duplicate credit reservation, crawl work, terminal writes, refunds, or email delivery.
 
-Normal healthy work should start within 30 seconds. Exceptional publish failure may wait up to the 30-minute reconciliation window.
+When an ordinary Queue-pull Worker is online, healthy work should start within 30 seconds. Exceptional publish failure may wait up to the 30-minute reconciliation window. In `batch_24h` mode while the workstation is offline, PostgreSQL retains the task until the next scheduled drain instead of pretending that real-time capacity exists.
 
 ## Abuse and Cost Controls
 
@@ -369,12 +369,15 @@ When the global free AI budget is exhausted, Open GEO Console still returns the 
 
 Each process continues to run one job at a time. Horizontal replicas provide concurrency safely through PostgreSQL row locking and leases.
 
-Initial commercial deployment:
+Initial low-volume batch deployment:
 
 ```text
 free Worker replicas: 1
 deep Worker replicas: 1
+delivery promise: within 24 hours
 ```
+
+The current i7-11800H, 32 GB workstation is sufficient for the expected one or two paid reports per day. A future higher-performance local machine may run additional single-job deep Worker processes, but process count remains explicit and bounded. CPU capacity does not override model-provider rate limits, local memory pressure, or the per-site crawl safety policy.
 
 Add a second deep replica when any condition persists:
 
@@ -384,12 +387,13 @@ Add a second deep replica when any condition persists:
 
 At approximately 50 paid deep reports per day, plan for two to three deep replicas and verify model-provider rate limits and token budget separately.
 
-Worker presence heartbeats support commerce health. Checkout stops accepting new live payments after the deep tier has no healthy heartbeat for 10 minutes, or when payment refund or email delivery has a declared operational incident. Existing paid jobs remain recoverable.
+Worker presence heartbeats support commerce health. Real-time checkout stops accepting new live payments after the deep tier has no healthy heartbeat for 10 minutes. Batch checkout instead uses the most recent successful drain, the next scheduled batch window, and the oldest paid job age. Payment refund or email delivery incidents pause checkout in either mode. Existing paid jobs remain recoverable.
 
 ## Deployment Modes
 
 ```text
 COMMERCE_MODE=disabled | test | live
+FULFILLMENT_MODE=batch_24h | realtime
 ```
 
 ### Free validation
@@ -404,13 +408,56 @@ COMMERCE_MODE=disabled | test | live
 
 No real payment is accepted. Workstation downtime may delay tasks.
 
-### Commercial launch
+### Zero-fixed-cost commercial batch launch
 
-Before `COMMERCE_MODE=live`:
+`COMMERCE_MODE=live` and `FULFILLMENT_MODE=batch_24h` permit a workstation to fulfill a small number of real orders when the customer-facing purchase surface promises delivery within 24 hours.
+
+The default fixed-cost infrastructure is:
+
+- Cloudflare Free for DNS, Turnstile, WAF, Queue, and an hourly deadline trigger;
+- Netlify Free as the commercial-compatible Next.js Web and short-API target, subject to a complete build, route, Webhook, and credit-usage canary before DNS cutover;
+- Neon Free while compute and storage remain within measured allowances;
+- one local free Worker and one local deep Worker;
+- Resend Free while message volume remains within allowance;
+- Airwallex Explore with transaction fees but no infrastructure subscription.
+
+Vercel Hobby remains valid only for non-commercial validation. It is not the Web origin for live orders.
+
+The workstation uses a batch supervisor rather than relying on an interactive terminal:
+
+- Windows starts a drain run at two configurable daily windows, initially 10:00 and 20:00 Asia/Shanghai;
+- `worker:drain:free` and `worker:drain:deep` recover expired leases, process eligible work until the lane is empty, perform Outbox reconciliation, record a successful drain, and exit;
+- when the workstation remains online, the ordinary Queue-pull Workers may continue to provide faster delivery;
+- sleep is disabled during a drain, unexpected process exit is restarted, and no inbound port is opened;
+- disk encryption, a dedicated restricted OS account, protected local secrets, stable outbound network access, and automatic security updates are commercial requirements.
+
+Cloudflare Queue message expiry does not lose work. Every drain starts from PostgreSQL authority and republishes or directly claims durable jobs whose notification expired while the workstation was offline.
+
+An hourly signed deadline check runs independently of the workstation:
+
+- at 20 hours, an unfinished paid order is marked at risk and alerts the operator;
+- at 24 hours, the order receives a full cash-refund request, its internal reservation is refunded, and the job becomes non-billable courtesy work;
+- checkout pauses while any paid order is overdue or the most recent successful drain is older than 24 hours;
+- if the report completes after the refund, it may still be delivered as a courtesy and cannot settle or charge a second time.
+
+This mode has no uptime or instant-delivery claim. The explicit product promise is “delivered by email within 24 hours or fully refunded.”
+
+Before batch live mode:
 
 - the Hong Kong merchant and settlement setup is approved;
 - Airwallex Live and required payment methods are enabled;
-- Vercel is on a commercial plan;
+- Netlify compatibility and usage canaries pass;
+- at least three consecutive scheduled drain rehearsals complete successfully;
+- the hourly deadline and automatic-refund drill passes;
+- the PostgreSQL, Queue, email, payment, and report-access checks below pass.
+
+### Real-time commercial launch
+
+`FULFILLMENT_MODE=realtime` replaces the batch promise only after:
+
+- the Hong Kong merchant and settlement setup is approved;
+- Airwallex Live and required payment methods are enabled;
+- the Web runs on a commercial-compatible plan;
 - free and deep Workers run on a persistent service such as Railway;
 - the PostgreSQL plan has adequate compute, storage, restore, and log retention;
 - the Resend domain is verified;
@@ -419,7 +466,7 @@ Before `COMMERCE_MODE=live`:
 - duplicate Webhook, Queue failure, Worker crash, email bounce, and refund-failure drills pass;
 - the commercial database audit reports no invariant violations.
 
-The workstation is not an authorized live paid-report runtime.
+The workstation may remain a development or overflow runner in real-time mode, but it is not counted as the required persistent paid capacity.
 
 ## Security and Privacy
 
@@ -436,7 +483,7 @@ The workstation is not an authorized live paid-report runtime.
 
 ### Trusted edge identity
 
-Anonymous quotas must not trust an arbitrary browser-supplied forwarding header. Cloudflare strips any incoming internal edge header and adds a deployment secret when proxying public application traffic. Vercel accepts `CF-Connecting-IP` for scan and link-reissue quotas only when that internal edge secret is valid. Direct requests to the Vercel origin cannot use anonymous scan, checkout, or link-reissue routes. Provider Webhook routes are exempt from the edge secret but require their own raw-body signatures. The edge secret is never returned to the browser or written to logs.
+Anonymous quotas must not trust an arbitrary browser-supplied forwarding header. Cloudflare strips any incoming internal edge header and adds a deployment secret when proxying public application traffic. The Web origin accepts `CF-Connecting-IP` for scan and link-reissue quotas only when that internal edge secret is valid. Direct requests to a Netlify or Vercel origin cannot use anonymous scan, checkout, or link-reissue routes. Provider Webhook routes are exempt from the edge secret but require their own raw-body signatures. The edge secret is never returned to the browser or written to logs.
 
 ## Observability and Operational Controls
 
@@ -452,6 +499,8 @@ Track at minimum:
 - email sent, delivered, bounced, and failed rates;
 - report-link redemption and reissue rates;
 - healthy Worker presence by tier;
+- last successful drain, next scheduled drain, paid SLA age, and overdue paid orders;
+- Netlify credit usage in batch mode;
 - Neon compute and storage usage.
 
 Immediate alerts:
@@ -459,7 +508,10 @@ Immediate alerts:
 - any failed cash refund;
 - a paid order with no deep job after five minutes;
 - a paid terminal job with an inconsistent credit or refund state;
-- no healthy deep Worker for ten minutes in live mode;
+- no healthy deep Worker for ten minutes in real-time mode;
+- no successful local drain for 20 hours in batch mode;
+- any batch order reaching 20 hours without a terminal report;
+- any batch order reaching the 24-hour automatic-refund boundary;
 - oldest paid queued job over ten minutes;
 - payment or email Webhook signature failure spikes;
 - paid email bounce or permanent delivery failure.
@@ -482,7 +534,10 @@ An operator may pause checkout, pause free AI, change the free daily budget, rep
 | Email API times out | Delivery remains queued/sent-unknown | Retry with permanent business idempotency |
 | Email scanner opens link | Token remains unused | Human POST performs redemption |
 | Buyer loses link | Order and encrypted email remain | Rate-limited link reissue |
-| Deep Worker unavailable | Paid work remains queued | Pause new checkout after health threshold; alert and recover |
+| Local workstation is offline at a batch window | Paid work remains in PostgreSQL | Alert, retry the drain, and preserve the 24-hour deadline |
+| Batch order reaches 20 hours | Order becomes SLA-at-risk | Alert operator and prioritize the next drain |
+| Batch order reaches 24 hours | Order, job, and reserved credit remain durable | Refund cash and internal credit, convert the job to courtesy work, and pause checkout |
+| Deep Worker unavailable in real-time mode | Paid work remains queued | Pause new checkout after health threshold; alert and recover |
 
 ## Verification
 
@@ -503,7 +558,10 @@ An operator may pause checkout, pause free AI, change the free daily budget, rep
 - email retry, duplicate Webhook, bounce, and out-of-order delivery events;
 - GET-does-not-consume and POST-does-consume report-link behavior;
 - report retention and link reissue authorization;
-- commerce-mode and Worker-health checkout gates;
+- commerce mode, fulfillment mode, scheduled-drain, and Worker-health checkout gates;
+- drain-until-empty behavior and expired Queue notification recovery;
+- 20-hour SLA warning and exactly-once 24-hour automatic refund;
+- SLA-refunded jobs becoming non-billable courtesy work without a second settlement;
 - privacy assertions for logs, Queue bodies, and stored hashes.
 
 ### Sandbox and live canaries
@@ -517,11 +575,14 @@ An operator may pause checkout, pause free AI, change the free daily budget, rep
 7. Worker termination during analysis followed by checkpoint recovery.
 8. Resend delivered, bounced, and retry fixtures.
 9. One controlled live low-value payment and full refund before public launch.
+10. Three consecutive scheduled workstation drains followed by one intentionally missed batch and SLA recovery drill.
 
 ### Acceptance targets
 
-- healthy Queue notification starts work within 30 seconds;
+- real-time mode starts healthy Queue work within 30 seconds;
 - exceptional missed notification recovers within 30 minutes;
+- batch mode completes paid reports within 24 hours or creates exactly one full refund;
+- a successful batch drain processes all eligible work, records its completion, and exits without idle database polling;
 - one provider payment creates exactly one paid entitlement and one deep job;
 - a paid terminal outcome never leaves a reserved credit;
 - limited and failed paid outcomes create exactly one full cash refund;
@@ -540,6 +601,7 @@ This design should be implemented as bounded phases:
 4. **Payment Sandbox:** Airwallex hosted checkout, signed Webhooks, internal one-credit entitlement, and paid deep-job creation.
 5. **Refunds:** provider refund adapter, refund Outbox/state, limited/failed cash mapping, and operator alerts.
 6. **Email and access:** Resend adapter, delivery state, templates, safe link redemption, reissue, retention, and PDF handoff.
-7. **Commercial operations:** Worker presence, checkout health gates, dashboards, runbooks, live canary, and persistent Worker deployment.
+7. **Batch commercial operations:** drain commands, Windows scheduling, SLA watchdog, courtesy conversion, Netlify canary, checkout health gates, dashboards, runbooks, and live canary.
+8. **Real-time upgrade:** persistent Worker deployment, short-SLA health gates, and replica scaling when revenue justifies fixed hosting.
 
-Each phase receives deterministic tests before the next phase starts. Live payment remains disabled until the final commercial readiness gate passes.
+Each phase receives deterministic tests before the next phase starts. Live payment remains disabled until the selected fulfillment mode's commercial readiness gate passes.
