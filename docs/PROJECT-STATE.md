@@ -43,7 +43,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - An independent Preview Neon database is marked `staging`; real PostgreSQL integration tests passed against it. The protected Preview deployment denies anonymous page/API access and authenticated browser acceptance proved three distinct sites, default reuse, a new forced report, and duplicate-click idempotency.
 - The existing production PostgreSQL database is marked `production`; the commercial invariant audit passes against both databases before deployment.
 - Live regression scan of `shun-express.com` produced a score of 35 with 26 grouped findings instead of the previous score of 0 with 62 repeated findings; the overview correctly summarizes 10 dead links.
-- The public noncommercial acceptance build remains at `https://open-geo-console.vercel.app`. The current protected Preview is `https://open-geo-console-4dbx3cabz-itheheda-6857s-projects.vercel.app`; Standard Authentication protects it and its automation bypass was rotated without exposing either credential.
+- Security implementation commit `0b09288` is deployed to the public production alias `https://open-geo-console.vercel.app` and protected Preview `https://open-geo-console-p9k9a9vqu-itheheda-6857s-projects.vercel.app`. Standard Authentication protects Preview, and its automation bypass was rotated without exposing either credential.
 
 ## Known Boundaries
 
@@ -54,7 +54,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Netlify is the intended commercial Web/API host. The existing Vercel Hobby deployment remains useful only for noncommercial acceptance because its terms are not the commercial target.
 - Real model behavior depends on the configured provider. CI uses mock clients; `npm run test:ai-live` remains the repeatable paid integration command.
 - The Vercel project is not connected to Git because the Vercel GitHub App lacks repository access. Preview variables therefore cannot yet be restricted to a fixed staging branch, and provider-level staging acceptance cannot run until independent CodingPlan, Airwallex Sandbox, Resend/test-recipient, and Queue credentials are supplied.
-- Cloudflare account/domain access was not available for Bot Fight Mode, WAF/short-window rate limiting, or production Turnstile configuration. Application Turnstile verification, database limiting, Webhook signatures, SSRF protection, and the commercial audit remain in code, but edge configuration and live production `429` acceptance are still external gates.
+- Cloudflare account/domain access was not available for Bot Fight Mode, WAF/short-window rate limiting, or production Turnstile configuration. Production now fails closed with `TURNSTILE_SECRET_KEY is required when Turnstile is enabled`; the public page loads, but scan submission and live third-site `429` acceptance remain blocked until valid production Turnstile keys are configured. Database limiting, Webhook signatures, SSRF protection, and the commercial audit remain active in code.
 - Anonymous users behind the same public IP or carrier/NAT gateway intentionally share the two-site rolling limit; there is no unauthenticated quota-reset endpoint.
 
 ## Next Steps
