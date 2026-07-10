@@ -38,7 +38,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Commercial terminalization is atomic: qualified jobs complete and settle; usable low-coverage jobs complete-limited and refund; unusable jobs fail and refund. `npm run db:audit` detects invariant violations.
 - The anonymous homepage now contains only website analysis, bilingual controls, value-led capability copy and a secondary log-tool link; it does not expose shared recent-report history or a personal-site default.
 - Live regression scan of `shun-express.com` produced a score of 35 with 26 grouped findings instead of the previous score of 0 with 62 repeated findings; the overview correctly summarizes 10 dead links.
-- The public noncommercial acceptance build for commit `1377f24` is deployed at `https://open-geo-console.vercel.app`. `COMMERCE_MODE=disabled` and `TURNSTILE_REQUIRED=false` keep the visual review public without exposing an unconfigured checkout or blocking the free form on a missing Turnstile secret.
+- The public noncommercial acceptance build for commit `e7fce6b` is deployed at `https://open-geo-console.vercel.app`. `COMMERCE_MODE=disabled`, `TURNSTILE_REQUIRED=false` and `OGC_TRUST_VERCEL_HEADERS=true` keep visual review public, prevent an unconfigured checkout, and preserve per-client anonymous limits on this legacy Vercel project.
 
 ## Known Boundaries
 
