@@ -37,7 +37,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Commercial terminalization is atomic: qualified jobs complete and settle; usable low-coverage jobs complete-limited and refund; unusable jobs fail and refund. `npm run db:audit` detects invariant violations.
 - The anonymous homepage now contains only website analysis, bilingual controls, value-led capability copy and a secondary log-tool link; it does not expose shared recent-report history or a personal-site default.
 - Live regression scan of `shun-express.com` produced a score of 35 with 26 grouped findings instead of the previous score of 0 with 62 repeated findings; the overview correctly summarizes 10 dead links.
-- The production Web is deployed at `https://open-geo-console.vercel.app` with a Vercel-connected Neon PostgreSQL authority. A live production scan of `me.itheheda.online` completed through MiMo 2.5 Pro with one planned/analyzed homepage and one verified free finding.
+- The public noncommercial acceptance build for commit `1377f24` is deployed at `https://open-geo-console.vercel.app`. `COMMERCE_MODE=disabled` and `TURNSTILE_REQUIRED=false` keep the visual review public without exposing an unconfigured checkout or blocking the free form on a missing Turnstile secret.
 
 ## Known Boundaries
 
@@ -47,7 +47,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Production always requires persistent PostgreSQL. Initial commercial operation may use scheduled workstation batches with a 24-hour/full-refund promise; instant delivery requires persistent `realtime` Workers.
 - Netlify is the intended commercial Web/API host. The existing Vercel Hobby deployment remains useful only for noncommercial acceptance because its terms are not the commercial target.
 - Real model behavior depends on the configured provider. CI uses mock clients; `npm run test:ai-live` remains the repeatable paid integration command.
-- The credential shared in chat is stored in local ignored state and as a Vercel Sensitive production variable for the authorized acceptance run. Because it was exposed in chat, it must still be rotated before public operation.
+- Vercel currently lists no project environment variables, so the public acceptance deployment is not evidence of live database, model, payment, email or Queue readiness. Any credential previously exposed in chat must still be rotated before public operation.
 
 ## Next Steps
 
