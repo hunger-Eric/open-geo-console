@@ -1,0 +1,70 @@
+import { NextResponse } from "next/server";
+import {
+  applyPaidPaymentEvent,
+  applyUnsuccessfulPaymentEvent,
+  markPaymentEventProcessing,
+  recordPaymentEvent
+} from "@/db/commercial-orders";
+import { markRefundSucceededFromProvider } from "@/db/commercial-refunds";
+import { AirwallexGateway } from "@/payments/airwallex";
+
+export const runtime = "nodejs";
+
+export async function POST(request: Request) {
+  let rawBody = "";
+  try {
+    rawBody = await request.text();
+    const event = new AirwallexGateway().verifyAndParseWebhook(rawBody, request.headers);
+    if (event.outcome === "payment_paid") {
+      if (!event.orderId || !event.paymentIntentId) throw new Error("A paid event is missing its order or payment identity.");
+      await applyPaidPaymentEvent({
+        provider: "airwallex",
+        providerEventId: event.eventId,
+        eventType: event.eventType,
+        orderId: event.orderId,
+        providerPaymentId: event.paymentIntentId,
+        providerCreatedAt: event.createdAt,
+        payloadHash: event.payloadHash,
+        selectedFields: { providerStatus: event.providerStatus }
+      });
+    } else if (event.outcome === "payment_failed" && event.orderId) {
+      await applyUnsuccessfulPaymentEvent({
+        provider: "airwallex",
+        providerEventId: event.eventId,
+        eventType: event.eventType,
+        orderId: event.orderId,
+        status: event.eventType.toLowerCase().includes("cancel") ? "cancelled" : "failed",
+        providerCreatedAt: event.createdAt,
+        payloadHash: event.payloadHash,
+        selectedFields: { providerStatus: event.providerStatus }
+      });
+    } else {
+      await recordPaymentEvent({
+        provider: "airwallex",
+        providerEventId: event.eventId,
+        eventType: event.eventType,
+        orderId: event.orderId,
+        providerCreatedAt: event.createdAt,
+        payloadHash: event.payloadHash,
+        selectedFields: { providerStatus: event.providerStatus }
+      });
+      if (
+        event.outcome === "refund_updated"
+        && event.providerRefundId
+        && event.providerStatus
+        && ["ACCEPTED", "SETTLED"].includes(event.providerStatus.toUpperCase())
+      ) {
+        await markRefundSucceededFromProvider({ providerRefundId: event.providerRefundId, orderId: event.orderId ?? undefined });
+      }
+      await markPaymentEventProcessing({
+        provider: "airwallex",
+        providerEventId: event.eventId,
+        status: event.outcome === "ignored" ? "ignored" : "processed",
+        orderId: event.orderId
+      });
+    }
+    return NextResponse.json({ received: true });
+  } catch {
+    return NextResponse.json({ error: "Invalid webhook." }, { status: 400 });
+  }
+}

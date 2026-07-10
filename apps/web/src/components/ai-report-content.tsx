@@ -29,20 +29,26 @@ const DIMENSION_LABELS: Record<Locale, Record<DimensionKey, string>> = {
 export function AiReportContent({
   dictionary,
   locale,
-  report
+  report,
+  reportLocale
 }: {
   dictionary: Dictionary;
   locale: Locale;
   report: AiWebsiteReportV1;
+  reportLocale: Locale;
 }) {
   const findings = report.tier === "free" ? report.findings.slice(0, 1) : report.findings;
   const isDeep = report.tier === "deep";
+  const generatedLocale = report.provenance.locale === "zh" || report.provenance.locale === "en"
+    ? report.provenance.locale
+    : reportLocale;
+  const generatedLang = generatedLocale === "zh" ? "zh-CN" : "en";
 
   return (
     <div className="space-y-6">
       <section className="workspace-surface p-6 sm:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-          <div className="max-w-3xl">
+          <div className="max-w-3xl" lang={generatedLang}>
             <div className="flex items-center gap-2 text-[var(--teal)]">
               <Sparkles aria-hidden="true" className="size-5" />
               <span className="text-sm font-semibold">
@@ -88,7 +94,7 @@ export function AiReportContent({
 
       {isDeep ? (
         <>
-      <section className="workspace-surface p-6 sm:p-8">
+      <section className="workspace-surface p-6 sm:p-8" lang={generatedLang}>
         <h2 className="text-xl font-semibold">{dictionary.aiReport.executiveSummary}</h2>
         <p className="mt-3 max-w-4xl text-sm leading-7 text-[var(--muted)]">{report.executiveSummary.overview}</p>
         <div className="mt-6 grid gap-5 lg:grid-cols-3">
@@ -108,10 +114,15 @@ export function AiReportContent({
         </div>
         <div className="grid md:grid-cols-2 xl:grid-cols-3">
           {report.dimensionScores.map((dimension) => (
-            <article key={dimension.dimension} className="border-b border-[var(--border)] p-6 md:border-r sm:p-7">
+            <article key={dimension.dimension} className="border-b border-[var(--border)] p-6 md:border-r sm:p-7" lang={generatedLang}>
               <div className="flex items-start justify-between gap-4">
                 <h3 className="font-semibold">{DIMENSION_LABELS[locale][dimension.dimension]}</h3>
-                <span className="text-2xl font-semibold text-[var(--teal)]">{dimension.score}</span>
+                <span
+                  className="text-2xl font-semibold text-[var(--teal)]"
+                  aria-label={`${DIMENSION_LABELS[locale][dimension.dimension]}: ${dimension.score} / 100`}
+                >
+                  {dimension.score} / 100
+                </span>
               </div>
               <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{dimension.explanation}</p>
               <p className="mt-4 text-xs text-[var(--muted)]">
@@ -129,7 +140,7 @@ export function AiReportContent({
         </div>
         <div className="divide-y divide-[var(--border)]">
           {findings.map((finding) => (
-            <article key={finding.id} className="p-6 sm:p-8">
+            <article key={finding.id} className="p-6 sm:p-8" lang={generatedLang}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-[var(--teal)]">{finding.severity}</p>
@@ -156,7 +167,7 @@ export function AiReportContent({
             </div>
             <div className="divide-y divide-[var(--border)]">
               {report.pageTypeAnalyses.map((analysis) => (
-                <article key={analysis.pageType} className="p-6 sm:p-8">
+                <article key={analysis.pageType} className="p-6 sm:p-8" lang={generatedLang}>
                   <h3 className="text-lg font-semibold">{analysis.pageType}</h3>
                   <div className="mt-4 grid gap-5 lg:grid-cols-2">
                     <SummaryList title={locale === "zh" ? "共性问题" : "Common issues"} values={analysis.commonIssues} />
@@ -168,7 +179,7 @@ export function AiReportContent({
             </div>
           </section>
 
-          <section className="workspace-surface p-6 sm:p-8">
+          <section className="workspace-surface p-6 sm:p-8" lang={generatedLang}>
             <h2 className="text-xl font-semibold">{dictionary.aiReport.roadmap}</h2>
             <div className="mt-6 grid gap-6 lg:grid-cols-3">
               <RoadmapColumn title={locale === "zh" ? "立即修复" : "Immediate"} items={report.roadmap.immediate} />
@@ -179,7 +190,7 @@ export function AiReportContent({
         </>
       ) : null}
 
-      <section className="workspace-surface p-6 sm:p-8">
+      <section className="workspace-surface p-6 sm:p-8" lang={generatedLang}>
         <h2 className="text-xl font-semibold">{dictionary.aiReport.coverage}</h2>
         <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
           {isDeep ? report.coverage.samplingMethod : dictionary.aiReport.homepagePreviewNotice}

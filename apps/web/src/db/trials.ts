@@ -44,11 +44,13 @@ export async function claimFreeSiteTrial(input: {
   now?: Date;
   ttlDays?: number;
   dailyDistinctSiteLimit?: number;
+  rollingWindowHours?: number;
 }): Promise<FreeTrialClaimResult> {
   const now = input.now ?? new Date();
   const ttlDays = input.ttlDays ?? 30;
-  const limit = input.dailyDistinctSiteLimit ?? 3;
-  if (!input.siteKey || ttlDays < 1 || limit < 1) {
+  const limit = input.dailyDistinctSiteLimit ?? 2;
+  const rollingWindowHours = input.rollingWindowHours ?? 24;
+  if (!input.siteKey || ttlDays < 1 || limit < 1 || rollingWindowHours < 1) {
     throw new Error("A site key, positive trial TTL, and positive daily limit are required.");
   }
   await ensureDatabase();
@@ -58,8 +60,6 @@ export async function claimFreeSiteTrial(input: {
   const expiresAt = new Date(now.getTime() + ttlDays * 86_400_000);
   const nowIso = now.toISOString();
   const expiresAtIso = expiresAt.toISOString();
-  const retryAfter = new Date(`${bucketDate}T00:00:00.000Z`);
-  retryAfter.setUTCDate(retryAfter.getUTCDate() + 1);
 
   return sql.begin(async (tx) => {
     // Transaction-scoped locks make the count-and-insert decisions atomic even
@@ -80,21 +80,36 @@ export async function claimFreeSiteTrial(input: {
       };
     }
 
-    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`rate:${ipHash}:${bucketDate}`}, 0))`;
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`rate:${ipHash}`}, 0))`;
     const sameSite = await tx<{ exists: boolean }[]>`
       SELECT EXISTS(
         SELECT 1 FROM anonymous_rate_buckets
-        WHERE ip_hash = ${ipHash} AND bucket_date = ${bucketDate} AND site_key = ${input.siteKey}
+        WHERE ip_hash = ${ipHash}
+          AND created_at >= ${nowIso}::timestamptz - (${rollingWindowHours} * interval '1 hour')
+          AND site_key = ${input.siteKey}
       ) AS exists
     `;
     if (!sameSite[0]?.exists) {
       const countRows = await tx<{ count: number }[]>`
         SELECT count(*)::integer AS count
-        FROM anonymous_rate_buckets
-        WHERE ip_hash = ${ipHash} AND bucket_date = ${bucketDate}
+        FROM (
+          SELECT DISTINCT site_key
+          FROM anonymous_rate_buckets
+          WHERE ip_hash = ${ipHash}
+            AND created_at >= ${nowIso}::timestamptz - (${rollingWindowHours} * interval '1 hour')
+        ) recent_sites
       `;
       if ((countRows[0]?.count ?? 0) >= limit) {
-        return { outcome: "rate_limited" as const, retryAfter };
+        const oldestRows = await tx<{ created_at: string | Date }[]>`
+          SELECT created_at
+          FROM anonymous_rate_buckets
+          WHERE ip_hash = ${ipHash}
+            AND created_at >= ${nowIso}::timestamptz - (${rollingWindowHours} * interval '1 hour')
+          ORDER BY created_at ASC
+          LIMIT 1
+        `;
+        const oldest = oldestRows[0] ? new Date(oldestRows[0].created_at) : now;
+        return { outcome: "rate_limited" as const, retryAfter: new Date(oldest.getTime() + rollingWindowHours * 3_600_000) };
       }
       await tx`
         INSERT INTO anonymous_rate_buckets (ip_hash, bucket_date, site_key, created_at)
@@ -121,6 +136,19 @@ export async function releaseFreeSiteTrial(siteKey: string, reportId: string): P
   await ensureDatabase();
   const rows = await getSqlClient()<{ site_key: string }[]>`
     DELETE FROM free_site_trials WHERE site_key = ${siteKey} AND report_id = ${reportId} RETURNING site_key
+  `;
+  return rows.length === 1;
+}
+
+export async function attachFreeTrialJob(siteKey: string, reportId: string, jobId: string): Promise<boolean> {
+  if (!siteKey || !reportId || !jobId) throw new Error("A site, report, and job are required.");
+  await ensureDatabase();
+  const rows = await getSqlClient()<{ site_key: string }[]>`
+    UPDATE free_site_trials
+    SET job_id = COALESCE(job_id, ${jobId})
+    WHERE site_key = ${siteKey} AND report_id = ${reportId}
+      AND (job_id IS NULL OR job_id = ${jobId})
+    RETURNING site_key
   `;
   return rows.length === 1;
 }

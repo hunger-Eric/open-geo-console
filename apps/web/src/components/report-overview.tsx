@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Dictionary, Locale } from "@/i18n";
 import { formatDate, formatNumber, interpolate, localizePath } from "@/i18n";
 import type { LocalizedFinding, ReportPresentation } from "@/report/presenter";
+import { technicalScoreLabel } from "@/report/score-labels";
 import { ScoreRing } from "./score-ring";
 import { SeverityPill } from "./severity-pill";
 
@@ -28,6 +29,7 @@ export function ReportOverview({
   const topFindings = presentation.priorityFindings.slice(0, 3);
   const issuesHref = localizePath(locale, `/reports/${reportId}/issues`);
   const botsHref = localizePath(locale, `/reports/${reportId}/bots`);
+  const scoreLabel = technicalScoreLabel(dictionary, reportTier, report.pages.length);
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -35,7 +37,7 @@ export function ReportOverview({
         <section className="workspace-surface p-6 sm:p-8">
           <div className="grid gap-7 md:grid-cols-[160px_minmax(0,1fr)] md:items-center">
             <div className="flex justify-center md:justify-start">
-              <ScoreRing label={reportTier === "free" ? dictionary.aiReport.homepageScore : dictionary.report.scoreLabel} score={report.score} />
+              <ScoreRing label={scoreLabel} score={report.score} />
             </div>
             <div>
               <p className="eyebrow">{dictionary.workspace.overviewTitle}</p>

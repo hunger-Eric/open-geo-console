@@ -23,7 +23,7 @@ export interface Dictionary {
     title: string;
     description: string;
   };
-  nav: Record<"scanner" | "logs" | "caseStudy", string>;
+  nav: Record<"scanner" | "logs", string>;
   actions: Record<
     | "generateReport"
     | "openSampleLogReport"
@@ -43,13 +43,10 @@ export interface Dictionary {
     description: string;
     urlLabel: string;
     urlPlaceholder: string;
-    recentReportsTitle: string;
-    emptyRecentReports: string;
     nextTitle: string;
     nextDescription: string;
-    firstCaseUrl: string;
   };
-  capabilities: Record<"geoAudit" | "crawlerLogs" | "selfHosted", { title: string; text: string }>;
+  capabilities: Record<"freeHomepage" | "evidenceAi" | "privateDeep", { title: string; text: string }>;
   report: {
     title: string;
     generatedFor: string;
@@ -182,12 +179,19 @@ export interface Dictionary {
     accessKeyLabel: string;
     unlockAction: string;
     unlocking: string;
-    retryAction: string;
+    startNewAnalysis: string;
     statusTitle: string;
     waitingDescription: string;
     completedDescription: string;
-    partialDescription: string;
+    completedLimitedDescription: string;
+    failedDescription: string;
     unavailableDescription: string;
+    reportLanguage: string;
+    reportLanguageEnglish: string;
+    reportLanguageChinese: string;
+    regenerateLanguage: string;
+    correctionInProgress: string;
+    siteTechnicalScore: string;
     queuePosition: string;
     queueJobsAhead: string;
     queueActiveJobsInPool: string;
@@ -196,18 +200,21 @@ export interface Dictionary {
     activeTierDeep: string;
     activeTierMixed: string;
     progressValue: string;
-    stages: Record<
-      | "queued"
-      | "discovering"
-      | "planning"
-      | "fetching"
-      | "analyzing"
-      | "synthesizing"
-      | "completed"
-      | "partial"
-      | "failed",
-      string
-    >;
+  };
+  commerce: {
+    offerTitle: string;
+    offerDescription: string;
+    scopeEvidence: string;
+    scopeFixes: string;
+    scopeRoadmap: string;
+    emailLabel: string;
+    currencyLabel: string;
+    deliveryPromise: string;
+    buyAction: string;
+    redirecting: string;
+    unavailable: string;
+    humanVerification: string;
+    operatorKeySummary: string;
   };
   logs: {
     title: string;
@@ -292,5 +299,5 @@ export interface Dictionary {
   };
   severity: Record<SeverityKey, string>;
   findings: Record<string, FindingMessage>;
-  errors: Record<"emptyUrl" | "unsupportedUrl" | "scanFailed", string>;
+  errors: Record<"emptyUrl" | "unsupportedUrl" | "scanFailed" | "humanVerificationRequired", string>;
 }

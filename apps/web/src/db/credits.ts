@@ -20,6 +20,13 @@ interface CreditSqlRow {
   status: CreditStatus;
 }
 
+export interface ReservedTerminalCommercialJob {
+  jobId: string;
+  reportId: string;
+  stage: "completed" | "completed_limited" | "failed";
+  reservationId: string;
+}
+
 export class AccessKeyError extends Error {
   constructor(
     public readonly code: "invalid" | "revoked" | "expired" | "exhausted" | "idempotency_conflict" | "already_settled",
@@ -58,6 +65,26 @@ export async function createAccessKey(input: { credits: number; expiresAt?: Date
     credits: input.credits,
     expiresAt: input.expiresAt ?? null
   };
+}
+
+/** Validates an access key as an authorization credential without consuming credit. */
+export async function validateAccessKey(rawKey: string): Promise<void> {
+  await ensureDatabase();
+  const keyHmac = hmacSecret(rawKey, requireSecret("OGC_TOKEN_HASH_SECRET"));
+  const keys = await getSqlClient()<AccessKeySqlRow[]>`
+    SELECT id, status, credits_remaining, expires_at
+    FROM access_keys
+    WHERE key_hmac = ${keyHmac}
+    LIMIT 1
+  `;
+  const key = keys[0];
+  if (!key) throw new AccessKeyError("invalid", "The access key is invalid.");
+  if (key.status === "revoked") throw new AccessKeyError("revoked", "The access key was revoked.");
+  if (key.expires_at && new Date(key.expires_at) <= new Date()) {
+    throw new AccessKeyError("expired", "The access key expired.");
+  }
+  // An exhausted key remains valid for authorizing a report it already paid
+  // for; only reserveCredit requires remaining credit.
 }
 
 export async function reserveCredit(input: {
@@ -170,6 +197,55 @@ export async function refundCredit(reservationId: string): Promise<CreditSqlRow>
     `;
     return updated[0];
   });
+}
+
+export async function getCreditReservationStatus(reservationId: string): Promise<CreditStatus | null> {
+  await ensureDatabase();
+  const rows = await getSqlClient()<{ status: CreditStatus }[]>`
+    SELECT status FROM credit_ledger WHERE id = ${reservationId} LIMIT 1
+  `;
+  return rows[0]?.status ?? null;
+}
+
+export async function getJobCreditStatus(jobId: string): Promise<CreditStatus | null> {
+  await ensureDatabase();
+  const rows = await getSqlClient()<{ status: CreditStatus }[]>`
+    SELECT ledger.status
+    FROM scan_jobs job
+    JOIN credit_ledger ledger ON
+      ledger.id = job.credit_reservation_id
+      OR (job.credit_reservation_id IS NULL AND ledger.job_id = job.id)
+    WHERE job.id = ${jobId}
+    LIMIT 1
+  `;
+  return rows[0]?.status ?? null;
+}
+
+export async function findReservedTerminalCommercialJobs(): Promise<ReservedTerminalCommercialJob[]> {
+  await ensureDatabase();
+  const rows = await getSqlClient()<Array<{
+    job_id: string;
+    report_id: string;
+    stage: ReservedTerminalCommercialJob["stage"];
+    reservation_id: string;
+  }>>`
+    SELECT job.id AS job_id,
+           job.report_id,
+           job.stage,
+           ledger.id AS reservation_id
+    FROM scan_jobs job
+    JOIN credit_ledger ledger ON ledger.id = job.credit_reservation_id OR ledger.job_id = job.id
+    WHERE job.tier = 'deep'
+      AND job.stage IN ('completed', 'completed_limited', 'failed')
+      AND ledger.status = 'reserved'
+    ORDER BY job.created_at, job.id
+  `;
+  return rows.map((row) => ({
+    jobId: row.job_id,
+    reportId: row.report_id,
+    stage: row.stage,
+    reservationId: row.reservation_id
+  }));
 }
 
 export async function revokeAccessKey(id: string): Promise<boolean> {

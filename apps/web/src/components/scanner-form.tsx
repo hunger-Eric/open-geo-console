@@ -5,17 +5,21 @@ import { useState, useTransition } from "react";
 import { ArrowRight, Loader2 } from "lucide-react";
 import type { Dictionary, Locale } from "@/i18n";
 import { localizePath } from "@/i18n";
+import { TurnstileWidget } from "./turnstile-widget";
 
 export function ScannerForm({
   dictionary,
-  locale
+  locale,
+  turnstileSiteKey
 }: {
   dictionary: Dictionary;
   locale: Locale;
+  turnstileSiteKey?: string;
 }) {
   const router = useRouter();
-  const [url, setUrl] = useState(dictionary.scanner.firstCaseUrl);
+  const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState("");
   const [isPending, startTransition] = useTransition();
 
   function submitScan(event: React.FormEvent<HTMLFormElement>) {
@@ -28,7 +32,7 @@ export function ScannerForm({
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ url, locale })
+        body: JSON.stringify({ url, locale, turnstileToken })
       });
       const payload = (await response.json()) as {
         reportId?: string;
@@ -51,6 +55,8 @@ export function ScannerForm({
     <form onSubmit={submitScan} className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row">
         <input
+          type="url"
+          required
           value={url}
           onChange={(event) => setUrl(event.target.value)}
           aria-label={dictionary.scanner.urlLabel}
@@ -59,7 +65,7 @@ export function ScannerForm({
         />
         <button
           type="submit"
-          disabled={isPending}
+          disabled={isPending || Boolean(turnstileSiteKey && !turnstileToken)}
           className="button-primary min-h-12 shrink-0 px-5"
         >
           {isPending ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
@@ -67,6 +73,7 @@ export function ScannerForm({
         </button>
       </div>
       <div aria-live="polite">{error ? <p className="text-sm text-[var(--red)]">{error}</p> : null}</div>
+      {turnstileSiteKey ? <TurnstileWidget siteKey={turnstileSiteKey} onToken={setTurnstileToken} /> : null}
     </form>
   );
 }

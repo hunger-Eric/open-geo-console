@@ -12,6 +12,12 @@
 | `/[locale]/reports/[id]/print` | Authorized deep-report print/PDF document; free previews render an upgrade explanation |
 | `/[locale]/logs` | Standalone advanced log analysis with an explicit target URL |
 
+The report header shows the persisted generation language. Interface language switches navigation and labels only. Homepage technical score, site technical score and AI dimension scores remain separately named and include `/ 100` plus their coverage context.
+
+## Report status contract
+
+The status surface exposes only `generating`, `completed`, `completed_limited`, or `unavailable`. Queue position and wait reason are visible while generating; internal Worker stage and checkpoint names are not. Limited reports remain readable with neutral styling and no manual checkpoint retry. A mismatched authorized legacy deep artifact may use `POST /api/reports/[id]/locale-correction` once without consuming another credit.
+
 ## Summary contract
 
 `@open-geo-console/log-parser` owns `BotEvidenceSummary` and `buildBotEvidenceSummary`. Version 1 includes analysis time, line counts, AI hits, registry size, operator aggregates, and sanitized detected-bot rows. It must not contain raw logs, IP addresses, request paths, or raw User-Agent strings.

@@ -11,19 +11,19 @@
 - [x] Collapse the simulator and technical evidence by default.
 - [x] Add pagination, bilingual copy, focus states, live status text, and responsive grouped rows.
 - [x] Verify 1440x1024, 1280x720, and 390x844 layouts and the main import/refresh/clear flow.
-- [x] Pass lint, 83 unit/integration tests, production build, and final design QA.
+- [x] Pass lint, unit/integration tests, production build, and final design QA.
 
 ## Optional follow-up
 
 - [x] Publish the Web to Vercel and connect the production Neon PostgreSQL database.
-- [ ] Move both Worker lanes from the temporary acceptance workstation to a continuously running production service.
+- [x] Add recorded workstation batch drains and preserve a configuration-only upgrade path to persistent real-time Workers.
 
 ## Evidence-backed AI report engine
 
 - [x] Add safe site identity, SSRF protection, sitemap/link discovery and representative-page selection.
 - [x] Add OpenAI-compatible page planning, batch analysis, structured synthesis and citation verification.
 - [x] Add persistent PostgreSQL jobs, leases, retries, seven-day crawl evidence and a separate Worker.
-- [x] Add 30-day free-site reuse, three-sites/day anonymous limiting and homepage-only free previews.
+- [x] Add 30-day free-site reuse, two-sites/rolling-24h anonymous limiting, Turnstile, global AI budget and homepage-only free previews.
 - [x] Add HMAC access Keys, idempotent credit ledger, failure refunds and private deep-report links.
 - [x] Add progressive status, AI analysis, deep unlock and print integration in English and Chinese.
 - [x] Validate the OpenAI-compatible transport, structured output and a complete evidence-backed report with MiMo 2.5 Pro.
@@ -32,5 +32,12 @@
 - [x] Re-scan `shun-express.com` and verify the 10-dead-link rollup in the browser.
 - [x] Restrict free technical and AI analysis to the homepage and one verified AI finding.
 - [x] Store deep multi-page technical reports privately and project legacy public reports to homepage scope.
+- [x] Add permanent/transient page recovery, replacement candidates, smallest-unit AI retries, and content-hash-aware checkpoint resume.
+- [x] Replace `partial` with completed-limited/unavailable product states and remove manual checkpoint retry from the report UI.
+- [x] Persist immutable report language, validate upgrade locale, and add one authorized no-charge legacy locale correction.
+- [x] Atomically terminalize commercial jobs with settled/refunded credit and add `npm run db:audit`.
+- [x] Remove personal-site defaults and shared recent reports from the anonymous homepage; label technical and AI scores independently.
 - [ ] Rotate the exposed credential before public production deployment.
-- [ ] Implement payment checkout and email-based Key delivery as a separate project phase.
+- [x] Implement Airwallex checkout/refunds, Queue outbox, Resend delivery, safe link redemption/reissue and 24-hour batch SLA.
+- [ ] Create live Cloudflare Queue/Turnstile, Airwallex and Resend resources; complete sandbox and real payment/refund/email drills.
+- [ ] Measure one, two and four deep Worker processes with representative live workloads before raising the default concurrency.

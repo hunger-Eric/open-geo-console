@@ -1,22 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { KeyRound, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { ArrowRight, KeyRound, Languages, Loader2, Sparkles } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { interpolate, type Dictionary } from "@/i18n";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { interpolate, localizePath, type Dictionary, type Locale } from "@/i18n";
+import { CommercialCheckout } from "./commercial-checkout";
 
-type JobStage = keyof Dictionary["aiReport"]["stages"];
 type WaitReason = "jobs_ahead" | "active_jobs_in_pool" | "awaiting_claim";
 type ActiveTier = "preview" | "deep" | "mixed";
+type PublicReportState = "generating" | "completed" | "completed_limited" | "unavailable";
 
 export interface PublicJobStatus {
-  id: string;
   tier: "preview" | "deep";
-  stage: JobStage;
-  status: "queued" | "running" | "completed" | "partial" | "failed";
+  state: PublicReportState;
   progress: number;
-  errorCode?: string | null;
-  publicError?: string | null;
+  plannedPages: number;
+  successfulPages: number;
+  failedPages: number;
+  refundState: "reserved" | "settled" | "refunded" | null;
   queuePosition: number | null;
   waitReason: WaitReason | null;
   activeTier: ActiveTier | null;
@@ -26,31 +28,28 @@ interface StatusPayload {
   job: PublicJobStatus | null;
   hasAiReport: boolean;
   hasDeepAccess: boolean;
+  reportLocale: Locale | null;
+  aiReportLocale: Locale | null;
+  localeCorrectionAvailable: boolean;
+  localeCorrectionInProgress: boolean;
 }
-
-const ACTIVE_STAGES = new Set<JobStage>([
-  "queued",
-  "discovering",
-  "planning",
-  "fetching",
-  "analyzing",
-  "synthesizing"
-]);
 
 export function AiReportStatus({
   dictionary,
-  reportId
+  reportId,
+  reportLocale
 }: {
   dictionary: Dictionary;
   reportId: string;
+  reportLocale: Locale;
 }) {
   const router = useRouter();
   const [payload, setPayload] = useState<StatusPayload | null>(null);
   const [accessKey, setAccessKey] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isUnlocking, setIsUnlocking] = useState(false);
-  const [isRetrying, setIsRetrying] = useState(false);
-  const refreshedCompletedReport = useRef(false);
+  const [isCorrecting, setIsCorrecting] = useState(false);
+  const refreshedTerminalReport = useRef(false);
 
   const loadStatus = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch(`/api/reports/${reportId}/status`, {
@@ -59,20 +58,17 @@ export function AiReportStatus({
     });
     if (!response.ok) return null;
     const next = (await response.json()) as StatusPayload;
-    const nextStage = next.job?.stage ?? null;
-    const shouldRefresh = nextStage === "completed"
-      && next.hasAiReport
-      && !refreshedCompletedReport.current;
+    const terminalWithReport = next.job?.state !== "generating" && next.hasAiReport;
     setPayload(next);
-    if (shouldRefresh) {
-      refreshedCompletedReport.current = true;
+    if (terminalWithReport && !refreshedTerminalReport.current) {
+      refreshedTerminalReport.current = true;
       router.refresh();
     }
     return next;
   }, [reportId, router]);
 
   useEffect(() => {
-    refreshedCompletedReport.current = false;
+    refreshedTerminalReport.current = false;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void loadStatus(controller.signal).catch(() => undefined);
@@ -83,24 +79,18 @@ export function AiReportStatus({
     };
   }, [loadStatus]);
 
-  const shouldPoll = payload?.job ? ACTIVE_STAGES.has(payload.job.stage) : false;
+  const isGenerating = payload?.job?.state === "generating";
   useEffect(() => {
-    if (!shouldPoll) return;
+    if (!isGenerating) return;
     const controller = new AbortController();
-    const delay = payload?.job?.stage === "queued" ? 5000 : 2500;
     const timer = window.setTimeout(() => {
       void loadStatus(controller.signal).catch(() => undefined);
-    }, delay);
+    }, payload?.job?.waitReason ? 5000 : 2500);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [loadStatus, payload, shouldPoll]);
-
-  const progress = useMemo(
-    () => Math.max(0, Math.min(100, payload?.job?.progress ?? 0)),
-    [payload?.job?.progress]
-  );
+  }, [isGenerating, loadStatus, payload?.job?.waitReason]);
 
   async function unlockDeepReport(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -114,7 +104,7 @@ export function AiReportStatus({
           "Content-Type": "application/json",
           "Idempotency-Key": globalThis.crypto.randomUUID()
         },
-        body: JSON.stringify({ accessKey: accessKey.trim() })
+        body: JSON.stringify({ accessKey: accessKey.trim(), locale: reportLocale })
       });
       const result = (await response.json()) as { error?: string; accessUrl?: string };
       if (!response.ok) throw new Error(result.error ?? "Unable to unlock the report.");
@@ -131,47 +121,35 @@ export function AiReportStatus({
     }
   }
 
-  async function retry() {
+  async function correctReportLanguage() {
     setError(null);
-    setIsRetrying(true);
+    setIsCorrecting(true);
     try {
-      const response = await fetch(`/api/reports/${reportId}/retry`, { method: "POST" });
+      const response = await fetch(`/api/reports/${reportId}/locale-correction`, { method: "POST" });
       const result = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "Unable to retry the report.");
+      if (!response.ok) throw new Error(result.error ?? "Unable to regenerate the report language.");
       await loadStatus();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to retry the report.");
+      setError(caught instanceof Error ? caught.message : "Unable to regenerate the report language.");
     } finally {
-      setIsRetrying(false);
+      setIsCorrecting(false);
     }
   }
 
-  const stage = payload?.job?.stage ?? "queued";
-  const isFailed = stage === "failed" || stage === "partial";
-  const isBusy = Boolean(payload?.job && ACTIVE_STAGES.has(stage)) || isUnlocking || isRetrying;
-  const publicError = payload?.job?.publicError === "AI analysis is not configured on this deployment."
-    ? dictionary.aiReport.unavailableDescription
-    : payload?.job?.publicError;
-  const queueDescription = payload?.job ? getQueueDescription(payload.job, dictionary) : null;
-  const statusDescription = stage === "completed"
-    ? dictionary.aiReport.completedDescription
-    : stage === "partial"
-      ? dictionary.aiReport.partialDescription
-      : isFailed && publicError
-        ? publicError
-        : queueDescription
-          ? queueDescription
-          : payload?.job
-            ? dictionary.aiReport.waitingDescription
-          : dictionary.aiReport.unavailableDescription;
+  const job = payload?.job ?? null;
+  const progress = Math.max(0, Math.min(99, job?.progress ?? 0));
+  const queueDescription = job ? getQueueDescription(job, dictionary) : null;
+  const statusDescription = getStatusDescription(payload, dictionary, queueDescription);
   const statusId = `ai-report-status-${reportId}`;
-  const progressValue = interpolate(dictionary.aiReport.progressValue, {
-    stage: dictionary.aiReport.stages[stage],
-    progress
-  });
+  const languageName = reportLocale === "zh"
+    ? dictionary.aiReport.reportLanguageChinese
+    : dictionary.aiReport.reportLanguageEnglish;
 
   return (
-    <section className="workspace-surface p-6 sm:p-8" aria-busy={isBusy}>
+    <section
+      className="workspace-surface p-6 sm:p-8"
+      aria-busy={Boolean(isGenerating || isUnlocking || isCorrecting)}
+    >
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-2xl">
           <div className="flex items-center gap-2 text-[var(--teal)]">
@@ -189,14 +167,14 @@ export function AiReportStatus({
           </p>
         </div>
         <span className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--muted)]">
-          {payload?.job?.tier === "deep" ? dictionary.aiReport.deepLabel : dictionary.aiReport.previewLabel}
+          {job?.tier === "deep" ? dictionary.aiReport.deepLabel : dictionary.aiReport.previewLabel}
         </span>
       </div>
 
-      {payload?.job ? (
+      {isGenerating ? (
         <div className="mt-6">
           <div className="flex items-center justify-between gap-4 text-sm">
-            <span className="font-semibold">{dictionary.aiReport.stages[stage]}</span>
+            <span className="font-semibold">{dictionary.aiReport.waitingDescription}</span>
             <span className="text-[var(--muted)]" aria-hidden="true">{progress}%</span>
           </div>
           <div
@@ -206,7 +184,7 @@ export function AiReportStatus({
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={progress}
-            aria-valuetext={progressValue}
+            aria-valuetext={interpolate(dictionary.aiReport.progressValue, { progress })}
           >
             <div
               className="h-full rounded-full bg-[var(--teal)] transition-[width] duration-500"
@@ -216,20 +194,31 @@ export function AiReportStatus({
         </div>
       ) : null}
 
-      {isFailed ? (
+      {job?.state === "unavailable" ? (
+        <Link href={localizePath(reportLocale, "/")} className="button-secondary mt-5">
+          <ArrowRight aria-hidden="true" className="size-4" />
+          {dictionary.aiReport.startNewAnalysis}
+        </Link>
+      ) : null}
+
+      {payload?.localeCorrectionAvailable ? (
         <button
           type="button"
           className="button-secondary mt-5"
-          disabled={isRetrying}
-          onClick={() => void retry()}
+          disabled={isCorrecting}
+          onClick={() => void correctReportLanguage()}
         >
-          {isRetrying ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <RefreshCw aria-hidden="true" className="size-4" />}
-          {dictionary.aiReport.retryAction}
+          {isCorrecting ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Languages aria-hidden="true" className="size-4" />}
+          {interpolate(dictionary.aiReport.regenerateLanguage, { language: languageName })}
         </button>
       ) : null}
 
       {!payload?.hasDeepAccess ? (
-        <form onSubmit={unlockDeepReport} className="mt-7 border-t border-[var(--border)] pt-6">
+        <div className="mt-7 border-t border-[var(--border)] pt-6">
+          <CommercialCheckout dictionary={dictionary} locale={reportLocale} reportId={reportId} />
+          <details className="mt-5">
+            <summary className="cursor-pointer text-sm font-semibold text-[var(--muted)]">{dictionary.commerce.operatorKeySummary}</summary>
+        <form onSubmit={unlockDeepReport} className="mt-4">
           <div className="max-w-2xl">
             <h3 className="text-lg font-semibold">{dictionary.aiReport.unlockTitle}</h3>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{dictionary.aiReport.unlockDescription}</p>
@@ -251,6 +240,8 @@ export function AiReportStatus({
             </button>
           </div>
         </form>
+          </details>
+        </div>
       ) : null}
 
       {error ? <p className="mt-4 text-sm text-[var(--red)]" role="alert">{error}</p> : null}
@@ -258,8 +249,29 @@ export function AiReportStatus({
   );
 }
 
+function getStatusDescription(
+  payload: StatusPayload | null,
+  dictionary: Dictionary,
+  queueDescription: string | null
+): string {
+  if (payload?.localeCorrectionInProgress) return dictionary.aiReport.correctionInProgress;
+  const job = payload?.job;
+  if (!job) return dictionary.aiReport.unavailableDescription;
+  if (job.state === "completed") {
+    return interpolate(dictionary.aiReport.completedDescription, { count: job.successfulPages });
+  }
+  if (job.state === "completed_limited") {
+    return interpolate(dictionary.aiReport.completedLimitedDescription, {
+      count: job.successfulPages,
+      failed: job.failedPages
+    });
+  }
+  if (job.state === "unavailable") return dictionary.aiReport.failedDescription;
+  return queueDescription ?? dictionary.aiReport.waitingDescription;
+}
+
 export function getQueueDescription(job: PublicJobStatus, dictionary: Dictionary): string | null {
-  if (job.stage !== "queued" || job.waitReason === null) return null;
+  if (job.state !== "generating" || job.waitReason === null) return null;
   const messages: string[] = [];
   if (job.queuePosition !== null) {
     messages.push(interpolate(dictionary.aiReport.queuePosition, { position: job.queuePosition }));

@@ -2,8 +2,7 @@ import { FileSearch, Upload } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ScannerForm } from "@/components/scanner-form";
-import { getRecentReports } from "@/db/reports";
-import { formatDate, getDictionary, isLocale, localizePath, type Locale } from "@/i18n";
+import { getDictionary, isLocale, localizePath, type Locale } from "@/i18n";
 import { scannerCapabilities } from "@/product/config";
 
 export const dynamic = "force-dynamic";
@@ -19,8 +18,6 @@ export default async function HomePage({
   }
   const locale: Locale = rawLocale;
   const dictionary = getDictionary(locale);
-  const reports = await getRecentReports(6);
-
   return (
     <main className="mx-auto w-full max-w-6xl space-y-6 px-5 py-8 sm:px-8 sm:py-12">
       <section className="workspace-surface p-6 sm:p-9">
@@ -35,7 +32,7 @@ export default async function HomePage({
           </div>
         </div>
         <div className="mt-8">
-          <ScannerForm locale={locale} dictionary={dictionary} />
+          <ScannerForm locale={locale} dictionary={dictionary} turnstileSiteKey={process.env.TURNSTILE_SITE_KEY?.trim()} />
         </div>
 
         <div className="mt-8 grid border-t border-[var(--border)] md:grid-cols-3 md:divide-x md:divide-[var(--border)]">
@@ -53,37 +50,16 @@ export default async function HomePage({
         </div>
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <section className="workspace-surface overflow-hidden">
-          <div className="border-b border-[var(--border)] px-6 py-5">
-            <h2 className="text-xl font-semibold">{dictionary.scanner.recentReportsTitle}</h2>
-          </div>
-          {reports.length === 0 ? (
-            <p className="px-6 py-8 text-sm leading-6 text-[var(--muted)]">{dictionary.scanner.emptyRecentReports}</p>
-          ) : (
-            <div className="divide-y divide-[var(--border)]">
-              {reports.map((report) => (
-                <Link key={report.id} href={localizePath(locale, `/reports/${report.id}`)} className="group flex items-center justify-between gap-4 px-6 py-4 hover:bg-[var(--subtle)]">
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold group-hover:text-[var(--teal)]">{report.url}</span>
-                    <span className="mt-1 block text-xs text-[var(--muted)]">{formatDate(locale, report.createdAt)}</span>
-                  </span>
-                  <span className="text-lg font-semibold">{report.score ?? "—"}</span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <aside className="workspace-surface h-fit p-6">
+      <aside className="workspace-surface p-6 sm:flex sm:items-center sm:justify-between sm:gap-8">
+        <div>
           <Upload aria-hidden="true" className="size-5 text-[var(--teal)]" />
           <h2 className="mt-3 text-lg font-semibold">{dictionary.nav.logs}</h2>
           <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{dictionary.scanner.nextDescription}</p>
-          <Link href={localizePath(locale, "/logs")} className="button-secondary mt-5 w-full">
+        </div>
+          <Link href={localizePath(locale, "/logs")} className="button-secondary mt-5 shrink-0 sm:mt-0">
             {dictionary.actions.openSampleLogReport}
           </Link>
-        </aside>
-      </div>
+      </aside>
     </main>
   );
 }

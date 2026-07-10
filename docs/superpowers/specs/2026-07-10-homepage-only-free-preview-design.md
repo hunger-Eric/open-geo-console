@@ -153,7 +153,7 @@ Acceptance requires `npm run lint`, `npm test`, `npm run build`, mocked request-
 
 ## Boundaries
 
-- The existing 30-day free site deduplication and three-sites-per-IP/day rules remain.
+- The 30-day free site deduplication remains. The later commercial-delivery design supersedes the original IP quota with two distinct sites per rolling 24 hours and adds a global daily AI budget.
 - Payment, account, subscription, and email delivery remain outside this change.
 - The deep maximum remains 50 pages.
 - Standard asset checks remain available in the free preview.

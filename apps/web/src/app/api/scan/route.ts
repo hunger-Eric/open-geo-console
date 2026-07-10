@@ -3,14 +3,26 @@ import { createSiteKey } from "@open-geo-console/site-crawler";
 import { NextResponse } from "next/server";
 import { enqueueScanJob } from "@/db/jobs";
 import { deleteGeoReport, saveGeoReport } from "@/db/reports";
-import { claimFreeSiteTrial, getActiveFreeSiteTrial } from "@/db/trials";
+import { attachFreeTrialJob, claimFreeSiteTrial, getActiveFreeSiteTrial } from "@/db/trials";
+import { consumeFreeAiDailyBudget } from "@/db/commercial-budget";
+import { hmacSecret, requireSecret } from "@/db/secrets";
+import { parseReportLocale } from "@/server/report-locale";
 import { createSafeFetch } from "@/server/safe-fetch";
+import { verifyTurnstile } from "@/security/turnstile";
+import { getTrustedClientIp } from "@/security/client-ip";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { url?: string; locale?: string };
+    const body = (await request.json()) as { url?: string; locale?: string; turnstileToken?: string };
+    const locale = parseReportLocale(body.locale);
+    if (!locale) throw new Error("Locale must be either en or zh.");
+    const ipAddress = getTrustedClientIp(request);
+    const challenge = await verifyTurnstile({ token: body.turnstileToken ?? "", remoteIp: ipAddress });
+    if (!challenge.success) {
+      return NextResponse.json({ error: "Human verification is required.", errorKey: "humanVerificationRequired" }, { status: 403 });
+    }
     const url = normalizeUrl(body.url);
     const submittedSiteKey = createSiteKey(url);
     const submittedExisting = await getActiveFreeSiteTrial(submittedSiteKey);
@@ -24,16 +36,14 @@ export async function POST(request: Request) {
       if (redirectedExisting) return reusedTrialResponse(redirectedExisting);
     }
     const report = await auditSite(finalUrl, { fetchImpl: safeFetch, pageLimit: 1 });
-    const saved = await saveGeoReport(finalUrl, report, siteKey);
-    let job: Awaited<ReturnType<typeof enqueueScanJob>>;
+    const saved = await saveGeoReport(finalUrl, report, siteKey, undefined, locale);
     let claim: Awaited<ReturnType<typeof claimFreeSiteTrial>>;
     try {
-      job = await enqueueScanJob({ reportId: saved.id, tier: "free", locale: body.locale === "zh" ? "zh" : "en" });
       claim = await claimFreeSiteTrial({
         siteKey,
         reportId: saved.id,
-        jobId: job.id,
-        ipAddress: clientIp(request)
+        ipAddress,
+        dailyDistinctSiteLimit: 2
       });
     } catch (error) {
       await deleteGeoReport(saved.id);
@@ -44,11 +54,34 @@ export async function POST(request: Request) {
       await deleteGeoReport(saved.id);
       if (claim.outcome === "rate_limited") {
         return NextResponse.json(
-          { error: "The daily free AI preview limit has been reached.", retryAfter: claim.retryAfter.toISOString() },
+          { error: "The rolling 24-hour free preview limit has been reached.", retryAfter: claim.retryAfter.toISOString() },
           { status: 429 }
         );
       }
       return reusedTrialResponse(claim);
+    }
+
+    const aiBudget = await consumeFreeAiDailyBudget({
+      idempotencyHmac: hmacSecret(`free-ai:${saved.id}`, requireSecret("OGC_IP_HASH_SECRET")),
+      limit: freeAiDailyLimit()
+    });
+    if (!aiBudget.granted) {
+      return NextResponse.json({
+        reportId: saved.id,
+        jobId: null,
+        tier: "free",
+        status: "technical_only",
+        aiPreview: aiBudget
+      }, { status: 200 });
+    }
+
+    let job: Awaited<ReturnType<typeof enqueueScanJob>>;
+    try {
+      job = await enqueueScanJob({ reportId: saved.id, tier: "free", locale });
+      if (!await attachFreeTrialJob(siteKey, saved.id, job.id)) throw new Error("The free preview could not be attached to its report.");
+    } catch (error) {
+      await deleteGeoReport(saved.id);
+      throw error;
     }
 
     return NextResponse.json({
@@ -72,6 +105,11 @@ export async function POST(request: Request) {
   }
 }
 
+function freeAiDailyLimit(): number {
+  const configured = Number(process.env.OGC_FREE_AI_DAILY_LIMIT ?? 50);
+  return Number.isSafeInteger(configured) && configured >= 0 ? configured : 50;
+}
+
 function reusedTrialResponse(trial: { reportId: string; jobId: string | null }) {
   return NextResponse.json({
     reportId: trial.reportId,
@@ -79,17 +117,6 @@ function reusedTrialResponse(trial: { reportId: string; jobId: string | null }) 
     tier: "free",
     status: "reused"
   });
-}
-
-function clientIp(request: Request): string {
-  const trustProxy = process.env.TRUST_PROXY_HEADERS === "true" || Boolean(process.env.VERCEL);
-  if (trustProxy) {
-    const forwarded = request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim();
-    if (forwarded) return forwarded;
-    const realIp = request.headers.get("x-real-ip")?.trim();
-    if (realIp) return realIp;
-  }
-  return "untrusted-direct-client";
 }
 
 function normalizeUrl(value: string | undefined): string {

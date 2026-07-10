@@ -7,9 +7,8 @@ export const en = {
     description: "Open-source AI Search Console for company websites."
   },
   nav: {
-    scanner: "Scanner",
-    logs: "Advanced log tool",
-    caseStudy: "First case"
+    scanner: "Website analysis",
+    logs: "Advanced log tool"
   },
   actions: {
     generateReport: "Generate GEO report",
@@ -25,30 +24,27 @@ export const en = {
     importLogs: "Import log file"
   },
   scanner: {
-    title: "Generate a shareable GEO report",
+    title: "Analyze your company website",
     description:
-      "Scan a company website for AI search readiness, then hand off a report with executive summary, evidence, and next fixes.",
+      "Get a free homepage check now. A private deep report analyzes the valid pages across your site with evidence-backed AI analysis.",
     urlLabel: "Company website URL",
     urlPlaceholder: "https://company.com",
-    recentReportsTitle: "Recent reports",
-    emptyRecentReports: "No saved scans yet. The default URL is the first public case study.",
-    nextTitle: "Next: AI crawler access",
+    nextTitle: "Already have server access logs?",
     nextDescription:
-      "After the GEO report, add access logs to answer whether OpenAI, Claude, Perplexity, or ByteDance has visited.",
-    firstCaseUrl: "https://me.itheheda.online"
+      "Verify whether identifiable AI crawlers visited the site."
   },
   capabilities: {
-    geoAudit: {
-      title: "GEO audit",
-      text: "Machine-readable assets, structure, schema, and content checks."
+    freeHomepage: {
+      title: "Free homepage check",
+      text: "See the homepage technical score and the most important verified finding."
     },
-    crawlerLogs: {
-      title: "Crawler logs",
-      text: "OpenAI, Claude, Perplexity, ByteDance, and more."
+    evidenceAi: {
+      title: "Evidence-backed AI analysis",
+      text: "Every formal AI finding is checked against captured page evidence."
     },
-    selfHosted: {
-      title: "Self-hosted",
-      text: "PostgreSQL-backed reports and a dedicated worker, ready for durable self-hosted deployment."
+    privateDeep: {
+      title: "Private deep report",
+      text: "Analyze valid site pages, coverage limits, dimension scores, and a 90-day roadmap."
     }
   },
   report: {
@@ -196,7 +192,7 @@ export const en = {
     description: "A real model reads selected pages, checks its conclusions against captured evidence, and builds a traceable company website report.",
     previewLabel: "Free AI preview",
     deepLabel: "Deep report",
-    homepageScore: "Homepage score",
+    homepageScore: "Homepage technical score",
     homepageScoreDescription: "This score uses the submitted homepage and the standard robots.txt, sitemap.xml, and llms.txt checks. It is not a site-wide score.",
     homepagePreviewNotice: "This free preview analyzed the homepage only.",
     detectedPagesEstimate: "Approximately {count} site URLs were detected without fetching or analyzing their content.",
@@ -218,12 +214,19 @@ export const en = {
     accessKeyLabel: "Report access key",
     unlockAction: "Unlock deep report",
     unlocking: "Reserving credit",
-    retryAction: "Retry from last checkpoint",
-    statusTitle: "AI analysis progress",
-    waitingDescription: "The technical report is ready while the evidence-backed AI analysis continues in the worker.",
-    completedDescription: "The evidence-backed AI report is complete and saved with its coverage and provenance.",
-    partialDescription: "A partial report is available, but coverage did not meet the completion threshold. Retry from the saved checkpoint.",
+    startNewAnalysis: "Start a new analysis",
+    statusTitle: "Report status",
+    waitingDescription: "The report is being generated. Recoverable work is handled automatically.",
+    completedDescription: "Report completed — {count} pages analyzed.",
+    completedLimitedDescription: "Report completed — {count} valid pages analyzed. {failed} inaccessible pages were excluded, are listed in coverage limitations, and the credit was returned.",
+    failedDescription: "This analysis could not be completed. The report credit has been returned. You can start a new analysis later.",
     unavailableDescription: "AI analysis has not been configured for this deployment.",
+    reportLanguage: "Report language",
+    reportLanguageEnglish: "English",
+    reportLanguageChinese: "Chinese",
+    regenerateLanguage: "Regenerate in {language}",
+    correctionInProgress: "Regenerating the report in its intended language.",
+    siteTechnicalScore: "Site technical score — based on {count} valid pages",
     queuePosition: "Queue position {position}",
     queueJobsAhead: "{count} jobs are ahead in this report lane.",
     queueActiveJobsInPool: "This report is next; the worker lane is processing another job.",
@@ -231,18 +234,22 @@ export const en = {
     activeTierPreview: "Free AI previews are currently being processed.",
     activeTierDeep: "Deep reports are currently being processed.",
     activeTierMixed: "Free previews and deep reports are currently being processed.",
-    progressValue: "{stage}, {progress}% complete",
-    stages: {
-      queued: "Queued",
-      discovering: "Discovering the site",
-      planning: "Planning representative pages",
-      fetching: "Fetching page evidence",
-      analyzing: "Analyzing page groups",
-      synthesizing: "Building the final report",
-      completed: "Completed",
-      partial: "Partially completed",
-      failed: "Failed"
-    }
+    progressValue: "Report generation is {progress}% complete"
+  },
+  commerce: {
+    offerTitle: "Unlock the full-site AI Search Visibility Audit",
+    offerDescription: "One purchase covers a private deep report for this site. The payment amount is fixed by the server-side catalog.",
+    scopeEvidence: "Evidence across up to 50 representative pages",
+    scopeFixes: "Prioritized fixes with page-level examples",
+    scopeRoadmap: "A practical 90-day action roadmap",
+    emailLabel: "Delivery email",
+    currencyLabel: "Payment currency",
+    deliveryPromise: "Delivered by email within 24 hours of payment or fully refunded.",
+    buyAction: "Unlock full-site analysis",
+    redirecting: "Opening secure checkout",
+    unavailable: "Online purchase is not configured for this deployment.",
+    humanVerification: "Complete human verification to continue.",
+    operatorKeySummary: "Already have a report access key?"
   },
   logs: {
     title: "AI Bot Visibility Report",
@@ -334,8 +341,8 @@ export const en = {
     simulator: {
       title: "External AI crawler simulator",
       description:
-        "Run the simulator against the first-case site, then compare the attempted crawl requests with the logs you paste or import below.",
-      targetUrlLabel: "First-case URL",
+        "Run the simulator against the website you enter, then compare the attempted crawl requests with the logs you paste or import below.",
+      targetUrlLabel: "Website URL",
       runButton: "Run simulator",
       runningButton: "Running simulator",
       compareButton: "Compare with imported logs",
@@ -442,6 +449,7 @@ export const en = {
   errors: {
     emptyUrl: "Enter a company website URL.",
     unsupportedUrl: "Only HTTP and HTTPS URLs are supported.",
-    scanFailed: "Unable to scan this website."
+    scanFailed: "Unable to scan this website.",
+    humanVerificationRequired: "Complete human verification before starting the diagnosis."
   }
 } satisfies Dictionary;

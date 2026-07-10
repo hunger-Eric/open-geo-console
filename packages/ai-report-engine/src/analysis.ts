@@ -16,6 +16,20 @@ export interface AnalyzePagesInput {
   batchSize?: number;
   maxCharactersPerPage?: number;
   signal?: AbortSignal;
+  maxAttempts?: number;
+  retryDelay?: (milliseconds: number) => Promise<void>;
+  completedAnalyses?: readonly PageAnalysis[];
+  onBatchComplete?: (analyses: PageAnalysis[]) => Promise<void> | void;
+}
+
+export class PageAnalysisBatchError extends Error {
+  readonly completedAnalyses: PageAnalysis[];
+
+  constructor(message: string, completedAnalyses: PageAnalysis[]) {
+    super(message);
+    this.name = "PageAnalysisBatchError";
+    this.completedAnalyses = completedAnalyses;
+  }
 }
 
 const confidences = new Set<Confidence>(["low", "medium", "high"]);
@@ -135,12 +149,20 @@ export async function analyzePageBatch(
 ): Promise<PageAnalysisBatch> {
   const batchSize = Math.max(1, Math.min(input.batchSize ?? 4, 10));
   const maxCharacters = Math.max(1_000, Math.min(input.maxCharactersPerPage ?? 30_000, 100_000));
-  const analyses: PageAnalysis[] = [];
+  const analyses: PageAnalysis[] = [...(input.completedAnalyses ?? [])];
+  const completedUrls = new Set(analyses.map(({ url }) => canonicalUrl(url)));
+  const pendingPages = input.pages.filter((page) => !completedUrls.has(canonicalUrl(page.url)));
   let modelId = client.configuredModel;
+  const maxAttempts = Math.max(1, input.maxAttempts ?? 3);
+  const retryDelay = input.retryDelay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
 
-  for (let start = 0; start < input.pages.length; start += batchSize) {
-    const pages = input.pages.slice(start, start + batchSize);
-    const completion = await client.completeJson({
+  for (let start = 0; start < pendingPages.length; start += batchSize) {
+    const pages = pendingPages.slice(start, start + batchSize);
+    let parsed: PageAnalysis[] | undefined;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const completion = await client.completeJson({
       signal: input.signal,
       temperature: 0.1,
       maxTokens: 8_000,
@@ -177,9 +199,27 @@ export async function analyzePageBatch(
           })
         }
       ]
-    });
-    modelId = completion.modelId;
-    analyses.push(...parseBatch(completion.value, pages));
+        });
+        modelId = completion.modelId;
+        const candidate = parseBatch(completion.value, pages);
+        if (candidate.length !== pages.length) {
+          throw new Error(`The model returned ${candidate.length} of ${pages.length} required page analyses.`);
+        }
+        parsed = candidate;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxAttempts) await retryDelay(Math.min(2_000, 250 * (2 ** (attempt - 1))));
+      }
+    }
+    if (!parsed) {
+      throw new PageAnalysisBatchError(
+        lastError instanceof Error ? lastError.message : "The page analysis batch failed.",
+        analyses
+      );
+    }
+    analyses.push(...parsed);
+    await input.onBatchComplete?.(parsed);
   }
 
   return { analyses, modelId };

@@ -6,6 +6,7 @@ import type { Dictionary, Locale } from "@/i18n";
 import { formatDate, formatNumber, interpolate } from "@/i18n";
 import type { LocalizedFinding, ReportPresentation } from "@/report/presenter";
 import { localizedAssetSummary } from "@/report/presenter";
+import { technicalScoreLabel } from "@/report/score-labels";
 import { PrintToolbar } from "./print-toolbar";
 import { ScoreRing } from "./score-ring";
 import { SeverityPill } from "./severity-pill";
@@ -18,7 +19,8 @@ export function ReportPrintView({
   locale,
   presentation,
   report,
-  reportHref
+  reportHref,
+  reportLocale
 }: {
   dictionary: Dictionary;
   aiReport?: AiWebsiteReportV1 | null;
@@ -27,6 +29,7 @@ export function ReportPrintView({
   presentation: ReportPresentation;
   report: GeoAuditReport;
   reportHref: string;
+  reportLocale: Locale;
 }) {
   const assets = Object.entries(report.machineReadableAssets) as Array<
     [keyof GeoAuditReport["machineReadableAssets"], GeoAuditReport["machineReadableAssets"][keyof GeoAuditReport["machineReadableAssets"]]]
@@ -39,10 +42,13 @@ export function ReportPrintView({
         <p className="eyebrow">{dictionary.workspace.printTitle}</p>
         <h1 className="mt-2 break-all text-3xl font-semibold">{report.url}</h1>
         <p className="mt-2 text-sm text-[var(--muted)]">{dictionary.report.scanDate}: {formatDate(locale, report.scannedAt)}</p>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          {dictionary.aiReport.reportLanguage}: {reportLocale === "zh" ? dictionary.aiReport.reportLanguageChinese : dictionary.aiReport.reportLanguageEnglish}
+        </p>
       </header>
 
       <section className="grid gap-6 border-b border-[var(--border)] py-8 sm:grid-cols-[160px_minmax(0,1fr)] sm:items-center">
-        <ScoreRing label={dictionary.report.scoreLabel} score={report.score} />
+        <ScoreRing label={technicalScoreLabel(dictionary, aiReport?.tier ?? "deep", report.pages.length)} score={report.score} />
         <div>
           <h2 className="text-2xl font-semibold">{presentation.scoreMeaning}</h2>
           <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{dictionary.report.scoreDescription}</p>
@@ -76,7 +82,7 @@ export function ReportPrintView({
 
       {aiReport ? (
         <PrintSection title={dictionary.aiReport.title}>
-          <AiReportContent dictionary={dictionary} locale={locale} report={aiReport} />
+          <AiReportContent dictionary={dictionary} locale={locale} report={aiReport} reportLocale={reportLocale} />
         </PrintSection>
       ) : null}
 

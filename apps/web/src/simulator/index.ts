@@ -6,7 +6,7 @@ import {
   type CrawlerRule
 } from "@open-geo-console/crawler-rules";
 
-export const DEFAULT_SIMULATOR_TARGET = "https://me.itheheda.online";
+export const DEFAULT_SIMULATOR_TARGET = "https://company.com";
 export const DEFAULT_SIMULATOR_MAX_PATHS = 8;
 export const DEFAULT_SIMULATOR_MAX_REQUESTS = 24;
 export const DEFAULT_SIMULATOR_REQUEST_TIMEOUT_MS = 10_000;

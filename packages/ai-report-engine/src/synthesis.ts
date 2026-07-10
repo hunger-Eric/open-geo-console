@@ -179,6 +179,25 @@ export async function synthesizeWebsiteReport(
   };
 }
 
+export async function synthesizeWebsiteReportWithRecovery(
+  client: JsonCompletionClient,
+  input: ReportSynthesisInput,
+  options: { maxAttempts?: number; delay?: (milliseconds: number) => Promise<void> } = {}
+): Promise<SynthesizeReportResult> {
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+  const delay = options.delay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await synthesizeWebsiteReport(client, input);
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) await delay(Math.min(2_000, 250 * (2 ** (attempt - 1))));
+    }
+  }
+  throw lastError;
+}
+
 function normalizeModelOutput(value: Record<string, unknown>): Record<string, unknown> {
   const normalized = stripNullOptionalStrings(value) as Record<string, unknown>;
   if (!Array.isArray(normalized.findings)) return normalized;

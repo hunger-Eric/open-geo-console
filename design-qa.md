@@ -29,7 +29,7 @@ The implementation keeps the report URL in a dedicated context block rather than
 - Mobile technical tables use labelled grouped rows; the document does not scroll horizontally.
 - Keyboard focus is visibly outlined; workspace and locale links expose `aria-current`.
 - Import, replace, refresh persistence, registry toggle, delete, and collapsed simulator states were exercised in the browser.
-- AI queued/failed progress, retry, Key unlock, evidence-backed preview, dimension scores and cited findings were exercised at 1440x1024 and 390x844.
+- AI queued/failed progress, Key unlock, evidence-backed preview, dimension scores and cited findings were exercised at 1440x1024 and 390x844 before the core status-state rework.
 - Chinese and English locale links both move the active teal state with the route.
 - White on teal contrast is 5.47:1; forest text on white is 16.73:1.
 - Overview, AI analysis, issues, bots, technical, print, and standalone log routes rendered without console errors.
@@ -38,6 +38,7 @@ The implementation keeps the report URL in a dedicated context block rather than
 - A synthetic queued report rendered queue position 1, the `awaiting_claim` explanation, the active deep tier, and an accessible 0/100 progress bar. The synthetic records were deleted after QA.
 - The homepage-only free report at `/zh/reports/b86bde02-4842-40a9-bbb3-83a62a80c4ea` rendered one audited page, an explicit homepage-score disclaimer, one AI finding, no dimension-detail section, and no horizontal overflow. Its direct `/print` route rendered only the deep-report unlock explanation with no report table or print button.
 - The same live run persisted `plannedPages=1`, `analyzedPages=1`, one free AI finding and no free technical payload. A temporary deep job persisted a private technical payload and settled its test credit; the temporary deep job, ledger and access Key were deleted after verification.
+- The core report-experience rework was browser-checked on `/en`, `/zh`, mobile `390x844`, and `/en/logs`: the homepage has an empty required URL, no personal/default site or shared report history, value-led free/deep copy, and an empty log target. Database-backed completed-limited and locale-correction browser flows still require a configured disposable PostgreSQL fixture; their contracts are covered by deterministic tests and the production build.
 
 ## Comparison history
 

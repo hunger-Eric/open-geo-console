@@ -7,9 +7,8 @@ export const zh = {
     description: "面向企业官网的开源 AI Search Console。"
   },
   nav: {
-    scanner: "体检入口",
-    logs: "高级日志工具",
-    caseStudy: "首个案例"
+    scanner: "网站分析",
+    logs: "高级日志工具"
   },
   actions: {
     generateReport: "生成 GEO 报告",
@@ -25,30 +24,26 @@ export const zh = {
     importLogs: "导入日志文件"
   },
   scanner: {
-    title: "生成一份可分享的 GEO 体检报告",
+    title: "分析你的企业官网",
     description:
-      "输入企业官网，检查 AI 搜索可读性，并生成包含管理摘要、证据和修复优先级的交付报告。",
+      "免费预览检查首页；私密深度报告会分析站内有效页面，并提供有证据支撑的 AI 分析。",
     urlLabel: "企业官网 URL",
     urlPlaceholder: "https://company.com",
-    recentReportsTitle: "最近报告",
-    emptyRecentReports: "还没有保存的扫描。默认网址是第一个公开案例。",
-    nextTitle: "下一步：AI 爬虫访问",
-    nextDescription:
-      "完成 GEO 体检后，接入访问日志，确认 OpenAI、Claude、Perplexity 或字节等 AI 爬虫是否来过。",
-    firstCaseUrl: "https://me.itheheda.online"
+    nextTitle: "已经有服务器访问日志？",
+    nextDescription: "验证可识别的 AI 爬虫是否真实访问过该站点。"
   },
   capabilities: {
-    geoAudit: {
-      title: "GEO 体检",
-      text: "检查机器可读资产、页面结构、Schema 和正文可读性。"
+    freeHomepage: {
+      title: "免费首页检查",
+      text: "查看首页技术评分和最重要的一条已核验证据问题。"
     },
-    crawlerLogs: {
-      title: "爬虫日志",
-      text: "识别 OpenAI、Claude、Perplexity、字节等 AI 爬虫访问。"
+    evidenceAi: {
+      title: "有证据支撑的 AI 分析",
+      text: "每条正式 AI 结论都会和已抓取的页面证据核对。"
     },
-    selfHosted: {
-      title: "自托管",
-      text: "PostgreSQL 持久报告与独立 Worker，适合可靠的开源自托管部署。"
+    privateDeep: {
+      title: "私密深度报告",
+      text: "分析站内有效页面、覆盖限制、AI 维度评分和 90 天路线图。"
     }
   },
   report: {
@@ -193,7 +188,7 @@ export const zh = {
     description: "真实大模型读取经过筛选的官网页面，逐条核验结论与抓取证据，并生成可追溯的企业官网报告。",
     previewLabel: "免费 AI 预览",
     deepLabel: "深度报告",
-    homepageScore: "首页评分",
+    homepageScore: "首页技术评分",
     homepageScoreDescription: "此评分只基于提交的首页以及 robots.txt、sitemap.xml、llms.txt 标准检查，不代表全站评分。",
     homepagePreviewNotice: "免费预览只分析了首页。",
     detectedPagesEstimate: "检测到约 {count} 个站内 URL，但尚未抓取或分析这些页面的内容。",
@@ -215,12 +210,19 @@ export const zh = {
     accessKeyLabel: "报告访问 Key",
     unlockAction: "解锁深度报告",
     unlocking: "正在预留额度",
-    retryAction: "从上个检查点重试",
-    statusTitle: "AI 分析进度",
-    waitingDescription: "技术报告已经可用，有证据支撑的 AI 分析正在 Worker 中继续执行。",
-    completedDescription: "有证据支撑的 AI 报告已经完成，并保存了覆盖范围和生成依据。",
-    partialDescription: "当前已有部分报告，但覆盖率尚未达到完成门槛，可以从保存的检查点重试。",
+    startNewAnalysis: "开始新的分析",
+    statusTitle: "报告状态",
+    waitingDescription: "报告正在生成，可恢复的工作会由系统自动处理。",
+    completedDescription: "报告已完成 — 已分析 {count} 个页面。",
+    completedLimitedDescription: "报告已完成 — 已分析 {count} 个有效页面，排除 {failed} 个不可访问页面；限制已列出，报告额度已退回。",
+    failedDescription: "本次分析无法完成，报告额度已经退回。你可以稍后开始新的分析。",
     unavailableDescription: "当前部署尚未配置 AI 分析服务。",
+    reportLanguage: "报告语言",
+    reportLanguageEnglish: "英文",
+    reportLanguageChinese: "中文",
+    regenerateLanguage: "用{language}重新生成",
+    correctionInProgress: "正在按报告设定语言重新生成。",
+    siteTechnicalScore: "全站技术评分 — 基于 {count} 个有效页面",
     queuePosition: "当前排队第 {position} 位",
     queueJobsAhead: "同类报告队列前面还有 {count} 个任务。",
     queueActiveJobsInPool: "当前任务已经排在最前，Worker 仍在处理同类任务。",
@@ -228,18 +230,22 @@ export const zh = {
     activeTierPreview: "当前正在处理免费 AI 预览。",
     activeTierDeep: "当前正在处理深度报告。",
     activeTierMixed: "当前同时在处理免费预览和深度报告。",
-    progressValue: "{stage}，已完成 {progress}%",
-    stages: {
-      queued: "已进入队列",
-      discovering: "正在发现站点结构",
-      planning: "正在规划代表页面",
-      fetching: "正在抓取页面证据",
-      analyzing: "正在分批分析页面",
-      synthesizing: "正在生成最终报告",
-      completed: "已完成",
-      partial: "部分完成",
-      failed: "失败"
-    }
+    progressValue: "报告生成已完成 {progress}%"
+  },
+  commerce: {
+    offerTitle: "解锁全站 AI 搜索可见性深度诊断",
+    offerDescription: "一次购买对应当前网站的一份私密深度报告，付款金额始终由服务端价格目录确定。",
+    scopeEvidence: "覆盖最多 50 个代表页面的证据",
+    scopeFixes: "按优先级排列的修复建议与页面示例",
+    scopeRoadmap: "可执行的 90 天行动路线图",
+    emailLabel: "报告接收邮箱",
+    currencyLabel: "付款币种",
+    deliveryPromise: "付款后 24 小时内通过邮件交付，否则全额退款。",
+    buyAction: "解锁全站分析",
+    redirecting: "正在打开安全收银台",
+    unavailable: "当前部署尚未配置在线购买。",
+    humanVerification: "请先完成人机验证。",
+    operatorKeySummary: "已经有报告访问 Key？"
   },
   logs: {
     title: "AI Bot 可见性报告",
@@ -328,8 +334,8 @@ export const zh = {
     simulator: {
       title: "外部 AI 爬虫模拟器",
       description:
-        "先对首个案例站点运行模拟器，再把生成的尝试请求与下方粘贴或导入的访问日志进行对比。",
-      targetUrlLabel: "首个案例 URL",
+        "对你输入的网站运行模拟器，再把生成的尝试请求与下方粘贴或导入的访问日志进行对比。",
+      targetUrlLabel: "网站 URL",
       runButton: "运行模拟器",
       runningButton: "正在运行模拟器",
       compareButton: "与导入日志对比",
@@ -436,6 +442,7 @@ export const zh = {
   errors: {
     emptyUrl: "请输入企业官网 URL。",
     unsupportedUrl: "仅支持 HTTP 和 HTTPS URL。",
-    scanFailed: "暂时无法扫描该网站。"
+    scanFailed: "暂时无法扫描该网站。",
+    humanVerificationRequired: "开始诊断前，请先完成人机验证。"
   }
 } satisfies Dictionary;

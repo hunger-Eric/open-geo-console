@@ -17,7 +17,7 @@ export function LogAnalyzer({
   dictionary: Dictionary;
   locale: Locale;
 }) {
-  const [sourceUrl, setSourceUrl] = useState(dictionary.scanner.firstCaseUrl);
+  const [sourceUrl, setSourceUrl] = useState("");
   const [input, setInput] = useState(sampleCrawlerLog);
   const deferredInput = useDeferredValue(input);
   const result = useMemo(() => analyzeLogs(deferredInput), [deferredInput]);
@@ -94,6 +94,7 @@ export function LogAnalyzer({
             id="standalone-target-url"
             type="url"
             value={sourceUrl}
+            placeholder={dictionary.scanner.urlPlaceholder}
             onChange={(event) => {
               setSourceUrl(event.target.value);
               simulator.clearComparison();

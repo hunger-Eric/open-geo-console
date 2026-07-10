@@ -89,7 +89,7 @@ export function preparePlanningCandidates(
     .slice(0, Math.max(0, Math.min(maxCandidates, MAX_PLANNING_CANDIDATES)));
 }
 
-function deterministicPlan(candidates: readonly PageCandidate[], tier: ReportTier): PlannedPage[] {
+export function createDeterministicPagePlan(candidates: readonly PageCandidate[], tier: ReportTier): PlannedPage[] {
   const limit = REPORT_TIER_LIMITS[tier];
   const selected: PageCandidate[] = [];
   const remaining = [...candidates];
@@ -225,7 +225,7 @@ export async function planPages(
 
   const allowed = new Map(candidates.map((candidate) => [candidate.url, candidate]));
   const modelSelected = parseModelPlan(completion.value, allowed, limit);
-  const fallback = deterministicPlan(candidates, input.tier);
+  const fallback = createDeterministicPagePlan(candidates, input.tier);
   const selected = [...modelSelected];
   const selectedUrls = new Set(selected.map((page) => page.url));
   for (const page of fallback) {
@@ -241,5 +241,28 @@ export async function planPages(
     selected,
     modelId: completion.modelId,
     fallbackUsed: modelSelected.length !== selected.length
+  };
+}
+
+export async function planPagesWithRecovery(
+  client: JsonCompletionClient,
+  input: PlanPagesInput,
+  options: { maxAttempts?: number; delay?: (milliseconds: number) => Promise<void> } = {}
+): Promise<PagePlan> {
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+  const delay = options.delay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await planPages(client, input);
+    } catch {
+      if (attempt < maxAttempts) await delay(Math.min(2_000, 250 * (2 ** (attempt - 1))));
+    }
+  }
+  const candidates = preparePlanningCandidates(input.candidates);
+  return {
+    tier: input.tier,
+    selected: createDeterministicPagePlan(candidates, input.tier),
+    modelId: client.configuredModel,
+    fallbackUsed: true
   };
 }

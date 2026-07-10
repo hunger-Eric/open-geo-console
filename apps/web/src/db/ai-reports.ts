@@ -2,13 +2,14 @@ import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import { ensureDatabase, getDb } from "./index";
-import { aiReports, type AiReportRow, type ReportTier, type StoredAiReport } from "./schema";
+import { getGeoReport } from "./reports";
+import { aiReports, type AiReportRow, type ReportLocale, type ReportTier, type StoredAiReport } from "./schema";
 
 export interface SaveAiReportInput {
   reportId: string;
   jobId: string;
   tier: ReportTier;
-  locale: string;
+  locale: ReportLocale;
   payload: StoredAiReport;
   technicalPayload?: GeoAuditReport;
   model: string;
@@ -16,8 +17,18 @@ export interface SaveAiReportInput {
   contentHash: string;
 }
 
+export function assertAiReportLocale(reportLocale: ReportLocale | null, aiLocale: ReportLocale): void {
+  if (!reportLocale) throw new Error("The scan report language has not been established.");
+  if (reportLocale !== aiLocale) {
+    throw new Error("The AI report language must match the persisted scan report language.");
+  }
+}
+
 export async function saveAiReport(input: SaveAiReportInput): Promise<AiReportRow> {
   await ensureDatabase();
+  const report = await getGeoReport(input.reportId);
+  if (!report) throw new Error("The scan report does not exist.");
+  assertAiReportLocale(report.reportLocale, input.locale);
   const now = new Date();
   const [row] = await getDb()
     .insert(aiReports)

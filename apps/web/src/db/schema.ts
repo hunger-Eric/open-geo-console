@@ -1,8 +1,10 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
 import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   index,
   integer,
@@ -14,6 +16,8 @@ import {
 } from "drizzle-orm/pg-core";
 
 export type ReportTier = "free" | "deep";
+export type ReportLocale = "en" | "zh";
+export type ScanJobReason = "standard" | "system_recovery" | "locale_correction";
 export type ScanJobStage =
   | "queued"
   | "discovering"
@@ -22,12 +26,48 @@ export type ScanJobStage =
   | "analyzing"
   | "synthesizing"
   | "completed"
-  | "partial"
+  | "completed_limited"
   | "failed";
 export type AccessKeyStatus = "active" | "revoked" | "exhausted";
 export type CreditStatus = "reserved" | "settled" | "refunded";
+export type CommerceCurrency = "CNY" | "USD" | "HKD";
+export type PaymentProvider = "airwallex" | "stripe";
+export type PaymentStatus = "created" | "pending" | "paid" | "failed" | "cancelled";
+export type FulfillmentStatus =
+  | "not_started"
+  | "queued"
+  | "processing"
+  | "completed"
+  | "completed_limited"
+  | "failed";
+export type OrderRefundStatus = "not_required" | "pending" | "submitted" | "refunded" | "failed";
+export type OrderDeliveryStatus = "not_queued" | "queued" | "sent" | "delivered" | "bounced" | "failed";
+export type PaymentEventProcessingStatus = "received" | "processed" | "ignored" | "failed";
+export type PaymentRefundReason = "completed_limited" | "report_failed" | "sla_missed" | "operator_approved";
+export type PaymentRefundState = "pending" | "submitted" | "succeeded" | "failed";
+export type EmailTemplateType =
+  | "payment_confirmed"
+  | "report_ready"
+  | "limited_report_refund"
+  | "report_failed_refund"
+  | "refund_succeeded"
+  | "refund_assistance"
+  | "link_reissue";
+export type EmailDeliveryState = "queued" | "sent" | "delivered" | "bounced" | "failed";
+export type JobDispatchState = "pending" | "published" | "abandoned";
+export type BatchRunStatus = "running" | "succeeded" | "partial" | "failed";
 
 export interface JobCheckpoint {
+  targetPageCount?: number;
+  rankedCandidateUrls?: string[];
+  effectivePlannedUrls?: string[];
+  permanentFailures?: Array<{ url: string; error: string; code?: string }>;
+  transientAttemptCounts?: Record<string, number>;
+  completedCrawlUrls?: string[];
+  completedPageAnalyses?: Array<{ url: string; contentHash: string; analysis: unknown }>;
+  synthesisInputHash?: string;
+  // Legacy keys remain readable while existing jobs drain and migrate to the
+  // explicit recovery contract above.
   discoveredUrls?: string[];
   candidateUrls?: string[];
   plannedUrls?: string[];
@@ -47,9 +87,15 @@ export const scanReports = pgTable(
     kind: text("kind").notNull().default("geo"),
     score: integer("score"),
     payload: jsonb("payload").$type<GeoAuditReport>().notNull(),
+    reportLocale: text("report_locale").$type<ReportLocale>(),
+    localeCorrectionUsedAt: timestamp("locale_correction_used_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
-  (table) => [index("scan_reports_created_at_idx").on(table.createdAt), index("scan_reports_site_key_idx").on(table.siteKey)]
+  (table) => [
+    index("scan_reports_created_at_idx").on(table.createdAt),
+    index("scan_reports_site_key_idx").on(table.siteKey),
+    check("scan_reports_report_locale_check", sql`${table.reportLocale} IS NULL OR ${table.reportLocale} IN ('en', 'zh')`)
+  ]
 );
 
 export type ScanReportRow = typeof scanReports.$inferSelect;
@@ -72,7 +118,8 @@ export const scanJobs = pgTable(
       .notNull()
       .references(() => scanReports.id, { onDelete: "cascade" }),
     tier: text("tier").$type<ReportTier>().notNull(),
-    locale: text("locale").notNull(),
+    locale: text("locale").$type<ReportLocale>().notNull(),
+    reason: text("reason").$type<ScanJobReason>().notNull().default("standard"),
     stage: text("stage").$type<ScanJobStage>().notNull().default("queued"),
     progress: integer("progress").notNull().default(0),
     checkpoint: jsonb("checkpoint").$type<JobCheckpoint>().notNull().default({}),
@@ -93,11 +140,331 @@ export const scanJobs = pgTable(
     index("scan_jobs_claim_idx").on(table.stage, table.leaseExpiresAt, table.createdAt),
     index("scan_jobs_tier_queue_idx").on(table.tier, table.stage, table.createdAt, table.id),
     index("scan_jobs_tier_lease_idx").on(table.tier, table.leaseExpiresAt),
-    index("scan_jobs_report_idx").on(table.reportId, table.createdAt)
+    index("scan_jobs_report_idx").on(table.reportId, table.createdAt),
+    check("scan_jobs_locale_check", sql`${table.locale} IN ('en', 'zh')`),
+    check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction')`),
+    check(
+      "scan_jobs_stage_check",
+      sql`${table.stage} IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')`
+    )
   ]
 );
 
 export type ScanJobRow = typeof scanJobs.$inferSelect;
+
+export const paymentOrders = pgTable(
+  "payment_orders",
+  {
+    id: text("id").primaryKey(),
+    checkoutIdempotencyHmac: text("checkout_idempotency_hmac").notNull(),
+    provider: text("provider").$type<PaymentProvider>().notNull(),
+    providerCheckoutId: text("provider_checkout_id"),
+    providerPaymentId: text("provider_payment_id"),
+    reportId: text("report_id")
+      .notNull()
+      .references(() => scanReports.id, { onDelete: "restrict" }),
+    fulfillmentJobId: text("fulfillment_job_id").references(() => scanJobs.id, { onDelete: "restrict" }),
+    siteKey: text("site_key").notNull(),
+    customerEmailEncrypted: text("customer_email_encrypted").notNull(),
+    customerEmailHmac: text("customer_email_hmac").notNull(),
+    emailKeyVersion: text("email_key_version").notNull(),
+    productCode: text("product_code").notNull(),
+    catalogVersion: text("catalog_version").notNull(),
+    termsVersion: text("terms_version").notNull(),
+    refundPolicyVersion: text("refund_policy_version").notNull(),
+    reportLocale: text("report_locale").$type<ReportLocale>().notNull(),
+    currency: text("currency").$type<CommerceCurrency>().notNull(),
+    amountMinor: integer("amount_minor").notNull(),
+    taxAmountMinor: integer("tax_amount_minor"),
+    paymentStatus: text("payment_status").$type<PaymentStatus>().notNull().default("created"),
+    fulfillmentStatus: text("fulfillment_status").$type<FulfillmentStatus>().notNull().default("not_started"),
+    refundStatus: text("refund_status").$type<OrderRefundStatus>().notNull().default("not_required"),
+    deliveryStatus: text("delivery_status").$type<OrderDeliveryStatus>().notNull().default("not_queued"),
+    courtesyNonBillable: boolean("courtesy_non_billable").notNull().default(false),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    deliveryDeadlineAt: timestamp("delivery_deadline_at", { withTimezone: true }),
+    fulfilledAt: timestamp("fulfilled_at", { withTimezone: true }),
+    refundedAt: timestamp("refunded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("payment_orders_checkout_idempotency_uidx").on(table.checkoutIdempotencyHmac),
+    uniqueIndex("payment_orders_provider_checkout_uidx").on(table.provider, table.providerCheckoutId),
+    uniqueIndex("payment_orders_provider_payment_uidx").on(table.provider, table.providerPaymentId),
+    uniqueIndex("payment_orders_fulfillment_job_uidx").on(table.fulfillmentJobId),
+    uniqueIndex("payment_orders_report_active_product_uidx")
+      .on(table.reportId, table.productCode)
+      .where(sql`${table.paymentStatus} IN ('created','pending','paid')`),
+    index("payment_orders_email_hmac_idx").on(table.customerEmailHmac, table.createdAt),
+    index("payment_orders_sla_idx").on(table.fulfillmentStatus, table.deliveryDeadlineAt),
+    check("payment_orders_provider_check", sql`${table.provider} IN ('airwallex','stripe')`),
+    check("payment_orders_report_locale_check", sql`${table.reportLocale} IN ('en','zh')`),
+    check("payment_orders_currency_check", sql`${table.currency} IN ('CNY','USD','HKD')`),
+    check("payment_orders_amount_check", sql`${table.amountMinor} > 0`),
+    check("payment_orders_tax_amount_check", sql`${table.taxAmountMinor} IS NULL OR ${table.taxAmountMinor} >= 0`),
+    check("payment_orders_payment_status_check", sql`${table.paymentStatus} IN ('created','pending','paid','failed','cancelled')`),
+    check(
+      "payment_orders_fulfillment_status_check",
+      sql`${table.fulfillmentStatus} IN ('not_started','queued','processing','completed','completed_limited','failed')`
+    ),
+    check(
+      "payment_orders_refund_status_check",
+      sql`${table.refundStatus} IN ('not_required','pending','submitted','refunded','failed')`
+    ),
+    check(
+      "payment_orders_delivery_status_check",
+      sql`${table.deliveryStatus} IN ('not_queued','queued','sent','delivered','bounced','failed')`
+    )
+  ]
+);
+
+export type PaymentOrderRow = typeof paymentOrders.$inferSelect;
+
+export const paymentEvents = pgTable(
+  "payment_events",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").$type<PaymentProvider>().notNull(),
+    providerEventId: text("provider_event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    orderId: text("order_id").references(() => paymentOrders.id, { onDelete: "restrict" }),
+    providerCreatedAt: timestamp("provider_created_at", { withTimezone: true }),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    processingStatus: text("processing_status").$type<PaymentEventProcessingStatus>().notNull().default("received"),
+    payloadHash: text("payload_hash").notNull(),
+    selectedFields: jsonb("selected_fields").$type<Record<string, string | number | boolean | null>>().notNull().default({}),
+    errorCode: text("error_code")
+  },
+  (table) => [
+    uniqueIndex("payment_events_provider_event_uidx").on(table.provider, table.providerEventId),
+    index("payment_events_order_idx").on(table.orderId, table.receivedAt),
+    check("payment_events_provider_check", sql`${table.provider} IN ('airwallex','stripe')`),
+    check(
+      "payment_events_processing_status_check",
+      sql`${table.processingStatus} IN ('received','processed','ignored','failed')`
+    )
+  ]
+);
+
+export type PaymentEventRow = typeof paymentEvents.$inferSelect;
+
+export const paymentRefunds = pgTable(
+  "payment_refunds",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => paymentOrders.id, { onDelete: "restrict" }),
+    provider: text("provider").$type<PaymentProvider>().notNull(),
+    providerRefundId: text("provider_refund_id"),
+    reason: text("reason").$type<PaymentRefundReason>().notNull(),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").$type<CommerceCurrency>().notNull(),
+    state: text("state").$type<PaymentRefundState>().notNull().default("pending"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    nextRetryAt: timestamp("next_retry_at", { withTimezone: true }),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    failureCode: text("failure_code"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    succeededAt: timestamp("succeeded_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("payment_refunds_order_uidx").on(table.orderId),
+    uniqueIndex("payment_refunds_idempotency_uidx").on(table.idempotencyKey),
+    uniqueIndex("payment_refunds_provider_refund_uidx").on(table.provider, table.providerRefundId),
+    index("payment_refunds_retry_idx").on(table.state, table.nextRetryAt),
+    check("payment_refunds_provider_check", sql`${table.provider} IN ('airwallex','stripe')`),
+    check(
+      "payment_refunds_reason_check",
+      sql`${table.reason} IN ('completed_limited','report_failed','sla_missed','operator_approved')`
+    ),
+    check("payment_refunds_amount_check", sql`${table.amountMinor} > 0`),
+    check("payment_refunds_currency_check", sql`${table.currency} IN ('CNY','USD','HKD')`),
+    check("payment_refunds_state_check", sql`${table.state} IN ('pending','submitted','succeeded','failed')`),
+    check("payment_refunds_attempts_check", sql`${table.attempts} >= 0`)
+  ]
+);
+
+export type PaymentRefundRow = typeof paymentRefunds.$inferSelect;
+
+export const jobDispatchOutbox = pgTable(
+  "job_dispatch_outbox",
+  {
+    id: text("id").primaryKey(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => scanJobs.id, { onDelete: "cascade" }),
+    tier: text("tier").$type<ReportTier>().notNull(),
+    schemaVersion: integer("schema_version").notNull().default(1),
+    state: text("state").$type<JobDispatchState>().notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("job_dispatch_outbox_job_uidx").on(table.jobId),
+    index("job_dispatch_outbox_pending_idx").on(table.state, table.nextAttemptAt),
+    check("job_dispatch_outbox_tier_check", sql`${table.tier} IN ('free','deep')`),
+    check("job_dispatch_outbox_schema_version_check", sql`${table.schemaVersion} > 0`),
+    check("job_dispatch_outbox_state_check", sql`${table.state} IN ('pending','published','abandoned')`),
+    check("job_dispatch_outbox_attempts_check", sql`${table.attempts} >= 0`)
+  ]
+);
+
+export type JobDispatchOutboxRow = typeof jobDispatchOutbox.$inferSelect;
+
+export const emailDeliveries = pgTable(
+  "email_deliveries",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id").references(() => paymentOrders.id, { onDelete: "restrict" }),
+    reportId: text("report_id")
+      .notNull()
+      .references(() => scanReports.id, { onDelete: "restrict" }),
+    templateType: text("template_type").$type<EmailTemplateType>().notNull(),
+    templateVersion: text("template_version").notNull(),
+    locale: text("locale").$type<ReportLocale>().notNull(),
+    recipientRef: text("recipient_ref").notNull(),
+    provider: text("provider").notNull().default("resend"),
+    providerEmailId: text("provider_email_id"),
+    businessIdempotencyKey: text("business_idempotency_key").notNull(),
+    state: text("state").$type<EmailDeliveryState>().notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    nextRetryAt: timestamp("next_retry_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    lastProviderEventAt: timestamp("last_provider_event_at", { withTimezone: true }),
+    failureCode: text("failure_code"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("email_deliveries_business_idempotency_uidx").on(table.businessIdempotencyKey),
+    uniqueIndex("email_deliveries_provider_email_uidx").on(table.provider, table.providerEmailId),
+    index("email_deliveries_order_idx").on(table.orderId, table.createdAt),
+    index("email_deliveries_order_template_idx").on(table.orderId, table.templateType, table.createdAt),
+    index("email_deliveries_retry_idx").on(table.state, table.nextRetryAt),
+    check("email_deliveries_template_type_check", sql`${table.templateType} IN ('payment_confirmed','report_ready','limited_report_refund','report_failed_refund','refund_succeeded','refund_assistance','link_reissue')`),
+    check("email_deliveries_locale_check", sql`${table.locale} IN ('en','zh')`),
+    check("email_deliveries_provider_check", sql`${table.provider} IN ('resend')`),
+    check("email_deliveries_state_check", sql`${table.state} IN ('queued','sent','delivered','bounced','failed')`),
+    check("email_deliveries_attempts_check", sql`${table.attempts} >= 0`)
+  ]
+);
+
+export type EmailDeliveryRow = typeof emailDeliveries.$inferSelect;
+
+export const emailDeliveryEvents = pgTable(
+  "email_delivery_events",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull().default("resend"),
+    providerEventId: text("provider_event_id").notNull(),
+    providerEmailId: text("provider_email_id").notNull(),
+    deliveryId: text("delivery_id").references(() => emailDeliveries.id, { onDelete: "cascade" }),
+    eventType: text("event_type").notNull(),
+    providerCreatedAt: timestamp("provider_created_at", { withTimezone: true }),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    processingStatus: text("processing_status").$type<PaymentEventProcessingStatus>().notNull().default("received"),
+    payloadHash: text("payload_hash").notNull(),
+    errorCode: text("error_code")
+  },
+  (table) => [
+    uniqueIndex("email_delivery_events_provider_event_uidx").on(table.provider, table.providerEventId),
+    index("email_delivery_events_provider_email_idx").on(table.providerEmailId, table.receivedAt),
+    index("email_delivery_events_delivery_idx").on(table.deliveryId, table.receivedAt),
+    check("email_delivery_events_provider_check", sql`${table.provider} IN ('resend')`),
+    check(
+      "email_delivery_events_processing_status_check",
+      sql`${table.processingStatus} IN ('received','processed','ignored','failed')`
+    )
+  ]
+);
+
+export const workerPresence = pgTable(
+  "worker_presence",
+  {
+    instanceId: text("instance_id").primaryKey(),
+    tier: text("tier").$type<ReportTier>().notNull(),
+    deploymentVersion: text("deployment_version").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    index("worker_presence_tier_heartbeat_idx").on(table.tier, table.lastHeartbeatAt),
+    check("worker_presence_tier_check", sql`${table.tier} IN ('free','deep')`)
+  ]
+);
+
+export type WorkerPresenceRow = typeof workerPresence.$inferSelect;
+
+export const batchRuns = pgTable(
+  "batch_runs",
+  {
+    id: text("id").primaryKey(),
+    tier: text("tier").$type<ReportTier>().notNull(),
+    status: text("status").$type<BatchRunStatus>().notNull().default("running"),
+    replicaCount: integer("replica_count").notNull().default(1),
+    claimedJobs: integer("claimed_jobs").notNull().default(0),
+    completedJobs: integer("completed_jobs").notNull().default(0),
+    failedJobs: integer("failed_jobs").notNull().default(0),
+    errorCode: text("error_code"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true })
+  },
+  (table) => [
+    index("batch_runs_tier_started_idx").on(table.tier, table.startedAt),
+    check("batch_runs_tier_check", sql`${table.tier} IN ('free','deep')`),
+    check("batch_runs_status_check", sql`${table.status} IN ('running','succeeded','partial','failed')`),
+    check("batch_runs_replica_count_check", sql`${table.replicaCount} > 0`),
+    check(
+      "batch_runs_counts_check",
+      sql`${table.claimedJobs} >= 0 AND ${table.completedJobs} >= 0 AND ${table.failedJobs} >= 0`
+    )
+  ]
+);
+
+export type BatchRunRow = typeof batchRuns.$inferSelect;
+
+export const freeAiDailyBudgets = pgTable(
+  "free_ai_daily_budgets",
+  {
+    bucketDate: date("bucket_date", { mode: "string" }).primaryKey(),
+    usedCount: integer("used_count").notNull().default(0),
+    limitSnapshot: integer("limit_snapshot").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check("free_ai_daily_budgets_used_check", sql`${table.usedCount} >= 0`),
+    check("free_ai_daily_budgets_limit_check", sql`${table.limitSnapshot} >= 0`)
+  ]
+);
+
+export const freeAiBudgetReservations = pgTable(
+  "free_ai_budget_reservations",
+  {
+    idempotencyHmac: text("idempotency_hmac").primaryKey(),
+    bucketDate: date("bucket_date", { mode: "string" })
+      .notNull()
+      .references(() => freeAiDailyBudgets.bucketDate, { onDelete: "cascade" }),
+    granted: boolean("granted").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [index("free_ai_budget_reservations_date_idx").on(table.bucketDate)]
+);
 
 export const aiReports = pgTable(
   "ai_reports",
@@ -188,13 +555,18 @@ export const accessKeys = pgTable(
     id: text("id").primaryKey(),
     keyPrefix: text("key_prefix").notNull(),
     keyHmac: text("key_hmac").notNull(),
+    paymentOrderId: text("payment_order_id").references(() => paymentOrders.id, { onDelete: "restrict" }),
     status: text("status").$type<AccessKeyStatus>().notNull().default("active"),
     creditsRemaining: integer("credits_remaining").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true })
   },
-  (table) => [uniqueIndex("access_keys_hmac_uidx").on(table.keyHmac), index("access_keys_prefix_idx").on(table.keyPrefix)]
+  (table) => [
+    uniqueIndex("access_keys_hmac_uidx").on(table.keyHmac),
+    uniqueIndex("access_keys_payment_order_uidx").on(table.paymentOrderId),
+    index("access_keys_prefix_idx").on(table.keyPrefix)
+  ]
 );
 
 export type AccessKeyRow = typeof accessKeys.$inferSelect;
@@ -211,6 +583,7 @@ export const creditLedger = pgTable(
       .references(() => scanReports.id, { onDelete: "restrict" }),
     jobId: text("job_id").references(() => scanJobs.id, { onDelete: "set null" }),
     idempotencyKey: text("idempotency_key").notNull(),
+    paymentOrderId: text("payment_order_id").references(() => paymentOrders.id, { onDelete: "restrict" }),
     credits: integer("credits").notNull().default(1),
     status: text("status").$type<CreditStatus>().notNull().default("reserved"),
     reservedAt: timestamp("reserved_at", { withTimezone: true }).notNull().defaultNow(),
@@ -219,6 +592,7 @@ export const creditLedger = pgTable(
   },
   (table) => [
     uniqueIndex("credit_ledger_key_idempotency_uidx").on(table.accessKeyId, table.idempotencyKey),
+    uniqueIndex("credit_ledger_payment_order_uidx").on(table.paymentOrderId),
     index("credit_ledger_report_idx").on(table.reportId)
   ]
 );

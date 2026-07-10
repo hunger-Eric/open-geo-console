@@ -6,7 +6,7 @@ import {
 } from "@open-geo-console/ai-report-engine";
 import { discoverSite, fetchEvidencePage } from "../worker/crawler-runtime";
 
-const targetUrl = process.env.OGC_LIVE_TEST_URL ?? "https://me.itheheda.online";
+const targetUrl = process.env.OGC_LIVE_TEST_URL ?? "https://company.com";
 const locale = process.env.OGC_LIVE_TEST_LOCALE === "zh" ? "zh" : "en";
 const client = configuredClient();
 const discovered = await discoverSite(targetUrl);

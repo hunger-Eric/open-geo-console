@@ -26,6 +26,7 @@ export function ReportView({
   page = 1,
   report,
   reportId,
+  reportLocale,
   reportTier,
   section = "overview"
 }: {
@@ -37,6 +38,7 @@ export function ReportView({
   page?: number;
   report: GeoAuditReport;
   reportId: string;
+  reportLocale: Locale;
   reportTier: "free" | "deep";
   section?: ReportWorkspaceSection;
 }) {
@@ -63,6 +65,7 @@ export function ReportView({
         presentation={presentation}
         report={report}
         reportHref={overviewHref}
+        reportLocale={reportLocale}
       />
     );
   }
@@ -93,6 +96,12 @@ export function ReportView({
               <dt className="inline">{dictionary.workspace.lastScan}: </dt>
               <dd className="inline text-[var(--foreground)]">{formatDate(locale, report.scannedAt)}</dd>
             </div>
+            <div>
+              <dt className="inline">{dictionary.aiReport.reportLanguage}: </dt>
+              <dd className="inline text-[var(--foreground)]">
+                {reportLocale === "zh" ? dictionary.aiReport.reportLanguageChinese : dictionary.aiReport.reportLanguageEnglish}
+              </dd>
+            </div>
           </dl>
         </div>
         <ReportActions
@@ -119,7 +128,7 @@ export function ReportView({
       <div className="mt-6">
         {section === "overview" ? (
           <div className="space-y-6">
-            <AiReportStatus dictionary={dictionary} reportId={reportId} />
+            <AiReportStatus dictionary={dictionary} reportId={reportId} reportLocale={reportLocale} />
             <ReportOverview
               dictionary={dictionary}
               evidence={evidence ?? null}
@@ -133,8 +142,8 @@ export function ReportView({
         ) : null}
         {section === "analysis" ? (
           <div className="space-y-6">
-            <AiReportStatus dictionary={dictionary} reportId={reportId} />
-            {aiReport ? <AiReportContent dictionary={dictionary} locale={locale} report={aiReport} /> : null}
+            <AiReportStatus dictionary={dictionary} reportId={reportId} reportLocale={reportLocale} />
+            {aiReport ? <AiReportContent dictionary={dictionary} locale={locale} report={aiReport} reportLocale={reportLocale} /> : null}
           </div>
         ) : null}
         {section === "issues" ? (

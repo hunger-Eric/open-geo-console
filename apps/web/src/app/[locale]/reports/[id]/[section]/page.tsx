@@ -32,6 +32,7 @@ export default async function ReportWorkspaceSectionPage({
   }
 
   const [evidence, visible] = await Promise.all([getBotEvidence(id), getVisibleReportBundle(id, row.payload)]);
+  const reportLocale: Locale = row.reportLocale ?? locale;
   return (
     <ReportView
       aiReport={visible.aiReport}
@@ -42,6 +43,7 @@ export default async function ReportWorkspaceSectionPage({
       page={page}
       report={visible.technicalReport}
       reportId={id}
+      reportLocale={reportLocale}
       reportTier={visible.tier}
       section={section}
     />

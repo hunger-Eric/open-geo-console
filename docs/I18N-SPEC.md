@@ -14,6 +14,8 @@
 - Navigation, report sections, severity labels, delivery actions, scanner capability blocks, and empty states must be driven by typed registries/configuration.
 - Components receive a `Dictionary` and `Locale` or derive them from route params.
 - Locale switching must preserve the current route shape and report id.
+- `scan_reports.report_locale` is the immutable generation language once established. Switching the interface route changes controls, dates and labels but never translates or regenerates stored report prose.
+- Generated prose must use `lang="zh-CN"` or `lang="en"` according to the artifact provenance. A legacy mismatch is corrected only through the authorized one-time locale-correction flow.
 - Date and number formatting must use locale-aware helpers.
 
 ## Fallback Rules

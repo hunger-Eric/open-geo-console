@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getAiReport } from "@/db/ai-reports";
-import { getLatestScanJob, getScanJobQueueStatus } from "@/db/jobs";
+import { getJobCreditStatus, getLatestScanJob, getScanJobQueueStatus } from "@/db/jobs";
 import { getGeoReport } from "@/db/reports";
+import { publicStateForStage } from "@/report/job-status";
 import { requestHasReportAccess } from "@/server/report-access";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -29,33 +30,41 @@ export async function GET(request: Request, context: RouteContext) {
   const job = deepJob ?? freeJob;
   const aiReport = deepAiReport ?? freeAiReport;
   const queue = job ? await getScanJobQueueStatus(job.id) : null;
+  const creditStatus = job ? await getJobCreditStatus(job.id) : null;
+  const reportLocale = report.reportLocale;
+  const aiReportLocale = aiReport?.locale === "zh" ? "zh" : aiReport?.locale === "en" ? "en" : null;
+  const localeCorrectionAvailable = Boolean(
+    hasDeepAccess
+      && reportLocale
+      && deepAiReport
+      && aiReportLocale
+      && aiReportLocale !== reportLocale
+      && !report.localeCorrectionUsedAt
+  );
 
   return NextResponse.json(
     {
       job: job ? {
-        id: job.id,
         tier: job.tier === "deep" ? "deep" : "preview",
-        stage: job.stage,
-        status: statusForStage(job.stage),
+        state: publicStateForStage(job.stage),
         progress: job.progress,
-        errorCode: job.errorCode,
-        publicError: job.publicError,
         plannedPages: job.plannedPages,
         successfulPages: job.successfulPages,
         failedPages: job.failedPages,
-        queuePosition: queue?.queuePosition ?? null,
-        waitReason: queue?.waitReason ?? null,
-        activeTier: queue?.activeTier ?? null
+        refundState: creditStatus,
+        queuePosition: job.stage === "queued" ? queue?.queuePosition ?? null : null,
+        waitReason: job.stage === "queued" ? queue?.waitReason ?? null : null,
+        activeTier: job.stage === "queued" ? queue?.activeTier ?? null : null
       } : null,
       hasAiReport: Boolean(aiReport),
-      hasDeepAccess
+      hasDeepAccess,
+      reportLocale,
+      aiReportLocale,
+      localeCorrectionAvailable,
+      localeCorrectionInProgress: Boolean(
+        deepJob?.reason === "locale_correction" && publicStateForStage(deepJob.stage) === "generating"
+      )
     },
     { headers: PRIVATE_NO_STORE }
   );
-}
-
-function statusForStage(stage: string): "queued" | "running" | "completed" | "partial" | "failed" {
-  if (stage === "queued") return "queued";
-  if (stage === "completed" || stage === "partial" || stage === "failed") return stage;
-  return "running";
 }

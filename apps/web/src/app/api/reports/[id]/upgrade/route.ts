@@ -1,38 +1,58 @@
 import { NextResponse } from "next/server";
 import { getAiReport } from "@/db/ai-reports";
-import { attachReservationToJob, reserveCredit, refundCredit } from "@/db/credits";
-import { enqueueScanJob, getLatestScanJob } from "@/db/jobs";
+import { attachReservationToJob, reserveCredit, refundCredit, validateAccessKey } from "@/db/credits";
+import { enqueueScanJob } from "@/db/jobs";
 import { issueReportAccessToken } from "@/db/report-tokens";
-import { getGeoReport } from "@/db/reports";
+import { getGeoReport, persistLegacyReportLocale } from "@/db/reports";
+import { parseReportLocale } from "@/server/report-locale";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
-  if (!(await getGeoReport(id))) return NextResponse.json({ error: "Report not found." }, { status: 404 });
-  const body = (await request.json()) as { accessKey?: unknown };
+  const body = (await request.json()) as { accessKey?: unknown; locale?: unknown };
   const accessKey = typeof body.accessKey === "string" ? body.accessKey.trim() : "";
+  const requestedLocale = parseReportLocale(body.locale);
   const idempotencyKey = request.headers.get("idempotency-key")?.trim() ?? "";
-  if (!accessKey || !idempotencyKey) {
-    return NextResponse.json({ error: "An access key and Idempotency-Key are required." }, { status: 400 });
+  if (!accessKey || !requestedLocale || !idempotencyKey) {
+    return NextResponse.json({ error: "An access key, an en or zh locale, and Idempotency-Key are required." }, { status: 400 });
+  }
+  const report = await getGeoReport(id);
+  if (!report) return NextResponse.json({ error: "Report not found." }, { status: 404 });
+  if (report.reportLocale && report.reportLocale !== requestedLocale) {
+    return localeMismatchResponse();
   }
 
   const existingReport = await getAiReport(id, "deep");
-  const locale = (await getLatestScanJob(id))?.locale === "zh" ? "zh" : "en";
   if (existingReport) {
-    const access = await issueReportAccessToken({ reportId: id });
-    return NextResponse.json({ accessUrl: accessUrl(request, id, access.rawToken), jobId: existingReport.jobId });
+    try {
+      await validateAccessKey(accessKey);
+      const persistedLocale = report.reportLocale ?? await persistLegacyReportLocale(id, requestedLocale);
+      if (persistedLocale !== requestedLocale) return localeMismatchResponse();
+      const access = await issueReportAccessToken({ reportId: id });
+      return NextResponse.json({ accessUrl: accessUrl(request, id, access.rawToken), jobId: existingReport.jobId });
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Unable to validate the report access key." },
+        { status: 400 }
+      );
+    }
   }
 
   try {
     const reservation = await reserveCredit({ rawKey: accessKey, reportId: id, idempotencyKey });
+    const persistedLocale = report.reportLocale ?? await persistLegacyReportLocale(id, requestedLocale);
+    if (persistedLocale !== requestedLocale) {
+      if (!reservation.job_id && reservation.status === "reserved") await refundCredit(reservation.id);
+      return localeMismatchResponse();
+    }
     let jobId = reservation.job_id;
     if (!jobId) {
       try {
         const job = await enqueueScanJob({
           reportId: id,
           tier: "deep",
-          locale,
+          locale: persistedLocale,
           creditReservationId: reservation.id
         });
         jobId = job.id;
@@ -53,6 +73,13 @@ export async function POST(request: Request, context: RouteContext) {
       { status: 400 }
     );
   }
+}
+
+function localeMismatchResponse() {
+  return NextResponse.json(
+    { error: "The requested locale must match the report's persisted language." },
+    { status: 409 }
+  );
 }
 
 function accessUrl(request: Request, reportId: string, token: string) {

@@ -1,6 +1,7 @@
 import {
   SiteDiscovery,
   buildPageCandidates,
+  CrawlPageError,
   compressCandidates,
   createSiteKey,
   extractPageContent,
@@ -122,20 +123,54 @@ export async function fetchEvidencePage(
   robotsPolicy: RobotsPolicy
 ): Promise<FetchedEvidencePage> {
   if (!isAllowedByRobots(planned.url, robotsPolicy)) {
-    throw new Error("robots.txt disallows this page.");
+    throw new CrawlPageError("robots-denied", "robots.txt disallows this page.");
   }
   const safeFetch = createSafeFetch();
   const response = await safeFetch(planned.url, { headers: { "user-agent": CRAWLER_USER_AGENT } });
-  if (!response.ok) throw new Error(`Page returned HTTP ${response.status}.`);
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new CrawlPageError("http-not-found", `Page returned HTTP ${response.status}.`, { status: response.status });
+    }
+    if (response.status === 410) {
+      throw new CrawlPageError("http-gone", `Page returned HTTP ${response.status}.`, { status: response.status });
+    }
+    if (response.status === 429) {
+      throw new CrawlPageError("http-rate-limited", `Page returned HTTP ${response.status}.`, { status: response.status });
+    }
+    if (response.status >= 500) {
+      throw new CrawlPageError("http-server-error", `Page returned HTTP ${response.status}.`, { status: response.status });
+    }
+    throw new CrawlPageError("unsupported-content", `Page returned unsupported HTTP ${response.status}.`, {
+      status: response.status,
+      disposition: "permanent"
+    });
+  }
+  const finalUrl = response.headers.get("x-ogc-final-url") ?? planned.url;
+  if (createSiteKey(finalUrl) !== createSiteKey(planned.url)) {
+    throw new CrawlPageError("outside-site", "The redirect leaves the requested site boundary.");
+  }
+  if (!isAllowedByRobots(finalUrl, robotsPolicy)) {
+    throw new CrawlPageError("disallowed-redirect", "The redirect target is disallowed by robots.txt.");
+  }
   let html = await response.text();
   let extracted = extractPageContent(html, planned.url, { maximumReadableCharacters: 100_000 });
   let browserRendered = false;
   if (extracted.browserFallback.required) {
-    const rendered = await renderWithBrowser(planned.url).catch(() => null);
+    let rendered: string | null;
+    try {
+      rendered = await renderWithBrowser(finalUrl);
+    } catch (error) {
+      throw new CrawlPageError(
+        "browser",
+        `Browser rendering failed: ${error instanceof Error ? error.message : "unknown browser error"}`
+      );
+    }
     if (rendered) {
       html = rendered;
       extracted = extractPageContent(html, planned.url, { maximumReadableCharacters: 100_000 });
       browserRendered = true;
+    } else {
+      throw new CrawlPageError("browser", "Browser rendering returned no readable document.");
     }
   }
   if (!extracted.text.trim()) throw new Error("The page did not expose readable text.");

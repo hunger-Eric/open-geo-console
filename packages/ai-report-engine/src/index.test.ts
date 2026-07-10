@@ -4,6 +4,7 @@ import {
   OpenAiCompatibleClient,
   ReportValidationError,
   analyzePageBatch,
+  planPagesWithRecovery,
   parseAiWebsiteReportV1,
   planPages,
   preparePlanningCandidates,
@@ -167,6 +168,21 @@ describe("page planning", () => {
     expect(freeClient.completeJson).not.toHaveBeenCalled();
   });
 
+  it("retries planning and then uses the deterministic fallback", async () => {
+    const client = mockClient([]);
+    vi.mocked(client.completeJson).mockRejectedValue(new Error("rate limited"));
+    const result = await planPagesWithRecovery(client, {
+      tier: "deep",
+      locale: "en",
+      targetUrl: page.url,
+      candidates: [{ url: page.url }, { url: "https://example.com/about" }]
+    }, { maxAttempts: 2, delay: async () => undefined });
+
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.selected.map(({ url }) => url)).toEqual([page.url, "https://example.com/about"]);
+  });
+
   it("fills an invalid model plan with deterministic representative pages", async () => {
     const result = await planPages(mockClient([{ selected: [{ url: "https://attacker.example/" }] }]), {
       tier: "deep",
@@ -222,6 +238,45 @@ describe("batch analysis and evidence", () => {
     const verified = verifyReportEvidence(report, [page]);
     expect(verified.rejectedFindingIds).toEqual(["bad"]);
     expect(verified.report.findings.map((finding) => finding.id)).not.toContain("bad");
+  });
+
+  it("retries only the failed analysis batch and preserves completed analyses", async () => {
+    const second = { ...page, url: "https://example.com/about", pageType: "about" as const };
+    const third = { ...page, url: "https://example.com/contact", pageType: "contact" as const };
+    const client = mockClient([]);
+    vi.mocked(client.completeJson)
+      .mockResolvedValueOnce({ value: { analyses: [{ url: page.url, summary: "one" }] }, modelId: "mock", rawContent: "{}" })
+      .mockRejectedValueOnce(new Error("timeout"))
+      .mockResolvedValueOnce({ value: { analyses: [{ url: second.url, summary: "two" }] }, modelId: "mock", rawContent: "{}" })
+      .mockResolvedValueOnce({ value: { analyses: [{ url: third.url, summary: "three" }] }, modelId: "mock", rawContent: "{}" });
+    const completed: string[][] = [];
+
+    const result = await analyzePageBatch(client, {
+      pages: [page, second, third],
+      locale: "en",
+      batchSize: 1,
+      maxAttempts: 2,
+      retryDelay: async () => undefined,
+      onBatchComplete: async (analyses) => {
+        completed.push(analyses.map(({ url }) => url));
+      }
+    });
+
+    expect(client.completeJson).toHaveBeenCalledTimes(4);
+    expect(result.analyses.map(({ url }) => url)).toEqual([page.url, second.url, third.url]);
+    expect(completed).toEqual([[page.url], [second.url], [third.url]]);
+  });
+
+  it("skips analysis calls for matching completed page analyses", async () => {
+    const existing = { url: page.url, pageType: page.pageType, summary: "saved", organizationSignals: [], strengths: [], findings: [] };
+    const client = mockClient([]);
+    const result = await analyzePageBatch(client, {
+      pages: [page],
+      locale: "en",
+      completedAnalyses: [existing]
+    });
+    expect(client.completeJson).not.toHaveBeenCalled();
+    expect(result.analyses).toEqual([existing]);
   });
 });
 

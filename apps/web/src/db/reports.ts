@@ -1,16 +1,18 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { ensureDatabase, getDb, isMemoryPersistence } from "./index";
+import { ensureDatabase, getDb, getSqlClient, isMemoryPersistence } from "./index";
 import { memoryDeleteReport, memoryGetReport, memoryRecentReports, memorySaveReport } from "./memory";
-import { scanReports, type ScanReportRow } from "./schema";
+import { scanReports, type ReportLocale, type ScanReportRow } from "./schema";
 
 export async function saveGeoReport(
   url: string,
   report: GeoAuditReport,
   siteKey?: string,
-  existingId?: string
+  existingId?: string,
+  reportLocale?: ReportLocale
 ): Promise<ScanReportRow> {
+  const existingMemoryRow = isMemoryPersistence() && existingId ? memoryGetReport(existingId) : null;
   const row: ScanReportRow = {
     id: existingId ?? randomUUID(),
     url,
@@ -18,6 +20,8 @@ export async function saveGeoReport(
     kind: "geo",
     score: report.score,
     payload: report,
+    reportLocale: reportLocale ?? existingMemoryRow?.reportLocale ?? null,
+    localeCorrectionUsedAt: existingMemoryRow?.localeCorrectionUsedAt ?? null,
     createdAt: new Date()
   };
 
@@ -30,7 +34,15 @@ export async function saveGeoReport(
     ? await insert
         .onConflictDoUpdate({
           target: scanReports.id,
-          set: { url: row.url, siteKey: row.siteKey, kind: row.kind, score: row.score, payload: row.payload, createdAt: row.createdAt }
+          set: {
+            url: row.url,
+            siteKey: row.siteKey,
+            kind: row.kind,
+            score: row.score,
+            payload: row.payload,
+            reportLocale: sql`COALESCE(${scanReports.reportLocale}, ${row.reportLocale})`,
+            createdAt: row.createdAt
+          }
         })
         .returning()
     : await insert.returning();
@@ -61,4 +73,85 @@ export async function deleteGeoReport(id: string): Promise<boolean> {
   await ensureDatabase();
   const rows = await getDb().delete(scanReports).where(eq(scanReports.id, id)).returning({ id: scanReports.id });
   return rows.length === 1;
+}
+
+export async function persistLegacyReportLocale(reportId: string, locale: ReportLocale): Promise<ReportLocale | null> {
+  if (isMemoryPersistence()) {
+    const row = memoryGetReport(reportId);
+    if (!row) return null;
+    if (row.reportLocale && row.reportLocale !== locale) return row.reportLocale;
+    memorySaveReport({ ...row, reportLocale: locale });
+    return locale;
+  }
+  await ensureDatabase();
+  const rows = await getSqlClient()<{ report_locale: ReportLocale | null }[]>`
+    UPDATE scan_reports
+    SET report_locale = ${locale}
+    WHERE id = ${reportId} AND (report_locale IS NULL OR report_locale = ${locale})
+    RETURNING report_locale
+  `;
+  if (rows[0]) return rows[0].report_locale;
+  const current = await getSqlClient()<{ report_locale: ReportLocale | null }[]>`
+    SELECT report_locale FROM scan_reports WHERE id = ${reportId}
+  `;
+  return current[0]?.report_locale ?? null;
+}
+
+export type LocaleCorrectionErrorCode =
+  | "report_not_found"
+  | "report_locale_missing"
+  | "deep_report_missing"
+  | "locale_already_matches"
+  | "correction_already_used";
+
+export class LocaleCorrectionError extends Error {
+  constructor(public readonly code: LocaleCorrectionErrorCode, message: string) {
+    super(message);
+  }
+}
+
+export async function createLocaleCorrectionJob(reportId: string): Promise<{ jobId: string; locale: ReportLocale }> {
+  await ensureDatabase();
+  if (isMemoryPersistence()) {
+    throw new Error("Locale correction jobs require PostgreSQL persistence.");
+  }
+  const jobId = randomUUID();
+  return getSqlClient().begin(async (tx) => {
+    const rows = await tx<{
+      report_locale: ReportLocale | null;
+      locale_correction_used_at: string | Date | null;
+      ai_locale: string | null;
+    }[]>`
+      SELECT report.report_locale, report.locale_correction_used_at, ai.locale AS ai_locale
+      FROM scan_reports report
+      LEFT JOIN ai_reports ai ON ai.report_id = report.id AND ai.tier = 'deep'
+      WHERE report.id = ${reportId}
+      FOR UPDATE OF report
+    `;
+    const report = rows[0];
+    if (!report) throw new LocaleCorrectionError("report_not_found", "Report not found.");
+    if (!report.report_locale) {
+      throw new LocaleCorrectionError("report_locale_missing", "The report language has not been established.");
+    }
+    if (!report.ai_locale) {
+      throw new LocaleCorrectionError("deep_report_missing", "A completed deep report is required for language correction.");
+    }
+    if (report.ai_locale === report.report_locale) {
+      throw new LocaleCorrectionError("locale_already_matches", "The generated report already uses the requested language.");
+    }
+    if (report.locale_correction_used_at) {
+      throw new LocaleCorrectionError("correction_already_used", "The one-time report language correction was already used.");
+    }
+
+    await tx`
+      UPDATE scan_reports
+      SET locale_correction_used_at = now()
+      WHERE id = ${reportId}
+    `;
+    await tx`
+      INSERT INTO scan_jobs (id, report_id, tier, locale, reason, credit_reservation_id)
+      VALUES (${jobId}, ${reportId}, 'deep', ${report.report_locale}, 'locale_correction', NULL)
+    `;
+    return { jobId, locale: report.report_locale };
+  });
 }
