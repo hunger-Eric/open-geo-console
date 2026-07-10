@@ -69,6 +69,7 @@ describe("i18n architecture", () => {
 
     expect(formatDateTime("en", date, { dateStyle: "medium", timeZone: "UTC" })).toContain("2026");
     expect(formatDateTime("zh", date, { dateStyle: "medium", timeZone: "UTC" })).toContain("2026");
+    expect(formatDateTime("en", date)).toBe("Jul 8, 2026, 12:34 PM");
     expect(formatNumber("en", 1234)).toBe("1,234");
     expect(formatPercent("en", 0.42)).toBe("42%");
   });

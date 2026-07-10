@@ -145,8 +145,15 @@ export function parseLogs(input: string): NormalizedLogEntry[] {
 }
 
 export function analyzeLogs(input: string): LogAnalysisResult {
-  const totalLines = input.split(/\r?\n/).filter((line) => line.trim() !== "").length;
   const entries = parseLogs(input);
+  return analyzeParsedLogs(input, entries);
+}
+
+export function analyzeParsedLogs(
+  input: string,
+  entries: NormalizedLogEntry[]
+): LogAnalysisResult {
+  const totalLines = input.split(/\r?\n/).filter((line) => line.trim() !== "").length;
   const missingUserAgent = entries.length > 0 && entries.every((entry) => !entry.userAgent);
   const visits = entries.flatMap((entry) => {
     const match = matchUserAgent(entry.userAgent);

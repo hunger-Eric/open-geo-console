@@ -14,7 +14,7 @@ The external AI crawler simulator is a stand-alone Open GEO Console workflow: it
 - `packages/geo-auditor` fetches homepage, `robots.txt`, `sitemap.xml`, `llms.txt`, representative pages, and emits stable GEO report JSON.
 - `packages/crawler-rules` owns the AI Bot Registry, including log-detectable bots, robots-token-only policy entries, and suspected/community entries.
 - `packages/log-parser` parses Nginx combined/access logs and Cloudflare JSONL, then produces aggregates, bot coverage, operator summaries, and policy hints.
-- The external simulator should use log-detectable crawler registry entries only, append an `ogc_run=<runId>` marker, and reconcile imported logs into attempted vs observed results.
+- `apps/web/src/simulator` owns the external simulator domain, its shared API contracts, the typed browser client/controller, and one canonical attempted-vs-observed matcher. Simulator requests use log-detectable crawler registry entries only and append an `ogc_run=<runId>` marker.
 
 ## Implemented
 
@@ -25,7 +25,9 @@ The external AI crawler simulator is a stand-alone Open GEO Console workflow: it
 - Public case report redesign with executive summary, score meaning, priority fixes, evidence sections, technical appendix, share/copy/print actions, and print-friendly CSS.
 - Stable `GeoFinding.messageKey + params` model with literal persisted finding text preserved only as legacy fallback.
 - AI Bot Visibility direction: v1 marks identifiable AI bots from access-log User-Agent values and keeps robots.txt-only controls separate from detected visits.
-- External simulator contract tests define attempted vs observed behavior, run-marker matching, browser User-Agent exclusion, robots-token-only exclusion, and i18n copy parity.
+- The external simulator now has one strict run/match JSON contract from route to browser, direct domain imports instead of runtime export discovery, one canonical matcher, and contract/client/API tests for malformed payloads and duplicate matching log lines.
+- The log analyzer is split into a small orchestration component plus focused analysis and simulator panels; expensive parsing follows deferred input updates.
+- Default localized date-time formatting uses UTC to keep server and browser renders deterministic and avoid hydration drift.
 - Unit coverage for crawler matching, log parsing, GEO audit findings, and report persistence.
 - README, Apache-2.0 license, project `AGENTS.md`, and sample crawler log fixture.
 

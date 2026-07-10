@@ -97,6 +97,20 @@ export interface SimulatorComparableLogEntry {
   timestamp?: string;
 }
 
+export interface SimulatorComparableAttempt {
+  id: string;
+  path: string;
+  userAgent: string;
+}
+
+export interface SimulatorComparableAttemptResult<
+  TAttempt extends SimulatorComparableAttempt = SimulatorComparableAttempt
+> {
+  attempt: TAttempt;
+  matched: boolean;
+  matches: SimulatorComparableLogEntry[];
+}
+
 export interface SimulatorLogComparison {
   attempt: SimulatorAttempt;
   matched: boolean;
@@ -171,11 +185,43 @@ export function compareSimulatorRunWithLogEntries(
   run: Pick<SimulatorRunResult, "attempted" | "runId">,
   entries: SimulatorComparableLogEntry[]
 ): SimulatorLogComparison[] {
-  return run.attempted.map((attempt) => {
+  return compareSimulatorAttemptsWithLogEntries(
+    run.runId,
+    run.attempted.map((attempt, index) => ({
+      ...attempt,
+      id: `${attempt.ruleId}:${attempt.path}:${index}`
+    })),
+    entries
+  ).map(({ attempt, matched, matches }) => {
+    const simulatorAttempt: SimulatorAttempt = {
+      ruleId: attempt.ruleId,
+      operator: attempt.operator,
+      bot: attempt.bot,
+      intent: attempt.intent,
+      detectability: attempt.detectability,
+      path: attempt.path,
+      requestPath: attempt.requestPath,
+      url: attempt.url,
+      status: attempt.status,
+      ok: attempt.ok,
+      userAgent: attempt.userAgent,
+      runMarker: attempt.runMarker,
+      error: attempt.error
+    };
+    return { attempt: simulatorAttempt, matched, matches };
+  });
+}
+
+export function compareSimulatorAttemptsWithLogEntries<TAttempt extends SimulatorComparableAttempt>(
+  runId: string,
+  attempts: TAttempt[],
+  entries: SimulatorComparableLogEntry[]
+): SimulatorComparableAttemptResult<TAttempt>[] {
+  return attempts.map((attempt) => {
     const matches = entries.filter((entry) => {
       const parsedPath = parseLogPath(entry.path);
       return (
-        parsedPath.searchParams.get(RUN_MARKER_PARAM) === run.runId &&
+        parsedPath.searchParams.get(RUN_MARKER_PARAM) === runId &&
         parsedPath.pathname === attempt.path &&
         entry.userAgent === attempt.userAgent
       );

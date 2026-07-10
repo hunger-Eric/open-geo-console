@@ -1,26 +1,22 @@
 import { NextResponse } from "next/server";
 import {
   isNetworkFailure,
+  readJsonRequest,
   runSimulator,
-  SimulatorEngineUnavailableError,
-  SimulatorInputError,
-  type SimulatorRunRequest
+  SimulatorInputError
 } from "../_lib/simulator-api";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as SimulatorRunRequest;
+    const body = await readJsonRequest(request);
     const result = await runSimulator(body);
 
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof SimulatorInputError) {
       return jsonError(error.code, error.message, 400);
-    }
-    if (error instanceof SimulatorEngineUnavailableError) {
-      return jsonError(error.code, error.message, 503);
     }
     if (isNetworkFailure(error)) {
       return jsonError("simulator_network_failure", errorMessage(error), 502);
