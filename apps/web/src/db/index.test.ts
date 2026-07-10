@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDatabasePath } from "./index";
+import { getDatabasePath, getDatabasePoolSize } from "./index";
 
 describe("database path selection", () => {
   const originalOpenGeoDbPath = process.env.OPEN_GEO_DB_PATH;
@@ -26,5 +26,17 @@ describe("database path selection", () => {
     process.env.VERCEL = "1";
 
     expect(getDatabasePath()).toBe(join(tmpdir(), "open-geo-console.sqlite"));
+  });
+});
+
+describe("database pool sizing", () => {
+  it("uses a configured positive integer", () => {
+    expect(getDatabasePoolSize({ OGC_DATABASE_POOL_SIZE: "5" })).toBe(5);
+  });
+
+  it("falls back when the value is empty, zero, or invalid", () => {
+    expect(getDatabasePoolSize({ OGC_DATABASE_POOL_SIZE: "" })).toBe(10);
+    expect(getDatabasePoolSize({ OGC_DATABASE_POOL_SIZE: "0" })).toBe(10);
+    expect(getDatabasePoolSize({ OGC_DATABASE_POOL_SIZE: "invalid" })).toBe(10);
   });
 });

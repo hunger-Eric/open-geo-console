@@ -15,7 +15,8 @@
 
 ## Optional follow-up
 
-- [ ] Publish the completed workspace when a deployment is explicitly requested.
+- [x] Publish the Web to Vercel and connect the production Neon PostgreSQL database.
+- [ ] Move both Worker lanes from the temporary acceptance workstation to a continuously running production service.
 
 ## Evidence-backed AI report engine
 

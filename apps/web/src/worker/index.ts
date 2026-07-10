@@ -11,15 +11,7 @@ let stopping = false;
 process.once("SIGINT", () => { stopping = true; });
 process.once("SIGTERM", () => { stopping = true; });
 
-// Remote serverless PostgreSQL clients may keep their connection bootstrap
-// handles unref'ed. Keep Node alive until migrations finish so a production
-// worker cannot exit with an unsettled top-level await before it is ready.
-const databaseStartupHold = setInterval(() => undefined, 1_000);
-try {
-  await ensureDatabase();
-} finally {
-  clearInterval(databaseStartupHold);
-}
+await ensureDatabase();
 process.stdout.write(`Open GEO Console ${config.tier} worker ${workerId} is ready.\n`);
 
 while (!stopping) {

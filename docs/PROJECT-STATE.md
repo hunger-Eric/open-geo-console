@@ -31,6 +31,7 @@ The web process persists a public homepage technical report and enqueues work. A
 - Free scans fetch only the submitted homepage and the three standard assets. Free AI planning is deterministic and does not call the model planner; public legacy reports are projected to homepage scope.
 - Deep jobs store a separate private technical report beside the deep AI payload. Authorized report routes use it; public routes never replace the homepage report with paid multi-page data.
 - Live regression scan of `shun-express.com` produced a score of 35 with 26 grouped findings instead of the previous score of 0 with 62 repeated findings; the overview correctly summarizes 10 dead links.
+- The production Web is deployed at `https://open-geo-console.vercel.app` with a Vercel-connected Neon PostgreSQL authority. A live production scan of `me.itheheda.online` completed through MiMo 2.5 Pro with one planned/analyzed homepage and one verified free finding.
 
 ## Known Boundaries
 
@@ -38,14 +39,16 @@ The web process persists a public homepage technical report and enqueues work. A
 - Official-site identity is inferred from internal site evidence only; external ownership/search verification is not performed.
 - Image aesthetics, video, login-only pages and form submission are outside the first AI report version.
 - A production deployment requires persistent PostgreSQL plus a continuously running Worker. Vercel `/tmp` and browser-local report persistence are not supported authorities.
+- The current Vercel Web and Neon database are durable, but the free/deep Workers used for production acceptance are temporary workstation processes. They stop when the workstation stops and must be moved to a long-running service before public operation.
 - Real model behavior depends on the configured provider. CI uses mock clients; `npm run test:ai-live` remains the repeatable paid integration command.
-- The credential shared in chat is configured only in ignored local state for this acceptance run. It must still be rotated before any public production deployment.
+- The credential shared in chat is stored in local ignored state and as a Vercel Sensitive production variable for the authorized acceptance run. Because it was exposed in chat, it must still be rotated before public operation.
 
 ## Next Steps
 
-1. Rotate the exposed model credential before public deployment and keep `OGC_ALLOW_BENCHMARK_NETWORK=false` outside the local Codex sandbox.
-2. Verify one manually issued deep-report Key against the running PostgreSQL/Web/two-Worker stack.
-3. Design the separate payment/email Key issuance phase against the existing `createAccessKey` service.
+1. Deploy `worker:free` and `worker:deep` to a continuously running service that shares the Neon `DATABASE_URL`; keep `OGC_ALLOW_BENCHMARK_NETWORK=false` there.
+2. Rotate the exposed model credential before public operation.
+3. Verify one manually issued deep-report Key against the production PostgreSQL/Web/two-Worker stack.
+4. Design the separate payment/email Key issuance phase against the existing `createAccessKey` service.
 
 ## Acceptance Commands
 

@@ -60,6 +60,8 @@ Required production variables:
 - `OGC_TOKEN_HASH_SECRET`
 - `OGC_IP_HASH_SECRET`
 
+Vercel can host the Next.js web process and a connected Neon PostgreSQL database, but it does not run the continuously polling Worker entry point. Deploy `worker:free` and `worker:deep` as separate long-running services against the same `DATABASE_URL`; a workstation process is suitable only for temporary acceptance testing.
+
 Set `TRUST_PROXY_HEADERS=true` only behind a proxy that overwrites forwarded-client-IP headers. Set `OGC_AI_JSON_RESPONSE_FORMAT=true` only if the configured model endpoint supports OpenAI JSON response mode.
 `OGC_AI_TIMEOUT_MS` controls the per-call model timeout; long structured reports typically need `180000` milliseconds.
 `OGC_ALLOW_BENCHMARK_NETWORK` exists only for sandboxed local networks that proxy public DNS through `198.18.0.0/15`; keep it `false` in production.

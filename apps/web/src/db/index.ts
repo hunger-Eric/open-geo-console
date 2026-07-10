@@ -18,7 +18,7 @@ export function getDb() {
   if (!database) {
     const connectionString = getDatabaseUrl();
     client = postgres(connectionString, {
-      max: Number(process.env.OGC_DATABASE_POOL_SIZE ?? "10"),
+      max: getDatabasePoolSize(),
       idle_timeout: 20,
       connect_timeout: 10,
       prepare: false,
@@ -27,6 +27,11 @@ export function getDb() {
     database = drizzle(client, { schema });
   }
   return database;
+}
+
+export function getDatabasePoolSize(environment: NodeJS.ProcessEnv = process.env): number {
+  const configured = Number(environment.OGC_DATABASE_POOL_SIZE);
+  return Number.isInteger(configured) && configured > 0 ? configured : 10;
 }
 
 export function getSqlClient(): ReturnType<typeof postgres> {
