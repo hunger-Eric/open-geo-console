@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { auditSite, createFinding, extractSitemapUrls, selectRepresentativePages } from "./index";
+import {
+  auditSite,
+  buildFindings,
+  calculateScore,
+  createFinding,
+  extractSitemapUrls,
+  selectRepresentativePages,
+  type AuditedPage,
+  type GeoFinding,
+  type MachineReadableAssets
+} from "./index";
 
 describe("geo auditor", () => {
   afterEach(() => {
@@ -49,7 +59,7 @@ describe("geo auditor", () => {
     ]);
     vi.stubGlobal(
       "fetch",
-      vi.fn((url: string) => responses.get(url) ?? new Response("", { status: 404 }))
+      vi.fn((url: string) => responses.get(url)?.clone() ?? new Response("", { status: 404 }))
     );
 
     const report = await auditSite("https://example.com");
@@ -99,4 +109,128 @@ describe("geo auditor", () => {
       recommendation: "Fix broken canonical pages or remove them from the sitemap."
     });
   });
+
+  it("keeps only the root status finding for non-2xx pages", () => {
+    const findings = buildFindings(
+      "https://example.com/",
+      [page("https://example.com/missing", { status: 404 })],
+      availableAssets()
+    );
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      messageKey: "page.badStatus",
+      url: "https://example.com/missing",
+      aggregation: {
+        affectedCount: 1,
+        representativeUrls: ["https://example.com/missing"]
+      }
+    });
+    expect(findings.map(({ messageKey }) => messageKey)).not.toContain("homepage.missingOpenGraph");
+  });
+
+  it("aggregates the same rule, page type, and query template with at most three representative URLs", () => {
+    const pages = Array.from({ length: 10 }, (_, index) =>
+      page(`https://example.com/index.php?route=product/product&product_id=${index + 1}`, {
+        status: 404
+      })
+    );
+
+    const findings = buildFindings("https://example.com/", pages, availableAssets());
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      messageKey: "page.badStatus",
+      aggregation: {
+        affectedCount: 10,
+        pageType: "product",
+        templateKey: "/index.php?product_id=:id&route=product/product"
+      }
+    });
+    expect(findings[0].aggregation?.representativeUrls).toHaveLength(3);
+    expect(findings[0].url).toBe(findings[0].aggregation?.representativeUrls[0]);
+  });
+
+  it("keeps the same rule in separate page-type and template groups", () => {
+    const findings = buildFindings(
+      "https://example.com/",
+      [
+        page("https://example.com/products/widget", { status: 404 }),
+        page("https://example.com/services/freight", { status: 404 })
+      ],
+      availableAssets()
+    );
+
+    expect(findings).toHaveLength(2);
+    expect(findings.map(({ aggregation }) => aggregation?.pageType).sort()).toEqual(["product", "service"]);
+  });
+
+  it("caps penalties globally by message key after aggregation", () => {
+    const firstStatusGroup = aggregatedFinding("page.badStatus", 5, "product", "/products/:slug");
+    const secondStatusGroup = aggregatedFinding("page.badStatus", 5, "service", "/services/:slug");
+    const warning = aggregatedFinding("page.h1Structure", 10, "product", "/products/:slug");
+    const info = aggregatedFinding("page.missingCanonical", 10, "product", "/products/:slug");
+
+    expect(calculateScore([firstStatusGroup, secondStatusGroup], [])).toBe(58);
+    expect(calculateScore([warning], [])).toBe(72);
+    expect(calculateScore([info], [])).toBe(82);
+  });
+
+  it("preserves the original penalty for a single occurrence", () => {
+    expect(calculateScore([aggregatedFinding("page.badStatus", 1)], [])).toBe(70);
+    expect(calculateScore([aggregatedFinding("page.h1Structure", 1)], [])).toBe(80);
+    expect(calculateScore([aggregatedFinding("page.missingCanonical", 1)], [])).toBe(85);
+  });
 });
+
+function page(url: string, overrides: Partial<AuditedPage> = {}): AuditedPage {
+  return {
+    url,
+    status: 200,
+    title: "Example page title",
+    metaDescription: "A complete description for the representative page.",
+    h1: ["Example page"],
+    h2: [],
+    canonical: url,
+    hasOpenGraph: true,
+    hasJsonLd: true,
+    readableTextLength: 1_000,
+    internalLinks: 3,
+    ...overrides
+  };
+}
+
+function availableAssets(): MachineReadableAssets {
+  return {
+    robotsTxt: asset("https://example.com/robots.txt"),
+    sitemapXml: asset("https://example.com/sitemap.xml"),
+    llmsTxt: asset("https://example.com/llms.txt")
+  };
+}
+
+function asset(url: string) {
+  return { url, present: true, status: 200, summary: "Available." };
+}
+
+function aggregatedFinding(
+  messageKey: Parameters<typeof createFinding>[0]["messageKey"],
+  affectedCount: number,
+  pageType: string = "other",
+  templateKey: string = "/:slug"
+): GeoFinding {
+  const url = "https://example.com/example";
+  return {
+    ...createFinding({
+      id: `${messageKey}-${pageType}`,
+      messageKey,
+      params: { url, status: 404, h1Count: 0 },
+      url
+    }),
+    aggregation: {
+      affectedCount,
+      representativeUrls: [url],
+      pageType: pageType as NonNullable<GeoFinding["aggregation"]>["pageType"],
+      templateKey
+    }
+  };
+}

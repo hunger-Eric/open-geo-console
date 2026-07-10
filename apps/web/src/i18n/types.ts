@@ -77,6 +77,29 @@ export interface Dictionary {
     loadingReport: string;
     reportUnavailableTitle: string;
     reportUnavailableDescription: string;
+    findingAggregation: {
+      affectedPages: string;
+      representativePages: string;
+      morePages: string;
+      pageType: string;
+      template: string;
+      pageTypeLabels: Record<
+        | "home"
+        | "product"
+        | "service"
+        | "about"
+        | "pricing"
+        | "case-study"
+        | "contact"
+        | "blog"
+        | "news"
+        | "help"
+        | "careers"
+        | "legal"
+        | "other",
+        string
+      >;
+    };
     metricLabels: Record<"critical" | "warnings" | "pages" | "assets", string>;
     tableHeaders: Record<"url" | "status" | "h1" | "schema" | "text" | "links", string>;
     fields: Record<"present" | "missing" | "yes" | "no" | "error", string>;
@@ -85,7 +108,7 @@ export interface Dictionary {
     assetMissing: string;
   };
   workspace: {
-    tabs: Record<"overview" | "issues" | "bots" | "technical", string>;
+    tabs: Record<"overview" | "analysis" | "issues" | "bots" | "technical", string>;
     currentSite: string;
     lastScan: string;
     overviewTitle: string;
@@ -131,6 +154,53 @@ export interface Dictionary {
     printTitle: string;
     backToReport: string;
     errors: Record<"emptyLogs" | "payloadTooLarge" | "saveFailed" | "deleteFailed", string>;
+  };
+  aiReport: {
+    title: string;
+    description: string;
+    previewLabel: string;
+    deepLabel: string;
+    technicalScore: string;
+    aiDimensions: string;
+    organizationProfile: string;
+    executiveSummary: string;
+    topFindings: string;
+    pageTypes: string;
+    roadmap: string;
+    coverage: string;
+    evidence: string;
+    confidence: string;
+    unlockTitle: string;
+    unlockDescription: string;
+    accessKeyLabel: string;
+    unlockAction: string;
+    unlocking: string;
+    retryAction: string;
+    statusTitle: string;
+    waitingDescription: string;
+    completedDescription: string;
+    partialDescription: string;
+    unavailableDescription: string;
+    queuePosition: string;
+    queueJobsAhead: string;
+    queueActiveJobsInPool: string;
+    queueAwaitingClaim: string;
+    activeTierPreview: string;
+    activeTierDeep: string;
+    activeTierMixed: string;
+    progressValue: string;
+    stages: Record<
+      | "queued"
+      | "discovering"
+      | "planning"
+      | "fetching"
+      | "analyzing"
+      | "synthesizing"
+      | "completed"
+      | "partial"
+      | "failed",
+      string
+    >;
   };
   logs: {
     title: string;

@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: open_geo_console
+      POSTGRES_USER: open_geo
+      POSTGRES_PASSWORD: open_geo
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - open-geo-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U open_geo -d open_geo_console"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker-free:
+    image: "${OGC_APP_IMAGE:-open-geo-console:local}"
+    profiles: ["workers"]
+    command: ["npm", "run", "worker:free"]
+    restart: unless-stopped
+    environment: &worker-environment
+      DATABASE_URL: "${DATABASE_URL:-postgres://open_geo:open_geo@postgres:5432/open_geo_console}"
+      OGC_DATABASE_POOL_SIZE: "${OGC_DATABASE_POOL_SIZE:-10}"
+      OGC_WORKER_POLL_MS: "${OGC_WORKER_POLL_MS:-1500}"
+      OGC_AI_BASE_URL: "${OGC_AI_BASE_URL:-}"
+      OGC_AI_API_KEY: "${OGC_AI_API_KEY:-}"
+      OGC_AI_MODEL: "${OGC_AI_MODEL:-}"
+      OGC_AI_JSON_RESPONSE_FORMAT: "${OGC_AI_JSON_RESPONSE_FORMAT:-false}"
+      OGC_AI_TIMEOUT_MS: "${OGC_AI_TIMEOUT_MS:-180000}"
+      OGC_BROWSER_HEADLESS: "${OGC_BROWSER_HEADLESS:-true}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker-deep:
+    image: "${OGC_APP_IMAGE:-open-geo-console:local}"
+    profiles: ["workers"]
+    command: ["npm", "run", "worker:deep"]
+    restart: unless-stopped
+    environment: *worker-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  open-geo-postgres:

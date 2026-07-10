@@ -1,0 +1,130 @@
+// Idempotent bootstrap for self-hosted deployments. A future migration runner can
+// execute the same statements and then take ownership of schema versioning.
+export const DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS scan_reports (
+    id text PRIMARY KEY,
+    url text NOT NULL,
+    site_key text,
+    kind text NOT NULL DEFAULT 'geo',
+    score integer,
+    payload jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS scan_reports_created_at_idx ON scan_reports (created_at)`,
+  `CREATE INDEX IF NOT EXISTS scan_reports_site_key_idx ON scan_reports (site_key)`,
+  `CREATE TABLE IF NOT EXISTS report_bot_evidence (
+    report_id text PRIMARY KEY REFERENCES scan_reports(id) ON DELETE CASCADE,
+    summary jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS scan_jobs (
+    id text PRIMARY KEY,
+    report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
+    tier text NOT NULL CHECK (tier IN ('free', 'deep')),
+    locale text NOT NULL,
+    stage text NOT NULL DEFAULT 'queued' CHECK (stage IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','partial','failed')),
+    progress integer NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+    checkpoint jsonb NOT NULL DEFAULT '{}'::jsonb,
+    planned_pages integer NOT NULL DEFAULT 0 CHECK (planned_pages >= 0),
+    successful_pages integer NOT NULL DEFAULT 0 CHECK (successful_pages >= 0),
+    failed_pages integer NOT NULL DEFAULT 0 CHECK (failed_pages >= 0),
+    attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    max_attempts integer NOT NULL DEFAULT 3 CHECK (max_attempts > 0),
+    lease_owner text,
+    lease_expires_at timestamptz,
+    error_code text,
+    public_error text,
+    credit_reservation_id text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS scan_jobs_claim_idx ON scan_jobs (stage, lease_expires_at, created_at)`,
+  `CREATE INDEX IF NOT EXISTS scan_jobs_tier_queue_idx ON scan_jobs (tier, stage, created_at, id)`,
+  `CREATE INDEX IF NOT EXISTS scan_jobs_tier_lease_idx ON scan_jobs (tier, lease_expires_at)`,
+  `CREATE INDEX IF NOT EXISTS scan_jobs_report_idx ON scan_jobs (report_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS ai_reports (
+    id text PRIMARY KEY,
+    report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
+    job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE CASCADE,
+    tier text NOT NULL CHECK (tier IN ('free', 'deep')),
+    locale text NOT NULL,
+    report_version integer NOT NULL DEFAULT 1,
+    payload jsonb NOT NULL,
+    model text NOT NULL,
+    prompt_version text NOT NULL,
+    content_hash text NOT NULL,
+    is_private boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (report_id, tier)
+  )`,
+  `CREATE INDEX IF NOT EXISTS ai_reports_job_idx ON ai_reports (job_id)`,
+  `CREATE TABLE IF NOT EXISTS crawl_evidence (
+    id text PRIMARY KEY,
+    report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
+    job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE CASCADE,
+    url text NOT NULL,
+    canonical_url text,
+    page_type text,
+    fetch_status text NOT NULL,
+    http_status integer,
+    content_hash text,
+    normalized_content text,
+    evidence_excerpts jsonb NOT NULL DEFAULT '[]'::jsonb,
+    fetched_at timestamptz NOT NULL DEFAULT now(),
+    content_expires_at timestamptz NOT NULL,
+    UNIQUE (job_id, url)
+  )`,
+  `CREATE INDEX IF NOT EXISTS crawl_evidence_expiry_idx ON crawl_evidence (content_expires_at)`,
+  `CREATE TABLE IF NOT EXISTS free_site_trials (
+    site_key text PRIMARY KEY,
+    report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
+    job_id text REFERENCES scan_jobs(id) ON DELETE SET NULL,
+    claimed_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS anonymous_rate_buckets (
+    ip_hash text NOT NULL,
+    bucket_date date NOT NULL,
+    site_key text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (ip_hash, bucket_date, site_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS anonymous_rate_ip_date_idx ON anonymous_rate_buckets (ip_hash, bucket_date)`,
+  `CREATE TABLE IF NOT EXISTS access_keys (
+    id text PRIMARY KEY,
+    key_prefix text NOT NULL,
+    key_hmac text NOT NULL UNIQUE,
+    status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked','exhausted')),
+    credits_remaining integer NOT NULL CHECK (credits_remaining >= 0),
+    expires_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    revoked_at timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS access_keys_prefix_idx ON access_keys (key_prefix)`,
+  `CREATE TABLE IF NOT EXISTS credit_ledger (
+    id text PRIMARY KEY,
+    access_key_id text NOT NULL REFERENCES access_keys(id) ON DELETE RESTRICT,
+    report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+    job_id text REFERENCES scan_jobs(id) ON DELETE SET NULL,
+    idempotency_key text NOT NULL,
+    credits integer NOT NULL DEFAULT 1 CHECK (credits > 0),
+    status text NOT NULL DEFAULT 'reserved' CHECK (status IN ('reserved','settled','refunded')),
+    reserved_at timestamptz NOT NULL DEFAULT now(),
+    settled_at timestamptz,
+    refunded_at timestamptz,
+    UNIQUE (access_key_id, idempotency_key)
+  )`,
+  `CREATE INDEX IF NOT EXISTS credit_ledger_report_idx ON credit_ledger (report_id)`,
+  `CREATE TABLE IF NOT EXISTS report_access_tokens (
+    id text PRIMARY KEY,
+    report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
+    token_prefix text NOT NULL,
+    token_hmac text NOT NULL UNIQUE,
+    expires_at timestamptz NOT NULL,
+    last_used_at timestamptz,
+    revoked_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS report_access_tokens_report_idx ON report_access_tokens (report_id)`
+] as const;

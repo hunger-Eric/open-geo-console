@@ -2,41 +2,48 @@
 
 ## Current Goal
 
-Ship a self-hostable, unauthenticated Open GEO Console MVP whose primary journey is `scan -> report workspace -> optional AI Bot evidence`. The report is the durable product object; the standalone log analyzer remains an advanced tool.
+Operate a durable, self-hostable report product whose main journey is `free technical report + AI preview → private deep AI report → optional AI Bot evidence`. The next commercial phase is payment and email-based Key delivery; the report engine, credit ledger and access-token boundary are already in place.
 
 ## Current Architecture
 
-- `apps/web` is a localized Next.js App Router app with SQLite/Drizzle persistence.
-- A report workspace is split into `/[locale]/reports/[id]`, `/issues`, `/bots`, `/technical`, and `/print`. Every workspace route carries the report UUID and target URL.
-- `packages/geo-auditor` owns the GEO scan and score. Log evidence never changes that score.
-- `packages/crawler-rules` owns AI crawler classification.
-- `packages/log-parser` parses Nginx combined logs and Cloudflare JSONL, returns full session analysis, and builds the versioned, share-safe `BotEvidenceSummary`.
-- `apps/web` persists one current evidence summary per report in `report_bot_evidence`. Raw logs, IPs, full paths, and raw User-Agent values are never persisted.
-- Local self-hosted SQLite defaults to `.data/open-geo-console.sqlite`; `OPEN_GEO_DB_PATH` overrides it. The browser fallback is a current-browser continuity copy, not cross-device shared storage.
+- `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point.
+- `packages/geo-auditor` owns deterministic technical evidence and the reproducible GEO score.
+- `packages/site-crawler` owns URL/SSRF safety, registrable site identity, robots/sitemap/link discovery, HTML extraction, template clustering and representative-page selection.
+- `packages/ai-report-engine` owns OpenAI-compatible transport, page planning, batch analysis, `AiWebsiteReportV1`, synthesis and evidence verification.
+- `packages/crawler-rules` and `packages/log-parser` continue to own AI crawler identity and sanitized access-log evidence.
+
+The web process persists a technical report and enqueues work. A separate Worker uses PostgreSQL leases and checkpoints to execute `discovering → planning → fetching → analyzing → synthesizing`. Free reports analyze up to 8 pages and show three verified findings; deep reports analyze up to 50 pages and are private.
 
 ## Implemented
 
-- Compact scan homepage with recent reports and an explicitly labeled advanced log tool.
-- Report-centered overview, issues, bot evidence, technical appendix, and print/PDF routes.
-- Overview limited to the score explanation, top three fixes, asset/scan summary, and sanitized bot evidence summary.
-- Issues and technical data paginated at 20 rows; the complete bot registry is separately paginated and hidden by default.
-- Report-scoped log import through `PUT /api/reports/[id]/bot-evidence`, evidence removal through `DELETE`, and SQLite upsert/delete helpers.
-- `BotEvidenceSummary` with `analysisVersion: 1`, deterministic aggregation, sanitized bot/operator rows, and no raw request material.
-- Report-aware simulator target URL; the advanced simulator is collapsed and remains semantically separate from observed log evidence.
-- Compact standalone `/[locale]/logs` mode with an explicit target URL and shared analysis components.
-- Bilingual typed dictionaries, stable locale switching, `aria-current`, `aria-live`, keyboard focus treatment, and mobile grouped-row tables without horizontal page scrolling.
-- Warm neutral/forest/teal visual system based on `docs/design/report-workspace-reference.png`; fixed 8px radii, no page grid, and no ambient card shadows.
-- Deterministic Nginx timestamp parsing, including numeric timezone offsets, so SSR and browser hydration produce identical evidence dates.
-- Design QA artifacts and verdict in the project-root `design-qa.md`.
+- Site-wide URL discovery capped at 50,000, candidate compression capped at 500, AI page planning and deterministic fallback selection.
+- DNS-pinned safe HTTP crawling, per-redirect validation, robots enforcement, response limits and Playwright fallback for JavaScript-rendered pages.
+- Structured model output, six AI dimensions, organization profile, page-type findings, evidence citations, coverage/provenance and 90-day roadmap.
+- Citation verification that removes unsupported model findings before persistence.
+- PostgreSQL schema for reports, jobs, AI payloads, seven-day page evidence, free trials, rate buckets, access Keys, credit ledger and private report tokens.
+- Thirty-day free preview reuse by registrable site, private-suffix tenant handling, and three distinct free sites per HMAC client IP/day.
+- HMAC-only Key/token storage; idempotent credit reservation, settlement and system-failure refund; report-specific HttpOnly access links.
+- Progressive status, retry, Key unlock, AI analysis, technical, issues, bot evidence and print/PDF report surfaces in English and Chinese.
+- Legacy SQLite import preserving report UUIDs and sanitized Bot Evidence.
+- Live MiMo 2.5 Pro acceptance against `me.itheheda.online`: 8 pages planned, 7 analyzed, one failed, evidence-validated Chinese preview persisted and rendered without browser console errors.
+- Non-2xx pages now emit only the HTTP root cause; repeated rule findings are grouped by page template and capped for scoring. The overview rolls template groups into one priority card with at most three representative URLs.
+- Free and deep report jobs have independent Worker lanes. The status API/UI shows real queue position, wait reason, and active tier with completion-driven polling.
+- Live regression scan of `shun-express.com` produced a score of 35 with 26 grouped findings instead of the previous score of 0 with 62 repeated findings; the overview correctly summarizes 10 dead links.
 
 ## Known Boundaries
 
-- v1 has no auth, billing, teams, or multi-tenant SaaS permissions.
-- Live scans depend on target availability and network access; deterministic tests mock fetch.
-- Vercel `/tmp` SQLite is ephemeral. Browser fallback supports the current browser only and must not be described as shared persistence.
-- Bot identity is User-Agent registry matching; v1 does not verify IP/ASN ownership.
-- Simulator requests are attempts, not evidence. Only imported logs can establish observed access.
-- PDF export uses the browser print dialog; there is no server-side PDF generator.
+- There are no user accounts, payment provider, email delivery, subscriptions or teams yet. Access Keys are manually issued.
+- Official-site identity is inferred from internal site evidence only; external ownership/search verification is not performed.
+- Image aesthetics, video, login-only pages and form submission are outside the first AI report version.
+- A production deployment requires persistent PostgreSQL plus a continuously running Worker. Vercel `/tmp` and browser-local report persistence are not supported authorities.
+- Real model behavior depends on the configured provider. CI uses mock clients; `npm run test:ai-live` remains the repeatable paid integration command.
+- The credential shared in chat is configured only in ignored local state for this acceptance run. It must still be rotated before any public production deployment.
+
+## Next Steps
+
+1. Rotate the exposed model credential before public deployment and keep `OGC_ALLOW_BENCHMARK_NETWORK=false` outside the local Codex sandbox.
+2. Verify one manually issued deep-report Key against the running PostgreSQL/Web/two-Worker stack.
+3. Design the separate payment/email Key issuance phase against the existing `createAccessKey` service.
 
 ## Acceptance Commands
 

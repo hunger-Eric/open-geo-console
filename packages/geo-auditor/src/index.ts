@@ -1,3 +1,9 @@
+import {
+  classifyPageType,
+  inferTemplateKey,
+  type PageType
+} from "@open-geo-console/site-crawler";
+
 export type FindingSeverity = "critical" | "warning" | "info";
 export type FindingMessageParamValue = string | number | boolean;
 export type FindingMessageParams = Record<string, FindingMessageParamValue>;
@@ -15,6 +21,13 @@ export type FindingMessageKey =
   | "page.lowReadableContent"
   | "homepage.missingOpenGraph";
 
+export interface FindingAggregation {
+  affectedCount: number;
+  representativeUrls: string[];
+  pageType?: PageType;
+  templateKey?: string;
+}
+
 export interface GeoFinding {
   id: string;
   severity: FindingSeverity;
@@ -24,6 +37,7 @@ export interface GeoFinding {
   description: string;
   recommendation: string;
   url?: string;
+  aggregation?: FindingAggregation;
 }
 
 interface FindingMessageDefinition {
@@ -145,6 +159,10 @@ export interface GeoAuditReport {
   machineReadableAssets: MachineReadableAssets;
 }
 
+export interface AuditSiteOptions {
+  fetchImpl?: typeof fetch;
+}
+
 interface FetchResult {
   url: string;
   status: number;
@@ -160,19 +178,20 @@ const REPRESENTATIVE_PATTERNS = [
   /about|company|team/i
 ];
 
-export async function auditSite(inputUrl: string): Promise<GeoAuditReport> {
+export async function auditSite(inputUrl: string, options: AuditSiteOptions = {}): Promise<GeoAuditReport> {
   const root = normalizeRootUrl(inputUrl);
+  const fetchImpl = options.fetchImpl ?? fetch;
   const scannedAt = new Date().toISOString();
   const [home, robotsTxt, sitemapXml, llmsTxt] = await Promise.all([
-    fetchText(root.href),
-    fetchText(new URL("/robots.txt", root).href),
-    fetchText(new URL("/sitemap.xml", root).href),
-    fetchText(new URL("/llms.txt", root).href)
+    fetchText(root.href, fetchImpl),
+    fetchText(new URL("/robots.txt", root).href, fetchImpl),
+    fetchText(new URL("/sitemap.xml", root).href, fetchImpl),
+    fetchText(new URL("/llms.txt", root).href, fetchImpl)
   ]);
 
   const sitemapUrls = sitemapXml.ok ? extractSitemapUrls(sitemapXml.text, root) : [];
   const representativeUrls = selectRepresentativePages(root, sitemapUrls);
-  const pageResults = await Promise.all(representativeUrls.map((url) => fetchText(url)));
+  const pageResults = await Promise.all(representativeUrls.map((url) => fetchText(url, fetchImpl)));
   const pages = pageResults.map((result) => analyzePage(result, root));
 
   if (!pages.some((page) => page.url === root.href)) {
@@ -266,12 +285,19 @@ export function analyzePage(result: FetchResult, root: URL): AuditedPage {
   };
 }
 
-function buildFindings(
+interface PageFindingCandidate {
+  finding: GeoFinding;
+  pageType: PageType;
+  templateKey: string;
+}
+
+export function buildFindings(
   siteUrl: string,
   pages: AuditedPage[],
   assets: MachineReadableAssets
 ): GeoFinding[] {
   const findings: GeoFinding[] = [];
+  const pageFindings: PageFindingCandidate[] = [];
   const homepage = pages[0];
 
   if (!assets.llmsTxt.present) {
@@ -302,17 +328,28 @@ function buildFindings(
   }
 
   for (const page of pages) {
-    if (page.status >= 400) {
-      findings.push(createFinding({
+    const pageType = classifyPageType(page.url, {
+      title: page.title,
+      description: page.metaDescription,
+      headings: [...page.h1, ...page.h2].map((text) => ({ text }))
+    });
+    const templateKey = inferTemplateKey(page.url, pageType);
+    const pushPageFinding = (finding: GeoFinding) => {
+      pageFindings.push({ finding, pageType, templateKey });
+    };
+
+    if (!isSuccessfulStatus(page.status)) {
+      pushPageFinding(createFinding({
         id: `bad-status-${hashId(page.url)}`,
         messageKey: "page.badStatus",
         params: { url: page.url, status: page.status },
         url: page.url
       }));
+      continue;
     }
 
     if (!page.title || page.title.length < 10) {
-      findings.push(createFinding({
+      pushPageFinding(createFinding({
         id: `missing-title-${hashId(page.url)}`,
         messageKey: "page.weakTitle",
         params: { url: page.url },
@@ -321,7 +358,7 @@ function buildFindings(
     }
 
     if (!page.metaDescription) {
-      findings.push(createFinding({
+      pushPageFinding(createFinding({
         id: `missing-description-${hashId(page.url)}`,
         messageKey: "page.missingMetaDescription",
         params: { url: page.url },
@@ -330,7 +367,7 @@ function buildFindings(
     }
 
     if (page.h1.length !== 1) {
-      findings.push(createFinding({
+      pushPageFinding(createFinding({
         id: `h1-${hashId(page.url)}`,
         messageKey: "page.h1Structure",
         params: { url: page.url, h1Count: page.h1.length },
@@ -339,7 +376,7 @@ function buildFindings(
     }
 
     if (!page.canonical) {
-      findings.push(createFinding({
+      pushPageFinding(createFinding({
         id: `canonical-${hashId(page.url)}`,
         messageKey: "page.missingCanonical",
         params: { url: page.url },
@@ -348,7 +385,7 @@ function buildFindings(
     }
 
     if (!page.hasJsonLd) {
-      findings.push(createFinding({
+      pushPageFinding(createFinding({
         id: `schema-${hashId(page.url)}`,
         messageKey: "page.missingJsonLd",
         params: { url: page.url },
@@ -356,8 +393,8 @@ function buildFindings(
       }));
     }
 
-    if (page.readableTextLength < 500 && page.status < 400) {
-      findings.push(createFinding({
+    if (page.readableTextLength < 500) {
+      pushPageFinding(createFinding({
         id: `thin-content-${hashId(page.url)}`,
         messageKey: "page.lowReadableContent",
         params: { url: page.url, readableTextLength: page.readableTextLength },
@@ -366,16 +403,58 @@ function buildFindings(
     }
   }
 
-  if (homepage && !homepage.hasOpenGraph) {
-    findings.push(createFinding({
-      id: "homepage-og",
-      messageKey: "homepage.missingOpenGraph",
-      params: { url: homepage.url },
-      url: homepage.url
-    }));
+  if (homepage && isSuccessfulStatus(homepage.status) && !homepage.hasOpenGraph) {
+    const pageType = classifyPageType(homepage.url, {
+      title: homepage.title,
+      description: homepage.metaDescription,
+      headings: [...homepage.h1, ...homepage.h2].map((text) => ({ text }))
+    });
+    pageFindings.push({
+      finding: createFinding({
+        id: "homepage-og",
+        messageKey: "homepage.missingOpenGraph",
+        params: { url: homepage.url },
+        url: homepage.url
+      }),
+      pageType,
+      templateKey: inferTemplateKey(homepage.url, pageType)
+    });
   }
 
-  return findings;
+  return [...findings, ...aggregatePageFindings(pageFindings)];
+}
+
+function aggregatePageFindings(candidates: PageFindingCandidate[]): GeoFinding[] {
+  const groups = new Map<string, PageFindingCandidate[]>();
+  for (const candidate of candidates) {
+    const ruleKey = candidate.finding.messageKey ?? candidate.finding.id;
+    const groupKey = `${ruleKey}\u0000${candidate.pageType}\u0000${candidate.templateKey}`;
+    const group = groups.get(groupKey) ?? [];
+    group.push(candidate);
+    groups.set(groupKey, group);
+  }
+
+  return [...groups.entries()].map(([groupKey, group]) => {
+    const first = group[0];
+    const representativeUrls = [
+      ...new Set(group.map(({ finding }) => finding.url).filter((url): url is string => Boolean(url)))
+    ].slice(0, 3);
+    return {
+      ...first.finding,
+      id: group.length === 1 ? first.finding.id : `group-${hashId(groupKey)}`,
+      url: representativeUrls[0] ?? first.finding.url,
+      aggregation: {
+        affectedCount: group.length,
+        representativeUrls,
+        pageType: first.pageType,
+        templateKey: first.templateKey
+      }
+    };
+  });
+}
+
+function isSuccessfulStatus(status: number): boolean {
+  return status >= 200 && status < 300;
 }
 
 export function createFinding({
@@ -415,12 +494,34 @@ function renderMessageTemplate(template: MessageTemplate, params: FindingMessage
   return typeof template === "function" ? template(params) : template;
 }
 
-function calculateScore(findings: GeoFinding[], pages: AuditedPage[]): number {
-  const penalty = findings.reduce((sum, finding) => {
-    if (finding.severity === "critical") return sum + 18;
-    if (finding.severity === "warning") return sum + 8;
-    return sum + 3;
-  }, 0);
+const FINDING_PENALTY: Record<FindingSeverity, number> = {
+  critical: 18,
+  warning: 8,
+  info: 3
+};
+
+const FINDING_PENALTY_CAP: Record<FindingSeverity, number> = {
+  critical: 30,
+  warning: 16,
+  info: 6
+};
+
+export function calculateScore(findings: GeoFinding[], pages: AuditedPage[]): number {
+  const rules = new Map<string, { affectedCount: number; severity: FindingSeverity }>();
+  for (const finding of findings) {
+    const ruleKey = finding.messageKey ?? finding.id;
+    const current = rules.get(ruleKey);
+    const affectedCount = Math.max(1, finding.aggregation?.affectedCount ?? 1);
+    rules.set(ruleKey, {
+      affectedCount: (current?.affectedCount ?? 0) + affectedCount,
+      severity: current?.severity ?? finding.severity
+    });
+  }
+  const penalty = [...rules.values()].reduce(
+    (sum, rule) =>
+      sum + Math.min(FINDING_PENALTY[rule.severity] * rule.affectedCount, FINDING_PENALTY_CAP[rule.severity]),
+    0
+  );
   const coverageBonus = Math.min(pages.length, 5) * 2;
   return Math.max(0, Math.min(100, 88 + coverageBonus - penalty));
 }
@@ -437,11 +538,11 @@ function assetCheck(name: string, result: FetchResult): AssetCheck {
   };
 }
 
-async function fetchText(url: string): Promise<FetchResult> {
+async function fetchText(url: string, fetchImpl: typeof fetch): Promise<FetchResult> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12000);
-    const response = await fetch(url, {
+    const response = await fetchImpl(url, {
       signal: controller.signal,
       headers: {
         "User-Agent": "OpenGEOConsole/0.1 (+https://github.com/open-geo-console)"

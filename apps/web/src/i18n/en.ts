@@ -48,7 +48,7 @@ export const en = {
     },
     selfHosted: {
       title: "Self-hosted",
-      text: "Local SQLite, no account required, ready for open-source deployment."
+      text: "PostgreSQL-backed reports and a dedicated worker, ready for durable self-hosted deployment."
     }
   },
   report: {
@@ -81,6 +81,28 @@ export const en = {
     reportUnavailableTitle: "Report unavailable",
     reportUnavailableDescription:
       "This report is not available in server storage or this browser. Generate a new scan to create a fresh report.",
+    findingAggregation: {
+      affectedPages: "{count} affected pages",
+      representativePages: "Representative pages",
+      morePages: "+{count} more affected pages",
+      pageType: "Page type: {pageType}",
+      template: "Template: {template}",
+      pageTypeLabels: {
+        home: "Home",
+        product: "Product",
+        service: "Service",
+        about: "About",
+        pricing: "Pricing",
+        "case-study": "Case study",
+        contact: "Contact",
+        blog: "Blog",
+        news: "News",
+        help: "Help",
+        careers: "Careers",
+        legal: "Legal",
+        other: "Other"
+      }
+    },
     metricLabels: {
       critical: "Critical",
       warnings: "Warnings",
@@ -113,6 +135,7 @@ export const en = {
   workspace: {
     tabs: {
       overview: "Overview",
+      analysis: "AI analysis",
       issues: "Issues",
       bots: "AI Bot evidence",
       technical: "Technical"
@@ -166,6 +189,52 @@ export const en = {
       payloadTooLarge: "The log input exceeds the 5 MiB limit.",
       saveFailed: "The analysis completed, but the shared summary could not be saved.",
       deleteFailed: "Unable to remove the saved evidence summary."
+    }
+  },
+  aiReport: {
+    title: "Evidence-backed AI website analysis",
+    description: "A real model reads selected pages, checks its conclusions against captured evidence, and builds a traceable company website report.",
+    previewLabel: "Free AI preview",
+    deepLabel: "Deep report",
+    technicalScore: "Technical score",
+    aiDimensions: "AI dimension scores",
+    organizationProfile: "Organization profile",
+    executiveSummary: "Executive summary",
+    topFindings: "Highest-impact findings",
+    pageTypes: "Page-type analysis",
+    roadmap: "90-day roadmap",
+    coverage: "Coverage and limits",
+    evidence: "Evidence",
+    confidence: "Confidence",
+    unlockTitle: "Unlock the deep AI report",
+    unlockDescription: "Use one report credit to analyze up to 50 representative pages and reveal the complete evidence and action plan.",
+    accessKeyLabel: "Report access key",
+    unlockAction: "Unlock deep report",
+    unlocking: "Reserving credit",
+    retryAction: "Retry from last checkpoint",
+    statusTitle: "AI analysis progress",
+    waitingDescription: "The technical report is ready while the evidence-backed AI analysis continues in the worker.",
+    completedDescription: "The evidence-backed AI report is complete and saved with its coverage and provenance.",
+    partialDescription: "A partial report is available, but coverage did not meet the completion threshold. Retry from the saved checkpoint.",
+    unavailableDescription: "AI analysis has not been configured for this deployment.",
+    queuePosition: "Queue position {position}",
+    queueJobsAhead: "{count} jobs are ahead in this report lane.",
+    queueActiveJobsInPool: "This report is next; the worker lane is processing another job.",
+    queueAwaitingClaim: "This report is next and is waiting for a worker to claim it.",
+    activeTierPreview: "Free AI previews are currently being processed.",
+    activeTierDeep: "Deep reports are currently being processed.",
+    activeTierMixed: "Free previews and deep reports are currently being processed.",
+    progressValue: "{stage}, {progress}% complete",
+    stages: {
+      queued: "Queued",
+      discovering: "Discovering the site",
+      planning: "Planning representative pages",
+      fetching: "Fetching page evidence",
+      analyzing: "Analyzing page groups",
+      synthesizing: "Building the final report",
+      completed: "Completed",
+      partial: "Partially completed",
+      failed: "Failed"
     }
   },
   logs: {

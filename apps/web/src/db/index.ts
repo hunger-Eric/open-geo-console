@@ -1,42 +1,78 @@
 import fs from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import { DATABASE_MIGRATIONS } from "./migrations";
 import * as schema from "./schema";
 
-let client: Database.Database | undefined;
+let client: ReturnType<typeof postgres> | undefined;
 let database: ReturnType<typeof drizzle<typeof schema>> | undefined;
+let initialization: Promise<void> | undefined;
 
-export function getDb() {
-  if (!client) {
-    const filePath = getDatabasePath();
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    client = new Database(filePath);
-    client.pragma("foreign_keys = ON");
-    client.pragma("journal_mode = WAL");
-    client.exec(`
-      CREATE TABLE IF NOT EXISTS scan_reports (
-        id TEXT PRIMARY KEY,
-        url TEXT NOT NULL,
-        kind TEXT NOT NULL DEFAULT 'geo',
-        score INTEGER,
-        payload TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS report_bot_evidence (
-        report_id TEXT PRIMARY KEY,
-        summary TEXT NOT NULL,
-        updated_at INTEGER NOT NULL,
-        FOREIGN KEY (report_id) REFERENCES scan_reports(id) ON DELETE CASCADE
-      );
-    `);
-    database = drizzle(client, { schema });
-  }
-
-  return database!;
+export function isMemoryPersistence(): boolean {
+  return process.env.NODE_ENV === "test" && !process.env.DATABASE_URL;
 }
 
+export function getDb() {
+  if (!database) {
+    const connectionString = getDatabaseUrl();
+    client = postgres(connectionString, {
+      max: Number(process.env.OGC_DATABASE_POOL_SIZE ?? "10"),
+      idle_timeout: 20,
+      connect_timeout: 10,
+      prepare: false,
+      onnotice: () => undefined
+    });
+    database = drizzle(client, { schema });
+  }
+  return database;
+}
+
+export function getSqlClient(): ReturnType<typeof postgres> {
+  getDb();
+  return client!;
+}
+
+export function getDatabaseUrl(): string {
+  const value = process.env.DATABASE_URL?.trim();
+  if (!value) {
+    throw new Error("DATABASE_URL is required for PostgreSQL persistence.");
+  }
+  return value;
+}
+
+export async function ensureDatabase(): Promise<void> {
+  if (isMemoryPersistence()) {
+    return;
+  }
+  if (!initialization) {
+    const sql = getSqlClient();
+    initialization = (async () => {
+      for (const migration of DATABASE_MIGRATIONS) {
+        await sql.unsafe(migration);
+      }
+    })().catch((error) => {
+      initialization = undefined;
+      throw error;
+    });
+  }
+  await initialization;
+}
+
+export async function closeDatabase(): Promise<void> {
+  if (client) {
+    await client.end({ timeout: 5 });
+  }
+  client = undefined;
+  database = undefined;
+  initialization = undefined;
+}
+
+/**
+ * Kept only so older tests and SQLite import tooling can locate a legacy file.
+ * Production persistence never reads this path.
+ */
 export function getDatabasePath(): string {
   if (process.env.OPEN_GEO_DB_PATH) {
     return process.env.OPEN_GEO_DB_PATH;
@@ -52,9 +88,7 @@ function findWorkspaceRoot(start: string): string {
   while (true) {
     const packagePath = path.join(current, "package.json");
     if (fs.existsSync(packagePath)) {
-      const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8")) as {
-        workspaces?: unknown;
-      };
+      const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8")) as { workspaces?: unknown };
       if (packageJson.workspaces) {
         return current;
       }

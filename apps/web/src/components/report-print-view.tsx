@@ -1,16 +1,19 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
+import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
 import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import type { Dictionary, Locale } from "@/i18n";
-import { formatDate, formatNumber } from "@/i18n";
-import type { ReportPresentation } from "@/report/presenter";
+import { formatDate, formatNumber, interpolate } from "@/i18n";
+import type { LocalizedFinding, ReportPresentation } from "@/report/presenter";
 import { localizedAssetSummary } from "@/report/presenter";
 import { PrintToolbar } from "./print-toolbar";
 import { ScoreRing } from "./score-ring";
 import { SeverityPill } from "./severity-pill";
+import { AiReportContent } from "./ai-report-content";
 
 export function ReportPrintView({
   dictionary,
+  aiReport,
   evidence,
   locale,
   presentation,
@@ -18,6 +21,7 @@ export function ReportPrintView({
   reportHref
 }: {
   dictionary: Dictionary;
+  aiReport?: AiWebsiteReportV1 | null;
   evidence: BotEvidenceSummary | null;
   locale: Locale;
   presentation: ReportPresentation;
@@ -55,11 +59,26 @@ export function ReportPrintView({
                 <h3 className="font-semibold">{finding.localizedTitle}</h3>
                 <p className="mt-1 text-sm leading-6 text-[var(--muted)]">{finding.localizedDescription}</p>
                 <p className="mt-2 text-sm leading-6">{finding.localizedRecommendation}</p>
+                {finding.aggregation ? (
+                  <PrintFindingAggregation
+                    aggregation={finding.aggregation}
+                    dictionary={dictionary}
+                    locale={locale}
+                  />
+                ) : finding.url ? (
+                  <p className="mt-2 break-all font-mono text-xs text-[var(--muted)]">{finding.url}</p>
+                ) : null}
               </div>
             </article>
           ))}
         </div>
       </PrintSection>
+
+      {aiReport ? (
+        <PrintSection title={dictionary.aiReport.title}>
+          <AiReportContent dictionary={dictionary} locale={locale} report={aiReport} />
+        </PrintSection>
+      ) : null}
 
       <PrintSection title={dictionary.report.machineReadableAssets}>
         <div className="divide-y divide-[var(--border)]">
@@ -102,6 +121,55 @@ export function ReportPrintView({
         </table>
       </PrintSection>
     </main>
+  );
+}
+
+function PrintFindingAggregation({
+  aggregation,
+  dictionary,
+  locale
+}: {
+  aggregation: NonNullable<LocalizedFinding["aggregation"]>;
+  dictionary: Dictionary;
+  locale: Locale;
+}) {
+  const representativeUrls = aggregation.representativeUrls.slice(0, 3);
+  const moreCount = Math.max(0, aggregation.affectedCount - representativeUrls.length);
+  const context = [
+    aggregation.pageType
+      ? interpolate(dictionary.report.findingAggregation.pageType, {
+          pageType: dictionary.report.findingAggregation.pageTypeLabels[aggregation.pageType]
+        })
+      : null,
+    aggregation.templateKey
+      ? interpolate(dictionary.report.findingAggregation.template, { template: aggregation.templateKey })
+      : null
+  ].filter((value): value is string => Boolean(value));
+
+  return (
+    <div className="mt-3 text-xs text-[var(--muted)]">
+      <p className="font-semibold text-[var(--foreground)]">
+        {interpolate(dictionary.report.findingAggregation.affectedPages, {
+          count: formatNumber(locale, aggregation.affectedCount)
+        })}
+      </p>
+      {context.length > 0 ? <p className="mt-1">{context.join(" · ")}</p> : null}
+      {representativeUrls.length > 0 ? (
+        <>
+          <p className="mt-2 font-semibold">{dictionary.report.findingAggregation.representativePages}</p>
+          <ul className="mt-1 space-y-1">
+            {representativeUrls.map((url) => <li key={url} className="break-all font-mono">{url}</li>)}
+          </ul>
+        </>
+      ) : null}
+      {moreCount > 0 ? (
+        <p className="mt-1">
+          {interpolate(dictionary.report.findingAggregation.morePages, {
+            count: formatNumber(locale, moreCount)
+          })}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

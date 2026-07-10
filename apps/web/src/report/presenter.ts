@@ -41,8 +41,48 @@ export function buildReportPresentation(
     availableAssets: Object.values(report.machineReadableAssets).filter((asset) => asset.present).length,
     localizedFindings,
     findingsBySeverity,
-    priorityFindings: [...findingsBySeverity.critical, ...findingsBySeverity.warning].slice(0, 5)
+    priorityFindings: rollUpPriorityFindings([
+      ...findingsBySeverity.critical,
+      ...findingsBySeverity.warning
+    ]).slice(0, 5)
   };
+}
+
+export function rollUpPriorityFindings(findings: LocalizedFinding[]): LocalizedFinding[] {
+  const groups = new Map<string, LocalizedFinding>();
+  for (const finding of findings) {
+    const key = finding.messageKey ?? finding.id;
+    const current = groups.get(key);
+    if (!current) {
+      groups.set(key, finding);
+      continue;
+    }
+
+    const currentUrls = current.aggregation?.representativeUrls ?? (current.url ? [current.url] : []);
+    const nextUrls = finding.aggregation?.representativeUrls ?? (finding.url ? [finding.url] : []);
+    const representativeUrls = [...new Set([...currentUrls, ...nextUrls])].slice(0, 3);
+    const affectedCount =
+      (current.aggregation?.affectedCount ?? 1) +
+      (finding.aggregation?.affectedCount ?? 1);
+    const pageType = current.aggregation?.pageType === finding.aggregation?.pageType
+      ? current.aggregation?.pageType
+      : undefined;
+    const templateKey = current.aggregation?.templateKey === finding.aggregation?.templateKey
+      ? current.aggregation?.templateKey
+      : undefined;
+
+    groups.set(key, {
+      ...current,
+      url: representativeUrls[0] ?? current.url,
+      aggregation: {
+        affectedCount,
+        representativeUrls,
+        ...(pageType ? { pageType } : {}),
+        ...(templateKey ? { templateKey } : {})
+      }
+    });
+  }
+  return [...groups.values()];
 }
 
 export function localizeFinding(finding: GeoFinding, dictionary: Dictionary): LocalizedFinding {

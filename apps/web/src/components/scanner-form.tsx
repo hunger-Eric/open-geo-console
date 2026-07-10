@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { ArrowRight, Loader2 } from "lucide-react";
-import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { Dictionary, Locale } from "@/i18n";
 import { localizePath } from "@/i18n";
 
@@ -29,24 +28,22 @@ export function ScannerForm({
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ url })
+        body: JSON.stringify({ url, locale })
       });
       const payload = (await response.json()) as {
+        reportId?: string;
         id?: string;
-        report?: GeoAuditReport;
         error?: string;
         errorKey?: keyof Dictionary["errors"];
       };
+      const reportId = payload.reportId ?? payload.id;
 
-      if (!response.ok || !payload.id) {
+      if (!response.ok || !reportId) {
         setError(payload.errorKey ? dictionary.errors[payload.errorKey] : (payload.error ?? dictionary.errors.scanFailed));
         return;
       }
 
-      if (payload.report) {
-        window.localStorage.setItem(`open-geo-console:report:${payload.id}`, JSON.stringify(payload.report));
-      }
-      router.push(localizePath(locale, `/reports/${payload.id}`));
+      router.push(localizePath(locale, `/reports/${reportId}`));
     });
   }
 

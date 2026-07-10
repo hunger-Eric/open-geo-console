@@ -1,69 +1,97 @@
 # Open GEO Console
 
-Open GEO Console is an open-source AI Search Console for company websites.
+Open GEO Console is an open-source AI Search Console for company websites. It combines deterministic GEO checks with evidence-backed large-model analysis and optional AI crawler log evidence.
 
-The MVP follows one product story: scan first, connect logs next. A user enters a company website URL, receives a GEO readiness report, then can upload or sample access logs to see whether identifiable AI crawlers such as OpenAI, Anthropic, Perplexity, Google, Microsoft, Meta, ByteDance, Amazon, Apple, and Common Crawl visited the site.
+## Product Flow
 
-## What v1 Does
+1. Enter a company website URL.
+2. Receive a persisted technical GEO report immediately.
+3. A worker discovers the site, asks an OpenAI-compatible model to plan representative pages, fetches real page evidence, and generates a structured AI report.
+4. The free preview analyzes up to 8 pages and exposes three verified findings. A report-credit key unlocks a private deep report of up to 50 pages.
+5. Access logs can be imported separately to show observed AI crawler visits; log evidence never changes the technical GEO score.
 
-- Generates a GEO audit for a website URL.
-- Presents each saved audit as a report workspace with overview, issues, AI Bot evidence, technical, and print/PDF views.
-- Checks `robots.txt`, `sitemap.xml`, `llms.txt`, schema, metadata, heading structure, canonical URLs, OpenGraph tags, readable content length, internal links, and HTTP status.
-- Parses Nginx combined/access logs and Cloudflare JSONL into an AI Bot Visibility Report, with report-scoped import and a standalone advanced tool.
-- Marks detected AI bots from access-log User-Agent values and separates them from robots.txt-only policy tokens such as `Google-Extended` and `Applebot-Extended`.
-- Provides a stand-alone external AI crawler simulator for Open GEO Console. The simulator is not code integrated into the first case personal website or any customer website.
-- Maintains an AI Bot Registry covering OpenAI, Anthropic, Perplexity, Google/Gemini, Microsoft/Copilot, Meta, ByteDance, Amazon, Apple, and Common Crawl.
-- Persists generated reports and one sanitized, replaceable bot evidence summary per report in local SQLite.
+AI findings must cite URLs from the current crawl and quote text present in retained page evidence. Unsupported findings are rejected rather than shown.
 
-Raw access logs, IP addresses, complete request paths, and raw User-Agent values are not persisted. Imported bot evidence is a separate dimension and does not change the GEO score.
+## Capabilities
 
-## External AI Crawler Simulator
-
-The external simulator is an Open GEO Console feature. It attempts HTTP requests with log-detectable AI crawler User-Agent strings and tags those requests with an `ogc_run=<runId>` marker so a site owner can later import access logs and check whether the requests reached the site.
-
-Attempted simulator requests are not proof of real AI company traffic. They only prove that Open GEO Console tried to make a request with a simulator User-Agent. Observed evidence comes from imported access logs that contain both a recognizable AI crawler User-Agent and the matching `ogc_run=<runId>` marker. Logs without the marker should stay in the attempted-but-not-observed state for that run.
-
-Robots-token-only entries such as `Google-Extended` and `Applebot-Extended` are policy controls, not HTTP User-Agent visits, so the simulator must not send them as crawler visits. Ordinary browser User-Agent strings are also not counted as AI bot evidence.
+- Technical checks for `robots.txt`, `sitemap.xml`, `llms.txt`, schema, metadata, headings, canonical URLs, OpenGraph, readable content and HTTP status.
+- AI-planned page sampling after site-wide URL discovery and page-type/template clustering.
+- OpenAI-compatible model transport with versioned `AiWebsiteReportV1` output and evidence validation.
+- HTTP crawling with DNS-pinned SSRF protection and Playwright fallback for JavaScript-rendered pages.
+- Progressive report jobs with PostgreSQL leases, checkpoints, retries and seven-day source-evidence retention.
+- Thirty-day free preview deduplication per registrable site and three distinct free sites per client IP/day.
+- HMAC-only report-credit keys, idempotent credit reservation/settlement/refund, and private report links using HttpOnly cookies.
+- Nginx and Cloudflare log analysis plus a clearly separated external AI crawler simulator.
 
 ## Workspaces
 
-- `apps/web` - Next.js UI, API routes, SQLite/Drizzle persistence.
-- `packages/crawler-rules` - AI User-Agent rules.
-- `packages/log-parser` - log parsing and aggregation.
-- `packages/geo-auditor` - GEO website audit engine.
+- `apps/web` — Next.js UI/API, PostgreSQL persistence, Worker and operator scripts.
+- `packages/geo-auditor` — deterministic technical audit and score.
+- `packages/site-crawler` — URL safety, site identity, discovery, extraction and page selection.
+- `packages/ai-report-engine` — model client, planning, analysis, synthesis and evidence validation.
+- `packages/crawler-rules` — AI crawler identity rules.
+- `packages/log-parser` — access-log parsing and sanitized bot evidence.
 
-## AI Bot Registry
-
-The AI Bot Registry is the source of truth for v1 bot visibility. It records which bots can be detected from logs, which entries are robots.txt policy controls only, and which entries need extra verification because public documentation is incomplete. See `docs/AI-BOT-REGISTRY.md` before adding or changing bot rules.
-
-## Quick Start
+## Local Setup
 
 ```bash
 npm install
+docker compose up -d postgres
+Copy-Item .env.example apps/web/.env.local
+npm run browser:install
 npm run dev
 ```
 
-Open `http://localhost:3000`, scan a website, then try the sample crawler log report.
+Run the two independent worker lanes in separate processes:
 
-The saved report opens at `/[locale]/reports/[id]`; use its workspace tabs for issues, report-scoped bot evidence, technical details, and print/PDF output. `/[locale]/logs` remains the standalone advanced log tool.
+```bash
+npm run worker:free
+npm run worker:deep
+```
 
-By default, local self-hosted reports are stored in `.data/open-geo-console.sqlite`. Set `OPEN_GEO_DB_PATH` to use a different SQLite file.
+The free lane handles preview jobs and the deep lane handles paid-credit jobs, so a long preview backlog cannot hide a deep report. `npm run worker` is the low-level entry point and requires an explicit `OGC_WORKER_TIER=free|deep`; normal operators should use the two lane commands above. The optional Compose worker profile also requires an application image supplied through `OGC_APP_IMAGE`.
 
-## Deployment
+Required production variables:
 
-The Vercel project is configured as a monorepo Next.js app:
+- `DATABASE_URL`
+- `OGC_AI_BASE_URL`
+- `OGC_AI_API_KEY`
+- `OGC_AI_MODEL`
+- `OGC_TOKEN_HASH_SECRET`
+- `OGC_IP_HASH_SECRET`
 
-- Framework preset: Next.js
-- Build command: `npm run build`
-- Output directory: `apps/web/.next`
+Set `TRUST_PROXY_HEADERS=true` only behind a proxy that overwrites forwarded-client-IP headers. Set `OGC_AI_JSON_RESPONSE_FORMAT=true` only if the configured model endpoint supports OpenAI JSON response mode.
+`OGC_AI_TIMEOUT_MS` controls the per-call model timeout; long structured reports typically need `180000` milliseconds.
+`OGC_ALLOW_BENCHMARK_NETWORK` exists only for sandboxed local networks that proxy public DNS through `198.18.0.0/15`; keep it `false` in production.
 
-Vercel serverless runtime uses `/tmp/open-geo-console.sqlite` unless `OPEN_GEO_DB_PATH` is configured. The scanner also stores the just-created report in the browser so the post-scan report page works in the demo deployment even when serverless functions do not share temp storage.
+Validate a newly configured model without creating report data:
 
-That browser copy is current-browser fallback only. It is not a cross-device shared report store.
+```bash
+npm run ai:probe
+```
 
-## First Case
+Create a report-credit key; the raw key is printed once:
 
-The first real test site is `https://me.itheheda.online`. It is intentionally treated as a case study and fixture source, not as part of this repository. The external simulator remains stand-alone inside Open GEO Console and should not require code changes inside that personal website.
+```bash
+npm run access-key:create -- --credits 3 --expires-at 2026-12-31
+```
+
+Import legacy SQLite reports into PostgreSQL:
+
+```bash
+npm run db:migrate:sqlite -- --source .data/open-geo-console.sqlite
+```
+
+## API and Reports
+
+- `POST /api/scan` creates or reuses a free report job.
+- `GET /api/reports/:id/status` returns public job progress, queue position, wait reason, and the currently active tier without exposing queued sites or job IDs.
+- `POST /api/reports/:id/upgrade` reserves one credit and creates a deep job.
+- `POST /api/reports/:id/retry` resumes a failed or partial authorized job.
+- `GET /api/reports/:id/access?token=…` exchanges a private link token for an HttpOnly report cookie.
+- `PUT|DELETE /api/reports/:id/bot-evidence` replaces or removes sanitized crawler evidence.
+
+See [AI Report Engine](docs/AI-REPORT-ENGINE.md) and [Report Workspace](docs/REPORT-WORKSPACE.md) for data and route contracts.
 
 ## Verification
 
@@ -72,3 +100,11 @@ npm run lint
 npm test
 npm run build
 ```
+
+With a deliberately configured test model:
+
+```bash
+npm run test:ai-live
+```
+
+The first public fixture remains `https://me.itheheda.online`. Never put provider keys, report-credit keys, view tokens or raw client IPs in the repository or report payloads.

@@ -1,4 +1,5 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
+import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
 import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
 import { FileSearch } from "lucide-react";
 import Link from "next/link";
@@ -11,11 +12,14 @@ import { ReportIssues } from "./report-issues";
 import { ReportOverview } from "./report-overview";
 import { ReportPrintView } from "./report-print-view";
 import { ReportTechnical } from "./report-technical";
+import { AiReportContent } from "./ai-report-content";
+import { AiReportStatus } from "./ai-report-status";
 
-export type ReportWorkspaceSection = "overview" | "issues" | "bots" | "technical" | "print";
+export type ReportWorkspaceSection = "overview" | "analysis" | "issues" | "bots" | "technical" | "print";
 
 export function ReportView({
   dictionary,
+  aiReport,
   evidence,
   locale,
   page = 1,
@@ -24,6 +28,7 @@ export function ReportView({
   section = "overview"
 }: {
   dictionary: Dictionary;
+  aiReport?: AiWebsiteReportV1 | null;
   evidence?: BotEvidenceSummary | null;
   locale: Locale;
   page?: number;
@@ -37,6 +42,7 @@ export function ReportView({
   if (section === "print") {
     return (
       <ReportPrintView
+        aiReport={aiReport}
         dictionary={dictionary}
         evidence={evidence ?? null}
         locale={locale}
@@ -49,6 +55,7 @@ export function ReportView({
 
   const tabs = [
     { key: "overview", href: overviewHref },
+    { key: "analysis", href: localizePath(locale, `/reports/${reportId}/analysis`) },
     { key: "issues", href: localizePath(locale, `/reports/${reportId}/issues`) },
     { key: "bots", href: localizePath(locale, `/reports/${reportId}/bots`) },
     { key: "technical", href: localizePath(locale, `/reports/${reportId}/technical`) }
@@ -96,14 +103,23 @@ export function ReportView({
 
       <div className="mt-6">
         {section === "overview" ? (
-          <ReportOverview
-            dictionary={dictionary}
-            evidence={evidence ?? null}
-            locale={locale}
-            presentation={presentation}
-            report={report}
-            reportId={reportId}
-          />
+          <div className="space-y-6">
+            <AiReportStatus dictionary={dictionary} reportId={reportId} />
+            <ReportOverview
+              dictionary={dictionary}
+              evidence={evidence ?? null}
+              locale={locale}
+              presentation={presentation}
+              report={report}
+              reportId={reportId}
+            />
+          </div>
+        ) : null}
+        {section === "analysis" ? (
+          <div className="space-y-6">
+            <AiReportStatus dictionary={dictionary} reportId={reportId} />
+            {aiReport ? <AiReportContent dictionary={dictionary} locale={locale} report={aiReport} /> : null}
+          </div>
         ) : null}
         {section === "issues" ? (
           <ReportIssues

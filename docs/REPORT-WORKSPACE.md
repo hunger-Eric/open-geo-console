@@ -5,6 +5,7 @@
 | Route | Purpose |
 | --- | --- |
 | `/[locale]/reports/[id]` | Score explanation, top three fixes, asset/scan summary, and bot evidence summary |
+| `/[locale]/reports/[id]/analysis` | Free AI preview or authorized private deep AI report |
 | `/[locale]/reports/[id]/issues?page=N` | Severity-grouped findings, 20 per page |
 | `/[locale]/reports/[id]/bots` | Log import, detected bots/operators, paginated registry, and collapsed simulator |
 | `/[locale]/reports/[id]/technical?page=N` | Scanned pages, assets, and technical appendix, 20 per page |
@@ -42,4 +43,4 @@ Re-importing evidence upserts the row. Deleting evidence removes it. History and
 
 ## Storage authority
 
-Self-hosted SQLite is the shared report authority. On ephemeral serverless storage, the browser fallback preserves the current browser's report/evidence continuity only. UI copy must not imply that the browser copy is cross-device shared.
+PostgreSQL is the report authority for technical reports, AI reports, jobs, access controls and bot evidence. The browser does not retain an authoritative report copy. Deep AI payloads require the report-specific HttpOnly access cookie; free previews remain accessible through their unlisted report UUID.

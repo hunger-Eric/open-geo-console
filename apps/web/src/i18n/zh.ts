@@ -48,7 +48,7 @@ export const zh = {
     },
     selfHosted: {
       title: "自托管",
-      text: "本地 SQLite，无需账号，适合开源部署。"
+      text: "PostgreSQL 持久报告与独立 Worker，适合可靠的开源自托管部署。"
     }
   },
   report: {
@@ -78,6 +78,28 @@ export const zh = {
     loadingReport: "正在读取浏览器中保存的报告副本。",
     reportUnavailableTitle: "报告不可用",
     reportUnavailableDescription: "服务端存储和当前浏览器都没有找到这份报告。请重新扫描生成新报告。",
+    findingAggregation: {
+      affectedPages: "影响 {count} 个页面",
+      representativePages: "代表 URL",
+      morePages: "另有 {count} 个受影响页面",
+      pageType: "页面类型：{pageType}",
+      template: "页面模板：{template}",
+      pageTypeLabels: {
+        home: "首页",
+        product: "产品",
+        service: "服务",
+        about: "关于",
+        pricing: "定价",
+        "case-study": "案例",
+        contact: "联系",
+        blog: "博客",
+        news: "新闻",
+        help: "帮助",
+        careers: "招聘",
+        legal: "法务",
+        other: "其他"
+      }
+    },
     metricLabels: {
       critical: "严重",
       warnings: "警告",
@@ -110,6 +132,7 @@ export const zh = {
   workspace: {
     tabs: {
       overview: "概览",
+      analysis: "AI 分析",
       issues: "问题",
       bots: "AI Bot 证据",
       technical: "技术"
@@ -163,6 +186,52 @@ export const zh = {
       payloadTooLarge: "日志内容超过 5 MiB 限制。",
       saveFailed: "分析已完成，但共享摘要无法保存。",
       deleteFailed: "无法移除已保存的证据摘要。"
+    }
+  },
+  aiReport: {
+    title: "有证据支撑的 AI 官网分析",
+    description: "真实大模型读取经过筛选的官网页面，逐条核验结论与抓取证据，并生成可追溯的企业官网报告。",
+    previewLabel: "免费 AI 预览",
+    deepLabel: "深度报告",
+    technicalScore: "技术评分",
+    aiDimensions: "AI 维度评分",
+    organizationProfile: "企业身份画像",
+    executiveSummary: "执行摘要",
+    topFindings: "最高影响问题",
+    pageTypes: "页面类型分析",
+    roadmap: "90 天行动路线图",
+    coverage: "覆盖范围与限制",
+    evidence: "证据",
+    confidence: "置信度",
+    unlockTitle: "解锁深度 AI 报告",
+    unlockDescription: "消耗一次报告额度，分析最多 50 个代表页面并查看完整证据和行动方案。",
+    accessKeyLabel: "报告访问 Key",
+    unlockAction: "解锁深度报告",
+    unlocking: "正在预留额度",
+    retryAction: "从上个检查点重试",
+    statusTitle: "AI 分析进度",
+    waitingDescription: "技术报告已经可用，有证据支撑的 AI 分析正在 Worker 中继续执行。",
+    completedDescription: "有证据支撑的 AI 报告已经完成，并保存了覆盖范围和生成依据。",
+    partialDescription: "当前已有部分报告，但覆盖率尚未达到完成门槛，可以从保存的检查点重试。",
+    unavailableDescription: "当前部署尚未配置 AI 分析服务。",
+    queuePosition: "当前排队第 {position} 位",
+    queueJobsAhead: "同类报告队列前面还有 {count} 个任务。",
+    queueActiveJobsInPool: "当前任务已经排在最前，Worker 仍在处理同类任务。",
+    queueAwaitingClaim: "当前任务已经排在最前，正在等待 Worker 领取。",
+    activeTierPreview: "当前正在处理免费 AI 预览。",
+    activeTierDeep: "当前正在处理深度报告。",
+    activeTierMixed: "当前同时在处理免费预览和深度报告。",
+    progressValue: "{stage}，已完成 {progress}%",
+    stages: {
+      queued: "已进入队列",
+      discovering: "正在发现站点结构",
+      planning: "正在规划代表页面",
+      fetching: "正在抓取页面证据",
+      analyzing: "正在分批分析页面",
+      synthesizing: "正在生成最终报告",
+      completed: "已完成",
+      partial: "部分完成",
+      failed: "失败"
     }
   },
   logs: {

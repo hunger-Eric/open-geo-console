@@ -7,18 +7,31 @@
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint",
-    "start": "next start"
+    "start": "next start",
+    "worker": "node --env-file-if-exists=.env.local --import tsx src/worker/index.ts",
+    "worker:free": "node --env-file-if-exists=.env.local --import tsx src/worker/run-tier.ts free",
+    "worker:deep": "node --env-file-if-exists=.env.local --import tsx src/worker/run-tier.ts deep",
+    "browser:install": "playwright install chromium",
+    "access-key:create": "node --env-file-if-exists=.env.local --import tsx src/scripts/create-access-key.ts",
+    "ai:probe": "node --env-file-if-exists=.env.local --import tsx src/scripts/ai-probe.ts",
+    "test:ai-live": "node --env-file-if-exists=.env.local --import tsx src/scripts/live-ai-scan.ts",
+    "db:migrate:sqlite": "node --env-file-if-exists=.env.local --import tsx src/scripts/migrate-sqlite.ts"
   },
   "dependencies": {
+    "@open-geo-console/ai-report-engine": "*",
     "@open-geo-console/crawler-rules": "*",
     "@open-geo-console/geo-auditor": "*",
     "@open-geo-console/log-parser": "*",
+    "@open-geo-console/site-crawler": "*",
     "better-sqlite3": "latest",
     "drizzle-orm": "latest",
     "lucide-react": "latest",
     "next": "latest",
+    "playwright": "latest",
+    "postgres": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "undici": "latest"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "latest",
@@ -26,6 +39,7 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "eslint-config-next": "latest",
-    "tailwindcss": "latest"
+    "tailwindcss": "latest",
+    "tsx": "latest"
   }
 }

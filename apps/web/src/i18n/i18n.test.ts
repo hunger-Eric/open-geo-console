@@ -35,6 +35,8 @@ describe("i18n architecture", () => {
 
     expect(chineseKeys).toEqual(englishKeys);
     expect(getDictionary("en").metadata.title).toBe("Open GEO Console");
+    expect(getDictionary("en").aiReport.queueJobsAhead).toContain("{count}");
+    expect(getDictionary("zh").report.findingAggregation.affectedPages).toContain("{count}");
   });
 
   it("extracts and strips route locales", () => {

@@ -3,8 +3,8 @@ import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
 import { ArrowRight, Bot, CheckCircle2, FileUp } from "lucide-react";
 import Link from "next/link";
 import type { Dictionary, Locale } from "@/i18n";
-import { formatDate, formatNumber, localizePath } from "@/i18n";
-import type { ReportPresentation } from "@/report/presenter";
+import { formatDate, formatNumber, interpolate, localizePath } from "@/i18n";
+import type { LocalizedFinding, ReportPresentation } from "@/report/presenter";
 import { ScoreRing } from "./score-ring";
 import { SeverityPill } from "./severity-pill";
 
@@ -70,6 +70,13 @@ export function ReportOverview({
                   <div className="min-w-0">
                     <h3 className="font-semibold">{finding.localizedTitle}</h3>
                     <p className="mt-1 text-sm leading-6 text-[var(--muted)]">{finding.localizedRecommendation}</p>
+                    {finding.aggregation ? (
+                      <PriorityFindingAggregation
+                        aggregation={finding.aggregation}
+                        dictionary={dictionary}
+                        locale={locale}
+                      />
+                    ) : null}
                   </div>
                   <Link href={issuesHref} className="text-link">
                     {dictionary.workspace.viewIssueDetails}
@@ -127,6 +134,50 @@ export function ReportOverview({
           </Link>
         </div>
       </aside>
+    </div>
+  );
+}
+
+function PriorityFindingAggregation({
+  aggregation,
+  dictionary,
+  locale
+}: {
+  aggregation: NonNullable<LocalizedFinding["aggregation"]>;
+  dictionary: Dictionary;
+  locale: Locale;
+}) {
+  const representativeUrls = aggregation.representativeUrls.slice(0, 3);
+  const moreCount = Math.max(0, aggregation.affectedCount - representativeUrls.length);
+  const context = [
+    aggregation.pageType
+      ? dictionary.report.findingAggregation.pageTypeLabels[aggregation.pageType]
+      : null,
+    aggregation.templateKey ?? null
+  ].filter((value): value is string => Boolean(value));
+
+  return (
+    <div className="mt-3 text-xs text-[var(--muted)]">
+      <p className="font-semibold text-[var(--foreground)]">
+        {interpolate(dictionary.report.findingAggregation.affectedPages, {
+          count: formatNumber(locale, aggregation.affectedCount)
+        })}
+        {context.length > 0 ? ` · ${context.join(" · ")}` : ""}
+      </p>
+      {representativeUrls.length > 0 ? (
+        <ul className="mt-2 space-y-1">
+          {representativeUrls.map((url) => (
+            <li key={url} className="break-all font-mono">{url}</li>
+          ))}
+        </ul>
+      ) : null}
+      {moreCount > 0 ? (
+        <p className="mt-1">
+          {interpolate(dictionary.report.findingAggregation.morePages, {
+            count: formatNumber(locale, moreCount)
+          })}
+        </p>
+      ) : null}
     </div>
   );
 }

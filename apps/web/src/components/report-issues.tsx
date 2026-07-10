@@ -1,7 +1,7 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { Dictionary, Locale } from "@/i18n";
-import { localizePath } from "@/i18n";
-import type { ReportPresentation } from "@/report/presenter";
+import { formatNumber, interpolate, localizePath } from "@/i18n";
+import type { LocalizedFinding, ReportPresentation } from "@/report/presenter";
 import { SeverityPill } from "./severity-pill";
 import { WorkspacePagination } from "./workspace-pagination";
 
@@ -56,7 +56,15 @@ export function ReportIssues({
                 <h3 className="text-base font-semibold">{finding.localizedTitle}</h3>
                 <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{finding.localizedDescription}</p>
                 <p className="mt-3 text-sm leading-6">{finding.localizedRecommendation}</p>
-                {finding.url ? <p className="mt-3 break-all font-mono text-xs text-[var(--muted)]">{finding.url}</p> : null}
+                {finding.aggregation ? (
+                  <FindingAggregation
+                    aggregation={finding.aggregation}
+                    dictionary={dictionary}
+                    locale={locale}
+                  />
+                ) : finding.url ? (
+                  <p className="mt-3 break-all font-mono text-xs text-[var(--muted)]">{finding.url}</p>
+                ) : null}
               </div>
             </article>
           ))}
@@ -70,6 +78,57 @@ export function ReportIssues({
         totalPages={totalPages}
       />
     </section>
+  );
+}
+
+function FindingAggregation({
+  aggregation,
+  dictionary,
+  locale
+}: {
+  aggregation: NonNullable<LocalizedFinding["aggregation"]>;
+  dictionary: Dictionary;
+  locale: Locale;
+}) {
+  const representativeUrls = aggregation.representativeUrls.slice(0, 3);
+  const moreCount = Math.max(0, aggregation.affectedCount - representativeUrls.length);
+  const context = [
+    aggregation.pageType
+      ? interpolate(dictionary.report.findingAggregation.pageType, {
+          pageType: dictionary.report.findingAggregation.pageTypeLabels[aggregation.pageType]
+        })
+      : null,
+    aggregation.templateKey
+      ? interpolate(dictionary.report.findingAggregation.template, { template: aggregation.templateKey })
+      : null
+  ].filter((value): value is string => Boolean(value));
+
+  return (
+    <div className="mt-4 rounded-lg bg-[var(--subtle)] p-4">
+      <p className="text-sm font-semibold">
+        {interpolate(dictionary.report.findingAggregation.affectedPages, {
+          count: formatNumber(locale, aggregation.affectedCount)
+        })}
+      </p>
+      {context.length > 0 ? <p className="mt-1 text-xs text-[var(--muted)]">{context.join(" · ")}</p> : null}
+      {representativeUrls.length > 0 ? (
+        <div className="mt-3">
+          <p className="text-xs font-semibold text-[var(--muted)]">{dictionary.report.findingAggregation.representativePages}</p>
+          <ul className="mt-2 space-y-1">
+            {representativeUrls.map((url) => (
+              <li key={url} className="break-all font-mono text-xs text-[var(--muted)]">{url}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {moreCount > 0 ? (
+        <p className="mt-2 text-xs text-[var(--muted)]">
+          {interpolate(dictionary.report.findingAggregation.morePages, {
+            count: formatNumber(locale, moreCount)
+          })}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
