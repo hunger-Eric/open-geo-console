@@ -63,7 +63,7 @@ Required production variables:
 
 The initial commercial target is Netlify plus Neon, Cloudflare Turnstile/Queue, Airwallex, Resend, and scheduled workstation batches. This avoids mandatory server rent at low order volume while keeping every paid task durable in PostgreSQL. A later `FULFILLMENT_MODE=realtime` deployment uses the same job/outbox records on persistent Worker infrastructure.
 
-On Vercel, anonymous rate limits use the platform-provided `x-vercel-forwarded-for` header when `VERCEL=1`; legacy projects that do not expose system variables must set `OGC_TRUST_VERCEL_HEADERS=true`. Elsewhere, set `TRUST_PROXY_HEADERS=true` only behind a proxy that overwrites forwarded-client-IP headers; direct deployments deliberately collapse to a fail-closed anonymous identity. Set `OGC_AI_JSON_RESPONSE_FORMAT=true` only if the configured model endpoint supports OpenAI JSON response mode.
+On Vercel, anonymous rate limits prefer `x-vercel-forwarded-for` and fall back to Vercel's overwritten `x-forwarded-for` when `VERCEL=1`; legacy projects that do not expose system variables must set `OGC_TRUST_VERCEL_HEADERS=true`. Elsewhere, set `TRUST_PROXY_HEADERS=true` only behind a proxy that overwrites forwarded-client-IP headers; direct deployments deliberately collapse to a fail-closed anonymous identity. Set `OGC_AI_JSON_RESPONSE_FORMAT=true` only if the configured model endpoint supports OpenAI JSON response mode.
 `OGC_AI_TIMEOUT_MS` controls the per-call model timeout; long structured reports typically need `180000` milliseconds.
 `OGC_ALLOW_BENCHMARK_NETWORK` exists only for sandboxed local networks that proxy public DNS through `198.18.0.0/15`; keep it `false` in production.
 

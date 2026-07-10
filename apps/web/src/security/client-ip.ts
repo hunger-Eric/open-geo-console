@@ -1,6 +1,8 @@
 export function getTrustedClientIp(request: Request, environment: NodeJS.ProcessEnv = process.env): string {
   if (environment.VERCEL === "1" || environment.OGC_TRUST_VERCEL_HEADERS === "true") {
-    const vercelIp = request.headers.get("x-vercel-forwarded-for")?.split(",", 1)[0]?.trim();
+    const vercelIp = request.headers.get("x-vercel-forwarded-for")?.split(",", 1)[0]?.trim()
+      ?? request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim()
+      ?? request.headers.get("x-real-ip")?.trim();
     return vercelIp ? normalizeIp(vercelIp) : "untrusted-direct-client";
   }
   if (environment.TRUST_PROXY_HEADERS !== "true") return "untrusted-direct-client";
