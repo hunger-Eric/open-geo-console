@@ -38,7 +38,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Commercial terminalization is atomic: qualified jobs complete and settle; usable low-coverage jobs complete-limited and refund; unusable jobs fail and refund. `npm run db:audit` detects invariant violations.
 - The anonymous homepage now contains only website analysis, bilingual controls, value-led capability copy and a secondary log-tool link; it does not expose shared recent-report history or a personal-site default.
 - Live regression scan of `shun-express.com` produced a score of 35 with 26 grouped findings instead of the previous score of 0 with 62 repeated findings; the overview correctly summarizes 10 dead links.
-- The public noncommercial acceptance build for commit `e7fce6b` is deployed at `https://open-geo-console.vercel.app`. `COMMERCE_MODE=disabled`, `TURNSTILE_REQUIRED=false` and `OGC_TRUST_VERCEL_HEADERS=true` keep visual review public, prevent an unconfigured checkout, and preserve per-client anonymous limits on this legacy Vercel project.
+- The public noncommercial acceptance build for commit `8991628` is deployed at `https://open-geo-console.vercel.app`. `COMMERCE_MODE=disabled`, `TURNSTILE_REQUIRED=false` and `OGC_TRUST_VERCEL_HEADERS=true` keep visual review public, prevent an unconfigured checkout, and preserve per-client anonymous limits on this legacy Vercel project. The live 429 diagnostic header confirmed `vercel` rather than the shared fallback identity.
 
 ## Known Boundaries
 
@@ -49,6 +49,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Netlify is the intended commercial Web/API host. The existing Vercel Hobby deployment remains useful only for noncommercial acceptance because its terms are not the commercial target.
 - Real model behavior depends on the configured provider. CI uses mock clients; `npm run test:ai-live` remains the repeatable paid integration command.
 - Vercel currently lists no project environment variables, so the public acceptance deployment is not evidence of live database, model, payment, email or Queue readiness. Any credential previously exposed in chat must still be rotated before public operation.
+- Anonymous users behind the same public IP or carrier/NAT gateway intentionally share the two-site rolling limit; there is no unauthenticated quota-reset endpoint.
 
 ## Next Steps
 
