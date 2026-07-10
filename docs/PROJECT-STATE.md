@@ -2,7 +2,7 @@
 
 ## Current Goal
 
-Operate a durable, self-hostable report product whose main journey is `free technical report + AI preview → one-time purchase → private deep report by email → optional AI Bot evidence`. The protected staging/production security contract is implemented and its isolated Preview/database path has a fixed protected alias; independent staging provider credentials, branch-scoped Preview variables, production edge controls, and provider drills remain external gates.
+Operate a durable, self-hostable report product whose main journey is `free technical report + AI preview → one-time purchase → private deep report by email → optional AI Bot evidence`. The protected staging and production security code is deployed. Production edge controls and isolated staging provider resources are configured; remaining gates are the user-approved shared model-key exception, branch-scoped Preview variables, and end-to-end payment/email/provider drills.
 
 ## Current Architecture
 
@@ -44,6 +44,10 @@ The web process persists a public homepage technical report and enqueues work. S
 - The existing production PostgreSQL database is marked `production`; the commercial invariant audit passes against both databases before deployment.
 - Live regression scan of `shun-express.com` produced a score of 35 with 26 grouped findings instead of the previous score of 0 with 62 repeated findings; the overview correctly summarizes 10 dead links.
 - Security implementation commit `0b09288` is deployed to the public production alias `https://open-geo-console.vercel.app`. Fixed staging alias `https://open-geo-console-staging-itheheda.vercel.app` points to the isolated Preview deployment; anonymous page/API checks return `302` to Vercel login and `401`, while an authenticated browser reaches the staging UI. Its automation bypass was rotated without exposing either credential.
+- Production is deployed at `https://geo.itheheda.online` through Cloudflare. Turnstile server verification is required for that hostname, Bot Fight Mode is enabled, AI-bot blocking remains off, and `/api/scan` has a Cloudflare 5 requests / 10 seconds / IP burst rule with a 10-second block.
+- Preview has separate Neon, HMAC, Airwallex Sandbox, Resend, Cloudflare Queue, test-recipient, and provider-specific Webhook bypass values. Airwallex and Resend Webhooks target the protected fixed alias and still require application signatures.
+- The latest Preview build is `https://open-geo-console-csquc869d-itheheda-6857s-projects.vercel.app`, repointed to the fixed protected alias. Anonymous checks again returned `302` for `/en` and `401` for `/api/scan`.
+- Browser acceptance reconfirmed authenticated staging access, staging-only forced-regeneration UI, same-site reuse, a new forced report ID, old-report availability after failure, and the two-active-job concurrency cap. The isolated staging database marker fingerprint is `7223dda0037deca3`; a staging Worker drained isolated jobs without touching production.
 
 ## Known Boundaries
 
@@ -53,17 +57,20 @@ The web process persists a public homepage technical report and enqueues work. S
 - Production always requires persistent PostgreSQL. Initial commercial operation may use scheduled workstation batches with a 24-hour/full-refund promise; instant delivery requires persistent `realtime` Workers.
 - Netlify is the intended commercial Web/API host. The existing Vercel Hobby deployment remains useful only for noncommercial acceptance because its terms are not the commercial target.
 - Real model behavior depends on the configured provider. CI uses mock clients; `npm run test:ai-live` remains the repeatable paid integration command.
-- The Vercel project is not connected to Git because the Vercel GitHub App lacks repository access. The fixed alias must therefore be repointed explicitly after each CLI Preview deployment, and Preview variables cannot yet be restricted to one Git branch. Provider-level staging acceptance cannot run until independent CodingPlan, Airwallex Sandbox, Resend/test-recipient, and Queue credentials are supplied.
-- Cloudflare account/domain access was not available for Bot Fight Mode, WAF/short-window rate limiting, or production Turnstile configuration. Production now fails closed with `TURNSTILE_SECRET_KEY is required when Turnstile is enabled`; the public page loads, but scan submission and live third-site `429` acceptance remain blocked until valid production Turnstile keys are configured. Database limiting, Webhook signatures, SSRF protection, and the commercial audit remain active in code.
+- The Vercel project is not connected to Git because the Vercel GitHub App lacks repository access. The fixed alias must therefore be repointed explicitly after each CLI Preview deployment, and Preview variables cannot yet be restricted to one Git branch.
+- At the user's written direction, Preview temporarily reuses the existing Xiaomi MiMo Token Plan API key. This is an explicit exception to the approved independent-model-key requirement; all other credentials remain separated. Replace it with a staging-only model key before claiming full conformance.
+- Vercel Sensitive variables cannot be decrypted by `vercel env pull`; local Worker drills must inject separately held staging values without printing them. A local real-model attempt used the approved existing key but the target failed SSRF/DNS revalidation with `UrlSafetyError` before model invocation, so real model acceptance remains open.
+- Production Turnstile and the Cloudflare burst rule are live. Server-side no-token rejection (`403`) and edge burst rejection (`429`) are proven, but the application-level third-distinct-site browser drill was not completed because the attempted target was not scannable.
+- Airwallex Sandbox and Resend resources/Webhooks are configured, but no real signed Sandbox delivery, payment/refund cycle, or application-originated redirected email has been observed yet.
 - Anonymous users behind the same public IP or carrier/NAT gateway intentionally share the two-site rolling limit; there is no unauthenticated quota-reset endpoint.
 
 ## Next Steps
 
-1. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the staging branch; until then, repoint the fixed staging alias after each CLI Preview deployment.
-2. Add independent staging CodingPlan, Airwallex Sandbox, Resend/test recipient, and Queue credentials; configure the rotated bypass in signed Sandbox Webhook URLs and run provider acceptance.
-3. Configure Cloudflare production Turnstile, Bot Fight Mode, and narrow WAF/rate-limit rules without blocking AI crawlers; then verify the public third distinct site returns `429` and staging variables cannot change it.
-4. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
-5. Measure one, two and four deep processes; keep two as the initial workstation default until live evidence supports a change.
+1. Replace the shared Preview model key with a staging-only key, then run one successful real-model staging report.
+2. Trigger and verify a signed Airwallex Sandbox Webhook, a test payment/refund, and an application-originated Resend message redirected only to `itheheda@gmail.com`.
+3. Complete the production application-rate-limit drill with three scannable distinct sites and a fresh Turnstile token for each; the third must return `429`, including when staging-only inputs are supplied.
+4. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the staging branch; until then, repoint the fixed staging alias after each CLI Preview deployment.
+5. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
 
 ## Acceptance Commands
 

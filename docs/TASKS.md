@@ -27,8 +27,10 @@
 - [x] Connect an independent Preview Neon database, initialize its staging marker, configure Preview policy variables, rotate the Vercel automation bypass without exposing it, deploy, and verify authenticated browser flows.
 - [x] Assign and verify the fixed protected staging alias `open-geo-console-staging-itheheda.vercel.app` without weakening Vercel Authentication.
 - [ ] Authorize the Vercel GitHub App for this repository, connect the project, and scope staging environment variables to one Preview branch; until then, repoint the fixed alias after each CLI deployment.
-- [ ] Add an independent CodingPlan staging key, Sandbox payment/Webhook credentials, Resend test configuration, test recipient, and staging Queue credentials; then run provider-level acceptance.
-- [ ] Configure production Cloudflare Bot Fight Mode, WAF/short-window rate limiting, and Turnstile without blocking AI crawlers; then complete live production third-site `429` browser acceptance.
+- [x] Create separate Airwallex Sandbox, Resend/test-recipient, and Cloudflare Queue resources; protect provider Webhooks with dedicated rotated bypass values and application signatures.
+- [ ] Replace the user-approved shared MiMo Preview key with an independent staging key, then complete a successful real-model report.
+- [x] Configure production Turnstile, Cloudflare Bot Fight Mode, and a narrow `/api/scan` burst rule while leaving AI-bot blocking off.
+- [ ] Complete signed Sandbox Webhook, payment/refund, redirected-email, and production application-level third-site `429` browser acceptance.
 
 ## Evidence-backed AI report engine
 
@@ -51,5 +53,6 @@
 - [x] Remove personal-site defaults and shared recent reports from the anonymous homepage; label technical and AI scores independently.
 - [ ] Rotate the exposed credential before public production deployment.
 - [x] Implement Airwallex checkout/refunds, Queue outbox, Resend delivery, safe link redemption/reissue and 24-hour batch SLA.
-- [ ] Create live Cloudflare Queue/Turnstile, Airwallex and Resend resources; complete sandbox and real payment/refund/email drills.
+- [x] Create production Cloudflare Turnstile and staging Queue/Airwallex/Resend resources.
+- [ ] Complete sandbox payment/refund/email and signed provider-delivery drills.
 - [ ] Measure one, two and four deep Worker processes with representative live workloads before raising the default concurrency.

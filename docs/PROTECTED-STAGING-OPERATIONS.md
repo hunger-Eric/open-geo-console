@@ -11,7 +11,7 @@ This runbook is the operator contract for the protected Vercel Preview and the p
 | Anonymous site limit | `OGC_STAGING_FREE_SITE_LIMIT`, integer 1-100, default 100 | Always 2 distinct sites per rolling 24 hours |
 | Commerce | `COMMERCE_MODE=test`, fixed Airwallex Sandbox host | `disabled` until live gates pass, then `live` |
 | Email | All envelopes redirected to `OGC_TEST_EMAIL_RECIPIENT`; missing recipient fails before Resend | Actual order recipient; test recipient must be absent |
-| Model, HMAC, Queue, payment, email, bypass | Independent staging values | Independent production values |
+| Model, HMAC, Queue, payment, email, bypass | Independent staging values; current model key reuse is a documented temporary exception | Independent production values |
 
 Production always uses the two-site policy even if a staging variable, header, cookie, or query parameter is present. Forced regeneration is accepted only for the protected staging identity.
 
@@ -38,6 +38,8 @@ npm run commerce:staging:all
 
 These commands do not fall back to `.env.local`; they refuse a non-staging profile, a production database marker, or live commerce. Both Worker lanes must be scheduled in production, but must never share model, Queue, HMAC, payment, or email credentials with staging.
 
+Vercel Sensitive values are intentionally not decryptable through `vercel env pull`; the generated file contains empty placeholders for those names. For a local Worker drill, inject the separately held staging values into only that process. Never weaken the database marker guard, print values, or copy production secrets into `.env.staging.local`.
+
 ## Local staging cleanup
 
 There is no HTTP quota reset or administrator bypass. To clear isolated staging free-site reuse and rolling-limit rows:
@@ -61,6 +63,8 @@ Both modes verify the deployment profile and database marker and refuse producti
 - Keep Airwallex Sandbox and Resend Webhook signature verification enabled in the application. Vercel protection is an outer gate, not a substitute for provider signatures or event idempotency.
 - Pass the current automation bypass only in the provider Webhook URL or another provider-supported secret location. Rotate it through Vercel's protection-bypass API or dashboard; never print, log, commit, or paste the value.
 - After rotation, verify the previous credential is rejected and update Sandbox providers securely. Do not disable Preview authentication to repair delivery.
+- Current production URL: `https://geo.itheheda.online`. Current protected staging URL: `https://open-geo-console-staging-itheheda.vercel.app`.
+- The staging Airwallex and Resend Webhooks use separate provider-specific protection-bypass values. Do not reuse the general automation bypass.
 
 ## Acceptance
 
@@ -78,9 +82,9 @@ Browser acceptance must prove anonymous denial, authenticated access, more than 
 
 ## Cloudflare production checklist
 
-When account access and a production domain are available:
+Current production configuration:
 
-1. Create production Turnstile keys, set the expected hostname, and enable server-side verification.
-2. Enable Bot Fight Mode and narrowly scoped WAF/short-window rate-limit rules for abusive scan and Webhook traffic.
-3. Keep the origin's database rate limit, Webhook signatures, SSRF protections, and commercial audit active.
-4. Do not enable the setting that blocks AI crawlers; crawler visibility is part of the product being measured.
+1. Turnstile uses a Managed widget for `geo.itheheda.online` and `open-geo-console.vercel.app`; `TURNSTILE_EXPECTED_HOSTNAME` is the canonical custom domain.
+2. Bot Fight Mode is enabled. The separate setting that blocks AI crawlers is off.
+3. Rate rule `protect-open-geo-scan-burst` blocks an IP after 5 `/api/scan` requests in 10 seconds for 10 seconds.
+4. The origin database limit, Webhook signatures, SSRF protections, and commercial audit remain mandatory. Do not treat the edge burst rule as the product quota.

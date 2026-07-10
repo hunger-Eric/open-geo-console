@@ -71,3 +71,11 @@ Vercel requests prefer `x-vercel-forwarded-for` and fall back to Vercel's overwr
 Every deployed Web, Worker, and commercial process declares `OGC_DEPLOYMENT_PROFILE=staging|production` and connects only to a PostgreSQL database with the same immutable `deployment_environment` marker. Only `VERCEL_ENV=preview` plus the staging profile may raise the rolling distinct-site limit, expose forced regeneration, redirect all test email, or use Airwallex Sandbox. Production unconditionally retains the two-site rolling limit and rejects test email configuration; request headers, cookies, query parameters, and administrator shortcuts are not policy inputs.
 
 Forced staging regeneration creates a new report behind a per-site reservation. The current reuse mapping switches only after successful terminalization; failure leaves the old report usable, and duplicate clicks return the active regeneration rather than creating another job.
+
+## 2026-07-11: Preview model-key reuse is a temporary explicit exception
+
+The approved design requires an independent staging model credential. The user explicitly directed Preview to reuse the existing Xiaomi MiMo Token Plan key during this rollout. This changes the rollout acceptance boundary but does not weaken any other separation: staging keeps independent PostgreSQL, HMAC, Queue, payment, email, and protection-bypass credentials. The shared model key is tracked as security debt and must be replaced before the deployment is described as fully conforming to the original design.
+
+## 2026-07-11: Production edge controls preserve AI crawler visibility
+
+The canonical production hostname is `geo.itheheda.online`. Cloudflare Bot Fight Mode and a narrow `/api/scan` burst limit are enabled, while the platform setting that blocks AI crawlers remains off. Turnstile is verified server-side for the production hostname. These edge controls supplement rather than replace the database distinct-site limit, Webhook signatures, SSRF checks, and commercial invariant audit.
