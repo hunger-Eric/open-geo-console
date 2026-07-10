@@ -29,6 +29,8 @@ export const en = {
       "Get a free homepage check now. A private deep report analyzes the valid pages across your site with evidence-backed AI analysis.",
     urlLabel: "Company website URL",
     urlPlaceholder: "https://company.com",
+    forceFreshLabel: "Force a fresh report",
+    forceFreshDescription: "Staging only. Keep the current report available while a new crawl and report are generated.",
     nextTitle: "Already have server access logs?",
     nextDescription:
       "Verify whether identifiable AI crawlers visited the site."
@@ -451,6 +453,10 @@ export const en = {
     unsupportedUrl: "Only HTTP and HTTPS URLs are supported.",
     scanFailed: "Unable to scan this website.",
     humanVerificationRequired: "Complete human verification before starting the diagnosis.",
-    freePreviewLimitReached: "The free preview supports two different websites per network in any 24-hour period. Please try again later."
+    freePreviewLimitReached: "The free preview supports two different websites per network in any 24-hour period. Please try again later.",
+    stagingFreePreviewLimitReached: "The protected staging Preview has reached its rolling 24-hour website limit.",
+    stagingConcurrencyLimitReached: "Two staging reports are already running. Wait for one to finish and try again.",
+    forceFreshUnavailable: "Forced regeneration is available only on the protected staging Preview.",
+    deploymentConfigurationInvalid: "This deployment is not configured with a safe environment identity."
   }
 } satisfies Dictionary;

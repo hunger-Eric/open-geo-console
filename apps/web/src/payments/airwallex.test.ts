@@ -10,6 +10,24 @@ describe("AirwallexGateway", () => {
     expect(verifyAirwallexWebhookSignature(`${body} `, "123", signature, "secret")).toBe(false);
   });
 
+  it("rejects a production API override in test commerce before network I/O", async () => {
+    const fetchImpl = vi.fn();
+    const gateway = new AirwallexGateway({
+      environment: {
+        COMMERCE_MODE: "test",
+        AIRWALLEX_API_BASE_URL: "https://api.airwallex.com",
+        AIRWALLEX_CLIENT_ID: "client",
+        AIRWALLEX_API_KEY: "key"
+      },
+      fetchImpl
+    });
+    await expect(gateway.createHostedCheckout({
+      orderId: "order_2", reportId: "report_2", siteKey: "example.com", locale: "en",
+      amountMinor: 2_900, currency: "USD", expiresAt: new Date("2030-01-01T00:00:00Z")
+    })).rejects.toThrow("Sandbox API");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("creates a fixed, non-reusable provider-hosted checkout", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ token: "access" }), { status: 200 }))

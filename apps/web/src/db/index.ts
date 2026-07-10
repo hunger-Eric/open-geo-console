@@ -1,4 +1,10 @@
 import fs from "node:fs";
+import type { DeploymentProfile } from "@/security/deployment-policy";
+import {
+  assertDeploymentRuntime,
+  nonSensitiveDatabaseFingerprint,
+  readDeploymentProfile
+} from "@/security/deployment-policy";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -8,7 +14,8 @@ import * as schema from "./schema";
 
 let client: ReturnType<typeof postgres> | undefined;
 let database: ReturnType<typeof drizzle<typeof schema>> | undefined;
-let initialization: Promise<void> | undefined;
+let schemaInitialization: Promise<void> | undefined;
+let validatedProfile: DeploymentProfile | undefined;
 
 export function isMemoryPersistence(): boolean {
   return process.env.NODE_ENV === "test" && !process.env.DATABASE_URL;
@@ -51,18 +58,88 @@ export async function ensureDatabase(): Promise<void> {
   if (isMemoryPersistence()) {
     return;
   }
-  if (!initialization) {
+  await ensureDatabaseSchema();
+  const profile = assertDeploymentRuntime();
+  if (validatedProfile === profile) return;
+  const rows = await getSqlClient()<{ profile: string }[]>`
+    SELECT profile FROM deployment_environment WHERE singleton = true LIMIT 1
+  `;
+  assertDatabaseProfileMatches(rows[0]?.profile, profile);
+  validatedProfile = profile;
+}
+
+export function assertDatabaseProfileMatches(
+  actualProfile: string | undefined,
+  expectedProfile: DeploymentProfile
+): void {
+  if (actualProfile !== expectedProfile) {
+    throw new Error("The database environment marker does not match the deployment profile.");
+  }
+}
+
+async function ensureDatabaseSchema(): Promise<void> {
+  if (!schemaInitialization) {
     const sql = getSqlClient();
-    initialization = (async () => {
+    schemaInitialization = (async () => {
       for (const migration of DATABASE_MIGRATIONS) {
         await sql.unsafe(migration);
       }
     })().catch((error) => {
-      initialization = undefined;
+      schemaInitialization = undefined;
       throw error;
     });
   }
-  await initialization;
+  await schemaInitialization;
+}
+
+export async function initializeDatabaseEnvironment(profile: DeploymentProfile): Promise<{ profile: DeploymentProfile; fingerprint: string }> {
+  if (isMemoryPersistence()) throw new Error("A PostgreSQL database is required to initialize its environment marker.");
+  if (readDeploymentProfile({ OGC_DEPLOYMENT_PROFILE: profile }) !== profile) throw new Error("Invalid database environment profile.");
+  await ensureDatabaseSchema();
+  const sql = getSqlClient();
+  await sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended('ogc:deployment-environment', 0))`;
+    const rows = await tx<{ profile: string }[]>`
+      SELECT profile FROM deployment_environment WHERE singleton = true FOR UPDATE
+    `;
+    if (rows[0] && rows[0].profile !== profile) {
+      throw new Error("The database environment marker is already initialized for another profile.");
+    }
+    if (!rows[0]) {
+      await tx`
+        INSERT INTO deployment_environment (singleton, profile)
+        VALUES (true, ${profile})
+      `;
+    }
+  });
+  validatedProfile = undefined;
+  return getDatabaseEnvironmentStatus();
+}
+
+export async function getDatabaseEnvironmentStatus(): Promise<{ profile: DeploymentProfile; fingerprint: string }> {
+  if (isMemoryPersistence()) throw new Error("A PostgreSQL database is required to inspect its environment marker.");
+  await ensureDatabaseSchema();
+  const rows = await getSqlClient()<{ profile: string; database_name: string; database_oid: string | number }[]>`
+    SELECT environment.profile,
+           current_database() AS database_name,
+           database.oid AS database_oid
+    FROM deployment_environment environment
+    JOIN pg_database database ON database.datname = current_database()
+    WHERE environment.singleton = true
+    LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row || (row.profile !== "staging" && row.profile !== "production")) {
+    throw new Error("The database environment marker has not been initialized.");
+  }
+  return {
+    profile: row.profile,
+    fingerprint: nonSensitiveDatabaseFingerprint({
+      databaseName: row.database_name,
+      databaseOid: row.database_oid,
+      profile: row.profile
+    })
+  };
 }
 
 export async function closeDatabase(): Promise<void> {
@@ -71,7 +148,8 @@ export async function closeDatabase(): Promise<void> {
   }
   client = undefined;
   database = undefined;
-  initialization = undefined;
+  schemaInitialization = undefined;
+  validatedProfile = undefined;
 }
 
 /**

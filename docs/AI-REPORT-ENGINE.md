@@ -44,11 +44,12 @@ The free tier returns one verified homepage finding. Its technical score covers 
 
 PostgreSQL tables:
 
+- `deployment_environment` — immutable `staging|production` database identity checked by every deployed process.
 - `scan_reports`, `report_bot_evidence` — technical report and sanitized log evidence.
 - `scan_jobs` — leased task state and checkpoints.
 - `ai_reports` — one current free and one current deep AI report per technical report; deep rows may include a private full technical payload.
 - `crawl_evidence` — normalized page content, hashes and excerpts; full normalized content expires after seven days.
-- `free_site_trials`, `anonymous_rate_buckets`, `free_ai_daily_budgets`, `free_ai_budget_reservations` — 30-day site reuse, rolling two-site anonymous limiting and an exact global AI budget.
+- `free_site_trials`, `staging_free_regenerations`, `anonymous_rate_buckets`, `free_ai_daily_budgets`, `free_ai_budget_reservations` — 30-day site reuse, staging-only regeneration reservations, rolling anonymous limiting and an exact global AI budget.
 - `access_keys`, `credit_ledger` — HMAC-only keys and idempotent credit transactions.
 - `report_access_tokens` — HMAC-only private report links.
 - `payment_orders`, `payment_events`, `payment_refunds` — immutable one-time purchases, verified provider events and cash refunds.
@@ -61,9 +62,9 @@ PostgreSQL is the only production authority. `better-sqlite3` remains solely for
 
 ### `POST /api/scan`
 
-Request: `{ "url": "https://company.example", "locale": "en|zh", "turnstileToken": "…" }`. Production verifies Turnstile server-side. The locale is validated strictly and persisted as the immutable report-generation language.
+Request: `{ "url": "https://company.example", "locale": "en|zh", "turnstileToken": "…" }`. Protected staging may additionally send `forceFresh: true`; production rejects it regardless of headers, cookies, or query parameters. Production verifies Turnstile server-side. The locale is validated strictly and persisted as the immutable report-generation language.
 
-Returns `202 { reportId, jobId, tier: "free", status: "queued" }`, an existing report with `status: "reused"`, `200 status: "technical_only"` after the daily AI budget is exhausted, or `429` after the rolling two-site limit.
+Returns `202 { reportId, jobId, tier: "free", status: "queued" }`, an existing report with `status: "reused"`, an active staging regeneration with `status: "regenerating"`, `200 status: "technical_only"` after the daily AI budget is exhausted, or `429` after the applicable rolling limit.
 
 ### `GET /api/reports/:id/status`
 

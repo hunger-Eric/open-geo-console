@@ -60,6 +60,7 @@ Required production variables:
 - `OGC_AI_MODEL`
 - `OGC_TOKEN_HASH_SECRET`
 - `OGC_IP_HASH_SECRET`
+- `OGC_DEPLOYMENT_PROFILE` (`staging` or `production`, matching the database marker)
 
 The initial commercial target is Netlify plus Neon, Cloudflare Turnstile/Queue, Airwallex, Resend, and scheduled workstation batches. This avoids mandatory server rent at low order volume while keeping every paid task durable in PostgreSQL. A later `FULFILLMENT_MODE=realtime` deployment uses the same job/outbox records on persistent Worker infrastructure.
 
@@ -90,6 +91,8 @@ Audit the terminal job/credit invariant without changing report state:
 ```bash
 npm run db:audit
 ```
+
+Protected staging uses a separate marked PostgreSQL database, independent provider credentials, Vercel Preview Authentication, a staging-only limit of at most 100 distinct sites per rolling 24 hours, and explicit staging Worker commands. Production always remains at two sites and cannot be changed by staging variables or request input. See [Protected Staging and Production Operations](docs/PROTECTED-STAGING-OPERATIONS.md).
 
 ## API and Reports
 

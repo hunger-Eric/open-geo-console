@@ -1,6 +1,12 @@
 // Idempotent bootstrap for self-hosted deployments. A future migration runner can
 // execute the same statements and then take ownership of schema versioning.
 export const DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS deployment_environment (
+    singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton = true),
+    profile text NOT NULL CHECK (profile IN ('staging','production')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
   `CREATE TABLE IF NOT EXISTS scan_reports (
     id text PRIMARY KEY,
     url text NOT NULL,
@@ -26,7 +32,7 @@ export const DATABASE_MIGRATIONS = [
     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
     tier text NOT NULL CHECK (tier IN ('free', 'deep')),
     locale text NOT NULL CONSTRAINT scan_jobs_locale_check CHECK (locale IN ('en','zh')),
-    reason text NOT NULL DEFAULT 'standard' CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction')),
+    reason text NOT NULL DEFAULT 'standard' CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration')),
     stage text NOT NULL DEFAULT 'queued' CONSTRAINT scan_jobs_stage_check CHECK (stage IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')),
     progress integer NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
     checkpoint jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -91,7 +97,7 @@ export const DATABASE_MIGRATIONS = [
   `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_locale_check CHECK (locale IN ('en','zh'))`,
   `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_reason_check`,
   `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_reason_check
-   CHECK (reason IN ('standard','system_recovery','locale_correction'))`,
+   CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration'))`,
   `CREATE TABLE IF NOT EXISTS crawl_evidence (
     id text PRIMARY KEY,
     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
@@ -115,6 +121,14 @@ export const DATABASE_MIGRATIONS = [
     job_id text REFERENCES scan_jobs(id) ON DELETE SET NULL,
     claimed_at timestamptz NOT NULL DEFAULT now(),
     expires_at timestamptz NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS staging_free_regenerations (
+    site_key text PRIMARY KEY,
+    reservation_id text NOT NULL UNIQUE,
+    report_id text REFERENCES scan_reports(id) ON DELETE SET NULL,
+    job_id text REFERENCES scan_jobs(id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE TABLE IF NOT EXISTS anonymous_rate_buckets (
     ip_hash text NOT NULL,

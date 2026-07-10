@@ -43,6 +43,8 @@ export interface Dictionary {
     description: string;
     urlLabel: string;
     urlPlaceholder: string;
+    forceFreshLabel: string;
+    forceFreshDescription: string;
     nextTitle: string;
     nextDescription: string;
   };
@@ -300,7 +302,15 @@ export interface Dictionary {
   severity: Record<SeverityKey, string>;
   findings: Record<string, FindingMessage>;
   errors: Record<
-    "emptyUrl" | "unsupportedUrl" | "scanFailed" | "humanVerificationRequired" | "freePreviewLimitReached",
+    | "emptyUrl"
+    | "unsupportedUrl"
+    | "scanFailed"
+    | "humanVerificationRequired"
+    | "freePreviewLimitReached"
+    | "stagingFreePreviewLimitReached"
+    | "stagingConcurrencyLimitReached"
+    | "forceFreshUnavailable"
+    | "deploymentConfigurationInvalid",
     string
   >;
 }

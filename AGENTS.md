@@ -15,6 +15,8 @@
 - `npm run worker` is a low-level entry point and requires `OGC_WORKER_TIER=free|deep`.
 - `npm run browser:install` installs Chromium for JavaScript-rendered page fallback.
 - `npm run db:audit` fails when a terminal commercial job still has a reserved credit.
+- `npm run worker:staging:free|deep` and `npm run commerce:staging:all` require `apps/web/.env.staging.local` and refuse a non-staging database marker.
+- `npm run staging:free:cleanup -- --confirm` is the only quota/reuse cleanup path and refuses production.
 - `npm run lint` checks the Next.js workspace.
 - `npm test` runs package and app unit tests.
 - `npm run build` builds packages and the web app.
@@ -31,6 +33,8 @@
 ## Production Boundaries
 
 - PostgreSQL is the only production report authority; do not restore SQLite or browser-local report persistence.
+- Every deployed Web/Worker process requires `OGC_DEPLOYMENT_PROFILE`, and its PostgreSQL `deployment_environment` marker must match before work is accepted.
+- Production free-site limits are always two distinct sites per rolling 24 hours; never add request-controlled or administrator bypasses. Forced regeneration exists only for protected staging Preview deployments.
 - Cloudflare Queue is notification-only. Payment, job, dispatch, refund, email, and access authority remains in PostgreSQL.
 - The web process creates jobs and serves reports. The worker is the only process that crawls pages or calls the configured model.
 - Only a verified payment Webhook may mark an order paid and create its exactly-once entitlement/deep job.

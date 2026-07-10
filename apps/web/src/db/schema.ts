@@ -17,7 +17,7 @@ import {
 
 export type ReportTier = "free" | "deep";
 export type ReportLocale = "en" | "zh";
-export type ScanJobReason = "standard" | "system_recovery" | "locale_correction";
+export type ScanJobReason = "standard" | "system_recovery" | "locale_correction" | "staging_regeneration";
 export type ScanJobStage =
   | "queued"
   | "discovering"
@@ -28,6 +28,16 @@ export type ScanJobStage =
   | "completed"
   | "completed_limited"
   | "failed";
+
+export const deploymentEnvironment = pgTable("deployment_environment", {
+  singleton: boolean("singleton").primaryKey().notNull().default(true),
+  profile: text("profile").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  check("deployment_environment_singleton_check", sql`${table.singleton} = true`),
+  check("deployment_environment_profile_check", sql`${table.profile} IN ('staging','production')`)
+]);
 export type AccessKeyStatus = "active" | "revoked" | "exhausted";
 export type CreditStatus = "reserved" | "settled" | "refunded";
 export type CommerceCurrency = "CNY" | "USD" | "HKD";
@@ -142,7 +152,7 @@ export const scanJobs = pgTable(
     index("scan_jobs_tier_lease_idx").on(table.tier, table.leaseExpiresAt),
     index("scan_jobs_report_idx").on(table.reportId, table.createdAt),
     check("scan_jobs_locale_check", sql`${table.locale} IN ('en', 'zh')`),
-    check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction')`),
+    check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration')`),
     check(
       "scan_jobs_stage_check",
       sql`${table.stage} IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')`
@@ -533,6 +543,15 @@ export const freeSiteTrials = pgTable("free_site_trials", {
   jobId: text("job_id").references(() => scanJobs.id, { onDelete: "set null" }),
   claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull()
+});
+
+export const stagingFreeRegenerations = pgTable("staging_free_regenerations", {
+  siteKey: text("site_key").primaryKey(),
+  reservationId: text("reservation_id").notNull().unique(),
+  reportId: text("report_id").references(() => scanReports.id, { onDelete: "set null" }),
+  jobId: text("job_id").references(() => scanJobs.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
 export const anonymousRateBuckets = pgTable(

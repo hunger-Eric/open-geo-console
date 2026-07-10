@@ -33,10 +33,42 @@ export interface EnqueueScanJobInput {
   reason?: ScanJobReason;
   creditReservationId?: string;
   maxAttempts?: number;
+  maxActiveTierJobs?: number;
+}
+
+export class ScanJobCapacityError extends Error {
+  constructor() {
+    super("The staging report concurrency limit has been reached.");
+    this.name = "ScanJobCapacityError";
+  }
 }
 
 export async function enqueueScanJob(input: EnqueueScanJobInput): Promise<ScanJobRow> {
   await ensureDatabase();
+  if (input.maxActiveTierJobs !== undefined) {
+    if (!Number.isSafeInteger(input.maxActiveTierJobs) || input.maxActiveTierJobs < 1 || input.maxActiveTierJobs > 2) {
+      throw new Error("The staging active-job limit must be an integer from 1 through 2.");
+    }
+    const id = randomUUID();
+    await getSqlClient().begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`enqueue-tier:${input.tier}`}, 0))`;
+      const counts = await tx<{ count: number }[]>`
+        SELECT count(*)::integer AS count
+        FROM scan_jobs
+        WHERE tier = ${input.tier}
+          AND stage NOT IN ('completed', 'completed_limited', 'failed')
+      `;
+      if ((counts[0]?.count ?? 0) >= input.maxActiveTierJobs!) throw new ScanJobCapacityError();
+      await tx`
+        INSERT INTO scan_jobs (id, report_id, tier, locale, reason, credit_reservation_id, max_attempts)
+        VALUES (
+          ${id}, ${input.reportId}, ${input.tier}, ${input.locale}, ${input.reason ?? "standard"},
+          ${input.creditReservationId ?? null}, ${input.maxAttempts ?? 3}
+        )
+      `;
+    });
+    return (await getScanJob(id))!;
+  }
   const [row] = await getDb()
     .insert(scanJobs)
     .values({
@@ -186,6 +218,11 @@ export async function claimScanJob(
           status = CASE WHEN access.status = 'exhausted' THEN 'active' ELSE access.status END
       FROM refunded WHERE access.id = refunded.access_key_id
     `;
+    await tx`
+      DELETE FROM staging_free_regenerations regeneration
+      USING scan_jobs job
+      WHERE regeneration.job_id = job.id AND job.stage = 'failed'
+    `;
     return tx<{ id: string }[]>`
       UPDATE scan_jobs
       SET lease_owner = ${workerId},
@@ -297,7 +334,7 @@ export async function terminalizeScanJob(
   await ensureDatabase();
   const sql = getSqlClient();
   await sql.begin(async (tx) => {
-    const jobs = await tx<{ id: string; credit_reservation_id: string | null }[]>`
+    const jobs = await tx<{ id: string; report_id: string; tier: ReportTier; credit_reservation_id: string | null }[]>`
       UPDATE scan_jobs
       SET stage = ${input.stage},
           progress = CASE WHEN ${input.stage} = 'failed' THEN progress ELSE 100 END,
@@ -316,11 +353,34 @@ export async function terminalizeScanJob(
         AND lease_owner = ${workerId}
         AND lease_expires_at > now()
         AND stage NOT IN ('completed', 'completed_limited', 'failed')
-      RETURNING id, credit_reservation_id
+      RETURNING id, report_id, tier, credit_reservation_id
     `;
     const job = jobs[0];
     if (!job) {
       throw new Error("The scan job cannot be terminalized without its active lease.");
+    }
+    if (job.tier === "free") {
+      const regenerations = await tx<{ site_key: string; report_id: string }[]>`
+        SELECT site_key, report_id
+        FROM staging_free_regenerations
+        WHERE job_id = ${id} AND report_id = ${job.report_id}
+        FOR UPDATE
+      `;
+      const regeneration = regenerations[0];
+      if (regeneration && input.stage !== "failed") {
+        await tx`
+          INSERT INTO free_site_trials (site_key, report_id, job_id, claimed_at, expires_at)
+          VALUES (${regeneration.site_key}, ${regeneration.report_id}, ${id}, now(), now() + interval '30 days')
+          ON CONFLICT (site_key) DO UPDATE SET
+            report_id = EXCLUDED.report_id,
+            job_id = EXCLUDED.job_id,
+            claimed_at = EXCLUDED.claimed_at,
+            expires_at = EXCLUDED.expires_at
+        `;
+      }
+      if (regeneration) {
+        await tx`DELETE FROM staging_free_regenerations WHERE site_key = ${regeneration.site_key} AND job_id = ${id}`;
+      }
     }
     if (!job.credit_reservation_id) return;
 

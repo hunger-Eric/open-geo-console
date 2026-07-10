@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ResendEmailGateway } from "./resend";
+import { ResendEmailGateway, resolveEnvelopeRecipient } from "./resend";
 import { renderTransactionalEmail } from "./templates";
 
 describe("ResendEmailGateway", () => {
@@ -14,6 +14,51 @@ describe("ResendEmailGateway", () => {
     });
     expect(fetchImpl.mock.calls[0]?.[1]?.headers).toMatchObject({ "idempotency-key": "report_ready/order-1/v1" });
     expect(String(fetchImpl.mock.calls[0]?.[1]?.body)).not.toContain("undefined");
+  });
+
+  it("redirects every test-mode envelope to the configured staging recipient", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: "email_test" }), { status: 200 }));
+    const gateway = new ResendEmailGateway({
+      environment: {
+        OGC_DEPLOYMENT_PROFILE: "staging",
+        COMMERCE_MODE: "test",
+        OGC_TEST_EMAIL_RECIPIENT: "operator@example.test",
+        RESEND_API_KEY: "re_test",
+        RESEND_FROM_EMAIL: "Open GEO <reports@example.com>"
+      },
+      fetchImpl
+    });
+    await gateway.send({
+      to: "buyer@example.com", template: "payment_confirmed", locale: "en", orderReference: "OGC-2",
+      siteLabel: "example.com", idempotencyKey: "payment_confirmed/order-2/v1"
+    });
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).to).toEqual(["operator@example.test"]);
+  });
+
+  it("fails before network I/O when the test recipient is missing", async () => {
+    const fetchImpl = vi.fn();
+    const gateway = new ResendEmailGateway({
+      environment: {
+        OGC_DEPLOYMENT_PROFILE: "staging",
+        COMMERCE_MODE: "test",
+        RESEND_API_KEY: "re_test",
+        RESEND_FROM_EMAIL: "Open GEO <reports@example.com>"
+      },
+      fetchImpl
+    });
+    await expect(gateway.send({
+      to: "buyer@example.com", template: "payment_confirmed", locale: "en", orderReference: "OGC-3",
+      siteLabel: "example.com", idempotencyKey: "payment_confirmed/order-3/v1"
+    })).rejects.toThrow("OGC_TEST_EMAIL_RECIPIENT");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("never redirects a production-profile recipient", () => {
+    expect(resolveEnvelopeRecipient("buyer@example.com", {
+      OGC_DEPLOYMENT_PROFILE: "production",
+      COMMERCE_MODE: "test",
+      OGC_TEST_EMAIL_RECIPIENT: "operator@example.test"
+    })).toBe("buyer@example.com");
   });
 
   it("escapes customer-visible fields in HTML", () => {

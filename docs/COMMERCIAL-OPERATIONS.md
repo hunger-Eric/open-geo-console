@@ -29,6 +29,8 @@ Customer promise: a paid report is delivered by email within 24 hours of confirm
 
 Use distinct random values for every secret family. The email-encryption secret must remain available for as long as its key version is used by retained orders.
 
+Staging and production must use different databases and every secret family in this table. `COMMERCE_MODE=test` is fixed to Airwallex Sandbox, and test-mode Resend envelopes are redirected to the required staging recipient. Protected Preview setup, environment markers, explicit staging Worker commands, bypass rotation, and production Cloudflare gates are documented in [Protected Staging and Production Operations](PROTECTED-STAGING-OPERATIONS.md).
+
 ## Safe launch modes
 
 - `COMMERCE_MODE=disabled`: default; checkout fails closed.

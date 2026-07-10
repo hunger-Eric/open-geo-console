@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDatabasePath, getDatabasePoolSize } from "./index";
+import { assertDatabaseProfileMatches, getDatabasePath, getDatabasePoolSize } from "./index";
 
 describe("database path selection", () => {
   const originalOpenGeoDbPath = process.env.OPEN_GEO_DB_PATH;
@@ -38,5 +38,13 @@ describe("database pool sizing", () => {
     expect(getDatabasePoolSize({ OGC_DATABASE_POOL_SIZE: "" })).toBe(10);
     expect(getDatabasePoolSize({ OGC_DATABASE_POOL_SIZE: "0" })).toBe(10);
     expect(getDatabasePoolSize({ OGC_DATABASE_POOL_SIZE: "invalid" })).toBe(10);
+  });
+});
+
+describe("database deployment marker", () => {
+  it("accepts only an exact deployment profile match", () => {
+    expect(() => assertDatabaseProfileMatches("staging", "staging")).not.toThrow();
+    expect(() => assertDatabaseProfileMatches("staging", "production")).toThrow("database environment marker");
+    expect(() => assertDatabaseProfileMatches(undefined, "production")).toThrow("database environment marker");
   });
 });

@@ -186,8 +186,15 @@ export class AirwallexGateway implements PaymentGateway {
 
   private baseUrl(): string {
     const configured = this.environment.AIRWALLEX_API_BASE_URL?.trim();
+    const mode = getCommerceMode(this.environment);
+    if (mode === "test") {
+      if (configured && configured.replace(/\/$/, "") !== "https://api-demo.airwallex.com") {
+        throw new Error("Airwallex test commerce must use the Sandbox API.");
+      }
+      return "https://api-demo.airwallex.com";
+    }
     if (configured) return configured.replace(/\/$/, "");
-    return getCommerceMode(this.environment) === "live" ? "https://api.airwallex.com" : "https://api-demo.airwallex.com";
+    return mode === "live" ? "https://api.airwallex.com" : "https://api-demo.airwallex.com";
   }
 }
 

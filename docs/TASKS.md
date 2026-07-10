@@ -18,6 +18,17 @@
 - [x] Publish the Web to Vercel and connect the production Neon PostgreSQL database.
 - [x] Add recorded workstation batch drains and preserve a configuration-only upgrade path to persistent real-time Workers.
 
+## Protected staging and production security
+
+- [x] Add fail-closed deployment profiles, immutable PostgreSQL environment markers, explicit staging Worker/commerce commands, and production-refusing cleanup.
+- [x] Keep production at two rolling distinct sites while allowing only protected staging Preview to configure up to 100.
+- [x] Add staging-only forced regeneration with old-report preservation, per-site idempotency, a two-job safety cap, UI, bilingual copy, and PostgreSQL integration coverage.
+- [x] Fix test commerce to Airwallex Sandbox and force all non-production email to the required test recipient.
+- [x] Connect an independent Preview Neon database, initialize its staging marker, configure Preview policy variables, rotate the Vercel automation bypass without exposing it, deploy, and verify authenticated browser flows.
+- [ ] Authorize the Vercel GitHub App for this repository, connect the project, and scope staging environment variables to the fixed protected Preview branch.
+- [ ] Add an independent CodingPlan staging key, Sandbox payment/Webhook credentials, Resend test configuration, test recipient, and staging Queue credentials; then run provider-level acceptance.
+- [ ] Configure production Cloudflare Bot Fight Mode, WAF/short-window rate limiting, and Turnstile without blocking AI crawlers; then complete live production third-site `429` browser acceptance.
+
 ## Evidence-backed AI report engine
 
 - [x] Add safe site identity, SSRF protection, sitemap/link discovery and representative-page selection.

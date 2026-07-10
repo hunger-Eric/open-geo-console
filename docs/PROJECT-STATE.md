@@ -2,7 +2,7 @@
 
 ## Current Goal
 
-Operate a durable, self-hostable report product whose main journey is `free technical report + AI preview → one-time purchase → private deep report by email → optional AI Bot evidence`. Code for the low-fixed-cost commercial path is complete; live provider resources and end-to-end sandbox/real-money drills remain external gates.
+Operate a durable, self-hostable report product whose main journey is `free technical report + AI preview → one-time purchase → private deep report by email → optional AI Bot evidence`. The protected staging/production security contract is implemented and its isolated Preview/database path is deployed; independent staging provider credentials, fixed branch integration, production edge controls, and provider drills remain external gates.
 
 ## Current Architecture
 
@@ -37,8 +37,13 @@ The web process persists a public homepage technical report and enqueues work. S
 - Reports persist one generation locale independently from the interface route. Legacy wrong-language deep artifacts have one authorized no-charge correction job.
 - Commercial terminalization is atomic: qualified jobs complete and settle; usable low-coverage jobs complete-limited and refund; unusable jobs fail and refund. `npm run db:audit` detects invariant violations.
 - The anonymous homepage now contains only website analysis, bilingual controls, value-led capability copy and a secondary log-tool link; it does not expose shared recent-report history or a personal-site default.
+- Deployment profiles and immutable PostgreSQL environment markers fail closed across Web, Worker, commerce, and cleanup. Only protected Vercel Preview plus the staging profile may raise the distinct-site limit to at most 100; production always remains at two.
+- Staging-only forced regeneration creates a new report behind a per-site reservation, preserves the prior reuse mapping on failure, switches it atomically on success, limits active staging free jobs to two, and deduplicates repeated clicks.
+- Explicit staging Worker/commerce commands read only `apps/web/.env.staging.local`. Test commerce uses the fixed Airwallex Sandbox endpoint, and all non-production email requires and redirects to `OGC_TEST_EMAIL_RECIPIENT`.
+- An independent Preview Neon database is marked `staging`; real PostgreSQL integration tests passed against it. The protected Preview deployment denies anonymous page/API access and authenticated browser acceptance proved three distinct sites, default reuse, a new forced report, and duplicate-click idempotency.
+- The existing production PostgreSQL database is marked `production`; the commercial invariant audit passes against both databases before deployment.
 - Live regression scan of `shun-express.com` produced a score of 35 with 26 grouped findings instead of the previous score of 0 with 62 repeated findings; the overview correctly summarizes 10 dead links.
-- The public noncommercial acceptance build for commit `8991628` is deployed at `https://open-geo-console.vercel.app`. `COMMERCE_MODE=disabled`, `TURNSTILE_REQUIRED=false` and `OGC_TRUST_VERCEL_HEADERS=true` keep visual review public, prevent an unconfigured checkout, and preserve per-client anonymous limits on this legacy Vercel project. The live 429 diagnostic header confirmed `vercel` rather than the shared fallback identity.
+- The public noncommercial acceptance build remains at `https://open-geo-console.vercel.app`. The current protected Preview is `https://open-geo-console-4dbx3cabz-itheheda-6857s-projects.vercel.app`; Standard Authentication protects it and its automation bypass was rotated without exposing either credential.
 
 ## Known Boundaries
 
@@ -48,16 +53,17 @@ The web process persists a public homepage technical report and enqueues work. S
 - Production always requires persistent PostgreSQL. Initial commercial operation may use scheduled workstation batches with a 24-hour/full-refund promise; instant delivery requires persistent `realtime` Workers.
 - Netlify is the intended commercial Web/API host. The existing Vercel Hobby deployment remains useful only for noncommercial acceptance because its terms are not the commercial target.
 - Real model behavior depends on the configured provider. CI uses mock clients; `npm run test:ai-live` remains the repeatable paid integration command.
-- Vercel currently lists no project environment variables, so the public acceptance deployment is not evidence of live database, model, payment, email or Queue readiness. Any credential previously exposed in chat must still be rotated before public operation.
+- The Vercel project is not connected to Git because the Vercel GitHub App lacks repository access. Preview variables therefore cannot yet be restricted to a fixed staging branch, and provider-level staging acceptance cannot run until independent CodingPlan, Airwallex Sandbox, Resend/test-recipient, and Queue credentials are supplied.
+- Cloudflare account/domain access was not available for Bot Fight Mode, WAF/short-window rate limiting, or production Turnstile configuration. Application Turnstile verification, database limiting, Webhook signatures, SSRF protection, and the commercial audit remain in code, but edge configuration and live production `429` acceptance are still external gates.
 - Anonymous users behind the same public IP or carrier/NAT gateway intentionally share the two-site rolling limit; there is no unauthenticated quota-reset endpoint.
 
 ## Next Steps
 
-1. Rotate the exposed model credential before public operation.
-2. Create Netlify, Cloudflare Turnstile/two Queues, Airwallex Sandbox and Resend domain/Webhook resources using `docs/COMMERCIAL-OPERATIONS.md`.
-3. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
-4. Measure one, two and four deep processes; keep two as the initial workstation default until live evidence supports a change.
-5. Move to persistent `realtime` Workers only when order volume or customer expectations require faster starts.
+1. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the fixed staging branch.
+2. Add independent staging CodingPlan, Airwallex Sandbox, Resend/test recipient, and Queue credentials; configure the rotated bypass in signed Sandbox Webhook URLs and run provider acceptance.
+3. Configure Cloudflare production Turnstile, Bot Fight Mode, and narrow WAF/rate-limit rules without blocking AI crawlers; then verify the public third distinct site returns `429` and staging variables cannot change it.
+4. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
+5. Measure one, two and four deep processes; keep two as the initial workstation default until live evidence supports a change.
 
 ## Acceptance Commands
 
@@ -65,4 +71,6 @@ The web process persists a public homepage technical report and enqueues work. S
 npm run lint
 npm test
 npm run build
+npm run db:audit
+npm run test:postgres:staging-security
 ```

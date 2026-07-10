@@ -50,6 +50,8 @@ describe("commercial persistence pure contracts", () => {
     expect(migration).toContain("ADD COLUMN IF NOT EXISTS report_locale text");
     expect(migration).toContain("ADD COLUMN IF NOT EXISTS locale_correction_used_at timestamptz");
     expect(migration).toContain("ADD COLUMN IF NOT EXISTS reason text NOT NULL DEFAULT 'standard'");
-    expect(migration).toContain("CHECK (reason IN ('standard','system_recovery','locale_correction'))");
+    expect(migration).toContain("CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration'))");
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS deployment_environment");
+    expect(migration).toContain("CREATE TABLE IF NOT EXISTS staging_free_regenerations");
   });
 });

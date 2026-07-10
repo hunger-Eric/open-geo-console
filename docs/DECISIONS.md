@@ -65,3 +65,9 @@ Without accounts there is no personal report center. The homepage submits a webs
 ## 2026-07-10: Anonymous rate-limit identity is platform-scoped
 
 Vercel requests prefer `x-vercel-forwarded-for` and fall back to Vercel's overwritten `x-forwarded-for` only when the `VERCEL=1` system marker or explicit legacy-project opt-in `OGC_TRUST_VERCEL_HEADERS=true` is present; Vercel overwrites the client header to prevent spoofing. Other deployments ignore forwarded headers unless `TRUST_PROXY_HEADERS=true` is set behind an edge that overwrites them. The fallback identity remains intentionally shared and fail-closed rather than trusting caller-controlled headers.
+
+## 2026-07-10: Deployment identity and database identity are fail-closed
+
+Every deployed Web, Worker, and commercial process declares `OGC_DEPLOYMENT_PROFILE=staging|production` and connects only to a PostgreSQL database with the same immutable `deployment_environment` marker. Only `VERCEL_ENV=preview` plus the staging profile may raise the rolling distinct-site limit, expose forced regeneration, redirect all test email, or use Airwallex Sandbox. Production unconditionally retains the two-site rolling limit and rejects test email configuration; request headers, cookies, query parameters, and administrator shortcuts are not policy inputs.
+
+Forced staging regeneration creates a new report behind a per-site reservation. The current reuse mapping switches only after successful terminalization; failure leaves the old report usable, and duplicate clicks return the active regeneration rather than creating another job.

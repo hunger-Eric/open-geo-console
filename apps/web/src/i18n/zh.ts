@@ -29,6 +29,8 @@ export const zh = {
       "免费预览检查首页；私密深度报告会分析站内有效页面，并提供有证据支撑的 AI 分析。",
     urlLabel: "企业官网 URL",
     urlPlaceholder: "https://company.com",
+    forceFreshLabel: "强制重新生成报告",
+    forceFreshDescription: "仅测试站可用。生成新的抓取与报告期间，旧报告仍保持可访问。",
     nextTitle: "已经有服务器访问日志？",
     nextDescription: "验证可识别的 AI 爬虫是否真实访问过该站点。"
   },
@@ -444,6 +446,10 @@ export const zh = {
     unsupportedUrl: "仅支持 HTTP 和 HTTPS URL。",
     scanFailed: "暂时无法扫描该网站。",
     humanVerificationRequired: "开始诊断前，请先完成人机验证。",
-    freePreviewLimitReached: "每个网络地址在任意 24 小时内最多免费分析 2 个不同网站，请稍后再试。"
+    freePreviewLimitReached: "每个网络地址在任意 24 小时内最多免费分析 2 个不同网站，请稍后再试。",
+    stagingFreePreviewLimitReached: "受保护测试站已达到滚动 24 小时网站额度上限。",
+    stagingConcurrencyLimitReached: "已有两个测试报告正在运行，请等待其中一个完成后再试。",
+    forceFreshUnavailable: "强制重新生成仅在受保护测试站可用。",
+    deploymentConfigurationInvalid: "当前部署没有配置安全且一致的环境身份。"
   }
 } satisfies Dictionary;

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ScannerForm } from "@/components/scanner-form";
 import { getDictionary, isLocale, localizePath, type Locale } from "@/i18n";
 import { scannerCapabilities } from "@/product/config";
+import { isProtectedStagingPreview } from "@/security/deployment-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,12 @@ export default async function HomePage({
           </div>
         </div>
         <div className="mt-8">
-          <ScannerForm locale={locale} dictionary={dictionary} turnstileSiteKey={process.env.TURNSTILE_SITE_KEY?.trim()} />
+          <ScannerForm
+            locale={locale}
+            dictionary={dictionary}
+            turnstileSiteKey={process.env.TURNSTILE_SITE_KEY?.trim()}
+            allowForceFresh={isProtectedStagingPreview()}
+          />
         </div>
 
         <div className="mt-8 grid border-t border-[var(--border)] md:grid-cols-3 md:divide-x md:divide-[var(--border)]">
