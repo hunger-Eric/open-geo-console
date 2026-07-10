@@ -22,6 +22,14 @@ describe("getTrustedClientIp", () => {
     expect(getTrustedClientIp(request, { VERCEL: "1" })).toBe("untrusted-direct-client");
   });
 
+  it("supports an explicit Vercel trust marker for legacy projects without system variables", () => {
+    const request = new Request("https://example.test", {
+      headers: { "x-vercel-forwarded-for": "203.0.113.11" }
+    });
+
+    expect(getTrustedClientIp(request, { OGC_TRUST_VERCEL_HEADERS: "true" })).toBe("203.0.113.11");
+  });
+
   it("uses explicitly trusted proxy headers outside Vercel", () => {
     const request = new Request("https://example.test", {
       headers: {
