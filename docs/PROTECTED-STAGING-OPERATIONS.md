@@ -56,6 +56,7 @@ Both modes verify the deployment profile and database marker and refuse producti
 
 ## Protected Preview and Webhooks
 
+- The fixed test URL is `https://open-geo-console-staging-itheheda.vercel.app`. After each CLI Preview deployment, repoint it explicitly with `npx vercel alias set <new-preview-url> open-geo-console-staging-itheheda.vercel.app`, then repeat the anonymous `302`/`401` checks before browser acceptance.
 - Keep Vercel Standard Authentication enabled for Preview deployments. Anonymous page requests must redirect to Vercel login, and anonymous `POST /api/scan` must be rejected by deployment protection.
 - Keep Airwallex Sandbox and Resend Webhook signature verification enabled in the application. Vercel protection is an outer gate, not a substitute for provider signatures or event idempotency.
 - Pass the current automation bypass only in the provider Webhook URL or another provider-supported secret location. Rotate it through Vercel's protection-bypass API or dashboard; never print, log, commit, or paste the value.

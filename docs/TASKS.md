@@ -25,7 +25,8 @@
 - [x] Add staging-only forced regeneration with old-report preservation, per-site idempotency, a two-job safety cap, UI, bilingual copy, and PostgreSQL integration coverage.
 - [x] Fix test commerce to Airwallex Sandbox and force all non-production email to the required test recipient.
 - [x] Connect an independent Preview Neon database, initialize its staging marker, configure Preview policy variables, rotate the Vercel automation bypass without exposing it, deploy, and verify authenticated browser flows.
-- [ ] Authorize the Vercel GitHub App for this repository, connect the project, and scope staging environment variables to the fixed protected Preview branch.
+- [x] Assign and verify the fixed protected staging alias `open-geo-console-staging-itheheda.vercel.app` without weakening Vercel Authentication.
+- [ ] Authorize the Vercel GitHub App for this repository, connect the project, and scope staging environment variables to one Preview branch; until then, repoint the fixed alias after each CLI deployment.
 - [ ] Add an independent CodingPlan staging key, Sandbox payment/Webhook credentials, Resend test configuration, test recipient, and staging Queue credentials; then run provider-level acceptance.
 - [ ] Configure production Cloudflare Bot Fight Mode, WAF/short-window rate limiting, and Turnstile without blocking AI crawlers; then complete live production third-site `429` browser acceptance.
 
