@@ -40,6 +40,8 @@ These commands do not fall back to `.env.local`; they refuse a non-staging profi
 
 Vercel Sensitive values are intentionally not decryptable through `vercel env pull`; the generated file contains empty placeholders for those names. For a local Worker drill, explicitly override each required empty placeholder with the separately held staging value in only that process. Merely loading another env file does not replace variables that already exist as empty placeholders. Never weaken the database marker guard, print values, or copy production secrets into `.env.staging.local`.
 
+If a workstation proxy uses the reserved `198.18.0.0/15` Fake-IP DNS range, the crawler will and must reject the target as an SSRF risk. Do not allowlist the range or disable URL safety. Run the Worker through public/direct DNS or on persistent infrastructure whose resolver returns the site's public addresses.
+
 ## Local staging cleanup
 
 There is no HTTP quota reset or administrator bypass. To clear isolated staging free-site reuse and rolling-limit rows:
