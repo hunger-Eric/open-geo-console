@@ -1,7 +1,7 @@
 # Airwallex PaymentIntent / HPP Post-Payment Return Design
 
 **Date:** 2026-07-11  
-**Status:** Approved in conversation; awaiting written-spec review  
+**Status:** Approved
 **Scope:** Replace the no-return Airwallex Payment Link checkout with a safe PaymentIntent and Hosted Payment Page flow that returns shoppers to the originating report.
 
 ## Goal

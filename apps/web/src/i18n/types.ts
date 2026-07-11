@@ -220,6 +220,19 @@ export interface Dictionary {
     unavailable: string;
     humanVerification: string;
     operatorKeySummary: string;
+    paymentReturnTitle: string;
+    paymentConfirming: string;
+    paymentNotCompleted: string;
+    paymentCancelled: string;
+    paymentQueued: string;
+    paymentGenerating: string;
+    paymentCompleted: string;
+    paymentFailed: string;
+    paymentRefundPending: string;
+    paymentRefunded: string;
+    paymentStatusUnavailable: string;
+    paymentRefresh: string;
+    paymentRefreshStopped: string;
   };
   logs: {
     title: string;

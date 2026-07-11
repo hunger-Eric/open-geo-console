@@ -48,7 +48,7 @@ export async function POST(request: Request, context: RouteContext) {
       if (active.customerEmailHmac !== protectedEmail.lookupHmac) {
         return NextResponse.json({ error: "This report already has an active checkout." }, { status: 409 });
       }
-      return checkoutResponse(active.id, active.providerCheckoutId);
+      return checkoutResponse(request, active.id, active.providerCheckoutId);
     }
 
     const order = await createPaymentOrder({
@@ -67,7 +67,7 @@ export async function POST(request: Request, context: RouteContext) {
       currency: price.currency,
       amountMinor: price.amountMinor
     });
-    return checkoutResponse(order.id, order.providerCheckoutId, {
+    return checkoutResponse(request, order.id, order.providerCheckoutId, {
       reportId: id,
       siteKey,
       locale,
@@ -81,6 +81,7 @@ export async function POST(request: Request, context: RouteContext) {
 }
 
 async function checkoutResponse(
+  request: Request,
   orderId: string,
   providerCheckoutId: string | null,
   createInput?: { reportId: string; siteKey: string; locale: "en" | "zh"; currency: "CNY" | "USD" | "HKD"; amountMinor: number }
@@ -88,7 +89,7 @@ async function checkoutResponse(
   const gateway = new AirwallexGateway();
   const recovered = providerCheckoutId ? null : await gateway.findHostedCheckoutByReference(orderId);
   const checkout = providerCheckoutId
-    ? await gateway.getHostedCheckout(providerCheckoutId)
+    ? await gateway.getHostedCheckout(providerCheckoutId, orderId)
     : recovered ?? await gateway.createHostedCheckout({
         orderId,
         reportId: createInput!.reportId,
@@ -96,10 +97,18 @@ async function checkoutResponse(
         locale: createInput!.locale,
         currency: createInput!.currency,
         amountMinor: createInput!.amountMinor,
-        expiresAt: new Date(Date.now() + 30 * 60_000)
+        returnUrl: new URL(`/${createInput!.locale}/reports/${encodeURIComponent(createInput!.reportId)}`, request.url).href
       });
   if (!providerCheckoutId) await attachHostedCheckout({ orderId, providerCheckoutId: checkout.providerCheckoutId });
-  return NextResponse.json({ orderId, checkoutUrl: checkout.checkoutUrl }, { status: providerCheckoutId ? 200 : 201 });
+  return NextResponse.json({
+    orderId,
+    hpp: {
+      intentId: checkout.providerCheckoutId,
+      clientSecret: checkout.clientSecret,
+      currency: checkout.currency,
+      environment: checkout.environment
+    }
+  }, { status: providerCheckoutId ? 200 : 201 });
 }
 
 function assertSmallRequest(request: Request) {

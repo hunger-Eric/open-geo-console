@@ -7,13 +7,15 @@ export interface HostedCheckoutInput {
   locale: "en" | "zh";
   amountMinor: number;
   currency: SupportedCurrency;
-  expiresAt: Date;
+  returnUrl: string;
 }
 
 export interface HostedCheckoutResult {
   provider: "airwallex";
   providerCheckoutId: string;
-  checkoutUrl: string;
+  clientSecret: string;
+  currency: SupportedCurrency;
+  environment: "demo" | "prod";
 }
 
 export interface RefundInput {
@@ -45,7 +47,7 @@ export interface VerifiedPaymentEvent {
 
 export interface PaymentGateway {
   createHostedCheckout(input: HostedCheckoutInput): Promise<HostedCheckoutResult>;
-  getHostedCheckout(providerCheckoutId: string): Promise<HostedCheckoutResult>;
+  getHostedCheckout(providerCheckoutId: string, orderId: string): Promise<HostedCheckoutResult>;
   findHostedCheckoutByReference(orderId: string): Promise<HostedCheckoutResult | null>;
   verifyAndParseWebhook(rawBody: string, headers: Headers): VerifiedPaymentEvent;
   requestRefund(input: RefundInput): Promise<RefundResult>;

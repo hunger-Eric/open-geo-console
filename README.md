@@ -99,8 +99,8 @@ Protected staging uses a separate marked PostgreSQL database, independent provid
 - `POST /api/scan` creates or reuses a free report job.
 - `GET /api/reports/:id/status` returns `generating`, `completed`, `completed_limited`, or `unavailable`, plus coverage, queue information while active, and final credit state.
 - `POST /api/reports/:id/upgrade` validates the persisted report language, reserves one credit and creates a deep job.
-- `POST /api/reports/:id/checkout` creates an immutable server-priced Airwallex checkout; browser amounts are ignored.
-- `GET /api/orders/:id/status` returns customer-safe payment, fulfillment, refund, and delivery states.
+- `POST /api/reports/:id/checkout` creates or recovers an immutable server-priced Airwallex PaymentIntent for Hosted Payment Page; browser amounts are ignored and the temporary client secret is not persisted.
+- `GET /api/reports/:id/orders/:orderId/status` verifies the order belongs to the report, then returns customer-safe payment, fulfillment, refund, and delivery states. Browser return parameters never mark an order paid.
 - `POST /api/reports/:id/locale-correction` schedules the one authorized no-charge regeneration when a legacy deep artifact uses the wrong language.
 - `POST /api/reports/:id/retry` is deprecated for normal users and returns `410`; recoverable work is automatic.
 - `GET /api/reports/:id/access?token=…` validates and renders a confirmation without consuming the token; `POST` redeems it, sets the report cookie, and redirects without token material.

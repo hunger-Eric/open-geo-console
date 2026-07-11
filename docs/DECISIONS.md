@@ -79,3 +79,7 @@ The approved design requires an independent staging model credential. The user e
 ## 2026-07-11: Production edge controls preserve AI crawler visibility
 
 The canonical production hostname is `geo.itheheda.online`. Cloudflare Bot Fight Mode and a narrow `/api/scan` burst limit are enabled, while the platform setting that blocks AI crawlers remains off. Turnstile is verified server-side for the production hostname. These edge controls supplement rather than replace the database distinct-site limit, Webhook signatures, SSRF checks, and commercial invariant audit.
+
+## 2026-07-11: Hosted checkout return is navigation, never payment authority
+
+New one-time checkout uses Airwallex PaymentIntent plus Hosted Payment Page. The provider intent ID is the durable checkout binding; its temporary client secret is browser-only and never persisted. Success and cancel navigation return to the exact originating localized report, where a report-bound order-status route projects only PostgreSQL lifecycle state. Browser parameters, HPP return type, and provider retrieval may improve navigation or reconstruct a payment session, but only the verified Airwallex Webhook may mark an order paid and create its entitlement, deep job, dispatch hint, and email.

@@ -254,7 +254,20 @@ export const en = {
     redirecting: "Opening secure checkout",
     unavailable: "Online purchase is not configured for this deployment.",
     humanVerification: "Complete human verification to continue.",
-    operatorKeySummary: "Already have a report access key?"
+    operatorKeySummary: "Already have a report access key?",
+    paymentReturnTitle: "Payment and delivery status",
+    paymentConfirming: "You are back at your report. We are waiting for the signed payment confirmation; no further action is needed.",
+    paymentNotCompleted: "The checkout was closed before payment was confirmed. You can try again when you are ready.",
+    paymentCancelled: "The payment was cancelled. No report entitlement was created.",
+    paymentQueued: "Payment confirmed. Your private deep report is queued and will be delivered by email within 24 hours.",
+    paymentGenerating: "Payment confirmed. Your private deep report is being generated.",
+    paymentCompleted: "Your private deep report is complete. Check the delivery email for secure access.",
+    paymentFailed: "The report could not be completed. The refund workflow is being handled automatically.",
+    paymentRefundPending: "A full refund has been requested and is awaiting provider confirmation.",
+    paymentRefunded: "The full refund has been confirmed.",
+    paymentStatusUnavailable: "We could not load this order status for the current report.",
+    paymentRefresh: "Refresh status",
+    paymentRefreshStopped: "Automatic updates have paused. Refresh to check the latest verified status."
   },
   logs: {
     title: "AI Bot Visibility Report",

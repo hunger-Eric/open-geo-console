@@ -37,6 +37,7 @@
     "db:migrate:sqlite": "node --env-file-if-exists=.env.local --import tsx src/scripts/migrate-sqlite.ts"
   },
   "dependencies": {
+    "@airwallex/components-sdk": "^1.32.0",
     "@open-geo-console/ai-report-engine": "*",
     "@open-geo-console/crawler-rules": "*",
     "@open-geo-console/geo-auditor": "*",

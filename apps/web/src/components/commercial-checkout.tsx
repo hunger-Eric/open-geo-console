@@ -3,6 +3,7 @@
 import { Check, Loader2, LockKeyhole } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { Dictionary, Locale } from "@/i18n";
+import { buildHppReturnUrls } from "./payment-return";
 import { TurnstileWidget } from "./turnstile-widget";
 
 type Currency = "CNY" | "USD" | "HKD";
@@ -11,6 +12,17 @@ interface CatalogPayload {
   mode: "disabled" | "test" | "live";
   prices: Array<{ currency: Currency; amountMinor: number }>;
   turnstileSiteKey: string | null;
+}
+
+interface CheckoutPayload {
+  orderId?: string;
+  hpp?: {
+    intentId?: string;
+    clientSecret?: string;
+    currency?: Currency;
+    environment?: "demo" | "prod";
+  };
+  error?: string;
 }
 
 export function CommercialCheckout({ dictionary, locale, reportId }: { dictionary: Dictionary; locale: Locale; reportId: string }) {
@@ -51,9 +63,24 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
         headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
         body: JSON.stringify({ email, currency, locale, turnstileToken })
       });
-      const payload = await response.json() as { checkoutUrl?: string; error?: string };
-      if (!response.ok || !payload.checkoutUrl) throw new Error(payload.error ?? dictionary.commerce.unavailable);
-      window.location.assign(payload.checkoutUrl);
+      const payload = await response.json() as CheckoutPayload;
+      if (!response.ok || !isHppPayload(payload)) throw new Error(payload.error ?? dictionary.commerce.unavailable);
+      const urls = buildHppReturnUrls(window.location.href, payload.orderId);
+      const { init } = await import("@airwallex/components-sdk");
+      const { payments } = await init({
+        env: payload.hpp.environment,
+        enabledElements: ["payments"],
+        locale
+      });
+      if (!payments) throw new Error(dictionary.commerce.unavailable);
+      const hppOptions = {
+        intent_id: payload.hpp.intentId,
+        client_secret: payload.hpp.clientSecret,
+        currency: payload.hpp.currency,
+        successUrl: urls.successUrl,
+        cancelUrl: urls.cancelUrl
+      };
+      payments.redirectToCheckout(hppOptions);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : dictionary.commerce.unavailable);
       setSubmitting(false);
@@ -98,4 +125,14 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
       {error ? <p className="mt-3 text-sm text-[var(--red)]" role="alert">{error}</p> : null}
     </section>
   );
+}
+
+function isHppPayload(payload: CheckoutPayload): payload is Required<Pick<CheckoutPayload, "orderId">> & {
+  hpp: { intentId: string; clientSecret: string; currency: Currency; environment: "demo" | "prod" };
+} {
+  return typeof payload.orderId === "string"
+    && typeof payload.hpp?.intentId === "string"
+    && typeof payload.hpp.clientSecret === "string"
+    && (payload.hpp.currency === "CNY" || payload.hpp.currency === "USD" || payload.hpp.currency === "HKD")
+    && (payload.hpp.environment === "demo" || payload.hpp.environment === "prod");
 }

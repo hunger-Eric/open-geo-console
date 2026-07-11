@@ -3,6 +3,7 @@ import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
 import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
 import { FileSearch } from "lucide-react";
 import Link from "next/link";
+import { Suspense } from "react";
 import type { Dictionary, Locale } from "@/i18n";
 import { formatDate, localizePath } from "@/i18n";
 import { buildReportPresentation } from "@/report/presenter";
@@ -14,6 +15,7 @@ import { ReportPrintView } from "./report-print-view";
 import { ReportTechnical } from "./report-technical";
 import { AiReportContent } from "./ai-report-content";
 import { AiReportStatus } from "./ai-report-status";
+import { PaymentReturnBanner } from "./payment-return-banner";
 
 export type ReportWorkspaceSection = "overview" | "analysis" | "issues" | "bots" | "technical" | "print";
 
@@ -111,6 +113,10 @@ export function ReportView({
           shareHref={overviewHref}
         />
       </section>
+
+      <Suspense fallback={null}>
+        <PaymentReturnBanner dictionary={dictionary} reportId={reportId} />
+      </Suspense>
 
       <nav className="workspace-tabs" aria-label={dictionary.report.title}>
         {tabs.map((tab) => (

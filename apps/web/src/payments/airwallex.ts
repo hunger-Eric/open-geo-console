@@ -34,61 +34,42 @@ export class AirwallexGateway implements PaymentGateway {
 
   async createHostedCheckout(input: HostedCheckoutInput): Promise<HostedCheckoutResult> {
     assertCommerceEnabled(this.environment);
-    const response = await this.api("/api/v1/pa/payment_links/create", {
+    const response = await this.api("/api/v1/pa/payment_intents/create", {
+      request_id: input.orderId,
       amount: amountMinorToMajor(input.amountMinor),
       currency: input.currency,
-      title: input.locale === "zh" ? "AI 搜索可见性深度诊断" : "AI Search Visibility Audit",
-      description: input.locale === "zh" ? "单份全站深度诊断报告" : "One-time full-site diagnostic report",
-      reference: input.orderId,
-      reusable: false,
-      expires_at: input.expiresAt.toISOString(),
+      merchant_order_id: input.orderId,
+      return_url: input.returnUrl,
       metadata: {
         ogc_order_id: input.orderId,
         ogc_report_id: input.reportId,
         ogc_site_key: input.siteKey
-      },
-      collectable_shopper_info: {
-        billing_address: false,
-        message: false,
-        phone_number: false,
-        reference: false,
-        shipping_address: false
       }
-    }) as { id?: unknown; url?: unknown };
-    if (typeof response.id !== "string" || typeof response.url !== "string") {
-      throw new Error("Airwallex did not return a valid hosted checkout.");
-    }
-    return { provider: "airwallex", providerCheckoutId: response.id, checkoutUrl: response.url };
+    });
+    return this.parsePaymentIntent(response, input.orderId);
   }
 
-  async getHostedCheckout(providerCheckoutId: string): Promise<HostedCheckoutResult> {
+  async getHostedCheckout(providerCheckoutId: string, orderId: string): Promise<HostedCheckoutResult> {
     assertCommerceEnabled(this.environment);
-    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(providerCheckoutId)) throw new Error("Airwallex checkout ID is invalid.");
-    const response = await this.apiGet(`/api/v1/pa/payment_links/${encodeURIComponent(providerCheckoutId)}`) as { id?: unknown; url?: unknown };
-    if (typeof response.id !== "string" || typeof response.url !== "string") {
-      throw new Error("Airwallex did not return a valid hosted checkout.");
-    }
-    return { provider: "airwallex", providerCheckoutId: response.id, checkoutUrl: response.url };
+    assertPaymentIntentId(providerCheckoutId);
+    const response = await this.apiGet(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}`);
+    return this.parsePaymentIntent(response, orderId);
   }
 
   async findHostedCheckoutByReference(orderId: string): Promise<HostedCheckoutResult | null> {
     assertCommerceEnabled(this.environment);
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(orderId)) throw new Error("Airwallex order reference is invalid.");
-    const from = new Date(this.now() - 2 * 60 * 60_000).toISOString();
-    const response = await this.apiGet(`/api/v1/pa/payment_links?active=true&reusable=false&page_num=0&page_size=100&from_created_at=${encodeURIComponent(from)}`) as {
+    const response = await this.apiGet(`/api/v1/pa/payment_intents?merchant_order_id=${encodeURIComponent(orderId)}&page_num=0&page_size=10`) as {
       items?: unknown;
     };
     const matches = Array.isArray(response.items) ? response.items.filter((item) => {
       if (!item || typeof item !== "object") return false;
       const record = item as Record<string, unknown>;
       const metadata = record.metadata && typeof record.metadata === "object" ? record.metadata as Record<string, unknown> : {};
-      return record.reference === orderId && metadata.ogc_order_id === orderId;
+      return record.merchant_order_id === orderId && metadata.ogc_order_id === orderId;
     }) : [];
-    if (matches.length > 1) throw new Error("Multiple Airwallex checkouts were found for one order reference.");
-    const match = matches[0] as Record<string, unknown> | undefined;
-    return match && typeof match.id === "string" && typeof match.url === "string"
-      ? { provider: "airwallex", providerCheckoutId: match.id, checkoutUrl: match.url }
-      : null;
+    if (matches.length > 1) throw new Error("Multiple Airwallex PaymentIntents were found for one order reference.");
+    return matches[0] ? this.parsePaymentIntent(matches[0], orderId) : null;
   }
 
   verifyAndParseWebhook(rawBody: string, headers: Headers): VerifiedPaymentEvent {
@@ -196,6 +177,29 @@ export class AirwallexGateway implements PaymentGateway {
     if (configured) return configured.replace(/\/$/, "");
     return mode === "live" ? "https://api.airwallex.com" : "https://api-demo.airwallex.com";
   }
+
+  private parsePaymentIntent(value: unknown, orderId: string): HostedCheckoutResult {
+    if (!value || typeof value !== "object") throw new Error("Airwallex did not return a valid PaymentIntent.");
+    const response = value as Record<string, unknown>;
+    const id = stringField(response, "id");
+    const clientSecret = stringField(response, "client_secret");
+    const currency = stringField(response, "currency");
+    const merchantOrderId = stringField(response, "merchant_order_id");
+    if (!id || !clientSecret || !currency || merchantOrderId !== orderId) {
+      throw new Error("Airwallex did not return a valid PaymentIntent.");
+    }
+    assertPaymentIntentId(id);
+    if (currency !== "CNY" && currency !== "USD" && currency !== "HKD") {
+      throw new Error("Airwallex returned an unsupported PaymentIntent currency.");
+    }
+    return {
+      provider: "airwallex",
+      providerCheckoutId: id,
+      clientSecret,
+      currency,
+      environment: getCommerceMode(this.environment) === "live" ? "prod" : "demo"
+    };
+  }
 }
 
 export function verifyAirwallexWebhookSignature(rawBody: string, timestamp: string, signature: string, secret: string): boolean {
@@ -213,6 +217,12 @@ function required(environment: NodeJS.ProcessEnv, name: string): string {
   const value = environment[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
   return value;
+}
+
+function assertPaymentIntentId(value: string): void {
+  if (!/^int_[a-zA-Z0-9_-]{1,124}$/.test(value)) {
+    throw new Error("Airwallex PaymentIntent ID is invalid or belongs to a legacy checkout.");
+  }
 }
 
 function objectField(value: unknown, key: string): Record<string, unknown> | null {

@@ -33,7 +33,7 @@
 - [ ] Replace the user-approved shared MiMo Preview key with an independent staging key, then complete a successful real-model report.
 - [x] Configure production Turnstile, Cloudflare Bot Fight Mode, and a narrow `/api/scan` burst rule while leaving AI-bot blocking off.
 - [ ] Complete signed Sandbox Webhook, payment/refund, redirected-email, and production application-level third-site `429` browser acceptance.
-- [ ] Replace the no-return Payment Link checkout with a verified post-payment journey: return to the originating report, show payment/fulfillment status, and keep signed Webhooks as the only payment authority.
+- [ ] Replace the no-return Payment Link checkout with a verified post-payment journey: PaymentIntent/HPP implementation, protected deployment, forged-return rejection, and cancel return pass; successful Sandbox payment and signed-Webhook banner transition remain blocked by the interactive CAPTCHA.
 
 ## Evidence-backed AI report engine
 

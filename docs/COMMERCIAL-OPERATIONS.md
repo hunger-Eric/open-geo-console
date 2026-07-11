@@ -41,6 +41,14 @@ Staging and production must use different databases and every secret family in t
 
 Live mode also requires explicit server-side `OGC_PRICE_CNY_MINOR`, `OGC_PRICE_USD_MINOR`, and `OGC_PRICE_HKD_MINOR` values. Browser requests never supply an authoritative amount.
 
+## Hosted checkout and return
+
+- New checkout creates an Airwallex PaymentIntent and launches the official Hosted Payment Page SDK. Payment Link IDs created before the migration remain legacy records and are never sent to PaymentIntent retrieval APIs.
+- HPP success and cancel navigation return to the originating localized report with an opaque order ID. The report-bound status API reads PostgreSQL only.
+- A success return displays `confirming` until a valid signed `payment_intent.succeeded` Webhook updates the order. A cancel return means only that the shopper left checkout; it is not a trusted provider cancellation.
+- The PaymentIntent client secret is temporary browser session material. Never log, persist, copy into monitoring, or expose it through the status API.
+- When investigating a return issue, verify the report/order binding, the signed provider event, and the PostgreSQL order state separately. Do not repair fulfillment from query parameters or a browser screenshot.
+
 ## Workstation batch schedule
 
 Run a manual drain from the repository root. The script always follows Worker drains with Queue reconciliation and `commerce:all`, so SLA checks, refunds and email are not skipped when a lane fails:

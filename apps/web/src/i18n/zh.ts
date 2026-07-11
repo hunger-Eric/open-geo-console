@@ -250,7 +250,20 @@ export const zh = {
     redirecting: "正在打开安全收银台",
     unavailable: "当前部署尚未配置在线购买。",
     humanVerification: "请先完成人机验证。",
-    operatorKeySummary: "已经有报告访问 Key？"
+    operatorKeySummary: "已经有报告访问 Key？",
+    paymentReturnTitle: "付款与交付状态",
+    paymentConfirming: "你已返回原报告页。系统正在等待已验签的付款确认，无需重复付款。",
+    paymentNotCompleted: "收银台已在付款确认前关闭。你可以准备好后重新发起付款。",
+    paymentCancelled: "付款已取消，系统没有创建报告权益。",
+    paymentQueued: "付款已确认。私密深度报告已进入队列，将在 24 小时内通过邮件交付。",
+    paymentGenerating: "付款已确认，私密深度报告正在生成。",
+    paymentCompleted: "私密深度报告已完成，请通过交付邮件安全访问。",
+    paymentFailed: "报告未能完成，系统正在自动处理退款。",
+    paymentRefundPending: "全额退款已提交，正在等待支付机构确认。",
+    paymentRefunded: "全额退款已确认。",
+    paymentStatusUnavailable: "无法读取当前报告对应的订单状态。",
+    paymentRefresh: "刷新状态",
+    paymentRefreshStopped: "自动更新已暂停，请刷新以读取最新验签状态。"
   },
   logs: {
     title: "AI Bot 可见性报告",

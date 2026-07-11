@@ -75,6 +75,16 @@ export async function getPaymentOrder(id: string): Promise<PaymentOrderRow | nul
   return row ?? null;
 }
 
+export async function getPaymentOrderForReport(id: string, reportId: string): Promise<PaymentOrderRow | null> {
+  await ensureDatabase();
+  const [row] = await getDb()
+    .select()
+    .from(paymentOrders)
+    .where(and(eq(paymentOrders.id, id), eq(paymentOrders.reportId, reportId)))
+    .limit(1);
+  return row ?? null;
+}
+
 export async function getPaymentOrderByCheckoutHmac(hmac: string): Promise<PaymentOrderRow | null> {
   await ensureDatabase();
   const [row] = await getDb()

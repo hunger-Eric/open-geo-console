@@ -88,9 +88,9 @@ Deprecated for normal users and returns `410`. The Worker owns recoverable retry
 
 ### Commercial routes
 
-- `POST /api/reports/:id/checkout` selects CNY/USD/HKD only from the server catalog, verifies Turnstile, protects the email with encryption plus a separate lookup HMAC, and creates an Airwallex hosted checkout.
+- `POST /api/reports/:id/checkout` selects CNY/USD/HKD only from the server catalog, verifies Turnstile, protects the email with encryption plus a separate lookup HMAC, and creates or recovers an Airwallex PaymentIntent for Hosted Payment Page. The temporary client secret is returned only to the browser and is never persisted.
 - The signed Airwallex Webhook is the only paid transition. Its transaction creates exactly one entitlement, reservation, deep job, dispatch outbox record, and payment-confirmation email.
-- `GET /api/orders/:id/status` exposes only customer-safe lifecycle states.
+- `GET /api/reports/:id/orders/:orderId/status` first binds the order to the report, then exposes only customer-safe lifecycle states. HPP success and cancel parameters are navigation hints and cannot mark an order paid or grant access.
 - `POST /api/reports/link-reissue` queues at most one replacement link per rolling hour for a matching order/email HMAC and always returns a generic result.
 - Airwallex and Resend Webhooks verify the raw body and deduplicate stable provider event IDs.
 

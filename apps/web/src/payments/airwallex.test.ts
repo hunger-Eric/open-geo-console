@@ -23,28 +23,68 @@ describe("AirwallexGateway", () => {
     });
     await expect(gateway.createHostedCheckout({
       orderId: "order_2", reportId: "report_2", siteKey: "example.com", locale: "en",
-      amountMinor: 2_900, currency: "USD", expiresAt: new Date("2030-01-01T00:00:00Z")
+      amountMinor: 2_900, currency: "USD",
+      returnUrl: "https://example.test/en/reports/report_2"
     })).rejects.toThrow("Sandbox API");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("creates a fixed, non-reusable provider-hosted checkout", async () => {
+  it("creates an idempotent fixed-price PaymentIntent for HPP", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ token: "access" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "link_1", url: "https://pay.example/link_1" }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "int_1", client_secret: "secret_1", currency: "USD", merchant_order_id: "order_1"
+      }), { status: 201 }));
     const gateway = new AirwallexGateway({
       environment: { COMMERCE_MODE: "test", AIRWALLEX_CLIENT_ID: "client", AIRWALLEX_API_KEY: "key" },
       fetchImpl
     });
     const result = await gateway.createHostedCheckout({
       orderId: "order_1", reportId: "report_1", siteKey: "example.com", locale: "en",
-      amountMinor: 2_900, currency: "USD", expiresAt: new Date("2030-01-01T00:00:00Z")
+      amountMinor: 2_900, currency: "USD",
+      returnUrl: "https://example.test/en/reports/report_1"
     });
-    expect(result.checkoutUrl).toBe("https://pay.example/link_1");
+    expect(result).toMatchObject({ providerCheckoutId: "int_1", clientSecret: "secret_1", currency: "USD", environment: "demo" });
     const request = fetchImpl.mock.calls[1];
     const body = JSON.parse(String(request[1]?.body));
-    expect(body).toMatchObject({ amount: 29, currency: "USD", reusable: false, reference: "order_1" });
+    expect(String(request[0])).toContain("/api/v1/pa/payment_intents/create");
+    expect(body).toMatchObject({
+      request_id: "order_1", merchant_order_id: "order_1", amount: 29, currency: "USD",
+      return_url: "https://example.test/en/reports/report_1"
+    });
     expect(body.metadata).toEqual({ ogc_order_id: "order_1", ogc_report_id: "report_1", ogc_site_key: "example.com" });
+  });
+
+  it("retrieves an attached PaymentIntent and rejects legacy Payment Link IDs", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: "access" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "int_existing", client_secret: "secret_existing", currency: "HKD", merchant_order_id: "order_1"
+      }), { status: 200 }));
+    const gateway = new AirwallexGateway({
+      environment: { COMMERCE_MODE: "test", AIRWALLEX_CLIENT_ID: "client", AIRWALLEX_API_KEY: "key" },
+      fetchImpl
+    });
+    await expect(gateway.getHostedCheckout("link_legacy", "order_1")).rejects.toThrow("legacy checkout");
+    await expect(gateway.getHostedCheckout("int_existing", "order_1")).resolves.toMatchObject({
+      providerCheckoutId: "int_existing", clientSecret: "secret_existing", currency: "HKD"
+    });
+  });
+
+  it("recovers one PaymentIntent by merchant order ID and rejects ambiguous matches", async () => {
+    const intent = {
+      id: "int_recovered", client_secret: "secret_recovered", currency: "CNY", merchant_order_id: "order_1",
+      metadata: { ogc_order_id: "order_1" }
+    };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: "access" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [intent] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [intent, { ...intent, id: "int_other" }] }), { status: 200 }));
+    const gateway = new AirwallexGateway({
+      environment: { COMMERCE_MODE: "test", AIRWALLEX_CLIENT_ID: "client", AIRWALLEX_API_KEY: "key" }, fetchImpl
+    });
+    await expect(gateway.findHostedCheckoutByReference("order_1")).resolves.toMatchObject({ providerCheckoutId: "int_recovered" });
+    await expect(gateway.findHostedCheckoutByReference("order_1")).rejects.toThrow("Multiple Airwallex PaymentIntents");
   });
 
   it("parses a signed paid event without trusting a browser success URL", () => {
