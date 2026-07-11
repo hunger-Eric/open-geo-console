@@ -22,7 +22,7 @@ const nextConfig: NextConfig = {
       source: "/reports/:id/report.html",
       headers: [
         { key: "Cache-Control", value: "private, no-store, max-age=0" },
-        { key: "Content-Security-Policy", value: "default-src 'self'; img-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" },
+        { key: "Content-Security-Policy", value: "default-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" },
         { key: "Referrer-Policy", value: "no-referrer" },
         { key: "X-Content-Type-Options", value: "nosniff" },
         { key: "X-Frame-Options", value: "DENY" }
