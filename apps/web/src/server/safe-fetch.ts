@@ -6,6 +6,7 @@ import {
 import { Agent, fetch as undiciFetch } from "undici";
 
 export const MAX_CRAWL_RESPONSE_BYTES = 2 * 1024 * 1024;
+const CLOUDFLARE_DOH_ENDPOINT = "https://cloudflare-dns.com/dns-query";
 const ALLOWED_CONTENT_TYPES = [
   "text/html",
   "text/plain",
@@ -32,7 +33,7 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
   const maxBytes = options.maxBytes ?? MAX_CRAWL_RESPONSE_BYTES;
   const timeoutMs = options.timeoutMs ?? 12_000;
   const allowedContentTypes = options.allowedContentTypes ?? ALLOWED_CONTENT_TYPES;
-  const resolver = options.resolver;
+  const resolver = options.resolver ?? configuredPublicDnsResolver();
   const allowBenchmarkNetwork =
     options.allowBenchmarkNetwork ?? process.env.OGC_ALLOW_BENCHMARK_NETWORK === "true";
 
@@ -98,6 +99,44 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
     }
     throw new Error("Safe redirect handling failed.");
   };
+}
+
+function configuredPublicDnsResolver(): HostnameResolver | undefined {
+  const endpoint = process.env.OGC_PUBLIC_DNS_DOH_URL?.trim();
+  if (!endpoint) return undefined;
+  if (endpoint !== CLOUDFLARE_DOH_ENDPOINT) {
+    throw new Error(`OGC_PUBLIC_DNS_DOH_URL must be ${CLOUDFLARE_DOH_ENDPOINT}.`);
+  }
+  return createCloudflareDohResolver(fetch);
+}
+
+export function createCloudflareDohResolver(fetchImpl: typeof fetch): HostnameResolver {
+  return async (hostname) => {
+    const answers = await Promise.all([queryDoh(fetchImpl, hostname, "A"), queryDoh(fetchImpl, hostname, "AAAA")]);
+    return answers.flat();
+  };
+}
+
+async function queryDoh(fetchImpl: typeof fetch, hostname: string, type: "A" | "AAAA") {
+  const url = new URL(CLOUDFLARE_DOH_ENDPOINT);
+  url.searchParams.set("name", hostname);
+  url.searchParams.set("type", type);
+  const response = await fetchImpl(url, {
+    headers: { accept: "application/dns-json" },
+    signal: AbortSignal.timeout(5_000)
+  });
+  if (!response.ok) throw new Error(`Public DNS lookup failed with HTTP ${response.status}.`);
+  const payload = await response.json() as {
+    Status?: number;
+    Answer?: Array<{ type?: number; data?: string }>;
+  };
+  if (payload.Status !== 0 && payload.Status !== 3) {
+    throw new Error(`Public DNS lookup failed with status ${payload.Status ?? "unknown"}.`);
+  }
+  const expectedType = type === "A" ? 1 : 28;
+  return (payload.Answer ?? [])
+    .filter((answer) => answer.type === expectedType && typeof answer.data === "string")
+    .map((answer) => answer.data!);
 }
 
 function isRedirect(status: number): boolean {
