@@ -8,8 +8,7 @@ export async function exportReportPdf(input: {
   if (url.pathname.includes("..") || !url.pathname.endsWith("/report.html")) {
     throw new Error("PDF export URL is not a controlled report artifact.");
   }
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchPdfBrowser();
   try {
     const context = await browser.newContext({
       extraHTTPHeaders: input.cookieHeader ? { cookie: input.cookieHeader } : undefined
@@ -31,4 +30,20 @@ export async function exportReportPdf(input: {
   } finally {
     await browser.close();
   }
+}
+
+async function launchPdfBrowser() {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    const [{ chromium }, serverlessChromium] = await Promise.all([
+      import("playwright-core"),
+      import("@sparticuz/chromium")
+    ]);
+    return chromium.launch({
+      args: serverlessChromium.default.args,
+      executablePath: await serverlessChromium.default.executablePath(),
+      headless: true
+    });
+  }
+  const { chromium } = await import("playwright");
+  return chromium.launch({ headless: true });
 }
