@@ -11,6 +11,35 @@ export interface PublicOrderStatus {
   fulfillmentMode: "batch_24h" | "realtime";
 }
 
+export const PAYMENT_STATUS_REQUEST_TIMEOUT_MS = 12_000;
+
+export async function fetchPaymentReturnStatus(
+  url: string,
+  options: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    fetchImpl?: typeof fetch;
+  } = {}
+): Promise<Response> {
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort(options.signal?.reason);
+  const timeout = setTimeout(
+    () => controller.abort(new DOMException("Payment status request timed out.", "TimeoutError")),
+    options.timeoutMs ?? PAYMENT_STATUS_REQUEST_TIMEOUT_MS
+  );
+  options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+
+  try {
+    return await (options.fetchImpl ?? fetch)(url, {
+      cache: "no-store",
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", abortFromCaller);
+  }
+}
+
 export function buildHppReturnUrls(currentUrl: string, orderId: string) {
   const base = new URL(currentUrl);
   base.hash = "";

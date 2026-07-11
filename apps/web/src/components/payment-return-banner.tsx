@@ -4,7 +4,7 @@ import { CircleAlert, CircleCheck, Loader2, RefreshCw } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Dictionary } from "@/i18n";
-import { getPaymentReturnView, isTerminalPaymentReturn, type PublicOrderStatus, type ReturnHint } from "./payment-return";
+import { fetchPaymentReturnStatus, getPaymentReturnView, isTerminalPaymentReturn, type PublicOrderStatus, type ReturnHint } from "./payment-return";
 
 interface ReturnContext { orderId: string; hint: ReturnHint }
 
@@ -26,9 +26,9 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
     if (!context) return null;
     setLoading(true);
     try {
-      const response = await fetch(
+      const response = await fetchPaymentReturnStatus(
         `/api/reports/${encodeURIComponent(reportId)}/orders/${encodeURIComponent(context.orderId)}/status`,
-        { cache: "no-store", signal }
+        { signal }
       );
       if (!response.ok) {
         setUnavailable(true);
@@ -38,8 +38,8 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
       setStatus(next);
       setUnavailable(false);
       return next;
-    } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) setUnavailable(true);
+    } catch {
+      if (!signal?.aborted) setUnavailable(true);
       return null;
     } finally {
       if (!signal?.aborted) setLoading(false);
@@ -54,7 +54,10 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
     let timer: number | undefined;
 
     const schedule = (delay: number) => {
-      timer = window.setTimeout(() => void poll(), delay);
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        void poll();
+      }, delay);
     };
     const poll = async () => {
       if (document.hidden) {

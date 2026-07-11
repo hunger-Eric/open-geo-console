@@ -1,7 +1,13 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { assertDatabaseProfileMatches, getDatabasePath, getDatabasePoolSize } from "./index";
+import {
+  assertDatabaseProfileMatches,
+  DATABASE_SCHEMA_VERSION,
+  getDatabasePath,
+  getDatabasePoolSize,
+  shouldRunDatabaseMigrations
+} from "./index";
 
 describe("database path selection", () => {
   const originalOpenGeoDbPath = process.env.OPEN_GEO_DB_PATH;
@@ -46,5 +52,20 @@ describe("database deployment marker", () => {
     expect(() => assertDatabaseProfileMatches("staging", "staging")).not.toThrow();
     expect(() => assertDatabaseProfileMatches("staging", "production")).toThrow("database environment marker");
     expect(() => assertDatabaseProfileMatches(undefined, "production")).toThrow("database environment marker");
+  });
+});
+
+describe("database schema marker", () => {
+  it("skips DDL bootstrap when the current schema version is present", () => {
+    expect(shouldRunDatabaseMigrations(DATABASE_SCHEMA_VERSION)).toBe(false);
+  });
+
+  it("bootstraps an unmarked or older database", () => {
+    expect(shouldRunDatabaseMigrations(undefined)).toBe(true);
+    expect(shouldRunDatabaseMigrations(DATABASE_SCHEMA_VERSION - 1)).toBe(true);
+  });
+
+  it("refuses to run older code against a newer schema", () => {
+    expect(() => shouldRunDatabaseMigrations(DATABASE_SCHEMA_VERSION + 1)).toThrow("newer than this deployment");
   });
 });

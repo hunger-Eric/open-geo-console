@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getDictionary } from "@/i18n";
-import { getPaymentReturnView, type PublicOrderStatus } from "./payment-return";
+import { fetchPaymentReturnStatus, getPaymentReturnView, type PublicOrderStatus } from "./payment-return";
 
 const base: PublicOrderStatus = {
   orderId: "order-1", paymentStatus: "pending", fulfillmentStatus: "not_started",
@@ -22,5 +22,28 @@ describe("payment return presentation", () => {
   it("prioritizes trusted refund state over the return hint", () => {
     expect(getPaymentReturnView({ ...base, paymentStatus: "paid", refundStatus: "refunded" }, "success", dictionary).message)
       .toBe(dictionary.commerce.paymentRefunded);
+  });
+});
+
+describe("payment return status request", () => {
+  it("aborts a hung status request within its own timeout", async () => {
+    const hangingFetch = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    })) as typeof fetch;
+
+    await expect(fetchPaymentReturnStatus("/api/status", { fetchImpl: hangingFetch, timeoutMs: 5 }))
+      .rejects.toMatchObject({ name: "TimeoutError" });
+  });
+
+  it("propagates a caller cancellation", async () => {
+    const caller = new AbortController();
+    const hangingFetch = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    })) as typeof fetch;
+    const request = fetchPaymentReturnStatus("/api/status", { fetchImpl: hangingFetch, signal: caller.signal });
+
+    caller.abort(new DOMException("Unmounted.", "AbortError"));
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
   });
 });

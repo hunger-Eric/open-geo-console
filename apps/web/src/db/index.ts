@@ -17,6 +17,8 @@ let database: ReturnType<typeof drizzle<typeof schema>> | undefined;
 let schemaInitialization: Promise<void> | undefined;
 let validatedProfile: DeploymentProfile | undefined;
 
+export const DATABASE_SCHEMA_VERSION = 1;
+
 export function isMemoryPersistence(): boolean {
   return process.env.NODE_ENV === "test" && !process.env.DATABASE_URL;
 }
@@ -80,17 +82,53 @@ export function assertDatabaseProfileMatches(
 async function ensureDatabaseSchema(): Promise<void> {
   if (!schemaInitialization) {
     const sql = getSqlClient();
-    schemaInitialization = sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(hashtextextended('ogc:schema-bootstrap', 0))`;
-      for (const migration of DATABASE_MIGRATIONS) {
-        await tx.unsafe(migration);
-      }
+    schemaInitialization = readDatabaseSchemaVersion(sql).then(async (currentVersion) => {
+      if (!shouldRunDatabaseMigrations(currentVersion)) return;
+      await sql.begin(async (tx) => {
+        await tx`SELECT pg_advisory_xact_lock(hashtextextended('ogc:schema-bootstrap', 0))`;
+        const lockedVersion = await readDatabaseSchemaVersion(tx);
+        if (!shouldRunDatabaseMigrations(lockedVersion)) return;
+        for (const migration of DATABASE_MIGRATIONS) {
+          await tx.unsafe(migration);
+        }
+        await tx`CREATE TABLE IF NOT EXISTS ogc_schema_state (
+          singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton = true),
+          version integer NOT NULL CHECK (version > 0),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        )`;
+        await tx`
+          INSERT INTO ogc_schema_state (singleton, version, updated_at)
+          VALUES (true, ${DATABASE_SCHEMA_VERSION}, now())
+          ON CONFLICT (singleton) DO UPDATE
+          SET version = EXCLUDED.version, updated_at = EXCLUDED.updated_at
+        `;
+      });
     }).catch((error) => {
       schemaInitialization = undefined;
       throw error;
     });
   }
   await schemaInitialization;
+}
+
+async function readDatabaseSchemaVersion(
+  sql: ReturnType<typeof postgres> | postgres.TransactionSql
+): Promise<number | undefined> {
+  const relation = await sql<{ exists: boolean }[]>`
+    SELECT to_regclass('public.ogc_schema_state') IS NOT NULL AS exists
+  `;
+  if (!relation[0]?.exists) return undefined;
+  const rows = await sql<{ version: number }[]>`
+    SELECT version FROM ogc_schema_state WHERE singleton = true LIMIT 1
+  `;
+  return rows[0]?.version;
+}
+
+export function shouldRunDatabaseMigrations(currentVersion: number | undefined): boolean {
+  if (currentVersion !== undefined && currentVersion > DATABASE_SCHEMA_VERSION) {
+    throw new Error("The database schema is newer than this deployment supports.");
+  }
+  return currentVersion !== DATABASE_SCHEMA_VERSION;
 }
 
 export async function initializeDatabaseEnvironment(profile: DeploymentProfile): Promise<{ profile: DeploymentProfile; fingerprint: string }> {
