@@ -69,8 +69,9 @@
 
 ## HTML-first visual evidence report delivery
 
-- [ ] Implement private screenshot evidence capture during Worker analysis.
-- [ ] Store screenshot asset metadata in PostgreSQL and bytes behind a private storage adapter.
-- [ ] Render a polished HTML report artifact with graded screenshot evidence cards.
-- [ ] Generate the customer PDF from the same HTML artifact with print-specific CSS.
-- [ ] Verify private asset authorization, screenshot fallback states, HTML browser QA, and PDF export QA.
+- [x] Implement private screenshot evidence capture during Worker analysis.
+- [x] Store screenshot asset metadata in PostgreSQL and bytes behind a private storage adapter.
+- [x] Render a polished HTML report artifact with graded screenshot evidence cards.
+- [x] Generate the customer PDF from the same HTML artifact with print-specific CSS.
+- [x] Verify private asset authorization, screenshot fallback states, desktop/mobile HTML browser QA, and PDF export QA.
+- [ ] Configure private staging object storage and visually verify a fresh deep report's real issue-crop/context assets; the accepted legacy report correctly exercises the unavailable fallback.

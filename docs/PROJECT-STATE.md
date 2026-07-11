@@ -2,7 +2,7 @@
 
 ## Current Goal
 
-Operate a durable, self-hostable report product whose main journey is `free technical report + AI preview → one-time purchase → private deep report by email → optional AI Bot evidence`. The protected staging and production security code is deployed. Production edge controls and isolated staging provider resources are configured; remaining gates are the user-approved shared model-key exception, branch-scoped Preview variables, and refund/email/provider drills.
+Operate a durable, self-hostable report product whose main journey is `free technical report + AI preview → one-time purchase → private HTML-first deep report by email → optional AI Bot evidence`. The protected staging and production security code is deployed. HTML-first delivery, private screenshot-asset boundaries, and same-HTML PDF export are implemented; remaining gates include a fresh staging deep-report drill with private object storage, the user-approved shared model-key exception, branch-scoped Preview variables, and refund/email/provider drills.
 
 ## Current Architecture
 
@@ -52,6 +52,10 @@ The web process persists a public homepage technical report and enqueues work. S
 - Preview has separate Neon, HMAC, Airwallex Sandbox, Resend, Cloudflare Queue, test-recipient, and provider-specific Webhook bypass values. Airwallex and Resend Webhooks target the protected fixed alias and still require application signatures.
 - Preview `https://open-geo-console-3k91cfqtw-itheheda-6857s-projects.vercel.app` (deployment `dpl_Eanrpi8hj1mWnQg6wt38AKiyLQMJ`) is repointed to the fixed protected alias and declares the Singapore `sin1` Function region. Authenticated browser acceptance on 2026-07-11 proved: no pre-rendered Turnstile, an enabled scanner button after valid URL input, a new report route in about 1.77 seconds, a truthful `pending/queued` workspace, background completion after one staging free Worker drain, and responsive 390x844 rendering. Console warnings/errors were empty.
 - Browser acceptance reconfirmed authenticated staging access, staging-only forced-regeneration UI, same-site reuse, a new forced report ID, old-report availability after failure, and the two-active-job concurrency cap. The isolated staging database marker fingerprint is `7223dda0037deca3`; a staging Worker drained isolated jobs without touching production.
+- Deep Workers now capture private visual evidence only after quote/URL verification. Critical findings request an issue crop plus context thumbnail; lower severities use compact captures, unreliable crops fall back to the viewport, and capture failures persist an explicit unavailable record without discarding the verified citation. Asset metadata and evidence/content hashes live in PostgreSQL schema v3 while bytes stay behind filesystem or S3-compatible adapters.
+- Private evidence reads inherit the existing report-access cookie/token boundary and are streamed through a report-and-asset-bound no-store route; storage keys are never exposed as stable public URLs. Unit coverage proves unauthorized reads fail before storage access.
+- The canonical customer artifact is now `/reports/:id/report.html`, with editorial summary, scores, priority findings, visual evidence, roadmap, technical appendix, and sources. `/api/reports/:id/artifacts/report.pdf` launches serverless Chromium against that exact authorized HTML route and applies A4 print CSS; the previous independent wide-layout PDF composition is no longer the delivery path.
+- Protected staging deployment `dpl_6XH3A4zQarfj9zREkx9C4PLqMXzq` (`https://open-geo-console-h44ppfw2k-itheheda-6857s-projects.vercel.app`) is assigned to the fixed staging alias. Authenticated desktop and 390x844 browser QA passed with both Noto Sans SC weights loaded. The accepted PDF is an 11-page, 200,698-byte `%PDF` document with complete Chinese text, compact roadmap pagination, findings, evidence fallbacks, recommendations, and appendix. Anonymous Preview access still redirects to Vercel Authentication.
 
 ## Known Boundaries
 
@@ -71,14 +75,16 @@ The web process persists a public homepage technical report and enqueues work. S
 - Protected staging test mode has a paid-and-completed-order operator access route for browser acceptance when email transport is intentionally unavailable. It issues a one-day private-report cookie only after staging/test profile and exact order/report state checks; production returns `404`.
 - The ignored `apps/web/.env.staging.local` now holds the pulled Preview environment for local operator checks. Staging PostgreSQL security tests and the commercial invariant audit pass; `.env.local` still points to a separately uninitialized database and is not accepted as staging or production authority.
 - Anonymous users behind the same public IP or carrier/NAT gateway intentionally share the two-site rolling limit; there is no unauthenticated quota-reset endpoint.
+- Preview does not yet have a private S3-compatible evidence bucket configured. The accepted paid report predates screenshot capture and therefore correctly renders `screenshot unavailable`; a fresh deep job with staging object storage is still required to visually accept real issue-crop/context pairs. This does not block HTML/PDF/fallback or authorization acceptance.
 
 ## Next Steps
 
-1. Replace the shared Preview model key with a staging-only key.
-2. Verify the remaining Airwallex refund cycle and application-originated Resend message redirected only to `itheheda@gmail.com`.
-3. Complete the production application-rate-limit drill with three scannable distinct sites and a fresh Turnstile token for each; the third must return `429`, including when staging-only inputs are supplied.
-4. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the staging branch; until then, repoint the fixed staging alias after each CLI Preview deployment.
-5. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
+1. Configure a private staging S3-compatible evidence bucket, run a fresh paid deep report, and visually verify real issue crops, context thumbnails, viewport fallback, and authorized asset streaming.
+2. Replace the shared Preview model key with a staging-only key.
+3. Verify the remaining Airwallex refund cycle and application-originated Resend message redirected only to `itheheda@gmail.com`.
+4. Complete the production application-rate-limit drill with three scannable distinct sites and a fresh Turnstile token for each; the third must return `429`, including when staging-only inputs are supplied.
+5. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the staging branch; until then, repoint the fixed staging alias after each CLI Preview deployment.
+6. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
 
 ## Acceptance Commands
 
