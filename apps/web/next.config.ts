@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@sparticuz/chromium", "playwright-core"],
+  serverExternalPackages: ["@sparticuz/chromium"],
   outputFileTracingIncludes: {
     "/api/reports/[id]/artifacts/report.pdf": ["./node_modules/@sparticuz/chromium/bin/**/*"]
   },
