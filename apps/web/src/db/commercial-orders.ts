@@ -144,6 +144,42 @@ export async function attachHostedCheckout(input: {
   return (await getPaymentOrder(input.orderId))!;
 }
 
+export async function replaceLegacyHostedCheckout(input: {
+  orderId: string;
+  expectedProviderCheckoutId: string;
+  providerCheckoutId: string;
+}): Promise<PaymentOrderRow> {
+  if (!input.orderId || !input.expectedProviderCheckoutId || !input.providerCheckoutId) {
+    throw new Error("Order and hosted checkout IDs are required.");
+  }
+  if (input.expectedProviderCheckoutId.startsWith("int_") || !input.providerCheckoutId.startsWith("int_")) {
+    throw new CommercialOrderConflictError("Only a legacy checkout may be replaced by a PaymentIntent.");
+  }
+  await ensureDatabase();
+  await getSqlClient().begin(async (tx) => {
+    const rows = await tx<Array<{
+      provider_checkout_id: string | null;
+      payment_status: PaymentOrderRow["paymentStatus"];
+    }>>`
+      SELECT provider_checkout_id, payment_status
+      FROM payment_orders WHERE id = ${input.orderId} FOR UPDATE
+    `;
+    const order = rows[0];
+    if (!order || order.provider_checkout_id !== input.expectedProviderCheckoutId) {
+      throw new CommercialOrderConflictError("The legacy checkout binding changed before replacement.");
+    }
+    if (!['created', 'pending'].includes(order.payment_status)) {
+      throw new CommercialOrderConflictError("Only an unpaid active order may replace a legacy checkout.");
+    }
+    await tx`
+      UPDATE payment_orders
+      SET provider_checkout_id = ${input.providerCheckoutId}, payment_status = 'pending', updated_at = now()
+      WHERE id = ${input.orderId}
+    `;
+  });
+  return (await getPaymentOrder(input.orderId))!;
+}
+
 export interface RecordPaymentEventInput {
   provider: PaymentProvider;
   providerEventId: string;

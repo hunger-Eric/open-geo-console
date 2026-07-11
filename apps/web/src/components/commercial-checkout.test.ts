@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readCheckoutPayload } from "./checkout-response";
 import { buildHppReturnUrls } from "./payment-return";
 
 describe("HPP return URLs", () => {
@@ -9,5 +10,18 @@ describe("HPP return URLs", () => {
     );
     expect(urls.successUrl).toBe("https://example.test/zh/reports/report-1/analysis?page=2&order=order-1&payment_return=success");
     expect(urls.cancelUrl).toBe("https://example.test/zh/reports/report-1/analysis?page=2&order=order-1&payment_return=cancel");
+  });
+});
+
+describe("checkout response parsing", () => {
+  it("turns an empty gateway response into a safe empty payload", async () => {
+    await expect(readCheckoutPayload(new Response(null, { status: 500 }))).resolves.toEqual({});
+  });
+
+  it("preserves a structured server error", async () => {
+    await expect(readCheckoutPayload(new Response(JSON.stringify({ error: "Checkout unavailable." }), {
+      status: 409,
+      headers: { "content-type": "application/json" }
+    }))).resolves.toEqual({ error: "Checkout unavailable." });
   });
 });

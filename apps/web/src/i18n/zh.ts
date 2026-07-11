@@ -266,6 +266,7 @@ export const zh = {
     redirecting: "正在打开安全收银台",
     verifying: "正在验证",
     unavailable: "当前部署尚未配置在线购买。",
+    checkoutFailed: "暂时无法打开安全收银台，请重试。",
     humanVerification: "请先完成人机验证。",
     operatorKeySummary: "已经有报告访问 Key？",
     paymentReturnTitle: "付款与交付状态",

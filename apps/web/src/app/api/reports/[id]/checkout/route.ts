@@ -4,9 +4,14 @@ import { assertCommerceEnabled, getPriceSnapshot, parseSupportedCurrency } from 
 import { normalizeCustomerEmail, protectCustomerEmail } from "@/commerce/customer-email";
 import { checkoutIdempotencyHmac } from "@/commerce/idempotency";
 import { assertCommerceReady } from "@/commerce/readiness";
-import { attachHostedCheckout, createPaymentOrder, getActivePaymentOrderForReport } from "@/db/commercial-orders";
+import {
+  attachHostedCheckout,
+  createPaymentOrder,
+  getActivePaymentOrderForReport,
+  replaceLegacyHostedCheckout
+} from "@/db/commercial-orders";
 import { getGeoReport } from "@/db/reports";
-import { AirwallexGateway } from "@/payments/airwallex";
+import { AirwallexGateway, isAirwallexPaymentIntentId } from "@/payments/airwallex";
 import { getTrustedClientIp } from "@/security/client-ip";
 import { verifyTurnstile } from "@/security/turnstile";
 import { parseReportLocale } from "@/server/report-locale";
@@ -42,13 +47,20 @@ export async function POST(request: Request, context: RouteContext) {
     const rawIdempotencyKey = request.headers.get("idempotency-key") ?? "";
     const checkoutHmac = checkoutIdempotencyHmac({ rawKey: rawIdempotencyKey, reportId: id });
     const siteKey = report.siteKey ?? createSiteKey(report.url);
+    const checkoutInput = {
+      reportId: id,
+      siteKey,
+      locale,
+      currency: price.currency,
+      amountMinor: price.amountMinor
+    };
 
     const active = await getActivePaymentOrderForReport(id, price.productCode);
     if (active && active.checkoutIdempotencyHmac !== checkoutHmac) {
       if (active.customerEmailHmac !== protectedEmail.lookupHmac) {
         return NextResponse.json({ error: "This report already has an active checkout." }, { status: 409 });
       }
-      return checkoutResponse(request, active.id, active.providerCheckoutId);
+      return checkoutResponse(request, active.id, active.providerCheckoutId, checkoutInput);
     }
 
     const order = await createPaymentOrder({
@@ -67,13 +79,7 @@ export async function POST(request: Request, context: RouteContext) {
       currency: price.currency,
       amountMinor: price.amountMinor
     });
-    return checkoutResponse(request, order.id, order.providerCheckoutId, {
-      reportId: id,
-      siteKey,
-      locale,
-      currency: price.currency,
-      amountMinor: price.amountMinor
-    });
+    return checkoutResponse(request, order.id, order.providerCheckoutId, checkoutInput);
   } catch (error) {
     if (process.env.NODE_ENV !== "production") console.error(error);
     return NextResponse.json({ error: publicError(error) }, { status: 400 });
@@ -87,9 +93,36 @@ async function checkoutResponse(
   createInput?: { reportId: string; siteKey: string; locale: "en" | "zh"; currency: "CNY" | "USD" | "HKD"; amountMinor: number }
 ) {
   const gateway = new AirwallexGateway();
-  const recovered = providerCheckoutId ? null : await gateway.findHostedCheckoutByReference(orderId);
-  const checkout = providerCheckoutId
-    ? await gateway.getHostedCheckout(providerCheckoutId, orderId)
+  let effectiveProviderCheckoutId = providerCheckoutId;
+  let migratedCheckout: Awaited<ReturnType<AirwallexGateway["createHostedCheckout"]>> | null = null;
+  if (providerCheckoutId && !isAirwallexPaymentIntentId(providerCheckoutId)) {
+    const legacyState = await gateway.deactivateLegacyHostedCheckout(providerCheckoutId, orderId);
+    if (legacyState === "paid") {
+      return NextResponse.json({
+        code: "payment_confirmation_pending",
+        error: "Payment was already received and is awaiting verified confirmation."
+      }, { status: 409 });
+    }
+    const migrated = await gateway.findHostedCheckoutByReference(orderId) ?? await gateway.createHostedCheckout({
+      orderId,
+      reportId: createInput!.reportId,
+      siteKey: createInput!.siteKey,
+      locale: createInput!.locale,
+      currency: createInput!.currency,
+      amountMinor: createInput!.amountMinor,
+      returnUrl: new URL(`/${createInput!.locale}/reports/${encodeURIComponent(createInput!.reportId)}`, request.url).href
+    });
+    await replaceLegacyHostedCheckout({
+      orderId,
+      expectedProviderCheckoutId: providerCheckoutId,
+      providerCheckoutId: migrated.providerCheckoutId
+    });
+    effectiveProviderCheckoutId = migrated.providerCheckoutId;
+    migratedCheckout = migrated;
+  }
+  const recovered = effectiveProviderCheckoutId ? null : await gateway.findHostedCheckoutByReference(orderId);
+  const checkout = migratedCheckout ?? (effectiveProviderCheckoutId
+    ? await gateway.getHostedCheckout(effectiveProviderCheckoutId, orderId)
     : recovered ?? await gateway.createHostedCheckout({
         orderId,
         reportId: createInput!.reportId,
@@ -98,8 +131,8 @@ async function checkoutResponse(
         currency: createInput!.currency,
         amountMinor: createInput!.amountMinor,
         returnUrl: new URL(`/${createInput!.locale}/reports/${encodeURIComponent(createInput!.reportId)}`, request.url).href
-      });
-  if (!providerCheckoutId) await attachHostedCheckout({ orderId, providerCheckoutId: checkout.providerCheckoutId });
+      }));
+  if (!effectiveProviderCheckoutId) await attachHostedCheckout({ orderId, providerCheckoutId: checkout.providerCheckoutId });
   return NextResponse.json({
     orderId,
     hpp: {

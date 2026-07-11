@@ -270,6 +270,7 @@ export const en = {
     redirecting: "Opening secure checkout",
     verifying: "Verifying",
     unavailable: "Online purchase is not configured for this deployment.",
+    checkoutFailed: "Secure checkout could not be opened. Please try again.",
     humanVerification: "Complete human verification to continue.",
     operatorKeySummary: "Already have a report access key?",
     paymentReturnTitle: "Payment and delivery status",

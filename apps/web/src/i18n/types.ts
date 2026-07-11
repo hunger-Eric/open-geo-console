@@ -228,6 +228,7 @@ export interface Dictionary {
     redirecting: string;
     verifying: string;
     unavailable: string;
+    checkoutFailed: string;
     humanVerification: string;
     operatorKeySummary: string;
     paymentReturnTitle: string;

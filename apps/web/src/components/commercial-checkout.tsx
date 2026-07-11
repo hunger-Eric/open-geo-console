@@ -3,6 +3,7 @@
 import { Check, Loader2, LockKeyhole } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dictionary, Locale } from "@/i18n";
+import { readCheckoutPayload, type CheckoutPayload } from "./checkout-response";
 import { buildHppReturnUrls } from "./payment-return";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "./turnstile-widget";
 
@@ -12,17 +13,6 @@ interface CatalogPayload {
   mode: "disabled" | "test" | "live";
   prices: Array<{ currency: Currency; amountMinor: number }>;
   turnstileSiteKey: string | null;
-}
-
-interface CheckoutPayload {
-  orderId?: string;
-  hpp?: {
-    intentId?: string;
-    clientSecret?: string;
-    currency?: Currency;
-    environment?: "demo" | "prod";
-  };
-  error?: string;
 }
 
 export function CommercialCheckout({ dictionary, locale, reportId }: { dictionary: Dictionary; locale: Locale; reportId: string }) {
@@ -77,8 +67,12 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
         headers: { "content-type": "application/json", "idempotency-key": checkoutIdempotencyKey.current },
         body: JSON.stringify({ email, currency, locale, turnstileToken: token })
       });
-      const payload = await response.json() as CheckoutPayload;
-      if (!response.ok || !isHppPayload(payload)) throw new Error(payload.error ?? dictionary.commerce.unavailable);
+      const payload = await readCheckoutPayload(response);
+      if (!response.ok || !isHppPayload(payload)) {
+        throw new Error(payload.code === "payment_confirmation_pending"
+          ? dictionary.commerce.paymentConfirming
+          : payload.error ?? dictionary.commerce.checkoutFailed);
+      }
       const urls = buildHppReturnUrls(window.location.href, payload.orderId);
       const { init } = await import("@airwallex/components-sdk");
       const { payments } = await init({
@@ -86,7 +80,7 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
         enabledElements: ["payments"],
         locale
       });
-      if (!payments) throw new Error(dictionary.commerce.unavailable);
+      if (!payments) throw new Error(dictionary.commerce.checkoutFailed);
       const hppOptions = {
         intent_id: payload.hpp.intentId,
         client_secret: payload.hpp.clientSecret,
@@ -96,7 +90,7 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
       };
       payments.redirectToCheckout(hppOptions);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : dictionary.commerce.unavailable);
+      setError(caught instanceof Error ? caught.message : dictionary.commerce.checkoutFailed);
       setSubmitting(false);
       setTurnstileToken("");
       turnstileRef.current?.reset();

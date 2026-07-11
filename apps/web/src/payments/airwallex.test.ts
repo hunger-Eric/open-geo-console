@@ -71,6 +71,50 @@ describe("AirwallexGateway", () => {
     });
   });
 
+  it("deactivates an unpaid legacy Payment Link only after verifying its order binding", async () => {
+    const legacy = {
+      id: "6fc2d9c0-2580-4ad3-a33d-72500ec93bda",
+      active: true,
+      status: "UNPAID",
+      successful_payment_intent_count: 0,
+      updated_at: "2026-07-11T00:00:00Z",
+      reference: "order_1",
+      metadata: { ogc_order_id: "order_1" }
+    };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: "access" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(legacy), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...legacy, active: false }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...legacy, active: false }), { status: 200 }));
+    const gateway = new AirwallexGateway({
+      environment: { COMMERCE_MODE: "test", AIRWALLEX_CLIENT_ID: "client", AIRWALLEX_API_KEY: "key" },
+      fetchImpl,
+      now: () => Date.parse("2026-07-11T01:00:00Z")
+    });
+    await expect(gateway.deactivateLegacyHostedCheckout(legacy.id, "order_1")).resolves.toBe("deactivated");
+    expect(String(fetchImpl.mock.calls[2]?.[0])).toContain(`/payment_links/${legacy.id}/deactivate`);
+  });
+
+  it("does not deactivate a legacy Payment Link that has already been paid", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: "access" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: "6fc2d9c0-2580-4ad3-a33d-72500ec93bda",
+        active: true,
+        status: "PAID",
+        successful_payment_intent_count: 1,
+        updated_at: "2026-07-11T00:59:00Z",
+        reference: "order_1",
+        metadata: { ogc_order_id: "order_1" }
+      }), { status: 200 }));
+    const gateway = new AirwallexGateway({
+      environment: { COMMERCE_MODE: "test", AIRWALLEX_CLIENT_ID: "client", AIRWALLEX_API_KEY: "key" }, fetchImpl
+    });
+    await expect(gateway.deactivateLegacyHostedCheckout("6fc2d9c0-2580-4ad3-a33d-72500ec93bda", "order_1"))
+      .resolves.toBe("paid");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it("recovers one PaymentIntent by merchant order ID and rejects ambiguous matches", async () => {
     const intent = {
       id: "int_recovered", client_secret: "secret_recovered", currency: "CNY", merchant_order_id: "order_1",

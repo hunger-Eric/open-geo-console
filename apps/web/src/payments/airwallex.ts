@@ -56,6 +56,33 @@ export class AirwallexGateway implements PaymentGateway {
     return this.parsePaymentIntent(response, orderId);
   }
 
+  async deactivateLegacyHostedCheckout(providerCheckoutId: string, orderId: string): Promise<"deactivated" | "paid"> {
+    assertCommerceEnabled(this.environment);
+    if (isAirwallexPaymentIntentId(providerCheckoutId)) {
+      throw new Error("A PaymentIntent cannot be retired as a legacy Payment Link.");
+    }
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(providerCheckoutId)) {
+      throw new Error("Airwallex legacy Payment Link ID is invalid.");
+    }
+    const current = await this.apiGet(`/api/v1/pa/payment_links/${encodeURIComponent(providerCheckoutId)}`);
+    const link = parseLegacyPaymentLink(current, providerCheckoutId, orderId);
+    if (link.paid) return "paid";
+    if (link.active && link.updatedAt > this.now() - 15 * 60_000) {
+      throw new Error("The legacy checkout is still active. Please retry after its payment window closes.");
+    }
+    if (link.active) {
+      await this.api(`/api/v1/pa/payment_links/${encodeURIComponent(providerCheckoutId)}/deactivate`, {});
+    }
+    const confirmed = parseLegacyPaymentLink(
+      await this.apiGet(`/api/v1/pa/payment_links/${encodeURIComponent(providerCheckoutId)}`),
+      providerCheckoutId,
+      orderId
+    );
+    if (confirmed.paid) return "paid";
+    if (confirmed.active) throw new Error("Airwallex legacy Payment Link could not be deactivated.");
+    return "deactivated";
+  }
+
   async findHostedCheckoutByReference(orderId: string): Promise<HostedCheckoutResult | null> {
     assertCommerceEnabled(this.environment);
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(orderId)) throw new Error("Airwallex order reference is invalid.");
@@ -220,9 +247,40 @@ function required(environment: NodeJS.ProcessEnv, name: string): string {
 }
 
 function assertPaymentIntentId(value: string): void {
-  if (!/^int_[a-zA-Z0-9_-]{1,124}$/.test(value)) {
+  if (!isAirwallexPaymentIntentId(value)) {
     throw new Error("Airwallex PaymentIntent ID is invalid or belongs to a legacy checkout.");
   }
+}
+
+export function isAirwallexPaymentIntentId(value: string): boolean {
+  return /^int_[a-zA-Z0-9_-]{1,124}$/.test(value);
+}
+
+function parseLegacyPaymentLink(value: unknown, providerCheckoutId: string, orderId: string): {
+  active: boolean;
+  paid: boolean;
+  updatedAt: number;
+} {
+  if (!value || typeof value !== "object") throw new Error("Airwallex did not return a valid legacy Payment Link.");
+  const link = value as Record<string, unknown>;
+  const metadata = objectField(link, "metadata");
+  if (stringField(link, "id") !== providerCheckoutId
+    || stringField(link, "reference") !== orderId
+    || stringField(metadata, "ogc_order_id") !== orderId) {
+    throw new Error("Airwallex legacy Payment Link does not belong to this order.");
+  }
+  const successfulCount = typeof link.successful_payment_intent_count === "number"
+    ? link.successful_payment_intent_count
+    : 0;
+  const updatedAt = Date.parse(stringField(link, "updated_at", "created_at") ?? "");
+  if (!Number.isFinite(updatedAt)) throw new Error("Airwallex legacy Payment Link is missing its update time.");
+  return {
+    active: link.active === true,
+    updatedAt,
+    paid: stringField(link, "status")?.toUpperCase() === "PAID"
+      || successfulCount > 0
+      || Boolean(stringField(link, "latest_successful_payment_intent_id"))
+  };
 }
 
 function objectField(value: unknown, key: string): Record<string, unknown> | null {

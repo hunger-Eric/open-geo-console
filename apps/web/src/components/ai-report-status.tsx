@@ -292,7 +292,11 @@ function getStatusDescription(
       failed: job.failedPages
     });
   }
-  if (job.state === "unavailable") return dictionary.aiReport.failedDescription;
+  if (job.state === "unavailable") {
+    return job.tier === "preview" && payload.hasTechnicalReport && job.refundState === null
+      ? dictionary.aiReport.unavailableDescription
+      : dictionary.aiReport.failedDescription;
+  }
   return queueDescription ?? dictionary.aiReport.stageDescriptions[job.stage];
 }
 
