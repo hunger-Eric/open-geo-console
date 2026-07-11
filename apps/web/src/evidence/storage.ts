@@ -1,6 +1,7 @@
 import path from "node:path";
 import { FilesystemEvidenceStorage } from "./storage-filesystem";
 import { S3EvidenceStorage } from "./storage-s3";
+import { VercelBlobEvidenceStorage } from "./storage-vercel-blob";
 
 export interface StoredEvidenceObject {
   body: Uint8Array;
@@ -8,7 +9,7 @@ export interface StoredEvidenceObject {
 }
 
 export interface EvidenceStorage {
-  readonly provider: "filesystem" | "s3";
+  readonly provider: "filesystem" | "s3" | "vercel-blob";
   put(key: string, body: Uint8Array, contentType: string): Promise<void>;
   get(key: string): Promise<StoredEvidenceObject | null>;
   delete(key: string): Promise<void>;
@@ -40,7 +41,8 @@ export function createEvidenceStorage(environment: NodeJS.ProcessEnv = process.e
     return new FilesystemEvidenceStorage(root);
   }
   if (provider === "s3") return S3EvidenceStorage.fromEnvironment(environment);
-  throw new Error("OGC_EVIDENCE_STORAGE must be s3 in staging/production or filesystem in local development.");
+  if (provider === "vercel-blob") return new VercelBlobEvidenceStorage();
+  throw new Error("OGC_EVIDENCE_STORAGE must be s3 or vercel-blob in staging/production, or filesystem in local development.");
 }
 
 function safeSegment(value: string): string {

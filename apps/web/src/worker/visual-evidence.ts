@@ -4,6 +4,7 @@ import { saveEvidenceAsset, evidenceAssetId, type SaveEvidenceAssetInput } from 
 import type { EvidenceAssetKind } from "@/db/schema";
 import { createEvidenceStorage, evidenceStorageKey, type EvidenceStorage } from "@/evidence/storage";
 import { resolveSafeUrl } from "@open-geo-console/site-crawler";
+import { configuredPublicDnsResolver } from "@/server/safe-fetch";
 
 const VIEWPORT = { width: 1440, height: 1000 } as const;
 const allowBenchmarkNetwork = process.env.OGC_ALLOW_BENCHMARK_NETWORK === "true";
@@ -69,7 +70,13 @@ export async function captureReportVisualEvidence(input: {
   const browser = await chromium.launch({ headless: process.env.OGC_BROWSER_HEADLESS !== "false" });
   try {
     for (const request of requests) {
-      await captureCitation(input, request, storage, browser).catch(async () => {
+      await captureCitation(input, request, storage, browser).catch(async (error) => {
+        console.error("Visual evidence citation capture failed.", {
+          reportId: input.reportId,
+          findingId: request.findingId,
+          citationIndex: request.citationIndex,
+          error: sanitizedCaptureError(error)
+        });
         await saveUnavailable(input, request, intendedKind(request), "capture_failed");
       });
     }
@@ -89,6 +96,7 @@ async function captureCitation(
     javaScriptEnabled: true,
     viewport: VIEWPORT
   });
+  const resolver = configuredPublicDnsResolver();
   try {
     const page = await context.newPage();
     await page.route("**/*", async (route) => {
@@ -96,31 +104,36 @@ async function captureCitation(
       if (!url.startsWith("http://") && !url.startsWith("https://")) return route.abort();
       if (route.request().resourceType() === "media") return route.abort();
       try {
-        await resolveSafeUrl(url, { allowBenchmarkNetwork });
+        await resolveSafeUrl(url, { allowBenchmarkNetwork, resolver });
         await route.continue();
       } catch {
         await route.abort();
       }
     });
-    await resolveSafeUrl(request.citation.url, { allowBenchmarkNetwork });
+    await resolveSafeUrl(request.citation.url, { allowBenchmarkNetwork, resolver });
     await page.goto(request.citation.url, { waitUntil: "networkidle", timeout: 30_000 });
-    await resolveSafeUrl(page.url(), { allowBenchmarkNetwork });
+    await resolveSafeUrl(page.url(), { allowBenchmarkNetwork, resolver });
     const capturedAt = new Date();
 
     if (request.severity === "critical") {
       const rect = await locateQuoteRect(page, request.citation.quote);
       if (rect) {
-        await persistCapture(input, request, storage, "issue_crop", await page.screenshot({
-          type: "jpeg",
-          quality: 88,
-          clip: paddedClip(rect)
-        }), capturedAt);
-        await persistCapture(input, request, storage, "context", await page.screenshot({
-          type: "jpeg",
-          quality: 68,
-          fullPage: false
-        }), capturedAt);
-        return;
+        try {
+          await persistCapture(input, request, storage, "issue_crop", await page.screenshot({
+            type: "jpeg",
+            quality: 88,
+            clip: paddedClip(rect)
+          }), capturedAt);
+          await persistCapture(input, request, storage, "context", await page.screenshot({
+            type: "jpeg",
+            quality: 68,
+            fullPage: false
+          }), capturedAt);
+          return;
+        } catch {
+          // A stale or oversized DOM rectangle must degrade to a readable viewport,
+          // not make the verified citation disappear from the report.
+        }
       }
       await persistCapture(input, request, storage, "viewport", await page.screenshot({
         type: "jpeg",
@@ -144,11 +157,10 @@ async function locateQuoteRect(page: import("playwright").Page, quote: string) {
   const needle = normalizeText(quote).slice(0, 180);
   if (needle.length < 12) return null;
   return page.locator("body").evaluate((body, expected) => {
-    const normalize = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
     let best: Element | null = null;
     let bestLength = Number.POSITIVE_INFINITY;
     for (const element of Array.from(body.querySelectorAll("main *, article *, section *, body *"))) {
-      const text = normalize(element.textContent ?? "");
+      const text = (element.textContent ?? "").replace(/\s+/g, " ").trim().toLowerCase();
       if (text.includes(expected) && text.length < bestLength) {
         const rect = element.getBoundingClientRect();
         if (rect.width >= 40 && rect.height >= 16) {
@@ -159,17 +171,33 @@ async function locateQuoteRect(page: import("playwright").Page, quote: string) {
     }
     if (!best) return null;
     const rect = best.getBoundingClientRect();
-    return { x: rect.x + window.scrollX, y: rect.y + window.scrollY, width: rect.width, height: rect.height };
+    return {
+      x: rect.x + window.scrollX,
+      y: rect.y + window.scrollY,
+      width: rect.width,
+      height: rect.height,
+      documentWidth: Math.max(document.documentElement.scrollWidth, body.scrollWidth),
+      documentHeight: Math.max(document.documentElement.scrollHeight, body.scrollHeight)
+    };
   }, needle);
 }
 
-function paddedClip(rect: { x: number; y: number; width: number; height: number }) {
+export function paddedClip(rect: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  documentWidth: number;
+  documentHeight: number;
+}) {
   const padding = 24;
+  const x = Math.max(0, rect.x - padding);
+  const y = Math.max(0, rect.y - padding);
   return {
-    x: Math.max(0, rect.x - padding),
-    y: Math.max(0, rect.y - padding),
-    width: Math.max(1, Math.min(VIEWPORT.width, rect.width + padding * 2)),
-    height: Math.max(1, Math.min(900, rect.height + padding * 2))
+    x,
+    y,
+    width: Math.max(1, Math.min(VIEWPORT.width, rect.width + padding * 2, rect.documentWidth - x)),
+    height: Math.max(1, Math.min(900, rect.height + padding * 2, rect.documentHeight - y))
   };
 }
 
@@ -248,4 +276,9 @@ function canonicalUrl(value: string): string {
 
 function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function sanitizedCaptureError(error: unknown): string {
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return message.replace(/https?:\/\/\S+/gi, "[url]").slice(0, 240);
 }

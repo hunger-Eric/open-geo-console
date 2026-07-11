@@ -12,7 +12,7 @@ This runbook is the operator contract for the protected Vercel Preview and the p
 | Commerce | `COMMERCE_MODE=test`, fixed Airwallex Sandbox host | `disabled` until live gates pass, then `live` |
 | Email | All envelopes redirected to `OGC_TEST_EMAIL_RECIPIENT`; missing recipient fails before Resend | Actual order recipient; test recipient must be absent |
 | Model, HMAC, Queue, payment, email, bypass | Independent staging values; current model key reuse is a documented temporary exception | Independent production values |
-| Visual evidence storage | Private staging S3-compatible bucket and credentials shared only by staging Web/deep Worker | Separate private production bucket and credentials |
+| Visual evidence storage | Preview-only Vercel Private Blob store in `sin1`, shared only by staging Web/deep Worker | Separate private production object store and credentials |
 
 Production always uses the two-site policy even if a staging variable, header, cookie, or query parameter is present. Forced regeneration is accepted only for the protected staging identity.
 
@@ -39,11 +39,11 @@ npm run commerce:staging:all
 
 These commands do not fall back to `.env.local`; they refuse a non-staging profile, a production database marker, or live commerce. Both Worker lanes must be scheduled in production, but must never share model, Queue, HMAC, payment, or email credentials with staging.
 
-Set `OGC_EVIDENCE_STORAGE=s3` plus all `OGC_EVIDENCE_S3_*` variables on the protected Preview and its deep Worker before visual-evidence acceptance. Filesystem storage is local-development-only and is rejected when `OGC_DEPLOYMENT_PROFILE` is `staging` or `production`. The bucket must remain private; customer reads always pass through the report-authorized evidence route.
+Protected staging uses `OGC_EVIDENCE_STORAGE=vercel-blob` and the Preview-only `open-geo-console-staging-evidence` Private Blob store. Vercel Web Functions use the project connection's rotating OIDC; before a workstation deep-Worker drill, run `npx vercel pull --yes --environment=preview` so `.vercel/.env.preview.local` contains the store's external-worker token. `npm run worker:staging:deep` loads only that ignored file plus `apps/web/.env.staging.local`; required Sensitive model/Queue values still need their existing explicit process-only overrides. Production may use a separate Private Blob or S3-compatible adapter. Filesystem storage remains local-development-only and is rejected for staging/production. Customer reads always pass through the report-authorized evidence route.
 
 Vercel Sensitive values are intentionally not decryptable through `vercel env pull`; the generated file contains empty placeholders for those names. For a local Worker drill, explicitly override each required empty placeholder with the separately held staging value in only that process. Merely loading another env file does not replace variables that already exist as empty placeholders. Never weaken the database marker guard, print values, or copy production secrets into `.env.staging.local`.
 
-If a workstation proxy uses the reserved `198.18.0.0/15` Fake-IP DNS range, the crawler will and must reject the target as an SSRF risk. Do not allowlist the range or disable URL safety. Run the Worker through public/direct DNS or on persistent infrastructure whose resolver returns the site's public addresses.
+If a workstation proxy uses the reserved `198.18.0.0/15` Fake-IP DNS range, the crawler will and must reject the target as an SSRF risk. Do not allowlist the range or disable URL safety. Set `OGC_PUBLIC_DNS_DOH_URL=https://cloudflare-dns.com/dns-query` for that Worker process; both crawl and screenshot-browser validation then use the fixed public resolver while retaining blocked-address checks and safe-fetch IP pinning.
 
 ## Local staging cleanup
 

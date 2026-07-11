@@ -1,6 +1,6 @@
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
 import { describe, expect, it } from "vitest";
-import { buildVisualEvidenceRequests, visualEvidenceHash } from "./visual-evidence";
+import { buildVisualEvidenceRequests, paddedClip, visualEvidenceHash } from "./visual-evidence";
 
 const report = {
   tier: "deep",
@@ -33,5 +33,16 @@ describe("visual evidence requests", () => {
     }, [{ url: "https://example.com/page", contentHash: "page-hash" }]);
 
     expect(visualEvidenceHash(first)).toBe(visualEvidenceHash(second));
+  });
+
+  it("clamps issue crops to the rendered document bounds", () => {
+    expect(paddedClip({
+      x: 1380,
+      y: 980,
+      width: 200,
+      height: 200,
+      documentWidth: 1440,
+      documentHeight: 1000
+    })).toEqual({ x: 1356, y: 956, width: 84, height: 44 });
   });
 });

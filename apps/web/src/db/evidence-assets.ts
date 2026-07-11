@@ -24,7 +24,7 @@ export interface SaveEvidenceAssetInput {
   contentHash: string;
   evidenceHash: string;
   assetHash?: string;
-  storageProvider?: "filesystem" | "s3";
+  storageProvider?: "filesystem" | "s3" | "vercel-blob";
   storageKey?: string;
   mimeType?: string;
   byteSize?: number;

@@ -15,7 +15,7 @@ import {
 } from "@open-geo-console/site-crawler";
 import type { ExtractedPage, PageCandidate, PageType, PlannedPage } from "@open-geo-console/ai-report-engine";
 import { createHash } from "node:crypto";
-import { createSafeFetch } from "@/server/safe-fetch";
+import { configuredPublicDnsResolver, createSafeFetch } from "@/server/safe-fetch";
 
 const CRAWLER_USER_AGENT = "OpenGeoConsoleBot/1.0 (+https://github.com/open-geo-console)";
 const MAX_SITEMAP_DOCUMENTS = 200;
@@ -201,6 +201,7 @@ async function renderWithBrowser(url: string): Promise<string | null> {
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: process.env.OGC_BROWSER_HEADLESS !== "false" });
   try {
+    const resolver = configuredPublicDnsResolver();
     const context = await browser.newContext({ userAgent: CRAWLER_USER_AGENT, javaScriptEnabled: true });
     const page = await context.newPage();
     await page.route("**/*", async (route) => {
@@ -210,7 +211,7 @@ async function renderWithBrowser(url: string): Promise<string | null> {
         return;
       }
       try {
-        await resolveSafeUrl(requestUrl, { allowBenchmarkNetwork });
+        await resolveSafeUrl(requestUrl, { allowBenchmarkNetwork, resolver });
         const resourceType = route.request().resourceType();
         if (resourceType === "image" || resourceType === "media" || resourceType === "font") {
           await route.abort();
@@ -222,7 +223,7 @@ async function renderWithBrowser(url: string): Promise<string | null> {
       }
     });
     await page.goto(url, { waitUntil: "networkidle", timeout: 30_000 });
-    await resolveSafeUrl(page.url(), { allowBenchmarkNetwork });
+    await resolveSafeUrl(page.url(), { allowBenchmarkNetwork, resolver });
     const html = await page.content();
     return Buffer.byteLength(html, "utf8") <= 2 * 1024 * 1024 ? html : null;
   } finally {

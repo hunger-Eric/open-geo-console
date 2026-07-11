@@ -62,7 +62,7 @@ Required production variables:
 - `OGC_TOKEN_HASH_SECRET`
 - `OGC_IP_HASH_SECRET`
 - `OGC_DEPLOYMENT_PROFILE` (`staging` or `production`, matching the database marker)
-- `OGC_EVIDENCE_STORAGE=s3` plus the private S3-compatible endpoint, region, bucket and credentials for both Web and deep Worker processes
+- `OGC_EVIDENCE_STORAGE=vercel-blob` with a connected Vercel Private Blob store, or `s3` plus a private S3-compatible endpoint, region, bucket and credentials; Web and deep Worker processes must share the same store
 
 The initial commercial target is Netlify plus Neon, Cloudflare Turnstile/Queue, Airwallex, Resend, and scheduled workstation batches. This avoids mandatory server rent at low order volume while keeping every paid task durable in PostgreSQL. A later `FULFILLMENT_MODE=realtime` deployment uses the same job/outbox records on persistent Worker infrastructure.
 

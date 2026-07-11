@@ -46,5 +46,9 @@ describe("private evidence storage", () => {
       OGC_DEPLOYMENT_PROFILE: "production",
       OGC_EVIDENCE_STORAGE: "s3"
     })).toThrow("OGC_EVIDENCE_S3_ENDPOINT");
+    expect(createEvidenceStorage({
+      OGC_DEPLOYMENT_PROFILE: "staging",
+      OGC_EVIDENCE_STORAGE: "vercel-blob"
+    }).provider).toBe("vercel-blob");
   });
 });

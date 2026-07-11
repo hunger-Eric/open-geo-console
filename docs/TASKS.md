@@ -74,4 +74,4 @@
 - [x] Render a polished HTML report artifact with graded screenshot evidence cards.
 - [x] Generate the customer PDF from the same HTML artifact with print-specific CSS.
 - [x] Verify private asset authorization, screenshot fallback states, desktop/mobile HTML browser QA, and PDF export QA.
-- [ ] Configure private staging object storage and visually verify a fresh deep report's real issue-crop/context assets; the accepted legacy report correctly exercises the unavailable fallback.
+- [x] Configure Preview-only private staging object storage and visually verify a fresh paid deep report's real issue crop, context thumbnail, compact screenshots, viewport fallback, authorized HTML/PDF reads, and anonymous object-store denial.

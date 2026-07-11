@@ -101,7 +101,7 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
   };
 }
 
-function configuredPublicDnsResolver(): HostnameResolver | undefined {
+export function configuredPublicDnsResolver(): HostnameResolver | undefined {
   const endpoint = process.env.OGC_PUBLIC_DNS_DOH_URL?.trim();
   if (!endpoint) return undefined;
   if (endpoint !== CLOUDFLARE_DOH_ENDPOINT) {
