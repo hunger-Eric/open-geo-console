@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
+import path from "node:path";
 
 const nextConfig: NextConfig = {
+  outputFileTracingRoot: path.join(process.cwd(), "../.."),
   serverExternalPackages: ["@sparticuz/chromium"],
   outputFileTracingIncludes: {
     "/api/reports/[id]/artifacts/report.pdf": [
