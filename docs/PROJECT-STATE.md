@@ -6,7 +6,7 @@ Operate a durable, self-hostable report product whose main journey is `free tech
 
 Release baseline `v0.2.0` freezes the accepted HTML-first visual-evidence implementation before subsequent feature work. It includes private screenshot capture/storage, access-controlled evidence delivery, same-HTML PDF export, and the verified paid staging drill; it does not claim the remaining production-readiness gates below are complete.
 
-The next product direction is approved but not implemented: a zero-configuration AI recommendation forensic report for Chinese export companies. It will lead with observed answer-engine recommendations and third-party citation gaps, keep the website audit as supporting evidence, give owners a decision report, and give their existing vendors a separate task package. The approved contract is `docs/superpowers/specs/2026-07-12-ai-recommendation-forensic-report-design.md`.
+The next product direction is a zero-configuration AI recommendation forensic report for Chinese export companies. Its first implementation slice is complete: provider-neutral immutable snapshot contracts, citation-intelligence contracts, deterministic cross-package fixtures, and private PostgreSQL persistence. No live answer-engine adapter, customer UI, runtime orchestration, or provider certification is enabled yet. The approved contract is `docs/superpowers/specs/2026-07-12-ai-recommendation-forensic-report-design.md`.
 
 ## Current Architecture
 
@@ -14,6 +14,8 @@ The next product direction is approved but not implemented: a zero-configuration
 - `packages/geo-auditor` owns deterministic technical evidence and the reproducible GEO score.
 - `packages/site-crawler` owns URL/SSRF safety, registrable site identity, robots/sitemap/link discovery, HTML extraction, template clustering and representative-page selection.
 - `packages/ai-report-engine` owns OpenAI-compatible transport, page planning, batch analysis, `AiWebsiteReportV1`, synthesis and evidence verification.
+- `packages/answer-engine-observer` owns provider-neutral question/surface/run/cell/source contracts, validation, deterministic identities and offline fixtures.
+- `packages/citation-intelligence` owns recommendation extraction, entity resolution, source categorization, Grade A-D evidence and evidence-linked opportunity hypotheses.
 - `packages/crawler-rules` and `packages/log-parser` continue to own AI crawler identity and sanitized access-log evidence.
 
 The web process persists a public homepage technical report and enqueues work. Separate free/deep Workers use PostgreSQL leases and resumable checkpoints. The default `batch_24h` mode drains PostgreSQL from a scheduled workstation and exits; `realtime` consumes Cloudflare Queue hints on persistent infrastructure. Free reports analyze one homepage and show one verified AI finding while the global budget remains. Deep AI and technical payloads are private.
@@ -24,6 +26,9 @@ The web process persists a public homepage technical report and enqueues work. S
 - DNS-pinned safe HTTP crawling, per-redirect validation, robots enforcement, response limits and Playwright fallback for JavaScript-rendered pages.
 - Structured model output, six AI dimensions, organization profile, page-type findings, evidence citations, coverage/provenance and 90-day roadmap.
 - Citation verification that removes unsupported model findings before persistence.
+- Immutable answer-snapshot and citation-evidence contracts with explicit failed/no-recommendation states, bounded provider metadata, sanitized errors, response hashes, source-local ordering and deterministic provider fixtures. Developer API observations cannot be labeled as consumer-app results.
+- Citation intelligence with clause-bound recommendation extraction, entity ambiguity handling, owned/earned/reference/community source categories, Grade A-D evidence, repeated-pattern support and non-causal opportunity hypotheses.
+- PostgreSQL schema v4 privately binds answer runs, cells, sources and citation evidence to the owning report/job. Writes are idempotent and immutable; bounded excerpts expire while hashes remain. Memory persistence mirrors the same boundary, and cross-package tests prove fixture round-trip and expiry behavior without enabling live providers.
 - PostgreSQL schema for reports, jobs, AI payloads, seven-day page evidence, free trials, rate buckets, access Keys, credit ledger and private report tokens.
 - Thirty-day free preview reuse by registrable site, private-suffix tenant handling, two distinct free sites per HMAC client IP in a rolling 24-hour window, Turnstile, and an exact global AI budget with technical-only fallback.
 - Vercel rate limiting prefers `x-vercel-forwarded-for` and falls back to the platform-overwritten `x-forwarded-for` when `VERCEL=1` or the legacy-project opt-in `OGC_TRUST_VERCEL_HEADERS=true`, instead of collapsing every visitor into the direct-client fallback; rate-limit errors expose localization keys for Chinese and English UI.
@@ -92,7 +97,7 @@ The web process persists a public homepage technical report and enqueues work. S
 3. Complete the production application-rate-limit drill with three scannable distinct sites and a fresh Turnstile token for each; the third must return `429`, including when staging-only inputs are supplied.
 4. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the staging branch; until then, repoint the fixed staging alias after each CLI Preview deployment.
 5. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
-6. After the recommendation-forensic design receives written-spec approval, create an implementation plan beginning with snapshot/evidence contracts and deterministic provider fixtures; do not enable product claims before two provider adapters pass protected-staging certification.
+6. Implement and certify the first source-bearing answer-engine adapter in protected staging, then a second independent adapter; do not enable recommendation-forensic product claims before both pass certification.
 
 ## Acceptance Commands
 

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   assertDatabaseProfileMatches,
   closeDatabase,
+  DATABASE_SCHEMA_VERSION,
   ensureDatabase,
   getDatabaseEnvironmentStatus,
   getSqlClient
@@ -22,6 +23,7 @@ const describePostgres = enabled ? describe : describe.skip;
 describePostgres("protected staging PostgreSQL integration", () => {
   const runId = randomUUID().replaceAll("-", "");
   const sitePrefix = `staging-it-${runId}`;
+  const ipPrefix = `2001:db8:${runId.slice(0, 4)}:${runId.slice(4, 8)}`;
   const original = {
     profile: process.env.OGC_DEPLOYMENT_PROFILE,
     vercelEnvironment: process.env.VERCEL_ENV,
@@ -114,12 +116,12 @@ describePostgres("protected staging PostgreSQL integration", () => {
     const reportB = await insertReport(`${sitePrefix}-quota-b.test`, "quota-b");
     const reportC = await insertReport(`${sitePrefix}-quota-c.test`, "quota-c");
     const [claimA, claimB] = await Promise.all([
-      claimFreeSiteTrial({ siteKey: `${sitePrefix}-quota-a.test`, reportId: reportA, ipAddress: "198.51.100.10", now, dailyDistinctSiteLimit: 1 }),
-      claimFreeSiteTrial({ siteKey: `${sitePrefix}-quota-b.test`, reportId: reportB, ipAddress: "198.51.100.10", now, dailyDistinctSiteLimit: 1 })
+      claimFreeSiteTrial({ siteKey: `${sitePrefix}-quota-a.test`, reportId: reportA, ipAddress: `${ipPrefix}::10`, now, dailyDistinctSiteLimit: 1 }),
+      claimFreeSiteTrial({ siteKey: `${sitePrefix}-quota-b.test`, reportId: reportB, ipAddress: `${ipPrefix}::10`, now, dailyDistinctSiteLimit: 1 })
     ]);
     expect([claimA.outcome, claimB.outcome].sort()).toEqual(["created", "rate_limited"]);
     const otherIp = await claimFreeSiteTrial({
-      siteKey: `${sitePrefix}-quota-c.test`, reportId: reportC, ipAddress: "198.51.100.11", now, dailyDistinctSiteLimit: 1
+      siteKey: `${sitePrefix}-quota-c.test`, reportId: reportC, ipAddress: `${ipPrefix}::11`, now, dailyDistinctSiteLimit: 1
     });
     expect(otherIp.outcome).toBe("created");
   }, 60_000);
@@ -130,6 +132,13 @@ describePostgres("protected staging PostgreSQL integration", () => {
     expect(() => assertDatabaseProfileMatches(database.profile, "production")).toThrow("database environment marker");
   }, 60_000);
 
+  it("requires the current fail-closed database schema marker", async () => {
+    const rows = await getSqlClient()<Array<{ version: number }>>`
+      SELECT version FROM ogc_schema_state WHERE singleton = true
+    `;
+    expect(rows[0]?.version).toBe(DATABASE_SCHEMA_VERSION);
+  });
+
   it("atomically admits and recovers one pending report job", async () => {
     const siteKey = `${sitePrefix}-admission.test`;
     const now = new Date("2031-01-01T12:00:00.000Z");
@@ -138,7 +147,7 @@ describePostgres("protected staging PostgreSQL integration", () => {
       siteKey,
       locale: "en" as const,
       idempotencyKey: `admission-${runId}`,
-      ipAddress: "198.51.100.42",
+      ipAddress: `${ipPrefix}::42`,
       forceFresh: false,
       stagingPreview: true,
       dailyDistinctSiteLimit: 2,

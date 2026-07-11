@@ -76,13 +76,13 @@
 - [x] Verify private asset authorization, screenshot fallback states, desktop/mobile HTML browser QA, and PDF export QA.
 - [x] Configure Preview-only private staging object storage and visually verify a fresh paid deep report's real issue crop, context thumbnail, compact screenshots, viewport fallback, authorized HTML/PDF reads, and anonymous object-store denial.
 
-## AI recommendation forensic report (approved design, not implemented)
+## AI recommendation forensic report (approved design, contracts implemented)
 
 - [x] Approve the zero-configuration recommendation-forensic product direction, target buyer, two-audience delivery, evidence grades, and non-service boundary.
-- [ ] Write and approve an implementation plan for `docs/superpowers/specs/2026-07-12-ai-recommendation-forensic-report-design.md`.
-- [ ] Add immutable answer-snapshot and citation-evidence contracts with deterministic provider fixtures.
+- [x] Write and approve an implementation plan for `docs/superpowers/specs/2026-07-12-ai-recommendation-forensic-report-design.md`.
+- [x] Add immutable answer-snapshot and citation-evidence contracts with deterministic provider fixtures and private schema-v4 persistence.
 - [ ] Certify the first source-bearing answer-engine adapter in protected staging.
 - [ ] Certify a second independent adapter and prove qualified/limited/failed commercial coverage outcomes.
-- [ ] Add citation intelligence, entity ambiguity handling, Grade A-D evidence, source gaps, and opportunity hypotheses.
+- [x] Add citation intelligence, entity ambiguity handling, Grade A-D evidence, source gaps, and opportunity hypotheses.
 - [ ] Deliver the executive decision report and separate vendor task package in private HTML/PDF.
 - [ ] Add the budgeted one-question free sample only after paid multi-engine staging acceptance.

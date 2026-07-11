@@ -1,11 +1,17 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
 import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
+import type {
+  CitationRetrievalState,
+  CitationSourceCategory,
+  EvidenceGrade
+} from "@open-geo-console/citation-intelligence";
 import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -69,6 +75,9 @@ export type JobDispatchState = "pending" | "published" | "abandoned";
 export type BatchRunStatus = "running" | "succeeded" | "partial" | "failed";
 export type EvidenceAssetKind = "issue_crop" | "context" | "compact" | "viewport";
 export type EvidenceAssetStatus = "ready" | "unavailable";
+export type AnswerSnapshotCellStatus = "succeeded" | "failed";
+export type CitationEvidenceGrade = EvidenceGrade;
+export type { CitationRetrievalState, CitationSourceCategory };
 
 export interface JobCheckpoint {
   targetPageCount?: number;
@@ -160,6 +169,7 @@ export const scanJobs = pgTable(
     index("scan_jobs_tier_queue_idx").on(table.tier, table.stage, table.createdAt, table.id),
     index("scan_jobs_tier_lease_idx").on(table.tier, table.leaseExpiresAt),
     index("scan_jobs_report_idx").on(table.reportId, table.createdAt),
+    uniqueIndex("scan_jobs_id_report_uidx").on(table.id, table.reportId),
     check("scan_jobs_locale_check", sql`${table.locale} IN ('en', 'zh')`),
     check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration')`),
     check(
@@ -170,6 +180,144 @@ export const scanJobs = pgTable(
 );
 
 export type ScanJobRow = typeof scanJobs.$inferSelect;
+
+export const answerSnapshotRuns = pgTable(
+  "answer_snapshot_runs",
+  {
+    id: text("id").primaryKey(),
+    reportId: text("report_id").notNull(),
+    jobId: text("job_id").notNull(),
+    locale: text("locale").notNull(),
+    region: text("region").notNull(),
+    questionSetVersion: text("question_set_version").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({ columns: [table.reportId], foreignColumns: [scanReports.id], name: "answer_snapshot_runs_report_fkey" }).onDelete("cascade"),
+    foreignKey({ columns: [table.jobId, table.reportId], foreignColumns: [scanJobs.id, scanJobs.reportId], name: "answer_snapshot_runs_job_report_fkey" }).onDelete("cascade"),
+    index("answer_snapshot_runs_job_idx").on(table.jobId, table.startedAt),
+    index("answer_snapshot_runs_report_idx").on(table.reportId, table.startedAt),
+    check("answer_snapshot_runs_locale_check", sql`length(btrim(${table.locale})) > 0`),
+    check("answer_snapshot_runs_region_check", sql`length(btrim(${table.region})) > 0`),
+    check("answer_snapshot_runs_question_set_check", sql`length(btrim(${table.questionSetVersion})) > 0`)
+  ]
+);
+
+export type AnswerSnapshotRunRow = typeof answerSnapshotRuns.$inferSelect;
+
+export const answerSnapshotCells = pgTable(
+  "answer_snapshot_cells",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id").notNull().references(() => answerSnapshotRuns.id, { onDelete: "cascade" }),
+    questionId: text("question_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    productId: text("product_id").notNull(),
+    modelId: text("model_id").notNull(),
+    collectionSurface: text("collection_surface").notNull(),
+    locale: text("locale").notNull(),
+    region: text("region").notNull(),
+    certificationState: text("certification_state").notNull(),
+    consumerApplicationLabel: text("consumer_application_label"),
+    status: text("status").$type<AnswerSnapshotCellStatus>().notNull(),
+    answerText: text("answer_text"),
+    executedAt: timestamp("executed_at", { withTimezone: true }).notNull(),
+    executionDurationMs: integer("execution_duration_ms").notNull(),
+    responseHash: text("response_hash"),
+    recommendationOutcome: text("recommendation_outcome"),
+    providerRequestId: text("provider_request_id"),
+    usage: jsonb("usage").$type<Record<string, unknown>>(),
+    errorClass: text("error_class"),
+    sanitizedError: text("sanitized_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("answer_snapshot_cells_identity_uidx").on(
+      table.runId, table.questionId, table.providerId, table.productId, table.modelId,
+      table.collectionSurface, table.locale, table.region
+    ),
+    index("answer_snapshot_cells_run_order_idx").on(table.runId, table.questionId, table.providerId, table.productId, table.modelId),
+    check("answer_snapshot_cells_status_check", sql`${table.status} IN ('succeeded','failed')`),
+    check("answer_snapshot_cells_surface_check", sql`${table.collectionSurface} IN ('developer_api','approved_browser_capture')`),
+    check("answer_snapshot_cells_certification_check", sql`${table.certificationState} IN ('candidate_uncertified','certified')`),
+    check("answer_snapshot_cells_duration_check", sql`${table.executionDurationMs} >= 0`),
+    check("answer_snapshot_cells_api_label_check", sql`${table.collectionSurface} <> 'developer_api' OR ${table.consumerApplicationLabel} IS NULL`),
+    check("answer_snapshot_cells_error_class_check", sql`${table.errorClass} IS NULL OR ${table.errorClass} IN ('timeout','rate-limit','authentication','unsupported','provider-unavailable','invalid-response','policy-blocked')`),
+    check("answer_snapshot_cells_outcome_check", sql`${table.recommendationOutcome} IS NULL OR ${table.recommendationOutcome} IN ('recommendations_present','no_recommendation')`),
+    check("answer_snapshot_cells_result_check", sql`(
+      ${table.status} = 'succeeded'
+      AND length(btrim(${table.answerText})) > 0
+      AND ${table.responseHash} IS NOT NULL
+      AND ${table.recommendationOutcome} IS NOT NULL
+      AND ${table.errorClass} IS NULL
+      AND ${table.sanitizedError} IS NULL
+    ) OR (
+      ${table.status} = 'failed'
+      AND ${table.answerText} IS NULL
+      AND ${table.responseHash} IS NULL
+      AND ${table.recommendationOutcome} IS NULL
+      AND ${table.errorClass} IS NOT NULL
+    )`)
+  ]
+);
+
+export type AnswerSnapshotCellRow = typeof answerSnapshotCells.$inferSelect;
+
+export const answerSnapshotSources = pgTable(
+  "answer_snapshot_sources",
+  {
+    id: text("id").primaryKey(),
+    cellId: text("cell_id").notNull().references(() => answerSnapshotCells.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    title: text("title").notNull(),
+    providerOrder: integer("provider_order").notNull(),
+    providerMetadata: jsonb("provider_metadata").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("answer_snapshot_sources_cell_order_uidx").on(table.cellId, table.providerOrder),
+    uniqueIndex("answer_snapshot_sources_cell_url_uidx").on(table.cellId, table.url),
+    check("answer_snapshot_sources_order_check", sql`${table.providerOrder} >= 0`),
+    check("answer_snapshot_sources_url_check", sql`${table.url} ~ '^https?://'`)
+  ]
+);
+
+export type AnswerSnapshotSourceRow = typeof answerSnapshotSources.$inferSelect;
+
+export const citationSourceEvidence = pgTable(
+  "citation_source_evidence",
+  {
+    id: text("id").primaryKey(),
+    sourceId: text("source_id").notNull().references(() => answerSnapshotSources.id, { onDelete: "cascade" }),
+    category: text("category").$type<CitationSourceCategory>().notNull(),
+    retrievalState: text("retrieval_state").$type<CitationRetrievalState>().notNull(),
+    excerpt: text("excerpt"),
+    excerptHash: text("excerpt_hash"),
+    contentHash: text("content_hash"),
+    grade: text("grade").$type<CitationEvidenceGrade>().notNull(),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("citation_source_evidence_source_uidx").on(table.sourceId),
+    index("citation_source_evidence_expiry_idx").on(table.retrievalState, table.expiresAt),
+    check("citation_source_evidence_category_check", sql`${table.category} IN ('owned_customer','owned_competitor','earned_editorial','directory_or_reference','community_or_ugc','institution','social','unknown')`),
+    check("citation_source_evidence_retrieval_check", sql`${table.retrievalState} IN ('available','inaccessible','not_retrieved','expired')`),
+    check("citation_source_evidence_grade_check", sql`${table.grade} IN ('A','B','C','D')`),
+    check("citation_source_evidence_excerpt_bound_check", sql`${table.excerpt} IS NULL OR char_length(${table.excerpt}) <= 1200`),
+    check("citation_source_evidence_content_check", sql`(
+      ${table.retrievalState} = 'available' AND ${table.excerpt} IS NOT NULL AND ${table.excerptHash} IS NOT NULL AND ${table.contentHash} IS NOT NULL
+    ) OR (
+      ${table.retrievalState} IN ('inaccessible','not_retrieved') AND ${table.excerpt} IS NULL AND ${table.excerptHash} IS NULL AND ${table.contentHash} IS NULL
+    ) OR (
+      ${table.retrievalState} = 'expired' AND ${table.excerpt} IS NULL
+    )`)
+  ]
+);
+
+export type CitationSourceEvidenceRow = typeof citationSourceEvidence.$inferSelect;
 
 export const paymentOrders = pgTable(
   "payment_orders",

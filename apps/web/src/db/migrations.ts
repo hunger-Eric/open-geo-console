@@ -455,5 +455,104 @@ export const DATABASE_MIGRATIONS = [
     UNIQUE (job_id, finding_id, citation_index, kind)
   )`,
   `CREATE INDEX IF NOT EXISTS report_evidence_assets_report_idx
-   ON report_evidence_assets (report_id, finding_id)`
+   ON report_evidence_assets (report_id, finding_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS scan_jobs_id_report_uidx ON scan_jobs (id, report_id)`,
+  `CREATE TABLE IF NOT EXISTS answer_snapshot_runs (
+    id text PRIMARY KEY,
+    report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
+    job_id text NOT NULL,
+    locale text NOT NULL CHECK (length(btrim(locale)) > 0),
+    region text NOT NULL CHECK (length(btrim(region)) > 0),
+    question_set_version text NOT NULL CHECK (length(btrim(question_set_version)) > 0),
+    started_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT answer_snapshot_runs_job_report_fkey
+      FOREIGN KEY (job_id, report_id) REFERENCES scan_jobs(id, report_id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS answer_snapshot_runs_job_idx ON answer_snapshot_runs (job_id, started_at)`,
+  `CREATE INDEX IF NOT EXISTS answer_snapshot_runs_report_idx ON answer_snapshot_runs (report_id, started_at)`,
+  `CREATE TABLE IF NOT EXISTS answer_snapshot_cells (
+    id text PRIMARY KEY,
+    run_id text NOT NULL REFERENCES answer_snapshot_runs(id) ON DELETE CASCADE,
+    question_id text NOT NULL,
+    provider_id text NOT NULL,
+    product_id text NOT NULL,
+    model_id text NOT NULL,
+    collection_surface text NOT NULL CHECK (collection_surface IN ('developer_api','approved_browser_capture')),
+    locale text NOT NULL,
+    region text NOT NULL,
+    certification_state text NOT NULL CHECK (certification_state IN ('candidate_uncertified','certified')),
+    consumer_application_label text,
+    status text NOT NULL CHECK (status IN ('succeeded','failed')),
+    answer_text text,
+    executed_at timestamptz NOT NULL,
+    execution_duration_ms integer NOT NULL CHECK (execution_duration_ms >= 0),
+    response_hash text,
+    recommendation_outcome text CHECK (recommendation_outcome IS NULL OR recommendation_outcome IN ('recommendations_present','no_recommendation')),
+    provider_request_id text,
+    usage jsonb,
+    error_class text CHECK (error_class IS NULL OR error_class IN ('timeout','rate-limit','authentication','unsupported','provider-unavailable','invalid-response','policy-blocked')),
+    sanitized_error text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT answer_snapshot_cells_api_label_check CHECK (collection_surface <> 'developer_api' OR consumer_application_label IS NULL),
+    CONSTRAINT answer_snapshot_cells_result_check CHECK (
+      (status = 'succeeded' AND length(btrim(answer_text)) > 0 AND response_hash IS NOT NULL
+        AND recommendation_outcome IS NOT NULL AND error_class IS NULL AND sanitized_error IS NULL)
+      OR
+      (status = 'failed' AND answer_text IS NULL AND response_hash IS NULL
+        AND recommendation_outcome IS NULL AND error_class IS NOT NULL)
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS answer_snapshot_cells_identity_uidx
+   ON answer_snapshot_cells (run_id, question_id, provider_id, product_id, model_id, collection_surface, locale, region)`,
+  `CREATE INDEX IF NOT EXISTS answer_snapshot_cells_run_order_idx
+   ON answer_snapshot_cells (run_id, question_id, provider_id, product_id, model_id)`,
+  `ALTER TABLE answer_snapshot_cells DROP CONSTRAINT IF EXISTS answer_snapshot_cells_error_class_check`,
+  `ALTER TABLE answer_snapshot_cells ADD CONSTRAINT answer_snapshot_cells_error_class_check
+   CHECK (error_class IS NULL OR error_class IN ('timeout','rate-limit','authentication','unsupported','provider-unavailable','invalid-response','policy-blocked'))`,
+  `CREATE TABLE IF NOT EXISTS answer_snapshot_sources (
+    id text PRIMARY KEY,
+    cell_id text NOT NULL REFERENCES answer_snapshot_cells(id) ON DELETE CASCADE,
+    url text NOT NULL CHECK (url ~ '^https?://'),
+    title text NOT NULL,
+    provider_order integer NOT NULL CHECK (provider_order >= 0),
+    provider_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (cell_id, provider_order),
+    UNIQUE (cell_id, url)
+  )`,
+  `CREATE TABLE IF NOT EXISTS citation_source_evidence (
+    id text PRIMARY KEY,
+    source_id text NOT NULL UNIQUE REFERENCES answer_snapshot_sources(id) ON DELETE CASCADE,
+    category text NOT NULL CHECK (category IN ('owned_customer','owned_competitor','earned_editorial','directory_or_reference','community_or_ugc','institution','social','unknown')),
+    retrieval_state text NOT NULL CHECK (retrieval_state IN ('available','inaccessible','not_retrieved','expired')),
+    excerpt text CHECK (excerpt IS NULL OR char_length(excerpt) <= 1200),
+    excerpt_hash text,
+    content_hash text,
+    grade text NOT NULL CHECK (grade IN ('A','B','C','D')),
+    retrieved_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT citation_source_evidence_content_check CHECK (
+      (retrieval_state = 'available' AND excerpt IS NOT NULL AND excerpt_hash IS NOT NULL AND content_hash IS NOT NULL)
+      OR (retrieval_state IN ('inaccessible','not_retrieved') AND excerpt IS NULL AND excerpt_hash IS NULL AND content_hash IS NULL)
+      OR (retrieval_state = 'expired' AND excerpt IS NULL)
+    )
+  )`,
+  `CREATE INDEX IF NOT EXISTS citation_source_evidence_expiry_idx
+   ON citation_source_evidence (retrieval_state, expires_at)`,
+  `ALTER TABLE citation_source_evidence DROP CONSTRAINT IF EXISTS citation_source_evidence_category_check`,
+  `ALTER TABLE citation_source_evidence ADD CONSTRAINT citation_source_evidence_category_check
+   CHECK (category IN ('owned_customer','owned_competitor','earned_editorial','directory_or_reference','community_or_ugc','institution','social','unknown'))`,
+  `ALTER TABLE citation_source_evidence DROP CONSTRAINT IF EXISTS citation_source_evidence_retrieval_state_check`,
+  `ALTER TABLE citation_source_evidence DROP CONSTRAINT IF EXISTS citation_source_evidence_retrieval_check`,
+  `ALTER TABLE citation_source_evidence DROP CONSTRAINT IF EXISTS citation_source_evidence_content_check`,
+  `UPDATE citation_source_evidence SET retrieval_state = 'inaccessible' WHERE retrieval_state = 'unavailable'`,
+  `ALTER TABLE citation_source_evidence ADD CONSTRAINT citation_source_evidence_retrieval_check
+   CHECK (retrieval_state IN ('available','inaccessible','not_retrieved','expired'))`,
+  `ALTER TABLE citation_source_evidence ADD CONSTRAINT citation_source_evidence_content_check CHECK (
+     (retrieval_state = 'available' AND excerpt IS NOT NULL AND excerpt_hash IS NOT NULL AND content_hash IS NOT NULL)
+     OR (retrieval_state IN ('inaccessible','not_retrieved') AND excerpt IS NULL AND excerpt_hash IS NULL AND content_hash IS NULL)
+     OR (retrieval_state = 'expired' AND excerpt IS NULL)
+   )`
 ] as const;

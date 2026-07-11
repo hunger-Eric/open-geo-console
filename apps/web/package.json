@@ -33,7 +33,7 @@
     "db:environment:init": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts init",
     "db:environment:inspect": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts inspect",
     "staging:free:cleanup": "node --env-file=.env.staging.local --import tsx src/scripts/staging-free-cleanup.ts",
-    "test:postgres:staging-security": "node --env-file=.env.staging.local ../../node_modules/vitest/vitest.mjs run --root ../.. apps/web/src/db/staging-security.postgres.test.ts",
+    "test:postgres:staging-security": "node --env-file=.env.staging.local ../../node_modules/vitest/vitest.mjs run --root ../.. apps/web/src/db/staging-security.postgres.test.ts apps/web/src/db/recommendation-forensics.postgres.test.ts",
     "db:migrate:sqlite": "node --env-file-if-exists=.env.local --import tsx src/scripts/migrate-sqlite.ts"
   },
   "dependencies": {
@@ -41,6 +41,8 @@
     "@aws-sdk/client-s3": "^3.1085.0",
     "@fontsource/noto-sans-sc": "^5.2.9",
     "@open-geo-console/ai-report-engine": "*",
+    "@open-geo-console/answer-engine-observer": "*",
+    "@open-geo-console/citation-intelligence": "*",
     "@open-geo-console/crawler-rules": "*",
     "@open-geo-console/geo-auditor": "*",
     "@open-geo-console/log-parser": "*",

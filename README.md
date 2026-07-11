@@ -34,6 +34,8 @@ AI findings must cite URLs from the current crawl and quote text present in reta
 - `packages/crawler-rules` — AI crawler identity rules.
 - `packages/log-parser` — access-log parsing and sanitized bot evidence.
 
+The recommendation-forensics foundation is split into two additional workspaces: `packages/answer-engine-observer` owns provider-neutral answer-snapshot contracts, validation and deterministic fixtures; `packages/citation-intelligence` owns recommendation/entity analysis, source categories, evidence grades and opportunity hypotheses. These packages do not enable a live provider or customer-facing recommendation claim by themselves.
+
 ## Local Setup
 
 ```bash

@@ -1,10 +1,23 @@
 import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
 import { getDatabasePath } from "./index";
-import type { ReportBotEvidenceRow, ScanReportRow } from "./schema";
+import type {
+  AnswerSnapshotCellRow,
+  AnswerSnapshotRunRow,
+  AnswerSnapshotSourceRow,
+  CitationSourceEvidenceRow,
+  ReportBotEvidenceRow,
+  ScanJobRow,
+  ScanReportRow
+} from "./schema";
 
 interface MemoryStore {
   reports: Map<string, ScanReportRow>;
   botEvidence: Map<string, ReportBotEvidenceRow>;
+  answerSnapshotRuns: Map<string, AnswerSnapshotRunRow>;
+  answerSnapshotCells: Map<string, AnswerSnapshotCellRow>;
+  answerSnapshotSources: Map<string, AnswerSnapshotSourceRow>;
+  citationSourceEvidence: Map<string, CitationSourceEvidenceRow>;
+  scanJobs: Map<string, ScanJobRow>;
 }
 
 const stores = new Map<string, MemoryStore>();
@@ -13,7 +26,15 @@ function currentStore(): MemoryStore {
   const key = getDatabasePath();
   let store = stores.get(key);
   if (!store) {
-    store = { reports: new Map(), botEvidence: new Map() };
+    store = {
+      reports: new Map(),
+      botEvidence: new Map(),
+      answerSnapshotRuns: new Map(),
+      answerSnapshotCells: new Map(),
+      answerSnapshotSources: new Map(),
+      citationSourceEvidence: new Map(),
+      scanJobs: new Map()
+    };
     stores.set(key, store);
   }
   return store;
@@ -31,7 +52,103 @@ export function memoryGetReport(id: string): ScanReportRow | null {
 export function memoryDeleteReport(id: string): boolean {
   const store = currentStore();
   store.botEvidence.delete(id);
+  const runIds = [...store.answerSnapshotRuns.values()].filter((run) => run.reportId === id).map((run) => run.id);
+  for (const runId of runIds) memoryDeleteAnswerSnapshotRun(runId);
+  for (const job of store.scanJobs.values()) {
+    if (job.reportId === id) store.scanJobs.delete(job.id);
+  }
   return store.reports.delete(id);
+}
+
+export function memoryGetScanJob(id: string): ScanJobRow | null {
+  return currentStore().scanJobs.get(id) ?? null;
+}
+
+export function memorySaveScanJob(row: ScanJobRow): ScanJobRow {
+  currentStore().scanJobs.set(row.id, row);
+  return row;
+}
+
+export function memoryGetAnswerSnapshotRun(id: string): AnswerSnapshotRunRow | null {
+  return currentStore().answerSnapshotRuns.get(id) ?? null;
+}
+
+export function memorySaveAnswerSnapshotRun(row: AnswerSnapshotRunRow): AnswerSnapshotRunRow {
+  currentStore().answerSnapshotRuns.set(row.id, row);
+  return row;
+}
+
+export function memoryGetAnswerSnapshotRunsForJob(jobId: string): AnswerSnapshotRunRow[] {
+  return [...currentStore().answerSnapshotRuns.values()].filter((run) => run.jobId === jobId);
+}
+
+export function memoryDeleteAnswerSnapshotRun(id: string): void {
+  const store = currentStore();
+  const cellIds = [...store.answerSnapshotCells.values()].filter((cell) => cell.runId === id).map((cell) => cell.id);
+  for (const cellId of cellIds) {
+    const sourceIds = [...store.answerSnapshotSources.values()].filter((source) => source.cellId === cellId).map((source) => source.id);
+    for (const sourceId of sourceIds) {
+      for (const evidence of store.citationSourceEvidence.values()) {
+        if (evidence.sourceId === sourceId) store.citationSourceEvidence.delete(evidence.id);
+      }
+      store.answerSnapshotSources.delete(sourceId);
+    }
+    store.answerSnapshotCells.delete(cellId);
+  }
+  store.answerSnapshotRuns.delete(id);
+}
+
+export function memoryGetAnswerSnapshotCell(id: string): AnswerSnapshotCellRow | null {
+  return currentStore().answerSnapshotCells.get(id) ?? null;
+}
+
+export function memorySaveAnswerSnapshotCell(row: AnswerSnapshotCellRow): AnswerSnapshotCellRow {
+  currentStore().answerSnapshotCells.set(row.id, row);
+  return row;
+}
+
+export function memoryGetAnswerSnapshotCellsForRuns(runIds: string[]): AnswerSnapshotCellRow[] {
+  const ids = new Set(runIds);
+  return [...currentStore().answerSnapshotCells.values()].filter((cell) => ids.has(cell.runId));
+}
+
+export function memoryGetAnswerSnapshotSource(id: string): AnswerSnapshotSourceRow | null {
+  return currentStore().answerSnapshotSources.get(id) ?? null;
+}
+
+export function memoryGetAnswerSnapshotSourcesForCells(cellIds: string[]): AnswerSnapshotSourceRow[] {
+  const ids = new Set(cellIds);
+  return [...currentStore().answerSnapshotSources.values()].filter((source) => ids.has(source.cellId));
+}
+
+export function memorySaveAnswerSnapshotSource(row: AnswerSnapshotSourceRow): AnswerSnapshotSourceRow {
+  currentStore().answerSnapshotSources.set(row.id, row);
+  return row;
+}
+
+export function memoryGetCitationSourceEvidence(id: string): CitationSourceEvidenceRow | null {
+  return currentStore().citationSourceEvidence.get(id) ?? null;
+}
+
+export function memoryGetCitationSourceEvidenceForSources(sourceIds: string[]): CitationSourceEvidenceRow[] {
+  const ids = new Set(sourceIds);
+  return [...currentStore().citationSourceEvidence.values()].filter((evidence) => ids.has(evidence.sourceId));
+}
+
+export function memorySaveCitationSourceEvidence(row: CitationSourceEvidenceRow): CitationSourceEvidenceRow {
+  currentStore().citationSourceEvidence.set(row.id, row);
+  return row;
+}
+
+export function memoryExpireCitationSourceContent(now: Date): number {
+  let count = 0;
+  for (const evidence of currentStore().citationSourceEvidence.values()) {
+    if (evidence.retrievalState === "available" && evidence.expiresAt <= now) {
+      currentStore().citationSourceEvidence.set(evidence.id, { ...evidence, retrievalState: "expired", excerpt: null });
+      count += 1;
+    }
+  }
+  return count;
 }
 
 export function memoryRecentReports(limit: number): ScanReportRow[] {
