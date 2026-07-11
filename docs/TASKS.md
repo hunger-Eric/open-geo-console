@@ -37,6 +37,8 @@
 - [x] Complete a real signed Airwallex Sandbox payment Webhook and prove that only its persisted state changes the original report banner to paid/queued.
 - [ ] Complete the remaining refund, redirected-email, and production application-level third-site `429` browser acceptance.
 - [x] Replace the no-return Payment Link checkout with a verified PaymentIntent/HPP journey, protected deployment, forged-return rejection, cancel return, successful Sandbox return, and signed-Webhook banner transition.
+- [x] Safely recover unpaid legacy Payment Links into HPP, reject paid-link replacement, and replace raw JSON parsing errors with localized checkout states.
+- [ ] Re-trigger the missing signed Airwallex Sandbox event for the provider-paid legacy report, then drain its deep job and verify the generated report.
 
 ## Evidence-backed AI report engine
 
