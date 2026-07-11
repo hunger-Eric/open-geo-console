@@ -38,6 +38,7 @@
 - [ ] Complete the remaining refund, redirected-email, and production application-level third-site `429` browser acceptance.
 - [x] Replace the no-return Payment Link checkout with a verified PaymentIntent/HPP journey, protected deployment, forged-return rejection, cancel return, successful Sandbox return, and signed-Webhook banner transition.
 - [x] Safely recover unpaid legacy Payment Links into HPP, reject paid-link replacement, and replace raw JSON parsing errors with localized checkout states.
+- [x] Distinguish a missing free AI preview from deployment-wide AI configuration and keep the completed technical report explicitly available.
 - [ ] Re-trigger the missing signed Airwallex Sandbox event for the provider-paid legacy report, then drain its deep job and verify the generated report.
 
 ## Evidence-backed AI report engine
