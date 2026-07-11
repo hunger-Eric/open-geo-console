@@ -32,7 +32,7 @@
 - [x] Assign and verify the fixed protected staging alias `open-geo-console-staging-itheheda.vercel.app` without weakening Vercel Authentication.
 - [ ] Authorize the Vercel GitHub App for this repository, connect the project, and scope staging environment variables to one Preview branch; until then, repoint the fixed alias after each CLI deployment.
 - [x] Create separate Airwallex Sandbox, Resend/test-recipient, and Cloudflare Queue resources; protect provider Webhooks with dedicated rotated bypass values and application signatures.
-- [ ] Replace the user-approved shared MiMo Preview key with an independent staging key, then complete a successful real-model report.
+- [ ] Replace the user-approved shared MiMo Preview key with an independent staging key; successful real-model report acceptance is complete.
 - [x] Configure production Turnstile, Cloudflare Bot Fight Mode, and a narrow `/api/scan` burst rule while leaving AI-bot blocking off.
 - [x] Complete a real signed Airwallex Sandbox payment Webhook and prove that only its persisted state changes the original report banner to paid/queued.
 - [ ] Complete the remaining refund, redirected-email, and production application-level third-site `429` browser acceptance.
@@ -40,7 +40,7 @@
 - [x] Safely recover unpaid legacy Payment Links into HPP, reject paid-link replacement, and replace raw JSON parsing errors with localized checkout states.
 - [x] Distinguish a missing free AI preview from deployment-wide AI configuration and keep the completed technical report explicitly available.
 - [x] Route provider-paid legacy orders into the report-bound payment-confirmation state and polling loop without granting entitlement from browser/provider retrieval.
-- [ ] Re-trigger the missing signed Airwallex Sandbox event for the provider-paid legacy report, then drain its deep job and verify the generated report.
+- [x] Re-trigger the missing signed Airwallex Sandbox event for the provider-paid legacy report, resolve it safely by Payment Link binding, drain its deep job, and verify the generated private report in the browser.
 
 ## Evidence-backed AI report engine
 

@@ -103,3 +103,13 @@ Scanner and checkout forms render Turnstile with `appearance: interaction-only` 
 ## 2026-07-11: Vercel Functions run near the Singapore database
 
 The repository-level Vercel configuration selects `sin1` for Functions so fast-admission database round trips stay near the Singapore Neon database. This does not move long-running crawling into the Web process; Worker placement remains an independent operations concern.
+
+## 2026-07-11: Legacy paid Webhooks may resolve only through an exact checkout binding
+
+Some legacy Airwallex Payment Link events omit `metadata.ogc_order_id` and use a human-readable title as `merchant_order_id`. A verified paid event may therefore resolve an order by `payment_link_id` only when it exactly matches the unique `(provider, provider_checkout_id)` database binding and the signed amount and currency match the immutable order. This compatibility path never accepts a title as an order ID and does not change the rule that only a verified Webhook creates payment and entitlement state.
+
+## 2026-07-11: Public DNS compatibility must preserve IP pinning and SSRF validation
+
+A Worker behind Fake-IP DNS may opt into the fixed Cloudflare DNS-over-HTTPS endpoint. Returned A/AAAA addresses still pass the existing private, reserved, metadata and benchmark-network blocks, and the crawler pins the approved address for the actual request and every redirect. The option is off by default; it is a resolver replacement, not an address allowlist or SSRF bypass.
+
+Protected staging test mode may issue a one-day operator preview cookie only for an exact paid-and-completed order/report pair. Vercel Authentication remains the outer staging boundary and production always returns `404`; normal customer delivery continues to use the one-time emailed access link.
