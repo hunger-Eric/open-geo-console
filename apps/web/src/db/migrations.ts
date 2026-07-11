@@ -427,5 +427,33 @@ export const DATABASE_MIGRATIONS = [
   `ALTER TABLE scan_reports ADD CONSTRAINT scan_reports_technical_status_check
    CHECK (technical_status IN ('pending','processing','completed','failed'))`,
   `CREATE UNIQUE INDEX IF NOT EXISTS scan_reports_admission_idempotency_uidx
-   ON scan_reports (admission_idempotency_hmac) WHERE admission_idempotency_hmac IS NOT NULL`
+   ON scan_reports (admission_idempotency_hmac) WHERE admission_idempotency_hmac IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS report_evidence_assets (
+    id text PRIMARY KEY,
+    report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
+    job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE CASCADE,
+    finding_id text NOT NULL,
+    citation_index integer NOT NULL CHECK (citation_index >= 0),
+    kind text NOT NULL CHECK (kind IN ('issue_crop','context','compact','viewport')),
+    status text NOT NULL CHECK (status IN ('ready','unavailable')),
+    source_url text NOT NULL,
+    quote text NOT NULL,
+    page_element text,
+    captured_at timestamptz NOT NULL,
+    viewport_width integer NOT NULL CHECK (viewport_width > 0),
+    viewport_height integer NOT NULL CHECK (viewport_height > 0),
+    content_hash text NOT NULL,
+    evidence_hash text NOT NULL,
+    asset_hash text,
+    storage_provider text,
+    storage_key text,
+    mime_type text,
+    byte_size integer CHECK (byte_size IS NULL OR byte_size >= 0),
+    failure_code text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (job_id, finding_id, citation_index, kind)
+  )`,
+  `CREATE INDEX IF NOT EXISTS report_evidence_assets_report_idx
+   ON report_evidence_assets (report_id, finding_id)`
 ] as const;

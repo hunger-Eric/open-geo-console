@@ -18,6 +18,7 @@ AI findings must cite URLs from the current crawl and quote text present in reta
 - Homepage-only free analysis plus AI-planned deep page sampling after site-wide URL discovery and page-type/template clustering.
 - OpenAI-compatible model transport with versioned `AiWebsiteReportV1` output and evidence validation.
 - HTTP crawling with DNS-pinned SSRF protection and Playwright fallback for JavaScript-rendered pages.
+- HTML-first private deep reports with Worker-captured visual evidence and PDF export from the same canonical HTML.
 - Progressive report jobs with PostgreSQL leases, page-level recovery, resumable checkpoints and seven-day source-evidence retention.
 - Thirty-day free preview deduplication per registrable site, two distinct free sites per HMAC client IP in a rolling 24-hour window, Turnstile, and a configurable global AI-preview budget with technical-only fallback.
 - HMAC-only report-credit keys, idempotent credit reservation/settlement/refund, and private report links using HttpOnly cookies.
@@ -61,6 +62,7 @@ Required production variables:
 - `OGC_TOKEN_HASH_SECRET`
 - `OGC_IP_HASH_SECRET`
 - `OGC_DEPLOYMENT_PROFILE` (`staging` or `production`, matching the database marker)
+- `OGC_EVIDENCE_STORAGE=s3` plus the private S3-compatible endpoint, region, bucket and credentials for both Web and deep Worker processes
 
 The initial commercial target is Netlify plus Neon, Cloudflare Turnstile/Queue, Airwallex, Resend, and scheduled workstation batches. This avoids mandatory server rent at low order volume while keeping every paid task durable in PostgreSQL. A later `FULFILLMENT_MODE=realtime` deployment uses the same job/outbox records on persistent Worker infrastructure.
 
@@ -107,6 +109,8 @@ Protected staging uses a separate marked PostgreSQL database, independent provid
 - `POST /api/reports/link-reissue` generically requests a rate-limited replacement link without revealing whether an order/email pair exists.
 - `POST /api/webhooks/airwallex` and `POST /api/webhooks/resend` verify raw-body signatures before idempotent processing.
 - `PUT|DELETE /api/reports/:id/bot-evidence` replaces or removes sanitized crawler evidence.
+- `GET /reports/:id/report.html` serves the canonical authorized private report; `GET /api/reports/:id/artifacts/report.pdf` exports that same HTML with print CSS.
+- `GET /api/reports/:id/evidence/:assetId` streams a report-bound private screenshot after the existing access-cookie check; it never returns an object-store URL.
 
 See [AI Report Engine](docs/AI-REPORT-ENGINE.md) and [Report Workspace](docs/REPORT-WORKSPACE.md) for data and route contracts.
 

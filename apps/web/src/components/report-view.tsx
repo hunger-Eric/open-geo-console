@@ -108,8 +108,9 @@ export function ReportView({
         </div>
         <ReportActions
           dictionary={dictionary}
+          htmlHref={`/reports/${reportId}/report.html`}
+          pdfHref={`/api/reports/${reportId}/artifacts/report.pdf`}
           printEnabled={canPrint}
-          printHref={localizePath(locale, `/reports/${reportId}/print`)}
           shareHref={overviewHref}
         />
       </section>

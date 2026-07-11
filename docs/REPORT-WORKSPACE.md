@@ -9,7 +9,10 @@
 | `/[locale]/reports/[id]/issues?page=N` | Severity-grouped findings, 20 per page |
 | `/[locale]/reports/[id]/bots` | Log import, detected bots/operators, paginated registry, and collapsed simulator |
 | `/[locale]/reports/[id]/technical?page=N` | Scanned pages, assets, and technical appendix, 20 per page |
-| `/[locale]/reports/[id]/print` | Authorized deep-report print/PDF document; free previews render an upgrade explanation |
+| `/[locale]/reports/[id]/print` | Legacy authorized print view; free previews render an upgrade explanation |
+| `/reports/[id]/report.html` | Canonical authorized private deep-report artifact with visual evidence |
+| `/api/reports/[id]/artifacts/report.pdf` | PDF exported from the same canonical HTML and print CSS |
+| `/api/reports/[id]/evidence/[assetId]` | Authorized private screenshot proxy; never exposes a stable object URL |
 | `/[locale]/logs` | Standalone advanced log analysis with an explicit target URL |
 
 The report header shows the persisted generation language. Interface language switches navigation and labels only. Homepage technical score, site technical score and AI dimension scores remain separately named and include `/ 100` plus their coverage context.
@@ -50,3 +53,5 @@ Re-importing evidence upserts the row. Deleting evidence removes it. History and
 ## Storage authority
 
 PostgreSQL is the report authority for technical reports, AI reports, jobs, access controls and bot evidence. The browser does not retain an authoritative report copy. Public technical reports are projected to the homepage plus standard assets. Deep AI and multi-page technical payloads require the report-specific HttpOnly access cookie; free previews remain accessible through their unlisted report UUID.
+
+Private deep findings may reference `report_evidence_assets` metadata. Screenshot bytes stay outside report JSON in the selected filesystem or S3-compatible adapter. Critical findings prefer an issue crop plus context image; warning/opportunity findings use compact captures; unreliable crops fall back to a viewport image. Any capture failure leaves the verified quote and URL visible with an explicit screenshot-unavailable state.

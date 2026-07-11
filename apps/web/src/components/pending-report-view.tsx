@@ -60,8 +60,9 @@ export function PendingReportView({
         </div>
         <ReportActions
           dictionary={dictionary}
+          htmlHref={`/reports/${reportId}/report.html`}
+          pdfHref={`/api/reports/${reportId}/artifacts/report.pdf`}
           printEnabled={false}
-          printHref={localizePath(locale, `/reports/${reportId}/print`)}
           shareHref={overviewHref}
         />
       </section>

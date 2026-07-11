@@ -1,0 +1,34 @@
+import "server-only";
+
+export async function exportReportPdf(input: {
+  htmlUrl: string;
+  cookieHeader: string;
+}): Promise<Buffer> {
+  const url = new URL(input.htmlUrl);
+  if (url.pathname.includes("..") || !url.pathname.endsWith("/report.html")) {
+    throw new Error("PDF export URL is not a controlled report artifact.");
+  }
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext({
+      extraHTTPHeaders: input.cookieHeader ? { cookie: input.cookieHeader } : undefined
+    });
+    const page = await context.newPage();
+    const response = await page.goto(url.href, { waitUntil: "networkidle", timeout: 45_000 });
+    if (!response?.ok()) throw new Error("The canonical HTML artifact could not be loaded for PDF export.");
+    await page.emulateMedia({ media: "print" });
+    const bytes = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      preferCSSPageSize: true,
+      displayHeaderFooter: true,
+      headerTemplate: "<span></span>",
+      footerTemplate: '<div style="font-size:8px;color:#687570;width:100%;text-align:center"><span class="pageNumber"></span> / <span class="totalPages"></span></div>',
+      margin: { top: "14mm", right: "13mm", bottom: "16mm", left: "13mm" }
+    });
+    return Buffer.from(bytes);
+  } finally {
+    await browser.close();
+  }
+}

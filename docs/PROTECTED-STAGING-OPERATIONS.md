@@ -12,6 +12,7 @@ This runbook is the operator contract for the protected Vercel Preview and the p
 | Commerce | `COMMERCE_MODE=test`, fixed Airwallex Sandbox host | `disabled` until live gates pass, then `live` |
 | Email | All envelopes redirected to `OGC_TEST_EMAIL_RECIPIENT`; missing recipient fails before Resend | Actual order recipient; test recipient must be absent |
 | Model, HMAC, Queue, payment, email, bypass | Independent staging values; current model key reuse is a documented temporary exception | Independent production values |
+| Visual evidence storage | Private staging S3-compatible bucket and credentials shared only by staging Web/deep Worker | Separate private production bucket and credentials |
 
 Production always uses the two-site policy even if a staging variable, header, cookie, or query parameter is present. Forced regeneration is accepted only for the protected staging identity.
 
@@ -37,6 +38,8 @@ npm run commerce:staging:all
 ```
 
 These commands do not fall back to `.env.local`; they refuse a non-staging profile, a production database marker, or live commerce. Both Worker lanes must be scheduled in production, but must never share model, Queue, HMAC, payment, or email credentials with staging.
+
+Set `OGC_EVIDENCE_STORAGE=s3` plus all `OGC_EVIDENCE_S3_*` variables on the protected Preview and its deep Worker before visual-evidence acceptance. Filesystem storage is local-development-only and is rejected when `OGC_DEPLOYMENT_PROFILE` is `staging` or `production`. The bucket must remain private; customer reads always pass through the report-authorized evidence route.
 
 Vercel Sensitive values are intentionally not decryptable through `vercel env pull`; the generated file contains empty placeholders for those names. For a local Worker drill, explicitly override each required empty placeholder with the separately held staging value in only that process. Merely loading another env file does not replace variables that already exist as empty placeholders. Never weaken the database marker guard, print values, or copy production secrets into `.env.staging.local`.
 

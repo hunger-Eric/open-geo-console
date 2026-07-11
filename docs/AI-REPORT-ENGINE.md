@@ -9,7 +9,7 @@ The deterministic and model-generated report dimensions are deliberately separat
 3. `site-crawler` safely resolves public destinations, discovers up to 50,000 URLs, clusters at most 500 candidates, and extracts page evidence.
 4. Free jobs deterministically analyze only the homepage without a model planning call. Deep jobs ask the configured OpenAI-compatible model to plan every eligible page on small sites or up to 50 representative pages, then analyze batches and synthesize `AiWebsiteReportV1`.
 5. The engine verifies every formal citation against fetched URL/text evidence. Unsupported findings are discarded.
-6. The Worker persists the final report, stores only required evidence excerpts long-term, and atomically terminalizes the job and its credit.
+6. For deep reports, the Worker captures report-bound visual evidence for verified citations, then persists the final report, metadata and required excerpts before atomically terminalizing the job and its credit. Screenshot failure is non-fatal.
 
 The Worker owns crawling and model calls. Web requests never run deep analysis inline.
 
@@ -49,6 +49,7 @@ PostgreSQL tables:
 - `scan_jobs` — leased task state and checkpoints.
 - `ai_reports` — one current free and one current deep AI report per technical report; deep rows may include a private full technical payload.
 - `crawl_evidence` — normalized page content, hashes and excerpts; full normalized content expires after seven days.
+- `report_evidence_assets` — private screenshot metadata bound to report, job, finding, citation, quote, URL, timestamp, viewport and content/evidence hashes; binary bytes remain in private adapter storage.
 - `free_site_trials`, `staging_free_regenerations`, `anonymous_rate_buckets`, `free_ai_daily_budgets`, `free_ai_budget_reservations` — 30-day site reuse, staging-only regeneration reservations, rolling anonymous limiting and an exact global AI budget.
 - `access_keys`, `credit_ledger` — HMAC-only keys and idempotent credit transactions.
 - `report_access_tokens` — HMAC-only private report links.
@@ -97,6 +98,8 @@ Deprecated for normal users and returns `410`. The Worker owns recoverable retry
 ## Operations
 
 Run web and both Worker lanes against the same `DATABASE_URL`. The default `batch_24h` mode drains and exits; `realtime` performs a recovery drain and then consumes Queue hints on persistent infrastructure. Run `npm run commerce:all` to reconcile terminal paid jobs, enforce 20/24-hour SLA boundaries, submit refunds, and send queued email. Cloudflare Queue is notification-only; PostgreSQL remains authoritative. See `docs/COMMERCIAL-OPERATIONS.md`.
+
+Local visual evidence defaults to `.data/evidence-assets` or `OGC_EVIDENCE_FILESYSTEM_ROOT`. Staging and production refuse filesystem storage: set `OGC_EVIDENCE_STORAGE=s3` and the `OGC_EVIDENCE_S3_*` private-bucket variables on both the Web process (authorized reads/PDF) and deep Worker (writes). The proxy reads bytes only after report-cookie authorization.
 
 The free deterministic auditor fetches the homepage plus `/robots.txt`, `/sitemap.xml`, and `/llms.txt`; it does not fetch sitemap entries or homepage link targets. A deep job runs a separate private technical audit over its planned pages. The auditor treats a non-2xx response as the root cause for that page and does not run downstream H1, Schema, canonical, metadata, or readability checks. Findings are grouped by rule, page type, and normalized template, with at most three representative URLs. The overview rolls template groups into one rule-level priority card. Score deductions are capped per rule so repeated pages cannot erase the complete score by themselves.
 

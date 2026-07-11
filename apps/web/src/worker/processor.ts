@@ -35,6 +35,7 @@ import {
 import type { JobCheckpoint, ScanJobRow } from "@/db/schema";
 import { projectFreeAiReport } from "@/report/visibility";
 import { createSafeFetch } from "@/server/safe-fetch";
+import { captureReportVisualEvidence } from "./visual-evidence";
 import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-runtime";
 import {
   calculateEffectiveCoverage,
@@ -281,6 +282,19 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       coverage
     });
     const reportToPersist = job.tier === "free" ? projectFreeAiReport(synthesis.report) : synthesis.report;
+    if (job.tier === "deep") {
+      await captureReportVisualEvidence({
+        reportId: job.reportId,
+        jobId: job.id,
+        report: reportToPersist,
+        pages: crawl.pages.map((evidence) => ({
+          url: evidence.page.url,
+          contentHash: evidence.contentHash
+        }))
+      }).catch(() => {
+        console.error("Visual evidence capture unavailable.", { reportId: job.reportId, jobId: job.id });
+      });
+    }
     await persistAiReport(job, reportToPersist, crawl.pages, technicalReport);
 
     const homepageUrl = new URL(discovery.targetUrl).href;

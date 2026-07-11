@@ -67,6 +67,8 @@ export type EmailTemplateType =
 export type EmailDeliveryState = "queued" | "sent" | "delivered" | "bounced" | "failed";
 export type JobDispatchState = "pending" | "published" | "abandoned";
 export type BatchRunStatus = "running" | "succeeded" | "partial" | "failed";
+export type EvidenceAssetKind = "issue_crop" | "context" | "compact" | "viewport";
+export type EvidenceAssetStatus = "ready" | "unavailable";
 
 export interface JobCheckpoint {
   targetPageCount?: number;
@@ -541,6 +543,55 @@ export const crawlEvidence = pgTable(
 );
 
 export type CrawlEvidenceRow = typeof crawlEvidence.$inferSelect;
+
+export const reportEvidenceAssets = pgTable(
+  "report_evidence_assets",
+  {
+    id: text("id").primaryKey(),
+    reportId: text("report_id")
+      .notNull()
+      .references(() => scanReports.id, { onDelete: "cascade" }),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => scanJobs.id, { onDelete: "cascade" }),
+    findingId: text("finding_id").notNull(),
+    citationIndex: integer("citation_index").notNull(),
+    kind: text("kind").$type<EvidenceAssetKind>().notNull(),
+    status: text("status").$type<EvidenceAssetStatus>().notNull(),
+    sourceUrl: text("source_url").notNull(),
+    quote: text("quote").notNull(),
+    pageElement: text("page_element"),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    viewportWidth: integer("viewport_width").notNull(),
+    viewportHeight: integer("viewport_height").notNull(),
+    contentHash: text("content_hash").notNull(),
+    evidenceHash: text("evidence_hash").notNull(),
+    assetHash: text("asset_hash"),
+    storageProvider: text("storage_provider"),
+    storageKey: text("storage_key"),
+    mimeType: text("mime_type"),
+    byteSize: integer("byte_size"),
+    failureCode: text("failure_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("report_evidence_assets_identity_uidx").on(
+      table.jobId,
+      table.findingId,
+      table.citationIndex,
+      table.kind
+    ),
+    index("report_evidence_assets_report_idx").on(table.reportId, table.findingId),
+    check("report_evidence_assets_citation_index_check", sql`${table.citationIndex} >= 0`),
+    check("report_evidence_assets_kind_check", sql`${table.kind} IN ('issue_crop','context','compact','viewport')`),
+    check("report_evidence_assets_status_check", sql`${table.status} IN ('ready','unavailable')`),
+    check("report_evidence_assets_viewport_check", sql`${table.viewportWidth} > 0 AND ${table.viewportHeight} > 0`),
+    check("report_evidence_assets_byte_size_check", sql`${table.byteSize} IS NULL OR ${table.byteSize} >= 0`)
+  ]
+);
+
+export type ReportEvidenceAssetRow = typeof reportEvidenceAssets.$inferSelect;
 
 export const freeSiteTrials = pgTable("free_site_trials", {
   siteKey: text("site_key").primaryKey(),
