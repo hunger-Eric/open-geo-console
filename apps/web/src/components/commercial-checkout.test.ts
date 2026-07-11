@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readCheckoutPayload } from "./checkout-response";
+import { getPaymentConfirmationReturnUrl, readCheckoutPayload } from "./checkout-response";
 import { buildHppReturnUrls } from "./payment-return";
 
 describe("HPP return URLs", () => {
@@ -23,5 +23,14 @@ describe("checkout response parsing", () => {
       status: 409,
       headers: { "content-type": "application/json" }
     }))).resolves.toEqual({ error: "Checkout unavailable." });
+  });
+
+  it("moves a provider-paid legacy order into the report-bound confirmation state", () => {
+    expect(getPaymentConfirmationReturnUrl({
+      code: "payment_confirmation_pending",
+      orderId: "order-1"
+    }, "https://example.test/zh/reports/report-1?tab=overview#checkout")).toBe(
+      "https://example.test/zh/reports/report-1?tab=overview&order=order-1&payment_return=success"
+    );
   });
 });

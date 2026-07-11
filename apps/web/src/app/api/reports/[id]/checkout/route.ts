@@ -100,7 +100,8 @@ async function checkoutResponse(
     if (legacyState === "paid") {
       return NextResponse.json({
         code: "payment_confirmation_pending",
-        error: "Payment was already received and is awaiting verified confirmation."
+        error: "Payment was already received and is awaiting verified confirmation.",
+        orderId
       }, { status: 409 });
     }
     const migrated = await gateway.findHostedCheckoutByReference(orderId) ?? await gateway.createHostedCheckout({

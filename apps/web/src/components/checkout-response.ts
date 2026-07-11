@@ -20,3 +20,16 @@ export async function readCheckoutPayload(response: Response): Promise<CheckoutP
     return {};
   }
 }
+
+export function getPaymentConfirmationReturnUrl(payload: CheckoutPayload, currentUrl: string): string | null {
+  if (payload.code !== "payment_confirmation_pending"
+    || typeof payload.orderId !== "string"
+    || !/^[a-zA-Z0-9_-]{1,128}$/.test(payload.orderId)) return null;
+  const url = new URL(currentUrl);
+  url.searchParams.delete("order");
+  url.searchParams.delete("payment_return");
+  url.hash = "";
+  url.searchParams.set("order", payload.orderId);
+  url.searchParams.set("payment_return", "success");
+  return url.href;
+}

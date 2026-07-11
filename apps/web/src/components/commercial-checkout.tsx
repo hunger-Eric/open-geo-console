@@ -3,7 +3,11 @@
 import { Check, Loader2, LockKeyhole } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dictionary, Locale } from "@/i18n";
-import { readCheckoutPayload, type CheckoutPayload } from "./checkout-response";
+import {
+  getPaymentConfirmationReturnUrl,
+  readCheckoutPayload,
+  type CheckoutPayload
+} from "./checkout-response";
 import { buildHppReturnUrls } from "./payment-return";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "./turnstile-widget";
 
@@ -68,6 +72,11 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
         body: JSON.stringify({ email, currency, locale, turnstileToken: token })
       });
       const payload = await readCheckoutPayload(response);
+      const confirmationReturnUrl = getPaymentConfirmationReturnUrl(payload, window.location.href);
+      if (confirmationReturnUrl) {
+        window.location.assign(confirmationReturnUrl);
+        return;
+      }
       if (!response.ok || !isHppPayload(payload)) {
         throw new Error(payload.code === "payment_confirmation_pending"
           ? dictionary.commerce.paymentConfirming

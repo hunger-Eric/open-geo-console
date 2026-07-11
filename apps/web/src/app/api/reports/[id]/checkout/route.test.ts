@@ -113,7 +113,7 @@ describe("commercial checkout route", () => {
       body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human" })
     }), { params: Promise.resolve({ id: "report-1" }) });
     expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ code: "payment_confirmation_pending" });
+    expect(await response.json()).toMatchObject({ code: "payment_confirmation_pending", orderId: "order-1" });
     expect(mocks.createHostedCheckout).not.toHaveBeenCalled();
     expect(mocks.replaceLegacyHostedCheckout).not.toHaveBeenCalled();
   });
