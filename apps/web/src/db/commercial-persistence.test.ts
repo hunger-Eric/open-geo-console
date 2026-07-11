@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { DATABASE_MIGRATIONS } from "./migrations";
 import {
   advanceEmailDeliveryState,
@@ -13,6 +14,12 @@ import {
 
 describe("commercial persistence migrations", () => {
   const migration = DATABASE_MIGRATIONS.join("\n");
+
+  it("serializes schema bootstrap across serverless instances", () => {
+    const databaseBootstrap = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+    expect(databaseBootstrap).toContain("pg_advisory_xact_lock(hashtextextended('ogc:schema-bootstrap', 0))");
+    expect(databaseBootstrap).toContain("await tx.unsafe(migration)");
+  });
 
   it("installs every commercial authority additively", () => {
     for (const table of [

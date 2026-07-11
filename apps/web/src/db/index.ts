@@ -80,11 +80,12 @@ export function assertDatabaseProfileMatches(
 async function ensureDatabaseSchema(): Promise<void> {
   if (!schemaInitialization) {
     const sql = getSqlClient();
-    schemaInitialization = (async () => {
+    schemaInitialization = sql.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended('ogc:schema-bootstrap', 0))`;
       for (const migration of DATABASE_MIGRATIONS) {
-        await sql.unsafe(migration);
+        await tx.unsafe(migration);
       }
-    })().catch((error) => {
+    }).catch((error) => {
       schemaInitialization = undefined;
       throw error;
     });
