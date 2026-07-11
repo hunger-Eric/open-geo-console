@@ -4,6 +4,8 @@
 
 Operate a durable, self-hostable report product whose main journey is `free technical report + AI preview → one-time purchase → private HTML-first deep report by email → optional AI Bot evidence`. The protected staging and production security code is deployed. HTML-first delivery, private screenshot assets, same-HTML PDF export, and a fresh paid staging deep-report drill are accepted; remaining gates include the user-approved shared model-key exception, branch-scoped Preview variables, and refund/email/provider drills.
 
+Release baseline `v0.2.0` freezes the accepted HTML-first visual-evidence implementation before subsequent feature work. It includes private screenshot capture/storage, access-controlled evidence delivery, same-HTML PDF export, and the verified paid staging drill; it does not claim the remaining production-readiness gates below are complete.
+
 ## Current Architecture
 
 - `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point.
