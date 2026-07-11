@@ -18,6 +18,7 @@ export async function exportReportPdf(input: {
     const page = await context.newPage();
     const response = await page.goto(url.href, { waitUntil: "networkidle", timeout: 45_000 });
     if (!response?.ok()) throw new Error("The canonical HTML artifact could not be loaded for PDF export.");
+    await page.evaluate(() => document.fonts.ready);
     await page.emulateMedia({ media: "print" });
     const bytes = await page.pdf({
       format: "A4",
