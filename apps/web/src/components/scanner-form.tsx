@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Loader2 } from "lucide-react";
 import type { Dictionary, Locale } from "@/i18n";
 import { localizePath } from "@/i18n";
-import { TurnstileWidget } from "./turnstile-widget";
+import { TurnstileWidget, type TurnstileWidgetHandle } from "./turnstile-widget";
 import { getScanProgressStage } from "./scanner-progress";
 
 export function ScannerForm({
@@ -21,9 +21,13 @@ export function ScannerForm({
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
   const [forceFresh, setForceFresh] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
+  const pendingSubmission = useRef(false);
+  const idempotencyKey = useRef("");
 
   useEffect(() => {
     if (!isSubmitting) return;
@@ -34,44 +38,72 @@ export function ScannerForm({
 
   function submitScan(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmitting || isVerifying) return;
     setError(null);
     setElapsedMs(0);
+    if (turnstileSiteKey && !turnstileToken) {
+      pendingSubmission.current = true;
+      setIsVerifying(true);
+      turnstileRef.current?.execute();
+      return;
+    }
+    void submitAcceptedScan(turnstileToken);
+  }
+
+  async function submitAcceptedScan(token: string) {
+    setIsVerifying(false);
     setIsSubmitting(true);
+    idempotencyKey.current ||= globalThis.crypto.randomUUID();
+    try {
+      const response = await fetch("/api/scan", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey.current
+        },
+        body: JSON.stringify({
+          url,
+          locale,
+          turnstileToken: token,
+          ...(allowForceFresh && forceFresh ? { forceFresh: true } : {})
+        })
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        reportId?: string;
+        id?: string;
+        error?: string;
+        errorKey?: keyof Dictionary["errors"];
+      };
+      const reportId = payload.reportId ?? payload.id;
 
-    void (async () => {
-      try {
-        const response = await fetch("/api/scan", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            url,
-            locale,
-            turnstileToken,
-            ...(allowForceFresh && forceFresh ? { forceFresh: true } : {})
-          })
-        });
-        const payload = (await response.json().catch(() => ({}))) as {
-          reportId?: string;
-          id?: string;
-          error?: string;
-          errorKey?: keyof Dictionary["errors"];
-        };
-        const reportId = payload.reportId ?? payload.id;
-
-        if (!response.ok || !reportId) {
-          setError(payload.errorKey ? dictionary.errors[payload.errorKey] : (payload.error ?? dictionary.errors.scanFailed));
-          setIsSubmitting(false);
-          return;
-        }
-
-        window.location.assign(localizePath(locale, `/reports/${reportId}`));
-      } catch {
-        setError(dictionary.errors.scanFailed);
+      if (!response.ok || !reportId) {
+        setError(payload.errorKey ? dictionary.errors[payload.errorKey] : (payload.error ?? dictionary.errors.scanFailed));
         setIsSubmitting(false);
+        setTurnstileToken("");
+        turnstileRef.current?.reset();
+        return;
       }
-    })();
+
+      window.location.assign(localizePath(locale, `/reports/${reportId}`));
+    } catch {
+      setError(dictionary.errors.scanFailed);
+      setIsSubmitting(false);
+      setTurnstileToken("");
+      turnstileRef.current?.reset();
+    }
+  }
+
+  function receiveTurnstileToken(token: string) {
+    setTurnstileToken(token);
+    if (!token || !pendingSubmission.current) return;
+    pendingSubmission.current = false;
+    void submitAcceptedScan(token);
+  }
+
+  function failTurnstile() {
+    pendingSubmission.current = false;
+    setIsVerifying(false);
+    setError(dictionary.errors.humanVerificationRequired);
   }
 
   const progressStage = getScanProgressStage(elapsedMs);
@@ -82,24 +114,32 @@ export function ScannerForm({
       : dictionary.scanner.scanProgressStarting;
 
   return (
-    <form onSubmit={submitScan} className="space-y-3">
+    <form onSubmit={submitScan} className="space-y-3" aria-busy={isSubmitting || isVerifying}>
       <div className="flex flex-col gap-3 sm:flex-row">
         <input
           type="url"
           required
+          disabled={isSubmitting || isVerifying}
           value={url}
-          onChange={(event) => setUrl(event.target.value)}
+          onChange={(event) => {
+            setUrl(event.target.value);
+            idempotencyKey.current = "";
+          }}
           aria-label={dictionary.scanner.urlLabel}
           className="input-control min-h-12 min-w-0 flex-1 text-base"
           placeholder={dictionary.scanner.urlPlaceholder}
         />
         <button
           type="submit"
-          disabled={isSubmitting || Boolean(turnstileSiteKey && !turnstileToken)}
+          disabled={isSubmitting || isVerifying || !url.trim()}
           className="button-primary min-h-12 shrink-0 px-5"
         >
-          {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
-          {dictionary.actions.generateReport}
+          {isSubmitting || isVerifying ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
+          {isVerifying
+            ? dictionary.scanner.verifyingHuman
+            : isSubmitting
+              ? dictionary.scanner.acceptingReport
+              : dictionary.actions.generateReport}
         </button>
       </div>
       {allowForceFresh ? (
@@ -124,7 +164,14 @@ export function ScannerForm({
         ) : null}
         {error ? <p className="text-sm text-[var(--red)]">{error}</p> : null}
       </div>
-      {turnstileSiteKey ? <TurnstileWidget siteKey={turnstileSiteKey} onToken={setTurnstileToken} /> : null}
+      {turnstileSiteKey ? (
+        <TurnstileWidget
+          ref={turnstileRef}
+          siteKey={turnstileSiteKey}
+          onToken={receiveTurnstileToken}
+          onError={failTurnstile}
+        />
+      ) : null}
     </form>
   );
 }

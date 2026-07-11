@@ -45,6 +45,8 @@ export interface Dictionary {
     urlPlaceholder: string;
     forceFreshLabel: string;
     forceFreshDescription: string;
+    verifyingHuman: string;
+    acceptingReport: string;
     scanProgressStarting: string;
     scanProgressSlow: string;
     scanProgressExtended: string;
@@ -113,6 +115,7 @@ export interface Dictionary {
     tabs: Record<"overview" | "analysis" | "issues" | "bots" | "technical", string>;
     currentSite: string;
     lastScan: string;
+    submittedAt: string;
     overviewTitle: string;
     topFixes: string;
     viewIssueDetails: string;
@@ -187,6 +190,8 @@ export interface Dictionary {
     startNewAnalysis: string;
     statusTitle: string;
     waitingDescription: string;
+    acceptedDescription: string;
+    technicalFailedDescription: string;
     completedDescription: string;
     completedLimitedDescription: string;
     failedDescription: string;
@@ -205,6 +210,10 @@ export interface Dictionary {
     activeTierDeep: string;
     activeTierMixed: string;
     progressValue: string;
+    stageDescriptions: Record<
+      "queued" | "discovering" | "planning" | "fetching" | "analyzing" | "synthesizing" | "completed" | "completed_limited" | "failed",
+      string
+    >;
   };
   commerce: {
     offerTitle: string;
@@ -217,6 +226,7 @@ export interface Dictionary {
     deliveryPromise: string;
     buyAction: string;
     redirecting: string;
+    verifying: string;
     unavailable: string;
     humanVerification: string;
     operatorKeySummary: string;

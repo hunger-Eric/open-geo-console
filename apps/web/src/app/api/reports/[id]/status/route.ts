@@ -46,6 +46,7 @@ export async function GET(request: Request, context: RouteContext) {
     {
       job: job ? {
         tier: job.tier === "deep" ? "deep" : "preview",
+        stage: job.stage,
         state: publicStateForStage(job.stage),
         progress: job.progress,
         plannedPages: job.plannedPages,
@@ -57,6 +58,10 @@ export async function GET(request: Request, context: RouteContext) {
         activeTier: job.stage === "queued" ? queue?.activeTier ?? null : null
       } : null,
       hasAiReport: Boolean(aiReport),
+      hasTechnicalReport: Boolean(report.payload),
+      technicalStatus: report.technicalStatus,
+      technicalErrorCode: report.technicalErrorCode,
+      technicalPublicError: report.technicalPublicError,
       hasDeepAccess,
       reportLocale,
       aiReportLocale,

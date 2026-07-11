@@ -17,6 +17,7 @@ import {
 
 export type ReportTier = "free" | "deep";
 export type ReportLocale = "en" | "zh";
+export type ReportTechnicalStatus = "pending" | "processing" | "completed" | "failed";
 export type ScanJobReason = "standard" | "system_recovery" | "locale_correction" | "staging_regeneration";
 export type ScanJobStage =
   | "queued"
@@ -96,7 +97,11 @@ export const scanReports = pgTable(
     siteKey: text("site_key"),
     kind: text("kind").notNull().default("geo"),
     score: integer("score"),
-    payload: jsonb("payload").$type<GeoAuditReport>().notNull(),
+    payload: jsonb("payload").$type<GeoAuditReport>(),
+    technicalStatus: text("technical_status").$type<ReportTechnicalStatus>().notNull().default("completed"),
+    technicalErrorCode: text("technical_error_code"),
+    technicalPublicError: text("technical_public_error"),
+    admissionIdempotencyHmac: text("admission_idempotency_hmac"),
     reportLocale: text("report_locale").$type<ReportLocale>(),
     localeCorrectionUsedAt: timestamp("locale_correction_used_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
@@ -104,6 +109,8 @@ export const scanReports = pgTable(
   (table) => [
     index("scan_reports_created_at_idx").on(table.createdAt),
     index("scan_reports_site_key_idx").on(table.siteKey),
+    uniqueIndex("scan_reports_admission_idempotency_uidx").on(table.admissionIdempotencyHmac),
+    check("scan_reports_technical_status_check", sql`${table.technicalStatus} IN ('pending', 'processing', 'completed', 'failed')`),
     check("scan_reports_report_locale_check", sql`${table.reportLocale} IS NULL OR ${table.reportLocale} IN ('en', 'zh')`)
   ]
 );

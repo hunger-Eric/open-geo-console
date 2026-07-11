@@ -8,6 +8,7 @@ import {
   getSqlClient
 } from "./index";
 import { terminalizeScanJob } from "./jobs";
+import { admitFreeScan } from "./scan-admission";
 import {
   attachStagingFreeRegeneration,
   beginStagingFreeRegeneration,
@@ -42,6 +43,8 @@ describePostgres("protected staging PostgreSQL integration", () => {
     await sql`DELETE FROM staging_free_regenerations WHERE site_key LIKE 'staging-it-%'`;
     await sql`DELETE FROM anonymous_rate_buckets WHERE site_key LIKE 'staging-it-%'`;
     await sql`DELETE FROM scan_reports WHERE site_key LIKE 'staging-it-%'`;
+    await sql`DELETE FROM free_ai_budget_reservations WHERE bucket_date = '2031-01-01'`;
+    await sql`DELETE FROM free_ai_daily_budgets WHERE bucket_date = '2031-01-01'`;
     await closeDatabase();
     restore("OGC_DEPLOYMENT_PROFILE", original.profile);
     restore("VERCEL_ENV", original.vercelEnvironment);
@@ -125,6 +128,48 @@ describePostgres("protected staging PostgreSQL integration", () => {
     const database = await getDatabaseEnvironmentStatus();
     expect(database.profile).toBe("staging");
     expect(() => assertDatabaseProfileMatches(database.profile, "production")).toThrow("database environment marker");
+  }, 60_000);
+
+  it("atomically admits and recovers one pending report job", async () => {
+    const siteKey = `${sitePrefix}-admission.test`;
+    const now = new Date("2031-01-01T12:00:00.000Z");
+    const input = {
+      url: `https://${siteKey}/`,
+      siteKey,
+      locale: "en" as const,
+      idempotencyKey: `admission-${runId}`,
+      ipAddress: "198.51.100.42",
+      forceFresh: false,
+      stagingPreview: true,
+      dailyDistinctSiteLimit: 2,
+      aiDailyLimit: 10,
+      now
+    };
+
+    const [first, duplicate] = await Promise.all([admitFreeScan(input), admitFreeScan(input)]);
+    expect(first.outcome).toBe("created");
+    expect(duplicate).toEqual(first);
+    if (first.outcome !== "created") throw new Error("Expected a created admission.");
+
+    const rows = await getSqlClient()<Array<{
+      technical_status: string;
+      payload: unknown;
+      jobs: number;
+      dispatches: number;
+    }>>`
+      SELECT report.technical_status, report.payload,
+             count(DISTINCT job.id)::integer AS jobs,
+             count(DISTINCT dispatch.id)::integer AS dispatches
+      FROM scan_reports report
+      LEFT JOIN scan_jobs job ON job.report_id = report.id
+      LEFT JOIN job_dispatch_outbox dispatch ON dispatch.job_id = job.id
+      WHERE report.id = ${first.reportId}
+      GROUP BY report.id
+    `;
+    expect(rows[0]).toMatchObject({ technical_status: "pending", payload: null, jobs: 1, dispatches: 1 });
+
+    const reused = await admitFreeScan({ ...input, idempotencyKey: `reuse-${runId}-123456` });
+    expect(reused).toMatchObject({ outcome: "reused", reportId: first.reportId, jobId: first.jobId });
   }, 60_000);
 
   async function insertReport(siteKey: string, suffix: string): Promise<string> {

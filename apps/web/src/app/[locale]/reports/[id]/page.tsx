@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { ReportView } from "@/components/report-view";
+import { PendingReportView } from "@/components/pending-report-view";
 import { StoredReportFallback } from "@/components/stored-report-fallback";
 import { getBotEvidence } from "@/db/bot-evidence";
 import { getGeoReport } from "@/db/reports";
@@ -23,9 +24,21 @@ export default async function ReportPage({
   if (!row) {
     return <StoredReportFallback dictionary={getDictionary(locale)} locale={locale} reportId={id} section="overview" />;
   }
+  const reportLocale: Locale = row.reportLocale ?? locale;
+  if (!row.payload) {
+    return (
+      <PendingReportView
+        createdAt={row.createdAt}
+        dictionary={getDictionary(locale)}
+        locale={locale}
+        reportId={id}
+        reportLocale={reportLocale}
+        url={row.url}
+      />
+    );
+  }
 
   const [evidence, visible] = await Promise.all([getBotEvidence(id), getVisibleReportBundle(id, row.payload)]);
-  const reportLocale: Locale = row.reportLocale ?? locale;
   return (
     <ReportView
       aiReport={visible.aiReport}

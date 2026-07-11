@@ -1,10 +1,10 @@
 "use client";
 
 import { Check, Loader2, LockKeyhole } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dictionary, Locale } from "@/i18n";
 import { buildHppReturnUrls } from "./payment-return";
-import { TurnstileWidget } from "./turnstile-widget";
+import { TurnstileWidget, type TurnstileWidgetHandle } from "./turnstile-widget";
 
 type Currency = "CNY" | "USD" | "HKD";
 interface CatalogPayload {
@@ -30,8 +30,12 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
   const [currency, setCurrency] = useState<Currency>(locale === "zh" ? "CNY" : "USD");
   const [email, setEmail] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [verifying, setVerifying] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
+  const pendingCheckout = useRef(false);
+  const checkoutIdempotencyKey = useRef("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -51,17 +55,27 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
 
   async function checkout(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting || verifying) return;
     if (catalog?.turnstileSiteKey && !turnstileToken) {
-      setError(dictionary.commerce.humanVerification);
+      setError(null);
+      pendingCheckout.current = true;
+      setVerifying(true);
+      turnstileRef.current?.execute();
       return;
     }
+    await startCheckout(turnstileToken);
+  }
+
+  async function startCheckout(token: string) {
+    setVerifying(false);
     setSubmitting(true);
     setError(null);
+    checkoutIdempotencyKey.current ||= crypto.randomUUID();
     try {
       const response = await fetch(`/api/reports/${reportId}/checkout`, {
         method: "POST",
-        headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
-        body: JSON.stringify({ email, currency, locale, turnstileToken })
+        headers: { "content-type": "application/json", "idempotency-key": checkoutIdempotencyKey.current },
+        body: JSON.stringify({ email, currency, locale, turnstileToken: token })
       });
       const payload = await response.json() as CheckoutPayload;
       if (!response.ok || !isHppPayload(payload)) throw new Error(payload.error ?? dictionary.commerce.unavailable);
@@ -84,7 +98,22 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : dictionary.commerce.unavailable);
       setSubmitting(false);
+      setTurnstileToken("");
+      turnstileRef.current?.reset();
     }
+  }
+
+  function receiveTurnstileToken(token: string) {
+    setTurnstileToken(token);
+    if (!token || !pendingCheckout.current) return;
+    pendingCheckout.current = false;
+    void startCheckout(token);
+  }
+
+  function failTurnstile() {
+    pendingCheckout.current = false;
+    setVerifying(false);
+    setError(dictionary.commerce.humanVerification);
   }
 
   return (
@@ -104,20 +133,39 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
       <form onSubmit={checkout} className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,1fr)_140px]">
         <label className="text-sm font-semibold">
           {dictionary.commerce.emailLabel}
-          <input className="input-control mt-2 w-full" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+          <input className="input-control mt-2 w-full" type="email" required autoComplete="email" value={email} onChange={(event) => {
+            setEmail(event.target.value);
+            checkoutIdempotencyKey.current = "";
+          }} />
         </label>
         <label className="text-sm font-semibold">
           {dictionary.commerce.currencyLabel}
-          <select className="input-control mt-2 w-full" value={currency} onChange={(event) => setCurrency(event.target.value as Currency)}>
+          <select className="input-control mt-2 w-full" value={currency} onChange={(event) => {
+            setCurrency(event.target.value as Currency);
+            checkoutIdempotencyKey.current = "";
+          }}>
             {catalog.prices.map((item) => <option key={item.currency} value={item.currency}>{item.currency} {(item.amountMinor / 100).toFixed(2)}</option>)}
           </select>
         </label>
-        {catalog.turnstileSiteKey ? <div className="sm:col-span-2"><TurnstileWidget siteKey={catalog.turnstileSiteKey} onToken={setTurnstileToken} /></div> : null}
+        {catalog.turnstileSiteKey ? (
+          <div className="sm:col-span-2">
+            <TurnstileWidget
+              ref={turnstileRef}
+              siteKey={catalog.turnstileSiteKey}
+              onToken={receiveTurnstileToken}
+              onError={failTurnstile}
+            />
+          </div>
+        ) : null}
         <div className="flex flex-col gap-3 sm:col-span-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm font-semibold text-[var(--foreground)]">{dictionary.commerce.deliveryPromise}</p>
-          <button className="button-primary min-h-12 shrink-0" disabled={submitting || !email || !price} type="submit">
-            {submitting ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <LockKeyhole aria-hidden="true" className="size-4" />}
-            {submitting ? dictionary.commerce.redirecting : `${dictionary.commerce.buyAction} · ${currency} ${price ? (price.amountMinor / 100).toFixed(2) : ""}`}
+          <button className="button-primary min-h-12 shrink-0" disabled={submitting || verifying || !email || !price} type="submit">
+            {submitting || verifying ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <LockKeyhole aria-hidden="true" className="size-4" />}
+            {verifying
+              ? dictionary.commerce.verifying
+              : submitting
+                ? dictionary.commerce.redirecting
+                : `${dictionary.commerce.buyAction} · ${currency} ${price ? (price.amountMinor / 100).toFixed(2) : ""}`}
           </button>
         </div>
       </form>

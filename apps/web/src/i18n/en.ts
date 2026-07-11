@@ -31,9 +31,11 @@ export const en = {
     urlPlaceholder: "https://company.com",
     forceFreshLabel: "Force a fresh report",
     forceFreshDescription: "Staging only. Keep the current report available while a new crawl and report are generated.",
-    scanProgressStarting: "Running safety checks and crawling the homepage. This usually takes 10–60 seconds.",
-    scanProgressSlow: "The target site is responding slowly. The secure crawl is still running; please keep this page open.",
-    scanProgressExtended: "This is taking longer than usual. Please do not click again—the request is still processing and the report will open automatically.",
+    verifyingHuman: "Verifying",
+    acceptingReport: "Creating report",
+    scanProgressStarting: "Creating a secure report workspace. The website analysis will continue after it opens.",
+    scanProgressSlow: "Admission is taking longer than expected. Your request is still protected against duplicate submission.",
+    scanProgressExtended: "The service is slow to accept this request. Keep this page open; retrying is safe and will recover the same request.",
     nextTitle: "Already have server access logs?",
     nextDescription:
       "Verify whether identifiable AI crawlers visited the site."
@@ -143,6 +145,7 @@ export const en = {
     },
     currentSite: "Website context",
     lastScan: "Last scan",
+    submittedAt: "Submitted",
     overviewTitle: "Audit overview",
     topFixes: "Highest-priority fixes",
     viewIssueDetails: "View repair guide",
@@ -222,6 +225,8 @@ export const en = {
     startNewAnalysis: "Start a new analysis",
     statusTitle: "Report status",
     waitingDescription: "The report is being generated. Recoverable work is handled automatically.",
+    acceptedDescription: "Your request is accepted. We are checking the website and will add results here as they become available.",
+    technicalFailedDescription: "The website could not be analyzed safely. You can start a new analysis with a reachable public URL.",
     completedDescription: "Report completed — {count} pages analyzed.",
     completedLimitedDescription: "Report completed — {count} valid pages analyzed. {failed} inaccessible pages were excluded, are listed in coverage limitations, and the credit was returned.",
     failedDescription: "This analysis could not be completed. The report credit has been returned. You can start a new analysis later.",
@@ -239,7 +244,18 @@ export const en = {
     activeTierPreview: "Free AI previews are currently being processed.",
     activeTierDeep: "Deep reports are currently being processed.",
     activeTierMixed: "Free previews and deep reports are currently being processed.",
-    progressValue: "Report generation is {progress}% complete"
+    progressValue: "Report generation is {progress}% complete",
+    stageDescriptions: {
+      queued: "Request accepted. The background worker will start automatically.",
+      discovering: "Checking URL safety and reading the submitted homepage.",
+      planning: "Preparing the evidence plan for this report.",
+      fetching: "Collecting readable website evidence.",
+      analyzing: "Analyzing the captured evidence.",
+      synthesizing: "Finalizing verified findings and recommendations.",
+      completed: "The report is complete.",
+      completed_limited: "The available report is complete with stated coverage limits.",
+      failed: "The report could not be completed."
+    }
   },
   commerce: {
     offerTitle: "Unlock the full-site AI Search Visibility Audit",
@@ -252,6 +268,7 @@ export const en = {
     deliveryPromise: "Delivered by email within 24 hours of payment or fully refunded.",
     buyAction: "Unlock full-site analysis",
     redirecting: "Opening secure checkout",
+    verifying: "Verifying",
     unavailable: "Online purchase is not configured for this deployment.",
     humanVerification: "Complete human verification to continue.",
     operatorKeySummary: "Already have a report access key?",

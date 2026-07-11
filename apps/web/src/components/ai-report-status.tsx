@@ -13,6 +13,7 @@ type PublicReportState = "generating" | "completed" | "completed_limited" | "una
 
 export interface PublicJobStatus {
   tier: "preview" | "deep";
+  stage: "queued" | "discovering" | "planning" | "fetching" | "analyzing" | "synthesizing" | "completed" | "completed_limited" | "failed";
   state: PublicReportState;
   progress: number;
   plannedPages: number;
@@ -27,6 +28,10 @@ export interface PublicJobStatus {
 interface StatusPayload {
   job: PublicJobStatus | null;
   hasAiReport: boolean;
+  hasTechnicalReport: boolean;
+  technicalStatus: "pending" | "processing" | "completed" | "failed";
+  technicalErrorCode: string | null;
+  technicalPublicError: string | null;
   hasDeepAccess: boolean;
   reportLocale: Locale | null;
   aiReportLocale: Locale | null;
@@ -36,12 +41,16 @@ interface StatusPayload {
 
 export function AiReportStatus({
   dictionary,
+  hasTechnicalReport = true,
   reportId,
-  reportLocale
+  reportLocale,
+  showCommerce = true
 }: {
   dictionary: Dictionary;
+  hasTechnicalReport?: boolean;
   reportId: string;
   reportLocale: Locale;
+  showCommerce?: boolean;
 }) {
   const router = useRouter();
   const [payload, setPayload] = useState<StatusPayload | null>(null);
@@ -50,6 +59,7 @@ export function AiReportStatus({
   const [isUnlocking, setIsUnlocking] = useState(false);
   const [isCorrecting, setIsCorrecting] = useState(false);
   const refreshedTerminalReport = useRef(false);
+  const refreshedTechnicalReport = useRef(hasTechnicalReport);
 
   const loadStatus = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch(`/api/reports/${reportId}/status`, {
@@ -58,6 +68,10 @@ export function AiReportStatus({
     });
     if (!response.ok) return null;
     const next = (await response.json()) as StatusPayload;
+    if (next.hasTechnicalReport && !refreshedTechnicalReport.current) {
+      refreshedTechnicalReport.current = true;
+      router.refresh();
+    }
     const terminalWithReport = next.job?.state !== "generating" && next.hasAiReport;
     setPayload(next);
     if (terminalWithReport && !refreshedTerminalReport.current) {
@@ -69,6 +83,7 @@ export function AiReportStatus({
 
   useEffect(() => {
     refreshedTerminalReport.current = false;
+    refreshedTechnicalReport.current = hasTechnicalReport;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void loadStatus(controller.signal).catch(() => undefined);
@@ -77,7 +92,7 @@ export function AiReportStatus({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [loadStatus]);
+  }, [hasTechnicalReport, loadStatus]);
 
   const isGenerating = payload?.job?.state === "generating";
   useEffect(() => {
@@ -139,7 +154,11 @@ export function AiReportStatus({
   const job = payload?.job ?? null;
   const progress = Math.max(0, Math.min(99, job?.progress ?? 0));
   const queueDescription = job ? getQueueDescription(job, dictionary) : null;
-  const statusDescription = getStatusDescription(payload, dictionary, queueDescription);
+  const statusDescription = payload
+    ? getStatusDescription(payload, dictionary, queueDescription)
+    : hasTechnicalReport
+      ? dictionary.aiReport.waitingDescription
+      : dictionary.aiReport.acceptedDescription;
   const statusId = `ai-report-status-${reportId}`;
   const languageName = reportLocale === "zh"
     ? dictionary.aiReport.reportLanguageChinese
@@ -213,7 +232,7 @@ export function AiReportStatus({
         </button>
       ) : null}
 
-      {!payload?.hasDeepAccess ? (
+      {showCommerce && !payload?.hasDeepAccess ? (
         <div className="mt-7 border-t border-[var(--border)] pt-6">
           <CommercialCheckout dictionary={dictionary} locale={reportLocale} reportId={reportId} />
           <details className="mt-5">
@@ -254,9 +273,16 @@ function getStatusDescription(
   dictionary: Dictionary,
   queueDescription: string | null
 ): string {
+  if (payload?.technicalStatus === "failed") {
+    return payload.technicalPublicError ?? dictionary.aiReport.technicalFailedDescription;
+  }
   if (payload?.localeCorrectionInProgress) return dictionary.aiReport.correctionInProgress;
   const job = payload?.job;
-  if (!job) return dictionary.aiReport.unavailableDescription;
+  if (!job) {
+    return payload && !payload.hasTechnicalReport
+      ? dictionary.aiReport.acceptedDescription
+      : dictionary.aiReport.unavailableDescription;
+  }
   if (job.state === "completed") {
     return interpolate(dictionary.aiReport.completedDescription, { count: job.successfulPages });
   }
@@ -267,7 +293,7 @@ function getStatusDescription(
     });
   }
   if (job.state === "unavailable") return dictionary.aiReport.failedDescription;
-  return queueDescription ?? dictionary.aiReport.waitingDescription;
+  return queueDescription ?? dictionary.aiReport.stageDescriptions[job.stage];
 }
 
 export function getQueueDescription(job: PublicJobStatus, dictionary: Dictionary): string | null {

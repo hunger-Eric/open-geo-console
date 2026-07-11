@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { ReportView, type ReportWorkspaceSection } from "@/components/report-view";
+import { PendingReportView } from "@/components/pending-report-view";
 import { StoredReportFallback } from "@/components/stored-report-fallback";
 import { getBotEvidence } from "@/db/bot-evidence";
 import { getGeoReport } from "@/db/reports";
@@ -30,9 +31,22 @@ export default async function ReportWorkspaceSectionPage({
   if (!row) {
     return <StoredReportFallback dictionary={dictionary} locale={locale} page={page} reportId={id} section={section} />;
   }
+  const reportLocale: Locale = row.reportLocale ?? locale;
+  if (!row.payload) {
+    return (
+      <PendingReportView
+        createdAt={row.createdAt}
+        dictionary={dictionary}
+        locale={locale}
+        reportId={id}
+        reportLocale={reportLocale}
+        section={section}
+        url={row.url}
+      />
+    );
+  }
 
   const [evidence, visible] = await Promise.all([getBotEvidence(id), getVisibleReportBundle(id, row.payload)]);
-  const reportLocale: Locale = row.reportLocale ?? locale;
   return (
     <ReportView
       aiReport={visible.aiReport}

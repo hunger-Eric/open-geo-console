@@ -5,6 +5,14 @@ import { ensureDatabase, getDb, getSqlClient, isMemoryPersistence } from "./inde
 import { memoryDeleteReport, memoryGetReport, memoryRecentReports, memorySaveReport } from "./memory";
 import { scanReports, type ReportLocale, type ScanReportRow } from "./schema";
 
+export interface CreateGeoReportShellInput {
+  url: string;
+  siteKey: string;
+  reportLocale: ReportLocale;
+  admissionIdempotencyHmac?: string;
+  id?: string;
+}
+
 export async function saveGeoReport(
   url: string,
   report: GeoAuditReport,
@@ -20,6 +28,10 @@ export async function saveGeoReport(
     kind: "geo",
     score: report.score,
     payload: report,
+    technicalStatus: "completed",
+    technicalErrorCode: null,
+    technicalPublicError: null,
+    admissionIdempotencyHmac: existingMemoryRow?.admissionIdempotencyHmac ?? null,
     reportLocale: reportLocale ?? existingMemoryRow?.reportLocale ?? null,
     localeCorrectionUsedAt: existingMemoryRow?.localeCorrectionUsedAt ?? null,
     createdAt: new Date()
@@ -40,6 +52,9 @@ export async function saveGeoReport(
             kind: row.kind,
             score: row.score,
             payload: row.payload,
+            technicalStatus: "completed",
+            technicalErrorCode: null,
+            technicalPublicError: null,
             reportLocale: sql`COALESCE(${scanReports.reportLocale}, ${row.reportLocale})`,
             createdAt: row.createdAt
           }
@@ -47,6 +62,101 @@ export async function saveGeoReport(
         .returning()
     : await insert.returning();
   return saved;
+}
+
+export async function createGeoReportShell(input: CreateGeoReportShellInput): Promise<ScanReportRow> {
+  const row: ScanReportRow = {
+    id: input.id ?? randomUUID(),
+    url: input.url,
+    siteKey: input.siteKey,
+    kind: "geo",
+    score: null,
+    payload: null,
+    technicalStatus: "pending",
+    technicalErrorCode: null,
+    technicalPublicError: null,
+    admissionIdempotencyHmac: input.admissionIdempotencyHmac ?? null,
+    reportLocale: input.reportLocale,
+    localeCorrectionUsedAt: null,
+    createdAt: new Date()
+  };
+  if (isMemoryPersistence()) return memorySaveReport(row);
+  await ensureDatabase();
+  const [saved] = await getDb().insert(scanReports).values(row).returning();
+  return saved;
+}
+
+export async function markGeoReportTechnicalProcessing(id: string): Promise<ScanReportRow | null> {
+  if (isMemoryPersistence()) {
+    const current = memoryGetReport(id);
+    if (!current) return null;
+    const updated = { ...current, technicalStatus: "processing" as const };
+    return memorySaveReport(updated);
+  }
+  await ensureDatabase();
+  const [updated] = await getDb().update(scanReports)
+    .set({ technicalStatus: "processing", technicalErrorCode: null, technicalPublicError: null })
+    .where(eq(scanReports.id, id))
+    .returning();
+  return updated ?? null;
+}
+
+export async function completeGeoReportTechnical(
+  id: string,
+  input: { url: string; siteKey: string; report: GeoAuditReport }
+): Promise<ScanReportRow | null> {
+  if (isMemoryPersistence()) {
+    const current = memoryGetReport(id);
+    if (!current) return null;
+    return memorySaveReport({
+      ...current,
+      url: input.url,
+      siteKey: input.siteKey,
+      score: input.report.score,
+      payload: input.report,
+      technicalStatus: "completed",
+      technicalErrorCode: null,
+      technicalPublicError: null
+    });
+  }
+  await ensureDatabase();
+  const [updated] = await getDb().update(scanReports)
+    .set({
+      url: input.url,
+      siteKey: input.siteKey,
+      score: input.report.score,
+      payload: input.report,
+      technicalStatus: "completed",
+      technicalErrorCode: null,
+      technicalPublicError: null
+    })
+    .where(eq(scanReports.id, id))
+    .returning();
+  return updated ?? null;
+}
+
+export async function failGeoReportTechnical(
+  id: string,
+  input: { code: string; publicMessage: string }
+): Promise<ScanReportRow | null> {
+  const code = input.code.slice(0, 100);
+  const publicMessage = input.publicMessage.slice(0, 500);
+  if (isMemoryPersistence()) {
+    const current = memoryGetReport(id);
+    if (!current) return null;
+    return memorySaveReport({
+      ...current,
+      technicalStatus: "failed",
+      technicalErrorCode: code,
+      technicalPublicError: publicMessage
+    });
+  }
+  await ensureDatabase();
+  const [updated] = await getDb().update(scanReports)
+    .set({ technicalStatus: "failed", technicalErrorCode: code, technicalPublicError: publicMessage })
+    .where(eq(scanReports.id, id))
+    .returning();
+  return updated ?? null;
 }
 
 export async function getGeoReport(id: string): Promise<ScanReportRow | null> {

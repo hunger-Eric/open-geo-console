@@ -416,5 +416,16 @@ export const DATABASE_MIGRATIONS = [
   `CREATE UNIQUE INDEX IF NOT EXISTS access_keys_payment_order_uidx
    ON access_keys (payment_order_id) WHERE payment_order_id IS NOT NULL`,
   `CREATE UNIQUE INDEX IF NOT EXISTS credit_ledger_payment_order_uidx
-   ON credit_ledger (payment_order_id) WHERE payment_order_id IS NOT NULL`
+   ON credit_ledger (payment_order_id) WHERE payment_order_id IS NOT NULL`,
+  `ALTER TABLE scan_reports ALTER COLUMN payload DROP NOT NULL`,
+  `ALTER TABLE scan_reports ADD COLUMN IF NOT EXISTS technical_status text NOT NULL DEFAULT 'completed'`,
+  `ALTER TABLE scan_reports ADD COLUMN IF NOT EXISTS technical_error_code text`,
+  `ALTER TABLE scan_reports ADD COLUMN IF NOT EXISTS technical_public_error text`,
+  `ALTER TABLE scan_reports ADD COLUMN IF NOT EXISTS admission_idempotency_hmac text`,
+  `UPDATE scan_reports SET technical_status = 'completed' WHERE payload IS NOT NULL`,
+  `ALTER TABLE scan_reports DROP CONSTRAINT IF EXISTS scan_reports_technical_status_check`,
+  `ALTER TABLE scan_reports ADD CONSTRAINT scan_reports_technical_status_check
+   CHECK (technical_status IN ('pending','processing','completed','failed'))`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS scan_reports_admission_idempotency_uidx
+   ON scan_reports (admission_idempotency_hmac) WHERE admission_idempotency_hmac IS NOT NULL`
 ] as const;

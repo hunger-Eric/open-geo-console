@@ -19,7 +19,12 @@ import type { RobotsPolicy } from "@open-geo-console/site-crawler";
 import { createHash } from "node:crypto";
 import { checkpointScanJob, failScanJob, isBillableCoverage, terminalizeScanJob } from "@/db/jobs";
 import { recordPaidJobOutcome } from "@/db/commercial-refunds";
-import { getGeoReport } from "@/db/reports";
+import {
+  completeGeoReportTechnical,
+  failGeoReportTechnical,
+  getGeoReport,
+  markGeoReportTechnicalProcessing
+} from "@/db/reports";
 import { saveAiReport } from "@/db/ai-reports";
 import {
   getCrawlEvidence,
@@ -56,6 +61,9 @@ interface DiscoverySnapshot {
 interface WorkerCheckpoint extends RecoveryCheckpoint {
   discoverySnapshot?: DiscoverySnapshot;
   pageAnalysisContentHashes?: Record<string, string>;
+  aiEnabled?: boolean;
+  aiSkipReason?: string;
+  technicalCompleted?: boolean;
 }
 
 export async function processScanJob(job: ScanJobRow, workerId: string): Promise<void> {
@@ -67,9 +75,49 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
   let checkpoint = normalizeCheckpoint(job.checkpoint);
   try {
     await purgeExpiredCrawlContent();
-    const storedReport = await getGeoReport(job.reportId);
+    let storedReport = await getGeoReport(job.reportId);
     if (!storedReport) throw new Error("The source technical report no longer exists.");
-    const client = createConfiguredClient();
+    if (job.tier === "free" && storedReport.technicalStatus !== "completed") {
+      await checkpointScanJob(job.id, workerId, { stage: "discovering", progress: 5 });
+      await markGeoReportTechnicalProcessing(job.reportId);
+      const technicalReport = await auditSite(storedReport.url, {
+        fetchImpl: createSafeFetch(),
+        pageLimit: 1
+      });
+      const completed = await completeGeoReportTechnical(job.reportId, {
+        url: technicalReport.url,
+        siteKey: storedReport.siteKey ?? new URL(technicalReport.url).hostname,
+        report: technicalReport
+      });
+      if (!completed) throw new Error("The technical report shell no longer exists.");
+      storedReport = completed;
+      checkpoint = { ...checkpoint, technicalCompleted: true };
+      await saveStageCheckpoint(job, workerId, "discovering", 10, checkpoint, {
+        plannedPages: 1,
+        successfulPages: 1,
+        failedPages: 0
+      });
+    }
+    if (job.tier === "free" && checkpoint.aiEnabled === false) {
+      await terminalizeScanJob(job.id, workerId, {
+        stage: "completed",
+        coverage: { plannedPages: 1, successfulPages: 1, failedPages: 0 }
+      });
+      return;
+    }
+    let client;
+    try {
+      client = createConfiguredClient();
+    } catch (error) {
+      if (job.tier !== "free" || storedReport.technicalStatus !== "completed") throw error;
+      checkpoint = { ...checkpoint, aiEnabled: false, aiSkipReason: "model_not_configured" };
+      await checkpointScanJob(job.id, workerId, { stage: "discovering", progress: 10, checkpoint });
+      await terminalizeScanJob(job.id, workerId, {
+        stage: "completed",
+        coverage: { plannedPages: 1, successfulPages: 1, failedPages: 0 }
+      });
+      return;
+    }
 
     let resumeStage = determineResumeStage(checkpoint);
     let discovery = checkpoint.discoverySnapshot;
@@ -264,6 +312,15 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       publicMessage: publicFailure(error),
       retryable: isRetryable(error)
     });
+    if (job.tier === "free" && failedJob.stage === "failed") {
+      const report = await getGeoReport(job.reportId);
+      if (report && report.technicalStatus !== "completed") {
+        await failGeoReportTechnical(job.reportId, {
+          code: error instanceof Error ? error.name : "scan_failed",
+          publicMessage: publicFailure(error)
+        });
+      }
+    }
     if (job.tier === "deep" && failedJob.stage === "failed") {
       await recordCommercialOutcomeSafely(job.id, "failed");
     }
