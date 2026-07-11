@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   applyPaidPaymentEvent,
   applyUnsuccessfulPaymentEvent,
+  getPaymentOrderByProviderCheckout,
   markPaymentEventProcessing,
   recordPaymentEvent
 } from "@/db/commercial-orders";
@@ -16,12 +17,13 @@ export async function POST(request: Request) {
     rawBody = await request.text();
     const event = new AirwallexGateway().verifyAndParseWebhook(rawBody, request.headers);
     if (event.outcome === "payment_paid") {
-      if (!event.orderId || !event.paymentIntentId) throw new Error("A paid event is missing its order or payment identity.");
+      const orderId = event.orderId ?? await resolveLegacyPaymentOrder(event);
+      if (!orderId || !event.paymentIntentId) throw new Error("A paid event is missing its order or payment identity.");
       await applyPaidPaymentEvent({
         provider: "airwallex",
         providerEventId: event.eventId,
         eventType: event.eventType,
-        orderId: event.orderId,
+        orderId,
         providerPaymentId: event.paymentIntentId,
         providerCreatedAt: event.createdAt,
         payloadHash: event.payloadHash,
@@ -67,4 +69,13 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid webhook." }, { status: 400 });
   }
+}
+
+async function resolveLegacyPaymentOrder(event: ReturnType<AirwallexGateway["verifyAndParseWebhook"]>): Promise<string | null> {
+  if (!event.paymentLinkId) return null;
+  const order = await getPaymentOrderByProviderCheckout("airwallex", event.paymentLinkId);
+  if (!order || event.currency !== order.currency || event.amountMinor !== order.amountMinor) {
+    throw new Error("A legacy paid event does not match its payment order.");
+  }
+  return order.id;
 }

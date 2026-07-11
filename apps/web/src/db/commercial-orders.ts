@@ -95,6 +95,20 @@ export async function getPaymentOrderByCheckoutHmac(hmac: string): Promise<Payme
   return row ?? null;
 }
 
+export async function getPaymentOrderByProviderCheckout(
+  provider: PaymentProvider,
+  providerCheckoutId: string
+): Promise<PaymentOrderRow | null> {
+  if (!providerCheckoutId.trim()) return null;
+  await ensureDatabase();
+  const [row] = await getDb()
+    .select()
+    .from(paymentOrders)
+    .where(and(eq(paymentOrders.provider, provider), eq(paymentOrders.providerCheckoutId, providerCheckoutId)))
+    .limit(1);
+  return row ?? null;
+}
+
 export async function getActivePaymentOrderForReport(
   reportId: string,
   productCode: string

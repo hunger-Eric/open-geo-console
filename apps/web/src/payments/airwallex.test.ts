@@ -142,4 +142,24 @@ describe("AirwallexGateway", () => {
       eventId: "evt_1", orderId: "order_1", paymentIntentId: "int_1", outcome: "payment_paid"
     });
   });
+
+  it("preserves a legacy Payment Link binding when its paid intent has no order metadata", () => {
+    const raw = JSON.stringify({
+      id: "evt_legacy", name: "payment_intent.succeeded", created_at: "2026-07-11T07:07:07Z",
+      data: { object: {
+        id: "int_legacy", status: "SUCCEEDED", amount: 199, currency: "CNY",
+        merchant_order_id: "AI Search Visibility Audit", payment_link_id: "legacy-link-1"
+      } }
+    });
+    const signature = createHmac("sha256", "secret").update(`123${raw}`).digest("hex");
+    const gateway = new AirwallexGateway({ environment: { AIRWALLEX_WEBHOOK_SECRET: "secret" } });
+    expect(gateway.verifyAndParseWebhook(raw, new Headers({ "x-timestamp": "123", "x-signature": signature })))
+      .toMatchObject({
+        orderId: null,
+        paymentLinkId: "legacy-link-1",
+        paymentIntentId: "int_legacy",
+        amountMinor: 19_900,
+        currency: "CNY"
+      });
+  });
 });

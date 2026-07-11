@@ -113,11 +113,21 @@ export class AirwallexGateway implements PaymentGateway {
     if (!eventId || !eventType) throw new Error("Airwallex webhook is missing its stable event identity.");
     const data = objectField(payload, "data");
     const resource = objectField(data, "object") ?? data;
+    if (!resource) throw new Error("Airwallex webhook is missing its payment resource.");
     const metadata = objectField(resource, "metadata");
     const createdAtValue = stringField(payload, "created_at") ?? stringField(resource, "created_at");
     const createdAt = createdAtValue ? new Date(createdAtValue) : new Date(0);
     if (Number.isNaN(createdAt.getTime())) throw new Error("Airwallex webhook creation time is invalid.");
     const providerStatus = stringField(resource, "status");
+    const metadataOrderId = stringField(metadata, "ogc_order_id");
+    const providerOrderId = stringField(resource, "merchant_order_id", "reference");
+    const orderId = validOrderReference(metadataOrderId)
+      ? metadataOrderId
+      : validOrderReference(providerOrderId)
+        ? providerOrderId
+        : null;
+    const currency = supportedCurrency(stringField(resource, "currency"));
+    const amountMinor = currency ? parseMajorAmountMinor(resource.amount) : null;
     const normalized = eventType.toLowerCase();
     const outcome = normalized.includes("refund")
       ? "refund_updated"
@@ -131,9 +141,12 @@ export class AirwallexGateway implements PaymentGateway {
       eventId,
       eventType,
       createdAt,
-      orderId: stringField(metadata, "ogc_order_id") ?? stringField(resource, "merchant_order_id", "reference"),
+      orderId,
+      paymentLinkId: stringField(resource, "payment_link_id"),
       paymentIntentId: stringField(resource, "payment_intent_id") ?? (normalized.includes("payment_intent") ? stringField(resource, "id") : null),
       providerRefundId: normalized.includes("refund") ? stringField(resource, "id") : null,
+      amountMinor,
+      currency,
       payloadHash: createHash("sha256").update(rawBody).digest("hex"),
       outcome,
       providerStatus
@@ -296,6 +309,20 @@ function stringField(value: unknown, ...keys: string[]): string | null {
     if (typeof candidate === "string" && candidate.trim()) return candidate;
   }
   return null;
+}
+
+function validOrderReference(value: string | null): value is string {
+  return Boolean(value && /^[a-zA-Z0-9_-]{1,128}$/.test(value));
+}
+
+function supportedCurrency(value: string | null): "CNY" | "USD" | "HKD" | null {
+  return value === "CNY" || value === "USD" || value === "HKD" ? value : null;
+}
+
+function parseMajorAmountMinor(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  const amountMinor = Math.round(value * 100);
+  return Math.abs(amountMinor / 100 - value) < 1e-9 && Number.isSafeInteger(amountMinor) ? amountMinor : null;
 }
 
 function normalizeRefundStatus(status: string): RefundResult["status"] {

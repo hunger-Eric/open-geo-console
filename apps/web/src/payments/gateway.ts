@@ -38,8 +38,11 @@ export interface VerifiedPaymentEvent {
   eventType: string;
   createdAt: Date;
   orderId: string | null;
+  paymentLinkId: string | null;
   paymentIntentId: string | null;
   providerRefundId: string | null;
+  amountMinor: number | null;
+  currency: SupportedCurrency | null;
   payloadHash: string;
   outcome: "payment_paid" | "payment_failed" | "refund_updated" | "ignored";
   providerStatus: string | null;
