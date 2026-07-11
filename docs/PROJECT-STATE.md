@@ -2,7 +2,7 @@
 
 ## Current Goal
 
-Operate a durable, self-hostable report product whose main journey is `free technical report + AI preview → one-time purchase → private deep report by email → optional AI Bot evidence`. The protected staging and production security code is deployed. Production edge controls and isolated staging provider resources are configured; remaining gates are the user-approved shared model-key exception, branch-scoped Preview variables, and end-to-end payment/email/provider drills.
+Operate a durable, self-hostable report product whose main journey is `free technical report + AI preview → one-time purchase → private deep report by email → optional AI Bot evidence`. The protected staging and production security code is deployed. Production edge controls and isolated staging provider resources are configured; remaining gates are the user-approved shared model-key exception, branch-scoped Preview variables, and refund/email/provider drills.
 
 ## Current Architecture
 
@@ -38,7 +38,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - New commerce checkout uses Airwallex PaymentIntent plus Hosted Payment Page instead of Payment Links. HPP success and cancel navigation return to the exact localized originating report; the report-bound status banner polls only PostgreSQL and never treats browser return parameters as payment or entitlement authority.
 - Reports persist one generation locale independently from the interface route. Legacy wrong-language deep artifacts have one authorized no-charge correction job.
 - Commercial terminalization is atomic: qualified jobs complete and settle; usable low-coverage jobs complete-limited and refund; unusable jobs fail and refund. `npm run db:audit` detects invariant violations.
-- Serverless schema bootstrap runs behind a PostgreSQL transaction-scoped advisory lock, preventing concurrent cold starts from racing the constraint refresh statements and returning a transient report-page `500`.
+- Serverless schema bootstrap records `ogc_schema_state.version` after the advisory-locked DDL pass. Later cold starts perform only the lightweight version/profile checks, so report and Webhook requests do not repeat the full migration set; newer database versions fail closed against older code.
 - The anonymous homepage now contains only website analysis, bilingual controls, value-led capability copy and a secondary log-tool link; it does not expose shared recent-report history or a personal-site default.
 - Deployment profiles and immutable PostgreSQL environment markers fail closed across Web, Worker, commerce, and cleanup. Only protected Vercel Preview plus the staging profile may raise the distinct-site limit to at most 100; production always remains at two.
 - Staging-only forced regeneration creates a new report behind a per-site reservation, preserves the prior reuse mapping on failure, switches it atomically on success, limits active staging free jobs to two, and deduplicates repeated clicks.
@@ -49,7 +49,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Security implementation commit `0b09288` is deployed to the public production alias `https://open-geo-console.vercel.app`. Fixed staging alias `https://open-geo-console-staging-itheheda.vercel.app` points to the isolated Preview deployment; anonymous page/API checks return `302` to Vercel login and `401`, while an authenticated browser reaches the staging UI. Its automation bypass was rotated without exposing either credential.
 - Production is deployed at `https://geo.itheheda.online` through Cloudflare. Turnstile server verification is required for that hostname, Bot Fight Mode is enabled, AI-bot blocking remains off, and `/api/scan` has a Cloudflare 5 requests / 10 seconds / IP burst rule with a 10-second block.
 - Preview has separate Neon, HMAC, Airwallex Sandbox, Resend, Cloudflare Queue, test-recipient, and provider-specific Webhook bypass values. Airwallex and Resend Webhooks target the protected fixed alias and still require application signatures.
-- The latest Preview build is `https://open-geo-console-9vdz4ivua-itheheda-6857s-projects.vercel.app`, repointed to the fixed protected alias. Authenticated browser acceptance proved the visible crawl state, disabled duplicate submission, automatic full-page navigation, and a successful report render after the schema-bootstrap race fix.
+- The latest Preview build is `https://open-geo-console-ekw9bb8h3-itheheda-6857s-projects.vercel.app`, repointed to the fixed protected alias. Authenticated browser acceptance proved PaymentIntent/HPP cancel and successful-card returns, bounded status retries, and the persisted paid/queued banner after the schema-bootstrap version fix.
 - Browser acceptance reconfirmed authenticated staging access, staging-only forced-regeneration UI, same-site reuse, a new forced report ID, old-report availability after failure, and the two-active-job concurrency cap. The isolated staging database marker fingerprint is `7223dda0037deca3`; a staging Worker drained isolated jobs without touching production.
 
 ## Known Boundaries
@@ -64,19 +64,18 @@ The web process persists a public homepage technical report and enqueues work. S
 - At the user's written direction, Preview temporarily reuses the existing Xiaomi MiMo Token Plan API key. This is an explicit exception to the approved independent-model-key requirement; all other credentials remain separated. Replace it with a staging-only model key before claiming full conformance.
 - Vercel Sensitive variables cannot be decrypted by `vercel env pull`; local Worker drills must explicitly override empty placeholders with separately held staging values in only that process, without printing them. Loading a second env file without explicit overrides leaves the empty Preview placeholders in effect. The local proxy DNS resolves `shun-express.com` into the reserved `198.18.0.0/15` Fake-IP range, so the Worker correctly fails closed with `UrlSafetyError`; real model acceptance requires a Worker environment with public DNS and remains open.
 - Production Turnstile and the Cloudflare burst rule are live. Server-side no-token rejection (`403`) and edge burst rejection (`429`) are proven, but the application-level third-distinct-site browser drill was not completed because the attempted target was not scannable.
-- Airwallex Sandbox and Resend resources/Webhooks are configured, but no real signed Sandbox delivery, payment/refund cycle, or application-originated redirected email has been observed yet.
-- PaymentIntent/HPP code is deployed to protected staging at `https://open-geo-console-staging-itheheda.vercel.app` through Preview `https://open-geo-console-31v6z9v4t-itheheda-6857s-projects.vercel.app`. Anonymous deployment protection remains `302`/`401`; a real Sandbox PaymentIntent opened HPP with fixed `USD 29.00`, and HPP cancel returned to the exact report with a non-authoritative "payment not completed" banner. The successful-card and signed-Webhook path is paused at Airwallex's interactive puzzle CAPTCHA and is not yet accepted.
-- Local `npm run db:audit` and `npm run test:postgres:staging-security` cannot run from the current checkout because `.env.local` points to a database without an initialized deployment marker and `apps/web/.env.staging.local` is absent. The fail-closed marker checks correctly refused both guessed staging and production identities.
+- Airwallex Sandbox and Resend resources/Webhooks are configured. A real signed `payment_intent.succeeded` delivery has been accepted exactly once; the remaining provider drills are refund and application-originated redirected email.
+- PaymentIntent/HPP code is deployed to protected staging at `https://open-geo-console-staging-itheheda.vercel.app` through Preview `https://open-geo-console-ekw9bb8h3-itheheda-6857s-projects.vercel.app`. Anonymous deployment protection remains `302`/`401`. Browser acceptance used a fixed `USD 29.00` Sandbox PaymentIntent: cancel returned to the exact report without claiming payment, the successful card returned through the success URL, the banner waited for PostgreSQL, and the verified Webhook alone produced `paid + queued` and the exactly-once deep entitlement/job.
+- The ignored `apps/web/.env.staging.local` now holds the pulled Preview environment for local operator checks. Staging PostgreSQL security tests and the commercial invariant audit pass; `.env.local` still points to a separately uninitialized database and is not accepted as staging or production authority.
 - Anonymous users behind the same public IP or carrier/NAT gateway intentionally share the two-site rolling limit; there is no unauthenticated quota-reset endpoint.
 
 ## Next Steps
 
-1. Complete the Airwallex Sandbox success path after the interactive CAPTCHA, then verify the signed Webhook changes the same report banner from confirming to queued without browser authority.
-2. Replace the shared Preview model key with a staging-only key, then run one successful real-model staging report.
-3. Verify the remaining Airwallex refund cycle and application-originated Resend message redirected only to `itheheda@gmail.com`.
-4. Complete the production application-rate-limit drill with three scannable distinct sites and a fresh Turnstile token for each; the third must return `429`, including when staging-only inputs are supplied.
-5. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the staging branch; until then, repoint the fixed staging alias after each CLI Preview deployment.
-6. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
+1. Replace the shared Preview model key with a staging-only key, then run one successful real-model staging report.
+2. Verify the remaining Airwallex refund cycle and application-originated Resend message redirected only to `itheheda@gmail.com`.
+3. Complete the production application-rate-limit drill with three scannable distinct sites and a fresh Turnstile token for each; the third must return `429`, including when staging-only inputs are supplied.
+4. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the staging branch; until then, repoint the fixed staging alias after each CLI Preview deployment.
+5. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
 
 ## Acceptance Commands
 

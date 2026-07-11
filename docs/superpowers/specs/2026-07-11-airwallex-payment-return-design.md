@@ -1,5 +1,7 @@
 # Airwallex PaymentIntent / HPP Post-Payment Return Design
 
+**Status:** Implemented and accepted in protected staging on 2026-07-11, including cancel and successful Sandbox HPP returns, forged-return rejection, verified-Webhook authority, paid/queued browser state, and transient status-request recovery.
+
 **Date:** 2026-07-11  
 **Status:** Approved
 **Scope:** Replace the no-return Airwallex Payment Link checkout with a safe PaymentIntent and Hosted Payment Page flow that returns shoppers to the originating report.

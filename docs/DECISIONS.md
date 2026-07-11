@@ -83,3 +83,7 @@ The canonical production hostname is `geo.itheheda.online`. Cloudflare Bot Fight
 ## 2026-07-11: Hosted checkout return is navigation, never payment authority
 
 New one-time checkout uses Airwallex PaymentIntent plus Hosted Payment Page. The provider intent ID is the durable checkout binding; its temporary client secret is browser-only and never persisted. Success and cancel navigation return to the exact originating localized report, where a report-bound order-status route projects only PostgreSQL lifecycle state. Browser parameters, HPP return type, and provider retrieval may improve navigation or reconstruct a payment session, but only the verified Airwallex Webhook may mark an order paid and create its entitlement, deep job, dispatch hint, and email.
+
+## 2026-07-11: Runtime requests validate a schema version instead of replaying DDL
+
+The advisory lock remains the single-writer boundary for database bootstrap, but successful bootstrap now records an explicit schema version. Every later serverless cold start reads that marker and the deployment profile without replaying the idempotent migration list. A missing or older marker triggers one locked migration pass with an in-lock recheck; a newer marker fails closed so older application code cannot operate against an unknown schema.

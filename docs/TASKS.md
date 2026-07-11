@@ -24,7 +24,7 @@
 - [x] Keep production at two rolling distinct sites while allowing only protected staging Preview to configure up to 100.
 - [x] Add staging-only forced regeneration with old-report preservation, per-site idempotency, a two-job safety cap, UI, bilingual copy, and PostgreSQL integration coverage.
 - [x] Make scan submission visibly progress through crawl/slow/extended states, prevent duplicate clicks, and use robust full-page report navigation.
-- [x] Serialize PostgreSQL schema bootstrap across serverless cold starts so report pages cannot race constraint refreshes.
+- [x] Version PostgreSQL schema bootstrap so only one advisory-locked deployment pass runs DDL and later serverless cold starts use lightweight checks.
 - [x] Fix test commerce to Airwallex Sandbox and force all non-production email to the required test recipient.
 - [x] Connect an independent Preview Neon database, initialize its staging marker, configure Preview policy variables, rotate the Vercel automation bypass without exposing it, deploy, and verify authenticated browser flows.
 - [x] Assign and verify the fixed protected staging alias `open-geo-console-staging-itheheda.vercel.app` without weakening Vercel Authentication.
@@ -32,8 +32,9 @@
 - [x] Create separate Airwallex Sandbox, Resend/test-recipient, and Cloudflare Queue resources; protect provider Webhooks with dedicated rotated bypass values and application signatures.
 - [ ] Replace the user-approved shared MiMo Preview key with an independent staging key, then complete a successful real-model report.
 - [x] Configure production Turnstile, Cloudflare Bot Fight Mode, and a narrow `/api/scan` burst rule while leaving AI-bot blocking off.
-- [ ] Complete signed Sandbox Webhook, payment/refund, redirected-email, and production application-level third-site `429` browser acceptance.
-- [ ] Replace the no-return Payment Link checkout with a verified post-payment journey: PaymentIntent/HPP implementation, protected deployment, forged-return rejection, and cancel return pass; successful Sandbox payment and signed-Webhook banner transition remain blocked by the interactive CAPTCHA.
+- [x] Complete a real signed Airwallex Sandbox payment Webhook and prove that only its persisted state changes the original report banner to paid/queued.
+- [ ] Complete the remaining refund, redirected-email, and production application-level third-site `429` browser acceptance.
+- [x] Replace the no-return Payment Link checkout with a verified PaymentIntent/HPP journey, protected deployment, forged-return rejection, cancel return, successful Sandbox return, and signed-Webhook banner transition.
 
 ## Evidence-backed AI report engine
 
