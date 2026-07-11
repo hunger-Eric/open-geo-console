@@ -31,6 +31,9 @@ export const en = {
     urlPlaceholder: "https://company.com",
     forceFreshLabel: "Force a fresh report",
     forceFreshDescription: "Staging only. Keep the current report available while a new crawl and report are generated.",
+    scanProgressStarting: "Running safety checks and crawling the homepage. This usually takes 10–60 seconds.",
+    scanProgressSlow: "The target site is responding slowly. The secure crawl is still running; please keep this page open.",
+    scanProgressExtended: "This is taking longer than usual. Please do not click again—the request is still processing and the report will open automatically.",
     nextTitle: "Already have server access logs?",
     nextDescription:
       "Verify whether identifiable AI crawlers visited the site."
@@ -232,7 +235,7 @@ export const en = {
     queuePosition: "Queue position {position}",
     queueJobsAhead: "{count} jobs are ahead in this report lane.",
     queueActiveJobsInPool: "This report is next; the worker lane is processing another job.",
-    queueAwaitingClaim: "This report is next and is waiting for a worker to claim it.",
+    queueAwaitingClaim: "This report is next, but no background worker has claimed it yet. It will continue automatically when a worker starts; do not resubmit.",
     activeTierPreview: "Free AI previews are currently being processed.",
     activeTierDeep: "Deep reports are currently being processed.",
     activeTierMixed: "Free previews and deep reports are currently being processed.",

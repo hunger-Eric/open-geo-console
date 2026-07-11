@@ -45,6 +45,9 @@ export interface Dictionary {
     urlPlaceholder: string;
     forceFreshLabel: string;
     forceFreshDescription: string;
+    scanProgressStarting: string;
+    scanProgressSlow: string;
+    scanProgressExtended: string;
     nextTitle: string;
     nextDescription: string;
   };

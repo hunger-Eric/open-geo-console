@@ -1,11 +1,11 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, Loader2 } from "lucide-react";
 import type { Dictionary, Locale } from "@/i18n";
 import { localizePath } from "@/i18n";
 import { TurnstileWidget } from "./turnstile-widget";
+import { getScanProgressStage } from "./scanner-progress";
 
 export function ScannerForm({
   dictionary,
@@ -18,46 +18,68 @@ export function ScannerForm({
   turnstileSiteKey?: string;
   allowForceFresh?: boolean;
 }) {
-  const router = useRouter();
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState("");
   const [forceFresh, setForceFresh] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+
+  useEffect(() => {
+    if (!isSubmitting) return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => setElapsedMs(Date.now() - startedAt), 1_000);
+    return () => window.clearInterval(timer);
+  }, [isSubmitting]);
 
   function submitScan(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setElapsedMs(0);
+    setIsSubmitting(true);
 
-    startTransition(async () => {
-      const response = await fetch("/api/scan", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          url,
-          locale,
-          turnstileToken,
-          ...(allowForceFresh && forceFresh ? { forceFresh: true } : {})
-        })
-      });
-      const payload = (await response.json()) as {
-        reportId?: string;
-        id?: string;
-        error?: string;
-        errorKey?: keyof Dictionary["errors"];
-      };
-      const reportId = payload.reportId ?? payload.id;
+    void (async () => {
+      try {
+        const response = await fetch("/api/scan", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            url,
+            locale,
+            turnstileToken,
+            ...(allowForceFresh && forceFresh ? { forceFresh: true } : {})
+          })
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          reportId?: string;
+          id?: string;
+          error?: string;
+          errorKey?: keyof Dictionary["errors"];
+        };
+        const reportId = payload.reportId ?? payload.id;
 
-      if (!response.ok || !reportId) {
-        setError(payload.errorKey ? dictionary.errors[payload.errorKey] : (payload.error ?? dictionary.errors.scanFailed));
-        return;
+        if (!response.ok || !reportId) {
+          setError(payload.errorKey ? dictionary.errors[payload.errorKey] : (payload.error ?? dictionary.errors.scanFailed));
+          setIsSubmitting(false);
+          return;
+        }
+
+        window.location.assign(localizePath(locale, `/reports/${reportId}`));
+      } catch {
+        setError(dictionary.errors.scanFailed);
+        setIsSubmitting(false);
       }
-
-      router.push(localizePath(locale, `/reports/${reportId}`));
-    });
+    })();
   }
+
+  const progressStage = getScanProgressStage(elapsedMs);
+  const progressMessage = progressStage === "extended"
+    ? dictionary.scanner.scanProgressExtended
+    : progressStage === "slow"
+      ? dictionary.scanner.scanProgressSlow
+      : dictionary.scanner.scanProgressStarting;
 
   return (
     <form onSubmit={submitScan} className="space-y-3">
@@ -73,10 +95,10 @@ export function ScannerForm({
         />
         <button
           type="submit"
-          disabled={isPending || Boolean(turnstileSiteKey && !turnstileToken)}
+          disabled={isSubmitting || Boolean(turnstileSiteKey && !turnstileToken)}
           className="button-primary min-h-12 shrink-0 px-5"
         >
-          {isPending ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
+          {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
           {dictionary.actions.generateReport}
         </button>
       </div>
@@ -94,7 +116,14 @@ export function ScannerForm({
           </span>
         </label>
       ) : null}
-      <div aria-live="polite">{error ? <p className="text-sm text-[var(--red)]">{error}</p> : null}</div>
+      <div aria-live="polite">
+        {isSubmitting ? (
+          <p role="status" className="rounded-lg border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 text-sm leading-6 text-[var(--muted)]">
+            {progressMessage}
+          </p>
+        ) : null}
+        {error ? <p className="text-sm text-[var(--red)]">{error}</p> : null}
+      </div>
       {turnstileSiteKey ? <TurnstileWidget siteKey={turnstileSiteKey} onToken={setTurnstileToken} /> : null}
     </form>
   );

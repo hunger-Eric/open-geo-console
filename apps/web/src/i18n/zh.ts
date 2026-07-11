@@ -31,6 +31,9 @@ export const zh = {
     urlPlaceholder: "https://company.com",
     forceFreshLabel: "强制重新生成报告",
     forceFreshDescription: "仅测试站可用。生成新的抓取与报告期间，旧报告仍保持可访问。",
+    scanProgressStarting: "正在进行网址安全校验并抓取首页，通常需要 10–60 秒。",
+    scanProgressSlow: "目标网站响应较慢，安全抓取仍在继续，请保持此页面打开。",
+    scanProgressExtended: "已超过通常等待时间。请勿重复点击，请求仍在处理，完成后会自动打开报告。",
     nextTitle: "已经有服务器访问日志？",
     nextDescription: "验证可识别的 AI 爬虫是否真实访问过该站点。"
   },
@@ -228,7 +231,7 @@ export const zh = {
     queuePosition: "当前排队第 {position} 位",
     queueJobsAhead: "同类报告队列前面还有 {count} 个任务。",
     queueActiveJobsInPool: "当前任务已经排在最前，Worker 仍在处理同类任务。",
-    queueAwaitingClaim: "当前任务已经排在最前，正在等待 Worker 领取。",
+    queueAwaitingClaim: "当前任务已经排在最前，后台 Worker 尚未领取；启动后会自动继续，无需重复提交。",
     activeTierPreview: "当前正在处理免费 AI 预览。",
     activeTierDeep: "当前正在处理深度报告。",
     activeTierMixed: "当前同时在处理免费预览和深度报告。",

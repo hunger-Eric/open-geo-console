@@ -23,6 +23,7 @@
 - [x] Add fail-closed deployment profiles, immutable PostgreSQL environment markers, explicit staging Worker/commerce commands, and production-refusing cleanup.
 - [x] Keep production at two rolling distinct sites while allowing only protected staging Preview to configure up to 100.
 - [x] Add staging-only forced regeneration with old-report preservation, per-site idempotency, a two-job safety cap, UI, bilingual copy, and PostgreSQL integration coverage.
+- [x] Make scan submission visibly progress through crawl/slow/extended states, prevent duplicate clicks, and use robust full-page report navigation.
 - [x] Fix test commerce to Airwallex Sandbox and force all non-production email to the required test recipient.
 - [x] Connect an independent Preview Neon database, initialize its staging marker, configure Preview policy variables, rotate the Vercel automation bypass without exposing it, deploy, and verify authenticated browser flows.
 - [x] Assign and verify the fixed protected staging alias `open-geo-console-staging-itheheda.vercel.app` without weakening Vercel Authentication.
