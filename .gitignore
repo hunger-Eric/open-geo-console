@@ -16,3 +16,4 @@ Thumbs.db
 *.tsbuildinfo
 .playwright-cli/
 output/
+.superpowers/

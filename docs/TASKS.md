@@ -66,3 +66,11 @@
 - [x] Create production Cloudflare Turnstile and staging Queue/Airwallex/Resend resources.
 - [ ] Complete sandbox payment/refund/email and signed provider-delivery drills.
 - [ ] Measure one, two and four deep Worker processes with representative live workloads before raising the default concurrency.
+
+## HTML-first visual evidence report delivery
+
+- [ ] Implement private screenshot evidence capture during Worker analysis.
+- [ ] Store screenshot asset metadata in PostgreSQL and bytes behind a private storage adapter.
+- [ ] Render a polished HTML report artifact with graded screenshot evidence cards.
+- [ ] Generate the customer PDF from the same HTML artifact with print-specific CSS.
+- [ ] Verify private asset authorization, screenshot fallback states, HTML browser QA, and PDF export QA.

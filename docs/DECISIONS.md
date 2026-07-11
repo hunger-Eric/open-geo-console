@@ -113,3 +113,7 @@ Some legacy Airwallex Payment Link events omit `metadata.ogc_order_id` and use a
 A Worker behind Fake-IP DNS may opt into the fixed Cloudflare DNS-over-HTTPS endpoint. Returned A/AAAA addresses still pass the existing private, reserved, metadata and benchmark-network blocks, and the crawler pins the approved address for the actual request and every redirect. The option is off by default; it is a resolver replacement, not an address allowlist or SSRF bypass.
 
 Protected staging test mode may issue a one-day operator preview cookie only for an exact paid-and-completed order/report pair. Vercel Authentication remains the outer staging boundary and production always returns `404`; normal customer delivery continues to use the one-time emailed access link.
+
+## 2026-07-11: Paid reports are HTML-first visual evidence artifacts
+
+The private paid report should be delivered as a polished HTML artifact plus a PDF exported from the same HTML. HTML is the canonical customer reading experience; PDF exists for forwarding and archival circulation, not as a separate report composition. Screenshot evidence is captured during Worker analysis beside the verified quote and URL, uses graded cards with issue crops and context thumbnails, follows the private report lifecycle, and inherits the report access boundary. Screenshot evidence does not alter the commercial state machine: only a verified Airwallex Webhook may mark an order paid and create paid entitlement, deep job, dispatch hint, and email.
