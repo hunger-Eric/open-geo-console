@@ -231,6 +231,7 @@ export const en = {
     completedLimitedDescription: "Report completed — {count} valid pages analyzed. {failed} inaccessible pages were excluded, are listed in coverage limitations, and the credit was returned.",
     failedDescription: "This analysis could not be completed. The report credit has been returned. You can start a new analysis later.",
     unavailableDescription: "AI analysis has not been configured for this deployment.",
+    previewUnavailableDescription: "This free AI preview was not generated, but the homepage technical report is complete and remains available.",
     reportLanguage: "Report language",
     reportLanguageEnglish: "English",
     reportLanguageChinese: "Chinese",

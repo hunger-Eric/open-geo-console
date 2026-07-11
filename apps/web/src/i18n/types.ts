@@ -196,6 +196,7 @@ export interface Dictionary {
     completedLimitedDescription: string;
     failedDescription: string;
     unavailableDescription: string;
+    previewUnavailableDescription: string;
     reportLanguage: string;
     reportLanguageEnglish: string;
     reportLanguageChinese: string;

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { interpolate, localizePath, type Dictionary, type Locale } from "@/i18n";
+import { getUnavailableDescriptionKey } from "./ai-report-status-copy";
 import { CommercialCheckout } from "./commercial-checkout";
 
 type WaitReason = "jobs_ahead" | "active_jobs_in_pool" | "awaiting_claim";
@@ -293,9 +294,7 @@ function getStatusDescription(
     });
   }
   if (job.state === "unavailable") {
-    return job.tier === "preview" && payload.hasTechnicalReport && job.refundState === null
-      ? dictionary.aiReport.unavailableDescription
-      : dictionary.aiReport.failedDescription;
+    return dictionary.aiReport[getUnavailableDescriptionKey(job, payload.hasTechnicalReport)];
   }
   return queueDescription ?? dictionary.aiReport.stageDescriptions[job.stage];
 }

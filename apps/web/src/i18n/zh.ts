@@ -227,6 +227,7 @@ export const zh = {
     completedLimitedDescription: "报告已完成 — 已分析 {count} 个有效页面，排除 {failed} 个不可访问页面；限制已列出，报告额度已退回。",
     failedDescription: "本次分析无法完成，报告额度已经退回。你可以稍后开始新的分析。",
     unavailableDescription: "当前部署尚未配置 AI 分析服务。",
+    previewUnavailableDescription: "本次免费 AI 预览未生成，但首页技术报告已经完成，可以正常查看。",
     reportLanguage: "报告语言",
     reportLanguageEnglish: "英文",
     reportLanguageChinese: "中文",
