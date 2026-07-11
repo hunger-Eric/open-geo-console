@@ -6,8 +6,8 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@sparticuz/chromium"],
   outputFileTracingIncludes: {
     "/api/reports/\\[id\\]/artifacts/report.pdf": [
-      "./node_modules/@sparticuz/chromium/bin/**/*",
-      "./node_modules/playwright-core/browsers.json"
+      "../../node_modules/@sparticuz/chromium/bin/**/*",
+      "../../node_modules/playwright-core/browsers.json"
     ]
   },
   transpilePackages: [
