@@ -1,4 +1,6 @@
 import "server-only";
+import serverlessChromium from "@sparticuz/chromium";
+import { chromium as serverlessPlaywright } from "playwright-core";
 
 export async function exportReportPdf(input: {
   htmlUrl: string;
@@ -34,13 +36,9 @@ export async function exportReportPdf(input: {
 
 async function launchPdfBrowser() {
   if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-    const [{ chromium }, serverlessChromium] = await Promise.all([
-      import("playwright-core"),
-      import("@sparticuz/chromium")
-    ]);
-    return chromium.launch({
-      args: serverlessChromium.default.args,
-      executablePath: await serverlessChromium.default.executablePath(),
+    return serverlessPlaywright.launch({
+      args: serverlessChromium.args,
+      executablePath: await serverlessChromium.executablePath(),
       headless: true
     });
   }

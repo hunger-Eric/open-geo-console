@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["@sparticuz/chromium", "playwright-core"],
+  outputFileTracingIncludes: {
+    "/api/reports/[id]/artifacts/report.pdf": ["./node_modules/@sparticuz/chromium/bin/**/*"]
+  },
   transpilePackages: [
     "@open-geo-console/ai-report-engine",
     "@open-geo-console/crawler-rules",

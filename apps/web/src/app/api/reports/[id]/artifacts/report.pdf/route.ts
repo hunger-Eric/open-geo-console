@@ -25,7 +25,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         "x-frame-options": "DENY"
       }
     });
-  } catch {
+  } catch (error) {
+    console.error("PDF artifact export failed.", error instanceof Error ? error.message : "unknown_error");
     return NextResponse.json({ error: "PDF export is temporarily unavailable. The HTML report remains available." }, {
       status: 503,
       headers: { "cache-control": "private, no-store", "retry-after": "30" }
