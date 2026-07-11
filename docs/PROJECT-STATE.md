@@ -64,15 +64,17 @@ The web process persists a public homepage technical report and enqueues work. S
 - Vercel Sensitive variables cannot be decrypted by `vercel env pull`; local Worker drills must explicitly override empty placeholders with separately held staging values in only that process, without printing them. Loading a second env file without explicit overrides leaves the empty Preview placeholders in effect. The local proxy DNS resolves `shun-express.com` into the reserved `198.18.0.0/15` Fake-IP range, so the Worker correctly fails closed with `UrlSafetyError`; real model acceptance requires a Worker environment with public DNS and remains open.
 - Production Turnstile and the Cloudflare burst rule are live. Server-side no-token rejection (`403`) and edge burst rejection (`429`) are proven, but the application-level third-distinct-site browser drill was not completed because the attempted target was not scannable.
 - Airwallex Sandbox and Resend resources/Webhooks are configured, but no real signed Sandbox delivery, payment/refund cycle, or application-originated redirected email has been observed yet.
+- Checkout currently uses Airwallex Payment Links, whose create API has no configured return flow. After payment, the shopper remains on the Airwallex-hosted page; the app does not preserve an order/report return context. A follow-up must evaluate migration to PaymentIntent plus Hosted Payment Page, return the shopper to the originating report with a payment/fulfillment status view, and keep the verified Webhook—not the browser return—as payment and entitlement authority.
 - Anonymous users behind the same public IP or carrier/NAT gateway intentionally share the two-site rolling limit; there is no unauthenticated quota-reset endpoint.
 
 ## Next Steps
 
-1. Replace the shared Preview model key with a staging-only key, then run one successful real-model staging report.
-2. Trigger and verify a signed Airwallex Sandbox Webhook, a test payment/refund, and an application-originated Resend message redirected only to `itheheda@gmail.com`.
-3. Complete the production application-rate-limit drill with three scannable distinct sites and a fresh Turnstile token for each; the third must return `429`, including when staging-only inputs are supplied.
-4. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the staging branch; until then, repoint the fixed staging alias after each CLI Preview deployment.
-5. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
+1. Design and implement the post-payment return journey, likely by migrating Payment Links to PaymentIntent plus Hosted Payment Page; return to the originating report, show verified order/fulfillment status, and never grant access from browser return parameters.
+2. Replace the shared Preview model key with a staging-only key, then run one successful real-model staging report.
+3. Trigger and verify a signed Airwallex Sandbox Webhook, a test payment/refund, and an application-originated Resend message redirected only to `itheheda@gmail.com`.
+4. Complete the production application-rate-limit drill with three scannable distinct sites and a fresh Turnstile token for each; the third must return `429`, including when staging-only inputs are supplied.
+5. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the staging branch; until then, repoint the fixed staging alias after each CLI Preview deployment.
+6. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
 
 ## Acceptance Commands
 
