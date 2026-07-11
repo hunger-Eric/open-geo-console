@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(process.cwd(), "../.."),
   serverExternalPackages: ["@sparticuz/chromium"],
   outputFileTracingIncludes: {
-    "/api/reports/[id]/artifacts/report.pdf": [
+    "/api/reports/\\[id\\]/artifacts/report.pdf": [
       "./node_modules/@sparticuz/chromium/bin/**/*",
       "./node_modules/playwright-core/browsers.json"
     ]
