@@ -23,7 +23,9 @@
 - [x] Add fail-closed deployment profiles, immutable PostgreSQL environment markers, explicit staging Worker/commerce commands, and production-refusing cleanup.
 - [x] Keep production at two rolling distinct sites while allowing only protected staging Preview to configure up to 100.
 - [x] Add staging-only forced regeneration with old-report preservation, per-site idempotency, a two-job safety cap, UI, bilingual copy, and PostgreSQL integration coverage.
-- [x] Make scan submission visibly progress through crawl/slow/extended states, prevent duplicate clicks, and use robust full-page report navigation.
+- [x] Replace crawl-blocking scan submission with atomic admission, an immediate pending report workspace, Worker-owned technical generation, stable idempotency, and truthful queue/stage polling.
+- [x] Make scanner and checkout Turnstile interaction-only and execute on demand, while preserving mandatory server-side verification.
+- [x] Verify the instant flow on protected Preview: about 1.77-second navigation, PostgreSQL `pending/queued`, staging Worker completion, empty console errors, and 390x844 responsive layout.
 - [x] Version PostgreSQL schema bootstrap so only one advisory-locked deployment pass runs DDL and later serverless cold starts use lightweight checks.
 - [x] Fix test commerce to Airwallex Sandbox and force all non-production email to the required test recipient.
 - [x] Connect an independent Preview Neon database, initialize its staging marker, configure Preview policy variables, rotate the Vercel automation bypass without exposing it, deploy, and verify authenticated browser flows.

@@ -87,3 +87,15 @@ New one-time checkout uses Airwallex PaymentIntent plus Hosted Payment Page. The
 ## 2026-07-11: Runtime requests validate a schema version instead of replaying DDL
 
 The advisory lock remains the single-writer boundary for database bootstrap, but successful bootstrap now records an explicit schema version. Every later serverless cold start reads that marker and the deployment profile without replaying the idempotent migration list. A missing or older marker triggers one locked migration pass with an in-lock recheck; a newer marker fails closed so older application code cannot operate against an unknown schema.
+
+## 2026-07-11: Report admission is fast; report generation is asynchronous
+
+`POST /api/scan` validates the request and Turnstile token, applies reuse/rate policy, and atomically creates the pending report shell, free job, dispatch hint, trial mapping, and budget decision. It does not crawl or call a model. The browser navigates to the stable report UUID immediately, where route loading and pending states expose queue and stage progress. The free Worker is the only process that fetches the homepage and standard assets, persists the technical payload, and optionally continues AI generation. Repeated submissions use HMAC-backed idempotency and return the same admission result.
+
+## 2026-07-11: Human verification is on demand, not a prerequisite UI
+
+Scanner and checkout forms render Turnstile with `appearance: interaction-only` and `execution: execute`. Their primary buttons are enabled by valid local form data and initiate verification on click; no checkbox or fixed empty widget slot appears before interaction. The server still rejects absent, invalid, expired, or reused tokens. This is a presentation and latency decision only: Turnstile remains request authorization, and verified payment Webhooks remain the sole payment and entitlement authority.
+
+## 2026-07-11: Vercel Functions run near the Singapore database
+
+The repository-level Vercel configuration selects `sin1` for Functions so fast-admission database round trips stay near the Singapore Neon database. This does not move long-running crawling into the Web process; Worker placement remains an independent operations concern.
