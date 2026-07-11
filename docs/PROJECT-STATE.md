@@ -6,6 +6,8 @@ Operate a durable, self-hostable report product whose main journey is `free tech
 
 Release baseline `v0.2.0` freezes the accepted HTML-first visual-evidence implementation before subsequent feature work. It includes private screenshot capture/storage, access-controlled evidence delivery, same-HTML PDF export, and the verified paid staging drill; it does not claim the remaining production-readiness gates below are complete.
 
+The next product direction is approved but not implemented: a zero-configuration AI recommendation forensic report for Chinese export companies. It will lead with observed answer-engine recommendations and third-party citation gaps, keep the website audit as supporting evidence, give owners a decision report, and give their existing vendors a separate task package. The approved contract is `docs/superpowers/specs/2026-07-12-ai-recommendation-forensic-report-design.md`.
+
 ## Current Architecture
 
 - `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point.
@@ -90,6 +92,7 @@ The web process persists a public homepage technical report and enqueues work. S
 3. Complete the production application-rate-limit drill with three scannable distinct sites and a fresh Turnstile token for each; the third must return `429`, including when staging-only inputs are supplied.
 4. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the staging branch; until then, repoint the fixed staging alias after each CLI Preview deployment.
 5. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
+6. After the recommendation-forensic design receives written-spec approval, create an implementation plan beginning with snapshot/evidence contracts and deterministic provider fixtures; do not enable product claims before two provider adapters pass protected-staging certification.
 
 ## Acceptance Commands
 
