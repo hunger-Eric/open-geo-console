@@ -1,6 +1,6 @@
 // Idempotent bootstrap for self-hosted deployments. A future migration runner can
 // execute the same statements and then take ownership of schema versioning.
-const V9_DATABASE_MIGRATIONS = [
+export const V9_DATABASE_MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS deployment_environment (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton = true),
     profile text NOT NULL CHECK (profile IN ('staging','production')),
@@ -1063,7 +1063,425 @@ export const V10_DATABASE_MIGRATIONS = [
    FOR EACH ROW EXECUTE FUNCTION ogc_preserve_market_source_identity()`
 ] as const;
 
+export const V11_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_public_jsonb_metadata_valid_node(document jsonb, depth integer)
+   RETURNS boolean
+   LANGUAGE plpgsql
+   IMMUTABLE
+   STRICT
+   AS $$
+   DECLARE
+     item record;
+     normalized_key text;
+   BEGIN
+     IF depth > 4 OR octet_length(document::text) > 8192 THEN RETURN false; END IF;
+     CASE jsonb_typeof(document)
+       WHEN 'object' THEN
+         FOR item IN SELECT entry.key, entry.value AS child FROM jsonb_each(document) AS entry LOOP
+           normalized_key := regexp_replace(lower(item.key), '[^a-z0-9]', '', 'g');
+           IF length(item.key) > 64 OR normalized_key <> ALL (ARRAY[
+             'id','name','canonicalname','type','category','kind','status','code','version',
+             'claim','claims','text','quote','title','snippet','field','value','values','items',
+             'sourceid','observationid','entityid','confidence','reason','details','relationship',
+             'from','to','subject','predicate','object','polarity','domain','registrabledomain',
+             'language','locale','region','mimetype','publishedat','updatedat','retrievedat','rank',
+             'resulttype','sourcekind','inputtokens','outputtokens','totaltokens','searchrequests',
+             'currency','costmicros','billedunits','requestunits','cachehits','billing','unit','count',
+             'requestcount','resultcount','estimatedcostmicros','providerreportedcostmicros','costuncertain'
+           ]) THEN RETURN false; END IF;
+           IF NOT ogc_public_jsonb_metadata_valid_node(item.child, depth + 1) THEN RETURN false; END IF;
+         END LOOP;
+       WHEN 'array' THEN
+         FOR item IN SELECT entry.value AS child FROM jsonb_array_elements(document) AS entry LOOP
+           IF NOT ogc_public_jsonb_metadata_valid_node(item.child, depth + 1) THEN RETURN false; END IF;
+         END LOOP;
+       WHEN 'string' THEN
+         IF length(document #>> '{}') > 2048 THEN RETURN false; END IF;
+       WHEN 'number', 'boolean', 'null' THEN NULL;
+       ELSE RETURN false;
+     END CASE;
+     RETURN true;
+   END $$`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS public_search_surface_authorities_one_active_uidx
+   ON public_search_surface_authorities (environment, surface_id) WHERE active = true`,
+  `CREATE OR REPLACE FUNCTION ogc_preserve_public_search_authority()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'Public-search authority evidence is immutable.'; END IF;
+     IF (to_jsonb(NEW) - 'active') IS DISTINCT FROM (to_jsonb(OLD) - 'active') THEN
+       RAISE EXCEPTION 'Public-search authority evidence is immutable; only atomic activation may change.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS public_search_surface_authorities_immutability_trigger ON public_search_surface_authorities`,
+  `CREATE TRIGGER public_search_surface_authorities_immutability_trigger
+   BEFORE UPDATE OR DELETE ON public_search_surface_authorities
+   FOR EACH ROW EXECUTE FUNCTION ogc_preserve_public_search_authority()`,
+  `CREATE OR REPLACE FUNCTION ogc_preserve_market_snapshot_identity()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'Market snapshot identities cannot be deleted.'; END IF;
+     IF (NEW.id, NEW.cache_identity, NEW.normalized_question, NEW.question_hash, NEW.locale, NEW.region,
+         NEW.surface_authority_version, NEW.surface_id, NEW.surface_version, NEW.fanout_version,
+         NEW.completion_version, NEW.created_at)
+        IS DISTINCT FROM
+        (OLD.id, OLD.cache_identity, OLD.normalized_question, OLD.question_hash, OLD.locale, OLD.region,
+         OLD.surface_authority_version, OLD.surface_id, OLD.surface_version, OLD.fanout_version,
+         OLD.completion_version, OLD.created_at) THEN
+       RAISE EXCEPTION 'Market snapshot identity fields are immutable.';
+     END IF;
+     IF OLD.status <> 'refreshing' AND NEW IS DISTINCT FROM OLD THEN
+       RAISE EXCEPTION 'A terminal market snapshot is immutable.';
+     END IF;
+     IF NEW.status NOT IN ('refreshing','completed','failed') OR
+        (NEW.status = 'refreshing' AND (NEW.query_fanout_hash IS DISTINCT FROM OLD.query_fanout_hash OR NEW.completed_at IS DISTINCT FROM OLD.completed_at)) THEN
+       RAISE EXCEPTION 'Only terminal snapshot state may change.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_snapshot_questions_immutability_trigger ON market_snapshot_questions`,
+  `CREATE TRIGGER market_snapshot_questions_immutability_trigger
+   BEFORE UPDATE OR DELETE ON market_snapshot_questions
+   FOR EACH ROW EXECUTE FUNCTION ogc_preserve_market_snapshot_identity()`,
+  `ALTER TABLE market_search_attempts DROP CONSTRAINT IF EXISTS market_search_attempts_timing_check`,
+  `ALTER TABLE market_search_attempts ADD CONSTRAINT market_search_attempts_timing_check CHECK (
+     (request_status = 'pending' AND completed_at IS NULL)
+     OR (request_status <> 'pending' AND completed_at IS NOT NULL)
+   )`,
+  `CREATE OR REPLACE FUNCTION ogc_preserve_market_attempt_identity()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'A market search attempt cannot be deleted.'; END IF;
+     IF (NEW.id, NEW.snapshot_id, NEW.query_id, NEW.authority_version, NEW.attempt_number,
+         NEW.idempotency_reference, NEW.started_at, NEW.created_at)
+        IS DISTINCT FROM
+        (OLD.id, OLD.snapshot_id, OLD.query_id, OLD.authority_version, OLD.attempt_number,
+         OLD.idempotency_reference, OLD.started_at, OLD.created_at) THEN
+       RAISE EXCEPTION 'A market search attempt cannot be reassigned.';
+     END IF;
+     IF OLD.request_status <> 'pending' AND NEW IS DISTINCT FROM OLD THEN
+       RAISE EXCEPTION 'A terminal market search attempt is immutable.';
+     END IF;
+     IF OLD.request_status = 'pending' AND NEW.request_status = 'pending' AND NEW IS DISTINCT FROM OLD THEN
+       RAISE EXCEPTION 'A pending market search attempt may only transition atomically to terminal.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_require_observation_terminal_attempt()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF NOT EXISTS (
+       SELECT 1 FROM market_search_attempts attempt
+       WHERE attempt.id = NEW.attempt_id AND attempt.snapshot_id = NEW.snapshot_id
+         AND attempt.query_id = NEW.query_id AND attempt.request_status IN ('succeeded','partial')
+     ) THEN RAISE EXCEPTION 'A search observation requires a succeeded or partial attempt.'; END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_search_observations_attempt_status_trigger ON market_search_observations`,
+  `CREATE TRIGGER market_search_observations_attempt_status_trigger
+   BEFORE INSERT ON market_search_observations
+   FOR EACH ROW EXECUTE FUNCTION ogc_require_observation_terminal_attempt()`,
+  `CREATE OR REPLACE FUNCTION ogc_require_source_observation_url()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF NOT EXISTS (
+       SELECT 1 FROM market_search_observations observation
+       WHERE observation.id = NEW.observation_id AND observation.snapshot_id = NEW.snapshot_id
+         AND observation.canonical_url = NEW.canonical_url
+     ) THEN RAISE EXCEPTION 'Source canonical URL must equal its observation canonical URL.'; END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_source_evidence_observation_url_trigger ON market_source_evidence`,
+  `CREATE TRIGGER market_source_evidence_observation_url_trigger
+   BEFORE INSERT ON market_source_evidence
+   FOR EACH ROW EXECUTE FUNCTION ogc_require_source_observation_url()`,
+  `ALTER TABLE report_market_snapshot_refs ADD COLUMN IF NOT EXISTS cache_identity text`,
+  `UPDATE report_market_snapshot_refs reference
+   SET cache_identity = snapshot.cache_identity
+   FROM market_snapshot_questions snapshot
+   WHERE reference.snapshot_id = snapshot.id AND reference.cache_identity IS NULL`,
+  `ALTER TABLE report_market_snapshot_refs ALTER COLUMN cache_identity SET NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_market_snapshot_refs_job_cache_uidx
+   ON report_market_snapshot_refs (job_id, cache_identity)`,
+  `DO $$ BEGIN
+     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'report_market_snapshot_refs_snapshot_cache_fkey') THEN
+       ALTER TABLE report_market_snapshot_refs ADD CONSTRAINT report_market_snapshot_refs_snapshot_cache_fkey
+         FOREIGN KEY (snapshot_id, cache_identity)
+         REFERENCES market_snapshot_questions(id, cache_identity) ON DELETE RESTRICT;
+     END IF;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_report_market_snapshot_ref()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_completed_at timestamptz;
+   BEGIN
+     IF NOT EXISTS (
+       SELECT 1 FROM scan_jobs job WHERE job.id = NEW.job_id AND job.report_id = NEW.report_id
+         AND job.product_contract = 'recommendation_forensics_v1'
+         AND job.fulfillment_methodology = 'public_search_source_forensics_v1'
+         AND job.recommendation_report_version = 2
+     ) THEN RAISE EXCEPTION 'Market snapshot references require a V2 public-search job.'; END IF;
+     SELECT completed_at INTO snapshot_completed_at FROM market_snapshot_questions
+       WHERE id = NEW.snapshot_id AND cache_identity = NEW.cache_identity AND status = 'completed';
+     IF snapshot_completed_at IS NULL THEN RAISE EXCEPTION 'Market snapshot references require a completed snapshot.'; END IF;
+     IF snapshot_completed_at > NEW.evidence_cutoff OR NEW.evidence_cutoff > now() THEN
+       RAISE EXCEPTION 'Market snapshot reference cutoff cannot precede the snapshot or be in the future.';
+     END IF;
+     IF NEW.freshness_state IS DISTINCT FROM (CASE
+       WHEN NEW.evidence_cutoff <= snapshot_completed_at + interval '7 days' THEN 'fresh'
+       WHEN NEW.evidence_cutoff <= snapshot_completed_at + interval '30 days' THEN 'historical'
+       ELSE 'insufficient' END) THEN
+       RAISE EXCEPTION 'Market snapshot freshness state does not match its evidence cutoff.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_market_snapshot_refs_validation_trigger ON report_market_snapshot_refs`,
+  `CREATE TRIGGER report_market_snapshot_refs_validation_trigger
+   BEFORE INSERT OR UPDATE ON report_market_snapshot_refs
+   FOR EACH ROW EXECUTE FUNCTION ogc_validate_report_market_snapshot_ref()`,
+  `CREATE OR REPLACE FUNCTION ogc_preserve_market_source_identity()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'Market source evidence cannot be deleted; expire retained content instead.'; END IF;
+     IF current_setting('ogc.market_source_expiry', true) IS DISTINCT FROM 'allowed' THEN
+       RAISE EXCEPTION 'Market source evidence is append-only; use ogc_expire_market_source_excerpt().';
+     END IF;
+     IF NOT (OLD.retrieval_state = 'available' AND NEW.retrieval_state = 'expired' AND NEW.excerpt IS NULL
+       AND (to_jsonb(NEW) - 'retrieval_state' - 'excerpt') = (to_jsonb(OLD) - 'retrieval_state' - 'excerpt')) THEN
+       RAISE EXCEPTION 'Market source evidence expiry may only remove retained excerpt text.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_expire_market_source_excerpt(expiry_now timestamptz)
+   RETURNS integer
+   LANGUAGE plpgsql
+   SECURITY DEFINER
+   SET search_path = public, pg_temp
+   AS $$
+   DECLARE affected integer;
+   BEGIN
+     PERFORM set_config('ogc.market_source_expiry', 'allowed', true);
+     UPDATE market_source_evidence
+       SET retrieval_state = 'expired', excerpt = NULL
+       WHERE retrieval_state = 'available' AND expires_at <= expiry_now;
+     GET DIAGNOSTICS affected = ROW_COUNT;
+     RETURN affected;
+   END $$`
+] as const;
+
+export const V12_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_public_jsonb_metadata_valid_node(document jsonb, depth integer)
+   RETURNS boolean
+   LANGUAGE plpgsql
+   IMMUTABLE
+   STRICT
+   AS $$
+   DECLARE
+     item record;
+     normalized_key text;
+     scalar_value text;
+   BEGIN
+     IF depth > 4 OR octet_length(document::text) > 8192 THEN RETURN false; END IF;
+     CASE jsonb_typeof(document)
+       WHEN 'object' THEN
+         FOR item IN SELECT entry.key, entry.value AS child FROM jsonb_each(document) AS entry LOOP
+           normalized_key := regexp_replace(lower(item.key), '[^a-z0-9]', '', 'g');
+           IF length(item.key) > 64 OR normalized_key <> ALL (ARRAY[
+             'id','name','canonicalname','type','category','kind','status','code','version',
+             'claim','claims','text','quote','title','snippet','field','value','values','items',
+             'sourceid','observationid','entityid','confidence','reason','details','relationship',
+             'from','to','subject','predicate','object','polarity','domain','registrabledomain',
+             'language','locale','region','mimetype','publishedat','updatedat','retrievedat','rank',
+             'resulttype','sourcekind','inputtokens','outputtokens','totaltokens','searchrequests',
+             'currency','costmicros','billedunits','requestunits','cachehits','billing','unit','count',
+             'requestcount','resultcount','estimatedcostmicros','providerreportedcostmicros','costuncertain'
+           ]) THEN RETURN false; END IF;
+           IF NOT ogc_public_jsonb_metadata_valid_node(item.child, depth + 1) THEN RETURN false; END IF;
+         END LOOP;
+       WHEN 'array' THEN
+         FOR item IN SELECT entry.value AS child FROM jsonb_array_elements(document) AS entry LOOP
+           IF NOT ogc_public_jsonb_metadata_valid_node(item.child, depth + 1) THEN RETURN false; END IF;
+         END LOOP;
+       WHEN 'string' THEN
+         scalar_value := btrim(document #>> '{}');
+         IF length(scalar_value) > 2048 THEN RETURN false; END IF;
+         IF scalar_value ~* '[[:alnum:]._%+-]+@[[:alnum:].-]+[.][[:alpha:]]{2,}'
+           OR scalar_value ~* '(^|[^[:alnum:]])(report|job|order|customer)[ _-]*(id|identity|identifier)([^[:alnum:]]|$)'
+           OR scalar_value ~* '^(report|job|order|customer)[_-][[:alnum:]-]{4,}$'
+           OR scalar_value ~* '(^|[^[:alnum:]])authorization([^[:alnum:]]|$)|(^|[^[:alnum:]])bearer[[:space:]]+|api[ _-]*key|access[ _-]*token|(^|[^[:alnum:]])token[ _-]*(id|identifier)([^[:alnum:]]|$)|^token[_-][[:alnum:]-]{3,}$|(^|[^[:alnum:]])secret([^[:alnum:]]|$)'
+           OR scalar_value ~* 'submitted[ _-]*url|client[ _-]*ip'
+           OR scalar_value ~ '^[0-9]{1,3}([.][0-9]{1,3}){3}$'
+           OR (scalar_value ~* '^[[:xdigit:]:]+$' AND scalar_value ~ ':.*:')
+         THEN RETURN false; END IF;
+       WHEN 'number', 'boolean', 'null' THEN NULL;
+       ELSE RETURN false;
+     END CASE;
+     RETURN true;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_require_completed_market_snapshot_ledger()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   AS $$
+   BEGIN
+     IF NEW.status = 'completed' THEN
+       IF EXISTS (
+         SELECT 1 FROM market_search_attempts attempt
+         WHERE attempt.snapshot_id = NEW.id AND attempt.request_status = 'pending'
+       ) THEN
+         RAISE EXCEPTION 'A completed market snapshot cannot retain pending attempts.';
+       END IF;
+       IF EXISTS (
+         SELECT 1 FROM market_snapshot_queries query
+         WHERE query.snapshot_id = NEW.id
+           AND NOT EXISTS (
+             SELECT 1 FROM market_search_attempts attempt
+             WHERE attempt.snapshot_id = NEW.id AND attempt.query_id = query.id
+               AND attempt.request_status <> 'pending'
+           )
+       ) THEN
+         RAISE EXCEPTION 'Every market snapshot query requires a terminal attempt before completion.';
+       END IF;
+       IF NOT EXISTS (
+         SELECT 1 FROM market_search_attempts attempt
+         WHERE attempt.snapshot_id = NEW.id AND attempt.request_status IN ('succeeded','partial')
+       ) THEN
+         RAISE EXCEPTION 'A completed market snapshot requires at least one successful or partial attempt.';
+       END IF;
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_preserve_market_source_identity()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP = 'DELETE' THEN
+       RAISE EXCEPTION 'Market source evidence cannot be deleted; expire retained content instead.';
+     END IF;
+     IF OLD.expires_at > clock_timestamp() THEN
+       RAISE EXCEPTION 'Market source evidence cannot expire before its database retention deadline.';
+     END IF;
+     IF NOT (OLD.retrieval_state = 'available' AND NEW.retrieval_state = 'expired' AND NEW.excerpt IS NULL
+       AND (to_jsonb(NEW) - 'retrieval_state' - 'excerpt') = (to_jsonb(OLD) - 'retrieval_state' - 'excerpt')) THEN
+       RAISE EXCEPTION 'Market source evidence expiry may only remove retained excerpt text.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_expire_market_source_excerpt(expiry_now timestamptz)
+   RETURNS integer
+   LANGUAGE plpgsql
+   SECURITY DEFINER
+   SET search_path = public, pg_temp
+   AS $$
+   DECLARE
+     affected integer;
+     database_now timestamptz := clock_timestamp();
+   BEGIN
+     IF expiry_now > database_now THEN
+       RAISE EXCEPTION 'Market source expiry cutoff cannot be in the future.';
+     END IF;
+     UPDATE market_source_evidence
+       SET retrieval_state = 'expired', excerpt = NULL
+       WHERE retrieval_state = 'available'
+         AND expires_at <= expiry_now
+         AND expires_at <= database_now;
+     GET DIAGNOSTICS affected = ROW_COUNT;
+     RETURN affected;
+   END $$`,
+  `REVOKE ALL ON FUNCTION ogc_expire_market_source_excerpt(timestamptz) FROM PUBLIC`,
+  `GRANT EXECUTE ON FUNCTION ogc_expire_market_source_excerpt(timestamptz) TO CURRENT_USER`
+] as const;
+
+export const V13_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS ogc_market_source_expiry_context (
+     backend_pid integer NOT NULL,
+     transaction_id bigint NOT NULL,
+     nonce uuid NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+     PRIMARY KEY (backend_pid, transaction_id, nonce)
+   )`,
+  `REVOKE ALL ON TABLE ogc_market_source_expiry_context FROM PUBLIC`,
+  `CREATE OR REPLACE FUNCTION ogc_preserve_market_source_identity()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path = public, pg_temp
+   AS $$
+   DECLARE
+     expiry_nonce text := current_setting('ogc.market_source_expiry_nonce', true);
+   BEGIN
+     IF TG_OP = 'DELETE' THEN
+       RAISE EXCEPTION 'Market source evidence cannot be deleted; expire retained content instead.';
+     END IF;
+     IF expiry_nonce IS NULL OR expiry_nonce = '' OR NOT EXISTS (
+       SELECT 1
+       FROM public.ogc_market_source_expiry_context context
+       WHERE context.backend_pid = pg_backend_pid()
+         AND context.transaction_id = txid_current()
+         AND context.nonce::text = expiry_nonce
+     ) THEN
+       RAISE EXCEPTION 'Market source evidence is append-only; use ogc_expire_market_source_excerpt().';
+     END IF;
+     IF OLD.expires_at > clock_timestamp() THEN
+       RAISE EXCEPTION 'Market source evidence cannot expire before its database retention deadline.';
+     END IF;
+     IF NOT (
+       OLD.retrieval_state = 'available'
+       AND NEW.retrieval_state = 'expired'
+       AND NEW.excerpt IS NULL
+       AND (to_jsonb(NEW) - 'retrieval_state' - 'excerpt') =
+           (to_jsonb(OLD) - 'retrieval_state' - 'excerpt')
+     ) THEN
+       RAISE EXCEPTION 'Market source evidence expiry may only remove retained excerpt text.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `REVOKE ALL ON FUNCTION ogc_preserve_market_source_identity() FROM PUBLIC`,
+  `CREATE OR REPLACE FUNCTION ogc_expire_market_source_excerpt(expiry_now timestamptz)
+   RETURNS integer
+   LANGUAGE plpgsql
+   SECURITY DEFINER
+   SET search_path = public, pg_temp
+   AS $$
+   DECLARE
+     affected integer;
+     database_now timestamptz := clock_timestamp();
+     expiry_nonce uuid := gen_random_uuid();
+     current_transaction_id bigint := txid_current();
+   BEGIN
+     IF expiry_now > database_now THEN
+       RAISE EXCEPTION 'Market source expiry cutoff cannot be in the future.';
+     END IF;
+
+     INSERT INTO public.ogc_market_source_expiry_context (backend_pid, transaction_id, nonce)
+     VALUES (pg_backend_pid(), current_transaction_id, expiry_nonce);
+     PERFORM set_config('ogc.market_source_expiry_nonce', expiry_nonce::text, true);
+
+     UPDATE public.market_source_evidence
+       SET retrieval_state = 'expired', excerpt = NULL
+       WHERE retrieval_state = 'available'
+         AND expires_at <= expiry_now
+         AND expires_at <= database_now;
+     GET DIAGNOSTICS affected = ROW_COUNT;
+
+     DELETE FROM public.ogc_market_source_expiry_context
+       WHERE backend_pid = pg_backend_pid()
+         AND transaction_id = current_transaction_id
+         AND nonce = expiry_nonce;
+     PERFORM set_config('ogc.market_source_expiry_nonce', '', true);
+     RETURN affected;
+   EXCEPTION WHEN OTHERS THEN
+     DELETE FROM public.ogc_market_source_expiry_context
+       WHERE backend_pid = pg_backend_pid()
+         AND transaction_id = current_transaction_id
+         AND nonce = expiry_nonce;
+     PERFORM set_config('ogc.market_source_expiry_nonce', '', true);
+     RAISE;
+   END $$`,
+  `REVOKE ALL ON FUNCTION ogc_expire_market_source_excerpt(timestamptz) FROM PUBLIC`,
+  `GRANT EXECUTE ON FUNCTION ogc_expire_market_source_excerpt(timestamptz) TO CURRENT_USER`
+] as const;
+
 export const DATABASE_MIGRATIONS = [
   ...V9_DATABASE_MIGRATIONS,
-  ...V10_DATABASE_MIGRATIONS
+  ...V10_DATABASE_MIGRATIONS,
+  ...V11_DATABASE_MIGRATIONS,
+  ...V12_DATABASE_MIGRATIONS,
+  ...V13_DATABASE_MIGRATIONS
 ] as const;

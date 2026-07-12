@@ -57,8 +57,8 @@ describe("database deployment marker", () => {
 });
 
 describe("database schema marker", () => {
-  it("uses public-search methodology schema version 10", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(10);
+  it("uses hardened public-search methodology schema version 13", () => {
+    expect(DATABASE_SCHEMA_VERSION).toBe(13);
   });
 
   it("contains the complete additive V2 authority and methodology migration", () => {
@@ -80,6 +80,15 @@ describe("database schema marker", () => {
     ]) {
       expect(sql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
     }
+    expect(sql).toContain("ogc_expire_market_source_excerpt");
+    expect(sql).toContain("report_market_snapshot_refs_snapshot_cache_fkey");
+    expect(sql).toContain("public_search_surface_authorities_one_active_uidx");
+    expect(sql).toContain("cannot retain pending attempts");
+    expect(sql).toContain("retention deadline");
+    expect(sql).toContain("REVOKE ALL ON FUNCTION ogc_expire_market_source_excerpt");
+    expect(sql).toContain("ogc_market_source_expiry_context");
+    expect(sql).toContain("ogc.market_source_expiry_nonce");
+    expect(sql).toContain("context.transaction_id = txid_current()");
   });
 
   it("backfills legacy scopes and replaces ambiguous AI report uniqueness", () => {

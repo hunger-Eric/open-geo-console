@@ -444,6 +444,9 @@ export const publicSearchSurfaceAuthorities = pgTable(
     uniqueIndex("public_search_surface_authorities_scope_uidx").on(
       table.authorityVersion, table.surfaceId, table.surfaceVersion
     ),
+    uniqueIndex("public_search_surface_authorities_one_active_uidx")
+      .on(table.environment, table.surfaceId)
+      .where(sql`${table.active} = true`),
     check("public_search_surface_authorities_version_check", sql`length(btrim(${table.authorityVersion})) > 0`),
     check("public_search_surface_authorities_surface_check", sql`length(btrim(${table.surfaceId})) > 0 AND length(btrim(${table.surfaceVersion})) > 0`),
     check("public_search_surface_authorities_environment_check", sql`${table.environment} IN ('staging','production')`),
@@ -560,6 +563,10 @@ export const marketSearchAttempts = pgTable(
     check("market_search_attempts_number_check", sql`${table.attemptNumber} > 0`),
     check("market_search_attempts_status_check", sql`${table.requestStatus} IN ('pending','succeeded','partial','timeout','rate_limited','unavailable','malformed','aborted')`),
     check("market_search_attempts_cost_check", sql`${table.configuredCostMicros} >= 0 AND (${table.providerCostMicros} IS NULL OR ${table.providerCostMicros} >= 0)`),
+    check("market_search_attempts_timing_check", sql`(
+      (${table.requestStatus} = 'pending' AND ${table.completedAt} IS NULL)
+      OR (${table.requestStatus} <> 'pending' AND ${table.completedAt} IS NOT NULL)
+    )`),
     check("market_search_attempts_usage_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.usage})`)
   ]
 );
@@ -684,6 +691,7 @@ export const reportMarketSnapshotRefs = pgTable(
     reportId: text("report_id").notNull(),
     jobId: text("job_id").notNull(),
     snapshotId: text("snapshot_id").notNull().references(() => marketSnapshotQuestions.id, { onDelete: "restrict" }),
+    cacheIdentity: text("cache_identity").notNull(),
     evidenceCutoff: timestamp("evidence_cutoff", { withTimezone: true }).notNull(),
     freshnessState: text("freshness_state").notNull(),
     actualCostMicros: integer("actual_cost_micros").notNull().default(0),
@@ -698,7 +706,13 @@ export const reportMarketSnapshotRefs = pgTable(
       foreignColumns: [scanJobs.id, scanJobs.reportId],
       name: "report_market_snapshot_refs_job_report_fkey"
     }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.snapshotId, table.cacheIdentity],
+      foreignColumns: [marketSnapshotQuestions.id, marketSnapshotQuestions.cacheIdentity],
+      name: "report_market_snapshot_refs_snapshot_cache_fkey"
+    }).onDelete("restrict"),
     uniqueIndex("report_market_snapshot_refs_job_snapshot_uidx").on(table.jobId, table.snapshotId),
+    uniqueIndex("report_market_snapshot_refs_job_cache_uidx").on(table.jobId, table.cacheIdentity),
     index("report_market_snapshot_refs_report_idx").on(table.reportId, table.createdAt),
     check("report_market_snapshot_refs_freshness_check", sql`${table.freshnessState} IN ('fresh','historical','insufficient')`),
     check("report_market_snapshot_refs_cost_check", sql`${table.actualCostMicros} >= 0 AND ${table.allocatedCostMicros} >= 0 AND ${table.avoidedCostMicros} >= 0`)

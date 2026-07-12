@@ -6,9 +6,17 @@ import type {
   AnswerSnapshotRunRow,
   AnswerSnapshotSourceRow,
   CitationSourceEvidenceRow,
+  MarketSearchAttemptRow,
+  MarketSearchObservationRow,
+  MarketSnapshotLeaseRow,
+  MarketSnapshotQueryRow,
+  MarketSnapshotQuestionRow,
+  MarketSourceEvidenceRow,
+  PublicSearchSurfaceAuthorityRow,
   RecommendationCertificationAuthorityRow,
   RecommendationForensicReportRow,
   ReportBotEvidenceRow,
+  ReportMarketSnapshotRefRow,
   ScanJobRow,
   ScanReportRow,
   SourceClassificationAuthorityRow
@@ -25,6 +33,14 @@ interface MemoryStore {
   recommendationCertificationAuthorities: Map<string, RecommendationCertificationAuthorityRow>;
   sourceClassificationAuthorities: Map<string, SourceClassificationAuthorityRow>;
   recommendationForensicReports: Map<string, RecommendationForensicReportRow>;
+  publicSearchSurfaceAuthorities: Map<string, PublicSearchSurfaceAuthorityRow>;
+  marketSnapshotQuestions: Map<string, MarketSnapshotQuestionRow>;
+  marketSnapshotQueries: Map<string, MarketSnapshotQueryRow>;
+  marketSearchAttempts: Map<string, MarketSearchAttemptRow>;
+  marketSearchObservations: Map<string, MarketSearchObservationRow>;
+  marketSourceEvidence: Map<string, MarketSourceEvidenceRow>;
+  marketSnapshotLeases: Map<string, MarketSnapshotLeaseRow>;
+  reportMarketSnapshotRefs: Map<string, ReportMarketSnapshotRefRow>;
   scanJobs: Map<string, ScanJobRow>;
 }
 
@@ -45,6 +61,14 @@ function currentStore(): MemoryStore {
       recommendationCertificationAuthorities: new Map(),
       sourceClassificationAuthorities: new Map(),
       recommendationForensicReports: new Map(),
+      publicSearchSurfaceAuthorities: new Map(),
+      marketSnapshotQuestions: new Map(),
+      marketSnapshotQueries: new Map(),
+      marketSearchAttempts: new Map(),
+      marketSearchObservations: new Map(),
+      marketSourceEvidence: new Map(),
+      marketSnapshotLeases: new Map(),
+      reportMarketSnapshotRefs: new Map(),
       scanJobs: new Map()
     };
     stores.set(key, store);
@@ -71,6 +95,9 @@ export function memoryDeleteReport(id: string): boolean {
   }
   for (const job of store.scanJobs.values()) {
     if (job.reportId === id) store.scanJobs.delete(job.id);
+  }
+  for (const reference of store.reportMarketSnapshotRefs.values()) {
+    if (reference.reportId === id) store.reportMarketSnapshotRefs.delete(reference.id);
   }
   return store.reports.delete(id);
 }
@@ -175,6 +202,86 @@ export function memorySaveAnswerExecutionCheckpoint(row: AnswerExecutionCheckpoi
 
 export function memorySaveRecommendationCertificationAuthority(row: RecommendationCertificationAuthorityRow): RecommendationCertificationAuthorityRow {
   currentStore().recommendationCertificationAuthorities.set(row.authorityVersion, row);
+  return row;
+}
+
+export function memoryListPublicSearchSurfaceAuthorities(): PublicSearchSurfaceAuthorityRow[] {
+  return [...currentStore().publicSearchSurfaceAuthorities.values()];
+}
+
+export function memorySavePublicSearchSurfaceAuthority(row: PublicSearchSurfaceAuthorityRow): PublicSearchSurfaceAuthorityRow {
+  currentStore().publicSearchSurfaceAuthorities.set(row.authorityVersion, row);
+  return row;
+}
+
+export function memoryGetMarketSnapshotQuestion(id: string): MarketSnapshotQuestionRow | null {
+  return currentStore().marketSnapshotQuestions.get(id) ?? null;
+}
+
+export function memoryListMarketSnapshotQuestions(): MarketSnapshotQuestionRow[] {
+  return [...currentStore().marketSnapshotQuestions.values()];
+}
+
+export function memorySaveMarketSnapshotQuestion(row: MarketSnapshotQuestionRow): MarketSnapshotQuestionRow {
+  currentStore().marketSnapshotQuestions.set(row.id, row);
+  return row;
+}
+
+export function memoryListMarketSnapshotQueries(snapshotId?: string): MarketSnapshotQueryRow[] {
+  return [...currentStore().marketSnapshotQueries.values()].filter((row) => !snapshotId || row.snapshotId === snapshotId);
+}
+
+export function memorySaveMarketSnapshotQuery(row: MarketSnapshotQueryRow): MarketSnapshotQueryRow {
+  currentStore().marketSnapshotQueries.set(row.id, row);
+  return row;
+}
+
+export function memoryListMarketSearchAttempts(snapshotId?: string): MarketSearchAttemptRow[] {
+  return [...currentStore().marketSearchAttempts.values()].filter((row) => !snapshotId || row.snapshotId === snapshotId);
+}
+
+export function memoryGetMarketSearchAttempt(id: string): MarketSearchAttemptRow | null {
+  return currentStore().marketSearchAttempts.get(id) ?? null;
+}
+
+export function memorySaveMarketSearchAttempt(row: MarketSearchAttemptRow): MarketSearchAttemptRow {
+  currentStore().marketSearchAttempts.set(row.id, row);
+  return row;
+}
+
+export function memoryListMarketSearchObservations(snapshotId?: string): MarketSearchObservationRow[] {
+  return [...currentStore().marketSearchObservations.values()].filter((row) => !snapshotId || row.snapshotId === snapshotId);
+}
+
+export function memorySaveMarketSearchObservation(row: MarketSearchObservationRow): MarketSearchObservationRow {
+  currentStore().marketSearchObservations.set(row.id, row);
+  return row;
+}
+
+export function memoryListMarketSourceEvidence(snapshotId?: string): MarketSourceEvidenceRow[] {
+  return [...currentStore().marketSourceEvidence.values()].filter((row) => !snapshotId || row.snapshotId === snapshotId);
+}
+
+export function memorySaveMarketSourceEvidence(row: MarketSourceEvidenceRow): MarketSourceEvidenceRow {
+  currentStore().marketSourceEvidence.set(row.id, row);
+  return row;
+}
+
+export function memoryGetMarketSnapshotLease(cacheIdentity: string): MarketSnapshotLeaseRow | null {
+  return currentStore().marketSnapshotLeases.get(cacheIdentity) ?? null;
+}
+
+export function memorySaveMarketSnapshotLease(row: MarketSnapshotLeaseRow): MarketSnapshotLeaseRow {
+  currentStore().marketSnapshotLeases.set(row.cacheIdentity, row);
+  return row;
+}
+
+export function memoryListReportMarketSnapshotRefs(reportId?: string): ReportMarketSnapshotRefRow[] {
+  return [...currentStore().reportMarketSnapshotRefs.values()].filter((row) => !reportId || row.reportId === reportId);
+}
+
+export function memorySaveReportMarketSnapshotRef(row: ReportMarketSnapshotRefRow): ReportMarketSnapshotRefRow {
+  currentStore().reportMarketSnapshotRefs.set(row.id, row);
   return row;
 }
 

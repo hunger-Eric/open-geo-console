@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
-import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V10_DATABASE_MIGRATIONS } from "./migrations";
+import { V10_DATABASE_MIGRATIONS, V9_DATABASE_MIGRATIONS } from "./migrations";
+
+const V10_SCHEMA_VERSION = 10;
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const describeDisposablePostgres = adminUrl ? describe : describe.skip;
@@ -33,8 +34,7 @@ describeDisposablePostgres("schema v10 disposable PostgreSQL migration", () => {
     const upgrade = postgres(withDatabase(adminUrl!, upgradeName), { max: 1, prepare: false });
     const bootstrap = postgres(withDatabase(adminUrl!, bootstrapName), { max: 1, prepare: false });
     try {
-      const v9 = DATABASE_MIGRATIONS.slice(0, -V10_DATABASE_MIGRATIONS.length);
-      await executeStatements(upgrade, v9);
+      await executeStatements(upgrade, V9_DATABASE_MIGRATIONS);
       await upgrade`CREATE TABLE ogc_schema_state (
         singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton = true),
         version integer NOT NULL CHECK (version > 0),
@@ -56,15 +56,15 @@ describeDisposablePostgres("schema v10 disposable PostgreSQL migration", () => {
           'encrypted','email-hmac','v1','recommendation_forensics_v1','v1','v1','v1','en','USD',2900)`;
 
       await executeStatements(upgrade, V10_DATABASE_MIGRATIONS);
-      await upgrade`UPDATE ogc_schema_state SET version=${DATABASE_SCHEMA_VERSION}, updated_at=now() WHERE singleton=true`;
+      await upgrade`UPDATE ogc_schema_state SET version=${V10_SCHEMA_VERSION}, updated_at=now() WHERE singleton=true`;
 
-      await executeStatements(bootstrap, DATABASE_MIGRATIONS);
+      await executeStatements(bootstrap, [...V9_DATABASE_MIGRATIONS, ...V10_DATABASE_MIGRATIONS]);
       await bootstrap`CREATE TABLE ogc_schema_state (
         singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton = true),
         version integer NOT NULL CHECK (version > 0),
         updated_at timestamptz NOT NULL DEFAULT now()
       )`;
-      await bootstrap`INSERT INTO ogc_schema_state (singleton, version) VALUES (true, ${DATABASE_SCHEMA_VERSION})`;
+      await bootstrap`INSERT INTO ogc_schema_state (singleton, version) VALUES (true, ${V10_SCHEMA_VERSION})`;
 
       const migrated = await upgrade<Array<{ fulfillment_methodology: string; recommendation_report_version: number }>>`
         SELECT fulfillment_methodology,recommendation_report_version FROM scan_jobs WHERE id=${jobId}`;
@@ -85,8 +85,7 @@ describeDisposablePostgres("schema v10 disposable PostgreSQL migration", () => {
     await admin.unsafe(`CREATE DATABASE ${quoteIdentifier(failureName)}`);
     const sql = postgres(withDatabase(adminUrl!, failureName), { max: 1, prepare: false });
     try {
-      const v9 = DATABASE_MIGRATIONS.slice(0, -V10_DATABASE_MIGRATIONS.length);
-      await executeStatements(sql, v9);
+      await executeStatements(sql, V9_DATABASE_MIGRATIONS);
       await sql`CREATE TABLE ogc_schema_state (
         singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton = true),
         version integer NOT NULL CHECK (version > 0),
@@ -101,13 +100,13 @@ describeDisposablePostgres("schema v10 disposable PostgreSQL migration", () => {
           }
           await tx.unsafe(statement);
         }
-        await tx`UPDATE ogc_schema_state SET version=${DATABASE_SCHEMA_VERSION} WHERE singleton=true`;
+        await tx`UPDATE ogc_schema_state SET version=${V10_SCHEMA_VERSION} WHERE singleton=true`;
       })).rejects.toThrow();
       expect((await sql<Array<{ version: number }>>`SELECT version FROM ogc_schema_state WHERE singleton=true`)[0]?.version).toBe(9);
 
       await sql.begin(async (tx) => {
         for (const statement of V10_DATABASE_MIGRATIONS) await tx.unsafe(statement);
-        await tx`UPDATE ogc_schema_state SET version=${DATABASE_SCHEMA_VERSION} WHERE singleton=true`;
+        await tx`UPDATE ogc_schema_state SET version=${V10_SCHEMA_VERSION} WHERE singleton=true`;
       });
       expect((await sql<Array<{ version: number }>>`SELECT version FROM ogc_schema_state WHERE singleton=true`)[0]?.version).toBe(10);
     } finally {

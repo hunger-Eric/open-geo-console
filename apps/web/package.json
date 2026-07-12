@@ -37,7 +37,7 @@
     "db:environment:init": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts init",
     "db:environment:inspect": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts inspect",
     "staging:free:cleanup": "node --env-file=.env.staging.local --import tsx src/scripts/staging-free-cleanup.ts",
-    "test:postgres:staging-security": "node --env-file=.env.staging.local ../../node_modules/vitest/vitest.mjs run --no-file-parallelism --root ../.. apps/web/src/db/staging-security.postgres.test.ts apps/web/src/db/schema-v10.postgres.test.ts apps/web/src/db/recommendation-forensics.postgres.test.ts apps/web/src/db/recommendation-commerce.postgres.test.ts apps/web/src/db/artifact-scope.postgres.test.ts",
+    "test:postgres:staging-security": "node --env-file=.env.staging.local ../../node_modules/vitest/vitest.mjs run --no-file-parallelism --root ../.. apps/web/src/db/staging-security.postgres.test.ts apps/web/src/db/schema-v10.postgres.test.ts apps/web/src/db/schema-v11.postgres.test.ts apps/web/src/db/schema-v12.postgres.test.ts apps/web/src/db/schema-v13.postgres.test.ts apps/web/src/db/market-snapshots.postgres.test.ts apps/web/src/db/recommendation-forensics.postgres.test.ts apps/web/src/db/recommendation-commerce.postgres.test.ts apps/web/src/db/artifact-scope.postgres.test.ts",
     "db:migrate:sqlite": "node --env-file-if-exists=.env.local --import tsx src/scripts/migrate-sqlite.ts"
   },
   "dependencies": {
@@ -50,6 +50,7 @@
     "@open-geo-console/crawler-rules": "*",
     "@open-geo-console/geo-auditor": "*",
     "@open-geo-console/log-parser": "*",
+    "@open-geo-console/public-search-observer": "*",
     "@open-geo-console/site-crawler": "*",
     "@sparticuz/chromium": "^149.0.0",
     "@vercel/blob": "^2.6.1",
