@@ -25,7 +25,7 @@ Customer promise: a paid report is delivered by email within 24 hours of confirm
 | Cloudflare Turnstile | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `TURNSTILE_EXPECTED_HOSTNAME` |
 | Cloudflare Queue | `CLOUDFLARE_ACCOUNT_ID`, Queue names, Queue API token |
 | Airwallex | `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY`, `AIRWALLEX_WEBHOOK_SECRET` |
-| Resend | `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `RESEND_WEBHOOK_SECRET` |
+| Resend | `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `RESEND_WEBHOOK_SECRET`, `OGC_REPLY_TO_EMAIL` |
 
 Use distinct random values for every secret family. The email-encryption secret must remain available for as long as its key version is used by retained orders.
 

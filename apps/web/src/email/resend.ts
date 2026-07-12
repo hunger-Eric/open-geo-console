@@ -1,4 +1,5 @@
 import type { EmailGateway, SendEmailInput, SendEmailResult } from "./gateway";
+import { isMailbox, readResendConfiguration, required } from "./config";
 import { renderTransactionalEmail } from "./templates";
 import { getCommerceMode } from "@/commerce/config";
 
@@ -27,16 +28,18 @@ export class ResendEmailGateway implements EmailGateway {
     if (!input.idempotencyKey || input.idempotencyKey.length > 256) throw new Error("A valid permanent email idempotency key is required.");
     const rendered = renderTransactionalEmail(input);
     const recipient = resolveEnvelopeRecipient(input.to, this.environment);
+    const configuration = readResendConfiguration(this.environment);
     const response = await this.fetchImpl("https://api.resend.com/emails", {
       method: "POST",
       headers: {
-        authorization: `Bearer ${required(this.environment, "RESEND_API_KEY")}`,
+        authorization: `Bearer ${configuration.apiKey}`,
         "content-type": "application/json",
         "idempotency-key": input.idempotencyKey
       },
       body: JSON.stringify({
-        from: required(this.environment, "RESEND_FROM_EMAIL"),
+        from: configuration.from,
         to: [recipient],
+        reply_to: configuration.replyTo,
         subject: rendered.subject,
         html: rendered.html,
         text: rendered.text
@@ -53,14 +56,8 @@ export function resolveEnvelopeRecipient(requestedRecipient: string, environment
   if (environment.OGC_DEPLOYMENT_PROFILE?.trim() === "production") return requestedRecipient;
   if (getCommerceMode(environment) !== "test") return requestedRecipient;
   const testRecipient = required(environment, "OGC_TEST_EMAIL_RECIPIENT");
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testRecipient)) {
+  if (!isMailbox(testRecipient)) {
     throw new Error("OGC_TEST_EMAIL_RECIPIENT must be a valid single email address.");
   }
   return testRecipient;
-}
-
-function required(environment: NodeJS.ProcessEnv, name: string): string {
-  const value = environment[name]?.trim();
-  if (!value) throw new Error(`${name} is required.`);
-  return value;
 }

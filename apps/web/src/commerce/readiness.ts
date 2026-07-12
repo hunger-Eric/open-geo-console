@@ -2,6 +2,7 @@ import { getFulfillmentMode, getCommerceMode } from "./config";
 import { getLastSuccessfulBatchRun, hasHealthyWorkerPresence } from "@/db/commercial-operations";
 import { findOverduePaidOrders } from "@/db/commercial-refunds";
 import { ensureDatabase, getSqlClient } from "@/db/index";
+import { isMailbox } from "@/email/config";
 
 export interface CommerceReadiness {
   ready: boolean;
@@ -11,7 +12,11 @@ export interface CommerceReadiness {
 export async function getCommerceReadiness(environment: NodeJS.ProcessEnv = process.env): Promise<CommerceReadiness> {
   const mode = getCommerceMode(environment);
   if (mode === "disabled") return { ready: false, code: "disabled" };
-  if (mode === "test") return { ready: true, code: "ready" };
+  if (mode === "test") {
+    return isMailbox(environment.OGC_REPLY_TO_EMAIL)
+      ? { ready: true, code: "ready" }
+      : { ready: false, code: "configuration" };
+  }
   if (!hasLiveConfiguration(environment)) return { ready: false, code: "configuration" };
   try {
     await ensureDatabase();
@@ -52,6 +57,6 @@ function hasLiveConfiguration(environment: NodeJS.ProcessEnv): boolean {
     "OGC_PAYMENT_IDEMPOTENCY_SECRET", "OGC_EMAIL_ENCRYPTION_SECRET", "OGC_EMAIL_LOOKUP_SECRET",
     "TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY", "TURNSTILE_EXPECTED_HOSTNAME",
     "AIRWALLEX_CLIENT_ID", "AIRWALLEX_API_KEY", "AIRWALLEX_WEBHOOK_SECRET",
-    "RESEND_API_KEY", "RESEND_FROM_EMAIL", "RESEND_WEBHOOK_SECRET"
-  ].every((name) => Boolean(environment[name]?.trim()));
+    "RESEND_API_KEY", "RESEND_FROM_EMAIL", "RESEND_WEBHOOK_SECRET", "OGC_REPLY_TO_EMAIL"
+  ].every((name) => Boolean(environment[name]?.trim())) && isMailbox(environment.OGC_REPLY_TO_EMAIL);
 }
