@@ -15,6 +15,7 @@ import type {
   PublicSearchSurfaceAuthorityRow,
   RecommendationCertificationAuthorityRow,
   RecommendationForensicReportRow,
+  ReportSourceForensicsRow,
   ReportBotEvidenceRow,
   ReportMarketSnapshotRefRow,
   ScanJobRow,
@@ -33,6 +34,7 @@ interface MemoryStore {
   recommendationCertificationAuthorities: Map<string, RecommendationCertificationAuthorityRow>;
   sourceClassificationAuthorities: Map<string, SourceClassificationAuthorityRow>;
   recommendationForensicReports: Map<string, RecommendationForensicReportRow>;
+  reportSourceForensics: Map<string, ReportSourceForensicsRow>;
   publicSearchSurfaceAuthorities: Map<string, PublicSearchSurfaceAuthorityRow>;
   marketSnapshotQuestions: Map<string, MarketSnapshotQuestionRow>;
   marketSnapshotQueries: Map<string, MarketSnapshotQueryRow>;
@@ -61,6 +63,7 @@ function currentStore(): MemoryStore {
       recommendationCertificationAuthorities: new Map(),
       sourceClassificationAuthorities: new Map(),
       recommendationForensicReports: new Map(),
+      reportSourceForensics: new Map(),
       publicSearchSurfaceAuthorities: new Map(),
       marketSnapshotQuestions: new Map(),
       marketSnapshotQueries: new Map(),
@@ -93,6 +96,9 @@ export function memoryDeleteReport(id: string): boolean {
   for (const row of store.recommendationForensicReports.values()) {
     if (row.reportId === id) store.recommendationForensicReports.delete(row.id);
   }
+  for (const row of store.reportSourceForensics.values()) {
+    if (row.reportId === id) store.reportSourceForensics.delete(row.id);
+  }
   for (const job of store.scanJobs.values()) {
     if (job.reportId === id) store.scanJobs.delete(job.id);
   }
@@ -104,6 +110,19 @@ export function memoryDeleteReport(id: string): boolean {
 
 export function memoryGetScanJob(id: string): ScanJobRow | null {
   return currentStore().scanJobs.get(id) ?? null;
+}
+
+export function memorySaveReportSourceForensics(row: ReportSourceForensicsRow): ReportSourceForensicsRow {
+  currentStore().reportSourceForensics.set(row.id, row);
+  return row;
+}
+
+export function memoryGetReportSourceForensicsForJob(jobId: string): ReportSourceForensicsRow | null {
+  return [...currentStore().reportSourceForensics.values()].find((row) => row.jobId === jobId) ?? null;
+}
+
+export function memoryGetReportSourceForensicsForReport(reportId: string): ReportSourceForensicsRow | null {
+  return [...currentStore().reportSourceForensics.values()].find((row) => row.reportId === reportId) ?? null;
 }
 
 export function memorySaveScanJob(row: ScanJobRow): ScanJobRow {

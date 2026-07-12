@@ -11,7 +11,7 @@ import type { PublicSourceEvidenceGraph } from "@open-geo-console/citation-intel
 import type { AiWebsiteReportV1 } from "./types";
 import { parseAiWebsiteReportV1 } from "./validation";
 import { verifyRecommendationForensicV2Claims, type EvidenceBoundV2Claim } from "./recommendation-forensic-v2-claims";
-import type { RecommendationForensicCostAccounting } from "./recommendation-forensic-cost";
+import { calculateRecommendationForensicCost, type RecommendationForensicCostAccounting } from "./recommendation-forensic-cost";
 
 export const RECOMMENDATION_FORENSIC_REPORT_V2_VERSION = 2 as const;
 export const PUBLIC_SEARCH_SOURCE_FORENSICS_METHODOLOGY = "public_search_source_forensics_v1" as const;
@@ -62,6 +62,7 @@ export function parseRecommendationForensicReportV2(value: unknown): Recommendat
   const questions = parseCanonicalBuyerQuestionSet(report.questions);
   if (questions.locale !== locale || questions.region !== region) fail("$.questions", "Question locale/region must match the report.");
   const authority = parsePublicSearchSurfaceAuthority(report.authority);
+  if (!authority.active) fail("$.authority.active", "Report authority must be active.");
   if (authority.surface.locale !== locale || authority.surface.region !== region) fail("$.authority", "Authority locale/region must match the report.");
   const fanouts = array(report.fanouts, "$.fanouts").map(parseSearchQueryFanout);
   const questionIds = new Set(questions.questions.map(({ id }) => id));
@@ -73,9 +74,17 @@ export function parseRecommendationForensicReportV2(value: unknown): Recommendat
   if (snapshotRefs.length !== queryIds.size || snapshotRefs.some((ref) => !questionIds.has(ref.questionId) || !queryIds.has(ref.queryVariantId))) {
     fail("$.snapshotRefs", "Every fanout query requires one bound snapshot reference.");
   }
+  if (new Set(snapshotRefs.map(({ snapshotId }) => snapshotId)).size !== snapshotRefs.length ||
+      new Set(snapshotRefs.map(({ queryVariantId }) => queryVariantId)).size !== snapshotRefs.length) {
+    fail("$.snapshotRefs", "Snapshot and query references must be unique.");
+  }
   const graph = object(report.sourceGraph, "$.sourceGraph") as unknown as PublicSourceEvidenceGraph;
   exact(graph.version, "public-source-evidence-graph-v1", "$.sourceGraph.version");
   const evidenceIds = uniqueIds(graph.evidence, "evidenceId", "$.sourceGraph.evidence");
+  const graphQueryIds = new Set(graph.dimensions.queryVariantIds);
+  if (graphQueryIds.size !== queryIds.size || [...queryIds].some((id) => !graphQueryIds.has(id))) {
+    fail("$.sourceGraph.dimensions.queryVariantIds", "Source graph must cover the exact report query variants.");
+  }
   const appendix = parseAiWebsiteReportV1(report.websiteFoundationAppendix);
   if (appendix.targetUrl !== report.targetUrl || appendix.provenance.locale !== locale) fail("$.websiteFoundationAppendix", "Appendix must match target and locale.");
   const websiteFindingIds = new Set(appendix.findings.map(({ id }) => id));
@@ -86,8 +95,11 @@ export function parseRecommendationForensicReportV2(value: unknown): Recommendat
   const taskPackage = object(report.vendorTaskPackage, "$.vendorTaskPackage");
   exact(taskPackage.version, "vendor-task-v2", "$.vendorTaskPackage.version");
   const tasks = array(taskPackage.tasks, "$.vendorTaskPackage.tasks").map(parseTask);
+  if (tasks.some(({ retestQuestionIds }) => retestQuestionIds.length === 0 || retestQuestionIds.some((id) => !questionIds.has(id)))) {
+    fail("$.vendorTaskPackage.tasks", "Every vendor task requires known retest question IDs.");
+  }
   verifyRecommendationForensicV2Claims([...comparison, verdict, ...priorities, ...tasks], evidenceIds, websiteFindingIds);
-  parseCoverage(report.coverage, questions.questions.length);
+  parseCoverage(report.coverage, queryIds.size);
   parseCustomerDisclosure(report.customerCostDisclosure);
   parseOperatorCost(report.operatorCostAccounting);
   parseSynthesis(report.synthesisProvenance);
@@ -101,7 +113,7 @@ function parseSection(value: unknown,path:string): V2EvidenceBoundSection { cons
 function parseTask(value: unknown,index:number): V2VendorTask { const path=`$.vendorTaskPackage.tasks[${index}]`, v=object(value,path), base=parseSection(value,path); return { ...base, vendor:oneOf(v.vendor,["website","content","seo","communications","cross-functional"],`${path}.vendor`), actions:stringArray(v.actions,`${path}.actions`), acceptanceCriteria:stringArray(v.acceptanceCriteria,`${path}.acceptanceCriteria`), retestQuestionIds:stringArray(v.retestQuestionIds,`${path}.retestQuestionIds`) }; }
 function parseCoverage(value: unknown, expected:number){ const v=object(value,"$.coverage"); oneOf(v.status,["complete","partial","insufficient"],"$.coverage.status"); for(const k of ["completedQueryCount","expectedQueryCount","observedResultCount","surfaceDomainCount"]) nonnegative(v[k],`$.coverage.${k}`); if(v.expectedQueryCount!==expected) fail("$.coverage.expectedQueryCount","Coverage denominator must equal canonical question count."); stringArray(v.reasons,"$.coverage.reasons"); }
 function parseCustomerDisclosure(value:unknown){ const v=object(value,"$.customerCostDisclosure"); oneOf(v.freshness,["fresh","mixed","stale"],"$.customerCostDisclosure.freshness"); boolean(v.collectedNewObservation,"$.customerCostDisclosure.collectedNewObservation"); }
-function parseOperatorCost(value:unknown){ const v=object(value,"$.operatorCostAccounting"); for(const k of ["searchCostMicros","retrievalCostMicros","synthesisCostMicros","artifactCostMicros","deliveryCostMicros","allocatedSharedCostMicros","avoidedCostMicros","priceMicros","refundMicros","actualIncrementalCostMicros","netRevenueMicros"]) nonnegative(v[k],`$.operatorCostAccounting.${k}`); if(!Number.isSafeInteger(v.contributionMarginMicros)) fail("$.operatorCostAccounting.contributionMarginMicros","Expected a safe integer."); }
+function parseOperatorCost(value:unknown){ const v=object(value,"$.operatorCostAccounting"); const baseKeys=["searchCostMicros","retrievalCostMicros","synthesisCostMicros","artifactCostMicros","deliveryCostMicros","allocatedSharedCostMicros","avoidedCostMicros","priceMicros","refundMicros"] as const; for(const k of [...baseKeys,"actualIncrementalCostMicros","netRevenueMicros"] as const) nonnegative(v[k],`$.operatorCostAccounting.${k}`); if(!Number.isSafeInteger(v.contributionMarginMicros)) fail("$.operatorCostAccounting.contributionMarginMicros","Expected a safe integer."); const base=Object.fromEntries(baseKeys.map((key)=>[key,v[key]])) as unknown as Parameters<typeof calculateRecommendationForensicCost>[0]; const expected=calculateRecommendationForensicCost(base); for(const key of ["actualIncrementalCostMicros","netRevenueMicros","contributionMarginMicros"] as const) if(v[key]!==expected[key]) fail(`$.operatorCostAccounting.${key}`,"Cost accounting does not reconcile."); }
 function parseSynthesis(value:unknown){ const v=object(value,"$.synthesisProvenance"); const mode=oneOf(v.mode,["deterministic_template","evidence_constrained_model"],"$.synthesisProvenance.mode"); text(v.inputHash,"$.synthesisProvenance.inputHash"); if(mode==="evidence_constrained_model") text(v.modelId,"$.synthesisProvenance.modelId"); }
 function uniqueIds(value:unknown,key:string,path:string){ const ids=new Set(array(value,path).map((item,i)=>text(object(item,`${path}[${i}]`)[key],`${path}[${i}].${key}`))); if(ids.size!==array(value,path).length) fail(path,"IDs must be unique."); return ids; }
 function object(v:unknown,p:string):Record<string,unknown>{ if(!v||typeof v!=="object"||Array.isArray(v)) fail(p,"Expected an object."); return v as Record<string,unknown>; }
