@@ -31,6 +31,7 @@ describe("commercial checkout route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.COMMERCE_MODE = "test";
+    process.env.OGC_REPLY_TO_EMAIL = "support@example.test";
     process.env.OGC_EMAIL_ENCRYPTION_SECRET = "encryption-secret-with-at-least-32-characters";
     process.env.OGC_EMAIL_LOOKUP_SECRET = "lookup-secret-with-at-least-32-characters";
     process.env.OGC_PAYMENT_IDEMPOTENCY_SECRET = "payment-idempotency-secret-at-least-32-chars";
