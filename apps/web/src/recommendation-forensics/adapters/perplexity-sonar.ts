@@ -62,8 +62,8 @@ export function createPerplexitySonarAdapter(
 ): AnswerEngineAdapter {
   const apiKey = requiredSecret(options.environment.OGC_ANSWER_PERPLEXITY_API_KEY);
   const model = requiredModel(options.environment.OGC_ANSWER_PERPLEXITY_MODEL);
-  const locale = requiredLabel(options.locale, "locale");
-  const region = requiredLabel(options.region, "region");
+  const locale = requiredLocale(options.locale);
+  const region = requiredGlobalRegion(options.region);
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== "function") {
     throw new PerplexitySonarAdapterError("provider-unavailable", "Perplexity API transport is unavailable.");
@@ -82,7 +82,7 @@ export function createPerplexitySonarAdapter(
   return {
     surface,
     async observe(input: ObserveAnswerInput) {
-      assertMatchingSurface(input.surface, surface);
+      assertMatchingSurface(input, surface);
       const startedAt = now();
       let response: Response;
       try {
@@ -95,6 +95,8 @@ export function createPerplexitySonarAdapter(
           body: JSON.stringify({
             model,
             messages: [{ role: "user", content: input.question.exactText }],
+            language_preference: locale,
+            search_language_filter: [locale],
             stream: false
           }),
           signal: input.signal
@@ -267,11 +269,27 @@ function requiredLabel(value: string, label: string): string {
   return value.trim();
 }
 
-function assertMatchingSurface(actual: AnswerEngineSurface, expected: AnswerEngineSurface): void {
+function requiredLocale(value: string): string {
+  const locale = requiredLabel(value, "locale");
+  if (locale !== "en" && locale !== "zh") throw new PerplexitySonarAdapterError("unsupported", "Perplexity certification currently supports only en or zh locale.");
+  return locale;
+}
+
+function requiredGlobalRegion(value: string): string {
+  const region = requiredLabel(value, "region");
+  if (region !== "global") throw new PerplexitySonarAdapterError("unsupported", "Perplexity certification currently supports only the global region.");
+  return region;
+}
+
+function assertMatchingSurface(input: ObserveAnswerInput, expected: AnswerEngineSurface): void {
+  const actual = input.surface;
   for (const key of [
     "providerId", "productId", "modelId", "collectionSurface", "locale", "region", "certificationState"
   ] as const) {
     if (actual[key] !== expected[key]) throw invalidResponse();
+  }
+  if (input.run.locale !== expected.locale || input.run.region !== expected.region || input.question.locale !== expected.locale) {
+    throw new PerplexitySonarAdapterError("unsupported", "Perplexity observation locale or region does not match its certified surface.");
   }
   if (actual.consumerApplicationLabel !== undefined) throw invalidResponse();
 }

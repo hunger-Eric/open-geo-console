@@ -118,6 +118,8 @@ describe("Perplexity Sonar answer-engine adapter", () => {
         role: "user",
         content: "Which freight forwarders are suitable for European exporters?"
       }],
+      language_preference: "en",
+      search_language_filter: ["en"],
       stream: false
     });
     expect(observed).toMatchObject({
@@ -224,6 +226,21 @@ describe("Perplexity Sonar answer-engine adapter", () => {
     expect(instance.classifyError?.(error)).toBe("timeout");
   });
 
+  it("rejects run locale, run region, and question locale drift before network", async () => {
+    for (const drift of [
+      (value: ObserveAnswerInput) => { value.run.locale = "zh"; },
+      (value: ObserveAnswerInput) => { value.run.region = "CN"; },
+      (value: ObserveAnswerInput) => { value.question.locale = "zh"; }
+    ]) {
+      const fetchImpl = vi.fn<typeof fetch>();
+      const instance = adapter(fetchImpl);
+      const value = input();
+      drift(value);
+      await expect(instance.observe(value)).rejects.toMatchObject({ errorClass: "unsupported" });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    }
+  });
+
   it.each([
     [401, "authentication"],
     [403, "authentication"],
@@ -265,5 +282,11 @@ describe("Perplexity Sonar answer-engine adapter", () => {
       PerplexitySonarAdapterError
     );
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("supports only explicit en/zh locale and the global region until mapped location certification exists", () => {
+    const environment = { OGC_ANSWER_PERPLEXITY_API_KEY: API_KEY, OGC_ANSWER_PERPLEXITY_MODEL: "sonar-pro" };
+    expect(() => createPerplexitySonarAdapter({ environment, locale: "fr", region: "global" })).toThrow("only en or zh");
+    expect(() => createPerplexitySonarAdapter({ environment, locale: "en", region: "US" })).toThrow("global region");
   });
 });

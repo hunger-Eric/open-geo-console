@@ -35,7 +35,7 @@ describe("OpenAI Responses web-search adapter", () => {
                 type: "output_text",
                 text: "Atlas and Beacon are recommended options.",
                 annotations: [
-                  citation("https://atlas.example/review", "Atlas review", 0, 5),
+                  citation("HTTPS://Atlas.Example:443/review/#first", "Atlas review", 0, 5),
                   citation("https://beacon.example/guide", "Beacon guide", 10, 16)
                 ]
               },
@@ -44,7 +44,7 @@ describe("OpenAI Responses web-search adapter", () => {
                 text: "Atlas is the preferred choice for regional coverage.",
                 annotations: [
                   citation("https://atlas.example/review", "Repeated Atlas title", 0, 5),
-                  citation("https://third.example/analysis", "Third analysis", 20, 28)
+                  citation("https://third.example/analysis/?b=2#fragment", "Third analysis", 20, 28)
                 ]
               }
             ]
@@ -70,8 +70,8 @@ describe("OpenAI Responses web-search adapter", () => {
         productId: "responses-web-search",
         modelId: "gpt-5.4-2026-03-05",
         collectionSurface: "developer_api",
-        locale: "en-US",
-        region: "US",
+        locale: "en",
+        region: "global",
         certificationState: "candidate_uncertified"
       }
     });
@@ -91,7 +91,7 @@ describe("OpenAI Responses web-search adapter", () => {
         providerMetadata: { sourceType: "url_citation" }
       },
       {
-        url: "https://third.example/analysis",
+        url: "https://third.example/analysis?b=2",
         title: "Third analysis",
         providerOrder: 2,
         providerMetadata: { sourceType: "url_citation" }
@@ -111,7 +111,7 @@ describe("OpenAI Responses web-search adapter", () => {
       tools: [{ type: "web_search" }],
       tool_choice: "required",
       store: false,
-      instructions: "Answer in en-US. Use web search and support the answer with URL citations.",
+      instructions: "Answer in en. Use web search and support the answer with URL citations.",
       input: "Which supplier is best for this requirement?"
     });
   });
@@ -252,21 +252,23 @@ describe("OpenAI Responses web-search adapter", () => {
   it("requires a dedicated model configuration and never labels the API as a consumer app", () => {
     vi.stubEnv("OGC_ANSWER_OPENAI_MODEL", "");
     expect(() => createOpenAIWebSearchAdapter({
-      locale: "en-US",
-      region: "US",
+      locale: "en",
+      region: "global",
       apiKey: SECRET
     })).toThrowError(OpenAIWebSearchAdapterError);
 
     const adapter = configuredAdapter();
     expect(adapter.surface.consumerApplicationLabel).toBeUndefined();
     expect(adapter.surface.collectionSurface).toBe("developer_api");
+    expect(() => createOpenAIWebSearchAdapter({ locale: "fr", region: "global", apiKey: SECRET, model: "gpt-pinned" })).toThrow("only en or zh");
+    expect(() => createOpenAIWebSearchAdapter({ locale: "en", region: "US", apiKey: SECRET, model: "gpt-pinned" })).toThrow("global region");
   });
 });
 
 function configuredAdapter(overrides: Partial<Parameters<typeof createOpenAIWebSearchAdapter>[0]> = {}) {
   return createOpenAIWebSearchAdapter({
-    locale: "en-US",
-    region: "US",
+    locale: "en",
+    region: "global",
     apiKey: SECRET,
     model: "gpt-5.4-2026-03-05",
     fetch: vi.fn(async () => jsonResponse(officialResponse())),
@@ -281,14 +283,14 @@ function observation(adapter: AnswerEngineAdapter, signal = new AbortController(
       id: "run-openai-1",
       reportId: "report-1",
       jobId: "job-1",
-      locale: "en-US",
-      region: "US",
+      locale: "en",
+      region: "global",
       questionSetVersion: "purchase-v1",
       startedAt: "2027-01-15T07:59:00.000Z"
     },
     question: {
       id: "question-1",
-      locale: "en-US",
+      locale: "en",
       category: "supplier_selection",
       exactText: "Which supplier is best for this requirement?",
       inferenceBasis: ["Customer requirement"]

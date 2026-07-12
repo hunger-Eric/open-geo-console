@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertCertificationCredential, parseCertificationCommand } from "./certify-recommendation-provider";
+import { assertCertificationCredential, parseCertificationCommand, prepareCertificationPreflight } from "./certify-recommendation-provider";
 
 const args = ["--provider", "openai", "--model", "gpt-pinned", "--locale", "en", "--region", "global", "--site", "https://reserved.example/", "--question", "Which supplier is suitable for this export requirement?", "--output", ".data/recommendation-certification/cert.json"];
 
@@ -15,6 +15,16 @@ describe("recommendation provider certification CLI guards", () => {
     expect(() => assertCertificationCredential(options, { OGC_ANSWER_OPENAI_API_KEY: "secret", OGC_ANSWER_OPENAI_MODEL: "drift" })).toThrow("exactly match");
   });
 
+  it("fails signing preflight before the staging marker callback or any provider construction", async () => {
+    const options = parseCertificationCommand(args);
+    const marker = vi.fn(async () => undefined);
+    await expect(prepareCertificationPreflight(options, {
+      OGC_ANSWER_OPENAI_API_KEY: "provider-secret",
+      OGC_ANSWER_OPENAI_MODEL: "gpt-pinned"
+    }, marker)).rejects.toThrow("Missing certification signing variables");
+    expect(marker).not.toHaveBeenCalled();
+  });
+
   it("allows dry fixture parsing without credentials but keeps the mode explicit", () => {
     const options = parseCertificationCommand([...args, "--dry-fixture"]);
     expect(options.dryFixture).toBe(true);
@@ -25,5 +35,6 @@ describe("recommendation provider certification CLI guards", () => {
     expect(() => parseCertificationCommand(args.map((item) => item.includes(".data/recommendation") ? "tracked/cert.json" : item))).toThrow(".data/recommendation-certification");
     const liveSite = args.map((item) => item === "https://reserved.example/" ? "https://public-company.com/" : item);
     expect(() => parseCertificationCommand([...liveSite, "--dry-fixture"])).toThrow("reserved");
+    expect(() => parseCertificationCommand(args.map((item) => item.includes("cert.json") ? ".data/recommendation-certification/nested/cert.json" : item))).toThrow("direct files");
   });
 });

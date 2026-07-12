@@ -65,8 +65,8 @@ export function createOpenAIWebSearchAdapter(
     options.model ?? process.env.OGC_ANSWER_OPENAI_MODEL,
     "OGC_ANSWER_OPENAI_MODEL"
   );
-  const locale = requiredConfiguration(options.locale, "locale");
-  const region = requiredConfiguration(options.region, "region");
+  const locale = requiredLocale(options.locale);
+  const region = requiredGlobalRegion(options.region);
   const apiKey = options.apiKey ?? process.env.OGC_ANSWER_OPENAI_API_KEY;
   const transport = options.fetch ?? fetch;
   const now = options.now ?? Date.now;
@@ -153,6 +153,18 @@ function requiredConfiguration(value: string | undefined, name: string): string 
     throw new OpenAIWebSearchAdapterError("unsupported", `${name} is not configured.`);
   }
   return value.trim();
+}
+
+function requiredLocale(value: string): string {
+  const locale = requiredConfiguration(value, "locale");
+  if (locale !== "en" && locale !== "zh") throw new OpenAIWebSearchAdapterError("unsupported", "OpenAI certification currently supports only en or zh locale.");
+  return locale;
+}
+
+function requiredGlobalRegion(value: string): string {
+  const region = requiredConfiguration(value, "region");
+  if (region !== "global") throw new OpenAIWebSearchAdapterError("unsupported", "OpenAI certification currently supports only the global region.");
+  return region;
 }
 
 function usableApiKey(value: string | undefined): string {
@@ -310,17 +322,25 @@ function toSnapshotSources(citations: OpenAIUrlCitation[]): AnswerSnapshotSource
   const seen = new Set<string>();
   const sources: AnswerSnapshotSource[] = [];
   for (const citation of citations) {
-    if (seen.has(citation.url)) continue;
-    seen.add(citation.url);
+    const url = canonicalProviderUrl(citation.url);
+    if (seen.has(url)) continue;
+    seen.add(url);
     const providerMetadata: AnswerSnapshotProviderMetadata = { sourceType: citation.type };
     sources.push({
-      url: citation.url,
+      url,
       title: citation.title,
       providerOrder: sources.length,
       providerMetadata
     });
   }
   return sources;
+}
+
+function canonicalProviderUrl(value: string): string {
+  const url = new URL(value);
+  url.hash = "";
+  if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
+  return url.href;
 }
 
 function providerTimestamp(value: unknown): string {

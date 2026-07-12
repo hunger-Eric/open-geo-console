@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { chmod, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import {
@@ -15,7 +14,8 @@ import { closeDatabase, ensureDatabase, getDatabaseEnvironmentStatus } from "@/d
 import { prepareStagingCommand } from "./staging-guard";
 import { createOpenAIWebSearchAdapter } from "@/recommendation-forensics/adapters/openai-web-search";
 import { createPerplexitySonarAdapter } from "@/recommendation-forensics/adapters/perplexity-sonar";
-import { finalizeCertificationArtifact } from "@/recommendation-forensics/certification-artifact";
+import { finalizeCertificationArtifact, readCertificationSigningConfig } from "@/recommendation-forensics/certification-artifact";
+import { assertPrivateCertificationArtifact, ensurePrivateCertificationDirectory, privateCertificationPath } from "@/recommendation-forensics/certification-path";
 import { retrieveCitationSource } from "@/worker/recommendation-forensics";
 
 export interface CertificationCommandOptions {
@@ -52,15 +52,31 @@ export function assertCertificationCredential(options: CertificationCommandOptio
   if (environment[`${prefix}_MODEL`]?.trim() !== options.model) throw new Error(`${prefix}_MODEL must exactly match --model.`);
 }
 
+export async function prepareCertificationPreflight(
+  options: CertificationCommandOptions,
+  environment: NodeJS.ProcessEnv,
+  assertStagingMarker: () => Promise<void>
+) {
+  assertCertificationCredential(options, environment);
+  const signing = options.dryFixture ? undefined : readCertificationSigningConfig(environment);
+  await assertStagingMarker();
+  return signing;
+}
+
 async function main() {
   const options = parseCertificationCommand(process.argv.slice(2));
-  assertCertificationCredential(options, process.env);
-  await prepareStagingCommand({ environment: process.env, ensureDatabase, getDatabaseStatus: getDatabaseEnvironmentStatus });
+  const signing = await prepareCertificationPreflight(options, process.env, async () => {
+    await prepareStagingCommand({ environment: process.env, ensureDatabase, getDatabaseStatus: getDatabaseEnvironmentStatus });
+  });
   const adapter = createAdapter(options);
   const cell = options.dryFixture ? dryFixtureCell(adapter.surface, options) : await observe(adapter, options);
   const retrievals = options.dryFixture || cell.status !== "succeeded" ? [] : await Promise.all(cell.sources.map(async ({ url }) => {
     const result = await retrieveCitationSource(url);
-    return { url, retrievalState: result.retrievalState, excerptHash: result.excerptHash, contentHash: result.contentHash };
+    return {
+      url, retrievalState: result.retrievalState, verifiedText: result.excerpt,
+      excerptHash: result.excerptHash, contentHash: result.contentHash,
+      retrievedAt: new Date(Math.max(Date.now(), Date.parse(cell.executedAt))).toISOString()
+    };
   }));
   if (!options.dryFixture && (cell.status !== "succeeded" || cell.sources.length === 0 || !retrievals.some(({ retrievalState }) => retrievalState === "available"))) {
     throw new Error("Live certification did not produce a safely retrievable source-bearing cell.");
@@ -70,10 +86,11 @@ async function main() {
     environment: "protected_staging", providerId: options.provider, siteUrl: options.site, question: options.question,
     surface: adapter.surface, observedAt: cell.executedAt, cell, retrievals,
     operatorReviewRequired: ["commercial_terms", "surface_label", "evidence_quality"]
-  });
-  await mkdir(path.dirname(options.output), { recursive: true });
+  }, signing);
+  await ensurePrivateCertificationDirectory();
   await writeFile(options.output, `${JSON.stringify(artifact, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
   await chmod(options.output, 0o600);
+  await assertPrivateCertificationArtifact(options.output);
   if (process.platform === "win32") console.error(JSON.stringify({ warning: "Verify that the artifact Windows ACL grants access only to the operator account.", output: options.output }));
   console.log(JSON.stringify({ provider: options.provider, mode: artifact.mode, installable: artifact.installable, artifactHash: artifact.artifactHash, output: options.output }));
 }
@@ -135,17 +152,9 @@ function validatedNonBrandQuestion(question: string, site: string) {
 }
 function digest(parts: string[]) { return createHash("sha256").update(parts.join("\0")).digest("hex"); }
 
-export function privateCertificationPath(value: string): string {
-  const root = workspaceRoot(process.cwd());
-  const privateRoot = path.join(root, ".data", "recommendation-certification");
-  const resolved = path.resolve(root, value);
-  if (resolved !== privateRoot && !resolved.startsWith(`${privateRoot}${path.sep}`)) {
-    throw new Error("Certification artifacts must stay under .data/recommendation-certification.");
-  }
-  return resolved;
-}
-function workspaceRoot(start: string): string { let current = path.resolve(start); while (true) { const packageFile = path.join(current, "package.json"); if (existsSync(packageFile)) { try { const parsed = JSON.parse(readFileSync(packageFile, "utf8")) as { workspaces?: unknown }; if (parsed.workspaces) return current; } catch {} } const parent = path.dirname(current); if (parent === current) return path.resolve(start); current = parent; } }
 function isReservedTestHostname(hostname: string) { return [".example", ".test", ".invalid"].some((suffix) => hostname === suffix.slice(1) || hostname.endsWith(suffix)); }
+
+export { privateCertificationPath };
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   main().catch((error) => { console.error(error instanceof Error ? error.message : "Certification failed."); process.exitCode = 1; }).finally(closeDatabase);
