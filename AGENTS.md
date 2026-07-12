@@ -29,8 +29,9 @@
 - `packages/geo-auditor` owns website audit logic and report JSON shape.
 - `packages/site-crawler` owns safe URL resolution, site identity, discovery, extraction, and representative-page selection.
 - `packages/ai-report-engine` owns model transport, prompts, report contracts, structured validation, and evidence verification.
-- `packages/answer-engine-observer` owns provider-neutral question, collection-surface, answer-snapshot, source, validation, and deterministic identity contracts. An adapter's existence is not provider certification.
-- `packages/citation-intelligence` owns recommendation extraction, entity resolution, source categories, Grade A-D evidence, and evidence-linked opportunity hypotheses.
+- `packages/public-search-observer` owns V2 public-search surfaces, authorities, canonical buyer questions, fanout, observations, coverage, registry, and prohibited-claim contracts. An adapter's existence is not certification.
+- `packages/answer-engine-observer` owns frozen historical V1 answer-snapshot contracts; active checkout and V2 Worker graphs must not import its provider adapters.
+- `packages/citation-intelligence` owns V2 public-source evidence graphs, entity resolution, evidence families, source eligibility/readiness, Grade A-D evidence, and non-causal opportunity hypotheses while preserving V1 exports.
 - `apps/web` owns PostgreSQL persistence, task orchestration, routes, access controls, and UI.
 
 ## Production Boundaries

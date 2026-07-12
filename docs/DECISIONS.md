@@ -147,3 +147,13 @@ Docker Desktop starts staging free/deep, production free/deep, and production co
 The primary customer audience is Chinese export companies, so Chinese interface URLs use the canonical unprefixed paths (`/`, `/logs`, `/reports/:id/...`). English remains explicit under `/en`. Existing `/zh/...` links permanently redirect to the equivalent unprefixed URL with the query preserved, while API, Next.js asset, public-file, and private `report.html` artifact paths stay outside locale rewriting.
 
 The routing layer changes interface chrome and canonical URLs only. A report's persisted generation locale remains immutable, and authorization continues to live in the report routes rather than in the Next.js proxy.
+
+## 2026-07-13: Paid recommendation forensics uses public-source snapshots, not answer-engine claims
+
+`recommendation_forensics_v1` remains the commercial product code, but every new order is report version 2 with methodology `public_search_source_forensics_v1`. Canonical non-brand buyer questions fan out to one accurately labeled public-search surface. Immutable shared market snapshots, retrieved public evidence, source families and website findings support the report; result order is raw context only and cannot be described as AI rank, recommendation, citation probability or causal evidence.
+
+The V2 report, snapshot refs, job terminal state, credit settlement/refund, paid order, refund request and email intent share one PostgreSQL transaction. Customer artifacts expose safe freshness and whether new collection occurred, never internal allocated cost, another customer's reuse or contribution margin. HTML remains canonical and PDF is materialized from the same V2 component before terminalization.
+
+Staging and production reached zero non-terminal V1 recommendation jobs before OpenAI/Perplexity runtime imports, credentials, flags and certification commands were removed from active admission and Worker graphs. Historical V1 rows, parsers, authorities and HTML/PDF rendering remain immutable and readable.
+
+V2 live admission requires one exact active public-search authority plus a non-fixture production registry, builder and artifact gate. The generic signed certification framework ships with an empty compile-time approved adapter registry, so it refuses before network access and the product remains fail-closed until a separately reviewed vendor plan is completed.

@@ -79,17 +79,16 @@
 - [x] Verify private asset authorization, screenshot fallback states, desktop/mobile HTML browser QA, and PDF export QA.
 - [x] Configure Preview-only private staging object storage and visually verify a fresh paid deep report's real issue crop, context thumbnail, compact screenshots, viewport fallback, authorized HTML/PDF reads, and anonymous object-store denial.
 
-## AI recommendation forensic report (Phase 5A implemented; live certification blocked)
+## Public-source recommendation forensics V2 (framework implemented; live adapter blocked)
 
-- [x] Approve the zero-configuration recommendation-forensic product direction, target buyer, two-audience delivery, evidence grades, and non-service boundary.
-- [x] Write and approve an implementation plan for `docs/superpowers/specs/2026-07-12-ai-recommendation-forensic-report-design.md`.
-- [x] Add immutable question/run/attempt/cell/source and citation-evidence contracts with deterministic fixtures, atomic checkpoints, evidence links and private schema-v9 persistence.
-- [x] Implement fail-closed OpenAI Responses Web Search and Perplexity Sonar adapters plus protected signed-artifact certification and deterministic authority-install commands.
-- [ ] Supply independent protected-staging provider credentials and signing authority, then create, manually review and install the first live source-bearing provider artifact.
-- [ ] Certify the second independent live provider and prove qualified/limited/failed commercial coverage, settlement and refund outcomes.
-- [x] Add citation intelligence, entity ambiguity handling, Grade A-D evidence, source gaps, and opportunity hypotheses.
-- [x] Implement the evidence-driven executive decision report and separate vendor task package in product-scoped private HTML/same-HTML PDF, with the legacy website audit as appendix.
-- [ ] Accept one real dual-provider paid report end to end: source retrieval, immutable evidence, HTML/PDF content and page count, anonymous `404`, transactional delivery/reply, and commercial settlement.
-- [ ] Drill missing/drifted authority, zero/one provider, timeout/rate-limit/provider outage, robots-inaccessible evidence, limited/failed output, refund, and email failure while the public product remains closed.
-- [ ] Run protected legacy-checkout retirement against real provider resources and dynamically prove schema-v9 bootstrap on a fresh empty PostgreSQL database.
-- [ ] Add the budgeted one-question free sample only after paid multi-engine staging acceptance.
+- [x] Approve `public_search_source_forensics_v1`, its non-model-attribution boundary, canonical buyer questions, shared market snapshots, customer isolation, freshness, evidence and commercial rules.
+- [x] Implement provider-neutral public-search contracts, deterministic fixtures, schema-v13 authorities/snapshots/attempts/observations/evidence/leases/report refs, and surface-neutral evidence graphs.
+- [x] Implement `RecommendationForensicReportV2`, exact V1/V2 dispatch, prohibited-claim verification, deterministic cost accounting, report builder and immutable V2 repository.
+- [x] Implement V2 Worker orchestration, cache reuse, freshness/refresh rules, resume identity, fail-closed artifact dependency and atomic report/ref/job/credit/order/refund/email terminalization.
+- [x] Add version-dispatched private HTML/same-HTML PDF rendering, customer-safe coverage/freshness fields, vendor task package, website appendix and pre-terminal HTML/PDF readiness gate.
+- [x] Drain staging V1 work, verify zero non-terminal V1 rows in staging and production, retire OpenAI/Perplexity from active admission/Worker graphs, and preserve historical V1 read/render contracts.
+- [x] Add signed public-search certification artifact/path/install framework with an empty compile-time approved adapter registry; fixtures remain non-installable and admission remains closed.
+- [ ] Select and legally review one live public-search vendor, add it through a separate approved-adapter plan, create/manual-review/install/activate its signed artifact, and keep the runtime flag false until then.
+- [ ] Accept one real V2 paid report end to end: source collection/retrieval, immutable evidence, authorized HTML/PDF and anonymous `404`, transactional delivery/reply, settlement plus limited/failed refunds and outage drills.
+- [ ] Provide `OGC_TEST_DATABASE_ADMIN_URL` and dynamically run fresh-database schema-v13, V2 repository and atomic fault-injection PostgreSQL tests; current local acceptance records these suites as skipped rather than proven.
+- [ ] Add any free sample only after paid V2 staging acceptance; never market public-search order as AI rank or recommendation.
