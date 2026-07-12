@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getPaymentOrder, issueReportAccessToken, getGeoReport } = vi.hoisted(() => ({
+const { getPaymentOrder, issueReportAccessToken, getGeoReport, productContractForCode } = vi.hoisted(() => ({
   getPaymentOrder: vi.fn(),
   issueReportAccessToken: vi.fn(),
-  getGeoReport: vi.fn()
+  getGeoReport: vi.fn(),
+  productContractForCode: vi.fn((code: string) => code === "recommendation_forensics_v1" ? "recommendation_forensics_v1" : "legacy_website_audit_v1")
 }));
 
-vi.mock("@/db/commercial-orders", () => ({ getPaymentOrder }));
+vi.mock("@/db/commercial-orders", () => ({ getPaymentOrder, productContractForCode }));
 vi.mock("@/db/report-tokens", () => ({ issueReportAccessToken }));
 vi.mock("@/db/reports", () => ({ getGeoReport }));
 
@@ -23,10 +24,22 @@ describe("staging report operator access", () => {
       id: "order-1",
       reportId: "report-1",
       paymentStatus: "paid",
-      fulfillmentStatus: "completed"
+      fulfillmentStatus: "completed",
+      productCode: "deep_report_v1"
     });
     getGeoReport.mockResolvedValue({ reportLocale: "zh" });
     issueReportAccessToken.mockResolvedValue({ rawToken: "secret", expiresAt: new Date("2026-07-12T00:00:00Z") });
+  });
+
+  it("derives recommendation scope only from the persisted order product", async () => {
+    getPaymentOrder.mockResolvedValue({
+      id: "order-2", reportId: "report-1", paymentStatus: "paid", fulfillmentStatus: "completed",
+      productCode: "recommendation_forensics_v1"
+    });
+    const response = await GET(new Request("https://staging.example/zh/reports/report-1/staging-access?order=order-2&scope=legacy_website_audit_v1"), context);
+    expect(response.headers.get("set-cookie")).toContain("ogc_report_report-1_recommendation=secret");
+    expect(response.headers.get("location")).toBe("https://staging.example/reports/report-1/report.html");
+    expect(issueReportAccessToken).toHaveBeenCalledWith(expect.objectContaining({ artifactScope: "recommendation_forensics_v1" }));
   });
 
   it("sets a short-lived report cookie for a completed paid staging order", async () => {

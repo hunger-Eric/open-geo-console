@@ -37,9 +37,11 @@ export async function POST(request: Request, context: RouteContext) {
   if (!report?.reportLocale) {
     return NextResponse.json({ error: "The report language has not been established." }, { status: 409 });
   }
-  const destination = new URL(`/${report.reportLocale}/reports/${id}/analysis`, request.url);
+  const destination = verified.artifactScope === "recommendation_forensics_v1"
+    ? new URL(`/reports/${id}/report.html`, request.url)
+    : new URL(`/${report.reportLocale}/reports/${id}/analysis`, request.url);
   const response = NextResponse.redirect(destination, 303);
-  response.cookies.set(reportAccessCookieName(id), token, {
+  response.cookies.set(reportAccessCookieName(id, verified.artifactScope), token, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

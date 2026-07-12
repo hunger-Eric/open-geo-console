@@ -1,5 +1,6 @@
 import { AnswerEngineRegistry } from "@open-geo-console/answer-engine-observer";
 import type { RecommendationForensicsDependencies } from "@/worker/recommendation-forensics";
+export { ProductionRecommendationReportBuilder } from "./production-report-builder";
 
 // Live adapters and the customer artifact builder are installed only by later,
 // separately certified rollout phases. Keeping both absent makes every new
@@ -8,7 +9,7 @@ export function createProductionAnswerEngineRegistry(): AnswerEngineRegistry {
   return new AnswerEngineRegistry();
 }
 
-export const productionRecommendationReportBuilderAvailable = false;
+export const productionRecommendationReportBuilderAvailable = true;
 
 export function createProductionRecommendationDependencies(): RecommendationForensicsDependencies | null {
   return null;

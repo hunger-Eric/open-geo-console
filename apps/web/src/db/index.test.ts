@@ -57,8 +57,16 @@ describe("database deployment marker", () => {
 });
 
 describe("database schema marker", () => {
-  it("uses repaired legacy-retirement schema version 8", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(8);
+  it("uses artifact-scoped schema version 9", () => {
+    expect(DATABASE_SCHEMA_VERSION).toBe(9);
+  });
+
+  it("backfills legacy scopes and replaces ambiguous AI report uniqueness", () => {
+    const sql = DATABASE_MIGRATIONS.join("\n");
+    expect(sql).toContain("artifact_scope text NOT NULL DEFAULT 'legacy_website_audit_v1'");
+    expect(sql).toContain("product_contract text NOT NULL DEFAULT 'legacy_website_audit_v1'");
+    expect(sql).toContain("DROP CONSTRAINT IF EXISTS ai_reports_report_id_tier_key");
+    expect(sql).toContain("ai_reports_report_tier_product_uidx");
   });
 
   it("skips DDL bootstrap when the current schema version is present", () => {

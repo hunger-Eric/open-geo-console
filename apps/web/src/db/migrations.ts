@@ -211,6 +211,11 @@ export const DATABASE_MIGRATIONS = [
     created_at timestamptz NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS report_access_tokens_report_idx ON report_access_tokens (report_id)`,
+  `ALTER TABLE report_access_tokens ADD COLUMN IF NOT EXISTS artifact_scope text NOT NULL DEFAULT 'legacy_website_audit_v1'`,
+  `ALTER TABLE report_access_tokens DROP CONSTRAINT IF EXISTS report_access_tokens_artifact_scope_check`,
+  `ALTER TABLE report_access_tokens ADD CONSTRAINT report_access_tokens_artifact_scope_check
+   CHECK (artifact_scope IN ('legacy_website_audit_v1','recommendation_forensics_v1'))`,
+  `CREATE INDEX IF NOT EXISTS report_access_tokens_report_scope_idx ON report_access_tokens (report_id, artifact_scope)`,
   `CREATE TABLE IF NOT EXISTS payment_orders (
     id text PRIMARY KEY,
     checkout_idempotency_hmac text NOT NULL UNIQUE,
@@ -625,5 +630,13 @@ export const DATABASE_MIGRATIONS = [
       FOREIGN KEY (job_id, report_id) REFERENCES scan_jobs(id, report_id) ON DELETE CASCADE,
     UNIQUE (report_id),
     UNIQUE (job_id)
-  )`
+  )`,
+  `ALTER TABLE ai_reports ADD COLUMN IF NOT EXISTS product_contract text NOT NULL DEFAULT 'legacy_website_audit_v1'`,
+  `ALTER TABLE ai_reports DROP CONSTRAINT IF EXISTS ai_reports_product_contract_check`,
+  `ALTER TABLE ai_reports ADD CONSTRAINT ai_reports_product_contract_check
+   CHECK (product_contract IN ('legacy_website_audit_v1','recommendation_forensics_v1'))`,
+  `ALTER TABLE ai_reports DROP CONSTRAINT IF EXISTS ai_reports_report_id_tier_key`,
+  `DROP INDEX IF EXISTS ai_reports_report_tier_uidx`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS ai_reports_report_tier_product_uidx
+   ON ai_reports (report_id, tier, product_contract)`
 ] as const;

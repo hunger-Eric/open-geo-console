@@ -1,20 +1,43 @@
 import { verifyReportAccessToken } from "@/db/report-tokens";
+import type { ReportArtifactScope } from "@/db/schema";
 
-export function reportAccessCookieName(reportId: string): string {
-  return `ogc_report_${reportId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+export function reportAccessCookieName(
+  reportId: string,
+  artifactScope: ReportArtifactScope = "legacy_website_audit_v1"
+): string {
+  const suffix = artifactScope === "recommendation_forensics_v1" ? "_recommendation" : "";
+  return `ogc_report_${reportId.replace(/[^a-zA-Z0-9_-]/g, "")}${suffix}`;
 }
 
-export async function requestHasReportAccess(request: Request, reportId: string): Promise<boolean> {
-  const rawToken = readCookie(request.headers.get("cookie") ?? "", reportAccessCookieName(reportId));
+export async function requestHasReportAccess(
+  request: Request,
+  reportId: string,
+  artifactScope: ReportArtifactScope = "legacy_website_audit_v1"
+): Promise<boolean> {
+  const rawToken = readCookie(request.headers.get("cookie") ?? "", reportAccessCookieName(reportId, artifactScope));
   if (!rawToken) return false;
   const verified = await verifyReportAccessToken(rawToken);
-  return verified?.reportId === reportId;
+  return verified?.reportId === reportId && verified.artifactScope === artifactScope;
 }
 
-export async function tokenGrantsReportAccess(rawToken: string | undefined, reportId: string): Promise<boolean> {
+export async function tokenGrantsReportAccess(
+  rawToken: string | undefined,
+  reportId: string,
+  artifactScope: ReportArtifactScope = "legacy_website_audit_v1"
+): Promise<boolean> {
   if (!rawToken) return false;
   const verified = await verifyReportAccessToken(rawToken);
-  return verified?.reportId === reportId;
+  return verified?.reportId === reportId && verified.artifactScope === artifactScope;
+}
+
+export async function resolveRequestArtifactScope(request: Request, reportId: string): Promise<ReportArtifactScope | null> {
+  if (await requestHasReportAccess(request, reportId, "recommendation_forensics_v1")) {
+    return "recommendation_forensics_v1";
+  }
+  if (await requestHasReportAccess(request, reportId, "legacy_website_audit_v1")) {
+    return "legacy_website_audit_v1";
+  }
+  return null;
 }
 
 function readCookie(header: string, name: string): string | undefined {

@@ -206,6 +206,22 @@ export async function getRecommendationForensicReportForJob(jobId: string): Prom
   return parseRecommendationForensicReportV1(row.payload, authorities);
 }
 
+export async function getRecommendationForensicReportForReport(reportId: string): Promise<RecommendationForensicReportV1 | null> {
+  let row: RecommendationForensicReportRow | null;
+  if (isMemoryPersistence()) row = memoryGetRecommendationForensicReportForReport(reportId);
+  else {
+    await ensureDatabase();
+    const stored = (await getSqlClient()<Array<Record<string, unknown>>>`
+      SELECT * FROM recommendation_forensic_reports
+      WHERE report_id = ${reportId} AND is_private = true
+    `)[0];
+    row = stored ? dbReportRow(stored) : null;
+  }
+  if (!row) return null;
+  const authorities = await loadAuthorities(row.certificationAuthorityVersion, row.sourceClassificationAuthorityVersion);
+  return parseRecommendationForensicReportV1(row.payload, authorities);
+}
+
 async function loadAuthorities(certificationVersion: string, sourceVersion: string) {
   if (isMemoryPersistence()) {
     const certification = memoryGetRecommendationCertificationAuthority(certificationVersion);

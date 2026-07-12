@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { loadPrivateReportArtifact } from "@/report/artifact-model";
 import { exportReportPdf } from "@/report/pdf-export";
-import { requestHasReportAccess } from "@/server/report-access";
+import { resolveRequestArtifactScope } from "@/server/report-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,8 +9,9 @@ export const maxDuration = 60;
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-  if (!await requestHasReportAccess(request, id)) return denied();
-  const model = await loadPrivateReportArtifact(id);
+  const productContract = await resolveRequestArtifactScope(request, id);
+  if (!productContract) return denied();
+  const model = await loadPrivateReportArtifact(id, productContract);
   if (!model) return denied();
   try {
     const htmlUrl = new URL(`/reports/${encodeURIComponent(id)}/report.html`, request.url).href;

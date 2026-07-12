@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element -- protected evidence is streamed through an authorized route and must remain printable */
 import type { AiFinding, EvidenceCitation, RoadmapItem } from "@open-geo-console/ai-report-engine";
-import type { PrivateReportArtifactModel } from "@/report/artifact-model";
+import type { LegacyPrivateReportArtifactModel } from "@/report/artifact-model";
 import type { ReportEvidenceAssetRow } from "@/db/schema";
 
 const copy = {
@@ -48,7 +48,7 @@ const copy = {
   }
 } as const;
 
-export function ReportArtifact({ model }: { model: PrivateReportArtifactModel }) {
+export function ReportArtifact({ model }: { model: LegacyPrivateReportArtifactModel }) {
   const t = copy[model.locale];
   const report = model.aiReport;
   const sourceUrls = [...new Set([

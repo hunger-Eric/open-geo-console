@@ -62,6 +62,7 @@ export type OrderRefundStatus = "not_required" | "pending" | "submitted" | "refu
 export type OrderDeliveryStatus = "not_queued" | "queued" | "sent" | "delivered" | "bounced" | "failed";
 export type PaymentEventProcessingStatus = "received" | "processed" | "ignored" | "failed";
 export type ReportProductContract = "legacy_website_audit_v1" | "recommendation_forensics_v1";
+export type ReportArtifactScope = ReportProductContract;
 export type PaymentRefundReason = "completed_limited" | "report_failed" | "sla_missed" | "operator_approved";
 export type PaymentRefundState = "pending" | "submitted" | "succeeded" | "failed";
 export type EmailTemplateType =
@@ -730,6 +731,7 @@ export const aiReports = pgTable(
       .notNull()
       .references(() => scanJobs.id, { onDelete: "cascade" }),
     tier: text("tier").$type<ReportTier>().notNull(),
+    productContract: text("product_contract").$type<ReportProductContract>().notNull().default("legacy_website_audit_v1"),
     locale: text("locale").notNull(),
     reportVersion: integer("report_version").notNull().default(1),
     payload: jsonb("payload").$type<StoredAiReport>().notNull(),
@@ -742,7 +744,7 @@ export const aiReports = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
-    uniqueIndex("ai_reports_report_tier_uidx").on(table.reportId, table.tier),
+    uniqueIndex("ai_reports_report_tier_product_uidx").on(table.reportId, table.tier, table.productContract),
     index("ai_reports_job_idx").on(table.jobId)
   ]
 );
@@ -919,6 +921,7 @@ export const reportAccessTokens = pgTable(
       .references(() => scanReports.id, { onDelete: "cascade" }),
     tokenPrefix: text("token_prefix").notNull(),
     tokenHmac: text("token_hmac").notNull(),
+    artifactScope: text("artifact_scope").$type<ReportArtifactScope>().notNull().default("legacy_website_audit_v1"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -926,7 +929,8 @@ export const reportAccessTokens = pgTable(
   },
   (table) => [
     uniqueIndex("report_access_tokens_hmac_uidx").on(table.tokenHmac),
-    index("report_access_tokens_report_idx").on(table.reportId)
+    index("report_access_tokens_report_idx").on(table.reportId),
+    index("report_access_tokens_report_scope_idx").on(table.reportId, table.artifactScope)
   ]
 );
 

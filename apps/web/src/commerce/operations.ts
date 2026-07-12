@@ -7,7 +7,7 @@ import {
   queueCommercialEmail,
   scheduleEmailRetry
 } from "@/db/commercial-delivery";
-import { getPaymentOrder } from "@/db/commercial-orders";
+import { getPaymentOrder, productContractForCode } from "@/db/commercial-orders";
 import {
   claimPendingRefunds,
   expirePaidOrderSla,
@@ -65,11 +65,15 @@ async function sendDelivery(delivery: EmailDeliveryRow, owner: string, gateway: 
   if (!recipient || !order || recipient.emailKeyVersion !== "v1") throw new Error("commercial_email_recipient_unavailable");
   let reportUrl: string | undefined;
   if (delivery.templateType === "report_ready" || delivery.templateType === "limited_report_refund" || delivery.templateType === "link_reissue") {
-    if (delivery.templateType === "link_reissue" && delivery.attempts === 1) await revokeReportAccessTokens(delivery.reportId);
+    const artifactScope = productContractForCode(order.productCode);
+    if (delivery.templateType === "link_reissue" && delivery.attempts === 1) {
+      await revokeReportAccessTokens(delivery.reportId, artifactScope);
+    }
     const access = await issueReportAccessToken({
       reportId: delivery.reportId,
       ttlDays: 30,
-      idempotencyKey: delivery.businessIdempotencyKey
+      idempotencyKey: `${delivery.businessIdempotencyKey}/${artifactScope}`,
+      artifactScope
     });
     reportUrl = new URL(
       `/api/reports/${encodeURIComponent(delivery.reportId)}/access?token=${encodeURIComponent(access.rawToken)}`,

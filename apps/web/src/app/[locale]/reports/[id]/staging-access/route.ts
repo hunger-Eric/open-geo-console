@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPaymentOrder } from "@/db/commercial-orders";
+import { getPaymentOrder, productContractForCode } from "@/db/commercial-orders";
 import { issueReportAccessToken } from "@/db/report-tokens";
 import { getGeoReport } from "@/db/reports";
 import { reportAccessCookieName } from "@/server/report-access";
@@ -21,11 +21,15 @@ export async function GET(request: Request, context: RouteContext) {
   const access = await issueReportAccessToken({
     reportId: id,
     ttlDays: 1,
-    idempotencyKey: `staging-operator-preview/${order.id}`
+    idempotencyKey: `staging-operator-preview/${order.id}/${order.productCode}`,
+    artifactScope: productContractForCode(order.productCode)
   });
-  const destination = new URL(`/${report.reportLocale}/reports/${id}/analysis`, request.url);
+  const artifactScope = productContractForCode(order.productCode);
+  const destination = artifactScope === "recommendation_forensics_v1"
+    ? new URL(`/reports/${id}/report.html`, request.url)
+    : new URL(`/${report.reportLocale}/reports/${id}/analysis`, request.url);
   const response = NextResponse.redirect(destination, 303);
-  response.cookies.set(reportAccessCookieName(id), access.rawToken, {
+  response.cookies.set(reportAccessCookieName(id, artifactScope), access.rawToken, {
     httpOnly: true,
     sameSite: "lax",
     secure: true,

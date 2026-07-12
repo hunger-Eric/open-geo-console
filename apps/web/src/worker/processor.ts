@@ -525,6 +525,7 @@ async function persistAiReport(
     reportId: job.reportId,
     jobId: job.id,
     tier: job.tier,
+    productContract: job.productContract,
     locale: job.locale,
     payload: report,
     technicalPayload,
