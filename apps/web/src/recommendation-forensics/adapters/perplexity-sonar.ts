@@ -96,7 +96,7 @@ export function createPerplexitySonarAdapter(
             model,
             messages: [{ role: "user", content: input.question.exactText }],
             language_preference: locale,
-            search_language_filter: [locale],
+            web_search_options: { search_language_filter: [locale] },
             stream: false
           }),
           signal: input.signal

@@ -11,7 +11,7 @@ Use `apps/web/.env.staging.local`; never commit it. Set `OGC_DEPLOYMENT_PROFILE=
 - Artifact signing: an independent random `OGC_RECOMMENDATION_CERTIFICATION_SIGNING_SECRET` of at least 32 bytes, a current `OGC_RECOMMENDATION_CERTIFICATION_SIGNING_KEY_ID`, and `OGC_RECOMMENDATION_CERTIFICATION_SIGNING_VERSION=v1`. Never reuse model, token, payment, email, or access secrets.
 - Keep `OGC_RECOMMENDATION_RUNTIME_ENABLED=false`, `OGC_RECOMMENDATION_OPERATOR_ENABLED=false`, and `OGC_RECOMMENDATION_PUBLIC_ENABLED=false` during certification.
 
-Current certification supports locale `en` or `zh` and region `global` only. Perplexity sends both `language_preference` and `search_language_filter` using that explicit locale. Non-global location claims remain unsupported until official provider location mapping is implemented and the resulting surface is separately certified.
+Current certification supports locale `en` or `zh` and region `global` only. Perplexity sends top-level `language_preference` and `web_search_options.search_language_filter` using that explicit locale. Non-global location claims remain unsupported until official provider location mapping is implemented and the resulting surface is separately certified.
 
 Use a reserved certification site or an operator-approved public test site. Use a non-brand purchase question that does not name the site or customer. The command refuses missing credentials before a provider request, requires the staging database marker, records the normalized cell and bounded cost metadata, retrieves provider sources through the SSRF/robots-safe crawler, and creates a new file without overwriting an earlier artifact.
 

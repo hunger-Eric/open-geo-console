@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -38,8 +38,22 @@ describe("private certification artifact paths", () => {
       await mkdir(target, { recursive: true });
       try { await symlink(target, path.join(data, "recommendation-certification"), process.platform === "win32" ? "junction" : "dir"); }
       catch (error) { if ((error as NodeJS.ErrnoException).code === "EPERM") return; throw error; }
-      await expect(ensurePrivateCertificationDirectory(root)).rejects.toThrow("symlink or junction");
+      await expect(ensurePrivateCertificationDirectory(root)).rejects.toThrow("symlinks or junctions");
     } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("rejects a .data junction before recursive mkdir can create an external child", async () => {
+    const root = await fixtureRoot();
+    const external = await mkdtemp(path.join(tmpdir(), "ogc-cert-external-"));
+    try {
+      try { await symlink(external, path.join(root, ".data"), process.platform === "win32" ? "junction" : "dir"); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "EPERM") return; throw error; }
+      await expect(ensurePrivateCertificationDirectory(root)).rejects.toThrow("symlinks or junctions");
+      await expect(lstat(path.join(external, "recommendation-certification"))).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(external, { recursive: true, force: true });
+    }
   });
 });
 

@@ -119,7 +119,7 @@ describe("Perplexity Sonar answer-engine adapter", () => {
         content: "Which freight forwarders are suitable for European exporters?"
       }],
       language_preference: "en",
-      search_language_filter: ["en"],
+      web_search_options: { search_language_filter: ["en"] },
       stream: false
     });
     expect(observed).toMatchObject({

@@ -14,13 +14,11 @@ export function privateCertificationPath(value: string, start = process.cwd()): 
 
 export async function ensurePrivateCertificationDirectory(start = process.cwd()): Promise<string> {
   const root = workspaceRoot(start);
+  const dataRoot = path.join(root, ".data");
   const privateRoot = path.join(root, ".data", "recommendation-certification");
+  for (const candidate of [root, dataRoot, privateRoot]) await assertExistingPathSafe(candidate);
   await mkdir(privateRoot, { recursive: true, mode: 0o700 });
-  const stat = await lstat(privateRoot);
-  const actual = await realpath(privateRoot);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || !samePath(actual, privateRoot)) {
-    throw new Error("Certification artifact directory must not be a symlink or junction.");
-  }
+  for (const candidate of [root, dataRoot, privateRoot]) await assertExistingPathSafe(candidate);
   return privateRoot;
 }
 
@@ -44,6 +42,14 @@ function workspaceRoot(start: string): string {
     const parent = path.dirname(current);
     if (parent === current) return path.resolve(start);
     current = parent;
+  }
+}
+async function assertExistingPathSafe(candidate: string): Promise<void> {
+  if (!existsSync(candidate)) return;
+  const stat = await lstat(candidate);
+  const actual = await realpath(candidate);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || !samePath(actual, candidate)) {
+    throw new Error("Certification artifact path ancestors must not be symlinks or junctions.");
   }
 }
 function samePath(left: string, right: string) { return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right; }

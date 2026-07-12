@@ -57,6 +57,9 @@ describe("recommendation certification artifacts", () => {
     })).toMatchObject({ keyId: "staging-1", version: "v1" });
     expect(() => readCertificationSigningConfig({})).toThrow("Missing certification signing variables");
     expect(() => readCertificationSigningConfig({ OGC_RECOMMENDATION_CERTIFICATION_SIGNING_SECRET: "short", OGC_RECOMMENDATION_CERTIFICATION_SIGNING_KEY_ID: "staging-1", OGC_RECOMMENDATION_CERTIFICATION_SIGNING_VERSION: "v1" })).toThrow("32 bytes");
+    const reused = "provider-key-that-is-at-least-32-bytes";
+    expect(() => readCertificationSigningConfig({ OGC_RECOMMENDATION_CERTIFICATION_SIGNING_SECRET: ` ${reused} `, OGC_RECOMMENDATION_CERTIFICATION_SIGNING_KEY_ID: "staging-1", OGC_RECOMMENDATION_CERTIFICATION_SIGNING_VERSION: "v1", OGC_ANSWER_OPENAI_API_KEY: reused })).toThrow("independent");
+    expect(() => readCertificationSigningConfig({ OGC_RECOMMENDATION_CERTIFICATION_SIGNING_SECRET: reused, OGC_RECOMMENDATION_CERTIFICATION_SIGNING_KEY_ID: "staging-1", OGC_RECOMMENDATION_CERTIFICATION_SIGNING_VERSION: "v1", OGC_ANSWER_PERPLEXITY_API_KEY: ` ${reused} ` })).toThrow("independent");
   });
 });
 

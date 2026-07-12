@@ -59,6 +59,9 @@ export function readCertificationSigningConfig(environment: NodeJS.ProcessEnv): 
   ].filter(([, value]) => !value).map(([name]) => name);
   if (missing.length > 0) throw new Error(`Missing certification signing variables: ${missing.join(", ")}.`);
   if (Buffer.byteLength(secret!, "utf8") < 32) throw new Error("OGC_RECOMMENDATION_CERTIFICATION_SIGNING_SECRET must contain at least 32 bytes.");
+  const providerSecrets = [environment.OGC_ANSWER_OPENAI_API_KEY, environment.OGC_ANSWER_PERPLEXITY_API_KEY]
+    .map((value) => value?.trim()).filter(Boolean);
+  if (providerSecrets.includes(secret)) throw new Error("Certification signing secret must be independent from provider API keys.");
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(keyId!)) throw new Error("OGC_RECOMMENDATION_CERTIFICATION_SIGNING_KEY_ID is invalid.");
   if (version !== "v1") throw new Error("OGC_RECOMMENDATION_CERTIFICATION_SIGNING_VERSION must be v1.");
   return { secret: secret!, keyId: keyId!, version };

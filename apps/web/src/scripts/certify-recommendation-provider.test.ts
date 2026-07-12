@@ -23,6 +23,15 @@ describe("recommendation provider certification CLI guards", () => {
       OGC_ANSWER_OPENAI_MODEL: "gpt-pinned"
     }, marker)).rejects.toThrow("Missing certification signing variables");
     expect(marker).not.toHaveBeenCalled();
+    const reused = "provider-key-that-is-at-least-32-bytes";
+    await expect(prepareCertificationPreflight(options, {
+      OGC_ANSWER_OPENAI_API_KEY: reused,
+      OGC_ANSWER_OPENAI_MODEL: "gpt-pinned",
+      OGC_RECOMMENDATION_CERTIFICATION_SIGNING_SECRET: ` ${reused} `,
+      OGC_RECOMMENDATION_CERTIFICATION_SIGNING_KEY_ID: "staging-current",
+      OGC_RECOMMENDATION_CERTIFICATION_SIGNING_VERSION: "v1"
+    }, marker)).rejects.toThrow("independent");
+    expect(marker).not.toHaveBeenCalled();
   });
 
   it("allows dry fixture parsing without credentials but keeps the mode explicit", () => {
