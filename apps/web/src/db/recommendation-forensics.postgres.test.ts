@@ -74,6 +74,41 @@ describePostgres("recommendation-forensics PostgreSQL persistence", () => {
       questionSetVersion: "fixture-v1",
       startedAt: "2030-01-01T00:00:00.000Z"
     });
+    const attackSource = { url: "https://attack.example.org/review", title: "Attack review", providerOrder: 0, providerMetadata: {} };
+    const attackCell = { ...cell, sources: [attackSource] };
+    const duplicatedLedger = {
+      runId,
+      checkpointRevision: 1,
+      providers: {
+        [surface.providerId]: { requestCount: 1, estimatedCostMicros: 0, cells: { [cell.id]: { attemptCount: 1, transientAttemptCount: 0 } } },
+        "foreign-provider": { requestCount: 1, estimatedCostMicros: 0, cells: { [cell.id]: { attemptCount: 1, transientAttemptCount: 0 } } }
+      }
+    };
+    await expect(compareAndSwapAnswerExecutionCheckpoint({ expectedRevision: 0, executionState: duplicatedLedger, cell: attackCell }))
+      .rejects.toThrow(/only one provider|foreign provider/i);
+    const attackWrites = await getSqlClient()<Array<{ checkpoints: number; cells: number; sources: number }>>`
+      SELECT
+        (SELECT count(*)::integer FROM answer_execution_checkpoints WHERE run_id = ${runId}) AS checkpoints,
+        (SELECT count(*)::integer FROM answer_snapshot_cells WHERE id = ${cell.id}) AS cells,
+        (SELECT count(*)::integer FROM answer_snapshot_sources source JOIN answer_snapshot_cells snapshot ON snapshot.id = source.cell_id WHERE snapshot.id = ${cell.id}) AS sources
+    `;
+    expect(attackWrites[0]).toEqual({ checkpoints: 0, cells: 0, sources: 0 });
+    await expect(compareAndSwapAnswerExecutionCheckpoint({
+      expectedRevision: 0,
+      executionState: {
+        runId,
+        checkpointRevision: 1,
+        providers: { [surface.providerId]: { requestCount: 1, estimatedCostMicros: 0, cells: { [cell.id]: { attemptCount: 1, transientAttemptCount: 0 } } } }
+      },
+      cell: { ...attackCell, providerRequestId: "Authorization: Bearer sk-live-postgres" }
+    })).rejects.toThrow(/providerRequestId.*sensitive/i);
+    const sensitiveWrites = await getSqlClient()<Array<{ checkpoints: number; cells: number; sources: number }>>`
+      SELECT
+        (SELECT count(*)::integer FROM answer_execution_checkpoints WHERE run_id = ${runId}) AS checkpoints,
+        (SELECT count(*)::integer FROM answer_snapshot_cells WHERE id = ${cell.id}) AS cells,
+        (SELECT count(*)::integer FROM answer_snapshot_sources source JOIN answer_snapshot_cells snapshot ON snapshot.id = source.cell_id WHERE snapshot.id = ${cell.id}) AS sources
+    `;
+    expect(sensitiveWrites[0]).toEqual({ checkpoints: 0, cells: 0, sources: 0 });
     await saveAnswerSnapshotCellImmutable(cell);
     await saveAnswerSnapshotCellImmutable(cell);
     const changedAnswer = "Changed";

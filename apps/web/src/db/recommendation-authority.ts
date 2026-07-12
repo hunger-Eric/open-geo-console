@@ -111,7 +111,11 @@ export async function compareAndSwapAnswerExecutionCheckpoint(input: AnswerExecu
     if (actualRevision !== input.expectedRevision) throw new Error("Answer execution checkpoint revision mismatch.");
     validateMonotonicLedger(checkpoint?.ledger as AnswerExecutionStateLedger | undefined, input.executionState);
     const knownCells = await tx<Array<{ id: string; provider_id: string }>>`SELECT id, provider_id FROM answer_snapshot_cells WHERE run_id = ${input.executionState.runId}`;
-    validateKnownCellProviders(input.executionState, knownCells.map(({ id, provider_id }) => ({ id, providerId: provider_id })));
+    validateCellProviderAssignments(
+      input.executionState,
+      knownCells.map(({ id, provider_id }) => ({ id, providerId: provider_id })),
+      cell
+    );
     if (cell) await persistCellAndSourcesTx(tx, cell, input.executionState);
     if (checkpoint) {
       const rows = await tx<Array<{ run_id: string }>>`
@@ -200,7 +204,11 @@ function memoryCompareAndSwap(expectedRevision: number, next: AnswerExecutionSta
   const existingCheckpoint = memoryGetAnswerExecutionCheckpoint(next.runId);
   if ((existingCheckpoint?.revision ?? 0) !== expectedRevision) throw new Error("Answer execution checkpoint revision mismatch.");
   validateMonotonicLedger(existingCheckpoint?.ledger, next);
-  validateKnownCellProviders(next, memoryGetAnswerSnapshotCellsForRuns([next.runId]).map(({ id, providerId }) => ({ id, providerId })));
+  validateCellProviderAssignments(
+    next,
+    memoryGetAnswerSnapshotCellsForRuns([next.runId]).map(({ id, providerId }) => ({ id, providerId })),
+    cell
+  );
   const prepared = cell ? prepareMemoryCellAndSources(cell, next) : null;
   if (prepared) {
     if (!prepared.existingCell) memorySaveAnswerSnapshotCell(prepared.cellRow);
@@ -297,10 +305,29 @@ function validateCheckpointShape(expectedRevision: number, next: AnswerExecution
   if (cell && cell.runId !== next.runId) throw new Error("Checkpoint cell must belong to the execution run.");
 }
 
-function validateKnownCellProviders(ledger: AnswerExecutionStateLedger, cells: Array<{ id: string; providerId: string }>): void {
-  for (const cell of cells) {
-    for (const [providerId, provider] of Object.entries(ledger.providers)) {
-      if (provider.cells[cell.id] && providerId !== cell.providerId) throw new Error("Answer execution cell ledger is stored under a foreign provider.");
+function validateCellProviderAssignments(
+  ledger: AnswerExecutionStateLedger,
+  persistedCells: Array<{ id: string; providerId: string }>,
+  pendingCell?: AnswerSnapshotCell
+): void {
+  const expectedProviders = new Map(persistedCells.map(({ id, providerId }) => [id, providerId]));
+  if (pendingCell) {
+    const existing = expectedProviders.get(pendingCell.id);
+    if (existing && existing !== pendingCell.surface.providerId) {
+      throw new Error("Checkpoint cell conflicts with its persisted provider.");
+    }
+    expectedProviders.set(pendingCell.id, pendingCell.surface.providerId);
+  }
+  const assignments = new Map<string, string>();
+  for (const [providerId, provider] of Object.entries(ledger.providers)) {
+    for (const cellId of Object.keys(provider.cells)) {
+      const previous = assignments.get(cellId);
+      if (previous) throw new Error("Answer execution cell ledger may assign each cell to only one provider.");
+      assignments.set(cellId, providerId);
+      const expectedProvider = expectedProviders.get(cellId);
+      if (expectedProvider && expectedProvider !== providerId) {
+        throw new Error("Answer execution cell ledger is stored under a foreign provider.");
+      }
     }
   }
 }

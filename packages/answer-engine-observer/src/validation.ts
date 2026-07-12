@@ -111,11 +111,19 @@ function sanitizedError(value: unknown): string {
   return result;
 }
 
+function sanitizedProviderRequestId(value: unknown): string {
+  const result = text(value, "cell.providerRequestId", 500);
+  if (containsSensitiveMaterial(result)) {
+    throw new TypeError("cell.providerRequestId contains sensitive authentication material");
+  }
+  return result;
+}
+
 function containsSensitiveMaterial(value: string): boolean {
   return (
     /authorization\s*:\s*\S+/i.test(value) ||
     /\bbearer\s+\S+/i.test(value) ||
-    /\b(?:api[-_ ]?key|access[-_ ]?token|client[-_ ]?secret|secret)\b\s*(?:[:=]\s*|\s+)\S+/i.test(value)
+    /\b(?:api[-_ ]?key|access[-_ ]?token|token|client[-_ ]?secret|secret)\b\s*(?:[:=]\s*|\s+)\S+/i.test(value)
   );
 }
 
@@ -234,7 +242,7 @@ export function parseAnswerSnapshotCell(value: unknown): AnswerSnapshotCell {
     executionDurationMs: integer(input.executionDurationMs, "cell.executionDurationMs"),
     ...(input.providerRequestId === undefined
       ? {}
-      : { providerRequestId: text(input.providerRequestId, "cell.providerRequestId", 500) }),
+      : { providerRequestId: sanitizedProviderRequestId(input.providerRequestId) }),
     ...(input.usage === undefined ? {} : { usage: optionalUsage(input.usage) })
   };
   const expectedId = createAnswerSnapshotCellId(common);

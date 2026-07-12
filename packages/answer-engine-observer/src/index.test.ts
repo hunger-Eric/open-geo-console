@@ -140,9 +140,24 @@ describe("answer observer contracts", () => {
       "Bearer fixture-token",
       "api_key=fixture-key",
       "access token: fixture-token",
+      "token=fixture-token",
       "client secret=fixture-secret"
     ]) {
       expect(() => parseAnswerSnapshotCell({ ...failed, sanitizedError })).toThrow(/sensitive/i);
+    }
+  });
+
+  it("rejects sensitive authentication material in provider request identifiers", () => {
+    for (const providerRequestId of [
+      "Authorization: Bearer sk-live-example",
+      "Bearer sk-live-example",
+      "api_key=fixture-key",
+      "api key: fixture-key",
+      "access token: fixture-token",
+      "client_secret=fixture-secret",
+      "secret: fixture-secret"
+    ]) {
+      expect(() => parseAnswerSnapshotCell({ ...successfulCell(), providerRequestId })).toThrow(/providerRequestId.*sensitive/i);
     }
   });
 

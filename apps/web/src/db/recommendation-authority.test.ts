@@ -15,7 +15,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { memorySaveScanJob } from "./memory";
 import { createGeoReportShell, deleteGeoReport, getGeoReport } from "./reports";
-import { createAnswerSnapshotRun } from "./recommendation-forensics";
+import { createAnswerSnapshotRun, getAnswerSnapshotBundleForJob } from "./recommendation-forensics";
 import {
   compareAndSwapAnswerExecutionCheckpoint,
   getAnswerExecutionCheckpoint,
@@ -75,6 +75,34 @@ describe("recommendation-forensic protected authority", () => {
       compareAndSwapAnswerExecutionCheckpoint({ expectedRevision: 1, executionState: ledger(runId, 2, cell.id, 1) })
     ]);
     expect(concurrent.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+  });
+
+  it("rejects a new cell duplicated under a foreign provider without writing any checkpoint evidence", async () => {
+    const cell = successfulCell(runId);
+    const duplicated: AnswerExecutionStateLedger = {
+      runId,
+      checkpointRevision: 1,
+      providers: {
+        "provider-a": { requestCount: 1, estimatedCostMicros: 0, cells: { [cell.id]: { attemptCount: 1, transientAttemptCount: 0 } } },
+        "provider-b": { requestCount: 1, estimatedCostMicros: 0, cells: { [cell.id]: { attemptCount: 1, transientAttemptCount: 0 } } }
+      }
+    };
+    await expect(compareAndSwapAnswerExecutionCheckpoint({ expectedRevision: 0, executionState: duplicated, cell }))
+      .rejects.toThrow(/only one provider|foreign provider/i);
+    expect(await getAnswerExecutionCheckpoint(runId)).toBeNull();
+    const bundle = await getAnswerSnapshotBundleForJob(jobId);
+    expect(bundle?.runs[0]?.cells).toEqual([]);
+  });
+
+  it("rejects a sensitive provider request identifier before memory persistence", async () => {
+    const cell = { ...successfulCell(runId), providerRequestId: "Authorization: Bearer sk-live-memory" };
+    await expect(compareAndSwapAnswerExecutionCheckpoint({
+      expectedRevision: 0,
+      executionState: ledger(runId, 1, cell.id, 1),
+      cell
+    })).rejects.toThrow(/providerRequestId.*sensitive/i);
+    expect(await getAnswerExecutionCheckpoint(runId)).toBeNull();
+    expect((await getAnswerSnapshotBundleForJob(jobId))?.runs[0]?.cells).toEqual([]);
   });
 
   it("rolls back the ledger when the optional cell is foreign or immutable data conflicts", async () => {
