@@ -339,6 +339,27 @@ describe("answer-engine runtime", () => {
     })).rejects.toThrow(/cost cannot be lower/i);
   });
 
+  it("rejects a valid cell identity moved into another provider ledger", async () => {
+    const providerOne = successfulAdapter("p1", "candidate_uncertified");
+    const providerTwo = successfulAdapter("p2", "candidate_uncertified");
+    const q = questions().slice(0, 1);
+    const first = await observeAnswerMatrix({
+      run, questions: q, adapters: [providerOne, providerTwo], expectedCheckpointRevision: 0
+    });
+    const moved = structuredClone(first.executionState);
+    const p1CellId = first.cells.find(({ surface }) => surface.providerId === "p1")!.id;
+    const p1Ledger = moved.providers.p1!.cells[p1CellId]!;
+    delete moved.providers.p1!.cells[p1CellId];
+    moved.providers.p1!.requestCount -= p1Ledger.attemptCount;
+    moved.providers.p2!.cells[p1CellId] = p1Ledger;
+    moved.providers.p2!.requestCount += p1Ledger.attemptCount;
+
+    await expect(observeAnswerMatrix({
+      run, questions: q, adapters: [providerOne, providerTwo], existingCells: first.cells,
+      existingExecutionState: moved, expectedCheckpointRevision: moved.checkpointRevision
+    })).rejects.toThrow(/wrong provider/i);
+  });
+
   it("uses external certification and counts distinct providers rather than models", async () => {
     const q = questions().slice(0, 3);
     const modelA = successfulAdapter("same-provider", "certified", "model-a");

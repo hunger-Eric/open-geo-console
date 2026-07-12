@@ -39,13 +39,19 @@ export async function observeAnswerMatrix(input: ObserveAnswerMatrixInput): Prom
   if (new Set(cells.map((cell) => cell.id)).size !== cells.length) {
     throw new Error("Existing snapshot cell identities must be unique.");
   }
-  const expectedCellIds = new Set(input.adapters.flatMap((adapter) => questions.map((question) =>
-    createAnswerSnapshotCellId({ runId: run.id, questionId: question.id, surface: adapter.surface })
-  )));
+  const expectedCellProviders = new Map<string, string>();
+  for (const adapter of input.adapters) {
+    for (const question of questions) {
+      expectedCellProviders.set(
+        createAnswerSnapshotCellId({ runId: run.id, questionId: question.id, surface: adapter.surface }),
+        adapter.surface.providerId
+      );
+    }
+  }
   const expectedProviderIds = new Set(input.adapters.map(({ surface }) => surface.providerId));
   const executionState = parseExecutionState(
     run.id, cells, input.existingExecutionState, input.expectedCheckpointRevision,
-    expectedCellIds, expectedProviderIds
+    expectedCellProviders, expectedProviderIds
   );
   const identities = new Set(cells.map((cell) => cell.id));
   const orderedExpectedCellIds: string[] = [];
@@ -148,7 +154,7 @@ function parseExecutionState(
   cells: AnswerSnapshotCell[],
   existing: AnswerExecutionStateLedger | undefined,
   expectedCheckpointRevision: number,
-  expectedCellIds: Set<string>,
+  expectedCellProviders: Map<string, string>,
   expectedProviderIds: Set<string>
 ): AnswerExecutionStateLedger {
   if (!Number.isSafeInteger(expectedCheckpointRevision) || expectedCheckpointRevision < 0) {
@@ -174,7 +180,11 @@ function parseExecutionState(
     const estimatedCostMicros = nonNegativeInteger(raw.estimatedCostMicros, "provider estimatedCostMicros");
     const cellLedgers: Record<string, ProviderCellAttemptLedger> = {};
     for (const [cellId, ledger] of Object.entries(raw.cells ?? {})) {
-      if (!expectedCellIds.has(cellId)) throw new Error("Provider execution ledger contains an unexpected cell identity.");
+      const expectedProviderId = expectedCellProviders.get(cellId);
+      if (!expectedProviderId) throw new Error("Provider execution ledger contains an unexpected cell identity.");
+      if (expectedProviderId !== providerId) {
+        throw new Error("Provider execution ledger cell is stored under the wrong provider.");
+      }
       const attemptCount = nonNegativeInteger(ledger.attemptCount, "cell attemptCount");
       const transientAttemptCount = nonNegativeInteger(ledger.transientAttemptCount, "cell transientAttemptCount");
       if (!cellId.trim() || transientAttemptCount > attemptCount) throw new Error("Provider cell attempt ledger is invalid.");
