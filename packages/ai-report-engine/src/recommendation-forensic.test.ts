@@ -93,7 +93,12 @@ function validReport(authority = emptyAuthority): RecommendationForensicReportV1
       certificationAuthorityVersion: authority.authorityVersion,
       certificationCapturedAt: authority.capturedAt,
       certificationProvenance: [], limitations: ["No certified live provider executed."],
-      methodology: "Observed recommendation outcomes only; no private ranking cause is claimed."
+      methodology: "Observed recommendation outcomes only; no private ranking cause is claimed.",
+      sourceCategoryContext: {
+        customerRegistrableDomain: "customer.example.com",
+        competitorRegistrableDomains: [],
+        knownDomains: { "editorial.example.org": "earned_editorial" }
+      }
     }
   };
 }
@@ -126,8 +131,9 @@ function reportWithCitation(): RecommendationForensicReportV1 {
       commercialCoverage: classifyCommercialCoverage(generatedQuestions.questions, [cell], emptyAuthority)
     },
     recommendedEntities: [{
-      entityId: "atlas", name: "Atlas Example", resolutionStatus: "resolved",
-      supportingCellIds: [cell.id]
+      entityId: "atlas", name: "Atlas Example", registrableDomain: "atlas.example.org",
+      resolution: { status: "resolved", entityId: "atlas", basis: "unique_name" },
+      signals: [{ cellId: cell.id, kind: "direct_candidate", supportingQuote: answerText }]
     }],
     citationSources: [{
       id: "citation-1", cellId: cell.id, url: cell.sources[0]!.url, title: cell.sources[0]!.title,
@@ -139,8 +145,148 @@ function reportWithCitation(): RecommendationForensicReportV1 {
       }
     }],
     evidenceGrades: [{ evidenceId: "evidence-1", citationSourceId: "citation-1", cellId: cell.id, grade: "A" }],
-    sourceCategoryBreakdown: [{ category: "earned_editorial", sourceCount: 1, citationSourceIds: ["citation-1"] }]
+    sourceCategoryBreakdown: [{ category: "earned_editorial", sourceCount: 1, citationSourceIds: ["citation-1"] }],
+    provenanceAndLimitations: {
+      ...report.provenanceAndLimitations,
+      sourceCategoryContext: {
+        ...report.provenanceAndLimitations.sourceCategoryContext,
+        competitorRegistrableDomains: ["atlas.example.org"]
+      }
+    }
   };
+}
+
+function limitedShellReport(): { report: RecommendationForensicReportV1; authority: CertificationAuthoritySnapshot } {
+  const report = validReport();
+  const surface: AnswerEngineSurface = {
+    providerId: "limited", productId: "limited-search", modelId: "limited-model",
+    collectionSurface: "developer_api", locale: "en", region: "global", certificationState: "certified"
+  };
+  const cells = generatedQuestions.questions.slice(0, 3).map((question, index) => {
+    const answerText = `Atlas Example is one candidate for question ${index + 1}.`;
+    return {
+      id: createAnswerSnapshotCellId({ runId: snapshotRun.id, questionId: question.id, surface }),
+      runId: snapshotRun.id, questionId: question.id, surface, status: "succeeded" as const,
+      answerText, responseHash: createAnswerResponseHash(answerText),
+      sources: [{
+        url: `https://editorial.example.org/atlas-${index + 1}`, title: `Atlas review ${index + 1}`,
+        providerOrder: 0, providerMetadata: { providerSourceId: `limited-source-${index + 1}` }
+      }],
+      recommendationOutcome: "recommendations_present" as const,
+      executedAt: `2026-07-12T00:00:1${index}.000Z`, executionDurationMs: 100
+    };
+  });
+  const authority: CertificationAuthoritySnapshot = {
+    authorityVersion: "limited-authority-v1", capturedAt: "2026-07-12T00:00:30.000Z",
+    certifications: [{
+      surface,
+      evidence: {
+        environment: "protected_staging", certifiedAt: "2026-07-12T00:00:00.000Z",
+        evidenceReference: "acceptance/limited"
+      }
+    }]
+  };
+  report.answerSnapshotMatrix = {
+    run: snapshotRun, cells,
+    commercialCoverage: classifyCommercialCoverage(generatedQuestions.questions, cells, authority)
+  };
+  report.provenanceAndLimitations.certificationAuthorityVersion = authority.authorityVersion;
+  report.provenanceAndLimitations.certificationCapturedAt = authority.capturedAt;
+  report.provenanceAndLimitations.certificationProvenance = [{
+    surfaceKey: [surface.providerId, surface.productId, surface.modelId, surface.collectionSurface, surface.locale, surface.region].join("/"),
+    evidenceReference: "acceptance/limited"
+  }];
+  return { report, authority };
+}
+
+function completeLimitedReport(): { report: RecommendationForensicReportV1; authority: CertificationAuthoritySnapshot } {
+  const { report, authority } = limitedShellReport();
+  const cells = report.answerSnapshotMatrix.cells.filter((cell) => cell.status === "succeeded");
+  report.recommendedEntities = [{
+    entityId: "atlas", name: "Atlas Example", registrableDomain: "atlas.example.org",
+    resolution: { status: "resolved", entityId: "atlas", basis: "unique_name" },
+    signals: cells.map((cell) => ({
+      cellId: cell.id, kind: "direct_candidate" as const, supportingQuote: cell.answerText
+    }))
+  }];
+  report.provenanceAndLimitations.sourceCategoryContext.competitorRegistrableDomains = ["atlas.example.org"];
+  report.citationSources = cells.map((cell, index) => ({
+    id: `commercial-citation-${index}`, cellId: cell.id, url: cell.sources[0]!.url,
+    title: cell.sources[0]!.title, category: "earned_editorial" as const, providerOrder: 0,
+    retrieval: {
+      state: "available" as const, retrievedAt: "2026-07-12T00:00:20.000Z",
+      contentHash: `${index + 1}`.repeat(64), verifiedExcerpt: `Atlas Example review evidence ${index + 1}.`,
+      mapping: "association" as const, supportedEntityIds: ["atlas"]
+    }
+  }));
+  report.evidenceGrades = report.citationSources.map((citation, index) => ({
+    evidenceId: `commercial-evidence-${index}`, citationSourceId: citation.id,
+    cellId: citation.cellId, grade: "B" as const
+  }));
+  report.sourceCategoryBreakdown = [{
+    category: "earned_editorial", sourceCount: report.citationSources.length,
+    citationSourceIds: report.citationSources.map(({ id }) => id)
+  }];
+  report.customerVsCompetitorGaps = [{
+    id: "gap-atlas", title: "Atlas evidence gap", rationale: "Atlas Example appears in observed answers.",
+    evidenceCellIds: cells.map(({ id }) => id), sourcePattern: "earned editorial evidence",
+    suggestedAction: "Commission a verifiable comparison brief for vendor review.",
+    competitorEntityIds: ["atlas"], outcome: "competitor_gap"
+  }];
+  report.vendorTaskPackage.tasks = [{
+    id: "task-comparison", vendor: "content", title: "Draft comparison evidence",
+    rationale: "Address the observed Atlas evidence gap.", actions: ["Draft a sourced comparison."],
+    acceptanceCriteria: ["Every claim has a public source."], evidenceCellIds: [cells[0]!.id],
+    retestQuestionIds: [report.generatedQuestions.questions[0]!.id]
+  }];
+  return { report, authority };
+}
+
+function completeNoRecommendationReport(): { report: RecommendationForensicReportV1; authority: CertificationAuthoritySnapshot } {
+  const { report, authority } = limitedShellReport();
+  const cells = report.answerSnapshotMatrix.cells.map((cell, index) => {
+    if (cell.status !== "succeeded") return cell;
+    const answerText = `No supplier recommendation is supported for question ${index + 1}.`;
+    return {
+      ...cell, answerText, responseHash: createAnswerResponseHash(answerText),
+      recommendationOutcome: "no_recommendation" as const
+    };
+  });
+  report.answerSnapshotMatrix.cells = cells;
+  report.answerSnapshotMatrix.commercialCoverage = classifyCommercialCoverage(
+    report.generatedQuestions.questions, cells, authority
+  );
+  const successful = cells.filter((cell) => cell.status === "succeeded");
+  report.citationSources = successful.map((cell, index) => ({
+    id: `no-rec-citation-${index}`, cellId: cell.id, url: cell.sources[0]!.url,
+    title: cell.sources[0]!.title, category: "earned_editorial" as const, providerOrder: 0,
+    retrieval: {
+      state: "available" as const, retrievedAt: "2026-07-12T00:00:20.000Z",
+      contentHash: `${index + 4}`.repeat(64), mapping: "none" as const, supportedEntityIds: []
+    }
+  }));
+  report.evidenceGrades = report.citationSources.map((citation, index) => ({
+    evidenceId: `no-rec-evidence-${index}`, citationSourceId: citation.id,
+    cellId: citation.cellId, grade: "D" as const
+  }));
+  report.sourceCategoryBreakdown = [{
+    category: "earned_editorial", sourceCount: report.citationSources.length,
+    citationSourceIds: report.citationSources.map(({ id }) => id)
+  }];
+  report.customerVsCompetitorGaps = [{
+    id: "gap-no-recommendation", title: "No recommendation outcome",
+    rationale: "The observed answer set did not recommend a supplier.",
+    evidenceCellIds: successful.map(({ id }) => id), sourcePattern: "no recommendation",
+    suggestedAction: "Preserve this question set for a later evidence-backed rerun.",
+    competitorEntityIds: [], outcome: "no_recommendation"
+  }];
+  report.vendorTaskPackage.tasks = [{
+    id: "task-no-rec", vendor: "cross-functional", title: "Prepare rerun evidence",
+    rationale: "The observed set produced no supplier recommendation.", actions: ["Review public category evidence."],
+    acceptanceCriteria: ["Evidence is public and source-linked."], evidenceCellIds: [successful[0]!.id],
+    retestQuestionIds: [report.generatedQuestions.questions[0]!.id]
+  }];
+  return { report, authority };
 }
 
 describe("RecommendationForensicReportV1", () => {
@@ -153,6 +299,22 @@ describe("RecommendationForensicReportV1", () => {
       .toThrow(/exactly three/i);
     expect(() => parseRecommendationForensicReportV1(websiteFoundation(), emptyAuthority))
       .toThrow(RecommendationForensicReportValidationError);
+  });
+
+  it("rejects a completed-limited report that is an empty structured shell", () => {
+    const { report, authority } = limitedShellReport();
+    expect(report.answerSnapshotMatrix.commercialCoverage.outcome).toBe("completed_limited");
+    expect(() => parseRecommendationForensicReportV1(report, authority)).toThrow(/auditable recommendation/i);
+  });
+
+  it("accepts an evidence-complete completed-limited report", () => {
+    const { report, authority } = completeLimitedReport();
+    expect(parseRecommendationForensicReportV1(report, authority)).toEqual(report);
+  });
+
+  it("accepts an explicit truthful no-recommendation completed-limited report", () => {
+    const { report, authority } = completeNoRecommendationReport();
+    expect(parseRecommendationForensicReportV1(report, authority)).toEqual(report);
   });
 
   it("requires an external certification authority and rejects self-asserted qualification", () => {
@@ -204,6 +366,14 @@ describe("RecommendationForensicReportV1", () => {
     const poisoned = structuredClone(report);
     poisoned.generatedQuestions.questions[0]!.exactText = "Which Customer Co provider is best?";
     expect(() => parseRecommendationForensicReportV1(poisoned, emptyAuthority)).toThrow(/brand|organization/i);
+
+    const punctuationVariant = validReport();
+    punctuationVariant.generatedQuestions = generatePurchaseQuestions({
+      locale: "en", organizationName: "Acme Inc", categories: ["freight forwarding"],
+      capabilities: ["customs clearance"], sourceUrls: []
+    });
+    punctuationVariant.generatedQuestions.questions[0]!.exactText = "Which Acme, Inc. provider is suitable?";
+    expect(() => parseRecommendationForensicReportV1(punctuationVariant, emptyAuthority)).toThrow(/brand|organization/i);
   });
 
   it("rebuilds Grade A from a provider-returned source and verified retrieval evidence", () => {
@@ -213,6 +383,14 @@ describe("RecommendationForensicReportV1", () => {
     const mismatchedSource = structuredClone(report);
     mismatchedSource.citationSources[0]!.url = "https://fabricated.example.org/not-returned";
     expect(() => parseRecommendationForensicReportV1(mismatchedSource, emptyAuthority)).toThrow(/returned source/i);
+
+    const selfCategorized = structuredClone(report);
+    selfCategorized.citationSources[0]!.category = "community_or_ugc";
+    expect(() => parseRecommendationForensicReportV1(selfCategorized, emptyAuthority)).toThrow(/recomputed|Category must/i);
+
+    const fabricatedSignal = structuredClone(report);
+    fabricatedSignal.recommendedEntities[0]!.signals[0]!.supportingQuote = "Atlas Example is the best provider.";
+    expect(() => parseRecommendationForensicReportV1(fabricatedSignal, emptyAuthority)).toThrow(/exact answerText substring/i);
 
     const forgedGrade = structuredClone(report);
     forgedGrade.citationSources[0]!.retrieval.state = "inaccessible";
@@ -249,10 +427,45 @@ describe("RecommendationForensicReportV1", () => {
     const report = reportWithCitation();
     report.evidenceGrades[0]!.repeatedPattern = {
       kind: "entity", value: "Atlas Example", occurrences: [
-        { cellId: report.answerSnapshotMatrix.cells[0]!.id, recommendationOutcome: "recommendations_present", supportingText: "Atlas Example candidate" },
-        { cellId: "foreign-cell", recommendationOutcome: "recommendations_present", supportingText: "Atlas Example candidate" }
+        { cellId: report.answerSnapshotMatrix.cells[0]!.id, recommendationOutcome: "recommendations_present", supportingText: "Atlas Example is one candidate." },
+        { cellId: "foreign-cell", recommendationOutcome: "recommendations_present", supportingText: "Atlas Example is one candidate." }
       ]
     };
     expect(() => parseRecommendationForensicReportV1(report, emptyAuthority)).toThrow(/repeated-pattern|report cell/i);
+  });
+
+  it("rejects Grade C text that is not an exact structured recommendation signal", () => {
+    const { report, authority } = limitedShellReport();
+    const cells = report.answerSnapshotMatrix.cells.filter((cell) => cell.status === "succeeded");
+    report.recommendedEntities = [{
+      entityId: "atlas", name: "Atlas Example",
+      resolution: { status: "resolved", entityId: "atlas", basis: "unique_name" },
+      signals: cells.map((cell) => ({
+        cellId: cell.id, kind: "direct_candidate" as const, supportingQuote: cell.answerText
+      }))
+    }];
+    report.citationSources = cells.map((cell, index) => ({
+      id: `limited-citation-${index}`, cellId: cell.id, url: cell.sources[0]!.url,
+      title: cell.sources[0]!.title, category: "earned_editorial" as const, providerOrder: 0,
+      retrieval: {
+        state: "available" as const, retrievedAt: "2026-07-12T00:00:20.000Z",
+        contentHash: `${index + 1}`.repeat(64), mapping: "none" as const, supportedEntityIds: []
+      }
+    }));
+    report.sourceCategoryBreakdown = [{
+      category: "earned_editorial", sourceCount: 3,
+      citationSourceIds: report.citationSources.map(({ id }) => id)
+    }];
+    report.evidenceGrades = [{
+      evidenceId: "pattern-evidence", citationSourceId: report.citationSources[0]!.id,
+      cellId: cells[0]!.id, grade: "C",
+      repeatedPattern: {
+        kind: "entity", value: "Atlas Example", occurrences: [
+          { cellId: cells[0]!.id, recommendationOutcome: "recommendations_present", supportingText: cells[0]!.answerText },
+          { cellId: cells[1]!.id, recommendationOutcome: "recommendations_present", supportingText: "Atlas Example fabricated quote" }
+        ]
+      }
+    }];
+    expect(() => parseRecommendationForensicReportV1(report, authority)).toThrow(/exact answerText substring|recommendation signal/i);
   });
 });

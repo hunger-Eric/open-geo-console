@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { AnswerQuestion, GeneratedQuestionSet, QuestionGenerationInput } from "./types";
 import { parseAnswerQuestion } from "./validation";
+import { canonicalizeBrand, stripCanonicalBrands } from "./brands";
 
 export function generatePurchaseQuestions(input: QuestionGenerationInput): GeneratedQuestionSet {
   const locale = input.locale.trim() || "en";
@@ -8,8 +9,10 @@ export function generatePurchaseQuestions(input: QuestionGenerationInput): Gener
     throw new TypeError("organizationName is required for non-branded question generation.");
   }
   const organizationName = input.organizationName.trim();
+  const organizationKey = canonicalizeBrand(organizationName);
+  if (!organizationKey) throw new TypeError("organizationName must contain a brand identity beyond a company suffix.");
   const brandAliases = [...new Set((input.brandAliases ?? []).map((alias) => alias.trim()).filter(Boolean))]
-    .filter((alias) => alias.toLocaleLowerCase() !== organizationName.toLocaleLowerCase());
+    .filter((alias) => canonicalizeBrand(alias).length > 0 && canonicalizeBrand(alias) !== organizationKey);
   const brands = [organizationName, ...brandAliases];
   const category = nonBrandedFirst(input.categories, brands);
   const capability = nonBrandedFirst(input.capabilities, brands);
@@ -78,13 +81,7 @@ function nonBrandedFirst(values: string[] | undefined, brands: string[]): string
 }
 
 function removeBrands(value: string, brands: string[]): string {
-  return [...brands]
-    .sort((left, right) => right.length - left.length)
-    .reduce((result, brand) => result.replace(new RegExp(escapeRegExp(brand), "giu"), ""), value);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return stripCanonicalBrands(value, brands);
 }
 
 function compact(values: Array<string | undefined>): string[] {

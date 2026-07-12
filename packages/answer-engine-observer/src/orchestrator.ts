@@ -2,19 +2,17 @@ import { createAnswerSnapshotCellId } from "./identity";
 import type {
   AnswerAdapterErrorClass,
   AnswerEngineAdapter,
+  AnswerExecutionStateLedger,
   AnswerQuestion,
   AnswerSnapshotCell,
   FailedAnswerSnapshotCell,
   ObserveAnswerMatrixInput,
   ObserveAnswerMatrixResult,
-  ProviderExecutionBudget
+  ProviderCellAttemptLedger,
+  ProviderExecutionBudget,
+  ProviderExecutionLedger
 } from "./types";
 import { parseAnswerQuestion, parseAnswerSnapshotCell, parseAnswerSnapshotRun } from "./validation";
-
-interface ProviderExecutionState {
-  requestCount: number;
-  spentMicros: number;
-}
 
 interface ValidatedProviderExecutionBudget extends ProviderExecutionBudget {
   maxTransientRetries: number;
@@ -34,30 +32,40 @@ export async function observeAnswerMatrix(input: ObserveAnswerMatrixInput): Prom
   const questions = input.questions.map(parseAnswerQuestion);
   const cells = [...(input.existingCells ?? []).map(parseAnswerSnapshotCell)];
   if (cells.some((cell) => cell.runId !== run.id)) throw new Error("Existing cells must belong to the observed run.");
+  const questionIds = new Set(questions.map(({ id }) => id));
+  if (cells.some((cell) => !questionIds.has(cell.questionId))) {
+    throw new Error("Existing cells must belong to the observed question set.");
+  }
   if (new Set(cells.map((cell) => cell.id)).size !== cells.length) {
     throw new Error("Existing snapshot cell identities must be unique.");
   }
+  const executionState = parseExecutionState(run.id, cells, input.existingExecutionState);
   const identities = new Set(cells.map((cell) => cell.id));
   const expectedCellIds: string[] = [];
-  const providerStates = initializeProviderStates(cells);
 
   for (const adapter of input.adapters) {
     const providerId = adapter.surface.providerId;
     const budget = validatedBudget(input.budgets?.[providerId] ?? DEFAULT_BUDGET);
-    const state = providerStates.get(providerId) ?? { requestCount: 0, spentMicros: 0 };
-    providerStates.set(providerId, state);
+    const providerLedger = executionState.providers[providerId] ?? {
+      requestCount: 0, estimatedCostMicros: 0, cells: {}
+    };
+    executionState.providers[providerId] = providerLedger;
     for (const question of questions) {
       const id = createAnswerSnapshotCellId({ runId: run.id, questionId: question.id, surface: adapter.surface });
       expectedCellIds.push(id);
       if (identities.has(id)) continue;
-      const cell = await executeCellWithRecovery(adapter, run, question, id, budget, state);
+      const cell = await executeCellWithRecovery(adapter, run, question, id, budget, providerLedger);
       if (!cell) continue;
       cells.push(cell);
       identities.add(cell.id);
       await input.persistCell?.(cell);
     }
   }
-  return { cells, pendingCellIds: expectedCellIds.filter((id) => !identities.has(id)) };
+  return {
+    cells,
+    pendingCellIds: expectedCellIds.filter((id) => !identities.has(id)),
+    executionState: structuredClone(executionState)
+  };
 }
 
 async function executeCellWithRecovery(
@@ -66,21 +74,23 @@ async function executeCellWithRecovery(
   question: AnswerQuestion,
   expectedId: string,
   budget: ValidatedProviderExecutionBudget,
-  state: ProviderExecutionState
+  providerLedger: ProviderExecutionLedger
 ): Promise<AnswerSnapshotCell | undefined> {
-  let attemptCount = 0;
-  while (canExecute(state, budget)) {
-    state.requestCount += 1;
-    attemptCount += 1;
+  const attemptLedger = providerLedger.cells[expectedId] ?? { attemptCount: 0, transientAttemptCount: 0 };
+  providerLedger.cells[expectedId] = attemptLedger;
+  while (canExecute(providerLedger, budget)) {
+    providerLedger.requestCount += 1;
+    attemptLedger.attemptCount += 1;
     const observed = parseAnswerSnapshotCell(await observeWithTimeout(adapter, run, question, budget.timeoutMs));
     if (observed.id !== expectedId) throw new Error("Adapter returned a cell for a different run, question, or surface.");
-    state.spentMicros += observed.usage?.estimatedCostMicros ?? 0;
+    providerLedger.estimatedCostMicros += observed.usage?.estimatedCostMicros ?? 0;
     if (observed.status === "succeeded") return observed;
     if (!TRANSIENT_ERRORS.has(observed.errorClass)) {
-      return terminalFailure(observed, attemptCount, "non_retryable");
+      return terminalFailure(observed, attemptLedger.attemptCount, "non_retryable");
     }
-    if (attemptCount > budget.maxTransientRetries) {
-      return terminalFailure(observed, attemptCount, "retry_exhausted");
+    attemptLedger.transientAttemptCount += 1;
+    if (attemptLedger.transientAttemptCount > budget.maxTransientRetries) {
+      return terminalFailure(observed, attemptLedger.attemptCount, "retry_exhausted");
     }
   }
   return undefined;
@@ -115,6 +125,58 @@ async function observeWithTimeout(
   }
 }
 
+function parseExecutionState(
+  runId: string,
+  cells: AnswerSnapshotCell[],
+  existing: AnswerExecutionStateLedger | undefined
+): AnswerExecutionStateLedger {
+  if (!existing) {
+    if (cells.length > 0) throw new Error("Existing cells require a persisted provider execution state ledger.");
+    return { runId, providers: {} };
+  }
+  if (existing.runId !== runId || !existing.providers || typeof existing.providers !== "object") {
+    throw new Error("Provider execution state ledger must belong to the observed run.");
+  }
+  const result: AnswerExecutionStateLedger = { runId, providers: {} };
+  for (const [providerId, raw] of Object.entries(existing.providers)) {
+    if (!providerId.trim() || !raw || typeof raw !== "object") throw new Error("Provider execution ledger is invalid.");
+    const requestCount = nonNegativeInteger(raw.requestCount, "provider requestCount");
+    const estimatedCostMicros = nonNegativeInteger(raw.estimatedCostMicros, "provider estimatedCostMicros");
+    const cellLedgers: Record<string, ProviderCellAttemptLedger> = {};
+    for (const [cellId, ledger] of Object.entries(raw.cells ?? {})) {
+      const attemptCount = nonNegativeInteger(ledger.attemptCount, "cell attemptCount");
+      const transientAttemptCount = nonNegativeInteger(ledger.transientAttemptCount, "cell transientAttemptCount");
+      if (!cellId.trim() || transientAttemptCount > attemptCount) throw new Error("Provider cell attempt ledger is invalid.");
+      cellLedgers[cellId] = { attemptCount, transientAttemptCount };
+    }
+    const recordedAttempts = Object.values(cellLedgers).reduce((sum, ledger) => sum + ledger.attemptCount, 0);
+    if (recordedAttempts !== requestCount) throw new Error("Provider request count must equal its persisted cell attempts.");
+    result.providers[providerId] = { requestCount, estimatedCostMicros, cells: cellLedgers };
+  }
+  for (const cell of cells) {
+    if (cell.status === "failed" && (!cell.attemptCount || !cell.failureDisposition)) {
+      throw new Error("Existing failed cells must carry terminal attempt metadata.");
+    }
+    const ledger = result.providers[cell.surface.providerId]?.cells[cell.id];
+    if (!ledger || ledger.attemptCount < 1 ||
+        (cell.status === "failed" && ledger.attemptCount !== cell.attemptCount)) {
+      throw new Error("Existing cells must match the persisted provider execution state ledger.");
+    }
+    if (cell.status === "succeeded" && ledger.transientAttemptCount >= ledger.attemptCount) {
+      throw new Error("Succeeded cells require a final non-transient success attempt.");
+    }
+    if (cell.status === "failed" && cell.failureDisposition === "retry_exhausted" &&
+        ledger.transientAttemptCount !== ledger.attemptCount) {
+      throw new Error("Retry-exhausted cells require every recorded attempt to be transient.");
+    }
+    if (cell.status === "failed" && cell.failureDisposition === "non_retryable" &&
+        ledger.transientAttemptCount >= ledger.attemptCount) {
+      throw new Error("Non-retryable cells require a final non-transient attempt.");
+    }
+  }
+  return result;
+}
+
 function terminalFailure(
   cell: FailedAnswerSnapshotCell,
   attemptCount: number,
@@ -138,20 +200,8 @@ function failedCell(
   };
 }
 
-function initializeProviderStates(cells: AnswerSnapshotCell[]): Map<string, ProviderExecutionState> {
-  const states = new Map<string, ProviderExecutionState>();
-  for (const cell of cells) {
-    const providerId = cell.surface.providerId;
-    const state = states.get(providerId) ?? { requestCount: 0, spentMicros: 0 };
-    state.requestCount += cell.status === "failed" ? (cell.attemptCount ?? 1) : 1;
-    state.spentMicros += cell.usage?.estimatedCostMicros ?? 0;
-    states.set(providerId, state);
-  }
-  return states;
-}
-
-function canExecute(state: ProviderExecutionState, budget: ValidatedProviderExecutionBudget): boolean {
-  return state.requestCount < budget.maxRequests && state.spentMicros < budget.maxEstimatedCostMicros;
+function canExecute(ledger: ProviderExecutionLedger, budget: ValidatedProviderExecutionBudget): boolean {
+  return ledger.requestCount < budget.maxRequests && ledger.estimatedCostMicros < budget.maxEstimatedCostMicros;
 }
 
 function validatedBudget(budget: ProviderExecutionBudget): ValidatedProviderExecutionBudget {
@@ -163,6 +213,11 @@ function validatedBudget(budget: ProviderExecutionBudget): ValidatedProviderExec
     throw new TypeError("Provider execution budgets require non-negative integer limits and a positive timeout.");
   }
   return { ...budget, maxTransientRetries };
+}
+
+function nonNegativeInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new TypeError(`${label} must be a non-negative integer.`);
+  return value as number;
 }
 
 class AdapterTimeoutError extends Error {}

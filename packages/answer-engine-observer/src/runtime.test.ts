@@ -86,6 +86,12 @@ describe("answer-engine runtime", () => {
     expect(broad).toMatchObject({ confidence: "low", fallbackReason: "insufficient_category_evidence" });
     expect(broad.questions).toHaveLength(3);
     expect(broad.questions.every((question) => /[\u4e00-\u9fff]/u.test(question.exactText))).toBe(true);
+
+    const punctuationVariant = generatePurchaseQuestions({
+      locale: "en", organizationName: "Acme Inc", brandAliases: [],
+      categories: ["Acme, Inc. freight forwarding"], capabilities: ["customs clearance"], sourceUrls: []
+    });
+    expect(JSON.stringify(punctuationVariant.questions)).not.toMatch(/Acme/i);
   });
 
   it("separates adapter existence from an immutable protected-staging authority snapshot", () => {
@@ -132,6 +138,16 @@ describe("answer-engine runtime", () => {
     expect(costly.observe).toHaveBeenCalledTimes(1);
     expect(untouchedSpy).not.toHaveBeenCalled();
     expect(costResult.pendingCellIds).toHaveLength(7);
+    const costlyObserve = costly.observe as ReturnType<typeof vi.fn>;
+    costlyObserve.mockClear();
+    const costResumed = await observeAnswerMatrix({
+      run, questions: questions(), adapters: [costly, untouched],
+      existingCells: costResult.cells, existingExecutionState: costResult.executionState,
+      budgets: { "cost-shared": { maxRequests: 8, maxEstimatedCostMicros: 1_000, timeoutMs: 1_000 } }
+    });
+    expect(costlyObserve).not.toHaveBeenCalled();
+    expect(untouchedSpy).not.toHaveBeenCalled();
+    expect(costResumed.executionState).toEqual(costResult.executionState);
   });
 
   it("checkpoints only successful cells and resumes budget-deferred missing cells", async () => {
@@ -147,12 +163,14 @@ describe("answer-engine runtime", () => {
 
     const secondPersist = vi.fn();
     const second = await observeAnswerMatrix({
-      run, questions: questions(), adapters: [adapter], existingCells: first.cells, persistCell: secondPersist,
+      run, questions: questions(), adapters: [adapter], existingCells: first.cells,
+      existingExecutionState: first.executionState, persistCell: secondPersist,
       budgets: { candidate: { maxRequests: 4, maxEstimatedCostMicros: 10_000, timeoutMs: 1_000 } }
     });
     expect(second.cells).toHaveLength(4);
     expect(second.pendingCellIds).toEqual([]);
     expect(secondPersist).toHaveBeenCalledTimes(1);
+    expect(second.executionState.providers.candidate).toMatchObject({ requestCount: 4 });
   });
 
   it("retries transient failures without checkpointing them and persists only the later success", async () => {
@@ -198,7 +216,8 @@ describe("answer-engine runtime", () => {
 
   it("leaves a transient cell missing when provider budget ends before retry exhaustion", async () => {
     const adapter = successfulAdapter("deferred", "candidate_uncertified");
-    adapter.observe = vi.fn(async () => { throw new Error("temporary"); });
+    const observe = vi.fn(async () => { throw new Error("temporary"); });
+    adapter.observe = observe;
     adapter.classifyError = () => "rate-limit";
     const persist = vi.fn();
     const result = await observeAnswerMatrix({
@@ -208,6 +227,20 @@ describe("answer-engine runtime", () => {
     expect(result.cells).toEqual([]);
     expect(result.pendingCellIds).toHaveLength(1);
     expect(persist).not.toHaveBeenCalled();
+    expect(result.executionState.providers.deferred).toMatchObject({
+      requestCount: 1,
+      cells: { [result.pendingCellIds[0]!]: { attemptCount: 1, transientAttemptCount: 1 } }
+    });
+
+    observe.mockClear();
+    const resumed = await observeAnswerMatrix({
+      run, questions: questions().slice(0, 1), adapters: [adapter],
+      existingExecutionState: result.executionState,
+      budgets: { deferred: { maxRequests: 1, maxEstimatedCostMicros: 10_000, timeoutMs: 1_000, maxTransientRetries: 2 } }
+    });
+    expect(observe).not.toHaveBeenCalled();
+    expect(resumed.pendingCellIds).toEqual(result.pendingCellIds);
+    expect(resumed.executionState).toEqual(result.executionState);
   });
 
   it("persists retry-exhausted failure once and immutable resume does not repeat it", async () => {
@@ -229,10 +262,30 @@ describe("answer-engine runtime", () => {
     observe.mockClear();
     const resumed = await observeAnswerMatrix({
       run, questions: questions().slice(0, 1), adapters: [adapter], existingCells: first.cells,
+      existingExecutionState: first.executionState,
       budgets: { exhausted: { maxRequests: 3, maxEstimatedCostMicros: 10_000, timeoutMs: 1_000, maxTransientRetries: 2 } }
     });
     expect(observe).not.toHaveBeenCalled();
     expect(resumed.cells).toEqual(first.cells);
+  });
+
+  it("fails closed on legacy failed cells without terminal disposition", async () => {
+    const adapter = successfulAdapter("legacy", "candidate_uncertified");
+    const q = questions().slice(0, 1);
+    const adapterSurface = adapter.surface;
+    const legacy = {
+      id: createAnswerSnapshotCellId({ runId: run.id, questionId: q[0]!.id, surface: adapterSurface }),
+      runId: run.id, questionId: q[0]!.id, surface: adapterSurface, status: "failed" as const,
+      errorClass: "provider-unavailable" as const, executedAt: "2026-07-12T00:00:01.000Z",
+      executionDurationMs: 10
+    };
+    await expect(observeAnswerMatrix({
+      run, questions: q, adapters: [adapter], existingCells: [legacy],
+      existingExecutionState: {
+        runId: run.id,
+        providers: { legacy: { requestCount: 1, estimatedCostMicros: 0, cells: { [legacy.id]: { attemptCount: 1, transientAttemptCount: 1 } } } }
+      }
+    })).rejects.toThrow(/terminal attempt metadata/i);
   });
 
   it("uses external certification and counts distinct providers rather than models", async () => {

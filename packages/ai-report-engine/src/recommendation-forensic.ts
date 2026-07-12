@@ -1,5 +1,7 @@
 import {
   classifyCommercialCoverage,
+  canonicalizeBrand,
+  containsCanonicalBrand,
   createAnswerEngineSurfaceKey,
   parseAnswerEngineSurface,
   parseAnswerQuestion,
@@ -14,11 +16,16 @@ import {
 } from "@open-geo-console/answer-engine-observer";
 import {
   assessEvidenceGrade,
+  categorizeSource,
+  validateRecommendationSignal,
   validateOpportunityHypothesis,
   type CitationRetrievalState,
   type CitationSourceCategory,
   type EvidenceGrade,
-  type RepeatedEvidencePattern
+  type RepeatedEvidencePattern,
+  type RecommendationKind,
+  type SourceCategoryContext,
+  type EntityResolution
 } from "@open-geo-console/citation-intelligence";
 import type { AiWebsiteReportV1 } from "./types";
 import { parseAiWebsiteReportV1 } from "./validation";
@@ -41,8 +48,13 @@ export interface AnswerSnapshotMatrixContract {
 export interface RecommendedEntityContract {
   entityId: string;
   name: string;
-  resolutionStatus: "resolved" | "ambiguous" | "unresolved";
-  supportingCellIds: string[];
+  registrableDomain?: string;
+  resolution: EntityResolution;
+  signals: Array<{
+    cellId: string;
+    kind: RecommendationKind;
+    supportingQuote: string;
+  }>;
 }
 
 export interface VerifiedCitationRetrievalContract {
@@ -87,6 +99,7 @@ export interface CustomerVsCompetitorGapContract {
   sourcePattern: string;
   suggestedAction: string;
   competitorEntityIds: string[];
+  outcome: "competitor_gap" | "no_recommendation";
 }
 
 export interface HomepageVsFullSiteBlindSpotContract {
@@ -135,6 +148,7 @@ export interface ProvenanceAndLimitationsContract {
   certificationProvenance: CertificationProvenanceContract[];
   limitations: string[];
   methodology: string;
+  sourceCategoryContext: SourceCategoryContext;
 }
 
 export interface RecommendationForensicReportV1 {
@@ -186,17 +200,37 @@ export function parseRecommendationForensicReportV1(
   validateCertificationProvenance(provenance.certificationProvenance, matrix.cells, authority);
   validateExecutiveVerdict(report.executiveVerdict, succeededCells);
   const recommendedEntities = validateRecommendedEntities(report.recommendedEntities, succeededCells);
-  const citationSources = parseCitationSources(report.citationSources, succeededCells, recommendedEntities);
-  validateEvidenceGrades(report.evidenceGrades, citationSources, succeededCells, recommendedEntities);
+  validateSourceCategoryIdentityContext(targetUrl, provenance.sourceCategoryContext, recommendedEntities);
+  const recommendationSignals = indexRecommendationSignals(recommendedEntities);
+  const citationSources = parseCitationSources(
+    report.citationSources, succeededCells, recommendedEntities, provenance.sourceCategoryContext
+  );
+  const gradedCitationIds = validateEvidenceGrades(
+    report.evidenceGrades, citationSources, succeededCells, recommendedEntities, recommendationSignals
+  );
   validateSourceCategoryBreakdown(report.sourceCategoryBreakdown, citationSources);
-  validateCustomerGaps(report.customerVsCompetitorGaps, succeededCells);
+  const gaps = validateCustomerGaps(report.customerVsCompetitorGaps, succeededCells, recommendedEntities);
   validateBlindSpot(report.homepageVsFullSiteBlindSpot);
   validateExecutivePriorities(report.executivePriorities, succeededCells);
-  validateVendorTaskPackage(report.vendorTaskPackage, succeededCells, new Set(questions.questions.map(({ id }) => id)));
+  const vendorTaskCount = validateVendorTaskPackage(
+    report.vendorTaskPackage, succeededCells, new Set(questions.questions.map(({ id }) => id)
+  ));
   const appendix = guarded("$.websiteFoundationAppendix", () => parseAiWebsiteReportV1(report.websiteFoundationAppendix));
   if (appendix.tier !== "deep" || appendix.targetUrl !== targetUrl || appendix.provenance.locale !== provenance.locale) {
     fail("$.websiteFoundationAppendix", "Appendix must be the matching deep website-foundation report.");
   }
+  const appendixBrands = [
+    appendix.organizationProfile.organizationName,
+    ...appendix.organizationProfile.brandNames
+  ].filter((brand): brand is string => Boolean(brand));
+  const appendixBrandKeys = new Set(appendixBrands.map(canonicalizeBrand));
+  if (!appendixBrandKeys.has(canonicalizeBrand(questions.organizationName)) ||
+      questions.brandAliases.some((alias) => !appendixBrandKeys.has(canonicalizeBrand(alias)))) {
+    fail("$.generatedQuestions", "Organization name and aliases must be grounded in the website foundation appendix.");
+  }
+  validateCommercialReportCompleteness(
+    matrix, authority, recommendedEntities, citationSources, gradedCitationIds, gaps, vendorTaskCount
+  );
   return value as RecommendationForensicReportV1;
 }
 
@@ -253,8 +287,32 @@ function parseProvenance(value: unknown, authority: CertificationAuthoritySnapsh
     certificationCapturedAt: authority.capturedAt,
     certificationProvenance,
     limitations: stringArray(input.limitations, "$.provenanceAndLimitations.limitations"),
-    methodology: text(input.methodology, "$.provenanceAndLimitations.methodology")
+    methodology: text(input.methodology, "$.provenanceAndLimitations.methodology"),
+    sourceCategoryContext: parseSourceCategoryContext(input.sourceCategoryContext)
   };
+}
+
+function parseSourceCategoryContext(value: unknown): SourceCategoryContext {
+  const input = record(value, "$.provenanceAndLimitations.sourceCategoryContext");
+  const customerRegistrableDomain = domain(input.customerRegistrableDomain, "$.provenanceAndLimitations.sourceCategoryContext.customerRegistrableDomain");
+  const competitorRegistrableDomains = stringArray(
+    input.competitorRegistrableDomains,
+    "$.provenanceAndLimitations.sourceCategoryContext.competitorRegistrableDomains"
+  ).map((item, index) => domain(item, `$.provenanceAndLimitations.sourceCategoryContext.competitorRegistrableDomains[${index}]`));
+  const knownDomainsInput = input.knownDomains === undefined
+    ? {}
+    : record(input.knownDomains, "$.provenanceAndLimitations.sourceCategoryContext.knownDomains");
+  const knownDomains: SourceCategoryContext["knownDomains"] = {};
+  for (const [knownDomain, categoryValue] of Object.entries(knownDomainsInput)) {
+    const category = citationCategory(
+      categoryValue, `$.provenanceAndLimitations.sourceCategoryContext.knownDomains.${knownDomain}`
+    );
+    if (category === "owned_customer" || category === "owned_competitor") {
+      fail("$.provenanceAndLimitations.sourceCategoryContext.knownDomains", "Owned categories come only from registrable-domain context.");
+    }
+    knownDomains![domain(knownDomain, "$.provenanceAndLimitations.sourceCategoryContext.knownDomains")] = category;
+  }
+  return { customerRegistrableDomain, competitorRegistrableDomains, knownDomains };
 }
 
 function parseGeneratedQuestions(value: unknown): GeneratedQuestionSet {
@@ -262,8 +320,10 @@ function parseGeneratedQuestions(value: unknown): GeneratedQuestionSet {
   if (input.version !== "purchase-v1") fail("$.generatedQuestions.version", "Expected purchase-v1.");
   const organizationName = text(input.organizationName, "$.generatedQuestions.organizationName");
   const brandAliases = stringArray(input.brandAliases, "$.generatedQuestions.brandAliases");
-  const normalizedBrands = [organizationName, ...brandAliases].map((brand) => brand.toLocaleLowerCase());
-  if (new Set(normalizedBrands).size !== normalizedBrands.length) fail("$.generatedQuestions.brandAliases", "Brands must be unique.");
+  const normalizedBrands = [organizationName, ...brandAliases].map(canonicalizeBrand);
+  if (normalizedBrands.some((brand) => !brand) || new Set(normalizedBrands).size !== normalizedBrands.length) {
+    fail("$.generatedQuestions.brandAliases", "Canonical brands must be non-empty and unique.");
+  }
   if (input.confidence !== "high" && input.confidence !== "low") fail("$.generatedQuestions.confidence", "Expected high or low.");
   if (input.confidence === "low" && input.fallbackReason !== "insufficient_category_evidence") {
     fail("$.generatedQuestions.fallbackReason", "Low confidence requires an explicit fallback reason.");
@@ -276,8 +336,7 @@ function parseGeneratedQuestions(value: unknown): GeneratedQuestionSet {
     fail("$.generatedQuestions.questions", "Expected three to five unique questions.");
   }
   for (const [index, question] of questions.entries()) {
-    const normalized = question.exactText.toLocaleLowerCase();
-    if (normalizedBrands.some((brand) => normalized.includes(brand))) {
+    if (containsCanonicalBrand(question.exactText, [organizationName, ...brandAliases])) {
       fail(`$.generatedQuestions.questions[${index}]`, "Question contains an organization brand or alias.");
     }
   }
@@ -357,29 +416,121 @@ function validateRecommendedEntities(
   const entities = array(value, "$.recommendedEntities");
   const result = new Map<string, RecommendedEntityContract>();
   entities.forEach((item, index) => {
-    const entity = record(item, `$.recommendedEntities[${index}]`);
-    const entityId = text(entity.entityId, `$.recommendedEntities[${index}].entityId`);
+    const path = `$.recommendedEntities[${index}]`;
+    const entity = record(item, path);
+    const entityId = text(entity.entityId, `${path}.entityId`);
     if (result.has(entityId)) fail("$.recommendedEntities", "Entity IDs must be unique.");
-    const name = text(entity.name, `$.recommendedEntities[${index}].name`);
-    if (!new Set(["resolved", "ambiguous", "unresolved"]).has(entity.resolutionStatus as string)) {
-      fail(`$.recommendedEntities[${index}].resolutionStatus`, "Unsupported resolution state.");
+    const name = text(entity.name, `${path}.name`);
+    const registrableDomain = entity.registrableDomain === undefined
+      ? undefined
+      : domain(entity.registrableDomain, `${path}.registrableDomain`);
+    const resolutionInput = record(entity.resolution, `${path}.resolution`);
+    let resolution: EntityResolution;
+    if (resolutionInput.status === "resolved") {
+      resolution = {
+        status: "resolved",
+        entityId: text(resolutionInput.entityId, `${path}.resolution.entityId`),
+        basis: text(resolutionInput.basis, `${path}.resolution.basis`) as Extract<EntityResolution, { status: "resolved" }>["basis"]
+      };
+    } else if (resolutionInput.status === "ambiguous") {
+      resolution = {
+        status: "ambiguous",
+        candidateEntityIds: stringArray(resolutionInput.candidateEntityIds, `${path}.resolution.candidateEntityIds`)
+      };
+    } else if (resolutionInput.status === "unresolved") {
+      const candidateEntityIds = stringArray(resolutionInput.candidateEntityIds, `${path}.resolution.candidateEntityIds`);
+      if (candidateEntityIds.length !== 0) fail(`${path}.resolution`, "Unresolved identity cannot name candidates.");
+      resolution = { status: "unresolved", candidateEntityIds: [] };
+    } else {
+      resolution = fail(`${path}.resolution.status`, "Unsupported entity resolution.");
     }
-    const supportingCellIds = validateCellIds(
-      entity.supportingCellIds, `$.recommendedEntities[${index}].supportingCellIds`, cells, true
-    );
+    const signals = array(entity.signals, `${path}.signals`).map((item, signalIndex) => {
+      const signalPath = `${path}.signals[${signalIndex}]`;
+      const signal = record(item, signalPath);
+      const cellId = text(signal.cellId, `${signalPath}.cellId`);
+      const cell = cells.get(cellId);
+      if (!cell || cell.recommendationOutcome !== "recommendations_present") {
+        fail(`${signalPath}.cellId`, "Recommendation signal must reference a succeeded recommendation cell.");
+      }
+      const kind = text(signal.kind, `${signalPath}.kind`) as RecommendationKind;
+      if (!new Set(["direct_candidate", "preferred_choice", "example", "suitability"]).has(kind)) {
+        fail(`${signalPath}.kind`, "Unsupported recommendation kind.");
+      }
+      const supportingQuote = text(signal.supportingQuote, `${signalPath}.supportingQuote`);
+      if (!cell.answerText.includes(supportingQuote)) {
+        fail(`${signalPath}.supportingQuote`, "Recommendation quote must be an exact answerText substring.");
+      }
+      guarded(signalPath, () => validateRecommendationSignal({
+        entityId, entityName: name, kind, supportingText: supportingQuote
+      }));
+      return { cellId, kind, supportingQuote };
+    });
+    if (signals.length === 0) fail(`${path}.signals`, "Recommended entities require at least one signal.");
     result.set(entityId, {
-      entityId, name,
-      resolutionStatus: entity.resolutionStatus as RecommendedEntityContract["resolutionStatus"],
-      supportingCellIds
+      entityId, name, ...(registrableDomain ? { registrableDomain } : {}), resolution, signals
     });
   });
+  for (const [entityId, entity] of result) {
+    const path = `$.recommendedEntities.${entityId}.resolution`;
+    const resolution = entity.resolution;
+    if (resolution.status === "resolved") {
+      if (resolution.entityId !== entityId || !new Set(["registrable_domain", "context", "unique_name"]).has(resolution.basis)) {
+        fail(path, "Resolved identity must close on its containing entity.");
+      }
+    } else if (resolution.status === "ambiguous") {
+      if (resolution.candidateEntityIds.length < 2 || new Set(resolution.candidateEntityIds).size !== resolution.candidateEntityIds.length ||
+          resolution.candidateEntityIds.some((id) => !result.has(id))) {
+        fail(path, "Ambiguous resolution candidates must reference known unique entities.");
+      }
+    } else if (resolution.status !== "unresolved" || resolution.candidateEntityIds.length !== 0) {
+      fail(path, "Unsupported or open entity resolution.");
+    }
+  }
   return result;
+}
+
+function indexRecommendationSignals(
+  entities: Map<string, RecommendedEntityContract>
+): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
+  for (const entity of entities.values()) {
+    for (const signal of entity.signals) {
+      const quotes = result.get(signal.cellId) ?? new Set<string>();
+      quotes.add(signal.supportingQuote);
+      result.set(signal.cellId, quotes);
+    }
+  }
+  return result;
+}
+
+function validateSourceCategoryIdentityContext(
+  targetUrl: string,
+  context: SourceCategoryContext,
+  entities: Map<string, RecommendedEntityContract>
+): void {
+  const targetHostname = new URL(targetUrl).hostname.toLocaleLowerCase();
+  if (!sameSite(targetHostname, context.customerRegistrableDomain)) {
+    fail("$.provenanceAndLimitations.sourceCategoryContext.customerRegistrableDomain", "Customer domain must contain the report target.");
+  }
+  const entityDomains = [...entities.values()]
+    .map(({ registrableDomain }) => registrableDomain)
+    .filter((value): value is string => Boolean(value))
+    .sort();
+  const contextDomains = [...context.competitorRegistrableDomains].sort();
+  if (JSON.stringify(entityDomains) !== JSON.stringify(contextDomains)) {
+    fail("$.provenanceAndLimitations.sourceCategoryContext.competitorRegistrableDomains", "Competitor domains must exactly match recommended entity identities.");
+  }
+}
+
+function sameSite(hostname: string, registrableDomain: string): boolean {
+  return hostname === registrableDomain || hostname.endsWith(`.${registrableDomain}`);
 }
 
 function parseCitationSources(
   value: unknown,
   cells: Map<string, SucceededCell>,
-  entities: Map<string, RecommendedEntityContract>
+  entities: Map<string, RecommendedEntityContract>,
+  categoryContext: SourceCategoryContext
 ): Map<string, CitationSourceContract> {
   const result = new Map<string, CitationSourceContract>();
   array(value, "$.citationSources").forEach((item, index) => {
@@ -395,7 +546,11 @@ function parseCitationSources(
     if (!providerSource) fail(`${path}.url`, "Citation URL is not a provider-returned source for the referenced cell.");
     const providerOrder = nonNegativeInteger(input.providerOrder, `${path}.providerOrder`);
     if (providerOrder !== providerSource.providerOrder) fail(`${path}.providerOrder`, "Order does not match provider-returned source metadata.");
-    const category = citationCategory(input.category, `${path}.category`);
+    const suppliedCategory = citationCategory(input.category, `${path}.category`);
+    const category = categorizeSource(url, categoryContext);
+    if (suppliedCategory !== category) {
+      fail(`${path}.category`, `Category must be ${category} when recomputed from registrable-domain context.`);
+    }
     const retrieval = parseRetrieval(input.retrieval, `${path}.retrieval`, cell, entities);
     const title = text(input.title, `${path}.title`);
     if (title !== providerSource.title) fail(`${path}.title`, "Title does not match provider-returned source metadata.");
@@ -448,9 +603,11 @@ function validateEvidenceGrades(
   value: unknown,
   citations: Map<string, CitationSourceContract>,
   cells: Map<string, SucceededCell>,
-  entities: Map<string, RecommendedEntityContract>
-): void {
+  entities: Map<string, RecommendedEntityContract>,
+  recommendationSignals: Map<string, Set<string>>
+): Set<string> {
   const evidenceIds = new Set<string>();
+  const gradedCitationIds = new Set<string>();
   array(value, "$.evidenceGrades").forEach((item, index) => {
     const path = `$.evidenceGrades[${index}]`;
     const input = record(item, path);
@@ -460,11 +617,13 @@ function validateEvidenceGrades(
     const citationSourceId = text(input.citationSourceId, `${path}.citationSourceId`);
     const citation = citations.get(citationSourceId);
     if (!citation) fail(`${path}.citationSourceId`, "Evidence must reference a normalized citation source.");
+    if (gradedCitationIds.has(citationSourceId)) fail(`${path}.citationSourceId`, "Citation sources must have exactly one grade.");
+    gradedCitationIds.add(citationSourceId);
     const cellId = text(input.cellId, `${path}.cellId`);
     if (citation.cellId !== cellId || !cells.has(cellId)) fail(`${path}.cellId`, "Evidence cell must match its citation source.");
     const repeatedPattern = input.repeatedPattern === undefined
       ? undefined
-      : parseRepeatedPattern(input.repeatedPattern, `${path}.repeatedPattern`, cells);
+      : parseRepeatedPattern(input.repeatedPattern, `${path}.repeatedPattern`, cells, recommendationSignals);
     const reconstructed = {
       evidenceId, cellId, sourceUrl: citation.url, providerReturned: true,
       retrievalState: citation.retrieval.state, verifiedExcerpt: citation.retrieval.verifiedExcerpt,
@@ -474,6 +633,7 @@ function validateEvidenceGrades(
     const expectedGrade = assessEvidenceGrade(reconstructed);
     if (input.grade !== expectedGrade) fail(`${path}.grade`, `Grade must be ${expectedGrade} when rebuilt from cell, source, and retrieval evidence.`);
   });
+  return gradedCitationIds;
 }
 
 function reconstructEvidenceRelationship(
@@ -488,14 +648,19 @@ function reconstructEvidenceRelationship(
   const excerpt = citation.retrieval.verifiedExcerpt?.toLocaleLowerCase() ?? "";
   const relevantEntityEvidence = supportedEntities.length > 0 &&
     supportedEntities.every(({ name }) => excerpt.includes(name.toLocaleLowerCase()));
-  const entityAmbiguous = supportedEntities.some(({ resolutionStatus }) => resolutionStatus !== "resolved");
+  const entityAmbiguous = supportedEntities.some(({ resolution }) => resolution.status !== "resolved");
   const preciseMapping = citation.retrieval.mapping === "precise" && Boolean(citation.retrieval.answerQuote) &&
     cell.answerText.includes(citation.retrieval.answerQuote!);
   const directSupport = preciseMapping && relevantEntityEvidence && citation.retrieval.state === "available";
   return { directSupport, preciseMapping, relevantEntityEvidence, entityAmbiguous };
 }
 
-function parseRepeatedPattern(value: unknown, path: string, cells: Map<string, SucceededCell>): RepeatedEvidencePattern {
+function parseRepeatedPattern(
+  value: unknown,
+  path: string,
+  cells: Map<string, SucceededCell>,
+  recommendationSignals: Map<string, Set<string>>
+): RepeatedEvidencePattern {
   const input = record(value, path);
   const kind = text(input.kind, `${path}.kind`) as RepeatedEvidencePattern["kind"];
   if (!new Set(["entity", "source", "source_category", "evidence_type"]).has(kind)) fail(`${path}.kind`, "Unsupported pattern kind.");
@@ -509,6 +674,12 @@ function parseRepeatedPattern(value: unknown, path: string, cells: Map<string, S
       fail(`${path}.occurrences[${index}]`, "Repeated-pattern occurrence must match a recommendation cell.");
     }
     const supportingText = text(occurrence.supportingText, `${path}.occurrences[${index}].supportingText`);
+    if (!cell.answerText.includes(supportingText)) {
+      fail(`${path}.occurrences[${index}].supportingText`, "Supporting text must be an exact answerText substring.");
+    }
+    if (!recommendationSignals.get(cellId)?.has(supportingText)) {
+      fail(`${path}.occurrences[${index}].supportingText`, "Grade C occurrence must bind an exact recommendation signal quote.");
+    }
     if (!supportingText.toLocaleLowerCase().includes(patternValue.toLocaleLowerCase())) {
       fail(`${path}.occurrences[${index}].supportingText`, "Supporting text must contain the pattern value.");
     }
@@ -540,19 +711,41 @@ function validateSourceCategoryBreakdown(value: unknown, citations: Map<string, 
   if (seenCitationIds.size !== citations.size) fail("$.sourceCategoryBreakdown", "Breakdown must cover every citation source exactly once.");
 }
 
-function validateCustomerGaps(value: unknown, cells: Map<string, SucceededCell>): void {
-  array(value, "$.customerVsCompetitorGaps").forEach((item, index) => {
+function validateCustomerGaps(
+  value: unknown,
+  cells: Map<string, SucceededCell>,
+  entities: Map<string, RecommendedEntityContract>
+): CustomerVsCompetitorGapContract[] {
+  return array(value, "$.customerVsCompetitorGaps").map((item, index) => {
     const path = `$.customerVsCompetitorGaps[${index}]`;
     const input = record(item, path);
+    const evidenceCellIds = validateCellIds(input.evidenceCellIds, `${path}.evidenceCellIds`, cells, true);
+    const competitorEntityIds = stringArray(input.competitorEntityIds, `${path}.competitorEntityIds`);
+    const outcome = text(input.outcome, `${path}.outcome`) as CustomerVsCompetitorGapContract["outcome"];
+    if (outcome !== "competitor_gap" && outcome !== "no_recommendation") fail(`${path}.outcome`, "Unsupported gap outcome.");
+    if (outcome === "competitor_gap") {
+      if (competitorEntityIds.length === 0 || competitorEntityIds.some((id) => !entities.has(id))) {
+        fail(`${path}.competitorEntityIds`, "Competitor gaps require known recommended entity IDs.");
+      }
+      for (const entityId of competitorEntityIds) {
+        if (!entities.get(entityId)!.signals.some(({ cellId }) => evidenceCellIds.includes(cellId))) {
+          fail(`${path}.evidenceCellIds`, "Gap evidence must support every referenced competitor entity.");
+        }
+      }
+    } else if (competitorEntityIds.length > 0 || evidenceCellIds.some((id) => cells.get(id)!.recommendationOutcome !== "no_recommendation")) {
+      fail(path, "No-recommendation gaps require only truthful no-recommendation cells and no competitor IDs.");
+    }
     const gap = {
       id: text(input.id, `${path}.id`), title: text(input.title, `${path}.title`),
       rationale: text(input.rationale, `${path}.rationale`),
-      evidenceCellIds: validateCellIds(input.evidenceCellIds, `${path}.evidenceCellIds`, cells, true),
+      evidenceCellIds,
       sourcePattern: text(input.sourcePattern, `${path}.sourcePattern`),
-      suggestedAction: text(input.suggestedAction, `${path}.suggestedAction`)
+      suggestedAction: text(input.suggestedAction, `${path}.suggestedAction`),
+      competitorEntityIds,
+      outcome
     };
     guarded(path, () => validateOpportunityHypothesis(gap));
-    stringArray(input.competitorEntityIds, `${path}.competitorEntityIds`);
+    return gap;
   });
 }
 
@@ -582,11 +775,12 @@ function validateVendorTaskPackage(
   value: unknown,
   cells: Map<string, SucceededCell>,
   questionIds: Set<string>
-): void {
+): number {
   const input = record(value, "$.vendorTaskPackage");
   if (input.version !== "vendor-task-v1") fail("$.vendorTaskPackage.version", "Expected vendor-task-v1.");
   const ids = new Set<string>();
-  array(input.tasks, "$.vendorTaskPackage.tasks").forEach((item, index) => {
+  const tasks = array(input.tasks, "$.vendorTaskPackage.tasks");
+  tasks.forEach((item, index) => {
     const path = `$.vendorTaskPackage.tasks[${index}]`;
     const task = record(item, path);
     const id = text(task.id, `${path}.id`);
@@ -601,10 +795,52 @@ function validateVendorTaskPackage(
         stringArray(task.acceptanceCriteria, `${path}.acceptanceCriteria`).length === 0) {
       fail(path, "Vendor tasks require actions and acceptance criteria.");
     }
-    validateCellIds(task.evidenceCellIds, `${path}.evidenceCellIds`, cells);
+    validateCellIds(task.evidenceCellIds, `${path}.evidenceCellIds`, cells, true);
     const retestIds = stringArray(task.retestQuestionIds, `${path}.retestQuestionIds`);
-    if (retestIds.some((questionId) => !questionIds.has(questionId))) fail(`${path}.retestQuestionIds`, "Unknown retest question.");
+    if (retestIds.length === 0 || retestIds.some((questionId) => !questionIds.has(questionId))) {
+      fail(`${path}.retestQuestionIds`, "Vendor tasks require at least one known retest question.");
+    }
   });
+  return tasks.length;
+}
+
+function validateCommercialReportCompleteness(
+  matrix: AnswerSnapshotMatrixContract,
+  authority: CertificationAuthoritySnapshot,
+  entities: Map<string, RecommendedEntityContract>,
+  citations: Map<string, CitationSourceContract>,
+  gradedCitationIds: Set<string>,
+  gaps: CustomerVsCompetitorGapContract[],
+  vendorTaskCount: number
+): void {
+  if (matrix.commercialCoverage.outcome === "failed") return;
+  const succeeded = matrix.cells.filter((cell): cell is SucceededCell => cell.status === "succeeded");
+  const recommendationCells = succeeded.filter(({ recommendationOutcome }) => recommendationOutcome === "recommendations_present");
+  const noRecommendationCells = succeeded.filter(({ recommendationOutcome }) => recommendationOutcome === "no_recommendation");
+  if ((recommendationCells.length > 0 && entities.size === 0) ||
+      (recommendationCells.length === 0 && noRecommendationCells.length === 0)) {
+    fail("$.recommendedEntities", "Limited or qualified reports require an auditable recommendation or truthful no-recommendation outcome.");
+  }
+  const certifiedSurfaceKeys = new Set(authority.certifications.map(({ surface }) => createAnswerEngineSurfaceKey(surface)));
+  const citationKeys = new Set([...citations.values()].map(({ cellId, url }) => `${cellId}\n${url}`));
+  for (const cell of succeeded) {
+    if (!certifiedSurfaceKeys.has(createAnswerEngineSurfaceKey(cell.surface))) continue;
+    for (const source of cell.sources) {
+      if (!citationKeys.has(`${cell.id}\n${source.url}`)) {
+        fail("$.citationSources", "Every provider-returned source in certified commercial coverage must be normalized.");
+      }
+    }
+  }
+  if ([...citations.keys()].some((id) => !gradedCitationIds.has(id))) {
+    fail("$.evidenceGrades", "Every normalized commercial citation source requires an evidence grade.");
+  }
+  if (gaps.length === 0) fail("$.customerVsCompetitorGaps", "Limited or qualified reports require at least one evidence-backed gap.");
+  if (recommendationCells.length === 0 && !gaps.some(({ outcome }) => outcome === "no_recommendation")) {
+    fail("$.customerVsCompetitorGaps", "All-no-recommendation coverage requires an explicit no-recommendation gap outcome.");
+  }
+  if (vendorTaskCount === 0) {
+    fail("$.vendorTaskPackage.tasks", "Limited or qualified reports require executable vendor tasks.");
+  }
 }
 
 function parseCommercialCoverage(value: unknown): CommercialCoverageDecision {
@@ -688,6 +924,14 @@ function httpUrl(value: unknown, path: string): string {
     if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) throw new Error();
   } catch {
     return fail(path, "Expected an absolute HTTP(S) URL.");
+  }
+  return result;
+}
+
+function domain(value: unknown, path: string): string {
+  const result = text(value, path).toLocaleLowerCase().replace(/^\.+|\.+$/g, "");
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(result)) {
+    return fail(path, "Expected a registrable domain.");
   }
   return result;
 }

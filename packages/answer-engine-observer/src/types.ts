@@ -159,11 +159,28 @@ export interface ProviderExecutionBudget {
   maxTransientRetries?: number;
 }
 
+export interface ProviderCellAttemptLedger {
+  attemptCount: number;
+  transientAttemptCount: number;
+}
+
+export interface ProviderExecutionLedger {
+  requestCount: number;
+  estimatedCostMicros: number;
+  cells: Record<string, ProviderCellAttemptLedger>;
+}
+
+export interface AnswerExecutionStateLedger {
+  runId: string;
+  providers: Record<string, ProviderExecutionLedger>;
+}
+
 export interface ObserveAnswerMatrixInput {
   run: AnswerSnapshotRunContract;
   questions: AnswerQuestion[];
   adapters: AnswerEngineAdapter[];
   existingCells?: AnswerSnapshotCell[];
+  existingExecutionState?: AnswerExecutionStateLedger;
   budgets?: Record<string, ProviderExecutionBudget>;
   persistCell?: (cell: AnswerSnapshotCell) => void | Promise<void>;
 }
@@ -171,6 +188,7 @@ export interface ObserveAnswerMatrixInput {
 export interface ObserveAnswerMatrixResult {
   cells: AnswerSnapshotCell[];
   pendingCellIds: string[];
+  executionState: AnswerExecutionStateLedger;
 }
 
 export interface CommercialCoverageDecision {
