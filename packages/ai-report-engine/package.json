@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@open-geo-console/answer-engine-observer": "*",
-    "@open-geo-console/citation-intelligence": "*"
+    "@open-geo-console/citation-intelligence": "*",
+    "@open-geo-console/public-search-observer": "*"
   }
 }

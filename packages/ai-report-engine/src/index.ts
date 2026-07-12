@@ -6,3 +6,7 @@ export * from "./synthesis";
 export * from "./types";
 export * from "./validation";
 export * from "./recommendation-forensic";
+export * from "./recommendation-forensic-v2";
+export * from "./recommendation-forensic-v2-claims";
+export * from "./recommendation-forensic-dispatch";
+export * from "./recommendation-forensic-cost";
