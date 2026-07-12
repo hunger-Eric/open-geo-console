@@ -39,9 +39,16 @@ export async function observeAnswerMatrix(input: ObserveAnswerMatrixInput): Prom
   if (new Set(cells.map((cell) => cell.id)).size !== cells.length) {
     throw new Error("Existing snapshot cell identities must be unique.");
   }
-  const executionState = parseExecutionState(run.id, cells, input.existingExecutionState);
+  const expectedCellIds = new Set(input.adapters.flatMap((adapter) => questions.map((question) =>
+    createAnswerSnapshotCellId({ runId: run.id, questionId: question.id, surface: adapter.surface })
+  )));
+  const expectedProviderIds = new Set(input.adapters.map(({ surface }) => surface.providerId));
+  const executionState = parseExecutionState(
+    run.id, cells, input.existingExecutionState, input.expectedCheckpointRevision,
+    expectedCellIds, expectedProviderIds
+  );
   const identities = new Set(cells.map((cell) => cell.id));
-  const expectedCellIds: string[] = [];
+  const orderedExpectedCellIds: string[] = [];
 
   for (const adapter of input.adapters) {
     const providerId = adapter.surface.providerId;
@@ -52,18 +59,19 @@ export async function observeAnswerMatrix(input: ObserveAnswerMatrixInput): Prom
     executionState.providers[providerId] = providerLedger;
     for (const question of questions) {
       const id = createAnswerSnapshotCellId({ runId: run.id, questionId: question.id, surface: adapter.surface });
-      expectedCellIds.push(id);
+      orderedExpectedCellIds.push(id);
       if (identities.has(id)) continue;
-      const cell = await executeCellWithRecovery(adapter, run, question, id, budget, providerLedger);
+      const cell = await executeCellWithRecovery(
+        adapter, run, question, id, budget, providerLedger, executionState, input.persistCheckpoint
+      );
       if (!cell) continue;
       cells.push(cell);
       identities.add(cell.id);
-      await input.persistCell?.(cell);
     }
   }
   return {
     cells,
-    pendingCellIds: expectedCellIds.filter((id) => !identities.has(id)),
+    pendingCellIds: orderedExpectedCellIds.filter((id) => !identities.has(id)),
     executionState: structuredClone(executionState)
   };
 }
@@ -74,7 +82,9 @@ async function executeCellWithRecovery(
   question: AnswerQuestion,
   expectedId: string,
   budget: ValidatedProviderExecutionBudget,
-  providerLedger: ProviderExecutionLedger
+  providerLedger: ProviderExecutionLedger,
+  executionState: AnswerExecutionStateLedger,
+  persistCheckpoint: ObserveAnswerMatrixInput["persistCheckpoint"]
 ): Promise<AnswerSnapshotCell | undefined> {
   const attemptLedger = providerLedger.cells[expectedId] ?? { attemptCount: 0, transientAttemptCount: 0 };
   providerLedger.cells[expectedId] = attemptLedger;
@@ -84,14 +94,22 @@ async function executeCellWithRecovery(
     const observed = parseAnswerSnapshotCell(await observeWithTimeout(adapter, run, question, budget.timeoutMs));
     if (observed.id !== expectedId) throw new Error("Adapter returned a cell for a different run, question, or surface.");
     providerLedger.estimatedCostMicros += observed.usage?.estimatedCostMicros ?? 0;
-    if (observed.status === "succeeded") return observed;
+    if (observed.status === "succeeded") {
+      await checkpoint(executionState, persistCheckpoint, observed);
+      return observed;
+    }
     if (!TRANSIENT_ERRORS.has(observed.errorClass)) {
-      return terminalFailure(observed, attemptLedger.attemptCount, "non_retryable");
+      const terminal = terminalFailure(observed, attemptLedger.attemptCount, "non_retryable");
+      await checkpoint(executionState, persistCheckpoint, terminal);
+      return terminal;
     }
     attemptLedger.transientAttemptCount += 1;
     if (attemptLedger.transientAttemptCount > budget.maxTransientRetries) {
-      return terminalFailure(observed, attemptLedger.attemptCount, "retry_exhausted");
+      const terminal = terminalFailure(observed, attemptLedger.attemptCount, "retry_exhausted");
+      await checkpoint(executionState, persistCheckpoint, terminal);
+      return terminal;
     }
+    await checkpoint(executionState, persistCheckpoint);
   }
   return undefined;
 }
@@ -128,22 +146,35 @@ async function observeWithTimeout(
 function parseExecutionState(
   runId: string,
   cells: AnswerSnapshotCell[],
-  existing: AnswerExecutionStateLedger | undefined
+  existing: AnswerExecutionStateLedger | undefined,
+  expectedCheckpointRevision: number,
+  expectedCellIds: Set<string>,
+  expectedProviderIds: Set<string>
 ): AnswerExecutionStateLedger {
+  if (!Number.isSafeInteger(expectedCheckpointRevision) || expectedCheckpointRevision < 0) {
+    throw new Error("expectedCheckpointRevision must be a non-negative integer.");
+  }
   if (!existing) {
     if (cells.length > 0) throw new Error("Existing cells require a persisted provider execution state ledger.");
-    return { runId, providers: {} };
+    if (expectedCheckpointRevision !== 0) throw new Error("A new execution state must expect checkpoint revision zero.");
+    return { runId, checkpointRevision: 0, providers: {} };
   }
   if (existing.runId !== runId || !existing.providers || typeof existing.providers !== "object") {
     throw new Error("Provider execution state ledger must belong to the observed run.");
   }
-  const result: AnswerExecutionStateLedger = { runId, providers: {} };
+  const checkpointRevision = nonNegativeInteger(existing.checkpointRevision, "checkpointRevision");
+  if (checkpointRevision !== expectedCheckpointRevision) {
+    throw new Error("expectedCheckpointRevision does not match the persisted execution state.");
+  }
+  const result: AnswerExecutionStateLedger = { runId, checkpointRevision, providers: {} };
   for (const [providerId, raw] of Object.entries(existing.providers)) {
     if (!providerId.trim() || !raw || typeof raw !== "object") throw new Error("Provider execution ledger is invalid.");
+    if (!expectedProviderIds.has(providerId)) throw new Error("Provider execution ledger contains an unexpected provider.");
     const requestCount = nonNegativeInteger(raw.requestCount, "provider requestCount");
     const estimatedCostMicros = nonNegativeInteger(raw.estimatedCostMicros, "provider estimatedCostMicros");
     const cellLedgers: Record<string, ProviderCellAttemptLedger> = {};
     for (const [cellId, ledger] of Object.entries(raw.cells ?? {})) {
+      if (!expectedCellIds.has(cellId)) throw new Error("Provider execution ledger contains an unexpected cell identity.");
       const attemptCount = nonNegativeInteger(ledger.attemptCount, "cell attemptCount");
       const transientAttemptCount = nonNegativeInteger(ledger.transientAttemptCount, "cell transientAttemptCount");
       if (!cellId.trim() || transientAttemptCount > attemptCount) throw new Error("Provider cell attempt ledger is invalid.");
@@ -162,6 +193,13 @@ function parseExecutionState(
         (cell.status === "failed" && ledger.attemptCount !== cell.attemptCount)) {
       throw new Error("Existing cells must match the persisted provider execution state ledger.");
     }
+    const providerCost = result.providers[cell.surface.providerId]!.estimatedCostMicros;
+    const persistedCellCost = cells
+      .filter(({ surface }) => surface.providerId === cell.surface.providerId)
+      .reduce((sum, item) => sum + (item.usage?.estimatedCostMicros ?? 0), 0);
+    if (providerCost < persistedCellCost) {
+      throw new Error("Provider execution ledger cost cannot be lower than persisted cell usage.");
+    }
     if (cell.status === "succeeded" && ledger.transientAttemptCount >= ledger.attemptCount) {
       throw new Error("Succeeded cells require a final non-transient success attempt.");
     }
@@ -175,6 +213,19 @@ function parseExecutionState(
     }
   }
   return result;
+}
+
+async function checkpoint(
+  executionState: AnswerExecutionStateLedger,
+  persistCheckpoint: ObserveAnswerMatrixInput["persistCheckpoint"],
+  cell?: AnswerSnapshotCell
+): Promise<void> {
+  const expectedRevision = executionState.checkpointRevision;
+  executionState.checkpointRevision += 1;
+  const snapshot = structuredClone(executionState);
+  // Phase 3 PostgreSQL persistence MUST atomically compare expectedRevision and write the
+  // monotonic next state together with the optional cell. This pure package cannot trust rollback state.
+  await persistCheckpoint?.({ expectedRevision, executionState: snapshot, ...(cell ? { cell } : {}) });
 }
 
 function terminalFailure(

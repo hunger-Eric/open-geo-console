@@ -16,6 +16,7 @@ import {
   type AiWebsiteReportV1,
   type RecommendationForensicReportV1
 } from "./index";
+import type { RecommendationForensicReportParseOptions } from "./index";
 
 const generatedQuestions = generatePurchaseQuestions({
   locale: "en", organizationName: "Customer Example", brandAliases: ["Customer Co"],
@@ -34,6 +35,27 @@ const emptyAuthority: CertificationAuthoritySnapshot = {
   certifications: []
 };
 
+function optionsFor(
+  report: RecommendationForensicReportV1,
+  certificationAuthority: CertificationAuthoritySnapshot = emptyAuthority
+): RecommendationForensicReportParseOptions {
+  return {
+    certificationAuthority,
+    sourceClassificationAuthority: {
+      authorityVersion: report.provenanceAndLimitations.sourceClassificationAuthorityVersion,
+      capturedAt: report.provenanceAndLimitations.sourceClassificationCapturedAt,
+      context: structuredClone(report.provenanceAndLimitations.sourceCategoryContext)
+    }
+  };
+}
+
+function parseReport(
+  report: RecommendationForensicReportV1,
+  certificationAuthority: CertificationAuthoritySnapshot = emptyAuthority
+): RecommendationForensicReportV1 {
+  return parseRecommendationForensicReportV1(report, optionsFor(report, certificationAuthority));
+}
+
 function websiteFoundation(): AiWebsiteReportV1 {
   const evidence = [{ url: "https://customer.example.com", quote: "Customer Example provides freight services." }];
   return {
@@ -49,7 +71,13 @@ function websiteFoundation(): AiWebsiteReportV1 {
       "organizationClarity", "informationArchitecture", "contentCitability",
       "trustEvidence", "entityConsistency", "geoUnderstandability"
     ].map((dimension) => ({ dimension, score: 70, explanation: "Grounded.", confidence: "high", evidence })) as AiWebsiteReportV1["dimensionScores"],
-    pageTypeAnalyses: [], findings: [], roadmap: { immediate: [], nextPhase: [], ongoing: [] },
+    pageTypeAnalyses: [],
+    findings: [{
+      id: "finding-1", title: "Website evidence finding", severity: "opportunity",
+      impact: "Public evidence can be clearer.", evidence,
+      recommendation: "Clarify the public evidence.", confidence: "high"
+    }],
+    roadmap: { immediate: [], nextPhase: [], ongoing: [] },
     coverage: {
       discoveredPages: 1, plannedPages: 1, analyzedPages: 1, failedPages: 0,
       samplingMethod: "Deep crawl", pageTypesCovered: ["home"], limitations: []
@@ -68,7 +96,7 @@ function validReport(authority = emptyAuthority): RecommendationForensicReportV1
     reportId: "report-1", jobId: "job-1", targetUrl: "https://customer.example.com",
     executiveVerdict: {
       summary: "No certified live recommendation observation is available.", customerMentioned: "unknown",
-      primaryGap: "Certified coverage is unavailable.", evidenceCellIds: []
+      primaryGap: "Certified coverage is unavailable.", evidenceCellIds: [], coverageOutcome: "failed"
     },
     generatedQuestions,
     answerSnapshotMatrix: {
@@ -82,9 +110,9 @@ function validReport(authority = emptyAuthority): RecommendationForensicReportV1
       omissions: [], contradictions: [], confidenceChanges: [], limitations: []
     },
     executivePriorities: [
-      { order: 1, title: "Priority 1", rationale: "Evidence-backed prioritization.", evidenceCellIds: [] },
-      { order: 2, title: "Priority 2", rationale: "Evidence-backed prioritization.", evidenceCellIds: [] },
-      { order: 3, title: "Priority 3", rationale: "Evidence-backed prioritization.", evidenceCellIds: [] }
+      { order: 1, title: "Priority 1", rationale: "Evidence-backed prioritization.", evidenceCellIds: [], websiteFindingIds: ["finding-1"] },
+      { order: 2, title: "Priority 2", rationale: "Evidence-backed prioritization.", evidenceCellIds: [], websiteFindingIds: ["finding-1"] },
+      { order: 3, title: "Priority 3", rationale: "Evidence-backed prioritization.", evidenceCellIds: [], websiteFindingIds: ["finding-1"] }
     ],
     vendorTaskPackage: { version: "vendor-task-v1", tasks: [] },
     websiteFoundationAppendix: websiteFoundation(),
@@ -98,7 +126,9 @@ function validReport(authority = emptyAuthority): RecommendationForensicReportV1
         customerRegistrableDomain: "customer.example.com",
         competitorRegistrableDomains: [],
         knownDomains: { "editorial.example.org": "earned_editorial" }
-      }
+      },
+      sourceClassificationAuthorityVersion: "source-authority-v1",
+      sourceClassificationCapturedAt: "2026-07-12T00:00:30.000Z"
     }
   };
 }
@@ -190,6 +220,8 @@ function limitedShellReport(): { report: RecommendationForensicReportV1; authori
     run: snapshotRun, cells,
     commercialCoverage: classifyCommercialCoverage(generatedQuestions.questions, cells, authority)
   };
+  report.executiveVerdict.coverageOutcome = report.answerSnapshotMatrix.commercialCoverage.outcome;
+  report.executiveVerdict.evidenceCellIds = [cells[0]!.id];
   report.provenanceAndLimitations.certificationAuthorityVersion = authority.authorityVersion;
   report.provenanceAndLimitations.certificationCapturedAt = authority.capturedAt;
   report.provenanceAndLimitations.certificationProvenance = [{
@@ -292,42 +324,71 @@ function completeNoRecommendationReport(): { report: RecommendationForensicRepor
 describe("RecommendationForensicReportV1", () => {
   it("requires the complete approved top-level contract and exactly three executive priorities", () => {
     const report = validReport();
-    expect(parseRecommendationForensicReportV1(report, emptyAuthority)).toEqual(report);
+    expect(parseReport(report)).toEqual(report);
     const { executiveVerdict: _missing, ...withoutVerdict } = report;
-    expect(() => parseRecommendationForensicReportV1(withoutVerdict, emptyAuthority)).toThrow(/executiveVerdict/i);
-    expect(() => parseRecommendationForensicReportV1({ ...report, executivePriorities: report.executivePriorities.slice(0, 2) }, emptyAuthority))
+    expect(() => parseRecommendationForensicReportV1(withoutVerdict, optionsFor(report))).toThrow(/executiveVerdict/i);
+    expect(() => parseRecommendationForensicReportV1({ ...report, executivePriorities: report.executivePriorities.slice(0, 2) }, optionsFor(report)))
       .toThrow(/exactly three/i);
-    expect(() => parseRecommendationForensicReportV1(websiteFoundation(), emptyAuthority))
+    expect(() => parseRecommendationForensicReportV1(websiteFoundation(), optionsFor(report)))
       .toThrow(RecommendationForensicReportValidationError);
   });
 
   it("rejects a completed-limited report that is an empty structured shell", () => {
     const { report, authority } = limitedShellReport();
     expect(report.answerSnapshotMatrix.commercialCoverage.outcome).toBe("completed_limited");
-    expect(() => parseRecommendationForensicReportV1(report, authority)).toThrow(/auditable recommendation/i);
+    expect(() => parseReport(report, authority)).toThrow(/auditable recommendation/i);
   });
 
   it("accepts an evidence-complete completed-limited report", () => {
     const { report, authority } = completeLimitedReport();
-    expect(parseRecommendationForensicReportV1(report, authority)).toEqual(report);
+    expect(parseReport(report, authority)).toEqual(report);
   });
 
   it("accepts an explicit truthful no-recommendation completed-limited report", () => {
     const { report, authority } = completeNoRecommendationReport();
-    expect(parseRecommendationForensicReportV1(report, authority)).toEqual(report);
+    expect(parseReport(report, authority)).toEqual(report);
   });
 
   it("requires an external certification authority and rejects self-asserted qualification", () => {
     const report = validReport();
-    expect(() => (parseRecommendationForensicReportV1 as (value: unknown, authority?: CertificationAuthoritySnapshot) => unknown)(report))
-      .toThrow(/CertificationAuthority/i);
+    expect(() => (parseRecommendationForensicReportV1 as (value: unknown, options?: RecommendationForensicReportParseOptions) => unknown)(report))
+      .toThrow(/options|CertificationAuthority/i);
     expect(() => parseRecommendationForensicReportV1({
       ...report,
       answerSnapshotMatrix: {
         ...report.answerSnapshotMatrix,
         commercialCoverage: { ...report.answerSnapshotMatrix.commercialCoverage, outcome: "qualified" }
       }
-    }, emptyAuthority)).toThrow(/commercialCoverage/i);
+    }, optionsFor(report))).toThrow(/commercialCoverage/i);
+  });
+
+  it("rejects source-classification self-assertion outside the external snapshot", () => {
+    const report = validReport();
+    const options = optionsFor(report);
+    report.provenanceAndLimitations.sourceCategoryContext.knownDomains!["fabricated.example.net"] = "earned_editorial";
+    expect(() => parseRecommendationForensicReportV1(report, options)).toThrow(/Source classification context/i);
+  });
+
+  it("binds verdict outcome/evidence and every priority to auditable evidence", () => {
+    const report = validReport();
+    report.executiveVerdict.coverageOutcome = "qualified";
+    expect(() => parseReport(report)).toThrow(/coverage outcome/i);
+
+    const { report: limited, authority } = completeLimitedReport();
+    limited.executiveVerdict.evidenceCellIds = [];
+    expect(() => parseReport(limited, authority)).toThrow(/succeeded report cell IDs/i);
+
+    const priorityless = validReport();
+    priorityless.executivePriorities[0].websiteFindingIds = [];
+    expect(() => parseReport(priorityless)).toThrow(/requires answer-cell or website-finding evidence/i);
+  });
+
+  it("requires an exact recommendation signal for every certified commercial recommendation cell", () => {
+    const { report, authority } = completeLimitedReport();
+    const missingCellId = report.answerSnapshotMatrix.cells[1]!.id;
+    report.recommendedEntities[0]!.signals = report.recommendedEntities[0]!.signals
+      .filter(({ cellId }) => cellId !== missingCellId);
+    expect(() => parseReport(report, authority)).toThrow(/every externally certified commercial recommendation cell/i);
   });
 
   it("matches report certification provenance to the external authority snapshot", () => {
@@ -356,16 +417,16 @@ describe("RecommendationForensicReportV1", () => {
       ].join("/"),
       evidenceReference: "acceptance/candidate"
     }];
-    expect(parseRecommendationForensicReportV1(report, authority)).toEqual(report);
+    expect(parseReport(report, authority)).toEqual(report);
     report.provenanceAndLimitations.certificationProvenance[0]!.evidenceReference = "self-asserted/fake";
-    expect(() => parseRecommendationForensicReportV1(report, authority)).toThrow(/certificationProvenance/i);
+    expect(() => parseReport(report, authority)).toThrow(/certificationProvenance/i);
   });
 
   it("rejects generated questions containing the organization name or a brand alias", () => {
     const report = validReport();
     const poisoned = structuredClone(report);
     poisoned.generatedQuestions.questions[0]!.exactText = "Which Customer Co provider is best?";
-    expect(() => parseRecommendationForensicReportV1(poisoned, emptyAuthority)).toThrow(/brand|organization/i);
+    expect(() => parseRecommendationForensicReportV1(poisoned, optionsFor(report))).toThrow(/brand|organization/i);
 
     const punctuationVariant = validReport();
     punctuationVariant.generatedQuestions = generatePurchaseQuestions({
@@ -373,36 +434,36 @@ describe("RecommendationForensicReportV1", () => {
       capabilities: ["customs clearance"], sourceUrls: []
     });
     punctuationVariant.generatedQuestions.questions[0]!.exactText = "Which Acme, Inc. provider is suitable?";
-    expect(() => parseRecommendationForensicReportV1(punctuationVariant, emptyAuthority)).toThrow(/brand|organization/i);
+    expect(() => parseRecommendationForensicReportV1(punctuationVariant, optionsFor(punctuationVariant))).toThrow(/brand|organization/i);
   });
 
   it("rebuilds Grade A from a provider-returned source and verified retrieval evidence", () => {
     const report = reportWithCitation();
-    expect(parseRecommendationForensicReportV1(report, emptyAuthority)).toEqual(report);
+    expect(parseReport(report)).toEqual(report);
 
     const mismatchedSource = structuredClone(report);
     mismatchedSource.citationSources[0]!.url = "https://fabricated.example.org/not-returned";
-    expect(() => parseRecommendationForensicReportV1(mismatchedSource, emptyAuthority)).toThrow(/returned source/i);
+    expect(() => parseRecommendationForensicReportV1(mismatchedSource, optionsFor(report))).toThrow(/returned source/i);
 
     const selfCategorized = structuredClone(report);
     selfCategorized.citationSources[0]!.category = "community_or_ugc";
-    expect(() => parseRecommendationForensicReportV1(selfCategorized, emptyAuthority)).toThrow(/recomputed|Category must/i);
+    expect(() => parseRecommendationForensicReportV1(selfCategorized, optionsFor(report))).toThrow(/recomputed|Category must/i);
 
     const fabricatedSignal = structuredClone(report);
     fabricatedSignal.recommendedEntities[0]!.signals[0]!.supportingQuote = "Atlas Example is the best provider.";
-    expect(() => parseRecommendationForensicReportV1(fabricatedSignal, emptyAuthority)).toThrow(/exact answerText substring/i);
+    expect(() => parseRecommendationForensicReportV1(fabricatedSignal, optionsFor(report))).toThrow(/exact answerText substring/i);
 
     const forgedGrade = structuredClone(report);
     forgedGrade.citationSources[0]!.retrieval.state = "inaccessible";
-    expect(() => parseRecommendationForensicReportV1(forgedGrade, emptyAuthority)).toThrow(/grade|retrieval/i);
+    expect(() => parseRecommendationForensicReportV1(forgedGrade, optionsFor(report))).toThrow(/grade|retrieval/i);
 
     const gradeB = reportWithCitation();
     gradeB.citationSources[0]!.retrieval.mapping = "association";
     delete gradeB.citationSources[0]!.retrieval.answerQuote;
     gradeB.evidenceGrades[0]!.grade = "B";
-    expect(parseRecommendationForensicReportV1(gradeB, emptyAuthority)).toEqual(gradeB);
+    expect(parseReport(gradeB)).toEqual(gradeB);
     gradeB.evidenceGrades[0]!.grade = "A";
-    expect(() => parseRecommendationForensicReportV1(gradeB, emptyAuthority)).toThrow(/Grade must be B/i);
+    expect(() => parseRecommendationForensicReportV1(gradeB, optionsFor(report))).toThrow(/Grade must be B/i);
 
     const booleanForgery = reportWithCitation() as RecommendationForensicReportV1 & {
       citationSources: Array<RecommendationForensicReportV1["citationSources"][number] & {
@@ -420,7 +481,7 @@ describe("RecommendationForensicReportV1", () => {
     Object.assign(booleanForgery.citationSources[0]!.retrieval, {
       directSupport: true, preciseMapping: true, relevantEntityEvidence: true, entityAmbiguous: false
     });
-    expect(() => parseRecommendationForensicReportV1(booleanForgery, emptyAuthority)).toThrow(/Grade must be D/i);
+    expect(() => parseRecommendationForensicReportV1(booleanForgery, optionsFor(report))).toThrow(/Grade must be D/i);
   });
 
   it("rejects repeated-pattern occurrences outside this report", () => {
@@ -431,7 +492,7 @@ describe("RecommendationForensicReportV1", () => {
         { cellId: "foreign-cell", recommendationOutcome: "recommendations_present", supportingText: "Atlas Example is one candidate." }
       ]
     };
-    expect(() => parseRecommendationForensicReportV1(report, emptyAuthority)).toThrow(/repeated-pattern|report cell/i);
+    expect(() => parseReport(report)).toThrow(/repeated-pattern|report cell/i);
   });
 
   it("rejects Grade C text that is not an exact structured recommendation signal", () => {
@@ -466,6 +527,6 @@ describe("RecommendationForensicReportV1", () => {
         ]
       }
     }];
-    expect(() => parseRecommendationForensicReportV1(report, authority)).toThrow(/exact answerText substring|recommendation signal/i);
+    expect(() => parseReport(report, authority)).toThrow(/exact answerText substring|recommendation signal/i);
   });
 });

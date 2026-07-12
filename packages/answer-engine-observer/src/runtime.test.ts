@@ -117,7 +117,7 @@ describe("answer-engine runtime", () => {
     ];
     const spies = adapters.map((adapter) => vi.spyOn(adapter, "observe"));
     const result = await observeAnswerMatrix({
-      run, questions: questions(), adapters,
+      run, questions: questions(), adapters, expectedCheckpointRevision: 0,
       budgets: { shared: { maxRequests: 3, maxEstimatedCostMicros: 10_000, timeoutMs: 1_000 } }
     });
     expect(spies.reduce((sum, spy) => sum + spy.mock.calls.length, 0)).toBe(3);
@@ -132,7 +132,7 @@ describe("answer-engine runtime", () => {
     const untouched = successfulAdapter("cost-shared", "candidate_uncertified", "model-b");
     const untouchedSpy = vi.spyOn(untouched, "observe");
     const costResult = await observeAnswerMatrix({
-      run, questions: questions(), adapters: [costly, untouched],
+      run, questions: questions(), adapters: [costly, untouched], expectedCheckpointRevision: 0,
       budgets: { "cost-shared": { maxRequests: 8, maxEstimatedCostMicros: 1_000, timeoutMs: 1_000 } }
     });
     expect(costly.observe).toHaveBeenCalledTimes(1);
@@ -143,6 +143,7 @@ describe("answer-engine runtime", () => {
     const costResumed = await observeAnswerMatrix({
       run, questions: questions(), adapters: [costly, untouched],
       existingCells: costResult.cells, existingExecutionState: costResult.executionState,
+      expectedCheckpointRevision: costResult.executionState.checkpointRevision,
       budgets: { "cost-shared": { maxRequests: 8, maxEstimatedCostMicros: 1_000, timeoutMs: 1_000 } }
     });
     expect(costlyObserve).not.toHaveBeenCalled();
@@ -154,7 +155,8 @@ describe("answer-engine runtime", () => {
     const adapter = successfulAdapter("candidate", "candidate_uncertified");
     const firstPersist = vi.fn();
     const first = await observeAnswerMatrix({
-      run, questions: questions(), adapters: [adapter], persistCell: firstPersist,
+      run, questions: questions(), adapters: [adapter], expectedCheckpointRevision: 0,
+      persistCheckpoint: firstPersist,
       budgets: { candidate: { maxRequests: 3, maxEstimatedCostMicros: 10_000, timeoutMs: 1_000 } }
     });
     expect(first.cells).toHaveLength(3);
@@ -164,7 +166,9 @@ describe("answer-engine runtime", () => {
     const secondPersist = vi.fn();
     const second = await observeAnswerMatrix({
       run, questions: questions(), adapters: [adapter], existingCells: first.cells,
-      existingExecutionState: first.executionState, persistCell: secondPersist,
+      existingExecutionState: first.executionState,
+      expectedCheckpointRevision: first.executionState.checkpointRevision,
+      persistCheckpoint: secondPersist,
       budgets: { candidate: { maxRequests: 4, maxEstimatedCostMicros: 10_000, timeoutMs: 1_000 } }
     });
     expect(second.cells).toHaveLength(4);
@@ -184,13 +188,22 @@ describe("answer-engine runtime", () => {
     adapter.classifyError = (): AnswerAdapterErrorClass => "provider-unavailable";
     const persist = vi.fn();
     const result = await observeAnswerMatrix({
-      run, questions: questions().slice(0, 1), adapters: [adapter], persistCell: persist,
+      run, questions: questions().slice(0, 1), adapters: [adapter], expectedCheckpointRevision: 0,
+      persistCheckpoint: persist,
       budgets: { retry: { maxRequests: 2, maxEstimatedCostMicros: 10_000, timeoutMs: 1_000, maxTransientRetries: 1 } }
     });
     expect(observe).toHaveBeenCalledTimes(2);
     expect(result.cells).toHaveLength(1);
     expect(result.cells[0]?.status).toBe("succeeded");
-    expect(persist).toHaveBeenCalledTimes(1);
+    expect(persist).toHaveBeenCalledTimes(2);
+    expect(persist.mock.calls.map(([checkpoint]) => ({
+      expectedRevision: checkpoint.expectedRevision,
+      nextRevision: checkpoint.executionState.checkpointRevision,
+      hasCell: Boolean(checkpoint.cell)
+    }))).toEqual([
+      { expectedRevision: 0, nextRevision: 1, hasCell: false },
+      { expectedRevision: 1, nextRevision: 2, hasCell: true }
+    ]);
     expect(JSON.stringify(result)).not.toMatch(/must-not-leak|api_key/i);
   });
 
@@ -204,7 +217,7 @@ describe("answer-engine runtime", () => {
       });
     });
     const result = await observeAnswerMatrix({
-      run, questions: questions().slice(0, 1), adapters: [adapter],
+      run, questions: questions().slice(0, 1), adapters: [adapter], expectedCheckpointRevision: 0,
       budgets: { slow: { maxRequests: 1, maxEstimatedCostMicros: 10_000, timeoutMs: 5, maxTransientRetries: 0 } }
     });
     expect(signal?.aborted).toBe(true);
@@ -221,12 +234,14 @@ describe("answer-engine runtime", () => {
     adapter.classifyError = () => "rate-limit";
     const persist = vi.fn();
     const result = await observeAnswerMatrix({
-      run, questions: questions().slice(0, 1), adapters: [adapter], persistCell: persist,
+      run, questions: questions().slice(0, 1), adapters: [adapter], expectedCheckpointRevision: 0,
+      persistCheckpoint: persist,
       budgets: { deferred: { maxRequests: 1, maxEstimatedCostMicros: 10_000, timeoutMs: 1_000, maxTransientRetries: 2 } }
     });
     expect(result.cells).toEqual([]);
     expect(result.pendingCellIds).toHaveLength(1);
-    expect(persist).not.toHaveBeenCalled();
+    expect(persist).toHaveBeenCalledTimes(1);
+    expect(persist.mock.calls[0]?.[0]).not.toHaveProperty("cell");
     expect(result.executionState.providers.deferred).toMatchObject({
       requestCount: 1,
       cells: { [result.pendingCellIds[0]!]: { attemptCount: 1, transientAttemptCount: 1 } }
@@ -236,6 +251,7 @@ describe("answer-engine runtime", () => {
     const resumed = await observeAnswerMatrix({
       run, questions: questions().slice(0, 1), adapters: [adapter],
       existingExecutionState: result.executionState,
+      expectedCheckpointRevision: result.executionState.checkpointRevision,
       budgets: { deferred: { maxRequests: 1, maxEstimatedCostMicros: 10_000, timeoutMs: 1_000, maxTransientRetries: 2 } }
     });
     expect(observe).not.toHaveBeenCalled();
@@ -250,7 +266,8 @@ describe("answer-engine runtime", () => {
     adapter.classifyError = () => "provider-unavailable";
     const persist = vi.fn();
     const first = await observeAnswerMatrix({
-      run, questions: questions().slice(0, 1), adapters: [adapter], persistCell: persist,
+      run, questions: questions().slice(0, 1), adapters: [adapter], expectedCheckpointRevision: 0,
+      persistCheckpoint: persist,
       budgets: { exhausted: { maxRequests: 3, maxEstimatedCostMicros: 10_000, timeoutMs: 1_000, maxTransientRetries: 2 } }
     });
     expect(observe).toHaveBeenCalledTimes(3);
@@ -258,11 +275,13 @@ describe("answer-engine runtime", () => {
       status: "failed", errorClass: "provider-unavailable", attemptCount: 3,
       failureDisposition: "retry_exhausted"
     });
-    expect(persist).toHaveBeenCalledTimes(1);
+    expect(persist).toHaveBeenCalledTimes(3);
+    expect(persist.mock.calls.map(([checkpoint]) => Boolean(checkpoint.cell))).toEqual([false, false, true]);
     observe.mockClear();
     const resumed = await observeAnswerMatrix({
       run, questions: questions().slice(0, 1), adapters: [adapter], existingCells: first.cells,
       existingExecutionState: first.executionState,
+      expectedCheckpointRevision: first.executionState.checkpointRevision,
       budgets: { exhausted: { maxRequests: 3, maxEstimatedCostMicros: 10_000, timeoutMs: 1_000, maxTransientRetries: 2 } }
     });
     expect(observe).not.toHaveBeenCalled();
@@ -281,11 +300,43 @@ describe("answer-engine runtime", () => {
     };
     await expect(observeAnswerMatrix({
       run, questions: q, adapters: [adapter], existingCells: [legacy],
+      expectedCheckpointRevision: 0,
       existingExecutionState: {
-        runId: run.id,
+        runId: run.id, checkpointRevision: 0,
         providers: { legacy: { requestCount: 1, estimatedCostMicros: 0, cells: { [legacy.id]: { attemptCount: 1, transientAttemptCount: 1 } } } }
       }
     })).rejects.toThrow(/terminal attempt metadata/i);
+  });
+
+  it("rejects stale revisions, unexpected ledger cells, and cost rollback", async () => {
+    const adapter = successfulAdapter("cas", "candidate_uncertified");
+    const original = adapter.observe.bind(adapter);
+    adapter.observe = async (input) => ({
+      ...(await original(input)), usage: { estimatedCostMicros: 500 }
+    });
+    const q = questions().slice(0, 1);
+    const first = await observeAnswerMatrix({
+      run, questions: q, adapters: [adapter], expectedCheckpointRevision: 0
+    });
+    await expect(observeAnswerMatrix({
+      run, questions: q, adapters: [adapter], existingCells: first.cells,
+      existingExecutionState: first.executionState, expectedCheckpointRevision: 0
+    })).rejects.toThrow(/expectedCheckpointRevision/i);
+
+    const unexpected = structuredClone(first.executionState);
+    unexpected.providers.cas!.requestCount += 1;
+    unexpected.providers.cas!.cells["foreign-cell"] = { attemptCount: 1, transientAttemptCount: 0 };
+    await expect(observeAnswerMatrix({
+      run, questions: q, adapters: [adapter], existingCells: first.cells,
+      existingExecutionState: unexpected, expectedCheckpointRevision: unexpected.checkpointRevision
+    })).rejects.toThrow(/unexpected cell identity/i);
+
+    const rollback = structuredClone(first.executionState);
+    rollback.providers.cas!.estimatedCostMicros = 0;
+    await expect(observeAnswerMatrix({
+      run, questions: q, adapters: [adapter], existingCells: first.cells,
+      existingExecutionState: rollback, expectedCheckpointRevision: rollback.checkpointRevision
+    })).rejects.toThrow(/cost cannot be lower/i);
   });
 
   it("uses external certification and counts distinct providers rather than models", async () => {
@@ -293,7 +344,9 @@ describe("answer-engine runtime", () => {
     const modelA = successfulAdapter("same-provider", "certified", "model-a");
     const modelB = successfulAdapter("same-provider", "certified", "model-b");
     const independent = successfulAdapter("independent", "certified");
-    const observations = await observeAnswerMatrix({ run, questions: q, adapters: [modelA, modelB, independent] });
+    const observations = await observeAnswerMatrix({
+      run, questions: q, adapters: [modelA, modelB, independent], expectedCheckpointRevision: 0
+    });
     const emptyAuthority = { authorityVersion: "empty", capturedAt: "2026-07-12T01:00:00.000Z", certifications: [] } as const;
     expect(classifyCommercialCoverage(q, observations.cells, emptyAuthority)).toMatchObject({
       outcome: "failed", certifiedProviderCount: 0

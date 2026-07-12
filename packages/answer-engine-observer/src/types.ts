@@ -172,7 +172,14 @@ export interface ProviderExecutionLedger {
 
 export interface AnswerExecutionStateLedger {
   runId: string;
+  checkpointRevision: number;
   providers: Record<string, ProviderExecutionLedger>;
+}
+
+export interface AnswerExecutionCheckpoint {
+  expectedRevision: number;
+  executionState: AnswerExecutionStateLedger;
+  cell?: AnswerSnapshotCell;
 }
 
 export interface ObserveAnswerMatrixInput {
@@ -181,8 +188,9 @@ export interface ObserveAnswerMatrixInput {
   adapters: AnswerEngineAdapter[];
   existingCells?: AnswerSnapshotCell[];
   existingExecutionState?: AnswerExecutionStateLedger;
+  expectedCheckpointRevision: number;
   budgets?: Record<string, ProviderExecutionBudget>;
-  persistCell?: (cell: AnswerSnapshotCell) => void | Promise<void>;
+  persistCheckpoint?: (checkpoint: AnswerExecutionCheckpoint) => void | Promise<void>;
 }
 
 export interface ObserveAnswerMatrixResult {

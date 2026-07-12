@@ -37,6 +37,7 @@ export interface ExecutiveVerdictContract {
   customerMentioned: "yes" | "no" | "mixed" | "unknown";
   primaryGap: string;
   evidenceCellIds: string[];
+  coverageOutcome: CommercialCoverageDecision["outcome"];
 }
 
 export interface AnswerSnapshotMatrixContract {
@@ -116,6 +117,7 @@ export interface ExecutivePriorityContract {
   title: string;
   rationale: string;
   evidenceCellIds: string[];
+  websiteFindingIds: string[];
 }
 
 export interface VendorTaskContract {
@@ -149,6 +151,19 @@ export interface ProvenanceAndLimitationsContract {
   limitations: string[];
   methodology: string;
   sourceCategoryContext: SourceCategoryContext;
+  sourceClassificationAuthorityVersion: string;
+  sourceClassificationCapturedAt: string;
+}
+
+export interface SourceClassificationAuthoritySnapshot {
+  authorityVersion: string;
+  capturedAt: string;
+  context: SourceCategoryContext;
+}
+
+export interface RecommendationForensicReportParseOptions {
+  certificationAuthority: CertificationAuthoritySnapshot;
+  sourceClassificationAuthority: SourceClassificationAuthoritySnapshot;
 }
 
 export interface RecommendationForensicReportV1 {
@@ -180,15 +195,17 @@ export class RecommendationForensicReportValidationError extends Error {
 
 export function parseRecommendationForensicReportV1(
   value: unknown,
-  certificationAuthority: CertificationAuthoritySnapshot
+  options: RecommendationForensicReportParseOptions
 ): RecommendationForensicReportV1 {
-  const authority = parseCertificationAuthority(certificationAuthority);
+  const optionsRecord = record(options, "options");
+  const authority = parseCertificationAuthority(optionsRecord.certificationAuthority);
+  const sourceAuthority = parseSourceClassificationAuthority(optionsRecord.sourceClassificationAuthority);
   const report = record(value, "$" );
   if (report.version !== RECOMMENDATION_FORENSIC_REPORT_VERSION) fail("$.version", "Expected recommendation-forensic version 1.");
   const reportId = text(report.reportId, "$.reportId");
   const jobId = text(report.jobId, "$.jobId");
   const targetUrl = httpUrl(report.targetUrl, "$.targetUrl");
-  const provenance = parseProvenance(report.provenanceAndLimitations, authority);
+  const provenance = parseProvenance(report.provenanceAndLimitations, authority, sourceAuthority);
   const questions = parseGeneratedQuestions(report.generatedQuestions);
   const matrix = parseAnswerSnapshotMatrix(report.answerSnapshotMatrix, {
     reportId, jobId, locale: provenance.locale, region: provenance.region, questions, authority
@@ -198,7 +215,9 @@ export function parseRecommendationForensicReportV1(
       .map((cell) => [cell.id, cell])
   );
   validateCertificationProvenance(provenance.certificationProvenance, matrix.cells, authority);
-  validateExecutiveVerdict(report.executiveVerdict, succeededCells);
+  validateExecutiveVerdict(
+    report.executiveVerdict, succeededCells, matrix.commercialCoverage.outcome, authority
+  );
   const recommendedEntities = validateRecommendedEntities(report.recommendedEntities, succeededCells);
   validateSourceCategoryIdentityContext(targetUrl, provenance.sourceCategoryContext, recommendedEntities);
   const recommendationSignals = indexRecommendationSignals(recommendedEntities);
@@ -211,7 +230,6 @@ export function parseRecommendationForensicReportV1(
   validateSourceCategoryBreakdown(report.sourceCategoryBreakdown, citationSources);
   const gaps = validateCustomerGaps(report.customerVsCompetitorGaps, succeededCells, recommendedEntities);
   validateBlindSpot(report.homepageVsFullSiteBlindSpot);
-  validateExecutivePriorities(report.executivePriorities, succeededCells);
   const vendorTaskCount = validateVendorTaskPackage(
     report.vendorTaskPackage, succeededCells, new Set(questions.questions.map(({ id }) => id)
   ));
@@ -228,8 +246,13 @@ export function parseRecommendationForensicReportV1(
       questions.brandAliases.some((alias) => !appendixBrandKeys.has(canonicalizeBrand(alias)))) {
     fail("$.generatedQuestions", "Organization name and aliases must be grounded in the website foundation appendix.");
   }
+  const websiteFindingIds = new Set(
+    appendix.findings.filter(({ evidence }) => evidence.length > 0).map(({ id }) => id)
+  );
+  validateExecutivePriorities(report.executivePriorities, succeededCells, websiteFindingIds);
   validateCommercialReportCompleteness(
-    matrix, authority, recommendedEntities, citationSources, gradedCitationIds, gaps, vendorTaskCount
+    matrix, authority, recommendedEntities, recommendationSignals,
+    citationSources, gradedCitationIds, gaps, vendorTaskCount
   );
   return value as RecommendationForensicReportV1;
 }
@@ -266,10 +289,18 @@ function parseCertification(value: unknown, index: number): CertifiedAnswerEngin
   };
 }
 
-function parseProvenance(value: unknown, authority: CertificationAuthoritySnapshot): ProvenanceAndLimitationsContract {
+function parseProvenance(
+  value: unknown,
+  authority: CertificationAuthoritySnapshot,
+  sourceAuthority: SourceClassificationAuthoritySnapshot
+): ProvenanceAndLimitationsContract {
   const input = record(value, "$.provenanceAndLimitations");
   if (input.certificationAuthorityVersion !== authority.authorityVersion || input.certificationCapturedAt !== authority.capturedAt) {
     fail("$.provenanceAndLimitations", "Certification provenance must match the external CertificationAuthority snapshot.");
+  }
+  if (input.sourceClassificationAuthorityVersion !== sourceAuthority.authorityVersion ||
+      input.sourceClassificationCapturedAt !== sourceAuthority.capturedAt) {
+    fail("$.provenanceAndLimitations", "Source classification provenance must match the external authority snapshot.");
   }
   const certificationProvenance = array(input.certificationProvenance, "$.provenanceAndLimitations.certificationProvenance")
     .map((item, index) => {
@@ -279,6 +310,10 @@ function parseProvenance(value: unknown, authority: CertificationAuthoritySnapsh
         evidenceReference: text(entry.evidenceReference, `$.provenanceAndLimitations.certificationProvenance[${index}].evidenceReference`)
       };
     });
+  const sourceCategoryContext = parseSourceCategoryContext(input.sourceCategoryContext);
+  if (JSON.stringify(sourceCategoryContext) !== JSON.stringify(sourceAuthority.context)) {
+    fail("$.provenanceAndLimitations.sourceCategoryContext", "Source classification context must exactly match the external authority snapshot.");
+  }
   return {
     generatedAt: timestamp(input.generatedAt, "$.provenanceAndLimitations.generatedAt"),
     locale: text(input.locale, "$.provenanceAndLimitations.locale"),
@@ -288,7 +323,19 @@ function parseProvenance(value: unknown, authority: CertificationAuthoritySnapsh
     certificationProvenance,
     limitations: stringArray(input.limitations, "$.provenanceAndLimitations.limitations"),
     methodology: text(input.methodology, "$.provenanceAndLimitations.methodology"),
-    sourceCategoryContext: parseSourceCategoryContext(input.sourceCategoryContext)
+    sourceCategoryContext,
+    sourceClassificationAuthorityVersion: sourceAuthority.authorityVersion,
+    sourceClassificationCapturedAt: sourceAuthority.capturedAt
+  };
+}
+
+function parseSourceClassificationAuthority(value: unknown): SourceClassificationAuthoritySnapshot {
+  if (!value) fail("SourceClassificationAuthority", "An external source classification authority snapshot is required.");
+  const input = record(value, "SourceClassificationAuthority");
+  return {
+    authorityVersion: text(input.authorityVersion, "SourceClassificationAuthority.authorityVersion"),
+    capturedAt: timestamp(input.capturedAt, "SourceClassificationAuthority.capturedAt"),
+    context: parseSourceCategoryContext(input.context)
   };
 }
 
@@ -399,14 +446,28 @@ function validateCertificationProvenance(
   }
 }
 
-function validateExecutiveVerdict(value: unknown, cells: Map<string, SucceededCell>): void {
+function validateExecutiveVerdict(
+  value: unknown,
+  cells: Map<string, SucceededCell>,
+  coverageOutcome: CommercialCoverageDecision["outcome"],
+  authority: CertificationAuthoritySnapshot
+): void {
   const input = record(value, "$.executiveVerdict");
   text(input.summary, "$.executiveVerdict.summary");
   text(input.primaryGap, "$.executiveVerdict.primaryGap");
   if (!new Set(["yes", "no", "mixed", "unknown"]).has(input.customerMentioned as string)) {
     fail("$.executiveVerdict.customerMentioned", "Unsupported mention outcome.");
   }
-  validateCellIds(input.evidenceCellIds, "$.executiveVerdict.evidenceCellIds", cells);
+  if (input.coverageOutcome !== coverageOutcome) {
+    fail("$.executiveVerdict.coverageOutcome", "Verdict coverage outcome must match commercial coverage.");
+  }
+  const certifiedKeys = new Set(authority.certifications.map(({ surface }) => createAnswerEngineSurfaceKey(surface)));
+  const commercialCells = new Map([...cells].filter(([, cell]) => certifiedKeys.has(createAnswerEngineSurfaceKey(cell.surface))));
+  validateCellIds(
+    input.evidenceCellIds, "$.executiveVerdict.evidenceCellIds",
+    coverageOutcome === "failed" ? cells : commercialCells,
+    coverageOutcome !== "failed"
+  );
 }
 
 function validateRecommendedEntities(
@@ -758,7 +819,11 @@ function validateBlindSpot(value: unknown): void {
   }
 }
 
-function validateExecutivePriorities(value: unknown, cells: Map<string, SucceededCell>): void {
+function validateExecutivePriorities(
+  value: unknown,
+  cells: Map<string, SucceededCell>,
+  websiteFindingIds: Set<string>
+): void {
   const priorities = array(value, "$.executivePriorities");
   if (priorities.length !== 3) fail("$.executivePriorities", "Expected exactly three executive priorities.");
   priorities.forEach((item, index) => {
@@ -767,7 +832,14 @@ function validateExecutivePriorities(value: unknown, cells: Map<string, Succeede
     if (input.order !== index + 1) fail(`${path}.order`, "Priorities must be ordered 1, 2, 3.");
     text(input.title, `${path}.title`);
     text(input.rationale, `${path}.rationale`);
-    validateCellIds(input.evidenceCellIds, `${path}.evidenceCellIds`, cells);
+    const answerEvidence = validateCellIds(input.evidenceCellIds, `${path}.evidenceCellIds`, cells);
+    const websiteEvidence = stringArray(input.websiteFindingIds, `${path}.websiteFindingIds`);
+    if (websiteEvidence.some((id) => !websiteFindingIds.has(id))) {
+      fail(`${path}.websiteFindingIds`, "Priority website evidence must reference a matching appendix finding with evidence.");
+    }
+    if (answerEvidence.length + websiteEvidence.length === 0) {
+      fail(path, "Every executive priority requires answer-cell or website-finding evidence.");
+    }
   });
 }
 
@@ -808,6 +880,7 @@ function validateCommercialReportCompleteness(
   matrix: AnswerSnapshotMatrixContract,
   authority: CertificationAuthoritySnapshot,
   entities: Map<string, RecommendedEntityContract>,
+  recommendationSignals: Map<string, Set<string>>,
   citations: Map<string, CitationSourceContract>,
   gradedCitationIds: Set<string>,
   gaps: CustomerVsCompetitorGapContract[],
@@ -825,6 +898,9 @@ function validateCommercialReportCompleteness(
   const citationKeys = new Set([...citations.values()].map(({ cellId, url }) => `${cellId}\n${url}`));
   for (const cell of succeeded) {
     if (!certifiedSurfaceKeys.has(createAnswerEngineSurfaceKey(cell.surface))) continue;
+    if (cell.recommendationOutcome === "recommendations_present" && !recommendationSignals.has(cell.id)) {
+      fail("$.recommendedEntities", "Every externally certified commercial recommendation cell requires an exact-quote entity signal.");
+    }
     for (const source of cell.sources) {
       if (!citationKeys.has(`${cell.id}\n${source.url}`)) {
         fail("$.citationSources", "Every provider-returned source in certified commercial coverage must be normalized.");
