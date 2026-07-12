@@ -1,6 +1,4 @@
-import { NextResponse } from "next/server";
-import { loadPrivateReportArtifact } from "@/report/artifact-model";
-import { exportReportPdf } from "@/report/pdf-export";
+import { serveScopedReportPdf } from "@/report/pdf-artifact-route";
 import { resolveRequestArtifactScope } from "@/server/report-access";
 
 export const runtime = "nodejs";
@@ -10,40 +8,13 @@ export const maxDuration = 60;
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const productContract = await resolveRequestArtifactScope(request, id);
-  if (!productContract) return denied();
-  const model = await loadPrivateReportArtifact(id, productContract);
-  if (!model) return denied();
-  try {
-    const htmlUrl = new URL(`/reports/${encodeURIComponent(id)}/report.html`, request.url).href;
-    const pdf = await exportReportPdf({ htmlUrl, cookieHeader: request.headers.get("cookie") ?? "" });
-    return new NextResponse(copyArrayBuffer(pdf), {
-      headers: {
-        "cache-control": "private, no-store, max-age=0",
-        "content-disposition": `inline; filename="open-geo-report-${id}.pdf"`,
-        "content-type": "application/pdf",
-        "referrer-policy": "no-referrer",
-        "x-content-type-options": "nosniff",
-        "x-frame-options": "DENY"
-      }
-    });
-  } catch (error) {
-    console.error("PDF artifact export failed.", error instanceof Error ? error.message : "unknown_error");
-    return NextResponse.json({ error: "PDF export is temporarily unavailable. The HTML report remains available." }, {
-      status: 503,
-      headers: { "cache-control": "private, no-store", "retry-after": "30" }
-    });
-  }
-}
-
-function copyArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const buffer = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(buffer).set(bytes);
-  return buffer;
-}
-
-function denied() {
-  return NextResponse.json({ error: "Report artifact is unavailable." }, {
-    status: 404,
-    headers: { "cache-control": "private, no-store" }
+  if (!productContract) return new Response(JSON.stringify({ error: "Report artifact is unavailable." }), {
+    status: 404, headers: { "cache-control": "private, no-store", "content-type": "application/json" }
+  });
+  const recommendation = productContract === "recommendation_forensics_v1";
+  return serveScopedReportPdf({
+    request, reportId: id, artifactScope: productContract, accessAlreadyVerified: true,
+    htmlPath: `/reports/${encodeURIComponent(id)}/${recommendation ? "recommendation-report.html" : "legacy-report.html"}`,
+    filename: `open-geo-${recommendation ? "recommendation" : "legacy"}-report-${id}.pdf`
   });
 }

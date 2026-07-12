@@ -7,7 +7,7 @@ export async function exportReportPdf(input: {
   cookieHeader: string;
 }): Promise<Buffer> {
   const url = new URL(input.htmlUrl);
-  if (url.pathname.includes("..") || !url.pathname.endsWith("/report.html")) {
+  if (!isControlledReportArtifactUrl(url)) {
     throw new Error("PDF export URL is not a controlled report artifact.");
   }
   const browser = await launchPdfBrowser();
@@ -33,6 +33,10 @@ export async function exportReportPdf(input: {
   } finally {
     await browser.close();
   }
+}
+
+export function isControlledReportArtifactUrl(url: URL): boolean {
+  return !url.pathname.includes("..") && /^\/reports\/[^/]+\/(?:report|legacy-report|recommendation-report)\.html$/.test(url.pathname);
 }
 
 async function launchPdfBrowser() {

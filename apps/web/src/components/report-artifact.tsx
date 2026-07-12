@@ -59,8 +59,8 @@ export function ReportArtifact({ model }: { model: LegacyPrivateReportArtifactMo
   return (
     <main>
       <nav className="artifact-actions no-print" aria-label="Report formats">
-        <a href={`/reports/${model.reportId}/report.html`}>{t.html}</a>
-        <a className="primary" href={`/api/reports/${model.reportId}/artifacts/report.pdf`}>{t.pdf}</a>
+        <a href={`/reports/${model.reportId}/legacy-report.html`}>{t.html}</a>
+        <a className="primary" href={`/api/reports/${model.reportId}/artifacts/legacy-report.pdf`}>{t.pdf}</a>
       </nav>
 
       <header className="cover artifact-section">

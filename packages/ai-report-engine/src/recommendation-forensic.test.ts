@@ -110,9 +110,9 @@ function validReport(authority = emptyAuthority): RecommendationForensicReportV1
       omissions: [], contradictions: [], confidenceChanges: [], limitations: []
     },
     executivePriorities: [
-      { order: 1, title: "Priority 1", rationale: "Evidence-backed prioritization.", evidenceCellIds: [], websiteFindingIds: ["finding-1"] },
-      { order: 2, title: "Priority 2", rationale: "Evidence-backed prioritization.", evidenceCellIds: [], websiteFindingIds: ["finding-1"] },
-      { order: 3, title: "Priority 3", rationale: "Evidence-backed prioritization.", evidenceCellIds: [], websiteFindingIds: ["finding-1"] }
+      { order: 1, title: "Priority 1", rationale: "Website evidence finding supports this priority.", evidenceCellIds: [], websiteFindingIds: ["finding-1"], citationSourceIds: [], gapIds: [] },
+      { order: 2, title: "Priority 2", rationale: "Website evidence finding supports this priority.", evidenceCellIds: [], websiteFindingIds: ["finding-1"], citationSourceIds: [], gapIds: [] },
+      { order: 3, title: "Priority 3", rationale: "Website evidence finding supports this priority.", evidenceCellIds: [], websiteFindingIds: ["finding-1"], citationSourceIds: [], gapIds: [] }
     ],
     vendorTaskPackage: { version: "vendor-task-v1", tasks: [] },
     websiteFoundationAppendix: websiteFoundation(),
@@ -267,10 +267,16 @@ function completeLimitedReport(): { report: RecommendationForensicReportV1; auth
   }];
   report.vendorTaskPackage.tasks = [{
     id: "task-comparison", vendor: "content", title: "Draft comparison evidence",
-    rationale: "Address the observed Atlas evidence gap.", actions: ["Draft a sourced comparison."],
+    rationale: "Address the observed Atlas evidence gap for Atlas Example.", actions: ["Draft a sourced comparison for Atlas Example."],
     acceptanceCriteria: ["Every claim has a public source."], evidenceCellIds: [cells[0]!.id],
+    websiteFindingIds: [], citationSourceIds: [], gapIds: ["gap-atlas"],
     retestQuestionIds: [report.generatedQuestions.questions[0]!.id]
   }];
+  report.executivePriorities = [
+    { order: 1, title: "Atlas evidence gap", rationale: "Atlas evidence gap appears in observed answers.", evidenceCellIds: [cells[0]!.id], websiteFindingIds: [], citationSourceIds: [], gapIds: ["gap-atlas"] },
+    { order: 2, title: "Website evidence finding", rationale: "Website evidence finding requires clarification.", evidenceCellIds: [], websiteFindingIds: ["finding-1"], citationSourceIds: [], gapIds: [] },
+    { order: 3, title: "Earned editorial evidence", rationale: "earned_editorial is the observed source category.", evidenceCellIds: [cells[0]!.id], websiteFindingIds: [], citationSourceIds: [report.citationSources[0]!.id], gapIds: [] }
+  ];
   return { report, authority };
 }
 
@@ -314,14 +320,31 @@ function completeNoRecommendationReport(): { report: RecommendationForensicRepor
   }];
   report.vendorTaskPackage.tasks = [{
     id: "task-no-rec", vendor: "cross-functional", title: "Prepare rerun evidence",
-    rationale: "The observed set produced no supplier recommendation.", actions: ["Review public category evidence."],
+    rationale: "No recommendation outcome requires a controlled rerun.", actions: ["Review public category evidence."],
     acceptanceCriteria: ["Evidence is public and source-linked."], evidenceCellIds: [successful[0]!.id],
+    websiteFindingIds: [], citationSourceIds: [], gapIds: ["gap-no-recommendation"],
     retestQuestionIds: [report.generatedQuestions.questions[0]!.id]
   }];
+  report.executivePriorities = [
+    { order: 1, title: "No recommendation outcome", rationale: "No recommendation outcome requires controlled retesting.", evidenceCellIds: [successful[0]!.id], websiteFindingIds: [], citationSourceIds: [], gapIds: ["gap-no-recommendation"] },
+    { order: 2, title: "Website evidence finding", rationale: "Website evidence finding requires clarification.", evidenceCellIds: [], websiteFindingIds: ["finding-1"], citationSourceIds: [], gapIds: [] },
+    { order: 3, title: "Earned editorial evidence", rationale: "earned_editorial is the observed source category.", evidenceCellIds: [successful[0]!.id], websiteFindingIds: [], citationSourceIds: [report.citationSources[0]!.id], gapIds: [] }
+  ];
   return { report, authority };
 }
 
 describe("RecommendationForensicReportV1", () => {
+  it("rejects a fixed Schema task that has no related website finding", () => {
+    const { report, authority } = completeLimitedReport();
+    report.vendorTaskPackage.tasks[0] = {
+      ...report.vendorTaskPackage.tasks[0]!,
+      title: "Implement Organization Schema",
+      actions: ["Add Schema and FAQ markup."],
+      websiteFindingIds: []
+    };
+    expect(() => parseReport(report, authority)).toThrow(/Schema.*website finding/i);
+  });
+
   it("requires the complete approved top-level contract and exactly three executive priorities", () => {
     const report = validReport();
     expect(parseReport(report)).toEqual(report);
@@ -380,7 +403,7 @@ describe("RecommendationForensicReportV1", () => {
 
     const priorityless = validReport();
     priorityless.executivePriorities[0].websiteFindingIds = [];
-    expect(() => parseReport(priorityless)).toThrow(/requires answer-cell or website-finding evidence/i);
+    expect(() => parseReport(priorityless)).toThrow(/requires structured report evidence/i);
   });
 
   it("requires an exact recommendation signal for every certified commercial recommendation cell", () => {

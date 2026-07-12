@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 import type { PrivateReportArtifactModel } from "@/report/artifact-model";
 import { ReportArtifact } from "./report-artifact";
@@ -43,15 +44,15 @@ const model = {
 
 describe("canonical report artifact", () => {
   it("renders material report content and protected visual evidence", () => {
-    const html = renderToStaticMarkup(<ReportArtifact model={model} />);
+    const html = renderToStaticMarkup(createElement(ReportArtifact, { model: model as never }));
 
     expect(html).toContain("Executive overview");
     expect(html).toContain("Clarify the primary offer");
     expect(html).toContain("Verified quote");
     expect(html).toContain("Add a concise definition");
     expect(html).toContain("/api/reports/report-1/evidence/asset-1");
-    expect(html).toContain("/reports/report-1/report.html");
-    expect(html).toContain("/api/reports/report-1/artifacts/report.pdf");
+    expect(html).toContain("/reports/report-1/legacy-report.html");
+    expect(html).toContain("/api/reports/report-1/artifacts/legacy-report.pdf");
   });
 
   it("keeps verified evidence visible when screenshots are unavailable", () => {
@@ -59,7 +60,7 @@ describe("canonical report artifact", () => {
       ...model,
       evidenceAssets: [{ ...model.evidenceAssets[0], status: "unavailable", kind: "viewport" }]
     } as unknown as PrivateReportArtifactModel;
-    const html = renderToStaticMarkup(<ReportArtifact model={unavailable} />);
+    const html = renderToStaticMarkup(createElement(ReportArtifact, { model: unavailable as never }));
 
     expect(html).toContain("Screenshot unavailable");
     expect(html).toContain("Verified quote");

@@ -38,11 +38,10 @@ export class ProductionRecommendationReportBuilder implements RecommendationRepo
     }));
     const sourceCategoryBreakdown = buildSourceBreakdown(citations);
     const gaps = buildGaps(succeeded, entities, input.websiteFoundation.provenance.locale);
-    const successfulIds = succeeded.map(({ id }) => id);
     const commercialIds = commercialEvidenceIds(succeeded, input);
     const locale = input.websiteFoundation.provenance.locale;
     const failed = input.coverage.outcome === "failed";
-    const priorities = buildPriorities(successfulIds, input);
+    const priorities = buildPriorities(succeeded, entities, citations, gaps, input);
 
     return {
       version: RECOMMENDATION_FORENSIC_REPORT_VERSION,
@@ -65,7 +64,7 @@ export class ProductionRecommendationReportBuilder implements RecommendationRepo
       executivePriorities: priorities,
       vendorTaskPackage: {
         version: "vendor-task-v1",
-        tasks: failed ? [] : buildVendorTasks(commercialIds, input, locale)
+        tasks: failed ? [] : buildVendorTasks(commercialIds, entities, citations, gaps, input, locale)
       },
       websiteFoundationAppendix: input.websiteFoundation,
       provenanceAndLimitations: {
@@ -311,58 +310,124 @@ function buildBlindSpot(input: RecommendationReportBuilderInput): Recommendation
   };
 }
 
-function buildPriorities(successfulIds: string[], input: RecommendationReportBuilderInput): RecommendationForensicReportV1["executivePriorities"] {
-  const findings = input.websiteFoundation.findings.filter(({ evidence }) => evidence.length > 0).map(({ id }) => id);
-  const firstCell = successfulIds[0];
-  const firstFinding = findings[0];
-  if (!firstCell && !firstFinding) throw new Error("Recommendation priorities require persisted answer or website evidence.");
+function buildPriorities(
+  cells: StoredSucceededCell[],
+  entities: RecommendationForensicReportV1["recommendedEntities"],
+  citations: RecommendationForensicReportV1["citationSources"],
+  gaps: RecommendationForensicReportV1["customerVsCompetitorGaps"],
+  input: RecommendationReportBuilderInput
+): RecommendationForensicReportV1["executivePriorities"] {
   const zh = input.websiteFoundation.provenance.locale === "zh";
-  const items = zh ? [
-    ["统一官方事实与实体身份", "先修复公开页面中的公司、产品、受众与市场表述，使供应商有单一事实源。"],
-    ["建立可引用的客户证据", "将数据、方法、案例和比较边界发布为第三方可独立核验的材料。"],
-    ["扩展第三方证据面", "按观察到的来源类别安排媒体、目录、机构与社区验证机会。"]
-  ] : [
-    ["Unify official facts and entity identity", "Repair company, product, audience, and market statements so vendors work from one public source of truth."],
-    ["Build citation-worthy customer evidence", "Publish data, methods, cases, and bounded comparisons that third parties can independently verify."],
-    ["Expand third-party evidence coverage", "Prioritize editorial, directory, institution, and community opportunities reflected in observed source categories."]
+  const finding = input.websiteFoundation.findings.find(({ evidence }) => evidence.length > 0);
+  const gap = gaps[0];
+  const citation = citations.find(({ retrieval }) => retrieval.state === "available") ?? citations[0];
+  const fallbackCell = cells[0];
+  if (!finding && !gap && !citation && !fallbackCell) {
+    throw new Error("Recommendation priorities require persisted answer or website evidence.");
+  }
+  const questionForCell = (cellId: string | undefined) => {
+    const questionId = cells.find(({ id }) => id === cellId)?.questionId;
+    return input.questions.questions.find(({ id }) => id === questionId)?.exactText ?? (zh ? "未知问题" : "Unknown question");
+  };
+  const gapEntities = gap?.competitorEntityIds.map((id) => entities.find((entity) => entity.entityId === id)?.name).filter(Boolean).join(", ") || (zh ? "未知对象" : "Unknown entity");
+  const blindEvidence = buildBlindSpot(input).omissions[0] ?? buildBlindSpot(input).limitations[0];
+  return [
+    {
+      order: 1,
+      title: gap?.title ?? (zh ? "未知推荐差距：先补采集" : "Unknown recommendation gap: collect evidence first"),
+      rationale: gap
+        ? (zh ? `${gap.title}涉及 ${gapEntities}，对应问题“${questionForCell(gap.evidenceCellIds[0])}”；仅表示已观察关联。` : `${gap.title} involves ${gapEntities} for “${questionForCell(gap.evidenceCellIds[0])}”; this is an observed association only.`)
+        : (zh ? `未知推荐差距：当前没有可审计推荐对象；以 ${finding?.title ?? "网站证据未知"} 为现有证据边界。` : `Unknown recommendation gap: no auditable entity was observed; ${finding?.title ?? "Website evidence Unknown"} is the current evidence boundary.`),
+      evidenceCellIds: gap?.evidenceCellIds.slice(0, 3) ?? (fallbackCell ? [fallbackCell.id] : []),
+      websiteFindingIds: !gap && finding ? [finding.id] : [], citationSourceIds: [], gapIds: gap ? [gap.id] : []
+    },
+    {
+      order: 2,
+      title: finding?.title ?? (zh ? "网站盲区未知：补采集" : "Website blind spot Unknown: collect evidence"),
+      rationale: finding
+        ? (zh ? `${finding.title}与首页/全站差异“${blindEvidence}”相关。` : `${finding.title} is tied to the homepage/full-site difference “${blindEvidence}”.`)
+        : (zh ? "网站盲区未知：没有带证据的网站finding，先采集首页与全站差异。" : "Website blind spot Unknown: no evidence-backed website finding exists, so collect homepage/full-site differences first."),
+      evidenceCellIds: [], websiteFindingIds: finding ? [finding.id] : [], citationSourceIds: [], gapIds: []
+    },
+    {
+      order: 3,
+      title: citation ? `${citation.category} ${zh ? "来源证据" : "source evidence"}` : (zh ? "来源证据未知：补采集" : "Source evidence Unknown: collect evidence"),
+      rationale: citation
+        ? (zh ? `${citation.category} 出现在问题“${questionForCell(citation.cellId)}”的提供商返回来源中，当前等级由检索状态决定。` : `${citation.category} appears in provider-returned sources for “${questionForCell(citation.cellId)}”; its grade follows the observed retrieval state.`)
+        : (zh ? `来源证据未知：没有可引用来源；${finding?.title ?? "网站证据未知"} 是当前证据边界，不预设媒体或目录动作。` : `Source evidence Unknown: no citeable source was observed; ${finding?.title ?? "Website evidence Unknown"} is the current boundary, so do not prescribe media or directory work.`),
+      evidenceCellIds: citation ? [citation.cellId] : (fallbackCell ? [fallbackCell.id] : []),
+      websiteFindingIds: !citation && finding ? [finding.id] : [], citationSourceIds: citation ? [citation.id] : [], gapIds: []
+    }
   ];
-  return items.map(([title, rationale], index) => ({
-    order: (index + 1) as 1 | 2 | 3,
-    title,
-    rationale,
-    evidenceCellIds: firstCell ? [firstCell] : [],
-    websiteFindingIds: firstFinding ? [firstFinding] : []
-  })) as RecommendationForensicReportV1["executivePriorities"];
 }
 
-function buildVendorTasks(commercialIds: string[], input: RecommendationReportBuilderInput, locale: string) {
-  const evidenceCellIds = commercialIds.slice(0, 1);
-  if (evidenceCellIds.length === 0) return [];
+function buildVendorTasks(
+  commercialIds: string[],
+  entities: RecommendationForensicReportV1["recommendedEntities"],
+  citations: RecommendationForensicReportV1["citationSources"],
+  gaps: RecommendationForensicReportV1["customerVsCompetitorGaps"],
+  input: RecommendationReportBuilderInput,
+  locale: string
+): RecommendationForensicReportV1["vendorTaskPackage"]["tasks"] {
+  const defaultCellId = commercialIds[0];
+  if (!defaultCellId) return [];
+  const finding = input.websiteFoundation.findings.find(({ evidence }) => evidence.length > 0);
+  const gap = gaps[0];
+  const citation = citations.find(({ retrieval }) => retrieval.state === "available") ?? citations[0];
+  const question = input.questions.questions[0]!;
   const retestQuestionIds = input.questions.questions.map(({ id }) => id);
   const zh = locale === "zh";
-  const definitions = zh ? [
-    ["website", "修正官方事实与实体身份", ["统一公司名称、产品分类、目标客户与服务地区。", "在相关页面附上可核验事实来源。"], ["所有关键事实在首页、关于页和产品页保持一致。"]],
-    ["seo", "交付 Schema、FAQ 与页面附件", ["提交 Organization/Product/Service Schema 草案。", "为固定复测问题建立 FAQ 与页面映射附件。"], ["Schema 通过语法验证，FAQ 答案可在公开页面找到。"]],
-    ["content", "制作可引用数据、案例与内容简报", ["发布带方法、日期和样本边界的数据页。", "制作客户案例、比较页和专家评论简报。"], ["每项主张都有公开来源、方法和审核人。"]],
-    ["communications", "建立媒体、目录与社区机会清单", ["按来源类别整理媒体、目录、机构和社区机会。", "仅提交可由接收方独立验证的证据包。"], ["每个机会记录适配主题、证据要求和负责人。"]],
-    ["cross-functional", "按固定问题集验收与复测", ["冻结本报告的 3–5 个问题和观察协议。", "完成任务后在同地区、语言和认证表面复测。"], ["验收记录含问题、表面、模型、地区、时间、来源和 Unknown 状态。"]]
-  ] : [
-    ["website", "Correct official facts and entity identity", ["Align company name, product category, audience, and served markets.", "Attach verifiable public evidence to the relevant pages."], ["Homepage, about, and product pages state the same key facts."]],
-    ["seo", "Deliver Schema, FAQ, and page attachments", ["Provide Organization/Product/Service Schema drafts.", "Map the fixed retest questions to FAQ answers and owner pages."], ["Schema passes syntax validation and every FAQ answer is present on a public page."]],
-    ["content", "Produce citeable data, cases, and content briefs", ["Publish a data page with method, date, and sample limits.", "Prepare case-study, comparison, and expert-commentary briefs."], ["Every material claim has a public source, method, and reviewer."]],
-    ["communications", "Build media, directory, and community opportunities", ["Prioritize editorial, directory, institution, and community categories.", "Share only evidence packs recipients can independently verify."], ["Each opportunity records topic fit, evidence requirement, and owner."]],
-    ["cross-functional", "Accept and retest with fixed questions", ["Freeze the report's 3–5 questions and observation protocol.", "After delivery, rerun the same locale, region, and certified surfaces."], ["Acceptance records question, surface, model, region, time, sources, and Unknown states."]]
+  const competitorNames = gap?.competitorEntityIds.map((id) => entities.find((entity) => entity.entityId === id)?.name).filter(Boolean).join(", ") || (zh ? "未知对象" : "Unknown entity");
+  const findingTitle = finding?.title ?? (zh ? "网站证据未知" : "Website evidence Unknown");
+  const gapTitle = gap?.title ?? (zh ? "推荐差距未知" : "Recommendation gap Unknown");
+  const sourceCategory = citation?.category ?? "unknown";
+  const websiteRefs = finding ? [finding.id] : [];
+  const gapRefs = gap ? [gap.id] : [];
+  const citationRefs = citation ? [citation.id] : [];
+  const citationCells = citation ? [citation.cellId] : [defaultCellId];
+  const gapCells = gap?.evidenceCellIds.slice(0, 3) ?? [defaultCellId];
+  const tasks: RecommendationForensicReportV1["vendorTaskPackage"]["tasks"] = [
+    {
+      id: "vendor-task-website", vendor: "website", title: findingTitle,
+      rationale: finding
+        ? (zh ? `${findingTitle} 是网站基础附录中的实际finding。` : `${findingTitle} is the evidence-backed website finding in the appendix.`)
+        : (zh ? `${gapTitle}涉及 ${competitorNames}，但网站证据未知。` : `${gapTitle} involves ${competitorNames}, but website evidence is Unknown.`),
+      actions: finding ? [finding.recommendation, `Attach the cited evidence to the owner page for “${question.exactText}”.`] : [zh ? "未知：先采集可核验的网站finding，不改写页面。" : "Unknown: collect a verifiable website finding before changing owner pages."],
+      acceptanceCriteria: [zh ? `交付物逐项引用finding“${findingTitle}”及其URL。` : `Every deliverable cites the finding “${findingTitle}” and its URLs.`],
+      evidenceCellIds: finding ? [defaultCellId] : gapCells, websiteFindingIds: websiteRefs, citationSourceIds: [], gapIds: finding ? [] : gapRefs, retestQuestionIds
+    },
+    {
+      id: "vendor-task-seo", vendor: "seo", title: zh ? "问题到页面的证据映射" : "Question-to-page evidence map",
+      rationale: finding
+        ? (zh ? `${findingTitle}需要映射实际问题“${question.exactText}”；未观察到的 Schema/FAQ 保留为未知。` : `${findingTitle} must be mapped to the actual question “${question.exactText}”; unobserved Schema/FAQ needs remain Unknown.`)
+        : (zh ? `${gapTitle}涉及 ${competitorNames}；问题到页面证据未知，先做证据收集。` : `${gapTitle} involves ${competitorNames}; question-to-page evidence is Unknown, so collect evidence first.`),
+      actions: [zh ? `把“${question.exactText}”映射到现有owner page；仅在${findingTitle}证据支持时提出结构化数据草案。` : `Map “${question.exactText}” to an existing owner page; propose structured-data drafts only when supported by ${findingTitle}.`],
+      acceptanceCriteria: [zh ? "附件列出实际问题、owner page、现有答案和未知证据。" : "Attachment lists the actual question, owner page, current answer, and Unknown evidence."],
+      evidenceCellIds: finding ? [defaultCellId] : gapCells, websiteFindingIds: websiteRefs, citationSourceIds: [], gapIds: finding ? [] : gapRefs, retestQuestionIds
+    },
+    {
+      id: "vendor-task-content", vendor: "content", title: gapTitle,
+      rationale: zh ? `${gapTitle}涉及 ${competitorNames} 与问题“${question.exactText}”。` : `${gapTitle} involves ${competitorNames} for “${question.exactText}”.`,
+      actions: [zh ? `围绕 ${competitorNames} 的已观察差距制作带方法、日期和边界的内容brief。` : `Create a method-, date-, and boundary-labeled content brief for the observed gap involving ${competitorNames}.`],
+      acceptanceCriteria: [zh ? `brief逐项回链 ${gapTitle} 的cell与问题。` : `The brief links every claim to ${gapTitle}, its cells, and its question.`],
+      evidenceCellIds: gapCells, websiteFindingIds: [], citationSourceIds: [], gapIds: gapRefs, retestQuestionIds
+    },
+    {
+      id: "vendor-task-communications", vendor: "communications", title: citation ? `${sourceCategory} evidence follow-up` : (zh ? "来源机会未知：证据收集" : "Source opportunity Unknown: evidence collection"),
+      rationale: citation ? (zh ? `${sourceCategory} 是实际观察到的来源类别。` : `${sourceCategory} is the observed source category.`) : (zh ? `${gapTitle}当前没有citation source；媒体、目录与社区动作保持未知。` : `${gapTitle} has no citation source; media, directory, and community work remains Unknown.`),
+      actions: citation ? [zh ? `核验 ${sourceCategory} 来源的公开证据要求，不承诺收录。` : `Verify the public evidence requirements for the ${sourceCategory} source; do not promise placement.`] : [zh ? "未知：先做媒体、目录与社区证据收集，不进行外联。" : "Unknown: collect media, directory, and community evidence before outreach."],
+      acceptanceCriteria: [zh ? "记录来源类别、URL、证据要求与未知状态。" : "Record source category, URL, evidence requirement, and Unknown state."],
+      evidenceCellIds: citation ? citationCells : gapCells, websiteFindingIds: [], citationSourceIds: citationRefs, gapIds: citation ? [] : gapRefs, retestQuestionIds
+    },
+    {
+      id: "vendor-task-retest", vendor: "cross-functional", title: gapTitle,
+      rationale: zh ? `${gapTitle}必须使用本报告实际生成的 ${retestQuestionIds.length} 个问题复测。` : `${gapTitle} must be retested with the ${retestQuestionIds.length} questions generated in this report.`,
+      actions: input.questions.questions.map((item) => zh ? `固定复测问题：${item.exactText}` : `Fixed retest question: ${item.exactText}`),
+      acceptanceCriteria: [zh ? "验收记录问题、表面、模型、地区、时间、来源、等级与未知状态。" : "Acceptance records question, surface, model, region, time, sources, grade, and Unknown state."],
+      evidenceCellIds: gapCells, websiteFindingIds: [], citationSourceIds: [], gapIds: gapRefs, retestQuestionIds
+    }
   ];
-  return definitions.map(([vendor, title, actions, acceptanceCriteria], index) => ({
-    id: `vendor-task-${index + 1}`,
-    vendor: vendor as "website" | "seo" | "content" | "communications" | "cross-functional",
-    title: title as string,
-    rationale: zh ? "该任务对应本报告中的答案快照、来源证据与网站基础发现。" : "This task maps to persisted answer snapshots, source evidence, and website-foundation findings in this report.",
-    actions: actions as string[],
-    acceptanceCriteria: acceptanceCriteria as string[],
-    evidenceCellIds,
-    retestQuestionIds
-  }));
+  return tasks;
 }
 
 function mentionLabel(value: "yes" | "no" | "mixed" | "unknown", zh: boolean) {

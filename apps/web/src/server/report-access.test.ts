@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const verifyReportAccessToken = vi.hoisted(() => vi.fn());
 vi.mock("@/db/report-tokens", () => ({ verifyReportAccessToken }));
 
-import { reportAccessCookieName, requestHasReportAccess, resolveRequestArtifactScope } from "./report-access";
+import { reportAccessCookieName, requestHasReportAccess, resolveRequestArtifactScope, scopedReportAccessCookieHeader } from "./report-access";
 
 describe("artifact-scoped report access", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -29,5 +29,7 @@ describe("artifact-scoped report access", () => {
       headers: { cookie: "ogc_report_report-1=old-token; ogc_report_report-1_recommendation=new-token" }
     });
     await expect(resolveRequestArtifactScope(request, "report-1")).resolves.toBe("recommendation_forensics_v1");
+    expect(scopedReportAccessCookieHeader(request, "report-1", "recommendation_forensics_v1")).toBe("ogc_report_report-1_recommendation=new-token");
+    expect(scopedReportAccessCookieHeader(request, "report-1", "legacy_website_audit_v1")).toBe("ogc_report_report-1=old-token");
   });
 });

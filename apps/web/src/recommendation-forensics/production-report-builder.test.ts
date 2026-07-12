@@ -31,8 +31,12 @@ describe("ProductionRecommendationReportBuilder", () => {
     ]));
     expect(parsed.recommendedEntities.flatMap((entity) => entity.signals)).not.toHaveLength(0);
     for (const priority of parsed.executivePriorities) {
-      expect(priority.evidenceCellIds.length + priority.websiteFindingIds.length).toBeGreaterThan(0);
+      expect(priority.evidenceCellIds.length + priority.websiteFindingIds.length + priority.citationSourceIds.length + priority.gapIds.length).toBeGreaterThan(0);
     }
+    expect(new Set(parsed.executivePriorities.map((priority) => JSON.stringify([
+      priority.websiteFindingIds, priority.citationSourceIds, priority.gapIds
+    ]))).size).toBe(3);
+    expect(parsed.vendorTaskPackage.tasks.find(({ vendor }) => vendor === "communications")?.citationSourceIds.length).toBeGreaterThan(0);
     expect(JSON.stringify(parsed)).not.toMatch(/caused (?:the )?(?:model|ranking)|guarantee(?:d|s)? ranking/i);
   });
 
@@ -74,8 +78,8 @@ describe("ProductionRecommendationReportBuilder", () => {
       sourceClassificationAuthority: input.sourceClassificationAuthority
     });
     expect(parsed.provenanceAndLimitations.locale).toBe("zh");
-    expect(parsed.executivePriorities[0].title).toBe("统一官方事实与实体身份");
-    expect(parsed.vendorTaskPackage.tasks[0]?.title).toBe("修正官方事实与实体身份");
+    expect(parsed.executivePriorities[0].gapIds).not.toHaveLength(0);
+    expect(parsed.vendorTaskPackage.tasks[0]?.websiteFindingIds).toEqual(["finding-1"]);
     expect(parsed.recommendedEntities.map(({ name }) => name)).toEqual(expect.arrayContaining(["Atlas Example", "Beacon Example"]));
   });
 });

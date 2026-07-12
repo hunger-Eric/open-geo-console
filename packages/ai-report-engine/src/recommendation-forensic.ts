@@ -118,6 +118,8 @@ export interface ExecutivePriorityContract {
   rationale: string;
   evidenceCellIds: string[];
   websiteFindingIds: string[];
+  citationSourceIds: string[];
+  gapIds: string[];
 }
 
 export interface VendorTaskContract {
@@ -128,6 +130,9 @@ export interface VendorTaskContract {
   actions: string[];
   acceptanceCriteria: string[];
   evidenceCellIds: string[];
+  websiteFindingIds: string[];
+  citationSourceIds: string[];
+  gapIds: string[];
   retestQuestionIds: string[];
 }
 
@@ -230,9 +235,6 @@ export function parseRecommendationForensicReportV1(
   validateSourceCategoryBreakdown(report.sourceCategoryBreakdown, citationSources);
   const gaps = validateCustomerGaps(report.customerVsCompetitorGaps, succeededCells, recommendedEntities);
   validateBlindSpot(report.homepageVsFullSiteBlindSpot);
-  const vendorTaskCount = validateVendorTaskPackage(
-    report.vendorTaskPackage, succeededCells, new Set(questions.questions.map(({ id }) => id)
-  ));
   const appendix = guarded("$.websiteFoundationAppendix", () => parseAiWebsiteReportV1(report.websiteFoundationAppendix));
   if (appendix.tier !== "deep" || appendix.targetUrl !== targetUrl || appendix.provenance.locale !== provenance.locale) {
     fail("$.websiteFoundationAppendix", "Appendix must be the matching deep website-foundation report.");
@@ -246,10 +248,18 @@ export function parseRecommendationForensicReportV1(
       questions.brandAliases.some((alias) => !appendixBrandKeys.has(canonicalizeBrand(alias)))) {
     fail("$.generatedQuestions", "Organization name and aliases must be grounded in the website foundation appendix.");
   }
-  const websiteFindingIds = new Set(
-    appendix.findings.filter(({ evidence }) => evidence.length > 0).map(({ id }) => id)
+  const websiteFindings = new Map(
+    appendix.findings.filter(({ evidence }) => evidence.length > 0).map((finding) => [finding.id, finding])
   );
-  validateExecutivePriorities(report.executivePriorities, succeededCells, websiteFindingIds);
+  const citationMap = citationSources;
+  const gapMap = new Map(gaps.map((gap) => [gap.id, gap]));
+  const vendorTaskCount = validateVendorTaskPackage(
+    report.vendorTaskPackage, succeededCells, new Set(questions.questions.map(({ id }) => id)),
+    websiteFindings, citationMap, gapMap, recommendedEntities
+  );
+  validateExecutivePriorities(
+    report.executivePriorities, succeededCells, websiteFindings, citationMap, gapMap
+  );
   validateCommercialReportCompleteness(
     matrix, authority, recommendedEntities, recommendationSignals,
     citationSources, gradedCitationIds, gaps, vendorTaskCount
@@ -822,31 +832,40 @@ function validateBlindSpot(value: unknown): void {
 function validateExecutivePriorities(
   value: unknown,
   cells: Map<string, SucceededCell>,
-  websiteFindingIds: Set<string>
+  websiteFindings: Map<string, AiWebsiteReportV1["findings"][number]>,
+  citations: Map<string, CitationSourceContract>,
+  gaps: Map<string, CustomerVsCompetitorGapContract>
 ): void {
   const priorities = array(value, "$.executivePriorities");
   if (priorities.length !== 3) fail("$.executivePriorities", "Expected exactly three executive priorities.");
+  const evidenceSignatures = new Set<string>();
+  const enforceDistinctEvidence = websiteFindings.size + citations.size + gaps.size >= 3;
   priorities.forEach((item, index) => {
     const path = `$.executivePriorities[${index}]`;
     const input = record(item, path);
     if (input.order !== index + 1) fail(`${path}.order`, "Priorities must be ordered 1, 2, 3.");
-    text(input.title, `${path}.title`);
-    text(input.rationale, `${path}.rationale`);
+    const title = text(input.title, `${path}.title`);
+    const rationale = text(input.rationale, `${path}.rationale`);
     const answerEvidence = validateCellIds(input.evidenceCellIds, `${path}.evidenceCellIds`, cells);
-    const websiteEvidence = stringArray(input.websiteFindingIds, `${path}.websiteFindingIds`);
-    if (websiteEvidence.some((id) => !websiteFindingIds.has(id))) {
-      fail(`${path}.websiteFindingIds`, "Priority website evidence must reference a matching appendix finding with evidence.");
+    const refs = validateEvidenceReferences(input, path, answerEvidence, websiteFindings, citations, gaps);
+    if (answerEvidence.length + refs.websiteFindingIds.length + refs.citationSourceIds.length + refs.gapIds.length === 0) {
+      fail(path, "Every executive priority requires structured report evidence.");
     }
-    if (answerEvidence.length + websiteEvidence.length === 0) {
-      fail(path, "Every executive priority requires answer-cell or website-finding evidence.");
-    }
+    validateSemanticEvidenceText(`${title}\n${rationale}`, path, refs, websiteFindings, citations, gaps);
+    const signature = JSON.stringify([answerEvidence, refs.websiteFindingIds, refs.citationSourceIds, refs.gapIds]);
+    if (enforceDistinctEvidence && evidenceSignatures.has(signature)) fail(path, "Executive priorities must not reuse one fixed evidence binding.");
+    evidenceSignatures.add(signature);
   });
 }
 
 function validateVendorTaskPackage(
   value: unknown,
   cells: Map<string, SucceededCell>,
-  questionIds: Set<string>
+  questionIds: Set<string>,
+  websiteFindings: Map<string, AiWebsiteReportV1["findings"][number]>,
+  citations: Map<string, CitationSourceContract>,
+  gaps: Map<string, CustomerVsCompetitorGapContract>,
+  entities: Map<string, RecommendedEntityContract>
 ): number {
   const input = record(value, "$.vendorTaskPackage");
   if (input.version !== "vendor-task-v1") fail("$.vendorTaskPackage.version", "Expected vendor-task-v1.");
@@ -861,19 +880,105 @@ function validateVendorTaskPackage(
     if (!new Set(["website", "content", "seo", "communications", "cross-functional"]).has(task.vendor as string)) {
       fail(`${path}.vendor`, "Unsupported vendor audience.");
     }
-    text(task.title, `${path}.title`);
-    text(task.rationale, `${path}.rationale`);
-    if (stringArray(task.actions, `${path}.actions`).length === 0 ||
+    const title = text(task.title, `${path}.title`);
+    const rationale = text(task.rationale, `${path}.rationale`);
+    const actions = stringArray(task.actions, `${path}.actions`);
+    if (actions.length === 0 ||
         stringArray(task.acceptanceCriteria, `${path}.acceptanceCriteria`).length === 0) {
       fail(path, "Vendor tasks require actions and acceptance criteria.");
     }
-    validateCellIds(task.evidenceCellIds, `${path}.evidenceCellIds`, cells, true);
+    const answerEvidence = validateCellIds(task.evidenceCellIds, `${path}.evidenceCellIds`, cells, true);
+    const refs = validateEvidenceReferences(task, path, answerEvidence, websiteFindings, citations, gaps);
+    if (refs.websiteFindingIds.length + refs.citationSourceIds.length + refs.gapIds.length === 0) {
+      fail(path, "Vendor tasks require website-finding, citation-source, or recommendation-gap references.");
+    }
+    const semanticText = `${title}\n${rationale}\n${actions.join("\n")}`;
+    validateSemanticEvidenceText(semanticText, path, refs, websiteFindings, citations, gaps);
+    validateTaskActionScope(semanticText, path, refs, entities, gaps);
     const retestIds = stringArray(task.retestQuestionIds, `${path}.retestQuestionIds`);
     if (retestIds.length === 0 || retestIds.some((questionId) => !questionIds.has(questionId))) {
       fail(`${path}.retestQuestionIds`, "Vendor tasks require at least one known retest question.");
     }
   });
   return tasks.length;
+}
+
+function validateEvidenceReferences(
+  input: Record<string, unknown>,
+  path: string,
+  answerEvidence: string[],
+  websiteFindings: Map<string, AiWebsiteReportV1["findings"][number]>,
+  citations: Map<string, CitationSourceContract>,
+  gaps: Map<string, CustomerVsCompetitorGapContract>
+): { websiteFindingIds: string[]; citationSourceIds: string[]; gapIds: string[] } {
+  const websiteFindingIds = uniqueKnownIds(input.websiteFindingIds, `${path}.websiteFindingIds`, websiteFindings);
+  const citationSourceIds = uniqueKnownIds(input.citationSourceIds, `${path}.citationSourceIds`, citations);
+  const gapIds = uniqueKnownIds(input.gapIds, `${path}.gapIds`, gaps);
+  if (citationSourceIds.some((id) => !answerEvidence.includes(citations.get(id)!.cellId))) {
+    fail(`${path}.citationSourceIds`, "Citation references must bind their exact answer cell.");
+  }
+  if (gapIds.some((id) => !gaps.get(id)!.evidenceCellIds.some((cellId) => answerEvidence.includes(cellId)))) {
+    fail(`${path}.gapIds`, "Gap references must intersect their supporting answer cells.");
+  }
+  return { websiteFindingIds, citationSourceIds, gapIds };
+}
+
+function uniqueKnownIds<T>(value: unknown, path: string, known: Map<string, T>): string[] {
+  const ids = stringArray(value, path);
+  if (new Set(ids).size !== ids.length || ids.some((id) => !known.has(id))) {
+    fail(path, "Evidence references must be unique known report records.");
+  }
+  return ids;
+}
+
+function validateSemanticEvidenceText(
+  value: string,
+  path: string,
+  refs: { websiteFindingIds: string[]; citationSourceIds: string[]; gapIds: string[] },
+  websiteFindings: Map<string, AiWebsiteReportV1["findings"][number]>,
+  citations: Map<string, CitationSourceContract>,
+  gaps: Map<string, CustomerVsCompetitorGapContract>
+): void {
+  const normalized = value.toLocaleLowerCase();
+  for (const id of refs.websiteFindingIds) {
+    if (!normalized.includes(websiteFindings.get(id)!.title.toLocaleLowerCase())) {
+      fail(path, "Evidence-driven copy must name each referenced website finding.");
+    }
+  }
+  for (const id of refs.gapIds) {
+    if (!normalized.includes(gaps.get(id)!.title.toLocaleLowerCase())) {
+      fail(path, "Evidence-driven copy must name each referenced recommendation gap.");
+    }
+  }
+  for (const id of refs.citationSourceIds) {
+    if (!normalized.includes(citations.get(id)!.category.toLocaleLowerCase())) {
+      fail(path, "Evidence-driven copy must name each referenced source category.");
+    }
+  }
+}
+
+function validateTaskActionScope(
+  value: string,
+  path: string,
+  refs: { websiteFindingIds: string[]; citationSourceIds: string[]; gapIds: string[] },
+  entities: Map<string, RecommendedEntityContract>,
+  gaps: Map<string, CustomerVsCompetitorGapContract>
+): void {
+  const normalized = value.toLocaleLowerCase();
+  if (/\b(?:schema|faq|structured data)\b|结构化数据|问答页/iu.test(value) && refs.websiteFindingIds.length === 0) {
+    fail(path, "Schema, FAQ, or structured-data work requires a related website finding.");
+  }
+  if (/\b(?:media|directory|community|press)\b|媒体|目录|社区/iu.test(value) && refs.citationSourceIds.length === 0 &&
+      !/unknown|evidence collection|未知|证据收集/iu.test(value)) {
+    fail(path, "Media and source-distribution work requires observed citation evidence or an explicit Unknown collection task.");
+  }
+  for (const gapId of refs.gapIds) {
+    for (const entityId of gaps.get(gapId)!.competitorEntityIds) {
+      if (!normalized.includes(entities.get(entityId)!.name.toLocaleLowerCase())) {
+        fail(path, "Gap-driven task copy must name the referenced competitor entity.");
+      }
+    }
+  }
 }
 
 function validateCommercialReportCompleteness(

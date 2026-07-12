@@ -40,6 +40,16 @@ export async function resolveRequestArtifactScope(request: Request, reportId: st
   return null;
 }
 
+export function scopedReportAccessCookieHeader(
+  request: Request,
+  reportId: string,
+  artifactScope: ReportArtifactScope
+): string | null {
+  const name = reportAccessCookieName(reportId, artifactScope);
+  const rawToken = readCookie(request.headers.get("cookie") ?? "", name);
+  return rawToken ? `${name}=${encodeURIComponent(rawToken)}` : null;
+}
+
 function readCookie(header: string, name: string): string | undefined {
   for (const part of header.split(";")) {
     const [rawName, ...rawValue] = part.trim().split("=");
