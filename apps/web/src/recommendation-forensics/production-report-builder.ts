@@ -321,6 +321,7 @@ function buildPriorities(
   const finding = input.websiteFoundation.findings.find(({ evidence }) => evidence.length > 0);
   const gap = gaps[0];
   const citation = citations.find(({ retrieval }) => retrieval.state === "available") ?? citations[0];
+  const blindCitation = citations.find(({ id }) => id !== citation?.id) ?? citation;
   const fallbackCell = cells[0];
   if (!finding && !gap && !citation && !fallbackCell) {
     throw new Error("Recommendation priorities require persisted answer or website evidence.");
@@ -346,8 +347,13 @@ function buildPriorities(
       title: finding?.title ?? (zh ? "网站盲区未知：补采集" : "Website blind spot Unknown: collect evidence"),
       rationale: finding
         ? (zh ? `${finding.title}与首页/全站差异“${blindEvidence}”相关。` : `${finding.title} is tied to the homepage/full-site difference “${blindEvidence}”.`)
-        : (zh ? "网站盲区未知：没有带证据的网站finding，先采集首页与全站差异。" : "Website blind spot Unknown: no evidence-backed website finding exists, so collect homepage/full-site differences first."),
-      evidenceCellIds: [], websiteFindingIds: finding ? [finding.id] : [], citationSourceIds: [], gapIds: []
+        : blindCitation
+          ? (zh ? `网站盲区未知：没有带证据的网站发现；以来源类别 ${blindCitation.category} 为边界补采集。` : `Website blind spot Unknown: no evidence-backed website finding exists; collect evidence within the ${blindCitation.category} source boundary.`)
+          : gap
+            ? (zh ? `网站盲区未知：没有带证据的网站发现；以差距“${gap.title}”为边界采集首页与全站差异。` : `Website blind spot Unknown: no evidence-backed website finding exists; collect homepage/full-site differences within the boundary of “${gap.title}”.`)
+            : (zh ? `网站盲区未知：没有带证据的网站发现；以问题“${questionForCell(fallbackCell?.id)}”的成功观察为边界补采集。` : `Website blind spot Unknown: no evidence-backed website finding exists; collect evidence from the successful observation for “${questionForCell(fallbackCell?.id)}”.`),
+      evidenceCellIds: finding ? [] : blindCitation ? [blindCitation.cellId] : gap ? gap.evidenceCellIds.slice(0, 3) : fallbackCell ? [fallbackCell.id] : [],
+      websiteFindingIds: finding ? [finding.id] : [], citationSourceIds: !finding && blindCitation ? [blindCitation.id] : [], gapIds: !finding && !blindCitation && gap ? [gap.id] : []
     },
     {
       order: 3,
@@ -392,7 +398,7 @@ function buildVendorTasks(
       rationale: finding
         ? (zh ? `${findingTitle} 是网站基础附录中的实际finding。` : `${findingTitle} is the evidence-backed website finding in the appendix.`)
         : (zh ? `${gapTitle}涉及 ${competitorNames}，但网站证据未知。` : `${gapTitle} involves ${competitorNames}, but website evidence is Unknown.`),
-      actions: finding ? [finding.recommendation, `Attach the cited evidence to the owner page for “${question.exactText}”.`] : [zh ? "未知：先采集可核验的网站finding，不改写页面。" : "Unknown: collect a verifiable website finding before changing owner pages."],
+      actions: finding ? [finding.recommendation, zh ? `把引用证据附到问题“${question.exactText}”对应的归属页面。` : `Attach the cited evidence to the owner page for “${question.exactText}”.`] : [zh ? "未知：先采集可核验的网站发现，不改写页面。" : "Unknown: collect a verifiable website finding before changing owner pages."],
       acceptanceCriteria: [zh ? `交付物逐项引用finding“${findingTitle}”及其URL。` : `Every deliverable cites the finding “${findingTitle}” and its URLs.`],
       evidenceCellIds: finding ? [defaultCellId] : gapCells, websiteFindingIds: websiteRefs, citationSourceIds: [], gapIds: finding ? [] : gapRefs, retestQuestionIds
     },
@@ -413,7 +419,7 @@ function buildVendorTasks(
       evidenceCellIds: gapCells, websiteFindingIds: [], citationSourceIds: [], gapIds: gapRefs, retestQuestionIds
     },
     {
-      id: "vendor-task-communications", vendor: "communications", title: citation ? `${sourceCategory} evidence follow-up` : (zh ? "来源机会未知：证据收集" : "Source opportunity Unknown: evidence collection"),
+      id: "vendor-task-communications", vendor: "communications", title: citation ? (zh ? `${sourceCategory} 来源证据跟进` : `${sourceCategory} evidence follow-up`) : (zh ? "来源机会未知：证据收集" : "Source opportunity Unknown: evidence collection"),
       rationale: citation ? (zh ? `${sourceCategory} 是实际观察到的来源类别。` : `${sourceCategory} is the observed source category.`) : (zh ? `${gapTitle}当前没有citation source；媒体、目录与社区动作保持未知。` : `${gapTitle} has no citation source; media, directory, and community work remains Unknown.`),
       actions: citation ? [zh ? `核验 ${sourceCategory} 来源的公开证据要求，不承诺收录。` : `Verify the public evidence requirements for the ${sourceCategory} source; do not promise placement.`] : [zh ? "未知：先做媒体、目录与社区证据收集，不进行外联。" : "Unknown: collect media, directory, and community evidence before outreach."],
       acceptanceCriteria: [zh ? "记录来源类别、URL、证据要求与未知状态。" : "Record source category, URL, evidence requirement, and Unknown state."],

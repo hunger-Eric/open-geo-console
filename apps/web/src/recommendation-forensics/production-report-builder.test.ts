@@ -81,6 +81,22 @@ describe("ProductionRecommendationReportBuilder", () => {
     expect(parsed.executivePriorities[0].gapIds).not.toHaveLength(0);
     expect(parsed.vendorTaskPackage.tasks[0]?.websiteFindingIds).toEqual(["finding-1"]);
     expect(parsed.recommendedEntities.map(({ name }) => name)).toEqual(expect.arrayContaining(["Atlas Example", "Beacon Example"]));
+    const userCopy = JSON.stringify({ priorities: parsed.executivePriorities, tasks: parsed.vendorTaskPackage, provenance: parsed.provenanceAndLimitations });
+    expect(userCopy).not.toMatch(/Attach the cited evidence|evidence follow-up|Fixed retest question|Acceptance records|Question-to-page evidence map/);
+  });
+
+  it("binds the Unknown website priority to existing answer evidence when website findings are absent", async () => {
+    const input = fixtureInput();
+    input.websiteFoundation.findings = [];
+    const report = await new ProductionRecommendationReportBuilder().build(input);
+    const parsed = parseRecommendationForensicReportV1(report, {
+      certificationAuthority: input.certificationAuthority,
+      sourceClassificationAuthority: input.sourceClassificationAuthority
+    });
+    const priority = parsed.executivePriorities[1]!;
+    expect(priority.websiteFindingIds).toEqual([]);
+    expect(priority.gapIds.length + priority.citationSourceIds.length + priority.evidenceCellIds.length).toBeGreaterThan(0);
+    expect(priority.rationale).toMatch(/Unknown|gap|difference|差距|未知/i);
   });
 });
 
