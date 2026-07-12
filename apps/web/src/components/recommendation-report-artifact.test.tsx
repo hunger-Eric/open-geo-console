@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 import type { RecommendationPrivateReportArtifactModel } from "@/report/artifact-model";
+import { ARTIFACT_CSS } from "@/report/artifact-styles";
 import { RecommendationReportArtifact } from "./recommendation-report-artifact";
 
 describe("RecommendationReportArtifact", () => {
@@ -25,6 +26,12 @@ describe("RecommendationReportArtifact", () => {
     expect(html).toContain("cert-evidence/engine");
     expect(html).toContain("/reports/report-1/recommendation-report.html");
     expect(html).toContain("/api/reports/report-1/artifacts/recommendation-report.pdf");
+  });
+
+  it("allows forensic artifact descendants and long evidence text to shrink on narrow screens", () => {
+    expect(ARTIFACT_CSS).toContain(".recommendation-artifact,.recommendation-artifact *{min-width:0}");
+    expect(ARTIFACT_CSS).toContain(".recommendation-artifact :where(h1,h2,h3,h4,p,li,dd,dt,strong,small,span,a,code){white-space:normal;overflow-wrap:anywhere;word-break:break-word}");
+    expect(ARTIFACT_CSS).not.toContain("overflow-x:hidden");
   });
 });
 
