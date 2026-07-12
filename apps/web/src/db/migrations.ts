@@ -167,12 +167,8 @@ export const DATABASE_MIGRATIONS = [
     reserved_at timestamptz NOT NULL DEFAULT now(),
     settled_at timestamptz,
     refunded_at timestamptz,
-    legacy_retirement_cutoff_at timestamptz,
-    legacy_retired_at timestamptz,
     UNIQUE (access_key_id, idempotency_key)
   )`,
-  `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS legacy_retirement_cutoff_at timestamptz`,
-  `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS legacy_retired_at timestamptz`,
   `CREATE INDEX IF NOT EXISTS credit_ledger_report_idx ON credit_ledger (report_id)`,
   `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_stage_check`,
   `WITH migrated_jobs AS (
@@ -244,9 +240,15 @@ export const DATABASE_MIGRATIONS = [
     delivery_deadline_at timestamptz,
     fulfilled_at timestamptz,
     refunded_at timestamptz,
+    legacy_retirement_cutoff_at timestamptz,
+    legacy_retired_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
+  `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS legacy_retirement_cutoff_at timestamptz`,
+  `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS legacy_retired_at timestamptz`,
+  `ALTER TABLE credit_ledger DROP COLUMN IF EXISTS legacy_retirement_cutoff_at`,
+  `ALTER TABLE credit_ledger DROP COLUMN IF EXISTS legacy_retired_at`,
   `CREATE UNIQUE INDEX IF NOT EXISTS payment_orders_provider_checkout_uidx
    ON payment_orders (provider, provider_checkout_id) WHERE provider_checkout_id IS NOT NULL`,
   `CREATE UNIQUE INDEX IF NOT EXISTS payment_orders_provider_payment_uidx

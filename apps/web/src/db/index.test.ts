@@ -8,6 +8,7 @@ import {
   getDatabasePoolSize,
   shouldRunDatabaseMigrations
 } from "./index";
+import { DATABASE_MIGRATIONS } from "./migrations";
 
 describe("database path selection", () => {
   const originalOpenGeoDbPath = process.env.OPEN_GEO_DB_PATH;
@@ -56,8 +57,8 @@ describe("database deployment marker", () => {
 });
 
 describe("database schema marker", () => {
-  it("uses legacy-retirement schema version 7", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(7);
+  it("uses repaired legacy-retirement schema version 8", () => {
+    expect(DATABASE_SCHEMA_VERSION).toBe(8);
   });
 
   it("skips DDL bootstrap when the current schema version is present", () => {
@@ -71,5 +72,17 @@ describe("database schema marker", () => {
 
   it("refuses to run older code against a newer schema", () => {
     expect(() => shouldRunDatabaseMigrations(DATABASE_SCHEMA_VERSION + 1)).toThrow("newer than this deployment");
+  });
+
+  it("keeps retirement columns on payment orders in fresh bootstrap and repairs legacy credit ledgers", () => {
+    const paymentCreate = DATABASE_MIGRATIONS.findIndex((statement) => statement.includes("CREATE TABLE IF NOT EXISTS payment_orders"));
+    const paymentAlter = DATABASE_MIGRATIONS.findIndex((statement) => statement.includes("ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS legacy_retirement_cutoff_at"));
+    const creditCreate = DATABASE_MIGRATIONS.find((statement) => statement.includes("CREATE TABLE IF NOT EXISTS credit_ledger"))!;
+    expect(paymentCreate).toBeGreaterThan(-1);
+    expect(paymentAlter).toBeGreaterThan(paymentCreate);
+    expect(DATABASE_MIGRATIONS[paymentCreate]).toContain("legacy_retirement_cutoff_at timestamptz");
+    expect(creditCreate).not.toContain("legacy_retirement_cutoff_at");
+    expect(DATABASE_MIGRATIONS).toContain("ALTER TABLE credit_ledger DROP COLUMN IF EXISTS legacy_retirement_cutoff_at");
+    expect(DATABASE_MIGRATIONS).toContain("ALTER TABLE credit_ledger DROP COLUMN IF EXISTS legacy_retired_at");
   });
 });

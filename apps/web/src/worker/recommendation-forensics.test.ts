@@ -26,6 +26,8 @@ describe("recommendation-forensics Worker pipeline", () => {
     const second = await runRecommendationForensicsPipeline(baseInput(dependencies));
     expect(second.coverage.outcome).toBe("qualified");
     expect(adapters.reduce((sum, item) => sum + vi.mocked(item.observe).mock.calls.length, 0)).toBe(8);
+    expect(build).toHaveBeenCalledTimes(1);
+    expect(persistence.saveReport).toHaveBeenCalledTimes(1);
   });
 
   it("classifies one usable certified provider as completed-limited", async () => {
@@ -75,6 +77,41 @@ describe("recommendation-forensics Worker pipeline", () => {
     expect(requested).toEqual([
       "https://a.example.com/robots.txt", "https://a.example.com/start", "https://b.example.com/robots.txt"
     ]);
+  });
+
+  it.each([
+    ["network error", () => Promise.reject(new Error("offline"))],
+    ["HTTP 500", () => Promise.resolve(new Response("error", { status: 500 }))],
+    ["HTTP 403", () => Promise.resolve(new Response("denied", { status: 403 }))],
+    ["unsafe parse", () => Promise.resolve(new Response("not a robots directive", { status: 200, headers: { "content-type": "text/plain" } }))]
+  ])("fails closed before citation content when robots has %s", async (_label, robotsResponse) => {
+    let contentCalls = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/robots.txt")) return robotsResponse();
+      contentCalls += 1;
+      return new Response("must not be fetched");
+    }) as unknown as typeof fetch;
+    const result = await retrieveCitationSource("https://deny.example.com/article", {
+      fetchImpl, resolver: async () => [{ address: "93.184.216.34", family: 4 }]
+    });
+    expect(result).toMatchObject({ retrievalState: "inaccessible", excerpt: null });
+    expect(contentCalls).toBe(0);
+  });
+
+  it("treats only an explicit robots not-found response as no rules", async () => {
+    let contentCalls = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/robots.txt")) return new Response("missing", { status: 404 });
+      contentCalls += 1;
+      return new Response("Public citation body", { headers: { "content-type": "text/plain" } });
+    }) as unknown as typeof fetch;
+    const result = await retrieveCitationSource("https://allow.example.com/article", {
+      fetchImpl, resolver: async () => [{ address: "93.184.216.34", family: 4 }]
+    });
+    expect(result.retrievalState).toBe("available");
+    expect(contentCalls).toBe(1);
   });
 });
 
@@ -140,10 +177,10 @@ function memoryPersistence() {
     compareAndSwap: async (next: AnswerExecutionCheckpoint) => { if ((checkpoint?.checkpointRevision ?? 0) !== next.expectedRevision) throw new Error("revision mismatch"); checkpoint = structuredClone(next.executionState); if (next.cell) cells.push(structuredClone(next.cell)); return checkpoint; },
     saveEvidence: async (input: { sourceId: string }) => { evidence.add(input.sourceId); return input; },
     getReport: async () => report,
-    saveReport: async (input: { reportId: string; jobId: string; coverage: { outcome: "qualified" | "completed_limited" | "failed" } }) => {
+    saveReport: vi.fn(async (input: { reportId: string; jobId: string; coverage: { outcome: "qualified" | "completed_limited" | "failed" } }) => {
       report = { reportId: input.reportId, jobId: input.jobId, answerSnapshotMatrix: { run, commercialCoverage: input.coverage } } as RecommendationForensicReportV1;
       return report;
-    }
+    })
   };
   return api;
 }

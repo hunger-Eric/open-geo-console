@@ -91,10 +91,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     if (job.productContract === "recommendation_forensics_v1" && checkpoint.contractVersion === 2 &&
         checkpoint.websiteFoundation?.completed) {
       const existingFoundation = await getAiReport(job.reportId, "deep");
-      if (isMatchingRecommendationWebsiteFoundation(job, storedReport.url, existingFoundation)) {
+      const canonicalTarget = resolveRecommendationFoundationTarget(checkpoint, existingFoundation, storedReport.url);
+      if (isMatchingRecommendationWebsiteFoundation(job, canonicalTarget, existingFoundation)) {
         await finalizeRecommendationJob({
           job, workerId, checkpoint, websiteFoundation: existingFoundation.payload,
-          targetUrl: storedReport.url,
+          targetUrl: canonicalTarget,
           coverage: { plannedPages: job.plannedPages, successfulPages: job.successfulPages, failedPages: job.failedPages }
         });
         return;
@@ -395,6 +396,14 @@ export function isMatchingRecommendationWebsiteFoundation(
   return Boolean(foundation && job.productContract === "recommendation_forensics_v1" &&
     foundation.jobId === job.id && foundation.reportId === job.reportId && foundation.locale === job.locale &&
     foundation.tier === "deep" && foundation.payload.tier === "deep" && foundation.payload.targetUrl === targetUrl);
+}
+
+export function resolveRecommendationFoundationTarget(
+  checkpoint: Pick<WorkerCheckpoint, "discoverySnapshot">,
+  foundation: Awaited<ReturnType<typeof getAiReport>>,
+  submittedUrl: string
+): string {
+  return checkpoint.discoverySnapshot?.targetUrl ?? foundation?.payload.targetUrl ?? submittedUrl;
 }
 
 async function finalizeRecommendationJob(input: {

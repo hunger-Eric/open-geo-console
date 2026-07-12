@@ -184,8 +184,7 @@ export async function retrieveCitationSource(url: string, options: {
         let policy = policies.get(origin);
         if (!policy) {
           const robotsUrl = new URL("/robots.txt", origin);
-          const robots = await robotsFetch(robotsUrl, { headers: { "user-agent": CITATION_CRAWLER_USER_AGENT } }).catch(() => null);
-          policy = parseRobotsTxt(robots?.ok ? await robots.text() : "", robotsUrl, "OpenGeoConsoleBot");
+          policy = await loadCitationRobotsPolicy(robotsFetch, robotsUrl);
           policies.set(origin, policy);
         }
         if (!isAllowedByRobots(target, policy)) throw new Error("robots.txt disallows this citation source.");
@@ -205,6 +204,22 @@ export async function retrieveCitationSource(url: string, options: {
   } catch {
     return unavailableRetrieval();
   }
+}
+
+async function loadCitationRobotsPolicy(fetchImpl: typeof fetch, robotsUrl: URL) {
+  const response = await fetchImpl(robotsUrl, { headers: { "user-agent": CITATION_CRAWLER_USER_AGENT } });
+  if (response.status === 404 || response.status === 410) {
+    return parseRobotsTxt("", robotsUrl, "OpenGeoConsoleBot");
+  }
+  if (!response.ok) throw new Error(`robots.txt is unavailable with HTTP ${response.status}.`);
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (contentType && contentType !== "text/plain") throw new Error("robots.txt returned an unsafe content type.");
+  const text = await response.text();
+  if (text.includes("\0") || text.split(/\r?\n/).some((line) => {
+    const normalized = line.trim();
+    return normalized && !normalized.startsWith("#") && !/^[A-Za-z][A-Za-z-]*\s*:/.test(normalized);
+  })) throw new Error("robots.txt could not be safely parsed.");
+  return parseRobotsTxt(text, robotsUrl, "OpenGeoConsoleBot");
 }
 
 async function persistMissingSourceEvidence(
