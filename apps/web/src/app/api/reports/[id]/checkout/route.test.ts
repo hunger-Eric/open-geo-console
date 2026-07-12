@@ -51,15 +51,15 @@ describe("commercial checkout route", () => {
     });
   });
 
-  it("hard-closes new recommendation checkout even when the former authority would be ready", async () => {
+  it("admits only after the V2 availability boundary succeeds and ignores browser prices", async () => {
     const response = await POST(new Request("https://example.test/api/reports/report-1/checkout", {
       method: "POST",
       headers: { "content-type": "application/json", "idempotency-key": "request-123" },
       body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human", amountMinor: 1 })
     }), { params: Promise.resolve({ id: "report-1" }) });
-    expect(response.status).toBe(400);
-    expect(mocks.createPaymentOrder).not.toHaveBeenCalled();
-    expect(mocks.createHostedCheckout).not.toHaveBeenCalled();
+    expect(response.status).toBe(201);
+    expect(mocks.createPaymentOrder).toHaveBeenCalledWith(expect.objectContaining({productCode:"recommendation_forensics_v1",amountMinor:2900}));
+    expect(mocks.createHostedCheckout).toHaveBeenCalledOnce();
   });
 
   it("stops before looking up or recovering any legacy checkout while the new product is unavailable", async () => {
@@ -69,7 +69,7 @@ describe("commercial checkout route", () => {
       body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human" })
     }), { params: Promise.resolve({ id: "report-1" }) });
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "The recommendation-forensics product is unavailable during the methodology migration." });
+    expect(await response.json()).toEqual({ error: "The recommendation-forensics product is not available." });
     expect(mocks.getActivePaymentOrderForReport).not.toHaveBeenCalled();
     expect(mocks.deactivateLegacyHostedCheckout).not.toHaveBeenCalled();
     expect(mocks.createHostedCheckout).not.toHaveBeenCalled();
@@ -80,11 +80,11 @@ describe("commercial checkout route", () => {
       method: "POST", headers: { "content-type": "application/json", "idempotency-key": "request-123" },
       body: JSON.stringify({ email: "buyer@example.com", currency: "CNY", locale: "zh" })
     }), { params: Promise.resolve({ id: "report-1" }) });
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(409);
     expect(mocks.createPaymentOrder).not.toHaveBeenCalled();
   });
 
-  it("does not recover an unpaid legacy Payment Link while new admission is hard-closed", async () => {
+  it("recovers an unpaid legacy Payment Link only after V2 availability succeeds", async () => {
     mocks.getActivePaymentOrderForReport.mockResolvedValue({
       id: "order-1",
       providerCheckoutId: "6fc2d9c0-2580-4ad3-a33d-72500ec93bda",
@@ -99,12 +99,12 @@ describe("commercial checkout route", () => {
       headers: { "content-type": "application/json", "idempotency-key": "request-123" },
       body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human" })
     }), { params: Promise.resolve({ id: "report-1" }) });
-    expect(response.status).toBe(400);
-    expect(mocks.deactivateLegacyHostedCheckout).not.toHaveBeenCalled();
-    expect(mocks.replaceLegacyHostedCheckout).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.deactivateLegacyHostedCheckout).toHaveBeenCalledOnce();
+    expect(mocks.replaceLegacyHostedCheckout).toHaveBeenCalledOnce();
   });
 
-  it("does not inspect a paid legacy Payment Link while new admission is hard-closed", async () => {
+  it("does not replace an already-paid legacy Payment Link", async () => {
     mocks.getActivePaymentOrderForReport.mockResolvedValue({
       id: "order-1",
       providerCheckoutId: "6fc2d9c0-2580-4ad3-a33d-72500ec93bda",
@@ -117,7 +117,8 @@ describe("commercial checkout route", () => {
       headers: { "content-type": "application/json", "idempotency-key": "request-123" },
       body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human" })
     }), { params: Promise.resolve({ id: "report-1" }) });
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(409);
+    expect(mocks.deactivateLegacyHostedCheckout).toHaveBeenCalledOnce();
     expect(mocks.createHostedCheckout).not.toHaveBeenCalled();
     expect(mocks.replaceLegacyHostedCheckout).not.toHaveBeenCalled();
   });

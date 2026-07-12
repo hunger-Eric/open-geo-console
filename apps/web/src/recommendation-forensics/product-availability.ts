@@ -1,55 +1,28 @@
-import { createAnswerEngineSurfaceKey, type AnswerEngineRegistry, type CertificationAuthoritySnapshot } from "@open-geo-console/answer-engine-observer";
-import { isDeepStrictEqual } from "node:util";
+import type { PublicSearchSurfaceAuthorityRow } from "@/db/schema";
 
-export type RecommendationProductAvailabilityCode =
-  | "ready" | "disabled" | "environment" | "runtime_incomplete" | "authority_unavailable" | "authority_mismatch"
-  | "methodology_migration";
-
-export interface RecommendationProductAvailability {
-  ready: boolean;
-  lane: "operator" | "public" | null;
-  code: RecommendationProductAvailabilityCode;
+export type RecommendationProductAvailabilityCode="ready"|"disabled"|"environment"|"runtime_incomplete"|"authority_unavailable"|"authority_mismatch";
+export interface RecommendationProductAvailability{ready:boolean;lane:"public"|null;code:RecommendationProductAvailabilityCode;}
+export function evaluateRecommendationProductAvailability(input:{environment:NodeJS.ProcessEnv;authority:PublicSearchSurfaceAuthorityRow|null;registryReady:boolean;builderAvailable:boolean;artifactGateAvailable:boolean;}):RecommendationProductAvailability{
+  if(input.environment.OGC_PUBLIC_SEARCH_RUNTIME_ENABLED!=="true")return closed("disabled");
+  if(input.environment.OGC_DEPLOYMENT_PROFILE!=="staging"&&input.environment.OGC_DEPLOYMENT_PROFILE!=="production")return closed("environment");
+  if(!input.authority)return closed("authority_unavailable");
+  const exact=input.authority.active&&input.authority.environment===input.environment.OGC_DEPLOYMENT_PROFILE&&input.authority.surfaceId===input.environment.OGC_PUBLIC_SEARCH_SURFACE_ID&&input.authority.surfaceVersion===input.environment.OGC_PUBLIC_SEARCH_SURFACE_VERSION&&
+    stringArray(input.authority.localeCapabilities).includes(input.environment.OGC_PUBLIC_SEARCH_LOCALE!)&&stringArray(input.authority.regionCapabilities).includes(input.environment.OGC_PUBLIC_SEARCH_REGION!)&&(!input.environment.OGC_PUBLIC_SEARCH_AUTHORITY_VERSION||input.authority.authorityVersion===input.environment.OGC_PUBLIC_SEARCH_AUTHORITY_VERSION);
+  if(!exact)return closed("authority_mismatch");
+  if(!input.registryReady||!input.builderAvailable||!input.artifactGateAvailable)return closed("runtime_incomplete");
+  return {ready:true,lane:"public",code:"ready"};
 }
-
-export function recommendationRuntimeMatchesAuthority(
-  registry: AnswerEngineRegistry,
-  authority: CertificationAuthoritySnapshot
-): boolean {
-  const runtime = registry.listCertified();
-  const runtimeKeys = new Set(runtime.map(({ surface }) => createAnswerEngineSurfaceKey(surface)));
-  const authorityKeys = new Set(authority.certifications.map(({ surface }) => createAnswerEngineSurfaceKey(surface)));
-  const providerIds = new Set(runtime.map(({ surface }) => surface.providerId));
-  const authorityByKey = new Map(authority.certifications.map((item) => [
-    createAnswerEngineSurfaceKey(item.surface), item.evidence
-  ]));
-  return providerIds.size >= 2 && runtimeKeys.size === authorityKeys.size &&
-    [...runtimeKeys].every((key) => authorityKeys.has(key)) &&
-    runtime.every(({ surface, certificationEvidence }) =>
-      isDeepStrictEqual(certificationEvidence, authorityByKey.get(createAnswerEngineSurfaceKey(surface)))
-    );
+export async function getRecommendationProductAvailability(environment:NodeJS.ProcessEnv=process.env):Promise<RecommendationProductAvailability>{
+  if(environment.OGC_PUBLIC_SEARCH_RUNTIME_ENABLED!=="true")return closed("disabled");
+  const profile=environment.OGC_DEPLOYMENT_PROFILE; if(profile!=="staging"&&profile!=="production")return closed("environment");
+  const required=[environment.OGC_PUBLIC_SEARCH_SURFACE_ID,environment.OGC_PUBLIC_SEARCH_SURFACE_VERSION,environment.OGC_PUBLIC_SEARCH_LOCALE,environment.OGC_PUBLIC_SEARCH_REGION]; if(required.some((value)=>!value?.trim()))return closed("runtime_incomplete");
+  try{
+    const [{getActivePublicSearchSurfaceAuthority},{createProductionPublicSourceForensicsDependencies}]=await Promise.all([import("@/db/public-search-authority"),import("@/public-source-forensics/production-runtime")]);
+    const authority=await getActivePublicSearchSurfaceAuthority({environment:profile,surfaceId:environment.OGC_PUBLIC_SEARCH_SURFACE_ID!,surfaceVersion:environment.OGC_PUBLIC_SEARCH_SURFACE_VERSION!,locale:environment.OGC_PUBLIC_SEARCH_LOCALE!,region:environment.OGC_PUBLIC_SEARCH_REGION!,authorityVersion:environment.OGC_PUBLIC_SEARCH_AUTHORITY_VERSION});
+    const runtime=await createProductionPublicSourceForensicsDependencies();
+    return evaluateRecommendationProductAvailability({environment,authority,registryReady:Boolean(runtime),builderAvailable:Boolean(runtime),artifactGateAvailable:Boolean(runtime)});
+  }catch{return closed("authority_unavailable");}
 }
-
-export function evaluateRecommendationProductAvailability(input: {
-  environment: NodeJS.ProcessEnv;
-  registry: AnswerEngineRegistry;
-  authority: CertificationAuthoritySnapshot | null;
-  authorityPersisted: boolean;
-  builderAvailable: boolean;
-}): RecommendationProductAvailability {
-  // Phase 0 deliberately closes all new recommendation admission. Historical
-  // V1 authority remains available only to drain already-paid persisted jobs.
-  void input;
-  return { ready: false, lane: null, code: "methodology_migration" };
-}
-
-export async function getRecommendationProductAvailability(
-  environment: NodeJS.ProcessEnv = process.env
-): Promise<RecommendationProductAvailability> {
-  void environment;
-  return { ready: false, lane: null, code: "methodology_migration" };
-}
-
-export async function assertRecommendationProductAvailable(environment: NodeJS.ProcessEnv = process.env): Promise<void> {
-  const availability = await getRecommendationProductAvailability(environment);
-  if (!availability.ready) throw new Error("The recommendation-forensics product is not available.");
-}
+export async function assertRecommendationProductAvailable(environment:NodeJS.ProcessEnv=process.env):Promise<void>{if(!(await getRecommendationProductAvailability(environment)).ready)throw new Error("The recommendation-forensics product is not available.");}
+function closed(code:RecommendationProductAvailabilityCode):RecommendationProductAvailability{return {ready:false,lane:null,code};}
+function stringArray(value:unknown):string[]{return Array.isArray(value)&&value.every((item)=>typeof item==="string")?value:[];}

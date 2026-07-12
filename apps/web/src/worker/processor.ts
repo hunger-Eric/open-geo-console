@@ -38,12 +38,6 @@ import type { JobCheckpoint, ScanJobRow } from "@/db/schema";
 import { projectFreeAiReport } from "@/report/visibility";
 import { createSafeFetch } from "@/server/safe-fetch";
 import { captureReportVisualEvidence } from "./visual-evidence";
-import {
-  RecommendationRuntimeUnavailableError,
-  RecommendationReportOutcomeMismatchError,
-  runRecommendationForensicsPipeline
-} from "./recommendation-forensics";
-import { createProductionRecommendationDependencies } from "@/recommendation-forensics/production-runtime";
 import { createProductionPublicSourceForensicsDependencies } from "@/public-source-forensics/production-runtime";
 import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
 import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-runtime";
@@ -90,6 +84,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
   let checkpoint = normalizeCheckpoint(job.checkpoint);
   try {
     const fulfillmentTarget = resolveRecommendationFulfillmentTarget(job);
+    if (fulfillmentTarget === "recommendation_v1") throw new HistoricalRecommendationRuntimeRetiredError();
     await purgeExpiredCrawlContent();
     let storedReport = await getGeoReport(job.reportId);
     if (!storedReport) throw new Error("The source technical report no longer exists.");
@@ -447,26 +442,7 @@ async function finalizeRecommendationJob(input: {
       coverage: input.coverage, snapshotRefs: result.commercialSnapshotRefs });
     return;
   }
-  const dependencies = await createProductionRecommendationDependencies();
-  if (!dependencies) throw new RecommendationRuntimeUnavailableError("Recommendation-forensics runtime is not installed.");
-  const result = await runRecommendationForensicsPipeline({
-    reportId: input.job.reportId, jobId: input.job.id, locale: input.job.locale,
-    region: process.env.OGC_RECOMMENDATION_REGION?.trim() || "global",
-    targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies
-  });
-  const checkpoint = {
-    ...input.checkpoint,
-    recommendationForensics: { runId: result.runId, questionsGenerated: true, reportSaved: true }
-  };
-  await saveStageCheckpoint(input.job, input.workerId, "synthesizing", 99, checkpoint);
-  const stage = result.coverage.outcome === "qualified"
-    ? "completed"
-    : result.coverage.outcome === "completed_limited" ? "completed_limited" : "failed";
-  const terminalJob = await terminalizeScanJob(input.job.id, input.workerId, {
-    stage, coverage: input.coverage,
-    ...(stage === "failed" ? { error: { code: "recommendation_coverage_failed", publicMessage: "The recommendation evidence was not sufficient for a usable report." } } : {})
-  });
-  await recordCommercialOutcomeSafely(input.job.id, terminalJob.stage as "completed" | "completed_limited" | "failed");
+  throw new HistoricalRecommendationRuntimeRetiredError();
 }
 
 async function recordCommercialOutcomeSafely(
@@ -758,15 +734,18 @@ function canonicalUrl(value: string): string {
 }
 
 function isRetryable(error: unknown): boolean {
-  if (error instanceof RecommendationRuntimeUnavailableError ||
-      error instanceof RecommendationForensicReportValidationError ||
-      error instanceof RecommendationReportOutcomeMismatchError) return false;
+  if (error instanceof HistoricalRecommendationRuntimeRetiredError ||
+      error instanceof RecommendationForensicReportValidationError) return false;
   const message = publicFailure(error).toLowerCase();
   return !message.includes("robots.txt") &&
     !message.includes("not configured") &&
     !message.includes("no public representative") &&
     !message.includes("no planned page returned readable evidence") &&
     !message.includes("source technical report no longer exists");
+}
+
+export class HistoricalRecommendationRuntimeRetiredError extends Error {
+  constructor() { super("Historical V1 recommendation fulfillment was retired after the zero-nonterminal audit."); }
 }
 
 function publicFailure(error: unknown): string {

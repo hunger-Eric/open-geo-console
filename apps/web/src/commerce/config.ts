@@ -2,10 +2,6 @@ export type CommerceMode = "disabled" | "test" | "live";
 export type FulfillmentMode = "batch_24h" | "realtime";
 export type SupportedCurrency = "CNY" | "USD" | "HKD";
 
-// Phase 0 migration safety: no catalog or checkout may admit a recommendation
-// order until the separately certified V2 search surface exists.
-export const RECOMMENDATION_NEW_ORDER_ADMISSION_ENABLED = false;
-
 export interface PriceSnapshot {
   productCode: "recommendation_forensics_v1";
   catalogVersion: string;

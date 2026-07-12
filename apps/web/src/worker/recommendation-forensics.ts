@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   classifyCommercialCoverage,
   createAnswerEngineSurfaceKey,
@@ -41,7 +42,6 @@ import {
   type CitationSourceEvidenceInput
 } from "@/db/recommendation-forensics";
 import { createSafeFetch } from "@/server/safe-fetch";
-import { recommendationRuntimeMatchesAuthority } from "@/recommendation-forensics/product-availability";
 
 export interface RecommendationReportBuilderInput {
   reportId: string;
@@ -280,6 +280,11 @@ function assertAdaptersMatchAuthority(
         !certifiedKeys.has(createAnswerEngineSurfaceKey(surface)))) {
     throw new RecommendationRuntimeUnavailableError("The answer-engine runtime does not match its persisted certification authority.");
   }
+}
+
+function recommendationRuntimeMatchesAuthority(registry: AnswerEngineRegistry, authority: CertificationAuthoritySnapshot): boolean {
+  const runtime=registry.listCertified(); const authorityByKey=new Map(authority.certifications.map((item)=>[createAnswerEngineSurfaceKey(item.surface),item.evidence]));
+  return new Set(runtime.map(({surface})=>surface.providerId)).size>=2&&runtime.length===authority.certifications.length&&runtime.every(({surface,certificationEvidence})=>isDeepStrictEqual(certificationEvidence,authorityByKey.get(createAnswerEngineSurfaceKey(surface))));
 }
 
 function unavailableRetrieval() {
