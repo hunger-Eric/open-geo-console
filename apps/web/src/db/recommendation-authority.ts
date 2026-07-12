@@ -45,6 +45,22 @@ import type {
 const CERTIFICATION_CONFIG = "OGC_RECOMMENDATION_CERTIFICATION_AUTHORITY_JSON";
 const SOURCE_CONFIG = "OGC_SOURCE_CLASSIFICATION_AUTHORITY_JSON";
 
+export function parseRecommendationCertificationAuthorityConfig(raw: string): CertificationAuthoritySnapshot {
+  return parseCertificationConfig(raw);
+}
+
+export async function getPersistedRecommendationCertificationAuthority(
+  authorityVersion: string
+): Promise<CertificationAuthoritySnapshot | null> {
+  if (!authorityVersion.trim()) return null;
+  if (isMemoryPersistence()) return clone(memoryGetRecommendationCertificationAuthority(authorityVersion)?.snapshot ?? null);
+  await ensureDatabase();
+  const row = (await getSqlClient()<Array<{ snapshot: CertificationAuthoritySnapshot }>>`
+    SELECT snapshot FROM recommendation_certification_authorities WHERE authority_version = ${authorityVersion}
+  `)[0];
+  return clone(row?.snapshot ?? null);
+}
+
 export async function installRecommendationAuthoritiesFromProtectedConfig(): Promise<{
   certificationAuthority: CertificationAuthoritySnapshot;
   sourceClassificationAuthority: SourceClassificationAuthoritySnapshot;
@@ -144,6 +160,7 @@ export async function saveRecommendationForensicReport(input: unknown): Promise<
     if (!memoryGetReport(report.reportId)) throw new Error("The recommendation report owner does not exist.");
     const job = memoryGetScanJob(report.jobId);
     if (!job || job.reportId !== report.reportId) throw new Error("The recommendation report job does not belong to its report.");
+    if (job.productContract !== "recommendation_forensics_v1") throw new Error("Recommendation reports require a recommendation-forensics job contract.");
     const existingByReport = memoryGetRecommendationForensicReportForReport(report.reportId);
     const existingByJob = memoryGetRecommendationForensicReportForJob(report.jobId);
     const existing = existingByReport ?? existingByJob;
@@ -154,6 +171,12 @@ export async function saveRecommendationForensicReport(input: unknown): Promise<
   await ensureDatabase();
   const sql = getSqlClient();
   await sql.begin(async (tx) => {
+    const job = (await tx<Array<{ report_id: string; product_contract: string }>>`
+      SELECT report_id, product_contract FROM scan_jobs WHERE id = ${row.jobId} FOR UPDATE
+    `)[0];
+    if (!job || job.report_id !== row.reportId || job.product_contract !== "recommendation_forensics_v1") {
+      throw new Error("Recommendation reports require their matching recommendation-forensics job contract.");
+    }
     await tx`
       INSERT INTO recommendation_forensic_reports (
         id, report_id, job_id, report_version, payload, certification_authority_version,

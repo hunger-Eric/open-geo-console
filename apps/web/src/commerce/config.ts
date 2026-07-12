@@ -3,7 +3,7 @@ export type FulfillmentMode = "batch_24h" | "realtime";
 export type SupportedCurrency = "CNY" | "USD" | "HKD";
 
 export interface PriceSnapshot {
-  productCode: "deep_report_v1";
+  productCode: "recommendation_forensics_v1";
   catalogVersion: string;
   currency: SupportedCurrency;
   amountMinor: number;
@@ -54,7 +54,7 @@ export function getPriceSnapshot(
   }
   const amountMinor = hasConfiguredPrice ? configured : TEST_PRICES[currency];
   return {
-    productCode: "deep_report_v1",
+    productCode: "recommendation_forensics_v1",
     catalogVersion: environment.OGC_PRICE_CATALOG_VERSION?.trim() || "2026-07-10.v1",
     currency,
     amountMinor,

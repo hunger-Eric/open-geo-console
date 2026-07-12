@@ -8,7 +8,9 @@ describe("commerce configuration", () => {
   });
 
   it("uses test-only defaults without accepting a browser amount", () => {
-    expect(getPriceSnapshot("USD", { COMMERCE_MODE: "test" }).amountMinor).toBe(2_900);
+    expect(getPriceSnapshot("USD", { COMMERCE_MODE: "test" })).toMatchObject({
+      productCode: "recommendation_forensics_v1", amountMinor: 2_900
+    });
     expect(amountMinorToMajor(2_900)).toBe(29);
   });
 

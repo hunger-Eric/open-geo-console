@@ -2,6 +2,7 @@ import {
   AI_REPORT_PROMPT_VERSION,
   REPORT_TIER_LIMITS,
   PageAnalysisBatchError,
+  RecommendationForensicReportValidationError,
   ReportValidationError,
   analyzePageBatch,
   createOpenAiCompatibleClient,
@@ -36,6 +37,12 @@ import type { JobCheckpoint, ScanJobRow } from "@/db/schema";
 import { projectFreeAiReport } from "@/report/visibility";
 import { createSafeFetch } from "@/server/safe-fetch";
 import { captureReportVisualEvidence } from "./visual-evidence";
+import {
+  RecommendationRuntimeUnavailableError,
+  RecommendationReportOutcomeMismatchError,
+  runRecommendationForensicsPipeline
+} from "./recommendation-forensics";
+import { createProductionRecommendationDependencies } from "@/recommendation-forensics/production-runtime";
 import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-runtime";
 import {
   calculateEffectiveCoverage,
@@ -60,6 +67,9 @@ interface DiscoverySnapshot {
 }
 
 interface WorkerCheckpoint extends RecoveryCheckpoint {
+  contractVersion?: 1 | 2;
+  websiteFoundation?: { completed: boolean; synthesisInputHash?: string };
+  recommendationForensics?: { runId?: string; questionsGenerated?: boolean; reportSaved?: boolean };
   discoverySnapshot?: DiscoverySnapshot;
   pageAnalysisContentHashes?: Record<string, string>;
   aiEnabled?: boolean;
@@ -296,6 +306,45 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       });
     }
     await persistAiReport(job, reportToPersist, crawl.pages, technicalReport);
+
+    if (job.productContract === "recommendation_forensics_v1") {
+      checkpoint = {
+        ...checkpoint,
+        contractVersion: 2,
+        websiteFoundation: { completed: true, synthesisInputHash }
+      };
+      await saveStageCheckpoint(job, workerId, "synthesizing", 90, checkpoint, {
+        plannedPages: effectiveCoverage.effectivePlannedPages,
+        successfulPages: effectiveCoverage.analyzedPages,
+        failedPages: failureCount(checkpoint)
+      });
+      const dependencies = createProductionRecommendationDependencies();
+      if (!dependencies) throw new RecommendationRuntimeUnavailableError("Recommendation-forensics runtime is not installed.");
+      const result = await runRecommendationForensicsPipeline({
+        reportId: job.reportId, jobId: job.id, locale: job.locale,
+        region: process.env.OGC_RECOMMENDATION_REGION?.trim() || "global",
+        targetUrl: discovery.targetUrl, websiteFoundation: reportToPersist, dependencies
+      });
+      checkpoint = {
+        ...checkpoint,
+        recommendationForensics: { runId: result.runId, questionsGenerated: true, reportSaved: true }
+      };
+      await saveStageCheckpoint(job, workerId, "synthesizing", 99, checkpoint);
+      const stage = result.coverage.outcome === "qualified"
+        ? "completed"
+        : result.coverage.outcome === "completed_limited" ? "completed_limited" : "failed";
+      const terminalJob = await terminalizeScanJob(job.id, workerId, {
+        stage,
+        coverage: {
+          plannedPages: effectiveCoverage.effectivePlannedPages,
+          successfulPages: effectiveCoverage.analyzedPages,
+          failedPages: failureCount(checkpoint)
+        },
+        ...(stage === "failed" ? { error: { code: "recommendation_coverage_failed", publicMessage: "The recommendation evidence was not sufficient for a usable report." } } : {})
+      });
+      await recordCommercialOutcomeSafely(job.id, terminalJob.stage as "completed" | "completed_limited" | "failed");
+      return;
+    }
 
     const homepageUrl = new URL(discovery.targetUrl).href;
     const homepageSucceeded = crawl.pages.some(({ page }) => canonicalUrl(page.url) === canonicalUrl(homepageUrl));
@@ -631,6 +680,9 @@ function canonicalUrl(value: string): string {
 }
 
 function isRetryable(error: unknown): boolean {
+  if (error instanceof RecommendationRuntimeUnavailableError ||
+      error instanceof RecommendationForensicReportValidationError ||
+      error instanceof RecommendationReportOutcomeMismatchError) return false;
   const message = publicFailure(error).toLowerCase();
   return !message.includes("robots.txt") &&
     !message.includes("not configured") &&

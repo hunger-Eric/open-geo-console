@@ -6,6 +6,7 @@ import {
   type CreditStatus,
   type JobCheckpoint,
   type ReportLocale,
+  type ReportProductContract,
   type ReportTier,
   type ScanJobReason,
   type ScanJobRow,
@@ -29,6 +30,7 @@ export interface ScanJobQueueStatus {
 export interface EnqueueScanJobInput {
   reportId: string;
   tier: ReportTier;
+  productContract?: ReportProductContract;
   locale: ReportLocale;
   reason?: ScanJobReason;
   creditReservationId?: string;
@@ -44,6 +46,9 @@ export class ScanJobCapacityError extends Error {
 }
 
 export async function enqueueScanJob(input: EnqueueScanJobInput): Promise<ScanJobRow> {
+  if (input.productContract === "recommendation_forensics_v1" && input.tier !== "deep") {
+    throw new Error("Recommendation-forensics jobs require the deep Worker lane.");
+  }
   await ensureDatabase();
   if (input.maxActiveTierJobs !== undefined) {
     if (!Number.isSafeInteger(input.maxActiveTierJobs) || input.maxActiveTierJobs < 1 || input.maxActiveTierJobs > 2) {
@@ -60,9 +65,9 @@ export async function enqueueScanJob(input: EnqueueScanJobInput): Promise<ScanJo
       `;
       if ((counts[0]?.count ?? 0) >= input.maxActiveTierJobs!) throw new ScanJobCapacityError();
       await tx`
-        INSERT INTO scan_jobs (id, report_id, tier, locale, reason, credit_reservation_id, max_attempts)
+        INSERT INTO scan_jobs (id, report_id, tier, product_contract, locale, reason, credit_reservation_id, max_attempts)
         VALUES (
-          ${id}, ${input.reportId}, ${input.tier}, ${input.locale}, ${input.reason ?? "standard"},
+          ${id}, ${input.reportId}, ${input.tier}, ${input.productContract ?? "legacy_website_audit_v1"}, ${input.locale}, ${input.reason ?? "standard"},
           ${input.creditReservationId ?? null}, ${input.maxAttempts ?? 3}
         )
       `;
@@ -75,6 +80,7 @@ export async function enqueueScanJob(input: EnqueueScanJobInput): Promise<ScanJo
       id: randomUUID(),
       reportId: input.reportId,
       tier: input.tier,
+      productContract: input.productContract ?? "legacy_website_audit_v1",
       locale: input.locale,
       reason: input.reason ?? "standard",
       creditReservationId: input.creditReservationId ?? null,

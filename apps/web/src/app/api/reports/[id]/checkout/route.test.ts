@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getGeoReport: vi.fn(), getActivePaymentOrderForReport: vi.fn(), createPaymentOrder: vi.fn(), attachHostedCheckout: vi.fn(),
   replaceLegacyHostedCheckout: vi.fn(), verifyTurnstile: vi.fn(), createHostedCheckout: vi.fn(),
-  getHostedCheckout: vi.fn(), findHostedCheckoutByReference: vi.fn(), deactivateLegacyHostedCheckout: vi.fn()
+  getHostedCheckout: vi.fn(), findHostedCheckoutByReference: vi.fn(), deactivateLegacyHostedCheckout: vi.fn(),
+  assertRecommendationProductAvailable: vi.fn()
 }));
 
 vi.mock("@/db/reports", () => ({ getGeoReport: mocks.getGeoReport }));
@@ -14,6 +15,9 @@ vi.mock("@/db/commercial-orders", () => ({
   replaceLegacyHostedCheckout: mocks.replaceLegacyHostedCheckout
 }));
 vi.mock("@/security/turnstile", () => ({ verifyTurnstile: mocks.verifyTurnstile }));
+vi.mock("@/recommendation-forensics/product-availability", () => ({
+  assertRecommendationProductAvailable: mocks.assertRecommendationProductAvailable
+}));
 vi.mock("@/payments/airwallex", () => ({
   isAirwallexPaymentIntentId: (value: string) => value.startsWith("int_"),
   AirwallexGateway: class {
@@ -41,6 +45,7 @@ describe("commercial checkout route", () => {
     mocks.createPaymentOrder.mockResolvedValue({ id: "order-1", providerCheckoutId: null });
     mocks.findHostedCheckoutByReference.mockResolvedValue(null);
     mocks.deactivateLegacyHostedCheckout.mockResolvedValue("deactivated");
+    mocks.assertRecommendationProductAvailable.mockResolvedValue(undefined);
     mocks.createHostedCheckout.mockResolvedValue({
       providerCheckoutId: "int_1", clientSecret: "secret_1", currency: "USD", environment: "demo"
     });
@@ -57,11 +62,26 @@ describe("commercial checkout route", () => {
       orderId: "order-1",
       hpp: { intentId: "int_1", clientSecret: "secret_1", currency: "USD", environment: "demo" }
     });
-    expect(mocks.createPaymentOrder).toHaveBeenCalledWith(expect.objectContaining({ amountMinor: 2_900, currency: "USD" }));
+    expect(mocks.createPaymentOrder).toHaveBeenCalledWith(expect.objectContaining({
+      productCode: "recommendation_forensics_v1", amountMinor: 2_900, currency: "USD"
+    }));
     expect(mocks.createHostedCheckout).toHaveBeenCalledWith(expect.objectContaining({
       amountMinor: 2_900, currency: "USD", returnUrl: "https://example.test/en/reports/report-1"
     }));
     expect(mocks.attachHostedCheckout).toHaveBeenCalledWith({ orderId: "order-1", providerCheckoutId: "int_1" });
+  });
+
+  it("stops before looking up or recovering any legacy checkout while the new product is unavailable", async () => {
+    mocks.assertRecommendationProductAvailable.mockRejectedValue(new Error("The recommendation-forensics product is not available."));
+    const response = await POST(new Request("https://example.test/api/reports/report-1/checkout", {
+      method: "POST", headers: { "content-type": "application/json", "idempotency-key": "request-123" },
+      body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human" })
+    }), { params: Promise.resolve({ id: "report-1" }) });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "The recommendation-forensics product is not available." });
+    expect(mocks.getActivePaymentOrderForReport).not.toHaveBeenCalled();
+    expect(mocks.deactivateLegacyHostedCheckout).not.toHaveBeenCalled();
+    expect(mocks.createHostedCheckout).not.toHaveBeenCalled();
   });
 
   it("requires the immutable report locale", async () => {

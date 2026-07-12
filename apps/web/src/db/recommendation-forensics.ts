@@ -80,6 +80,7 @@ export async function createAnswerSnapshotRun(input: AnswerSnapshotRunContract):
     if (!memoryGetReport(run.reportId)) throw new Error("The snapshot report does not exist.");
     const job = memoryGetScanJob(run.jobId);
     if (!job || job.reportId !== run.reportId) throw new Error("The snapshot run job does not belong to its report.");
+    if (job.productContract !== "recommendation_forensics_v1") throw new Error("Answer snapshots require a recommendation-forensics job contract.");
     const existing = memoryGetAnswerSnapshotRun(run.id);
     if (existing) assertImmutable("answer snapshot run", runRowComparable(existing), runRowComparable(row));
     else memorySaveAnswerSnapshotRun(row);
@@ -88,8 +89,9 @@ export async function createAnswerSnapshotRun(input: AnswerSnapshotRunContract):
   await ensureDatabase();
   const sql = getSqlClient();
   await sql.begin(async (tx) => {
-    const jobs = await tx<{ report_id: string }[]>`SELECT report_id FROM scan_jobs WHERE id = ${run.jobId}`;
+    const jobs = await tx<{ report_id: string; product_contract: string }[]>`SELECT report_id, product_contract FROM scan_jobs WHERE id = ${run.jobId}`;
     if (jobs[0]?.report_id !== run.reportId) throw new Error("The snapshot run job does not belong to its report.");
+    if (jobs[0]?.product_contract !== "recommendation_forensics_v1") throw new Error("Answer snapshots require a recommendation-forensics job contract.");
     await tx`
       INSERT INTO answer_snapshot_runs (id, report_id, job_id, locale, region, question_set_version, started_at)
       VALUES (${run.id}, ${run.reportId}, ${run.jobId}, ${run.locale}, ${run.region}, ${run.questionSetVersion}, ${run.startedAt})

@@ -31,6 +31,9 @@ export const DATABASE_MIGRATIONS = [
     id text PRIMARY KEY,
     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
     tier text NOT NULL CHECK (tier IN ('free', 'deep')),
+    product_contract text NOT NULL DEFAULT 'legacy_website_audit_v1'
+      CONSTRAINT scan_jobs_product_contract_check
+      CHECK (product_contract IN ('legacy_website_audit_v1','recommendation_forensics_v1')),
     locale text NOT NULL CONSTRAINT scan_jobs_locale_check CHECK (locale IN ('en','zh')),
     reason text NOT NULL DEFAULT 'standard' CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration')),
     stage text NOT NULL DEFAULT 'queued' CONSTRAINT scan_jobs_stage_check CHECK (stage IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')),
@@ -49,6 +52,10 @@ export const DATABASE_MIGRATIONS = [
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS product_contract text NOT NULL DEFAULT 'legacy_website_audit_v1'`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_product_contract_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_product_contract_check
+    CHECK (product_contract IN ('legacy_website_audit_v1','recommendation_forensics_v1'))`,
   `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS reason text NOT NULL DEFAULT 'standard'`,
   `CREATE INDEX IF NOT EXISTS scan_jobs_claim_idx ON scan_jobs (stage, lease_expires_at, created_at)`,
   `CREATE INDEX IF NOT EXISTS scan_jobs_tier_queue_idx ON scan_jobs (tier, stage, created_at, id)`,

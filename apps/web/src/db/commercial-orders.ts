@@ -413,8 +413,9 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
       report_id: string;
       report_locale: ReportLocale;
       fulfillment_job_id: string | null;
+      product_code: string;
     }>>`
-      SELECT id, provider, provider_payment_id, payment_status, report_id, report_locale, fulfillment_job_id
+      SELECT id, provider, provider_payment_id, payment_status, report_id, report_locale, fulfillment_job_id, product_code
       FROM payment_orders WHERE id = ${input.orderId} FOR UPDATE
     `;
     const order = orderRows[0];
@@ -470,9 +471,9 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
       jobId = ids.jobId;
       await tx`
         INSERT INTO scan_jobs
-          (id, report_id, tier, locale, reason, stage, credit_reservation_id)
+          (id, report_id, tier, product_contract, locale, reason, stage, credit_reservation_id)
         VALUES
-          (${jobId}, ${order.report_id}, 'deep', ${order.report_locale}, 'standard', 'queued', ${reservation.id})
+          (${jobId}, ${order.report_id}, 'deep', ${productContractForCode(order.product_code)}, ${order.report_locale}, 'standard', 'queued', ${reservation.id})
       `;
     }
     await tx`
@@ -527,6 +528,12 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
     order: (await getPaymentOrder(input.orderId))!,
     ...result
   };
+}
+
+export function productContractForCode(productCode: string): "legacy_website_audit_v1" | "recommendation_forensics_v1" {
+  if (productCode === "recommendation_forensics_v1") return "recommendation_forensics_v1";
+  if (productCode === "deep_report_v1") return "legacy_website_audit_v1";
+  throw new CommercialOrderConflictError("The paid order uses an unsupported product contract.");
 }
 
 function assertOrderInput(input: CreatePaymentOrderInput): void {

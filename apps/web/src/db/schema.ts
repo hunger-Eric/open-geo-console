@@ -61,6 +61,7 @@ export type FulfillmentStatus =
 export type OrderRefundStatus = "not_required" | "pending" | "submitted" | "refunded" | "failed";
 export type OrderDeliveryStatus = "not_queued" | "queued" | "sent" | "delivered" | "bounced" | "failed";
 export type PaymentEventProcessingStatus = "received" | "processed" | "ignored" | "failed";
+export type ReportProductContract = "legacy_website_audit_v1" | "recommendation_forensics_v1";
 export type PaymentRefundReason = "completed_limited" | "report_failed" | "sla_missed" | "operator_approved";
 export type PaymentRefundState = "pending" | "submitted" | "succeeded" | "failed";
 export type EmailTemplateType =
@@ -81,6 +82,9 @@ export type CitationEvidenceGrade = EvidenceGrade;
 export type { CitationRetrievalState, CitationSourceCategory };
 
 export interface JobCheckpoint {
+  contractVersion?: 1 | 2;
+  websiteFoundation?: { completed: boolean; synthesisInputHash?: string };
+  recommendationForensics?: { runId?: string; questionsGenerated?: boolean; reportSaved?: boolean };
   targetPageCount?: number;
   rankedCandidateUrls?: string[];
   effectivePlannedUrls?: string[];
@@ -147,6 +151,7 @@ export const scanJobs = pgTable(
       .notNull()
       .references(() => scanReports.id, { onDelete: "cascade" }),
     tier: text("tier").$type<ReportTier>().notNull(),
+    productContract: text("product_contract").$type<ReportProductContract>().notNull().default("legacy_website_audit_v1"),
     locale: text("locale").$type<ReportLocale>().notNull(),
     reason: text("reason").$type<ScanJobReason>().notNull().default("standard"),
     stage: text("stage").$type<ScanJobStage>().notNull().default("queued"),
@@ -172,6 +177,7 @@ export const scanJobs = pgTable(
     index("scan_jobs_report_idx").on(table.reportId, table.createdAt),
     uniqueIndex("scan_jobs_id_report_uidx").on(table.id, table.reportId),
     check("scan_jobs_locale_check", sql`${table.locale} IN ('en', 'zh')`),
+    check("scan_jobs_product_contract_check", sql`${table.productContract} IN ('legacy_website_audit_v1','recommendation_forensics_v1')`),
     check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration')`),
     check(
       "scan_jobs_stage_check",

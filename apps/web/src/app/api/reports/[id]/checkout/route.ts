@@ -15,6 +15,7 @@ import { AirwallexGateway, isAirwallexPaymentIntentId } from "@/payments/airwall
 import { getTrustedClientIp } from "@/security/client-ip";
 import { verifyTurnstile } from "@/security/turnstile";
 import { parseReportLocale } from "@/server/report-locale";
+import { assertRecommendationProductAvailable } from "@/recommendation-forensics/product-availability";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
@@ -24,6 +25,7 @@ export async function POST(request: Request, context: RouteContext) {
     assertSmallRequest(request);
     assertCommerceEnabled();
     await assertCommerceReady();
+    await assertRecommendationProductAvailable();
     const { id } = await context.params;
     const body = await request.json() as { email?: unknown; currency?: unknown; locale?: unknown; turnstileToken?: unknown };
     const currency = parseSupportedCurrency(body.currency);
@@ -152,6 +154,6 @@ function assertSmallRequest(request: Request) {
 
 function publicError(error: unknown): string {
   const message = error instanceof Error ? error.message : "Unable to create checkout.";
-  if (/required|valid|supported|locale|configured|accepting|active checkout/i.test(message)) return message;
+  if (/required|valid|supported|locale|configured|accepting|available|active checkout/i.test(message)) return message;
   return "Unable to create secure checkout. Please try again later.";
 }

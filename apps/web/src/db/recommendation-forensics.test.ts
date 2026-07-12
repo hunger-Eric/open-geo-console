@@ -58,6 +58,15 @@ describe("recommendation-forensics memory persistence", () => {
     })).rejects.toThrow("does not match");
   });
 
+  it("does not attach answer observations to a legacy website-audit job", async () => {
+    const legacyJobId = randomUUID();
+    memorySaveScanJob({ ...memoryJob(legacyJobId, reportId), productContract: "legacy_website_audit_v1" });
+    await expect(createAnswerSnapshotRun({
+      id: randomUUID(), reportId, jobId: legacyJobId, locale: "en", region: "US",
+      questionSetVersion: "purchase-v1", startedAt: "2030-01-01T00:00:00.000Z"
+    })).rejects.toThrow(/job contract/i);
+  });
+
   it("rejects a missing or cross-report job binding", async () => {
     await expect(createAnswerSnapshotRun({
       id: randomUUID(), reportId, jobId: "missing-job", locale: "en", region: "US",
@@ -202,7 +211,7 @@ function successCell(runId: string) {
 function memoryJob(id: string, reportId: string) {
   const now = new Date("2030-01-01T00:00:00.000Z");
   return {
-    id, reportId, tier: "deep" as const, locale: "en" as const, reason: "standard" as const,
+    id, reportId, tier: "deep" as const, productContract: "recommendation_forensics_v1" as const, locale: "en" as const, reason: "standard" as const,
     stage: "queued" as const, progress: 0, checkpoint: {}, plannedPages: 0,
     successfulPages: 0, failedPages: 0, attempts: 0, maxAttempts: 3,
     leaseOwner: null, leaseExpiresAt: null, errorCode: null, publicError: null,

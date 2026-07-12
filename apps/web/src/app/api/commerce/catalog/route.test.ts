@@ -12,11 +12,11 @@ describe("commerce catalog route", () => {
     expect(await (await GET()).json()).toMatchObject({ enabled: false, prices: [] });
   });
 
-  it("returns only server-owned price snapshots", async () => {
+  it("does not expose legacy GEO pricing while the replacement product runtime is unavailable", async () => {
     process.env.COMMERCE_MODE = "test";
     process.env.OGC_REPLY_TO_EMAIL = "support@example.test";
     const payload = await (await GET()).json() as { enabled: boolean; prices: Array<{ currency: string; amountMinor: number }> };
-    expect(payload.enabled).toBe(true);
-    expect(payload.prices).toEqual(expect.arrayContaining([{ currency: "USD", amountMinor: 2_900 }]));
+    expect(payload.enabled).toBe(false);
+    expect(payload.prices).toEqual([]);
   });
 });
