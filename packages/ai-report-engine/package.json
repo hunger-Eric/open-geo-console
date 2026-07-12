@@ -14,5 +14,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@open-geo-console/answer-engine-observer": "*",
+    "@open-geo-console/citation-intelligence": "*"
   }
 }

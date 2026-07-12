@@ -97,11 +97,76 @@ export interface ObserveAnswerInput {
   run: AnswerSnapshotRunContract;
   question: AnswerQuestion;
   surface: AnswerEngineSurface;
+  signal: AbortSignal;
 }
 
 export interface AnswerEngineAdapter {
   readonly surface: AnswerEngineSurface;
   observe(input: ObserveAnswerInput): Promise<AnswerSnapshotCell>;
+  classifyError?(error: unknown): AnswerAdapterErrorClass;
+}
+
+export interface QuestionGenerationInput {
+  locale: string;
+  organizationName?: string;
+  categories?: string[];
+  capabilities?: string[];
+  audiences?: string[];
+  useCases?: string[];
+  sourceUrls: string[];
+}
+
+export interface GeneratedQuestionSet {
+  version: "purchase-v1";
+  confidence: "high" | "low";
+  fallbackReason?: "insufficient_category_evidence";
+  limitations: string[];
+  questions: AnswerQuestion[];
+}
+
+export interface AnswerEngineCertificationEvidence {
+  certifiedAt: string;
+  environment: "protected_staging";
+  evidenceReference: string;
+}
+
+export interface RegisteredAnswerEngine {
+  adapter: AnswerEngineAdapter;
+  surface: AnswerEngineSurface;
+  certificationEvidence?: AnswerEngineCertificationEvidence;
+}
+
+export interface CertifiedAnswerEngineSurface {
+  surface: AnswerEngineSurface;
+  evidence: AnswerEngineCertificationEvidence;
+}
+
+export interface ProviderExecutionBudget {
+  maxRequests: number;
+  maxEstimatedCostMicros: number;
+  timeoutMs: number;
+}
+
+export interface ObserveAnswerMatrixInput {
+  run: AnswerSnapshotRunContract;
+  questions: AnswerQuestion[];
+  adapters: AnswerEngineAdapter[];
+  existingCells?: AnswerSnapshotCell[];
+  budgets?: Record<string, ProviderExecutionBudget>;
+  persistCell?: (cell: AnswerSnapshotCell) => void | Promise<void>;
+}
+
+export interface ObserveAnswerMatrixResult {
+  cells: AnswerSnapshotCell[];
+  pendingCellIds: string[];
+}
+
+export interface CommercialCoverageDecision {
+  outcome: "qualified" | "completed_limited" | "failed";
+  certifiedSurfaceCount: number;
+  qualifyingSurfaceCount: number;
+  successfulQuestionCount: number;
+  reasons: string[];
 }
 
 export interface AnswerSnapshotRunIdentityInput {
