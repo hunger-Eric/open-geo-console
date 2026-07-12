@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabase, ensureDatabase, getSqlClient } from "./index";
 import { terminalizeScanJob } from "./jobs";
 import { recordPaidJobOutcome } from "./commercial-refunds";
-import { applyPaidPaymentEvent } from "./commercial-orders";
+import { applyPaidPaymentEvent, finalizeLegacyUnpaidOrderRetirement } from "./commercial-orders";
 
 const enabled = Boolean(process.env.DATABASE_URL && process.env.OGC_DEPLOYMENT_PROFILE === "staging");
 const describePostgres = enabled ? describe : describe.skip;
@@ -47,8 +47,10 @@ describePostgres("recommendation commercial terminal matrix", () => {
   it.each(records)("atomically terminalizes and reconciles $stage", async (row) => {
     const workerId = `worker-${row.stage}`;
     await terminalizeScanJob(row.jobId, workerId, { stage: row.stage, coverage: { plannedPages: 4, successfulPages: row.stage === "failed" ? 0 : 4, failedPages: 0 }, ...(row.stage === "failed" ? { error: { code: "forensics_failed", publicMessage: "Unavailable." } } : {}) });
-    const first = await recordPaidJobOutcome({ jobId: row.jobId, outcome: row.stage });
-    const second = await recordPaidJobOutcome({ jobId: row.jobId, outcome: row.stage });
+    const [first, second] = await Promise.all([
+      recordPaidJobOutcome({ jobId: row.jobId, outcome: row.stage }),
+      recordPaidJobOutcome({ jobId: row.jobId, outcome: row.stage })
+    ]);
     expect(second).toEqual(first);
     const state = (await getSqlClient()<Array<{ credit_status: string; fulfillment_status: string; refund_count: number }>>`
       SELECT ledger.status credit_status, orders.fulfillment_status,
@@ -68,28 +70,34 @@ describePostgres("retired legacy paid event", () => {
   const preReportId = `precutoff-report-${suffix}`;
   const orderId = `retired-order-${suffix}`;
   const preCutoffOrderId = `precutoff-order-${suffix}`;
+  const raceReportId = `race-report-${suffix}`;
+  const raceOrderId = `race-order-${suffix}`;
 
   beforeAll(async () => {
     await ensureDatabase();
     await getSqlClient()`INSERT INTO scan_reports (id,url,site_key,report_locale,technical_status) VALUES (${reportId},'https://example.com','example.com','en','completed')`;
     await getSqlClient()`INSERT INTO scan_reports (id,url,site_key,report_locale,technical_status) VALUES (${preReportId},'https://example.org','example.org','en','completed')`;
+    await getSqlClient()`INSERT INTO scan_reports (id,url,site_key,report_locale,technical_status) VALUES (${raceReportId},'https://race.example','race.example','en','completed')`;
     await getSqlClient()`INSERT INTO payment_orders (id,checkout_idempotency_hmac,provider,provider_checkout_id,report_id,site_key,customer_email_encrypted,customer_email_hmac,email_key_version,product_code,catalog_version,terms_version,refund_policy_version,report_locale,currency,amount_minor,payment_status,legacy_retirement_cutoff_at,legacy_retired_at) VALUES (${orderId},${`checkout-${orderId}`},'airwallex',${`legacy-link-${suffix}`},${reportId},'example.com','encrypted','email-hmac','v1','deep_report_v1','v1','v1','v1','en','USD',2900,'cancelled','2030-01-01T00:00:00Z','2030-01-01T00:01:00Z')`;
     await getSqlClient()`INSERT INTO payment_orders (id,checkout_idempotency_hmac,provider,provider_checkout_id,report_id,site_key,customer_email_encrypted,customer_email_hmac,email_key_version,product_code,catalog_version,terms_version,refund_policy_version,report_locale,currency,amount_minor,payment_status,legacy_retirement_cutoff_at) VALUES (${preCutoffOrderId},${`checkout-${preCutoffOrderId}`},'airwallex',${`legacy-link-pre-${suffix}`},${preReportId},'example.org','encrypted','email-hmac-2','v1','deep_report_v1','v1','v1','v1','en','USD',2900,'pending','2030-01-01T00:00:00Z')`;
+    await getSqlClient()`INSERT INTO payment_orders (id,checkout_idempotency_hmac,provider,provider_checkout_id,report_id,site_key,customer_email_encrypted,customer_email_hmac,email_key_version,product_code,catalog_version,terms_version,refund_policy_version,report_locale,currency,amount_minor,payment_status,legacy_retirement_cutoff_at) VALUES (${raceOrderId},${`checkout-${raceOrderId}`},'airwallex',${`legacy-link-race-${suffix}`},${raceReportId},'race.example','encrypted','email-hmac-3','v1','deep_report_v1','v1','v1','v1','en','USD',2900,'pending','2030-01-01T00:00:00Z')`;
   }, 120_000);
 
   afterAll(async () => {
     const sql=getSqlClient();
     const preJob = (await sql<{ fulfillment_job_id: string | null }[]>`SELECT fulfillment_job_id FROM payment_orders WHERE id=${preCutoffOrderId}`)[0]?.fulfillment_job_id;
-    await sql`DELETE FROM email_deliveries WHERE order_id IN (${orderId},${preCutoffOrderId})`;
-    await sql`DELETE FROM credit_ledger WHERE payment_order_id IN (${orderId},${preCutoffOrderId})`;
-    await sql`DELETE FROM access_keys WHERE payment_order_id IN (${orderId},${preCutoffOrderId})`;
+    await sql`DELETE FROM email_deliveries WHERE order_id IN (${orderId},${preCutoffOrderId},${raceOrderId})`;
+    await sql`DELETE FROM credit_ledger WHERE payment_order_id IN (${orderId},${preCutoffOrderId},${raceOrderId})`;
+    await sql`DELETE FROM access_keys WHERE payment_order_id IN (${orderId},${preCutoffOrderId},${raceOrderId})`;
     await sql`DELETE FROM payment_events WHERE order_id=${orderId}`;
     await sql`DELETE FROM payment_events WHERE order_id=${preCutoffOrderId}`;
-    await sql`DELETE FROM payment_refunds WHERE order_id IN (${orderId},${preCutoffOrderId})`;
-    await sql`DELETE FROM payment_orders WHERE id IN (${orderId},${preCutoffOrderId})`;
+    await sql`DELETE FROM payment_events WHERE order_id=${raceOrderId}`;
+    await sql`DELETE FROM payment_refunds WHERE order_id IN (${orderId},${preCutoffOrderId},${raceOrderId})`;
+    await sql`DELETE FROM payment_orders WHERE id IN (${orderId},${preCutoffOrderId},${raceOrderId})`;
     if (preJob) await sql`DELETE FROM scan_jobs WHERE id=${preJob}`;
     await sql`DELETE FROM scan_reports WHERE id=${reportId}`;
     await sql`DELETE FROM scan_reports WHERE id=${preReportId}`;
+    await sql`DELETE FROM scan_reports WHERE id=${raceReportId}`;
     await closeDatabase();
   }, 120_000);
 
@@ -118,5 +126,17 @@ describePostgres("retired legacy paid event", () => {
     } finally {
       if (original === undefined) delete process.env.OGC_TOKEN_HASH_SECRET; else process.env.OGC_TOKEN_HASH_SECRET = original;
     }
+  }, 120_000);
+
+  it("resolves retirement versus late-payment competition to one refund and no job", async () => {
+    const paid = applyPaidPaymentEvent({ provider: "airwallex", providerEventId: `evt-race-${suffix}`, eventType: "payment.succeeded", orderId: raceOrderId, providerPaymentId: `int-race-${suffix}`, providerCreatedAt: new Date("2030-01-01T00:02:00Z"), payloadHash: `hash-race-${suffix}` });
+    const retired = finalizeLegacyUnpaidOrderRetirement(raceOrderId, new Date("2030-01-01T00:00:00Z"));
+    const [result] = await Promise.all([paid, retired]);
+    expect(result).toMatchObject({ retiredRefund: true });
+    const state = (await getSqlClient()<Array<{ refund_count: number; fulfillment_job_id: string | null }>>`
+      SELECT (SELECT count(*)::integer FROM payment_refunds WHERE order_id=orders.id) refund_count, fulfillment_job_id
+      FROM payment_orders orders WHERE id=${raceOrderId}
+    `)[0]!;
+    expect(state).toEqual({ refund_count: 1, fulfillment_job_id: null });
   }, 120_000);
 });
