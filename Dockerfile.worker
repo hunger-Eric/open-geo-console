@@ -1,0 +1,23 @@
+FROM node:24-bookworm-slim
+
+WORKDIR /app
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+COPY package.json package-lock.json tsconfig.base.json vitest.config.ts ./
+COPY apps/web/package.json ./apps/web/package.json
+COPY packages/ai-report-engine/package.json ./packages/ai-report-engine/package.json
+COPY packages/answer-engine-observer/package.json ./packages/answer-engine-observer/package.json
+COPY packages/citation-intelligence/package.json ./packages/citation-intelligence/package.json
+COPY packages/crawler-rules/package.json ./packages/crawler-rules/package.json
+COPY packages/geo-auditor/package.json ./packages/geo-auditor/package.json
+COPY packages/log-parser/package.json ./packages/log-parser/package.json
+COPY packages/site-crawler/package.json ./packages/site-crawler/package.json
+
+RUN npm ci --include=dev && npx playwright install --with-deps chromium
+
+COPY apps ./apps
+COPY packages ./packages
+
+ENV NODE_ENV=production
+
+CMD ["npm", "run", "worker:realtime:free"]

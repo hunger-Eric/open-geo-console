@@ -10,7 +10,7 @@ import { closeDatabase, ensureDatabase } from "../db";
 import { createJobNotificationQueue, readJobQueueConfig } from "../queue";
 import { processScanJob } from "./processor";
 import { positiveInteger, readWorkerConfig } from "./config";
-import { runRealtimeLane } from "./drain";
+import { runPostgresPollingLane, runRealtimeLane } from "./drain";
 import { runRecordedBatchDrain } from "./drain-batch";
 import { WorkerPresenceReporter } from "./presence";
 
@@ -51,19 +51,31 @@ try {
     });
     process.stdout.write(`Batch drain claimed ${result.claimedJobs} ${config.tier} job(s).\n`);
   } else {
-    if (queueConfig.provider === "noop") {
-      throw new Error("Realtime fulfillment requires a Cloudflare or local job notification queue.");
+    if (queueConfig.provider === "postgres") {
+      await runPostgresPollingLane({
+        tier: config.tier,
+        workerIdPrefix: workerId,
+        runner,
+        pollMs: positiveInteger(process.env.OGC_WORKER_POLL_MS, 5_000),
+        shouldStop: () => stopping,
+        onCycleError: () => process.stderr.write("The PostgreSQL polling cycle failed and will retry.\n"),
+        onProcessingError: () => process.stderr.write("A claimed report job exited unexpectedly.\n")
+      });
+    } else {
+      if (queueConfig.provider === "noop") {
+        throw new Error("Realtime fulfillment requires a Cloudflare, local, or PostgreSQL queue provider.");
+      }
+      await runRealtimeLane({
+        tier: config.tier,
+        workerIdPrefix: workerId,
+        runner,
+        queue: createJobNotificationQueue(queueConfig),
+        queuePollMs: positiveInteger(process.env.OGC_QUEUE_PULL_MS, 30_000),
+        shouldStop: () => stopping,
+        onCycleError: () => process.stderr.write("The job notification cycle failed and will retry.\n"),
+        onProcessingError: () => process.stderr.write("A claimed report job exited unexpectedly.\n")
+      });
     }
-    await runRealtimeLane({
-      tier: config.tier,
-      workerIdPrefix: workerId,
-      runner,
-      queue: createJobNotificationQueue(queueConfig),
-      queuePollMs: positiveInteger(process.env.OGC_QUEUE_PULL_MS, 30_000),
-      shouldStop: () => stopping,
-      onCycleError: () => process.stderr.write("The job notification cycle failed and will retry.\n"),
-      onProcessingError: () => process.stderr.write("A claimed report job exited unexpectedly.\n")
-    });
   }
 } finally {
   await presence.stop();

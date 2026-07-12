@@ -129,3 +129,9 @@ The buyer receives a plain-language executive decision report. The buyer's exist
 Each answer-engine observation is stored as an immutable run/cell/source snapshot bound to one report and job. Successful, failed, and no-recommendation states remain distinct; answer text is integrity-bound by hash, provider metadata is allowlisted and bounded, and retained citation excerpts expire while their hashes remain. Citation grades and opportunity hypotheses must point back to stored cells and sources, and opportunity language must not claim algorithmic causation.
 
 The provider-neutral contracts and deterministic fixtures may ship before any live provider is enabled. Implementing an adapter does not certify it, and a developer API observation must not be labeled as a consumer application result. Customer-facing recommendation claims remain disabled until two independent source-bearing surfaces pass protected-staging certification.
+
+## 2026-07-12: Low-cost persistent Workers poll authoritative PostgreSQL from Docker Desktop
+
+The workstation deployment uses `FULFILLMENT_MODE=realtime` with `OGC_JOB_QUEUE_PROVIDER=postgres`. A bounded idle poll claims jobs through the existing PostgreSQL lease boundary, keeps Worker presence current, and avoids both locally unavailable Vercel Sensitive Queue credentials and repeated empty batch-run records. Cloudflare Queue remains an optional notification hint for hosted deployments; it never becomes job authority.
+
+Docker Desktop starts staging free/deep, production free, and production commerce with `restart: unless-stopped`. Runtime environment files are generated under ignored `.data`, restricted to the current Windows user, and never copied into the image. Production deep remains fail-closed until production has independent private evidence storage, and the workstation being powered off remains an availability boundary.

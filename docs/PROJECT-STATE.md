@@ -18,7 +18,7 @@ The next product direction is a zero-configuration AI recommendation forensic re
 - `packages/citation-intelligence` owns recommendation extraction, entity resolution, source categorization, Grade A-D evidence and evidence-linked opportunity hypotheses.
 - `packages/crawler-rules` and `packages/log-parser` continue to own AI crawler identity and sanitized access-log evidence.
 
-The web process persists a public homepage technical report and enqueues work. Separate free/deep Workers use PostgreSQL leases and resumable checkpoints. The default `batch_24h` mode drains PostgreSQL from a scheduled workstation and exits; `realtime` consumes Cloudflare Queue hints on persistent infrastructure. Free reports analyze one homepage and show one verified AI finding while the global budget remains. Deep AI and technical payloads are private.
+The web process persists a public homepage technical report and enqueues work. Separate free/deep Workers use PostgreSQL leases and resumable checkpoints. Docker Desktop now keeps the authorized workstation lanes alive with bounded PostgreSQL polling; Cloudflare Queue remains optional and notification-only. Batch drains remain a manual fallback. Free reports analyze one homepage and show one verified AI finding while the global budget remains. Deep AI and technical payloads are private.
 
 ## Implemented
 
@@ -35,6 +35,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - HMAC-only Key/token storage; idempotent credit reservation, settlement and system-failure refund; scanner-safe GET plus human POST report-link redemption.
 - Fixed server-side CNY/USD/HKD catalog, Airwallex hosted checkout/Webhooks/refunds, exactly-once paid entitlement/job/outbox creation, encrypted customer email, Resend delivery/Webhooks, one-hour link-reissue limiting, and 20/24-hour SLA automation.
 - Cloudflare Queue push/pull adapters, notification-only outbox reconciliation, worker presence, recorded batch drains, Windows Task Scheduler scripts and Netlify monorepo configuration.
+- Docker Desktop persistent PostgreSQL polling is active for staging free/deep and production free, with `restart: unless-stopped`, graceful Worker shutdown, ACL-restricted ignored runtime env files, and a five-minute production commerce loop. A fresh staging `shun-express.com` report completed from 0% to 100% in one attempt after automatic claim, proving container DoH, crawl, model, and persistence behavior. Production deep remains disabled because production has no independent private evidence store.
 - Product-level status, Key unlock, AI analysis, technical, issues, bot evidence and print/PDF report surfaces in English and Chinese; checkpoint retry is no longer delegated to users.
 - Scan submission performs only validation, Turnstile verification, rate/reuse checks, and an atomic PostgreSQL admission transaction. It returns a stable report UUID immediately; the Worker alone crawls the homepage and persists the technical payload. Pending report routes render a real workspace with queue/stage copy and skeleton content instead of holding the homepage button open.
 - Turnstile uses explicit `interaction-only` appearance with `execute` execution. Scanner and checkout buttons become actionable from their own form data, then request a token on click; verified server-side tokens remain mandatory and the widget does not reserve blank space before interaction.
@@ -78,6 +79,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Official-site identity is inferred from internal site evidence only; external ownership/search verification is not performed.
 - Image aesthetics, video, login-only pages and form submission are outside the first AI report version.
 - Production always requires persistent PostgreSQL. Initial commercial operation may use scheduled workstation batches with a 24-hour/full-refund promise; instant delivery requires persistent `realtime` Workers.
+- Docker Desktop Workers stop when the workstation or Docker Desktop is offline. `restart: unless-stopped` recovers them when Docker starts, but it does not provide hosted availability.
 - Netlify is the intended commercial Web/API host. The existing Vercel Hobby deployment remains useful only for noncommercial acceptance because its terms are not the commercial target.
 - Real model behavior depends on the configured provider. CI uses mock clients; `npm run test:ai-live` remains the repeatable paid integration command.
 - The Vercel project is not connected to Git because the Vercel GitHub App lacks repository access. The fixed alias must therefore be repointed explicitly after each CLI Preview deployment, and Preview variables cannot yet be restricted to one Git branch.

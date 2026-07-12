@@ -12,6 +12,7 @@
 - `npm run worker:free` and `npm run worker:deep` start the two independent AI report lanes; production must service both.
 - In the default `FULFILLMENT_MODE=batch_24h`, the lane commands drain PostgreSQL and exit. Use `worker:realtime:free|deep` only on persistent infrastructure.
 - `npm run commerce:all` reconciles commercial outcomes, enforces the 24-hour SLA, submits refunds, and sends queued email.
+- `powershell -File scripts/start-workstation-workers.ps1` builds and starts the Docker Desktop staging free/deep, production free, and production commerce services. Production deep remains gated on private evidence storage.
 - `npm run worker` is a low-level entry point and requires `OGC_WORKER_TIER=free|deep`.
 - `npm run browser:install` installs Chromium for JavaScript-rendered page fallback.
 - `npm run db:audit` fails when a terminal commercial job still has a reserved credit.
@@ -38,6 +39,7 @@
 - Every deployed Web/Worker process requires `OGC_DEPLOYMENT_PROFILE`, and its PostgreSQL `deployment_environment` marker must match before work is accepted.
 - Production free-site limits are always two distinct sites per rolling 24 hours; never add request-controlled or administrator bypasses. Forced regeneration exists only for protected staging Preview deployments.
 - Cloudflare Queue is notification-only. Payment, job, dispatch, refund, email, and access authority remains in PostgreSQL.
+- Persistent self-hosted Workers may use `OGC_JOB_QUEUE_PROVIDER=postgres` with `FULFILLMENT_MODE=realtime`; this polls the authoritative job table without creating empty batch-run records.
 - The web process creates jobs and serves reports. The worker is the only process that crawls pages or calls the configured model.
 - Only a verified payment Webhook may mark an order paid and create its exactly-once entitlement/deep job.
 - Free reports audit only the submitted homepage plus standard assets. Multi-page technical and AI evidence belongs to the authorized private deep bundle.

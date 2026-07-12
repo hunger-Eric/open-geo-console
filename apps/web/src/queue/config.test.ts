@@ -11,6 +11,11 @@ describe("queue runtime configuration", () => {
       .toThrow(/CLOUDFLARE_ACCOUNT_ID/);
   });
 
+  it("supports PostgreSQL polling for a persistent self-hosted Worker", () => {
+    expect(readJobQueueConfig({ OGC_JOB_QUEUE_PROVIDER: "postgres", FULFILLMENT_MODE: "realtime" }))
+      .toEqual({ provider: "postgres", fulfillmentMode: "realtime" });
+  });
+
   it("accepts only the two fulfillment modes", () => {
     expect(parseFulfillmentMode(" realtime ")).toBe("realtime");
     expect(parseFulfillmentMode(undefined)).toBe("batch_24h");

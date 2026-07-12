@@ -1,7 +1,7 @@
 import { positiveInteger } from "@/worker/config";
 import { getFulfillmentMode, type FulfillmentMode } from "@/commerce/config";
 
-export type JobQueueProvider = "cloudflare" | "local" | "noop";
+export type JobQueueProvider = "cloudflare" | "local" | "postgres" | "noop";
 export type { FulfillmentMode } from "@/commerce/config";
 
 export interface CloudflareQueueConfig {
@@ -40,8 +40,8 @@ export function readJobQueueConfig(environment: NodeJS.ProcessEnv = process.env)
 
 export function parseJobQueueProvider(raw: string | undefined): JobQueueProvider {
   const provider = raw?.trim().toLowerCase() || "noop";
-  if (provider === "cloudflare" || provider === "local" || provider === "noop") return provider;
-  throw new Error("OGC_JOB_QUEUE_PROVIDER must be 'cloudflare', 'local', or 'noop'.");
+  if (provider === "cloudflare" || provider === "local" || provider === "postgres" || provider === "noop") return provider;
+  throw new Error("OGC_JOB_QUEUE_PROVIDER must be 'cloudflare', 'local', 'postgres', or 'noop'.");
 }
 
 export function parseFulfillmentMode(raw: string | undefined): FulfillmentMode {

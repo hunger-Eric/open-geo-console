@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { LocalJobNotificationQueue } from "@/queue/local";
-import { boundedReplicas, drainTierUntilEmpty, runRealtimeLane } from "./drain";
+import { boundedReplicas, drainTierUntilEmpty, runPostgresPollingLane, runRealtimeLane } from "./drain";
 
 describe("worker drains", () => {
   it("drains authoritative work until every replica observes an empty queue", async () => {
@@ -69,5 +69,24 @@ describe("worker drains", () => {
     expect(boundedReplicas(undefined)).toBe(1);
     expect(boundedReplicas(4)).toBe(4);
     expect(boundedReplicas(100)).toBe(16);
+  });
+
+  it("polls PostgreSQL directly without recording empty batch drains", async () => {
+    const jobs = [{ id: "first" }, { id: "second" }];
+    const processed: string[] = [];
+    let stopping = false;
+    const result = await runPostgresPollingLane({
+      tier: "free",
+      pollMs: 1_000,
+      shouldStop: () => stopping,
+      delay: async () => { stopping = true; },
+      runner: {
+        claim: async () => jobs.shift() ?? null,
+        process: async (job) => { processed.push(job.id); }
+      }
+    });
+
+    expect(processed).toEqual(["first", "second"]);
+    expect(result).toEqual({ tier: "free", replicas: 1, claimedJobs: 2, completedJobs: 2, failedJobs: 0 });
   });
 });

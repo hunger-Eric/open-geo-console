@@ -74,6 +74,49 @@ export interface RealtimeLaneOptions<Job> extends Omit<DrainOptions<Job>, "repli
   onCycleError?: (error: unknown) => void;
 }
 
+export interface PostgresPollingLaneOptions<Job> extends Omit<DrainOptions<Job>, "replicas"> {
+  pollMs?: number;
+  delay?: (milliseconds: number) => Promise<void>;
+  onCycleError?: (error: unknown) => void;
+}
+
+/** Keeps a self-hosted Worker alive while PostgreSQL remains the only job authority. */
+export async function runPostgresPollingLane<Job>(options: PostgresPollingLaneOptions<Job>): Promise<DrainResult> {
+  const result: DrainResult = {
+    tier: options.tier,
+    replicas: 1,
+    claimedJobs: 0,
+    completedJobs: 0,
+    failedJobs: 0
+  };
+  const workerId = options.workerIdPrefix ?? `ogc-postgres-${options.tier}-${randomUUID()}`;
+  const delay = options.delay ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  const pollMs = boundedPollMs(options.pollMs);
+
+  while (!options.shouldStop?.()) {
+    let job: Job | null = null;
+    try {
+      job = await options.runner.claim(workerId, options.tier);
+    } catch (error) {
+      options.onCycleError?.(error);
+    }
+    if (!job) {
+      if (!options.shouldStop?.()) await delay(pollMs);
+      continue;
+    }
+    result.claimedJobs += 1;
+    options.onClaim?.(job, workerId);
+    try {
+      await options.runner.process(job, workerId);
+      result.completedJobs += 1;
+    } catch (error) {
+      result.failedJobs += 1;
+      options.onProcessingError?.(error, workerId);
+    }
+  }
+  return result;
+}
+
 /**
  * Runs startup recovery from PostgreSQL, then waits for Queue hints. Queue is
  * intentionally never asked which job to run.

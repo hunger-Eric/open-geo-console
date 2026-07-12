@@ -55,6 +55,14 @@ npm run worker:deep
 
 The free lane handles preview jobs and the deep lane handles paid jobs. In `FULFILLMENT_MODE=batch_24h` these commands drain and exit; on persistent infrastructure use `worker:realtime:free` and `worker:realtime:deep`. Run `npm run commerce:all` after a batch to reconcile outcomes, enforce the SLA, submit refunds, and send email. See [Commercial Operations](docs/COMMERCIAL-OPERATIONS.md).
 
+For the low-cost Windows deployment, Docker Desktop can keep the authorized lanes alive and restart them automatically:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-workstation-workers.ps1
+```
+
+The launcher creates ACL-restricted, ignored runtime env files from the target Vercel/worker files, starts staging free/deep, production free, and production commerce, and uses PostgreSQL polling instead of requiring a locally decryptable Cloudflare Queue token. Production deep is not started until its own private evidence store is configured.
+
 Required production variables:
 
 - `DATABASE_URL`
@@ -66,7 +74,7 @@ Required production variables:
 - `OGC_DEPLOYMENT_PROFILE` (`staging` or `production`, matching the database marker)
 - `OGC_EVIDENCE_STORAGE=vercel-blob` with a connected Vercel Private Blob store, or `s3` plus a private S3-compatible endpoint, region, bucket and credentials; Web and deep Worker processes must share the same store
 
-The initial commercial target is Netlify plus Neon, Cloudflare Turnstile/Queue, Airwallex, Resend, and scheduled workstation batches. This avoids mandatory server rent at low order volume while keeping every paid task durable in PostgreSQL. A later `FULFILLMENT_MODE=realtime` deployment uses the same job/outbox records on persistent Worker infrastructure.
+The low-cost commercial target is Vercel/Netlify plus Neon, Cloudflare Turnstile/Queue, Airwallex, Resend, and persistent Docker Desktop Workers. This avoids mandatory server rent at low order volume while keeping every task durable in PostgreSQL. The workstation still must remain online; hosted Workers can later use the same leases and state machines without a rewrite.
 
 On Vercel, anonymous rate limits prefer `x-vercel-forwarded-for` and fall back to Vercel's overwritten `x-forwarded-for` when `VERCEL=1`; legacy projects that do not expose system variables must set `OGC_TRUST_VERCEL_HEADERS=true`. Elsewhere, set `TRUST_PROXY_HEADERS=true` only behind a proxy that overwrites forwarded-client-IP headers; direct deployments deliberately collapse to a fail-closed anonymous identity. Set `OGC_AI_JSON_RESPONSE_FORMAT=true` only if the configured model endpoint supports OpenAI JSON response mode.
 `OGC_AI_TIMEOUT_MS` controls the per-call model timeout; long structured reports typically need `180000` milliseconds.

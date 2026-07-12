@@ -2,7 +2,7 @@
 
 ## Initial operating model
 
-The initial commercial deployment has no always-on report server. Netlify serves the Next.js web/API surface, Neon is the PostgreSQL authority, Cloudflare Turnstile protects anonymous forms, Cloudflare Queue carries non-sensitive job notifications, and the operator workstation drains report jobs in `batch_24h` mode.
+The low-cost deployment has no hosted report server. Vercel/Netlify serves the Next.js web/API surface, Neon is the PostgreSQL authority, Cloudflare Turnstile protects anonymous forms, and Docker Desktop keeps the authorized workstation Worker lanes alive. Cloudflare Queue remains an optional non-sensitive notification path; workstation containers use bounded PostgreSQL polling so Vercel Sensitive Queue credentials do not need to be copied locally.
 
 Customer promise: a paid report is delivered by email within 24 hours of confirmed payment or receives a full refund. Do not describe this mode as instant or real-time processing.
 
@@ -37,7 +37,7 @@ Staging and production must use different databases and every secret family in t
 - `COMMERCE_MODE=test`: Airwallex Sandbox and non-live email testing.
 - `COMMERCE_MODE=live`: accepts real orders only when all live checks pass.
 - `FULFILLMENT_MODE=batch_24h`: workstation drains and exits.
-- `FULFILLMENT_MODE=realtime`: a future persistent Worker drains recovery work, then waits for Queue notifications.
+- `FULFILLMENT_MODE=realtime`: a persistent Worker uses Cloudflare/local hints or bounded PostgreSQL polling.
 
 Live mode also requires explicit server-side `OGC_PRICE_CNY_MINOR`, `OGC_PRICE_USD_MINOR`, and `OGC_PRICE_HKD_MINOR` values. Browser requests never supply an authoritative amount.
 
@@ -49,7 +49,18 @@ Live mode also requires explicit server-side `OGC_PRICE_CNY_MINOR`, `OGC_PRICE_U
 - The PaymentIntent client secret is temporary browser session material. Never log, persist, copy into monitoring, or expose it through the status API.
 - When investigating a return issue, verify the report/order binding, the signed provider event, and the PostgreSQL order state separately. Do not repair fulfillment from query parameters or a browser screenshot.
 
-## Workstation batch schedule
+## Docker Desktop workstation Workers
+
+Docker Desktop must start with Windows. The containers use `restart: unless-stopped`, keep database-backed Worker heartbeats, poll PostgreSQL every five seconds while idle, and do not create empty batch-run rows.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-workstation-workers.ps1
+docker compose --profile workstation ps
+```
+
+The launcher writes merged runtime environment files only under ignored `.data/workstation-docker/`, removes inherited ACLs, and grants the current Windows user read/write access. It never prints or copies secrets into the image. The default services are staging free/deep, production free, and production commerce. Production deep fails closed until independent private evidence storage is configured; enable it only with `-EnableProductionDeep`. Staging commerce still requires locally available staging-only Airwallex/Resend secrets.
+
+## Manual batch fallback
 
 Run a manual drain from the repository root. The script always follows Worker drains with Queue reconciliation and `commerce:all`, so SLA checks, refunds and email are not skipped when a lane fails:
 
@@ -57,7 +68,7 @@ Run a manual drain from the repository root. The script always follows Worker dr
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-commercial-batch.ps1 -DeepProcesses 2
 ```
 
-Install the 10:00 and 20:00 local-time Windows schedule after `.env.local` has been configured and a manual drain succeeds:
+The legacy 10:00 and 20:00 schedule is a fallback for operators who deliberately keep a complete production `.env.local`; it is not the active Docker Desktop path:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-commercial-batch-schedule.ps1 -DeepProcesses 2
