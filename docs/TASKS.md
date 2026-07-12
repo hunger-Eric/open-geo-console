@@ -18,7 +18,7 @@
 - [x] Publish the Web to Vercel and connect the production Neon PostgreSQL database.
 - [x] Add recorded workstation batch drains and preserve a configuration-only upgrade path to persistent real-time Workers.
 - [x] Run staging free/deep, production free, and production commerce as restartable Docker Desktop services using authoritative PostgreSQL polling.
-- [ ] Configure an independent production private evidence store, then enable and verify the production deep Docker Worker.
+- [x] Configure an independent production private evidence store, then enable and verify the production deep Docker Worker.
 - [ ] Provide locally decryptable staging-only Airwallex/Resend Worker credentials before automating staging commerce.
 
 ## Protected staging and production security

@@ -12,7 +12,7 @@
 - `npm run worker:free` and `npm run worker:deep` start the two independent AI report lanes; production must service both.
 - In the default `FULFILLMENT_MODE=batch_24h`, the lane commands drain PostgreSQL and exit. Use `worker:realtime:free|deep` only on persistent infrastructure.
 - `npm run commerce:all` reconciles commercial outcomes, enforces the 24-hour SLA, submits refunds, and sends queued email.
-- `powershell -File scripts/start-workstation-workers.ps1` builds and starts the Docker Desktop staging free/deep, production free, and production commerce services. Production deep remains gated on private evidence storage.
+- `powershell -File scripts/start-workstation-workers.ps1` builds and starts the Docker Desktop staging free/deep, production free/deep, and production commerce services. Each deep lane remains gated on its environment's private evidence storage.
 - `npm run worker` is a low-level entry point and requires `OGC_WORKER_TIER=free|deep`.
 - `npm run browser:install` installs Chromium for JavaScript-rendered page fallback.
 - `npm run db:audit` fails when a terminal commercial job still has a reserved credit.

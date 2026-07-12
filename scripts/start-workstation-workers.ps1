@@ -9,6 +9,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $webRoot = Join-Path $repoRoot "apps\web"
 $runtimeDirectory = Join-Path $repoRoot ".data\workstation-docker"
 New-Item -ItemType Directory -Force -Path $runtimeDirectory | Out-Null
+$script:ProductionDeepReady = $false
 
 function Convert-EnvValue {
   param([string]$Value)
@@ -70,12 +71,22 @@ function Write-RuntimeEnv {
   if ($Environment -eq "staging") {
     Require-Values $values @("OGC_EVIDENCE_STORAGE", "BLOB_READ_WRITE_TOKEN") "Staging deep-report storage"
   }
-  if ($Environment -eq "production" -and $EnableProductionDeep) {
+  if ($Environment -eq "production") {
     if ($values["OGC_EVIDENCE_STORAGE"] -eq "vercel-blob") {
-      Require-Values $values @("BLOB_READ_WRITE_TOKEN") "Production deep-report Vercel Blob storage"
+      if ($values.ContainsKey("BLOB_READ_WRITE_TOKEN") -and -not [string]::IsNullOrWhiteSpace($values["BLOB_READ_WRITE_TOKEN"])) {
+        $script:ProductionDeepReady = $true
+      } elseif ($EnableProductionDeep) {
+        Require-Values $values @("BLOB_READ_WRITE_TOKEN") "Production deep-report Vercel Blob storage"
+      }
     } elseif ($values["OGC_EVIDENCE_STORAGE"] -eq "s3") {
-      Require-Values $values @("OGC_EVIDENCE_S3_ENDPOINT", "OGC_EVIDENCE_S3_REGION", "OGC_EVIDENCE_S3_BUCKET", "OGC_EVIDENCE_S3_ACCESS_KEY_ID", "OGC_EVIDENCE_S3_SECRET_ACCESS_KEY") "Production deep-report S3 storage"
-    } else {
+      $s3Names = @("OGC_EVIDENCE_S3_ENDPOINT", "OGC_EVIDENCE_S3_REGION", "OGC_EVIDENCE_S3_BUCKET", "OGC_EVIDENCE_S3_ACCESS_KEY_ID", "OGC_EVIDENCE_S3_SECRET_ACCESS_KEY")
+      $missingS3 = @($s3Names | Where-Object { -not $values.ContainsKey($_) -or [string]::IsNullOrWhiteSpace($values[$_]) })
+      if ($missingS3.Count -eq 0) {
+        $script:ProductionDeepReady = $true
+      } elseif ($EnableProductionDeep) {
+        Require-Values $values $s3Names "Production deep-report S3 storage"
+      }
+    } elseif ($EnableProductionDeep) {
       throw "Production deep-report private storage is not configured."
     }
   }
@@ -115,7 +126,7 @@ $commerceLines = @(Get-Content -LiteralPath $productionPath | Where-Object {
 if ($LASTEXITCODE -ne 0) { throw "Could not restrict permissions on $commercePath." }
 
 if ($PrepareOnly) {
-  Write-Host "Docker Desktop Worker environment prepared. Production deep=$EnableProductionDeep."
+  Write-Host "Docker Desktop Worker environment prepared. Production deep=$script:ProductionDeepReady."
   exit 0
 }
 
@@ -124,11 +135,11 @@ try {
   if (-not $SkipBuild) { docker compose build staging-worker-free }
   if ($LASTEXITCODE -ne 0) { throw "Worker image build failed." }
   $services = @("staging-worker-free", "staging-worker-deep", "production-worker-free", "production-commerce")
-  if ($EnableProductionDeep) { $services += "production-worker-deep" }
+  if ($script:ProductionDeepReady) { $services += "production-worker-deep" }
   docker compose --profile workstation --profile workstation-production-deep up -d @services
   if ($LASTEXITCODE -ne 0) { throw "Worker containers did not start." }
 } finally {
   Pop-Location
 }
 
-Write-Host "Docker Desktop Workers started. Production deep=$EnableProductionDeep."
+Write-Host "Docker Desktop Workers started. Production deep=$script:ProductionDeepReady."

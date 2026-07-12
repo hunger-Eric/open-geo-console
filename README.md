@@ -61,7 +61,7 @@ For the low-cost Windows deployment, Docker Desktop can keep the authorized lane
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-workstation-workers.ps1
 ```
 
-The launcher creates ACL-restricted, ignored runtime env files from the target Vercel/worker files, starts staging free/deep, production free, and production commerce, and uses PostgreSQL polling instead of requiring a locally decryptable Cloudflare Queue token. Production deep is not started until its own private evidence store is configured.
+The launcher creates ACL-restricted, ignored runtime env files from the target Vercel/worker files, starts staging free/deep, production free/deep, and production commerce, and uses PostgreSQL polling instead of requiring a locally decryptable Cloudflare Queue token. Production deep is detected and started only when its own private evidence store credentials are present.
 
 Required production variables:
 

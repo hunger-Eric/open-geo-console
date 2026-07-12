@@ -58,7 +58,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-workstation-
 docker compose --profile workstation ps
 ```
 
-The launcher writes merged runtime environment files only under ignored `.data/workstation-docker/`, removes inherited ACLs, and grants the current Windows user read/write access. It never prints or copies secrets into the image. The default services are staging free/deep, production free, and production commerce. Production deep fails closed until independent private evidence storage is configured; enable it only with `-EnableProductionDeep`. Staging commerce still requires locally available staging-only Airwallex/Resend secrets.
+The launcher writes merged runtime environment files only under ignored `.data/workstation-docker/`, removes inherited ACLs, and grants the current Windows user read/write access. It never prints or copies secrets into the image. The active services are staging free/deep, production free/deep, and production commerce. Production deep is auto-detected from independent private-storage credentials and otherwise fails closed; `-EnableProductionDeep` remains a strict preflight assertion. Staging commerce still requires locally available staging-only Airwallex/Resend secrets.
 
 ## Manual batch fallback
 
