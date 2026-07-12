@@ -31,6 +31,8 @@
     "ai:probe": "node --env-file-if-exists=.env.local --import tsx src/scripts/ai-probe.ts",
     "test:ai-live": "node --env-file-if-exists=.env.local --import tsx src/scripts/live-ai-scan.ts",
     "recommendation:methodology:audit": "node --env-file-if-exists=.env.local --import tsx src/scripts/audit-recommendation-methodologies.ts",
+    "public-search:certify": "node --env-file=.env.staging.local --import tsx src/scripts/certify-public-search-surface.ts",
+    "public-search:authority:install": "node --env-file=.env.staging.local --import tsx src/scripts/install-public-search-authority.ts",
     "db:audit": "node --env-file-if-exists=.env.local --import tsx src/scripts/db-audit.ts",
     "db:environment:init": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts init",
     "db:environment:inspect": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts inspect",

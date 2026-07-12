@@ -1,0 +1,2 @@
+import {describe,expect,it} from "vitest";import {approvedPublicSearchCertificationAdapters,runPublicSearchCertificationCommand} from "./certify-public-search-surface";
+describe("public-search certification command",()=>{it("has an empty approved registry and refuses network work",async()=>{expect(approvedPublicSearchCertificationAdapters.size).toBe(0);await expect(runPublicSearchCertificationCommand(["--adapter","caller-module","--locale","zh-CN","--region","CN","--output",".data/public-search-certification/a.json"])).rejects.toThrow(/No approved/);});});
