@@ -2,6 +2,7 @@ import { createAnswerEngineSurfaceKey } from "./registry";
 import type {
   AnswerQuestion,
   AnswerSnapshotCell,
+  CertificationAuthoritySnapshot,
   CertifiedAnswerEngineSurface,
   CommercialCoverageDecision
 } from "./types";
@@ -9,58 +10,72 @@ import type {
 export function classifyCommercialCoverage(
   questions: readonly AnswerQuestion[],
   cells: readonly AnswerSnapshotCell[],
-  certifications: readonly CertifiedAnswerEngineSurface[]
+  authority: CertificationAuthoritySnapshot
 ): CommercialCoverageDecision {
   const marketQuestionIds = new Set(questions.map(({ id }) => id));
+  const capturedAt = Date.parse(authority?.capturedAt ?? "");
+  const certifications = Array.isArray(authority?.certifications) ? authority.certifications : [];
   const certifiedSurfaceKeys = new Set(
-    certifications.filter(isValidCertification).map(({ surface }) => createAnswerEngineSurfaceKey(surface))
+    certifications.filter((certification) => isValidCertification(certification, capturedAt))
+      .map(({ surface }) => createAnswerEngineSurfaceKey(surface))
   );
   const certified = cells.filter((cell) =>
     certifiedSurfaceKeys.has(createAnswerEngineSurfaceKey(cell.surface)) && marketQuestionIds.has(cell.questionId)
   );
   const surfaces = groupBySurface(certified);
-  const qualifying = [...surfaces.values()].filter((surfaceCells) => {
-    const usable = surfaceCells.filter((cell) => cell.status === "succeeded" &&
-      (cell.recommendationOutcome === "no_recommendation" || cell.sources.length > 0));
-    return new Set(usable.map(({ questionId }) => questionId)).size >= 3 &&
-      usable.some((cell) => cell.status === "succeeded" && cell.sources.length > 0);
-  });
-  const successfulQuestionCount = new Set(certified
-    .filter((cell) => cell.status === "succeeded" &&
-      (cell.recommendationOutcome === "no_recommendation" || cell.sources.length > 0))
-    .map(({ questionId }) => questionId)).size;
-  if (qualifying.length >= 2) {
+  const qualifyingProviderIds = new Set<string>();
+  for (const surfaceCells of surfaces.values()) {
+    const usable = surfaceCells.filter(isUsableCommercialCell);
+    if (new Set(usable.map(({ questionId }) => questionId)).size >= 3 && usable.some(hasProviderSource)) {
+      qualifyingProviderIds.add(surfaceCells[0]!.surface.providerId);
+    }
+  }
+  const certifiedProviderCount = new Set(certified.map(({ surface }) => surface.providerId)).size;
+  const qualifyingProviderCount = qualifyingProviderIds.size;
+  const successfulQuestionCount = new Set(certified.filter(isUsableCommercialCell).map(({ questionId }) => questionId)).size;
+  if (qualifyingProviderCount >= 2) {
     return {
-      outcome: "qualified", certifiedSurfaceCount: surfaces.size, qualifyingSurfaceCount: qualifying.length,
+      outcome: "qualified", certifiedProviderCount, qualifyingProviderCount,
       successfulQuestionCount, reasons: []
     };
   }
-  if (qualifying.length === 1) {
+  if (qualifyingProviderCount === 1) {
     return {
-      outcome: "completed_limited", certifiedSurfaceCount: surfaces.size, qualifyingSurfaceCount: 1,
-      successfulQuestionCount, reasons: ["Fewer than two certified source-bearing surfaces completed three market questions."]
+      outcome: "completed_limited", certifiedProviderCount, qualifyingProviderCount,
+      successfulQuestionCount, reasons: ["Fewer than two independently certified providers completed three market questions."]
     };
   }
   return {
-    outcome: "failed", certifiedSurfaceCount: surfaces.size, qualifyingSurfaceCount: 0,
-    successfulQuestionCount, reasons: [surfaces.size === 0
-      ? "No certified answer-engine surface produced commercial evidence."
-      : "No certified surface completed a usable three-question evidence set."]
+    outcome: "failed", certifiedProviderCount, qualifyingProviderCount: 0,
+    successfulQuestionCount, reasons: [certifiedProviderCount === 0
+      ? "No externally certified answer-engine provider produced commercial evidence."
+      : "No certified provider completed a usable three-question evidence set."]
   };
 }
 
-function isValidCertification({ surface, evidence }: CertifiedAnswerEngineSurface): boolean {
-  return surface.certificationState === "certified" &&
-    evidence.environment === "protected_staging" &&
-    Number.isFinite(Date.parse(evidence.certifiedAt)) &&
+function isUsableCommercialCell(cell: AnswerSnapshotCell): boolean {
+  return cell.status === "succeeded" &&
+    (cell.recommendationOutcome === "no_recommendation" || cell.sources.length > 0);
+}
+
+function hasProviderSource(cell: AnswerSnapshotCell): boolean {
+  return cell.status === "succeeded" && cell.sources.length > 0;
+}
+
+function isValidCertification(
+  { surface, evidence }: CertifiedAnswerEngineSurface,
+  capturedAt: number
+): boolean {
+  const certifiedAt = Date.parse(evidence.certifiedAt);
+  return surface.certificationState === "certified" && evidence.environment === "protected_staging" &&
+    Number.isFinite(capturedAt) && Number.isFinite(certifiedAt) && certifiedAt <= capturedAt &&
     evidence.evidenceReference.trim().length > 0;
 }
 
 function groupBySurface(cells: readonly AnswerSnapshotCell[]): Map<string, AnswerSnapshotCell[]> {
   const result = new Map<string, AnswerSnapshotCell[]>();
   for (const cell of cells) {
-    const key = [cell.surface.providerId, cell.surface.productId, cell.surface.modelId,
-      cell.surface.collectionSurface, cell.surface.locale, cell.surface.region].join("/");
+    const key = createAnswerEngineSurfaceKey(cell.surface);
     result.set(key, [...(result.get(key) ?? []), cell]);
   }
   return result;

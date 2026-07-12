@@ -1,6 +1,7 @@
 import type {
   AnswerEngineAdapter,
   AnswerEngineCertificationEvidence,
+  CertificationAuthoritySnapshot,
   CertifiedAnswerEngineSurface,
   RegisteredAnswerEngine
 } from "./types";
@@ -39,6 +40,27 @@ export class AnswerEngineRegistry {
       surface,
       evidence: certificationEvidence!
     }));
+  }
+
+  createCertificationAuthoritySnapshot(input: {
+    authorityVersion: string;
+    capturedAt: string;
+  }): CertificationAuthoritySnapshot {
+    if (!input.authorityVersion.trim()) throw new TypeError("authorityVersion is required.");
+    if (!Number.isFinite(Date.parse(input.capturedAt))) throw new TypeError("capturedAt must be a timestamp.");
+    if (this.listCertified().some(({ certificationEvidence }) =>
+      Date.parse(certificationEvidence!.certifiedAt) > Date.parse(input.capturedAt))) {
+      throw new TypeError("capturedAt cannot predate certification evidence.");
+    }
+    const certifications = this.listCertifications().map(({ surface, evidence }) => Object.freeze({
+      surface: Object.freeze({ ...surface }),
+      evidence: Object.freeze({ ...evidence })
+    }));
+    return Object.freeze({
+      authorityVersion: input.authorityVersion,
+      capturedAt: input.capturedAt,
+      certifications: Object.freeze(certifications)
+    }) as unknown as CertificationAuthoritySnapshot;
   }
 }
 

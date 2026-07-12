@@ -7,6 +7,7 @@ import type {
   AnswerQuestion,
   AnswerQuestionCategory,
   AnswerSnapshotCell,
+  FailedAnswerSnapshotCell,
   AnswerSnapshotProviderMetadata,
   AnswerSnapshotRunContract,
   AnswerSnapshotSource,
@@ -280,10 +281,22 @@ export function parseAnswerSnapshotCell(value: unknown): AnswerSnapshotCell {
     }
     const errorClass = text(input.errorClass, "cell.errorClass", 64) as AnswerAdapterErrorClass;
     if (!ERROR_CLASSES.has(errorClass)) throw new TypeError("cell.errorClass is unsupported");
+    const hasRetryMetadata = input.attemptCount !== undefined || input.failureDisposition !== undefined;
+    let retryMetadata: Pick<FailedAnswerSnapshotCell, "attemptCount" | "failureDisposition"> = {};
+    if (hasRetryMetadata) {
+      const attemptCount = integer(input.attemptCount, "cell.attemptCount");
+      if (attemptCount < 1) throw new TypeError("cell.attemptCount must be at least one");
+      const failureDisposition = text(input.failureDisposition, "cell.failureDisposition", 64);
+      if (failureDisposition !== "non_retryable" && failureDisposition !== "retry_exhausted") {
+        throw new TypeError("cell.failureDisposition is unsupported");
+      }
+      retryMetadata = { attemptCount, failureDisposition };
+    }
     return {
       ...common,
       status,
       errorClass,
+      ...retryMetadata,
       ...(input.sanitizedError === undefined
         ? {}
         : { sanitizedError: sanitizedError(input.sanitizedError) })

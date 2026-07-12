@@ -89,6 +89,8 @@ export interface FailedAnswerSnapshotCell extends AnswerSnapshotCellBase {
   status: "failed";
   errorClass: AnswerAdapterErrorClass;
   sanitizedError?: string;
+  attemptCount?: number;
+  failureDisposition?: "non_retryable" | "retry_exhausted";
 }
 
 export type AnswerSnapshotCell = SuccessfulAnswerSnapshotCell | FailedAnswerSnapshotCell;
@@ -108,7 +110,8 @@ export interface AnswerEngineAdapter {
 
 export interface QuestionGenerationInput {
   locale: string;
-  organizationName?: string;
+  organizationName: string;
+  brandAliases?: string[];
   categories?: string[];
   capabilities?: string[];
   audiences?: string[];
@@ -118,6 +121,8 @@ export interface QuestionGenerationInput {
 
 export interface GeneratedQuestionSet {
   version: "purchase-v1";
+  organizationName: string;
+  brandAliases: string[];
   confidence: "high" | "low";
   fallbackReason?: "insufficient_category_evidence";
   limitations: string[];
@@ -141,10 +146,17 @@ export interface CertifiedAnswerEngineSurface {
   evidence: AnswerEngineCertificationEvidence;
 }
 
+export interface CertificationAuthoritySnapshot {
+  authorityVersion: string;
+  capturedAt: string;
+  certifications: readonly CertifiedAnswerEngineSurface[];
+}
+
 export interface ProviderExecutionBudget {
   maxRequests: number;
   maxEstimatedCostMicros: number;
   timeoutMs: number;
+  maxTransientRetries?: number;
 }
 
 export interface ObserveAnswerMatrixInput {
@@ -163,8 +175,8 @@ export interface ObserveAnswerMatrixResult {
 
 export interface CommercialCoverageDecision {
   outcome: "qualified" | "completed_limited" | "failed";
-  certifiedSurfaceCount: number;
-  qualifyingSurfaceCount: number;
+  certifiedProviderCount: number;
+  qualifyingProviderCount: number;
   successfulQuestionCount: number;
   reasons: string[];
 }

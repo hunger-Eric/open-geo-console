@@ -4,10 +4,17 @@ import { parseAnswerQuestion } from "./validation";
 
 export function generatePurchaseQuestions(input: QuestionGenerationInput): GeneratedQuestionSet {
   const locale = input.locale.trim() || "en";
-  const category = nonBrandedFirst(input.categories, input.organizationName);
-  const capability = nonBrandedFirst(input.capabilities, input.organizationName);
-  const audience = nonBrandedFirst(input.audiences, input.organizationName);
-  const useCase = nonBrandedFirst(input.useCases, input.organizationName);
+  if (typeof input.organizationName !== "string" || !input.organizationName.trim()) {
+    throw new TypeError("organizationName is required for non-branded question generation.");
+  }
+  const organizationName = input.organizationName.trim();
+  const brandAliases = [...new Set((input.brandAliases ?? []).map((alias) => alias.trim()).filter(Boolean))]
+    .filter((alias) => alias.toLocaleLowerCase() !== organizationName.toLocaleLowerCase());
+  const brands = [organizationName, ...brandAliases];
+  const category = nonBrandedFirst(input.categories, brands);
+  const capability = nonBrandedFirst(input.capabilities, brands);
+  const audience = nonBrandedFirst(input.audiences, brands);
+  const useCase = nonBrandedFirst(input.useCases, brands);
   const isChinese = locale.toLocaleLowerCase().startsWith("zh");
   const confidence = category && (capability || audience || useCase) ? "high" : "low";
   const subject = category ?? (isChinese ? "这类服务" : "this type of service");
@@ -46,6 +53,8 @@ export function generatePurchaseQuestions(input: QuestionGenerationInput): Gener
   }));
   return {
     version: "purchase-v1",
+    organizationName,
+    brandAliases,
     confidence,
     ...(confidence === "low" ? { fallbackReason: "insufficient_category_evidence" as const } : {}),
     limitations: confidence === "low"
@@ -61,17 +70,17 @@ function questionId(locale: string, category: string, exactText: string): string
   return `purchase-${createHash("sha256").update(JSON.stringify([locale, category, exactText])).digest("hex").slice(0, 20)}`;
 }
 
-function nonBrandedFirst(values: string[] | undefined, organizationName: string | undefined): string | undefined {
+function nonBrandedFirst(values: string[] | undefined, brands: string[]): string | undefined {
   return values
-    ?.map((value) => removeOrganizationName(value.trim(), organizationName))
+    ?.map((value) => removeBrands(value.trim(), brands))
     .map((value) => value.replace(/\s{2,}/g, " ").trim())
     .find(Boolean);
 }
 
-function removeOrganizationName(value: string, organizationName: string | undefined): string {
-  const brand = organizationName?.trim();
-  if (!brand) return value;
-  return value.replace(new RegExp(escapeRegExp(brand), "giu"), "");
+function removeBrands(value: string, brands: string[]): string {
+  return [...brands]
+    .sort((left, right) => right.length - left.length)
+    .reduce((result, brand) => result.replace(new RegExp(escapeRegExp(brand), "giu"), ""), value);
 }
 
 function escapeRegExp(value: string): string {
