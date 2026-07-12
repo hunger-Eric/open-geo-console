@@ -32,6 +32,8 @@
     "access-key:create": "npm run access-key:create --workspace apps/web --",
     "ai:probe": "npm run ai:probe --workspace apps/web",
     "test:ai-live": "npm run test:ai-live --workspace apps/web",
+    "recommendation:certify": "npm run recommendation:certify --workspace apps/web --",
+    "recommendation:authority:install": "npm run recommendation:authority:install --workspace apps/web --",
     "db:audit": "npm run db:audit --workspace apps/web",
     "db:environment:init": "npm run db:environment:init --workspace apps/web --",
     "db:environment:inspect": "npm run db:environment:inspect --workspace apps/web",

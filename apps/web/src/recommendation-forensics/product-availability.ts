@@ -1,11 +1,8 @@
 import { createAnswerEngineSurfaceKey, type AnswerEngineRegistry, type CertificationAuthoritySnapshot } from "@open-geo-console/answer-engine-observer";
 import { isDeepStrictEqual } from "node:util";
 import {
-  getPersistedRecommendationCertificationAuthority,
-  parseRecommendationCertificationAuthorityConfig
-} from "@/db/recommendation-authority";
-import {
   createProductionAnswerEngineRegistry,
+  loadPersistedAuthorities,
   productionRecommendationReportBuilderAvailable
 } from "./production-runtime";
 
@@ -60,19 +57,10 @@ export function evaluateRecommendationProductAvailability(input: {
 export async function getRecommendationProductAvailability(
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<RecommendationProductAvailability> {
-  const registry = createProductionAnswerEngineRegistry();
-  const rawAuthority = environment.OGC_RECOMMENDATION_CERTIFICATION_AUTHORITY_JSON?.trim();
-  let authority: CertificationAuthoritySnapshot | null = null;
-  let authorityPersisted = false;
-  try {
-    if (rawAuthority) {
-      authority = parseRecommendationCertificationAuthorityConfig(rawAuthority);
-      const persisted = await getPersistedRecommendationCertificationAuthority(authority.authorityVersion);
-      authorityPersisted = isDeepStrictEqual(persisted, authority);
-    }
-  } catch {
-    authority = null;
-  }
+  const configured = await loadPersistedAuthorities(environment);
+  const authority = configured?.certificationAuthority ?? null;
+  const authorityPersisted = Boolean(configured);
+  const registry = createProductionAnswerEngineRegistry(environment, authority ?? undefined);
   return evaluateRecommendationProductAvailability({
     environment, registry, authority, authorityPersisted,
     builderAvailable: productionRecommendationReportBuilderAvailable

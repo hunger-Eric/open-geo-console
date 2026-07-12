@@ -33,7 +33,7 @@ describe("OpenAI Responses web-search adapter", () => {
             content: [
               {
                 type: "output_text",
-                text: "Atlas and Beacon are established options.",
+                text: "Atlas and Beacon are recommended options.",
                 annotations: [
                   citation("https://atlas.example/review", "Atlas review", 0, 5),
                   citation("https://beacon.example/guide", "Beacon guide", 10, 16)
@@ -41,7 +41,7 @@ describe("OpenAI Responses web-search adapter", () => {
               },
               {
                 type: "output_text",
-                text: "Atlas has the stronger regional coverage.",
+                text: "Atlas is the preferred choice for regional coverage.",
                 annotations: [
                   citation("https://atlas.example/review", "Repeated Atlas title", 0, 5),
                   citation("https://third.example/analysis", "Third analysis", 20, 28)
@@ -61,7 +61,7 @@ describe("OpenAI Responses web-search adapter", () => {
     expect(cell).toMatchObject({
       status: "succeeded",
       providerRequestId: "resp_01OfficialRequestId",
-      answerText: "Atlas and Beacon are established options.\nAtlas has the stronger regional coverage.",
+      answerText: "Atlas and Beacon are recommended options.\nAtlas is the preferred choice for regional coverage.",
       executedAt: "2027-01-15T08:00:00.000Z",
       executionDurationMs: 123,
       usage: { inputTokens: 120, outputTokens: 42 },
@@ -307,7 +307,7 @@ function officialResponse(overrides: Record<string, unknown> = {}): Record<strin
     model: "gpt-5.4-2026-03-05",
     output: [
       completedSearchCall(),
-      completedMessage("Atlas is a cited option.", [
+      completedMessage("Atlas is a recommended option.", [
         citation("https://source.example/atlas", "Atlas evidence", 0, 5)
       ])
     ],

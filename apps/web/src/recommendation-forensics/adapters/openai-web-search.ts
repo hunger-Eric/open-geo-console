@@ -1,6 +1,8 @@
 import {
+  classifyRecommendationOutcomeText,
   createAnswerResponseHash,
   createAnswerSnapshotCellId,
+  parseAnswerSnapshotCell,
   type AnswerAdapterErrorClass,
   type AnswerEngineAdapter,
   type AnswerEngineCertificationState,
@@ -117,7 +119,7 @@ export function createOpenAIWebSearchAdapter(
       const parsed = parseOpenAIResponse(payload, model);
       const sources = toSnapshotSources(parsed.citations);
       const executionDurationMs = Math.max(0, Math.round(now() - startedAt));
-      return {
+      return parseAnswerSnapshotCell({
         id: createAnswerSnapshotCellId({
           runId: input.run.id,
           questionId: input.question.id,
@@ -130,12 +132,12 @@ export function createOpenAIWebSearchAdapter(
         answerText: parsed.answerText,
         responseHash: createAnswerResponseHash(parsed.answerText),
         sources,
-        recommendationOutcome: "recommendations_present",
+        recommendationOutcome: requiredRecommendationOutcome(parsed.answerText),
         executedAt: parsed.createdAt,
         executionDurationMs,
         ...(parsed.responseId ? { providerRequestId: parsed.responseId } : {}),
         ...(parsed.usage ? { usage: parsed.usage } : {})
-      } satisfies SuccessfulAnswerSnapshotCell;
+      } satisfies SuccessfulAnswerSnapshotCell);
     }
   };
 }
@@ -250,7 +252,7 @@ function parseOpenAIResponse(value: unknown, expectedModel: string): ParsedOpenA
       for (const annotationValue of content.annotations) {
         const annotation = asOptionalRecord(annotationValue);
         if (!annotation || annotation.type !== "url_citation") continue;
-        citations.push(parseCitation(annotation));
+        citations.push(parseCitation(annotation, content.text));
       }
     }
   }
@@ -272,7 +274,7 @@ function isCompletedWebSearchCall(value: unknown): boolean {
   return item?.type === "web_search_call" && item.status === "completed";
 }
 
-function parseCitation(annotation: Record<string, unknown>): OpenAIUrlCitation {
+function parseCitation(annotation: Record<string, unknown>, answerText: string): OpenAIUrlCitation {
   if (
     typeof annotation.url !== "string" ||
     typeof annotation.title !== "string" ||
@@ -280,7 +282,8 @@ function parseCitation(annotation: Record<string, unknown>): OpenAIUrlCitation {
     !Number.isSafeInteger(annotation.start_index) ||
     (annotation.start_index as number) < 0 ||
     !Number.isSafeInteger(annotation.end_index) ||
-    (annotation.end_index as number) < (annotation.start_index as number)
+    (annotation.end_index as number) <= (annotation.start_index as number) ||
+    (annotation.end_index as number) > answerText.length
   ) {
     throw invalidResponse();
   }
@@ -290,7 +293,8 @@ function parseCitation(annotation: Record<string, unknown>): OpenAIUrlCitation {
   } catch {
     throw invalidResponse();
   }
-  if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || !parsed.hostname) {
+  if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || !parsed.hostname ||
+      parsed.username || parsed.password || annotation.url.length > 4_096) {
     throw invalidResponse();
   }
   return {
@@ -361,4 +365,10 @@ function asOptionalRecord(value: unknown): Record<string, unknown> | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return asOptionalRecord(value) !== undefined;
+}
+
+function requiredRecommendationOutcome(answerText: string): "recommendations_present" | "no_recommendation" {
+  const outcome = classifyRecommendationOutcomeText(answerText);
+  if (!outcome) throw invalidResponse();
+  return outcome;
 }

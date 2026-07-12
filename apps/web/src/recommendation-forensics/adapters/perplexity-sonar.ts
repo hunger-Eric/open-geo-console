@@ -1,4 +1,5 @@
 import {
+  classifyRecommendationOutcomeText,
   createAnswerResponseHash,
   createAnswerSnapshotCellId,
   parseAnswerSnapshotCell,
@@ -122,7 +123,7 @@ export function createPerplexitySonarAdapter(
         answerText: parsed.answerText,
         responseHash: createAnswerResponseHash(parsed.answerText),
         sources: parsed.sources,
-        recommendationOutcome: recommendationOutcome(parsed.answerText),
+        recommendationOutcome: requiredRecommendationOutcome(parsed.answerText),
         providerRequestId: parsed.requestId,
         ...(parsed.usage ? { usage: parsed.usage } : {}),
         executedAt: new Date(finishedAt).toISOString(),
@@ -287,7 +288,8 @@ function absoluteHttpUrl(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length === 0 || value.length > 4_096) return undefined;
   try {
     const url = new URL(value);
-    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname ? value : undefined;
+    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname &&
+      !url.username && !url.password ? value : undefined;
   } catch {
     return undefined;
   }
@@ -324,10 +326,10 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function recommendationOutcome(answerText: string): "recommendations_present" | "no_recommendation" {
-  return /\b(?:cannot|can't|unable to|no)\s+(?:make\s+)?(?:a\s+)?recommend(?:ation|ations)?\b|无法(?:给出)?推荐|没有(?:明确)?推荐/i.test(answerText)
-    ? "no_recommendation"
-    : "recommendations_present";
+function requiredRecommendationOutcome(answerText: string): "recommendations_present" | "no_recommendation" {
+  const outcome = classifyRecommendationOutcomeText(answerText);
+  if (!outcome) throw invalidResponse();
+  return outcome;
 }
 
 function httpError(status: number): PerplexitySonarAdapterError {

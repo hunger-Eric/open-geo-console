@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type postgres from "postgres";
 import {
   parseAnswerSnapshotCell,
+  parseAnswerEngineSurface,
   type AnswerExecutionCheckpoint,
   type AnswerExecutionStateLedger,
   type AnswerSnapshotCell,
@@ -49,6 +50,10 @@ export function parseRecommendationCertificationAuthorityConfig(raw: string): Ce
   return parseCertificationConfig(raw);
 }
 
+export function parseSourceClassificationAuthorityConfig(raw: string): SourceClassificationAuthoritySnapshot {
+  return parseSourceConfig(raw);
+}
+
 export async function getPersistedRecommendationCertificationAuthority(
   authorityVersion: string
 ): Promise<CertificationAuthoritySnapshot | null> {
@@ -57,6 +62,18 @@ export async function getPersistedRecommendationCertificationAuthority(
   await ensureDatabase();
   const row = (await getSqlClient()<Array<{ snapshot: CertificationAuthoritySnapshot }>>`
     SELECT snapshot FROM recommendation_certification_authorities WHERE authority_version = ${authorityVersion}
+  `)[0];
+  return clone(row?.snapshot ?? null);
+}
+
+export async function getPersistedSourceClassificationAuthority(
+  authorityVersion: string
+): Promise<SourceClassificationAuthoritySnapshot | null> {
+  if (!authorityVersion.trim()) return null;
+  if (isMemoryPersistence()) return clone(memoryGetSourceClassificationAuthority(authorityVersion)?.snapshot ?? null);
+  await ensureDatabase();
+  const row = (await getSqlClient()<Array<{ snapshot: SourceClassificationAuthoritySnapshot }>>`
+    SELECT snapshot FROM source_classification_authorities WHERE authority_version = ${authorityVersion}
   `)[0];
   return clone(row?.snapshot ?? null);
 }
@@ -430,8 +447,16 @@ function dbReportRow(row: Record<string, unknown>): RecommendationForensicReport
 function parseCertificationConfig(raw: string): CertificationAuthoritySnapshot {
   const value = JSON.parse(raw) as CertificationAuthoritySnapshot;
   if (!value.authorityVersion?.trim() || !validDate(value.capturedAt) || !Array.isArray(value.certifications)) throw new Error("Protected certification authority config is invalid.");
+  const keys = new Set<string>();
   for (const certification of value.certifications) {
-    if (certification.surface.certificationState !== "certified" || certification.evidence.environment !== "protected_staging" || !certification.evidence.evidenceReference.trim() || !validDate(certification.evidence.certifiedAt)) throw new Error("Protected certification authority evidence is invalid.");
+    const surface = parseAnswerEngineSurface(certification.surface);
+    const key = [surface.providerId, surface.productId, surface.modelId, surface.collectionSurface, surface.locale, surface.region].join("/");
+    if (keys.has(key) || surface.certificationState !== "certified" || certification.evidence.environment !== "protected_staging" ||
+        !certification.evidence.evidenceReference.trim() || !validDate(certification.evidence.certifiedAt) ||
+        Date.parse(certification.evidence.certifiedAt) > Date.parse(value.capturedAt)) {
+      throw new Error("Protected certification authority evidence is invalid.");
+    }
+    keys.add(key);
   }
   return clone(value);
 }

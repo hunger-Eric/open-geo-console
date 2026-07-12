@@ -414,7 +414,7 @@ async function finalizeRecommendationJob(input: {
   targetUrl: string;
   coverage: { plannedPages: number; successfulPages: number; failedPages: number };
 }): Promise<void> {
-  const dependencies = createProductionRecommendationDependencies();
+  const dependencies = await createProductionRecommendationDependencies();
   if (!dependencies) throw new RecommendationRuntimeUnavailableError("Recommendation-forensics runtime is not installed.");
   const result = await runRecommendationForensicsPipeline({
     reportId: input.job.reportId, jobId: input.job.id, locale: input.job.locale,

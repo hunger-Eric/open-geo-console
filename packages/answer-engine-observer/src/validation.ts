@@ -214,7 +214,8 @@ export function parseAnswerSnapshotSource(value: unknown): AnswerSnapshotSource 
   } catch {
     throw new TypeError("source.url must be an absolute HTTP(S) URL");
   }
-  if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !parsed.hostname) {
+  if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || !parsed.hostname ||
+      parsed.username || parsed.password) {
     throw new TypeError("source.url must be an absolute HTTP(S) URL");
   }
   return {
@@ -315,4 +316,26 @@ export function parseAnswerSnapshotCell(value: unknown): AnswerSnapshotCell {
 
 export function assertAnswerSnapshotCell(value: unknown): asserts value is AnswerSnapshotCell {
   parseAnswerSnapshotCell(value);
+}
+
+export function classifyRecommendationOutcomeText(
+  answerText: string
+): "recommendations_present" | "no_recommendation" | null {
+  const normalized = answerText.normalize("NFKC");
+  const explicitNone = [
+    /\b(?:cannot|can't|unable to)\s+(?:make|provide|give)\s+(?:a\s+)?(?:specific\s+)?recommendation/i,
+    /\bno\s+(?:specific|clear|concrete)\s+recommendations?\b/i,
+    /\bdo\s+not\s+recommend\s+(?:any|a\s+specific)\b/i,
+    /(?:无法|不能|不宜)(?:给出|提供)?(?:任何|具体|明确)?推荐/,
+    /没有(?:任何|具体|明确)?推荐/,
+    /不推荐任何/
+  ].some((pattern) => pattern.test(normalized));
+  if (explicitNone) return "no_recommendation";
+  const explicitRecommendation = [
+    /\b(?:recommend(?:ed|s|ing|ations?)|preferred|best|top)\b/i,
+    /\b(?:strong|leading|viable|suitable)\s+(?:choice|option|candidate|supplier|provider)s?\b/i,
+    /\b(?:is|are|would be)\s+(?:well\s+)?suited\b/i,
+    /(?:推荐|首选|优先选择|最佳|更适合|适合|候选)(?:的|方案|供应商|服务商|公司|品牌)?/
+  ].some((pattern) => pattern.test(normalized));
+  return explicitRecommendation ? "recommendations_present" : null;
 }

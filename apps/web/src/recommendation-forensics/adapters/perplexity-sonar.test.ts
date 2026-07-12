@@ -180,6 +180,27 @@ describe("Perplexity Sonar answer-engine adapter", () => {
   });
 
   it.each([
+    ["I cannot provide a specific recommendation from these sources.", "no_recommendation"],
+    ["根据这些来源，没有明确推荐。", "no_recommendation"],
+    ["Atlas is the preferred supplier.", "recommendations_present"],
+    ["Atlas 是首选供应商。", "recommendations_present"]
+  ] as const)("classifies explicit recommendation semantics: %s", async (content, outcome) => {
+    const response = officialResponseFixture({
+      choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }]
+    });
+    const observed = await adapter(vi.fn<typeof fetch>().mockResolvedValue(Response.json(response))).observe(input());
+    expect(observed).toMatchObject({ status: "succeeded", recommendationOutcome: outcome });
+  });
+
+  it("rejects a source-bearing but semantically ambiguous answer", async () => {
+    const response = officialResponseFixture({
+      choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "Atlas appears in the sources." } }]
+    });
+    const instance = adapter(vi.fn<typeof fetch>().mockResolvedValue(Response.json(response)));
+    await expect(instance.observe(input())).rejects.toMatchObject({ errorClass: "invalid-response" });
+  });
+
+  it.each([
     [undefined, "missing citations"],
     [null, "null citations"],
     [[], "empty citations"]
