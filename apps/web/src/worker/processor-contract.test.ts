@@ -2,10 +2,25 @@ import { describe, expect, it } from "vitest";
 import type { AiReportRow, ScanJobRow } from "@/db/schema";
 import {
   isMatchingRecommendationWebsiteFoundation,
+  resolveRecommendationFulfillmentTarget,
   resolveRecommendationFoundationTarget
 } from "./processor";
 
 describe("recommendation website-foundation resume contract", () => {
+  it("dispatches only from the persisted methodology and rejects a missing value", () => {
+    expect(resolveRecommendationFulfillmentTarget({
+      productContract: "recommendation_forensics_v1",
+      fulfillmentMethodology: "answer_engine_recommendation_forensics_v1", recommendationReportVersion: 1
+    })).toBe("recommendation_v1");
+    expect(resolveRecommendationFulfillmentTarget({
+      productContract: "recommendation_forensics_v1",
+      fulfillmentMethodology: "public_search_source_forensics_v1", recommendationReportVersion: 2
+    })).toBe("recommendation_v2");
+    expect(() => resolveRecommendationFulfillmentTarget({
+      productContract: "recommendation_forensics_v1",
+      fulfillmentMethodology: null, recommendationReportVersion: null
+    })).toThrow(/methodology/i);
+  });
   it("reuses only the same new-product job/report/locale deep appendix", () => {
     const job = { id: "job-1", reportId: "report-1", locale: "en", productContract: "recommendation_forensics_v1" } as ScanJobRow;
     const foundation = { jobId: "job-1", reportId: "report-1", locale: "en", tier: "deep", payload: { tier: "deep", targetUrl: "https://example.com/" } } as AiReportRow;

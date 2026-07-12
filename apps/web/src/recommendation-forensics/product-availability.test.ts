@@ -10,28 +10,28 @@ describe("recommendation-forensics product availability", () => {
     expect(evaluateRecommendationProductAvailability({ environment: {}, registry: new AnswerEngineRegistry(), authority: null, authorityPersisted: false, builderAvailable: false })).toMatchObject({ ready: false });
   });
 
-  it("allows protected staging operator execution only when the installed runtime is complete", () => {
+  it("hard-closes protected staging even when the historical V1 runtime is complete", () => {
     const { registry, authority } = completeRuntime();
     expect(evaluateRecommendationProductAvailability({
       environment: { OGC_DEPLOYMENT_PROFILE: "staging", OGC_RECOMMENDATION_OPERATOR_ENABLED: "true" },
       registry, authority, authorityPersisted: true, builderAvailable: true
-    })).toEqual({ ready: true, lane: "operator", code: "ready" });
+    })).toEqual({ ready: false, lane: null, code: "methodology_migration" });
   });
 
   it("requires live commerce and an explicit public flag in production", () => {
     const { registry, authority } = completeRuntime();
     const base = { OGC_DEPLOYMENT_PROFILE: "production", OGC_RECOMMENDATION_PUBLIC_ENABLED: "true" };
     expect(evaluateRecommendationProductAvailability({ environment: base, registry, authority, authorityPersisted: true, builderAvailable: true }).ready).toBe(false);
-    expect(evaluateRecommendationProductAvailability({ environment: { ...base, COMMERCE_MODE: "live" }, registry, authority, authorityPersisted: true, builderAvailable: true })).toEqual({ ready: true, lane: "public", code: "ready" });
+    expect(evaluateRecommendationProductAvailability({ environment: { ...base, COMMERCE_MODE: "live" }, registry, authority, authorityPersisted: true, builderAvailable: true })).toEqual({ ready: false, lane: null, code: "methodology_migration" });
   });
 
   it("rejects authority drift and requires two distinct provider ids", () => {
     const { registry, authority } = completeRuntime();
     const env = { OGC_DEPLOYMENT_PROFILE: "production", OGC_RECOMMENDATION_PUBLIC_ENABLED: "true", COMMERCE_MODE: "live" };
-    expect(evaluateRecommendationProductAvailability({ environment: env, registry, authority: { ...authority, certifications: authority.certifications.slice(0, 1) }, authorityPersisted: true, builderAvailable: true })).toMatchObject({ ready: false, code: "authority_mismatch" });
+    expect(evaluateRecommendationProductAvailability({ environment: env, registry, authority: { ...authority, certifications: authority.certifications.slice(0, 1) }, authorityPersisted: true, builderAvailable: true })).toMatchObject({ ready: false, code: "methodology_migration" });
     const evidenceDrift = structuredClone(authority);
     evidenceDrift.certifications[0]!.evidence.evidenceReference = "different/evidence";
-    expect(evaluateRecommendationProductAvailability({ environment: env, registry, authority: evidenceDrift, authorityPersisted: true, builderAvailable: true })).toMatchObject({ ready: false, code: "authority_mismatch" });
+    expect(evaluateRecommendationProductAvailability({ environment: env, registry, authority: evidenceDrift, authorityPersisted: true, builderAvailable: true })).toMatchObject({ ready: false, code: "methodology_migration" });
   });
 });
 

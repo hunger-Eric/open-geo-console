@@ -63,6 +63,10 @@ export type OrderDeliveryStatus = "not_queued" | "queued" | "sent" | "delivered"
 export type PaymentEventProcessingStatus = "received" | "processed" | "ignored" | "failed";
 export type ReportProductContract = "legacy_website_audit_v1" | "recommendation_forensics_v1";
 export type ReportArtifactScope = ReportProductContract;
+export type RecommendationFulfillmentMethodology =
+  | "answer_engine_recommendation_forensics_v1"
+  | "public_search_source_forensics_v1";
+export type RecommendationReportVersion = 1 | 2;
 export type PaymentRefundReason = "completed_limited" | "report_failed" | "sla_missed" | "operator_approved";
 export type PaymentRefundState = "pending" | "submitted" | "succeeded" | "failed";
 export type EmailTemplateType =
@@ -153,6 +157,8 @@ export const scanJobs = pgTable(
       .references(() => scanReports.id, { onDelete: "cascade" }),
     tier: text("tier").$type<ReportTier>().notNull(),
     productContract: text("product_contract").$type<ReportProductContract>().notNull().default("legacy_website_audit_v1"),
+    fulfillmentMethodology: text("fulfillment_methodology").$type<RecommendationFulfillmentMethodology>(),
+    recommendationReportVersion: integer("recommendation_report_version").$type<RecommendationReportVersion>(),
     locale: text("locale").$type<ReportLocale>().notNull(),
     reason: text("reason").$type<ScanJobReason>().notNull().default("standard"),
     stage: text("stage").$type<ScanJobStage>().notNull().default("queued"),
@@ -177,8 +183,19 @@ export const scanJobs = pgTable(
     index("scan_jobs_tier_lease_idx").on(table.tier, table.leaseExpiresAt),
     index("scan_jobs_report_idx").on(table.reportId, table.createdAt),
     uniqueIndex("scan_jobs_id_report_uidx").on(table.id, table.reportId),
+    uniqueIndex("scan_jobs_recommendation_contract_scope_uidx").on(
+      table.id, table.reportId, table.productContract, table.fulfillmentMethodology, table.recommendationReportVersion
+    ),
     check("scan_jobs_locale_check", sql`${table.locale} IN ('en', 'zh')`),
     check("scan_jobs_product_contract_check", sql`${table.productContract} IN ('legacy_website_audit_v1','recommendation_forensics_v1')`),
+    check("scan_jobs_methodology_contract_check", sql`(
+      (${table.productContract} = 'legacy_website_audit_v1' AND ${table.fulfillmentMethodology} IS NULL AND ${table.recommendationReportVersion} IS NULL)
+      OR (${table.productContract} = 'recommendation_forensics_v1'
+        AND ${table.fulfillmentMethodology} IS NOT NULL
+        AND ${table.recommendationReportVersion} IS NOT NULL
+        AND ((${table.fulfillmentMethodology} = 'answer_engine_recommendation_forensics_v1' AND ${table.recommendationReportVersion} = 1)
+          OR (${table.fulfillmentMethodology} = 'public_search_source_forensics_v1' AND ${table.recommendationReportVersion} = 2)))
+    )`),
     check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration')`),
     check(
       "scan_jobs_stage_check",
@@ -404,6 +421,332 @@ export const recommendationForensicReports = pgTable(
 );
 export type RecommendationForensicReportRow = typeof recommendationForensicReports.$inferSelect;
 
+export const publicSearchSurfaceAuthorities = pgTable(
+  "public_search_surface_authorities",
+  {
+    authorityVersion: text("authority_version").primaryKey(),
+    surfaceId: text("surface_id").notNull(),
+    surfaceVersion: text("surface_version").notNull(),
+    environment: text("environment").notNull(),
+    localeCapabilities: jsonb("locale_capabilities").$type<unknown>().notNull(),
+    regionCapabilities: jsonb("region_capabilities").$type<unknown>().notNull(),
+    termsReviewedAt: timestamp("terms_reviewed_at", { withTimezone: true }).notNull(),
+    evidenceReferences: jsonb("evidence_references").$type<unknown>().notNull(),
+    active: boolean("active").notNull().default(false),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    index("public_search_surface_authorities_active_idx").on(table.environment, table.active, table.surfaceId),
+    uniqueIndex("public_search_surface_authorities_identity_uidx").on(
+      table.environment, table.surfaceId, table.surfaceVersion, table.authorityVersion
+    ),
+    uniqueIndex("public_search_surface_authorities_scope_uidx").on(
+      table.authorityVersion, table.surfaceId, table.surfaceVersion
+    ),
+    check("public_search_surface_authorities_version_check", sql`length(btrim(${table.authorityVersion})) > 0`),
+    check("public_search_surface_authorities_surface_check", sql`length(btrim(${table.surfaceId})) > 0 AND length(btrim(${table.surfaceVersion})) > 0`),
+    check("public_search_surface_authorities_environment_check", sql`${table.environment} IN ('staging','production')`),
+    check("public_search_surface_authorities_locale_shape_check", sql`jsonb_typeof(${table.localeCapabilities}) = 'array'`),
+    check("public_search_surface_authorities_region_shape_check", sql`jsonb_typeof(${table.regionCapabilities}) = 'array'`),
+    check("public_search_surface_authorities_evidence_shape_check", sql`jsonb_typeof(${table.evidenceReferences}) = 'array'`)
+  ]
+);
+export type PublicSearchSurfaceAuthorityRow = typeof publicSearchSurfaceAuthorities.$inferSelect;
+
+export const marketSnapshotQuestions = pgTable(
+  "market_snapshot_questions",
+  {
+    id: text("id").primaryKey(),
+    cacheIdentity: text("cache_identity").notNull(),
+    normalizedQuestion: text("normalized_question").notNull(),
+    questionHash: text("question_hash").notNull(),
+    locale: text("locale").notNull(),
+    region: text("region").notNull(),
+    surfaceAuthorityVersion: text("surface_authority_version").notNull()
+      .references(() => publicSearchSurfaceAuthorities.authorityVersion, { onDelete: "restrict" }),
+    surfaceId: text("surface_id").notNull(),
+    surfaceVersion: text("surface_version").notNull(),
+    fanoutVersion: text("fanout_version").notNull(),
+    status: text("status").notNull().default("refreshing"),
+    completionVersion: integer("completion_version").notNull(),
+    queryFanoutHash: text("query_fanout_hash"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.surfaceAuthorityVersion, table.surfaceId, table.surfaceVersion],
+      foreignColumns: [
+        publicSearchSurfaceAuthorities.authorityVersion,
+        publicSearchSurfaceAuthorities.surfaceId,
+        publicSearchSurfaceAuthorities.surfaceVersion
+      ],
+      name: "market_snapshot_questions_authority_scope_fkey"
+    }).onDelete("restrict"),
+    uniqueIndex("market_snapshot_questions_identity_version_uidx").on(table.cacheIdentity, table.completionVersion),
+    uniqueIndex("market_snapshot_questions_id_cache_uidx").on(table.id, table.cacheIdentity),
+    uniqueIndex("market_snapshot_questions_id_authority_uidx").on(table.id, table.surfaceAuthorityVersion),
+    index("market_snapshot_questions_freshness_idx").on(table.cacheIdentity, table.status, table.completedAt),
+    check("market_snapshot_questions_identity_check", sql`length(btrim(${table.cacheIdentity})) > 0 AND length(btrim(${table.questionHash})) > 0`),
+    check("market_snapshot_questions_question_check", sql`length(btrim(${table.normalizedQuestion})) > 0`),
+    check("market_snapshot_questions_locale_region_check", sql`length(btrim(${table.locale})) > 0 AND length(btrim(${table.region})) > 0`),
+    check("market_snapshot_questions_completion_version_check", sql`${table.completionVersion} > 0`),
+    check("market_snapshot_questions_status_check", sql`${table.status} IN ('refreshing','completed','failed')`),
+    check("market_snapshot_questions_terminal_check", sql`(
+      (${table.status} = 'completed' AND ${table.completedAt} IS NOT NULL AND ${table.queryFanoutHash} IS NOT NULL)
+      OR (${table.status} <> 'completed' AND ${table.completedAt} IS NULL)
+    )`)
+  ]
+);
+export type MarketSnapshotQuestionRow = typeof marketSnapshotQuestions.$inferSelect;
+
+export const marketSnapshotQueries = pgTable(
+  "market_snapshot_queries",
+  {
+    id: text("id").primaryKey(),
+    snapshotId: text("snapshot_id").notNull().references(() => marketSnapshotQuestions.id, { onDelete: "cascade" }),
+    queryOrder: integer("query_order").notNull(),
+    queryText: text("query_text").notNull(),
+    queryHash: text("query_hash").notNull(),
+    derivationRule: text("derivation_rule").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("market_snapshot_queries_snapshot_order_uidx").on(table.snapshotId, table.queryOrder),
+    uniqueIndex("market_snapshot_queries_snapshot_hash_uidx").on(table.snapshotId, table.queryHash),
+    uniqueIndex("market_snapshot_queries_scope_uidx").on(table.id, table.snapshotId),
+    check("market_snapshot_queries_order_check", sql`${table.queryOrder} >= 0`),
+    check("market_snapshot_queries_text_check", sql`length(btrim(${table.queryText})) > 0 AND length(btrim(${table.derivationRule})) > 0`)
+  ]
+);
+export type MarketSnapshotQueryRow = typeof marketSnapshotQueries.$inferSelect;
+
+export const marketSearchAttempts = pgTable(
+  "market_search_attempts",
+  {
+    id: text("id").primaryKey(),
+    snapshotId: text("snapshot_id").notNull(),
+    queryId: text("query_id").notNull(),
+    authorityVersion: text("authority_version").notNull()
+      .references(() => publicSearchSurfaceAuthorities.authorityVersion, { onDelete: "restrict" }),
+    attemptNumber: integer("attempt_number").notNull(),
+    requestStatus: text("request_status").notNull(),
+    idempotencyReference: text("idempotency_reference").notNull(),
+    usage: jsonb("usage").$type<unknown>().notNull().default({}),
+    configuredCostMicros: integer("configured_cost_micros").notNull().default(0),
+    providerCostMicros: integer("provider_cost_micros"),
+    costUncertain: boolean("cost_uncertain").notNull().default(false),
+    sanitizedError: text("sanitized_error"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.queryId, table.snapshotId],
+      foreignColumns: [marketSnapshotQueries.id, marketSnapshotQueries.snapshotId],
+      name: "market_search_attempts_query_scope_fkey"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.snapshotId, table.authorityVersion],
+      foreignColumns: [marketSnapshotQuestions.id, marketSnapshotQuestions.surfaceAuthorityVersion],
+      name: "market_search_attempts_authority_scope_fkey"
+    }).onDelete("cascade"),
+    uniqueIndex("market_search_attempts_snapshot_number_uidx").on(table.snapshotId, table.attemptNumber),
+    uniqueIndex("market_search_attempts_scope_uidx").on(table.id, table.snapshotId, table.queryId),
+    uniqueIndex("market_search_attempts_idempotency_uidx").on(table.idempotencyReference),
+    index("market_search_attempts_snapshot_idx").on(table.snapshotId, table.startedAt),
+    check("market_search_attempts_number_check", sql`${table.attemptNumber} > 0`),
+    check("market_search_attempts_status_check", sql`${table.requestStatus} IN ('pending','succeeded','partial','timeout','rate_limited','unavailable','malformed','aborted')`),
+    check("market_search_attempts_cost_check", sql`${table.configuredCostMicros} >= 0 AND (${table.providerCostMicros} IS NULL OR ${table.providerCostMicros} >= 0)`),
+    check("market_search_attempts_usage_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.usage})`)
+  ]
+);
+export type MarketSearchAttemptRow = typeof marketSearchAttempts.$inferSelect;
+
+export const marketSearchObservations = pgTable(
+  "market_search_observations",
+  {
+    id: text("id").primaryKey(),
+    snapshotId: text("snapshot_id").notNull(),
+    queryId: text("query_id").notNull(),
+    attemptId: text("attempt_id").notNull(),
+    surfaceResultOrder: integer("surface_result_order").notNull(),
+    resultUrl: text("result_url").notNull(),
+    canonicalUrl: text("canonical_url").notNull(),
+    title: text("title").notNull(),
+    snippet: text("snippet"),
+    resultStatus: text("result_status").notNull(),
+    resultMetadata: jsonb("result_metadata").$type<unknown>().notNull().default({}),
+    contentHash: text("content_hash").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.attemptId, table.snapshotId, table.queryId],
+      foreignColumns: [marketSearchAttempts.id, marketSearchAttempts.snapshotId, marketSearchAttempts.queryId],
+      name: "market_search_observations_attempt_scope_fkey"
+    }).onDelete("cascade"),
+    uniqueIndex("market_search_observations_attempt_order_uidx").on(table.attemptId, table.surfaceResultOrder),
+    uniqueIndex("market_search_observations_scope_uidx").on(table.id, table.snapshotId),
+    index("market_search_observations_snapshot_idx").on(table.snapshotId, table.queryId, table.surfaceResultOrder),
+    check("market_search_observations_order_check", sql`${table.surfaceResultOrder} >= 0`),
+    check("market_search_observations_url_check", sql`${table.resultUrl} ~ '^https?://' AND ${table.canonicalUrl} ~ '^https?://'`),
+    check("market_search_observations_status_check", sql`${table.resultStatus} IN ('returned','duplicate','inaccessible','filtered')`),
+    check("market_search_observations_metadata_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.resultMetadata})`)
+  ]
+);
+export type MarketSearchObservationRow = typeof marketSearchObservations.$inferSelect;
+
+export const marketSourceEvidence = pgTable(
+  "market_source_evidence",
+  {
+    id: text("id").primaryKey(),
+    snapshotId: text("snapshot_id").notNull(),
+    observationId: text("observation_id").notNull(),
+    canonicalUrl: text("canonical_url").notNull(),
+    registrableDomain: text("registrable_domain").notNull(),
+    retrievalState: text("retrieval_state").notNull(),
+    excerpt: text("excerpt"),
+    excerptHash: text("excerpt_hash"),
+    contentHash: text("content_hash"),
+    sourceCategory: text("source_category").notNull(),
+    entities: jsonb("entities").$type<unknown>().notNull().default([]),
+    claims: jsonb("claims").$type<unknown>().notNull().default([]),
+    contradictions: jsonb("contradictions").$type<unknown>().notNull().default([]),
+    evidenceFamilyIdentity: text("evidence_family_identity").notNull(),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.observationId, table.snapshotId],
+      foreignColumns: [marketSearchObservations.id, marketSearchObservations.snapshotId],
+      name: "market_source_evidence_observation_scope_fkey"
+    }).onDelete("cascade"),
+    uniqueIndex("market_source_evidence_observation_uidx").on(table.observationId),
+    index("market_source_evidence_snapshot_family_idx").on(table.snapshotId, table.evidenceFamilyIdentity),
+    index("market_source_evidence_expiry_idx").on(table.retrievalState, table.expiresAt),
+    check("market_source_evidence_url_check", sql`${table.canonicalUrl} ~ '^https?://'`),
+    check("market_source_evidence_state_check", sql`${table.retrievalState} IN ('available','inaccessible','not_retrieved','expired')`),
+    check("market_source_evidence_category_check", sql`${table.sourceCategory} IN ('company_owned','earned_editorial','directory_or_reference','community_or_ugc','institution','social','unknown')`),
+    check("market_source_evidence_excerpt_bound_check", sql`${table.excerpt} IS NULL OR char_length(${table.excerpt}) <= 1200`),
+    check("market_source_evidence_content_check", sql`(
+      (${table.retrievalState} = 'available' AND ${table.excerpt} IS NOT NULL AND ${table.excerptHash} IS NOT NULL AND ${table.contentHash} IS NOT NULL)
+      OR (${table.retrievalState} IN ('inaccessible','not_retrieved') AND ${table.excerpt} IS NULL AND ${table.excerptHash} IS NULL AND ${table.contentHash} IS NULL)
+      OR (${table.retrievalState} = 'expired' AND ${table.excerpt} IS NULL
+        AND ${table.excerptHash} IS NOT NULL AND ${table.contentHash} IS NOT NULL)
+    )`),
+    check("market_source_evidence_entities_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.entities})`),
+    check("market_source_evidence_claims_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.claims})`),
+    check("market_source_evidence_contradictions_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.contradictions})`)
+  ]
+);
+export type MarketSourceEvidenceRow = typeof marketSourceEvidence.$inferSelect;
+
+export const marketSnapshotLeases = pgTable(
+  "market_snapshot_leases",
+  {
+    cacheIdentity: text("cache_identity").primaryKey(),
+    leaseOwner: text("lease_owner").notNull(),
+    state: text("state").notNull().default("active"),
+    acquiredAt: timestamp("acquired_at", { withTimezone: true }).notNull().defaultNow(),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    attemptNumber: integer("attempt_number").notNull(),
+    terminalSnapshotId: text("terminal_snapshot_id"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.terminalSnapshotId, table.cacheIdentity],
+      foreignColumns: [marketSnapshotQuestions.id, marketSnapshotQuestions.cacheIdentity],
+      name: "market_snapshot_leases_terminal_scope_fkey"
+    }).onDelete("restrict"),
+    index("market_snapshot_leases_expiry_idx").on(table.state, table.expiresAt),
+    check("market_snapshot_leases_state_check", sql`${table.state} IN ('active','completed','failed')`),
+    check("market_snapshot_leases_attempt_check", sql`${table.attemptNumber} > 0`),
+    check("market_snapshot_leases_terminal_check", sql`(
+      (${table.state} = 'completed' AND ${table.terminalSnapshotId} IS NOT NULL)
+      OR (${table.state} <> 'completed' AND ${table.terminalSnapshotId} IS NULL)
+    )`)
+  ]
+);
+export type MarketSnapshotLeaseRow = typeof marketSnapshotLeases.$inferSelect;
+
+export const reportMarketSnapshotRefs = pgTable(
+  "report_market_snapshot_refs",
+  {
+    id: text("id").primaryKey(),
+    reportId: text("report_id").notNull(),
+    jobId: text("job_id").notNull(),
+    snapshotId: text("snapshot_id").notNull().references(() => marketSnapshotQuestions.id, { onDelete: "restrict" }),
+    evidenceCutoff: timestamp("evidence_cutoff", { withTimezone: true }).notNull(),
+    freshnessState: text("freshness_state").notNull(),
+    actualCostMicros: integer("actual_cost_micros").notNull().default(0),
+    allocatedCostMicros: integer("allocated_cost_micros").notNull().default(0),
+    avoidedCostMicros: integer("avoided_cost_micros").notNull().default(0),
+    bindingHash: text("binding_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.jobId, table.reportId],
+      foreignColumns: [scanJobs.id, scanJobs.reportId],
+      name: "report_market_snapshot_refs_job_report_fkey"
+    }).onDelete("cascade"),
+    uniqueIndex("report_market_snapshot_refs_job_snapshot_uidx").on(table.jobId, table.snapshotId),
+    index("report_market_snapshot_refs_report_idx").on(table.reportId, table.createdAt),
+    check("report_market_snapshot_refs_freshness_check", sql`${table.freshnessState} IN ('fresh','historical','insufficient')`),
+    check("report_market_snapshot_refs_cost_check", sql`${table.actualCostMicros} >= 0 AND ${table.allocatedCostMicros} >= 0 AND ${table.avoidedCostMicros} >= 0`)
+  ]
+);
+export type ReportMarketSnapshotRefRow = typeof reportMarketSnapshotRefs.$inferSelect;
+
+export const reportSourceForensics = pgTable(
+  "report_source_forensics",
+  {
+    id: text("id").primaryKey(),
+    reportId: text("report_id").notNull(),
+    jobId: text("job_id").notNull(),
+    reportVersion: integer("report_version").notNull(),
+    fulfillmentMethodology: text("fulfillment_methodology").$type<RecommendationFulfillmentMethodology>().notNull(),
+    productContract: text("product_contract").$type<ReportProductContract>().notNull(),
+    payload: jsonb("payload").$type<unknown>().notNull(),
+    authorityHash: text("authority_hash").notNull(),
+    provenanceHash: text("provenance_hash").notNull(),
+    contentHash: text("content_hash").notNull(),
+    isPrivate: boolean("is_private").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.jobId, table.reportId],
+      foreignColumns: [scanJobs.id, scanJobs.reportId],
+      name: "report_source_forensics_job_report_fkey"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.jobId, table.reportId, table.productContract, table.fulfillmentMethodology, table.reportVersion],
+      foreignColumns: [
+        scanJobs.id, scanJobs.reportId, scanJobs.productContract,
+        scanJobs.fulfillmentMethodology, scanJobs.recommendationReportVersion
+      ],
+      name: "report_source_forensics_v2_job_fkey"
+    }).onDelete("cascade"),
+    uniqueIndex("report_source_forensics_report_uidx").on(table.reportId),
+    uniqueIndex("report_source_forensics_job_uidx").on(table.jobId),
+    check("report_source_forensics_version_check", sql`${table.reportVersion} = 2`),
+    check("report_source_forensics_methodology_check", sql`${table.fulfillmentMethodology} = 'public_search_source_forensics_v1'`),
+    check("report_source_forensics_product_check", sql`${table.productContract} = 'recommendation_forensics_v1'`),
+    check("report_source_forensics_private_check", sql`${table.isPrivate} = true`)
+  ]
+);
+export type ReportSourceForensicsRow = typeof reportSourceForensics.$inferSelect;
+
 export const paymentOrders = pgTable(
   "payment_orders",
   {
@@ -421,6 +764,8 @@ export const paymentOrders = pgTable(
     customerEmailHmac: text("customer_email_hmac").notNull(),
     emailKeyVersion: text("email_key_version").notNull(),
     productCode: text("product_code").notNull(),
+    fulfillmentMethodology: text("fulfillment_methodology").$type<RecommendationFulfillmentMethodology>(),
+    recommendationReportVersion: integer("recommendation_report_version").$type<RecommendationReportVersion>(),
     catalogVersion: text("catalog_version").notNull(),
     termsVersion: text("terms_version").notNull(),
     refundPolicyVersion: text("refund_policy_version").notNull(),
@@ -456,6 +801,14 @@ export const paymentOrders = pgTable(
     check("payment_orders_report_locale_check", sql`${table.reportLocale} IN ('en','zh')`),
     check("payment_orders_currency_check", sql`${table.currency} IN ('CNY','USD','HKD')`),
     check("payment_orders_amount_check", sql`${table.amountMinor} > 0`),
+    check("payment_orders_methodology_product_check", sql`(
+      (${table.productCode} = 'recommendation_forensics_v1'
+        AND ${table.fulfillmentMethodology} IS NOT NULL
+        AND ${table.recommendationReportVersion} IS NOT NULL
+        AND ((${table.fulfillmentMethodology} = 'answer_engine_recommendation_forensics_v1' AND ${table.recommendationReportVersion} = 1)
+          OR (${table.fulfillmentMethodology} = 'public_search_source_forensics_v1' AND ${table.recommendationReportVersion} = 2)))
+      OR (${table.productCode} <> 'recommendation_forensics_v1' AND ${table.fulfillmentMethodology} IS NULL AND ${table.recommendationReportVersion} IS NULL)
+    )`),
     check("payment_orders_tax_amount_check", sql`${table.taxAmountMinor} IS NULL OR ${table.taxAmountMinor} >= 0`),
     check("payment_orders_payment_status_check", sql`${table.paymentStatus} IN ('created','pending','paid','failed','cancelled')`),
     check(

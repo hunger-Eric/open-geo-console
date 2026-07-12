@@ -22,7 +22,7 @@ describePostgres("artifact scope PostgreSQL isolation", () => {
     const sql = getSqlClient();
     await sql`INSERT INTO scan_reports (id,url,site_key,report_locale,technical_status) VALUES (${reportId},'https://scope.example','scope.example','en','completed')`;
     await sql`INSERT INTO scan_jobs (id,report_id,tier,product_contract,locale,stage) VALUES (${legacyJobId},${reportId},'deep','legacy_website_audit_v1','en','completed')`;
-    await sql`INSERT INTO scan_jobs (id,report_id,tier,product_contract,locale,stage) VALUES (${recommendationJobId},${reportId},'deep','recommendation_forensics_v1','en','completed')`;
+    await sql`INSERT INTO scan_jobs (id,report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,locale,stage) VALUES (${recommendationJobId},${reportId},'deep','recommendation_forensics_v1','answer_engine_recommendation_forensics_v1',1,'en','completed')`;
     await sql`INSERT INTO ai_reports (id,report_id,job_id,tier,product_contract,locale,payload,model,prompt_version,content_hash,is_private) VALUES (${`ai-legacy-${suffix}`},${reportId},${legacyJobId},'deep','legacy_website_audit_v1','en','{"artifact":"legacy"}'::jsonb,'fixture','v1','legacy-hash',true)`;
     await sql`INSERT INTO ai_reports (id,report_id,job_id,tier,product_contract,locale,payload,model,prompt_version,content_hash,is_private) VALUES (${`ai-new-${suffix}`},${reportId},${recommendationJobId},'deep','recommendation_forensics_v1','en','{"artifact":"recommendation"}'::jsonb,'fixture','v1','recommendation-hash',true)`;
   }, 60_000);

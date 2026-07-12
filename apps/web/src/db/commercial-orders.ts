@@ -9,12 +9,15 @@ import {
   type PaymentEventRow,
   type PaymentOrderRow,
   type PaymentProvider,
+  type RecommendationFulfillmentMethodology,
+  type RecommendationReportVersion,
   type ReportLocale
 } from "./schema";
 
 const PAYMENT_CONFIRMATION_TEMPLATE_VERSION = "v1";
 
 export interface CreatePaymentOrderInput {
+  /** Methodology is intentionally absent: createPaymentOrder selects it from productCode on the server. */
   checkoutIdempotencyHmac: string;
   provider: PaymentProvider;
   reportId: string;
@@ -50,6 +53,8 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
       customerEmailHmac: input.customerEmailHmac,
       emailKeyVersion: input.emailKeyVersion,
       productCode: input.productCode,
+      fulfillmentMethodology: fulfillmentMethodologyForProductAdmission(input.productCode),
+      recommendationReportVersion: recommendationReportVersionForProductAdmission(input.productCode),
       catalogVersion: input.catalogVersion,
       termsVersion: input.termsVersion,
       refundPolicyVersion: input.refundPolicyVersion,
@@ -455,10 +460,14 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
       report_locale: ReportLocale;
       fulfillment_job_id: string | null;
       product_code: string;
+      fulfillment_methodology: RecommendationFulfillmentMethodology | null;
+      recommendation_report_version: RecommendationReportVersion | null;
       legacy_retirement_cutoff_at: Date | null;
       legacy_retired_at: Date | null;
     }>>`
       SELECT id, provider, provider_payment_id, payment_status, report_id, report_locale, fulfillment_job_id, product_code,
+             fulfillment_methodology,
+             recommendation_report_version,
              legacy_retirement_cutoff_at, legacy_retired_at
       FROM payment_orders WHERE id = ${input.orderId} FOR UPDATE
     `;
@@ -539,9 +548,9 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
       jobId = ids.jobId;
       await tx`
         INSERT INTO scan_jobs
-          (id, report_id, tier, product_contract, locale, reason, stage, credit_reservation_id)
+          (id, report_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, locale, reason, stage, credit_reservation_id)
         VALUES
-          (${jobId}, ${order.report_id}, 'deep', ${productContractForCode(order.product_code)}, ${order.report_locale}, 'standard', 'queued', ${reservation.id})
+          (${jobId}, ${order.report_id}, 'deep', ${productContractForCode(order.product_code)}, ${order.fulfillment_methodology}, ${order.recommendation_report_version}, ${order.report_locale}, 'standard', 'queued', ${reservation.id})
       `;
     }
     await tx`
@@ -604,6 +613,20 @@ export function productContractForCode(productCode: string): "legacy_website_aud
   throw new CommercialOrderConflictError("The paid order uses an unsupported product contract.");
 }
 
+export function fulfillmentMethodologyForProductAdmission(
+  productCode: string
+): RecommendationFulfillmentMethodology | null {
+  if (productCode === "recommendation_forensics_v1") return "public_search_source_forensics_v1";
+  if (productCode === "deep_report_v1") return null;
+  throw new CommercialOrderConflictError("The paid order uses an unsupported fulfillment methodology.");
+}
+
+export function recommendationReportVersionForProductAdmission(productCode: string): RecommendationReportVersion | null {
+  if (productCode === "recommendation_forensics_v1") return 2;
+  if (productCode === "deep_report_v1") return null;
+  throw new CommercialOrderConflictError("The paid order uses an unsupported recommendation report version.");
+}
+
 function assertOrderInput(input: CreatePaymentOrderInput): void {
   const required = [
     input.checkoutIdempotencyHmac,
@@ -632,12 +655,14 @@ function assertPaymentEventInput(input: RecordPaymentEventInput): void {
   }
 }
 
-function matchesImmutableOrder(row: PaymentOrderRow, input: CreatePaymentOrderInput): boolean {
+export function matchesImmutableOrder(row: PaymentOrderRow, input: CreatePaymentOrderInput): boolean {
   return row.provider === input.provider
     && row.reportId === input.reportId
     && row.siteKey === input.siteKey
     && row.customerEmailHmac === input.customerEmailHmac
     && row.productCode === input.productCode
+    && row.fulfillmentMethodology === fulfillmentMethodologyForProductAdmission(input.productCode)
+    && row.recommendationReportVersion === recommendationReportVersionForProductAdmission(input.productCode)
     && row.catalogVersion === input.catalogVersion
     && row.termsVersion === input.termsVersion
     && row.refundPolicyVersion === input.refundPolicyVersion

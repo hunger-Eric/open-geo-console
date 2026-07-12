@@ -17,7 +17,7 @@ let database: ReturnType<typeof drizzle<typeof schema>> | undefined;
 let schemaInitialization: Promise<void> | undefined;
 let validatedProfile: DeploymentProfile | undefined;
 
-export const DATABASE_SCHEMA_VERSION = 9;
+export const DATABASE_SCHEMA_VERSION = 10;
 
 export function isMemoryPersistence(): boolean {
   return process.env.NODE_ENV === "test" && !process.env.DATABASE_URL;

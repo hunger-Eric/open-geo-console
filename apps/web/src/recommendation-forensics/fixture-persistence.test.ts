@@ -139,6 +139,8 @@ function memoryJob(id: string, reportId: string) {
     reportId,
     tier: "deep" as const,
     productContract: "recommendation_forensics_v1" as const,
+    fulfillmentMethodology: "answer_engine_recommendation_forensics_v1" as const,
+    recommendationReportVersion: 1 as const,
     locale: "en" as const,
     reason: "standard" as const,
     stage: "queued" as const,

@@ -60,7 +60,7 @@ describe("recommendation-forensics memory persistence", () => {
 
   it("does not attach answer observations to a legacy website-audit job", async () => {
     const legacyJobId = randomUUID();
-    memorySaveScanJob({ ...memoryJob(legacyJobId, reportId), productContract: "legacy_website_audit_v1" });
+    memorySaveScanJob({ ...memoryJob(legacyJobId, reportId), productContract: "legacy_website_audit_v1", fulfillmentMethodology: null, recommendationReportVersion: null });
     await expect(createAnswerSnapshotRun({
       id: randomUUID(), reportId, jobId: legacyJobId, locale: "en", region: "US",
       questionSetVersion: "purchase-v1", startedAt: "2030-01-01T00:00:00.000Z"
@@ -211,7 +211,9 @@ function successCell(runId: string) {
 function memoryJob(id: string, reportId: string) {
   const now = new Date("2030-01-01T00:00:00.000Z");
   return {
-    id, reportId, tier: "deep" as const, productContract: "recommendation_forensics_v1" as const, locale: "en" as const, reason: "standard" as const,
+    id, reportId, tier: "deep" as const, productContract: "recommendation_forensics_v1" as const,
+    fulfillmentMethodology: "answer_engine_recommendation_forensics_v1" as const, locale: "en" as const, reason: "standard" as const,
+    recommendationReportVersion: 1 as const,
     stage: "queued" as const, progress: 0, checkpoint: {}, plannedPages: 0,
     successfulPages: 0, failedPages: 0, attempts: 0, maxAttempts: 3,
     leaseOwner: null, leaseExpiresAt: null, errorCode: null, publicError: null,

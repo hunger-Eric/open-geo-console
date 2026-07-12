@@ -32,11 +32,12 @@
     "test:ai-live": "node --env-file-if-exists=.env.local --import tsx src/scripts/live-ai-scan.ts",
     "recommendation:certify": "node --env-file=.env.staging.local --import tsx src/scripts/certify-recommendation-provider.ts",
     "recommendation:authority:install": "node --env-file=.env.staging.local --import tsx src/scripts/install-recommendation-authority.ts",
+    "recommendation:methodology:audit": "node --env-file-if-exists=.env.local --import tsx src/scripts/audit-recommendation-methodologies.ts",
     "db:audit": "node --env-file-if-exists=.env.local --import tsx src/scripts/db-audit.ts",
     "db:environment:init": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts init",
     "db:environment:inspect": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts inspect",
     "staging:free:cleanup": "node --env-file=.env.staging.local --import tsx src/scripts/staging-free-cleanup.ts",
-    "test:postgres:staging-security": "node --env-file=.env.staging.local ../../node_modules/vitest/vitest.mjs run --root ../.. apps/web/src/db/staging-security.postgres.test.ts apps/web/src/db/recommendation-forensics.postgres.test.ts apps/web/src/db/recommendation-commerce.postgres.test.ts apps/web/src/db/artifact-scope.postgres.test.ts",
+    "test:postgres:staging-security": "node --env-file=.env.staging.local ../../node_modules/vitest/vitest.mjs run --no-file-parallelism --root ../.. apps/web/src/db/staging-security.postgres.test.ts apps/web/src/db/schema-v10.postgres.test.ts apps/web/src/db/recommendation-forensics.postgres.test.ts apps/web/src/db/recommendation-commerce.postgres.test.ts apps/web/src/db/artifact-scope.postgres.test.ts",
     "db:migrate:sqlite": "node --env-file-if-exists=.env.local --import tsx src/scripts/migrate-sqlite.ts"
   },
   "dependencies": {

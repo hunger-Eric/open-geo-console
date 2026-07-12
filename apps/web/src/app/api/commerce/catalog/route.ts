@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCommerceMode, getPriceSnapshot, type SupportedCurrency } from "@/commerce/config";
+import { getCommerceMode, getPriceSnapshot, RECOMMENDATION_NEW_ORDER_ADMISSION_ENABLED, type SupportedCurrency } from "@/commerce/config";
 import { getCommerceReadiness } from "@/commerce/readiness";
 import { getRecommendationProductAvailability } from "@/recommendation-forensics/product-availability";
 
@@ -12,9 +12,9 @@ export async function GET() {
     const product = await getRecommendationProductAvailability();
     const currencies: SupportedCurrency[] = ["CNY", "USD", "HKD"];
     return NextResponse.json({
-      enabled: readiness.ready && product.ready,
+      enabled: RECOMMENDATION_NEW_ORDER_ADMISSION_ENABLED && readiness.ready && product.ready,
       mode,
-      prices: readiness.ready && product.ready ? currencies.map((currency) => {
+      prices: RECOMMENDATION_NEW_ORDER_ADMISSION_ENABLED && readiness.ready && product.ready ? currencies.map((currency) => {
         const price = getPriceSnapshot(currency);
         return { currency, amountMinor: price.amountMinor };
       }) : [],

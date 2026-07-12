@@ -6,6 +6,8 @@ import {
   type CreditStatus,
   type JobCheckpoint,
   type ReportLocale,
+  type RecommendationFulfillmentMethodology,
+  type RecommendationReportVersion,
   type ReportProductContract,
   type ReportTier,
   type ScanJobReason,
@@ -31,6 +33,8 @@ export interface EnqueueScanJobInput {
   reportId: string;
   tier: ReportTier;
   productContract?: ReportProductContract;
+  fulfillmentMethodology?: RecommendationFulfillmentMethodology | null;
+  recommendationReportVersion?: RecommendationReportVersion | null;
   locale: ReportLocale;
   reason?: ScanJobReason;
   creditReservationId?: string;
@@ -46,6 +50,7 @@ export class ScanJobCapacityError extends Error {
 }
 
 export async function enqueueScanJob(input: EnqueueScanJobInput): Promise<ScanJobRow> {
+  assertFulfillmentPair(input.productContract ?? "legacy_website_audit_v1", input.fulfillmentMethodology ?? null, input.recommendationReportVersion ?? null);
   if (input.productContract === "recommendation_forensics_v1" && input.tier !== "deep") {
     throw new Error("Recommendation-forensics jobs require the deep Worker lane.");
   }
@@ -65,9 +70,9 @@ export async function enqueueScanJob(input: EnqueueScanJobInput): Promise<ScanJo
       `;
       if ((counts[0]?.count ?? 0) >= input.maxActiveTierJobs!) throw new ScanJobCapacityError();
       await tx`
-        INSERT INTO scan_jobs (id, report_id, tier, product_contract, locale, reason, credit_reservation_id, max_attempts)
+        INSERT INTO scan_jobs (id, report_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, locale, reason, credit_reservation_id, max_attempts)
         VALUES (
-          ${id}, ${input.reportId}, ${input.tier}, ${input.productContract ?? "legacy_website_audit_v1"}, ${input.locale}, ${input.reason ?? "standard"},
+          ${id}, ${input.reportId}, ${input.tier}, ${input.productContract ?? "legacy_website_audit_v1"}, ${input.fulfillmentMethodology ?? null}, ${input.recommendationReportVersion ?? null}, ${input.locale}, ${input.reason ?? "standard"},
           ${input.creditReservationId ?? null}, ${input.maxAttempts ?? 3}
         )
       `;
@@ -81,6 +86,8 @@ export async function enqueueScanJob(input: EnqueueScanJobInput): Promise<ScanJo
       reportId: input.reportId,
       tier: input.tier,
       productContract: input.productContract ?? "legacy_website_audit_v1",
+      fulfillmentMethodology: input.fulfillmentMethodology ?? null,
+      recommendationReportVersion: input.recommendationReportVersion ?? null,
       locale: input.locale,
       reason: input.reason ?? "standard",
       creditReservationId: input.creditReservationId ?? null,
@@ -88,6 +95,21 @@ export async function enqueueScanJob(input: EnqueueScanJobInput): Promise<ScanJo
     })
     .returning();
   return row;
+}
+
+function assertFulfillmentPair(
+  productContract: ReportProductContract,
+  methodology: RecommendationFulfillmentMethodology | null,
+  reportVersion: RecommendationReportVersion | null
+): void {
+  if (productContract === "recommendation_forensics_v1" &&
+      !((methodology === "answer_engine_recommendation_forensics_v1" && reportVersion === 1) ||
+        (methodology === "public_search_source_forensics_v1" && reportVersion === 2))) {
+    throw new Error("Recommendation-forensics jobs require a matching explicit methodology and report version.");
+  }
+  if (productContract === "legacy_website_audit_v1" && (methodology !== null || reportVersion !== null)) {
+    throw new Error("Legacy website-audit jobs cannot use a recommendation fulfillment methodology or report version.");
+  }
 }
 
 export async function getScanJob(id: string): Promise<ScanJobRow | null> {

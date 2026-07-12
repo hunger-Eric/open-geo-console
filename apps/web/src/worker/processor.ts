@@ -85,12 +85,16 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
   }, 30_000);
   let checkpoint = normalizeCheckpoint(job.checkpoint);
   try {
+    const fulfillmentTarget = resolveRecommendationFulfillmentTarget(job);
+    if (fulfillmentTarget === "recommendation_v2") {
+      throw new RecommendationRuntimeUnavailableError("Public-search source-forensics fulfillment is not installed.");
+    }
     await purgeExpiredCrawlContent();
     let storedReport = await getGeoReport(job.reportId);
     if (!storedReport) throw new Error("The source technical report no longer exists.");
     if (job.productContract === "recommendation_forensics_v1" && checkpoint.contractVersion === 2 &&
         checkpoint.websiteFoundation?.completed) {
-      const existingFoundation = await getAiReport(job.reportId, "deep");
+      const existingFoundation = await getAiReport(job.reportId, "deep", job.productContract);
       const canonicalTarget = resolveRecommendationFoundationTarget(checkpoint, existingFoundation, storedReport.url);
       if (isMatchingRecommendationWebsiteFoundation(job, canonicalTarget, existingFoundation)) {
         await finalizeRecommendationJob({
@@ -320,7 +324,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     }
     await persistAiReport(job, reportToPersist, crawl.pages, technicalReport);
 
-    if (job.productContract === "recommendation_forensics_v1") {
+    if (fulfillmentTarget === "recommendation_v1") {
       checkpoint = {
         ...checkpoint,
         contractVersion: 2,
@@ -386,6 +390,20 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
   } finally {
     clearInterval(heartbeat);
   }
+}
+
+export function resolveRecommendationFulfillmentTarget(
+  job: Pick<ScanJobRow, "productContract" | "fulfillmentMethodology" | "recommendationReportVersion">
+): "legacy" | "recommendation_v1" | "recommendation_v2" {
+  if (job.productContract === "legacy_website_audit_v1") {
+    if (job.fulfillmentMethodology !== null || job.recommendationReportVersion !== null) {
+      throw new Error("Legacy jobs cannot carry a recommendation methodology or report version.");
+    }
+    return "legacy";
+  }
+  if (job.fulfillmentMethodology === "answer_engine_recommendation_forensics_v1" && job.recommendationReportVersion === 1) return "recommendation_v1";
+  if (job.fulfillmentMethodology === "public_search_source_forensics_v1" && job.recommendationReportVersion === 2) return "recommendation_v2";
+  throw new Error("Recommendation jobs require a recognized persisted methodology and matching report version.");
 }
 
 export function isMatchingRecommendationWebsiteFoundation(

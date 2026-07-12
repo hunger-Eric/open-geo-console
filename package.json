@@ -34,6 +34,7 @@
     "test:ai-live": "npm run test:ai-live --workspace apps/web",
     "recommendation:certify": "npm run recommendation:certify --workspace apps/web --",
     "recommendation:authority:install": "npm run recommendation:authority:install --workspace apps/web --",
+    "recommendation:methodology:audit": "npm run recommendation:methodology:audit --workspace apps/web",
     "db:audit": "npm run db:audit --workspace apps/web",
     "db:environment:init": "npm run db:environment:init --workspace apps/web --",
     "db:environment:inspect": "npm run db:environment:inspect --workspace apps/web",

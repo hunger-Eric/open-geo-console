@@ -54,8 +54,8 @@ describePostgres("recommendation-forensics PostgreSQL persistence", () => {
       VALUES (${reportId}, 'https://customer.example.com', 'example.com', 'en', 'pending')
     `;
     await sql`
-      INSERT INTO scan_jobs (id, report_id, tier, product_contract, locale)
-      VALUES (${jobId}, ${reportId}, 'deep', 'recommendation_forensics_v1', 'en')
+      INSERT INTO scan_jobs (id, report_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, locale)
+      VALUES (${jobId}, ${reportId}, 'deep', 'recommendation_forensics_v1', 'answer_engine_recommendation_forensics_v1', 1, 'en')
     `;
   }, 60_000);
 

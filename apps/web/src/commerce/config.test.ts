@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { amountMinorToMajor, getCommerceMode, getFulfillmentMode, getPriceSnapshot, parseSupportedCurrency } from "./config";
+import { amountMinorToMajor, getCommerceMode, getFulfillmentMode, getPriceSnapshot, parseSupportedCurrency, RECOMMENDATION_NEW_ORDER_ADMISSION_ENABLED } from "./config";
 
 describe("commerce configuration", () => {
   it("fails closed by default and uses batch fulfillment", () => {
     expect(getCommerceMode({})).toBe("disabled");
     expect(getFulfillmentMode({})).toBe("batch_24h");
+    expect(RECOMMENDATION_NEW_ORDER_ADMISSION_ENABLED).toBe(false);
   });
 
   it("uses test-only defaults without accepting a browser amount", () => {

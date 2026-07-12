@@ -51,24 +51,15 @@ describe("commercial checkout route", () => {
     });
   });
 
-  it("ignores browser amount tampering and snapshots the server catalog price", async () => {
+  it("hard-closes new recommendation checkout even when the former authority would be ready", async () => {
     const response = await POST(new Request("https://example.test/api/reports/report-1/checkout", {
       method: "POST",
       headers: { "content-type": "application/json", "idempotency-key": "request-123" },
       body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human", amountMinor: 1 })
     }), { params: Promise.resolve({ id: "report-1" }) });
-    expect(response.status).toBe(201);
-    expect(await response.json()).toEqual({
-      orderId: "order-1",
-      hpp: { intentId: "int_1", clientSecret: "secret_1", currency: "USD", environment: "demo" }
-    });
-    expect(mocks.createPaymentOrder).toHaveBeenCalledWith(expect.objectContaining({
-      productCode: "recommendation_forensics_v1", amountMinor: 2_900, currency: "USD"
-    }));
-    expect(mocks.createHostedCheckout).toHaveBeenCalledWith(expect.objectContaining({
-      amountMinor: 2_900, currency: "USD", returnUrl: "https://example.test/en/reports/report-1"
-    }));
-    expect(mocks.attachHostedCheckout).toHaveBeenCalledWith({ orderId: "order-1", providerCheckoutId: "int_1" });
+    expect(response.status).toBe(400);
+    expect(mocks.createPaymentOrder).not.toHaveBeenCalled();
+    expect(mocks.createHostedCheckout).not.toHaveBeenCalled();
   });
 
   it("stops before looking up or recovering any legacy checkout while the new product is unavailable", async () => {
@@ -78,7 +69,7 @@ describe("commercial checkout route", () => {
       body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human" })
     }), { params: Promise.resolve({ id: "report-1" }) });
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "The recommendation-forensics product is not available." });
+    expect(await response.json()).toEqual({ error: "The recommendation-forensics product is unavailable during the methodology migration." });
     expect(mocks.getActivePaymentOrderForReport).not.toHaveBeenCalled();
     expect(mocks.deactivateLegacyHostedCheckout).not.toHaveBeenCalled();
     expect(mocks.createHostedCheckout).not.toHaveBeenCalled();
@@ -89,11 +80,11 @@ describe("commercial checkout route", () => {
       method: "POST", headers: { "content-type": "application/json", "idempotency-key": "request-123" },
       body: JSON.stringify({ email: "buyer@example.com", currency: "CNY", locale: "zh" })
     }), { params: Promise.resolve({ id: "report-1" }) });
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(400);
     expect(mocks.createPaymentOrder).not.toHaveBeenCalled();
   });
 
-  it("deactivates and replaces an unpaid legacy Payment Link before returning HPP", async () => {
+  it("does not recover an unpaid legacy Payment Link while new admission is hard-closed", async () => {
     mocks.getActivePaymentOrderForReport.mockResolvedValue({
       id: "order-1",
       providerCheckoutId: "6fc2d9c0-2580-4ad3-a33d-72500ec93bda",
@@ -108,19 +99,12 @@ describe("commercial checkout route", () => {
       headers: { "content-type": "application/json", "idempotency-key": "request-123" },
       body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human" })
     }), { params: Promise.resolve({ id: "report-1" }) });
-    expect(response.status).toBe(200);
-    expect(mocks.deactivateLegacyHostedCheckout).toHaveBeenCalledWith(
-      "6fc2d9c0-2580-4ad3-a33d-72500ec93bda", "order-1"
-    );
-    expect(mocks.replaceLegacyHostedCheckout).toHaveBeenCalledWith({
-      orderId: "order-1",
-      expectedProviderCheckoutId: "6fc2d9c0-2580-4ad3-a33d-72500ec93bda",
-      providerCheckoutId: "int_migrated"
-    });
-    expect(await response.json()).toMatchObject({ hpp: { intentId: "int_migrated" } });
+    expect(response.status).toBe(400);
+    expect(mocks.deactivateLegacyHostedCheckout).not.toHaveBeenCalled();
+    expect(mocks.replaceLegacyHostedCheckout).not.toHaveBeenCalled();
   });
 
-  it("waits for the signed Webhook instead of replacing a paid legacy Payment Link", async () => {
+  it("does not inspect a paid legacy Payment Link while new admission is hard-closed", async () => {
     mocks.getActivePaymentOrderForReport.mockResolvedValue({
       id: "order-1",
       providerCheckoutId: "6fc2d9c0-2580-4ad3-a33d-72500ec93bda",
@@ -133,8 +117,7 @@ describe("commercial checkout route", () => {
       headers: { "content-type": "application/json", "idempotency-key": "request-123" },
       body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human" })
     }), { params: Promise.resolve({ id: "report-1" }) });
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ code: "payment_confirmation_pending", orderId: "order-1" });
+    expect(response.status).toBe(400);
     expect(mocks.createHostedCheckout).not.toHaveBeenCalled();
     expect(mocks.replaceLegacyHostedCheckout).not.toHaveBeenCalled();
   });

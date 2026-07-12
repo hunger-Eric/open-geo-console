@@ -80,6 +80,14 @@ export function memoryGetScanJob(id: string): ScanJobRow | null {
 }
 
 export function memorySaveScanJob(row: ScanJobRow): ScanJobRow {
+  if (row.productContract === "recommendation_forensics_v1" &&
+      !((row.fulfillmentMethodology === "answer_engine_recommendation_forensics_v1" && row.recommendationReportVersion === 1) ||
+        (row.fulfillmentMethodology === "public_search_source_forensics_v1" && row.recommendationReportVersion === 2))) {
+    throw new Error("Recommendation-forensics memory jobs require a matching methodology and report version.");
+  }
+  if (row.productContract === "legacy_website_audit_v1" && (row.fulfillmentMethodology || row.recommendationReportVersion)) {
+    throw new Error("Legacy memory jobs cannot use a recommendation fulfillment methodology or report version.");
+  }
   currentStore().scanJobs.set(row.id, row);
   return row;
 }

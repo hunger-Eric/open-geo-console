@@ -1,6 +1,6 @@
 import { createSiteKey } from "@open-geo-console/site-crawler";
 import { NextResponse } from "next/server";
-import { assertCommerceEnabled, getPriceSnapshot, parseSupportedCurrency } from "@/commerce/config";
+import { assertCommerceEnabled, getPriceSnapshot, parseSupportedCurrency, RECOMMENDATION_NEW_ORDER_ADMISSION_ENABLED } from "@/commerce/config";
 import { normalizeCustomerEmail, protectCustomerEmail } from "@/commerce/customer-email";
 import { checkoutIdempotencyHmac } from "@/commerce/idempotency";
 import { assertCommerceReady } from "@/commerce/readiness";
@@ -25,6 +25,9 @@ export async function POST(request: Request, context: RouteContext) {
     assertSmallRequest(request);
     assertCommerceEnabled();
     await assertCommerceReady();
+    if (!RECOMMENDATION_NEW_ORDER_ADMISSION_ENABLED) {
+      throw new Error("The recommendation-forensics product is unavailable during the methodology migration.");
+    }
     await assertRecommendationProductAvailable();
     const { id } = await context.params;
     const body = await request.json() as { email?: unknown; currency?: unknown; locale?: unknown; turnstileToken?: unknown };

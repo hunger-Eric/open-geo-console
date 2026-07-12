@@ -57,8 +57,29 @@ describe("database deployment marker", () => {
 });
 
 describe("database schema marker", () => {
-  it("uses artifact-scoped schema version 9", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(9);
+  it("uses public-search methodology schema version 10", () => {
+    expect(DATABASE_SCHEMA_VERSION).toBe(10);
+  });
+
+  it("contains the complete additive V2 authority and methodology migration", () => {
+    const sql = DATABASE_MIGRATIONS.join("\n");
+    expect(sql).toContain("fulfillment_methodology");
+    expect(sql).toContain("recommendation_report_version");
+    expect(sql).toContain("answer_engine_recommendation_forensics_v1");
+    expect(sql).toContain("public_search_source_forensics_v1");
+    for (const table of [
+      "public_search_surface_authorities",
+      "market_snapshot_questions",
+      "market_snapshot_queries",
+      "market_search_attempts",
+      "market_search_observations",
+      "market_source_evidence",
+      "market_snapshot_leases",
+      "report_market_snapshot_refs",
+      "report_source_forensics"
+    ]) {
+      expect(sql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
+    }
   });
 
   it("backfills legacy scopes and replaces ambiguous AI report uniqueness", () => {

@@ -25,8 +25,8 @@ describePostgres("recommendation commercial terminal matrix", () => {
     for (const row of records) {
       await sql`INSERT INTO scan_reports (id,url,site_key,report_locale,technical_status) VALUES (${row.reportId},'https://example.com','example.com','en','completed')`;
       await sql`INSERT INTO access_keys (id,key_prefix,key_hmac,status,credits_remaining) VALUES (${row.accessId},'matrix',${`hmac-${row.accessId}`},'exhausted',0)`;
-      await sql`INSERT INTO scan_jobs (id,report_id,tier,product_contract,locale,stage,lease_owner,lease_expires_at,credit_reservation_id) VALUES (${row.jobId},${row.reportId},'deep','recommendation_forensics_v1','en','synthesizing',${`worker-${row.stage}`},now()+interval '10 minutes',${row.creditId})`;
-      await sql`INSERT INTO payment_orders (id,checkout_idempotency_hmac,provider,provider_payment_id,report_id,fulfillment_job_id,site_key,customer_email_encrypted,customer_email_hmac,email_key_version,product_code,catalog_version,terms_version,refund_policy_version,report_locale,currency,amount_minor,payment_status,fulfillment_status,paid_at) VALUES (${row.orderId},${`checkout-${row.orderId}`},'airwallex',${`int-${row.orderId}`},${row.reportId},${row.jobId},'example.com','encrypted','email-hmac','v1','recommendation_forensics_v1','v1','v1','v1','en','USD',2900,'paid','processing',now())`;
+      await sql`INSERT INTO scan_jobs (id,report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,locale,stage,lease_owner,lease_expires_at,credit_reservation_id) VALUES (${row.jobId},${row.reportId},'deep','recommendation_forensics_v1','answer_engine_recommendation_forensics_v1',1,'en','synthesizing',${`worker-${row.stage}`},now()+interval '10 minutes',${row.creditId})`;
+      await sql`INSERT INTO payment_orders (id,checkout_idempotency_hmac,provider,provider_payment_id,report_id,fulfillment_job_id,site_key,customer_email_encrypted,customer_email_hmac,email_key_version,product_code,fulfillment_methodology,recommendation_report_version,catalog_version,terms_version,refund_policy_version,report_locale,currency,amount_minor,payment_status,fulfillment_status,paid_at) VALUES (${row.orderId},${`checkout-${row.orderId}`},'airwallex',${`int-${row.orderId}`},${row.reportId},${row.jobId},'example.com','encrypted','email-hmac','v1','recommendation_forensics_v1','answer_engine_recommendation_forensics_v1',1,'v1','v1','v1','en','USD',2900,'paid','processing',now())`;
       await sql`INSERT INTO credit_ledger (id,access_key_id,report_id,idempotency_key,payment_order_id,job_id,credits,status) VALUES (${row.creditId},${row.accessId},${row.reportId},${`credit-${row.orderId}`},${row.orderId},${row.jobId},1,'reserved')`;
     }
   }, 120_000);
@@ -124,6 +124,31 @@ describePostgres("retired legacy paid event", () => {
       const job = (await getSqlClient()<Array<{ product_contract: string }>>`SELECT product_contract FROM scan_jobs WHERE id=${(result as { jobId: string }).jobId}`)[0];
       expect(job?.product_contract).toBe("legacy_website_audit_v1");
     } finally {
+      if (original === undefined) delete process.env.OGC_TOKEN_HASH_SECRET; else process.env.OGC_TOKEN_HASH_SECRET = original;
+    }
+  }, 120_000);
+
+  it("copies the order methodology exactly into the Webhook-created job", async () => {
+    const methodReportId = `report-method-${suffix}`;
+    const methodOrderId = `order-method-${suffix}`;
+    const original = process.env.OGC_TOKEN_HASH_SECRET;
+    process.env.OGC_TOKEN_HASH_SECRET = "test-token-hash-secret-with-at-least-32-characters";
+    try {
+      await getSqlClient()`INSERT INTO scan_reports (id,url,site_key,report_locale,technical_status) VALUES (${methodReportId},'https://method.example','method.example','en','completed')`;
+      await getSqlClient()`INSERT INTO payment_orders (id,checkout_idempotency_hmac,provider,report_id,site_key,customer_email_encrypted,customer_email_hmac,email_key_version,product_code,fulfillment_methodology,recommendation_report_version,catalog_version,terms_version,refund_policy_version,report_locale,currency,amount_minor,payment_status) VALUES (${methodOrderId},${`checkout-${methodOrderId}`},'airwallex',${methodReportId},'method.example','encrypted','method-email-hmac','v1','recommendation_forensics_v1','answer_engine_recommendation_forensics_v1',1,'v1','v1','v1','en','USD',2900,'pending')`;
+      const result = await applyPaidPaymentEvent({ provider: "airwallex", providerEventId: `evt-method-${suffix}`, eventType: "payment.succeeded", orderId: methodOrderId, providerPaymentId: `int-method-${suffix}`, providerCreatedAt: new Date("2030-01-01T00:02:00Z"), payloadHash: `hash-method-${suffix}` });
+      const job = (await getSqlClient()<Array<{ fulfillment_methodology: string | null; recommendation_report_version: number | null }>>`SELECT fulfillment_methodology,recommendation_report_version FROM scan_jobs WHERE id=${(result as { jobId: string }).jobId}`)[0];
+      expect(job).toMatchObject({ fulfillment_methodology: "answer_engine_recommendation_forensics_v1", recommendation_report_version: 1 });
+    } finally {
+      const job = (await getSqlClient()<Array<{ fulfillment_job_id: string | null }>>`SELECT fulfillment_job_id FROM payment_orders WHERE id=${methodOrderId}`)[0]?.fulfillment_job_id;
+      await getSqlClient()`DELETE FROM email_deliveries WHERE order_id=${methodOrderId}`;
+      await getSqlClient()`DELETE FROM job_dispatch_outbox WHERE job_id=${job ?? ""}`;
+      await getSqlClient()`DELETE FROM credit_ledger WHERE payment_order_id=${methodOrderId}`;
+      await getSqlClient()`DELETE FROM access_keys WHERE payment_order_id=${methodOrderId}`;
+      await getSqlClient()`DELETE FROM payment_events WHERE order_id=${methodOrderId}`;
+      await getSqlClient()`DELETE FROM payment_orders WHERE id=${methodOrderId}`;
+      if (job) await getSqlClient()`DELETE FROM scan_jobs WHERE id=${job}`;
+      await getSqlClient()`DELETE FROM scan_reports WHERE id=${methodReportId}`;
       if (original === undefined) delete process.env.OGC_TOKEN_HASH_SECRET; else process.env.OGC_TOKEN_HASH_SECRET = original;
     }
   }, 120_000);

@@ -1,6 +1,6 @@
 // Idempotent bootstrap for self-hosted deployments. A future migration runner can
 // execute the same statements and then take ownership of schema versioning.
-export const DATABASE_MIGRATIONS = [
+const V9_DATABASE_MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS deployment_environment (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton = true),
     profile text NOT NULL CHECK (profile IN ('staging','production')),
@@ -554,7 +554,7 @@ export const DATABASE_MIGRATIONS = [
     CONSTRAINT citation_source_evidence_content_check CHECK (
       (retrieval_state = 'available' AND excerpt IS NOT NULL AND excerpt_hash IS NOT NULL AND content_hash IS NOT NULL)
       OR (retrieval_state IN ('inaccessible','not_retrieved') AND excerpt IS NULL AND excerpt_hash IS NULL AND content_hash IS NULL)
-      OR (retrieval_state = 'expired' AND excerpt IS NULL)
+      OR (retrieval_state = 'expired' AND excerpt IS NULL AND excerpt_hash IS NOT NULL AND content_hash IS NOT NULL)
     )
   )`,
   `CREATE INDEX IF NOT EXISTS citation_source_evidence_expiry_idx
@@ -639,4 +639,431 @@ export const DATABASE_MIGRATIONS = [
   `DROP INDEX IF EXISTS ai_reports_report_tier_uidx`,
   `CREATE UNIQUE INDEX IF NOT EXISTS ai_reports_report_tier_product_uidx
    ON ai_reports (report_id, tier, product_contract)`
+] as const;
+
+export const V10_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_public_jsonb_metadata_valid_node(document jsonb, depth integer)
+   RETURNS boolean
+   LANGUAGE plpgsql
+   IMMUTABLE
+   STRICT
+   AS $$
+   DECLARE
+     item record;
+     normalized_key text;
+   BEGIN
+     IF depth > 4 OR octet_length(document::text) > 8192 THEN
+       RETURN false;
+     END IF;
+     CASE jsonb_typeof(document)
+       WHEN 'object' THEN
+         FOR item IN SELECT entry.key, entry.value AS child FROM jsonb_each(document) AS entry LOOP
+           normalized_key := regexp_replace(lower(item.key), '[^a-z0-9]', '', 'g');
+           IF length(item.key) > 64 OR normalized_key <> ALL (ARRAY[
+             'id','name','canonicalname','type','category','kind','status','code','version',
+             'claim','claims','text','quote','title','snippet','field','value','values','items',
+             'sourceid','observationid','entityid','confidence','reason','details','relationship',
+             'from','to','subject','predicate','object','polarity','domain','registrabledomain',
+             'language','locale','region','mimetype','publishedat','updatedat','retrievedat','rank',
+             'resulttype','sourcekind','inputtokens','outputtokens','totaltokens','searchrequests',
+             'currency','costmicros','billedunits','requestunits','cachehits','billing','unit','count'
+           ]) THEN
+             RETURN false;
+           END IF;
+           IF NOT ogc_public_jsonb_metadata_valid_node(item.child, depth + 1) THEN
+             RETURN false;
+           END IF;
+         END LOOP;
+       WHEN 'array' THEN
+         FOR item IN SELECT entry.value AS child FROM jsonb_array_elements(document) AS entry LOOP
+           IF NOT ogc_public_jsonb_metadata_valid_node(item.child, depth + 1) THEN
+             RETURN false;
+           END IF;
+         END LOOP;
+       WHEN 'string' THEN
+         IF length(document #>> '{}') > 2048 THEN RETURN false; END IF;
+       WHEN 'number', 'boolean', 'null' THEN NULL;
+       ELSE RETURN false;
+     END CASE;
+     RETURN true;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_public_jsonb_metadata_valid(document jsonb)
+   RETURNS boolean
+   LANGUAGE sql
+   IMMUTABLE
+   STRICT
+   AS $$ SELECT ogc_public_jsonb_metadata_valid_node(document, 0) $$`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS fulfillment_methodology text`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS recommendation_report_version integer`,
+  `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS fulfillment_methodology text`,
+  `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS recommendation_report_version integer`,
+  `UPDATE scan_jobs
+   SET fulfillment_methodology = 'answer_engine_recommendation_forensics_v1'
+   WHERE product_contract = 'recommendation_forensics_v1' AND fulfillment_methodology IS NULL`,
+  `UPDATE scan_jobs SET recommendation_report_version = 1
+   WHERE product_contract = 'recommendation_forensics_v1' AND recommendation_report_version IS NULL`,
+  `UPDATE scan_jobs
+   SET fulfillment_methodology = NULL
+   WHERE product_contract = 'legacy_website_audit_v1'`,
+  `UPDATE scan_jobs SET recommendation_report_version = NULL
+   WHERE product_contract = 'legacy_website_audit_v1'`,
+  `UPDATE payment_orders
+   SET fulfillment_methodology = 'answer_engine_recommendation_forensics_v1'
+   WHERE product_code = 'recommendation_forensics_v1' AND fulfillment_methodology IS NULL`,
+  `UPDATE payment_orders SET recommendation_report_version = 1
+   WHERE product_code = 'recommendation_forensics_v1' AND recommendation_report_version IS NULL`,
+  `UPDATE payment_orders
+   SET fulfillment_methodology = NULL
+   WHERE product_code <> 'recommendation_forensics_v1'`,
+  `UPDATE payment_orders SET recommendation_report_version = NULL
+   WHERE product_code <> 'recommendation_forensics_v1'`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_methodology_contract_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_methodology_contract_check CHECK (
+     (product_contract = 'legacy_website_audit_v1' AND fulfillment_methodology IS NULL AND recommendation_report_version IS NULL)
+     OR (product_contract = 'recommendation_forensics_v1'
+       AND fulfillment_methodology IS NOT NULL AND recommendation_report_version IS NOT NULL
+       AND ((fulfillment_methodology = 'answer_engine_recommendation_forensics_v1' AND recommendation_report_version = 1)
+         OR (fulfillment_methodology = 'public_search_source_forensics_v1' AND recommendation_report_version = 2)))
+   )`,
+  `ALTER TABLE payment_orders DROP CONSTRAINT IF EXISTS payment_orders_methodology_product_check`,
+  `ALTER TABLE payment_orders ADD CONSTRAINT payment_orders_methodology_product_check CHECK (
+     (product_code = 'recommendation_forensics_v1'
+       AND fulfillment_methodology IS NOT NULL AND recommendation_report_version IS NOT NULL
+       AND ((fulfillment_methodology = 'answer_engine_recommendation_forensics_v1' AND recommendation_report_version = 1)
+         OR (fulfillment_methodology = 'public_search_source_forensics_v1' AND recommendation_report_version = 2)))
+     OR (product_code <> 'recommendation_forensics_v1' AND fulfillment_methodology IS NULL AND recommendation_report_version IS NULL)
+   )`,
+  `CREATE INDEX IF NOT EXISTS scan_jobs_methodology_stage_idx
+   ON scan_jobs (fulfillment_methodology, stage, created_at)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS scan_jobs_recommendation_contract_scope_uidx
+   ON scan_jobs (id, report_id, product_contract, fulfillment_methodology, recommendation_report_version)`,
+  `CREATE INDEX IF NOT EXISTS payment_orders_methodology_status_idx
+   ON payment_orders (fulfillment_methodology, fulfillment_status, created_at)`,
+  `CREATE TABLE IF NOT EXISTS public_search_surface_authorities (
+    authority_version text PRIMARY KEY CHECK (length(btrim(authority_version)) > 0),
+    surface_id text NOT NULL CHECK (length(btrim(surface_id)) > 0),
+    surface_version text NOT NULL CHECK (length(btrim(surface_version)) > 0),
+    environment text NOT NULL CHECK (environment IN ('staging','production')),
+    locale_capabilities jsonb NOT NULL CHECK (
+      jsonb_typeof(locale_capabilities) = 'array' AND ogc_public_jsonb_metadata_valid(locale_capabilities)
+    ),
+    region_capabilities jsonb NOT NULL CHECK (
+      jsonb_typeof(region_capabilities) = 'array' AND ogc_public_jsonb_metadata_valid(region_capabilities)
+    ),
+    terms_reviewed_at timestamptz NOT NULL,
+    evidence_references jsonb NOT NULL CHECK (
+      jsonb_typeof(evidence_references) = 'array' AND ogc_public_jsonb_metadata_valid(evidence_references)
+    ),
+    active boolean NOT NULL DEFAULT false,
+    captured_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (authority_version, surface_id, surface_version),
+    UNIQUE (environment, surface_id, surface_version, authority_version)
+  )`,
+  `CREATE INDEX IF NOT EXISTS public_search_surface_authorities_active_idx
+   ON public_search_surface_authorities (environment, active, surface_id)`,
+  `CREATE TABLE IF NOT EXISTS market_snapshot_questions (
+    id text PRIMARY KEY,
+    cache_identity text NOT NULL CHECK (length(btrim(cache_identity)) > 0),
+    normalized_question text NOT NULL CHECK (length(btrim(normalized_question)) > 0),
+    question_hash text NOT NULL CHECK (length(btrim(question_hash)) > 0),
+    locale text NOT NULL CHECK (length(btrim(locale)) > 0),
+    region text NOT NULL CHECK (length(btrim(region)) > 0),
+    surface_authority_version text NOT NULL,
+    surface_id text NOT NULL,
+    surface_version text NOT NULL,
+    fanout_version text NOT NULL CHECK (length(btrim(fanout_version)) > 0),
+    status text NOT NULL DEFAULT 'refreshing' CHECK (status IN ('refreshing','completed','failed')),
+    completion_version integer NOT NULL CHECK (completion_version > 0),
+    query_fanout_hash text,
+    completed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT market_snapshot_questions_authority_scope_fkey
+      FOREIGN KEY (surface_authority_version, surface_id, surface_version)
+      REFERENCES public_search_surface_authorities(authority_version, surface_id, surface_version) ON DELETE RESTRICT,
+    CONSTRAINT market_snapshot_questions_terminal_check CHECK (
+      (status = 'completed' AND completed_at IS NOT NULL AND query_fanout_hash IS NOT NULL)
+      OR (status <> 'completed' AND completed_at IS NULL)
+    ),
+    UNIQUE (cache_identity, completion_version),
+    UNIQUE (id, cache_identity),
+    UNIQUE (id, surface_authority_version)
+  )`,
+  `CREATE INDEX IF NOT EXISTS market_snapshot_questions_freshness_idx
+   ON market_snapshot_questions (cache_identity, status, completed_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS market_snapshot_queries (
+    id text PRIMARY KEY,
+    snapshot_id text NOT NULL REFERENCES market_snapshot_questions(id) ON DELETE CASCADE,
+    query_order integer NOT NULL CHECK (query_order >= 0),
+    query_text text NOT NULL CHECK (length(btrim(query_text)) > 0),
+    query_hash text NOT NULL CHECK (length(btrim(query_hash)) > 0),
+    derivation_rule text NOT NULL CHECK (length(btrim(derivation_rule)) > 0),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (snapshot_id, query_order),
+    UNIQUE (snapshot_id, query_hash),
+    UNIQUE (id, snapshot_id)
+  )`,
+  `CREATE TABLE IF NOT EXISTS market_search_attempts (
+    id text PRIMARY KEY,
+    snapshot_id text NOT NULL,
+    query_id text NOT NULL,
+    authority_version text NOT NULL,
+    attempt_number integer NOT NULL CHECK (attempt_number > 0),
+    request_status text NOT NULL CHECK (request_status IN ('pending','succeeded','partial','timeout','rate_limited','unavailable','malformed','aborted')),
+    idempotency_reference text NOT NULL UNIQUE CHECK (length(btrim(idempotency_reference)) > 0),
+    usage jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (ogc_public_jsonb_metadata_valid(usage)),
+    configured_cost_micros integer NOT NULL DEFAULT 0 CHECK (configured_cost_micros >= 0),
+    provider_cost_micros integer CHECK (provider_cost_micros IS NULL OR provider_cost_micros >= 0),
+    cost_uncertain boolean NOT NULL DEFAULT false,
+    sanitized_error text CHECK (sanitized_error IS NULL OR char_length(sanitized_error) <= 500),
+    started_at timestamptz NOT NULL DEFAULT now(),
+    completed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT market_search_attempts_query_scope_fkey
+      FOREIGN KEY (query_id, snapshot_id) REFERENCES market_snapshot_queries(id, snapshot_id) ON DELETE CASCADE,
+    CONSTRAINT market_search_attempts_authority_scope_fkey
+      FOREIGN KEY (snapshot_id, authority_version)
+      REFERENCES market_snapshot_questions(id, surface_authority_version) ON DELETE CASCADE,
+    UNIQUE (snapshot_id, attempt_number),
+    UNIQUE (id, snapshot_id, query_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS market_search_attempts_snapshot_idx
+   ON market_search_attempts (snapshot_id, started_at)`,
+  `CREATE TABLE IF NOT EXISTS market_search_observations (
+    id text PRIMARY KEY,
+    snapshot_id text NOT NULL,
+    query_id text NOT NULL,
+    attempt_id text NOT NULL,
+    surface_result_order integer NOT NULL CHECK (surface_result_order >= 0),
+    result_url text NOT NULL CHECK (result_url ~ '^https?://'),
+    canonical_url text NOT NULL CHECK (canonical_url ~ '^https?://'),
+    title text NOT NULL,
+    snippet text CHECK (snippet IS NULL OR char_length(snippet) <= 1200),
+    result_status text NOT NULL CHECK (result_status IN ('returned','duplicate','inaccessible','filtered')),
+    result_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (ogc_public_jsonb_metadata_valid(result_metadata)),
+    content_hash text NOT NULL CHECK (length(btrim(content_hash)) > 0),
+    observed_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT market_search_observations_attempt_scope_fkey
+      FOREIGN KEY (attempt_id, snapshot_id, query_id)
+      REFERENCES market_search_attempts(id, snapshot_id, query_id) ON DELETE CASCADE,
+    UNIQUE (attempt_id, surface_result_order),
+    UNIQUE (id, snapshot_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS market_search_observations_snapshot_idx
+   ON market_search_observations (snapshot_id, query_id, surface_result_order)`,
+  `CREATE TABLE IF NOT EXISTS market_source_evidence (
+    id text PRIMARY KEY,
+    snapshot_id text NOT NULL,
+    observation_id text NOT NULL UNIQUE,
+    canonical_url text NOT NULL CHECK (canonical_url ~ '^https?://'),
+    registrable_domain text NOT NULL CHECK (length(btrim(registrable_domain)) > 0),
+    retrieval_state text NOT NULL CHECK (retrieval_state IN ('available','inaccessible','not_retrieved','expired')),
+    excerpt text CHECK (excerpt IS NULL OR char_length(excerpt) <= 1200),
+    excerpt_hash text,
+    content_hash text,
+    source_category text NOT NULL CHECK (source_category IN ('company_owned','earned_editorial','directory_or_reference','community_or_ugc','institution','social','unknown')),
+    entities jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (ogc_public_jsonb_metadata_valid(entities)),
+    claims jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (ogc_public_jsonb_metadata_valid(claims)),
+    contradictions jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (ogc_public_jsonb_metadata_valid(contradictions)),
+    evidence_family_identity text NOT NULL CHECK (length(btrim(evidence_family_identity)) > 0),
+    retrieved_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT market_source_evidence_observation_scope_fkey
+      FOREIGN KEY (observation_id, snapshot_id)
+      REFERENCES market_search_observations(id, snapshot_id) ON DELETE CASCADE,
+    CONSTRAINT market_source_evidence_content_check CHECK (
+      (retrieval_state = 'available' AND excerpt IS NOT NULL AND excerpt_hash IS NOT NULL AND content_hash IS NOT NULL)
+      OR (retrieval_state IN ('inaccessible','not_retrieved') AND excerpt IS NULL AND excerpt_hash IS NULL AND content_hash IS NULL)
+      OR (retrieval_state = 'expired' AND excerpt IS NULL)
+    )
+  )`,
+  `CREATE INDEX IF NOT EXISTS market_source_evidence_snapshot_family_idx
+   ON market_source_evidence (snapshot_id, evidence_family_identity)`,
+  `CREATE INDEX IF NOT EXISTS market_source_evidence_expiry_idx
+   ON market_source_evidence (retrieval_state, expires_at)`,
+  `ALTER TABLE market_source_evidence DROP CONSTRAINT IF EXISTS market_source_evidence_source_category_check`,
+  `ALTER TABLE market_source_evidence DROP CONSTRAINT IF EXISTS market_source_evidence_category_check`,
+  `ALTER TABLE market_source_evidence ADD CONSTRAINT market_source_evidence_category_check
+   CHECK (source_category IN ('company_owned','earned_editorial','directory_or_reference','community_or_ugc','institution','social','unknown'))`,
+  `ALTER TABLE market_source_evidence DROP CONSTRAINT IF EXISTS market_source_evidence_content_check`,
+  `ALTER TABLE market_source_evidence ADD CONSTRAINT market_source_evidence_content_check CHECK (
+     (retrieval_state = 'available' AND excerpt IS NOT NULL AND excerpt_hash IS NOT NULL AND content_hash IS NOT NULL)
+     OR (retrieval_state IN ('inaccessible','not_retrieved') AND excerpt IS NULL AND excerpt_hash IS NULL AND content_hash IS NULL)
+     OR (retrieval_state = 'expired' AND excerpt IS NULL AND excerpt_hash IS NOT NULL AND content_hash IS NOT NULL)
+   )`,
+  `CREATE TABLE IF NOT EXISTS market_snapshot_leases (
+    cache_identity text PRIMARY KEY,
+    lease_owner text NOT NULL CHECK (length(btrim(lease_owner)) > 0),
+    state text NOT NULL DEFAULT 'active' CHECK (state IN ('active','completed','failed')),
+    acquired_at timestamptz NOT NULL DEFAULT now(),
+    heartbeat_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    attempt_number integer NOT NULL CHECK (attempt_number > 0),
+    terminal_snapshot_id text,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT market_snapshot_leases_terminal_scope_fkey
+      FOREIGN KEY (terminal_snapshot_id, cache_identity)
+      REFERENCES market_snapshot_questions(id, cache_identity) ON DELETE RESTRICT,
+    CONSTRAINT market_snapshot_leases_terminal_check CHECK (
+      (state = 'completed' AND terminal_snapshot_id IS NOT NULL)
+      OR (state <> 'completed' AND terminal_snapshot_id IS NULL)
+    )
+  )`,
+  `CREATE INDEX IF NOT EXISTS market_snapshot_leases_expiry_idx
+   ON market_snapshot_leases (state, expires_at)`,
+  `CREATE TABLE IF NOT EXISTS report_market_snapshot_refs (
+    id text PRIMARY KEY,
+    report_id text NOT NULL,
+    job_id text NOT NULL,
+    snapshot_id text NOT NULL REFERENCES market_snapshot_questions(id) ON DELETE RESTRICT,
+    evidence_cutoff timestamptz NOT NULL,
+    freshness_state text NOT NULL CHECK (freshness_state IN ('fresh','historical','insufficient')),
+    actual_cost_micros integer NOT NULL DEFAULT 0 CHECK (actual_cost_micros >= 0),
+    allocated_cost_micros integer NOT NULL DEFAULT 0 CHECK (allocated_cost_micros >= 0),
+    avoided_cost_micros integer NOT NULL DEFAULT 0 CHECK (avoided_cost_micros >= 0),
+    binding_hash text NOT NULL CHECK (length(btrim(binding_hash)) > 0),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT report_market_snapshot_refs_job_report_fkey
+      FOREIGN KEY (job_id, report_id) REFERENCES scan_jobs(id, report_id) ON DELETE CASCADE,
+    UNIQUE (job_id, snapshot_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS report_market_snapshot_refs_report_idx
+   ON report_market_snapshot_refs (report_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS report_source_forensics (
+    id text PRIMARY KEY,
+    report_id text NOT NULL,
+    job_id text NOT NULL,
+    report_version integer NOT NULL CHECK (report_version = 2),
+    fulfillment_methodology text NOT NULL CHECK (fulfillment_methodology = 'public_search_source_forensics_v1'),
+    product_contract text NOT NULL CHECK (product_contract = 'recommendation_forensics_v1'),
+    payload jsonb NOT NULL,
+    authority_hash text NOT NULL CHECK (length(btrim(authority_hash)) > 0),
+    provenance_hash text NOT NULL CHECK (length(btrim(provenance_hash)) > 0),
+    content_hash text NOT NULL CHECK (length(btrim(content_hash)) > 0),
+    is_private boolean NOT NULL DEFAULT true CHECK (is_private = true),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT report_source_forensics_job_report_fkey
+      FOREIGN KEY (job_id, report_id) REFERENCES scan_jobs(id, report_id) ON DELETE CASCADE,
+    CONSTRAINT report_source_forensics_v2_job_fkey
+      FOREIGN KEY (job_id, report_id, product_contract, fulfillment_methodology, report_version)
+      REFERENCES scan_jobs(id, report_id, product_contract, fulfillment_methodology, recommendation_report_version)
+      ON DELETE CASCADE,
+    UNIQUE (report_id),
+    UNIQUE (job_id)
+  )`,
+  `DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'report_source_forensics_v2_job_fkey') THEN
+      ALTER TABLE report_source_forensics ADD CONSTRAINT report_source_forensics_v2_job_fkey
+        FOREIGN KEY (job_id, report_id, product_contract, fulfillment_methodology, report_version)
+        REFERENCES scan_jobs(id, report_id, product_contract, fulfillment_methodology, recommendation_report_version)
+        ON DELETE CASCADE;
+    END IF;
+  END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_require_completed_market_snapshot_ledger()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   AS $$
+   BEGIN
+     IF NEW.status = 'completed' AND NOT EXISTS (
+       SELECT 1 FROM market_search_attempts attempt
+       WHERE attempt.snapshot_id = NEW.id AND attempt.request_status IN ('succeeded','partial')
+     ) THEN
+       RAISE EXCEPTION 'A completed market snapshot requires a successful or partial attempt ledger.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_snapshot_questions_completion_ledger_trigger ON market_snapshot_questions`,
+  `CREATE TRIGGER market_snapshot_questions_completion_ledger_trigger
+   BEFORE INSERT OR UPDATE OF status, completed_at ON market_snapshot_questions
+   FOR EACH ROW EXECUTE FUNCTION ogc_require_completed_market_snapshot_ledger()`,
+  `CREATE OR REPLACE FUNCTION ogc_preserve_completed_market_snapshot()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   AS $$
+   BEGIN
+     IF OLD.status = 'completed' AND NEW IS DISTINCT FROM OLD THEN
+       RAISE EXCEPTION 'A completed market snapshot is immutable; refresh by inserting a new completion version.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_snapshot_questions_immutability_trigger ON market_snapshot_questions`,
+  `CREATE TRIGGER market_snapshot_questions_immutability_trigger
+   BEFORE UPDATE ON market_snapshot_questions
+   FOR EACH ROW EXECUTE FUNCTION ogc_preserve_completed_market_snapshot()`,
+  `CREATE OR REPLACE FUNCTION ogc_prevent_market_immutable_row_mutation()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     RAISE EXCEPTION 'Completed public-search evidence rows are immutable and cannot be reassigned or deleted.';
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_snapshot_queries_immutability_trigger ON market_snapshot_queries`,
+  `CREATE TRIGGER market_snapshot_queries_immutability_trigger
+   BEFORE UPDATE OR DELETE ON market_snapshot_queries
+   FOR EACH ROW EXECUTE FUNCTION ogc_prevent_market_immutable_row_mutation()`,
+  `DROP TRIGGER IF EXISTS market_search_observations_immutability_trigger ON market_search_observations`,
+  `CREATE TRIGGER market_search_observations_immutability_trigger
+   BEFORE UPDATE OR DELETE ON market_search_observations
+   FOR EACH ROW EXECUTE FUNCTION ogc_prevent_market_immutable_row_mutation()`,
+  `CREATE OR REPLACE FUNCTION ogc_preserve_market_attempt_identity()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP = 'DELETE' THEN
+       RAISE EXCEPTION 'A market search attempt cannot be deleted.';
+     END IF;
+     IF (NEW.id, NEW.snapshot_id, NEW.query_id, NEW.authority_version, NEW.attempt_number,
+         NEW.idempotency_reference, NEW.started_at)
+        IS DISTINCT FROM
+        (OLD.id, OLD.snapshot_id, OLD.query_id, OLD.authority_version, OLD.attempt_number,
+         OLD.idempotency_reference, OLD.started_at) THEN
+       RAISE EXCEPTION 'A market search attempt cannot be reassigned.';
+     END IF;
+     IF NEW IS DISTINCT FROM OLD AND EXISTS (
+       SELECT 1 FROM market_snapshot_questions snapshot
+       WHERE snapshot.id = OLD.snapshot_id AND snapshot.status = 'completed'
+     ) THEN
+       RAISE EXCEPTION 'A completed market snapshot attempt ledger is immutable.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_search_attempts_identity_trigger ON market_search_attempts`,
+  `CREATE TRIGGER market_search_attempts_identity_trigger
+   BEFORE UPDATE OR DELETE ON market_search_attempts
+   FOR EACH ROW EXECUTE FUNCTION ogc_preserve_market_attempt_identity()`,
+  `CREATE OR REPLACE FUNCTION ogc_preserve_market_source_identity()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP = 'DELETE' THEN
+       RAISE EXCEPTION 'Market source evidence cannot be deleted; expire retained content instead.';
+     END IF;
+     IF (NEW.id, NEW.snapshot_id, NEW.observation_id, NEW.canonical_url,
+         NEW.registrable_domain, NEW.source_category, NEW.evidence_family_identity,
+         NEW.retrieved_at, NEW.created_at)
+        IS DISTINCT FROM
+        (OLD.id, OLD.snapshot_id, OLD.observation_id, OLD.canonical_url,
+         OLD.registrable_domain, OLD.source_category, OLD.evidence_family_identity,
+         OLD.retrieved_at, OLD.created_at) THEN
+       RAISE EXCEPTION 'Market source evidence cannot be reassigned.';
+     END IF;
+     IF NEW IS DISTINCT FROM OLD AND NOT (
+       OLD.retrieval_state = 'available'
+       AND NEW.retrieval_state = 'expired'
+       AND NEW.excerpt IS NULL
+       AND (to_jsonb(NEW) - 'retrieval_state' - 'excerpt') =
+           (to_jsonb(OLD) - 'retrieval_state' - 'excerpt')
+     ) THEN
+       RAISE EXCEPTION 'Market source evidence is append-only; only retained text may expire.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_source_evidence_identity_trigger ON market_source_evidence`,
+  `CREATE TRIGGER market_source_evidence_identity_trigger
+   BEFORE UPDATE OR DELETE ON market_source_evidence
+   FOR EACH ROW EXECUTE FUNCTION ogc_preserve_market_source_identity()`
+] as const;
+
+export const DATABASE_MIGRATIONS = [
+  ...V9_DATABASE_MIGRATIONS,
+  ...V10_DATABASE_MIGRATIONS
 ] as const;
