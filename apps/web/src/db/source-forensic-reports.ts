@@ -13,7 +13,7 @@ import type { ReportSourceForensicsRow } from "./schema";
 
 export async function saveSourceForensicReport(input: unknown): Promise<RecommendationForensicReportV2> {
   const report = parseRecommendationForensicReportV2(input);
-  const row = toRow(report);
+  const row = prepareSourceForensicReportRow(report);
   if (isMemoryPersistence()) {
     if (!memoryGetReport(report.reportId)) throw new Error("The source-forensics report owner does not exist.");
     const job = memoryGetScanJob(report.jobId);
@@ -68,7 +68,7 @@ async function readOne(column: "job_id" | "report_id", value: string): Promise<R
   }
   if (!row) return null;
   const report = parseRecommendationForensicReportV2(row.payload);
-  assertImmutable(row, toRow(report));
+  assertImmutable(row, prepareSourceForensicReportRow(report));
   return report;
 }
 
@@ -79,7 +79,7 @@ function assertV2Job(job: { reportId: string; productContract: string; fulfillme
   }
 }
 
-function toRow(report: RecommendationForensicReportV2): ReportSourceForensicsRow {
+export function prepareSourceForensicReportRow(report: RecommendationForensicReportV2): ReportSourceForensicsRow {
   const payload = structuredClone(report);
   return {
     id: hash([report.reportId, report.jobId, "recommendation-forensic-v2"]), reportId: report.reportId, jobId: report.jobId,

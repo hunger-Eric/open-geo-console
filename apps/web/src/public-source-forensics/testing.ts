@@ -19,16 +19,16 @@ export function createTestSourceForensicReport(identity: { reportId?: string; jo
     generatedAt: "2030-01-02T00:00:00.000Z", evidenceCutoffAt: "2030-01-02T00:00:00.000Z", questions, fanouts,
     authority: { authorityId: "authority-v2", environment: "test", surface, active: true, certifiedAt: "2030-01-01T00:00:00.000Z",
       evidenceReference: "fixture://review", supportedLocales: [surface.locale], supportedRegions: [surface.region] },
-    snapshotRefs: queries.map(({ fanout, query }, index) => ({ snapshotId: `snapshot-${index}`, questionId: fanout.questionId,
-      queryVariantId: query.id, observationId: `observation-${index}`, freshness: "fresh", observedAt: "2030-01-01T00:00:00.000Z", collectedForThisRun: index === 0 })),
+    snapshotRefs: fanouts.map((fanout, index) => ({ snapshotId: `snapshot-${index}`, questionId: fanout.questionId,
+      queryVariantIds: fanout.queries.map(({ id }) => id), observationIds: [`observation-${index}`], freshness: "fresh", observedAt: "2030-01-01T00:00:00.000Z", collectedForThisRun: index === 0 })),
     coverage: { status: "complete", completedQueryCount: queries.length, expectedQueryCount: queries.length,
       observedResultCount: fixture.observations.reduce((sum, item) => sum + item.results.length, 0), surfaceDomainCount: 8, reasons: [] },
-    sourceGraph: graph, websiteFoundationAppendix: website(), commercialOutcome: "completed",
+    sourceGraph: graph, websiteFoundationAppendix: createTestWebsiteFoundation(), commercialOutcome: "completed",
     cost: { searchCostMicros: 10, retrievalCostMicros: 20, synthesisCostMicros: 0, artifactCostMicros: 5,
       deliveryCostMicros: 5, allocatedSharedCostMicros: 0, avoidedCostMicros: 0, priceMicros: 100, refundMicros: 0 } });
 }
 
-function website(): AiWebsiteReportV1 {
+export function createTestWebsiteFoundation(): AiWebsiteReportV1 {
   const evidence = [{ url: "https://customer-logistics.example/", quote: "客户企业提供跨境货运服务。" }];
   return { version: AI_WEBSITE_REPORT_VERSION, tier: "deep", targetUrl: "https://customer-logistics.example/",
     organizationProfile: { organizationName: "客户企业", brandNames: ["客户企业"], summary: "跨境货运。", businessModel: "服务",

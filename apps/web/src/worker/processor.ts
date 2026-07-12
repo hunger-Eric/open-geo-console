@@ -20,6 +20,7 @@ import type { RobotsPolicy } from "@open-geo-console/site-crawler";
 import { createHash } from "node:crypto";
 import { checkpointScanJob, failScanJob, isBillableCoverage, terminalizeScanJob } from "@/db/jobs";
 import { recordPaidJobOutcome } from "@/db/commercial-refunds";
+import { terminalizePaidPublicSourceReport } from "@/db/public-source-commerce";
 import {
   completeGeoReportTechnical,
   failGeoReportTechnical,
@@ -43,6 +44,8 @@ import {
   runRecommendationForensicsPipeline
 } from "./recommendation-forensics";
 import { createProductionRecommendationDependencies } from "@/recommendation-forensics/production-runtime";
+import { createProductionPublicSourceForensicsDependencies } from "@/public-source-forensics/production-runtime";
+import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
 import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-runtime";
 import {
   calculateEffectiveCoverage,
@@ -70,6 +73,7 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
   contractVersion?: 1 | 2;
   websiteFoundation?: { completed: boolean; synthesisInputHash?: string };
   recommendationForensics?: { runId?: string; questionsGenerated?: boolean; reportSaved?: boolean };
+  publicSourceForensics?: PublicSourcePipelineCheckpoint;
   discoverySnapshot?: DiscoverySnapshot;
   pageAnalysisContentHashes?: Record<string, string>;
   aiEnabled?: boolean;
@@ -86,13 +90,10 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
   let checkpoint = normalizeCheckpoint(job.checkpoint);
   try {
     const fulfillmentTarget = resolveRecommendationFulfillmentTarget(job);
-    if (fulfillmentTarget === "recommendation_v2") {
-      throw new RecommendationRuntimeUnavailableError("Public-search source-forensics fulfillment is not installed.");
-    }
     await purgeExpiredCrawlContent();
     let storedReport = await getGeoReport(job.reportId);
     if (!storedReport) throw new Error("The source technical report no longer exists.");
-    if (job.productContract === "recommendation_forensics_v1" && checkpoint.contractVersion === 2 &&
+    if (fulfillmentTarget !== "legacy" && job.productContract === "recommendation_forensics_v1" && checkpoint.contractVersion === 2 &&
         checkpoint.websiteFoundation?.completed) {
       const existingFoundation = await getAiReport(job.reportId, "deep", job.productContract);
       const canonicalTarget = resolveRecommendationFoundationTarget(checkpoint, existingFoundation, storedReport.url);
@@ -100,7 +101,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
         await finalizeRecommendationJob({
           job, workerId, checkpoint, websiteFoundation: existingFoundation.payload,
           targetUrl: canonicalTarget,
-          coverage: { plannedPages: job.plannedPages, successfulPages: job.successfulPages, failedPages: job.failedPages }
+          coverage: { plannedPages: job.plannedPages, successfulPages: job.successfulPages, failedPages: job.failedPages },
+          fulfillmentTarget
         });
         return;
       }
@@ -324,7 +326,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     }
     await persistAiReport(job, reportToPersist, crawl.pages, technicalReport);
 
-    if (fulfillmentTarget === "recommendation_v1") {
+    if (fulfillmentTarget !== "legacy") {
       checkpoint = {
         ...checkpoint,
         contractVersion: 2,
@@ -337,7 +339,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       });
       await finalizeRecommendationJob({
         job, workerId, checkpoint, websiteFoundation: reportToPersist, targetUrl: discovery.targetUrl,
-        coverage: {
+        fulfillmentTarget, coverage: {
           plannedPages: effectiveCoverage.effectivePlannedPages,
           successfulPages: effectiveCoverage.analyzedPages,
           failedPages: failureCount(checkpoint)
@@ -431,7 +433,20 @@ async function finalizeRecommendationJob(input: {
   websiteFoundation: AiWebsiteReportV1;
   targetUrl: string;
   coverage: { plannedPages: number; successfulPages: number; failedPages: number };
+  fulfillmentTarget: "recommendation_v1" | "recommendation_v2";
 }): Promise<void> {
+  if (input.fulfillmentTarget === "recommendation_v2") {
+    const dependencies = await createProductionPublicSourceForensicsDependencies();
+    if (!dependencies) throw new PublicSourceAuthorityUnavailableError("Public-source forensics authority is not installed.");
+    const result = await runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
+      locale: input.websiteFoundation.provenance.locale, region: process.env.OGC_PUBLIC_SEARCH_REGION?.trim() || "CN",
+      targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies });
+    const checkpoint = { ...input.checkpoint, recommendationForensics: { questionsGenerated: true, reportSaved: true }, publicSourceForensics: result.checkpoint };
+    await saveStageCheckpoint(input.job, input.workerId, "synthesizing", 99, checkpoint);
+    await terminalizePaidPublicSourceReport({ report: result.report, workerId: input.workerId, checkpointIdentityHash: result.checkpoint.identityHash,
+      coverage: input.coverage, snapshotRefs: result.commercialSnapshotRefs });
+    return;
+  }
   const dependencies = await createProductionRecommendationDependencies();
   if (!dependencies) throw new RecommendationRuntimeUnavailableError("Recommendation-forensics runtime is not installed.");
   const result = await runRecommendationForensicsPipeline({

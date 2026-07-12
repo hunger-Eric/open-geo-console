@@ -17,7 +17,7 @@ export const RECOMMENDATION_FORENSIC_REPORT_V2_VERSION = 2 as const;
 export const PUBLIC_SEARCH_SOURCE_FORENSICS_METHODOLOGY = "public_search_source_forensics_v1" as const;
 
 export interface MarketSnapshotReferenceContract {
-  snapshotId: string; questionId: string; queryVariantId: string; observationId: string;
+  snapshotId: string; questionId: string; queryVariantIds: string[]; observationIds: string[];
   freshness: "fresh" | "stale" | "expired"; observedAt: string; collectedForThisRun: boolean;
 }
 export interface V2EvidenceBoundSection extends EvidenceBoundV2Claim { id: string; title: string; }
@@ -71,11 +71,13 @@ export function parseRecommendationForensicReportV2(value: unknown): Recommendat
   }
   const snapshotRefs = array(report.snapshotRefs, "$.snapshotRefs").map(parseSnapshotRef);
   const queryIds = new Set(fanouts.flatMap(({ queries }) => queries.map(({ id }) => id)));
-  if (snapshotRefs.length !== queryIds.size || snapshotRefs.some((ref) => !questionIds.has(ref.questionId) || !queryIds.has(ref.queryVariantId))) {
-    fail("$.snapshotRefs", "Every fanout query requires one bound snapshot reference.");
+  const referencedQueryIds = snapshotRefs.flatMap(({ queryVariantIds }) => queryVariantIds);
+  if (snapshotRefs.length !== questionIds.size || snapshotRefs.some((ref) => !questionIds.has(ref.questionId)) ||
+      referencedQueryIds.length !== queryIds.size || referencedQueryIds.some((id) => !queryIds.has(id))) {
+    fail("$.snapshotRefs", "Every question and fanout query requires one bound market snapshot reference.");
   }
   if (new Set(snapshotRefs.map(({ snapshotId }) => snapshotId)).size !== snapshotRefs.length ||
-      new Set(snapshotRefs.map(({ queryVariantId }) => queryVariantId)).size !== snapshotRefs.length) {
+      new Set(snapshotRefs.map(({ questionId }) => questionId)).size !== snapshotRefs.length || new Set(referencedQueryIds).size !== referencedQueryIds.length) {
     fail("$.snapshotRefs", "Snapshot and query references must be unique.");
   }
   const graph = object(report.sourceGraph, "$.sourceGraph") as unknown as PublicSourceEvidenceGraph;
@@ -108,7 +110,7 @@ export function parseRecommendationForensicReportV2(value: unknown): Recommendat
   return value as RecommendationForensicReportV2;
 }
 
-function parseSnapshotRef(value: unknown): MarketSnapshotReferenceContract { const v=object(value,"snapshotRef"); return { snapshotId:text(v.snapshotId,"snapshotRef.snapshotId"), questionId:text(v.questionId,"snapshotRef.questionId"), queryVariantId:text(v.queryVariantId,"snapshotRef.queryVariantId"), observationId:text(v.observationId,"snapshotRef.observationId"), freshness: oneOf(v.freshness,["fresh","stale","expired"],"snapshotRef.freshness"), observedAt:timestamp(v.observedAt,"snapshotRef.observedAt"), collectedForThisRun:boolean(v.collectedForThisRun,"snapshotRef.collectedForThisRun") }; }
+function parseSnapshotRef(value: unknown): MarketSnapshotReferenceContract { const v=object(value,"snapshotRef"); return { snapshotId:text(v.snapshotId,"snapshotRef.snapshotId"), questionId:text(v.questionId,"snapshotRef.questionId"), queryVariantIds:stringArray(v.queryVariantIds,"snapshotRef.queryVariantIds"), observationIds:stringArray(v.observationIds,"snapshotRef.observationIds"), freshness: oneOf(v.freshness,["fresh","stale","expired"],"snapshotRef.freshness"), observedAt:timestamp(v.observedAt,"snapshotRef.observedAt"), collectedForThisRun:boolean(v.collectedForThisRun,"snapshotRef.collectedForThisRun") }; }
 function parseSection(value: unknown,path:string): V2EvidenceBoundSection { const v=object(value,path); return { id:text(v.id,`${path}.id`), title:text(v.title,`${path}.title`), text:text(v.text,`${path}.text`), evidenceIds:stringArray(v.evidenceIds,`${path}.evidenceIds`), websiteFindingIds:stringArray(v.websiteFindingIds,`${path}.websiteFindingIds`) }; }
 function parseTask(value: unknown,index:number): V2VendorTask { const path=`$.vendorTaskPackage.tasks[${index}]`, v=object(value,path), base=parseSection(value,path); return { ...base, vendor:oneOf(v.vendor,["website","content","seo","communications","cross-functional"],`${path}.vendor`), actions:stringArray(v.actions,`${path}.actions`), acceptanceCriteria:stringArray(v.acceptanceCriteria,`${path}.acceptanceCriteria`), retestQuestionIds:stringArray(v.retestQuestionIds,`${path}.retestQuestionIds`) }; }
 function parseCoverage(value: unknown, expected:number){ const v=object(value,"$.coverage"); oneOf(v.status,["complete","partial","insufficient"],"$.coverage.status"); for(const k of ["completedQueryCount","expectedQueryCount","observedResultCount","surfaceDomainCount"]) nonnegative(v[k],`$.coverage.${k}`); if(v.expectedQueryCount!==expected) fail("$.coverage.expectedQueryCount","Coverage denominator must equal canonical question count."); stringArray(v.reasons,"$.coverage.reasons"); }
