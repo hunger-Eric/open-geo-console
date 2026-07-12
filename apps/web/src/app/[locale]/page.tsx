@@ -1,12 +1,22 @@
 import { FileSearch, Upload } from "lucide-react";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ScannerForm } from "@/components/scanner-form";
-import { getDictionary, isLocale, localizePath, type Locale } from "@/i18n";
+import { getDictionary, getLocaleAlternates, isLocale, localizePath, type Locale } from "@/i18n";
 import { scannerCapabilities } from "@/product/config";
 import { isProtectedStagingPreview } from "@/security/deployment-policy";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  return isLocale(locale) ? { alternates: getLocaleAlternates(locale, "/") } : {};
+}
 
 export default async function HomePage({
   params

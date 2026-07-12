@@ -10,7 +10,7 @@ The next product direction is a zero-configuration AI recommendation forensic re
 
 ## Current Architecture
 
-- `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point.
+- `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point. Chinese is the canonical unprefixed interface (`/`, `/reports/...`); English remains explicit under `/en`, and legacy `/zh/...` URLs permanently redirect to their unprefixed equivalents.
 - `packages/geo-auditor` owns deterministic technical evidence and the reproducible GEO score.
 - `packages/site-crawler` owns URL/SSRF safety, registrable site identity, robots/sitemap/link discovery, HTML extraction, template clustering and representative-page selection.
 - `packages/ai-report-engine` owns OpenAI-compatible transport, page planning, batch analysis, `AiWebsiteReportV1`, synthesis and evidence verification.
@@ -37,6 +37,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Cloudflare Queue push/pull adapters, notification-only outbox reconciliation, worker presence, recorded batch drains, Windows Task Scheduler scripts and Netlify monorepo configuration.
 - Docker Desktop persistent PostgreSQL polling is active for staging free/deep and production free/deep, with `restart: unless-stopped`, graceful Worker shutdown, ACL-restricted ignored runtime env files, and a five-minute production commerce loop. A fresh staging `shun-express.com` report completed from 0% to 100% in one attempt after automatic claim, proving container DoH, crawl, model, and persistence behavior. Production deep uses the independent private `open-geo-console-production-evidence` Blob store in `sin1`; authenticated container put/get/delete passed and anonymous access returned `403`.
 - Product-level status, Key unlock, AI analysis, technical, issues, bot evidence and print/PDF report surfaces in English and Chinese; checkpoint retry is no longer delegated to users.
+- Public language routing now treats Chinese as the default without a URL prefix, keeps English under `/en`, and permanently redirects legacy `/zh` links while preserving path and query. Shared link helpers, language switching, canonical/alternate metadata and document `lang` values follow the same contract; stored report generation locale remains immutable.
 - Scan submission performs only validation, Turnstile verification, rate/reuse checks, and an atomic PostgreSQL admission transaction. It returns a stable report UUID immediately; the Worker alone crawls the homepage and persists the technical payload. Pending report routes render a real workspace with queue/stage copy and skeleton content instead of holding the homepage button open.
 - Turnstile uses explicit `interaction-only` appearance with `execute` execution. Scanner and checkout buttons become actionable from their own form data, then request a token on click; verified server-side tokens remain mandatory and the widget does not reserve blank space before interaction.
 - Legacy SQLite import preserving report UUIDs and sanitized Bot Evidence.

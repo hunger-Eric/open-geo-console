@@ -106,6 +106,10 @@ npm run db:audit
 
 Protected staging uses a separate marked PostgreSQL database, independent provider credentials, Vercel Preview Authentication, a staging-only limit of at most 100 distinct sites per rolling 24 hours, and explicit staging Worker commands. Production always remains at two sites and cannot be changed by staging variables or request input. See [Protected Staging and Production Operations](docs/PROTECTED-STAGING-OPERATIONS.md).
 
+## Public language URLs
+
+Chinese is the default interface and uses unprefixed canonical URLs such as `/`, `/logs`, and `/reports/:id`. English uses `/en`, `/en/logs`, and `/en/reports/:id`. Legacy `/zh/...` links permanently redirect to the equivalent unprefixed path. Interface routing never changes a report's persisted generation language.
+
 ## API and Reports
 
 - `POST /api/scan` creates or reuses a free report job.

@@ -1,15 +1,27 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ReportView, type ReportWorkspaceSection } from "@/components/report-view";
 import { PendingReportView } from "@/components/pending-report-view";
 import { StoredReportFallback } from "@/components/stored-report-fallback";
 import { getBotEvidence } from "@/db/bot-evidence";
 import { getGeoReport } from "@/db/reports";
-import { getDictionary, isLocale, type Locale } from "@/i18n";
+import { getDictionary, getLocaleAlternates, isLocale, type Locale } from "@/i18n";
 import { getVisibleReportBundle } from "@/server/visible-ai-report";
 
 const sections = ["analysis", "issues", "bots", "technical", "print"] as const;
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params
+}: {
+  params: Promise<{ id: string; locale: string; section: string }>;
+}): Promise<Metadata> {
+  const { id, locale, section } = await params;
+  return isLocale(locale)
+    ? { alternates: getLocaleAlternates(locale, `/reports/${id}/${section}`) }
+    : {};
+}
 
 export default async function ReportWorkspaceSectionPage({
   params,

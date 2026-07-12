@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { languageActions, navItems } from "@/product/config";
-import { localizePath, switchLocalePath, type Dictionary, type Locale } from "@/i18n";
+import { localizePath, stripLocaleFromPathname, switchLocalePath, type Dictionary, type Locale } from "@/i18n";
 
 export function AppHeader({
   locale,
@@ -13,6 +13,7 @@ export function AppHeader({
   dictionary: Dictionary;
 }) {
   const pathname = usePathname();
+  const logicalPathname = stripLocaleFromPathname(pathname).pathname;
 
   return (
     <header className="border-b border-[var(--border)] bg-white print:hidden">
@@ -33,7 +34,7 @@ export function AppHeader({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:justify-end">
           <nav className="flex items-center gap-2 text-sm text-[var(--muted)]">
             {navItems.map((item) => {
-              const active = !item.external && (item.href === "/" ? pathname === `/${locale}` : pathname.includes(item.href));
+              const active = !item.external && (item.href === "/" ? logicalPathname === "/" : logicalPathname.includes(item.href));
               return item.external ? (
                 <a
                   key={item.key}

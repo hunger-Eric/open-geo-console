@@ -4,6 +4,7 @@ import { formatDateTime, formatNumber, formatPercent } from "./format";
 import { defaultLocale, isLocale, locales } from "./locales";
 import {
   getLocaleFromPathname,
+  getLocaleAlternates,
   getLocaleRoutingAction,
   stripLocaleFromPathname,
   switchLocale,
@@ -23,7 +24,7 @@ function flattenKeys(value: unknown, prefix = ""): string[] {
 describe("i18n architecture", () => {
   it("recognizes only supported locales", () => {
     expect(locales).toEqual(["en", "zh"]);
-    expect(defaultLocale).toBe("en");
+    expect(defaultLocale).toBe("zh");
     expect(isLocale("en")).toBe(true);
     expect(isLocale("zh")).toBe(true);
     expect(isLocale("de")).toBe(false);
@@ -49,21 +50,41 @@ describe("i18n architecture", () => {
   });
 
   it("preserves path, query, and hash when switching locale", () => {
-    expect(withLocale("zh", "/reports/abc?tab=summary#top")).toBe("/zh/reports/abc?tab=summary#top");
-    expect(switchLocale("/en/logs", "zh")).toBe("/zh/logs");
+    expect(withLocale("zh", "/reports/abc?tab=summary#top")).toBe("/reports/abc?tab=summary#top");
+    expect(withLocale("en", "/reports/abc?tab=summary#top")).toBe("/en/reports/abc?tab=summary#top");
+    expect(switchLocale("/en/logs", "zh")).toBe("/logs");
+    expect(switchLocale("/logs", "en")).toBe("/en/logs");
     expect(withLocale("en", "/api/scan")).toBe("/api/scan");
     expect(withLocale("zh", "https://example.com/report")).toBe("https://example.com/report");
   });
 
   it("defines routing behavior without localizing APIs", () => {
-    expect(getLocaleRoutingAction("/")).toEqual({ kind: "redirect", pathname: "/en" });
-    expect(getLocaleRoutingAction("/api/scan")).toEqual({ kind: "next" });
-    expect(getLocaleRoutingAction("/_next/static/chunk.js")).toEqual({ kind: "next" });
-    expect(getLocaleRoutingAction("/zh/reports/abc")).toEqual({
+    expect(getLocaleRoutingAction("/")).toEqual({ kind: "rewrite", locale: "zh", pathname: "/" });
+    expect(getLocaleRoutingAction("/reports/abc")).toEqual({
       kind: "rewrite",
       locale: "zh",
       pathname: "/reports/abc"
     });
+    expect(getLocaleRoutingAction("/api/scan")).toEqual({ kind: "next" });
+    expect(getLocaleRoutingAction("/_next/static/chunk.js")).toEqual({ kind: "next" });
+    expect(getLocaleRoutingAction("/reports/abc/report.html")).toEqual({ kind: "next" });
+    expect(getLocaleRoutingAction("/zh/reports/abc")).toEqual({
+      kind: "redirect",
+      pathname: "/reports/abc"
+    });
+    expect(getLocaleRoutingAction("/en/reports/abc")).toEqual({ kind: "next" });
+  });
+
+  it("generates canonical and alternate URLs from the same logical path", () => {
+    expect(getLocaleAlternates("zh", "/reports/abc")).toEqual({
+      canonical: "/reports/abc",
+      languages: {
+        "zh-CN": "/reports/abc",
+        en: "/en/reports/abc",
+        "x-default": "/reports/abc"
+      }
+    });
+    expect(getLocaleAlternates("en", "/reports/abc").canonical).toBe("/en/reports/abc");
   });
 
   it("formats dates and numbers through locale-aware helpers", () => {

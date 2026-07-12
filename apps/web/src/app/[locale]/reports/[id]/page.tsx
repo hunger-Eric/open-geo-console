@@ -1,13 +1,23 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ReportView } from "@/components/report-view";
 import { PendingReportView } from "@/components/pending-report-view";
 import { StoredReportFallback } from "@/components/stored-report-fallback";
 import { getBotEvidence } from "@/db/bot-evidence";
 import { getGeoReport } from "@/db/reports";
-import { getDictionary, isLocale, type Locale } from "@/i18n";
+import { getDictionary, getLocaleAlternates, isLocale, type Locale } from "@/i18n";
 import { getVisibleReportBundle } from "@/server/visible-ai-report";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params
+}: {
+  params: Promise<{ id: string; locale: string }>;
+}): Promise<Metadata> {
+  const { id, locale } = await params;
+  return isLocale(locale) ? { alternates: getLocaleAlternates(locale, `/reports/${id}`) } : {};
+}
 
 export default async function ReportPage({
   params

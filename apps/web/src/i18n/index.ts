@@ -13,7 +13,9 @@ export { dictionaries, formatDateTime, formatPercent, locales };
 export type { Dictionary, FindingMessage, Locale, SeverityKey, TranslationParams } from "./types";
 export {
   getLocaleFromPathname,
+  getLocaleAlternates,
   getLocaleRoutingAction,
+  INTERFACE_LOCALE_HEADER,
   isLocalizablePathname,
   stripLocaleFromPathname,
   switchLocale,
@@ -30,7 +32,7 @@ export function getDictionary(locale: Locale): Dictionary {
 }
 
 export function normalizeLocale(value: string | undefined): Locale {
-  return isLocale(value) ? value : "en";
+  return isLocale(value) ? value : "zh";
 }
 
 export function localizePath(locale: Locale, path: string): string {

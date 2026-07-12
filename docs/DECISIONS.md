@@ -135,3 +135,9 @@ The provider-neutral contracts and deterministic fixtures may ship before any li
 The workstation deployment uses `FULFILLMENT_MODE=realtime` with `OGC_JOB_QUEUE_PROVIDER=postgres`. A bounded idle poll claims jobs through the existing PostgreSQL lease boundary, keeps Worker presence current, and avoids both locally unavailable Vercel Sensitive Queue credentials and repeated empty batch-run records. Cloudflare Queue remains an optional notification hint for hosted deployments; it never becomes job authority.
 
 Docker Desktop starts staging free/deep, production free/deep, and production commerce with `restart: unless-stopped`. Runtime environment files are generated under ignored `.data`, restricted to the current Windows user, and never copied into the image. Each deep lane remains fail-closed unless its environment has independent private evidence storage, and the workstation being powered off remains an availability boundary.
+
+## 2026-07-12: Chinese is the unprefixed canonical interface
+
+The primary customer audience is Chinese export companies, so Chinese interface URLs use the canonical unprefixed paths (`/`, `/logs`, `/reports/:id/...`). English remains explicit under `/en`. Existing `/zh/...` links permanently redirect to the equivalent unprefixed URL with the query preserved, while API, Next.js asset, public-file, and private `report.html` artifact paths stay outside locale rewriting.
+
+The routing layer changes interface chrome and canonical URLs only. A report's persisted generation locale remains immutable, and authorization continues to live in the report routes rather than in the Next.js proxy.
