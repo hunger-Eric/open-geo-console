@@ -1,5 +1,5 @@
 /* eslint-disable @next/next/no-img-element -- authorized evidence must remain printable from the canonical artifact */
-import type { RecommendationPrivateReportArtifactModel } from "@/report/artifact-model";
+import type { RecommendationPrivateReportArtifactModelV1 } from "@/report/artifact-model";
 
 const labels = {
   en: {
@@ -25,7 +25,7 @@ const labels = {
   }
 } as const;
 
-export function RecommendationReportArtifact({ model }: { model: RecommendationPrivateReportArtifactModel }) {
+export function RecommendationReportArtifact({ model }: { model: RecommendationPrivateReportArtifactModelV1 }) {
   const t = labels[model.locale];
   const report = model.recommendationReport;
   const succeeded = report.answerSnapshotMatrix.cells.filter((cell) => cell.status === "succeeded");
@@ -167,7 +167,7 @@ export function RecommendationReportArtifact({ model }: { model: RecommendationP
 
 function Heading({ number, title }: { number: string; title: string }) { return <div className="section-heading"><span>{number}</span><h2>{title}</h2></div>; }
 function DetailList({ title, values, unknown }: { title: string; values: string[]; unknown: string }) { return <div className="detail-list"><h3>{title}</h3>{values.length ? <ul>{values.map((value) => <li key={value}>{value}</li>)}</ul> : <p>{unknown}</p>}</div>; }
-function RoadmapColumn({ title, items }: { title: string; items: RecommendationPrivateReportArtifactModel["recommendationReport"]["websiteFoundationAppendix"]["roadmap"]["immediate"] }) { return <div className="roadmap-column"><h3>{title}</h3>{items.map((item) => <article key={item.title}><h4>{item.title}</h4><p>{item.rationale}</p><ul>{item.actions.map((action) => <li key={action}>{action}</li>)}</ul></article>)}</div>; }
+function RoadmapColumn({ title, items }: { title: string; items: RecommendationPrivateReportArtifactModelV1["recommendationReport"]["websiteFoundationAppendix"]["roadmap"]["immediate"] }) { return <div className="roadmap-column"><h3>{title}</h3>{items.map((item) => <article key={item.title}><h4>{item.title}</h4><p>{item.rationale}</p><ul>{item.actions.map((action) => <li key={action}>{action}</li>)}</ul></article>)}</div>; }
 function formatDate(value: string, locale: "en" | "zh") { return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
 function humanize(value: string) { return value.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase()); }
 function mentionText(value: "yes" | "no" | "mixed" | "unknown", locale: "en" | "zh") { return locale === "zh" ? ({ yes: "客户被提及", no: "客户未被提及", mixed: "客户部分被提及", unknown: "客户提及未知" } as const)[value] : ({ yes: "Customer mentioned", no: "Customer not mentioned", mixed: "Customer mention is mixed", unknown: "Customer mention unknown" } as const)[value]; }

@@ -1,10 +1,11 @@
 import "server-only";
-import type { AiWebsiteReportV1, RecommendationForensicReportV1 } from "@open-geo-console/ai-report-engine";
+import type { AiWebsiteReportV1, RecommendationForensicReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import { getAiReport } from "@/db/ai-reports";
 import { listEvidenceAssets } from "@/db/evidence-assets";
 import { getGeoReport } from "@/db/reports";
 import { getRecommendationForensicReportForReport } from "@/db/recommendation-authority";
+import { getSourceForensicReportForReport } from "@/db/source-forensic-reports";
 import type { ReportArtifactScope, ReportEvidenceAssetRow, ReportLocale } from "@/db/schema";
 
 export interface LegacyPrivateReportArtifactModel {
@@ -16,14 +17,29 @@ export interface LegacyPrivateReportArtifactModel {
   evidenceAssets: ReportEvidenceAssetRow[];
 }
 
-export interface RecommendationPrivateReportArtifactModel {
+export interface RecommendationPrivateReportArtifactModelV1 {
   productContract: "recommendation_forensics_v1";
+  reportVersion: 1;
+  fulfillmentMethodology: "answer_engine_recommendation_forensics_v1";
   reportId: string;
   locale: ReportLocale;
   technicalReport: GeoAuditReport;
   recommendationReport: RecommendationForensicReportV1;
   evidenceAssets: ReportEvidenceAssetRow[];
 }
+
+export interface RecommendationPrivateReportArtifactModelV2 {
+  productContract: "recommendation_forensics_v1";
+  reportVersion: 2;
+  fulfillmentMethodology: "public_search_source_forensics_v1";
+  reportId: string;
+  locale: ReportLocale;
+  technicalReport: GeoAuditReport;
+  recommendationReport: RecommendationForensicReportV2;
+  evidenceAssets: ReportEvidenceAssetRow[];
+}
+
+export type RecommendationPrivateReportArtifactModel = RecommendationPrivateReportArtifactModelV1 | RecommendationPrivateReportArtifactModelV2;
 
 export type PrivateReportArtifactModel = LegacyPrivateReportArtifactModel | RecommendationPrivateReportArtifactModel;
 
@@ -32,23 +48,25 @@ export async function loadPrivateReportArtifact(
   productContract: ReportArtifactScope = "legacy_website_audit_v1"
 ): Promise<PrivateReportArtifactModel | null> {
   if (productContract === "recommendation_forensics_v1") {
-    const [report, recommendation, foundation] = await Promise.all([
+    const [report, v1, v2, foundation] = await Promise.all([
       getGeoReport(reportId),
       getRecommendationForensicReportForReport(reportId),
+      getSourceForensicReportForReport(reportId),
       getAiReport(reportId, "deep", "recommendation_forensics_v1")
     ]);
-    if (!report?.reportLocale || !recommendation || !foundation?.technicalPayload ||
-        foundation.jobId !== recommendation.jobId || recommendation.provenanceAndLimitations.locale !== report.reportLocale) {
+    if (!report?.reportLocale || !foundation?.technicalPayload || (v1 ? 1 : 0) + (v2 ? 1 : 0) !== 1) {
       return null;
     }
-    return {
-      productContract,
-      reportId,
-      locale: report.reportLocale,
-      technicalReport: foundation.technicalPayload,
-      recommendationReport: recommendation,
-      evidenceAssets: await listEvidenceAssets(reportId, recommendation.jobId)
-    };
+    if (v2) {
+      if (foundation.jobId !== v2.jobId || !localeMatches(v2.locale, report.reportLocale)) return null;
+      return { productContract, reportVersion: 2, fulfillmentMethodology: "public_search_source_forensics_v1", reportId,
+        locale: report.reportLocale, technicalReport: foundation.technicalPayload, recommendationReport: v2,
+        evidenceAssets: await listEvidenceAssets(reportId, v2.jobId) };
+    }
+    if (foundation.jobId !== v1!.jobId || !localeMatches(v1!.provenanceAndLimitations.locale, report.reportLocale)) return null;
+    return { productContract, reportVersion: 1, fulfillmentMethodology: "answer_engine_recommendation_forensics_v1", reportId,
+      locale: report.reportLocale, technicalReport: foundation.technicalPayload, recommendationReport: v1!,
+      evidenceAssets: await listEvidenceAssets(reportId, v1!.jobId) };
   }
   const [report, deep] = await Promise.all([
     getGeoReport(reportId),
@@ -63,4 +81,8 @@ export async function loadPrivateReportArtifact(
     aiReport: deep.payload,
     evidenceAssets: await listEvidenceAssets(reportId, deep.jobId)
   };
+}
+
+function localeMatches(generationLocale: string, routeLocale: ReportLocale): boolean {
+  return generationLocale.toLowerCase().split(/[-_]/, 1)[0] === routeLocale;
 }

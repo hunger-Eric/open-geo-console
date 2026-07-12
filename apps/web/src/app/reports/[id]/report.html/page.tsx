@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { ReportArtifact } from "@/components/report-artifact";
 import { RecommendationReportArtifact } from "@/components/recommendation-report-artifact";
+import { PublicSourceForensicsReportArtifact } from "@/components/public-source-forensics-report-artifact";
 import { loadPrivateReportArtifact } from "@/report/artifact-model";
 import { ARTIFACT_CSS } from "@/report/artifact-styles";
 import { reportAccessCookieName, tokenGrantsReportAccess } from "@/server/report-access";
@@ -25,7 +26,7 @@ export default async function PrivateHtmlReportPage({ params }: { params: Promis
     <>
       <style dangerouslySetInnerHTML={{ __html: ARTIFACT_CSS }} />
       {model.productContract === "recommendation_forensics_v1"
-        ? <RecommendationReportArtifact model={model} />
+        ? model.reportVersion===2?<PublicSourceForensicsReportArtifact model={model}/>:<RecommendationReportArtifact model={model}/>
         : <ReportArtifact model={model} />}
     </>
   );

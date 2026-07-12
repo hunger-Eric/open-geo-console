@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
-import type { RecommendationPrivateReportArtifactModel } from "@/report/artifact-model";
+import type { RecommendationPrivateReportArtifactModelV1 } from "@/report/artifact-model";
 import { ARTIFACT_CSS } from "@/report/artifact-styles";
 import { RecommendationReportArtifact } from "./recommendation-report-artifact";
 
@@ -35,10 +35,10 @@ describe("RecommendationReportArtifact", () => {
   });
 });
 
-function model(): RecommendationPrivateReportArtifactModel {
+function model(): RecommendationPrivateReportArtifactModelV1 {
   return {
-    productContract: "recommendation_forensics_v1", reportId: "report-1", locale: "en",
-    technicalReport: { url: "https://customer.example.com", scannedAt: "2030-01-01T00:00:00Z", score: 65, pages: [{ url: "https://customer.example.com", status: 200, h1: ["Customer"], h2: [], hasOpenGraph: true, hasJsonLd: false, readableTextLength: 100, internalLinks: 2 }], findings: [{ id: "technical-1", severity: "info", title: "Technical finding", description: "Technical evidence.", recommendation: "Review the evidence." }], recommendations: [], machineReadableAssets: { robotsTxt: { url: "https://customer.example.com/robots.txt", present: true, summary: "Available" }, sitemapXml: { url: "https://customer.example.com/sitemap.xml", present: true, summary: "Available" }, llmsTxt: { url: "https://customer.example.com/llms.txt", present: false, summary: "Unavailable" } } } as RecommendationPrivateReportArtifactModel["technicalReport"],
+    productContract: "recommendation_forensics_v1", reportVersion: 1, fulfillmentMethodology: "answer_engine_recommendation_forensics_v1", reportId: "report-1", locale: "en",
+    technicalReport: { url: "https://customer.example.com", scannedAt: "2030-01-01T00:00:00Z", score: 65, pages: [{ url: "https://customer.example.com", status: 200, h1: ["Customer"], h2: [], hasOpenGraph: true, hasJsonLd: false, readableTextLength: 100, internalLinks: 2 }], findings: [{ id: "technical-1", severity: "info", title: "Technical finding", description: "Technical evidence.", recommendation: "Review the evidence." }], recommendations: [], machineReadableAssets: { robotsTxt: { url: "https://customer.example.com/robots.txt", present: true, summary: "Available" }, sitemapXml: { url: "https://customer.example.com/sitemap.xml", present: true, summary: "Available" }, llmsTxt: { url: "https://customer.example.com/llms.txt", present: false, summary: "Unavailable" } } } as RecommendationPrivateReportArtifactModelV1["technicalReport"],
     evidenceAssets: [],
     recommendationReport: {
       reportId: "report-1", jobId: "job-1", targetUrl: "https://customer.example.com",
@@ -53,10 +53,10 @@ function model(): RecommendationPrivateReportArtifactModel {
       evidenceGrades: [{ evidenceId: "ev-1", citationSourceId: "source-1", cellId: "cell-1", grade: "D" }],
       sourceCategoryBreakdown: [{ category: "earned_editorial", sourceCount: 1, citationSourceIds: ["source-1"] }], customerVsCompetitorGaps: [],
       homepageVsFullSiteBlindSpot: { homepageSummary: "Homepage.", fullSiteSummary: "Full site.", omissions: [], contradictions: [], confidenceChanges: [], limitations: [] },
-      executivePriorities: [1,2,3].map((order) => ({ order, title: `Priority ${order}`, rationale: "Evidence backed.", evidenceCellIds: ["cell-1"], websiteFindingIds: [], citationSourceIds: [], gapIds: [] })) as RecommendationPrivateReportArtifactModel["recommendationReport"]["executivePriorities"],
+      executivePriorities: [1,2,3].map((order) => ({ order, title: `Priority ${order}`, rationale: "Evidence backed.", evidenceCellIds: ["cell-1"], websiteFindingIds: [], citationSourceIds: [], gapIds: [] })) as RecommendationPrivateReportArtifactModelV1["recommendationReport"]["executivePriorities"],
       vendorTaskPackage: { version: "vendor-task-v1", tasks: [{ id: "task-1", vendor: "website", title: "Correct facts", rationale: "Observed gap.", actions: ["Align facts."], acceptanceCriteria: ["Facts match."], evidenceCellIds: ["cell-1"], websiteFindingIds: [], citationSourceIds: [], gapIds: ["gap-1"], retestQuestionIds: ["q1"] }] },
-      websiteFoundationAppendix: { organizationProfile: { organizationName: "Customer" }, executiveSummary: { overview: "Foundation summary." }, dimensionScores: [{ dimension: "organizationClarity", score: 70, explanation: "Grounded." }], findings: [], roadmap: { immediate: [{ title: "Immediate roadmap task", rationale: "Observed foundation evidence.", actions: ["Review."], relatedFindingIds: [] }], nextPhase: [], ongoing: [] } } as RecommendationPrivateReportArtifactModel["recommendationReport"]["websiteFoundationAppendix"],
+      websiteFoundationAppendix: { organizationProfile: { organizationName: "Customer" }, executiveSummary: { overview: "Foundation summary." }, dimensionScores: [{ dimension: "organizationClarity", score: 70, explanation: "Grounded." }], findings: [], roadmap: { immediate: [{ title: "Immediate roadmap task", rationale: "Observed foundation evidence.", actions: ["Review."], relatedFindingIds: [] }], nextPhase: [], ongoing: [] } } as RecommendationPrivateReportArtifactModelV1["recommendationReport"]["websiteFoundationAppendix"],
       provenanceAndLimitations: { generatedAt: "2030-01-01T00:00:02Z", locale: "en", region: "global", certificationAuthorityVersion: "cert-v1", certificationCapturedAt: "2030-01-01T00:00:00Z", certificationProvenance: [{ surfaceKey: "engine/search/v1/developer_api/en/global", evidenceReference: "cert-evidence/engine" }], sourceClassificationAuthorityVersion: "source-v1", sourceClassificationCapturedAt: "2030-01-01T00:00:00Z", limitations: ["Unknown stays visible."], methodology: "Observed only." }
-    } as RecommendationPrivateReportArtifactModel["recommendationReport"]
+    } as RecommendationPrivateReportArtifactModelV1["recommendationReport"]
   };
 }

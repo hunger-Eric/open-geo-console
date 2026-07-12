@@ -3,11 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}), { virtual: true });
 
 const mocks = vi.hoisted(() => ({
-  getAiReport: vi.fn(), getGeoReport: vi.fn(), getRecommendation: vi.fn(), listEvidenceAssets: vi.fn()
+  getAiReport: vi.fn(), getGeoReport: vi.fn(), getRecommendation: vi.fn(), getSourceForensic: vi.fn(), listEvidenceAssets: vi.fn()
 }));
 vi.mock("@/db/ai-reports", () => ({ getAiReport: mocks.getAiReport }));
 vi.mock("@/db/reports", () => ({ getGeoReport: mocks.getGeoReport }));
 vi.mock("@/db/recommendation-authority", () => ({ getRecommendationForensicReportForReport: mocks.getRecommendation }));
+vi.mock("@/db/source-forensic-reports", () => ({ getSourceForensicReportForReport: mocks.getSourceForensic }));
 vi.mock("@/db/evidence-assets", () => ({ listEvidenceAssets: mocks.listEvidenceAssets }));
 
 import { loadPrivateReportArtifact } from "./artifact-model";
@@ -17,6 +18,16 @@ describe("private artifact model product isolation", () => {
     vi.clearAllMocks();
     mocks.getGeoReport.mockResolvedValue({ reportLocale: "en" });
     mocks.listEvidenceAssets.mockResolvedValue([]);
+    mocks.getRecommendation.mockResolvedValue(null);
+    mocks.getSourceForensic.mockResolvedValue(null);
+  });
+
+  it("dispatches an exact V2 methodology without exposing a V1 fallback", async () => {
+    mocks.getGeoReport.mockResolvedValue({ reportLocale: "zh" });
+    mocks.getSourceForensic.mockResolvedValue({ version:2, methodology:"public_search_source_forensics_v1", jobId:"v2-job", locale:"zh-CN" });
+    mocks.getAiReport.mockResolvedValue({ jobId:"v2-job", technicalPayload:{url:"https://example.com"} });
+    const result=await loadPrivateReportArtifact("report-1","recommendation_forensics_v1");
+    expect(result).toMatchObject({productContract:"recommendation_forensics_v1",reportVersion:2,fulfillmentMethodology:"public_search_source_forensics_v1"});
   });
 
   it("loads only the legacy foundation for legacy scope", async () => {
