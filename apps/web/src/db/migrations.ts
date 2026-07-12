@@ -554,5 +554,63 @@ export const DATABASE_MIGRATIONS = [
      (retrieval_state = 'available' AND excerpt IS NOT NULL AND excerpt_hash IS NOT NULL AND content_hash IS NOT NULL)
      OR (retrieval_state IN ('inaccessible','not_retrieved') AND excerpt IS NULL AND excerpt_hash IS NULL AND content_hash IS NULL)
      OR (retrieval_state = 'expired' AND excerpt IS NULL)
-   )`
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS answer_snapshot_runs_scope_uidx ON answer_snapshot_runs (id, report_id, job_id)`,
+  `ALTER TABLE answer_snapshot_cells ADD COLUMN IF NOT EXISTS attempt_count integer`,
+  `ALTER TABLE answer_snapshot_cells ADD COLUMN IF NOT EXISTS failure_disposition text`,
+  `ALTER TABLE answer_snapshot_cells DROP CONSTRAINT IF EXISTS answer_snapshot_cells_failure_disposition_check`,
+  `ALTER TABLE answer_snapshot_cells ADD CONSTRAINT answer_snapshot_cells_failure_disposition_check CHECK (failure_disposition IS NULL OR failure_disposition IN ('non_retryable','retry_exhausted'))`,
+  `ALTER TABLE answer_snapshot_cells DROP CONSTRAINT IF EXISTS answer_snapshot_cells_result_check`,
+  `ALTER TABLE answer_snapshot_cells ADD CONSTRAINT answer_snapshot_cells_result_check CHECK (
+    (status = 'succeeded' AND length(btrim(answer_text)) > 0 AND response_hash IS NOT NULL
+      AND recommendation_outcome IS NOT NULL AND error_class IS NULL AND sanitized_error IS NULL
+      AND attempt_count IS NULL AND failure_disposition IS NULL)
+    OR
+    (status = 'failed' AND answer_text IS NULL AND response_hash IS NULL
+      AND recommendation_outcome IS NULL AND error_class IS NOT NULL
+      AND ((attempt_count IS NULL AND failure_disposition IS NULL)
+        OR (attempt_count > 0 AND failure_disposition IS NOT NULL)))
+  )`,
+  `CREATE TABLE IF NOT EXISTS recommendation_certification_authorities (
+    authority_version text PRIMARY KEY CHECK (length(btrim(authority_version)) > 0),
+    captured_at timestamptz NOT NULL,
+    snapshot jsonb NOT NULL,
+    evidence_references jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS source_classification_authorities (
+    authority_version text PRIMARY KEY CHECK (length(btrim(authority_version)) > 0),
+    captured_at timestamptz NOT NULL,
+    snapshot jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS answer_execution_checkpoints (
+    run_id text PRIMARY KEY,
+    report_id text NOT NULL,
+    job_id text NOT NULL,
+    revision integer NOT NULL CHECK (revision >= 0),
+    ledger jsonb NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT answer_execution_checkpoints_run_scope_fkey
+      FOREIGN KEY (run_id, report_id, job_id) REFERENCES answer_snapshot_runs(id, report_id, job_id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS answer_execution_checkpoints_job_idx ON answer_execution_checkpoints (job_id)`,
+  `CREATE TABLE IF NOT EXISTS recommendation_forensic_reports (
+    id text PRIMARY KEY,
+    report_id text NOT NULL,
+    job_id text NOT NULL,
+    report_version integer NOT NULL CHECK (report_version = 1),
+    payload jsonb NOT NULL,
+    certification_authority_version text NOT NULL REFERENCES recommendation_certification_authorities(authority_version) ON DELETE RESTRICT,
+    source_classification_authority_version text NOT NULL REFERENCES source_classification_authorities(authority_version) ON DELETE RESTRICT,
+    content_hash text NOT NULL,
+    is_private boolean NOT NULL DEFAULT true CHECK (is_private = true),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT recommendation_forensic_reports_job_report_fkey
+      FOREIGN KEY (job_id, report_id) REFERENCES scan_jobs(id, report_id) ON DELETE CASCADE,
+    UNIQUE (report_id),
+    UNIQUE (job_id)
+  )`
 ] as const;

@@ -1,5 +1,6 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
-import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
+import type { AiWebsiteReportV1, RecommendationForensicReportV1, SourceClassificationAuthoritySnapshot } from "@open-geo-console/ai-report-engine";
+import type { AnswerExecutionStateLedger, CertificationAuthoritySnapshot } from "@open-geo-console/answer-engine-observer";
 import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
 import type {
   CitationRetrievalState,
@@ -196,6 +197,7 @@ export const answerSnapshotRuns = pgTable(
   (table) => [
     foreignKey({ columns: [table.reportId], foreignColumns: [scanReports.id], name: "answer_snapshot_runs_report_fkey" }).onDelete("cascade"),
     foreignKey({ columns: [table.jobId, table.reportId], foreignColumns: [scanJobs.id, scanJobs.reportId], name: "answer_snapshot_runs_job_report_fkey" }).onDelete("cascade"),
+    uniqueIndex("answer_snapshot_runs_scope_uidx").on(table.id, table.reportId, table.jobId),
     index("answer_snapshot_runs_job_idx").on(table.jobId, table.startedAt),
     index("answer_snapshot_runs_report_idx").on(table.reportId, table.startedAt),
     check("answer_snapshot_runs_locale_check", sql`length(btrim(${table.locale})) > 0`),
@@ -230,6 +232,8 @@ export const answerSnapshotCells = pgTable(
     usage: jsonb("usage").$type<Record<string, unknown>>(),
     errorClass: text("error_class"),
     sanitizedError: text("sanitized_error"),
+    attemptCount: integer("attempt_count"),
+    failureDisposition: text("failure_disposition"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
@@ -245,6 +249,7 @@ export const answerSnapshotCells = pgTable(
     check("answer_snapshot_cells_api_label_check", sql`${table.collectionSurface} <> 'developer_api' OR ${table.consumerApplicationLabel} IS NULL`),
     check("answer_snapshot_cells_error_class_check", sql`${table.errorClass} IS NULL OR ${table.errorClass} IN ('timeout','rate-limit','authentication','unsupported','provider-unavailable','invalid-response','policy-blocked')`),
     check("answer_snapshot_cells_outcome_check", sql`${table.recommendationOutcome} IS NULL OR ${table.recommendationOutcome} IN ('recommendations_present','no_recommendation')`),
+    check("answer_snapshot_cells_failure_disposition_check", sql`${table.failureDisposition} IS NULL OR ${table.failureDisposition} IN ('non_retryable','retry_exhausted')`),
     check("answer_snapshot_cells_result_check", sql`(
       ${table.status} = 'succeeded'
       AND length(btrim(${table.answerText})) > 0
@@ -252,12 +257,16 @@ export const answerSnapshotCells = pgTable(
       AND ${table.recommendationOutcome} IS NOT NULL
       AND ${table.errorClass} IS NULL
       AND ${table.sanitizedError} IS NULL
+      AND ${table.attemptCount} IS NULL
+      AND ${table.failureDisposition} IS NULL
     ) OR (
       ${table.status} = 'failed'
       AND ${table.answerText} IS NULL
       AND ${table.responseHash} IS NULL
       AND ${table.recommendationOutcome} IS NULL
       AND ${table.errorClass} IS NOT NULL
+      AND ((${table.attemptCount} IS NULL AND ${table.failureDisposition} IS NULL)
+        OR (${table.attemptCount} > 0 AND ${table.failureDisposition} IS NOT NULL))
     )`)
   ]
 );
@@ -318,6 +327,75 @@ export const citationSourceEvidence = pgTable(
 );
 
 export type CitationSourceEvidenceRow = typeof citationSourceEvidence.$inferSelect;
+
+export const recommendationCertificationAuthorities = pgTable(
+  "recommendation_certification_authorities",
+  {
+    authorityVersion: text("authority_version").primaryKey(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    snapshot: jsonb("snapshot").$type<CertificationAuthoritySnapshot>().notNull(),
+    evidenceReferences: jsonb("evidence_references").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [check("recommendation_certification_authority_version_check", sql`length(btrim(${table.authorityVersion})) > 0`)]
+);
+export type RecommendationCertificationAuthorityRow = typeof recommendationCertificationAuthorities.$inferSelect;
+
+export const sourceClassificationAuthorities = pgTable(
+  "source_classification_authorities",
+  {
+    authorityVersion: text("authority_version").primaryKey(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    snapshot: jsonb("snapshot").$type<SourceClassificationAuthoritySnapshot>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [check("source_classification_authority_version_check", sql`length(btrim(${table.authorityVersion})) > 0`)]
+);
+export type SourceClassificationAuthorityRow = typeof sourceClassificationAuthorities.$inferSelect;
+
+export const answerExecutionCheckpoints = pgTable(
+  "answer_execution_checkpoints",
+  {
+    runId: text("run_id").primaryKey(),
+    reportId: text("report_id").notNull(),
+    jobId: text("job_id").notNull(),
+    revision: integer("revision").notNull(),
+    ledger: jsonb("ledger").$type<AnswerExecutionStateLedger>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({ columns: [table.runId, table.reportId, table.jobId], foreignColumns: [answerSnapshotRuns.id, answerSnapshotRuns.reportId, answerSnapshotRuns.jobId], name: "answer_execution_checkpoints_run_scope_fkey" }).onDelete("cascade"),
+    index("answer_execution_checkpoints_job_idx").on(table.jobId),
+    check("answer_execution_checkpoints_revision_check", sql`${table.revision} >= 0`)
+  ]
+);
+export type AnswerExecutionCheckpointRow = typeof answerExecutionCheckpoints.$inferSelect;
+
+export const recommendationForensicReports = pgTable(
+  "recommendation_forensic_reports",
+  {
+    id: text("id").primaryKey(),
+    reportId: text("report_id").notNull(),
+    jobId: text("job_id").notNull(),
+    reportVersion: integer("report_version").notNull(),
+    payload: jsonb("payload").$type<RecommendationForensicReportV1>().notNull(),
+    certificationAuthorityVersion: text("certification_authority_version").notNull().references(() => recommendationCertificationAuthorities.authorityVersion, { onDelete: "restrict" }),
+    sourceClassificationAuthorityVersion: text("source_classification_authority_version").notNull().references(() => sourceClassificationAuthorities.authorityVersion, { onDelete: "restrict" }),
+    contentHash: text("content_hash").notNull(),
+    isPrivate: boolean("is_private").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({ columns: [table.jobId, table.reportId], foreignColumns: [scanJobs.id, scanJobs.reportId], name: "recommendation_forensic_reports_job_report_fkey" }).onDelete("cascade"),
+    uniqueIndex("recommendation_forensic_reports_report_uidx").on(table.reportId),
+    uniqueIndex("recommendation_forensic_reports_job_uidx").on(table.jobId),
+    check("recommendation_forensic_reports_version_check", sql`${table.reportVersion} = 1`),
+    check("recommendation_forensic_reports_private_check", sql`${table.isPrivate} = true`)
+  ]
+);
+export type RecommendationForensicReportRow = typeof recommendationForensicReports.$inferSelect;
 
 export const paymentOrders = pgTable(
   "payment_orders",

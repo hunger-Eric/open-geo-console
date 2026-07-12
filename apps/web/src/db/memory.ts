@@ -2,12 +2,16 @@ import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
 import { getDatabasePath } from "./index";
 import type {
   AnswerSnapshotCellRow,
+  AnswerExecutionCheckpointRow,
   AnswerSnapshotRunRow,
   AnswerSnapshotSourceRow,
   CitationSourceEvidenceRow,
+  RecommendationCertificationAuthorityRow,
+  RecommendationForensicReportRow,
   ReportBotEvidenceRow,
   ScanJobRow,
-  ScanReportRow
+  ScanReportRow,
+  SourceClassificationAuthorityRow
 } from "./schema";
 
 interface MemoryStore {
@@ -17,6 +21,10 @@ interface MemoryStore {
   answerSnapshotCells: Map<string, AnswerSnapshotCellRow>;
   answerSnapshotSources: Map<string, AnswerSnapshotSourceRow>;
   citationSourceEvidence: Map<string, CitationSourceEvidenceRow>;
+  answerExecutionCheckpoints: Map<string, AnswerExecutionCheckpointRow>;
+  recommendationCertificationAuthorities: Map<string, RecommendationCertificationAuthorityRow>;
+  sourceClassificationAuthorities: Map<string, SourceClassificationAuthorityRow>;
+  recommendationForensicReports: Map<string, RecommendationForensicReportRow>;
   scanJobs: Map<string, ScanJobRow>;
 }
 
@@ -33,6 +41,10 @@ function currentStore(): MemoryStore {
       answerSnapshotCells: new Map(),
       answerSnapshotSources: new Map(),
       citationSourceEvidence: new Map(),
+      answerExecutionCheckpoints: new Map(),
+      recommendationCertificationAuthorities: new Map(),
+      sourceClassificationAuthorities: new Map(),
+      recommendationForensicReports: new Map(),
       scanJobs: new Map()
     };
     stores.set(key, store);
@@ -54,6 +66,9 @@ export function memoryDeleteReport(id: string): boolean {
   store.botEvidence.delete(id);
   const runIds = [...store.answerSnapshotRuns.values()].filter((run) => run.reportId === id).map((run) => run.id);
   for (const runId of runIds) memoryDeleteAnswerSnapshotRun(runId);
+  for (const row of store.recommendationForensicReports.values()) {
+    if (row.reportId === id) store.recommendationForensicReports.delete(row.id);
+  }
   for (const job of store.scanJobs.values()) {
     if (job.reportId === id) store.scanJobs.delete(job.id);
   }
@@ -84,6 +99,7 @@ export function memoryGetAnswerSnapshotRunsForJob(jobId: string): AnswerSnapshot
 
 export function memoryDeleteAnswerSnapshotRun(id: string): void {
   const store = currentStore();
+  store.answerExecutionCheckpoints.delete(id);
   const cellIds = [...store.answerSnapshotCells.values()].filter((cell) => cell.runId === id).map((cell) => cell.id);
   for (const cellId of cellIds) {
     const sourceIds = [...store.answerSnapshotSources.values()].filter((source) => source.cellId === cellId).map((source) => source.id);
@@ -138,6 +154,46 @@ export function memoryGetCitationSourceEvidenceForSources(sourceIds: string[]): 
 export function memorySaveCitationSourceEvidence(row: CitationSourceEvidenceRow): CitationSourceEvidenceRow {
   currentStore().citationSourceEvidence.set(row.id, row);
   return row;
+}
+
+export function memoryGetAnswerExecutionCheckpoint(runId: string): AnswerExecutionCheckpointRow | null {
+  return currentStore().answerExecutionCheckpoints.get(runId) ?? null;
+}
+
+export function memorySaveAnswerExecutionCheckpoint(row: AnswerExecutionCheckpointRow): AnswerExecutionCheckpointRow {
+  currentStore().answerExecutionCheckpoints.set(row.runId, row);
+  return row;
+}
+
+export function memorySaveRecommendationCertificationAuthority(row: RecommendationCertificationAuthorityRow): RecommendationCertificationAuthorityRow {
+  currentStore().recommendationCertificationAuthorities.set(row.authorityVersion, row);
+  return row;
+}
+
+export function memoryGetRecommendationCertificationAuthority(version: string): RecommendationCertificationAuthorityRow | null {
+  return currentStore().recommendationCertificationAuthorities.get(version) ?? null;
+}
+
+export function memorySaveSourceClassificationAuthority(row: SourceClassificationAuthorityRow): SourceClassificationAuthorityRow {
+  currentStore().sourceClassificationAuthorities.set(row.authorityVersion, row);
+  return row;
+}
+
+export function memoryGetSourceClassificationAuthority(version: string): SourceClassificationAuthorityRow | null {
+  return currentStore().sourceClassificationAuthorities.get(version) ?? null;
+}
+
+export function memorySaveRecommendationForensicReport(row: RecommendationForensicReportRow): RecommendationForensicReportRow {
+  currentStore().recommendationForensicReports.set(row.id, row);
+  return row;
+}
+
+export function memoryGetRecommendationForensicReportForJob(jobId: string): RecommendationForensicReportRow | null {
+  return [...currentStore().recommendationForensicReports.values()].find((row) => row.jobId === jobId) ?? null;
+}
+
+export function memoryGetRecommendationForensicReportForReport(reportId: string): RecommendationForensicReportRow | null {
+  return [...currentStore().recommendationForensicReports.values()].find((row) => row.reportId === reportId) ?? null;
 }
 
 export function memoryExpireCitationSourceContent(now: Date): number {

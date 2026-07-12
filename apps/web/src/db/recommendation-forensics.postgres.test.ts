@@ -10,6 +10,10 @@ import {
   saveAnswerSnapshotSourcesImmutable,
   saveCitationSourceEvidenceImmutable
 } from "./recommendation-forensics";
+import {
+  compareAndSwapAnswerExecutionCheckpoint,
+  getAnswerExecutionCheckpoint
+} from "./recommendation-authority";
 
 const enabled = Boolean(process.env.DATABASE_URL && process.env.OGC_DEPLOYMENT_PROFILE === "staging");
 const describePostgres = enabled ? describe : describe.skip;
@@ -105,8 +109,50 @@ describePostgres("recommendation-forensics PostgreSQL persistence", () => {
     if (stored?.status !== "succeeded") throw new Error("Expected successful fixture cell.");
     expect(stored.sources[0]?.evidence).toMatchObject({ excerpt: null, contentHash: "content-hash", retrievalState: "expired", grade: "A" });
 
+    const executionState = {
+      runId,
+      checkpointRevision: 1,
+      providers: {
+        [surface.providerId]: {
+          requestCount: 1,
+          estimatedCostMicros: 0,
+          cells: { [cell.id]: { attemptCount: 1, transientAttemptCount: 0 } }
+        }
+      }
+    };
+    const checkpointCell = {
+      ...cell,
+      sources: [{ url: "https://editorial.example.org/review", title: "Review", providerOrder: 0, providerMetadata: {} }]
+    };
+    await compareAndSwapAnswerExecutionCheckpoint({ expectedRevision: 0, executionState, cell: checkpointCell });
+    const races = await Promise.allSettled([
+      compareAndSwapAnswerExecutionCheckpoint({ expectedRevision: 1, executionState: { ...executionState, checkpointRevision: 2 } }),
+      compareAndSwapAnswerExecutionCheckpoint({ expectedRevision: 1, executionState: { ...executionState, checkpointRevision: 2 } })
+    ]);
+    expect(races.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    expect((await getAnswerExecutionCheckpoint(runId))?.checkpointRevision).toBe(2);
+    const checkpointChangedAnswer = "Changed after checkpoint";
+    const revisionThree = {
+      runId,
+      checkpointRevision: 3,
+      providers: {
+        [surface.providerId]: {
+          requestCount: 2,
+          estimatedCostMicros: 0,
+          cells: { [cell.id]: { attemptCount: 2, transientAttemptCount: 0 } }
+        }
+      }
+    };
+    await expect(compareAndSwapAnswerExecutionCheckpoint({
+      expectedRevision: 2,
+      executionState: revisionThree,
+      cell: { ...checkpointCell, answerText: checkpointChangedAnswer, responseHash: createHash("sha256").update(checkpointChangedAnswer).digest("hex") }
+    })).rejects.toThrow(/immutability/i);
+    expect((await getAnswerExecutionCheckpoint(runId))?.checkpointRevision).toBe(2);
+
     await getSqlClient()`DELETE FROM scan_reports WHERE id = ${reportId}`;
     expect(await getAnswerSnapshotBundleForJob(jobId)).toBeNull();
+    expect(await getAnswerExecutionCheckpoint(runId)).toBeNull();
   }, 60_000);
 
   it("enforces successful/failed exclusivity at the database boundary", async () => {
@@ -115,5 +161,16 @@ describePostgres("recommendation-forensics PostgreSQL persistence", () => {
       WHERE table_schema = 'public' AND table_name = 'answer_snapshot_cells'
     `;
     expect(constraints.map((row) => row.constraint_name)).toContain("answer_snapshot_cells_result_check");
+    const privateColumns = await getSqlClient()<Array<{ table_name: string; column_name: string }>>`
+      SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name IN (
+        'answer_execution_checkpoints', 'recommendation_certification_authorities',
+        'source_classification_authorities', 'recommendation_forensic_reports'
+      )
+    `;
+    expect(new Set(privateColumns.map(({ table_name }) => table_name))).toEqual(new Set([
+      "answer_execution_checkpoints", "recommendation_certification_authorities",
+      "source_classification_authorities", "recommendation_forensic_reports"
+    ]));
   });
 });

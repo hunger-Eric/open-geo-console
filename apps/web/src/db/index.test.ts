@@ -56,8 +56,8 @@ describe("database deployment marker", () => {
 });
 
 describe("database schema marker", () => {
-  it("uses recommendation-forensics schema version 4", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(4);
+  it("uses recommendation-forensics authority schema version 5", () => {
+    expect(DATABASE_SCHEMA_VERSION).toBe(5);
   });
 
   it("skips DDL bootstrap when the current schema version is present", () => {

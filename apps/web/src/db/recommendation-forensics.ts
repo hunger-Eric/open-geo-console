@@ -138,14 +138,14 @@ export async function saveAnswerSnapshotCellImmutable(input: AnswerSnapshotCell)
           id, run_id, question_id, provider_id, product_id, model_id, collection_surface,
           locale, region, certification_state, consumer_application_label, status, answer_text,
           executed_at, execution_duration_ms, response_hash, recommendation_outcome,
-          provider_request_id, usage, error_class, sanitized_error
+          provider_request_id, usage, error_class, sanitized_error, attempt_count, failure_disposition
         ) VALUES (
           ${row.id}, ${row.runId}, ${row.questionId}, ${row.providerId}, ${row.productId}, ${row.modelId},
           ${row.collectionSurface}, ${row.locale}, ${row.region}, ${row.certificationState},
           ${row.consumerApplicationLabel}, ${row.status}, ${row.answerText}, ${row.executedAt.toISOString()},
           ${row.executionDurationMs}, ${row.responseHash}, ${row.recommendationOutcome},
           ${row.providerRequestId}, ${row.usage ? JSON.stringify(row.usage) : null}::jsonb,
-          ${row.errorClass}, ${row.sanitizedError}
+          ${row.errorClass}, ${row.sanitizedError}, ${row.attemptCount}, ${row.failureDisposition}
         ) ON CONFLICT (id) DO NOTHING
       `;
     } catch (error) {
@@ -311,6 +311,8 @@ function cellToRow(cell: AnswerSnapshotCell): AnswerSnapshotCellRow {
     recommendationOutcome: success ? cell.recommendationOutcome : null,
     providerRequestId: cell.providerRequestId ?? null, usage: cell.usage ? { ...cell.usage } : null,
     errorClass: success ? null : cell.errorClass, sanitizedError: success ? null : cell.sanitizedError ?? null,
+    attemptCount: success ? null : cell.attemptCount ?? null,
+    failureDisposition: success ? null : cell.failureDisposition ?? null,
     createdAt: new Date()
   };
 }
@@ -323,7 +325,7 @@ function rowToCell(row: AnswerSnapshotCellRow, sources: StoredAnswerSnapshotSour
   };
   return row.status === "succeeded"
     ? { ...common, status: "succeeded", answerText: row.answerText!, responseHash: row.responseHash!, recommendationOutcome: row.recommendationOutcome as "recommendations_present" | "no_recommendation", sources }
-    : { ...common, status: "failed", errorClass: row.errorClass as FailedAnswerSnapshotCell["errorClass"], ...(row.sanitizedError ? { sanitizedError: row.sanitizedError } : {}) };
+    : { ...common, status: "failed", errorClass: row.errorClass as FailedAnswerSnapshotCell["errorClass"], ...(row.sanitizedError ? { sanitizedError: row.sanitizedError } : {}), ...(row.attemptCount ? { attemptCount: row.attemptCount, failureDisposition: row.failureDisposition as NonNullable<FailedAnswerSnapshotCell["failureDisposition"]> } : {}) };
 }
 function sourceToRow(cellId: string, source: AnswerSnapshotSource): AnswerSnapshotSourceRow {
   return { id: hashIdentity([cellId, source.url]), cellId, ...source, providerMetadata: { ...source.providerMetadata }, createdAt: new Date() };
@@ -372,6 +374,6 @@ type AnswerSnapshotCellDb = Record<string, unknown> & { id: string };
 type AnswerSnapshotSourceDb = Record<string, unknown> & { id: string };
 type CitationSourceEvidenceDb = Record<string, unknown> & { id: string };
 function dbRunToRow(row: AnswerSnapshotRunDb): AnswerSnapshotRunRow { return { id: row.id, reportId: row.report_id, jobId: row.job_id, locale: row.locale, region: row.region, questionSetVersion: row.question_set_version, startedAt: new Date(row.started_at), createdAt: new Date(row.created_at) }; }
-function dbCellToRow(row: AnswerSnapshotCellDb): AnswerSnapshotCellRow { return { id: row.id, runId: row.run_id as string, questionId: row.question_id as string, providerId: row.provider_id as string, productId: row.product_id as string, modelId: row.model_id as string, collectionSurface: row.collection_surface as string, locale: row.locale as string, region: row.region as string, certificationState: row.certification_state as string, consumerApplicationLabel: row.consumer_application_label as string | null, status: row.status as AnswerSnapshotCellRow["status"], answerText: row.answer_text as string | null, executedAt: new Date(row.executed_at as string | Date), executionDurationMs: row.execution_duration_ms as number, responseHash: row.response_hash as string | null, recommendationOutcome: row.recommendation_outcome as string | null, providerRequestId: row.provider_request_id as string | null, usage: row.usage as Record<string, unknown> | null, errorClass: row.error_class as string | null, sanitizedError: row.sanitized_error as string | null, createdAt: new Date(row.created_at as string | Date) }; }
+function dbCellToRow(row: AnswerSnapshotCellDb): AnswerSnapshotCellRow { return { id: row.id, runId: row.run_id as string, questionId: row.question_id as string, providerId: row.provider_id as string, productId: row.product_id as string, modelId: row.model_id as string, collectionSurface: row.collection_surface as string, locale: row.locale as string, region: row.region as string, certificationState: row.certification_state as string, consumerApplicationLabel: row.consumer_application_label as string | null, status: row.status as AnswerSnapshotCellRow["status"], answerText: row.answer_text as string | null, executedAt: new Date(row.executed_at as string | Date), executionDurationMs: row.execution_duration_ms as number, responseHash: row.response_hash as string | null, recommendationOutcome: row.recommendation_outcome as string | null, providerRequestId: row.provider_request_id as string | null, usage: row.usage as Record<string, unknown> | null, errorClass: row.error_class as string | null, sanitizedError: row.sanitized_error as string | null, attemptCount: row.attempt_count as number | null, failureDisposition: row.failure_disposition as string | null, createdAt: new Date(row.created_at as string | Date) }; }
 function dbSourceToRow(row: AnswerSnapshotSourceDb): AnswerSnapshotSourceRow { return { id: row.id, cellId: row.cell_id as string, url: row.url as string, title: row.title as string, providerOrder: row.provider_order as number, providerMetadata: row.provider_metadata as Record<string, unknown>, createdAt: new Date(row.created_at as string | Date) }; }
 function dbEvidenceToRow(row: CitationSourceEvidenceDb): CitationSourceEvidenceRow { return { id: row.id, sourceId: row.source_id as string, category: row.category as CitationSourceCategory, retrievalState: row.retrieval_state as CitationRetrievalState, excerpt: row.excerpt as string | null, excerptHash: row.excerpt_hash as string | null, contentHash: row.content_hash as string | null, grade: row.grade as CitationEvidenceGrade, retrievedAt: new Date(row.retrieved_at as string | Date), expiresAt: new Date(row.expires_at as string | Date), createdAt: new Date(row.created_at as string | Date) }; }
