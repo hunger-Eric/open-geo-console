@@ -25,6 +25,7 @@ export interface SafeFetchOptions {
   timeoutMs?: number;
   allowedContentTypes?: string[];
   allowBenchmarkNetwork?: boolean;
+  beforeRequest?: (url: URL) => void | Promise<void>;
 }
 
 export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
@@ -42,6 +43,7 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
     let resolved = await resolveSafeUrl(current, { resolver, allowBenchmarkNetwork });
 
     for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
+      await options.beforeRequest?.(new URL(current.href));
       const pinned = resolved.addresses[0]!;
       const pinnedFamily: 4 | 6 = pinned.family === 6 ? 6 : 4;
       const dispatcher = new Agent({

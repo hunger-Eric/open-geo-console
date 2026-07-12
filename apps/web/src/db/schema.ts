@@ -436,6 +436,8 @@ export const paymentOrders = pgTable(
     deliveryDeadlineAt: timestamp("delivery_deadline_at", { withTimezone: true }),
     fulfilledAt: timestamp("fulfilled_at", { withTimezone: true }),
     refundedAt: timestamp("refunded_at", { withTimezone: true }),
+    legacyRetirementCutoffAt: timestamp("legacy_retirement_cutoff_at", { withTimezone: true }),
+    legacyRetiredAt: timestamp("legacy_retired_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },

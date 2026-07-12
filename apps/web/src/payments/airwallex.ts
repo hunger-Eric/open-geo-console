@@ -83,6 +83,28 @@ export class AirwallexGateway implements PaymentGateway {
     return "deactivated";
   }
 
+  async retireHostedCheckout(providerCheckoutId: string, orderId: string): Promise<"deactivated" | "cancelled" | "paid"> {
+    if (!isAirwallexPaymentIntentId(providerCheckoutId)) {
+      return this.deactivateLegacyHostedCheckout(providerCheckoutId, orderId);
+    }
+    assertCommerceEnabled(this.environment);
+    const current = await this.apiGet(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}`) as Record<string, unknown>;
+    assertPaymentIntentOrder(current, orderId);
+    const status = String(current.status ?? "").toUpperCase();
+    if (["SUCCEEDED", "SETTLED", "PAID"].includes(status)) return "paid";
+    if (["CANCELLED", "CANCELED"].includes(status)) return "cancelled";
+    if (!["CREATED", "PENDING", "REQUIRES_PAYMENT_METHOD", "REQUIRES_CUSTOMER_ACTION", "REQUIRES_ACTION"].includes(status)) {
+      throw new Error(`Airwallex PaymentIntent status ${status || "unknown"} is not safely cancellable.`);
+    }
+    await this.api(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}/cancel`, {});
+    const confirmed = await this.apiGet(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}`) as Record<string, unknown>;
+    assertPaymentIntentOrder(confirmed, orderId);
+    const confirmedStatus = String(confirmed.status ?? "").toUpperCase();
+    if (["SUCCEEDED", "SETTLED", "PAID"].includes(confirmedStatus)) return "paid";
+    if (!["CANCELLED", "CANCELED"].includes(confirmedStatus)) throw new Error("Airwallex PaymentIntent cancellation was not confirmed.");
+    return "cancelled";
+  }
+
   async findHostedCheckoutByReference(orderId: string): Promise<HostedCheckoutResult | null> {
     assertCommerceEnabled(this.environment);
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(orderId)) throw new Error("Airwallex order reference is invalid.");
@@ -116,7 +138,8 @@ export class AirwallexGateway implements PaymentGateway {
     if (!resource) throw new Error("Airwallex webhook is missing its payment resource.");
     const metadata = objectField(resource, "metadata");
     const createdAtValue = stringField(payload, "created_at") ?? stringField(resource, "created_at");
-    const createdAt = createdAtValue ? new Date(createdAtValue) : new Date(0);
+    if (!createdAtValue) throw new Error("Airwallex webhook creation time is required.");
+    const createdAt = new Date(createdAtValue);
     if (Number.isNaN(createdAt.getTime())) throw new Error("Airwallex webhook creation time is invalid.");
     const providerStatus = stringField(resource, "status");
     const metadataOrderId = stringField(metadata, "ogc_order_id");
@@ -294,6 +317,13 @@ function parseLegacyPaymentLink(value: unknown, providerCheckoutId: string, orde
       || successfulCount > 0
       || Boolean(stringField(link, "latest_successful_payment_intent_id"))
   };
+}
+
+function assertPaymentIntentOrder(value: Record<string, unknown>, orderId: string): void {
+  const metadata = objectField(value, "metadata");
+  if (stringField(value, "merchant_order_id") !== orderId || stringField(metadata, "ogc_order_id") !== orderId) {
+    throw new Error("Airwallex PaymentIntent does not belong to this order.");
+  }
 }
 
 function objectField(value: unknown, key: string): Record<string, unknown> | null {

@@ -11,16 +11,18 @@ import {
   type AnswerSnapshotRunContract
 } from "@open-geo-console/answer-engine-observer";
 import type { AiWebsiteReportV1, RecommendationForensicReportV1 } from "@open-geo-console/ai-report-engine";
-import { runRecommendationForensicsPipeline } from "./recommendation-forensics";
+import { retrieveCitationSource, runRecommendationForensicsPipeline } from "./recommendation-forensics";
 
 describe("recommendation-forensics Worker pipeline", () => {
   it("qualifies two certified providers and resumes without duplicate provider execution", async () => {
     const persistence = memoryPersistence();
     const adapters = [adapter("provider-a"), adapter("provider-b")];
     const dependencies = deps(adapters, persistence);
+    const build = vi.spyOn(dependencies.builder, "build");
     const first = await runRecommendationForensicsPipeline(baseInput(dependencies));
     expect(first.coverage.outcome).toBe("qualified");
     expect(adapters.reduce((sum, item) => sum + vi.mocked(item.observe).mock.calls.length, 0)).toBe(8);
+    expect(build).toHaveBeenCalledTimes(1);
     const second = await runRecommendationForensicsPipeline(baseInput(dependencies));
     expect(second.coverage.outcome).toBe("qualified");
     expect(adapters.reduce((sum, item) => sum + vi.mocked(item.observe).mock.calls.length, 0)).toBe(8);
@@ -28,17 +30,20 @@ describe("recommendation-forensics Worker pipeline", () => {
 
   it("classifies one usable certified provider as completed-limited", async () => {
     const persistence = memoryPersistence();
-    const result = await runRecommendationForensicsPipeline(baseInput(deps([adapter("provider-a")], persistence)));
+    const result = await runRecommendationForensicsPipeline(baseInput(deps([
+      adapter("provider-a"), adapter("provider-b", true)
+    ], persistence)));
     expect(result.coverage.outcome).toBe("completed_limited");
   });
 
   it("classifies an unusable provider as failed and surfaces report-builder validation failure", async () => {
     const persistence = memoryPersistence();
-    const broken = adapter("provider-a", true);
-    const result = await runRecommendationForensicsPipeline(baseInput(deps([broken], persistence)));
+    const result = await runRecommendationForensicsPipeline(baseInput(deps([
+      adapter("provider-a", true), adapter("provider-b", true)
+    ], persistence)));
     expect(result.coverage.outcome).toBe("failed");
     await expect(runRecommendationForensicsPipeline(baseInput({
-      ...deps([adapter("provider-a")], memoryPersistence()),
+      ...deps([adapter("provider-a"), adapter("provider-b")], memoryPersistence()),
       builder: { build: async () => { throw new Error("report validation failed"); } }
     }))).rejects.toThrow("report validation failed");
   });
@@ -46,8 +51,30 @@ describe("recommendation-forensics Worker pipeline", () => {
   it("rejects a CAS race instead of overwriting checkpoint state", async () => {
     const persistence = memoryPersistence();
     persistence.compareAndSwap = async () => { throw new Error("Answer execution checkpoint revision mismatch."); };
-    await expect(runRecommendationForensicsPipeline(baseInput(deps([adapter("provider-a")], persistence))))
+    await expect(runRecommendationForensicsPipeline(baseInput(deps([
+      adapter("provider-a"), adapter("provider-b")
+    ], persistence))))
       .rejects.toThrow(/revision mismatch/i);
+  });
+
+  it("checks robots before source content and rechecks a cross-origin redirect", async () => {
+    const requested: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requested.push(url);
+      if (url === "https://a.example.com/robots.txt") return new Response("User-agent: *\nAllow: /");
+      if (url === "https://a.example.com/start") return new Response(null, { status: 302, headers: { location: "https://b.example.com/private" } });
+      if (url === "https://b.example.com/robots.txt") return new Response("User-agent: OpenGeoConsoleBot\nDisallow: /private");
+      throw new Error(`content must not be fetched: ${url}`);
+    }) as unknown as typeof fetch;
+    const result = await retrieveCitationSource("https://a.example.com/start", {
+      fetchImpl,
+      resolver: async () => [{ address: "93.184.216.34", family: 4 }]
+    });
+    expect(result.retrievalState).toBe("inaccessible");
+    expect(requested).toEqual([
+      "https://a.example.com/robots.txt", "https://a.example.com/start", "https://b.example.com/robots.txt"
+    ]);
   });
 });
 
@@ -57,7 +84,7 @@ function deps(adapters: AnswerEngineAdapter[], persistence: ReturnType<typeof me
     certifiedAt: "2030-01-01T00:00:00.000Z", environment: "protected_staging", evidenceReference: `evidence/${item.surface.providerId}`
   });
   return {
-    adapters,
+    adapters, registry,
     certificationAuthority: registry.createCertificationAuthoritySnapshot({ authorityVersion: "cert-v1", capturedAt: "2030-01-01T00:00:00.000Z" }),
     sourceClassificationAuthority: { authorityVersion: "source-v1", capturedAt: "2030-01-01T00:00:00.000Z", context: { customerRegistrableDomain: "customer.example.com", competitorRegistrableDomains: [], knownDomains: {} } },
     builder: { build: async (input: { reportId: string; jobId: string; coverage: unknown }) => ({ reportId: input.reportId, jobId: input.jobId, coverage: input.coverage }) },
@@ -86,6 +113,7 @@ function adapter(providerId: string, fail = false): AnswerEngineAdapter {
 function memoryPersistence() {
   let run: AnswerSnapshotRunContract | null = null;
   let checkpoint: AnswerExecutionStateLedger | null = null;
+  let report: RecommendationForensicReportV1 | null = null;
   const cells: AnswerSnapshotCell[] = [];
   const evidence = new Set<string>();
   const api = {
@@ -111,7 +139,11 @@ function memoryPersistence() {
     getCheckpoint: async () => checkpoint,
     compareAndSwap: async (next: AnswerExecutionCheckpoint) => { if ((checkpoint?.checkpointRevision ?? 0) !== next.expectedRevision) throw new Error("revision mismatch"); checkpoint = structuredClone(next.executionState); if (next.cell) cells.push(structuredClone(next.cell)); return checkpoint; },
     saveEvidence: async (input: { sourceId: string }) => { evidence.add(input.sourceId); return input; },
-    saveReport: async (input: { reportId: string; jobId: string; coverage: { outcome: "qualified" | "completed_limited" | "failed" } }) => ({ reportId: input.reportId, jobId: input.jobId, answerSnapshotMatrix: { commercialCoverage: input.coverage } } as RecommendationForensicReportV1)
+    getReport: async () => report,
+    saveReport: async (input: { reportId: string; jobId: string; coverage: { outcome: "qualified" | "completed_limited" | "failed" } }) => {
+      report = { reportId: input.reportId, jobId: input.jobId, answerSnapshotMatrix: { run, commercialCoverage: input.coverage } } as RecommendationForensicReportV1;
+      return report;
+    }
   };
   return api;
 }

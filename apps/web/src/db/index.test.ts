@@ -56,8 +56,8 @@ describe("database deployment marker", () => {
 });
 
 describe("database schema marker", () => {
-  it("uses product-contract schema version 6", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(6);
+  it("uses legacy-retirement schema version 7", () => {
+    expect(DATABASE_SCHEMA_VERSION).toBe(7);
   });
 
   it("skips DDL bootstrap when the current schema version is present", () => {

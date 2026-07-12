@@ -18,6 +18,24 @@ export interface RecommendationProductAvailability {
   code: RecommendationProductAvailabilityCode;
 }
 
+export function recommendationRuntimeMatchesAuthority(
+  registry: AnswerEngineRegistry,
+  authority: CertificationAuthoritySnapshot
+): boolean {
+  const runtime = registry.listCertified();
+  const runtimeKeys = new Set(runtime.map(({ surface }) => createAnswerEngineSurfaceKey(surface)));
+  const authorityKeys = new Set(authority.certifications.map(({ surface }) => createAnswerEngineSurfaceKey(surface)));
+  const providerIds = new Set(runtime.map(({ surface }) => surface.providerId));
+  const authorityByKey = new Map(authority.certifications.map((item) => [
+    createAnswerEngineSurfaceKey(item.surface), item.evidence
+  ]));
+  return providerIds.size >= 2 && runtimeKeys.size === authorityKeys.size &&
+    [...runtimeKeys].every((key) => authorityKeys.has(key)) &&
+    runtime.every(({ surface, certificationEvidence }) =>
+      isDeepStrictEqual(certificationEvidence, authorityByKey.get(createAnswerEngineSurfaceKey(surface)))
+    );
+}
+
 export function evaluateRecommendationProductAvailability(input: {
   environment: NodeJS.ProcessEnv;
   registry: AnswerEngineRegistry;
@@ -33,18 +51,7 @@ export function evaluateRecommendationProductAvailability(input: {
   if (lane === "public" && input.environment.COMMERCE_MODE !== "live") return { ready: false, lane, code: "environment" };
   if (!input.builderAvailable || input.registry.listCertified().length < 2) return { ready: false, lane, code: "runtime_incomplete" };
   if (!input.authority || !input.authorityPersisted) return { ready: false, lane, code: "authority_unavailable" };
-  const runtime = input.registry.listCertified();
-  const runtimeKeys = new Set(runtime.map(({ surface }) => createAnswerEngineSurfaceKey(surface)));
-  const authorityKeys = new Set(input.authority.certifications.map(({ surface }) => createAnswerEngineSurfaceKey(surface)));
-  const providerIds = new Set(runtime.map(({ surface }) => surface.providerId));
-  const authorityByKey = new Map(input.authority.certifications.map((item) => [
-    createAnswerEngineSurfaceKey(item.surface), item.evidence
-  ]));
-  const evidenceDrift = runtime.some(({ surface, certificationEvidence }) =>
-    !isDeepStrictEqual(certificationEvidence, authorityByKey.get(createAnswerEngineSurfaceKey(surface)))
-  );
-  if (providerIds.size < 2 || runtimeKeys.size !== authorityKeys.size ||
-      [...runtimeKeys].some((key) => !authorityKeys.has(key)) || evidenceDrift) {
+  if (!recommendationRuntimeMatchesAuthority(input.registry, input.authority)) {
     return { ready: false, lane, code: "authority_mismatch" };
   }
   return { ready: true, lane, code: "ready" };

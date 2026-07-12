@@ -24,6 +24,7 @@
     "commerce:sla": "node --env-file-if-exists=.env.local --import tsx src/scripts/commercial-operations.ts sla",
     "commerce:reconcile": "node --env-file-if-exists=.env.local --import tsx src/scripts/commercial-operations.ts reconcile",
     "commerce:all": "node --env-file-if-exists=.env.local --import tsx src/scripts/commercial-operations.ts all",
+    "commerce:retire-legacy": "node --env-file-if-exists=.env.local --import tsx src/scripts/retire-legacy-checkouts.ts",
     "commerce:staging:all": "node --env-file=.env.staging.local --import tsx src/scripts/staging-commercial-operations.ts all",
     "browser:install": "playwright install chromium",
     "access-key:create": "node --env-file-if-exists=.env.local --import tsx src/scripts/create-access-key.ts",
@@ -33,7 +34,7 @@
     "db:environment:init": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts init",
     "db:environment:inspect": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts inspect",
     "staging:free:cleanup": "node --env-file=.env.staging.local --import tsx src/scripts/staging-free-cleanup.ts",
-    "test:postgres:staging-security": "node --env-file=.env.staging.local ../../node_modules/vitest/vitest.mjs run --root ../.. apps/web/src/db/staging-security.postgres.test.ts apps/web/src/db/recommendation-forensics.postgres.test.ts",
+    "test:postgres:staging-security": "node --env-file=.env.staging.local ../../node_modules/vitest/vitest.mjs run --root ../.. apps/web/src/db/staging-security.postgres.test.ts apps/web/src/db/recommendation-forensics.postgres.test.ts apps/web/src/db/recommendation-commerce.postgres.test.ts",
     "db:migrate:sqlite": "node --env-file-if-exists=.env.local --import tsx src/scripts/migrate-sqlite.ts"
   },
   "dependencies": {

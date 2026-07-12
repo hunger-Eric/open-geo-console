@@ -125,6 +125,40 @@ export async function getActivePaymentOrderForReport(
   return rows[0] ? getPaymentOrder(rows[0].id) : null;
 }
 
+export interface LegacyRetirementCandidate {
+  id: string;
+  providerCheckoutId: string | null;
+  cutoffAt: Date;
+}
+
+export async function prepareLegacyUnpaidOrderRetirement(cutoffAt: Date): Promise<LegacyRetirementCandidate[]> {
+  if (!Number.isFinite(cutoffAt.getTime())) throw new Error("A valid legacy retirement cutoff is required.");
+  await ensureDatabase();
+  const rows = await getSqlClient()<Array<{ id: string; provider_checkout_id: string | null; legacy_retirement_cutoff_at: Date }>>`
+    UPDATE payment_orders
+    SET legacy_retirement_cutoff_at = COALESCE(legacy_retirement_cutoff_at, ${cutoffAt.toISOString()}), updated_at = now()
+    WHERE product_code = 'deep_report_v1'
+      AND payment_status IN ('created','pending')
+      AND created_at <= ${cutoffAt.toISOString()}
+    RETURNING id, provider_checkout_id, legacy_retirement_cutoff_at
+  `;
+  return rows.map((row) => ({ id: row.id, providerCheckoutId: row.provider_checkout_id, cutoffAt: new Date(row.legacy_retirement_cutoff_at) }));
+}
+
+export async function finalizeLegacyUnpaidOrderRetirement(orderId: string, cutoffAt: Date): Promise<boolean> {
+  await ensureDatabase();
+  const rows = await getSqlClient()<{ id: string }[]>`
+    UPDATE payment_orders
+    SET payment_status = 'cancelled', legacy_retired_at = COALESCE(legacy_retired_at, now()), updated_at = now()
+    WHERE id = ${orderId}
+      AND product_code = 'deep_report_v1'
+      AND payment_status IN ('created','pending')
+      AND legacy_retirement_cutoff_at = ${cutoffAt.toISOString()}
+    RETURNING id
+  `;
+  return rows.length === 1;
+}
+
 export async function attachHostedCheckout(input: {
   orderId: string;
   providerCheckoutId: string;
@@ -360,12 +394,20 @@ export interface PaidFulfillmentResult {
   emailDeliveryId: string;
 }
 
+export interface RetiredLegacyPaidRefundResult {
+  order: PaymentOrderRow;
+  eventId: string;
+  duplicate: boolean;
+  retiredRefund: true;
+  refundId: string;
+}
+
 /**
  * Converts a verified paid event into exactly one entitlement, reservation,
  * deep job, dispatch hint and confirmation email. Provider calls happen before
  * or after this short transaction, never while its locks are held.
  */
-export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): Promise<PaidFulfillmentResult> {
+export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): Promise<PaidFulfillmentResult | RetiredLegacyPaidRefundResult> {
   assertPaymentEventInput(input);
   if (!input.orderId || !input.providerPaymentId) {
     throw new Error("A paid event requires order and provider payment IDs.");
@@ -381,7 +423,6 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
     emailDeliveryId: randomUUID()
   };
   const selectedFields = JSON.stringify(input.selectedFields ?? {});
-  const internalKeyHmac = hmacSecret(randomUUID(), requireSecret("OGC_TOKEN_HASH_SECRET"));
 
   const result = await sql.begin(async (tx) => {
     const insertedEvents = await tx<{ id: string }[]>`
@@ -414,8 +455,11 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
       report_locale: ReportLocale;
       fulfillment_job_id: string | null;
       product_code: string;
+      legacy_retirement_cutoff_at: Date | null;
+      legacy_retired_at: Date | null;
     }>>`
-      SELECT id, provider, provider_payment_id, payment_status, report_id, report_locale, fulfillment_job_id, product_code
+      SELECT id, provider, provider_payment_id, payment_status, report_id, report_locale, fulfillment_job_id, product_code,
+             legacy_retirement_cutoff_at, legacy_retired_at
       FROM payment_orders WHERE id = ${input.orderId} FOR UPDATE
     `;
     const order = orderRows[0];
@@ -425,9 +469,33 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
     if (order.provider_payment_id && order.provider_payment_id !== input.providerPaymentId) {
       throw new CommercialOrderConflictError("The payment order is already bound to another provider payment.");
     }
-    if (order.payment_status === "failed" || order.payment_status === "cancelled") {
+    const cutoff = order.legacy_retirement_cutoff_at ? new Date(order.legacy_retirement_cutoff_at) : null;
+    const lateRetiredLegacyPayment = order.product_code === "deep_report_v1" && cutoff &&
+      (Boolean(order.legacy_retired_at) || !input.providerCreatedAt || input.providerCreatedAt > cutoff);
+    if (lateRetiredLegacyPayment) {
+      await tx`
+        UPDATE payment_orders
+        SET provider_payment_id = COALESCE(provider_payment_id, ${input.providerPaymentId}),
+            payment_status = 'paid', paid_at = COALESCE(paid_at, ${input.providerCreatedAt?.toISOString() ?? new Date().toISOString()}),
+            fulfillment_status = 'failed', refund_status = CASE WHEN refund_status = 'not_required' THEN 'pending' ELSE refund_status END,
+            courtesy_non_billable = true, updated_at = now()
+        WHERE id = ${order.id}
+      `;
+      await tx`
+        INSERT INTO payment_refunds (id, order_id, provider, reason, amount_minor, currency, state, idempotency_key)
+        SELECT ${randomUUID()}, id, provider, 'operator_approved', amount_minor, currency, 'pending', ${`legacy_retired_full_refund/${order.id}`}
+        FROM payment_orders WHERE id = ${order.id}
+        ON CONFLICT (order_id) DO NOTHING
+      `;
+      const refund = (await tx<{ id: string }[]>`SELECT id FROM payment_refunds WHERE order_id = ${order.id}`)[0];
+      await tx`UPDATE payment_events SET processing_status = 'processed', processed_at = COALESCE(processed_at, now()) WHERE id = ${event.id}`;
+      return { retiredRefund: true as const, eventId: event.id, duplicate, refundId: refund!.id };
+    }
+    const paidBeforeCutoff = order.product_code === "deep_report_v1" && cutoff && input.providerCreatedAt && input.providerCreatedAt <= cutoff;
+    if (order.payment_status === "failed" || (order.payment_status === "cancelled" && !paidBeforeCutoff)) {
       throw new CommercialOrderConflictError("A terminal unsuccessful payment order cannot become paid.");
     }
+    const internalKeyHmac = hmacSecret(randomUUID(), requireSecret("OGC_TOKEN_HASH_SECRET"));
 
     await tx`
       UPDATE payment_orders

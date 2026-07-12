@@ -167,8 +167,12 @@ export const DATABASE_MIGRATIONS = [
     reserved_at timestamptz NOT NULL DEFAULT now(),
     settled_at timestamptz,
     refunded_at timestamptz,
+    legacy_retirement_cutoff_at timestamptz,
+    legacy_retired_at timestamptz,
     UNIQUE (access_key_id, idempotency_key)
   )`,
+  `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS legacy_retirement_cutoff_at timestamptz`,
+  `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS legacy_retired_at timestamptz`,
   `CREATE INDEX IF NOT EXISTS credit_ledger_report_idx ON credit_ledger (report_id)`,
   `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_stage_check`,
   `WITH migrated_jobs AS (

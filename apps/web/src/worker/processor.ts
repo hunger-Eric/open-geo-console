@@ -26,7 +26,7 @@ import {
   getGeoReport,
   markGeoReportTechnicalProcessing
 } from "@/db/reports";
-import { saveAiReport } from "@/db/ai-reports";
+import { getAiReport, saveAiReport } from "@/db/ai-reports";
 import {
   getCrawlEvidence,
   getReusableCrawlEvidence,
@@ -88,6 +88,18 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     await purgeExpiredCrawlContent();
     let storedReport = await getGeoReport(job.reportId);
     if (!storedReport) throw new Error("The source technical report no longer exists.");
+    if (job.productContract === "recommendation_forensics_v1" && checkpoint.contractVersion === 2 &&
+        checkpoint.websiteFoundation?.completed) {
+      const existingFoundation = await getAiReport(job.reportId, "deep");
+      if (isMatchingRecommendationWebsiteFoundation(job, storedReport.url, existingFoundation)) {
+        await finalizeRecommendationJob({
+          job, workerId, checkpoint, websiteFoundation: existingFoundation.payload,
+          targetUrl: storedReport.url,
+          coverage: { plannedPages: job.plannedPages, successfulPages: job.successfulPages, failedPages: job.failedPages }
+        });
+        return;
+      }
+    }
     if (job.tier === "free" && storedReport.technicalStatus !== "completed") {
       await checkpointScanJob(job.id, workerId, { stage: "discovering", progress: 5 });
       await markGeoReportTechnicalProcessing(job.reportId);
@@ -318,31 +330,14 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
         successfulPages: effectiveCoverage.analyzedPages,
         failedPages: failureCount(checkpoint)
       });
-      const dependencies = createProductionRecommendationDependencies();
-      if (!dependencies) throw new RecommendationRuntimeUnavailableError("Recommendation-forensics runtime is not installed.");
-      const result = await runRecommendationForensicsPipeline({
-        reportId: job.reportId, jobId: job.id, locale: job.locale,
-        region: process.env.OGC_RECOMMENDATION_REGION?.trim() || "global",
-        targetUrl: discovery.targetUrl, websiteFoundation: reportToPersist, dependencies
-      });
-      checkpoint = {
-        ...checkpoint,
-        recommendationForensics: { runId: result.runId, questionsGenerated: true, reportSaved: true }
-      };
-      await saveStageCheckpoint(job, workerId, "synthesizing", 99, checkpoint);
-      const stage = result.coverage.outcome === "qualified"
-        ? "completed"
-        : result.coverage.outcome === "completed_limited" ? "completed_limited" : "failed";
-      const terminalJob = await terminalizeScanJob(job.id, workerId, {
-        stage,
+      await finalizeRecommendationJob({
+        job, workerId, checkpoint, websiteFoundation: reportToPersist, targetUrl: discovery.targetUrl,
         coverage: {
           plannedPages: effectiveCoverage.effectivePlannedPages,
           successfulPages: effectiveCoverage.analyzedPages,
           failedPages: failureCount(checkpoint)
-        },
-        ...(stage === "failed" ? { error: { code: "recommendation_coverage_failed", publicMessage: "The recommendation evidence was not sufficient for a usable report." } } : {})
+        }
       });
-      await recordCommercialOutcomeSafely(job.id, terminalJob.stage as "completed" | "completed_limited" | "failed");
       return;
     }
 
@@ -390,6 +385,46 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
   } finally {
     clearInterval(heartbeat);
   }
+}
+
+export function isMatchingRecommendationWebsiteFoundation(
+  job: ScanJobRow,
+  targetUrl: string,
+  foundation: Awaited<ReturnType<typeof getAiReport>>
+): foundation is NonNullable<Awaited<ReturnType<typeof getAiReport>>> {
+  return Boolean(foundation && job.productContract === "recommendation_forensics_v1" &&
+    foundation.jobId === job.id && foundation.reportId === job.reportId && foundation.locale === job.locale &&
+    foundation.tier === "deep" && foundation.payload.tier === "deep" && foundation.payload.targetUrl === targetUrl);
+}
+
+async function finalizeRecommendationJob(input: {
+  job: ScanJobRow;
+  workerId: string;
+  checkpoint: WorkerCheckpoint;
+  websiteFoundation: AiWebsiteReportV1;
+  targetUrl: string;
+  coverage: { plannedPages: number; successfulPages: number; failedPages: number };
+}): Promise<void> {
+  const dependencies = createProductionRecommendationDependencies();
+  if (!dependencies) throw new RecommendationRuntimeUnavailableError("Recommendation-forensics runtime is not installed.");
+  const result = await runRecommendationForensicsPipeline({
+    reportId: input.job.reportId, jobId: input.job.id, locale: input.job.locale,
+    region: process.env.OGC_RECOMMENDATION_REGION?.trim() || "global",
+    targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies
+  });
+  const checkpoint = {
+    ...input.checkpoint,
+    recommendationForensics: { runId: result.runId, questionsGenerated: true, reportSaved: true }
+  };
+  await saveStageCheckpoint(input.job, input.workerId, "synthesizing", 99, checkpoint);
+  const stage = result.coverage.outcome === "qualified"
+    ? "completed"
+    : result.coverage.outcome === "completed_limited" ? "completed_limited" : "failed";
+  const terminalJob = await terminalizeScanJob(input.job.id, input.workerId, {
+    stage, coverage: input.coverage,
+    ...(stage === "failed" ? { error: { code: "recommendation_coverage_failed", publicMessage: "The recommendation evidence was not sufficient for a usable report." } } : {})
+  });
+  await recordCommercialOutcomeSafely(input.job.id, terminalJob.stage as "completed" | "completed_limited" | "failed");
 }
 
 async function recordCommercialOutcomeSafely(

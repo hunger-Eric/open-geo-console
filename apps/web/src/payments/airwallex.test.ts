@@ -115,6 +115,20 @@ describe("AirwallexGateway", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it("cancels only a cancellable PaymentIntent and confirms its terminal provider state", async () => {
+    const intent = { id: "int_retire", merchant_order_id: "order_1", metadata: { ogc_order_id: "order_1" } };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: "access" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...intent, status: "REQUIRES_PAYMENT_METHOD" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...intent, status: "CANCELLED" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...intent, status: "CANCELLED" }), { status: 200 }));
+    const gateway = new AirwallexGateway({
+      environment: { COMMERCE_MODE: "test", AIRWALLEX_CLIENT_ID: "client", AIRWALLEX_API_KEY: "key" }, fetchImpl
+    });
+    await expect(gateway.retireHostedCheckout("int_retire", "order_1")).resolves.toBe("cancelled");
+    expect(String(fetchImpl.mock.calls[2]?.[0])).toContain("/payment_intents/int_retire/cancel");
+  });
+
   it("recovers one PaymentIntent by merchant order ID and rejects ambiguous matches", async () => {
     const intent = {
       id: "int_recovered", client_secret: "secret_recovered", currency: "CNY", merchant_order_id: "order_1",

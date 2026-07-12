@@ -6,6 +6,7 @@ import {
   generatePurchaseQuestions,
   observeAnswerMatrix,
   type AnswerEngineAdapter,
+  type AnswerEngineRegistry,
   type AnswerExecutionCheckpoint,
   type AnswerExecutionStateLedger,
   type AnswerSnapshotCell,
@@ -15,7 +16,12 @@ import {
   type ProviderExecutionBudget
 } from "@open-geo-console/answer-engine-observer";
 import { assessEvidenceGrade, categorizeSource } from "@open-geo-console/citation-intelligence";
-import { extractReadableText } from "@open-geo-console/site-crawler";
+import {
+  extractReadableText,
+  isAllowedByRobots,
+  parseRobotsTxt,
+  type HostnameResolver
+} from "@open-geo-console/site-crawler";
 import type {
   AiWebsiteReportV1,
   RecommendationForensicReportV1,
@@ -24,6 +30,7 @@ import type {
 import {
   compareAndSwapAnswerExecutionCheckpoint,
   getAnswerExecutionCheckpoint,
+  getRecommendationForensicReportForJob,
   saveRecommendationForensicReport
 } from "@/db/recommendation-authority";
 import {
@@ -34,6 +41,7 @@ import {
   type CitationSourceEvidenceInput
 } from "@/db/recommendation-forensics";
 import { createSafeFetch } from "@/server/safe-fetch";
+import { recommendationRuntimeMatchesAuthority } from "@/recommendation-forensics/product-availability";
 
 export interface RecommendationReportBuilderInput {
   reportId: string;
@@ -53,6 +61,7 @@ export interface RecommendationReportBuilder {
 
 export interface RecommendationForensicsDependencies {
   adapters: AnswerEngineAdapter[];
+  registry: AnswerEngineRegistry;
   certificationAuthority: CertificationAuthoritySnapshot;
   sourceClassificationAuthority: SourceClassificationAuthoritySnapshot;
   builder: RecommendationReportBuilder;
@@ -64,6 +73,7 @@ export interface RecommendationForensicsDependencies {
     getCheckpoint: typeof getAnswerExecutionCheckpoint;
     compareAndSwap: (checkpoint: AnswerExecutionCheckpoint) => Promise<AnswerExecutionStateLedger>;
     saveEvidence: (input: CitationSourceEvidenceInput) => Promise<unknown>;
+    getReport: (jobId: string) => Promise<RecommendationForensicReportV1 | null>;
     saveReport: (input: unknown) => Promise<RecommendationForensicReportV1>;
   };
 }
@@ -83,9 +93,19 @@ export async function runRecommendationForensicsPipeline(input: {
   websiteFoundation: AiWebsiteReportV1;
   dependencies: RecommendationForensicsDependencies;
 }): Promise<RecommendationForensicsPipelineResult> {
-  if (input.dependencies.adapters.length === 0) throw new RecommendationRuntimeUnavailableError("No answer-engine adapter is installed.");
-  assertAdaptersMatchAuthority(input.dependencies.adapters, input.dependencies.certificationAuthority);
   const persist = input.dependencies.persistence ?? defaultPersistence;
+  const persistedReport = await persist.getReport(input.jobId);
+  if (persistedReport) {
+    return {
+      coverage: persistedReport.answerSnapshotMatrix.commercialCoverage,
+      report: persistedReport,
+      runId: persistedReport.answerSnapshotMatrix.run.id
+    };
+  }
+  if (input.dependencies.adapters.length === 0) throw new RecommendationRuntimeUnavailableError("No answer-engine adapter is installed.");
+  assertAdaptersMatchAuthority(
+    input.dependencies.registry, input.dependencies.adapters, input.dependencies.certificationAuthority
+  );
   const profile = input.websiteFoundation.organizationProfile;
   if (!profile.organizationName) throw new RecommendationQuestionGenerationError();
   const questions = generatePurchaseQuestions({
@@ -143,15 +163,35 @@ export async function runRecommendationForensicsPipeline(input: {
   return { coverage, report, runId: run.id };
 }
 
-export async function retrieveCitationSource(url: string): Promise<{
+export async function retrieveCitationSource(url: string, options: {
+  fetchImpl?: typeof fetch;
+  resolver?: HostnameResolver;
+} = {}): Promise<{
   retrievalState: "available" | "inaccessible";
   excerpt: string | null;
   excerptHash: string | null;
   contentHash: string | null;
 }> {
   try {
-    const response = await createSafeFetch({ maxBytes: 512_000, timeoutMs: 10_000 })(url, {
-      headers: { accept: "text/html,text/plain,application/xhtml+xml;q=0.9" }
+    const robotsFetch = createSafeFetch({
+      fetchImpl: options.fetchImpl, resolver: options.resolver, maxBytes: 256_000, timeoutMs: 10_000
+    });
+    const policies = new Map<string, ReturnType<typeof parseRobotsTxt>>();
+    const response = await createSafeFetch({
+      fetchImpl: options.fetchImpl, resolver: options.resolver, maxBytes: 512_000, timeoutMs: 10_000,
+      beforeRequest: async (target) => {
+        const origin = target.origin;
+        let policy = policies.get(origin);
+        if (!policy) {
+          const robotsUrl = new URL("/robots.txt", origin);
+          const robots = await robotsFetch(robotsUrl, { headers: { "user-agent": CITATION_CRAWLER_USER_AGENT } }).catch(() => null);
+          policy = parseRobotsTxt(robots?.ok ? await robots.text() : "", robotsUrl, "OpenGeoConsoleBot");
+          policies.set(origin, policy);
+        }
+        if (!isAllowedByRobots(target, policy)) throw new Error("robots.txt disallows this citation source.");
+      }
+    })(url, {
+      headers: { accept: "text/html,text/plain,application/xhtml+xml;q=0.9", "user-agent": CITATION_CRAWLER_USER_AGENT }
     });
     if (!response.ok) return unavailableRetrieval();
     const raw = await response.text();
@@ -214,12 +254,15 @@ function stableRunStartedAt(jobId: string): string {
 }
 
 function assertAdaptersMatchAuthority(
+  registry: AnswerEngineRegistry,
   adapters: AnswerEngineAdapter[],
   authority: CertificationAuthoritySnapshot
 ): void {
   const certifiedKeys = new Set(authority.certifications.map(({ surface }) => createAnswerEngineSurfaceKey(surface)));
-  if (adapters.some(({ surface }) => surface.certificationState !== "certified" ||
-      !certifiedKeys.has(createAnswerEngineSurfaceKey(surface)))) {
+  const adapterKeys = new Set(adapters.map(({ surface }) => createAnswerEngineSurfaceKey(surface)));
+  if (!recommendationRuntimeMatchesAuthority(registry, authority) || adapterKeys.size !== certifiedKeys.size ||
+      adapters.some(({ surface }) => surface.certificationState !== "certified" ||
+        !certifiedKeys.has(createAnswerEngineSurfaceKey(surface)))) {
     throw new RecommendationRuntimeUnavailableError("The answer-engine runtime does not match its persisted certification authority.");
   }
 }
@@ -236,8 +279,11 @@ const defaultPersistence = {
   getCheckpoint: getAnswerExecutionCheckpoint,
   compareAndSwap: compareAndSwapAnswerExecutionCheckpoint,
   saveEvidence: saveCitationSourceEvidenceImmutable,
+  getReport: getRecommendationForensicReportForJob,
   saveReport: saveRecommendationForensicReport
 };
+
+const CITATION_CRAWLER_USER_AGENT = "OpenGeoConsoleBot/1.0 (+https://github.com/open-geo-console)";
 
 export class RecommendationRuntimeUnavailableError extends Error {}
 export class RecommendationQuestionGenerationError extends Error {}
