@@ -19,7 +19,7 @@
 - [x] Add recorded workstation batch drains and preserve a configuration-only upgrade path to persistent real-time Workers.
 - [x] Run staging free/deep, production free, and production commerce as restartable Docker Desktop services using authoritative PostgreSQL polling.
 - [x] Configure an independent production private evidence store, then enable and verify the production deep Docker Worker.
-- [ ] Provide locally decryptable staging-only Airwallex/Resend Worker credentials before automating staging commerce.
+- [ ] Provide locally decryptable staging-only `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `RESEND_WEBHOOK_SECRET`, then rerun staging commerce and prove the queued confirmation/report-ready messages are delivered. The Gmail test recipient, Airwallex HPP/Webhook, and deep fulfillment already passed the 2026-07-12 drill.
 
 ## Protected staging and production security
 
@@ -79,13 +79,17 @@
 - [x] Verify private asset authorization, screenshot fallback states, desktop/mobile HTML browser QA, and PDF export QA.
 - [x] Configure Preview-only private staging object storage and visually verify a fresh paid deep report's real issue crop, context thumbnail, compact screenshots, viewport fallback, authorized HTML/PDF reads, and anonymous object-store denial.
 
-## AI recommendation forensic report (approved design, contracts implemented)
+## AI recommendation forensic report (Phase 5A implemented; live certification blocked)
 
 - [x] Approve the zero-configuration recommendation-forensic product direction, target buyer, two-audience delivery, evidence grades, and non-service boundary.
 - [x] Write and approve an implementation plan for `docs/superpowers/specs/2026-07-12-ai-recommendation-forensic-report-design.md`.
-- [x] Add immutable answer-snapshot and citation-evidence contracts with deterministic provider fixtures and private schema-v4 persistence.
-- [ ] Certify the first source-bearing answer-engine adapter in protected staging.
-- [ ] Certify a second independent adapter and prove qualified/limited/failed commercial coverage outcomes.
+- [x] Add immutable question/run/attempt/cell/source and citation-evidence contracts with deterministic fixtures, atomic checkpoints, evidence links and private schema-v9 persistence.
+- [x] Implement fail-closed OpenAI Responses Web Search and Perplexity Sonar adapters plus protected signed-artifact certification and deterministic authority-install commands.
+- [ ] Supply independent protected-staging provider credentials and signing authority, then create, manually review and install the first live source-bearing provider artifact.
+- [ ] Certify the second independent live provider and prove qualified/limited/failed commercial coverage, settlement and refund outcomes.
 - [x] Add citation intelligence, entity ambiguity handling, Grade A-D evidence, source gaps, and opportunity hypotheses.
-- [ ] Deliver the executive decision report and separate vendor task package in private HTML/PDF.
+- [x] Implement the evidence-driven executive decision report and separate vendor task package in product-scoped private HTML/same-HTML PDF, with the legacy website audit as appendix.
+- [ ] Accept one real dual-provider paid report end to end: source retrieval, immutable evidence, HTML/PDF content and page count, anonymous `404`, transactional delivery/reply, and commercial settlement.
+- [ ] Drill missing/drifted authority, zero/one provider, timeout/rate-limit/provider outage, robots-inaccessible evidence, limited/failed output, refund, and email failure while the public product remains closed.
+- [ ] Run protected legacy-checkout retirement against real provider resources and dynamically prove schema-v9 bootstrap on a fresh empty PostgreSQL database.
 - [ ] Add the budgeted one-question free sample only after paid multi-engine staging acceptance.

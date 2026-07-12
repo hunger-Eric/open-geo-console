@@ -48,6 +48,7 @@ Live mode also requires explicit server-side `OGC_PRICE_CNY_MINOR`, `OGC_PRICE_U
 - A success return displays `confirming` until a valid signed `payment_intent.succeeded` Webhook updates the order. A cancel return means only that the shopper left checkout; it is not a trusted provider cancellation.
 - The PaymentIntent client secret is temporary browser session material. Never log, persist, copy into monitoring, or expose it through the status API.
 - When investigating a return issue, verify the report/order binding, the signed provider event, and the PostgreSQL order state separately. Do not repair fulfillment from query parameters or a browser screenshot.
+- Retire pre-migration unpaid provider resources only through `npm run commerce:retire-legacy`. The command requires `OGC_DEPLOYMENT_PROFILE=staging|production`, `COMMERCE_MODE=test|live`, `OGC_LEGACY_RETIREMENT_ENABLED=true`, and an explicit ISO `OGC_LEGACY_RETIREMENT_CUTOFF_AT`; it rechecks provider state and does not retire a checkout that is already paid. Review the printed inspected/retired/paid counts and provider state before disabling the gate again.
 
 ## Docker Desktop workstation Workers
 
@@ -86,6 +87,8 @@ Code and mocked provider tests are not proof of live readiness. Before `COMMERCE
 4. Create Cloudflare Turnstile and Queue resources and restrict tokens to the minimum permissions.
 5. Run one real low-value payment, duplicate Webhook replay, report completion, secure email redemption, full refund, bounce, workstation-offline, and 24-hour watchdog drill.
 6. Confirm sanitized logs contain no email address, report token, payment secret, model key, or unhashed IP.
+
+For transactional email acceptance, use `RESEND_FROM_EMAIL="Open GEO Console <reports@itheheda.online>"` and `OGC_REPLY_TO_EMAIL="support@itheheda.online"`, prove the message leaves `queued`, process the signed Resend event, and send a real reply that arrives in the support mailbox. Staging must additionally redirect the envelope to `OGC_TEST_EMAIL_RECIPIENT`; do not treat a queued database row as provider delivery.
 
 ## Failure handling
 

@@ -130,6 +130,12 @@ Each answer-engine observation is stored as an immutable run/cell/source snapsho
 
 The provider-neutral contracts and deterministic fixtures may ship before any live provider is enabled. Implementing an adapter does not certify it, and a developer API observation must not be labeled as a consumer application result. Customer-facing recommendation claims remain disabled until two independent source-bearing surfaces pass protected-staging certification.
 
+Certification artifacts are immutable and authenticated separately from provider credentials. Runtime registration requires two distinct surfaces plus exact agreement among protected environment configuration, the signed certification/source authority and PostgreSQL authority; zero or one valid surface keeps both operator and public product lanes closed. Commercial checkpoints persist provider attempts and their evidence atomically so resume cannot silently mix observations from different provider ledgers.
+
+## 2026-07-12: Transactional email is replyable without becoming an inbound workflow
+
+Resend remains outbound transport, but every order and report-delivery message uses the verified `Open GEO Console <reports@itheheda.online>` sender with `Reply-To: support@itheheda.online`. Reply handling belongs to the support mailbox rather than the application database. Missing or malformed From/Reply-To/Webhook configuration fails commerce readiness, and non-production envelopes still redirect to `OGC_TEST_EMAIL_RECIPIENT` without changing the visible Reply-To identity.
+
 ## 2026-07-12: Low-cost persistent Workers poll authoritative PostgreSQL from Docker Desktop
 
 The workstation deployment uses `FULFILLMENT_MODE=realtime` with `OGC_JOB_QUEUE_PROVIDER=postgres`. A bounded idle poll claims jobs through the existing PostgreSQL lease boundary, keeps Worker presence current, and avoids both locally unavailable Vercel Sensitive Queue credentials and repeated empty batch-run records. Cloudflare Queue remains an optional notification hint for hosted deployments; it never becomes job authority.

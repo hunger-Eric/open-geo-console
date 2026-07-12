@@ -1,14 +1,16 @@
 # Open GEO Console
 
-Open GEO Console is an open-source AI Search Console for company websites. It combines deterministic GEO checks with evidence-backed large-model analysis and optional AI crawler log evidence.
+Open GEO Console is an open-source AI Search Console for company websites. It combines a free deterministic GEO check with a private recommendation-forensics product that observes source-bearing answer-engine results, explains citation gaps, and turns evidence into an executive decision report plus a vendor task package.
 
 ## Product Flow
 
 1. Enter a company website URL.
 2. Receive a persisted technical GEO report immediately.
-3. A worker discovers the site, fetches real page evidence, and generates a structured AI report. Recoverable page and model failures are retried automatically at the smallest failed unit.
-4. The free preview analyzes the submitted homepage and exposes one verified AI finding while capacity remains. A one-time purchase or operator report-credit key unlocks a private deep report covering every eligible page on small sites or up to 50 representative pages on larger sites.
-5. Paid reports are delivered by secure email link within 24 hours or receive a full refund. Access logs can be imported separately; log evidence never changes the technical GEO score.
+3. The free preview analyzes the submitted homepage and exposes one verified technical/AI foundation finding while capacity remains.
+4. The paid product contract asks 3-5 non-brand purchase questions across two independently certified, source-bearing answer-engine surfaces, persists immutable observations, and produces `RecommendationForensicReportV1`. The buyer receives an executive layer; existing website/content/SEO/communications vendors receive a separate task package. The legacy website audit is supporting appendix evidence, not the paid product thesis.
+5. Paid reports are delivered as private HTML and same-HTML PDF by secure email link within 24 hours or receive a full refund. Access logs can be imported separately; log evidence never changes the technical GEO score.
+
+The recommendation product is implemented but remains fail-closed: no public or operator catalog opens until two exact provider surfaces have independently passed protected-staging certification and their immutable authority matches the runtime configuration and PostgreSQL authority. No live OpenAI/Perplexity certification or dual-provider paid drill has been accepted yet.
 
 AI findings must cite URLs from the current crawl and quote text present in retained page evidence. Unsupported findings are rejected rather than shown.
 
@@ -16,7 +18,9 @@ AI findings must cite URLs from the current crawl and quote text present in reta
 
 - Technical checks for `robots.txt`, `sitemap.xml`, `llms.txt`, schema, metadata, headings, canonical URLs, OpenGraph, readable content and HTTP status.
 - Homepage-only free analysis plus AI-planned deep page sampling after site-wide URL discovery and page-type/template clustering.
-- OpenAI-compatible model transport with versioned `AiWebsiteReportV1` output and evidence validation.
+- OpenAI-compatible website-analysis transport with versioned `AiWebsiteReportV1` output retained as technical appendix evidence.
+- Versioned `RecommendationForensicReportV1` with immutable answer cells/sources, evidence-linked entity and citation analysis, Grade A-D evidence, customer/competitor gaps, homepage/full-site blind spots, three executive priorities, and a separate vendor task package.
+- Fail-closed OpenAI Responses Web Search and Perplexity Sonar adapters, protected-staging signed certification artifacts, exact runtime/authority matching, and qualified/limited/failed commercial coverage outcomes.
 - HTTP crawling with DNS-pinned SSRF protection and Playwright fallback for JavaScript-rendered pages.
 - HTML-first private deep reports with Worker-captured visual evidence and PDF export from the same canonical HTML.
 - Progressive report jobs with PostgreSQL leases, page-level recovery, resumable checkpoints and seven-day source-evidence retention.
@@ -34,7 +38,7 @@ AI findings must cite URLs from the current crawl and quote text present in reta
 - `packages/crawler-rules` — AI crawler identity rules.
 - `packages/log-parser` — access-log parsing and sanitized bot evidence.
 
-The recommendation-forensics foundation is split into two additional workspaces: `packages/answer-engine-observer` owns provider-neutral answer-snapshot contracts, validation and deterministic fixtures; `packages/citation-intelligence` owns recommendation/entity analysis, source categories, evidence grades and opportunity hypotheses. These packages do not enable a live provider or customer-facing recommendation claim by themselves.
+Recommendation forensics is split into two additional workspaces: `packages/answer-engine-observer` owns provider-neutral question, collection-surface, immutable answer-snapshot and source contracts; `packages/citation-intelligence` owns recommendation/entity analysis, source categories, evidence grades and opportunity hypotheses. `apps/web` owns provider adapters, certification/runtime authority, PostgreSQL checkpoints, commercial coverage, scoped access and HTML/PDF delivery. Adapter code and deterministic fixtures are never proof of a live or consumer-app observation.
 
 ## Local Setup
 
@@ -73,6 +77,8 @@ Required production variables:
 - `OGC_IP_HASH_SECRET`
 - `OGC_DEPLOYMENT_PROFILE` (`staging` or `production`, matching the database marker)
 - `OGC_EVIDENCE_STORAGE=vercel-blob` with a connected Vercel Private Blob store, or `s3` plus a private S3-compatible endpoint, region, bucket and credentials; Web and deep Worker processes must share the same store
+
+Recommendation-provider variables are intentionally omitted from the basic setup because the product must stay closed until protected-staging certification. Configure and install the two independent authorities only by following [Recommendation Provider Certification](docs/operations/recommendation-provider-certification.md); keep all three recommendation enable flags `false` until that runbook's paid and failure drills pass.
 
 The low-cost commercial target is Vercel/Netlify plus Neon, Cloudflare Turnstile/Queue, Airwallex, Resend, and persistent Docker Desktop Workers. This avoids mandatory server rent at low order volume while keeping every task durable in PostgreSQL. The workstation still must remain online; hosted Workers can later use the same leases and state machines without a rewrite.
 
@@ -116,6 +122,7 @@ Chinese is the default interface and uses unprefixed canonical URLs such as `/`,
 - `GET /api/reports/:id/status` returns `generating`, `completed`, `completed_limited`, or `unavailable`, plus coverage, queue information while active, and final credit state.
 - `POST /api/reports/:id/upgrade` validates the persisted report language, reserves one credit and creates a deep job.
 - `POST /api/reports/:id/checkout` creates or recovers an immutable server-priced Airwallex PaymentIntent for Hosted Payment Page; browser amounts are ignored and the temporary client secret is not persisted.
+- `GET /api/commerce/catalog` exposes the recommendation product only when the deployment lane, two-provider runtime registry, protected configuration and persisted authorities all agree; otherwise it stays closed.
 - `GET /api/reports/:id/orders/:orderId/status` verifies the order belongs to the report, then returns customer-safe payment, fulfillment, refund, and delivery states. Browser return parameters never mark an order paid.
 - `POST /api/reports/:id/locale-correction` schedules the one authorized no-charge regeneration when a legacy deep artifact uses the wrong language.
 - `POST /api/reports/:id/retry` is deprecated for normal users and returns `410`; recoverable work is automatic.
@@ -123,7 +130,7 @@ Chinese is the default interface and uses unprefixed canonical URLs such as `/`,
 - `POST /api/reports/link-reissue` generically requests a rate-limited replacement link without revealing whether an order/email pair exists.
 - `POST /api/webhooks/airwallex` and `POST /api/webhooks/resend` verify raw-body signatures before idempotent processing.
 - `PUT|DELETE /api/reports/:id/bot-evidence` replaces or removes sanitized crawler evidence.
-- `GET /reports/:id/report.html` serves the canonical authorized private report; `GET /api/reports/:id/artifacts/report.pdf` exports that same HTML with print CSS.
+- `GET /reports/:id/report.html` serves the product-scoped canonical authorized private report; explicit legacy/recommendation HTML and PDF routes prevent a token for one product contract from opening the other.
 - `GET /api/reports/:id/evidence/:assetId` streams a report-bound private screenshot after the existing access-cookie check; it never returns an object-store URL.
 
 See [AI Report Engine](docs/AI-REPORT-ENGINE.md) and [Report Workspace](docs/REPORT-WORKSPACE.md) for data and route contracts.
