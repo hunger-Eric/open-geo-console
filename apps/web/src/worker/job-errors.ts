@@ -20,6 +20,11 @@ export class PublicSourceRuntimeError extends JobError {
     super(message, code, "operator_repairable", options);
   }
 }
+export class StagingLiveDrillFaultError extends JobError {
+  constructor(fault: string) {
+    super(`Protected staging live Worker drill injected ${fault} fault.`, `staging_live_drill_${fault}`, "operator_repairable");
+  }
+}
 export class CheckpointValidationError extends JobError {
   constructor(message: string, options?: ErrorOptions) { super(message, "checkpoint_validation_failed", "permanent", options); }
 }
