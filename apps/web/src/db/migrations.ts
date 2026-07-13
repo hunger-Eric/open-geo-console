@@ -1518,11 +1518,20 @@ export const V14_DATABASE_MIGRATIONS = [
    CHECK (request_status IN ('pending','succeeded','partial','timeout','rate_limited','unavailable','malformed','aborted','authentication','unsupported'))`
 ] as const;
 
+export const V15_DATABASE_MIGRATIONS = [
+  `DROP INDEX IF EXISTS payment_orders_report_active_product_uidx`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS payment_orders_report_active_product_uidx
+   ON payment_orders (report_id, product_code)
+   WHERE payment_status IN ('created','pending')
+      OR (payment_status = 'paid' AND refund_status <> 'refunded')`
+] as const;
+
 export const DATABASE_MIGRATIONS = [
   ...V9_DATABASE_MIGRATIONS,
   ...V10_DATABASE_MIGRATIONS,
   ...V11_DATABASE_MIGRATIONS,
   ...V12_DATABASE_MIGRATIONS,
   ...V13_DATABASE_MIGRATIONS,
-  ...V14_DATABASE_MIGRATIONS
+  ...V14_DATABASE_MIGRATIONS,
+  ...V15_DATABASE_MIGRATIONS
 ] as const;

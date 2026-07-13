@@ -154,6 +154,6 @@ function assertSmallRequest(request: Request) {
 
 function publicError(error: unknown): string {
   const message = error instanceof Error ? error.message : "Unable to create checkout.";
-  if (/required|valid|supported|locale|configured|accepting|available|active checkout/i.test(message)) return message;
+  if (message === "The recommendation-forensics product is not available.") return message;
   return "Unable to create secure checkout. Please try again later.";
 }

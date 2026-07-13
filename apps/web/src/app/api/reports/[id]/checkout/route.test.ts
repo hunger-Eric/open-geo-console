@@ -122,4 +122,14 @@ describe("commercial checkout route", () => {
     expect(mocks.createHostedCheckout).not.toHaveBeenCalled();
     expect(mocks.replaceLegacyHostedCheckout).not.toHaveBeenCalled();
   });
+
+  it("never returns an internal database query when checkout creation fails", async () => {
+    mocks.createPaymentOrder.mockRejectedValue(new Error('Failed query: insert into payment_orders ("report_locale")'));
+    const response = await POST(new Request("https://example.test/api/reports/report-1/checkout", {
+      method: "POST", headers: { "content-type": "application/json", "idempotency-key": "request-123" },
+      body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human" })
+    }), { params: Promise.resolve({ id: "report-1" }) });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Unable to create secure checkout. Please try again later." });
+  });
 });

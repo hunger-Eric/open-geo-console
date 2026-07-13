@@ -816,7 +816,7 @@ export const paymentOrders = pgTable(
     uniqueIndex("payment_orders_fulfillment_job_uidx").on(table.fulfillmentJobId),
     uniqueIndex("payment_orders_report_active_product_uidx")
       .on(table.reportId, table.productCode)
-      .where(sql`${table.paymentStatus} IN ('created','pending','paid')`),
+      .where(sql`${table.paymentStatus} IN ('created','pending') OR (${table.paymentStatus} = 'paid' AND ${table.refundStatus} <> 'refunded')`),
     index("payment_orders_email_hmac_idx").on(table.customerEmailHmac, table.createdAt),
     index("payment_orders_sla_idx").on(table.fulfillmentStatus, table.deliveryDeadlineAt),
     check("payment_orders_provider_check", sql`${table.provider} IN ('airwallex','stripe')`),
