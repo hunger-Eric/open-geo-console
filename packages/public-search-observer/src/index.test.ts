@@ -145,6 +145,19 @@ describe("public-search observer contracts", () => {
     const rejectedResult = await observePublicSearch({ adapter: rejected, query, budget, signal: new AbortController().signal });
     expect(rejectedResult).toMatchObject({ status: "rate_limited", usage: { requestCount: 1, costUncertain: true } });
     expect(JSON.stringify(rejectedResult)).not.toContain("must-not-leak");
+    for (const status of ["authentication", "unsupported"] as const) {
+      const adapter: PublicSearchSurfaceAdapter = {
+        ...base,
+        search: async () => { throw new Error("Authorization: Bearer must-not-leak"); },
+        classifyError: () => status
+      };
+      await expect(observePublicSearch({ adapter, query, budget, signal: new AbortController().signal }))
+        .resolves.toMatchObject({
+          status,
+          results: [],
+          usage: { requestCount: 1, resultCount: 0, costUncertain: true }
+        });
+    }
     const invalidClassifier: PublicSearchSurfaceAdapter = { ...rejected, classifyError: () => "unknown-runtime-status" as never };
     expect((await observePublicSearch({ adapter: invalidClassifier, query, budget, signal: new AbortController().signal })).status).toBe("unavailable");
 

@@ -14,7 +14,7 @@ import type {
 } from "./types";
 
 const SURFACE_KINDS = new Set(["documented_api", "licensed_index", "self_hosted_index"]);
-const STATUSES = new Set(["complete", "partial", "rate_limited", "timed_out", "unavailable", "malformed", "aborted"]);
+const STATUSES = new Set(["complete", "partial", "rate_limited", "timed_out", "unavailable", "malformed", "aborted", "authentication", "unsupported"]);
 
 function object(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${label} must be an object`);

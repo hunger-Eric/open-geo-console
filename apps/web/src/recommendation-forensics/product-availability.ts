@@ -15,12 +15,11 @@ export function evaluateRecommendationProductAvailability(input:{environment:Nod
 export async function getRecommendationProductAvailability(environment:NodeJS.ProcessEnv=process.env):Promise<RecommendationProductAvailability>{
   if(environment.OGC_PUBLIC_SEARCH_RUNTIME_ENABLED!=="true")return closed("disabled");
   const profile=environment.OGC_DEPLOYMENT_PROFILE; if(profile!=="staging"&&profile!=="production")return closed("environment");
-  const required=[environment.OGC_PUBLIC_SEARCH_SURFACE_ID,environment.OGC_PUBLIC_SEARCH_SURFACE_VERSION,environment.OGC_PUBLIC_SEARCH_LOCALE,environment.OGC_PUBLIC_SEARCH_REGION]; if(required.some((value)=>!value?.trim()))return closed("runtime_incomplete");
+  const required=[environment.OGC_PUBLIC_SEARCH_ADAPTER,environment.OGC_PUBLIC_SEARCH_LOCALE,environment.OGC_PUBLIC_SEARCH_REGION]; if(required.some((value)=>!value?.trim()))return closed("runtime_incomplete");
   try{
-    const [{getActivePublicSearchSurfaceAuthority},{createProductionPublicSourceForensicsDependencies}]=await Promise.all([import("@/db/public-search-authority"),import("@/public-source-forensics/production-runtime")]);
-    const authority=await getActivePublicSearchSurfaceAuthority({environment:profile,surfaceId:environment.OGC_PUBLIC_SEARCH_SURFACE_ID!,surfaceVersion:environment.OGC_PUBLIC_SEARCH_SURFACE_VERSION!,locale:environment.OGC_PUBLIC_SEARCH_LOCALE!,region:environment.OGC_PUBLIC_SEARCH_REGION!,authorityVersion:environment.OGC_PUBLIC_SEARCH_AUTHORITY_VERSION});
-    const runtime=await createProductionPublicSourceForensicsDependencies();
-    return evaluateRecommendationProductAvailability({environment,authority,registryReady:Boolean(runtime),builderAvailable:Boolean(runtime),artifactGateAvailable:Boolean(runtime)});
+    const {resolveProductionPublicSearchRuntime}=await import("@/public-source-forensics/production-runtime");
+    await resolveProductionPublicSearchRuntime({environment,getAuthority:(await import("@/db/public-search-authority")).getActivePublicSearchSurfaceAuthority});
+    return closed("runtime_incomplete");
   }catch{return closed("authority_unavailable");}
 }
 export async function assertRecommendationProductAvailable(environment:NodeJS.ProcessEnv=process.env):Promise<void>{if(!(await getRecommendationProductAvailability(environment)).ready)throw new Error("The recommendation-forensics product is not available.");}

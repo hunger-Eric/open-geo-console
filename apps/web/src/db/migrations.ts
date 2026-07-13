@@ -1478,10 +1478,49 @@ export const V13_DATABASE_MIGRATIONS = [
   `GRANT EXECUTE ON FUNCTION ogc_expire_market_source_excerpt(timestamptz) TO CURRENT_USER`
 ] as const;
 
+export const V14_DATABASE_MIGRATIONS = [
+  `ALTER TABLE public_search_surface_authorities ADD COLUMN IF NOT EXISTS adapter_id text`,
+  `ALTER TABLE public_search_surface_authorities ADD COLUMN IF NOT EXISTS provider_id text`,
+  `ALTER TABLE public_search_surface_authorities ADD COLUMN IF NOT EXISTS product_id text`,
+  `ALTER TABLE public_search_surface_authorities ADD COLUMN IF NOT EXISTS model_id text`,
+  `ALTER TABLE public_search_surface_authorities ADD COLUMN IF NOT EXISTS adapter_version text`,
+  `UPDATE public_search_surface_authorities
+   SET adapter_id='historical-unbound-v1', provider_id='historical-unbound-v1',
+       product_id='historical-unbound-v1', model_id='historical-unbound-v1',
+       adapter_version='historical-unbound-v1'
+   WHERE adapter_id IS NULL OR provider_id IS NULL OR product_id IS NULL OR model_id IS NULL OR adapter_version IS NULL`,
+  `ALTER TABLE public_search_surface_authorities ALTER COLUMN adapter_id SET NOT NULL`,
+  `ALTER TABLE public_search_surface_authorities ALTER COLUMN provider_id SET NOT NULL`,
+  `ALTER TABLE public_search_surface_authorities ALTER COLUMN product_id SET NOT NULL`,
+  `ALTER TABLE public_search_surface_authorities ALTER COLUMN model_id SET NOT NULL`,
+  `ALTER TABLE public_search_surface_authorities ALTER COLUMN adapter_version SET NOT NULL`,
+  `ALTER TABLE public_search_surface_authorities DROP CONSTRAINT IF EXISTS public_search_surface_authorities_adapter_identity_check`,
+  `ALTER TABLE public_search_surface_authorities
+   ADD CONSTRAINT public_search_surface_authorities_adapter_identity_check
+   CHECK (length(btrim(adapter_id)) > 0 AND length(btrim(provider_id)) > 0 AND length(btrim(product_id)) > 0 AND length(btrim(model_id)) > 0 AND length(btrim(adapter_version)) > 0)`,
+  `DROP INDEX IF EXISTS public_search_surface_authorities_active_idx`,
+  `CREATE INDEX IF NOT EXISTS public_search_surface_authorities_active_idx
+   ON public_search_surface_authorities (environment, active, adapter_id, provider_id, product_id, model_id, adapter_version, surface_id)`,
+  `DROP INDEX IF EXISTS public_search_surface_authorities_identity_uidx`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS public_search_surface_authorities_identity_uidx
+   ON public_search_surface_authorities (environment, adapter_id, provider_id, product_id, model_id, adapter_version, surface_id, surface_version, authority_version)`,
+  `DROP INDEX IF EXISTS public_search_surface_authorities_scope_uidx`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS public_search_surface_authorities_scope_uidx
+   ON public_search_surface_authorities (authority_version, adapter_id, provider_id, product_id, model_id, adapter_version, surface_id, surface_version)`,
+  `DROP INDEX IF EXISTS public_search_surface_authorities_one_active_uidx`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS public_search_surface_authorities_one_active_uidx
+   ON public_search_surface_authorities (environment, adapter_id, provider_id, product_id, model_id, adapter_version, surface_id) WHERE active = true`,
+  `ALTER TABLE market_search_attempts DROP CONSTRAINT IF EXISTS market_search_attempts_status_check`,
+  `ALTER TABLE market_search_attempts DROP CONSTRAINT IF EXISTS market_search_attempts_request_status_check`,
+  `ALTER TABLE market_search_attempts ADD CONSTRAINT market_search_attempts_status_check
+   CHECK (request_status IN ('pending','succeeded','partial','timeout','rate_limited','unavailable','malformed','aborted','authentication','unsupported'))`
+] as const;
+
 export const DATABASE_MIGRATIONS = [
   ...V9_DATABASE_MIGRATIONS,
   ...V10_DATABASE_MIGRATIONS,
   ...V11_DATABASE_MIGRATIONS,
   ...V12_DATABASE_MIGRATIONS,
-  ...V13_DATABASE_MIGRATIONS
+  ...V13_DATABASE_MIGRATIONS,
+  ...V14_DATABASE_MIGRATIONS
 ] as const;

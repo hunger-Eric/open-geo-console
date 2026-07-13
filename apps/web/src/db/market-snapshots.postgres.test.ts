@@ -51,8 +51,8 @@ describePostgres("public-search market snapshot PostgreSQL authority", () => {
     }
     process.env.DATABASE_URL = databaseUrl;
     await ensureDatabase();
-    const installed = await installPublicSearchSurfaceAuthority({ environment: "staging", surfaceId: surface.surfaceId, surfaceVersion: surface.surfaceVersion, localeCapabilities: [surface.locale], regionCapabilities: [surface.region], termsReviewedAt: "2030-01-01T00:00:00.000Z", evidenceReferences: ["fixture-review"], capturedAt: "2030-01-02T00:00:00.000Z", active: false });
-    const authority = await activatePublicSearchSurfaceAuthority({ authorityVersion: installed.authorityVersion, environment: "staging", surfaceId: installed.surfaceId, surfaceVersion: installed.surfaceVersion });
+    const installed = await installPublicSearchSurfaceAuthority({ environment: "staging", adapterId:"fixture",providerId:surface.providerId,productId:surface.productId,modelId:"fixture-model",adapterVersion:surface.adapterVersion, surfaceId: surface.surfaceId, surfaceVersion: surface.surfaceVersion, localeCapabilities: [surface.locale], regionCapabilities: [surface.region], termsReviewedAt: "2030-01-01T00:00:00.000Z", evidenceReferences: ["fixture-review"], capturedAt: "2030-01-02T00:00:00.000Z", active: false });
+    const authority = await activatePublicSearchSurfaceAuthority({ authorityVersion: installed.authorityVersion, environment: "staging",adapterId:installed.adapterId,providerId:installed.providerId,productId:installed.productId,modelId:installed.modelId,adapterVersion:installed.adapterVersion, surfaceId: installed.surfaceId, surfaceVersion: installed.surfaceVersion });
     authorityVersion = authority.authorityVersion;
     const sql = getSqlClient();
     await sql`INSERT INTO scan_reports (id,url,site_key,report_locale,technical_status) VALUES (${reportId},'https://private.example.test','private.example.test','zh','completed')`;

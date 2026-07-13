@@ -6,7 +6,9 @@ export type SearchObservationStatus =
   | "timed_out"
   | "unavailable"
   | "malformed"
-  | "aborted";
+  | "aborted"
+  | "authentication"
+  | "unsupported";
 
 export type SearchAdapterErrorClass = Exclude<SearchObservationStatus, "complete" | "partial">;
 

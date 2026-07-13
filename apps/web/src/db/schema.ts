@@ -425,6 +425,11 @@ export const publicSearchSurfaceAuthorities = pgTable(
   "public_search_surface_authorities",
   {
     authorityVersion: text("authority_version").primaryKey(),
+    adapterId: text("adapter_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    productId: text("product_id").notNull(),
+    modelId: text("model_id").notNull(),
+    adapterVersion: text("adapter_version").notNull(),
     surfaceId: text("surface_id").notNull(),
     surfaceVersion: text("surface_version").notNull(),
     environment: text("environment").notNull(),
@@ -437,17 +442,20 @@ export const publicSearchSurfaceAuthorities = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
-    index("public_search_surface_authorities_active_idx").on(table.environment, table.active, table.surfaceId),
+    index("public_search_surface_authorities_active_idx").on(table.environment, table.active, table.adapterId, table.providerId, table.productId, table.modelId, table.adapterVersion, table.surfaceId),
     uniqueIndex("public_search_surface_authorities_identity_uidx").on(
-      table.environment, table.surfaceId, table.surfaceVersion, table.authorityVersion
+      table.environment, table.adapterId, table.providerId, table.productId, table.modelId, table.adapterVersion,
+      table.surfaceId, table.surfaceVersion, table.authorityVersion
     ),
     uniqueIndex("public_search_surface_authorities_scope_uidx").on(
-      table.authorityVersion, table.surfaceId, table.surfaceVersion
+      table.authorityVersion, table.adapterId, table.providerId, table.productId, table.modelId, table.adapterVersion,
+      table.surfaceId, table.surfaceVersion
     ),
     uniqueIndex("public_search_surface_authorities_one_active_uidx")
-      .on(table.environment, table.surfaceId)
+      .on(table.environment, table.adapterId, table.providerId, table.productId, table.modelId, table.adapterVersion, table.surfaceId)
       .where(sql`${table.active} = true`),
     check("public_search_surface_authorities_version_check", sql`length(btrim(${table.authorityVersion})) > 0`),
+    check("public_search_surface_authorities_adapter_identity_check", sql`length(btrim(${table.adapterId})) > 0 AND length(btrim(${table.providerId})) > 0 AND length(btrim(${table.productId})) > 0 AND length(btrim(${table.modelId})) > 0 AND length(btrim(${table.adapterVersion})) > 0`),
     check("public_search_surface_authorities_surface_check", sql`length(btrim(${table.surfaceId})) > 0 AND length(btrim(${table.surfaceVersion})) > 0`),
     check("public_search_surface_authorities_environment_check", sql`${table.environment} IN ('staging','production')`),
     check("public_search_surface_authorities_locale_shape_check", sql`jsonb_typeof(${table.localeCapabilities}) = 'array'`),
@@ -561,7 +569,7 @@ export const marketSearchAttempts = pgTable(
     uniqueIndex("market_search_attempts_idempotency_uidx").on(table.idempotencyReference),
     index("market_search_attempts_snapshot_idx").on(table.snapshotId, table.startedAt),
     check("market_search_attempts_number_check", sql`${table.attemptNumber} > 0`),
-    check("market_search_attempts_status_check", sql`${table.requestStatus} IN ('pending','succeeded','partial','timeout','rate_limited','unavailable','malformed','aborted')`),
+    check("market_search_attempts_status_check", sql`${table.requestStatus} IN ('pending','succeeded','partial','timeout','rate_limited','unavailable','malformed','aborted','authentication','unsupported')`),
     check("market_search_attempts_cost_check", sql`${table.configuredCostMicros} >= 0 AND (${table.providerCostMicros} IS NULL OR ${table.providerCostMicros} >= 0)`),
     check("market_search_attempts_timing_check", sql`(
       (${table.requestStatus} = 'pending' AND ${table.completedAt} IS NULL)

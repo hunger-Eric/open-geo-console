@@ -32,7 +32,7 @@ describe("public-source forensics pipeline", () => {
     const reports=new Map<string,RecommendationForensicReportV2>(), checkpoints=new Map<string,PublicSourcePipelineCheckpoint>();
     const closed=deps({reports,checkpoints,artifactReadiness:FAIL_CLOSED_ARTIFACT_READINESS,resolve:async({fanout},index=0)=>snapshot(fanout,index)});
     await expect(run("report-c","job-c",closed)).rejects.toBeInstanceOf(PublicSourceArtifactUnavailableError);
-    const drifted=deps({reports,checkpoints:new Map([["job-d",{identityHash:"wrong",methodology:"public_search_source_forensics_v1",questionSetVersion:"wrong",fanoutVersion:"wrong",authorityId:"wrong",snapshotIds:[],websiteFoundationHash:"wrong",evidenceCutoffAt:"2030-01-02T00:00:00.000Z",locale:"zh-CN",region:"CN"}]]),resolve:async({fanout})=>snapshot(fanout,1)});
+    const drifted=deps({reports,checkpoints:new Map([["job-d",{identityHash:"wrong",methodology:"public_search_source_forensics_v1",questionSetVersion:"wrong",fanoutVersion:"wrong",authorityId:"wrong",snapshotIds:[],websiteFoundationHash:"wrong",evidenceCutoffAt:"2030-01-02T00:00:00.000Z",locale:"zh-CN",region:"CN",adapterIdentityHash:"wrong"}]]),resolve:async({fanout})=>snapshot(fanout,1)});
     await expect(run("report-d","job-d",drifted)).rejects.toBeInstanceOf(PublicSourceResumeIdentityMismatchError);
   });
 });

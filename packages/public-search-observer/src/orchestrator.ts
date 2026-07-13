@@ -71,7 +71,7 @@ function terminal(
 function safeClassification(input: ObservePublicSearchInput, error: unknown): SearchAdapterErrorClass {
   try {
     const classified = input.adapter.classifyError?.(error) ?? "unavailable";
-    return (["rate_limited", "timed_out", "unavailable", "malformed", "aborted"] as const).includes(classified)
+    return (["rate_limited", "timed_out", "unavailable", "malformed", "aborted", "authentication", "unsupported"] as const).includes(classified)
       ? classified
       : "unavailable";
   } catch {
@@ -85,7 +85,9 @@ function safeMessage(status: SearchAdapterErrorClass): string {
     timed_out: "The public-search request timed out; cost may be uncertain.",
     unavailable: "The public-search surface was unavailable.",
     malformed: "The public-search surface returned an invalid response.",
-    aborted: "The caller cancelled the public-search request."
+    aborted: "The caller cancelled the public-search request.",
+    authentication: "The public-search credential was rejected.",
+    unsupported: "The configured public-search surface does not support the required capability."
   };
   return messages[status];
 }

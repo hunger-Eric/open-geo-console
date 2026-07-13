@@ -57,8 +57,8 @@ describe("database deployment marker", () => {
 });
 
 describe("database schema marker", () => {
-  it("uses hardened public-search methodology schema version 13", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(13);
+  it("uses hardened public-search methodology schema version 14", () => {
+    expect(DATABASE_SCHEMA_VERSION).toBe(14);
   });
 
   it("contains the complete additive V2 authority and methodology migration", () => {

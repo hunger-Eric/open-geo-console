@@ -15,7 +15,7 @@ export interface ResolvedPublicSourceSnapshot {
 export interface PublicSourcePipelineCheckpoint {
   identityHash: string; methodology: "public_search_source_forensics_v1"; questionSetVersion: string;
   fanoutVersion: string; authorityId: string; snapshotIds: string[]; websiteFoundationHash: string;
-  evidenceCutoffAt: string; locale: string; region: string;
+  evidenceCutoffAt: string; locale: string; region: string; adapterIdentityHash: string;
 }
 
 export interface PublicSourceForensicsDependencies {
@@ -57,7 +57,8 @@ export async function runPublicSourceForensicsPipeline(input: {
   const websiteFoundationHash = sha(input.websiteFoundation);
   if (prior && (prior.methodology !== "public_search_source_forensics_v1" || prior.questionSetVersion !== questions.questionSetVersion ||
       prior.fanoutVersion !== fanouts[0]!.fanoutVersion || prior.authorityId !== authority.authorityId || prior.websiteFoundationHash !== websiteFoundationHash ||
-      prior.locale !== input.locale || prior.region !== input.region)) throw new PublicSourceResumeIdentityMismatchError();
+      prior.locale !== input.locale || prior.region !== input.region ||
+      prior.adapterIdentityHash !== adapterIdentityHash(authority))) throw new PublicSourceResumeIdentityMismatchError();
   const evidenceCutoffAt = prior?.evidenceCutoffAt ?? (input.dependencies.now ?? (() => new Date()))().toISOString();
   const snapshots = await Promise.all(fanouts.map((fanout) => input.dependencies.resolveSnapshot({ questionId: fanout.questionId, fanout, evidenceCutoffAt })));
   const actualCostMicros = snapshots.reduce((sum, item) => sum + item.actualCostMicros, 0);
@@ -99,10 +100,12 @@ function createCheckpoint(value: { input: Parameters<typeof runPublicSourceForen
   const core = { methodology: "public_search_source_forensics_v1" as const, questionSetVersion: value.questions.questionSetVersion,
     fanoutVersion: value.fanouts[0]!.fanoutVersion, authorityId: value.authority.authorityId,
     snapshotIds: value.snapshots.map(({ snapshotId }) => snapshotId), websiteFoundationHash: sha(value.input.websiteFoundation),
-    evidenceCutoffAt: value.evidenceCutoffAt, locale: value.input.locale, region: value.input.region };
+    evidenceCutoffAt: value.evidenceCutoffAt, locale: value.input.locale, region: value.input.region,
+    adapterIdentityHash: adapterIdentityHash(value.authority) };
   return { ...core, identityHash: sha(core) };
 }
-function checkpointFromReport(report: RecommendationForensicReportV2, foundation: AiWebsiteReportV1): PublicSourcePipelineCheckpoint { const core={ methodology: report.methodology, questionSetVersion: report.questions.questionSetVersion, fanoutVersion: report.fanouts[0]!.fanoutVersion, authorityId: report.authority.authorityId, snapshotIds: report.snapshotRefs.map(({snapshotId})=>snapshotId), websiteFoundationHash:sha(foundation), evidenceCutoffAt:report.evidenceCutoffAt, locale:report.locale, region:report.region }; return {...core,identityHash:sha(core)}; }
+function checkpointFromReport(report: RecommendationForensicReportV2, foundation: AiWebsiteReportV1): PublicSourcePipelineCheckpoint { const core={ methodology: report.methodology, questionSetVersion: report.questions.questionSetVersion, fanoutVersion: report.fanouts[0]!.fanoutVersion, authorityId: report.authority.authorityId, snapshotIds: report.snapshotRefs.map(({snapshotId})=>snapshotId), websiteFoundationHash:sha(foundation), evidenceCutoffAt:report.evidenceCutoffAt, locale:report.locale, region:report.region, adapterIdentityHash:adapterIdentityHash(report.authority) }; return {...core,identityHash:sha(core)}; }
+function adapterIdentityHash(authority: PublicSearchSurfaceAuthority): string { return sha({ adapterVersion: authority.surface.adapterVersion, providerId: authority.surface.providerId, productId: authority.surface.productId, modelSurface: authority.surface.surfaceId, surfaceVersion: authority.surface.surfaceVersion, locale: authority.surface.locale, region: authority.surface.region }); }
 function sha(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 export class PublicSourceAuthorityUnavailableError extends Error {}
 export class PublicSourceQuestionGenerationError extends Error {}

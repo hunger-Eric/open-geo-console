@@ -41,7 +41,7 @@ import type {
 const DAY_MS = 86_400_000;
 const FRESH_MS = 7 * DAY_MS;
 const STALE_MS = 30 * DAY_MS;
-const TERMINAL_ATTEMPT_STATES = new Set(["succeeded", "partial", "timeout", "rate_limited", "unavailable", "malformed", "aborted"]);
+const TERMINAL_ATTEMPT_STATES = new Set(["succeeded", "partial", "timeout", "rate_limited", "unavailable", "malformed", "aborted", "authentication", "unsupported"]);
 const SUCCESS_ATTEMPT_STATES = new Set(["succeeded", "partial"]);
 const PUBLIC_METADATA_KEYS = new Set([
   "id", "name", "canonicalname", "type", "category", "kind", "status", "code", "version", "claim", "claims",
@@ -411,7 +411,7 @@ export async function completeMarketSnapshotLease(input: {
       SELECT
         (SELECT count(*)::integer FROM market_snapshot_queries query WHERE query.snapshot_id=${snapshotId}) AS query_count,
         (SELECT count(DISTINCT attempt.query_id)::integer FROM market_search_attempts attempt
-          WHERE attempt.snapshot_id=${snapshotId} AND attempt.request_status IN ('succeeded','partial','timeout','rate_limited','unavailable','malformed','aborted')) AS terminal_query_count,
+          WHERE attempt.snapshot_id=${snapshotId} AND attempt.request_status IN ('succeeded','partial','timeout','rate_limited','unavailable','malformed','aborted','authentication','unsupported')) AS terminal_query_count,
         (SELECT count(*)::integer FROM market_search_attempts attempt
           WHERE attempt.snapshot_id=${snapshotId} AND attempt.request_status IN ('succeeded','partial')) AS successful_count,
         (SELECT count(*)::integer FROM market_search_attempts attempt
