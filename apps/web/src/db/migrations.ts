@@ -1574,6 +1574,18 @@ export const V16_DATABASE_MIGRATIONS = [
   `CREATE TRIGGER scan_job_transition_events_append_only BEFORE UPDATE OR DELETE ON scan_job_transition_events FOR EACH ROW EXECUTE FUNCTION ogc_reject_job_event_mutation()`
 ] as const;
 
+// Event records remain immutable to application writes. PostgreSQL executes
+// FK cascade deletes through a nested trigger, so that bounded cleanup must be
+// permitted when its owning scan job/report is deleted; rejecting it would
+// make the documented ON DELETE CASCADE relationship unusable.
+export const V17_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_reject_job_event_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP = 'DELETE' AND pg_trigger_depth() > 1 THEN RETURN OLD; END IF;
+     RAISE EXCEPTION 'Job event history is append-only.';
+   END $$`
+] as const;
+
 export const DATABASE_MIGRATIONS = [
   ...V9_DATABASE_MIGRATIONS,
   ...V10_DATABASE_MIGRATIONS,
@@ -1582,5 +1594,6 @@ export const DATABASE_MIGRATIONS = [
   ...V13_DATABASE_MIGRATIONS,
   ...V14_DATABASE_MIGRATIONS,
   ...V15_DATABASE_MIGRATIONS,
-  ...V16_DATABASE_MIGRATIONS
+  ...V16_DATABASE_MIGRATIONS,
+  ...V17_DATABASE_MIGRATIONS
 ] as const;

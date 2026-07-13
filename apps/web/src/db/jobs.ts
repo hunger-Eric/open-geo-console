@@ -282,6 +282,13 @@ export interface CheckpointScanJobInput {
   failedPages?: number;
   phase?: ScanJobPhase;
   recovery?: JobCheckpoint["recovery"];
+  /**
+   * Worker recovery writers supply the revision they observed when the lease
+   * was claimed. This prevents a stale execution from overwriting a newer
+   * checkpoint while still allowing legacy database maintenance callers to
+   * omit the guard.
+   */
+  expectedCheckpointRevision?: number;
 }
 
 export async function checkpointScanJob(
@@ -306,6 +313,7 @@ export async function checkpointScanJob(
           failed_pages = COALESCE(${input.failedPages ?? null}, failed_pages), updated_at = now()
       WHERE id = ${id} AND lease_owner = ${workerId} AND lease_expires_at > now()
         AND execution_state = 'running'
+        AND (${input.expectedCheckpointRevision ?? null}::integer IS NULL OR checkpoint_revision = ${input.expectedCheckpointRevision ?? null})
       RETURNING id, execution_state, checkpoint_revision, current_phase
     `;
     const row = rows[0];

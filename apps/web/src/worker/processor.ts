@@ -47,7 +47,7 @@ import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-
 import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { JobExecutionLease, configuredJobHardDeadlineMs } from "./job-execution";
 import { normalizeJobError } from "./job-errors";
-import { phaseForStage } from "./job-state";
+import { phaseForStage, recoveryEnvelope } from "./job-state";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
 import {
   calculateEffectiveCoverage,
@@ -89,13 +89,10 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     heartbeat: () => heartbeatScanJob(job.id, workerId)
   });
   execution.start();
-  let checkpointRevision = job.checkpointRevision;
+  const writeRecoveryCheckpoint = createRecoveryCheckpointWriter({ job, workerId });
   const checkpointJob = async (input: CheckpointScanJobInput) => {
     execution.throwIfAborted();
-    const phase = input.phase ?? phaseForStage(input.stage);
-    const checkpoint = input.checkpoint ? withRecoveryEnvelope(job, input.checkpoint, phase, checkpointRevision + 1) : undefined;
-    const updated = await checkpointScanJob(job.id, workerId, { ...input, phase, checkpoint });
-    checkpointRevision = updated.checkpointRevision;
+    const updated = await writeRecoveryCheckpoint(input);
     execution.checkpointed();
     return updated;
   };
@@ -123,7 +120,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
           job, workerId, checkpoint, websiteFoundation: existingFoundation.payload,
           targetUrl: canonicalTarget,
           coverage: { plannedPages: job.plannedPages, successfulPages: job.successfulPages, failedPages: job.failedPages },
-          fulfillmentTarget
+          fulfillmentTarget, checkpointJob
         });
         return;
       }
@@ -368,7 +365,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
           successfulPages: effectiveCoverage.analyzedPages,
           failedPages: failureCount(checkpoint)
         },
-        signal: execution.controller.signal
+        signal: execution.controller.signal, checkpointJob
       });
       return;
     }
@@ -397,9 +394,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     if (error instanceof ReportValidationError) {
       console.error("AI report validation issues:", error.issues);
     }
-    const phase = phaseForStage((await getScanJob(job.id))?.stage ?? job.stage);
+    const currentJob = await getScanJob(job.id);
+    const phase = currentJob?.currentPhase ?? phaseForStage(currentJob?.stage ?? job.stage);
     const normalized = normalizeJobError(error, {
-      jobId: job.id, phase, phaseAttempt: job.phaseAttempt ?? 0, resumeGeneration: job.resumeGeneration ?? 0,
+      jobId: job.id, phase, phaseAttempt: currentJob?.phaseAttempt ?? job.phaseAttempt ?? 0,
+      resumeGeneration: currentJob?.resumeGeneration ?? job.resumeGeneration ?? 0,
       configuredSecrets: [process.env.OGC_AI_API_KEY ?? "", process.env.OGC_PUBLIC_SEARCH_MIMO_API_KEY ?? ""]
     });
     const failedJob = await failScanJob(job.id, workerId, {
@@ -465,6 +464,7 @@ async function finalizeRecommendationJob(input: {
   targetUrl: string;
   coverage: { plannedPages: number; successfulPages: number; failedPages: number };
   fulfillmentTarget: "recommendation_v1" | "recommendation_v2";
+  checkpointJob: WorkerCheckpointWriter;
   signal?: AbortSignal;
 }): Promise<void> {
   if (input.fulfillmentTarget === "recommendation_v2") {
@@ -476,6 +476,7 @@ async function finalizeRecommendationJob(input: {
         coverage: input.coverage,
         readCheckpoint: () => checkpoint,
         onCheckpointSaved: async (next) => { checkpoint = next; },
+        checkpointJob: input.checkpointJob,
         retrieveSource: createWorkerPublicSourceRetriever(),
         // This verifies the canonical V2 HTML and a real Chromium PDF before the
         // atomic terminalization boundary; it never persists a report itself.
@@ -487,7 +488,9 @@ async function finalizeRecommendationJob(input: {
       locale: input.websiteFoundation.provenance.locale, region: process.env.OGC_PUBLIC_SEARCH_REGION?.trim() || "CN",
       targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies, signal: input.signal });
     checkpoint = { ...checkpoint, recommendationForensics: { questionsGenerated: true, reportSaved: true }, publicSourceForensics: result.checkpoint };
-    await checkpointScanJob(input.job.id, input.workerId, { stage: "synthesizing", phase: "artifact_verification", progress: 99, checkpoint: checkpoint as JobCheckpoint, ...input.coverage });
+    const artifactCheckpoint = await input.checkpointJob({ stage: "synthesizing", phase: "artifact_verification", progress: 99,
+      checkpoint: checkpoint as JobCheckpoint, ...input.coverage });
+    checkpoint = normalizeCheckpoint(artifactCheckpoint.checkpoint);
     await terminalizePaidPublicSourceReport({ report: result.report, workerId: input.workerId, checkpointIdentityHash: result.checkpoint.identityHash,
       coverage: input.coverage, snapshotRefs: result.commercialSnapshotRefs });
     return;
@@ -497,7 +500,6 @@ async function finalizeRecommendationJob(input: {
 
 export interface WorkerPublicSourceForensicsCollaborators {
   resolveSnapshot: typeof resolvePublicSourceSnapshot;
-  checkpointJob: typeof checkpointScanJob;
   getReport: typeof getSourceForensicReportForJob;
   saveReport: typeof saveSourceForensicReport;
 }
@@ -508,6 +510,7 @@ export interface WorkerPublicSourceForensicsDependencyInput {
   coverage: { plannedPages: number; successfulPages: number; failedPages: number };
   readCheckpoint: () => WorkerCheckpoint;
   onCheckpointSaved: (checkpoint: WorkerCheckpoint) => Promise<void>;
+  checkpointJob: WorkerCheckpointWriter;
   retrieveSource?: PublicSourceRetriever;
   artifactReadiness?: ArtifactReadinessGate;
   signal?: AbortSignal;
@@ -528,7 +531,6 @@ export function createWorkerPublicSourceForensicsDependencies(
   }
   const collaborators = input.collaborators ?? {
     resolveSnapshot: resolvePublicSourceSnapshot,
-    checkpointJob: checkpointScanJob,
     getReport: getSourceForensicReportForJob,
     saveReport: saveSourceForensicReport
   };
@@ -555,13 +557,13 @@ export function createWorkerPublicSourceForensicsDependencies(
       requireJob(jobId);
       const next = { ...input.readCheckpoint(), publicSourceForensics };
       input.signal?.throwIfAborted();
-      await collaborators.checkpointJob(input.job.id, input.workerId, {
+      const updated = await input.checkpointJob({
         stage: "synthesizing", phase: "source_retrieval",
         progress: 95,
         checkpoint: next as JobCheckpoint,
         ...input.coverage
       });
-      await input.onCheckpointSaved(next);
+      await input.onCheckpointSaved(normalizeCheckpoint(updated.checkpoint));
     },
     getReport: async (jobId) => {
       requireJob(jobId);
@@ -875,7 +877,44 @@ function hashSynthesisInput(
   })).digest("hex");
 }
 
-function withRecoveryEnvelope(job: ScanJobRow, checkpoint: JobCheckpoint, phase: ReturnType<typeof phaseForStage>, revision: number): JobCheckpoint {
+export type WorkerCheckpointWriter = (input: CheckpointScanJobInput) => Promise<ScanJobRow>;
+
+/**
+ * The Worker-only checkpoint authority. Every analysis phase must enter via
+ * this closure so the database revision and recoverable envelope advance as
+ * one compare-and-swap guarded write.
+ */
+export function createRecoveryCheckpointWriter(input: {
+  job: ScanJobRow;
+  workerId: string;
+  write?: typeof checkpointScanJob;
+}): WorkerCheckpointWriter {
+  let checkpointRevision = input.job.checkpointRevision;
+  const write = input.write ?? checkpointScanJob;
+  return async (checkpointInput) => {
+    const phase = checkpointInput.phase ?? phaseForStage(checkpointInput.stage);
+    const expectedCheckpointRevision = checkpointRevision;
+    const checkpoint = checkpointInput.checkpoint
+      ? withRecoveryEnvelope(input.job, checkpointInput.checkpoint, phase, expectedCheckpointRevision + 1)
+      : undefined;
+    const updated = await write(input.job.id, input.workerId, {
+      ...checkpointInput,
+      phase,
+      checkpoint,
+      expectedCheckpointRevision
+    });
+    const recovery = checkpoint ? recoveryEnvelope(updated.checkpoint) : null;
+    if (updated.checkpointRevision !== expectedCheckpointRevision + 1 || updated.currentPhase !== phase ||
+        (checkpoint && (!recovery || recovery.revision !== updated.checkpointRevision || recovery.phase !== updated.currentPhase ||
+          recovery.phaseAttempt !== updated.phaseAttempt || recovery.resumeGeneration !== updated.resumeGeneration))) {
+      throw new Error("Recovery checkpoint write did not commit a matching database state.");
+    }
+    checkpointRevision = updated.checkpointRevision;
+    return updated;
+  };
+}
+
+export function withRecoveryEnvelope(job: ScanJobRow, checkpoint: JobCheckpoint, phase: ReturnType<typeof phaseForStage>, revision: number): JobCheckpoint {
   const serializable = { ...checkpoint } as Record<string, unknown>;
   delete serializable.recovery;
   const publicSource = checkpoint.publicSourceForensics as { authorityId?: string } | undefined;
@@ -890,7 +929,9 @@ function withRecoveryEnvelope(job: ScanJobRow, checkpoint: JobCheckpoint, phase:
   return {
     ...checkpoint,
     recovery: {
-      schemaVersion: 1, phase, revision, phaseAttempt: job.phaseAttempt, resumeGeneration: job.resumeGeneration,
+      // checkpointScanJob resets the phase-local attempt after every committed
+      // checkpoint, so the envelope must describe that committed state.
+      schemaVersion: 1, phase, revision, phaseAttempt: 0, resumeGeneration: job.resumeGeneration,
       identity: { jobId: job.id, reportId: job.reportId, productContract: job.productContract,
         methodology: job.fulfillmentMethodology, locale: job.locale,
         authorityId: publicSource?.authorityId ?? null },

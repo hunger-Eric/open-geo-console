@@ -47,9 +47,9 @@ describe("worker V2 public-source collaborators", () => {
   it("binds snapshot resolution and persisted checkpoints to the leased job, while deferring report persistence to terminalization", async () => {
     const job = { id: "job-v2", reportId: "report-v2", locale: "zh-CN", productContract: "recommendation_forensics_v1" } as unknown as ScanJobRow;
     let checkpoint: ScanJobRow["checkpoint"] = {};
-    const checkpointJob = vi.fn(async (_id: string, _worker: string, input: { checkpoint?: ScanJobRow["checkpoint"] }) => {
+    const checkpointJob = vi.fn(async (input: { checkpoint?: ScanJobRow["checkpoint"] }) => {
       checkpoint = input.checkpoint ?? {};
-      return job;
+      return { ...job, checkpoint, checkpointRevision: 1, currentPhase: "source_retrieval", phaseAttempt: 0, resumeGeneration: 0 };
     });
     const resolveSnapshot = vi.fn(async (input: { question: { id: string; normalizedText: string }; fanout: SearchQueryFanout; leaseOwner: string }) => {
       expect(input.question).toMatchObject({ id: "question-1", normalizedText: "independent logistics suppliers" });
@@ -62,11 +62,11 @@ describe("worker V2 public-source collaborators", () => {
       coverage: { plannedPages: 3, successfulPages: 3, failedPages: 0 },
       readCheckpoint: () => checkpoint as never,
       onCheckpointSaved: async () => undefined,
+      checkpointJob,
       artifactReadiness: { async verify() {} },
       retrieveSource: async () => ({ fact: retrieval(), source: sourceEvidence() }),
       collaborators: {
         resolveSnapshot,
-        checkpointJob,
         getReport: async () => null,
         saveReport: async (report) => report as RecommendationForensicReportV2
       }
@@ -77,8 +77,8 @@ describe("worker V2 public-source collaborators", () => {
     await dependencies.saveCheckpoint(job.id, checkpointValue());
 
     expect(resolveSnapshot).toHaveBeenCalledOnce();
-    expect(checkpointJob).toHaveBeenCalledWith(job.id, "worker-v2", expect.objectContaining({
-      stage: "synthesizing", progress: 95,
+    expect(checkpointJob).toHaveBeenCalledWith(expect.objectContaining({
+      stage: "synthesizing", phase: "source_retrieval", progress: 95,
       checkpoint: expect.objectContaining({ publicSourceForensics: checkpointValue() })
     }));
     expect(dependencies.deferReportPersistence).toBe(true);
@@ -93,7 +93,8 @@ describe("worker V2 public-source collaborators", () => {
       coverage: { plannedPages: 3, successfulPages: 3, failedPages: 0 },
       readCheckpoint: () => ({}) as never,
       onCheckpointSaved: async () => undefined,
-      collaborators: { resolveSnapshot: vi.fn(), checkpointJob: vi.fn(), getReport: async () => null, saveReport: async (report: unknown) => report as RecommendationForensicReportV2 }
+      checkpointJob: vi.fn(),
+      collaborators: { resolveSnapshot: vi.fn(), getReport: async () => null, saveReport: async (report: unknown) => report as RecommendationForensicReportV2 }
     };
     expect(() => createWorkerPublicSourceForensicsDependencies(input, runtime())).toThrow(/collaborator/i);
   });
