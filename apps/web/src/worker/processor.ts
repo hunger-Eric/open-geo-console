@@ -114,7 +114,10 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
   try {
     const fulfillmentTarget = resolveRecommendationFulfillmentTarget(job);
     if (fulfillmentTarget === "recommendation_v1") throw new HistoricalRecommendationRuntimeRetiredError();
-    await purgeExpiredCrawlContent();
+    // Retention cleanup is housekeeping, not a prerequisite for a paid
+    // delivery. Keep it on the free lane so a broad historical scan cannot
+    // delay a deep job after its payment has been verified.
+    if (job.tier === "free") await purgeExpiredCrawlContent();
     let storedReport = await getGeoReport(job.reportId);
     if (!storedReport) throw new Error("The source technical report no longer exists.");
     if (fulfillmentTarget !== "legacy" && job.productContract === "recommendation_forensics_v1" && checkpoint.contractVersion === 2 &&
