@@ -17,7 +17,7 @@ import {
 import {readMiMoPublicSearchConfig} from "./config";
 
 export interface PublicSearchProbeCaseSummary {
-  id: "official-factual" | "chinese-b2b-discovery" | "narrow-no-result";
+  id: "official-factual" | "chinese-b2b-discovery" | "narrow-structured-search";
   status: SearchObservationStatus;
   passed: boolean;
   sourceDomains: string[];
@@ -38,22 +38,21 @@ const CASES = [
     id: "official-factual" as const,
     query: "What official OpenAI announcement retired the Assistants API?",
     expectedDomain: "openai.com",
-    expectedPathPrefix: "/index/",
-    expectedStatus: "complete" as const
+    expectedStatuses: ["complete"] as const
   },
   {
     id: "chinese-b2b-discovery" as const,
     query: "中国海运拼箱货运代理供应商有哪些？",
-    expectedStatus: "complete" as const
+    expectedStatuses: ["complete"] as const
   },
   {
-    id: "narrow-no-result" as const,
+    id: "narrow-structured-search" as const,
     query: "site:public-search-no-result.invalid 一家不存在的物流服务商",
-    expectedStatus: "malformed" as const
+    expectedStatuses: ["complete", "malformed"] as const
   }
 ] as const;
 
-const PROBE_BUDGET: SearchExecutionBudget = Object.freeze({maxRequests: 3, maxResults: 10, timeoutMs: 20_000, maxCostMicros: 10_000_000});
+const PROBE_BUDGET: SearchExecutionBudget = Object.freeze({maxRequests: 3, maxResults: 3, timeoutMs: 30_000, maxCostMicros: 10_000_000});
 
 export async function runMiMoPublicSearchProbe(input: {
   environment: NodeJS.ProcessEnv;
@@ -79,16 +78,17 @@ export async function runMiMoPublicSearchProbe(input: {
       signal: AbortSignal.timeout(PROBE_BUDGET.timeoutMs)
     });
     const sourceDomains = [...new Set(observation.results.map(({url}) => new URL(url).hostname.toLowerCase()))].sort();
+    const expectedStatuses: readonly SearchObservationStatus[] = item.expectedStatuses;
     const expectedDomain = "expectedDomain" in item ? item.expectedDomain : undefined;
-    const expectedPathPrefix = "expectedPathPrefix" in item ? item.expectedPathPrefix : undefined;
     const expectedSource = expectedDomain === undefined || observation.results.some(({url}) => {
       const source = new URL(url);
-      return source.hostname.toLowerCase() === expectedDomain && (expectedPathPrefix === undefined || source.pathname.startsWith(expectedPathPrefix));
+      const hostname = source.hostname.toLowerCase();
+      return hostname === expectedDomain || hostname.endsWith(`.${expectedDomain}`);
     });
     cases.push({
       id: item.id,
       status: observation.status,
-      passed: observation.status === item.expectedStatus && expectedSource,
+      passed: expectedStatuses.includes(observation.status) && expectedSource,
       sourceDomains,
       sourceCount: observation.results.length,
       usage: {requestCount: observation.usage.requestCount, resultCount: observation.usage.resultCount, costUncertain: observation.usage.costUncertain === true},

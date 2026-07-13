@@ -161,3 +161,7 @@ V2 live admission requires one exact active public-search authority plus a non-f
 ## 2026-07-13: Public-search adapters are provider-independent and identity-bound
 
 `OGC_PUBLIC_SEARCH_ADAPTER` selects reviewed compile-time factories. MiMo is configured only through `OGC_PUBLIC_SEARCH_MIMO_*`; public-search runtime never reads or inherits `OGC_AI_*`. Exact adapter/provider/product/model/adapter-version/surface identity is persisted in schema v14 and bound into resume identity, so recovery cannot switch provider. Registration and a local probe are neither certification nor activation; catalog, checkout, Worker collection and production remain closed until every authority and artifact gate agrees.
+
+## 2026-07-13: MiMo certification uses a bounded 30-second, three-source matrix
+
+The protected-staging MiMo surface needed roughly 27 seconds for Chinese B2B and narrow queries. The shared public-search timeout is therefore 30 seconds, below the existing 120-second hard cap. Certification samples three ordered structured sources per query; the official-factual case requires an authoritative OpenAI domain or subdomain, while the narrow case accepts either structured results or an explicit malformed/no-annotations result. This accepts documented provider behavior without accepting generated prose as evidence, and does not change the separate activation or commercial gates.

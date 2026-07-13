@@ -10,7 +10,7 @@ MiMo is now the first compile-time registered public-search adapter behind an in
 
 Read-only database evidence on 2026-07-13 found zero non-terminal recommendation rows, zero non-terminal V1 rows, and zero terminal commercial jobs with a reserved credit in both staging and production. The normal CLI audits were not used because they can bootstrap/migrate schema state; no database migration was authorized in this adapter implementation.
 
-The same-date MiMo capability probe passed its official-factual source case but timed out on the Chinese B2B and narrow/no-result cases. That is negative certification evidence; it does not authorize an artifact, authority installation, activation, customer collection, or production change.
+The same-date MiMo capability probe passed official-factual, Chinese B2B and narrow structured-search cases after a bounded 30-second timeout and three-source sample. Its signed artifact was installed only as an inactive staging authority. Runtime stays false; this does not authorize activation, customer collection, paid delivery/refund drills, or production change.
 
 Phases 4–9 of the approved V2 plan are implemented. The repository now has a versioned, public-source-based recommendation-forensics pipeline whose persisted evidence, report construction, artifact rendering, commercial terminalization and certification admission are explicit and fail closed.
 

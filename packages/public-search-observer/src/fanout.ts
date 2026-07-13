@@ -4,7 +4,7 @@ import { assertNoCustomerIdentity, parseSearchExecutionBudget, parseSearchQueryF
 import type { CustomerIdentityExclusion, SearchExecutionBudget } from "./types";
 
 export const DEFAULT_FANOUT_VERSION = "public-search-fanout-v1";
-export const DEFAULT_QUERY_BUDGET: SearchExecutionBudget = Object.freeze({ maxRequests: 1, maxResults: 10, timeoutMs: 20_000, maxCostMicros: 100_000 });
+export const DEFAULT_QUERY_BUDGET: SearchExecutionBudget = Object.freeze({ maxRequests: 1, maxResults: 10, timeoutMs: 30_000, maxCostMicros: 100_000 });
 
 export function createSearchQueryFanout(input: {
   question: CanonicalBuyerQuestion;

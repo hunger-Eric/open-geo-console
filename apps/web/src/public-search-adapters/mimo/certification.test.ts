@@ -19,7 +19,7 @@ describe("MiMo public-search certification",()=>{
   it("requires every quality case and independent review references before creating an installable artifact",async()=>{
     const probe=await runMiMoPublicSearchProbe({environment,locale:"zh-CN",region:"CN",fetch:async()=>new Response(JSON.stringify(response),{status:200})});
     expect(()=>finalizeMiMoPublicSearchCertification({
-      probe, locale:"zh-CN", region:"CN", reviewedBy:"operator", reviewedAt:"2026-07-13T00:00:00.000Z",
+      probe:{...probe,cases:probe.cases.map((item,index)=>index===1?{...item,passed:false}:item)}, locale:"zh-CN", region:"CN", reviewedBy:"operator", reviewedAt:"2026-07-13T00:00:00.000Z",
       review:{termsReviewReference:"terms-review",commercialUseReviewReference:"commercial-review",storageDisplayReviewReference:"storage-review"}
     })).toThrow(/quality/i);
   });
@@ -29,7 +29,7 @@ describe("MiMo public-search certification",()=>{
       probe:{adapterId:"mimo",identity:{adapterId:"mimo",providerId:"xiaomi-mimo",productId:"native-web-search",modelId:"mimo-v2.5-pro",adapterVersion:"mimo-web-search-adapter-v1",surface:{surfaceId:"mimo-native-web-search",providerId:"xiaomi-mimo",productId:"native-web-search",surfaceKind:"documented_api",contractVersion:"public-search-surface-v1",surfaceVersion:"mimo-native-web-search-v1",adapterVersion:"mimo-web-search-adapter-v1",locale:"zh-CN",region:"CN"}},cases:[
         {id:"official-factual",status:"complete",passed:true,sourceDomains:["openai.com"],sourceCount:1,usage:{requestCount:1,resultCount:1,costUncertain:true}},
         {id:"chinese-b2b-discovery",status:"complete",passed:true,sourceDomains:["supplier.example"],sourceCount:1,usage:{requestCount:1,resultCount:1,costUncertain:true}},
-        {id:"narrow-no-result",status:"malformed",passed:true,sourceDomains:[],sourceCount:0,usage:{requestCount:1,resultCount:0,costUncertain:true}}
+        {id:"narrow-structured-search",status:"complete",passed:true,sourceDomains:["source.example"],sourceCount:1,usage:{requestCount:1,resultCount:1,costUncertain:true}}
       ],failureSemantics:{authentication:true,rateLimited:true,timedOut:true,malformed:true}},locale:"zh-CN",region:"CN",reviewedBy:"operator",reviewedAt:"2026-07-13T00:00:00.000Z",
       review:{termsReviewReference:"terms-review",commercialUseReviewReference:"commercial-review",storageDisplayReviewReference:"storage-review"},
       signing:{secret:"x".repeat(32),keyId:"mimo-test",version:"v1"}

@@ -14,7 +14,7 @@ The provider-independent adapter layer now resolves `OGC_PUBLIC_SEARCH_ADAPTER` 
 
 On 2026-07-13, direct read-only staging and production PostgreSQL checks found zero non-terminal recommendation rows, zero non-terminal V1 rows, and zero terminal jobs with a reserved credit. The existing audit CLI was not used because its bootstrap behavior may migrate a schema-v13 database; it must be rerun only after a separately authorized schema-v14 rollout.
 
-The 2026-07-13 MiMo protected-staging capability probe proved structured annotations for its official-factual case, but the Chinese B2B and narrow/no-result matrix cases exhausted the 20-second timeout. It is not certification and no authority was installed or activated.
+The 2026-07-13 MiMo protected-staging capability probe passed its official-factual, Chinese B2B and narrow structured-search cases after using a 30-second timeout and three-source certification sample. Its signed artifact is installed as an inactive staging authority; staging is schema v14 and runtime remains disabled. Activation, paid fulfillment, refund, delivery and outage drills are still pending.
 
 - `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point. Chinese is the canonical unprefixed interface (`/`, `/reports/...`); English remains explicit under `/en`, and legacy `/zh/...` URLs permanently redirect to their unprefixed equivalents.
 - `packages/geo-auditor` owns deterministic technical evidence and the reproducible GEO score.
