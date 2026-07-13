@@ -5,6 +5,9 @@ import { checkpointScanJob, failScanJob, getScanJob, resumeScanJobAfterRepair } 
 import { PublicSourceRuntimeError, normalizeJobError } from "@/worker/job-errors";
 import { recoveryEnvelope } from "@/worker/job-state";
 import { createRecoveryCheckpointWriter } from "@/worker/processor";
+import { createTestWebsiteFoundation } from "../public-source-forensics/testing";
+import { PublicSourceArtifactUnavailableError, runPublicSourceForensicsPipeline, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "@/worker/public-source-forensics";
+import type { PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
 
 const enabled = Boolean(process.env.DATABASE_URL && process.env.OGC_DEPLOYMENT_PROFILE === "staging");
 const describePostgres = enabled ? describe : describe.skip;
@@ -17,6 +20,11 @@ describePostgres("schema-v16 recovery checkpoint authority", () => {
     jobId: `recovery-job-${phase}-${suffix}`,
     workerId: `recovery-worker-${phase}-${suffix}`
   }));
+  const artifactGate = {
+    reportId: `recovery-report-artifact-gate-${suffix}`,
+    jobId: `recovery-job-artifact-gate-${suffix}`,
+    workerId: `recovery-worker-artifact-gate-${suffix}`
+  };
 
   beforeAll(async () => {
     await ensureDatabase();
@@ -28,11 +36,17 @@ describePostgres("schema-v16 recovery checkpoint authority", () => {
         (id,report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,locale,stage,execution_state,current_phase,lease_owner,lease_expires_at)
         VALUES (${row.jobId},${row.reportId},'deep','recommendation_forensics_v1','public_search_source_forensics_v1',2,'en','synthesizing','running','public_source_preflight',${row.workerId},now()+interval '10 minutes')`;
     }
+    await sql`INSERT INTO scan_reports (id,url,site_key,report_locale,technical_status)
+      VALUES (${artifactGate.reportId},'https://recovery-gate.example','recovery-gate.example','zh','completed')`;
+    await sql`INSERT INTO scan_jobs
+      (id,report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,locale,stage,execution_state,current_phase,lease_owner,lease_expires_at)
+      VALUES (${artifactGate.jobId},${artifactGate.reportId},'deep','recommendation_forensics_v1','public_search_source_forensics_v1',2,'zh','synthesizing','running','source_retrieval',${artifactGate.workerId},now()+interval '10 minutes')`;
   }, 120_000);
 
   afterAll(async () => {
     const sql = getSqlClient();
     for (const row of rows) await sql`DELETE FROM scan_reports WHERE id=${row.reportId}`;
+    await sql`DELETE FROM scan_reports WHERE id=${artifactGate.reportId}`;
     await closeDatabase();
   }, 120_000);
 
@@ -86,4 +100,77 @@ describePostgres("schema-v16 recovery checkpoint authority", () => {
     expect(resumed).toMatchObject({ executionState: "queued", currentPhase: row.phase, stage: "synthesizing", checkpointRevision: written.checkpointRevision });
     expect(resumed.checkpoint).toMatchObject({ websiteFoundation: { completed: true }, discoverySnapshot: { targetUrl: "https://recovery.example/" } });
   }, 120_000);
+
+  it("checkpoints the real artifact gate before it throws, then resumes without re-fetching public sources", async () => {
+    const initial = await getScanJob(artifactGate.jobId);
+    if (!initial) throw new Error("Missing artifact gate recovery fixture.");
+    const writer = createRecoveryCheckpointWriter({ job: initial, workerId: artifactGate.workerId });
+    let checkpoint = initial.checkpoint;
+    let retrievalCalls = 0;
+    const authority = fixtureAuthority();
+    const dependencies: PublicSourceForensicsDependencies = {
+      authority,
+      getCheckpoint: async () => (checkpoint.publicSourceForensics as PublicSourcePipelineCheckpoint | undefined) ?? null,
+      saveCheckpoint: async (_jobId, publicSourceForensics) => {
+        const updated = await writer({ stage: "synthesizing", phase: "source_retrieval", progress: 95,
+          checkpoint: { ...checkpoint, websiteFoundation: { completed: true }, publicSourceForensics } });
+        checkpoint = updated.checkpoint;
+      },
+      prepareArtifactVerification: async ({ report, checkpoint: publicSourceForensics, commercialSnapshotRefs }) => {
+        const updated = await writer({ stage: "synthesizing", phase: "artifact_verification", progress: 99,
+          checkpoint: { ...checkpoint, recommendationForensics: { questionsGenerated: true, reportSaved: true }, publicSourceForensics,
+            pendingArtifactVerification: { report, commercialSnapshotRefs } } });
+        checkpoint = updated.checkpoint;
+      },
+      resolveSnapshot: async ({ fanout }) => {
+        retrievalCalls++;
+        return fixtureSnapshot(fanout, retrievalCalls);
+      },
+      getReport: async () => null,
+      saveReport: async (report) => report as never,
+      artifactReadiness: { async verify() { throw new PublicSourceArtifactUnavailableError(); } },
+      now: () => new Date("2030-01-02T00:00:00.000Z"),
+      costCapMicros: 1_000
+    };
+    await expect(runPublicSourceForensicsPipeline({ reportId: artifactGate.reportId, jobId: artifactGate.jobId, locale: "zh-CN", region: "CN",
+      targetUrl: "https://customer-logistics.example/", websiteFoundation: createTestWebsiteFoundation(), dependencies })).rejects.toBeInstanceOf(PublicSourceArtifactUnavailableError);
+    expect(retrievalCalls).toBe(3);
+    const artifactCheckpoint = await getScanJob(artifactGate.jobId);
+    const envelope = recoveryEnvelope(artifactCheckpoint!.checkpoint);
+    expect(artifactCheckpoint).toMatchObject({ currentPhase: "artifact_verification", checkpointRevision: 2 });
+    expect(artifactCheckpoint!.checkpoint).toMatchObject({ pendingArtifactVerification: { report: { reportId: artifactGate.reportId } } });
+
+    const normalized = normalizeJobError(new PublicSourceRuntimeError("Artifact rendering is unavailable.", "artifact_unavailable"), {
+      jobId: artifactGate.jobId, phase: "artifact_verification", phaseAttempt: 0, resumeGeneration: 0
+    });
+    await failScanJob(artifactGate.jobId, artifactGate.workerId, { code: normalized.code, publicMessage: "The analysis is temporarily unavailable.",
+      retryable: false, classification: "operator_repairable", internalError: normalized, phase: "artifact_verification" });
+    const event = (await getSqlClient()<Array<{ phase: string }>>`SELECT phase FROM scan_job_error_events WHERE job_id=${artifactGate.jobId} ORDER BY recorded_at DESC LIMIT 1`)[0];
+    expect(event?.phase).toBe("artifact_verification");
+    await resumeScanJobAfterRepair({ id: artifactGate.jobId, inputHash: envelope!.inputHash, readiness: async () => undefined });
+    const resumed = await getScanJob(artifactGate.jobId);
+    expect(resumed).toMatchObject({ executionState: "queued", currentPhase: "artifact_verification", stage: "synthesizing" });
+    expect(resumed!.checkpoint).toMatchObject({ pendingArtifactVerification: { report: { reportId: artifactGate.reportId } } });
+    expect(retrievalCalls).toBe(3);
+  }, 120_000);
 });
+
+function fixtureAuthority(): PublicSearchSurfaceAuthority {
+  const surface = { surfaceId: "fixture-surface", providerId: "fixture-index", productId: "fixture-search", surfaceKind: "documented_api" as const,
+    contractVersion: "public-search-surface-v1", surfaceVersion: "fixture-v1", adapterVersion: "fixture-adapter-v1", locale: "zh-CN", region: "CN" };
+  return { authorityId: "fixture-authority", environment: "test", surface, active: true, certifiedAt: "2030-01-01T00:00:00.000Z",
+    evidenceReference: "fixture://recovery", supportedLocales: ["zh-CN"], supportedRegions: ["CN"] };
+}
+
+function fixtureSnapshot(fanout: SearchQueryFanout, index: number) {
+  const observations = fanout.queries.map((query, order) => ({ observationId: `recovery-observation-${index}-${order}`, surface: fixtureAuthority().surface,
+    queryId: query.id, exactQuery: query.exactQuery, requestedAt: "2030-01-01T00:00:00.000Z", completedAt: "2030-01-01T00:00:01.000Z",
+    status: "complete" as const, results: [{ surfaceResultOrder: 0, url: `https://source-${index}-${order}.example/fact`, title: "Public source", snippet: "Public logistics capability.", displayedHost: `source-${index}-${order}.example` }],
+    usage: { requestCount: 1, resultCount: 1, estimatedCostMicros: 1 } }));
+  return { snapshotId: `recovery-snapshot-${fanout.questionId}`, cacheIdentity: `recovery-cache-${fanout.questionId}`, questionId: fanout.questionId,
+    observedAt: "2030-01-01T00:00:01.000Z", ageMs: 60_000, collectedForThisRun: true, refreshAttempted: false, refreshFailed: false,
+    sufficientlyEvidenced: true, observations, retrievals: observations.flatMap((observation) => observation.results.map((result) => ({ observationId: observation.observationId,
+      queryId: observation.queryId, resultUrl: result.url, retrievalState: "available" as const, publiclyRoutable: true, robotsAllowed: true,
+      accessBarrier: "none" as const, contentBytes: 100, normalizedText: "Public logistics capability.", normalizedContentHash: `sha256:${"a".repeat(64)}`, verifiedExcerpt: "Public logistics capability." }))),
+    actualCostMicros: 10, allocatedCostMicros: 0, avoidedCostMicros: 0 };
+}

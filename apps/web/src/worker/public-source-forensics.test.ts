@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { MarketSearchObservation, PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import { createTestWebsiteFoundation } from "../public-source-forensics/testing";
-import { FAIL_CLOSED_ARTIFACT_READINESS, PublicSourceArtifactUnavailableError, PublicSourceResumeIdentityMismatchError, runPublicSourceForensicsPipeline, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
+import { PublicSourceArtifactUnavailableError, PublicSourceResumeIdentityMismatchError, runPublicSourceForensicsPipeline, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
 
 const surface = { surfaceId:"fixture-surface",providerId:"fixture-index",productId:"fixture-search",surfaceKind:"documented_api" as const,
   contractVersion:"public-search-surface-v1",surfaceVersion:"fixture-v1",adapterVersion:"fixture-adapter-v1",locale:"zh-CN",region:"CN" };
@@ -28,19 +28,27 @@ describe("public-source forensics pipeline", () => {
     expect(second.report.operatorCostAccounting.avoidedCostMicros).toBe(30);
   });
 
-  it("falls closed on artifact failure and refuses resume identity drift", async () => {
+  it("persists the artifact-verification boundary before a real artifact gate failure", async () => {
     const reports=new Map<string,RecommendationForensicReportV2>(), checkpoints=new Map<string,PublicSourcePipelineCheckpoint>();
-    const closed=deps({reports,checkpoints,artifactReadiness:FAIL_CLOSED_ARTIFACT_READINESS,resolve:async({fanout},index=0)=>snapshot(fanout,index)});
+    const order:string[]=[];
+    const prepareArtifactVerification=vi.fn(async()=>{order.push("checkpoint");});
+    const closed=deps({reports,checkpoints,prepareArtifactVerification,artifactReadiness:{async verify(){order.push("artifact"); throw new PublicSourceArtifactUnavailableError();}},resolve:async({fanout},index=0)=>snapshot(fanout,index)});
     await expect(run("report-c","job-c",closed)).rejects.toBeInstanceOf(PublicSourceArtifactUnavailableError);
+    expect(order).toEqual(["checkpoint","artifact"]);
+    expect(prepareArtifactVerification).toHaveBeenCalledWith(expect.objectContaining({ jobId:"job-c", report:expect.objectContaining({ reportId:"report-c" }) }));
+  });
+
+  it("refuses resume identity drift", async () => {
+    const reports=new Map<string,RecommendationForensicReportV2>();
     const drifted=deps({reports,checkpoints:new Map([["job-d",{identityHash:"wrong",methodology:"public_search_source_forensics_v1",questionSetVersion:"wrong",fanoutVersion:"wrong",authorityId:"wrong",snapshotIds:[],websiteFoundationHash:"wrong",evidenceCutoffAt:"2030-01-02T00:00:00.000Z",locale:"zh-CN",region:"CN",adapterIdentityHash:"wrong"}]]),resolve:async({fanout})=>snapshot(fanout,1)});
     await expect(run("report-d","job-d",drifted)).rejects.toBeInstanceOf(PublicSourceResumeIdentityMismatchError);
   });
 });
 
-function deps(input:{reports:Map<string,RecommendationForensicReportV2>;checkpoints:Map<string,PublicSourcePipelineCheckpoint>;resolve:PublicSourceForensicsDependencies["resolveSnapshot"];artifactReadiness?:PublicSourceForensicsDependencies["artifactReadiness"]}):PublicSourceForensicsDependencies{
+function deps(input:{reports:Map<string,RecommendationForensicReportV2>;checkpoints:Map<string,PublicSourcePipelineCheckpoint>;resolve:PublicSourceForensicsDependencies["resolveSnapshot"];artifactReadiness?:PublicSourceForensicsDependencies["artifactReadiness"];prepareArtifactVerification?:PublicSourceForensicsDependencies["prepareArtifactVerification"]}):PublicSourceForensicsDependencies{
   return {authority,resolveSnapshot:input.resolve,getCheckpoint:async(id)=>input.checkpoints.get(id)??null,saveCheckpoint:async(id,c)=>{input.checkpoints.set(id,c);},
     getReport:async(id)=>input.reports.get(id)??null,saveReport:async(value)=>{const report=value as RecommendationForensicReportV2;input.reports.set(report.jobId,report);return report;},
-    artifactReadiness:input.artifactReadiness??{async verify(){}},now:()=>new Date("2030-01-02T00:00:00.000Z"),costCapMicros:1000};
+    artifactReadiness:input.artifactReadiness??{async verify(){}},prepareArtifactVerification:input.prepareArtifactVerification,now:()=>new Date("2030-01-02T00:00:00.000Z"),costCapMicros:1000};
 }
 function run(reportId:string,jobId:string,dependencies:PublicSourceForensicsDependencies){return runPublicSourceForensicsPipeline({reportId,jobId,locale:"zh-CN",region:"CN",targetUrl:"https://customer-logistics.example/",websiteFoundation:createTestWebsiteFoundation(),dependencies});}
 function snapshot(fanout:SearchQueryFanout,index:number){

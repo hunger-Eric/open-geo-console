@@ -18,6 +18,15 @@ export interface PublicSourcePipelineCheckpoint {
   evidenceCutoffAt: string; locale: string; region: string; adapterIdentityHash: string;
 }
 
+export interface PublicSourceCommercialSnapshotRef {
+  snapshotId: string;
+  cacheIdentity: string;
+  freshnessState: "fresh" | "historical" | "insufficient";
+  actualCostMicros: number;
+  allocatedCostMicros: number;
+  avoidedCostMicros: number;
+}
+
 export interface PublicSourceForensicsDependencies {
   authority: PublicSearchSurfaceAuthority;
   resolveSnapshot(input: { questionId: string; fanout: SearchQueryFanout; evidenceCutoffAt: string }): Promise<ResolvedPublicSourceSnapshot>;
@@ -26,6 +35,13 @@ export interface PublicSourceForensicsDependencies {
   getReport(jobId: string): Promise<RecommendationForensicReportV2 | null>;
   saveReport(report: unknown): Promise<RecommendationForensicReportV2>;
   artifactReadiness: ArtifactReadinessGate;
+  /** Persists the complete pre-artifact payload before the real gate runs. */
+  prepareArtifactVerification?(input: {
+    jobId: string;
+    report: RecommendationForensicReportV2;
+    checkpoint: PublicSourcePipelineCheckpoint;
+    commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
+  }): Promise<void>;
   buildReport?: (input: PublicSourceForensicReportBuilderInput) => RecommendationForensicReportV2;
   now?: () => Date;
   costCapMicros?: number;
@@ -38,7 +54,7 @@ export const FAIL_CLOSED_ARTIFACT_READINESS: ArtifactReadinessGate = { async ver
 export async function runPublicSourceForensicsPipeline(input: {
   reportId: string; jobId: string; locale: string; region: string; targetUrl: string;
   websiteFoundation: AiWebsiteReportV1; dependencies: PublicSourceForensicsDependencies; signal?: AbortSignal;
-}): Promise<{ report: RecommendationForensicReportV2; checkpoint: PublicSourcePipelineCheckpoint; commercialSnapshotRefs: Array<{ snapshotId:string;cacheIdentity:string;freshnessState:"fresh"|"historical"|"insufficient";actualCostMicros:number;allocatedCostMicros:number;avoidedCostMicros:number }> }> {
+}): Promise<{ report: RecommendationForensicReportV2; checkpoint: PublicSourcePipelineCheckpoint; commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[] }> {
   input.signal?.throwIfAborted();
   const existing = await input.dependencies.getReport(input.jobId);
   if (existing) return { report: existing, checkpoint: checkpointFromReport(existing, input.websiteFoundation), commercialSnapshotRefs: [] };
@@ -93,14 +109,19 @@ export async function runPublicSourceForensicsPipeline(input: {
     cost: { searchCostMicros: actualCostMicros, retrievalCostMicros: 0, synthesisCostMicros: 0, artifactCostMicros: 0, deliveryCostMicros: 0,
       allocatedSharedCostMicros: snapshots.reduce((sum,item)=>sum+item.allocatedCostMicros,0), avoidedCostMicros: snapshots.reduce((sum,item)=>sum+item.avoidedCostMicros,0),
       priceMicros, refundMicros: decision.settlement === "refund" ? priceMicros : 0 } });
+  const commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[] = snapshots.map((item) => ({
+    snapshotId: item.snapshotId, cacheIdentity: item.cacheIdentity,
+    freshnessState: item.ageMs <= 7 * 24 * 60 * 60 * 1_000 ? "fresh" : item.ageMs <= 30 * 24 * 60 * 60 * 1_000 ? "historical" : "insufficient",
+    actualCostMicros: item.actualCostMicros, allocatedCostMicros: item.allocatedCostMicros, avoidedCostMicros: item.avoidedCostMicros
+  }));
+  input.signal?.throwIfAborted();
+  await input.dependencies.prepareArtifactVerification?.({ jobId: input.jobId, report, checkpoint, commercialSnapshotRefs });
   input.signal?.throwIfAborted();
   await input.dependencies.artifactReadiness.verify(report);
   input.signal?.throwIfAborted();
   const stored = input.dependencies.deferReportPersistence ? report : await input.dependencies.saveReport(report);
   if (stored.reportId !== input.reportId || stored.jobId !== input.jobId || stored.commercialOutcome !== decision.outcome) throw new PublicSourceReportOutcomeMismatchError();
-  return { report: stored, checkpoint, commercialSnapshotRefs: snapshots.map((item)=>({snapshotId:item.snapshotId,cacheIdentity:item.cacheIdentity,
-    freshnessState:item.ageMs<=7*24*60*60*1_000?"fresh":item.ageMs<=30*24*60*60*1_000?"historical":"insufficient",
-    actualCostMicros:item.actualCostMicros,allocatedCostMicros:item.allocatedCostMicros,avoidedCostMicros:item.avoidedCostMicros})) };
+  return { report: stored, checkpoint, commercialSnapshotRefs };
 }
 
 function createCheckpoint(value: { input: Parameters<typeof runPublicSourceForensicsPipeline>[0]; questions: ReturnType<typeof generateCanonicalBuyerQuestions>; fanouts: SearchQueryFanout[]; snapshots: ResolvedPublicSourceSnapshot[]; evidenceCutoffAt: string; authority: PublicSearchSurfaceAuthority }): PublicSourcePipelineCheckpoint {

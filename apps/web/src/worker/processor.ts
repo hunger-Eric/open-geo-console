@@ -10,6 +10,7 @@ import {
   preparePlanningCandidates,
   synthesizeWebsiteReportWithRecovery,
   type AiWebsiteReportV1,
+  type RecommendationForensicReportV2,
   type ExtractedPage,
   type PageAnalysis,
   type PlannedPage
@@ -42,7 +43,7 @@ import { captureReportVisualEvidence } from "./visual-evidence";
 import { createProductionPublicSourceForensicsDependencies } from "@/public-source-forensics/production-runtime";
 import { createPublicSourceArtifactReadinessGate } from "@/public-source-forensics/artifact-readiness";
 import { exportCanonicalArtifactHtmlPdf } from "@/report/pdf-export";
-import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline, type ArtifactReadinessGate, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
+import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline, type ArtifactReadinessGate, type PublicSourceCommercialSnapshotRef, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
 import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-runtime";
 import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { JobExecutionLease, configuredJobHardDeadlineMs } from "./job-execution";
@@ -76,6 +77,10 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
   websiteFoundation?: { completed: boolean; synthesisInputHash?: string };
   recommendationForensics?: { runId?: string; questionsGenerated?: boolean; reportSaved?: boolean };
   publicSourceForensics?: PublicSourcePipelineCheckpoint;
+  pendingArtifactVerification?: {
+    report: RecommendationForensicReportV2;
+    commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
+  };
   discoverySnapshot?: DiscoverySnapshot;
   pageAnalysisContentHashes?: Record<string, string>;
   aiEnabled?: boolean;
@@ -469,6 +474,16 @@ async function finalizeRecommendationJob(input: {
 }): Promise<void> {
   if (input.fulfillmentTarget === "recommendation_v2") {
     let checkpoint = input.checkpoint;
+    const artifactReadiness = createWorkerPublicSourceArtifactReadinessGate();
+    if (input.job.currentPhase === "artifact_verification" && checkpoint.pendingArtifactVerification) {
+      input.signal?.throwIfAborted();
+      await artifactReadiness.verify(checkpoint.pendingArtifactVerification.report);
+      input.signal?.throwIfAborted();
+      await terminalizePaidPublicSourceReport({ report: checkpoint.pendingArtifactVerification.report, workerId: input.workerId,
+        checkpointIdentityHash: checkpoint.publicSourceForensics?.identityHash ?? "", coverage: input.coverage,
+        snapshotRefs: checkpoint.pendingArtifactVerification.commercialSnapshotRefs });
+      return;
+    }
     const dependencies = await createProductionPublicSourceForensicsDependencies(process.env, {
       createDependencies: async (runtime) => createWorkerPublicSourceForensicsDependencies({
         job: input.job,
@@ -480,17 +495,13 @@ async function finalizeRecommendationJob(input: {
         retrieveSource: createWorkerPublicSourceRetriever(),
         // This verifies the canonical V2 HTML and a real Chromium PDF before the
         // atomic terminalization boundary; it never persists a report itself.
-        artifactReadiness: createWorkerPublicSourceArtifactReadinessGate(),
+        artifactReadiness,
         signal: input.signal
       }, runtime)
     });
     const result = await runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
       locale: input.websiteFoundation.provenance.locale, region: process.env.OGC_PUBLIC_SEARCH_REGION?.trim() || "CN",
       targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies, signal: input.signal });
-    checkpoint = { ...checkpoint, recommendationForensics: { questionsGenerated: true, reportSaved: true }, publicSourceForensics: result.checkpoint };
-    const artifactCheckpoint = await input.checkpointJob({ stage: "synthesizing", phase: "artifact_verification", progress: 99,
-      checkpoint: checkpoint as JobCheckpoint, ...input.coverage });
-    checkpoint = normalizeCheckpoint(artifactCheckpoint.checkpoint);
     await terminalizePaidPublicSourceReport({ report: result.report, workerId: input.workerId, checkpointIdentityHash: result.checkpoint.identityHash,
       coverage: input.coverage, snapshotRefs: result.commercialSnapshotRefs });
     return;
@@ -560,6 +571,22 @@ export function createWorkerPublicSourceForensicsDependencies(
       const updated = await input.checkpointJob({
         stage: "synthesizing", phase: "source_retrieval",
         progress: 95,
+        checkpoint: next as JobCheckpoint,
+        ...input.coverage
+      });
+      await input.onCheckpointSaved(normalizeCheckpoint(updated.checkpoint));
+    },
+    prepareArtifactVerification: async ({ jobId, report, checkpoint: publicSourceForensics, commercialSnapshotRefs }) => {
+      requireJob(jobId);
+      const next = {
+        ...input.readCheckpoint(),
+        recommendationForensics: { questionsGenerated: true, reportSaved: true },
+        publicSourceForensics,
+        pendingArtifactVerification: { report, commercialSnapshotRefs }
+      };
+      input.signal?.throwIfAborted();
+      const updated = await input.checkpointJob({
+        stage: "synthesizing", phase: "artifact_verification", progress: 99,
         checkpoint: next as JobCheckpoint,
         ...input.coverage
       });
