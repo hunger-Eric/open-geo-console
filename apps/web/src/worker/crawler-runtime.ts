@@ -42,7 +42,8 @@ export interface FetchedEvidencePage {
 export async function discoverSite(
   targetUrl: string,
   tier: "free" | "deep" = "deep",
-  fetchImpl: typeof fetch = createSafeFetch()
+  fetchImpl: typeof fetch = createSafeFetch(),
+  signal?: AbortSignal
 ): Promise<DiscoveredSite> {
   const root = new URL(targetUrl);
   root.pathname = "/";
@@ -50,8 +51,8 @@ export async function discoverSite(
   root.hash = "";
 
   const [homepageResponse, robotsResponse] = await Promise.all([
-    fetchImpl(root, { headers: { "user-agent": CRAWLER_USER_AGENT } }),
-    fetchImpl(new URL("/robots.txt", root), { headers: { "user-agent": CRAWLER_USER_AGENT } }).catch(() => null)
+    fetchImpl(root, { signal, headers: { "user-agent": CRAWLER_USER_AGENT } }),
+    fetchImpl(new URL("/robots.txt", root), { signal, headers: { "user-agent": CRAWLER_USER_AGENT } }).catch(() => null)
   ]);
   if (!homepageResponse.ok) throw new Error(`Homepage returned HTTP ${homepageResponse.status}.`);
   const homepageHtml = await homepageResponse.text();
@@ -69,11 +70,12 @@ export async function discoverSite(
     : [...new Set([...robotsPolicy.sitemaps, new URL("/sitemap.xml", root).href])];
   const visitedSitemaps = new Set<string>();
   while (sitemapQueue.length > 0 && visitedSitemaps.size < MAX_SITEMAP_DOCUMENTS) {
+    signal?.throwIfAborted();
     const sitemapUrl = sitemapQueue.shift()!;
     if (visitedSitemaps.has(sitemapUrl)) continue;
     visitedSitemaps.add(sitemapUrl);
     try {
-      const response = await fetchImpl(sitemapUrl, { headers: { "user-agent": CRAWLER_USER_AGENT } });
+      const response = await fetchImpl(sitemapUrl, { signal, headers: { "user-agent": CRAWLER_USER_AGENT } });
       if (!response.ok) continue;
       const nested = discovery.addSitemapDocument(await response.text(), sitemapUrl);
       if (tier === "deep") {
@@ -120,13 +122,14 @@ export async function discoverSite(
 
 export async function fetchEvidencePage(
   planned: PlannedPage,
-  robotsPolicy: RobotsPolicy
+  robotsPolicy: RobotsPolicy,
+  signal?: AbortSignal
 ): Promise<FetchedEvidencePage> {
   if (!isAllowedByRobots(planned.url, robotsPolicy)) {
     throw new CrawlPageError("robots-denied", "robots.txt disallows this page.");
   }
   const safeFetch = createSafeFetch();
-  const response = await safeFetch(planned.url, { headers: { "user-agent": CRAWLER_USER_AGENT } });
+  const response = await safeFetch(planned.url, { signal, headers: { "user-agent": CRAWLER_USER_AGENT } });
   if (!response.ok) {
     if (response.status === 404) {
       throw new CrawlPageError("http-not-found", `Page returned HTTP ${response.status}.`, { status: response.status });
@@ -158,7 +161,7 @@ export async function fetchEvidencePage(
   if (extracted.browserFallback.required) {
     let rendered: string | null;
     try {
-      rendered = await renderWithBrowser(finalUrl);
+      rendered = await renderWithBrowser(finalUrl, signal);
     } catch (error) {
       throw new CrawlPageError(
         "browser",
@@ -197,7 +200,8 @@ export async function fetchEvidencePage(
   };
 }
 
-async function renderWithBrowser(url: string): Promise<string | null> {
+async function renderWithBrowser(url: string, signal?: AbortSignal): Promise<string | null> {
+  signal?.throwIfAborted();
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: process.env.OGC_BROWSER_HEADLESS !== "false" });
   try {
@@ -223,6 +227,7 @@ async function renderWithBrowser(url: string): Promise<string | null> {
       }
     });
     await page.goto(url, { waitUntil: "networkidle", timeout: 30_000 });
+    signal?.throwIfAborted();
     await resolveSafeUrl(page.url(), { allowBenchmarkNetwork, resolver });
     const html = await page.content();
     return Buffer.byteLength(html, "utf8") <= 2 * 1024 * 1024 ? html : null;

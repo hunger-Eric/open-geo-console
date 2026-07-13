@@ -82,6 +82,7 @@ export async function fetchPlannedPagesWithRecovery<T extends RecoveredPage>(inp
   fetchPage: (page: PlannedPage) => Promise<T>;
   saveCheckpoint: (checkpoint: RecoveryCheckpoint) => Promise<void>;
   delay?: (milliseconds: number) => Promise<void>;
+  signal?: AbortSignal;
 }): Promise<{
   pages: T[];
   checkpoint: RecoveryCheckpoint;
@@ -135,10 +136,12 @@ export async function fetchPlannedPagesWithRecovery<T extends RecoveredPage>(inp
   }
 
   for (let index = 0; index < checkpoint.effectivePlan!.length; index += 1) {
+    input.signal?.throwIfAborted();
     const page = checkpoint.effectivePlan![index]!;
     if (completed.has(page.url) || permanent.has(page.url) || exhausted.has(page.url)) continue;
     let resolved = false;
     while (!resolved) {
+      input.signal?.throwIfAborted();
       const previousAttempts = checkpoint.transientAttemptCounts![page.url] ?? 0;
       if (previousAttempts >= MAX_PAGE_ATTEMPTS) {
         exhausted.add(page.url);
@@ -180,12 +183,21 @@ export async function fetchPlannedPagesWithRecovery<T extends RecoveredPage>(inp
           resolved = true;
           continue;
         }
-        await delay(Math.min(2_000, 250 * (2 ** (attempt - 1))));
+        await delayWithSignal(delay, Math.min(2_000, 250 * (2 ** (attempt - 1))), input.signal);
       }
     }
   }
 
   return { pages: [...results.values()], checkpoint, exhaustedTransientUrls: [...exhausted] };
+}
+
+async function delayWithSignal(delay: (milliseconds: number) => Promise<void>, milliseconds: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  if (!signal) return delay(milliseconds);
+  await Promise.race([
+    delay(milliseconds),
+    new Promise<never>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }))
+  ]);
 }
 
 function defaultDelay(milliseconds: number): Promise<void> {

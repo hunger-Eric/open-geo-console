@@ -182,20 +182,30 @@ export async function synthesizeWebsiteReport(
 export async function synthesizeWebsiteReportWithRecovery(
   client: JsonCompletionClient,
   input: ReportSynthesisInput,
-  options: { maxAttempts?: number; delay?: (milliseconds: number) => Promise<void> } = {}
+  options: { maxAttempts?: number; delay?: (milliseconds: number) => Promise<void>; signal?: AbortSignal } = {}
 ): Promise<SynthesizeReportResult> {
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const delay = options.delay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    options.signal?.throwIfAborted();
     try {
-      return await synthesizeWebsiteReport(client, input);
+      return await synthesizeWebsiteReport(client, input, options.signal);
     } catch (error) {
       lastError = error;
-      if (attempt < maxAttempts) await delay(Math.min(2_000, 250 * (2 ** (attempt - 1))));
+      if (attempt < maxAttempts) await delayWithSignal(delay, Math.min(2_000, 250 * (2 ** (attempt - 1))), options.signal);
     }
   }
   throw lastError;
+}
+
+async function delayWithSignal(delay: (milliseconds: number) => Promise<void>, milliseconds: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  if (!signal) return delay(milliseconds);
+  await Promise.race([
+    delay(milliseconds),
+    new Promise<never>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }))
+  ]);
 }
 
 function normalizeModelOutput(value: Record<string, unknown>): Record<string, unknown> {

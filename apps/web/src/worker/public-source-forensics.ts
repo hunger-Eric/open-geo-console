@@ -37,8 +37,9 @@ export const FAIL_CLOSED_ARTIFACT_READINESS: ArtifactReadinessGate = { async ver
 
 export async function runPublicSourceForensicsPipeline(input: {
   reportId: string; jobId: string; locale: string; region: string; targetUrl: string;
-  websiteFoundation: AiWebsiteReportV1; dependencies: PublicSourceForensicsDependencies;
+  websiteFoundation: AiWebsiteReportV1; dependencies: PublicSourceForensicsDependencies; signal?: AbortSignal;
 }): Promise<{ report: RecommendationForensicReportV2; checkpoint: PublicSourcePipelineCheckpoint; commercialSnapshotRefs: Array<{ snapshotId:string;cacheIdentity:string;freshnessState:"fresh"|"historical"|"insufficient";actualCostMicros:number;allocatedCostMicros:number;avoidedCostMicros:number }> }> {
+  input.signal?.throwIfAborted();
   const existing = await input.dependencies.getReport(input.jobId);
   if (existing) return { report: existing, checkpoint: checkpointFromReport(existing, input.websiteFoundation), commercialSnapshotRefs: [] };
   const authority = input.dependencies.authority;
@@ -60,7 +61,11 @@ export async function runPublicSourceForensicsPipeline(input: {
       prior.locale !== input.locale || prior.region !== input.region ||
       prior.adapterIdentityHash !== adapterIdentityHash(authority))) throw new PublicSourceResumeIdentityMismatchError();
   const evidenceCutoffAt = prior?.evidenceCutoffAt ?? (input.dependencies.now ?? (() => new Date()))().toISOString();
-  const snapshots = await Promise.all(fanouts.map((fanout) => input.dependencies.resolveSnapshot({ questionId: fanout.questionId, fanout, evidenceCutoffAt })));
+  const snapshots = await Promise.all(fanouts.map(async (fanout) => {
+    input.signal?.throwIfAborted();
+    return input.dependencies.resolveSnapshot({ questionId: fanout.questionId, fanout, evidenceCutoffAt });
+  }));
+  input.signal?.throwIfAborted();
   const actualCostMicros = snapshots.reduce((sum, item) => sum + item.actualCostMicros, 0);
   const decision = decidePublicSourceCommercialCoverage({ authorityReady: true, evidenceIsolated: snapshots.every((item) => item.questionId && item.snapshotId),
     artifactReady: true, costCapExceeded: actualCostMicros > (input.dependencies.costCapMicros ?? Number.MAX_SAFE_INTEGER),
@@ -88,7 +93,9 @@ export async function runPublicSourceForensicsPipeline(input: {
     cost: { searchCostMicros: actualCostMicros, retrievalCostMicros: 0, synthesisCostMicros: 0, artifactCostMicros: 0, deliveryCostMicros: 0,
       allocatedSharedCostMicros: snapshots.reduce((sum,item)=>sum+item.allocatedCostMicros,0), avoidedCostMicros: snapshots.reduce((sum,item)=>sum+item.avoidedCostMicros,0),
       priceMicros, refundMicros: decision.settlement === "refund" ? priceMicros : 0 } });
+  input.signal?.throwIfAborted();
   await input.dependencies.artifactReadiness.verify(report);
+  input.signal?.throwIfAborted();
   const stored = input.dependencies.deferReportPersistence ? report : await input.dependencies.saveReport(report);
   if (stored.reportId !== input.reportId || stored.jobId !== input.jobId || stored.commercialOutcome !== decision.outcome) throw new PublicSourceReportOutcomeMismatchError();
   return { report: stored, checkpoint, commercialSnapshotRefs: snapshots.map((item)=>({snapshotId:item.snapshotId,cacheIdentity:item.cacheIdentity,

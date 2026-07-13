@@ -34,6 +34,7 @@
     "public-search:probe": "node --env-file=.env.staging.local --import tsx src/scripts/probe-public-search.ts",
     "public-search:certify": "node --env-file=.env.staging.local --import tsx src/scripts/certify-public-search-surface.ts",
     "public-search:authority:install": "node --env-file=.env.staging.local --import tsx src/scripts/install-public-search-authority.ts",
+    "public-search:authority:activate": "node --env-file=.env.staging.local --import tsx src/scripts/activate-public-search-authority.ts",
     "db:audit": "node --env-file-if-exists=.env.local --import tsx src/scripts/db-audit.ts",
     "db:environment:init": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts init",
     "db:environment:inspect": "node --env-file-if-exists=.env.local --import tsx src/scripts/database-environment.ts inspect",

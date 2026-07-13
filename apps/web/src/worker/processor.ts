@@ -19,7 +19,7 @@ import { auditSite, type GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { RobotsPolicy } from "@open-geo-console/site-crawler";
 import type { CanonicalBuyerQuestion, PublicSearchSurfaceAdapter, PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import { createHash } from "node:crypto";
-import { checkpointScanJob, failScanJob, isBillableCoverage, terminalizeScanJob } from "@/db/jobs";
+import { checkpointScanJob, failScanJob, heartbeatScanJob, isBillableCoverage, terminalizeScanJob, type CheckpointScanJobInput } from "@/db/jobs";
 import { recordPaidJobOutcome } from "@/db/commercial-refunds";
 import { terminalizePaidPublicSourceReport } from "@/db/public-source-commerce";
 import { getSourceForensicReportForJob, saveSourceForensicReport } from "@/db/source-forensic-reports";
@@ -46,6 +46,7 @@ import { exportCanonicalArtifactHtmlPdf } from "@/report/pdf-export";
 import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline, type ArtifactReadinessGate, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
 import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-runtime";
 import { executePublicSourceRetrieval } from "./public-source-retriever";
+import { JobExecutionLease, configuredJobHardDeadlineMs } from "./job-execution";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
 import {
   calculateEffectiveCoverage,
@@ -82,11 +83,25 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
 }
 
 export async function processScanJob(job: ScanJobRow, workerId: string): Promise<void> {
-  const heartbeat = setInterval(() => {
-    void import("@/db/jobs")
-      .then(({ heartbeatScanJob }) => heartbeatScanJob(job.id, workerId))
-      .catch(() => undefined);
-  }, 30_000);
+  const execution = new JobExecutionLease({
+    hardDeadlineMs: configuredJobHardDeadlineMs(),
+    heartbeat: () => heartbeatScanJob(job.id, workerId)
+  });
+  execution.start();
+  const checkpointJob = async (input: CheckpointScanJobInput) => {
+    execution.throwIfAborted();
+    const updated = await checkpointScanJob(job.id, workerId, input);
+    execution.checkpointed();
+    return updated;
+  };
+  const saveCheckpoint = async (
+    stage: "discovering" | "planning" | "fetching" | "analyzing" | "synthesizing",
+    progress: number,
+    nextCheckpoint: WorkerCheckpoint,
+    coverage: { plannedPages?: number; successfulPages?: number; failedPages?: number } = {}
+  ) => {
+    await checkpointJob({ stage, progress, checkpoint: nextCheckpoint as JobCheckpoint, ...coverage });
+  };
   let checkpoint = normalizeCheckpoint(job.checkpoint);
   try {
     const fulfillmentTarget = resolveRecommendationFulfillmentTarget(job);
@@ -109,10 +124,10 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       }
     }
     if (job.tier === "free" && storedReport.technicalStatus !== "completed") {
-      await checkpointScanJob(job.id, workerId, { stage: "discovering", progress: 5 });
+      await checkpointJob({ stage: "discovering", progress: 5 });
       await markGeoReportTechnicalProcessing(job.reportId);
       const technicalReport = await auditSite(storedReport.url, {
-        fetchImpl: createSafeFetch(),
+        fetchImpl: fetchWithSignal(createSafeFetch(), execution.controller.signal),
         pageLimit: 1
       });
       const completed = await completeGeoReportTechnical(job.reportId, {
@@ -123,7 +138,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       if (!completed) throw new Error("The technical report shell no longer exists.");
       storedReport = completed;
       checkpoint = { ...checkpoint, technicalCompleted: true };
-      await saveStageCheckpoint(job, workerId, "discovering", 10, checkpoint, {
+      await saveCheckpoint("discovering", 10, checkpoint, {
         plannedPages: 1,
         successfulPages: 1,
         failedPages: 0
@@ -142,7 +157,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     } catch (error) {
       if (job.tier !== "free" || storedReport.technicalStatus !== "completed") throw error;
       checkpoint = { ...checkpoint, aiEnabled: false, aiSkipReason: "model_not_configured" };
-      await checkpointScanJob(job.id, workerId, { stage: "discovering", progress: 10, checkpoint });
+      await checkpointJob({ stage: "discovering", progress: 10, checkpoint });
       await terminalizeScanJob(job.id, workerId, {
         stage: "completed",
         coverage: { plannedPages: 1, successfulPages: 1, failedPages: 0 }
@@ -153,8 +168,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     let resumeStage = determineResumeStage(checkpoint);
     let discovery = checkpoint.discoverySnapshot;
     if (resumeStage === "discovering" || !discovery) {
-      await checkpointScanJob(job.id, workerId, { stage: "discovering", progress: 10 });
-      const discovered = await discoverSite(storedReport.url, job.tier);
+      await checkpointJob({ stage: "discovering", progress: 10 });
+      const discovered = await discoverSite(storedReport.url, job.tier, createSafeFetch(), execution.controller.signal);
       discovery = snapshotDiscovery(discovered);
       const rankedCandidates = rankCandidates(discovered.candidates, []);
       checkpoint = {
@@ -164,7 +179,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
         rankedCandidates,
         rankedCandidateUrls: rankedCandidates.map(({ url }) => url)
       };
-      await saveStageCheckpoint(job, workerId, "planning", 25, checkpoint);
+      await saveCheckpoint("planning", 25, checkpoint);
       resumeStage = "planning";
     }
 
@@ -173,7 +188,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
         tier: job.tier,
         locale: job.locale,
         targetUrl: discovery.targetUrl,
-        candidates: discovery.candidates
+        candidates: discovery.candidates,
+        signal: execution.controller.signal
       });
       if (pagePlan.selected.length === 0) {
         throw new Error("No public representative pages could be planned.");
@@ -188,7 +204,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
         effectivePlannedUrls: pagePlan.selected.map(({ url }) => url),
         planningCompleted: true
       };
-      await saveStageCheckpoint(job, workerId, "fetching", 35, checkpoint);
+      await saveCheckpoint("fetching", 35, checkpoint);
     }
 
     const crawl = await fetchPlannedPagesWithRecovery<StoredPageEvidence>({
@@ -197,15 +213,16 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       effectivePlan: checkpoint.effectivePlan!,
       checkpoint,
       loadCompleted: (planned) => loadCompletedEvidence(job, planned),
-      fetchPage: (planned) => loadOrFetchEvidence(job, planned, discovery.robotsPolicy),
+      fetchPage: (planned) => loadOrFetchEvidence(job, planned, discovery.robotsPolicy, execution.controller.signal),
       saveCheckpoint: async (next) => {
         checkpoint = { ...checkpoint, ...next };
-        await saveStageCheckpoint(job, workerId, "fetching", crawlProgress(checkpoint), checkpoint, {
+        await saveCheckpoint("fetching", crawlProgress(checkpoint), checkpoint, {
           plannedPages: checkpoint.effectivePlan?.length ?? 0,
           successfulPages: checkpoint.completedCrawlUrls?.length ?? 0,
           failedPages: failureCount(checkpoint)
         });
-      }
+      },
+      signal: execution.controller.signal
     });
     checkpoint = { ...checkpoint, ...crawl.checkpoint };
     for (const failure of checkpoint.permanentFailures ?? []) {
@@ -220,7 +237,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
 
     const technicalReport = job.tier === "deep"
       ? await auditSite(discovery.targetUrl, {
-          fetchImpl: createSafeFetch(),
+          fetchImpl: fetchWithSignal(createSafeFetch(), execution.controller.signal),
           pageUrls: checkpoint.effectivePlan!.map(({ url }) => url)
         })
       : undefined;
@@ -230,7 +247,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       const evidence = evidenceByUrl.get(canonicalUrl(stored.url));
       return Boolean(evidence?.contentHash) && evidence?.contentHash === stored.contentHash;
     });
-    await saveStageCheckpoint(job, workerId, "analyzing", 65, checkpoint, {
+    await saveCheckpoint("analyzing", 65, checkpoint, {
       plannedPages: checkpoint.effectivePlan!.length,
       successfulPages: crawl.pages.length,
       failedPages: failureCount(checkpoint)
@@ -243,6 +260,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
         locale: job.locale,
         batchSize: 4,
         maxCharactersPerPage: 30_000,
+        signal: execution.controller.signal,
         completedAnalyses: checkpoint.completedPageAnalyses.map(({ analysis }) => analysis),
         onBatchComplete: async (batch) => {
           checkpoint.completedPageAnalyses = mergeCompletedAnalyses(
@@ -250,7 +268,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
             batch,
             evidenceByUrl
           );
-          await saveStageCheckpoint(job, workerId, "analyzing", analysisProgress(
+          await saveCheckpoint("analyzing", analysisProgress(
             checkpoint.completedPageAnalyses.length,
             crawl.pages.length
           ), checkpoint, {
@@ -267,7 +285,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
           error.completedAnalyses,
           evidenceByUrl
         );
-        await saveStageCheckpoint(job, workerId, "analyzing", analysisProgress(
+        await saveCheckpoint("analyzing", analysisProgress(
           checkpoint.completedPageAnalyses.length,
           crawl.pages.length
         ), checkpoint);
@@ -301,7 +319,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     };
     const synthesisInputHash = hashSynthesisInput(crawl.pages, analyzed.analyses, coverage);
     checkpoint.synthesisInputHash = synthesisInputHash;
-    await saveStageCheckpoint(job, workerId, "synthesizing", 85, checkpoint);
+    await saveCheckpoint("synthesizing", 85, checkpoint);
 
     const synthesis = await synthesizeWebsiteReportWithRecovery(client, {
       targetUrl: discovery.targetUrl,
@@ -310,7 +328,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       pages: crawl.pages.map(({ page }) => page),
       pageAnalyses: analyzed.analyses,
       coverage
-    });
+    }, { signal: execution.controller.signal });
     const reportToPersist = job.tier === "free" ? projectFreeAiReport(synthesis.report) : synthesis.report;
     if (job.tier === "deep") {
       await captureReportVisualEvidence({
@@ -333,7 +351,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
         contractVersion: 2,
         websiteFoundation: { completed: true, synthesisInputHash }
       };
-      await saveStageCheckpoint(job, workerId, "synthesizing", 90, checkpoint, {
+      await saveCheckpoint("synthesizing", 90, checkpoint, {
         plannedPages: effectiveCoverage.effectivePlannedPages,
         successfulPages: effectiveCoverage.analyzedPages,
         failedPages: failureCount(checkpoint)
@@ -344,7 +362,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
           plannedPages: effectiveCoverage.effectivePlannedPages,
           successfulPages: effectiveCoverage.analyzedPages,
           failedPages: failureCount(checkpoint)
-        }
+        },
+        signal: execution.controller.signal
       });
       return;
     }
@@ -391,7 +410,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       await recordCommercialOutcomeSafely(job.id, "failed");
     }
   } finally {
-    clearInterval(heartbeat);
+    execution.stop();
   }
 }
 
@@ -435,6 +454,7 @@ async function finalizeRecommendationJob(input: {
   targetUrl: string;
   coverage: { plannedPages: number; successfulPages: number; failedPages: number };
   fulfillmentTarget: "recommendation_v1" | "recommendation_v2";
+  signal?: AbortSignal;
 }): Promise<void> {
   if (input.fulfillmentTarget === "recommendation_v2") {
     let checkpoint = input.checkpoint;
@@ -448,13 +468,14 @@ async function finalizeRecommendationJob(input: {
         retrieveSource: createWorkerPublicSourceRetriever(),
         // This verifies the canonical V2 HTML and a real Chromium PDF before the
         // atomic terminalization boundary; it never persists a report itself.
-        artifactReadiness: createWorkerPublicSourceArtifactReadinessGate()
+        artifactReadiness: createWorkerPublicSourceArtifactReadinessGate(),
+        signal: input.signal
       }, runtime)
     });
     if (!dependencies) throw new PublicSourceAuthorityUnavailableError("Public-source forensics authority is not installed.");
     const result = await runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
       locale: input.websiteFoundation.provenance.locale, region: process.env.OGC_PUBLIC_SEARCH_REGION?.trim() || "CN",
-      targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies });
+      targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies, signal: input.signal });
     checkpoint = { ...checkpoint, recommendationForensics: { questionsGenerated: true, reportSaved: true }, publicSourceForensics: result.checkpoint };
     await saveStageCheckpoint(input.job, input.workerId, "synthesizing", 99, checkpoint);
     await terminalizePaidPublicSourceReport({ report: result.report, workerId: input.workerId, checkpointIdentityHash: result.checkpoint.identityHash,
@@ -479,6 +500,7 @@ export interface WorkerPublicSourceForensicsDependencyInput {
   onCheckpointSaved: (checkpoint: WorkerCheckpoint) => Promise<void>;
   retrieveSource?: PublicSourceRetriever;
   artifactReadiness?: ArtifactReadinessGate;
+  signal?: AbortSignal;
   collaborators?: WorkerPublicSourceForensicsCollaborators;
 }
 
@@ -512,7 +534,8 @@ export function createWorkerPublicSourceForensicsDependencies(
       fanout,
       evidenceCutoffAt,
       leaseOwner: `public-source:${input.job.id}:${input.workerId}`,
-      retrieveSource: input.retrieveSource
+      retrieveSource: input.retrieveSource,
+      signal: input.signal
     }),
     getCheckpoint: async (jobId) => {
       requireJob(jobId);
@@ -521,6 +544,7 @@ export function createWorkerPublicSourceForensicsDependencies(
     saveCheckpoint: async (jobId, publicSourceForensics) => {
       requireJob(jobId);
       const next = { ...input.readCheckpoint(), publicSourceForensics };
+      input.signal?.throwIfAborted();
       await collaborators.checkpointJob(input.job.id, input.workerId, {
         stage: "synthesizing",
         progress: 95,
@@ -617,7 +641,8 @@ async function loadCompletedEvidence(job: ScanJobRow, planned: PlannedPage): Pro
 async function loadOrFetchEvidence(
   job: ScanJobRow,
   planned: PlannedPage,
-  robotsPolicy: RobotsPolicy
+  robotsPolicy: RobotsPolicy,
+  signal?: AbortSignal
 ): Promise<StoredPageEvidence> {
   const current = await getCrawlEvidence(job.id, planned.url);
   const reusable = current?.normalizedContent ? current : await getReusableCrawlEvidence(job.reportId, planned.url);
@@ -640,7 +665,7 @@ async function loadOrFetchEvidence(
     return evidence;
   }
 
-  const fetched = await fetchEvidencePage(planned, robotsPolicy);
+  const fetched = await fetchEvidencePage(planned, robotsPolicy, signal);
   await saveCrawlEvidence({
     reportId: job.reportId,
     jobId: job.id,
@@ -831,6 +856,10 @@ function createConfiguredClient() {
     timeoutMs: configuredAiTimeoutMs(),
     useJsonResponseFormat: process.env.OGC_AI_JSON_RESPONSE_FORMAT === "true"
   });
+}
+
+function fetchWithSignal(fetchImpl: typeof fetch, signal: AbortSignal): typeof fetch {
+  return (input, init = {}) => fetchImpl(input, { ...init, signal });
 }
 
 function configuredAiTimeoutMs(): number {
