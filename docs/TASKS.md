@@ -38,7 +38,7 @@
 - [ ] Replace the user-approved shared MiMo Preview key with an independent staging key; successful real-model report acceptance is complete.
 - [x] Configure production Turnstile, Cloudflare Bot Fight Mode, and a narrow `/api/scan` burst rule while leaving AI-bot blocking off.
 - [x] Complete a real signed Airwallex Sandbox payment Webhook and prove that only its persisted state changes the original report banner to paid/queued.
-- [ ] Complete the remaining refund, redirected-email, and production application-level third-site `429` browser acceptance.
+- [ ] Complete the production application-level third-site `429` browser acceptance. The 2026-07-13 staging failure-path refund and redirected-email drill completed through provider submission and three delivered test emails.
 - [x] Replace the no-return Payment Link checkout with a verified PaymentIntent/HPP journey, protected deployment, forged-return rejection, cancel return, successful Sandbox return, and signed-Webhook banner transition.
 - [x] Safely recover unpaid legacy Payment Links into HPP, reject paid-link replacement, and replace raw JSON parsing errors with localized checkout states.
 - [x] Distinguish a missing free AI preview from deployment-wide AI configuration and keep the completed technical report explicitly available.
@@ -67,7 +67,7 @@
 - [ ] Rotate the exposed credential before public production deployment.
 - [x] Implement Airwallex checkout/refunds, Queue outbox, Resend delivery, safe link redemption/reissue and 24-hour batch SLA.
 - [x] Create production Cloudflare Turnstile and staging Queue/Airwallex/Resend resources.
-- [ ] Complete Sandbox settlement and delivery drills: the 2026-07-13 V2 failure order is `paid/failed/refund pending` with queued confirmation/refund emails. The protected Preview commerce endpoint is implemented to use existing Vercel secrets; deploy and invoke it after explicit confirmation, then verify provider/database outcomes.
+- [x] Complete the V2 failure-path Sandbox settlement and delivery drill: order `558098d6-4fc2-4da0-b2c0-c7083bb76555` reached `paid/failed/refunded/delivered`; its provider refund succeeded and payment-confirmed, report-failed-refund and refund-succeeded redirected test emails were delivered through the protected Preview commerce runner.
 - [ ] Measure one, two and four deep Worker processes with representative live workloads before raising the default concurrency.
 
 ## HTML-first visual evidence report delivery
