@@ -67,7 +67,7 @@
 - [ ] Rotate the exposed credential before public production deployment.
 - [x] Implement Airwallex checkout/refunds, Queue outbox, Resend delivery, safe link redemption/reissue and 24-hour batch SLA.
 - [x] Create production Cloudflare Turnstile and staging Queue/Airwallex/Resend resources.
-- [ ] Complete sandbox payment/refund/email and signed provider-delivery drills.
+- [ ] Complete Sandbox settlement and delivery drills: the 2026-07-13 V2 failure order is `paid/failed/refund pending` with queued confirmation/refund emails, but the local staging commerce Worker lacks authorized Airwallex/Resend credentials to submit the refund or deliver those messages.
 - [ ] Measure one, two and four deep Worker processes with representative live workloads before raising the default concurrency.
 
 ## HTML-first visual evidence report delivery
@@ -92,7 +92,7 @@
 - [x] Run protected-staging MiMo capability certification, store an independent Preview signing key, and install its re-signed exact authority inactive. Runtime remains false; explicit activation and commercial drills are separate gates.
 - [x] Add an exact-authority V2 snapshot lease/attempt/observation resolver. It records only normalized annotations-derived observations and marks un-fetched sources `not_retrieved`; it is not yet a live Worker collaborator.
 - [x] Bind the V2 snapshot resolver to job-bound checkpoint persistence, V2 safe source retrieval, and canonical HTML/real-PDF artifact readiness. The Worker defers report persistence to atomic terminalization and remains fail-closed while runtime is disabled, authority inactive, or a collaborator is absent.
-- [ ] Rebuild the protected-staging free Worker after Docker Desktop recovers, then prove `OGC_JOB_HARD_DEADLINE_MS` cancels a stalled job through `failScanJob()` rather than permitting infinite lease renewal; resume report `c3a97bce-6bfc-43a9-916b-d8ddd26b0ec1` only after that proof.
-- [ ] Accept one real V2 paid report end to end: source collection/retrieval, immutable evidence, authorized HTML/PDF and anonymous `404`, transactional delivery/reply, settlement plus limited/failed refunds and outage drills.
+- [x] Prove `OGC_JOB_HARD_DEADLINE_MS` routes an expired Worker lease through the existing retry/failure boundary; the protected-staging free report `c3a97bce-6bfc-43a9-916b-d8ddd26b0ec1` then completed.
+- [ ] Accept one real V2 paid report end to end: source collection/retrieval, immutable evidence, authorized HTML/PDF and anonymous `404`, transactional delivery/reply, settlement plus limited/failed refunds and outage drills. A 2026-07-13 Sandbox payment/Webhook passed, but its deep job exposed the old workstation V2-MiMo placeholder configuration and entered the refund path; the staging-only configuration repair now resolves the active authority and a fresh paid success drill is still required.
 - [x] Use an isolated disposable PostgreSQL 16 admin URL to run the schema-v9-to-v14 bootstrap/upgrade, market snapshot, V2 repository and atomic-commerce suites. The local proof passed on 2026-07-13; this URL is not a staging or production authority.
 - [ ] Add any free sample only after paid V2 staging acceptance; never market public-search order as AI rank or recommendation.

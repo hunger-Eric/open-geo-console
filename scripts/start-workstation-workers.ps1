@@ -62,6 +62,20 @@ function Write-RuntimeEnv {
 
   $providerNames = @("OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL", "OGC_AI_TIMEOUT_MS", "OGC_AI_JSON_RESPONSE_FORMAT")
   Merge-EnvFile $values (Join-Path $webRoot ".env.local") -AllowedNames $providerNames -OnlyIfMissing
+  if ($Environment -eq "staging" -and $values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true") {
+    $publicSearchMiMoFallbacks = @{
+      "OGC_PUBLIC_SEARCH_MIMO_BASE_URL" = "OGC_AI_BASE_URL"
+      "OGC_PUBLIC_SEARCH_MIMO_API_KEY" = "OGC_AI_API_KEY"
+      "OGC_PUBLIC_SEARCH_MIMO_MODEL" = "OGC_AI_MODEL"
+    }
+    foreach ($target in $publicSearchMiMoFallbacks.Keys) {
+      $source = $publicSearchMiMoFallbacks[$target]
+      if ((-not $values.ContainsKey($target) -or [string]::IsNullOrWhiteSpace($values[$target])) -and
+          $values.ContainsKey($source) -and -not [string]::IsNullOrWhiteSpace($values[$source])) {
+        $values[$target] = $values[$source]
+      }
+    }
+  }
   $values["FULFILLMENT_MODE"] = "realtime"
   $values["OGC_JOB_QUEUE_PROVIDER"] = "postgres"
   $values["OGC_WORKER_POLL_MS"] = "5000"
