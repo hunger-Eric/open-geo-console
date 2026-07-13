@@ -98,20 +98,24 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
       identity, authorityVersion: input.authority.authorityId, token: claim.token, questionHash: sha(input.question.normalizedText)
     });
     snapshotId = snapshot.id;
+    // A canonical fanout variant can be refreshed more than once. Its storage
+    // row must therefore be snapshot-scoped; the table's primary key is global.
     const queries = input.fanout.queries.map((query, queryOrder) => ({
-      id: query.id, queryOrder, queryText: query.exactQuery, queryHash: sha(query.exactQuery), derivationRule: query.derivationRuleId
+      id: snapshotQueryId(snapshotId, query.id), queryOrder, queryText: query.exactQuery, queryHash: sha(query.exactQuery), derivationRule: query.derivationRuleId
     }));
     await appendMarketSnapshotQueries({ snapshotId, token: claim.token, queries });
 
     const observations: MarketSearchObservation[] = [];
     const successful: Array<{ observation: MarketSearchObservation; attemptId: string }> = [];
-    for (const query of input.fanout.queries) {
+    for (const [queryOrder, query] of input.fanout.queries.entries()) {
       if (input.signal?.aborted) throw new PublicSourceSnapshotUnavailableError();
+      const storedQuery = queries[queryOrder]!;
       const attempt = await beginMarketSearchAttempt({
-        snapshotId, queryId: query.id, token: claim.token,
-        idempotencyReference: deterministicId("public-search-attempt", [snapshotId, query.id]), configuredCostMicros: input.fanout.budget.maxCostMicros
+        snapshotId, queryId: storedQuery.id, token: claim.token,
+        idempotencyReference: deterministicId("public-search-attempt", [snapshotId, storedQuery.id]), configuredCostMicros: input.fanout.budget.maxCostMicros
       });
-      const observation = await observePublicSearch({ adapter: input.adapter, query, budget: input.fanout.budget, signal: input.signal ?? new AbortController().signal });
+      const observed = await observePublicSearch({ adapter: input.adapter, query, budget: input.fanout.budget, signal: input.signal ?? new AbortController().signal });
+      const observation = { ...observed, queryId: storedQuery.id };
       const requestStatus = attemptStatus(observation.status);
       const providerCostMicros = observation.usage.providerReportedCostMicros ?? observation.usage.estimatedCostMicros ?? null;
       await completeMarketSearchAttempt({
@@ -227,6 +231,7 @@ function assertExactRuntime(input: ResolvePublicSourceSnapshotInput): void {
 function sameQuery(query: SearchQueryVariant, fanout: SearchQueryFanout): boolean { return query.questionId === fanout.questionId && query.fanoutVersion === fanout.fanoutVersion && query.locale === fanout.surface.locale && query.region === fanout.surface.region; }
 function attemptStatus(status: SearchObservationStatus): "succeeded" | "partial" | "timeout" | Exclude<SearchObservationStatus, "complete" | "partial" | "timed_out"> { return status === "complete" ? "succeeded" : status === "timed_out" ? "timeout" : status; }
 function observationId(snapshotId: string, queryId: string, order: number, canonicalUrl: string): string { return deterministicId("market-observation", [snapshotId, queryId, String(order), canonicalUrl]); }
+function snapshotQueryId(snapshotId: string, queryId: string): string { return deterministicId("market-snapshot-query", [snapshotId, queryId]); }
 function fanoutHash(fanout: SearchQueryFanout): string { return sha(JSON.stringify({ questionId: fanout.questionId, questionSetVersion: fanout.questionSetVersion, fanoutVersion: fanout.fanoutVersion, surface: fanout.surface, queries: fanout.queries.map(({ id, exactQuery, derivationRuleId, resultDepth }) => ({ id, exactQuery, derivationRuleId, resultDepth })) })); }
 function knownCost(attempts: Array<{ providerCostMicros: number | null }>): number { return attempts.reduce((total, attempt) => total + (attempt.providerCostMicros ?? 0), 0); }
 function sha(value: string): string { return createHash("sha256").update(value).digest("hex"); }
