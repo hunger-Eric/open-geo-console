@@ -14,7 +14,7 @@ const describePostgres = enabled ? describe : describe.skip;
 
 describePostgres("schema-v16 recovery checkpoint authority", () => {
   const suffix = randomUUID().replaceAll("-", "");
-  const rows = (["source_retrieval", "artifact_verification"] as const).map((phase) => ({
+  const rows = (["source_retrieval", "artifact_verification", "terminalization"] as const).map((phase) => ({
     phase,
     reportId: `recovery-report-${phase}-${suffix}`,
     jobId: `recovery-job-${phase}-${suffix}`,

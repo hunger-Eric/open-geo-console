@@ -37,7 +37,7 @@ const runner = {
   claim: claimScanJob,
   process: async (job: NonNullable<Awaited<ReturnType<typeof claimScanJob>>>, owner: string) => {
     process.stdout.write(`Processing ${job.tier} AI report job ${job.id}.\n`);
-    await processScanJob(job, owner, { liveDrill });
+    await processScanJob(job, owner, { liveDrill: liveDrill ?? undefined });
   }
 };
 
