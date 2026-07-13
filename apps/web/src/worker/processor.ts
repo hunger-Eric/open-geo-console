@@ -212,6 +212,14 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         effectivePlannedUrls: pagePlan.selected.map(({ url }) => url),
         planningCompleted: true
       };
+      resumeStage = "fetching";
+    }
+
+    // A paid deep job can inherit a durable page plan from its technical
+    // foundation.  It still needs a fetching checkpoint before any page I/O,
+    // otherwise recovery (and the protected staging crawl drill) has no
+    // durable boundary to resume from.
+    if (resumeStage === "fetching") {
       await saveCheckpoint("fetching", 35, checkpoint);
       options.liveDrill?.inject({ jobId: job.id, fault: "crawl" });
     }
