@@ -16,6 +16,8 @@ On 2026-07-13, direct read-only staging and production PostgreSQL checks found z
 
 The 2026-07-13 MiMo protected-staging capability probe passed its official-factual, Chinese B2B and narrow structured-search cases after using a 30-second timeout and three-source certification sample. Its signed artifact is installed as an inactive staging authority; staging is schema v14 and runtime remains disabled. Activation, paid fulfillment, refund, delivery and outage drills are still pending.
 
+The independent certification HMAC secret/key ID must be configured in protected staging secret storage before activation or artifact re-verification; no signing secret is committed or retained in a local runtime file.
+
 - `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point. Chinese is the canonical unprefixed interface (`/`, `/reports/...`); English remains explicit under `/en`, and legacy `/zh/...` URLs permanently redirect to their unprefixed equivalents.
 - `packages/geo-auditor` owns deterministic technical evidence and the reproducible GEO score.
 - `packages/site-crawler` owns URL/SSRF safety, registrable site identity, robots/sitemap/link discovery, HTML extraction, template clustering and representative-page selection.

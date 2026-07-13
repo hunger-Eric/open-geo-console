@@ -8,6 +8,8 @@ MiMo is the first compile-time registered adapter. This is only code registratio
 
 The protected-staging capability probe on 2026-07-13 used the configured `mimo-v2.5-pro` surface without enabling runtime. After raising the bounded search timeout to 30 seconds and reducing certification sampling to three sources, its official-factual, Chinese B2B-discovery, and narrow structured-search cases passed with structured annotations. A signed artifact was installed in staging as inactive authority `public-search-authority-f9add998ac5b8e3d8e9cc44d6f93e0c1a687247a47f395f5001c0f924cd8b876`; schema version is 14 and `OGC_PUBLIC_SEARCH_RUNTIME_ENABLED` remains false. This is not activation or customer readiness.
 
+Before activation or later artifact re-verification, store the independent certification HMAC secret and key ID in the protected staging secret store. A one-process signing value must never become a durable operational credential or be committed to a local env file.
+
 MiMo is selected only by `OGC_PUBLIC_SEARCH_ADAPTER=mimo` and reads only `OGC_PUBLIC_SEARCH_MIMO_BASE_URL`, `OGC_PUBLIC_SEARCH_MIMO_API_KEY`, and `OGC_PUBLIC_SEARCH_MIMO_MODEL`. Its configuration is independent from the report-generation `OGC_AI_*` namespace; identical secret values may be supplied deliberately, but there is no inheritance or fallback.
 
 ## Framework boundary
