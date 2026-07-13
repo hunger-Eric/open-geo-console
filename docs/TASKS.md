@@ -89,8 +89,9 @@
 - [x] Drain staging V1 work, verify zero non-terminal V1 rows in staging and production, retire OpenAI/Perplexity from active admission/Worker graphs, and preserve historical V1 read/render contracts.
 - [x] Add signed public-search certification artifact/path/install framework with an empty compile-time approved adapter registry; fixtures remain non-installable and admission remains closed.
 - [x] Add the compile-time approved registry, independent MiMo configuration/normalization, exact schema-v14 authority identity, redacted probe and signed-certification entry points; runtime remains closed without artifact readiness and an active authority.
-- [x] Run protected-staging MiMo capability certification and install its exact signed authority inactive. Runtime remains false; explicit activation and commercial drills are separate gates.
-- [ ] Select and legally review one live public-search vendor, add it through a separate approved-adapter plan, create/manual-review/install/activate its signed artifact, and keep the runtime flag false until then.
+- [x] Run protected-staging MiMo capability certification, store an independent Preview signing key, and install its re-signed exact authority inactive. Runtime remains false; explicit activation and commercial drills are separate gates.
+- [x] Add an exact-authority V2 snapshot lease/attempt/observation resolver. It records only normalized annotations-derived observations and marks un-fetched sources `not_retrieved`; it is not yet a live Worker collaborator.
+- [ ] Bind the V2 snapshot resolver to job-bound checkpoint persistence, V2 safe source retrieval, and canonical artifact readiness; prove the real Worker remains fail-closed until all three collaborators exist.
 - [ ] Accept one real V2 paid report end to end: source collection/retrieval, immutable evidence, authorized HTML/PDF and anonymous `404`, transactional delivery/reply, settlement plus limited/failed refunds and outage drills.
 - [x] Use an isolated disposable PostgreSQL 16 admin URL to run the schema-v9-to-v14 bootstrap/upgrade, market snapshot, V2 repository and atomic-commerce suites. The local proof passed on 2026-07-13; this URL is not a staging or production authority.
 - [ ] Add any free sample only after paid V2 staging acceptance; never market public-search order as AI rank or recommendation.

@@ -6,11 +6,11 @@ Plan: `docs/superpowers/specs/2026-07-12-public-web-recommendation-source-forens
 
 ## Executive conclusion
 
-MiMo is now the first compile-time registered public-search adapter behind an independent configuration and identity boundary. It is not certified or activated: no signed live artifact, active exact authority, artifact-readiness gate, or authorized V2 customer report exists, so catalog and checkout remain closed.
+MiMo is now the first compile-time registered public-search adapter behind an independent configuration and identity boundary. Its redacted protected-staging probe and a re-signed inactive authority are complete, but it is not activated: no active exact authority, complete Worker artifact/checkpoint collaborators, or authorized V2 customer report exists, so catalog and checkout remain closed.
 
 Read-only database evidence on 2026-07-13 found zero non-terminal recommendation rows, zero non-terminal V1 rows, and zero terminal commercial jobs with a reserved credit in both staging and production. The normal CLI audits were not used because they can bootstrap/migrate schema state; no database migration was authorized in this adapter implementation.
 
-The same-date MiMo capability probe passed official-factual, Chinese B2B and narrow structured-search cases after a bounded 30-second timeout and three-source sample. Its signed artifact was installed only as an inactive staging authority. Runtime stays false; this does not authorize activation, customer collection, paid delivery/refund drills, or production change.
+The same-date MiMo capability probe passed official-factual, Chinese B2B and narrow structured-search cases after a bounded 30-second timeout and three-source sample; a redacted retry passed as well. A sensitive protected-Preview HMAC signed inactive authority `public-search-authority-101c9dbb38db639d7f5b4207f8eb14e9832008672df617858239b6770b546c6e`. Runtime stays false; this does not authorize activation, customer collection, paid delivery/refund drills, or production change.
 
 Phases 4–9 of the approved V2 plan are implemented. The repository now has a versioned, public-source-based recommendation-forensics pipeline whose persisted evidence, report construction, artifact rendering, commercial terminalization and certification admission are explicit and fail closed.
 
@@ -28,7 +28,7 @@ This is an implementation-complete framework, not a claim that a live public-sea
 ### Phase 5 — fulfillment and commercial state machine
 
 - Added coverage freshness boundaries, cache/resume behavior and bounded collection budgets.
-- Added fail-closed runtime admission for production collection.
+- Added exact-authority runtime collaborator validation and a V2 snapshot lease/attempt/observation resolver. It persists structured annotations only and marks un-fetched sources `not_retrieved` rather than fabricating evidence.
 - Made V2 report persistence, terminal job state, credit settlement/refund, order/refund state and email intent one PostgreSQL transaction.
 - Kept PostgreSQL as the sole job, payment, delivery and access authority.
 
@@ -92,7 +92,7 @@ New purchases use report version 2 and methodology `public_search_source_forensi
 
 | Check | Result | Interpretation |
 |---|---|---|
-| Full repository unit suite | Final pass: 127 files passed, 11 skipped; 674 tests passed, 27 skipped | Deterministic package/app behavior is covered |
+| Full repository unit suite | Final pass: 134 files passed, 12 skipped; 701 tests passed, 28 skipped | Deterministic package/app behavior is covered |
 | Lint | Final pass | Next.js workspace static checks passed |
 | Production build | Final pass | All packages and the Next.js production app compiled successfully |
 | Staging V1 methodology audit | Final pass: zero non-terminal recommendation rows and zero V1 rows requiring retained adapters | V1 active fulfillment retirement boundary satisfied |
@@ -100,8 +100,8 @@ New purchases use report version 2 and methodology `public_search_source_forensi
 | Staging and production `db:audit` | Final pass in both environments | No terminal commercial job retained reserved credit |
 | PostgreSQL integration suite in final pass | Unproven: command exceeded the 244-second execution ceiling | Must not be reported as a pass; rerun without the tool ceiling |
 | Fresh-database fault-injection tests | Passed against isolated local PostgreSQL 16 on 2026-07-13 | v9-to-v14 bootstrap/upgrade, snapshot, repository and atomic-commerce suites passed; not staging/production evidence |
-| Live V2 browser/PDF customer drill | External unproven | No authorized live adapter, active authority or V2 report exists |
-| Live vendor certification/failure drills | External unproven | Intentionally impossible while approved registry is empty |
+| Live V2 browser/PDF customer drill | External unproven | Snapshot resolver exists but is not yet connected to the job-bound checkpoint, safe-retrieval and artifact collaborators |
+| Live vendor certification/failure drills | External unproven | MiMo probe/certification is inactive only; runtime remains false |
 | `git diff --check` | Pass | No whitespace error detected |
 | CodeGraph sync/status | Pass: index current, 412 files, 4,386 nodes, 10,982 edges | Structural index matches the final workspace |
 
@@ -109,13 +109,11 @@ These results were collected after the final documentation edits. The isolated P
 
 ## Remaining gates before enabling sales
 
-1. Approve and register one concrete non-fixture public-search adapter in source review.
-2. Run the signed certification plan against protected staging, including terms, storage, budget and sanitized failure evidence.
-3. Install the verified artifact as inactive authority, then activate it through the explicit database authority process.
-4. Configure the exact protected runtime and confirm catalog remains closed under every mismatch case.
-5. Complete a paid protected-staging V2 drill from signed payment Webhook through collection, report, canonical HTML, materialized PDF, delivery and access.
-6. Execute timeout, partial coverage, unusable evidence, refund, retry/resume and artifact-failure drills.
-8. Only after all evidence passes, make the separately reviewed production activation decision.
+1. Connect the exact runtime collaborator seam to job-bound checkpoint persistence, V2 safe retrieval and canonical artifact readiness; retain fail-closed behavior for every absent collaborator.
+2. Activate the separately reviewed inactive authority only in protected staging, then confirm catalog/checkout remain closed for all identity mismatches.
+3. Complete a paid protected-staging V2 drill from signed payment Webhook through collection, report, canonical HTML, materialized PDF, delivery and access.
+4. Execute timeout, partial coverage, unusable evidence, refund, retry/resume and artifact-failure drills.
+5. Only after all evidence passes, make the separately reviewed production activation decision.
 
 ## Commit trail
 

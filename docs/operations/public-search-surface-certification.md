@@ -4,11 +4,11 @@ The V2 framework certifies one accurately labeled public-search surface. Certifi
 
 ## Current status
 
-MiMo is the first compile-time registered adapter. This is only code registration: no live certification artifact has been accepted, no authority is active, and catalog, checkout, Worker execution, and production remain fail-closed. Fixture artifacts used by tests are never installable or activatable.
+MiMo is the first compile-time registered adapter. Its latest live artifact is signed with a sensitive protected-Preview HMAC and installed inactive; no authority is active, and catalog, checkout, Worker execution, and production remain fail-closed. Fixture artifacts used by tests are never installable or activatable.
 
-The protected-staging capability probe on 2026-07-13 used the configured `mimo-v2.5-pro` surface without enabling runtime. After raising the bounded search timeout to 30 seconds and reducing certification sampling to three sources, its official-factual, Chinese B2B-discovery, and narrow structured-search cases passed with structured annotations. A signed artifact was installed in staging as inactive authority `public-search-authority-f9add998ac5b8e3d8e9cc44d6f93e0c1a687247a47f395f5001c0f924cd8b876`; schema version is 14 and `OGC_PUBLIC_SEARCH_RUNTIME_ENABLED` remains false. This is not activation or customer readiness.
+The protected-staging capability probe on 2026-07-13 used the configured `mimo-v2.5-pro` surface without enabling runtime. After raising the bounded search timeout to 30 seconds and reducing certification sampling to three sources, its official-factual, Chinese B2B-discovery, and narrow structured-search cases passed with structured annotations; a subsequent redacted retry also passed. The persistent Preview signing key produced inactive authority `public-search-authority-101c9dbb38db639d7f5b4207f8eb14e9832008672df617858239b6770b546c6e`; schema version is 14 and `OGC_PUBLIC_SEARCH_RUNTIME_ENABLED` remains false. This is not activation or customer readiness.
 
-Before activation or later artifact re-verification, store the independent certification HMAC secret and key ID in the protected staging secret store. A one-process signing value must never become a durable operational credential or be committed to a local env file.
+The independent certification HMAC secret and key ID are stored as sensitive protected-Preview values. They are not committed or retained in a local env file. A previously ephemeral signed artifact is not an activation candidate.
 
 MiMo is selected only by `OGC_PUBLIC_SEARCH_ADAPTER=mimo` and reads only `OGC_PUBLIC_SEARCH_MIMO_BASE_URL`, `OGC_PUBLIC_SEARCH_MIMO_API_KEY`, and `OGC_PUBLIC_SEARCH_MIMO_MODEL`. Its configuration is independent from the report-generation `OGC_AI_*` namespace; identical secret values may be supplied deliberately, but there is no inheritance or fallback.
 
@@ -47,5 +47,6 @@ Installation verifies the signature, content hash, environment, capability set, 
 
 - Changing the report-generation model never changes the selected public-search adapter. Changing `OGC_PUBLIC_SEARCH_ADAPTER` takes effect only after a Worker restart, and new jobs bind the exact adapter/authority identity; running or resumable work never switches suppliers automatically.
 - A provider outage follows the existing limited/failed/refund path. It never selects a fallback supplier.
+- The V2 snapshot resolver records only structured annotations and marks any not-yet-safe-fetched source `not_retrieved`; it cannot make a source-quality or artifact-readiness claim. Job-bound checkpoint, safe retrieval and canonical PDF collaborators must be wired and tested before a Worker can be enabled.
 - Staging acceptance is not production authority. Production activation remains a separate reviewed decision after protected-staging certification, inactive installation, explicit activation, and paid failure-drill evidence.
 - MiMo's commercial-use and data-retention terms remain external review gates. Do not use a local probe as proof of contractual rights or search quality.

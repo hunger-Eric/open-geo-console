@@ -10,13 +10,13 @@ The paid contract remains `recommendation_forensics_v1`, but every new order is 
 
 ## Current Architecture
 
-The provider-independent adapter layer now resolves `OGC_PUBLIC_SEARCH_ADAPTER` only from compile-time-reviewed factories. MiMo is the first candidate and reads only `OGC_PUBLIC_SEARCH_MIMO_*`; no live certification artifact, active authority, or artifact-readiness gate exists, so admission remains fail-closed.
+The provider-independent adapter layer resolves `OGC_PUBLIC_SEARCH_ADAPTER` only from compile-time-reviewed factories. MiMo is the first candidate and reads only `OGC_PUBLIC_SEARCH_MIMO_*`. A protected-Preview signing key now holds the credential for the latest signed inactive MiMo authority, but no active authority plus complete Worker artifact/checkpoint collaborators exist, so admission remains fail-closed.
 
 On 2026-07-13, direct read-only staging and production PostgreSQL checks found zero non-terminal recommendation rows, zero non-terminal V1 rows, and zero terminal jobs with a reserved credit. The existing audit CLI was not used because its bootstrap behavior may migrate a schema-v13 database; it must be rerun only after a separately authorized schema-v14 rollout.
 
-The 2026-07-13 MiMo protected-staging capability probe passed its official-factual, Chinese B2B and narrow structured-search cases after using a 30-second timeout and three-source certification sample. Its signed artifact is installed as an inactive staging authority; staging is schema v14 and runtime remains disabled. Activation, paid fulfillment, refund, delivery and outage drills are still pending.
+The 2026-07-13 MiMo protected-staging capability probe passed its official-factual, Chinese B2B and narrow structured-search cases after using a 30-second timeout and three-source certification sample. A subsequent redacted retry also passed. The independently signed artifact is installed as inactive staging authority `public-search-authority-101c9dbb38db639d7f5b4207f8eb14e9832008672df617858239b6770b546c6e`; staging is schema v14 and runtime remains disabled. Activation, paid fulfillment, refund, delivery and outage drills are still pending.
 
-The independent certification HMAC secret/key ID must be configured in protected staging secret storage before activation or artifact re-verification; no signing secret is committed or retained in a local runtime file.
+The independent certification HMAC secret/key ID is stored as a sensitive protected-Preview value; no signing secret is committed or retained in a local runtime file. The exact runtime now has an authority-checked collaborator seam and a V2 snapshot lease/attempt/observation resolver. It still lacks the job-bound checkpoint, safe source-retrieval and canonical artifact collaborators required for a real Worker run, so the default dependency factory returns `null`.
 
 - `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point. Chinese is the canonical unprefixed interface (`/`, `/reports/...`); English remains explicit under `/en`, and legacy `/zh/...` URLs permanently redirect to their unprefixed equivalents.
 - `packages/geo-auditor` owns deterministic technical evidence and the reproducible GEO score.

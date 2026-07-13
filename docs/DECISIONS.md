@@ -165,3 +165,7 @@ V2 live admission requires one exact active public-search authority plus a non-f
 ## 2026-07-13: MiMo certification uses a bounded 30-second, three-source matrix
 
 The protected-staging MiMo surface needed roughly 27 seconds for Chinese B2B and narrow queries. The shared public-search timeout is therefore 30 seconds, below the existing 120-second hard cap. Certification samples three ordered structured sources per query; the official-factual case requires an authoritative OpenAI domain or subdomain, while the narrow case accepts either structured results or an explicit malformed/no-annotations result. This accepts documented provider behavior without accepting generated prose as evidence, and does not change the separate activation or commercial gates.
+
+## 2026-07-13: MiMo staging certification keys are Preview secrets, not local artifacts
+
+The re-signed inactive MiMo authority uses an independently generated HMAC stored as a sensitive Vercel Preview value, with a separate key ID/version. A local process may use that value only while creating its artifact; it must never retain, commit, print or substitute it. Activation remains blocked until job-bound checkpoint, safe-retrieval and canonical-artifact collaborators are connected and verified.
