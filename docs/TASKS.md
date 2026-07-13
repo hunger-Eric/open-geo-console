@@ -19,7 +19,7 @@
 - [x] Add recorded workstation batch drains and preserve a configuration-only upgrade path to persistent real-time Workers.
 - [x] Run staging free/deep, production free, and production commerce as restartable Docker Desktop services using authoritative PostgreSQL polling.
 - [x] Configure an independent production private evidence store, then enable and verify the production deep Docker Worker.
-- [ ] Provide locally decryptable staging-only `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `RESEND_WEBHOOK_SECRET`, then rerun staging commerce and prove the queued confirmation/report-ready messages are delivered. The Gmail test recipient, Airwallex HPP/Webhook, and deep fulfillment already passed the 2026-07-12 drill.
+- [ ] Deploy and invoke the protected Preview `POST /api/staging/commerce/run` endpoint after an explicit operator confirmation, then prove the queued Sandbox refund and redirected confirmation/refund test emails leave their pending states. The endpoint uses Vercel Preview runtime secrets; the local report-generation Workers do not need payment or email credentials.
 
 ## Protected staging and production security
 
@@ -67,7 +67,7 @@
 - [ ] Rotate the exposed credential before public production deployment.
 - [x] Implement Airwallex checkout/refunds, Queue outbox, Resend delivery, safe link redemption/reissue and 24-hour batch SLA.
 - [x] Create production Cloudflare Turnstile and staging Queue/Airwallex/Resend resources.
-- [ ] Complete Sandbox settlement and delivery drills: the 2026-07-13 V2 failure order is `paid/failed/refund pending` with queued confirmation/refund emails, but the local staging commerce Worker lacks authorized Airwallex/Resend credentials to submit the refund or deliver those messages.
+- [ ] Complete Sandbox settlement and delivery drills: the 2026-07-13 V2 failure order is `paid/failed/refund pending` with queued confirmation/refund emails. The protected Preview commerce endpoint is implemented to use existing Vercel secrets; deploy and invoke it after explicit confirmation, then verify provider/database outcomes.
 - [ ] Measure one, two and four deep Worker processes with representative live workloads before raising the default concurrency.
 
 ## HTML-first visual evidence report delivery

@@ -42,6 +42,14 @@ export function isProtectedStagingPreview(environment: Environment = process.env
     && environment.COMMERCE_MODE?.trim() !== "live";
 }
 
+export function assertProtectedStagingCommercePreview(environment: Environment = process.env): void {
+  if (environment.VERCEL_ENV?.trim() !== "preview"
+    || environment.OGC_DEPLOYMENT_PROFILE?.trim() !== "staging"
+    || environment.COMMERCE_MODE?.trim() !== "test") {
+    throw new DeploymentPolicyError("This operation only runs in the protected staging Preview test-commerce environment.");
+  }
+}
+
 export function freeDistinctSiteLimit(environment: Environment = process.env): number {
   if (environment.VERCEL_ENV?.trim() === "production") return 2;
   if (!isProtectedStagingPreview(environment)) return 2;

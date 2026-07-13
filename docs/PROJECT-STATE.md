@@ -18,6 +18,8 @@ The 2026-07-13 MiMo protected-staging capability probe passed its official-factu
 
 The independent certification HMAC secret/key ID is stored as a sensitive protected-Preview value; no signing secret is committed or retained in a local runtime file. The exact runtime has an authority-checked Worker seam: job-bound checkpoints, V2 safe retrieval, and canonical HTML/real Chromium-PDF readiness run before the atomic terminalization boundary. A per-job abort controller now enforces `OGC_JOB_HARD_DEADLINE_MS`; only successful phase checkpoints permit lease renewal, and deadline expiration reaches the normal retry/failure terminalization path. Missing runtime/collaborator inputs still return `null` before any MiMo request.
 
+The protected Preview now exposes `POST /api/staging/commerce/run` behind Vercel Authentication. It is additionally hidden unless the runtime is exactly `VERCEL_ENV=preview`, `OGC_DEPLOYMENT_PROFILE=staging`, and `COMMERCE_MODE=test`; it runs the fixed reconcile/SLA/refund/email sequence with existing Preview secrets and returns only non-sensitive counts. The workstation Worker remains report-generation only and no longer needs payment or email credentials for this acceptance path.
+
 - `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point. Chinese is the canonical unprefixed interface (`/`, `/reports/...`); English remains explicit under `/en`, and legacy `/zh/...` URLs permanently redirect to their unprefixed equivalents.
 - `packages/geo-auditor` owns deterministic technical evidence and the reproducible GEO score.
 - `packages/site-crawler` owns URL/SSRF safety, registrable site identity, robots/sitemap/link discovery, HTML extraction, template clustering and representative-page selection.
@@ -114,7 +116,7 @@ The web process persists a public homepage technical report and enqueues work. S
 ## Next Steps
 
 1. Replace the shared Preview model key with a staging-only key.
-2. Provide locally decryptable staging-only `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `RESEND_WEBHOOK_SECRET`, rerun `npm run commerce:staging:all` until the existing confirmation/report-ready deliveries leave `queued`, then verify the remaining Airwallex refund cycle.
+2. Deploy the protected Preview commerce endpoint, repoint the fixed staging alias, and invoke its POST only after confirming the pending Sandbox refund and queued redirected test emails should be executed; then verify provider and database outcomes. Local commerce credentials are no longer a prerequisite for this staging path.
 3. Complete the production application-rate-limit drill with three scannable distinct sites and a fresh Turnstile token for each; the third must return `429`, including when staging-only inputs are supplied.
 4. Authorize the Vercel GitHub App, connect this repository, and scope Preview variables to the staging branch; until then, repoint the fixed staging alias after each CLI Preview deployment.
 5. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.

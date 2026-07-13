@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertDeploymentRuntime,
+  assertProtectedStagingCommercePreview,
   assertStagingCommandEnvironment,
   freeDistinctSiteLimit,
   isProtectedStagingPreview,
@@ -53,6 +54,15 @@ describe("deployment security policy", () => {
     expect(() => assertDeploymentRuntime({ OGC_DEPLOYMENT_PROFILE: "staging", COMMERCE_MODE: "live" })).toThrow("live commerce");
     expect(() => assertDeploymentRuntime({ OGC_DEPLOYMENT_PROFILE: "production", OGC_TEST_EMAIL_RECIPIENT: "operator@example.test" })).toThrow("must not configure");
     expect(() => assertStagingCommandEnvironment({ OGC_DEPLOYMENT_PROFILE: "production", COMMERCE_MODE: "test" })).toThrow("only runs");
+    expect(() => assertProtectedStagingCommercePreview({
+      VERCEL_ENV: "preview", OGC_DEPLOYMENT_PROFILE: "staging", COMMERCE_MODE: "test"
+    })).not.toThrow();
+    expect(() => assertProtectedStagingCommercePreview({
+      VERCEL_ENV: "preview", OGC_DEPLOYMENT_PROFILE: "staging", COMMERCE_MODE: "live"
+    })).toThrow("protected staging Preview");
+    expect(() => assertProtectedStagingCommercePreview({
+      VERCEL_ENV: "production", OGC_DEPLOYMENT_PROFILE: "production", COMMERCE_MODE: "live"
+    })).toThrow("protected staging Preview");
   });
 
   it("produces a stable opaque database fingerprint", () => {
