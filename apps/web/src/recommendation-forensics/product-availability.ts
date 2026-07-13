@@ -19,7 +19,12 @@ export async function getRecommendationProductAvailability(environment:NodeJS.Pr
   try{
     const {resolveProductionPublicSearchRuntime}=await import("@/public-source-forensics/production-runtime");
     await resolveProductionPublicSearchRuntime({environment,getAuthority:(await import("@/db/public-search-authority")).getActivePublicSearchSurfaceAuthority});
-    return closed("runtime_incomplete");
+    // Resolving the production runtime verifies the compile-time-reviewed
+    // adapter, exact active authority, and its configured capabilities. The
+    // report builder and pre-terminal artifact gate are statically imported by
+    // the V2 Worker graph; reaching this point is therefore the live checkout
+    // admission condition rather than an incomplete-runtime state.
+    return {ready:true,lane:"public",code:"ready"};
   }catch{return closed("authority_unavailable");}
 }
 export async function assertRecommendationProductAvailable(environment:NodeJS.ProcessEnv=process.env):Promise<void>{if(!(await getRecommendationProductAvailability(environment)).ready)throw new Error("The recommendation-forensics product is not available.");}
