@@ -25,24 +25,28 @@ export class JobTransitionService {
   static async claim(workerId: string, tier: ReportTier, leaseSeconds: number): Promise<string | null> {
     const sql = getSqlClient();
     return sql.begin(async (tx) => {
-      const claimed = await tx<{ id: string; checkpoint_revision: number; current_phase: ScanJobPhase }[]>`
-        UPDATE scan_jobs
-        SET execution_state = 'running', lease_owner = ${workerId},
-            lease_expires_at = now() + (${leaseSeconds} * interval '1 second'),
-            attempts = attempts + 1, phase_attempt = phase_attempt + 1, updated_at = now()
-        WHERE id = (
-          SELECT id FROM scan_jobs
+      const claimed = await tx<{ id: string; checkpoint_revision: number; current_phase: ScanJobPhase; from_execution_state: string }[]>`
+        WITH candidate AS (
+          SELECT id, execution_state
+          FROM scan_jobs
           WHERE tier = ${tier} AND execution_state IN ('queued','retry_wait')
             AND phase_attempt < max_attempts
             AND (retry_not_before IS NULL OR retry_not_before <= now())
             AND (lease_expires_at IS NULL OR lease_expires_at <= now())
           ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
         )
-        RETURNING id, checkpoint_revision, current_phase
+        UPDATE scan_jobs job
+        SET execution_state = 'running', lease_owner = ${workerId},
+            lease_expires_at = now() + (${leaseSeconds} * interval '1 second'),
+            attempts = attempts + 1, phase_attempt = phase_attempt + 1, updated_at = now()
+        FROM candidate
+        WHERE job.id = candidate.id
+        RETURNING job.id, job.checkpoint_revision, job.current_phase,
+          candidate.execution_state AS from_execution_state
       `;
       const job = claimed[0];
       if (!job) return null;
-      await this.appendTransition(tx, { jobId: job.id, fromState: "queued", toState: "running", phase: job.current_phase,
+      await this.appendTransition(tx, { jobId: job.id, fromState: job.from_execution_state, toState: "running", phase: job.current_phase,
         checkpointRevision: job.checkpoint_revision, reasonCode: "lease_claimed" });
       return job.id;
     });

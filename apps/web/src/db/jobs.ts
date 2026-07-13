@@ -223,6 +223,32 @@ export async function claimScanJob(
   await ensureDatabase();
   const sql = getSqlClient();
   await sql.begin(async (tx) => {
+    const recoverableExpired = await tx<Array<{
+      id: string;
+      current_phase: ScanJobPhase;
+      checkpoint_revision: number;
+    }>>`
+      UPDATE scan_jobs
+      SET execution_state = 'retry_wait', lease_owner = NULL, lease_expires_at = NULL,
+          retry_not_before = NULL, error_code = 'lease_expired',
+          public_error = 'The analysis is being recovered after a Worker interruption.',
+          updated_at = now()
+      WHERE execution_state = 'running'
+        AND lease_expires_at <= now()
+        AND phase_attempt < max_attempts
+      RETURNING id, current_phase, checkpoint_revision
+    `;
+    for (const job of recoverableExpired) {
+      await JobTransitionService.appendTransition(tx, {
+        jobId: job.id,
+        fromState: "running",
+        toState: "retry_wait",
+        phase: job.current_phase,
+        checkpointRevision: job.checkpoint_revision,
+        reasonCode: "lease_expired"
+      });
+    }
+
     // Permanently fail only the phase that exhausted its local transient budget,
     // then atomically return any still-reserved commercial credit.
     await tx`

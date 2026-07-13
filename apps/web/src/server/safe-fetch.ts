@@ -20,12 +20,19 @@ const ALLOWED_CONTENT_TYPES = [
 export interface SafeFetchOptions {
   fetchImpl?: typeof fetch;
   resolver?: HostnameResolver;
+  /** Test seam for asserting lifecycle behavior without weakening DNS pinning. */
+  dispatcherFactory?: () => PinnedDispatcher;
   maxRedirects?: number;
   maxBytes?: number;
   timeoutMs?: number;
   allowedContentTypes?: string[];
   allowBenchmarkNetwork?: boolean;
   beforeRequest?: (url: URL) => void | Promise<void>;
+}
+
+interface PinnedDispatcher {
+  close(): Promise<void>;
+  destroy(error?: Error | null): Promise<void>;
 }
 
 export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
@@ -46,7 +53,7 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
       await options.beforeRequest?.(new URL(current.href));
       const pinned = resolved.addresses[0]!;
       const pinnedFamily: 4 | 6 = pinned.family === 6 ? 6 : 4;
-      const dispatcher = new Agent({
+      const dispatcher = options.dispatcherFactory?.() ?? new Agent({
         connect: {
           lookup(_hostname, lookupOptions, callback) {
             if (lookupOptions.all) {
@@ -58,9 +65,9 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
         }
       });
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      const timeout = setTimeout(() => controller.abort(new DOMException("Safe fetch timed out.", "TimeoutError")), timeoutMs);
       const inheritedSignal = init.signal;
-      const abort = () => controller.abort();
+      const abort = () => controller.abort(inheritedSignal?.reason);
       inheritedSignal?.addEventListener("abort", abort, { once: true });
       try {
         const response = await fetchImpl(current, {
@@ -96,11 +103,23 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
       } finally {
         clearTimeout(timeout);
         inheritedSignal?.removeEventListener("abort", abort);
-        await dispatcher.close();
+        // close() is graceful and waits for an active request to drain. Once a
+        // caller or deadline aborts, that wait can outlive the Worker lease.
+        // Destroy the per-request dispatcher instead so the socket unwinds
+        // before the next source can be considered or a heartbeat is lost.
+        if (controller.signal.aborted) {
+          await dispatcher.destroy(abortError(controller.signal.reason));
+        } else {
+          await dispatcher.close();
+        }
       }
     }
     throw new Error("Safe redirect handling failed.");
   };
+}
+
+function abortError(reason: unknown): Error {
+  return reason instanceof Error ? reason : new DOMException("Safe fetch was aborted.", "AbortError");
 }
 
 export function configuredPublicDnsResolver(): HostnameResolver | undefined {

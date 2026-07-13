@@ -1,8 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createMarketSnapshotIdentity } from "@open-geo-console/public-search-observer";
+import {
+  createMarketSnapshotIdentity,
+  createSearchQueryFanout,
+  type CanonicalBuyerQuestion,
+  type PublicSearchSurfaceAdapter,
+  type PublicSearchSurfaceAuthority
+} from "@open-geo-console/public-search-observer";
 import { closeDatabase, ensureDatabase, getSqlClient } from "./index";
+import { claimScanJob } from "./jobs";
 import {
   acquireMarketSnapshotLease,
   appendMarketSnapshotQueries,
@@ -16,6 +23,10 @@ import {
   heartbeatMarketSnapshotLease
 } from "./market-snapshots";
 import { activatePublicSearchSurfaceAuthority, installPublicSearchSurfaceAuthority } from "./public-search-authority";
+import {
+  PublicSourceSnapshotUnavailableError,
+  resolvePublicSourceSnapshot
+} from "@/worker/public-source-snapshot-resolver";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const describePostgres = adminUrl ? describe : describe.skip;
@@ -32,6 +43,8 @@ describePostgres("public-search market snapshot PostgreSQL authority", () => {
   const jobId = `market-job-${suffix}`;
   const v1ReportId = `market-v1-report-${suffix}`;
   const v1JobId = `market-v1-job-${suffix}`;
+  const expiredReportId = `market-expired-report-${suffix}`;
+  const expiredJobId = `market-expired-job-${suffix}`;
   let authorityVersion = "";
   let snapshotId = "";
 
@@ -59,6 +72,10 @@ describePostgres("public-search market snapshot PostgreSQL authority", () => {
     await sql`INSERT INTO scan_jobs (id,report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,locale,stage) VALUES (${jobId},${reportId},'deep','recommendation_forensics_v1','public_search_source_forensics_v1',2,'zh','queued')`;
     await sql`INSERT INTO scan_reports (id,url,site_key,report_locale,technical_status) VALUES (${v1ReportId},'https://legacy.example.test','legacy.example.test','en','completed')`;
     await sql`INSERT INTO scan_jobs (id,report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,locale,stage) VALUES (${v1JobId},${v1ReportId},'deep','recommendation_forensics_v1','answer_engine_recommendation_forensics_v1',1,'en','queued')`;
+    await sql`INSERT INTO scan_reports (id,url,site_key,report_locale,technical_status) VALUES (${expiredReportId},'https://expired.example.test','expired.example.test','en','completed')`;
+    await sql`INSERT INTO scan_jobs
+      (id,report_id,tier,locale,stage,execution_state,current_phase,attempts,max_attempts,phase_attempt,lease_owner,lease_expires_at)
+      VALUES (${expiredJobId},${expiredReportId},'free','en','synthesizing','running','public_source_preflight',1,3,1,'expired-worker',now()-interval '1 minute')`;
   }, 120_000);
 
   afterAll(async () => {
@@ -119,7 +136,140 @@ describePostgres("public-search market snapshot PostgreSQL authority", () => {
     `;
     expect(shared.map(({ document }) => document).join("\n")).not.toMatch(new RegExp(`${reportId}|${jobId}|private\\.example`, "i"));
   }, 120_000);
+
+  it("persists a second snapshot for the same canonical fanout after the first refresh fails", async () => {
+    const retryQuestion: CanonicalBuyerQuestion = {
+      id: `retry-question-${suffix}`,
+      questionSetVersion: "1",
+      locale: surface.locale,
+      region: surface.region,
+      kind: "supplier_discovery",
+      exactText: "深圳到台湾的运输公司有哪些？",
+      normalizedText: "深圳到台湾的运输公司有哪些？",
+      derivation: {
+        ruleId: "direct",
+        evidenceSourceIds: ["public-fixture"],
+        subject: "深圳到台湾运输",
+        broadened: false
+      }
+    };
+    const fanout = createSearchQueryFanout({ question: retryQuestion, surface, excludedIdentities: [] });
+    const authority: PublicSearchSurfaceAuthority = {
+      authorityId: authorityVersion,
+      environment: "test",
+      surface,
+      active: true,
+      certifiedAt: "2030-01-02T00:00:00.000Z",
+      evidenceReference: "fixture-review",
+      supportedLocales: [surface.locale],
+      supportedRegions: [surface.region]
+    };
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, "unavailable"),
+      question: retryQuestion,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: `snapshot-refresh-failure-${suffix}`
+    })).rejects.toBeInstanceOf(PublicSourceSnapshotUnavailableError);
+
+    const completed = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, "complete"),
+      question: retryQuestion,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: `snapshot-refresh-retry-${suffix}`
+    });
+    const retryIdentity = createMarketSnapshotIdentity({ question: retryQuestion, surface, fanoutVersion: fanout.fanoutVersion });
+    const snapshots = await getSqlClient()<Array<{ id: string; status: string; completion_version: number }>>`
+      SELECT id, status, completion_version
+      FROM market_snapshot_questions
+      WHERE cache_identity=${retryIdentity.id}
+      ORDER BY completion_version
+    `;
+    const queryRows = await getSqlClient()<Array<{ id: string; snapshot_id: string }>>`
+      SELECT queries.id, queries.snapshot_id
+      FROM market_snapshot_queries queries
+      JOIN market_snapshot_questions snapshots ON snapshots.id=queries.snapshot_id
+      WHERE snapshots.cache_identity=${retryIdentity.id}
+      ORDER BY snapshots.completion_version, queries.query_order
+    `;
+    const bundle = await getMarketSnapshotBundle(completed.snapshotId);
+
+    expect(snapshots).toEqual([
+      expect.objectContaining({ status: "failed", completion_version: 1 }),
+      expect.objectContaining({ id: completed.snapshotId, status: "completed", completion_version: 2 })
+    ]);
+    expect(new Set(queryRows.map(({ id }) => id)).size).toBe(fanout.queries.length * 2);
+    expect(new Set(queryRows.map(({ snapshot_id }) => snapshot_id)).size).toBe(2);
+    expect(bundle?.queries).toHaveLength(fanout.queries.length);
+    expect(bundle?.attempts).toHaveLength(fanout.queries.length);
+    expect(bundle?.observations).toHaveLength(fanout.queries.length);
+    expect(bundle?.sources).toHaveLength(fanout.queries.length);
+    expect(bundle?.sources.every(({ retrievalState }) => retrievalState === "not_retrieved")).toBe(true);
+  }, 120_000);
+
+  it("atomically recovers an unexhausted expired running Worker lease before claim", async () => {
+    const claimed = await claimScanJob(`replacement-worker-${suffix}`, "free", 90);
+    expect(claimed).toMatchObject({
+      id: expiredJobId,
+      executionState: "running",
+      currentPhase: "public_source_preflight",
+      phaseAttempt: 2,
+      leaseOwner: `replacement-worker-${suffix}`
+    });
+    const transitions = await getSqlClient()<Array<{
+      from_execution_state: string;
+      to_execution_state: string;
+      reason_code: string;
+    }>>`
+      SELECT from_execution_state, to_execution_state, reason_code
+      FROM scan_job_transition_events
+      WHERE job_id=${expiredJobId}
+      ORDER BY recorded_at, id
+    `;
+    expect(transitions).toEqual([
+      { from_execution_state: "running", to_execution_state: "retry_wait", reason_code: "lease_expired" },
+      { from_execution_state: "retry_wait", to_execution_state: "running", reason_code: "lease_claimed" }
+    ]);
+  });
 });
+
+function fixtureAdapter(
+  authority: PublicSearchSurfaceAuthority,
+  status: "complete" | "unavailable"
+): PublicSearchSurfaceAdapter {
+  return {
+    id: "fixture",
+    surface: authority.surface,
+    authority,
+    search: async ({ query }) => ({
+      observationId: `adapter-observation-${query.id}`,
+      surface: authority.surface,
+      queryId: query.id,
+      exactQuery: query.exactQuery,
+      requestedAt: "2030-01-02T00:00:00.000Z",
+      completedAt: "2030-01-02T00:00:00.000Z",
+      status,
+      results: status === "complete" ? [{
+        surfaceResultOrder: 1,
+        url: "https://directory.example.test/shenzhen-taiwan",
+        title: "深圳台湾货运目录",
+        snippet: "公开目录条目",
+        displayedHost: "directory.example.test"
+      }] : [],
+      usage: {
+        requestCount: 1,
+        resultCount: status === "complete" ? 1 : 0,
+        estimatedCostMicros: 42,
+        costUncertain: false
+      }
+    }),
+    classifyError: () => "unavailable"
+  };
+}
 
 function sha(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function quoteIdentifier(value: string): string { return `"${value.replaceAll('"','""')}"`; }

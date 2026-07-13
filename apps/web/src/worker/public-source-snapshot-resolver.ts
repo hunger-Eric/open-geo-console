@@ -97,13 +97,14 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     const snapshot = await createMarketSnapshotRefresh({
       identity, authorityVersion: input.authority.authorityId, token: claim.token, questionHash: sha(input.question.normalizedText)
     });
-    snapshotId = snapshot.id;
+    const currentSnapshotId = snapshot.id;
+    snapshotId = currentSnapshotId;
     // A canonical fanout variant can be refreshed more than once. Its storage
     // row must therefore be snapshot-scoped; the table's primary key is global.
     const queries = input.fanout.queries.map((query, queryOrder) => ({
-      id: snapshotQueryId(snapshotId, query.id), queryOrder, queryText: query.exactQuery, queryHash: sha(query.exactQuery), derivationRule: query.derivationRuleId
+      id: snapshotQueryId(currentSnapshotId, query.id), queryOrder, queryText: query.exactQuery, queryHash: sha(query.exactQuery), derivationRule: query.derivationRuleId
     }));
-    await appendMarketSnapshotQueries({ snapshotId, token: claim.token, queries });
+    await appendMarketSnapshotQueries({ snapshotId: currentSnapshotId, token: claim.token, queries });
 
     const observations: MarketSearchObservation[] = [];
     const successful: Array<{ observation: MarketSearchObservation; attemptId: string }> = [];
@@ -111,8 +112,8 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
       if (input.signal?.aborted) throw new PublicSourceSnapshotUnavailableError();
       const storedQuery = queries[queryOrder]!;
       const attempt = await beginMarketSearchAttempt({
-        snapshotId, queryId: storedQuery.id, token: claim.token,
-        idempotencyReference: deterministicId("public-search-attempt", [snapshotId, storedQuery.id]), configuredCostMicros: input.fanout.budget.maxCostMicros
+        snapshotId: currentSnapshotId, queryId: storedQuery.id, token: claim.token,
+        idempotencyReference: deterministicId("public-search-attempt", [currentSnapshotId, storedQuery.id]), configuredCostMicros: input.fanout.budget.maxCostMicros
       });
       const observed = await observePublicSearch({ adapter: input.adapter, query, budget: input.fanout.budget, signal: input.signal ?? new AbortController().signal });
       const observation = { ...observed, queryId: storedQuery.id };
@@ -127,10 +128,10 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     }
     if (successful.length === 0) throw new PublicSourceSnapshotUnavailableError();
 
-    const rows = successful.flatMap(({ observation, attemptId }) => observationRows(snapshotId!, attemptId, observation));
+    const rows = successful.flatMap(({ observation, attemptId }) => observationRows(currentSnapshotId, attemptId, observation));
     if (rows.length) await appendMarketSearchObservations({ token: claim.token, observations: rows });
-    const retrievals = await appendRetrievals({ input, snapshotId, token: claim.token, observations: successful, evidenceCutoff });
-    const completed = await completeMarketSnapshotLease({ snapshotId, token: claim.token, queryFanoutHash: fanoutHash(input.fanout), completedAt: new Date() });
+    const retrievals = await appendRetrievals({ input, snapshotId: currentSnapshotId, token: claim.token, observations: successful, evidenceCutoff });
+    const completed = await completeMarketSnapshotLease({ snapshotId: currentSnapshotId, token: claim.token, queryFanoutHash: fanoutHash(input.fanout), completedAt: new Date() });
     return materialize({
       snapshot: completed,
       questionId: input.question.id,

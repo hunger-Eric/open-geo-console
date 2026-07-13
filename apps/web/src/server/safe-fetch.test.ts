@@ -48,4 +48,25 @@ describe("createSafeFetch", () => {
     const safeFetch = createSafeFetch({ fetchImpl, resolver: publicResolver, maxBytes: 5 });
     await expect(safeFetch("https://example.com")).rejects.toThrow(/byte crawl limit/);
   });
+
+  it("destroys a pinned dispatcher instead of waiting for graceful close after caller abort", async () => {
+    const controller = new AbortController();
+    const dispatcher = { close: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
+    const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    })) as unknown as typeof fetch;
+    const safeFetch = createSafeFetch({
+      fetchImpl,
+      resolver: publicResolver,
+      dispatcherFactory: () => dispatcher
+    });
+
+    const pending = safeFetch("https://example.com", { signal: controller.signal });
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    controller.abort(new DOMException("Worker deadline exceeded.", "AbortError"));
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(dispatcher.destroy).toHaveBeenCalledTimes(1);
+    expect(dispatcher.close).not.toHaveBeenCalled();
+  });
 });
