@@ -123,7 +123,10 @@ export async function getActivePaymentOrderForReport(
     SELECT id FROM payment_orders
     WHERE report_id = ${reportId}
       AND product_code = ${productCode}
-      AND payment_status IN ('created','pending','paid')
+      AND (
+        payment_status IN ('created','pending')
+        OR (payment_status = 'paid' AND refund_status <> 'refunded')
+      )
     ORDER BY created_at DESC
     LIMIT 1
   `;
