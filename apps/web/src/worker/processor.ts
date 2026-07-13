@@ -674,8 +674,8 @@ function createWorkerPublicSourceRetriever(): PublicSourceRetriever {
         retrievalState: fact.retrievalState === "available" ? "available" : "inaccessible",
         ...(fact.retrievalState === "available" ? {
           excerpt: fact.verifiedExcerpt ?? null,
-          excerptHash: fact.normalizedContentHash ?? null,
-          contentHash: fact.normalizedContentHash ?? null
+          excerptHash: sourceEvidenceHash(fact.normalizedContentHash),
+          contentHash: sourceEvidenceHash(fact.normalizedContentHash)
         } : {}),
         sourceCategory: "unknown",
         entities: fact.entityMentions ?? [],
@@ -685,6 +685,15 @@ function createWorkerPublicSourceRetriever(): PublicSourceRetriever {
       }
     };
   };
+}
+
+/** The retrieval contract labels hashes with `sha256:`; the SQL evidence row
+ * stores the fixed-width digest so its schema can validate it directly. */
+export function sourceEvidenceHash(value: string | undefined): string | null {
+  if (!value) return null;
+  const digest = value.startsWith("sha256:") ? value.slice("sha256:".length) : value;
+  if (!/^[a-f0-9]{64}$/i.test(digest)) throw new Error("Public-source content hash must be a SHA-256 digest.");
+  return digest.toLowerCase();
 }
 
 function createWorkerPublicSourceArtifactReadinessGate(): ArtifactReadinessGate {

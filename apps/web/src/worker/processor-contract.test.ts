@@ -7,7 +7,8 @@ import {
   isMatchingRecommendationWebsiteFoundation,
   resolvePublicSourceRunScope,
   resolveRecommendationFulfillmentTarget,
-  resolveRecommendationFoundationTarget
+  resolveRecommendationFoundationTarget,
+  sourceEvidenceHash
 } from "./processor";
 
 describe("recommendation website-foundation resume contract", () => {
@@ -47,6 +48,13 @@ describe("recommendation website-foundation resume contract", () => {
 describe("worker V2 public-source collaborators", () => {
   it("uses the exact certified surface locale instead of compact report chrome locale", () => {
     expect(resolvePublicSourceRunScope(runtime())).toEqual({ locale: "zh-CN", region: "CN" });
+  });
+
+  it("converts retrieval hash labels into the evidence store digest contract", () => {
+    const digest = "a".repeat(64);
+    expect(sourceEvidenceHash(`sha256:${digest}`)).toBe(digest);
+    expect(sourceEvidenceHash(digest.toUpperCase())).toBe(digest);
+    expect(() => sourceEvidenceHash("sha256:not-a-digest")).toThrow(/SHA-256/i);
   });
 
   it("binds snapshot resolution and persisted checkpoints to the leased job, while deferring report persistence to terminalization", async () => {
