@@ -9,6 +9,7 @@ export interface PublicOrderStatus {
   deliveryStatus: "not_queued" | "queued" | "sent" | "delivered" | "bounced" | "failed";
   deliveryDeadlineAt: string | null;
   fulfillmentMode: "batch_24h" | "realtime";
+  progress: { stage: string; progress: number } | null;
 }
 
 export const PAYMENT_STATUS_REQUEST_TIMEOUT_MS = 12_000;
@@ -63,6 +64,9 @@ export function getPaymentReturnView(status: PublicOrderStatus | null, hint: Ret
   if (status.paymentStatus !== "paid") return { kind: hint === "cancel" ? "warning" : "pending", message: hint === "cancel" ? dictionary.commerce.paymentNotCompleted : dictionary.commerce.paymentConfirming } as const;
   if (status.fulfillmentStatus === "completed" || status.fulfillmentStatus === "completed_limited") return { kind: "success", message: dictionary.commerce.paymentCompleted } as const;
   if (status.fulfillmentStatus === "failed") return { kind: "warning", message: dictionary.commerce.paymentFailed } as const;
+  if (status.progress && !["queued", "completed", "completed_limited", "failed"].includes(status.progress.stage)) {
+    return { kind: "pending", message: dictionary.commerce.paymentGenerating } as const;
+  }
   if (status.fulfillmentStatus === "processing") return { kind: "pending", message: dictionary.commerce.paymentGenerating } as const;
   return { kind: "success", message: dictionary.commerce.paymentQueued } as const;
 }

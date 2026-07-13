@@ -4,7 +4,7 @@ import { fetchPaymentReturnStatus, getPaymentReturnView, type PublicOrderStatus 
 
 const base: PublicOrderStatus = {
   orderId: "order-1", paymentStatus: "pending", fulfillmentStatus: "not_started",
-  refundStatus: "not_required", deliveryStatus: "not_queued", deliveryDeadlineAt: null, fulfillmentMode: "batch_24h"
+  refundStatus: "not_required", deliveryStatus: "not_queued", deliveryDeadlineAt: null, fulfillmentMode: "batch_24h", progress: null
 };
 
 describe("payment return presentation", () => {
@@ -17,6 +17,12 @@ describe("payment return presentation", () => {
   it("shows queued only after persisted paid state", () => {
     expect(getPaymentReturnView({ ...base, paymentStatus: "paid", fulfillmentStatus: "queued" }, "success", dictionary).message)
       .toBe(dictionary.commerce.paymentQueued);
+  });
+
+  it("shows generation after payment when the report-bound deep job is advancing", () => {
+    expect(getPaymentReturnView({
+      ...base, paymentStatus: "paid", fulfillmentStatus: "queued", progress: { stage: "analyzing", progress: 65 }
+    }, "success", dictionary).message).toBe(dictionary.commerce.paymentGenerating);
   });
 
   it("prioritizes trusted refund state over the return hint", () => {

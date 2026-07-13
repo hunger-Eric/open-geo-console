@@ -22,6 +22,8 @@ The protected Preview now exposes `POST /api/staging/commerce/run` and a locale-
 
 Schema v15 releases a report/product checkout slot only after its paid order has reached `refund_status=refunded`; unpaid and unsettled paid orders remain unique. Checkout failures now return only a fixed safe error, never internal SQL text. This repair must be validated on protected staging with a newly created Sandbox PaymentIntent before another payment is submitted.
 
+The report-bound paid-order status endpoint exposes only the associated deep job's stage and bounded percentage to that order's return page. The payment-return banner treats an advancing job as generation-in-progress and renders its progress bar instead of misleadingly stopping at payment confirmation.
+
 - `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point. Chinese is the canonical unprefixed interface (`/`, `/reports/...`); English remains explicit under `/en`, and legacy `/zh/...` URLs permanently redirect to their unprefixed equivalents.
 - `packages/geo-auditor` owns deterministic technical evidence and the reproducible GEO score.
 - `packages/site-crawler` owns URL/SSRF safety, registrable site identity, robots/sitemap/link discovery, HTML extraction, template clustering and representative-page selection.

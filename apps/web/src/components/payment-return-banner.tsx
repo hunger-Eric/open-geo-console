@@ -89,6 +89,9 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
   if (!context) return null;
   const view = getPaymentReturnView(status, context.hint, dictionary);
   const Icon = view.kind === "success" ? CircleCheck : view.kind === "warning" ? CircleAlert : Loader2;
+  const progress = status?.progress && !["queued", "completed", "completed_limited", "failed"].includes(status.progress.stage)
+    ? Math.max(0, Math.min(99, status.progress.progress))
+    : null;
 
   return (
     <section className="workspace-surface mt-6 p-5 sm:p-6" aria-busy={loading} aria-live="polite">
@@ -100,6 +103,17 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
             {unavailable ? dictionary.commerce.paymentStatusUnavailable : view.message}
           </p>
           {pollingStopped ? <p className="mt-2 text-xs text-[var(--muted)]">{dictionary.commerce.paymentRefreshStopped}</p> : null}
+          {progress !== null ? (
+            <div className="mt-3">
+              <div className="flex justify-between text-xs text-[var(--muted)]">
+                <span>{dictionary.commerce.paymentGenerating}</span>
+                <span>{progress}%</span>
+              </div>
+              <div className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--subtle)]" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+                <div className="h-full rounded-full bg-[var(--teal)] transition-[width] duration-500" style={{ width: `${progress}%` }} />
+              </div>
+            </div>
+          ) : null}
         </div>
         <button
           type="button"
