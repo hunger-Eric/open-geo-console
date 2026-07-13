@@ -41,12 +41,11 @@ describe("production public-search runtime", () => {
     expect(resolveRuntime).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps production dependency construction closed when exact resolution fails", async () => {
-    const dependencies = await createProductionPublicSourceForensicsDependencies(
+  it("preserves an operator-repairable cause when exact resolution fails", async () => {
+    await expect(createProductionPublicSourceForensicsDependencies(
       { ...environment, OGC_PUBLIC_SEARCH_RUNTIME_ENABLED: "false" },
       { resolveRuntime: async () => { throw new Error("disabled"); } }
-    );
-    expect(dependencies).toBeNull();
+    )).rejects.toMatchObject({ code: "public_source_runtime_resolution_failed", classification: "operator_repairable" });
   });
 
   it("rejects collaborators that replace the resolved authority identity", async () => {
@@ -55,11 +54,10 @@ describe("production public-search runtime", () => {
       registry: createApprovedPublicSearchAdapterRegistry([createMiMoPublicSearchAdapterFactory()]),
       getAuthority: async () => authority()
     });
-    const dependencies = await createProductionPublicSourceForensicsDependencies(environment, {
+    await expect(createProductionPublicSourceForensicsDependencies(environment, {
       resolveRuntime: async () => runtime,
       createDependencies: async () => fixtureDependencies({ ...runtime.authority, surface: { ...runtime.authority.surface, surfaceVersion: "other" } })
-    });
-    expect(dependencies).toBeNull();
+    })).rejects.toMatchObject({ code: "public_source_authority_mismatch", classification: "operator_repairable" });
   });
 });
 function authority(){return {authorityVersion:"a",adapterId:"mimo",providerId:"xiaomi-mimo",productId:"native-web-search",modelId:"mimo-v2.5-pro",adapterVersion:"mimo-web-search-adapter-v1",surfaceId:"mimo-native-web-search",surfaceVersion:"mimo-native-web-search-v1",environment:"staging",localeCapabilities:["zh-CN"],regionCapabilities:["CN"],termsReviewedAt:new Date(),evidenceReferences:["review"],active:true,capturedAt:new Date(),createdAt:new Date()};}

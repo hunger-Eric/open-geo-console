@@ -14,6 +14,10 @@ import {
   type ScanJobRow,
   type ScanJobStage
 } from "./schema";
+import { JobTransitionService } from "@/worker/job-transition-service";
+import { phaseForStage, stageForPhase, type ScanJobPhase } from "@/worker/job-state";
+import type { NormalizedJobError } from "@/worker/job-errors";
+import { validateRecoveryCheckpoint } from "@/worker/job-recovery";
 
 export { getJobCreditStatus } from "./credits";
 
@@ -135,7 +139,7 @@ export async function getScanJobQueueStatus(id: string): Promise<ScanJobQueueSta
     deep_active: boolean;
   }[]>`
     WITH target AS (
-      SELECT id, tier, stage
+      SELECT id, tier, stage, execution_state
       FROM scan_jobs
       WHERE id = ${id}
     ), eligible AS (
@@ -143,13 +147,11 @@ export async function getScanJobQueueStatus(id: string): Promise<ScanJobQueueSta
       FROM scan_jobs job
       CROSS JOIN target
       WHERE job.tier = target.tier
-        AND job.attempts < job.max_attempts
+        AND job.phase_attempt < job.max_attempts
         AND (
-          (job.stage = 'queued' AND (job.lease_expires_at IS NULL OR job.lease_expires_at <= now()))
-          OR (
-            job.stage NOT IN ('queued', 'completed', 'completed_limited', 'failed')
-            AND job.lease_expires_at <= now()
-          )
+          job.execution_state IN ('queued', 'retry_wait')
+          AND (job.retry_not_before IS NULL OR job.retry_not_before <= now())
+          AND (job.lease_expires_at IS NULL OR job.lease_expires_at <= now())
         )
     ), ranked AS (
       SELECT id, row_number() OVER (ORDER BY created_at, id)::integer AS queue_position
@@ -159,7 +161,7 @@ export async function getScanJobQueueStatus(id: string): Promise<ScanJobQueueSta
         COALESCE(bool_or(job.tier = 'free'), false) AS free_active,
         COALESCE(bool_or(job.tier = 'deep'), false) AS deep_active
       FROM scan_jobs job
-      WHERE job.stage NOT IN ('completed', 'completed_limited', 'failed')
+      WHERE job.execution_state = 'running'
         AND job.lease_expires_at > now()
     )
     SELECT
@@ -169,7 +171,7 @@ export async function getScanJobQueueStatus(id: string): Promise<ScanJobQueueSta
         SELECT 1
         FROM scan_jobs active_job
         WHERE active_job.tier = target.tier
-          AND active_job.stage NOT IN ('completed', 'completed_limited', 'failed')
+          AND active_job.execution_state = 'running'
           AND active_job.lease_expires_at > now()
       ) AS same_tier_active,
       active_leases.free_active,
@@ -220,19 +222,20 @@ export async function claimScanJob(
   }
   await ensureDatabase();
   const sql = getSqlClient();
-  const claimed = await sql.begin(async (tx) => {
-    // Permanently fail abandoned jobs that already consumed their last attempt,
+  await sql.begin(async (tx) => {
+    // Permanently fail only the phase that exhausted its local transient budget,
     // then atomically return any still-reserved commercial credit.
     await tx`
       WITH failed_jobs AS (
         UPDATE scan_jobs
-        SET stage = 'failed', lease_owner = NULL, lease_expires_at = NULL,
+        SET stage = 'failed', execution_state = 'failed', current_phase = 'terminalization',
+            lease_owner = NULL, lease_expires_at = NULL, retry_not_before = NULL,
             error_code = 'lease_exhausted',
             public_error = 'The analysis could not be completed after multiple attempts.',
             updated_at = now()
-        WHERE stage NOT IN ('completed', 'completed_limited', 'failed')
-          AND lease_expires_at <= now()
-          AND attempts >= max_attempts
+        WHERE execution_state IN ('running', 'retry_wait')
+          AND (lease_expires_at IS NULL OR lease_expires_at <= now())
+          AND phase_attempt >= max_attempts
         RETURNING credit_reservation_id
       ), refunded AS (
         UPDATE credit_ledger ledger
@@ -251,29 +254,9 @@ export async function claimScanJob(
       USING scan_jobs job
       WHERE regeneration.job_id = job.id AND job.stage = 'failed'
     `;
-    return tx<{ id: string }[]>`
-      UPDATE scan_jobs
-      SET lease_owner = ${workerId},
-          lease_expires_at = now() + (${leaseSeconds} * interval '1 second'),
-          attempts = attempts + 1,
-          updated_at = now()
-      WHERE id = (
-        SELECT id
-        FROM scan_jobs
-        WHERE attempts < max_attempts
-          AND tier = ${tier}
-          AND (
-            (stage = 'queued' AND (lease_expires_at IS NULL OR lease_expires_at <= now()))
-            OR (stage NOT IN ('queued', 'completed', 'completed_limited', 'failed') AND lease_expires_at <= now())
-          )
-        ORDER BY created_at, id
-        FOR UPDATE SKIP LOCKED
-        LIMIT 1
-      )
-      RETURNING id
-    `;
   });
-  return claimed[0] ? getScanJob(claimed[0].id) : null;
+  const claimedId = await JobTransitionService.claim(workerId, tier, leaseSeconds);
+  return claimedId ? getScanJob(claimedId) : null;
 }
 
 export async function heartbeatScanJob(id: string, workerId: string, leaseSeconds = 90): Promise<boolean> {
@@ -284,7 +267,7 @@ export async function heartbeatScanJob(id: string, workerId: string, leaseSecond
     SET lease_expires_at = now() + (${leaseSeconds} * interval '1 second'), updated_at = now()
     WHERE id = ${id}
       AND lease_owner = ${workerId}
-      AND stage NOT IN ('completed', 'completed_limited', 'failed')
+      AND execution_state = 'running'
     RETURNING id
   `;
   return rows.length === 1;
@@ -297,6 +280,8 @@ export interface CheckpointScanJobInput {
   plannedPages?: number;
   successfulPages?: number;
   failedPages?: number;
+  phase?: ScanJobPhase;
+  recovery?: JobCheckpoint["recovery"];
 }
 
 export async function checkpointScanJob(
@@ -310,24 +295,24 @@ export async function checkpointScanJob(
   await ensureDatabase();
   const sql = getSqlClient();
   const checkpoint = JSON.stringify(input.checkpoint ?? {});
-  const rows = await sql<{ id: string }[]>`
-    UPDATE scan_jobs
-    SET stage = ${input.stage},
-        progress = ${input.progress},
-        checkpoint = checkpoint || ${checkpoint}::jsonb,
-        planned_pages = COALESCE(${input.plannedPages ?? null}, planned_pages),
-        successful_pages = COALESCE(${input.successfulPages ?? null}, successful_pages),
-        failed_pages = COALESCE(${input.failedPages ?? null}, failed_pages),
-        updated_at = now()
-    WHERE id = ${id}
-      AND lease_owner = ${workerId}
-      AND lease_expires_at > now()
-      AND stage NOT IN ('completed', 'completed_limited', 'failed')
-    RETURNING id
-  `;
-  if (!rows[0]) {
-    throw new Error("The scan job lease is missing or expired.");
-  }
+  await sql.begin(async (tx) => {
+    const rows = await tx<{ id: string; execution_state: string; checkpoint_revision: number; current_phase: ScanJobPhase }[]>`
+      UPDATE scan_jobs
+      SET stage = ${input.stage}, execution_state = 'running', current_phase = ${input.phase ?? phaseForStage(input.stage)},
+          progress = ${input.progress}, checkpoint = checkpoint || ${checkpoint}::jsonb,
+          checkpoint_revision = checkpoint_revision + 1, phase_attempt = 0, retry_not_before = NULL,
+          planned_pages = COALESCE(${input.plannedPages ?? null}, planned_pages),
+          successful_pages = COALESCE(${input.successfulPages ?? null}, successful_pages),
+          failed_pages = COALESCE(${input.failedPages ?? null}, failed_pages), updated_at = now()
+      WHERE id = ${id} AND lease_owner = ${workerId} AND lease_expires_at > now()
+        AND execution_state = 'running'
+      RETURNING id, execution_state, checkpoint_revision, current_phase
+    `;
+    const row = rows[0];
+    if (!row) throw new Error("The scan job lease is missing or expired.");
+    await JobTransitionService.appendTransition(tx, { jobId: id, fromState: row.execution_state, toState: "running",
+      phase: row.current_phase, checkpointRevision: row.checkpoint_revision, reasonCode: "checkpoint_advanced" });
+  });
   return (await getScanJob(id))!;
 }
 
@@ -341,6 +326,8 @@ export interface TerminalizeScanJobInput {
   stage: TerminalScanJobStage;
   coverage: ScanJobCoverage;
   error?: { code: string; publicMessage: string };
+  internalError?: NormalizedJobError;
+  phase?: ScanJobPhase;
 }
 
 export function terminalCreditStatus(stage: TerminalScanJobStage): Exclude<CreditStatus, "reserved"> {
@@ -362,9 +349,11 @@ export async function terminalizeScanJob(
   await ensureDatabase();
   const sql = getSqlClient();
   await sql.begin(async (tx) => {
-    const jobs = await tx<{ id: string; report_id: string; tier: ReportTier; credit_reservation_id: string | null }[]>`
+    const jobs = await tx<{ id: string; report_id: string; tier: ReportTier; credit_reservation_id: string | null; execution_state: string; checkpoint_revision: number }[]>`
       UPDATE scan_jobs
       SET stage = ${input.stage},
+          execution_state = ${input.stage === "failed" ? "failed" : "completed"},
+          current_phase = 'terminalization', retry_not_before = NULL, repair_reason_code = NULL, repair_deadline_at = NULL,
           progress = CASE WHEN ${input.stage} = 'failed' THEN progress ELSE 100 END,
           planned_pages = ${input.coverage.plannedPages},
           successful_pages = ${input.coverage.successfulPages},
@@ -381,12 +370,19 @@ export async function terminalizeScanJob(
         AND lease_owner = ${workerId}
         AND lease_expires_at > now()
         AND stage NOT IN ('completed', 'completed_limited', 'failed')
-      RETURNING id, report_id, tier, credit_reservation_id
+      RETURNING id, report_id, tier, credit_reservation_id, execution_state, checkpoint_revision
     `;
     const job = jobs[0];
     if (!job) {
       throw new Error("The scan job cannot be terminalized without its active lease.");
     }
+    const errorEventId = input.internalError ? await JobTransitionService.appendError(tx, {
+      jobId: id, phase: input.phase ?? "terminalization", checkpointRevision: job.checkpoint_revision,
+      jobAttempt: 0, phaseAttempt: 0, resumeGeneration: 0, error: input.internalError
+    }) : null;
+    await JobTransitionService.appendTransition(tx, { jobId: id, fromState: job.execution_state,
+      toState: input.stage === "failed" ? "failed" : "completed", phase: "terminalization",
+      checkpointRevision: job.checkpoint_revision, reasonCode: input.error?.code ?? "terminalized", errorEventId });
     if (job.tier === "free") {
       const regenerations = await tx<{ site_key: string; report_id: string }[]>`
         SELECT site_key, report_id
@@ -474,92 +470,117 @@ export async function finishScanJob(
 export async function failScanJob(
   id: string,
   workerId: string,
-  error: { code: string; publicMessage: string; retryable: boolean }
+  error: { code: string; publicMessage: string; retryable: boolean; classification?: "operator_repairable" | "target_limitation"; internalError?: NormalizedJobError; phase?: ScanJobPhase }
 ): Promise<ScanJobRow> {
+  if (error.classification === "operator_repairable") {
+    await ensureDatabase();
+    const sql = getSqlClient();
+    await sql.begin(async (tx) => {
+      const rows = await tx<{ id: string; execution_state: string; checkpoint_revision: number; attempts: number; phase_attempt: number; resume_generation: number; current_phase: ScanJobPhase }[]>`
+        SELECT id, execution_state, checkpoint_revision, attempts, phase_attempt, resume_generation, current_phase
+        FROM scan_jobs WHERE id = ${id} AND lease_owner = ${workerId} AND lease_expires_at > now() FOR UPDATE
+      `;
+      const job = rows[0];
+      if (!job) throw new Error("The scan job lease is missing or expired.");
+      const errorEventId = error.internalError ? await JobTransitionService.appendError(tx, { jobId: id,
+        phase: error.phase ?? job.current_phase, checkpointRevision: job.checkpoint_revision, jobAttempt: job.attempts,
+        phaseAttempt: job.phase_attempt, resumeGeneration: job.resume_generation, error: error.internalError }) : null;
+      await tx`
+        UPDATE scan_jobs SET execution_state='repair_wait', lease_owner=NULL, lease_expires_at=NULL,
+          retry_not_before=NULL, repair_reason_code=${error.code}, repair_deadline_at=NULL,
+          error_code=${error.code}, public_error=${error.publicMessage}, updated_at=now() WHERE id=${id}
+      `;
+      await JobTransitionService.appendTransition(tx, { jobId: id, fromState: job.execution_state, toState: "repair_wait",
+        phase: error.phase ?? job.current_phase, checkpointRevision: job.checkpoint_revision, reasonCode: error.code, errorEventId });
+    });
+    return (await getScanJob(id))!;
+  }
   if (!error.retryable) {
     const job = await getScanJob(id);
     return terminalizeScanJob(id, workerId, {
       stage: "failed",
       coverage: coverageFromJob(job),
-      error: { code: error.code, publicMessage: error.publicMessage }
+      error: { code: error.code, publicMessage: error.publicMessage }, internalError: error.internalError, phase: error.phase
     });
   }
 
   await ensureDatabase();
-  const rows = await getSqlClient()<{ id: string }[]>`
-    UPDATE scan_jobs
-    SET stage = 'queued', lease_owner = NULL, lease_expires_at = NULL,
-        error_code = ${error.code}, public_error = ${error.publicMessage}, updated_at = now()
-    WHERE id = ${id} AND lease_owner = ${workerId}
-      AND lease_expires_at > now()
-      AND attempts < max_attempts
-      AND stage NOT IN ('completed', 'completed_limited', 'failed')
-    RETURNING id
-  `;
-  if (rows[0]) return (await getScanJob(id))!;
+  const rows = await getSqlClient().begin(async (tx) => {
+    const candidates = await tx<{ id: string; execution_state: string; current_phase: ScanJobPhase; checkpoint_revision: number; attempts: number; phase_attempt: number; resume_generation: number; max_attempts: number }[]>`
+      SELECT id, execution_state, current_phase, checkpoint_revision, attempts, phase_attempt, resume_generation, max_attempts
+      FROM scan_jobs WHERE id=${id} AND lease_owner=${workerId} AND lease_expires_at > now() FOR UPDATE
+    `;
+    const job = candidates[0];
+    if (!job || job.phase_attempt >= job.max_attempts) return false;
+    const errorEventId = error.internalError ? await JobTransitionService.appendError(tx, { jobId: id,
+      phase: error.phase ?? job.current_phase, checkpointRevision: job.checkpoint_revision, jobAttempt: job.attempts,
+      phaseAttempt: job.phase_attempt, resumeGeneration: job.resume_generation, error: error.internalError }) : null;
+    const retryAt = error.internalError?.retryableAt?.toISOString() ?? new Date(Date.now() + 15_000).toISOString();
+    await tx`
+      UPDATE scan_jobs SET execution_state='retry_wait', lease_owner=NULL, lease_expires_at=NULL,
+        retry_not_before=${retryAt}, error_code=${error.code}, public_error=${error.publicMessage}, updated_at=now() WHERE id=${id}
+    `;
+    await JobTransitionService.appendTransition(tx, { jobId: id, fromState: job.execution_state, toState: "retry_wait",
+      phase: error.phase ?? job.current_phase, checkpointRevision: job.checkpoint_revision, reasonCode: error.code, errorEventId });
+    return true;
+  });
+  if (rows) return (await getScanJob(id))!;
 
   const job = await getScanJob(id);
   return terminalizeScanJob(id, workerId, {
     stage: "failed",
     coverage: coverageFromJob(job),
-    error: { code: error.code, publicMessage: error.publicMessage }
+    error: { code: error.code, publicMessage: error.publicMessage }, internalError: error.internalError, phase: error.phase
   });
 }
 
 export async function retryScanJob(id: string): Promise<ScanJobRow> {
+  void id;
+  throw new Error("Terminal jobs cannot be retried directly. Use the restricted historical recovery transaction after refund, delivery, checkpoint, and readiness validation.");
+}
+
+/**
+ * Operator-only recovery boundary. It is deliberately not exposed by a
+ * customer route: the caller must supply a non-mutating readiness probe and
+ * the exact input identity expected by the preserved checkpoint.
+ */
+export async function resumeScanJobAfterRepair(input: {
+  id: string;
+  inputHash: string;
+  readiness: () => Promise<void>;
+}): Promise<ScanJobRow> {
   await ensureDatabase();
+  await input.readiness();
   const sql = getSqlClient();
   await sql.begin(async (tx) => {
-    const jobs = await tx<{ id: string; stage: ScanJobStage; credit_reservation_id: string | null }[]>`
-      SELECT id, stage, credit_reservation_id FROM scan_jobs WHERE id = ${id} FOR UPDATE
+    const rows = await tx<{
+      id: string; report_id: string; product_contract: ScanJobRow["productContract"]; fulfillment_methodology: ScanJobRow["fulfillmentMethodology"];
+      locale: ScanJobRow["locale"]; checkpoint: JobCheckpoint; checkpoint_revision: number; current_phase: ScanJobPhase;
+      execution_state: string; resume_generation: number;
+    }[]>`
+      SELECT id, report_id, product_contract, fulfillment_methodology, locale, checkpoint, checkpoint_revision,
+             current_phase, execution_state, resume_generation
+      FROM scan_jobs WHERE id=${input.id} FOR UPDATE
     `;
-    const job = jobs[0];
-    if (!job) throw new Error("The scan job does not exist.");
-    if (job.stage !== "failed" && job.stage !== "completed_limited") {
-      throw new Error("Only a failed or completed-limited scan job can be retried.");
-    }
-
-    if (job.credit_reservation_id) {
-      const reservations = await tx<{
-        id: string;
-        access_key_id: string;
-        credits: number;
-        status: "reserved" | "settled" | "refunded";
-      }[]>`
-        SELECT id, access_key_id, credits, status
-        FROM credit_ledger WHERE id = ${job.credit_reservation_id} FOR UPDATE
-      `;
-      const reservation = reservations[0];
-      if (!reservation) throw new Error("The job's credit reservation no longer exists.");
-      if (reservation.status === "settled") throw new Error("A settled commercial job cannot be retried.");
-      if (reservation.status === "refunded") {
-        const charged = await tx<{ id: string }[]>`
-          UPDATE access_keys
-          SET credits_remaining = credits_remaining - ${reservation.credits},
-              status = CASE WHEN credits_remaining - ${reservation.credits} = 0 THEN 'exhausted' ELSE status END
-          WHERE id = ${reservation.access_key_id}
-            AND status IN ('active', 'exhausted')
-            AND credits_remaining >= ${reservation.credits}
-            AND (expires_at IS NULL OR expires_at > now())
-          RETURNING id
-        `;
-        if (!charged[0]) throw new Error("The access key no longer has credit available for this retry.");
-        await tx`
-          UPDATE credit_ledger SET status = 'reserved', refunded_at = NULL
-          WHERE id = ${reservation.id}
-        `;
-      }
-    }
-
+    const job = rows[0];
+    if (!job || job.execution_state !== "repair_wait") throw new Error("Only a repair-waiting job can be resumed.");
+    validateRecoveryCheckpoint({
+      job: { id: job.id, reportId: job.report_id, productContract: job.product_contract,
+        fulfillmentMethodology: job.fulfillment_methodology, locale: job.locale,
+        checkpointRevision: job.checkpoint_revision, currentPhase: job.current_phase },
+      checkpoint: job.checkpoint, phase: job.current_phase, inputHash: input.inputHash
+    });
     await tx`
       UPDATE scan_jobs
-      SET stage = 'queued', progress = 0, attempts = 0,
-          lease_owner = NULL, lease_expires_at = NULL,
-          error_code = NULL, public_error = NULL, updated_at = now()
-      WHERE id = ${id}
+      SET execution_state='queued', stage=${stageForPhase(job.current_phase)}, retry_not_before=NULL,
+          repair_reason_code=NULL, repair_deadline_at=NULL, resume_generation=resume_generation+1,
+          error_code=NULL, public_error=NULL, updated_at=now()
+      WHERE id=${job.id} AND execution_state='repair_wait'
     `;
+    await JobTransitionService.appendTransition(tx, { jobId: job.id, fromState: "repair_wait", toState: "queued",
+      phase: job.current_phase, checkpointRevision: job.checkpoint_revision, reasonCode: "repair_readiness_passed" });
   });
-  return (await getScanJob(id))!;
+  return (await getScanJob(input.id))!;
 }
 
 export function isBillableCoverage(input: {

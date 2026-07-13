@@ -2,7 +2,6 @@ import {
   AI_REPORT_PROMPT_VERSION,
   REPORT_TIER_LIMITS,
   PageAnalysisBatchError,
-  RecommendationForensicReportValidationError,
   ReportValidationError,
   analyzePageBatch,
   createOpenAiCompatibleClient,
@@ -19,7 +18,7 @@ import { auditSite, type GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { RobotsPolicy } from "@open-geo-console/site-crawler";
 import type { CanonicalBuyerQuestion, PublicSearchSurfaceAdapter, PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import { createHash } from "node:crypto";
-import { checkpointScanJob, failScanJob, heartbeatScanJob, isBillableCoverage, terminalizeScanJob, type CheckpointScanJobInput } from "@/db/jobs";
+import { checkpointScanJob, failScanJob, getScanJob, heartbeatScanJob, isBillableCoverage, terminalizeScanJob, type CheckpointScanJobInput } from "@/db/jobs";
 import { recordPaidJobOutcome } from "@/db/commercial-refunds";
 import { terminalizePaidPublicSourceReport } from "@/db/public-source-commerce";
 import { getSourceForensicReportForJob, saveSourceForensicReport } from "@/db/source-forensic-reports";
@@ -47,6 +46,8 @@ import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline
 import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-runtime";
 import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { JobExecutionLease, configuredJobHardDeadlineMs } from "./job-execution";
+import { normalizeJobError } from "./job-errors";
+import { phaseForStage } from "./job-state";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
 import {
   calculateEffectiveCoverage,
@@ -88,9 +89,13 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     heartbeat: () => heartbeatScanJob(job.id, workerId)
   });
   execution.start();
+  let checkpointRevision = job.checkpointRevision;
   const checkpointJob = async (input: CheckpointScanJobInput) => {
     execution.throwIfAborted();
-    const updated = await checkpointScanJob(job.id, workerId, input);
+    const phase = input.phase ?? phaseForStage(input.stage);
+    const checkpoint = input.checkpoint ? withRecoveryEnvelope(job, input.checkpoint, phase, checkpointRevision + 1) : undefined;
+    const updated = await checkpointScanJob(job.id, workerId, { ...input, phase, checkpoint });
+    checkpointRevision = updated.checkpointRevision;
     execution.checkpointed();
     return updated;
   };
@@ -351,7 +356,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
         contractVersion: 2,
         websiteFoundation: { completed: true, synthesisInputHash }
       };
-      await saveCheckpoint("synthesizing", 90, checkpoint, {
+      await checkpointJob({ stage: "synthesizing", phase: "public_source_preflight", progress: 90, checkpoint: checkpoint as JobCheckpoint,
         plannedPages: effectiveCoverage.effectivePlannedPages,
         successfulPages: effectiveCoverage.analyzedPages,
         failedPages: failureCount(checkpoint)
@@ -392,10 +397,16 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
     if (error instanceof ReportValidationError) {
       console.error("AI report validation issues:", error.issues);
     }
+    const phase = phaseForStage((await getScanJob(job.id))?.stage ?? job.stage);
+    const normalized = normalizeJobError(error, {
+      jobId: job.id, phase, phaseAttempt: job.phaseAttempt ?? 0, resumeGeneration: job.resumeGeneration ?? 0,
+      configuredSecrets: [process.env.OGC_AI_API_KEY ?? "", process.env.OGC_PUBLIC_SEARCH_MIMO_API_KEY ?? ""]
+    });
     const failedJob = await failScanJob(job.id, workerId, {
-      code: error instanceof Error ? error.name : "scan_failed",
-      publicMessage: publicFailure(error),
-      retryable: isRetryable(error)
+      code: normalized.code, publicMessage: "The analysis is temporarily unavailable.",
+      retryable: normalized.classification === "transient",
+      classification: normalized.classification === "operator_repairable" ? "operator_repairable" : normalized.classification === "target_limitation" ? "target_limitation" : undefined,
+      internalError: normalized, phase
     });
     if (job.tier === "free" && failedJob.stage === "failed") {
       const report = await getGeoReport(job.reportId);
@@ -472,12 +483,11 @@ async function finalizeRecommendationJob(input: {
         signal: input.signal
       }, runtime)
     });
-    if (!dependencies) throw new PublicSourceAuthorityUnavailableError("Public-source forensics authority is not installed.");
     const result = await runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
       locale: input.websiteFoundation.provenance.locale, region: process.env.OGC_PUBLIC_SEARCH_REGION?.trim() || "CN",
       targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies, signal: input.signal });
     checkpoint = { ...checkpoint, recommendationForensics: { questionsGenerated: true, reportSaved: true }, publicSourceForensics: result.checkpoint };
-    await saveStageCheckpoint(input.job, input.workerId, "synthesizing", 99, checkpoint);
+    await checkpointScanJob(input.job.id, input.workerId, { stage: "synthesizing", phase: "artifact_verification", progress: 99, checkpoint: checkpoint as JobCheckpoint, ...input.coverage });
     await terminalizePaidPublicSourceReport({ report: result.report, workerId: input.workerId, checkpointIdentityHash: result.checkpoint.identityHash,
       coverage: input.coverage, snapshotRefs: result.commercialSnapshotRefs });
     return;
@@ -546,7 +556,7 @@ export function createWorkerPublicSourceForensicsDependencies(
       const next = { ...input.readCheckpoint(), publicSourceForensics };
       input.signal?.throwIfAborted();
       await collaborators.checkpointJob(input.job.id, input.workerId, {
-        stage: "synthesizing",
+        stage: "synthesizing", phase: "source_retrieval",
         progress: 95,
         checkpoint: next as JobCheckpoint,
         ...input.coverage
@@ -828,22 +838,6 @@ function mergeCompletedAnalyses(
   return [...merged.values()];
 }
 
-async function saveStageCheckpoint(
-  job: ScanJobRow,
-  workerId: string,
-  stage: "discovering" | "planning" | "fetching" | "analyzing" | "synthesizing",
-  progress: number,
-  checkpoint: WorkerCheckpoint,
-  coverage: { plannedPages?: number; successfulPages?: number; failedPages?: number } = {}
-) {
-  await checkpointScanJob(job.id, workerId, {
-    stage,
-    progress,
-    checkpoint: checkpoint as JobCheckpoint,
-    ...coverage
-  });
-}
-
 function createConfiguredClient() {
   const baseUrl = process.env.OGC_AI_BASE_URL?.trim();
   const apiKey = process.env.OGC_AI_API_KEY?.trim();
@@ -881,6 +875,31 @@ function hashSynthesisInput(
   })).digest("hex");
 }
 
+function withRecoveryEnvelope(job: ScanJobRow, checkpoint: JobCheckpoint, phase: ReturnType<typeof phaseForStage>, revision: number): JobCheckpoint {
+  const serializable = { ...checkpoint } as Record<string, unknown>;
+  delete serializable.recovery;
+  const publicSource = checkpoint.publicSourceForensics as { authorityId?: string } | undefined;
+  const completedArtifacts = [
+    checkpoint.discoverySnapshot ? "discovery" : null,
+    checkpoint.planningCompleted ? "plan" : null,
+    checkpoint.completedCrawlUrls?.length ? "crawl" : null,
+    checkpoint.completedPageAnalyses?.length ? "page_analysis" : null,
+    checkpoint.websiteFoundation?.completed ? "website_foundation" : null,
+    publicSource ? "public_source" : null
+  ].filter((value): value is string => Boolean(value));
+  return {
+    ...checkpoint,
+    recovery: {
+      schemaVersion: 1, phase, revision, phaseAttempt: job.phaseAttempt, resumeGeneration: job.resumeGeneration,
+      identity: { jobId: job.id, reportId: job.reportId, productContract: job.productContract,
+        methodology: job.fulfillmentMethodology, locale: job.locale,
+        authorityId: publicSource?.authorityId ?? null },
+      inputHash: createHash("sha256").update(JSON.stringify(serializable)).digest("hex"),
+      completedArtifacts, remainingWork: [phase], priorTransitionId: null
+    }
+  };
+}
+
 function coverageLimitations(checkpoint: WorkerCheckpoint, exhaustedTransientUrls: readonly string[]): string[] {
   const limitations: string[] = [];
   const permanentCount = checkpoint.permanentFailures?.length ?? 0;
@@ -912,17 +931,6 @@ function canonicalUrl(value: string): string {
   } catch {
     return value;
   }
-}
-
-function isRetryable(error: unknown): boolean {
-  if (error instanceof HistoricalRecommendationRuntimeRetiredError ||
-      error instanceof RecommendationForensicReportValidationError) return false;
-  const message = publicFailure(error).toLowerCase();
-  return !message.includes("robots.txt") &&
-    !message.includes("not configured") &&
-    !message.includes("no public representative") &&
-    !message.includes("no planned page returned readable evidence") &&
-    !message.includes("source technical report no longer exists");
 }
 
 export class HistoricalRecommendationRuntimeRetiredError extends Error {

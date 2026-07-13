@@ -48,14 +48,15 @@ export async function GET(request: Request, context: RouteContext) {
         tier: job.tier === "deep" ? "deep" : "preview",
         stage: job.stage,
         state: publicStateForStage(job.stage),
+        executionState: job.executionState,
         progress: job.progress,
         plannedPages: job.plannedPages,
         successfulPages: job.successfulPages,
         failedPages: job.failedPages,
         refundState: creditStatus,
-        queuePosition: job.stage === "queued" ? queue?.queuePosition ?? null : null,
-        waitReason: job.stage === "queued" ? queue?.waitReason ?? null : null,
-        activeTier: job.stage === "queued" ? queue?.activeTier ?? null : null
+        queuePosition: job.executionState === "queued" ? queue?.queuePosition ?? null : null,
+        waitReason: job.executionState === "queued" ? queue?.waitReason ?? null : null,
+        activeTier: job.executionState === "queued" ? queue?.activeTier ?? null : null
       } : null,
       hasAiReport: Boolean(aiReport),
       hasTechnicalReport: Boolean(report.payload),

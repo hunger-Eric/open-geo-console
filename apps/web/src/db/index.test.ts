@@ -57,8 +57,8 @@ describe("database deployment marker", () => {
 });
 
 describe("database schema marker", () => {
-  it("uses hardened public-search methodology schema version 14", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(14);
+  it("uses recoverable analysis-ledger schema version 16", () => {
+    expect(DATABASE_SCHEMA_VERSION).toBe(16);
   });
 
   it("contains the complete additive V2 authority and methodology migration", () => {
@@ -89,6 +89,17 @@ describe("database schema marker", () => {
     expect(sql).toContain("ogc_market_source_expiry_context");
     expect(sql).toContain("ogc.market_source_expiry_nonce");
     expect(sql).toContain("context.transaction_id = txid_current()");
+  });
+
+  it("adds an append-only recovery ledger without replacing the legacy stage projection", () => {
+    const sql = DATABASE_MIGRATIONS.join("\n");
+    for (const column of ["execution_state", "current_phase", "checkpoint_revision", "phase_attempt", "resume_generation", "retry_not_before", "repair_reason_code", "repair_deadline_at"]) {
+      expect(sql).toContain(column);
+    }
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS scan_job_error_events");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS scan_job_transition_events");
+    expect(sql).toContain("Job event history is append-only.");
+    expect(sql).toContain("scan_jobs_repair_wait_lease_check");
   });
 
   it("backfills legacy scopes and replaces ambiguous AI report uniqueness", () => {

@@ -190,6 +190,8 @@ export interface Dictionary {
     startNewAnalysis: string;
     statusTitle: string;
     waitingDescription: string;
+    retryWaitDescription: string;
+    repairWaitDescription: string;
     acceptedDescription: string;
     technicalFailedDescription: string;
     completedDescription: string;

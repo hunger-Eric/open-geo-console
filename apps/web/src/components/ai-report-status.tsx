@@ -16,6 +16,7 @@ export interface PublicJobStatus {
   tier: "preview" | "deep";
   stage: "queued" | "discovering" | "planning" | "fetching" | "analyzing" | "synthesizing" | "completed" | "completed_limited" | "failed";
   state: PublicReportState;
+  executionState: "queued" | "running" | "retry_wait" | "repair_wait" | "completed" | "failed";
   progress: number;
   plannedPages: number;
   successfulPages: number;
@@ -296,6 +297,8 @@ function getStatusDescription(
   if (job.state === "unavailable") {
     return dictionary.aiReport[getUnavailableDescriptionKey(job, payload.hasTechnicalReport)];
   }
+  if (job.executionState === "retry_wait") return dictionary.aiReport.retryWaitDescription;
+  if (job.executionState === "repair_wait") return dictionary.aiReport.repairWaitDescription;
   return queueDescription ?? dictionary.aiReport.stageDescriptions[job.stage];
 }
 

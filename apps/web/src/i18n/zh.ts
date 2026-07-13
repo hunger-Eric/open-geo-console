@@ -221,6 +221,8 @@ export const zh = {
     startNewAnalysis: "开始新的分析",
     statusTitle: "报告状态",
     waitingDescription: "报告正在生成，可恢复的工作会由系统自动处理。",
+    retryWaitDescription: "系统遇到临时问题，已完成的工作会保留，报告将自动继续。",
+    repairWaitDescription: "服务正在修复履约依赖，已完成的工作会保留，你无需重复提交。",
     acceptedDescription: "请求已接收，系统正在检查网站；结果准备好后会自动显示在这里。",
     technicalFailedDescription: "系统无法安全地分析这个网站，请使用可公开访问的网址重新生成。",
     completedDescription: "报告已完成 — 已分析 {count} 个页面。",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveScanJobQueueStatus } from "./jobs";
+import { deriveScanJobQueueStatus, retryScanJob } from "./jobs";
 
 describe("scan job queue status", () => {
   it("reports jobs ahead using the same deterministic queue position", () => {
@@ -48,5 +48,11 @@ describe("scan job queue status", () => {
       free_active: true,
       deep_active: false
     })).toEqual({ queuePosition: null, waitReason: "active_jobs_in_pool", activeTier: "preview" });
+  });
+});
+
+describe("terminal-job retry boundary", () => {
+  it("rejects the legacy direct retry path before it can reopen credits or refunds", async () => {
+    await expect(retryScanJob("job-1")).rejects.toThrow(/restricted historical recovery/i);
   });
 });

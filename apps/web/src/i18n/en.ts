@@ -225,6 +225,8 @@ export const en = {
     startNewAnalysis: "Start a new analysis",
     statusTitle: "Report status",
     waitingDescription: "The report is being generated. Recoverable work is handled automatically.",
+    retryWaitDescription: "A temporary issue was detected. The report will resume automatically while preserving completed work.",
+    repairWaitDescription: "We are repairing a fulfillment dependency. Completed work is preserved and no action is required from you.",
     acceptedDescription: "Your request is accepted. We are checking the website and will add results here as they become available.",
     technicalFailedDescription: "The website could not be analyzed safely. You can start a new analysis with a reachable public URL.",
     completedDescription: "Report completed — {count} pages analyzed.",

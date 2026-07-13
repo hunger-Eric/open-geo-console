@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { ensureDatabase, getDb, getSqlClient } from "./index";
 import {
   paymentRefunds,
@@ -8,6 +8,9 @@ import {
   type PaymentRefundRow
 } from "./schema";
 import { getPaymentOrder } from "./commercial-orders";
+import { JobTransitionService } from "@/worker/job-transition-service";
+import { validateRecoveryCheckpoint } from "@/worker/job-recovery";
+import type { JobCheckpoint, ScanJobPhase, ScanJobRow } from "./schema";
 
 const TERMINAL_EMAIL_TEMPLATE_VERSION = "v1";
 
@@ -160,12 +163,12 @@ export async function expirePaidOrderSla(orderId: string, now = new Date()): Pro
     }
 
     if (order.fulfillment_job_id) {
-      const jobs = await tx<{ stage: string; credit_reservation_id: string | null }[]>`
-        SELECT stage, credit_reservation_id FROM scan_jobs
+      const jobs = await tx<{ stage: string; execution_state: string; credit_reservation_id: string | null }[]>`
+        SELECT stage, execution_state, credit_reservation_id FROM scan_jobs
         WHERE id = ${order.fulfillment_job_id} FOR UPDATE
       `;
       const job = jobs[0];
-      if (!job || ["completed", "completed_limited", "failed"].includes(job.stage)) {
+      if (!job || ["completed", "failed"].includes(job.execution_state)) {
         return { expired: false, orderId: order.id, refundId: null, internalCreditRefunded: false };
       }
     }
@@ -190,7 +193,11 @@ export async function expirePaidOrderSla(orderId: string, now = new Date()): Pro
     `;
     if (order.fulfillment_job_id) {
       await tx`
-        UPDATE scan_jobs SET credit_reservation_id = NULL, updated_at = now()
+        UPDATE scan_jobs
+        SET stage = 'failed', execution_state = 'failed', current_phase = 'terminalization',
+            lease_owner = NULL, lease_expires_at = NULL, retry_not_before = NULL,
+            credit_reservation_id = NULL, error_code = 'sla_expired',
+            public_error = 'The analysis could not be completed within the fulfillment window.', updated_at = now()
         WHERE id = ${order.fulfillment_job_id}
           AND credit_reservation_id IN (
             SELECT id FROM credit_ledger WHERE payment_order_id = ${order.id}
@@ -230,10 +237,11 @@ export async function recordPaidJobOutcome(input: {
       fulfillment_status: string;
       refund_status: string;
       job_stage: string;
+      execution_state: string;
     }>>`
       SELECT orders.id, orders.report_id, orders.report_locale, orders.provider,
              orders.amount_minor, orders.currency, orders.fulfillment_status,
-             orders.refund_status, jobs.stage AS job_stage
+             orders.refund_status, jobs.stage AS job_stage, jobs.execution_state
       FROM payment_orders orders
       JOIN scan_jobs jobs ON jobs.id = orders.fulfillment_job_id
       WHERE orders.fulfillment_job_id = ${input.jobId} AND orders.payment_status = 'paid'
@@ -241,7 +249,7 @@ export async function recordPaidJobOutcome(input: {
     `;
     const order = orders[0];
     if (!order) return null;
-    if (order.job_stage !== input.outcome) {
+    if (order.job_stage !== input.outcome || (input.outcome === "failed" ? order.execution_state !== "failed" : order.execution_state !== "completed")) {
       throw new Error("The persisted scan job does not match the requested commercial outcome.");
     }
     if (["completed", "completed_limited", "failed"].includes(order.fulfillment_status)
@@ -327,6 +335,86 @@ export async function reconcilePaidJobOutcomes(limit = 100): Promise<{
     if (await recordPaidJobOutcome({ jobId: row.job_id, outcome: row.stage })) reconciled += 1;
   }
   return { inspected: rows.length, reconciled };
+}
+
+/**
+ * Restricted historical recovery. This is intentionally an internal function:
+ * callers must have authenticated operator authority and a non-mutating
+ * readiness probe. Provider-submitted refunds and delivered promises are
+ * immutable, so those orders are rejected rather than silently recharged.
+ */
+export async function recoverHistoricalPaidJob(input: {
+  jobId: string;
+  inputHash: string;
+  readiness: () => Promise<void>;
+}): Promise<{ jobId: string; orderId: string }> {
+  await ensureDatabase();
+  await input.readiness();
+  return getSqlClient().begin(async (tx) => {
+    const rows = await tx<Array<{
+      job_id: string; report_id: string; product_contract: ScanJobRow["productContract"]; fulfillment_methodology: ScanJobRow["fulfillmentMethodology"]; locale: ScanJobRow["locale"];
+      checkpoint: JobCheckpoint; checkpoint_revision: number; current_phase: ScanJobPhase; execution_state: string;
+      resume_generation: number; order_id: string; payment_status: string; fulfillment_status: string; refund_status: string;
+      delivery_deadline_at: Date | string | null; refund_id: string | null; refund_state: string | null; submitted_at: Date | string | null;
+      credit_id: string | null; credit_status: string | null; access_key_id: string | null; credits: number | null;
+    }>>`
+      SELECT job.id AS job_id, job.report_id, job.product_contract, job.fulfillment_methodology, job.locale,
+             job.checkpoint, job.checkpoint_revision, job.current_phase, job.execution_state, job.resume_generation,
+             orders.id AS order_id, orders.payment_status, orders.fulfillment_status, orders.refund_status, orders.delivery_deadline_at,
+             refunds.id AS refund_id, refunds.state AS refund_state, refunds.submitted_at,
+             ledger.id AS credit_id, ledger.status AS credit_status, ledger.access_key_id, ledger.credits
+      FROM scan_jobs job
+      JOIN payment_orders orders ON orders.fulfillment_job_id = job.id
+      LEFT JOIN payment_refunds refunds ON refunds.order_id = orders.id
+      LEFT JOIN credit_ledger ledger ON ledger.job_id = job.id
+      WHERE job.id = ${input.jobId}
+      FOR UPDATE OF job, orders
+    `;
+    const row = rows[0];
+    if (!row) throw new Error("The paid job does not exist.");
+    if (row.execution_state !== "failed" || row.payment_status !== "paid" || row.fulfillment_status !== "failed") {
+      throw new Error("Only a terminal failed paid job can enter historical recovery.");
+    }
+    if (!row.delivery_deadline_at || new Date(row.delivery_deadline_at) <= new Date()) throw new Error("The fulfillment SLA has expired.");
+    if (row.refund_state !== "pending" || row.submitted_at) throw new Error("A submitted or completed refund cannot be reopened.");
+    if (!row.credit_id || row.credit_status !== "refunded" || !row.access_key_id || !row.credits) throw new Error("The credit reservation cannot be restored safely.");
+    const delivered = await tx<{ id: string }[]>`
+      SELECT id FROM email_deliveries
+      WHERE order_id=${row.order_id} AND template_type IN ('report_failed_refund','limited_report_refund','refund_succeeded')
+        AND state IN ('sent','delivered')
+      FOR UPDATE
+    `;
+    if (delivered[0]) throw new Error("A failure or refund promise was already sent or delivered.");
+    validateRecoveryCheckpoint({
+      job: { id: row.job_id, reportId: row.report_id, productContract: row.product_contract,
+        fulfillmentMethodology: row.fulfillment_methodology, locale: row.locale,
+        checkpointRevision: row.checkpoint_revision, currentPhase: row.current_phase },
+      checkpoint: row.checkpoint, phase: row.current_phase, inputHash: input.inputHash
+    });
+    const restored = await tx<{ id: string }[]>`
+      UPDATE access_keys SET credits_remaining=credits_remaining-${row.credits},
+        status=CASE WHEN credits_remaining-${row.credits}=0 THEN 'exhausted' ELSE status END
+      WHERE id=${row.access_key_id} AND status IN ('active','exhausted') AND credits_remaining >= ${row.credits}
+      RETURNING id
+    `;
+    if (!restored[0]) throw new Error("The original credit capacity cannot be restored safely.");
+    await tx`DELETE FROM email_deliveries WHERE order_id=${row.order_id} AND template_type IN ('report_failed_refund','limited_report_refund','refund_succeeded') AND state='queued'`;
+    await tx`DELETE FROM payment_refunds WHERE id=${row.refund_id} AND state='pending' AND submitted_at IS NULL`;
+    await tx`UPDATE credit_ledger SET status='reserved', refunded_at=NULL WHERE id=${row.credit_id} AND status='refunded'`;
+    await tx`
+      UPDATE payment_orders SET fulfillment_status='queued', fulfilled_at=NULL, refund_status='not_required',
+        delivery_status='not_queued', updated_at=now() WHERE id=${row.order_id}
+    `;
+    await tx`
+      UPDATE scan_jobs SET stage='queued', execution_state='queued', retry_not_before=NULL,
+        repair_reason_code=NULL, repair_deadline_at=NULL, resume_generation=resume_generation+1,
+        credit_reservation_id=${row.credit_id}, error_code=NULL, public_error=NULL, updated_at=now()
+      WHERE id=${row.job_id} AND execution_state='failed'
+    `;
+    await JobTransitionService.appendTransition(tx, { jobId: row.job_id, fromState: "failed", toState: "queued",
+      phase: row.current_phase, checkpointRevision: row.checkpoint_revision, reasonCode: "historical_recovery" });
+    return { jobId: row.job_id, orderId: row.order_id };
+  });
 }
 
 export async function claimPendingRefunds(input: {

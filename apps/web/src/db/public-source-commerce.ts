@@ -3,6 +3,7 @@ import { parseRecommendationForensicReportV2, type RecommendationForensicReportV
 import { ensureDatabase, getSqlClient } from "./index";
 import { prepareSourceForensicReportRow } from "./source-forensic-reports";
 import type { ScanJobCoverage } from "./jobs";
+import { JobTransitionService } from "@/worker/job-transition-service";
 
 export interface PaidPublicSourceSnapshotRef {
   snapshotId: string; cacheIdentity: string; freshnessState: "fresh" | "historical" | "insufficient";
@@ -22,11 +23,11 @@ export async function terminalizePaidPublicSourceReport(input: {
   const row = prepareSourceForensicReportRow(report);
   await ensureDatabase();
   return getSqlClient().begin(async (tx) => {
-    const job = (await tx<Array<{ id:string;report_id:string;stage:string;lease_owner:string|null;lease_expires_at:string|null;credit_reservation_id:string|null;checkpoint:Record<string,unknown>;product_contract:string;fulfillment_methodology:string;recommendation_report_version:number }>>`
-      SELECT id,report_id,stage,lease_owner,lease_expires_at,credit_reservation_id,checkpoint,product_contract,fulfillment_methodology,recommendation_report_version
+    const job = (await tx<Array<{ id:string;report_id:string;stage:string;execution_state:string;checkpoint_revision:number;lease_owner:string|null;lease_expires_at:string|null;credit_reservation_id:string|null;checkpoint:Record<string,unknown>;product_contract:string;fulfillment_methodology:string;recommendation_report_version:number }>>`
+      SELECT id,report_id,stage,execution_state,checkpoint_revision,lease_owner,lease_expires_at,credit_reservation_id,checkpoint,product_contract,fulfillment_methodology,recommendation_report_version
       FROM scan_jobs WHERE id=${report.jobId} FOR UPDATE`)[0];
     if (!job || job.report_id!==report.reportId || job.product_contract!=="recommendation_forensics_v1" || job.fulfillment_methodology!==report.methodology || Number(job.recommendation_report_version)!==2 ||
-        job.lease_owner!==input.workerId || !job.lease_expires_at || Date.parse(job.lease_expires_at)<=Date.now() || ["completed","completed_limited","failed"].includes(job.stage)) throw new Error("V2 terminalization requires its exact active leased job.");
+        job.execution_state!=="running" || job.lease_owner!==input.workerId || !job.lease_expires_at || Date.parse(job.lease_expires_at)<=Date.now() || ["completed","completed_limited","failed"].includes(job.stage)) throw new Error("V2 terminalization requires its exact active leased job.");
     const checkpoint=(job.checkpoint?.publicSourceForensics ?? null) as {identityHash?:unknown}|null;
     if (checkpoint?.identityHash!==input.checkpointIdentityHash) throw new Error("V2 terminalization checkpoint identity mismatch.");
     const order=(await tx<Array<{id:string;provider:string;amount_minor:number;currency:string;report_locale:string;fulfillment_status:string;refund_status:string}>>`
@@ -49,10 +50,13 @@ export async function terminalizePaidPublicSourceReport(input: {
     const storedRefs=await tx<Array<{snapshot_id:string}>>`SELECT snapshot_id FROM report_market_snapshot_refs WHERE job_id=${report.jobId}`;
     if(storedRefs.length!==input.snapshotRefs.length) throw new Error("Every report snapshot must be atomically bound.");
     fault(input.faultAfter,"refs");
-    await tx`UPDATE scan_jobs SET stage=${report.commercialOutcome},progress=CASE WHEN ${report.commercialOutcome}='failed' THEN progress ELSE 100 END,
+    await tx`UPDATE scan_jobs SET stage=${report.commercialOutcome},execution_state=${report.commercialOutcome==='failed'?'failed':'completed'},current_phase='terminalization',retry_not_before=NULL,repair_reason_code=NULL,repair_deadline_at=NULL,progress=CASE WHEN ${report.commercialOutcome}='failed' THEN progress ELSE 100 END,
       planned_pages=${input.coverage.plannedPages},successful_pages=${input.coverage.successfulPages},failed_pages=${input.coverage.failedPages},lease_owner=NULL,lease_expires_at=NULL,
       error_code=CASE WHEN ${report.commercialOutcome}='failed' THEN 'public_source_coverage_failed' ELSE NULL END,
       public_error=CASE WHEN ${report.commercialOutcome}='failed' THEN 'The public-source evidence was not sufficient for a usable report.' ELSE NULL END,updated_at=now() WHERE id=${report.jobId}`;
+    await JobTransitionService.appendTransition(tx, { jobId: report.jobId, fromState: job.execution_state,
+      toState: report.commercialOutcome==='failed'?'failed':'completed', phase: 'terminalization',
+      checkpointRevision: job.checkpoint_revision, reasonCode: 'public_source_terminalization' });
     fault(input.faultAfter,"job");
     if(job.credit_reservation_id){
       const target=report.commercialOutcome==="completed"?"settled":"refunded";

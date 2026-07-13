@@ -1526,6 +1526,54 @@ export const V15_DATABASE_MIGRATIONS = [
       OR (payment_status = 'paid' AND refund_status <> 'refunded')`
 ] as const;
 
+export const V16_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS execution_state text NOT NULL DEFAULT 'queued'`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS current_phase text NOT NULL DEFAULT 'admission'`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS checkpoint_revision integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS phase_attempt integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS resume_generation integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS retry_not_before timestamptz`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS repair_reason_code text`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS repair_deadline_at timestamptz`,
+  `UPDATE scan_jobs SET execution_state = CASE
+     WHEN stage IN ('completed','completed_limited') THEN 'completed'
+     WHEN stage = 'failed' THEN 'failed'
+     ELSE 'queued' END,
+     current_phase = CASE
+       WHEN stage = 'discovering' THEN 'discovery' WHEN stage = 'planning' THEN 'planning'
+       WHEN stage = 'fetching' THEN 'fetching' WHEN stage = 'analyzing' THEN 'page_analysis'
+       WHEN stage = 'synthesizing' THEN 'website_synthesis'
+       WHEN stage IN ('completed','completed_limited','failed') THEN 'terminalization' ELSE 'admission' END
+   WHERE execution_state = 'queued' AND current_phase = 'admission'`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_execution_state_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_execution_state_check CHECK (execution_state IN ('queued','running','retry_wait','repair_wait','completed','failed'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_current_phase_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_current_phase_check CHECK (current_phase IN ('admission','discovery','planning','fetching','technical_audit','page_analysis','website_synthesis','public_source_preflight','question_generation','snapshot_resolution','source_retrieval','evidence_graph','report_build','artifact_verification','terminalization'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_repair_wait_lease_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_repair_wait_lease_check CHECK (execution_state <> 'repair_wait' OR (lease_owner IS NULL AND lease_expires_at IS NULL))`,
+  `CREATE INDEX IF NOT EXISTS scan_jobs_execution_claim_idx ON scan_jobs (tier, execution_state, retry_not_before, created_at, id)`,
+  `CREATE TABLE IF NOT EXISTS scan_job_error_events (
+     id text PRIMARY KEY, job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE CASCADE,
+     phase text NOT NULL, checkpoint_revision integer NOT NULL, job_attempt integer NOT NULL,
+     phase_attempt integer NOT NULL, resume_generation integer NOT NULL, classification text NOT NULL,
+     code text NOT NULL, error_type text NOT NULL, message text NOT NULL, stack text,
+     causes jsonb NOT NULL DEFAULT '[]'::jsonb, fingerprint text NOT NULL,
+     retryable_at timestamptz, recorded_at timestamptz NOT NULL DEFAULT now())`,
+  `CREATE INDEX IF NOT EXISTS scan_job_error_events_job_recorded_idx ON scan_job_error_events (job_id, recorded_at)`,
+  `CREATE TABLE IF NOT EXISTS scan_job_transition_events (
+     id text PRIMARY KEY, job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE CASCADE,
+     from_execution_state text, to_execution_state text NOT NULL, phase text NOT NULL,
+     checkpoint_revision integer NOT NULL, reason_code text,
+     error_event_id text REFERENCES scan_job_error_events(id) ON DELETE RESTRICT,
+     recorded_at timestamptz NOT NULL DEFAULT now())`,
+  `CREATE INDEX IF NOT EXISTS scan_job_transition_events_job_recorded_idx ON scan_job_transition_events (job_id, recorded_at)`,
+  `CREATE OR REPLACE FUNCTION ogc_reject_job_event_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Job event history is append-only.'; END $$`,
+  `DROP TRIGGER IF EXISTS scan_job_error_events_append_only ON scan_job_error_events`,
+  `CREATE TRIGGER scan_job_error_events_append_only BEFORE UPDATE OR DELETE ON scan_job_error_events FOR EACH ROW EXECUTE FUNCTION ogc_reject_job_event_mutation()`,
+  `DROP TRIGGER IF EXISTS scan_job_transition_events_append_only ON scan_job_transition_events`,
+  `CREATE TRIGGER scan_job_transition_events_append_only BEFORE UPDATE OR DELETE ON scan_job_transition_events FOR EACH ROW EXECUTE FUNCTION ogc_reject_job_event_mutation()`
+] as const;
+
 export const DATABASE_MIGRATIONS = [
   ...V9_DATABASE_MIGRATIONS,
   ...V10_DATABASE_MIGRATIONS,
@@ -1533,5 +1581,6 @@ export const DATABASE_MIGRATIONS = [
   ...V12_DATABASE_MIGRATIONS,
   ...V13_DATABASE_MIGRATIONS,
   ...V14_DATABASE_MIGRATIONS,
-  ...V15_DATABASE_MIGRATIONS
+  ...V15_DATABASE_MIGRATIONS,
+  ...V16_DATABASE_MIGRATIONS
 ] as const;

@@ -36,6 +36,11 @@ export type ScanJobStage =
   | "completed"
   | "completed_limited"
   | "failed";
+export type ScanJobExecutionState = "queued" | "running" | "retry_wait" | "repair_wait" | "completed" | "failed";
+export type ScanJobPhase =
+  | "admission" | "discovery" | "planning" | "fetching" | "technical_audit" | "page_analysis"
+  | "website_synthesis" | "public_source_preflight" | "question_generation" | "snapshot_resolution"
+  | "source_retrieval" | "evidence_graph" | "report_build" | "artifact_verification" | "terminalization";
 
 export const deploymentEnvironment = pgTable("deployment_environment", {
   singleton: boolean("singleton").primaryKey().notNull().default(true),
@@ -87,6 +92,18 @@ export type CitationEvidenceGrade = EvidenceGrade;
 export type { CitationRetrievalState, CitationSourceCategory };
 
 export interface JobCheckpoint {
+  recovery?: {
+    schemaVersion: 1;
+    phase: ScanJobPhase;
+    revision: number;
+    phaseAttempt: number;
+    resumeGeneration: number;
+    identity: { jobId: string; reportId: string; productContract: string; methodology: string | null; locale: string; authorityId: string | null };
+    inputHash: string;
+    completedArtifacts: string[];
+    remainingWork: string[];
+    priorTransitionId: string | null;
+  };
   contractVersion?: 1 | 2;
   websiteFoundation?: { completed: boolean; synthesisInputHash?: string };
   recommendationForensics?: { runId?: string; questionsGenerated?: boolean; reportSaved?: boolean };
@@ -162,6 +179,14 @@ export const scanJobs = pgTable(
     locale: text("locale").$type<ReportLocale>().notNull(),
     reason: text("reason").$type<ScanJobReason>().notNull().default("standard"),
     stage: text("stage").$type<ScanJobStage>().notNull().default("queued"),
+    executionState: text("execution_state").$type<ScanJobExecutionState>().notNull().default("queued"),
+    currentPhase: text("current_phase").$type<ScanJobPhase>().notNull().default("admission"),
+    checkpointRevision: integer("checkpoint_revision").notNull().default(0),
+    phaseAttempt: integer("phase_attempt").notNull().default(0),
+    resumeGeneration: integer("resume_generation").notNull().default(0),
+    retryNotBefore: timestamp("retry_not_before", { withTimezone: true }),
+    repairReasonCode: text("repair_reason_code"),
+    repairDeadlineAt: timestamp("repair_deadline_at", { withTimezone: true }),
     progress: integer("progress").notNull().default(0),
     checkpoint: jsonb("checkpoint").$type<JobCheckpoint>().notNull().default({}),
     plannedPages: integer("planned_pages").notNull().default(0),
@@ -200,11 +225,46 @@ export const scanJobs = pgTable(
     check(
       "scan_jobs_stage_check",
       sql`${table.stage} IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')`
-    )
+    ),
+    check("scan_jobs_execution_state_check", sql`${table.executionState} IN ('queued','running','retry_wait','repair_wait','completed','failed')`),
+    check("scan_jobs_current_phase_check", sql`${table.currentPhase} IN ('admission','discovery','planning','fetching','technical_audit','page_analysis','website_synthesis','public_source_preflight','question_generation','snapshot_resolution','source_retrieval','evidence_graph','report_build','artifact_verification','terminalization')`)
   ]
 );
 
 export type ScanJobRow = typeof scanJobs.$inferSelect;
+
+export const scanJobErrorEvents = pgTable("scan_job_error_events", {
+  id: text("id").primaryKey(),
+  jobId: text("job_id").notNull().references(() => scanJobs.id, { onDelete: "cascade" }),
+  phase: text("phase").$type<ScanJobPhase>().notNull(),
+  checkpointRevision: integer("checkpoint_revision").notNull(),
+  jobAttempt: integer("job_attempt").notNull(),
+  phaseAttempt: integer("phase_attempt").notNull(),
+  resumeGeneration: integer("resume_generation").notNull(),
+  classification: text("classification").notNull(),
+  code: text("code").notNull(),
+  errorType: text("error_type").notNull(),
+  message: text("message").notNull(),
+  stack: text("stack"),
+  causes: jsonb("causes").$type<string[]>().notNull().default([]),
+  fingerprint: text("fingerprint").notNull(),
+  retryableAt: timestamp("retryable_at", { withTimezone: true }),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [index("scan_job_error_events_job_recorded_idx").on(table.jobId, table.recordedAt)]);
+export type ScanJobErrorEventRow = typeof scanJobErrorEvents.$inferSelect;
+
+export const scanJobTransitionEvents = pgTable("scan_job_transition_events", {
+  id: text("id").primaryKey(),
+  jobId: text("job_id").notNull().references(() => scanJobs.id, { onDelete: "cascade" }),
+  fromExecutionState: text("from_execution_state").$type<ScanJobExecutionState>(),
+  toExecutionState: text("to_execution_state").$type<ScanJobExecutionState>().notNull(),
+  phase: text("phase").$type<ScanJobPhase>().notNull(),
+  checkpointRevision: integer("checkpoint_revision").notNull(),
+  reasonCode: text("reason_code"),
+  errorEventId: text("error_event_id").references(() => scanJobErrorEvents.id, { onDelete: "restrict" }),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [index("scan_job_transition_events_job_recorded_idx").on(table.jobId, table.recordedAt)]);
+export type ScanJobTransitionEventRow = typeof scanJobTransitionEvents.$inferSelect;
 
 export const answerSnapshotRuns = pgTable(
   "answer_snapshot_runs",

@@ -5,6 +5,7 @@ import type { PublicSearchAdapterFactory, PublicSearchAdapterIdentity } from "@/
 import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import type { PublicSearchSurfaceAuthorityRow } from "@/db/schema";
 import type { PublicSourceForensicsDependencies } from "@/worker/public-source-forensics";
+import { PublicSourceRuntimeError } from "@/worker/job-errors";
 
 export const APPROVED_FACTORIES = createApprovedPublicSearchAdapterRegistry([createMiMoPublicSearchAdapterFactory()]);
 
@@ -19,9 +20,9 @@ export interface ProductionPublicSourceForensicsRuntimeOptions {
 
 export async function resolveProductionPublicSearchRuntime(input:{environment:NodeJS.ProcessEnv;getAuthority:typeof getActivePublicSearchSurfaceAuthority;registry?:ReadonlyMap<string,PublicSearchAdapterFactory>}):Promise<{adapter:PublicSearchSurfaceAdapter;authority:PublicSearchSurfaceAuthority;identity:PublicSearchAdapterIdentity}> {
   const environment=input.environment;
-  if(environment.OGC_PUBLIC_SEARCH_RUNTIME_ENABLED!=="true") throw new Error("Public-search runtime is disabled.");
+  if(environment.OGC_PUBLIC_SEARCH_RUNTIME_ENABLED!=="true") throw new PublicSourceRuntimeError("Public-search runtime is disabled.", "public_source_runtime_disabled");
   const profile=environment.OGC_DEPLOYMENT_PROFILE;
-  if(profile!=="staging"&&profile!=="production") throw new Error("Public-search runtime environment is invalid.");
+  if(profile!=="staging"&&profile!=="production") throw new PublicSourceRuntimeError("Public-search runtime environment is invalid.", "public_source_runtime_environment_invalid");
   const locale=required(environment.OGC_PUBLIC_SEARCH_LOCALE,"OGC_PUBLIC_SEARCH_LOCALE"),region=required(environment.OGC_PUBLIC_SEARCH_REGION,"OGC_PUBLIC_SEARCH_REGION");
   const factory=selectApprovedPublicSearchAdapterFactory({environment,registry:input.registry??APPROVED_FACTORIES});
   const identity=factory.resolveIdentity({environment,locale,region});
@@ -36,22 +37,23 @@ export async function resolveProductionPublicSearchRuntime(input:{environment:No
 export async function createProductionPublicSourceForensicsDependencies(
   environment: NodeJS.ProcessEnv = process.env,
   options: ProductionPublicSourceForensicsRuntimeOptions = {}
-): Promise<PublicSourceForensicsDependencies | null> {
+): Promise<PublicSourceForensicsDependencies> {
   try {
     const runtime = await (options.resolveRuntime ?? resolveProductionPublicSearchRuntime)({
       environment,
       getAuthority: getActivePublicSearchSurfaceAuthority
     });
-    if (!options.createDependencies) return null;
+    if (!options.createDependencies) throw new PublicSourceRuntimeError("Required public-source Worker collaborator is unavailable.", "public_source_dependency_missing");
     const dependencies = await options.createDependencies(runtime);
-    if (!sameAuthority(dependencies.authority, runtime.authority)) throw new Error("Public-source runtime dependency authority mismatch.");
+    if (!sameAuthority(dependencies.authority, runtime.authority)) throw new PublicSourceRuntimeError("Public-source runtime dependency authority mismatch.", "public_source_authority_mismatch");
     return dependencies;
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof PublicSourceRuntimeError) throw error;
+    throw new PublicSourceRuntimeError(error instanceof Error ? error.message : "Public-source runtime resolution failed.", "public_source_runtime_resolution_failed", { cause: error });
   }
 }
-function required(value:string|undefined,name:string){if(!value?.trim())throw new Error(`${name} is required.`);return value.trim();}
-function assertRow(row:PublicSearchSurfaceAuthorityRow,identity:PublicSearchAdapterIdentity,environment:"staging"|"production",locale:string,region:string){const locales=Array.isArray(row.localeCapabilities)?row.localeCapabilities.filter((value):value is string=>typeof value==="string"):[];const regions=Array.isArray(row.regionCapabilities)?row.regionCapabilities.filter((value):value is string=>typeof value==="string"):[];if(!row.active||row.environment!==environment||row.adapterId!==identity.adapterId||row.providerId!==identity.providerId||row.productId!==identity.productId||row.modelId!==identity.modelId||row.adapterVersion!==identity.adapterVersion||row.surfaceId!==identity.surface.surfaceId||row.surfaceVersion!==identity.surface.surfaceVersion||!locales.includes(locale)||!regions.includes(region))throw new Error("Public-search authority identity mismatch.");}
+function required(value:string|undefined,name:string){if(!value?.trim())throw new PublicSourceRuntimeError(`${name} is required.`, "public_source_required_configuration");return value.trim();}
+function assertRow(row:PublicSearchSurfaceAuthorityRow,identity:PublicSearchAdapterIdentity,environment:"staging"|"production",locale:string,region:string){const locales=Array.isArray(row.localeCapabilities)?row.localeCapabilities.filter((value):value is string=>typeof value==="string"):[];const regions=Array.isArray(row.regionCapabilities)?row.regionCapabilities.filter((value):value is string=>typeof value==="string"):[];if(!row.active||row.environment!==environment||row.adapterId!==identity.adapterId||row.providerId!==identity.providerId||row.productId!==identity.productId||row.modelId!==identity.modelId||row.adapterVersion!==identity.adapterVersion||row.surfaceId!==identity.surface.surfaceId||row.surfaceVersion!==identity.surface.surfaceVersion||!locales.includes(locale)||!regions.includes(region))throw new PublicSourceRuntimeError("Public-search authority identity mismatch.", "public_source_authority_mismatch");}
 function sameAuthority(left: PublicSearchSurfaceAuthority, right: PublicSearchSurfaceAuthority): boolean {
   const surfaceKeys: Array<keyof PublicSearchSurfaceAuthority["surface"]> = ["surfaceId", "providerId", "productId", "surfaceKind", "contractVersion", "surfaceVersion", "adapterVersion", "locale", "region"];
   return left.authorityId === right.authorityId && left.environment === right.environment && left.active === right.active &&
