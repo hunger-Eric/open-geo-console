@@ -49,6 +49,8 @@ function Write-RuntimeEnv {
   if ($Environment -eq "staging") {
     Merge-EnvFile $values (Join-Path $repoRoot ".vercel\.env.preview.local")
     Merge-EnvFile $values (Join-Path $webRoot ".env.staging.local")
+    $publicSearchPath = Join-Path $webRoot ".env.public-search.staging.local"
+    if (Test-Path -LiteralPath $publicSearchPath) { Merge-EnvFile $values $publicSearchPath }
     $values["OGC_DEPLOYMENT_PROFILE"] = "staging"
     $values["VERCEL_ENV"] = "preview"
   } else {
@@ -70,6 +72,9 @@ function Write-RuntimeEnv {
   Require-Values $values @("DATABASE_URL", "OGC_DEPLOYMENT_PROFILE", "OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL") "$Environment Worker"
   if ($Environment -eq "staging") {
     Require-Values $values @("OGC_EVIDENCE_STORAGE", "BLOB_READ_WRITE_TOKEN") "Staging deep-report storage"
+    if ($values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true") {
+      Require-Values $values @("OGC_PUBLIC_SEARCH_ADAPTER", "OGC_PUBLIC_SEARCH_MIMO_BASE_URL", "OGC_PUBLIC_SEARCH_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_MODEL", "OGC_PUBLIC_SEARCH_LOCALE", "OGC_PUBLIC_SEARCH_REGION") "Staging public-search runtime"
+    }
   }
   if ($Environment -eq "production") {
     if ($values["OGC_EVIDENCE_STORAGE"] -eq "vercel-blob") {
