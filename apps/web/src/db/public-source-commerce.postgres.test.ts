@@ -36,7 +36,8 @@ describePostgres("paid public-source atomic terminalization",()=>{
       await completeMarketSearchAttempt({attemptId:attempt.id,token:claim.token,requestStatus:"succeeded",usage:{requestCount:1,resultCount:0},providerCostMicros:10,costUncertain:false}); await completeMarketSnapshotLease({snapshotId:snapshot.id,token:claim.token,queryFanoutHash:sha(`fanout-${index}`)});
       snapshotIds.push(snapshot.id); refs.push({snapshotId:snapshot.id,cacheIdentity:identity.id,freshnessState:"fresh",actualCostMicros:10,allocatedCostMicros:0,avoidedCostMicros:0});
     }
-    report={...report,snapshotRefs:report.snapshotRefs.map((ref,index)=>({...ref,snapshotId:snapshotIds[index]!}))};
+    const evidenceCutoffAt=new Date((await sql<Array<{now:Date}>>`SELECT clock_timestamp() AS now`)[0]!.now).toISOString();
+    report={...report,generatedAt:evidenceCutoffAt,evidenceCutoffAt,snapshotRefs:report.snapshotRefs.map((ref,index)=>({...ref,snapshotId:snapshotIds[index]!}))};
   },120_000);
   afterAll(async()=>{await closeDatabase();if(originalDatabaseUrl===undefined)delete process.env.DATABASE_URL;else process.env.DATABASE_URL=originalDatabaseUrl;await admin.unsafe(`DROP DATABASE IF EXISTS ${quote(databaseName)} WITH (FORCE)`);await admin.end({timeout:5});},120_000);
   it("rolls back every injected write boundary and succeeds exactly once on retry",async()=>{

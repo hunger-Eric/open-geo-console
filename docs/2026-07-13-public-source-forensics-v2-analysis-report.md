@@ -10,6 +10,8 @@ MiMo is now the first compile-time registered public-search adapter behind an in
 
 Read-only database evidence on 2026-07-13 found zero non-terminal recommendation rows, zero non-terminal V1 rows, and zero terminal commercial jobs with a reserved credit in both staging and production. The normal CLI audits were not used because they can bootstrap/migrate schema state; no database migration was authorized in this adapter implementation.
 
+The same-date MiMo capability probe passed its official-factual source case but timed out on the Chinese B2B and narrow/no-result cases. That is negative certification evidence; it does not authorize an artifact, authority installation, activation, customer collection, or production change.
+
 Phases 4–9 of the approved V2 plan are implemented. The repository now has a versioned, public-source-based recommendation-forensics pipeline whose persisted evidence, report construction, artifact rendering, commercial terminalization and certification admission are explicit and fail closed.
 
 This is an implementation-complete framework, not a claim that a live public-search vendor has been certified. The compile-time approved adapter registry is empty, there is no active exact V2 authority, and no authorized live V2 report exists. Catalog and checkout therefore remain closed. No developer fixture, historical answer-provider result, HTML snapshot, or unit test is presented as external production evidence.
@@ -97,13 +99,13 @@ New purchases use report version 2 and methodology `public_search_source_forensi
 | Production V1 methodology audit | Final pass: zero non-terminal recommendation rows and zero V1 rows requiring retained adapters | No production V1 work remained at retirement |
 | Staging and production `db:audit` | Final pass in both environments | No terminal commercial job retained reserved credit |
 | PostgreSQL integration suite in final pass | Unproven: command exceeded the 244-second execution ceiling | Must not be reported as a pass; rerun without the tool ceiling |
-| Fresh-database fault-injection tests | Skipped locally where `OGC_TEST_DATABASE_ADMIN_URL` is absent | Requires an authorized disposable PostgreSQL admin URL |
+| Fresh-database fault-injection tests | Passed against isolated local PostgreSQL 16 on 2026-07-13 | v9-to-v14 bootstrap/upgrade, snapshot, repository and atomic-commerce suites passed; not staging/production evidence |
 | Live V2 browser/PDF customer drill | External unproven | No authorized live adapter, active authority or V2 report exists |
 | Live vendor certification/failure drills | External unproven | Intentionally impossible while approved registry is empty |
 | `git diff --check` | Pass | No whitespace error detected |
 | CodeGraph sync/status | Pass: index current, 412 files, 4,386 nodes, 10,982 edges | Structural index matches the final workspace |
 
-These results were collected after the final documentation edits. The PostgreSQL integration timeout and external live gates remain deliberately classified as unproven rather than inferred from the passing deterministic suite.
+These results were collected after the final documentation edits. The isolated PostgreSQL suite is proven; external live gates remain deliberately classified as unproven rather than inferred from deterministic or local capability evidence.
 
 ## Remaining gates before enabling sales
 
@@ -113,7 +115,6 @@ These results were collected after the final documentation edits. The PostgreSQL
 4. Configure the exact protected runtime and confirm catalog remains closed under every mismatch case.
 5. Complete a paid protected-staging V2 drill from signed payment Webhook through collection, report, canonical HTML, materialized PDF, delivery and access.
 6. Execute timeout, partial coverage, unusable evidence, refund, retry/resume and artifact-failure drills.
-7. Rerun the PostgreSQL fault-injection suite with `OGC_TEST_DATABASE_ADMIN_URL` and retain the output.
 8. Only after all evidence passes, make the separately reviewed production activation decision.
 
 ## Commit trail

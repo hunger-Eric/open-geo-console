@@ -53,7 +53,7 @@ const CASES = [
   }
 ] as const;
 
-const PROBE_BUDGET: SearchExecutionBudget = Object.freeze({maxRequests: 3, maxResults: 20, timeoutMs: 20_000, maxCostMicros: 10_000_000});
+const PROBE_BUDGET: SearchExecutionBudget = Object.freeze({maxRequests: 3, maxResults: 10, timeoutMs: 20_000, maxCostMicros: 10_000_000});
 
 export async function runMiMoPublicSearchProbe(input: {
   environment: NodeJS.ProcessEnv;

@@ -97,6 +97,20 @@ describe("MiMo public-search adapter", () => {
     expect(JSON.stringify(observation)).not.toContain(config.apiKey);
   });
 
+  it("accepts provider-reported top-level web-search usage without reading prose", async () => {
+    const { usage, ...topLevel } = MIMO_SUCCESS_RESPONSE;
+    const adapter = createMiMoPublicSearchAdapter({ config, authority, fetch: async () => response({ ...topLevel, web_search_usage: usage.web_search_usage }) });
+    await expect(adapter.search({ surface, query, budget: { maxRequests: 3, maxResults: 10, timeoutMs: 100, maxCostMicros: 1_000 }, signal: new AbortController().signal }))
+      .resolves.toMatchObject({ status: "complete", usage: { requestCount: 3, resultCount: 1 } });
+  });
+
+  it("caps over-returned structured annotations at the shared result budget", async () => {
+    const second = { ...MIMO_SUCCESS_RESPONSE.choices[0]!.message.annotations[0], url: "https://www.dsv.com/other-public-page" };
+    const adapter = createMiMoPublicSearchAdapter({ config, authority, fetch: async () => response({ ...MIMO_SUCCESS_RESPONSE, choices: [{ ...MIMO_SUCCESS_RESPONSE.choices[0], message: { ...MIMO_SUCCESS_RESPONSE.choices[0]!.message, annotations: [...MIMO_SUCCESS_RESPONSE.choices[0]!.message.annotations, second] } }] }) });
+    await expect(adapter.search({ surface, query, budget: { maxRequests: 3, maxResults: 1, timeoutMs: 100, maxCostMicros: 1_000 }, signal: new AbortController().signal }))
+      .resolves.toMatchObject({ status: "complete", results: [{ surfaceResultOrder: 1 }] });
+  });
+
   it("returns malformed without prose fallback for missing or unsafe annotations", async () => {
     const contentOnly = createMiMoPublicSearchAdapter({ config, authority, fetch: async () => response({ choices: [{ finish_reason: "stop", message: { content: "https://unsafe.example/answer" } }], usage: { web_search_usage: { tool_usage: 1, page_usage: 1 } } }) });
     const unsafe = createMiMoPublicSearchAdapter({ config, authority, fetch: async () => response({ ...MIMO_SUCCESS_RESPONSE, choices: [{ ...MIMO_SUCCESS_RESPONSE.choices[0], message: { ...MIMO_SUCCESS_RESPONSE.choices[0]!.message, annotations: [{ ...MIMO_SUCCESS_RESPONSE.choices[0]!.message.annotations[0], url: "https://user:pass@unsafe.example/path" }] } }] }) });

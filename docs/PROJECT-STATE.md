@@ -14,6 +14,8 @@ The provider-independent adapter layer now resolves `OGC_PUBLIC_SEARCH_ADAPTER` 
 
 On 2026-07-13, direct read-only staging and production PostgreSQL checks found zero non-terminal recommendation rows, zero non-terminal V1 rows, and zero terminal jobs with a reserved credit. The existing audit CLI was not used because its bootstrap behavior may migrate a schema-v13 database; it must be rerun only after a separately authorized schema-v14 rollout.
 
+The 2026-07-13 MiMo protected-staging capability probe proved structured annotations for its official-factual case, but the Chinese B2B and narrow/no-result matrix cases exhausted the 20-second timeout. It is not certification and no authority was installed or activated.
+
 - `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point. Chinese is the canonical unprefixed interface (`/`, `/reports/...`); English remains explicit under `/en`, and legacy `/zh/...` URLs permanently redirect to their unprefixed equivalents.
 - `packages/geo-auditor` owns deterministic technical evidence and the reproducible GEO score.
 - `packages/site-crawler` owns URL/SSRF safety, registrable site identity, robots/sitemap/link discovery, HTML extraction, template clustering and representative-page selection.
@@ -33,7 +35,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Citation verification that removes unsupported model findings before persistence.
 - Immutable question/run/attempt/cell/source contracts with explicit failed/no-recommendation states, bounded provider metadata, sanitized errors, response and retrieved-content hashes, source-local ordering and deterministic fixtures. Developer API observations cannot be labeled as consumer-app results.
 - Citation intelligence with clause-bound recommendation extraction, entity ambiguity handling, owned/earned/reference/community source categories, Grade A-D evidence, customer/competitor gaps, homepage/full-site blind spots, evidence-linked priorities and non-causal vendor tasks.
-- PostgreSQL schema v13 binds V1 history plus V2 methodology, public-search authorities, questions, queries, attempts, observations, source evidence, leases, report snapshot refs and V2 reports to exact jobs. Retained excerpts expire while hashes and cost ledgers remain.
+- PostgreSQL schema v14 binds V1 history plus V2 methodology, exact adapter identity, public-search authorities, questions, queries, attempts, observations, source evidence, leases, report snapshot refs and V2 reports to exact jobs. Retained excerpts expire while hashes and cost ledgers remain.
 - `RecommendationForensicReportV1` is built only from persisted evidence and renders complete bilingual executive and vendor layers plus the legacy technical appendix. Product-scoped cookies/tokens, explicit legacy/recommendation HTML/PDF routes and private evidence routes prevent cross-product access.
 - Historical OpenAI Responses Web Search and Perplexity Sonar adapters remain only as V1 regression sources; checkout, catalog and deployed Worker graphs no longer import them.
 - V2 certification validates HMAC-authenticated, path-confined artifacts with exact surface/capability/terms/storage/error/budget review evidence. The compile-time approved adapter registry is empty, so certification refuses before network access and availability remains closed.
@@ -93,7 +95,7 @@ The web process persists a public homepage technical report and enqueues work. S
 - Netlify is the intended commercial Web/API host. The existing Vercel Hobby deployment remains useful only for noncommercial acceptance because its terms are not the commercial target.
 - Real model behavior depends on the configured provider. CI uses mock clients; `npm run test:ai-live` remains the repeatable paid integration command.
 - No live V2 public-search vendor or approved adapter is selected. The approved certification registry is intentionally empty; no live signed artifact, active public-search authority, V2 paid report, real HTML/PDF browser artifact, or provider failure/refund drill has been accepted. Environment flags and fixture authorities cannot open admission.
-- The schema is version 13 and existing staging migrations/audits pass, but bootstrap plus V2 atomic fault injection against a freshly created empty PostgreSQL database remains unproven without `OGC_TEST_DATABASE_ADMIN_URL`.
+- Schema v14 bootstrap/upgrade plus V2 snapshot, repository and atomic-commerce fault injection passed against a local isolated PostgreSQL 16 disposable admin URL on 2026-07-13. This does not substitute for staging or production acceptance.
 - Legacy checkout retirement is implemented and protected by explicit environment gates, but the operator command has not been run against the real provider resources.
 - The Vercel project is not connected to Git because the Vercel GitHub App lacks repository access. The fixed alias must therefore be repointed explicitly after each CLI Preview deployment, and Preview variables cannot yet be restricted to one Git branch.
 - At the user's written direction, Preview temporarily reuses the existing Xiaomi MiMo Token Plan API key. This is an explicit exception to the approved independent-model-key requirement; all other credentials remain separated. Replace it with a staging-only model key before claiming full conformance.
@@ -116,7 +118,6 @@ The web process persists a public homepage technical report and enqueues work. S
 5. Run duplicate payment/Webhook/Queue, completed/limited/failed report, email bounce/reissue, workstation-offline and full-refund drills before `COMMERCE_MODE=live`.
 6. Run a separate vendor-selection and legal/terms review, implement one approved public-search adapter, certify its exact surface, install and explicitly activate the signed authority, then run the complete protected-staging V2 paid, artifact-access, email/reply, settlement, limited/failed/refund and outage drills. Keep `OGC_PUBLIC_SEARCH_RUNTIME_ENABLED=false` until every gate passes.
 7. Run `npm run commerce:retire-legacy` with explicit protected-environment gates and an audited ISO cutoff, then verify the real provider resources are inactive/non-payable without modifying paid orders.
-8. Provide `OGC_TEST_DATABASE_ADMIN_URL` and run the schema-v13 bootstrap, V2 report repository and atomic-commerce fault-injection suites against freshly created empty PostgreSQL databases.
 
 ## Acceptance Commands
 

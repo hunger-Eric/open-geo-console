@@ -153,7 +153,7 @@ function normalizeMiMoResponse(input: {
 }): MarketSearchObservation {
   const parsed = parseMiMoPayload(input.payload);
   if (!parsed) return malformedObservation(input);
-  const results = toResults(parsed.annotations);
+  const results = toResults(parsed.annotations, Math.min(input.request.budget.maxResults, input.request.query.resultDepth));
   if (!results) return malformedObservation(input, parsed.requestCount);
   const completedAt = new Date().toISOString();
   return {
@@ -201,7 +201,7 @@ function parseMiMoPayload(value: unknown): { annotations: MiMoAnnotation[]; requ
   const payload = record(value);
   const choice = Array.isArray(payload?.choices) ? record(payload.choices[0]) : undefined;
   const message = record(choice?.message);
-  const usage = record(record(payload?.usage)?.web_search_usage);
+  const usage = record(record(payload?.usage)?.web_search_usage) ?? record(payload?.web_search_usage);
   if (!message || !Array.isArray(message.annotations) || !usage) return null;
   const requestCount = nonNegativeInteger(usage.tool_usage);
   const pageUsage = nonNegativeInteger(usage.page_usage);
@@ -217,7 +217,7 @@ function parseMiMoPayload(value: unknown): { annotations: MiMoAnnotation[]; requ
   return annotations.length ? { annotations, requestCount, pageUsage } : null;
 }
 
-function toResults(annotations: readonly MiMoAnnotation[]): SearchResultObservation[] | null {
+function toResults(annotations: readonly MiMoAnnotation[], maximum: number): SearchResultObservation[] | null {
   const results: SearchResultObservation[] = [];
   const seen = new Set<string>();
   for (const annotation of annotations) {
@@ -227,6 +227,7 @@ function toResults(annotations: readonly MiMoAnnotation[]): SearchResultObservat
     }
     if (seen.has(canonical)) continue;
     seen.add(canonical);
+    if (results.length >= maximum) continue;
     results.push({
       surfaceResultOrder: results.length + 1,
       url: canonical,

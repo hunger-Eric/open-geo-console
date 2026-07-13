@@ -91,5 +91,5 @@
 - [x] Add the compile-time approved registry, independent MiMo configuration/normalization, exact schema-v14 authority identity, redacted probe and signed-certification entry points; runtime remains closed without artifact readiness and an active authority.
 - [ ] Select and legally review one live public-search vendor, add it through a separate approved-adapter plan, create/manual-review/install/activate its signed artifact, and keep the runtime flag false until then.
 - [ ] Accept one real V2 paid report end to end: source collection/retrieval, immutable evidence, authorized HTML/PDF and anonymous `404`, transactional delivery/reply, settlement plus limited/failed refunds and outage drills.
-- [ ] Provide `OGC_TEST_DATABASE_ADMIN_URL` and dynamically run fresh-database schema-v13, V2 repository and atomic fault-injection PostgreSQL tests; current local acceptance records these suites as skipped rather than proven.
+- [x] Use an isolated disposable PostgreSQL 16 admin URL to run the schema-v9-to-v14 bootstrap/upgrade, market snapshot, V2 repository and atomic-commerce suites. The local proof passed on 2026-07-13; this URL is not a staging or production authority.
 - [ ] Add any free sample only after paid V2 staging acceptance; never market public-search order as AI rank or recommendation.

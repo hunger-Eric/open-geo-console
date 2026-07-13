@@ -6,6 +6,8 @@ The V2 framework certifies one accurately labeled public-search surface. Certifi
 
 MiMo is the first compile-time registered adapter. This is only code registration: no live certification artifact has been accepted, no authority is active, and catalog, checkout, Worker execution, and production remain fail-closed. Fixture artifacts used by tests are never installable or activatable.
 
+The protected-staging capability probe on 2026-07-13 used the configured `mimo-v2.5-pro` surface without enabling runtime. Its official-factual case passed with ten structured sources and three provider search calls, but the Chinese B2B-discovery and narrow/no-result cases exceeded the 20-second boundary and ended `aborted`. This is a failed certification matrix, not a certification artifact: no authority was installed or activated.
+
 MiMo is selected only by `OGC_PUBLIC_SEARCH_ADAPTER=mimo` and reads only `OGC_PUBLIC_SEARCH_MIMO_BASE_URL`, `OGC_PUBLIC_SEARCH_MIMO_API_KEY`, and `OGC_PUBLIC_SEARCH_MIMO_MODEL`. Its configuration is independent from the report-generation `OGC_AI_*` namespace; identical secret values may be supplied deliberately, but there is no inheritance or fallback.
 
 ## Framework boundary

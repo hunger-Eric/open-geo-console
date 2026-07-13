@@ -8,6 +8,7 @@ import {
   V11_DATABASE_MIGRATIONS,
   V12_DATABASE_MIGRATIONS,
   V13_DATABASE_MIGRATIONS,
+  V14_DATABASE_MIGRATIONS,
   V9_DATABASE_MIGRATIONS
 } from "./migrations";
 
@@ -22,7 +23,7 @@ type SchemaShape = {
   triggers: string[];
 };
 
-describeDisposablePostgres("schema v13 disposable PostgreSQL migration", () => {
+describeDisposablePostgres("schema v13-to-v14 disposable PostgreSQL migration", () => {
   const suffix = randomUUID().replaceAll("-", "");
   const upgradeName = `ogc_v13_upgrade_${suffix}`;
   const bootstrapName = `ogc_v13_bootstrap_${suffix}`;
@@ -35,7 +36,7 @@ describeDisposablePostgres("schema v13 disposable PostgreSQL migration", () => {
     await admin.end({ timeout: 5 });
   }, 60_000);
 
-  it("converges from v12 and a fresh V9 through V13 bootstrap", async () => {
+  it("converges from v12 and a fresh V9 through V14 bootstrap", async () => {
     await admin.unsafe(`CREATE DATABASE ${quoteIdentifier(upgradeName)}`);
     await admin.unsafe(`CREATE DATABASE ${quoteIdentifier(bootstrapName)}`);
     const upgrade = postgres(withDatabase(adminUrl!, upgradeName), { max: 1, prepare: false });
@@ -54,21 +55,24 @@ describeDisposablePostgres("schema v13 disposable PostgreSQL migration", () => {
       await upgrade`INSERT INTO ogc_schema_state (singleton, version) VALUES (true, 12)`;
       await executeStatements(upgrade, V13_DATABASE_MIGRATIONS);
       await upgrade`UPDATE ogc_schema_state SET version=13, updated_at=now() WHERE singleton=true`;
+      await executeStatements(upgrade, V14_DATABASE_MIGRATIONS);
+      await upgrade`UPDATE ogc_schema_state SET version=14, updated_at=now() WHERE singleton=true`;
 
       await executeStatements(bootstrap, DATABASE_MIGRATIONS);
       await bootstrap`CREATE TABLE ogc_schema_state (
         singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton = true),
         version integer NOT NULL CHECK (version > 0),
         updated_at timestamptz NOT NULL DEFAULT now())`;
-      await bootstrap`INSERT INTO ogc_schema_state (singleton, version) VALUES (true, 13)`;
+      await bootstrap`INSERT INTO ogc_schema_state (singleton, version) VALUES (true, 14)`;
 
-      expect(DATABASE_SCHEMA_VERSION).toBe(13);
+      expect(DATABASE_SCHEMA_VERSION).toBe(14);
       expect(DATABASE_MIGRATIONS).toEqual([
         ...V9_DATABASE_MIGRATIONS,
         ...V10_DATABASE_MIGRATIONS,
         ...V11_DATABASE_MIGRATIONS,
         ...V12_DATABASE_MIGRATIONS,
-        ...V13_DATABASE_MIGRATIONS
+        ...V13_DATABASE_MIGRATIONS,
+        ...V14_DATABASE_MIGRATIONS
       ]);
       expect(await schemaShape(upgrade)).toEqual(await schemaShape(bootstrap));
       await expectV13ExpiryGuards(upgrade, suffix);
@@ -90,9 +94,9 @@ async function expectV13ExpiryGuards(sql: postgres.Sql, suffix: string): Promise
   const futureSource = `source-future-${suffix}`;
 
   await sql`INSERT INTO public_search_surface_authorities
-    (authority_version,surface_id,surface_version,environment,locale_capabilities,region_capabilities,
+    (authority_version,adapter_id,provider_id,product_id,model_id,adapter_version,surface_id,surface_version,environment,locale_capabilities,region_capabilities,
      terms_reviewed_at,evidence_references,active,captured_at)
-    VALUES (${authority},'surface-v13','v1','staging','["zh-CN"]','["CN"]',now(),'[]',true,now())`;
+    VALUES (${authority},'fixture','fixture-provider','fixture-search','fixture-model','fixture-v1','surface-v13','v1','staging','["zh-CN"]','["CN"]',now(),'[]',true,now())`;
   await sql`INSERT INTO market_snapshot_questions
     (id,cache_identity,normalized_question,question_hash,locale,region,surface_authority_version,
      surface_id,surface_version,fanout_version,status,completion_version)

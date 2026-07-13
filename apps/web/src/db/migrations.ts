@@ -1484,11 +1484,13 @@ export const V14_DATABASE_MIGRATIONS = [
   `ALTER TABLE public_search_surface_authorities ADD COLUMN IF NOT EXISTS product_id text`,
   `ALTER TABLE public_search_surface_authorities ADD COLUMN IF NOT EXISTS model_id text`,
   `ALTER TABLE public_search_surface_authorities ADD COLUMN IF NOT EXISTS adapter_version text`,
+  `ALTER TABLE public_search_surface_authorities DISABLE TRIGGER public_search_surface_authorities_immutability_trigger`,
   `UPDATE public_search_surface_authorities
    SET adapter_id='historical-unbound-v1', provider_id='historical-unbound-v1',
        product_id='historical-unbound-v1', model_id='historical-unbound-v1',
        adapter_version='historical-unbound-v1'
    WHERE adapter_id IS NULL OR provider_id IS NULL OR product_id IS NULL OR model_id IS NULL OR adapter_version IS NULL`,
+  `ALTER TABLE public_search_surface_authorities ENABLE TRIGGER public_search_surface_authorities_immutability_trigger`,
   `ALTER TABLE public_search_surface_authorities ALTER COLUMN adapter_id SET NOT NULL`,
   `ALTER TABLE public_search_surface_authorities ALTER COLUMN provider_id SET NOT NULL`,
   `ALTER TABLE public_search_surface_authorities ALTER COLUMN product_id SET NOT NULL`,
