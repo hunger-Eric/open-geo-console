@@ -5,6 +5,7 @@ import type { AiReportRow, ScanJobRow } from "@/db/schema";
 import {
   createWorkerPublicSourceForensicsDependencies,
   isMatchingRecommendationWebsiteFoundation,
+  resolvePublicSourceRunScope,
   resolveRecommendationFulfillmentTarget,
   resolveRecommendationFoundationTarget
 } from "./processor";
@@ -44,6 +45,10 @@ describe("recommendation website-foundation resume contract", () => {
 });
 
 describe("worker V2 public-source collaborators", () => {
+  it("uses the exact certified surface locale instead of compact report chrome locale", () => {
+    expect(resolvePublicSourceRunScope(runtime())).toEqual({ locale: "zh-CN", region: "CN" });
+  });
+
   it("binds snapshot resolution and persisted checkpoints to the leased job, while deferring report persistence to terminalization", async () => {
     const job = { id: "job-v2", reportId: "report-v2", locale: "zh-CN", productContract: "recommendation_forensics_v1" } as unknown as ScanJobRow;
     let checkpoint: ScanJobRow["checkpoint"] = {};

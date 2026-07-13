@@ -527,12 +527,21 @@ async function finalizeRecommendationJob(input: {
       }, runtime)
     });
     const result = await runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
-      locale: input.websiteFoundation.provenance.locale, region: process.env.OGC_PUBLIC_SEARCH_REGION?.trim() || "CN",
+      ...resolvePublicSourceRunScope(dependencies),
       targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies, signal: input.signal });
     await terminalize(result.report, result.commercialSnapshotRefs);
     return;
   }
   throw new HistoricalRecommendationRuntimeRetiredError();
+}
+
+/**
+ * Report chrome uses compact locales (for example `zh`), while the certified
+ * public-search surface owns its exact provider locale (for example `zh-CN`).
+ * V2 questions, snapshots, and artifacts must be bound to that surface.
+ */
+export function resolvePublicSourceRunScope(dependencies: Pick<PublicSourceForensicsDependencies, "authority">): { locale: string; region: string } {
+  return { locale: dependencies.authority.surface.locale, region: dependencies.authority.surface.region };
 }
 
 export interface WorkerPublicSourceForensicsCollaborators {
