@@ -168,4 +168,4 @@ The protected-staging MiMo surface needed roughly 27 seconds for Chinese B2B and
 
 ## 2026-07-13: MiMo staging certification keys are Preview secrets, not local artifacts
 
-The re-signed inactive MiMo authority uses an independently generated HMAC stored as a sensitive Vercel Preview value, with a separate key ID/version. A local process may use that value only while creating its artifact; it must never retain, commit, print or substitute it. Activation remains blocked until job-bound checkpoint, safe-retrieval and canonical-artifact collaborators are connected and verified.
+The re-signed inactive MiMo authority uses an independently generated HMAC stored as a sensitive Vercel Preview value, with a separate key ID/version. A local process may use that value only while creating its artifact; it must never retain, commit, print or substitute it. Job-bound checkpoint, safe-retrieval and canonical-artifact collaborators are now implemented and locally verified; activation remains blocked on protected-staging paid, delivery/refund and outage evidence.

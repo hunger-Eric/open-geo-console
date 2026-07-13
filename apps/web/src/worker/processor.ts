@@ -17,10 +17,12 @@ import {
 } from "@open-geo-console/ai-report-engine";
 import { auditSite, type GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { RobotsPolicy } from "@open-geo-console/site-crawler";
+import type { CanonicalBuyerQuestion, PublicSearchSurfaceAdapter, PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import { createHash } from "node:crypto";
 import { checkpointScanJob, failScanJob, isBillableCoverage, terminalizeScanJob } from "@/db/jobs";
 import { recordPaidJobOutcome } from "@/db/commercial-refunds";
 import { terminalizePaidPublicSourceReport } from "@/db/public-source-commerce";
+import { getSourceForensicReportForJob, saveSourceForensicReport } from "@/db/source-forensic-reports";
 import {
   completeGeoReportTechnical,
   failGeoReportTechnical,
@@ -39,8 +41,12 @@ import { projectFreeAiReport } from "@/report/visibility";
 import { createSafeFetch } from "@/server/safe-fetch";
 import { captureReportVisualEvidence } from "./visual-evidence";
 import { createProductionPublicSourceForensicsDependencies } from "@/public-source-forensics/production-runtime";
-import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
+import { createPublicSourceArtifactReadinessGate } from "@/public-source-forensics/artifact-readiness";
+import { exportCanonicalArtifactHtmlPdf } from "@/report/pdf-export";
+import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline, type ArtifactReadinessGate, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
 import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-runtime";
+import { executePublicSourceRetrieval } from "./public-source-retriever";
+import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
 import {
   calculateEffectiveCoverage,
   determineResumeStage,
@@ -431,18 +437,164 @@ async function finalizeRecommendationJob(input: {
   fulfillmentTarget: "recommendation_v1" | "recommendation_v2";
 }): Promise<void> {
   if (input.fulfillmentTarget === "recommendation_v2") {
-    const dependencies = await createProductionPublicSourceForensicsDependencies();
+    let checkpoint = input.checkpoint;
+    const dependencies = await createProductionPublicSourceForensicsDependencies(process.env, {
+      createDependencies: async (runtime) => createWorkerPublicSourceForensicsDependencies({
+        job: input.job,
+        workerId: input.workerId,
+        coverage: input.coverage,
+        readCheckpoint: () => checkpoint,
+        onCheckpointSaved: async (next) => { checkpoint = next; },
+        retrieveSource: createWorkerPublicSourceRetriever(),
+        // This verifies the canonical V2 HTML and a real Chromium PDF before the
+        // atomic terminalization boundary; it never persists a report itself.
+        artifactReadiness: createWorkerPublicSourceArtifactReadinessGate()
+      }, runtime)
+    });
     if (!dependencies) throw new PublicSourceAuthorityUnavailableError("Public-source forensics authority is not installed.");
     const result = await runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
       locale: input.websiteFoundation.provenance.locale, region: process.env.OGC_PUBLIC_SEARCH_REGION?.trim() || "CN",
       targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies });
-    const checkpoint = { ...input.checkpoint, recommendationForensics: { questionsGenerated: true, reportSaved: true }, publicSourceForensics: result.checkpoint };
+    checkpoint = { ...checkpoint, recommendationForensics: { questionsGenerated: true, reportSaved: true }, publicSourceForensics: result.checkpoint };
     await saveStageCheckpoint(input.job, input.workerId, "synthesizing", 99, checkpoint);
     await terminalizePaidPublicSourceReport({ report: result.report, workerId: input.workerId, checkpointIdentityHash: result.checkpoint.identityHash,
       coverage: input.coverage, snapshotRefs: result.commercialSnapshotRefs });
     return;
   }
   throw new HistoricalRecommendationRuntimeRetiredError();
+}
+
+export interface WorkerPublicSourceForensicsCollaborators {
+  resolveSnapshot: typeof resolvePublicSourceSnapshot;
+  checkpointJob: typeof checkpointScanJob;
+  getReport: typeof getSourceForensicReportForJob;
+  saveReport: typeof saveSourceForensicReport;
+}
+
+export interface WorkerPublicSourceForensicsDependencyInput {
+  job: Pick<ScanJobRow, "id" | "reportId">;
+  workerId: string;
+  coverage: { plannedPages: number; successfulPages: number; failedPages: number };
+  readCheckpoint: () => WorkerCheckpoint;
+  onCheckpointSaved: (checkpoint: WorkerCheckpoint) => Promise<void>;
+  retrieveSource?: PublicSourceRetriever;
+  artifactReadiness?: ArtifactReadinessGate;
+  collaborators?: WorkerPublicSourceForensicsCollaborators;
+}
+
+/**
+ * Creates the job-bound V2 collaborators used by the Worker only.  The report
+ * remains deferred so `terminalizePaidPublicSourceReport` is the sole writer
+ * of report, snapshot binding, job, refund, and email terminal state.
+ */
+export function createWorkerPublicSourceForensicsDependencies(
+  input: WorkerPublicSourceForensicsDependencyInput,
+  runtime: { adapter: PublicSearchSurfaceAdapter; authority: PublicSearchSurfaceAuthority }
+): PublicSourceForensicsDependencies {
+  if (!input.retrieveSource || !input.artifactReadiness) {
+    throw new PublicSourceAuthorityUnavailableError("Required public-source Worker collaborator is unavailable.");
+  }
+  const collaborators = input.collaborators ?? {
+    resolveSnapshot: resolvePublicSourceSnapshot,
+    checkpointJob: checkpointScanJob,
+    getReport: getSourceForensicReportForJob,
+    saveReport: saveSourceForensicReport
+  };
+  const requireJob = (jobId: string) => {
+    if (jobId !== input.job.id) throw new PublicSourceAuthorityUnavailableError("Public-source collaborator job identity mismatch.");
+  };
+  return {
+    authority: runtime.authority,
+    resolveSnapshot: async ({ questionId, fanout, evidenceCutoffAt }) => collaborators.resolveSnapshot({
+      authority: runtime.authority,
+      adapter: runtime.adapter,
+      question: questionFromFanout(questionId, fanout),
+      fanout,
+      evidenceCutoffAt,
+      leaseOwner: `public-source:${input.job.id}:${input.workerId}`,
+      retrieveSource: input.retrieveSource
+    }),
+    getCheckpoint: async (jobId) => {
+      requireJob(jobId);
+      return input.readCheckpoint().publicSourceForensics ?? null;
+    },
+    saveCheckpoint: async (jobId, publicSourceForensics) => {
+      requireJob(jobId);
+      const next = { ...input.readCheckpoint(), publicSourceForensics };
+      await collaborators.checkpointJob(input.job.id, input.workerId, {
+        stage: "synthesizing",
+        progress: 95,
+        checkpoint: next as JobCheckpoint,
+        ...input.coverage
+      });
+      await input.onCheckpointSaved(next);
+    },
+    getReport: async (jobId) => {
+      requireJob(jobId);
+      return collaborators.getReport(jobId);
+    },
+    saveReport: collaborators.saveReport,
+    artifactReadiness: input.artifactReadiness,
+    deferReportPersistence: true
+  };
+}
+
+function questionFromFanout(questionId: string, fanout: SearchQueryFanout): CanonicalBuyerQuestion {
+  if (questionId !== fanout.questionId || !fanout.questionSetVersion.trim()) {
+    throw new PublicSourceAuthorityUnavailableError("Public-source fanout identity is invalid.");
+  }
+  const canonical = fanout.queries.find((query) => query.derivationRuleId === "query-canonical-v1");
+  if (!canonical || canonical.questionId !== questionId || canonical.locale !== fanout.surface.locale || canonical.region !== fanout.surface.region) {
+    throw new PublicSourceAuthorityUnavailableError("Public-source canonical query is unavailable.");
+  }
+  const normalizedText = canonical.exactQuery.normalize("NFKC").replace(/\s+/g, " ").trim();
+  if (!normalizedText) throw new PublicSourceAuthorityUnavailableError("Public-source canonical query is empty.");
+  return {
+    id: questionId,
+    questionSetVersion: fanout.questionSetVersion,
+    locale: fanout.surface.locale,
+    region: fanout.surface.region,
+    kind: "supplier_discovery",
+    exactText: normalizedText,
+    normalizedText,
+    derivation: { ruleId: "worker-fanout-canonical-v1", evidenceSourceIds: [], subject: normalizedText, broadened: false }
+  };
+}
+
+function createWorkerPublicSourceRetriever(): PublicSourceRetriever {
+  return async ({ observation, result, signal }): Promise<InjectedPublicSourceRetrieval> => {
+    const fact = await executePublicSourceRetrieval({
+      observationId: observation.observationId,
+      queryId: observation.queryId,
+      resultUrl: result.url
+    }, { signal });
+    return {
+      fact,
+      source: {
+        retrievalState: fact.retrievalState === "available" ? "available" : "inaccessible",
+        ...(fact.retrievalState === "available" ? {
+          excerpt: fact.verifiedExcerpt ?? null,
+          excerptHash: fact.normalizedContentHash ?? null,
+          contentHash: fact.normalizedContentHash ?? null
+        } : {}),
+        sourceCategory: "unknown",
+        entities: fact.entityMentions ?? [],
+        claims: fact.claims ?? [],
+        contradictions: [],
+        evidenceFamilyIdentity: createHash("sha256").update(fact.finalUrl ?? fact.resultUrl).digest("hex")
+      }
+    };
+  };
+}
+
+function createWorkerPublicSourceArtifactReadinessGate(): ArtifactReadinessGate {
+  return createPublicSourceArtifactReadinessGate({
+    loadTechnicalReport: async (reportId, jobId) => {
+      const foundation = await getAiReport(reportId, "deep", "recommendation_forensics_v1");
+      return foundation?.jobId === jobId ? foundation.technicalPayload ?? null : null;
+    },
+    materializePdf: async ({ html }) => exportCanonicalArtifactHtmlPdf(html)
+  });
 }
 
 async function recordCommercialOutcomeSafely(

@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import type { PublicSearchSurfaceAdapter, PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import type { AiReportRow, ScanJobRow } from "@/db/schema";
 import {
+  createWorkerPublicSourceForensicsDependencies,
   isMatchingRecommendationWebsiteFoundation,
   resolveRecommendationFulfillmentTarget,
   resolveRecommendationFoundationTarget
@@ -33,9 +36,97 @@ describe("recommendation website-foundation resume contract", () => {
     const job = { id: "job-1", reportId: "report-1", locale: "en", productContract: "recommendation_forensics_v1" } as ScanJobRow;
     const foundation = { jobId: "job-1", reportId: "report-1", locale: "en", tier: "deep", payload: { tier: "deep", targetUrl: "https://x.example/" } } as AiReportRow;
     const target = resolveRecommendationFoundationTarget({
-      discoverySnapshot: { targetUrl: "https://x.example/", candidates: [], robotsPolicy: { rules: [], sitemaps: [] }, estimatedPages: 1 }
+      discoverySnapshot: { targetUrl: "https://x.example/", candidates: [], robotsPolicy: { rules: [], sitemaps: [], userAgent: "OpenGeoConsoleBot" }, estimatedPages: 1 }
     }, foundation, "https://x.example/a");
     expect(target).toBe("https://x.example/");
     expect(isMatchingRecommendationWebsiteFoundation(job, target, foundation)).toBe(true);
   });
 });
+
+describe("worker V2 public-source collaborators", () => {
+  it("binds snapshot resolution and persisted checkpoints to the leased job, while deferring report persistence to terminalization", async () => {
+    const job = { id: "job-v2", reportId: "report-v2", locale: "zh-CN", productContract: "recommendation_forensics_v1" } as unknown as ScanJobRow;
+    let checkpoint: ScanJobRow["checkpoint"] = {};
+    const checkpointJob = vi.fn(async (_id: string, _worker: string, input: { checkpoint?: ScanJobRow["checkpoint"] }) => {
+      checkpoint = input.checkpoint ?? {};
+      return job;
+    });
+    const resolveSnapshot = vi.fn(async (input: { question: { id: string; normalizedText: string }; fanout: SearchQueryFanout; leaseOwner: string }) => {
+      expect(input.question).toMatchObject({ id: "question-1", normalizedText: "independent logistics suppliers" });
+      expect(input.leaseOwner).toBe("public-source:job-v2:worker-v2");
+      return snapshot(input.fanout);
+    });
+    const dependencies = createWorkerPublicSourceForensicsDependencies({
+      job,
+      workerId: "worker-v2",
+      coverage: { plannedPages: 3, successfulPages: 3, failedPages: 0 },
+      readCheckpoint: () => checkpoint as never,
+      onCheckpointSaved: async () => undefined,
+      artifactReadiness: { async verify() {} },
+      retrieveSource: async () => ({ fact: retrieval(), source: sourceEvidence() }),
+      collaborators: {
+        resolveSnapshot,
+        checkpointJob,
+        getReport: async () => null,
+        saveReport: async (report) => report as RecommendationForensicReportV2
+      }
+    }, runtime());
+
+    const fanout = fixtureFanout();
+    await dependencies.resolveSnapshot({ questionId: fanout.questionId, fanout, evidenceCutoffAt: "2030-01-02T00:00:00.000Z" });
+    await dependencies.saveCheckpoint(job.id, checkpointValue());
+
+    expect(resolveSnapshot).toHaveBeenCalledOnce();
+    expect(checkpointJob).toHaveBeenCalledWith(job.id, "worker-v2", expect.objectContaining({
+      stage: "synthesizing", progress: 95,
+      checkpoint: expect.objectContaining({ publicSourceForensics: checkpointValue() })
+    }));
+    expect(dependencies.deferReportPersistence).toBe(true);
+    await expect(dependencies.getCheckpoint("other-job")).rejects.toThrow(/job/i);
+    await expect(dependencies.saveCheckpoint("other-job", checkpointValue())).rejects.toThrow(/job/i);
+  });
+
+  it("fails closed when the safe retrieval or artifact collaborator is absent", () => {
+    const input = {
+      job: { id: "job-v2", reportId: "report-v2", locale: "zh-CN", productContract: "recommendation_forensics_v1" } as unknown as ScanJobRow,
+      workerId: "worker-v2",
+      coverage: { plannedPages: 3, successfulPages: 3, failedPages: 0 },
+      readCheckpoint: () => ({}) as never,
+      onCheckpointSaved: async () => undefined,
+      collaborators: { resolveSnapshot: vi.fn(), checkpointJob: vi.fn(), getReport: async () => null, saveReport: async (report: unknown) => report as RecommendationForensicReportV2 }
+    };
+    expect(() => createWorkerPublicSourceForensicsDependencies(input, runtime())).toThrow(/collaborator/i);
+  });
+});
+
+function runtime(): { adapter: PublicSearchSurfaceAdapter; authority: PublicSearchSurfaceAuthority } {
+  const surface = { surfaceId: "mimo-native-web-search", providerId: "xiaomi-mimo", productId: "native-web-search", surfaceKind: "documented_api" as const,
+    contractVersion: "public-search-surface-v1", surfaceVersion: "mimo-native-web-search-v1", adapterVersion: "mimo-web-search-adapter-v1", locale: "zh-CN", region: "CN" };
+  const authority: PublicSearchSurfaceAuthority = { authorityId: "authority-v2", environment: "protected_staging", surface, active: true,
+    certifiedAt: "2030-01-01T00:00:00.000Z", evidenceReference: "fixture://review", supportedLocales: ["zh-CN"], supportedRegions: ["CN"] };
+  return { authority, adapter: { id: "mimo", surface, authority, search: async () => { throw new Error("not called"); }, classifyError: () => "unavailable" } };
+}
+
+function fixtureFanout(): SearchQueryFanout {
+  const { authority } = runtime();
+  return { questionId: "question-1", questionSetVersion: "buyer-questions-v1", fanoutVersion: "public-search-fanout-v1", surface: authority.surface,
+    queries: [{ id: "query-1", questionId: "question-1", fanoutVersion: "public-search-fanout-v1", locale: "zh-CN", region: "CN", exactQuery: "independent logistics suppliers", derivationRuleId: "query-canonical-v1", resultDepth: 3 }],
+    budget: { maxRequests: 1, maxResults: 3, timeoutMs: 30_000, maxCostMicros: 100 } };
+}
+
+function checkpointValue() {
+  return { identityHash: "checkpoint-hash", methodology: "public_search_source_forensics_v1" as const, questionSetVersion: "buyer-questions-v1", fanoutVersion: "public-search-fanout-v1", authorityId: "authority-v2", snapshotIds: ["snapshot-1"], websiteFoundationHash: "foundation-hash", evidenceCutoffAt: "2030-01-02T00:00:00.000Z", locale: "zh-CN", region: "CN", adapterIdentityHash: "adapter-hash" };
+}
+
+function snapshot(fanout: SearchQueryFanout) {
+  return { snapshotId: "snapshot-1", cacheIdentity: "cache-1", questionId: fanout.questionId, observedAt: "2030-01-02T00:00:00.000Z", ageMs: 0,
+    collectedForThisRun: true, refreshAttempted: true, refreshFailed: false, sufficientlyEvidenced: true, observations: [], retrievals: [], actualCostMicros: 0, allocatedCostMicros: 0, avoidedCostMicros: 0 };
+}
+
+function retrieval() {
+  return { observationId: "observation-1", queryId: "query-1", resultUrl: "https://source.example/", retrievalState: "available" as const, publiclyRoutable: true, robotsAllowed: true, accessBarrier: "none" as const, normalizedText: "source", normalizedContentHash: "sha256:fixture", verifiedExcerpt: "source" };
+}
+
+function sourceEvidence() {
+  return { retrievalState: "available" as const, sourceCategory: "unknown" as const, entities: [], claims: [], contradictions: [], evidenceFamilyIdentity: "evidence-family" };
+}

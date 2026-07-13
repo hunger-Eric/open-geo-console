@@ -6,7 +6,7 @@ Plan: `docs/superpowers/specs/2026-07-12-public-web-recommendation-source-forens
 
 ## Executive conclusion
 
-MiMo is now the first compile-time registered public-search adapter behind an independent configuration and identity boundary. Its redacted protected-staging probe and a re-signed inactive authority are complete, but it is not activated: no active exact authority, complete Worker artifact/checkpoint collaborators, or authorized V2 customer report exists, so catalog and checkout remain closed.
+MiMo is now the first compile-time registered public-search adapter behind an independent configuration and identity boundary. Its redacted protected-staging probe and a re-signed inactive authority are complete, but it is not activated: no active exact authority or authorized V2 customer report exists, so catalog and checkout remain closed.
 
 Read-only database evidence on 2026-07-13 found zero non-terminal recommendation rows, zero non-terminal V1 rows, and zero terminal commercial jobs with a reserved credit in both staging and production. The normal CLI audits were not used because they can bootstrap/migrate schema state; no database migration was authorized in this adapter implementation.
 
@@ -28,7 +28,7 @@ This is an implementation-complete framework, not a claim that a live public-sea
 ### Phase 5 — fulfillment and commercial state machine
 
 - Added coverage freshness boundaries, cache/resume behavior and bounded collection budgets.
-- Added exact-authority runtime collaborator validation and a V2 snapshot lease/attempt/observation resolver. It persists structured annotations only and marks un-fetched sources `not_retrieved` rather than fabricating evidence.
+- Added exact-authority runtime collaborator validation, a job-bound V2 snapshot lease/attempt/observation resolver and safe source retrieval. It persists structured annotations only and marks un-fetched sources `not_retrieved` rather than fabricating evidence.
 - Made V2 report persistence, terminal job state, credit settlement/refund, order/refund state and email intent one PostgreSQL transaction.
 - Kept PostgreSQL as the sole job, payment, delivery and access authority.
 
@@ -36,7 +36,7 @@ This is an implementation-complete framework, not a claim that a live public-sea
 
 - Added discriminated V1/V2 artifact models and version-routed HTML/PDF rendering.
 - Made the V2 HTML component canonical and required PDF materialization from that exact component.
-- Added an artifact-readiness gate that rejects missing or malformed PDF bytes before commercial terminalization.
+- Added an artifact-readiness gate that renders the canonical V2 component with print CSS and rejects a missing or malformed real Chromium PDF before commercial terminalization, without persisting the report early.
 
 ### Phase 7 — V1 retirement from active fulfillment
 
@@ -100,20 +100,20 @@ New purchases use report version 2 and methodology `public_search_source_forensi
 | Staging and production `db:audit` | Final pass in both environments | No terminal commercial job retained reserved credit |
 | PostgreSQL integration suite in final pass | Unproven: command exceeded the 244-second execution ceiling | Must not be reported as a pass; rerun without the tool ceiling |
 | Fresh-database fault-injection tests | Passed against isolated local PostgreSQL 16 on 2026-07-13 | v9-to-v14 bootstrap/upgrade, snapshot, repository and atomic-commerce suites passed; not staging/production evidence |
-| Live V2 browser/PDF customer drill | External unproven | Snapshot resolver exists but is not yet connected to the job-bound checkpoint, safe-retrieval and artifact collaborators |
+| Worker collaborator focused tests | Pass | Job-bound checkpoint, V2 safe retrieval, deferred report persistence, canonical artifact gate, and missing-collaborator fail-closed behavior are covered locally |
+| Live V2 browser/PDF customer drill | External unproven | Worker collaborators are implemented, but no paid protected-staging customer drill has exercised them |
 | Live vendor certification/failure drills | External unproven | MiMo probe/certification is inactive only; runtime remains false |
 | `git diff --check` | Pass | No whitespace error detected |
-| CodeGraph sync/status | Pass: index current, 412 files, 4,386 nodes, 10,982 edges | Structural index matches the final workspace |
+| CodeGraph sync/status | Pass: index current, 430 files, 4,629 nodes, 11,546 edges | Structural index matches the workspace |
 
 These results were collected after the final documentation edits. The isolated PostgreSQL suite is proven; external live gates remain deliberately classified as unproven rather than inferred from deterministic or local capability evidence.
 
 ## Remaining gates before enabling sales
 
-1. Connect the exact runtime collaborator seam to job-bound checkpoint persistence, V2 safe retrieval and canonical artifact readiness; retain fail-closed behavior for every absent collaborator.
-2. Activate the separately reviewed inactive authority only in protected staging, then confirm catalog/checkout remain closed for all identity mismatches.
-3. Complete a paid protected-staging V2 drill from signed payment Webhook through collection, report, canonical HTML, materialized PDF, delivery and access.
-4. Execute timeout, partial coverage, unusable evidence, refund, retry/resume and artifact-failure drills.
-5. Only after all evidence passes, make the separately reviewed production activation decision.
+1. Activate the separately reviewed inactive authority only in protected staging, then confirm catalog/checkout remain closed for all identity mismatches.
+2. Complete a paid protected-staging V2 drill from signed payment Webhook through collection, report, canonical HTML, materialized PDF, delivery and access.
+3. Execute timeout, partial coverage, unusable evidence, refund, retry/resume and artifact-failure drills.
+4. Only after all evidence passes, make the separately reviewed production activation decision.
 
 ## Commit trail
 
