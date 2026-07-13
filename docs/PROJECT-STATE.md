@@ -12,6 +12,8 @@ The paid contract remains `recommendation_forensics_v1`, but every new order is 
 
 The provider-independent adapter layer now resolves `OGC_PUBLIC_SEARCH_ADAPTER` only from compile-time-reviewed factories. MiMo is the first candidate and reads only `OGC_PUBLIC_SEARCH_MIMO_*`; no live certification artifact, active authority, or artifact-readiness gate exists, so admission remains fail-closed.
 
+On 2026-07-13, direct read-only staging and production PostgreSQL checks found zero non-terminal recommendation rows, zero non-terminal V1 rows, and zero terminal jobs with a reserved credit. The existing audit CLI was not used because its bootstrap behavior may migrate a schema-v13 database; it must be rerun only after a separately authorized schema-v14 rollout.
+
 - `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point. Chinese is the canonical unprefixed interface (`/`, `/reports/...`); English remains explicit under `/en`, and legacy `/zh/...` URLs permanently redirect to their unprefixed equivalents.
 - `packages/geo-auditor` owns deterministic technical evidence and the reproducible GEO score.
 - `packages/site-crawler` owns URL/SSRF safety, registrable site identity, robots/sitemap/link discovery, HTML extraction, template clustering and representative-page selection.
