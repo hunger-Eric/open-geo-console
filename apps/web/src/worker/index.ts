@@ -13,8 +13,10 @@ import { positiveInteger, readWorkerConfig } from "./config";
 import { runPostgresPollingLane, runRealtimeLane } from "./drain";
 import { runRecordedBatchDrain } from "./drain-batch";
 import { WorkerPresenceReporter } from "./presence";
+import { createStagingLiveDrill } from "./staging-live-drill";
 
 const config = readWorkerConfig();
+const liveDrill = createStagingLiveDrill();
 const workerId = `ogc-worker-${config.tier}-${randomUUID()}`;
 let stopping = false;
 
@@ -35,7 +37,7 @@ const runner = {
   claim: claimScanJob,
   process: async (job: NonNullable<Awaited<ReturnType<typeof claimScanJob>>>, owner: string) => {
     process.stdout.write(`Processing ${job.tier} AI report job ${job.id}.\n`);
-    await processScanJob(job, owner);
+    await processScanJob(job, owner, { liveDrill });
   }
 };
 

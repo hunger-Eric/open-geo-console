@@ -49,6 +49,7 @@ import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { JobExecutionLease, configuredJobHardDeadlineMs } from "./job-execution";
 import { normalizeJobError } from "./job-errors";
 import { phaseForStage, recoveryEnvelope } from "./job-state";
+import type { StagingLiveDrill } from "./staging-live-drill";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
 import {
   calculateEffectiveCoverage,
@@ -88,7 +89,7 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
   technicalCompleted?: boolean;
 }
 
-export async function processScanJob(job: ScanJobRow, workerId: string): Promise<void> {
+export async function processScanJob(job: ScanJobRow, workerId: string, options: { liveDrill?: StagingLiveDrill } = {}): Promise<void> {
   const execution = new JobExecutionLease({
     hardDeadlineMs: configuredJobHardDeadlineMs(),
     heartbeat: () => heartbeatScanJob(job.id, workerId)
@@ -125,7 +126,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
           job, workerId, checkpoint, websiteFoundation: existingFoundation.payload,
           targetUrl: canonicalTarget,
           coverage: { plannedPages: job.plannedPages, successfulPages: job.successfulPages, failedPages: job.failedPages },
-          fulfillmentTarget, checkpointJob
+          fulfillmentTarget, checkpointJob, liveDrill: options.liveDrill
         });
         return;
       }
@@ -212,6 +213,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
         planningCompleted: true
       };
       await saveCheckpoint("fetching", 35, checkpoint);
+      options.liveDrill?.inject({ jobId: job.id, fault: "crawl" });
     }
 
     const crawl = await fetchPlannedPagesWithRecovery<StoredPageEvidence>({
@@ -259,6 +261,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
       successfulPages: crawl.pages.length,
       failedPages: failureCount(checkpoint)
     });
+    options.liveDrill?.inject({ jobId: job.id, fault: "model" });
 
     let analyzed;
     try {
@@ -358,11 +361,12 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
         contractVersion: 2,
         websiteFoundation: { completed: true, synthesisInputHash }
       };
-      await checkpointJob({ stage: "synthesizing", phase: "public_source_preflight", progress: 90, checkpoint: checkpoint as JobCheckpoint,
+      const preflightCheckpoint = await checkpointJob({ stage: "synthesizing", phase: "public_source_preflight", progress: 90, checkpoint: checkpoint as JobCheckpoint,
         plannedPages: effectiveCoverage.effectivePlannedPages,
         successfulPages: effectiveCoverage.analyzedPages,
         failedPages: failureCount(checkpoint)
       });
+      checkpoint = normalizeCheckpoint(preflightCheckpoint.checkpoint);
       await finalizeRecommendationJob({
         job, workerId, checkpoint, websiteFoundation: reportToPersist, targetUrl: discovery.targetUrl,
         fulfillmentTarget, coverage: {
@@ -370,7 +374,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string): Promise
           successfulPages: effectiveCoverage.analyzedPages,
           failedPages: failureCount(checkpoint)
         },
-        signal: execution.controller.signal, checkpointJob
+        signal: execution.controller.signal, checkpointJob, liveDrill: options.liveDrill
       });
       return;
     }
@@ -471,19 +475,30 @@ async function finalizeRecommendationJob(input: {
   fulfillmentTarget: "recommendation_v1" | "recommendation_v2";
   checkpointJob: WorkerCheckpointWriter;
   signal?: AbortSignal;
+  liveDrill?: StagingLiveDrill;
 }): Promise<void> {
   if (input.fulfillmentTarget === "recommendation_v2") {
     let checkpoint = input.checkpoint;
     const artifactReadiness = createWorkerPublicSourceArtifactReadinessGate();
-    if (input.job.currentPhase === "artifact_verification" && checkpoint.pendingArtifactVerification) {
+    const checkpointPhase = () => recoveryEnvelope(checkpoint)?.phase;
+    const terminalize = async (report: RecommendationForensicReportV2, snapshotRefs: PublicSourceCommercialSnapshotRef[]) => {
+      if (checkpointPhase() !== "terminalization") {
+        const updated = await input.checkpointJob({ stage: "synthesizing", phase: "terminalization", progress: 99,
+          checkpoint: checkpoint as JobCheckpoint, ...input.coverage });
+        checkpoint = normalizeCheckpoint(updated.checkpoint);
+      }
+      input.liveDrill?.inject({ jobId: input.job.id, fault: "terminalization" });
+      await terminalizePaidPublicSourceReport({ report, workerId: input.workerId,
+        checkpointIdentityHash: checkpoint.publicSourceForensics?.identityHash ?? "", coverage: input.coverage, snapshotRefs });
+    };
+    if (["artifact_verification", "terminalization"].includes(checkpointPhase() ?? "") && checkpoint.pendingArtifactVerification) {
       input.signal?.throwIfAborted();
       await artifactReadiness.verify(checkpoint.pendingArtifactVerification.report);
       input.signal?.throwIfAborted();
-      await terminalizePaidPublicSourceReport({ report: checkpoint.pendingArtifactVerification.report, workerId: input.workerId,
-        checkpointIdentityHash: checkpoint.publicSourceForensics?.identityHash ?? "", coverage: input.coverage,
-        snapshotRefs: checkpoint.pendingArtifactVerification.commercialSnapshotRefs });
+      await terminalize(checkpoint.pendingArtifactVerification.report, checkpoint.pendingArtifactVerification.commercialSnapshotRefs);
       return;
     }
+    if (checkpointPhase() === "public_source_preflight") input.liveDrill?.inject({ jobId: input.job.id, fault: "v2_runtime" });
     const dependencies = await createProductionPublicSourceForensicsDependencies(process.env, {
       createDependencies: async (runtime) => createWorkerPublicSourceForensicsDependencies({
         job: input.job,
@@ -496,14 +511,14 @@ async function finalizeRecommendationJob(input: {
         // This verifies the canonical V2 HTML and a real Chromium PDF before the
         // atomic terminalization boundary; it never persists a report itself.
         artifactReadiness,
+        liveDrill: input.liveDrill,
         signal: input.signal
       }, runtime)
     });
     const result = await runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
       locale: input.websiteFoundation.provenance.locale, region: process.env.OGC_PUBLIC_SEARCH_REGION?.trim() || "CN",
       targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies, signal: input.signal });
-    await terminalizePaidPublicSourceReport({ report: result.report, workerId: input.workerId, checkpointIdentityHash: result.checkpoint.identityHash,
-      coverage: input.coverage, snapshotRefs: result.commercialSnapshotRefs });
+    await terminalize(result.report, result.commercialSnapshotRefs);
     return;
   }
   throw new HistoricalRecommendationRuntimeRetiredError();
@@ -524,6 +539,7 @@ export interface WorkerPublicSourceForensicsDependencyInput {
   checkpointJob: WorkerCheckpointWriter;
   retrieveSource?: PublicSourceRetriever;
   artifactReadiness?: ArtifactReadinessGate;
+  liveDrill?: StagingLiveDrill;
   signal?: AbortSignal;
   collaborators?: WorkerPublicSourceForensicsCollaborators;
 }
@@ -591,6 +607,7 @@ export function createWorkerPublicSourceForensicsDependencies(
         ...input.coverage
       });
       await input.onCheckpointSaved(normalizeCheckpoint(updated.checkpoint));
+      input.liveDrill?.inject({ jobId: input.job.id, fault: "artifact" });
     },
     getReport: async (jobId) => {
       requireJob(jobId);

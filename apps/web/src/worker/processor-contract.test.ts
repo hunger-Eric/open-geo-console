@@ -56,6 +56,7 @@ describe("worker V2 public-source collaborators", () => {
       expect(input.leaseOwner).toBe("public-source:job-v2:worker-v2");
       return snapshot(input.fanout);
     });
+    const liveDrill = { inject: vi.fn() };
     const dependencies = createWorkerPublicSourceForensicsDependencies({
       job,
       workerId: "worker-v2",
@@ -63,6 +64,7 @@ describe("worker V2 public-source collaborators", () => {
       readCheckpoint: () => checkpoint as never,
       onCheckpointSaved: async () => undefined,
       checkpointJob,
+      liveDrill,
       artifactReadiness: { async verify() {} },
       retrieveSource: async () => ({ fact: retrieval(), source: sourceEvidence() }),
       collaborators: {
@@ -82,6 +84,11 @@ describe("worker V2 public-source collaborators", () => {
       checkpoint: expect.objectContaining({ publicSourceForensics: checkpointValue() })
     }));
     expect(dependencies.deferReportPersistence).toBe(true);
+    await dependencies.prepareArtifactVerification?.({
+      jobId: job.id, report: {} as RecommendationForensicReportV2,
+      checkpoint: checkpointValue(), commercialSnapshotRefs: []
+    });
+    expect(liveDrill.inject).toHaveBeenCalledWith({ jobId: job.id, fault: "artifact" });
     await expect(dependencies.getCheckpoint("other-job")).rejects.toThrow(/job/i);
     await expect(dependencies.saveCheckpoint("other-job", checkpointValue())).rejects.toThrow(/job/i);
   });
