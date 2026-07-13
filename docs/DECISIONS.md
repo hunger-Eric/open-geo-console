@@ -157,3 +157,7 @@ The V2 report, snapshot refs, job terminal state, credit settlement/refund, paid
 Staging and production reached zero non-terminal V1 recommendation jobs before OpenAI/Perplexity runtime imports, credentials, flags and certification commands were removed from active admission and Worker graphs. Historical V1 rows, parsers, authorities and HTML/PDF rendering remain immutable and readable.
 
 V2 live admission requires one exact active public-search authority plus a non-fixture production registry, builder and artifact gate. The generic signed certification framework ships with an empty compile-time approved adapter registry, so it refuses before network access and the product remains fail-closed until a separately reviewed vendor plan is completed.
+
+## 2026-07-13: Public-search adapters are provider-independent and identity-bound
+
+`OGC_PUBLIC_SEARCH_ADAPTER` selects reviewed compile-time factories. MiMo is configured only through `OGC_PUBLIC_SEARCH_MIMO_*`; public-search runtime never reads or inherits `OGC_AI_*`. Exact adapter/provider/product/model/adapter-version/surface identity is persisted in schema v14 and bound into resume identity, so recovery cannot switch provider. Registration and a local probe are neither certification nor activation; catalog, checkout, Worker collection and production remain closed until every authority and artifact gate agrees.

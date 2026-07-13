@@ -6,6 +6,8 @@ Plan: `docs/superpowers/specs/2026-07-12-public-web-recommendation-source-forens
 
 ## Executive conclusion
 
+MiMo is now the first compile-time registered public-search adapter behind an independent configuration and identity boundary. It is not certified or activated: no signed live artifact, active exact authority, artifact-readiness gate, or authorized V2 customer report exists, so catalog and checkout remain closed.
+
 Phases 4–9 of the approved V2 plan are implemented. The repository now has a versioned, public-source-based recommendation-forensics pipeline whose persisted evidence, report construction, artifact rendering, commercial terminalization and certification admission are explicit and fail closed.
 
 This is an implementation-complete framework, not a claim that a live public-search vendor has been certified. The compile-time approved adapter registry is empty, there is no active exact V2 authority, and no authorized live V2 report exists. Catalog and checkout therefore remain closed. No developer fixture, historical answer-provider result, HTML snapshot, or unit test is presented as external production evidence.

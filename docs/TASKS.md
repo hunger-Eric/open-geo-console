@@ -79,7 +79,7 @@
 - [x] Verify private asset authorization, screenshot fallback states, desktop/mobile HTML browser QA, and PDF export QA.
 - [x] Configure Preview-only private staging object storage and visually verify a fresh paid deep report's real issue crop, context thumbnail, compact screenshots, viewport fallback, authorized HTML/PDF reads, and anonymous object-store denial.
 
-## Public-source recommendation forensics V2 (framework implemented; live adapter blocked)
+## Public-source recommendation forensics V2 (provider-independent adapter framework; live admission blocked)
 
 - [x] Approve `public_search_source_forensics_v1`, its non-model-attribution boundary, canonical buyer questions, shared market snapshots, customer isolation, freshness, evidence and commercial rules.
 - [x] Implement provider-neutral public-search contracts, deterministic fixtures, schema-v13 authorities/snapshots/attempts/observations/evidence/leases/report refs, and surface-neutral evidence graphs.
@@ -88,6 +88,7 @@
 - [x] Add version-dispatched private HTML/same-HTML PDF rendering, customer-safe coverage/freshness fields, vendor task package, website appendix and pre-terminal HTML/PDF readiness gate.
 - [x] Drain staging V1 work, verify zero non-terminal V1 rows in staging and production, retire OpenAI/Perplexity from active admission/Worker graphs, and preserve historical V1 read/render contracts.
 - [x] Add signed public-search certification artifact/path/install framework with an empty compile-time approved adapter registry; fixtures remain non-installable and admission remains closed.
+- [x] Add the compile-time approved registry, independent MiMo configuration/normalization, exact schema-v14 authority identity, redacted probe and signed-certification entry points; runtime remains closed without artifact readiness and an active authority.
 - [ ] Select and legally review one live public-search vendor, add it through a separate approved-adapter plan, create/manual-review/install/activate its signed artifact, and keep the runtime flag false until then.
 - [ ] Accept one real V2 paid report end to end: source collection/retrieval, immutable evidence, authorized HTML/PDF and anonymous `404`, transactional delivery/reply, settlement plus limited/failed refunds and outage drills.
 - [ ] Provide `OGC_TEST_DATABASE_ADMIN_URL` and dynamically run fresh-database schema-v13, V2 repository and atomic fault-injection PostgreSQL tests; current local acceptance records these suites as skipped rather than proven.
