@@ -78,8 +78,8 @@
 - [x] Retain same-HTML Chromium PDF materialization only as private Worker readiness/storage; remove customer PDF routes, buttons, print workspace, product copy, and email claims.
 - [x] Verify private asset authorization, screenshot fallback states, desktop/mobile HTML browser QA, and internal PDF readiness.
 - [x] Configure Preview-only private staging object storage and visually verify a fresh paid deep report's evidence images, authorized HTML reads, private internal PDF storage, and anonymous object-store denial.
-- [x] Enforce immutable new-report locale through model prompts, one bounded correction, a prospective final gate, localized system copy, and `repair_wait` on exhausted validation.
-- [x] Localize deterministic technical finding titles, descriptions, recommendations, and machine-readable asset summaries when materializing new combined revisions; preserve and label source-original page titles, H1 values, and URLs without rewriting historical artifacts.
+- [x] Enforce immutable new-report locale and `geo_v1` GEO terminology through model prompts, one bounded correction, a prospective final gate, localized system copy, and `repair_wait` on exhausted validation; preserve stable internal `seo` identifiers and legacy report display.
+- [x] Localize deterministic technical findings and machine-readable asset summaries for new combined revisions; detect exact duplicate and dominant-template page titles, present the page-specific title segment compactly with expandable full source evidence, and preserve source-original titles, H1 values, URLs, and historical artifacts unchanged.
 
 ## Combined paid report and one-time correction
 
