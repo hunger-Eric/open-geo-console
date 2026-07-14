@@ -525,9 +525,11 @@ describe("report validation and synthesis", () => {
   });
 
   it("corrects Chinese report prose once and keeps English evidence quotes", async () => {
-    const invalid = reportModelOutput(1);
-    const valid = chineseReportModelOutput();
-    const client = mockClient([invalid, valid]);
+    const invalid = chineseReportModelOutput();
+    (invalid.executiveSummary as Record<string, unknown>).overview = "The website clearly introduces the product.";
+    const client = mockClient([invalid, {
+      corrections: [{ path: "executiveSummary.overview", text: "网站清楚介绍了产品。" }]
+    }]);
 
     const result = await synthesizeWebsiteReportWithRecovery(client, synthesisInput("zh-CN"), { maxAttempts: 3, delay: async () => undefined });
 
@@ -537,14 +539,19 @@ describe("report validation and synthesis", () => {
     for (const call of vi.mocked(client.completeJson).mock.calls) {
       expect(JSON.stringify(call[0])).toContain("Simplified Chinese");
     }
+    const correctionPayload = JSON.parse(vi.mocked(client.completeJson).mock.calls[1]![0].messages[1]!.content);
+    expect(correctionPayload.fieldsToCorrect).toEqual([
+      { path: "executiveSummary.overview", text: "The website clearly introduces the product." }
+    ]);
+    expect(correctionPayload.pageEvidence).toBeUndefined();
   });
 
   it("corrects legacy SEO terminology in synthesis using the existing single correction", async () => {
     const invalid = reportModelOutput(1);
-    const valid = reportModelOutput(1);
     (invalid.executiveSummary as Record<string, unknown>).overview = "Improve SEO visibility with clearer evidence.";
-    (valid.executiveSummary as Record<string, unknown>).overview = "Improve GEO visibility with clearer evidence.";
-    const client = mockClient([invalid, valid]);
+    const client = mockClient([invalid, {
+      corrections: [{ path: "executiveSummary.overview", text: "Improve GEO visibility with clearer evidence." }]
+    }]);
 
     const result = await synthesizeWebsiteReportWithRecovery(client, synthesisInput("en"), { maxAttempts: 3, delay: async () => undefined });
 

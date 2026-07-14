@@ -24,6 +24,18 @@ export interface SynthesizeReportResult {
   rejectedEvidence: RejectedEvidence[];
 }
 
+class WebsiteReportLanguageValidationError extends ReportLanguageValidationError {
+  readonly draft: SynthesizeReportResult;
+
+  constructor(error: ReportLanguageValidationError, draft: SynthesizeReportResult) {
+    super(error.violations);
+    this.name = "WebsiteReportLanguageValidationError";
+    this.draft = draft;
+  }
+}
+
+interface WebsiteLanguageCorrection { path: string; text: string }
+
 const severityRank: Record<AiFinding["severity"], number> = {
   critical: 3,
   warning: 2,
@@ -184,14 +196,21 @@ export async function synthesizeWebsiteReport(
         .slice(0, 1)
     : verified.report.findings;
   const finalReport = { ...verified.report, findings: tierFindings };
-  assertWebsiteReportLanguage(finalReport, input);
-
-  return {
+  const result = {
     report: finalReport,
     modelId: completion.modelId,
     rejectedFindingIds: verified.rejectedFindingIds,
     rejectedEvidence: verified.rejectedEvidence
   };
+  try {
+    assertWebsiteReportLanguage(finalReport, input);
+  } catch (error) {
+    if (error instanceof ReportLanguageValidationError) {
+      throw new WebsiteReportLanguageValidationError(error, result);
+    }
+    throw error;
+  }
+  return result;
 }
 
 export async function synthesizeWebsiteReportWithRecovery(
@@ -202,20 +221,16 @@ export async function synthesizeWebsiteReportWithRecovery(
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const delay = options.delay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let lastError: unknown;
-  let languageCorrectionUsed = false;
-  let languageFeedback: string[] = [];
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     options.signal?.throwIfAborted();
-    const isLanguageCorrectionCall = languageFeedback.length > 0;
     try {
-      return await synthesizeWebsiteReport(client, input, options.signal, languageFeedback);
+      return await synthesizeWebsiteReport(client, input, options.signal);
     } catch (error) {
       lastError = error;
-      if (isLanguageCorrectionCall) throw error;
-      if (error instanceof ReportLanguageValidationError) {
-        if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
-        languageCorrectionUsed = true;
-        languageFeedback = reportLanguageCorrectionFeedback(error, input.locale);
+      if (error instanceof WebsiteReportLanguageValidationError) {
+        if (attempt >= maxAttempts) throw error;
+        await delayWithSignal(delay, Math.min(2_000, 250 * (2 ** (attempt - 1))), options.signal);
+        return correctWebsiteReportLanguage(client, input, error, options.signal);
       }
       if (attempt < maxAttempts) await delayWithSignal(delay, Math.min(2_000, 250 * (2 ** (attempt - 1))), options.signal);
     }
@@ -223,9 +238,102 @@ export async function synthesizeWebsiteReportWithRecovery(
   throw lastError;
 }
 
+async function correctWebsiteReportLanguage(
+  client: JsonCompletionClient,
+  input: ReportSynthesisInput,
+  error: WebsiteReportLanguageValidationError,
+  signal?: AbortSignal
+): Promise<SynthesizeReportResult> {
+  const allowedTerms = collectSourceGroundedAllowedTerms(input);
+  const violationPaths = new Set(error.violations.map(({ path }) => path));
+  const fieldsToCorrect = websiteReportLanguageFields(error.draft.report)
+    .filter(({ path }) => violationPaths.has(path));
+  if (fieldsToCorrect.length !== violationPaths.size) throw error;
+  const languageInstruction = reportLanguageInstruction(input.locale);
+  const completion = await client.completeJson({
+    signal,
+    temperature: 0.1,
+    maxTokens: 8_000,
+    messages: [
+      {
+        role: "system",
+        content: `You are a strict GEO report-language editor. Return JSON only. The allowedOriginalTerms list is exhaustive: for Simplified Chinese output, no other Latin-script sequence may appear, even inside quotation marks, examples, markup, code, email labels, or protocol labels. Replace forbidden source-language text with a Chinese description instead of repeating it. ${languageInstruction}`
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          task: "Return only corrected replacement prose for the exact supplied paths.",
+          rules: [
+            languageInstruction,
+            "Return exactly one correction for every supplied field path, with no missing, duplicate, or extra paths.",
+            "Treat allowedOriginalTerms as the complete and exclusive list of Latin-script text permitted in Chinese replacements.",
+            "Never repeat forbidden source-language headings in quotation marks or examples; describe them in Chinese instead.",
+            "Do not output markup, code, email labels, or protocol-label examples in corrected prose."
+          ],
+          correctionRequired: reportLanguageCorrectionFeedback(error, input.locale),
+          allowedOriginalTerms: allowedTerms,
+          locale: input.locale,
+          outputShape: { corrections: [{ path: "exact supplied field path", text: "replacement prose only" }] },
+          fieldsToCorrect
+        })
+      }
+    ]
+  });
+  const corrections = parseWebsiteLanguageCorrections(completion.value, fieldsToCorrect.map(({ path }) => path));
+  const corrected = corrections ? applyWebsiteLanguageCorrections(error.draft.report, corrections) : null;
+  if (!corrected) throw error;
+  assertWebsiteReportLanguage(corrected, input);
+  return { ...error.draft, report: corrected };
+}
+
+function parseWebsiteLanguageCorrections(value: unknown, expectedPaths: readonly string[]): WebsiteLanguageCorrection[] | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = (value as Record<string, unknown>).corrections;
+  if (!Array.isArray(raw) || raw.length !== expectedPaths.length) return null;
+  const expected = new Set(expectedPaths);
+  const seen = new Set<string>();
+  const corrections: WebsiteLanguageCorrection[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") return null;
+    const record = item as Record<string, unknown>;
+    if (typeof record.path !== "string" || !expected.has(record.path) || seen.has(record.path) ||
+        typeof record.text !== "string" || !record.text.trim() || record.text.length > 4_000) return null;
+    seen.add(record.path);
+    corrections.push({ path: record.path, text: record.text.trim() });
+  }
+  return seen.size === expected.size ? corrections : null;
+}
+
+function applyWebsiteLanguageCorrections(
+  draft: AiWebsiteReportV1,
+  corrections: readonly WebsiteLanguageCorrection[]
+): AiWebsiteReportV1 | null {
+  const corrected = structuredClone(draft) as AiWebsiteReportV1;
+  for (const { path, text } of corrections) {
+    const segments = path.replace(/\[(\d+)]/g, ".$1").split(".");
+    let parent: unknown = corrected;
+    for (const segment of segments.slice(0, -1)) {
+      if (!parent || typeof parent !== "object") return null;
+      parent = (parent as Record<string, unknown>)[segment];
+    }
+    const leaf = segments.at(-1)!;
+    if (!parent || typeof parent !== "object" || typeof (parent as Record<string, unknown>)[leaf] !== "string") return null;
+    (parent as Record<string, unknown>)[leaf] = text;
+  }
+  return corrected;
+}
+
 function assertWebsiteReportLanguage(report: AiWebsiteReportV1, input: ReportSynthesisInput): void {
-  const roadmap = [...report.roadmap.immediate, ...report.roadmap.nextPhase, ...report.roadmap.ongoing];
-  const fields = [
+  const fields = websiteReportLanguageFields(report);
+  assertReportLanguage(fields, input.locale, collectSourceGroundedAllowedTerms(input));
+  assertGeoTerminology(fields, GEO_TERMINOLOGY_POLICY);
+}
+
+function websiteReportLanguageFields(report: AiWebsiteReportV1): Array<{ path: string; text: string }> {
+  const roadmap = (["immediate", "nextPhase", "ongoing"] as const).flatMap((phase) =>
+    report.roadmap[phase].map((item, index) => ({ phase, index, item }))
+  );
+  return [
     ...(report.organizationProfile.organizationName
       ? [{ path: "organizationProfile.organizationName", text: report.organizationProfile.organizationName }]
       : []),
@@ -258,14 +366,12 @@ function assertWebsiteReportLanguage(report: AiWebsiteReportV1, input: ReportSyn
       { path: `findings[${itemIndex}].recommendation`, text: item.recommendation },
       ...(item.rewriteExample ? [{ path: `findings[${itemIndex}].rewriteExample`, text: item.rewriteExample }] : [])
     ]),
-    ...roadmap.flatMap((item, itemIndex) => [
-      { path: `roadmap[${itemIndex}].title`, text: item.title },
-      { path: `roadmap[${itemIndex}].rationale`, text: item.rationale },
-      ...item.actions.map((text, index) => ({ path: `roadmap[${itemIndex}].actions[${index}]`, text }))
+    ...roadmap.flatMap(({ phase, index: itemIndex, item }) => [
+      { path: `roadmap.${phase}[${itemIndex}].title`, text: item.title },
+      { path: `roadmap.${phase}[${itemIndex}].rationale`, text: item.rationale },
+      ...item.actions.map((text, index) => ({ path: `roadmap.${phase}[${itemIndex}].actions[${index}]`, text }))
     ])
   ];
-  assertReportLanguage(fields, input.locale, collectSourceGroundedAllowedTerms(input));
-  assertGeoTerminology(fields, GEO_TERMINOLOGY_POLICY);
 }
 
 function collectSourceGroundedAllowedTerms(input: ReportSynthesisInput): string[] {
@@ -282,6 +388,9 @@ function collectSourceGroundedAllowedTerms(input: ReportSynthesisInput): string[
       }
     } catch {
       // Invalid page URLs contribute no allowlist term.
+    }
+    for (const match of page.text.matchAll(/([A-Za-z][A-Za-z0-9+.-]{1,39})(?=[\u3400-\u9fff])/gu)) {
+      terms.add(match[1]!);
     }
   }
   return [...terms];
