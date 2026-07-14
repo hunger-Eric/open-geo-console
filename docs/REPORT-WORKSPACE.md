@@ -9,13 +9,19 @@
 | `/[locale]/reports/[id]/issues?page=N` | Severity-grouped findings, 20 per page |
 | `/[locale]/reports/[id]/bots` | Log import, detected bots/operators, paginated registry, and collapsed simulator |
 | `/[locale]/reports/[id]/technical?page=N` | Scanned pages, assets, and technical appendix, 20 per page |
-| `/[locale]/reports/[id]/print` | Legacy authorized print view; free previews render an upgrade explanation |
-| `/reports/[id]/report.html` | Canonical authorized private deep-report artifact with visual evidence |
-| `/api/reports/[id]/artifacts/report.pdf` | PDF exported from the same canonical HTML and print CSS |
+| `/reports/[id]/report.html` | Canonical authorized combined/deep HTML artifact with visual evidence |
+| `/reports/[id]/legacy-report.html` | Frozen legacy HTML artifact |
+| `/reports/[id]/recommendation-report.html` | Version-dispatched recommendation-forensics HTML artifact |
 | `/api/reports/[id]/evidence/[assetId]` | Authorized private screenshot proxy; never exposes a stable object URL |
 | `/[locale]/logs` | Standalone advanced log analysis with an explicit target URL |
 
-The report header shows the persisted generation language. Interface language switches navigation and labels only. Homepage technical score, site technical score and AI dimension scores remain separately named and include `/ 100` plus their coverage context.
+The report header shows the persisted generation language. Interface language switches navigation and labels only. The workspace and transactional completion email expose only the secure HTML link; customer PDF routes and the print workspace do not exist. Homepage technical score, site technical score and AI dimension scores remain separately named and include `/ 100` plus their coverage context.
+
+## Artifact and language contract
+
+New reports keep their persisted generation locale across model prompts, deterministic labels, final artifact readiness and email. One language correction is permitted inside each model boundary; an exhausted final gate enters `repair_wait`. Foreign source evidence remains verbatim and is labeled `来源原文` / `Source original`.
+
+The canonical server-rendered HTML is the only customer artifact. Workers privately convert the same HTML to PDF for signature/page-count readiness, hashing and storage before activation. Those bytes and database fields are not customer-routable. Existing historical payloads, active revisions and private PDF bytes are not migrated or deleted.
 
 ## Report status contract
 

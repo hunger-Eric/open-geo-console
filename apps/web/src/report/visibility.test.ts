@@ -14,7 +14,7 @@ describe("report visibility projection", () => {
     });
 
     expect(bundle.tier).toBe("free");
-    expect(bundle.canPrint).toBe(false);
+    expect(bundle.canAccessHtmlArtifact).toBe(false);
     expect(bundle.technicalReport.pages.map(({ url }) => url)).toEqual(["https://example.com/"]);
     expect(bundle.aiReport?.findings).toHaveLength(1);
     expect(bundle.aiReport?.dimensionScores).toEqual([]);
@@ -32,7 +32,7 @@ describe("report visibility projection", () => {
     });
 
     expect(bundle.tier).toBe("deep");
-    expect(bundle.canPrint).toBe(true);
+    expect(bundle.canAccessHtmlArtifact).toBe(true);
     expect(bundle.technicalReport).toBe(deepTechnical);
     expect(bundle.aiReport?.findings).toHaveLength(3);
   });

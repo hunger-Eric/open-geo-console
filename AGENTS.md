@@ -46,6 +46,7 @@
 - Free reports audit only the submitted homepage plus standard assets. Multi-page technical and AI evidence belongs to the authorized private deep bundle.
 - Terminal commercial jobs must use the atomic job-and-credit terminalization boundary; never split a terminal stage write from settlement/refund.
 - A report's persisted generation locale is immutable after it is established; interface-route locale changes UI chrome, not stored report prose.
+- Customer report delivery is HTML-only; keep Chromium PDF generation, hashes, page-count checks and storage private to Worker readiness, with no customer PDF route, action or email claim.
 - Client-IP rate limits trust Vercel's `x-vercel-forwarded-for` / overwritten `x-forwarded-for` headers only when `VERCEL=1` or `OGC_TRUST_VERCEL_HEADERS=true`; other proxy headers require an explicitly trusted proxy that overwrites them.
 - Never persist or log raw model API keys, report-credit keys, report access tokens, or unhashed client IPs.
 

@@ -3,7 +3,7 @@
 ## Report workspace rebuild
 
 - [x] Preserve the selected option 1 visual reference in `docs/design/`.
-- [x] Add overview, issues, bots, technical, and print report routes.
+- [x] Add overview, issues, bots, and technical report routes; remove the obsolete customer print workspace.
 - [x] Keep report ID and target URL across every workspace section.
 - [x] Add versioned, sanitized bot evidence summaries to `log-parser`.
 - [x] Add one-to-one PostgreSQL bot-evidence persistence plus PUT/DELETE APIs.
@@ -52,7 +52,7 @@
 - [x] Add persistent PostgreSQL jobs, leases, retries, seven-day crawl evidence and a separate Worker.
 - [x] Add 30-day free-site reuse, two-sites/rolling-24h anonymous limiting, Turnstile, global AI budget and homepage-only free previews.
 - [x] Add HMAC access Keys, idempotent credit ledger, failure refunds and private deep-report links.
-- [x] Add progressive status, AI analysis, deep unlock and print integration in English and Chinese.
+- [x] Add progressive status, AI analysis, and authorized deep HTML access in English and Chinese.
 - [x] Validate the OpenAI-compatible transport, structured output and a complete evidence-backed report with MiMo 2.5 Pro.
 - [x] Short-circuit downstream checks for non-2xx pages, aggregate repeated findings by template, and cap score deductions per rule.
 - [x] Split free/deep Worker lanes and expose truthful queue position, wait reason, and active tier in the status UI.
@@ -70,25 +70,26 @@
 - [x] Complete the V2 failure-path Sandbox settlement and delivery drill: order `558098d6-4fc2-4da0-b2c0-c7083bb76555` reached `paid/failed/refunded/delivered`; its provider refund succeeded and payment-confirmed, report-failed-refund and refund-succeeded redirected test emails were delivered through the protected Preview commerce runner.
 - [ ] Measure one, two and four deep Worker processes with representative live workloads before raising the default concurrency.
 
-## HTML-first visual evidence report delivery
+## HTML-only customer report delivery
 
 - [x] Implement private screenshot evidence capture during Worker analysis.
 - [x] Store screenshot asset metadata in PostgreSQL and bytes behind a private storage adapter.
 - [x] Render a polished HTML report artifact with graded screenshot evidence cards.
-- [x] Generate the customer PDF from the same HTML artifact with print-specific CSS.
-- [x] Verify private asset authorization, screenshot fallback states, desktop/mobile HTML browser QA, and PDF export QA.
-- [x] Configure Preview-only private staging object storage and visually verify a fresh paid deep report's real issue crop, context thumbnail, compact screenshots, viewport fallback, authorized HTML/PDF reads, and anonymous object-store denial.
+- [x] Retain same-HTML Chromium PDF materialization only as private Worker readiness/storage; remove customer PDF routes, buttons, print workspace, product copy, and email claims.
+- [x] Verify private asset authorization, screenshot fallback states, desktop/mobile HTML browser QA, and internal PDF readiness.
+- [x] Configure Preview-only private staging object storage and visually verify a fresh paid deep report's evidence images, authorized HTML reads, private internal PDF storage, and anonymous object-store denial.
+- [x] Enforce immutable new-report locale through model prompts, one bounded correction, a prospective final gate, localized system copy, and `repair_wait` on exhausted validation.
 
 ## Combined paid report and one-time correction
 
-- [ ] Complete protected-staging acceptance for the grounded three-question presentation in `docs/superpowers/plans/2026-07-14-combined-geo-report-question-answer-presentation.md`. The combined-only answer contract, compact renderer, shared HTML/PDF readiness, schema-v19 refresh lineage and guarded operator command are locally implemented and verified; deployment, artifact activation, Chromium screenshots and runtime evidence remain.
+- [ ] Complete protected-staging acceptance for the grounded three-question presentation in `docs/superpowers/plans/2026-07-14-combined-geo-report-question-answer-presentation.md`. The combined-only answer contract, compact renderer, customer HTML/internal-PDF readiness, schema-v19 refresh lineage and guarded operator command are locally implemented and verified; deployment, artifact activation, Chromium screenshots and runtime evidence remain.
 - [x] Keep the commercial SKU `recommendation_forensics_v1` while introducing the canonical artifact contract `combined_geo_report_v1`.
 - [x] Bind exactly three editable, purpose-fixed business questions before checkout; require explicit low-confidence acknowledgement and lock the final private/public variants after payment.
 - [x] Prevent customer identity and private question text from entering shared snapshots, queries, attempts, observations, or `market_source_evidence`.
 - [x] Add schema-v18 correction, question-set, combined-payload and artifact-revision persistence with one correction per order and one active artifact per report.
-- [x] Render full technical evidence, public-source forensics, scores, roadmap, vendor tasks, method and limitations from one canonical HTML component; export PDF from the same HTML.
-- [x] Route HTML sections, PDF and private evidence through the active combined revision and return application-level `404` for anonymous access.
-- [x] Complete the real protected-staging correction for order `5f999610-17d5-4df9-9aa0-a6cce5e5b741`: three fresh snapshots, 22 source-evidence rows, ten screenshots, 19-page PDF, atomic activation, one delivered correction email, zero new billing/refund effects, and real Chromium acceptance.
+- [x] Render full technical evidence, public-source forensics, scores, roadmap, vendor tasks, method and limitations from one canonical HTML component; materialize its PDF privately for readiness.
+- [x] Route customer HTML sections and private evidence through the active combined revision; remove customer PDF handlers and return application-level `404` for unauthorized or retired routes.
+- [x] Complete the real protected-staging correction for order `5f999610-17d5-4df9-9aa0-a6cce5e5b741`: three fresh snapshots, 22 source-evidence rows, ten screenshots, a 19-page internal readiness PDF, atomic activation, one delivered correction email, zero new billing/refund effects, and real Chromium acceptance.
 
 ## Public-source recommendation forensics V2 (provider-independent adapter framework; live admission blocked)
 
@@ -96,16 +97,16 @@
 - [x] Implement provider-neutral public-search contracts, deterministic fixtures, schema-v13 authorities/snapshots/attempts/observations/evidence/leases/report refs, and surface-neutral evidence graphs.
 - [x] Implement `RecommendationForensicReportV2`, exact V1/V2 dispatch, prohibited-claim verification, deterministic cost accounting, report builder and immutable V2 repository.
 - [x] Implement V2 Worker orchestration, cache reuse, freshness/refresh rules, resume identity, fail-closed artifact dependency and atomic report/ref/job/credit/order/refund/email terminalization.
-- [x] Add version-dispatched private HTML/same-HTML PDF rendering, customer-safe coverage/freshness fields, vendor task package, website appendix and pre-terminal HTML/PDF readiness gate.
+- [x] Add version-dispatched customer HTML, private same-HTML PDF readiness, customer-safe coverage/freshness fields, vendor task package, website appendix and pre-terminal artifact gate.
 - [x] Drain staging V1 work, verify zero non-terminal V1 rows in staging and production, retire OpenAI/Perplexity from active admission/Worker graphs, and preserve historical V1 read/render contracts.
 - [x] Add signed public-search certification artifact/path/install framework with an empty compile-time approved adapter registry; fixtures remain non-installable and admission remains closed.
 - [x] Add the compile-time approved registry, independent MiMo configuration/normalization, exact schema-v14 authority identity, redacted probe and signed-certification entry points; runtime remains closed without artifact readiness and an active authority.
 - [x] Run protected-staging MiMo capability certification, store an independent Preview signing key, and install its re-signed exact authority inactive. Runtime remains false; explicit activation and commercial drills are separate gates.
 - [x] Add an exact-authority V2 snapshot lease/attempt/observation resolver. It records only normalized annotations-derived observations and marks un-fetched sources `not_retrieved`; it is not yet a live Worker collaborator.
-- [x] Bind the V2 snapshot resolver to job-bound checkpoint persistence, V2 safe source retrieval, and canonical HTML/real-PDF artifact readiness. The Worker defers report persistence to atomic terminalization and remains fail-closed while runtime is disabled, authority inactive, or a collaborator is absent.
+- [x] Bind the V2 snapshot resolver to job-bound checkpoint persistence, V2 safe source retrieval, canonical customer HTML, and real private-PDF readiness. The Worker defers report persistence to atomic terminalization and remains fail-closed while runtime is disabled, authority inactive, or a collaborator is absent.
 - [x] Make V2 public-source safe retrieval abort the per-request dispatcher at `OGC_JOB_HARD_DEADLINE_MS` rather than waiting for graceful close; focused retriever and PostgreSQL recovery regressions pass. Both controlled staging lanes were rebuilt from reviewed revision `1698f04` before the successful fresh paid V2 drill on 2026-07-14.
 - [x] Implement schema-v16 recoverable analysis state: phase/state/progress/commercial separation, checkpoint revisions, phase-local retry/backoff, append-only redacted failure/transition events, `repair_wait`, typed V2 runtime failures, safe customer status, and restricted historical pending-refund recovery. The shared revision/CAS checkpoint writer persists the complete V2 pending artifact before real readiness verification, so artifact repair resumes without re-fetching public sources; schema v17 keeps event history immutable while permitting FK cascade cleanup.
 - [ ] Run live protected-staging Worker fault injections for crawl/model/V2/artifact/terminalization recovery. PostgreSQL staging integration now proves source/artifact checkpoint continuation, exact phase events, stale rejection, readiness gating, and no refund/email; live external dependency drills must additionally prove no duplicate evidence/artifact effects.
-- [x] Accept one real V2 paid report end to end. Order `5f999610-17d5-4df9-9aa0-a6cce5e5b741` reached `paid/completed/delivered`, job `dd2cff0b-ba16-43b0-aded-55fdc767e656` completed at 100%, credit settled with zero refunds, 3 snapshot refs bound 14 available public evidence rows, protected Chrome rendered the substantive private HTML and scoped PDF, and both transactional emails were delivered.
+- [x] Accept one real V2 paid report end to end. Order `5f999610-17d5-4df9-9aa0-a6cce5e5b741` reached `paid/completed/delivered`, job `dd2cff0b-ba16-43b0-aded-55fdc767e656` completed at 100%, credit settled with zero refunds, 3 snapshot refs bound 14 available public evidence rows, protected Chrome rendered the substantive private HTML and internal-readiness PDF, and both transactional emails were delivered.
 - [x] Use an isolated disposable PostgreSQL admin URL to run the schema/V2 suites. The 2026-07-13 market-snapshot suite proves a complete second snapshot for the same fanout and replacement claim after an unexhausted expired running lease (`4/4` tests); this does not substitute for live paid acceptance.
 - [ ] Add any free sample only after paid V2 staging acceptance; never market public-search order as AI rank or recommendation.

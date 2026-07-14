@@ -40,6 +40,14 @@ The Worker owns crawling and model calls. Web requests never run deep analysis i
 
 The free tier returns one verified homepage finding. Its technical score covers only the homepage and the standard robots/sitemap/llms assets. The deep AI and technical payloads are private and are returned only when the report-specific HttpOnly cookie validates.
 
+## Language and Artifact Readiness
+
+A report's persisted generation locale is immutable. Page analysis, website synthesis and combined-answer prompts all include the shared locale instruction. Generated prose is validated inside each retry boundary; a language violation permits one corrective model call and then fails closed. New combined artifacts also run a prospective final prose gate before HTML or internal PDF materialization. Source-original quotes remain verbatim and are excluded from the prose gate; application-owned labels and methodology copy are localized deterministically. Only independently resolved entity names and supported claim subjects can authorize foreign-language proper names.
+
+An exhausted language gate is normalized as `report_language_validation_failed`, classified `operator_repairable`, and moved to `repair_wait` without automatic regeneration, terminalization, refund or failure email. Historical payload parsing does not invoke the prospective gate and existing payloads are never rewritten.
+
+HTML is the only customer report format and completion emails link only to the authorized HTML artifact. The Worker still renders that exact HTML through `report/pdf-export.ts`, validates the `%PDF-` signature and substantive page count, hashes it, and stores it privately before activation. There are no customer PDF handlers; persisted `pdf_sha256`, `pdf_storage_key` and readiness page count remain internal invariants.
+
 ## Persistence
 
 PostgreSQL tables:
@@ -99,7 +107,7 @@ Deprecated for normal users and returns `410`. The Worker owns recoverable retry
 
 Run web and both Worker lanes against the same `DATABASE_URL`. The default `batch_24h` mode drains and exits; `realtime` performs a recovery drain and then consumes Queue hints on persistent infrastructure. Run `npm run commerce:all` to reconcile terminal paid jobs, enforce 20/24-hour SLA boundaries, submit refunds, and send queued email. Cloudflare Queue is notification-only; PostgreSQL remains authoritative. See `docs/COMMERCIAL-OPERATIONS.md`.
 
-Local visual evidence defaults to `.data/evidence-assets` or `OGC_EVIDENCE_FILESYSTEM_ROOT`. Staging and production refuse filesystem storage. Use `OGC_EVIDENCE_STORAGE=vercel-blob` with a connected Vercel Private Blob store, or `s3` with the `OGC_EVIDENCE_S3_*` private-bucket variables. Web (authorized reads/PDF) and deep Worker (writes) must share the store. Vercel Functions prefer project-scoped OIDC; an external workstation Worker uses the Preview-only `BLOB_READ_WRITE_TOKEN`. The proxy reads bytes only after report-cookie authorization.
+Local visual evidence defaults to `.data/evidence-assets` or `OGC_EVIDENCE_FILESYSTEM_ROOT`. Staging and production refuse filesystem storage. Use `OGC_EVIDENCE_STORAGE=vercel-blob` with a connected Vercel Private Blob store, or `s3` with the `OGC_EVIDENCE_S3_*` private-bucket variables. Web authorized evidence reads and deep Worker evidence/internal-PDF writes must share the store. Vercel Functions prefer project-scoped OIDC; an external workstation Worker uses the Preview-only `BLOB_READ_WRITE_TOKEN`. The proxy reads evidence bytes only after report-cookie authorization.
 
 The free deterministic auditor fetches the homepage plus `/robots.txt`, `/sitemap.xml`, and `/llms.txt`; it does not fetch sitemap entries or homepage link targets. A deep job runs a separate private technical audit over its planned pages. The auditor treats a non-2xx response as the root cause for that page and does not run downstream H1, Schema, canonical, metadata, or readability checks. Findings are grouped by rule, page type, and normalized template, with at most three representative URLs. The overview rolls template groups into one rule-level priority card. Score deductions are capped per rule so repeated pages cannot erase the complete score by themselves.
 

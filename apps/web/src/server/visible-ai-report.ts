@@ -17,8 +17,12 @@ export async function getVisibleReportBundle(
   if (hasCombinedAccess) {
     const active = await getActiveCombinedGeoReport(reportId);
     if (!active) throw new Error("The active combined report artifact is unavailable.");
-    return { tier: "deep", canPrint: true, technicalReport: active.report.technicalFoundation.technicalReport,
-      aiReport: active.report.technicalFoundation.aiReport };
+    return {
+      tier: "deep",
+      canAccessHtmlArtifact: true,
+      technicalReport: active.report.technicalFoundation.technicalReport,
+      aiReport: active.report.technicalFoundation.aiReport
+    };
   }
   const token = cookieStore.get(reportAccessCookieName(reportId))?.value;
   const hasDeepAccess = await tokenGrantsReportAccess(token, reportId);

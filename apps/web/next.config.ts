@@ -4,12 +4,6 @@ import path from "node:path";
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(process.cwd(), "../.."),
   serverExternalPackages: ["@sparticuz/chromium"],
-  outputFileTracingIncludes: {
-    "/api/reports/\\[id\\]/artifacts/report.pdf": [
-      "../../node_modules/@sparticuz/chromium/bin/**/*",
-      "../../node_modules/playwright-core/browsers.json"
-    ]
-  },
   transpilePackages: [
     "@open-geo-console/ai-report-engine",
     "@open-geo-console/crawler-rules",
