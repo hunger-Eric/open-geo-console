@@ -6,6 +6,7 @@ import {
   createWorkerPublicSourceForensicsDependencies,
   correctionArtifactVerificationResume,
   isMatchingRecommendationWebsiteFoundation,
+  publicSourceArtifactVerificationResume,
   resolvePublicSourceRunScope,
   resolveRecommendationFulfillmentTarget,
   resolveRecommendationFoundationTarget,
@@ -32,6 +33,25 @@ describe("recommendation website-foundation resume contract", () => {
     };
     expect(correctionArtifactVerificationResume(checkpoint as never)).toEqual({ report, checkpoint: publicSourceForensics, commercialSnapshotRefs: [] });
     expect(correctionArtifactVerificationResume({ ...checkpoint, recovery: { ...checkpoint.recovery, phase: "source_retrieval" } } as never)).toBeNull();
+  });
+
+  it("reuses the persisted public-source payload for paid combined terminalization", () => {
+    const report = { reportId: "report-1", jobId: "job-1" } as RecommendationForensicReportV2;
+    const publicSourceForensics = checkpointValue();
+    const checkpoint = {
+      recovery: { schemaVersion: 1, phase: "terminalization", revision: 3, phaseAttempt: 0,
+        resumeGeneration: 1, identity: { jobId: "job-1", reportId: "report-1", productContract: "recommendation_forensics_v1",
+          methodology: "public_search_source_forensics_v1", locale: "zh", authorityId: "authority-v2" }, inputHash: "input",
+        completedArtifacts: ["public_source"], remainingWork: ["terminalization"], priorTransitionId: null },
+      publicSourceForensics,
+      pendingArtifactVerification: { report, commercialSnapshotRefs: [{ snapshotId: "snapshot-1", cacheIdentity: "cache-1",
+        freshnessState: "fresh", actualCostMicros: 0, allocatedCostMicros: 0, avoidedCostMicros: 0 }] }
+    };
+    expect(publicSourceArtifactVerificationResume(checkpoint as never)).toEqual({
+      report,
+      checkpoint: publicSourceForensics,
+      commercialSnapshotRefs: checkpoint.pendingArtifactVerification.commercialSnapshotRefs
+    });
   });
 
   it("dispatches only from the persisted methodology and rejects a missing value", () => {

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { parseRecommendationForensicReportV2, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import { ensureDatabase, getSqlClient } from "./index";
 import { prepareSourceForensicReportRow } from "./source-forensic-reports";
+import { snapshotReferenceBinding } from "./combined-correction-terminalization";
 import type { ScanJobCoverage } from "./jobs";
 import { JobTransitionService } from "@/worker/job-transition-service";
 
@@ -41,9 +42,13 @@ export async function terminalizePaidPublicSourceReport(input: {
     fault(input.faultAfter,"report");
     for(const ref of input.snapshotRefs){
       if(!Number.isSafeInteger(ref.actualCostMicros)||ref.actualCostMicros<0||!Number.isSafeInteger(ref.allocatedCostMicros)||ref.allocatedCostMicros<0||!Number.isSafeInteger(ref.avoidedCostMicros)||ref.avoidedCostMicros<0) throw new Error("Snapshot costs must be non-negative integers.");
-      const bindingHash=sha([report.reportId,report.jobId,ref.snapshotId,ref.cacheIdentity,report.evidenceCutoffAt]);
+      const snapshot=(await tx<Array<{completed_at:string}>>`SELECT completed_at FROM market_snapshot_questions
+        WHERE id=${ref.snapshotId} AND cache_identity=${ref.cacheIdentity} AND status='completed'`)[0];
+      if(!snapshot)throw new Error("The public-source snapshot is not complete and bindable.");
+      const binding=snapshotReferenceBinding(report.evidenceCutoffAt,snapshot.completed_at);
+      const bindingHash=sha([report.reportId,report.jobId,ref.snapshotId,ref.cacheIdentity,binding.evidenceCutoff]);
       await tx`INSERT INTO report_market_snapshot_refs(id,report_id,job_id,snapshot_id,cache_identity,evidence_cutoff,freshness_state,actual_cost_micros,allocated_cost_micros,avoided_cost_micros,binding_hash)
-        SELECT ${sha([report.jobId,ref.snapshotId])},${report.reportId},${report.jobId},snapshot.id,snapshot.cache_identity,${report.evidenceCutoffAt},${ref.freshnessState},${ref.actualCostMicros},${ref.allocatedCostMicros},${ref.avoidedCostMicros},${bindingHash}
+        SELECT ${sha([report.jobId,ref.snapshotId])},${report.reportId},${report.jobId},snapshot.id,snapshot.cache_identity,${binding.evidenceCutoff},${binding.freshnessState},${ref.actualCostMicros},${ref.allocatedCostMicros},${ref.avoidedCostMicros},${bindingHash}
         FROM market_snapshot_questions snapshot WHERE snapshot.id=${ref.snapshotId} AND snapshot.cache_identity=${ref.cacheIdentity} AND snapshot.status='completed'
         ON CONFLICT(job_id,snapshot_id) DO NOTHING`;
     }

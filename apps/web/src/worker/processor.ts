@@ -646,7 +646,7 @@ async function finalizeCorrectionJob(input: {
     htmlSha256:ready.htmlSha256,pdfSha256:ready.pdfSha256,pdfStorageKey:ready.pdfStorageKey,pageCount:ready.pageCount});
 }
 
-export function correctionArtifactVerificationResume(checkpoint: WorkerCheckpoint): {
+export function publicSourceArtifactVerificationResume(checkpoint: WorkerCheckpoint): {
   report: RecommendationForensicReportV2;
   checkpoint: PublicSourcePipelineCheckpoint;
   commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
@@ -656,6 +656,8 @@ export function correctionArtifactVerificationResume(checkpoint: WorkerCheckpoin
   return { report:checkpoint.pendingArtifactVerification.report,checkpoint:checkpoint.publicSourceForensics,
     commercialSnapshotRefs:checkpoint.pendingArtifactVerification.commercialSnapshotRefs };
 }
+
+export const correctionArtifactVerificationResume = publicSourceArtifactVerificationResume;
 
 async function resolveCombinedQuestionAnswers(input: {
   checkpoint: WorkerCheckpoint;
@@ -739,32 +741,37 @@ async function finalizeRecommendationJob(input: {
       await terminalize(checkpoint.pendingArtifactVerification.report, checkpoint.pendingArtifactVerification.commercialSnapshotRefs);
       return;
     }
-    if (checkpointPhase() === "public_source_preflight") input.liveDrill?.inject({ jobId: input.job.id, fault: "v2_runtime" });
-    createPublicSourceAttemptBudget(input.remainingMs);
-    const dependencies = await createProductionPublicSourceForensicsDependencies(process.env, {
-      createDependencies: async (runtime) => createWorkerPublicSourceForensicsDependencies({
-        job: input.job,
-        workerId: input.workerId,
-        coverage: input.coverage,
-        readCheckpoint: () => checkpoint,
-        onCheckpointSaved: async (next) => { checkpoint = next; },
-        checkpointJob: input.checkpointJob,
-        retrieveSource: createWorkerPublicSourceRetriever(),
-        // This verifies the canonical V2 HTML and a real Chromium PDF before the
-        // atomic terminalization boundary; it never persists a report itself.
-        artifactReadiness,
-        liveDrill: input.liveDrill,
-        signal: input.signal
-      }, runtime)
-    });
     const businessQuestionSet = input.job.businessQuestionSetId
       ? await getConfirmedBusinessQuestionSet(input.job.reportId, input.job.businessQuestionSetId)
       : null;
     if (input.job.businessQuestionSetId && !businessQuestionSet) throw new Error("The job-bound business question set is unavailable or unlocked.");
-    const result = await runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
-      ...resolvePublicSourceRunScope(dependencies),
-      targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, businessQuestionSet: businessQuestionSet ?? undefined,
-      dependencies, signal: input.signal });
+    const resumedPublicSource = input.job.artifactContract === "combined_geo_report_v1"
+      ? publicSourceArtifactVerificationResume(checkpoint)
+      : null;
+    const result = resumedPublicSource ?? await (async () => {
+      if (checkpointPhase() === "public_source_preflight") input.liveDrill?.inject({ jobId: input.job.id, fault: "v2_runtime" });
+      createPublicSourceAttemptBudget(input.remainingMs);
+      const dependencies = await createProductionPublicSourceForensicsDependencies(process.env, {
+        createDependencies: async (runtime) => createWorkerPublicSourceForensicsDependencies({
+          job: input.job,
+          workerId: input.workerId,
+          coverage: input.coverage,
+          readCheckpoint: () => checkpoint,
+          onCheckpointSaved: async (next) => { checkpoint = next; },
+          checkpointJob: input.checkpointJob,
+          retrieveSource: createWorkerPublicSourceRetriever(),
+          // This verifies the canonical V2 HTML and a real Chromium PDF before the
+          // atomic terminalization boundary; it never persists a report itself.
+          artifactReadiness,
+          liveDrill: input.liveDrill,
+          signal: input.signal
+        }, runtime)
+      });
+      return runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
+        ...resolvePublicSourceRunScope(dependencies),
+        targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, businessQuestionSet: businessQuestionSet ?? undefined,
+        dependencies, signal: input.signal });
+    })();
     if(input.job.artifactContract==="combined_geo_report_v1"&&result.report.commercialOutcome==="completed"){
       const context=await getPendingPaidCombinedContext(input.job.id);
       const questions=input.job.businessQuestionSetId?await getConfirmedBusinessQuestionSet(input.job.reportId,input.job.businessQuestionSetId):null;
