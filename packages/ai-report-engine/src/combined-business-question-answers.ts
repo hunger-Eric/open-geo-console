@@ -139,9 +139,11 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const delay = options.delay ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let lastError: unknown;
+  let languageCorrectionUsed = false;
   let languageFeedback: string[] = [];
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     input.signal?.throwIfAborted();
+    const isLanguageCorrectionCall = languageFeedback.length > 0;
     try {
       const languageInstruction = reportLanguageInstruction(input.forensic.locale);
       const completion = await client.completeJson({
@@ -185,8 +187,10 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
       return parsed;
     } catch (error) {
       lastError = error;
+      if (isLanguageCorrectionCall) throw error;
       if (error instanceof ReportLanguageValidationError) {
-        if (attempt >= maxAttempts) throw error;
+        if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
+        languageCorrectionUsed = true;
         languageFeedback = languageViolationFeedback(error);
       }
       if (attempt < maxAttempts) await delayWithAbort(delay, Math.min(2_000, 250 * 2 ** (attempt - 1)), input.signal);

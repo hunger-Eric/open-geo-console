@@ -69,7 +69,7 @@ describe("combined business question answers", () => {
     expect(JSON.stringify(correction)).not.toContain("customer should update");
   });
 
-  it("uses the bounded third model call after repeated language violations", async () => {
+  it("does not make a third model call after a repeated language violation", async () => {
     const { questionSet, forensic, value } = fixture("zh-CN");
     const invalid = value.answers.map((item) => ({
       ...item,
@@ -82,7 +82,18 @@ describe("combined business question answers", () => {
       { questionSet, forensic },
       { maxAttempts: 3, delay: async () => undefined }
     )).rejects.toThrow(ReportLanguageValidationError);
-    expect(completeJson).toHaveBeenCalledTimes(3);
+    expect(completeJson).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves ordinary retries for non-language failures", async () => {
+    const { questionSet, forensic, value } = fixture();
+    const completeJson = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary transport failure"))
+      .mockResolvedValueOnce({ value: { answers: value.answers }, modelId: "served", rawContent: "{}" });
+    await expect(synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
+    )).resolves.toMatchObject({ synthesis: { modelId: "served" } });
+    expect(completeJson).toHaveBeenCalledTimes(2);
   });
 
   it("allows exact proper names from resolved entities and supported claims", async () => {
@@ -116,7 +127,7 @@ describe("combined business question answers", () => {
     await expect(synthesizeCombinedBusinessQuestionAnswers(
       { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
     )).rejects.toThrow(ReportLanguageValidationError);
-    expect(completeJson).toHaveBeenCalledTimes(3);
+    expect(completeJson).toHaveBeenCalledTimes(2);
   });
 
   it.each(["Customer Growth Strategy", "Product One", "Google Analytics", "Cloudflare Workers"])(
@@ -131,7 +142,7 @@ describe("combined business question answers", () => {
     await expect(synthesizeCombinedBusinessQuestionAnswers(
       { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
     )).rejects.toThrow(ReportLanguageValidationError);
-    expect(completeJson).toHaveBeenCalledTimes(3);
+    expect(completeJson).toHaveBeenCalledTimes(2);
     }
   );
 
@@ -150,7 +161,7 @@ describe("combined business question answers", () => {
     await expect(synthesizeCombinedBusinessQuestionAnswers(
       { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
     )).rejects.toThrow(ReportLanguageValidationError);
-    expect(completeJson).toHaveBeenCalledTimes(3);
+    expect(completeJson).toHaveBeenCalledTimes(2);
   });
 
   it("allows a product-like term only when it is a resolved entity", async () => {
