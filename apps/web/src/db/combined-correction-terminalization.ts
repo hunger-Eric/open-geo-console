@@ -35,9 +35,13 @@ export async function terminalizeCombinedCorrection(input: {
       SELECT payment_status,fulfillment_status,refund_status,report_locale FROM payment_orders WHERE id=${report.orderId} AND report_id=${report.reportId} FOR UPDATE`)[0];
     if (!order || order.payment_status!=="paid" || order.fulfillment_status!=="completed" || order.refund_status!=="not_required") throw new Error("The original paid order is not eligible for correction activation.");
     for (const ref of input.snapshotRefs) {
-      const bindingHash=sha([report.reportId,report.jobId,ref.snapshotId,ref.cacheIdentity,report.evidenceCutoffAt]);
+      const snapshot=(await tx<Array<{completed_at:string}>>`SELECT completed_at FROM market_snapshot_questions
+        WHERE id=${ref.snapshotId} AND cache_identity=${ref.cacheIdentity} AND status='completed'`)[0];
+      if(!snapshot) throw new Error("The correction snapshot is not complete and bindable.");
+      const reference=snapshotReferenceBinding(report.evidenceCutoffAt,snapshot.completed_at);
+      const bindingHash=sha([report.reportId,report.jobId,ref.snapshotId,ref.cacheIdentity,reference.evidenceCutoff]);
       await tx`INSERT INTO report_market_snapshot_refs(id,report_id,job_id,snapshot_id,cache_identity,evidence_cutoff,freshness_state,actual_cost_micros,allocated_cost_micros,avoided_cost_micros,binding_hash)
-        SELECT ${sha([report.jobId,ref.snapshotId])},${report.reportId},${report.jobId},snapshot.id,snapshot.cache_identity,${report.evidenceCutoffAt},${ref.freshnessState},${ref.actualCostMicros},${ref.allocatedCostMicros},${ref.avoidedCostMicros},${bindingHash}
+        SELECT ${sha([report.jobId,ref.snapshotId])},${report.reportId},${report.jobId},snapshot.id,snapshot.cache_identity,${reference.evidenceCutoff},${reference.freshnessState},${ref.actualCostMicros},${ref.allocatedCostMicros},${ref.avoidedCostMicros},${bindingHash}
         FROM market_snapshot_questions snapshot WHERE snapshot.id=${ref.snapshotId} AND snapshot.cache_identity=${ref.cacheIdentity} AND snapshot.status='completed'
         ON CONFLICT(job_id,snapshot_id) DO NOTHING`;
     }
@@ -83,7 +87,13 @@ export async function terminalizePaidCombinedReport(input: {
     if(!order||order.refund_status!=="not_required"||!["queued","processing"].includes(order.fulfillment_status))throw new Error("The paid combined order is not activatable.");
     const credit=(await tx<Array<{id:string;status:string;job_id:string|null}>>`SELECT id,status,job_id FROM credit_ledger WHERE id=${job.credit_reservation_id} FOR UPDATE`)[0];
     if(!credit||credit.status!=="reserved"||(credit.job_id&&credit.job_id!==report.jobId))throw new Error("The paid combined credit reservation is invalid.");
-    for(const ref of input.snapshotRefs){const bindingHash=sha([report.reportId,report.jobId,ref.snapshotId,ref.cacheIdentity,report.evidenceCutoffAt]);await tx`INSERT INTO report_market_snapshot_refs(id,report_id,job_id,snapshot_id,cache_identity,evidence_cutoff,freshness_state,actual_cost_micros,allocated_cost_micros,avoided_cost_micros,binding_hash) SELECT ${sha([report.jobId,ref.snapshotId])},${report.reportId},${report.jobId},snapshot.id,snapshot.cache_identity,${report.evidenceCutoffAt},${ref.freshnessState},${ref.actualCostMicros},${ref.allocatedCostMicros},${ref.avoidedCostMicros},${bindingHash} FROM market_snapshot_questions snapshot WHERE snapshot.id=${ref.snapshotId} AND snapshot.cache_identity=${ref.cacheIdentity} AND snapshot.status='completed' ON CONFLICT(job_id,snapshot_id) DO NOTHING`;}
+    for(const ref of input.snapshotRefs){
+      const snapshot=(await tx<Array<{completed_at:string}>>`SELECT completed_at FROM market_snapshot_questions WHERE id=${ref.snapshotId} AND cache_identity=${ref.cacheIdentity} AND status='completed'`)[0];
+      if(!snapshot)throw new Error("The paid combined snapshot is not complete and bindable.");
+      const reference=snapshotReferenceBinding(report.evidenceCutoffAt,snapshot.completed_at);
+      const bindingHash=sha([report.reportId,report.jobId,ref.snapshotId,ref.cacheIdentity,reference.evidenceCutoff]);
+      await tx`INSERT INTO report_market_snapshot_refs(id,report_id,job_id,snapshot_id,cache_identity,evidence_cutoff,freshness_state,actual_cost_micros,allocated_cost_micros,avoided_cost_micros,binding_hash) SELECT ${sha([report.jobId,ref.snapshotId])},${report.reportId},${report.jobId},snapshot.id,snapshot.cache_identity,${reference.evidenceCutoff},${reference.freshnessState},${ref.actualCostMicros},${ref.allocatedCostMicros},${ref.avoidedCostMicros},${bindingHash} FROM market_snapshot_questions snapshot WHERE snapshot.id=${ref.snapshotId} AND snapshot.cache_identity=${ref.cacheIdentity} AND snapshot.status='completed' ON CONFLICT(job_id,snapshot_id) DO NOTHING`;
+    }
     const refs=await tx<Array<{snapshot_id:string}>>`SELECT snapshot_id FROM report_market_snapshot_refs WHERE job_id=${report.jobId}`;if(refs.length!==input.snapshotRefs.length)throw new Error("Every paid combined snapshot must be bound.");
     await tx`INSERT INTO combined_geo_reports(artifact_revision_id,report_id,order_id,job_id,question_set_id,payload) VALUES(${report.artifactRevisionId},${report.reportId},${report.orderId},${report.jobId},${report.questionSetIdentity},${JSON.stringify(report)}::jsonb)`;
     await tx`UPDATE report_artifact_revisions SET status='ready',html_sha256=${input.htmlSha256},pdf_sha256=${input.pdfSha256},pdf_storage_key=${input.pdfStorageKey},payload_identity_hash=${sha([JSON.stringify(report)])},readiness=${JSON.stringify({htmlCanonical:true,pageCount:input.pageCount,privateEvidenceReady:true})}::jsonb,ready_at=now() WHERE id=${report.artifactRevisionId} AND job_id=${report.jobId} AND status='pending'`;
@@ -97,5 +107,13 @@ export async function terminalizePaidCombinedReport(input: {
     const emailId=randomUUID(),businessKey=`report_ready/${report.artifactRevisionId}/v1`;await tx`INSERT INTO email_deliveries(id,order_id,report_id,template_type,template_version,locale,recipient_ref,provider,business_idempotency_key,state) VALUES(${emailId},${order.id},${report.reportId},'report_ready','v1',${order.report_locale},${order.id},'resend',${businessKey},'queued') ON CONFLICT(business_idempotency_key) DO NOTHING`;
     const email=(await tx<Array<{id:string}>>`SELECT id FROM email_deliveries WHERE business_idempotency_key=${businessKey}`)[0];if(!email)throw new Error("Paid combined completion email was not persisted.");return{report,emailDeliveryId:email.id};
   });
+}
+export function snapshotReferenceBinding(reportCutoff:string,snapshotCompletedAt:string,now=new Date()):{evidenceCutoff:string;freshnessState:"fresh"|"historical"|"insufficient"}{
+  const reportTime=Date.parse(reportCutoff),completedTime=Date.parse(snapshotCompletedAt),nowTime=now.getTime();
+  if(!Number.isFinite(reportTime)||!Number.isFinite(completedTime)||completedTime>nowTime)throw new Error("Snapshot reference timestamps are invalid.");
+  const cutoff=Math.max(reportTime,completedTime);
+  if(cutoff>nowTime)throw new Error("Snapshot reference cutoff cannot be in the future.");
+  const age=cutoff-completedTime;
+  return {evidenceCutoff:new Date(cutoff).toISOString(),freshnessState:age<=7*24*60*60_000?"fresh":age<=30*24*60*60_000?"historical":"insufficient"};
 }
 function sha(parts:string[]):string{return createHash("sha256").update(parts.join("\0")).digest("hex");}
