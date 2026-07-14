@@ -18,14 +18,14 @@ export async function GET(request: Request, context: RouteContext) {
     return new NextResponse(null, { status: 404 });
   }
 
+  const artifactScope = report.activeArtifactRevisionId ? "combined_geo_report_v1" : productContractForCode(order.productCode);
   const access = await issueReportAccessToken({
     reportId: id,
     ttlDays: 1,
-    idempotencyKey: `staging-operator-preview/${order.id}/${order.productCode}`,
-    artifactScope: productContractForCode(order.productCode)
+    idempotencyKey: `staging-operator-preview/${order.id}/${artifactScope}`,
+    artifactScope
   });
-  const artifactScope = productContractForCode(order.productCode);
-  const destination = artifactScope === "recommendation_forensics_v1"
+  const destination = artifactScope === "recommendation_forensics_v1" || artifactScope === "combined_geo_report_v1"
     ? new URL(`/reports/${id}/report.html`, request.url)
     : new URL(`/${report.reportLocale}/reports/${id}/analysis`, request.url);
   const response = NextResponse.redirect(destination, 303);

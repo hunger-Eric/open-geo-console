@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import type { ReportArtifactScope } from "@/db/schema";
 import { loadPrivateReportArtifact } from "./artifact-model";
 import { exportReportPdf } from "./pdf-export";
+import { createEvidenceStorage } from "@/evidence/storage";
 import {
   requestHasReportAccess,
   scopedReportAccessCookieHeader
@@ -24,18 +25,14 @@ export async function serveScopedReportPdf(input: {
   const model = await loadPrivateReportArtifact(input.reportId, input.artifactScope);
   if (!model || model.productContract !== input.artifactScope) return denied();
   try {
+    if (model.productContract === "combined_geo_report_v1") {
+      const stored = await createEvidenceStorage().get(model.pdfStorageKey);
+      if (!stored || stored.contentType !== "application/pdf" || new TextDecoder().decode(stored.body.slice(0, 5)) !== "%PDF-") return denied();
+      return pdfResponse(stored.body, input.filename);
+    }
     const htmlUrl = new URL(input.htmlPath, input.request.url).href;
     const pdf = await exportReportPdf({ htmlUrl, cookieHeader });
-    return new NextResponse(copyArrayBuffer(pdf), {
-      headers: {
-        "cache-control": "private, no-store, max-age=0",
-        "content-disposition": `inline; filename="${input.filename}"`,
-        "content-type": "application/pdf",
-        "referrer-policy": "no-referrer",
-        "x-content-type-options": "nosniff",
-        "x-frame-options": "DENY"
-      }
-    });
+    return pdfResponse(pdf, input.filename);
   } catch (error) {
     console.error("PDF artifact export failed.", error instanceof Error ? error.message : "unknown_error");
     return NextResponse.json({ error: "PDF export is temporarily unavailable. The HTML report remains available." }, {
@@ -43,6 +40,13 @@ export async function serveScopedReportPdf(input: {
       headers: { "cache-control": "private, no-store", "retry-after": "30" }
     });
   }
+}
+
+function pdfResponse(bytes: Uint8Array, filename: string) {
+  return new NextResponse(copyArrayBuffer(bytes), { headers: {
+    "cache-control": "private, no-store, max-age=0", "content-disposition": `inline; filename="${filename}"`,
+    "content-type": "application/pdf", "referrer-policy": "no-referrer", "x-content-type-options": "nosniff", "x-frame-options": "DENY"
+  }});
 }
 
 function copyArrayBuffer(bytes: Uint8Array): ArrayBuffer {

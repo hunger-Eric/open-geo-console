@@ -25,6 +25,7 @@ import { revealCustomerEmail } from "./customer-email";
 import { ResendEmailGateway, ResendRequestError } from "@/email/resend";
 import type { EmailTemplate } from "@/email/gateway";
 import { AirwallexGateway } from "@/payments/airwallex";
+import { getActiveCombinedGeoReport } from "@/db/combined-reports";
 
 export interface CommercialOperationResult {
   claimed: number;
@@ -64,8 +65,9 @@ async function sendDelivery(delivery: EmailDeliveryRow, owner: string, gateway: 
   ]);
   if (!recipient || !order || recipient.emailKeyVersion !== "v1") throw new Error("commercial_email_recipient_unavailable");
   let reportUrl: string | undefined;
-  if (delivery.templateType === "report_ready" || delivery.templateType === "limited_report_refund" || delivery.templateType === "link_reissue") {
-    const artifactScope = productContractForCode(order.productCode);
+  if (delivery.templateType === "report_ready" || delivery.templateType === "limited_report_refund" || delivery.templateType === "link_reissue" || delivery.templateType === "corrected_report_ready") {
+    const artifactScope = await getActiveCombinedGeoReport(delivery.reportId)
+      ? "combined_geo_report_v1" : productContractForCode(order.productCode);
     if (delivery.templateType === "link_reissue" && delivery.attempts === 1) {
       await revokeReportAccessTokens(delivery.reportId, artifactScope);
     }

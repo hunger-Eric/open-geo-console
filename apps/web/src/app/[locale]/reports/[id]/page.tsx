@@ -7,6 +7,8 @@ import { getBotEvidence } from "@/db/bot-evidence";
 import { getGeoReport } from "@/db/reports";
 import { getDictionary, getLocaleAlternates, isLocale, type Locale } from "@/i18n";
 import { getVisibleReportBundle } from "@/server/visible-ai-report";
+import { cookies } from "next/headers";
+import { reportAccessCookieName, tokenGrantsReportAccess } from "@/server/report-access";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +37,10 @@ export default async function ReportPage({
     return <StoredReportFallback dictionary={getDictionary(locale)} locale={locale} reportId={id} section="overview" />;
   }
   const reportLocale: Locale = row.reportLocale ?? locale;
+  if (row.activeArtifactRevisionId) {
+    const token=(await cookies()).get(reportAccessCookieName(id,"combined_geo_report_v1"))?.value;
+    if(!await tokenGrantsReportAccess(token,id,"combined_geo_report_v1")) notFound();
+  }
   if (!row.payload) {
     return (
       <PendingReportView

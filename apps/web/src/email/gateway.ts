@@ -5,7 +5,8 @@ export type EmailTemplate =
   | "report_failed_refund"
   | "refund_succeeded"
   | "refund_assistance"
-  | "link_reissue";
+  | "link_reissue"
+  | "corrected_report_ready";
 export type EmailLocale = "en" | "zh";
 
 export interface SendEmailInput {

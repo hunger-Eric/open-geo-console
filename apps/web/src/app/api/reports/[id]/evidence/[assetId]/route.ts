@@ -2,14 +2,18 @@ import { NextResponse } from "next/server";
 import { getEvidenceAsset } from "@/db/evidence-assets";
 import { createEvidenceStorage } from "@/evidence/storage";
 import { requestHasReportAccess } from "@/server/report-access";
+import { getActiveCombinedGeoReport } from "@/db/combined-reports";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string; assetId: string }> }) {
   const { id, assetId } = await context.params;
-  if (!await requestHasReportAccess(request, id)) return privateError(404);
+  const legacyAccess=await requestHasReportAccess(request,id,"legacy_website_audit_v1");
+  const combinedAccess=legacyAccess?false:await requestHasReportAccess(request,id,"combined_geo_report_v1");
+  if(!legacyAccess&&!combinedAccess)return privateError(404);
   const asset = await getEvidenceAsset(id, assetId);
+  if(combinedAccess){const active=await getActiveCombinedGeoReport(id);if(!active||!asset||![active.report.originalPaidJobId,active.report.jobId].includes(asset.jobId))return privateError(404);}
   if (!asset || asset.status !== "ready" || !asset.storageKey) return privateError(404);
   const object = await createEvidenceStorage().get(asset.storageKey);
   if (!object) return privateError(404);
