@@ -141,7 +141,7 @@ function checkpointValue() {
 
 function snapshot(fanout: SearchQueryFanout) {
   return { snapshotId: "snapshot-1", cacheIdentity: "cache-1", questionId: fanout.questionId, observedAt: "2030-01-02T00:00:00.000Z", ageMs: 0,
-    collectedForThisRun: true, refreshAttempted: true, refreshFailed: false, sufficientlyEvidenced: true, observations: [], retrievals: [], actualCostMicros: 0, allocatedCostMicros: 0, avoidedCostMicros: 0 };
+    collectedForThisRun: true, refreshAttempted: true, refreshFailed: false, sufficientlyEvidenced: true, availableSourceCount: 3, observations: [], retrievals: [], actualCostMicros: 0, allocatedCostMicros: 0, avoidedCostMicros: 0 };
 }
 
 function retrieval() {

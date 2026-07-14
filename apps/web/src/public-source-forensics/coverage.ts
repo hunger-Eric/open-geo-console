@@ -5,6 +5,8 @@ export interface PublicSourceQuestionCoverage {
   questionId: string;
   ageMs: number;
   sufficientlyEvidenced: boolean;
+  availableSourceCount?: number;
+  requiredSourceCount?: number;
   refreshAttempted: boolean;
   refreshFailed: boolean;
 }
@@ -36,10 +38,12 @@ export function decidePublicSourceCommercialCoverage(input: {
   if (input.questions.some(({ ageMs, refreshFailed }) => ageMs > PUBLIC_SOURCE_MAX_HISTORICAL_MS && refreshFailed)) {
     return failed(0, ["expired_refresh_failed"]);
   }
-  const usable = input.questions.filter(({ ageMs, sufficientlyEvidenced, refreshFailed }) =>
-    sufficientlyEvidenced && (ageMs <= PUBLIC_SOURCE_FRESH_MS || (ageMs <= PUBLIC_SOURCE_MAX_HISTORICAL_MS && refreshFailed)));
+  const usable = input.questions.filter(({ ageMs, sufficientlyEvidenced, availableSourceCount, refreshFailed }) =>
+    sufficientlyEvidenced && (availableSourceCount ?? 1) >= 1 && (ageMs <= PUBLIC_SOURCE_FRESH_MS || (ageMs <= PUBLIC_SOURCE_MAX_HISTORICAL_MS && refreshFailed)));
+  const fullyEvidenced = usable.filter(({ availableSourceCount, requiredSourceCount }) =>
+    availableSourceCount === undefined || availableSourceCount >= (requiredSourceCount ?? 3));
   const historical = usable.filter(({ ageMs }) => ageMs > PUBLIC_SOURCE_FRESH_MS).map(({ questionId }) => questionId);
-  if (usable.length >= 3 && historical.length === 0) return {
+  if (fullyEvidenced.length >= 3 && historical.length === 0) return {
     outcome: "completed", settlement: "settle", usableQuestionCount: usable.length,
     refreshRequiredQuestionIds: refreshRequired, historicalQuestionIds: [], reasons: []
   };

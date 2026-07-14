@@ -169,7 +169,7 @@ function fixtureSnapshot(fanout: SearchQueryFanout, index: number) {
     usage: { requestCount: 1, resultCount: 1, estimatedCostMicros: 1 } }));
   return { snapshotId: `recovery-snapshot-${fanout.questionId}`, cacheIdentity: `recovery-cache-${fanout.questionId}`, questionId: fanout.questionId,
     observedAt: "2030-01-01T00:00:01.000Z", ageMs: 60_000, collectedForThisRun: true, refreshAttempted: false, refreshFailed: false,
-    sufficientlyEvidenced: true, observations, retrievals: observations.flatMap((observation) => observation.results.map((result) => ({ observationId: observation.observationId,
+    sufficientlyEvidenced: true, availableSourceCount: 3, observations, retrievals: observations.flatMap((observation) => observation.results.map((result) => ({ observationId: observation.observationId,
       queryId: observation.queryId, resultUrl: result.url, retrievalState: "available" as const, publiclyRoutable: true, robotsAllowed: true,
       accessBarrier: "none" as const, contentBytes: 100, normalizedText: "Public logistics capability.", normalizedContentHash: `sha256:${"a".repeat(64)}`, verifiedExcerpt: "Public logistics capability." }))),
     actualCostMicros: 10, allocatedCostMicros: 0, avoidedCostMicros: 0 };

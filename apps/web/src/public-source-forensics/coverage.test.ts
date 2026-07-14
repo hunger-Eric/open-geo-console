@@ -20,4 +20,10 @@ describe("public-source commercial coverage", () => {
     expect(decidePublicSourceCommercialCoverage({ ...ready, questions:[q("a",0),q("b",0,{sufficientlyEvidenced:false}),q("c",0,{sufficientlyEvidenced:false})] })).toMatchObject({outcome:"failed",settlement:"refund"});
     for (const gate of [{authorityReady:false},{evidenceIsolated:false},{artifactReady:false},{costCapExceeded:true}]) expect(decidePublicSourceCommercialCoverage({ ...ready,...gate,questions:[q("a",0),q("b",0),q("c",0)] }).outcome).toBe("failed");
   });
+  it("requires three persisted available sources per question for settlement", () => {
+    const counted = (id: string, count: number) => q(id, 0, { availableSourceCount: count, requiredSourceCount: 3 });
+    expect(decidePublicSourceCommercialCoverage({ ...ready, questions: [counted("a",3),counted("b",3),counted("c",3)] })).toMatchObject({ outcome:"completed", settlement:"settle" });
+    expect(decidePublicSourceCommercialCoverage({ ...ready, questions: [counted("a",1),counted("b",1),counted("c",1)] })).toMatchObject({ outcome:"completed_limited", settlement:"refund" });
+    expect(decidePublicSourceCommercialCoverage({ ...ready, questions: [counted("a",3),counted("b",3),counted("c",2)] })).toMatchObject({ outcome:"completed_limited", settlement:"refund" });
+  });
 });

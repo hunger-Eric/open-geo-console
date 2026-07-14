@@ -9,6 +9,7 @@ import { createConcurrencyGate, type ConcurrencyGate } from "./bounded-scheduler
 export interface ResolvedPublicSourceSnapshot {
   snapshotId: string; cacheIdentity: string; questionId: string; observedAt: string; ageMs: number;
   collectedForThisRun: boolean; refreshAttempted: boolean; refreshFailed: boolean; sufficientlyEvidenced: boolean;
+  availableSourceCount: number;
   observations: MarketSearchObservation[]; retrievals: RetrievedPublicSourceFact[];
   actualCostMicros: number; allocatedCostMicros: number; avoidedCostMicros: number;
 }
@@ -89,6 +90,7 @@ export async function runPublicSourceForensicsPipeline(input: {
   const decision = decidePublicSourceCommercialCoverage({ authorityReady: true, evidenceIsolated: snapshots.every((item) => item.questionId && item.snapshotId),
     artifactReady: true, costCapExceeded: actualCostMicros > (input.dependencies.costCapMicros ?? Number.MAX_SAFE_INTEGER),
     questions: snapshots.map((item) => ({ questionId: item.questionId, ageMs: item.ageMs, sufficientlyEvidenced: item.sufficientlyEvidenced,
+      availableSourceCount: item.availableSourceCount, requiredSourceCount: 3,
       refreshAttempted: item.refreshAttempted, refreshFailed: item.refreshFailed })) });
   const observations = snapshots.flatMap(({ observations: values }) => values);
   const retrievals = snapshots.flatMap(({ retrievals: values }) => values);

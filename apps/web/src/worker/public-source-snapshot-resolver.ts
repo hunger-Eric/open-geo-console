@@ -42,6 +42,7 @@ export interface ResolvedPublicSourceSnapshotValue {
   refreshAttempted: boolean;
   refreshFailed: boolean;
   sufficientlyEvidenced: boolean;
+  availableSourceCount: number;
   observations: MarketSearchObservation[];
   retrievals: RetrievedPublicSourceFact[];
   actualCostMicros: number;
@@ -144,7 +145,10 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
       const rows = successful.flatMap(({ observation, attemptId }) => observationRows(currentSnapshotId, attemptId, observation));
       if (rows.length) await appendMarketSearchObservations({ token: claim.token, observations: rows });
     }
-    const retrievals = await appendRetrievals({ input, snapshotId: currentSnapshotId, token: claim.token, observations: successful, evidenceCutoff });
+    await appendRetrievals({ input, snapshotId: currentSnapshotId, token: claim.token, observations: successful, evidenceCutoff });
+    const persistedBundle = await getMarketSnapshotBundle(currentSnapshotId);
+    if (!persistedBundle) throw new PublicSourceSnapshotUnavailableError();
+    const retrievals = factsFromBundle(persistedBundle);
     const completed = await completeMarketSnapshotLease({ snapshotId: currentSnapshotId, token: claim.token, queryFanoutHash: fanoutHash(input.fanout), completedAt: new Date() });
     return materialize({
       snapshot: completed,
@@ -179,7 +183,7 @@ async function resolveExisting(input: ResolvePublicSourceSnapshotInput & { ident
   return {
     snapshotId: bundle.snapshot.id, cacheIdentity: bundle.snapshot.cacheIdentity, questionId: input.question.id,
     observedAt: bundle.snapshot.completedAt!.toISOString(), ageMs: input.ageMs, collectedForThisRun: false, refreshAttempted: false,
-    refreshFailed: false, sufficientlyEvidenced: retrievals.some(({ retrievalState }) => retrievalState === "available"), observations, retrievals,
+    refreshFailed: false, sufficientlyEvidenced: retrievals.length > 0, availableSourceCount: retrievals.length, observations, retrievals,
     actualCostMicros: 0, allocatedCostMicros: 0, avoidedCostMicros: cost
   };
 }
@@ -232,7 +236,7 @@ function materialize(input: { snapshot: Awaited<ReturnType<typeof completeMarket
   return {
     snapshotId: input.snapshot.id, cacheIdentity: input.snapshot.cacheIdentity, questionId: input.questionId, observedAt: input.snapshot.completedAt!.toISOString(),
     ageMs: Math.max(0, input.evidenceCutoff.getTime() - input.snapshot.completedAt!.getTime()), collectedForThisRun: input.collectedForThisRun, refreshAttempted: true, refreshFailed: false,
-    sufficientlyEvidenced: input.retrievals.some(({ retrievalState }) => retrievalState === "available"), observations: input.observations, retrievals: input.retrievals,
+    sufficientlyEvidenced: input.retrievals.length > 0, availableSourceCount: input.retrievals.length, observations: input.observations, retrievals: input.retrievals,
     actualCostMicros: cost, allocatedCostMicros: cost, avoidedCostMicros: 0
   };
 }
