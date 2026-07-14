@@ -121,6 +121,8 @@ npm run test:postgres:staging-security
 
 Browser acceptance must prove anonymous denial, authenticated access, more than two distinct staging sites, same-site reuse, forced-new report identity, duplicate-click idempotency, and separation from production data. Provider acceptance additionally requires a real CodingPlan staging call, an Airwallex Sandbox signed Webhook, and a redirected Resend message. Production acceptance must prove the third distinct site returns `429` and staging variables do not change that result.
 
+For an authenticated operator preview of an exact paid staging order, open `/{locale}/reports/{reportId}/staging-access?order={orderId}`. The route issues a one-day cookie only when the persisted order/report pair is paid and deliverable (`completed` or fully refunded `completed_limited`), redirects to the scoped HTML artifact, and remains `404` outside protected staging test mode. It does not create a customer PDF or bypass normal emailed access in production.
+
 ## Cloudflare production checklist
 
 Current production configuration:

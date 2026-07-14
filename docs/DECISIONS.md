@@ -112,7 +112,7 @@ Some legacy Airwallex Payment Link events omit `metadata.ogc_order_id` and use a
 
 A Worker behind Fake-IP DNS may opt into the fixed Cloudflare DNS-over-HTTPS endpoint. Returned A/AAAA addresses still pass the existing private, reserved, metadata and benchmark-network blocks, and the crawler pins the approved address for the actual request and every redirect. The option is off by default; it is a resolver replacement, not an address allowlist or SSRF bypass.
 
-Protected staging test mode may issue a one-day operator preview cookie only for an exact paid-and-completed order/report pair. Vercel Authentication remains the outer staging boundary and production always returns `404`; normal customer delivery continues to use the one-time emailed access link.
+Protected staging test mode may issue a one-day operator preview cookie only for an exact paid-and-deliverable order/report pair: `completed` or `completed_limited`. Limited reports remain fully refunded courtesy deliveries. Vercel Authentication remains the outer staging boundary and production always returns `404`; normal customer delivery continues to use the one-time emailed access link.
 
 ## 2026-07-11: Paid reports are HTML-first visual evidence artifacts
 
