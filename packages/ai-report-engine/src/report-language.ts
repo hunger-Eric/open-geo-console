@@ -85,7 +85,7 @@ export function normalizeReportLanguage(locale: string): NormalizedReportLanguag
 export function reportLanguageInstruction(locale: string): string {
   const terminology = " Use GEO terminology. Do not use SEO, Search Engine Optimization, or equivalent legacy terminology in report prose.";
   return normalizeReportLanguage(locale) === "zh"
-    ? `Write all report prose in Simplified Chinese. Keep only unavoidable official names, brands, product names, URLs, code, email addresses, and identifiers in their original form. Preserve verbatim evidence in its source language. Do not repeat the prose in English.${terminology}`
+    ? `Write all report prose in Simplified Chinese. Keep only unavoidable official names, brands, product names, URLs, code, email addresses, and identifiers in their original form. Preserve verbatim evidence in its source language. Outside evidence quote fields, translate or summarize source-language English into Simplified Chinese and never quote or repeat it in report prose. Do not repeat the prose in English.${terminology}`
     : `Write all report prose in English. Keep only unavoidable official names and verbatim evidence in their source language. Do not repeat the prose in Chinese.${terminology}`;
 }
 

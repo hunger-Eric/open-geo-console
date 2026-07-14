@@ -18,6 +18,7 @@ describe("report language contract", () => {
   it("gives the model an explicit non-bilingual Chinese instruction", () => {
     expect(reportLanguageInstruction("zh-CN")).toContain("Simplified Chinese");
     expect(reportLanguageInstruction("zh-CN")).toContain("Do not repeat the prose in English");
+    expect(reportLanguageInstruction("zh-CN")).toContain("Outside evidence quote fields");
     expect(reportLanguageInstruction("zh-CN")).toContain("Use GEO terminology");
     expect(reportLanguageInstruction("zh-CN")).toContain("Do not use SEO");
   });
