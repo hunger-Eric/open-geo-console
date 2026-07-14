@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { ensureDatabase, getDb, getSqlClient } from "./index";
 import { hmacSecret, requireSecret } from "./secrets";
 import {
   paymentEvents,
   paymentOrders,
+  reportBusinessQuestionSets,
   type CommerceCurrency,
   type PaymentEventRow,
   type PaymentOrderRow,
@@ -26,6 +27,7 @@ export interface CreatePaymentOrderInput {
   customerEmailHmac: string;
   emailKeyVersion: string;
   productCode: string;
+  businessQuestionSetId: string;
   catalogVersion: string;
   termsVersion: string;
   refundPolicyVersion: string;
@@ -40,10 +42,23 @@ export class CommercialOrderConflictError extends Error {}
 export async function createPaymentOrder(input: CreatePaymentOrderInput): Promise<PaymentOrderRow> {
   assertOrderInput(input);
   await ensureDatabase();
+  const previous = await getPaymentOrderByCheckoutHmac(input.checkoutIdempotencyHmac);
+  if (previous) {
+    if (!matchesImmutableOrder(previous, input)) throw new CommercialOrderConflictError("The checkout idempotency key conflicts with another order.");
+    return previous;
+  }
   const id = randomUUID();
-  const inserted = await getDb()
-    .insert(paymentOrders)
-    .values({
+  const inserted = await getDb().transaction(async (tx) => {
+    const [questionSet] = await tx.select().from(reportBusinessQuestionSets).where(and(
+      eq(reportBusinessQuestionSets.id, input.businessQuestionSetId),
+      eq(reportBusinessQuestionSets.reportId, input.reportId),
+      eq(reportBusinessQuestionSets.status, "confirmed"),
+      isNull(reportBusinessQuestionSets.orderId)
+    )).limit(1);
+    if (!questionSet || (questionSet.confidence === "low" && !questionSet.acknowledgedLowConfidence)) {
+      throw new CommercialOrderConflictError("Three confirmed business questions are required before checkout.");
+    }
+    const rows = await tx.insert(paymentOrders).values({
       id,
       checkoutIdempotencyHmac: input.checkoutIdempotencyHmac,
       provider: input.provider,
@@ -53,6 +68,7 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
       customerEmailHmac: input.customerEmailHmac,
       emailKeyVersion: input.emailKeyVersion,
       productCode: input.productCode,
+      businessQuestionSetId: input.businessQuestionSetId,
       fulfillmentMethodology: fulfillmentMethodologyForProductAdmission(input.productCode),
       recommendationReportVersion: recommendationReportVersionForProductAdmission(input.productCode),
       catalogVersion: input.catalogVersion,
@@ -62,9 +78,22 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
       currency: input.currency,
       amountMinor: input.amountMinor,
       taxAmountMinor: input.taxAmountMinor ?? null
-    })
-    .onConflictDoNothing({ target: paymentOrders.checkoutIdempotencyHmac })
-    .returning();
+    }).onConflictDoNothing({ target: paymentOrders.checkoutIdempotencyHmac }).returning();
+    if (rows[0]) {
+      const locked = await tx.update(reportBusinessQuestionSets).set({
+        orderId: rows[0].id,
+        status: "locked",
+        lockedAt: new Date(),
+        updatedAt: new Date()
+      }).where(and(
+        eq(reportBusinessQuestionSets.id, input.businessQuestionSetId),
+        eq(reportBusinessQuestionSets.status, "confirmed"),
+        isNull(reportBusinessQuestionSets.orderId)
+      )).returning({ id: reportBusinessQuestionSets.id });
+      if (locked.length !== 1) throw new CommercialOrderConflictError("The business question set changed during checkout.");
+    }
+    return rows;
+  });
   if (inserted[0]) return inserted[0];
 
   const existing = await getPaymentOrderByCheckoutHmac(input.checkoutIdempotencyHmac);
@@ -427,6 +456,7 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
     accessKeyId: randomUUID(),
     reservationId: randomUUID(),
     jobId: randomUUID(),
+    artifactRevisionId: randomUUID(),
     dispatchId: randomUUID(),
     emailDeliveryId: randomUUID()
   };
@@ -465,12 +495,13 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
       product_code: string;
       fulfillment_methodology: RecommendationFulfillmentMethodology | null;
       recommendation_report_version: RecommendationReportVersion | null;
+      business_question_set_id: string | null;
       legacy_retirement_cutoff_at: Date | null;
       legacy_retired_at: Date | null;
     }>>`
       SELECT id, provider, provider_payment_id, payment_status, report_id, report_locale, fulfillment_job_id, product_code,
              fulfillment_methodology,
-             recommendation_report_version,
+             recommendation_report_version, business_question_set_id,
              legacy_retirement_cutoff_at, legacy_retired_at
       FROM payment_orders WHERE id = ${input.orderId} FOR UPDATE
     `;
@@ -480,6 +511,9 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
     }
     if (order.provider_payment_id && order.provider_payment_id !== input.providerPaymentId) {
       throw new CommercialOrderConflictError("The payment order is already bound to another provider payment.");
+    }
+    if (order.product_code === "recommendation_forensics_v1" && !order.business_question_set_id) {
+      throw new CommercialOrderConflictError("The paid order is missing its locked business question set.");
     }
     const cutoff = order.legacy_retirement_cutoff_at ? new Date(order.legacy_retirement_cutoff_at) : null;
     const lateRetiredLegacyPayment = order.product_code === "deep_report_v1" && cutoff &&
@@ -551,9 +585,11 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
       jobId = ids.jobId;
       await tx`
         INSERT INTO scan_jobs
-          (id, report_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, locale, reason, stage, credit_reservation_id)
+          (id, report_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, artifact_contract, business_question_set_id, locale, reason, stage, credit_reservation_id)
         VALUES
-          (${jobId}, ${order.report_id}, 'deep', ${productContractForCode(order.product_code)}, ${order.fulfillment_methodology}, ${order.recommendation_report_version}, ${order.report_locale}, 'standard', 'queued', ${reservation.id})
+          (${jobId}, ${order.report_id}, 'deep', ${productContractForCode(order.product_code)}, ${order.fulfillment_methodology}, ${order.recommendation_report_version},
+           ${order.product_code === "recommendation_forensics_v1" ? "combined_geo_report_v1" : "legacy_website_audit_v1"}, ${order.business_question_set_id},
+           ${order.report_locale}, 'standard', 'queued', ${reservation.id})
       `;
     }
     await tx`
@@ -564,6 +600,15 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
       UPDATE payment_orders SET fulfillment_job_id = COALESCE(fulfillment_job_id, ${jobId}), updated_at = now()
       WHERE id = ${order.id}
     `;
+    if (order.product_code === "recommendation_forensics_v1") {
+      const artifacts=await tx<Array<{id:string}>>`SELECT id FROM report_artifact_revisions WHERE job_id=${jobId} LIMIT 1`;
+      if(!artifacts[0]) {
+        await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`artifact-revision:${order.report_id}`},0))`;
+        const revisions=await tx<Array<{revision:number}>>`SELECT COALESCE(max(revision),0)::integer AS revision FROM report_artifact_revisions WHERE report_id=${order.report_id}`;
+        await tx`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,revision,artifact_contract,status,payload_identity_hash)
+          VALUES(${ids.artifactRevisionId},${order.report_id},${order.id},${jobId},${(revisions[0]?.revision ?? 0)+1},'combined_geo_report_v1','pending',${`${order.business_question_set_id}:${jobId}`})`;
+      }
+    }
 
     await tx`
       INSERT INTO job_dispatch_outbox (id, job_id, tier, schema_version, state)
@@ -639,6 +684,7 @@ function assertOrderInput(input: CreatePaymentOrderInput): void {
     input.customerEmailHmac,
     input.emailKeyVersion,
     input.productCode,
+    input.businessQuestionSetId,
     input.catalogVersion,
     input.termsVersion,
     input.refundPolicyVersion
@@ -664,6 +710,7 @@ export function matchesImmutableOrder(row: PaymentOrderRow, input: CreatePayment
     && row.siteKey === input.siteKey
     && row.customerEmailHmac === input.customerEmailHmac
     && row.productCode === input.productCode
+    && row.businessQuestionSetId === input.businessQuestionSetId
     && row.fulfillmentMethodology === fulfillmentMethodologyForProductAdmission(input.productCode)
     && row.recommendationReportVersion === recommendationReportVersionForProductAdmission(input.productCode)
     && row.catalogVersion === input.catalogVersion

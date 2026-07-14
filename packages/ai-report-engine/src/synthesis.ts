@@ -63,6 +63,7 @@ export function buildSynthesisPrompt(input: ReportSynthesisInput): string {
         summary: "string",
         businessModel: "string|null",
         productsAndServices: ["string"],
+        capabilities: ["string"],
         targetAudiences: ["string"],
         marketsAndRegions: ["string"],
         legalEntity: "string|null",

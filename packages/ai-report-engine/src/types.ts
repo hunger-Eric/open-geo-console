@@ -1,5 +1,5 @@
 export const AI_WEBSITE_REPORT_VERSION = 1 as const;
-export const AI_REPORT_PROMPT_VERSION = "ai-website-report-v1" as const;
+export const AI_REPORT_PROMPT_VERSION = "ai-website-report-v2" as const;
 
 export type ReportTier = "free" | "deep";
 
@@ -44,6 +44,7 @@ export interface OrganizationProfile {
   summary: string;
   businessModel: string | null;
   productsAndServices: string[];
+  capabilities?: string[];
   targetAudiences: string[];
   marketsAndRegions: string[];
   legalEntity: string | null;

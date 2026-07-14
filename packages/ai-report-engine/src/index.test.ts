@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   AI_WEBSITE_REPORT_VERSION,
+  AI_REPORT_PROMPT_VERSION,
   OpenAiCompatibleClient,
   ReportValidationError,
   analyzePageBatch,
@@ -115,7 +116,7 @@ function validReport(): AiWebsiteReportV1 {
     provenance: {
       reportVersion: 1,
       modelId: "mock-model",
-      promptVersion: "ai-website-report-v1",
+      promptVersion: AI_REPORT_PROMPT_VERSION,
       locale: "en",
       generatedAt: "2026-07-10T00:00:00.000Z",
       contentHash: "abc"
@@ -309,7 +310,7 @@ describe("report validation and synthesis", () => {
     expect(result.report.provenance).toMatchObject({
       reportVersion: 1,
       modelId: "served-model",
-      promptVersion: "ai-website-report-v1",
+      promptVersion: AI_REPORT_PROMPT_VERSION,
       locale: "en",
       generatedAt: "2026-07-10T00:00:00.000Z"
     });

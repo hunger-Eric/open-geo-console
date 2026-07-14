@@ -145,6 +145,7 @@ export function validateAiWebsiteReportV1(value: unknown): ValidationIssue[] {
   requireString(profile.summary, "$.organizationProfile.summary", issues);
   requireNullableString(profile.businessModel, "$.organizationProfile.businessModel", issues);
   requireStringArray(profile.productsAndServices, "$.organizationProfile.productsAndServices", issues);
+  if (profile.capabilities !== undefined) requireStringArray(profile.capabilities, "$.organizationProfile.capabilities", issues);
   requireStringArray(profile.targetAudiences, "$.organizationProfile.targetAudiences", issues);
   requireStringArray(profile.marketsAndRegions, "$.organizationProfile.marketsAndRegions", issues);
   requireNullableString(profile.legalEntity, "$.organizationProfile.legalEntity", issues);

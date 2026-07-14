@@ -27,7 +27,7 @@ export async function POST(request: Request, context: RouteContext) {
     await assertCommerceReady();
     await assertRecommendationProductAvailable();
     const { id } = await context.params;
-    const body = await request.json() as { email?: unknown; currency?: unknown; locale?: unknown; turnstileToken?: unknown };
+    const body = await request.json() as { email?: unknown; currency?: unknown; locale?: unknown; turnstileToken?: unknown; questionSetId?: unknown };
     const currency = parseSupportedCurrency(body.currency);
     const locale = parseReportLocale(body.locale);
     if (!currency || !locale) return NextResponse.json({ error: "A supported currency and report locale are required." }, { status: 400 });
@@ -59,6 +59,9 @@ export async function POST(request: Request, context: RouteContext) {
 
     const active = await getActivePaymentOrderForReport(id, price.productCode);
     if (active && active.checkoutIdempotencyHmac !== checkoutHmac) {
+      if (active.businessQuestionSetId !== body.questionSetId) {
+        return NextResponse.json({ error: "This report already has an active checkout bound to another question set." }, { status: 409 });
+      }
       if (active.customerEmailHmac !== protectedEmail.lookupHmac) {
         return NextResponse.json({ error: "This report already has an active checkout." }, { status: 409 });
       }
@@ -74,6 +77,7 @@ export async function POST(request: Request, context: RouteContext) {
       customerEmailHmac: protectedEmail.lookupHmac,
       emailKeyVersion: "v1",
       productCode: price.productCode,
+      businessQuestionSetId: typeof body.questionSetId === "string" ? body.questionSetId : "",
       catalogVersion: price.catalogVersion,
       termsVersion: price.purchaseTermsVersion,
       refundPolicyVersion: price.refundPolicyVersion,

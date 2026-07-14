@@ -18,6 +18,12 @@ interface CatalogPayload {
   prices: Array<{ currency: Currency; amountMinor: number }>;
   turnstileSiteKey: string | null;
 }
+interface BusinessQuestionPayload {
+  id: string;
+  confidence: "low" | "high";
+  requiresAcknowledgement: boolean;
+  questions: Array<{ purpose: string; generatedText: string; privateText?: string }>;
+}
 
 export function CommercialCheckout({ dictionary, locale, reportId }: { dictionary: Dictionary; locale: Locale; reportId: string }) {
   const [catalog, setCatalog] = useState<CatalogPayload | null>(null);
@@ -27,6 +33,10 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
   const [verifying, setVerifying] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [questionSetId, setQuestionSetId] = useState("");
+  const [questions, setQuestions] = useState<string[]>([]);
+  const [lowConfidence, setLowConfidence] = useState(false);
+  const [acknowledgedLowConfidence, setAcknowledgedLowConfidence] = useState(false);
   const turnstileRef = useRef<TurnstileWidgetHandle>(null);
   const pendingCheckout = useRef(false);
   const checkoutIdempotencyKey = useRef("");
@@ -43,6 +53,23 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
       .catch(() => undefined);
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/reports/${reportId}/business-questions`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to prepare the three business questions.");
+        return response.json() as Promise<BusinessQuestionPayload>;
+      })
+      .then((value) => {
+        if (value.questions.length !== 3) throw new Error("The business question contract is incomplete.");
+        setQuestionSetId(value.id);
+        setQuestions(value.questions.map((question) => question.privateText ?? question.generatedText));
+        setLowConfidence(value.requiresAcknowledgement || value.confidence === "low");
+      })
+      .catch((caught) => { if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Unable to prepare business questions."); });
+    return () => controller.abort();
+  }, [reportId]);
 
   const price = useMemo(() => catalog?.prices.find((item) => item.currency === currency), [catalog, currency]);
   if (!catalog?.enabled) return null;
@@ -66,10 +93,20 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
     setError(null);
     checkoutIdempotencyKey.current ||= crypto.randomUUID();
     try {
+      if (!questionSetId || questions.length !== 3) throw new Error("Confirm all three business questions before checkout.");
+      const confirmation = await fetch(`/api/reports/${reportId}/business-questions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ questionSetId, questions, acknowledgedLowConfidence })
+      });
+      if (!confirmation.ok) {
+        const payload = await confirmation.json() as { error?: string };
+        throw new Error(payload.error ?? "Unable to confirm business questions.");
+      }
       const response = await fetch(`/api/reports/${reportId}/checkout`, {
         method: "POST",
         headers: { "content-type": "application/json", "idempotency-key": checkoutIdempotencyKey.current },
-        body: JSON.stringify({ email, currency, locale, turnstileToken: token })
+        body: JSON.stringify({ email, currency, locale, turnstileToken: token, questionSetId })
       });
       const payload = await readCheckoutPayload(response);
       const confirmationReturnUrl = getPaymentConfirmationReturnUrl(payload, window.location.href);
@@ -133,6 +170,25 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
           <li key={item} className="flex gap-2"><Check aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-[var(--teal)]" />{item}</li>
         ))}
       </ul>
+      <div className="mt-5 grid gap-4">
+        <div>
+          <h4 className="text-sm font-semibold">{locale === "zh" ? "付款前确认三个业务问题" : "Confirm three business questions before payment"}</h4>
+          <p className="mt-1 text-xs leading-5 text-[var(--muted)]">{locale === "zh" ? "可编辑文字，但不能增加、删除或重排；付款后永久锁定。" : "Edit the wording if needed. Questions cannot be added, removed, or reordered and lock permanently after payment."}</p>
+        </div>
+        {questions.map((question, index) => (
+          <label className="text-sm font-semibold" key={index}>
+            {locale === "zh" ? `问题 ${index + 1}` : `Question ${index + 1}`}
+            <textarea className="input-control mt-2 min-h-24 w-full" required maxLength={500} value={question}
+              onChange={(event) => setQuestions((current) => current.map((value, position) => position === index ? event.target.value : value))} />
+          </label>
+        ))}
+        {lowConfidence ? (
+          <label className="flex items-start gap-2 rounded-lg border border-amber-500/40 p-3 text-sm">
+            <input className="mt-1" type="checkbox" checked={acknowledgedLowConfidence} onChange={(event) => setAcknowledgedLowConfidence(event.target.checked)} />
+            <span>{locale === "zh" ? "业务画像置信度较低；我已检查并确认以上三个问题。" : "The business profile has low confidence; I reviewed and explicitly confirm all three questions."}</span>
+          </label>
+        ) : null}
+      </div>
       <form onSubmit={checkout} className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,1fr)_140px]">
         <label className="text-sm font-semibold">
           {dictionary.commerce.emailLabel}
@@ -162,7 +218,7 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
         ) : null}
         <div className="flex flex-col gap-3 sm:col-span-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm font-semibold text-[var(--foreground)]">{dictionary.commerce.deliveryPromise}</p>
-          <button className="button-primary min-h-12 shrink-0" disabled={submitting || verifying || !email || !price} type="submit">
+          <button className="button-primary min-h-12 shrink-0" disabled={submitting || verifying || !email || !price || questions.length !== 3 || (lowConfidence && !acknowledgedLowConfidence)} type="submit">
             {submitting || verifying ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <LockKeyhole aria-hidden="true" className="size-4" />}
             {verifying
               ? dictionary.commerce.verifying
