@@ -279,7 +279,7 @@ export async function analyzePageBatch(
         {
           role: "system",
           content: isLanguageCorrectionCall
-            ? `You are a strict GEO report-language editor. Return JSON only. Rewrite only the flagged report-prose fields. Preserve URLs, page types, severities, confidence values, and every evidence object exactly. ${languageInstruction}`
+            ? `You are a strict GEO report-language editor. Return JSON only. Rewrite only the flagged report-prose fields. The allowedOriginalTerms list is exhaustive: for Simplified Chinese output, no other Latin-script sequence may appear, even inside quotation marks, examples, markup, code, email labels, or protocol labels. Replace forbidden source-language text with a Chinese description instead of repeating it. ${languageInstruction}`
             : `You are an evidence-first GEO website analyst. Return JSON only. Analyze only supplied page text. Every formal finding must contain at least one verbatim quote copied from the supplied page and its exact URL. Do not make external ownership, market, traffic, ranking, or performance claims. ${languageInstruction}`
         },
         {
@@ -290,6 +290,9 @@ export async function analyzePageBatch(
               languageInstruction,
               "Rewrite every flagged prose field in the required language.",
               "Translate or omit every other Latin-script word outside evidence quote fields.",
+              "Treat allowedOriginalTerms as the complete and exclusive list of Latin-script text permitted in Chinese replacements.",
+              "Never repeat forbidden source-language headings in quotation marks or examples; describe them in Chinese instead.",
+              "Do not output markup, code, email labels, or protocol-label examples in corrected prose.",
               "Return exactly one correction for every supplied field path, with no missing, duplicate, or extra paths.",
               "Return only replacement prose; do not add evidence, brands, platforms, claims, or other fields."
             ],
