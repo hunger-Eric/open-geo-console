@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { buildPublicSourceEvidenceGraph, type RetrievedPublicSourceFact } from "@open-geo-console/citation-intelligence";
-import { createSearchQueryFanout, DEFAULT_QUERY_BUDGET, generateCanonicalBuyerQuestions, type MarketSearchObservation, type PublicSearchSurfaceAuthority, type SearchQueryFanout } from "@open-geo-console/public-search-observer";
+import { createSearchQueryFanout, DEFAULT_QUERY_BUDGET, generateCanonicalBuyerQuestions, toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet, type MarketSearchObservation, type PublicSearchSurfaceAuthority, type SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import type { AiWebsiteReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import { decidePublicSourceCommercialCoverage } from "@/public-source-forensics/coverage";
 import { buildPublicSourceForensicReport, type PublicSourceForensicReportBuilderInput } from "@/public-source-forensics/report-builder";
@@ -55,7 +55,7 @@ export const FAIL_CLOSED_ARTIFACT_READINESS: ArtifactReadinessGate = { async ver
 
 export async function runPublicSourceForensicsPipeline(input: {
   reportId: string; jobId: string; locale: string; region: string; targetUrl: string;
-  websiteFoundation: AiWebsiteReportV1; dependencies: PublicSourceForensicsDependencies; signal?: AbortSignal;
+  websiteFoundation: AiWebsiteReportV1; businessQuestionSet?: ConfirmedBusinessQuestionSet; dependencies: PublicSourceForensicsDependencies; signal?: AbortSignal;
 }): Promise<{ report: RecommendationForensicReportV2; checkpoint: PublicSourcePipelineCheckpoint; commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[] }> {
   input.signal?.throwIfAborted();
   const existing = await input.dependencies.getReport(input.jobId);
@@ -63,13 +63,13 @@ export async function runPublicSourceForensicsPipeline(input: {
   const authority = input.dependencies.authority;
   if (!authority.active || authority.surface.locale !== input.locale || authority.surface.region !== input.region) throw new PublicSourceAuthorityUnavailableError();
   const profile = input.websiteFoundation.organizationProfile;
-  const questions = generateCanonicalBuyerQuestions({ locale: input.locale, region: input.region,
+  const questions = input.businessQuestionSet ? toCanonicalBuyerQuestionSet(input.businessQuestionSet) : generateCanonicalBuyerQuestions({ locale: input.locale, region: input.region,
     categoryEvidence: profile.productsAndServices.map((value, index) => ({ value, confidence: "high" as const, sourceId: `website-foundation-category-${index}` })),
     capabilityEvidence: profile.productsAndServices.map((value, index) => ({ value, confidence: "high" as const, sourceId: `website-foundation-capability-${index}` })),
     broadCategory: profile.businessModel || "business services",
     excludedIdentities: [{ kind: "customer_domain", value: new URL(input.targetUrl).hostname },
       ...(profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value })))] });
-  if (questions.confidence !== "high" || questions.questions.length < 3) throw new PublicSourceQuestionGenerationError();
+  if (questions.questions.length !== 3 || (!input.businessQuestionSet && questions.confidence !== "high")) throw new PublicSourceQuestionGenerationError();
   const fanouts = questions.questions.map((question) => createSearchQueryFanout({ question, surface: authority.surface, resultDepth: 3,
     budget: { ...DEFAULT_QUERY_BUDGET, maxResults: 3 },
     excludedIdentities: [{ kind: "customer_domain", value: new URL(input.targetUrl).hostname }, ...profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value }))] }));

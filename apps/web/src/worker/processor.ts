@@ -30,13 +30,20 @@ import {
   markGeoReportTechnicalProcessing
 } from "@/db/reports";
 import { getAiReport, saveAiReport } from "@/db/ai-reports";
+import { getConfirmedBusinessQuestionSet } from "@/db/business-questions";
+import { getCorrectionExecutionContext } from "@/db/report-corrections";
+import { listEvidenceAssets } from "@/db/evidence-assets";
+import { terminalizeCombinedCorrection, terminalizePaidCombinedReport } from "@/db/combined-correction-terminalization";
+import { getPendingPaidCombinedContext } from "@/db/combined-reports";
+import { buildReadyCombinedArtifact } from "@/report/combined-artifact-readiness";
+import { createEvidenceStorage } from "@/evidence/storage";
 import {
   getCrawlEvidence,
   getReusableCrawlEvidence,
   purgeExpiredCrawlContent,
   saveCrawlEvidence
 } from "@/db/crawl-evidence";
-import type { JobCheckpoint, ScanJobRow } from "@/db/schema";
+import type { JobCheckpoint, ReportEvidenceAssetRow, ScanJobRow } from "@/db/schema";
 import { projectFreeAiReport } from "@/report/visibility";
 import { createSafeFetch } from "@/server/safe-fetch";
 import { captureReportVisualEvidence } from "./visual-evidence";
@@ -121,6 +128,22 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     if (job.tier === "free") await purgeExpiredCrawlContent();
     let storedReport = await getGeoReport(job.reportId);
     if (!storedReport) throw new Error("The source technical report no longer exists.");
+    if (job.reason === "paid_report_correction") {
+      const foundation = await getAiReport(job.reportId, "deep", "recommendation_forensics_v1");
+      const context = await getCorrectionExecutionContext(job.id);
+      if (!context) throw new Error("The correction execution identity is unavailable.");
+      const foundationMatches = foundation?.technicalPayload && foundation.isPrivate && foundation.payload.tier === "deep" &&
+        foundation.reportId === job.reportId && foundation.locale === job.locale && sameTarget(foundation.payload.targetUrl, storedReport.url);
+      if (foundationMatches) {
+        const evidenceAssets = await listEvidenceAssets(job.reportId, context.originalPaidJobId);
+        if (await areReusableEvidenceAssets(evidenceAssets)) {
+          await finalizeCorrectionJob({ job, workerId, checkpoint, websiteFoundation: foundation.payload,
+            technicalReport: foundation.technicalPayload!, targetUrl: foundation.payload.targetUrl, evidenceAssets, context,
+            checkpointJob, signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill });
+          return;
+        }
+      }
+    }
     if (fulfillmentTarget !== "legacy" && job.productContract === "recommendation_forensics_v1" && checkpoint.contractVersion === 2 &&
         checkpoint.websiteFoundation?.completed) {
       const existingFoundation = await getAiReport(job.reportId, "deep", job.productContract);
@@ -128,6 +151,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       if (isMatchingRecommendationWebsiteFoundation(job, canonicalTarget, existingFoundation)) {
         await finalizeRecommendationJob({
           job, workerId, checkpoint, websiteFoundation: existingFoundation.payload,
+          technicalReport: existingFoundation.technicalPayload!,
           targetUrl: canonicalTarget,
           coverage: { plannedPages: job.plannedPages, successfulPages: job.successfulPages, failedPages: job.failedPages },
           fulfillmentTarget, checkpointJob, liveDrill: options.liveDrill,
@@ -380,8 +404,19 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         failedPages: failureCount(checkpoint)
       });
       checkpoint = normalizeCheckpoint(preflightCheckpoint.checkpoint);
+      if (job.reason === "paid_report_correction") {
+        const context = await getCorrectionExecutionContext(job.id);
+        if (!context) throw new Error("The correction execution identity is unavailable after technical regeneration.");
+        const evidenceAssets = await listEvidenceAssets(job.reportId, job.id);
+        await assertReusableEvidenceAssets(evidenceAssets);
+        await finalizeCorrectionJob({ job, workerId, checkpoint, websiteFoundation: reportToPersist,
+          targetUrl: discovery.targetUrl, technicalReport: technicalReport!, evidenceAssets, context,
+          checkpointJob, signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill });
+        return;
+      }
       await finalizeRecommendationJob({
         job, workerId, checkpoint, websiteFoundation: reportToPersist, targetUrl: discovery.targetUrl,
+        technicalReport: technicalReport!,
         fulfillmentTarget, coverage: {
           plannedPages: effectiveCoverage.effectivePlannedPages,
           successfulPages: effectiveCoverage.analyzedPages,
@@ -438,7 +473,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         });
       }
     }
-    if (job.tier === "deep" && failedJob.stage === "failed") {
+    if (job.tier === "deep" && failedJob.stage === "failed" && job.reason !== "paid_report_correction") {
       await recordCommercialOutcomeSafely(job.id, "failed");
     }
   } finally {
@@ -478,11 +513,67 @@ export function resolveRecommendationFoundationTarget(
   return checkpoint.discoverySnapshot?.targetUrl ?? foundation?.payload.targetUrl ?? submittedUrl;
 }
 
+async function finalizeCorrectionJob(input: {
+  job: ScanJobRow;
+  workerId: string;
+  checkpoint: WorkerCheckpoint;
+  websiteFoundation: AiWebsiteReportV1;
+  technicalReport: GeoAuditReport;
+  targetUrl: string;
+  evidenceAssets: ReportEvidenceAssetRow[];
+  context: NonNullable<Awaited<ReturnType<typeof getCorrectionExecutionContext>>>;
+  checkpointJob: WorkerCheckpointWriter;
+  signal?: AbortSignal;
+  remainingMs: number;
+  liveDrill?: StagingLiveDrill;
+}): Promise<void> {
+  let checkpoint=input.checkpoint;
+  createPublicSourceAttemptBudget(input.remainingMs);
+  const questionSet=input.job.businessQuestionSetId ? await getConfirmedBusinessQuestionSet(input.job.reportId,input.job.businessQuestionSetId) : null;
+  if(!questionSet) throw new Error("The correction question set is not locked and available.");
+  const dependencies=await createProductionPublicSourceForensicsDependencies(process.env,{createDependencies:async(runtime)=>
+    createWorkerPublicSourceForensicsDependencies({job:input.job,workerId:input.workerId,
+      coverage:{plannedPages:input.job.plannedPages,successfulPages:input.job.successfulPages,failedPages:input.job.failedPages},
+      readCheckpoint:()=>checkpoint,onCheckpointSaved:async(next)=>{checkpoint=next;},checkpointJob:input.checkpointJob,
+      retrieveSource:createWorkerPublicSourceRetriever(),artifactReadiness:{async verify(){ /* combined readiness runs below */ }},
+      liveDrill:input.liveDrill,signal:input.signal},runtime)});
+  const result=await runPublicSourceForensicsPipeline({reportId:input.job.reportId,jobId:input.job.id,
+    ...resolvePublicSourceRunScope(dependencies),targetUrl:input.targetUrl,websiteFoundation:input.websiteFoundation,
+    businessQuestionSet:questionSet,dependencies,signal:input.signal});
+  input.signal?.throwIfAborted();
+  const ready=await buildReadyCombinedArtifact({artifactRevisionId:input.context.artifactRevisionId,
+    artifactRevision:input.context.artifactRevision,reportId:input.job.reportId,orderId:input.context.orderId,jobId:input.job.id,
+    originalPaidJobId:input.context.originalPaidJobId,targetUrl:input.targetUrl,technicalReport:input.technicalReport,
+    aiReport:input.websiteFoundation,evidenceAssets:input.evidenceAssets,businessQuestionSet:questionSet,publicSourceForensics:result.report});
+  input.signal?.throwIfAborted();
+  await terminalizeCombinedCorrection({report:ready.report,workerId:input.workerId,
+    checkpointIdentityHash:result.checkpoint.identityHash,snapshotRefs:result.commercialSnapshotRefs,
+    htmlSha256:ready.htmlSha256,pdfSha256:ready.pdfSha256,pdfStorageKey:ready.pdfStorageKey,pageCount:ready.pageCount});
+}
+
+async function assertReusableEvidenceAssets(assets: ReportEvidenceAssetRow[]): Promise<void> {
+  const required=assets.filter((asset)=>asset.status==="ready");
+  if(required.length===0 || assets.some((asset)=>asset.status!=="ready" || !asset.storageKey || !asset.contentHash)) {
+    throw new Error("The correction screenshot foundation failed completeness or retention validation.");
+  }
+  const storage=createEvidenceStorage();
+  for(const asset of required){
+    const object=await storage.get(asset.storageKey!);
+    if(!object?.body.byteLength) throw new Error("A retained correction screenshot is no longer readable.");
+  }
+}
+async function areReusableEvidenceAssets(assets: ReportEvidenceAssetRow[]): Promise<boolean> {
+  try { await assertReusableEvidenceAssets(assets); return true; }
+  catch { return false; }
+}
+function sameTarget(left:string,right:string):boolean{try{const a=new URL(left),b=new URL(right);a.hash="";b.hash="";a.pathname=a.pathname.replace(/\/$/,"")||"/";b.pathname=b.pathname.replace(/\/$/,"")||"/";return a.href===b.href;}catch{return false;}}
+
 async function finalizeRecommendationJob(input: {
   job: ScanJobRow;
   workerId: string;
   checkpoint: WorkerCheckpoint;
   websiteFoundation: AiWebsiteReportV1;
+  technicalReport: GeoAuditReport;
   targetUrl: string;
   coverage: { plannedPages: number; successfulPages: number; failedPages: number };
   fulfillmentTarget: "recommendation_v1" | "recommendation_v2";
@@ -493,7 +584,9 @@ async function finalizeRecommendationJob(input: {
 }): Promise<void> {
   if (input.fulfillmentTarget === "recommendation_v2") {
     let checkpoint = input.checkpoint;
-    const artifactReadiness = createWorkerPublicSourceArtifactReadinessGate();
+    const artifactReadiness = input.job.artifactContract === "combined_geo_report_v1"
+      ? { async verify() { /* canonical combined readiness runs after public-source synthesis */ } }
+      : createWorkerPublicSourceArtifactReadinessGate();
     const checkpointPhase = () => recoveryEnvelope(checkpoint)?.phase;
     const terminalize = async (report: RecommendationForensicReportV2, snapshotRefs: PublicSourceCommercialSnapshotRef[]) => {
       if (checkpointPhase() !== "terminalization") {
@@ -505,7 +598,7 @@ async function finalizeRecommendationJob(input: {
       await terminalizePaidPublicSourceReport({ report, workerId: input.workerId,
         checkpointIdentityHash: checkpoint.publicSourceForensics?.identityHash ?? "", coverage: input.coverage, snapshotRefs });
     };
-    if (["artifact_verification", "terminalization"].includes(checkpointPhase() ?? "") && checkpoint.pendingArtifactVerification) {
+    if (input.job.artifactContract !== "combined_geo_report_v1" && ["artifact_verification", "terminalization"].includes(checkpointPhase() ?? "") && checkpoint.pendingArtifactVerification) {
       input.signal?.throwIfAborted();
       await artifactReadiness.verify(checkpoint.pendingArtifactVerification.report);
       input.signal?.throwIfAborted();
@@ -530,9 +623,26 @@ async function finalizeRecommendationJob(input: {
         signal: input.signal
       }, runtime)
     });
+    const businessQuestionSet = input.job.businessQuestionSetId
+      ? await getConfirmedBusinessQuestionSet(input.job.reportId, input.job.businessQuestionSetId)
+      : null;
+    if (input.job.businessQuestionSetId && !businessQuestionSet) throw new Error("The job-bound business question set is unavailable or unlocked.");
     const result = await runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
       ...resolvePublicSourceRunScope(dependencies),
-      targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, dependencies, signal: input.signal });
+      targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, businessQuestionSet: businessQuestionSet ?? undefined,
+      dependencies, signal: input.signal });
+    if(input.job.artifactContract==="combined_geo_report_v1"&&result.report.commercialOutcome==="completed"){
+      const context=await getPendingPaidCombinedContext(input.job.id);
+      const questions=input.job.businessQuestionSetId?await getConfirmedBusinessQuestionSet(input.job.reportId,input.job.businessQuestionSetId):null;
+      if(!context||!questions)throw new Error("The pending paid combined artifact identity is unavailable.");
+      const evidenceAssets=await listEvidenceAssets(input.job.reportId,input.job.id);await assertReusableEvidenceAssets(evidenceAssets);
+      const ready=await buildReadyCombinedArtifact({artifactRevisionId:context.artifactRevisionId,artifactRevision:context.artifactRevision,
+        reportId:input.job.reportId,orderId:context.orderId,jobId:input.job.id,originalPaidJobId:input.job.id,targetUrl:input.targetUrl,
+        technicalReport:input.technicalReport,aiReport:input.websiteFoundation,evidenceAssets,businessQuestionSet:questions,publicSourceForensics:result.report});
+      await terminalizePaidCombinedReport({report:ready.report,workerId:input.workerId,checkpointIdentityHash:result.checkpoint.identityHash,
+        snapshotRefs:result.commercialSnapshotRefs,htmlSha256:ready.htmlSha256,pdfSha256:ready.pdfSha256,pdfStorageKey:ready.pdfStorageKey,pageCount:ready.pageCount});
+      return;
+    }
     await terminalize(result.report, result.commercialSnapshotRefs);
     return;
   }
