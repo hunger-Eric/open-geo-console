@@ -56,6 +56,11 @@ describe("public-source snapshot resolver", () => {
     expect(reused.observations.map(({ queryId }) => queryId).sort()).toEqual(first.observations.map(({ queryId }) => queryId).sort());
     expect(reused.avoidedCostMicros).toBeGreaterThan(0);
     expect(search).toHaveBeenCalledTimes(fanout.queries.length);
+
+    const refreshed = await resolvePublicSourceSnapshot({ ...input, forceRefresh: true, evidenceCutoffAt: "2030-01-05T00:00:00.000Z" });
+    expect(refreshed).toMatchObject({ collectedForThisRun: true, refreshAttempted: true });
+    expect(refreshed.snapshotId).not.toBe(first.snapshotId);
+    expect(search).toHaveBeenCalledTimes(fanout.queries.length * 2);
   });
 
   it("runs no more than two search requests for one question at a time", async () => {

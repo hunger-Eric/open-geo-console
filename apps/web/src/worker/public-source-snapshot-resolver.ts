@@ -73,6 +73,7 @@ export interface ResolvePublicSourceSnapshotInput {
   signal?: AbortSignal;
   retrieveSource?: PublicSourceRetriever;
   retrievalGate?: ConcurrencyGate;
+  forceRefresh?: boolean;
 }
 
 const DEFAULT_LEASE_DURATION_MS = 5 * 60_000;
@@ -82,11 +83,11 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
   assertExactRuntime(input);
   const evidenceCutoff = date(input.evidenceCutoffAt, "evidenceCutoffAt");
   const identity = createMarketSnapshotIdentity({ question: input.question, surface: input.authority.surface, fanoutVersion: input.fanout.fanoutVersion });
-  const prior = await findExactMarketSnapshot({ identity, evidenceCutoff });
+  const prior = input.forceRefresh ? null : await findExactMarketSnapshot({ identity, evidenceCutoff });
   if (prior) return resolveExisting({ ...input, identity, evidenceCutoff, snapshotId: prior.snapshot.id, ageMs: prior.ageMs });
 
   const leaseDurationMs = positive(input.leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS, "leaseDurationMs");
-  const claim = await acquireMarketSnapshotLease({ cacheIdentity: identity.id, leaseOwner: input.leaseOwner, leaseDurationMs });
+  const claim = await acquireMarketSnapshotLease({ cacheIdentity: identity.id, leaseOwner: input.leaseOwner, leaseDurationMs, forceRefresh: input.forceRefresh });
   if (!claim.acquired) {
     if (claim.state === "completed") throw new PublicSourceSnapshotAuthorityMismatchError();
     const waited = await waitForMarketSnapshot({ identity, deadline: new Date(Date.now() + positive(input.waitDeadlineMs ?? DEFAULT_WAIT_DEADLINE_MS, "waitDeadlineMs")), signal: input.signal });
@@ -99,7 +100,7 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
 
   let snapshotId: string | undefined;
   try {
-    const resumed = claim.takeover ? await findResumableMarketSnapshot({ identity, authorityVersion: input.authority.authorityId }) : null;
+    const resumed = claim.takeover && !input.forceRefresh ? await findResumableMarketSnapshot({ identity, authorityVersion: input.authority.authorityId }) : null;
     const snapshot = resumed ?? await createMarketSnapshotRefresh({
       identity, authorityVersion: input.authority.authorityId, token: claim.token, questionHash: sha(input.question.normalizedText)
     });

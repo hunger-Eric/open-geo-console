@@ -101,7 +101,7 @@ export interface SourceEvidenceInput {
 }
 
 export async function acquireMarketSnapshotLease(input: {
-  cacheIdentity: string; leaseOwner: string; leaseDurationMs: number;
+  cacheIdentity: string; leaseOwner: string; leaseDurationMs: number; forceRefresh?: boolean;
 }): Promise<LeaseClaim> {
   const cacheIdentity = identityText(input.cacheIdentity);
   const leaseOwner = opaqueOwner(input.leaseOwner);
@@ -114,7 +114,7 @@ export async function acquireMarketSnapshotLease(input: {
       memorySaveMarketSnapshotLease(row);
       return { acquired: true, takeover: false, token: token(row), expiresAt: new Date(row.expiresAt) };
     }
-    if ((existing.state === "active" && existing.expiresAt.getTime() <= now.getTime()) || existing.state === "failed") {
+    if ((existing.state === "active" && existing.expiresAt.getTime() <= now.getTime()) || existing.state === "failed" || (existing.state === "completed" && input.forceRefresh === true)) {
       const row = leaseRow(cacheIdentity, leaseOwner, existing.attemptNumber + 1, now, leaseDurationMs);
       memorySaveMarketSnapshotLease(row);
       markUnfinishedAttemptsUncertainMemory(cacheIdentity, now);
@@ -138,6 +138,7 @@ export async function acquireMarketSnapshotLease(input: {
         attempt_number = market_snapshot_leases.attempt_number + 1, terminal_snapshot_id = NULL, updated_at = clock_timestamp()
       WHERE (market_snapshot_leases.state = 'active' AND market_snapshot_leases.expires_at <= clock_timestamp())
          OR market_snapshot_leases.state = 'failed'
+         OR (market_snapshot_leases.state = 'completed' AND ${input.forceRefresh === true})
       RETURNING *, attempt_number > 1 AS takeover
     `;
     if (acquired[0]) {
