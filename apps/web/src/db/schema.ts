@@ -42,6 +42,8 @@ export type ScanJobExecutionState = "queued" | "running" | "retry_wait" | "repai
 export type ScanJobPhase =
   | "admission" | "discovery" | "planning" | "fetching" | "technical_audit" | "page_analysis"
   | "website_synthesis" | "public_source_preflight" | "question_generation" | "snapshot_resolution"
+  | "provider_discovery_search" | "candidate_resolution" | "candidate_verification" | "provider_source_retrieval"
+  | "provider_passage_selection" | "provider_claim_extraction" | "provider_qualification" | "grounded_answer_synthesis"
   | "source_retrieval" | "evidence_graph" | "report_build" | "artifact_verification" | "terminalization";
 
 export const deploymentEnvironment = pgTable("deployment_environment", {
@@ -239,7 +241,7 @@ export const scanJobs = pgTable(
       sql`${table.stage} IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')`
     ),
     check("scan_jobs_execution_state_check", sql`${table.executionState} IN ('queued','running','retry_wait','repair_wait','completed','failed')`),
-    check("scan_jobs_current_phase_check", sql`${table.currentPhase} IN ('admission','discovery','planning','fetching','technical_audit','page_analysis','website_synthesis','public_source_preflight','question_generation','snapshot_resolution','source_retrieval','evidence_graph','report_build','artifact_verification','terminalization')`)
+    check("scan_jobs_current_phase_check", sql`${table.currentPhase} IN ('admission','discovery','planning','fetching','technical_audit','page_analysis','website_synthesis','public_source_preflight','question_generation','snapshot_resolution','provider_discovery_search','candidate_resolution','candidate_verification','provider_source_retrieval','provider_passage_selection','provider_claim_extraction','provider_qualification','grounded_answer_synthesis','source_retrieval','evidence_graph','report_build','artifact_verification','terminalization')`)
   ]
 );
 

@@ -3,6 +3,8 @@ import type { JobCheckpoint, ScanJobStage } from "@/db/schema";
 export const ANALYSIS_PHASES = [
   "admission", "discovery", "planning", "fetching", "technical_audit", "page_analysis",
   "website_synthesis", "public_source_preflight", "question_generation", "snapshot_resolution",
+  "provider_discovery_search", "candidate_resolution", "candidate_verification", "provider_source_retrieval",
+  "provider_passage_selection", "provider_claim_extraction", "provider_qualification", "grounded_answer_synthesis",
   "source_retrieval", "evidence_graph", "report_build", "artifact_verification", "terminalization"
 ] as const;
 
@@ -54,6 +56,14 @@ export function stageForPhase(phase: ScanJobPhase, fallback: Exclude<ScanJobStag
     case "public_source_preflight":
     case "question_generation":
     case "snapshot_resolution":
+    case "provider_discovery_search":
+    case "candidate_resolution":
+    case "candidate_verification":
+    case "provider_source_retrieval":
+    case "provider_passage_selection":
+    case "provider_claim_extraction":
+    case "provider_qualification":
+    case "grounded_answer_synthesis":
     case "source_retrieval":
     case "evidence_graph":
     case "report_build":
@@ -71,4 +81,3 @@ export function recoveryEnvelope(checkpoint: JobCheckpoint): RecoveryCheckpointE
     typeof value.phase === "string" && ANALYSIS_PHASES.includes(value.phase as ScanJobPhase) &&
     value.identity !== undefined && typeof value.inputHash === "string" ? value as RecoveryCheckpointEnvelope : null;
 }
-

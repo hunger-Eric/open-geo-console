@@ -75,6 +75,12 @@ export interface ResolvePublicSourceSnapshotInput {
   retrievalGate?: ConcurrencyGate;
   forceRefresh?: boolean;
   forceRefreshAfter?: string;
+  snapshotMetadata?: {
+    snapshotKind: "standard_question" | "provider_discovery" | "candidate_verification";
+    parentSnapshotId?: string | null;
+    candidateSetHash?: string | null;
+    queryPlanVersion: string;
+  };
 }
 
 const DEFAULT_LEASE_DURATION_MS = 5 * 60_000;
@@ -84,9 +90,11 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
   assertExactRuntime(input);
   const evidenceCutoff = date(input.evidenceCutoffAt, "evidenceCutoffAt");
   const identity = createMarketSnapshotIdentity({ question: input.question, surface: input.authority.surface, fanoutVersion: input.fanout.fanoutVersion });
-  const prior = await findExactMarketSnapshot({ identity, evidenceCutoff });
+  const exactPrior = await findExactMarketSnapshot({ identity, evidenceCutoff });
+  const prior = exactPrior && snapshotMetadataMatches(exactPrior.snapshot, input.snapshotMetadata) ? exactPrior : null;
+  const metadataMismatch = Boolean(exactPrior && !prior);
   const refreshBoundary=input.forceRefreshAfter?date(input.forceRefreshAfter,"forceRefreshAfter"):null;
-  const forceRefresh=input.forceRefresh===true||Boolean(refreshBoundary&&(!prior?.snapshot.completedAt||prior.snapshot.completedAt<refreshBoundary));
+  const forceRefresh=input.forceRefresh===true||metadataMismatch||Boolean(refreshBoundary&&(!prior?.snapshot.completedAt||prior.snapshot.completedAt<refreshBoundary));
   if (prior&&!forceRefresh) return resolveExisting({ ...input, identity, evidenceCutoff, snapshotId: prior.snapshot.id, ageMs: prior.ageMs });
 
   const leaseDurationMs = positive(input.leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS, "leaseDurationMs");
@@ -103,9 +111,16 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
 
   let snapshotId: string | undefined;
   try {
-    const resumed = claim.takeover && !forceRefresh ? await findResumableMarketSnapshot({ identity, authorityVersion: input.authority.authorityId }) : null;
+    const resumable = claim.takeover && !forceRefresh ? await findResumableMarketSnapshot({ identity, authorityVersion: input.authority.authorityId }) : null;
+    const resumed = resumable && snapshotMetadataMatches(resumable, input.snapshotMetadata) ? resumable : null;
     const snapshot = resumed ?? await createMarketSnapshotRefresh({
-      identity, authorityVersion: input.authority.authorityId, token: claim.token, questionHash: sha(input.question.normalizedText)
+      identity, authorityVersion: input.authority.authorityId, token: claim.token, questionHash: sha(input.question.normalizedText),
+      ...(input.snapshotMetadata ? {
+        snapshotKind: input.snapshotMetadata.snapshotKind,
+        parentSnapshotId: input.snapshotMetadata.parentSnapshotId,
+        candidateSetHash: input.snapshotMetadata.candidateSetHash,
+        queryPlanVersion: input.snapshotMetadata.queryPlanVersion
+      } : {})
     });
     const currentSnapshotId = snapshot.id;
     snapshotId = currentSnapshotId;
@@ -182,6 +197,7 @@ async function resolveExisting(input: ResolvePublicSourceSnapshotInput & { ident
   if (!bundle || bundle.snapshot.status !== "completed" || bundle.snapshot.surfaceAuthorityVersion !== input.authority.authorityId) {
     throw new PublicSourceSnapshotAuthorityMismatchError();
   }
+  if (!snapshotMetadataMatches(bundle.snapshot, input.snapshotMetadata)) throw new PublicSourceSnapshotAuthorityMismatchError();
   const observations = toObservations(bundle, input.authority.surface, input.fanout);
   const retrievals = factsFromBundle(bundle, input.fanout);
   const cost = knownCost(bundle.attempts);
@@ -323,6 +339,14 @@ function snapshotQueryId(snapshotId: string, queryId: string): string { return d
 function fanoutHash(fanout: SearchQueryFanout): string { return sha(JSON.stringify({ questionId: fanout.questionId, questionSetVersion: fanout.questionSetVersion, fanoutVersion: fanout.fanoutVersion, surface: fanout.surface, queries: fanout.queries.map(({ id, exactQuery, derivationRuleId, resultDepth }) => ({ id, exactQuery, derivationRuleId, resultDepth })) })); }
 function knownCost(attempts: Array<{ providerCostMicros: number | null }>): number { return attempts.reduce((total, attempt) => total + (attempt.providerCostMicros ?? 0), 0); }
 function sha(value: string): string { return createHash("sha256").update(value).digest("hex"); }
+function snapshotMetadataMatches(
+  snapshot: { snapshotKind: string; parentSnapshotId: string | null; candidateSetHash: string | null; queryPlanVersion: string },
+  expected: ResolvePublicSourceSnapshotInput["snapshotMetadata"]
+): boolean {
+  const metadata = expected ?? { snapshotKind: "standard_question" as const, parentSnapshotId: null, candidateSetHash: null, queryPlanVersion: "legacy-standard-v1" };
+  return snapshot.snapshotKind === metadata.snapshotKind && snapshot.parentSnapshotId === (metadata.parentSnapshotId ?? null) &&
+    snapshot.candidateSetHash === (metadata.candidateSetHash ?? null) && snapshot.queryPlanVersion === metadata.queryPlanVersion;
+}
 function date(value: string, label: string): Date { const parsed = new Date(value); if (!Number.isFinite(parsed.getTime())) throw new TypeError(`${label} must be an ISO timestamp.`); return parsed; }
 function positive(value: number, label: string): number { if (!Number.isSafeInteger(value) || value < 1 || value > 60 * 60_000) throw new TypeError(`${label} is invalid.`); return value; }
 

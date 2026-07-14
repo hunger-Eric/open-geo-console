@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { buildPublicSourceEvidenceGraph, type RetrievedPublicSourceFact } from "@open-geo-console/citation-intelligence";
-import { createSearchQueryFanout, DEFAULT_QUERY_BUDGET, generateCanonicalBuyerQuestions, toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet, type MarketSearchObservation, type PublicSearchSurfaceAuthority, type SearchQueryFanout } from "@open-geo-console/public-search-observer";
+import { createSearchQueryFanout, DEFAULT_QUERY_BUDGET, generateCanonicalBuyerQuestions, toCanonicalBuyerQuestionSet, type CanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet, type CustomerIdentityExclusion, type MarketSearchObservation, type PublicSearchSurfaceAuthority, type SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import type { AiWebsiteReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import { decidePublicSourceCommercialCoverage } from "@/public-source-forensics/coverage";
 import { buildPublicSourceForensicReport, type PublicSourceForensicReportBuilderInput } from "@/public-source-forensics/report-builder";
@@ -70,9 +70,8 @@ export async function runPublicSourceForensicsPipeline(input: {
     excludedIdentities: [{ kind: "customer_domain", value: new URL(input.targetUrl).hostname },
       ...(profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value })))] });
   if (questions.questions.length !== 3 || (!input.businessQuestionSet && questions.confidence !== "high")) throw new PublicSourceQuestionGenerationError();
-  const fanouts = questions.questions.map((question) => createSearchQueryFanout({ question, surface: authority.surface, resultDepth: 3,
-    budget: { ...DEFAULT_QUERY_BUDGET, maxResults: 3 },
-    excludedIdentities: [{ kind: "customer_domain", value: new URL(input.targetUrl).hostname }, ...profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value }))] }));
+  const excludedIdentities: CustomerIdentityExclusion[] = [{ kind: "customer_domain", value: new URL(input.targetUrl).hostname }, ...profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value }))];
+  const fanouts = createPublicSourceQuestionFanouts({ questions, authority, excludedIdentities });
   const prior = await input.dependencies.getCheckpoint(input.jobId);
   const websiteFoundationHash = sha(input.websiteFoundation);
   if (prior && (prior.methodology !== "public_search_source_forensics_v1" || prior.questionSetVersion !== questions.questionSetVersion ||
@@ -127,6 +126,20 @@ export async function runPublicSourceForensicsPipeline(input: {
   const stored = input.dependencies.deferReportPersistence ? report : await input.dependencies.saveReport(report);
   if (stored.reportId !== input.reportId || stored.jobId !== input.jobId || stored.commercialOutcome !== decision.outcome) throw new PublicSourceReportOutcomeMismatchError();
   return { report: stored, checkpoint, commercialSnapshotRefs };
+}
+
+export function createPublicSourceQuestionFanouts(input: {
+  questions: CanonicalBuyerQuestionSet;
+  authority: PublicSearchSurfaceAuthority;
+  excludedIdentities: readonly CustomerIdentityExclusion[];
+  ordinals?: readonly number[];
+}): SearchQueryFanout[] {
+  const ordinals = input.ordinals ?? input.questions.questions.map((_, index) => index);
+  if (!ordinals.length || new Set(ordinals).size !== ordinals.length || ordinals.some((ordinal) => !Number.isSafeInteger(ordinal) || ordinal < 0 || ordinal >= input.questions.questions.length)) throw new TypeError("Public-source fanout ordinals are invalid.");
+  return ordinals.map((ordinal) => createSearchQueryFanout({
+    question: input.questions.questions[ordinal]!, surface: input.authority.surface, resultDepth: 3,
+    budget: { ...DEFAULT_QUERY_BUDGET, maxResults: 3 }, excludedIdentities: input.excludedIdentities
+  }));
 }
 
 function createCheckpoint(value: { input: Parameters<typeof runPublicSourceForensicsPipeline>[0]; questions: ReturnType<typeof generateCanonicalBuyerQuestions>; fanouts: SearchQueryFanout[]; snapshots: ResolvedPublicSourceSnapshot[]; evidenceCutoffAt: string; authority: PublicSearchSurfaceAuthority }): PublicSourcePipelineCheckpoint {

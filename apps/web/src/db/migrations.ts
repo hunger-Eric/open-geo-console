@@ -1792,6 +1792,8 @@ export const V19_DATABASE_MIGRATIONS = [
 ] as const;
 
 export const V20_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_current_phase_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_current_phase_check CHECK (current_phase IN ('admission','discovery','planning','fetching','technical_audit','page_analysis','website_synthesis','public_source_preflight','question_generation','snapshot_resolution','provider_discovery_search','candidate_resolution','candidate_verification','provider_source_retrieval','provider_passage_selection','provider_claim_extraction','provider_qualification','grounded_answer_synthesis','source_retrieval','evidence_graph','report_build','artifact_verification','terminalization'))`,
   `ALTER TABLE market_snapshot_questions ADD COLUMN IF NOT EXISTS snapshot_kind text NOT NULL DEFAULT 'standard_question'`,
   `ALTER TABLE market_snapshot_questions ADD COLUMN IF NOT EXISTS parent_snapshot_id text`,
   `ALTER TABLE market_snapshot_questions ADD COLUMN IF NOT EXISTS candidate_set_hash text`,
