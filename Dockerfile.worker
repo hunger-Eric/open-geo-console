@@ -1,5 +1,8 @@
 FROM node:24-bookworm-slim
 
+ARG OGC_REVISION=unknown
+LABEL org.opencontainers.image.revision=$OGC_REVISION
+
 WORKDIR /app
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
@@ -11,6 +14,7 @@ COPY packages/citation-intelligence/package.json ./packages/citation-intelligenc
 COPY packages/crawler-rules/package.json ./packages/crawler-rules/package.json
 COPY packages/geo-auditor/package.json ./packages/geo-auditor/package.json
 COPY packages/log-parser/package.json ./packages/log-parser/package.json
+COPY packages/public-search-observer/package.json ./packages/public-search-observer/package.json
 COPY packages/site-crawler/package.json ./packages/site-crawler/package.json
 
 RUN npm ci --include=dev && npx playwright install --with-deps chromium
