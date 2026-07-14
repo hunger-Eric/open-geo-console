@@ -1,3 +1,4 @@
+import React from "react";
 import type { RecommendationPrivateReportArtifactModelV2 } from "@/report/artifact-model";
 
 export function PublicSourceForensicsReportArtifact({ model }: { model: RecommendationPrivateReportArtifactModelV2 }) {
