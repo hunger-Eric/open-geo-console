@@ -316,6 +316,8 @@ describe("batch analysis and evidence", () => {
     for (const call of vi.mocked(client.completeJson).mock.calls) {
       expect(JSON.stringify(call[0])).toContain("Simplified Chinese");
     }
+    expect(JSON.stringify(vi.mocked(client.completeJson).mock.calls[1]?.[0]))
+      .toContain("keep verbatim source text only inside evidence quote fields");
   });
 
   it("corrects legacy SEO terminology in page analysis using the existing single correction", async () => {

@@ -5,6 +5,7 @@ import {
   ReportLanguageValidationError,
   assertGeoTerminology,
   assertReportLanguage,
+  reportLanguageCorrectionFeedback,
   reportLanguageInstruction
 } from "./report-language";
 import type {
@@ -230,7 +231,7 @@ export async function analyzePageBatch(
         if (error instanceof ReportLanguageValidationError) {
           if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
           languageCorrectionUsed = true;
-          languageFeedback = languageViolationFeedback(error);
+          languageFeedback = reportLanguageCorrectionFeedback(error, input.locale);
         }
         if (attempt < maxAttempts) await retryDelay(Math.min(2_000, 250 * (2 ** (attempt - 1))));
       }
@@ -284,10 +285,6 @@ function collectPageAllowedTerms(pages: readonly ExtractedPage[]): string[] {
 }
 
 const HOSTNAME_NOISE = new Set(["www", "com", "org", "net", "io", "co", "cn"]);
-
-function languageViolationFeedback(error: ReportLanguageValidationError): string[] {
-  return error.violations.map(({ path, reason }) => `${path}: ${reason}`);
-}
 
 export function createFallbackPageAnalysis(page: ExtractedPage): PageAnalysis {
   return {

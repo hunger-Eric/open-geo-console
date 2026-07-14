@@ -13,6 +13,7 @@ import {
   ReportLanguageValidationError,
   assertGeoTerminology,
   assertReportLanguage,
+  reportLanguageCorrectionFeedback,
   reportLanguageInstruction
 } from "./report-language";
 
@@ -214,7 +215,7 @@ export async function synthesizeWebsiteReportWithRecovery(
       if (error instanceof ReportLanguageValidationError) {
         if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
         languageCorrectionUsed = true;
-        languageFeedback = languageViolationFeedback(error);
+        languageFeedback = reportLanguageCorrectionFeedback(error, input.locale);
       }
       if (attempt < maxAttempts) await delayWithSignal(delay, Math.min(2_000, 250 * (2 ** (attempt - 1))), options.signal);
     }
@@ -287,10 +288,6 @@ function collectSourceGroundedAllowedTerms(input: ReportSynthesisInput): string[
 }
 
 const HOSTNAME_NOISE = new Set(["www", "com", "org", "net", "io", "co", "cn"]);
-
-function languageViolationFeedback(error: ReportLanguageValidationError): string[] {
-  return error.violations.map(({ path, reason }) => `${path}: ${reason}`);
-}
 
 async function delayWithSignal(delay: (milliseconds: number) => Promise<void>, milliseconds: number, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();

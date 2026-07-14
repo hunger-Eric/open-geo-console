@@ -65,7 +65,9 @@ describe("combined business question answers", () => {
       expect(JSON.stringify(call[0])).toContain("Simplified Chinese");
     }
     const correction = JSON.parse(completeJson.mock.calls[1]![0].messages[1].content).correctionRequired;
-    expect(correction).toEqual(["answers[0].answer: unexpected_english_sentence", "answers[1].answer: unexpected_english_sentence", "answers[2].answer: unexpected_english_sentence"]);
+    expect(correction).toEqual([0, 1, 2].map((index) =>
+      `answers[${index}].answer: unexpected_english_sentence. Rewrite this field entirely in Simplified Chinese; keep verbatim source text only inside evidence quote fields.`
+    ));
     expect(JSON.stringify(correction)).not.toContain("customer should update");
     expect(JSON.parse(completeJson.mock.calls[1]![0].messages[1].content).correctionInstruction).toContain("翻译、音译或省略");
   });

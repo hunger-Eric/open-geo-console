@@ -89,6 +89,22 @@ export function reportLanguageInstruction(locale: string): string {
     : `Write all report prose in English. Keep only unavoidable official names and verbatim evidence in their source language. Do not repeat the prose in Chinese.${terminology}`;
 }
 
+export function reportLanguageCorrectionFeedback(
+  error: ReportLanguageValidationError,
+  locale: string
+): string[] {
+  const language = normalizeReportLanguage(locale);
+  return error.violations.map(({ path, reason }) => {
+    if (reason === "legacy_seo_terminology") {
+      return `${path}: ${reason}. Replace legacy SEO terminology with GEO terminology while preserving the meaning.`;
+    }
+    if (language === "zh") {
+      return `${path}: ${reason}. Rewrite this field entirely in Simplified Chinese; keep verbatim source text only inside evidence quote fields.`;
+    }
+    return `${path}: ${reason}. Rewrite this field entirely in English; keep verbatim source text only inside evidence quote fields.`;
+  });
+}
+
 export function assertGeoTerminology(
   fields: readonly ReportLanguageField[],
   policy: ReportTerminologyPolicy
