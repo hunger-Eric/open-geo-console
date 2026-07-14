@@ -102,28 +102,6 @@ export function assertReportLanguage(
   if (violations.length) throw new ReportLanguageValidationError(violations);
 }
 
-export function extractConfirmedQuestionOfficialTerms(texts: readonly string[]): string[] {
-  const terms = new Set<string>();
-  for (const text of texts) {
-    const matches = [...text.matchAll(/[A-Za-z][A-Za-z0-9-]*/g)];
-    for (const [index, match] of matches.entries()) {
-      const value = match[0];
-      if (!/^[A-Z][a-z0-9]{2,20}$/.test(value)) continue;
-      const previous = matches[index - 1];
-      const next = matches[index + 1];
-      const adjacent = (other: RegExpMatchArray | undefined, before: boolean) => {
-        if (!other || !/^[A-Z][a-z0-9]{2,20}$/.test(other[0])) return false;
-        const gap = before
-          ? text.slice((other.index ?? 0) + other[0].length, match.index ?? 0)
-          : text.slice((match.index ?? 0) + value.length, other.index ?? 0);
-        return /^\s+$/.test(gap);
-      };
-      if (!adjacent(previous, true) && !adjacent(next, false)) terms.add(value);
-    }
-  }
-  return [...terms];
-}
-
 function containsOrdinaryEnglishWord(value: string): boolean {
   const words = value.match(/[A-Za-z][A-Za-z0-9]*(?:[-_./][A-Za-z0-9]+)*/g) ?? [];
   return words.some((word) => !isTechnicalToken(word));
@@ -158,7 +136,6 @@ function sanitize(value: string, allowedTerms: readonly string[]): string {
   let result = value
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g, " ")
     .replace(/<\/?[A-Za-z][^>]{0,120}>/g, " ")
-    .replace(/[‘’'"]([A-Za-z][A-Za-z0-9_-]{1,80})[‘’'"]/g, " ")
     .replace(/https?:\/\/[^\s。！？；，、）】》)\]};,!"'<>]+/gi, " ")
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, " ")
     .replace(/`[^`]*`/g, " ");

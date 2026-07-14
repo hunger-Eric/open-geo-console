@@ -4,7 +4,7 @@ import { parseAiWebsiteReportV1 } from "./validation";
 import type { AiWebsiteReportV1 } from "./types";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import { parseCombinedBusinessQuestionAnswers, type CombinedBusinessQuestionAnswers } from "./combined-business-question-answers";
-import { assertReportLanguage, extractConfirmedQuestionOfficialTerms, type ReportLanguageField } from "./report-language";
+import { assertReportLanguage, type ReportLanguageField } from "./report-language";
 
 export const COMBINED_GEO_REPORT_VERSION = 1 as const;
 export const COMBINED_GEO_REPORT_CONTRACT = "combined_geo_report_v1" as const;
@@ -123,8 +123,7 @@ export function assertCombinedGeoReportLanguage(report: CombinedGeoReportV1): vo
 
   const allowedTerms = [
     ...forensic.sourceGraph.entities.filter(({ status }) => status === "resolved").map(({ canonicalName }) => canonicalName),
-    ...forensic.sourceGraph.claims.filter(({ status }) => status === "supported").map(({ subjectName }) => subjectName),
-    ...extractConfirmedQuestionOfficialTerms(report.businessQuestionSet.questions.map(({ privateText }) => privateText))
+    ...forensic.sourceGraph.claims.filter(({ status }) => status === "supported").map(({ subjectName }) => subjectName)
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 120);
   assertReportLanguage(fields, report.locale, [...new Set(allowedTerms)]);
 }

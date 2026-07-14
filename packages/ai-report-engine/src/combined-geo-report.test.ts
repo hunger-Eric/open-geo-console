@@ -33,6 +33,13 @@ describe("prospective combined report language gate", () => {
     report.publicSourceForensics.executiveVerdict.text = "Forensic Action System";
     expect(() => assertCombinedGeoReportLanguage(report)).toThrow(ReportLanguageValidationError);
   });
+
+  it("does not let title-case words in confirmed questions authorize report prose", () => {
+    const report = fixture("zh-CN");
+    report.businessQuestionSet.questions[0]!.privateText = "是否需要 Update 或 Improve？";
+    report.vendorTaskPackage.tasks[0]!.text = "Update";
+    expect(() => assertCombinedGeoReportLanguage(report)).toThrow(ReportLanguageValidationError);
+  });
 });
 
 function fixture(locale: string): CombinedGeoReportV1 {
