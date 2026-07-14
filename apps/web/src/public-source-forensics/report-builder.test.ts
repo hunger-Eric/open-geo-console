@@ -11,4 +11,17 @@ describe("public-source forensics report builder", () => {
     expect(report.customerCostDisclosure).toEqual({ freshness: "fresh", collectedNewObservation: true });
     expect(JSON.stringify(report)).not.toMatch(/ChatGPT|Perplexity|recommended this company/i);
   });
+
+  it("accepts a language-only website appendix locale under a regional public-search locale", () => {
+    const report = createTestSourceForensicReport();
+    const regionalized = {
+      ...report,
+      websiteFoundationAppendix: {
+        ...report.websiteFoundationAppendix,
+        provenance: { ...report.websiteFoundationAppendix.provenance, locale: "zh" }
+      }
+    };
+
+    expect(parseRecommendationForensicReportV2(regionalized)).toEqual(regionalized);
+  });
 });

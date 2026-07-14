@@ -88,7 +88,7 @@ export function parseRecommendationForensicReportV2(value: unknown): Recommendat
     fail("$.sourceGraph.dimensions.queryVariantIds", "Source graph must cover the exact report query variants.");
   }
   const appendix = parseAiWebsiteReportV1(report.websiteFoundationAppendix);
-  if (appendix.targetUrl !== report.targetUrl || appendix.provenance.locale !== locale) fail("$.websiteFoundationAppendix", "Appendix must match target and locale.");
+  if (appendix.targetUrl !== report.targetUrl || !sameLanguageLocale(appendix.provenance.locale, locale)) fail("$.websiteFoundationAppendix", "Appendix must match target and language locale.");
   const websiteFindingIds = new Set(appendix.findings.map(({ id }) => id));
   const comparison = array(report.customerComparison, "$.customerComparison").map((item, i) => parseSection(item, `$.customerComparison[${i}]`));
   const verdict = parseSection(report.executiveVerdict, "$.executiveVerdict");
@@ -128,4 +128,5 @@ function exact(v:unknown,e:unknown,p:string){ if(v!==e) fail(p,`Expected ${Strin
 function oneOf<T extends string>(v:unknown,values:readonly T[],p:string):T{ if(!values.includes(v as T)) fail(p,"Unsupported value."); return v as T; }
 function boolean(v:unknown,p:string):boolean{ if(typeof v!=="boolean") fail(p,"Expected a boolean."); return v; }
 function nonnegative(v:unknown,p:string):number{ if(!Number.isSafeInteger(v)||(v as number)<0) fail(p,"Expected a non-negative safe integer."); return v as number; }
+function sameLanguageLocale(left:string,right:string):boolean{ const language=(value:string)=>value.trim().toLowerCase().split(/[-_]/,1)[0]; return Boolean(language(left))&&language(left)===language(right); }
 function fail(path:string,message:string):never{ throw new TypeError(`${path}: ${message}`); }
