@@ -81,7 +81,7 @@
 
 ## Combined paid report and one-time correction
 
-- [ ] Complete protected-staging acceptance for the grounded three-question presentation in `docs/superpowers/plans/2026-07-14-combined-geo-report-question-answer-presentation.md`. The combined-only answer contract, compact renderer, shared HTML/PDF readiness, schema-v19 refresh lineage and guarded operator command are locally implemented and verified; deployment, artifact activation, Chromium screenshots and runtime evidence remain.
+- [x] Complete protected-staging acceptance for the grounded three-question presentation in `docs/superpowers/plans/2026-07-14-combined-geo-report-question-answer-presentation.md`; revision 10 is active with same-HTML PDF readiness, real Chromium screenshots, anonymous application `404`, zero commercial side effects and preserved technical evidence.
 - [x] Keep the commercial SKU `recommendation_forensics_v1` while introducing the canonical artifact contract `combined_geo_report_v1`.
 - [x] Bind exactly three editable, purpose-fixed business questions before checkout; require explicit low-confidence acknowledgement and lock the final private/public variants after payment.
 - [x] Prevent customer identity and private question text from entering shared snapshots, queries, attempts, observations, or `market_source_evidence`.
