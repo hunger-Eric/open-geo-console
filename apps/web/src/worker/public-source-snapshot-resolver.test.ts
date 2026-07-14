@@ -116,6 +116,36 @@ describe("public-source snapshot resolver", () => {
     expect(resumed.sufficientlyEvidenced).toBe(true);
   });
 
+  it("downgrades a source rejected by shared evidence privacy validation without failing the snapshot", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const resolved = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-sensitive-source",
+      retrieveSource: async ({ observation, result }) => {
+        const value = availableRetrieval(observation, result);
+        const excerpt = "Contact public-source@example.test for details.";
+        return {
+          ...value,
+          fact: { ...value.fact, normalizedText: excerpt, verifiedExcerpt: excerpt },
+          source: { ...value.source, excerpt }
+        };
+      }
+    });
+    const bundle = await getMarketSnapshotBundle(resolved.snapshotId);
+
+    expect(resolved).toMatchObject({ collectedForThisRun: true, sufficientlyEvidenced: false, availableSourceCount: 0 });
+    expect(resolved.retrievals).toEqual([]);
+    expect(bundle?.snapshot.status).toBe("completed");
+    expect(bundle?.sources).toEqual([
+      expect.objectContaining({ retrievalState: "inaccessible", excerpt: null, excerptHash: null, contentHash: null })
+    ]);
+  });
+
   it("never reuses a completed snapshot under a different authority version", async () => {
     const firstAuthority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });

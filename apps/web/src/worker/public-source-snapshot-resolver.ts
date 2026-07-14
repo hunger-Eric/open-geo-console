@@ -207,7 +207,31 @@ async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput
     }
     const value = await input.input.retrieveSource({ observation, result, signal: input.input.signal ?? new AbortController().signal });
     if (value.fact.observationId !== observation.observationId || value.fact.queryId !== observation.queryId || canonicalizePublicSourceUrl(value.fact.resultUrl) !== canonicalUrl) throw new PublicSourceSnapshotUnavailableError();
-    await appendMarketSourceEvidence({ token: input.token, sources: [{ ...base, ...value.source }] });
+    try {
+      await appendMarketSourceEvidence({ token: input.token, sources: [{ ...base, ...value.source }] });
+    } catch (error) {
+      input.input.signal?.throwIfAborted();
+      // Public pages can contain email addresses, IP literals, credential-like
+      // examples, or unsupported annotation keys. The shared evidence store
+      // intentionally rejects that material. Treat the individual source as
+      // inaccessible instead of failing the entire question snapshot. A real
+      // lease/database failure also rejects this safe fallback and therefore
+      // still fails closed with the original error.
+      try {
+        await appendMarketSourceEvidence({ token: input.token, sources: [{
+          ...base,
+          retrievalState: "inaccessible",
+          sourceCategory: "unknown",
+          entities: [],
+          claims: [],
+          contradictions: [],
+          evidenceFamilyIdentity: deterministicId("evidence-family", [canonicalUrl])
+        }] });
+      } catch {
+        throw error;
+      }
+      return null;
+    }
     if (value.fact.retrievalState === "available") availableCount += 1;
     return value.fact;
   }, input.input.signal)));
