@@ -4,6 +4,7 @@ import type { PublicSearchSurfaceAdapter, PublicSearchSurfaceAuthority, SearchQu
 import type { AiReportRow, ScanJobRow } from "@/db/schema";
 import {
   createWorkerPublicSourceForensicsDependencies,
+  correctionArtifactVerificationResume,
   isMatchingRecommendationWebsiteFoundation,
   resolvePublicSourceRunScope,
   resolveRecommendationFulfillmentTarget,
@@ -12,6 +13,21 @@ import {
 } from "./processor";
 
 describe("recommendation website-foundation resume contract", () => {
+  it("resumes a correction artifact gate without resolving completed snapshots again", () => {
+    const report = { reportId: "report-1", jobId: "job-1" } as RecommendationForensicReportV2;
+    const publicSourceForensics = checkpointValue();
+    const checkpoint = {
+      recovery: { schemaVersion: 1, phase: "artifact_verification", revision: 2, phaseAttempt: 1,
+        resumeGeneration: 1, identity: { jobId: "job-1", reportId: "report-1", productContract: "recommendation_forensics_v1",
+          methodology: "public_search_source_forensics_v1", locale: "zh", authorityId: "authority-v2" }, inputHash: "input",
+        completedArtifacts: ["public_source"], remainingWork: ["artifact_verification"], priorTransitionId: null },
+      publicSourceForensics,
+      pendingArtifactVerification: { report, commercialSnapshotRefs: [] }
+    };
+    expect(correctionArtifactVerificationResume(checkpoint as never)).toEqual({ report, checkpoint: publicSourceForensics, commercialSnapshotRefs: [] });
+    expect(correctionArtifactVerificationResume({ ...checkpoint, recovery: { ...checkpoint.recovery, phase: "source_retrieval" } } as never)).toBeNull();
+  });
+
   it("dispatches only from the persisted methodology and rejects a missing value", () => {
     expect(resolveRecommendationFulfillmentTarget({
       productContract: "recommendation_forensics_v1",

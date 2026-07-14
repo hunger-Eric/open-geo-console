@@ -531,15 +531,18 @@ async function finalizeCorrectionJob(input: {
   createPublicSourceAttemptBudget(input.remainingMs);
   const questionSet=input.job.businessQuestionSetId ? await getConfirmedBusinessQuestionSet(input.job.reportId,input.job.businessQuestionSetId) : null;
   if(!questionSet) throw new Error("The correction question set is not locked and available.");
-  const dependencies=await createProductionPublicSourceForensicsDependencies(process.env,{createDependencies:async(runtime)=>
-    createWorkerPublicSourceForensicsDependencies({job:input.job,workerId:input.workerId,
-      coverage:{plannedPages:input.job.plannedPages,successfulPages:input.job.successfulPages,failedPages:input.job.failedPages},
-      readCheckpoint:()=>checkpoint,onCheckpointSaved:async(next)=>{checkpoint=next;},checkpointJob:input.checkpointJob,
-      retrieveSource:createWorkerPublicSourceRetriever(),artifactReadiness:{async verify(){ /* combined readiness runs below */ }},
-      liveDrill:input.liveDrill,signal:input.signal},runtime)});
-  const result=await runPublicSourceForensicsPipeline({reportId:input.job.reportId,jobId:input.job.id,
-    ...resolvePublicSourceRunScope(dependencies),targetUrl:input.targetUrl,websiteFoundation:input.websiteFoundation,
-    businessQuestionSet:questionSet,dependencies,signal:input.signal});
+  const resumed=correctionArtifactVerificationResume(checkpoint);
+  const result=resumed ?? await (async()=>{
+    const dependencies=await createProductionPublicSourceForensicsDependencies(process.env,{createDependencies:async(runtime)=>
+      createWorkerPublicSourceForensicsDependencies({job:input.job,workerId:input.workerId,
+        coverage:{plannedPages:input.job.plannedPages,successfulPages:input.job.successfulPages,failedPages:input.job.failedPages},
+        readCheckpoint:()=>checkpoint,onCheckpointSaved:async(next)=>{checkpoint=next;},checkpointJob:input.checkpointJob,
+        retrieveSource:createWorkerPublicSourceRetriever(),artifactReadiness:{async verify(){ /* combined readiness runs below */ }},
+        liveDrill:input.liveDrill,signal:input.signal},runtime)});
+    return runPublicSourceForensicsPipeline({reportId:input.job.reportId,jobId:input.job.id,
+      ...resolvePublicSourceRunScope(dependencies),targetUrl:input.targetUrl,websiteFoundation:input.websiteFoundation,
+      businessQuestionSet:questionSet,dependencies,signal:input.signal});
+  })();
   input.signal?.throwIfAborted();
   const ready=await buildReadyCombinedArtifact({artifactRevisionId:input.context.artifactRevisionId,
     artifactRevision:input.context.artifactRevision,reportId:input.job.reportId,orderId:input.context.orderId,jobId:input.job.id,
@@ -549,6 +552,17 @@ async function finalizeCorrectionJob(input: {
   await terminalizeCombinedCorrection({report:ready.report,workerId:input.workerId,
     checkpointIdentityHash:result.checkpoint.identityHash,snapshotRefs:result.commercialSnapshotRefs,
     htmlSha256:ready.htmlSha256,pdfSha256:ready.pdfSha256,pdfStorageKey:ready.pdfStorageKey,pageCount:ready.pageCount});
+}
+
+export function correctionArtifactVerificationResume(checkpoint: WorkerCheckpoint): {
+  report: RecommendationForensicReportV2;
+  checkpoint: PublicSourcePipelineCheckpoint;
+  commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
+} | null {
+  const phase=recoveryEnvelope(checkpoint)?.phase;
+  if(!["artifact_verification","terminalization"].includes(phase ?? "") || !checkpoint.pendingArtifactVerification || !checkpoint.publicSourceForensics) return null;
+  return { report:checkpoint.pendingArtifactVerification.report,checkpoint:checkpoint.publicSourceForensics,
+    commercialSnapshotRefs:checkpoint.pendingArtifactVerification.commercialSnapshotRefs };
 }
 
 async function assertReusableEvidenceAssets(assets: ReportEvidenceAssetRow[]): Promise<void> {
