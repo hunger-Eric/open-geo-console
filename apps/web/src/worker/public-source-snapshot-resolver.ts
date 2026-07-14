@@ -127,7 +127,10 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
           idempotencyReference: deterministicId("public-search-attempt", [currentSnapshotId, storedQuery.id]), configuredCostMicros: input.fanout.budget.maxCostMicros
         });
         const observed = await observePublicSearch({ adapter: input.adapter, query, budget: input.fanout.budget, signal: input.signal ?? new AbortController().signal });
-        const observation = { ...observed, queryId: storedQuery.id };
+        // Provider observation identifiers are not guaranteed to be unique
+        // across fanout queries. The persisted attempt is the authoritative,
+        // snapshot-scoped observation identity used by retrieval provenance.
+        const observation = { ...observed, observationId: attempt.id, queryId: storedQuery.id };
         const requestStatus = attemptStatus(observation.status);
         const providerCostMicros = observation.usage.providerReportedCostMicros ?? observation.usage.estimatedCostMicros ?? null;
         await completeMarketSearchAttempt({
@@ -275,10 +278,11 @@ function observationRows(snapshotId: string, attemptId: string, observation: Mar
 }
 
 function toObservations(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>, surface: PublicSearchSurfaceAdapter["surface"]): MarketSearchObservation[] {
-  return bundle.attempts.filter(({ requestStatus }) => requestStatus === "succeeded" || requestStatus === "partial").map((attempt) => {
+  return bundle.attempts.filter(({ requestStatus }) => requestStatus !== "pending").map((attempt) => {
     const query = bundle.queries.find(({ id }) => id === attempt.queryId);
     if (!query || !attempt.completedAt) throw new PublicSourceSnapshotUnavailableError();
-    return { observationId: attempt.id, surface, queryId: attempt.queryId, exactQuery: query.queryText, requestedAt: attempt.startedAt.toISOString(), completedAt: attempt.completedAt.toISOString(), status: attempt.requestStatus === "succeeded" ? "complete" : "partial",
+    const status = attempt.requestStatus === "succeeded" ? "complete" : attempt.requestStatus === "timeout" ? "timed_out" : attempt.requestStatus;
+    return { observationId: attempt.id, surface, queryId: attempt.queryId, exactQuery: query.queryText, requestedAt: attempt.startedAt.toISOString(), completedAt: attempt.completedAt.toISOString(), status,
       results: bundle.observations.filter((row) => row.attemptId === attempt.id && row.resultStatus === "returned").map((row) => ({ surfaceResultOrder: row.surfaceResultOrder, url: row.resultUrl, title: row.title, snippet: row.snippet ?? "", displayedHost: String((row.resultMetadata as { domain?: unknown })?.domain ?? new URL(row.resultUrl).hostname), metadata: { rank: row.surfaceResultOrder } })),
       usage: attempt.usage as MarketSearchObservation["usage"], ...(attempt.sanitizedError ? { sanitizedError: attempt.sanitizedError } : {}) };
   });
