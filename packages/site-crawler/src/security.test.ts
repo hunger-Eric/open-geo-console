@@ -80,6 +80,26 @@ describe("crawler URL safety", () => {
     });
   });
 
+  it("propagates caller abort during DNS instead of classifying it as a DNS failure", async () => {
+    const controller = new AbortController();
+    const reason = new Error("Worker deadline during DNS");
+    let receivedSignal: AbortSignal | undefined;
+    const pending = resolveSafeUrl("https://example.com/path", {
+      signal: controller.signal,
+      resolver: async (_hostname, signal) => {
+        receivedSignal = signal;
+        return await new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }
+    });
+
+    controller.abort(reason);
+
+    await expect(pending).rejects.toBe(reason);
+    expect(receivedSignal).toBe(controller.signal);
+  });
+
   it("validates relative redirects and every redirect DNS target", async () => {
     await expect(
       validateRedirectTarget("https://example.com/old", "/new", { resolver: publicResolver })
@@ -90,6 +110,20 @@ describe("crawler URL safety", () => {
         resolver: publicResolver
       })
     ).rejects.toMatchObject({ code: "blocked-hostname" });
+  });
+
+  it("propagates caller abort while resolving a redirect target", async () => {
+    const controller = new AbortController();
+    const reason = new Error("redirect deadline");
+    const pending = validateRedirectTarget("https://example.com/old", "https://redirect.test/new", {
+      signal: controller.signal,
+      resolver: async (_hostname, signal) => await new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      })
+    });
+
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
   });
 
   it("enforces redirect count and optional same-site redirects", async () => {

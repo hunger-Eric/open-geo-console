@@ -118,6 +118,7 @@ export async function executePublicSourceRetrieval(input: {
     });
   } catch (error) {
     if (options.signal?.aborted) throw options.signal.reason;
+    if (isAbort(error)) throw error;
     const common = retrievalCommon(request, visitedUrls, undefined, robotsCheckedOrigins);
     if (error instanceof PublicSourceRobotsDeniedError) {
       return unavailableResult({
@@ -201,3 +202,7 @@ function unavailableResult(input: Parameters<typeof normalizePublicSourceRetriev
 }
 
 class PublicSourceRobotsDeniedError extends Error {}
+
+function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError");
+}

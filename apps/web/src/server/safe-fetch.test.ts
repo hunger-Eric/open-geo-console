@@ -87,8 +87,7 @@ describe("createSafeFetch", () => {
     const controller = new AbortController();
     const reason = new Error("phase expired");
     const dispatcher = { close: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
-    let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
-    const body = new ReadableStream<Uint8Array>({ start(controller) { bodyController = controller; } });
+    const body = new ReadableStream<Uint8Array>({ start() {} });
     const fetchImpl = vi.fn(async () => new Response(body, { headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
     const pending = createSafeFetch({ fetchImpl, resolver: publicResolver, dispatcherFactory: () => dispatcher })(
       "https://example.com", { signal: controller.signal }
@@ -96,10 +95,48 @@ describe("createSafeFetch", () => {
 
     await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
     controller.abort(reason);
-    bodyController?.error(reason);
 
     await expect(pending).rejects.toBe(reason);
     expect(dispatcher.destroy).toHaveBeenCalledTimes(1);
     expect(dispatcher.close).not.toHaveBeenCalled();
+  });
+
+  it("propagates abort while waiting for response headers", async () => {
+    const controller = new AbortController();
+    const reason = new Error("deadline before headers");
+    const dispatcher = { close: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
+    const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    })) as unknown as typeof fetch;
+    const pending = createSafeFetch({ fetchImpl, resolver: publicResolver, dispatcherFactory: () => dispatcher })(
+      "https://example.com", { signal: controller.signal }
+    );
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+
+    controller.abort(reason);
+
+    await expect(pending).rejects.toBe(reason);
+    expect(dispatcher.destroy).toHaveBeenCalledOnce();
+    expect(dispatcher.close).not.toHaveBeenCalled();
+  });
+
+  it("does not let hanging dispatcher cleanup hide the caller abort", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const reason = new Error("bounded cleanup deadline");
+    const dispatcher = { close: vi.fn(async () => {}), destroy: vi.fn(() => new Promise<void>(() => {})) };
+    const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    })) as unknown as typeof fetch;
+    const pending = createSafeFetch({ fetchImpl, resolver: publicResolver, dispatcherFactory: () => dispatcher })(
+      "https://example.com", { signal: controller.signal }
+    );
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    const rejected = expect(pending).rejects.toBe(reason);
+    controller.abort(reason);
+    await vi.advanceTimersByTimeAsync(1_001);
+
+    await rejected;
+    vi.useRealTimers();
   });
 });

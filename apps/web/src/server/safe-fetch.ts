@@ -16,6 +16,7 @@ const ALLOWED_CONTENT_TYPES = [
   "application/json",
   "application/ld+json"
 ];
+const DISPATCHER_CLEANUP_TIMEOUT_MS = 1_000;
 
 export interface SafeFetchOptions {
   fetchImpl?: typeof fetch;
@@ -48,12 +49,17 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
   return async (input, init = {}) => {
     const inheritedSignal = init.signal;
     inheritedSignal?.throwIfAborted();
+    const deadlineSignal = AbortSignal.timeout(timeoutMs);
+    const requestSignal = inheritedSignal
+      ? AbortSignal.any([inheritedSignal, deadlineSignal])
+      : deadlineSignal;
     let current = typeof input === "string" || input instanceof URL ? new URL(input) : new URL(input.url);
-    let resolved = await resolveSafeUrl(current, { resolver, allowBenchmarkNetwork });
+    let resolved = await resolveSafeUrl(current, { resolver, allowBenchmarkNetwork, signal: requestSignal });
 
     for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
-      inheritedSignal?.throwIfAborted();
+      requestSignal.throwIfAborted();
       await options.beforeRequest?.(new URL(current.href));
+      requestSignal.throwIfAborted();
       const pinned = resolved.addresses[0]!;
       const pinnedFamily: 4 | 6 = pinned.family === 6 ? 6 : 4;
       const dispatcher = options.dispatcherFactory?.() ?? new Agent({
@@ -67,15 +73,11 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
           }
         }
       });
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(new DOMException("Safe fetch timed out.", "TimeoutError")), timeoutMs);
-      const abort = () => controller.abort(inheritedSignal?.reason);
-      inheritedSignal?.addEventListener("abort", abort, { once: true });
       try {
         const response = await fetchImpl(current, {
           ...init,
           redirect: "manual",
-          signal: controller.signal,
+          signal: requestSignal,
           dispatcher
         } as RequestInit & { dispatcher?: Agent });
 
@@ -87,14 +89,15 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
           }
           resolved = await validateRedirectTarget(current, location, {
             resolver,
-            allowBenchmarkNetwork
+            allowBenchmarkNetwork,
+            signal: requestSignal
           });
           current = resolved.url;
           continue;
         }
 
         assertAllowedContent(response, allowedContentTypes, maxBytes);
-        const body = await readLimitedBody(response, maxBytes);
+        const body = await readLimitedBody(response, maxBytes, requestSignal);
         const headers = new Headers(response.headers);
         headers.set("x-ogc-final-url", current.href);
         return new Response(body.buffer as ArrayBuffer, {
@@ -103,16 +106,14 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
           headers
         });
       } finally {
-        clearTimeout(timeout);
-        inheritedSignal?.removeEventListener("abort", abort);
         // close() is graceful and waits for an active request to drain. Once a
         // caller or deadline aborts, that wait can outlive the Worker lease.
         // Destroy the per-request dispatcher instead so the socket unwinds
         // before the next source can be considered or a heartbeat is lost.
-        if (controller.signal.aborted) {
-          await dispatcher.destroy(abortError(controller.signal.reason));
+        if (requestSignal.aborted) {
+          await settleDispatcherCleanup(dispatcher.destroy(abortError(requestSignal.reason)));
         } else {
-          await dispatcher.close();
+          await closeDispatcher(dispatcher);
         }
       }
     }
@@ -134,19 +135,20 @@ export function configuredPublicDnsResolver(): HostnameResolver | undefined {
 }
 
 export function createCloudflareDohResolver(fetchImpl: typeof fetch): HostnameResolver {
-  return async (hostname) => {
-    const answers = await Promise.all([queryDoh(fetchImpl, hostname, "A"), queryDoh(fetchImpl, hostname, "AAAA")]);
+  return async (hostname, signal) => {
+    signal?.throwIfAborted();
+    const answers = await Promise.all([queryDoh(fetchImpl, hostname, "A", signal), queryDoh(fetchImpl, hostname, "AAAA", signal)]);
     return answers.flat();
   };
 }
 
-async function queryDoh(fetchImpl: typeof fetch, hostname: string, type: "A" | "AAAA") {
+async function queryDoh(fetchImpl: typeof fetch, hostname: string, type: "A" | "AAAA", callerSignal?: AbortSignal) {
   const url = new URL(CLOUDFLARE_DOH_ENDPOINT);
   url.searchParams.set("name", hostname);
   url.searchParams.set("type", type);
   const response = await fetchImpl(url, {
     headers: { accept: "application/dns-json" },
-    signal: AbortSignal.timeout(5_000)
+    signal: callerSignal ? AbortSignal.any([callerSignal, AbortSignal.timeout(5_000)]) : AbortSignal.timeout(5_000)
   });
   if (!response.ok) throw new Error(`Public DNS lookup failed with HTTP ${response.status}.`);
   const payload = await response.json() as {
@@ -177,20 +179,27 @@ function assertAllowedContent(response: Response, allowedContentTypes: string[],
   }
 }
 
-async function readLimitedBody(response: Response, maxBytes: number): Promise<Uint8Array> {
+async function readLimitedBody(response: Response, maxBytes: number, signal: AbortSignal): Promise<Uint8Array> {
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      throw new Error(`Response exceeds the ${maxBytes} byte crawl limit.`);
+  const abort = () => { void reader.cancel(signal.reason).catch(() => undefined); };
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    while (true) {
+      signal.throwIfAborted();
+      const { done, value } = await readWithSignal(reader, signal);
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error(`Response exceeds the ${maxBytes} byte crawl limit.`);
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+  } finally {
+    signal.removeEventListener("abort", abort);
   }
   const joined = new Uint8Array(total);
   let offset = 0;
@@ -199,4 +208,37 @@ async function readLimitedBody(response: Response, maxBytes: number): Promise<Ui
     offset += chunk.byteLength;
   }
   return joined;
+}
+
+async function readWithSignal(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  signal.throwIfAborted();
+  return await new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    reader.read().then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
+async function closeDispatcher(dispatcher: PinnedDispatcher): Promise<void> {
+  const closed = await settleWithinCleanupBound(dispatcher.close());
+  if (!closed) await settleDispatcherCleanup(dispatcher.destroy(new Error("Dispatcher cleanup exceeded its bound.")));
+}
+
+async function settleDispatcherCleanup(cleanup: Promise<void>): Promise<void> {
+  await settleWithinCleanupBound(cleanup);
+}
+
+async function settleWithinCleanupBound(cleanup: Promise<void>): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      cleanup.then(() => true, () => false),
+      new Promise<false>((resolve) => { timeout = setTimeout(() => resolve(false), DISPATCHER_CLEANUP_TIMEOUT_MS); })
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }

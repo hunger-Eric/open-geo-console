@@ -32,6 +32,23 @@ describe("V2 public-source retriever", () => {
     await expect(pending).rejects.toBe(reason);
   });
 
+  it("propagates abort during source body streaming without an inaccessible fact", async () => {
+    const controller = new AbortController();
+    const reason = new Error("Worker deadline during source body");
+    const body = new ReadableStream<Uint8Array>({ start(stream) { stream.enqueue(new TextEncoder().encode("partial")); } });
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/robots.txt")
+      ? new Response("User-agent: *\nAllow: /")
+      : new Response(body, { headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
+    const pending = executePublicSourceRetrieval({
+      observationId: "obs-1", queryId: "query-1", resultUrl: "https://source.example/article"
+    }, { fetchImpl, resolver: publicResolver, signal: controller.signal });
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(2));
+
+    controller.abort(reason);
+
+    await expect(pending).rejects.toBe(reason);
+  });
+
   it("retrieves only robots-authorized public text through safe fetch", async () => {
     const requested: string[] = [];
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {

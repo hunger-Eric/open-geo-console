@@ -29,11 +29,13 @@ export interface ResolvedAddress {
 }
 
 export type HostnameResolver = (
-  hostname: string
+  hostname: string,
+  signal?: AbortSignal
 ) => Promise<ReadonlyArray<string | ResolvedAddress>>;
 
 export interface UrlSafetyOptions {
   resolver?: HostnameResolver;
+  signal?: AbortSignal;
   allowHosts?: ReadonlySet<string>;
   blockHosts?: ReadonlySet<string>;
   allowBenchmarkNetwork?: boolean;
@@ -233,6 +235,7 @@ export async function resolveSafeUrl(
   input: string | URL,
   options: UrlSafetyOptions = {}
 ): Promise<SafeResolvedUrl> {
+  options.signal?.throwIfAborted();
   const url = parseHttpUrl(input);
   const hostname = stripIpv6Brackets(url.hostname).toLowerCase().replace(/\.$/, "");
   if (isBlockedHostname(hostname, options)) {
@@ -244,10 +247,12 @@ export async function resolveSafeUrl(
   try {
     rawAddresses = literalFamily
       ? [{ address: hostname, family: literalFamily as 4 | 6 }]
-      : await (options.resolver ?? defaultHostnameResolver)(hostname);
-  } catch {
+      : await waitForResolver((options.resolver ?? defaultHostnameResolver)(hostname, options.signal), options.signal);
+  } catch (error) {
+    if (options.signal?.aborted) throw options.signal.reason;
     throw new UrlSafetyError("dns-resolution-failed", "The target hostname could not be resolved.", url.href);
   }
+  options.signal?.throwIfAborted();
 
   const addresses = rawAddresses.map((entry) =>
     typeof entry === "string"
@@ -270,6 +275,16 @@ export async function resolveSafeUrl(
     );
   }
   return { url, addresses };
+}
+
+async function waitForResolver<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return await new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
 export async function validateRedirectChain(
