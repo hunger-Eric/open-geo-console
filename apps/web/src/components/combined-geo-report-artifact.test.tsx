@@ -43,6 +43,31 @@ describe("CombinedGeoReportArtifact", () => {
     expect(visibleText).toContain("来源原文");
     expect(visibleText).toContain("Technical proof quote");
     expect(visibleText).not.toMatch(/organizationClarity|core_service_discovery|>critical<|>website<|>home</);
+    expect(visibleText).not.toMatch(/COMBINED GEO REPORT V1|\bRevision\b|\bTitle\b|\bCanonical\b|\bText\b|\bArtifact\b|\brevision\b|\btest\b/);
+  });
+
+  it("turns internal enum values into human-readable English labels", () => {
+    const model = combinedArtifactFixture();
+    const report = model.combinedReport;
+    report.technicalFoundation.aiReport.dimensionScores = [{ dimension: "organizationClarity", score: 80, explanation: "Clear organization." }] as never;
+    report.technicalFoundation.aiReport.pageTypeAnalyses = [{ pageType: "home", sampledUrls: [], strengths: [], commonIssues: [], recommendations: [], evidence: [] }] as never;
+    report.vendorTaskPackage.tasks = [{ id: "task", vendor: "cross-functional", title: "Update", text: "Improve", actions: [], acceptanceCriteria: [] }] as never;
+    const visibleText = renderToStaticMarkup(createElement(CombinedGeoReportArtifact, { model })).replace(/<[^>]+>/g, " ");
+    expect(visibleText).toContain("Organization clarity");
+    expect(visibleText).toContain("Core service discovery");
+    expect(visibleText).toContain("Cross-functional");
+    expect(visibleText).not.toMatch(/organizationClarity|core_service_discovery|cross-functional/);
+  });
+
+  it("localizes the actual info severity and insufficient coverage values", () => {
+    const model = combinedArtifactFixture();
+    model.locale = "zh";
+    model.combinedReport.technicalFoundation.aiReport.findings[0]!.severity = "info" as never;
+    model.combinedReport.publicSourceForensics.coverage.status = "insufficient" as never;
+    const visibleText = renderToStaticMarkup(createElement(CombinedGeoReportArtifact, { model })).replace(/<[^>]+>/g, " ");
+    expect(visibleText).toContain("提示");
+    expect(visibleText).toContain("证据不足");
+    expect(visibleText).not.toMatch(/>info<|>insufficient</);
   });
 });
 

@@ -21,6 +21,18 @@ describe("prospective combined report language gate", () => {
     report.businessQuestionAnswers!.answers[0]!.answer = "客户应立即更新所有公开材料。";
     expect(() => assertCombinedGeoReportLanguage(report)).toThrow(ReportLanguageValidationError);
   });
+
+  it("does not let model-owned profile phrases authorize other report prose", () => {
+    const report = fixture("zh-CN");
+    report.technicalFoundation.aiReport.organizationProfile.organizationName = "Vendor Growth Plan";
+    report.technicalFoundation.aiReport.organizationProfile.brandNames = ["Forensic Action System"];
+    report.technicalFoundation.aiReport.organizationProfile.legalEntity = "Report Operations Group";
+    report.vendorTaskPackage.tasks[0]!.text = "Vendor Growth Plan";
+    expect(() => assertCombinedGeoReportLanguage(report)).toThrow(ReportLanguageValidationError);
+    report.vendorTaskPackage.tasks[0]!.text = "改进页面。";
+    report.publicSourceForensics.executiveVerdict.text = "Forensic Action System";
+    expect(() => assertCombinedGeoReportLanguage(report)).toThrow(ReportLanguageValidationError);
+  });
 });
 
 function fixture(locale: string): CombinedGeoReportV1 {

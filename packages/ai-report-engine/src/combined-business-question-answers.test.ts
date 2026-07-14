@@ -130,7 +130,7 @@ describe("combined business question answers", () => {
     expect(completeJson).toHaveBeenCalledTimes(2);
   });
 
-  it("allows official brand-style terms that occur in verified evidence", async () => {
+  it("does not infer allowed prose from capitalization in verified excerpts", async () => {
     const { questionSet, forensic, value } = fixture("zh-CN");
     forensic.sourceGraph.evidence = forensic.sourceGraph.evidence.map((item) => ({
       ...item,
@@ -138,14 +138,14 @@ describe("combined business question answers", () => {
     }));
     const answers = value.answers.map((item) => ({
       ...item,
-      answer: "Panli 可结合 AMERICAN NEW LOGISTICS、U-shipment、ERP 和 TMS 提供已验证的业务支持。"
+      answer: "客户应当 UPDATE ALL CONTENT NOW 并继续核验公开材料。"
     }));
     const completeJson = vi.fn(async () => ({ value: { answers }, modelId: "served", rawContent: "{}" }));
 
-    const result = await synthesizeCombinedBusinessQuestionAnswers(
-      { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 1 }
-    );
-    expect(result.answers[0].answer).toBe(answers[0]!.answer);
+    await expect(synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
+    )).rejects.toThrow(ReportLanguageValidationError);
+    expect(completeJson).toHaveBeenCalledTimes(2);
   });
 
   it.each(["Customer Growth Strategy", "Product One", "Google Analytics", "Cloudflare Workers"])(

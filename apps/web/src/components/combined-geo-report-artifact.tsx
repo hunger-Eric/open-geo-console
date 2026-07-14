@@ -13,10 +13,10 @@ export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateRep
   return <main className="recommendation-artifact combined-geo-artifact" data-artifact-revision={model.artifactRevisionId}>
     <nav className="artifact-actions no-print" aria-label="Report formats"><a href={`/reports/${model.reportId}/report.html`}>HTML</a><a className="primary" href={`/api/reports/${model.reportId}/artifacts/report.pdf`}>PDF</a></nav>
     <header className="cover artifact-section">
-      <p className="eyebrow">OPEN GEO CONSOLE · COMBINED GEO REPORT V1</p>
+      <p className="eyebrow">OPEN GEO CONSOLE · {zh ? "GEO 综合报告" : "Combined GEO report"}</p>
       <h1>{ai.organizationProfile.organizationName ?? report.targetUrl}</h1>
       <p className="lede">{ai.executiveSummary.overview}</p>
-      <dl className="cover-meta"><div><dt>URL</dt><dd>{report.targetUrl}</dd></div><div><dt>Revision</dt><dd>{report.artifactRevision} · {model.artifactRevisionId}</dd></div><div><dt>{zh ? "证据截止" : "Evidence cutoff"}</dt><dd>{report.evidenceCutoffAt}</dd></div></dl>
+      <dl className="cover-meta"><div><dt>URL</dt><dd>{report.targetUrl}</dd></div><div><dt>{zh ? "报告版本" : "Revision"}</dt><dd>{report.artifactRevision} · {model.artifactRevisionId}</dd></div><div><dt>{zh ? "证据截止" : "Evidence cutoff"}</dt><dd>{report.evidenceCutoffAt}</dd></div></dl>
     </header>
 
     <Section number="01" title={zh ? "技术与 AI 评分" : "Technical and AI scores"}>
@@ -25,7 +25,7 @@ export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateRep
 
     <Section number="02" title={zh ? "完整技术分析" : "Complete technical analysis"}>
       <div className="finding-list">{technical.findings.map((finding) => <article className={`finding-card severity-${finding.severity}`} key={finding.id}><p className="citation-category">{label("severity", finding.severity)}</p><h3>{finding.title}</h3><p>{finding.description}</p><strong>{zh ? "建议" : "Recommendation"}</strong><p>{finding.recommendation}</p>{finding.url ? <a href={finding.url}>{finding.url}</a> : null}{finding.aggregation ? <p>{finding.aggregation.affectedCount} {zh ? "个受影响页面" : "affected"} · {finding.aggregation.representativeUrls.join(", ")}</p> : null}</article>)}</div>
-      <table><thead><tr><th>URL</th><th>HTTP</th><th>Title</th><th>H1</th><th>Canonical</th><th>JSON-LD</th><th>Text</th></tr></thead><tbody>{technical.pages.map((page) => <tr key={page.url}><td><a href={page.url}>{page.url}</a></td><td>{page.status}</td><td>{page.title ?? "—"}</td><td>{page.h1.join(" | ") || "—"}</td><td>{page.canonical ?? "—"}</td><td>{page.hasJsonLd ? (zh ? "是" : "Yes") : (zh ? "否" : "No")}</td><td>{page.readableTextLength}</td></tr>)}</tbody></table>
+      <table><thead><tr><th>URL</th><th>HTTP</th><th>{zh ? "标题" : "Title"}</th><th>H1</th><th>{zh ? "规范链接" : "Canonical"}</th><th>JSON-LD</th><th>{zh ? "正文长度" : "Text"}</th></tr></thead><tbody>{technical.pages.map((page) => <tr key={page.url}><td><a href={page.url}>{page.url}</a></td><td>{page.status}</td><td>{page.title ?? "—"}</td><td>{page.h1.join(" | ") || "—"}</td><td>{page.canonical ?? "—"}</td><td>{page.hasJsonLd ? (zh ? "是" : "Yes") : (zh ? "否" : "No")}</td><td>{page.readableTextLength}</td></tr>)}</tbody></table>
       <h3>{zh ? "机器可读资产" : "Machine-readable assets"}</h3><ul>{Object.entries(technical.machineReadableAssets).map(([name, asset]) => <li key={name}><strong>{name}</strong>: {label("asset", asset.present ? "ready" : "missing")} · <a href={asset.url}>{asset.url}</a> · {asset.summary}</li>)}</ul>
     </Section>
 
@@ -57,7 +57,7 @@ export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateRep
 
     <Section number="06" title={zh ? "90 天路线图" : "90-day roadmap"}><div className="roadmap-grid"><Roadmap title={zh ? "立即执行" : "Immediate"} items={ai.roadmap.immediate}/><Roadmap title={zh ? "下一阶段" : "Next phase"} items={ai.roadmap.nextPhase}/><Roadmap title={zh ? "持续优化" : "Ongoing"} items={ai.roadmap.ongoing}/></div></Section>
     <Section number="07" title={zh ? "供应商任务包与验收标准" : "Vendor task package and acceptance criteria"}>{report.vendorTaskPackage.tasks.map((task) => <article className="vendor-task" key={task.id}><p className="citation-category">{label("vendor", task.vendor)}</p><h3>{task.title}</h3><p>{task.text}</p><div className="vendor-columns"><List title={zh ? "动作" : "Actions"} values={task.actions}/><List title={zh ? "验收标准" : "Acceptance criteria"} values={task.acceptanceCriteria}/></div></article>)}</Section>
-    <Section number="08" title={zh ? "方法、覆盖、新鲜度与限制" : "Method, coverage, freshness, and limitations"}><dl className="provenance-grid"><div><dt>Artifact</dt><dd>{report.artifactContract} / revision {report.artifactRevision}</dd></div><div><dt>{zh ? "技术覆盖" : "Technical coverage"}</dt><dd>{report.methodology.technicalCoverage}</dd></div><div><dt>{zh ? "搜索表面" : "Public search surface"}</dt><dd>{report.methodology.publicSearchSurface}</dd></div><div><dt>{zh ? "证据新鲜度" : "Evidence freshness"}</dt><dd>{report.methodology.evidenceFreshness}</dd></div><div><dt>{zh ? "覆盖" : "Coverage"}</dt><dd>{label("coverage", forensic.coverage.status)} · {forensic.coverage.completedQueryCount}/{forensic.coverage.expectedQueryCount}</dd></div></dl><ul>{[...new Set([...ai.coverage.limitations, ...forensic.limitations, ...report.methodology.limitations])].map((item)=><li key={item}>{item}</li>)}</ul></Section>
+    <Section number="08" title={zh ? "方法、覆盖、新鲜度与限制" : "Method, coverage, freshness, and limitations"}><dl className="provenance-grid"><div><dt>{zh ? "技术标识" : "Artifact identifier"}</dt><dd>{report.artifactContract} / {zh ? "版本" : "revision"} {report.artifactRevision}</dd></div><div><dt>{zh ? "技术覆盖" : "Technical coverage"}</dt><dd>{report.methodology.technicalCoverage}</dd></div><div><dt>{zh ? "证据新鲜度" : "Evidence freshness"}</dt><dd>{report.methodology.evidenceFreshness}</dd></div><div><dt>{zh ? "覆盖" : "Coverage"}</dt><dd>{label("coverage", forensic.coverage.status)} · {forensic.coverage.completedQueryCount}/{forensic.coverage.expectedQueryCount}</dd></div></dl><ul>{[...new Set([...ai.coverage.limitations, ...forensic.limitations, ...report.methodology.limitations])].map((item)=><li key={item}>{item}</li>)}</ul></Section>
   </main>;
 }
 
@@ -69,13 +69,23 @@ type ArtifactLabelKind = "dimension" | "pageType" | "severity" | "vendor" | "pur
 const ZH_ARTIFACT_LABELS: Record<ArtifactLabelKind, Record<string, string>> = {
   dimension: { organizationClarity: "组织清晰度", informationArchitecture: "信息架构", contentCitability: "内容可引用性", trustEvidence: "信任证据", entityConsistency: "实体一致性", geoUnderstandability: "GEO 可理解性" },
   pageType: { home: "首页", product: "产品页", service: "服务页", about: "关于页", pricing: "定价页", "case-study": "案例页", contact: "联系页", blog: "博客页", news: "新闻页", documentation: "文档页", legal: "法律页", other: "其他页面" },
-  severity: { critical: "严重", warning: "警告", opportunity: "机会", high: "高", medium: "中", low: "低" },
+  severity: { critical: "严重", warning: "警告", opportunity: "机会", high: "高", medium: "中", low: "低", info: "提示" },
   vendor: { website: "网站", content: "内容", seo: "SEO", communications: "传播", "cross-functional": "跨职能" },
   purpose: { core_service_discovery: "核心服务发现", customer_region_fit: "客户与区域匹配", purchase_delivery_risk: "采购与交付风险" },
   freshness: { fresh: "最新", mixed: "混合时效", stale: "已陈旧", expired: "已失效" },
-  coverage: { complete: "完整", partial: "部分", limited: "有限", unavailable: "不可用" },
+  coverage: { complete: "完整", partial: "部分", limited: "有限", unavailable: "不可用", insufficient: "证据不足" },
   asset: { ready: "已就绪", missing: "缺失" }
 };
+const EN_ARTIFACT_LABELS: Record<ArtifactLabelKind, Record<string, string>> = {
+  dimension: { organizationClarity: "Organization clarity", informationArchitecture: "Information architecture", contentCitability: "Content citability", trustEvidence: "Trust evidence", entityConsistency: "Entity consistency", geoUnderstandability: "GEO understandability" },
+  pageType: { home: "Home", product: "Product", service: "Service", about: "About", pricing: "Pricing", "case-study": "Case study", contact: "Contact", blog: "Blog", news: "News", documentation: "Documentation", legal: "Legal", other: "Other" },
+  severity: { critical: "Critical", warning: "Warning", opportunity: "Opportunity", high: "High", medium: "Medium", low: "Low", info: "Info" },
+  vendor: { website: "Website", content: "Content", seo: "SEO", communications: "Communications", "cross-functional": "Cross-functional" },
+  purpose: { core_service_discovery: "Core service discovery", customer_region_fit: "Customer and region fit", purchase_delivery_risk: "Purchase and delivery risk" },
+  freshness: { fresh: "Fresh", mixed: "Mixed freshness", stale: "Stale", expired: "Expired" },
+  coverage: { complete: "Complete", partial: "Partial", limited: "Limited", unavailable: "Unavailable", insufficient: "Insufficient evidence" },
+  asset: { ready: "Ready", missing: "Missing" }
+};
 function artifactValueLabel(kind: ArtifactLabelKind, value: string, zh: boolean): string {
-  return zh ? ZH_ARTIFACT_LABELS[kind][value] ?? value : value;
+  return (zh ? ZH_ARTIFACT_LABELS : EN_ARTIFACT_LABELS)[kind][value] ?? value;
 }

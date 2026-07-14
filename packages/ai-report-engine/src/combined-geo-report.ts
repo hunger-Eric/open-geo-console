@@ -122,12 +122,9 @@ export function assertCombinedGeoReportLanguage(report: CombinedGeoReportV1): vo
   addList("methodology.limitations", report.methodology.limitations);
 
   const allowedTerms = [
-    ai.organizationProfile.organizationName,
-    ai.organizationProfile.legalEntity,
-    ...ai.organizationProfile.brandNames,
     ...forensic.sourceGraph.entities.filter(({ status }) => status === "resolved").map(({ canonicalName }) => canonicalName),
     ...forensic.sourceGraph.claims.filter(({ status }) => status === "supported").map(({ subjectName }) => subjectName)
-  ].filter((value): value is string => Boolean(value?.trim()) && value.length <= 120);
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 120);
   assertReportLanguage(fields, report.locale, [...new Set(allowedTerms)]);
 }
 
