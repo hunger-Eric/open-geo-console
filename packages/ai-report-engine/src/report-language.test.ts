@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ReportLanguageValidationError,
   assertReportLanguage,
+  extractConfirmedQuestionOfficialTerms,
   normalizeReportLanguage,
   reportLanguageInstruction
 } from "./report-language";
@@ -129,6 +130,20 @@ describe("report language contract", () => {
         "zh-CN"
       )
     ).not.toThrow();
+  });
+
+  it("allows bounded source identifiers and timestamps without allowing English prose", () => {
+    expect(() => assertReportLanguage([{
+      path: "technical",
+      text: "请检查 <title>、<meta name=\"description\">、‘service’、SOP、KPI、ID；证据截止 2026-07-14T09:26:04.175Z。"
+    }], "zh-CN")).not.toThrow();
+    expect(() => assertReportLanguage([{ path: "technical", text: "请 UPDATE ALL CONTENT NOW。" }], "zh-CN"))
+      .toThrow(ReportLanguageValidationError);
+  });
+
+  it("extracts an isolated official name from a confirmed Chinese question but not an English phrase", () => {
+    expect(extractConfirmedQuestionOfficialTerms(["哪些方案适合 Shopee 等平台？"])).toEqual(["Shopee"]);
+    expect(extractConfirmedQuestionOfficialTerms(["Customer Growth Strategy"])).toEqual([]);
   });
 
   it("requires explicit allowed terms for proper names", () => {

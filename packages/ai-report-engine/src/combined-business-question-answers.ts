@@ -5,6 +5,7 @@ import { sha256Hex } from "./evidence";
 import {
   ReportLanguageValidationError,
   assertReportLanguage,
+  extractConfirmedQuestionOfficialTerms,
   reportLanguageInstruction
 } from "./report-language";
 import type { RecommendationForensicReportV2 } from "./recommendation-forensic-v2";
@@ -191,7 +192,7 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
         synthesis: { mode: "evidence_constrained_model", modelId: completion.modelId, inputHash },
         answers: boundAnswers
       }, input.questionSet, input.forensic);
-      assertAnswerLanguage(parsed.answers, input.forensic.locale, collectQuestionAnswerAllowedTerms(input.forensic));
+      assertAnswerLanguage(parsed.answers, input.forensic.locale, collectQuestionAnswerAllowedTerms(input.questionSet, input.forensic));
       return parsed;
     } catch (error) {
       lastError = error;
@@ -219,7 +220,7 @@ function assertAnswerLanguage(
   );
 }
 
-function collectQuestionAnswerAllowedTerms(forensic: RecommendationForensicReportV2): string[] {
+function collectQuestionAnswerAllowedTerms(questionSet: ConfirmedBusinessQuestionSet, forensic: RecommendationForensicReportV2): string[] {
   const graphTerms = [
     ...(forensic.sourceGraph.entities ?? [])
       .filter(({ status }) => status === "resolved")
@@ -228,7 +229,7 @@ function collectQuestionAnswerAllowedTerms(forensic: RecommendationForensicRepor
       .filter(({ status }) => status === "supported")
       .map(({ subjectName }) => subjectName)
   ];
-  return [...new Set(graphTerms
+  return [...new Set([...graphTerms, ...extractConfirmedQuestionOfficialTerms(questionSet.questions.map(({ privateText }) => privateText))]
     .filter((value): value is string => Boolean(value?.trim()) && value!.length <= 120))];
 }
 
