@@ -69,7 +69,7 @@ describe("combined business question answers", () => {
     expect(JSON.stringify(correction)).not.toContain("customer should update");
   });
 
-  it("does not make a third model call after a repeated language violation", async () => {
+  it("uses the bounded third model call after repeated language violations", async () => {
     const { questionSet, forensic, value } = fixture("zh-CN");
     const invalid = value.answers.map((item) => ({
       ...item,
@@ -82,19 +82,16 @@ describe("combined business question answers", () => {
       { questionSet, forensic },
       { maxAttempts: 3, delay: async () => undefined }
     )).rejects.toThrow(ReportLanguageValidationError);
-    expect(completeJson).toHaveBeenCalledTimes(2);
+    expect(completeJson).toHaveBeenCalledTimes(3);
   });
 
-  it("allows exact proper names from authoritative graph and appendix fields", async () => {
+  it("allows exact proper names from resolved entities and supported claims", async () => {
     const { questionSet, forensic, value } = fixture("zh-CN");
     forensic.sourceGraph.entities = [{ canonicalName: "Acme", status: "resolved" }] as unknown as RecommendationForensicReportV2["sourceGraph"]["entities"];
     forensic.sourceGraph.claims = [{ subjectName: "Beta Labs", status: "supported" }] as unknown as RecommendationForensicReportV2["sourceGraph"]["claims"];
-    forensic.websiteFoundationAppendix = { organizationProfile: {
-      organizationName: "Gamma Systems", brandNames: ["Product 360"], productsAndServices: ["Product 360"], legalEntity: "Legal Co"
-    } } as unknown as RecommendationForensicReportV2["websiteFoundationAppendix"];
     const answers = value.answers.map((item, index) => ({
       ...item,
-      answer: `Acme、Beta Labs、Gamma Systems、Product 360 与 Legal Co 应更新第 ${index + 1} 项业务材料。`
+      answer: `Acme 与 Beta Labs 应更新第 ${index + 1} 项业务材料并持续核验。`
     }));
     const completeJson = vi.fn(async () => ({ value: { answers }, modelId: "served", rawContent: "{}" }));
 
@@ -104,7 +101,7 @@ describe("combined business question answers", () => {
       { maxAttempts: 1 }
     );
     expect(result.answers[0].answer).toContain("Acme");
-    expect(result.answers[0].answer).toContain("Product 360");
+    expect(result.answers[0].answer).toContain("Beta Labs");
     expect(completeJson).toHaveBeenCalledOnce();
   });
 
@@ -119,7 +116,7 @@ describe("combined business question answers", () => {
     await expect(synthesizeCombinedBusinessQuestionAnswers(
       { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
     )).rejects.toThrow(ReportLanguageValidationError);
-    expect(completeJson).toHaveBeenCalledTimes(2);
+    expect(completeJson).toHaveBeenCalledTimes(3);
   });
 
   it.each(["Customer Growth Strategy", "Product One", "Google Analytics", "Cloudflare Workers"])(
@@ -134,9 +131,38 @@ describe("combined business question answers", () => {
     await expect(synthesizeCombinedBusinessQuestionAnswers(
       { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
     )).rejects.toThrow(ReportLanguageValidationError);
-    expect(completeJson).toHaveBeenCalledTimes(2);
+    expect(completeJson).toHaveBeenCalledTimes(3);
     }
   );
+
+  it.each([
+    ["organizationName", "AI Customer Growth Strategy"],
+    ["brandNames", ["Grow Revenue in 30 Days"]],
+    ["legalEntity", "cloud-first-growth"]
+  ] as const)("does not let appendix profile %s authorize combined prose", async (field, value) => {
+    const { questionSet, forensic, value: answerFixture } = fixture("zh-CN");
+    forensic.websiteFoundationAppendix = { organizationProfile: {
+      organizationName: null, brandNames: [], productsAndServices: [], legalEntity: null, [field]: value
+    } } as unknown as RecommendationForensicReportV2["websiteFoundationAppendix"];
+    const leaked = Array.isArray(value) ? value[0]! : value;
+    const invalid = answerFixture.answers.map((item) => ({ ...item, answer: `客户不应把 ${leaked} 当作普通报告正文。` }));
+    const completeJson = vi.fn(async () => ({ value: { answers: invalid }, modelId: "served", rawContent: "{}" }));
+    await expect(synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
+    )).rejects.toThrow(ReportLanguageValidationError);
+    expect(completeJson).toHaveBeenCalledTimes(3);
+  });
+
+  it("allows a product-like term only when it is a resolved entity", async () => {
+    const { questionSet, forensic, value } = fixture("zh-CN");
+    forensic.sourceGraph.entities = [{ canonicalName: "Google Analytics", status: "resolved" }] as unknown as RecommendationForensicReportV2["sourceGraph"]["entities"];
+    const answers = value.answers.map((item) => ({ ...item, answer: "客户可依据 Google Analytics 的独立公开证据更新业务材料。" }));
+    const completeJson = vi.fn(async () => ({ value: { answers }, modelId: "served", rawContent: "{}" }));
+    const result = await synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 1 }
+    );
+    expect(result.answers[0].answer).toContain("Google Analytics");
+  });
 });
 
 function fixture(locale = "en") {

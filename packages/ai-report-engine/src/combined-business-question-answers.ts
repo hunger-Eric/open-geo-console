@@ -139,11 +139,9 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const delay = options.delay ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let lastError: unknown;
-  let languageCorrectionUsed = false;
   let languageFeedback: string[] = [];
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     input.signal?.throwIfAborted();
-    const isLanguageCorrectionCall = languageFeedback.length > 0;
     try {
       const languageInstruction = reportLanguageInstruction(input.forensic.locale);
       const completion = await client.completeJson({
@@ -151,9 +149,11 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
         temperature: 0.1,
         maxTokens: 2_000,
         messages: [
-          { role: "system", content: `You write concise business answers grounded exclusively in supplied verified public-source excerpts. Return JSON only. ${languageInstruction}` },
+          { role: "system", content: input.forensic.locale.toLowerCase().startsWith("zh")
+            ? `你只能根据给定且已验证的公开来源摘录，撰写简洁直接的业务回答。只返回 JSON。${languageInstruction}`
+            : `You write concise business answers grounded exclusively in supplied verified public-source excerpts. Return JSON only. ${languageInstruction}` },
           { role: "user", content: JSON.stringify({
-            task: "Answer each business question directly in one short paragraph.",
+            task: input.forensic.locale.toLowerCase().startsWith("zh") ? "用一个简短中文段落直接回答每个业务问题。" : "Answer each business question directly in one short paragraph.",
             rules: [
               languageInstruction,
               "Use only the supplied evidence for that exact question.",
@@ -185,10 +185,8 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
       return parsed;
     } catch (error) {
       lastError = error;
-      if (isLanguageCorrectionCall) throw error;
       if (error instanceof ReportLanguageValidationError) {
-        if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
-        languageCorrectionUsed = true;
+        if (attempt >= maxAttempts) throw error;
         languageFeedback = languageViolationFeedback(error);
       }
       if (attempt < maxAttempts) await delayWithAbort(delay, Math.min(2_000, 250 * 2 ** (attempt - 1)), input.signal);
@@ -218,13 +216,7 @@ function collectQuestionAnswerAllowedTerms(forensic: RecommendationForensicRepor
       .filter(({ status }) => status === "supported")
       .map(({ subjectName }) => subjectName)
   ];
-  const profile = forensic.websiteFoundationAppendix?.organizationProfile;
-  const profileTerms = profile ? [
-    profile.organizationName,
-    ...profile.brandNames,
-    profile.legalEntity
-  ] : [];
-  return [...new Set([...graphTerms, ...profileTerms]
+  return [...new Set(graphTerms
     .filter((value): value is string => Boolean(value?.trim()) && value!.length <= 120))];
 }
 
