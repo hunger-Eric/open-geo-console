@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element -- protected evidence images must render in the canonical printable HTML */
 import type { CombinedPrivateReportArtifactModel } from "@/report/artifact-model";
+import { analyzeTitlePatterns, type TitlePatternKind } from "@open-geo-console/geo-auditor";
 import React from "react";
 
 export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateReportArtifactModel }) {
@@ -8,8 +9,10 @@ export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateRep
   const technical = report.technicalFoundation.technicalReport;
   const forensic = report.publicSourceForensics;
   const zh = model.locale === "zh";
-  const label = (kind: ArtifactLabelKind, value: string) => artifactValueLabel(kind, value, zh);
+  const geoTerminology = report.presentationTerminologyPolicy === "geo_v1";
+  const label = (kind: ArtifactLabelKind, value: string) => artifactValueLabel(kind, value, zh, geoTerminology);
   const answers = report.businessQuestionAnswers?.answers ?? [];
+  const titleDisplays = titlePatternDisplays(technical);
   return <main className="recommendation-artifact combined-geo-artifact" data-artifact-revision={model.artifactRevisionId}>
     <nav className="artifact-actions no-print" aria-label="Report formats"><a href={`/reports/${model.reportId}/report.html`}>HTML</a></nav>
     <header className="cover artifact-section">
@@ -26,7 +29,7 @@ export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateRep
     <Section number="02" title={zh ? "完整技术分析" : "Complete technical analysis"}>
       <div className="finding-list">{technical.findings.map((finding) => <article className={`finding-card severity-${finding.severity}`} key={finding.id}><p className="citation-category">{label("severity", finding.severity)}</p><h3>{finding.title}</h3><p>{finding.description}</p><strong>{zh ? "建议" : "Recommendation"}</strong><p>{finding.recommendation}</p>{finding.url ? <a href={finding.url}>{finding.url}</a> : null}{finding.aggregation ? <p>{finding.aggregation.affectedCount} {zh ? "个受影响页面" : "affected"} · {finding.aggregation.representativeUrls.join(", ")}</p> : null}</article>)}</div>
       <p className="source-original-label">{zh ? "页面标题、H1 和 URL 为来源原文" : "Page titles, H1 values, and URLs are source-original"}</p>
-      <table><thead><tr><th>URL</th><th>HTTP</th><th>{zh ? "标题" : "Title"}</th><th>H1</th><th>{zh ? "规范链接" : "Canonical"}</th><th>JSON-LD</th><th>{zh ? "正文长度" : "Text"}</th></tr></thead><tbody>{technical.pages.map((page) => <tr key={page.url}><td><a href={page.url}>{page.url}</a></td><td>{page.status}</td><td>{page.title ?? "—"}</td><td>{page.h1.join(" | ") || "—"}</td><td>{page.canonical ?? "—"}</td><td>{page.hasJsonLd ? (zh ? "是" : "Yes") : (zh ? "否" : "No")}</td><td>{page.readableTextLength}</td></tr>)}</tbody></table>
+      <table><thead><tr><th>URL</th><th>HTTP</th><th>{zh ? "标题" : "Title"}</th><th>H1</th><th>{zh ? "规范链接" : "Canonical"}</th><th>JSON-LD</th><th>{zh ? "正文长度" : "Text"}</th></tr></thead><tbody>{technical.pages.map((page) => <tr key={page.url}><td><a href={page.url}>{page.url}</a></td><td>{page.status}</td><td><SourceTitleCell title={page.title} display={titleDisplays.get(page.url)} zh={zh}/></td><td>{page.h1.join(" | ") || "—"}</td><td>{page.canonical ?? "—"}</td><td>{page.hasJsonLd ? (zh ? "是" : "Yes") : (zh ? "否" : "No")}</td><td>{page.readableTextLength}</td></tr>)}</tbody></table>
       <h3>{zh ? "机器可读资产" : "Machine-readable assets"}</h3><ul>{Object.entries(technical.machineReadableAssets).map(([name, asset]) => <li key={name}><strong>{name}</strong>: {label("asset", asset.present ? "ready" : "missing")} · <a href={asset.url}>{asset.url}</a> · {asset.summary}</li>)}</ul>
     </Section>
 
@@ -87,6 +90,64 @@ const EN_ARTIFACT_LABELS: Record<ArtifactLabelKind, Record<string, string>> = {
   coverage: { complete: "Complete", partial: "Partial", limited: "Limited", unavailable: "Unavailable", insufficient: "Insufficient evidence" },
   asset: { ready: "Ready", missing: "Missing" }
 };
-function artifactValueLabel(kind: ArtifactLabelKind, value: string, zh: boolean): string {
+function artifactValueLabel(kind: ArtifactLabelKind, value: string, zh: boolean, geoTerminology: boolean): string {
+  if (kind === "vendor" && value === "seo" && geoTerminology) return "GEO";
   return (zh ? ZH_ARTIFACT_LABELS : EN_ARTIFACT_LABELS)[kind][value] ?? value;
+}
+
+interface SourceTitleDisplay {
+  kind: TitlePatternKind;
+  sharedSegment: string;
+  uniqueSegment: string;
+}
+
+function titlePatternDisplays(
+  technical: CombinedPrivateReportArtifactModel["combinedReport"]["technicalFoundation"]["technicalReport"]
+): Map<string, SourceTitleDisplay> {
+  const messageKeys = new Set(technical.findings.map((finding) => finding.messageKey));
+  const enabledKinds = new Set<TitlePatternKind>();
+  if (messageKeys.has("page.duplicateTitles")) enabledKinds.add("exact_duplicate");
+  if (messageKeys.has("page.dominantTitleTemplate")) {
+    enabledKinds.add("dominant_prefix");
+    enabledKinds.add("dominant_suffix");
+  }
+  if (enabledKinds.size === 0) return new Map();
+
+  const displays = new Map<string, SourceTitleDisplay>();
+  for (const match of analyzeTitlePatterns(technical.pages)) {
+    if (!enabledKinds.has(match.kind)) continue;
+    for (const url of match.affectedUrls) {
+      displays.set(url, {
+        kind: match.kind,
+        sharedSegment: match.sharedSegment,
+        uniqueSegment: match.uniqueSegments[url] ?? ""
+      });
+    }
+  }
+  return displays;
+}
+
+function SourceTitleCell({
+  title,
+  display,
+  zh
+}: {
+  title?: string;
+  display?: SourceTitleDisplay;
+  zh: boolean;
+}) {
+  if (!title) return <>—</>;
+  if (!display) return <>{title}</>;
+  const position = display.kind === "dominant_prefix"
+    ? (zh ? "前缀" : "prefix")
+    : display.kind === "dominant_suffix"
+      ? (zh ? "后缀" : "suffix")
+      : (zh ? "标题" : "title");
+  return <div className="source-title-cell">
+    <strong>{display.uniqueSegment || (zh ? "无独有标题文本" : "No page-unique title text")}</strong>
+    <span>{zh
+      ? `共享模板${position}（${[...display.sharedSegment].length} 字）`
+      : `Shared template ${position} (${[...display.sharedSegment].length} characters)`}</span>
+    <details><summary>{zh ? "查看来源原文" : "View source original"}</summary><span>{title}</span></details>
+  </div>;
 }

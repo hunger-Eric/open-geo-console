@@ -27,4 +27,21 @@ describe("combined artifact canonical rendering",()=>{
       limitations: ["有 1 个计划页面未完成分析。"]
     });
   });
+
+  it("renders the prospective GEO terminology policy in canonical HTML", () => {
+    const model = combinedArtifactFixture();
+    model.combinedReport.presentationTerminologyPolicy = "geo_v1";
+    model.combinedReport.vendorTaskPackage.tasks = [{
+      id: "task",
+      vendor: "seo",
+      title: "Improve evidence",
+      text: "Improve public evidence.",
+      actions: ["Edit the page."],
+      acceptanceCriteria: ["Evidence is clear."]
+    }] as never;
+
+    const visibleText = renderCanonicalCombinedArtifactHtml(model).replace(/<[^>]+>/g, " ");
+    expect(visibleText).toContain("GEO");
+    expect(visibleText).not.toMatch(/\bSEO\b/);
+  });
 });

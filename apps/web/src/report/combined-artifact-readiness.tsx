@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertCombinedGeoReportLanguage, requireReadyCombinedGeoReport, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedReportLanguageScope, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedReportLanguageScope, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -103,6 +103,7 @@ export async function buildReadyCombinedArtifact(input: {
     orderId: input.orderId,
     jobId: input.jobId,
     originalPaidJobId: input.originalPaidJobId,
+    presentationTerminologyPolicy: GEO_TERMINOLOGY_POLICY,
     targetUrl: input.targetUrl,
     locale: forensic.locale,
     region: forensic.region,
