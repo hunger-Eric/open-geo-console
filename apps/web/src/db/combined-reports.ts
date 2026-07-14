@@ -1,4 +1,4 @@
-import { parseCombinedGeoReportV1, parseCombinedGeoReportV2, type CombinedGeoReportV1, type CombinedGeoReportV2 } from "@open-geo-console/ai-report-engine";
+import { parseCombinedGeoReportV1, parseCombinedGeoReportV2, parseCombinedGeoReportV3, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3 } from "@open-geo-console/ai-report-engine";
 import { ensureDatabase, getSqlClient } from "./index";
 
 export interface ActiveCombinedGeoReport {
@@ -7,7 +7,7 @@ export interface ActiveCombinedGeoReport {
   pdfStorageKey: string;
   htmlSha256: string;
   pdfSha256: string;
-  report: CombinedGeoReportV1 | CombinedGeoReportV2;
+  report: CombinedGeoReportV1 | CombinedGeoReportV2 | CombinedGeoReportV3;
 }
 
 export async function getActiveCombinedGeoReport(reportId: string): Promise<ActiveCombinedGeoReport | null> {
@@ -26,11 +26,13 @@ export async function getActiveCombinedGeoReport(reportId: string): Promise<Acti
     FROM scan_reports report
     JOIN report_artifact_revisions artifact ON artifact.id=report.active_artifact_revision_id
     JOIN combined_geo_reports combined ON combined.artifact_revision_id=artifact.id
-    WHERE report.id=${reportId} AND artifact.status='active' AND artifact.artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2')
+    WHERE report.id=${reportId} AND artifact.status='active' AND artifact.artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3')
     LIMIT 1`;
   const row = rows[0];
   if (!row?.pdf_storage_key || !row.html_sha256 || !row.pdf_sha256) return null;
-  const report = row.artifact_contract === "combined_geo_report_v2" ? parseCombinedGeoReportV2(row.payload) : parseCombinedGeoReportV1(row.payload);
+  const report = row.artifact_contract === "combined_geo_report_v3" ? parseCombinedGeoReportV3(row.payload)
+    : row.artifact_contract === "combined_geo_report_v2" ? parseCombinedGeoReportV2(row.payload)
+      : parseCombinedGeoReportV1(row.payload);
   if (report.reportId !== reportId || report.artifactRevisionId !== row.artifact_revision_id || report.artifactRevision !== row.revision) return null;
   return {
     artifactRevisionId: row.artifact_revision_id,

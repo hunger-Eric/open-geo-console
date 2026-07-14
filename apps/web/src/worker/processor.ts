@@ -15,6 +15,7 @@ import {
   synthesizeWebsiteReportWithRecovery,
   type AiWebsiteReportV1,
   type CombinedBusinessQuestionAnswers,
+  type CombinedGeoReportV3,
   type GroundedAnswerEvidence,
   type RecommendationForensicReportV2,
   type ExtractedPage,
@@ -44,7 +45,7 @@ import { listEvidenceAssets } from "@/db/evidence-assets";
 import { terminalizeCombinedCorrection, terminalizePaidCombinedReport } from "@/db/combined-correction-terminalization";
 import { getPendingPaidCombinedContext } from "@/db/combined-reports";
 import { failStagingCombinedArtifactRefresh, getStagingCombinedArtifactRefreshContext, terminalizeStagingCombinedArtifactRefresh } from "@/db/staging-combined-artifact-refresh";
-import { buildReadyCombinedArtifact, buildReadyCombinedArtifactV2 } from "@/report/combined-artifact-readiness";
+import { buildReadyCombinedArtifact, buildReadyCombinedArtifactV2, buildReadyCombinedArtifactV3, materializePreparedCombinedArtifactV3 } from "@/report/combined-artifact-readiness";
 import { createEvidenceStorage } from "@/evidence/storage";
 import {
   getCrawlEvidence,
@@ -63,7 +64,7 @@ import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline
 import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-runtime";
 import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { JobExecutionLease, configuredJobHardDeadlineMs } from "./job-execution";
-import { normalizeJobError, PublicSourceRuntimeError } from "./job-errors";
+import { normalizeJobError } from "./job-errors";
 import { assertStagingCommandEnvironment } from "@/security/deployment-policy";
 import { createPublicSourceAttemptBudget } from "./public-source-execution-budget";
 import { phaseForStage, recoveryEnvelope } from "./job-state";
@@ -100,7 +101,7 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
   recommendationForensics?: { runId?: string; questionsGenerated?: boolean; reportSaved?: boolean };
   publicSourceForensics?: PublicSourcePipelineCheckpoint;
   pendingArtifactVerification?: {
-    report: RecommendationForensicReportV2;
+    report: RecommendationForensicReportV2 | CombinedGeoReportV3;
     commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
   };
   providerDiscovery?: ProviderDiscoveryCheckpointV1;
@@ -655,11 +656,24 @@ export function publicSourceArtifactVerificationResume(checkpoint: WorkerCheckpo
 } | null {
   const phase=recoveryEnvelope(checkpoint)?.phase;
   if(!["artifact_verification","terminalization"].includes(phase ?? "") || !checkpoint.pendingArtifactVerification || !checkpoint.publicSourceForensics) return null;
-  return { report:checkpoint.pendingArtifactVerification.report,checkpoint:checkpoint.publicSourceForensics,
+  const report=checkpoint.pendingArtifactVerification.report;
+  if(isCombinedGeoReportV3(report)) return null;
+  return { report,checkpoint:checkpoint.publicSourceForensics,
     commercialSnapshotRefs:checkpoint.pendingArtifactVerification.commercialSnapshotRefs };
 }
 
 export const correctionArtifactVerificationResume = publicSourceArtifactVerificationResume;
+
+export function combinedV3ArtifactVerificationResume(checkpoint: WorkerCheckpoint): {
+  report: CombinedGeoReportV3;
+  checkpoint: AnswerFirstV3Checkpoint;
+  commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
+} | null {
+  const phase=recoveryEnvelope(checkpoint)?.phase;
+  const report=checkpoint.pendingArtifactVerification?.report;
+  if(!["artifact_verification","terminalization"].includes(phase ?? "") || !isCombinedGeoReportV3(report) || !checkpoint.answerFirstV3) return null;
+  return {report,checkpoint:checkpoint.answerFirstV3,commercialSnapshotRefs:checkpoint.pendingArtifactVerification!.commercialSnapshotRefs};
+}
 
 async function resolveCombinedQuestionAnswers(input: {
   checkpoint: WorkerCheckpoint;
@@ -717,7 +731,7 @@ async function finalizeRecommendationJob(input: {
   liveDrill?: StagingLiveDrill;
 }): Promise<void> {
   if (input.fulfillmentTarget === "recommendation_v2") {
-    if (input.job.artifactContract === "combined_geo_report_v2") {
+    if (input.job.artifactContract === "combined_geo_report_v2" || input.job.artifactContract === "combined_geo_report_v3") {
       await finalizeProviderDiscoveryCombinedJob(input);
       return;
     }
@@ -736,7 +750,7 @@ async function finalizeRecommendationJob(input: {
       await terminalizePaidPublicSourceReport({ report, workerId: input.workerId,
         checkpointIdentityHash: checkpoint.publicSourceForensics?.identityHash ?? "", coverage: input.coverage, snapshotRefs });
     };
-    if (input.job.artifactContract !== "combined_geo_report_v1" && ["artifact_verification", "terminalization"].includes(checkpointPhase() ?? "") && checkpoint.pendingArtifactVerification) {
+    if (input.job.artifactContract !== "combined_geo_report_v1" && ["artifact_verification", "terminalization"].includes(checkpointPhase() ?? "") && checkpoint.pendingArtifactVerification && !isCombinedGeoReportV3(checkpoint.pendingArtifactVerification.report)) {
       input.signal?.throwIfAborted();
       await artifactReadiness.verify(checkpoint.pendingArtifactVerification.report);
       input.signal?.throwIfAborted();
@@ -818,9 +832,15 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     ? await getConfirmedBusinessQuestionSet(input.job.reportId, input.job.businessQuestionSetId)
     : null;
   const pending = input.artifactContext ?? await getPendingPaidCombinedContext(input.job.id);
-  if (!businessQuestionSet || !pending) throw new Error("The V2 combined job requires its exact locked questions and pending artifact revision.");
+  if (!businessQuestionSet || !pending) throw new Error("The combined job requires its exact locked questions and pending artifact revision.");
   const evidenceAssets = input.evidenceAssets ?? await listEvidenceAssets(input.job.reportId, input.job.id);
   await assertReusableEvidenceAssets(evidenceAssets);
+  const resumedV3 = input.job.artifactContract === "combined_geo_report_v3" ? combinedV3ArtifactVerificationResume(checkpoint) : null;
+  if (resumedV3) {
+    const ready = await materializePreparedCombinedArtifactV3(resumedV3.report, evidenceAssets);
+    await terminalizeReadyCombinedArtifact(input, ready, resumedV3.checkpoint.identityHash, resumedV3.commercialSnapshotRefs);
+    return;
+  }
   createPublicSourceAttemptBudget(input.remainingMs);
   const runtime = await resolveProductionPublicSearchRuntime({ environment: process.env, getAuthority: getActivePublicSearchSurfaceAuthority });
   const client = createConfiguredClient();
@@ -883,7 +903,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       verificationSnapshotId,
       ...forensicResult.report.snapshotRefs.map(({ snapshotId }) => snapshotId)
     ]);
-    await resolveAnswerFirstV3({
+    const answerResult = await resolveAnswerFirstV3({
       questionSet: businessQuestionSet,
       providerDiscovery: providerResult.providerDiscovery,
       forensicReport: forensicResult.report,
@@ -902,7 +922,33 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         checkpoint = normalizeCheckpoint(updated.checkpoint);
       }
     });
-    throw new PublicSourceRuntimeError("combined_v3_artifact_readiness_pending", "V3 answer checkpoint is ready but matching artifact readiness is not yet configured.");
+    const verificationRef = await providerVerificationCommercialRef(verificationSnapshotId);
+    const snapshotRefs = uniqueSnapshotRefs([...forensicResult.commercialSnapshotRefs, verificationRef]);
+    if (snapshotRefs.length !== 4) throw new Error("V3 combined reports require exactly four immutable market snapshots.");
+    const ready = await buildReadyCombinedArtifactV3({
+      artifactRevisionId: pending.artifactRevisionId,
+      artifactRevision: pending.artifactRevision,
+      reportId: input.job.reportId,
+      orderId: pending.orderId,
+      jobId: input.job.id,
+      originalPaidJobId: input.originalPaidJobId ?? input.job.id,
+      targetUrl: input.targetUrl,
+      technicalReport: input.technicalReport,
+      aiReport: input.websiteFoundation,
+      evidenceAssets,
+      businessQuestionSet,
+      answerCards: answerResult.answerCards,
+      engineProvenance: answerResult.checkpoint.engineProvenance,
+      publicSourceForensics: forensicResult.report,
+      providerDiscovery: providerResult.providerDiscovery,
+      onReportPrepared: async (report) => {
+        const next = { ...checkpoint, pendingArtifactVerification: { report, commercialSnapshotRefs: snapshotRefs } };
+        const updated = await input.checkpointJob({ stage: "synthesizing", phase: "artifact_verification", progress: 99, checkpoint: next as JobCheckpoint, ...input.coverage });
+        checkpoint = normalizeCheckpoint(updated.checkpoint);
+      }
+    });
+    await terminalizeReadyCombinedArtifact(input, ready, answerResult.checkpoint.identityHash, snapshotRefs);
+    return;
   }
   const groundedAnswerEvidence = groundedEvidenceFromForensic(forensicResult.report);
   const questionIds = forensicResult.report.questions.questions.slice(1).map(({ id }) => id) as [string, string];
@@ -948,6 +994,23 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
   if(input.job.reason==="staging_artifact_refresh") await terminalizeStagingCombinedArtifactRefresh(terminalInput);
   else if(input.job.reason==="paid_report_correction") await terminalizeCombinedCorrection(terminalInput);
   else await terminalizePaidCombinedReport(terminalInput);
+}
+
+async function terminalizeReadyCombinedArtifact(
+  input: Parameters<typeof finalizeProviderDiscoveryCombinedJob>[0],
+  ready: Awaited<ReturnType<typeof buildReadyCombinedArtifactV3>>,
+  checkpointIdentityHash: string,
+  snapshotRefs: PublicSourceCommercialSnapshotRef[]
+): Promise<void> {
+  const terminalInput = { report: ready.report, workerId: input.workerId, checkpointIdentityHash, snapshotRefs,
+    htmlSha256: ready.htmlSha256, pdfSha256: ready.pdfSha256, pdfStorageKey: ready.pdfStorageKey, pageCount: ready.pageCount };
+  if(input.job.reason==="staging_artifact_refresh") await terminalizeStagingCombinedArtifactRefresh(terminalInput);
+  else if(input.job.reason==="paid_report_correction") await terminalizeCombinedCorrection(terminalInput);
+  else await terminalizePaidCombinedReport(terminalInput);
+}
+
+function isCombinedGeoReportV3(value: RecommendationForensicReportV2 | CombinedGeoReportV3 | undefined): value is CombinedGeoReportV3 {
+  return Boolean(value && "artifactContract" in value && value.artifactContract === "combined_geo_report_v3");
 }
 
 function groundedEvidenceFromForensic(report: RecommendationForensicReportV2): GroundedAnswerEvidence[] {

@@ -1,5 +1,5 @@
 import "server-only";
-import type { AiWebsiteReportV1, CombinedGeoReportV1, CombinedGeoReportV2, RecommendationForensicReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import type { AiWebsiteReportV1, CombinedGeoReportV1, CombinedGeoReportV2, CombinedGeoReportV3, RecommendationForensicReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import { getAiReport } from "@/db/ai-reports";
 import { listEvidenceAssets } from "@/db/evidence-assets";
@@ -23,7 +23,11 @@ export interface CombinedPrivateReportArtifactModelV2 extends Omit<CombinedPriva
   productContract: "combined_geo_report_v2";
   combinedReport: CombinedGeoReportV2;
 }
-export type CombinedPrivateReportArtifactModel = CombinedPrivateReportArtifactModelV1 | CombinedPrivateReportArtifactModelV2;
+export interface CombinedPrivateReportArtifactModelV3 extends Omit<CombinedPrivateReportArtifactModelV1, "productContract" | "combinedReport"> {
+  productContract: "combined_geo_report_v3";
+  combinedReport: CombinedGeoReportV3;
+}
+export type CombinedPrivateReportArtifactModel = CombinedPrivateReportArtifactModelV1 | CombinedPrivateReportArtifactModelV2 | CombinedPrivateReportArtifactModelV3;
 
 export interface LegacyPrivateReportArtifactModel {
   productContract: "legacy_website_audit_v1";
@@ -64,8 +68,7 @@ export async function loadPrivateReportArtifact(
   reportId: string,
   productContract: ReportArtifactScope = "legacy_website_audit_v1"
 ): Promise<PrivateReportArtifactModel | null> {
-  if (productContract === "combined_geo_report_v3") return null;
-  if (productContract === "combined_geo_report_v1" || productContract === "combined_geo_report_v2") {
+  if (productContract === "combined_geo_report_v1" || productContract === "combined_geo_report_v2" || productContract === "combined_geo_report_v3") {
     const active = await getActiveCombinedGeoReport(reportId);
     if (!active) return null;
     if (active.report.artifactContract !== productContract) return null;
@@ -84,9 +87,11 @@ export async function loadPrivateReportArtifact(
       artifactRevisionId: active.artifactRevisionId,
       pdfStorageKey: active.pdfStorageKey
     };
-    return productContract === "combined_geo_report_v2"
-      ? { ...common, productContract, combinedReport: active.report as CombinedGeoReportV2 }
-      : { ...common, productContract, combinedReport: active.report as CombinedGeoReportV1 };
+    return productContract === "combined_geo_report_v3"
+      ? { ...common, productContract, combinedReport: active.report as CombinedGeoReportV3 }
+      : productContract === "combined_geo_report_v2"
+        ? { ...common, productContract, combinedReport: active.report as CombinedGeoReportV2 }
+        : { ...common, productContract, combinedReport: active.report as CombinedGeoReportV1 };
   }
   if (productContract === "recommendation_forensics_v1") {
     const [report, v1, v2, foundation] = await Promise.all([

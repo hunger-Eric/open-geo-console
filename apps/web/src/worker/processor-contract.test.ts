@@ -4,6 +4,7 @@ import type { PublicSearchSurfaceAdapter, PublicSearchSurfaceAuthority, SearchQu
 import type { AiReportRow, ScanJobRow } from "@/db/schema";
 import {
   createWorkerPublicSourceForensicsDependencies,
+  combinedV3ArtifactVerificationResume,
   correctionArtifactVerificationResume,
   isMatchingRecommendationWebsiteFoundation,
   publicSourceArtifactVerificationResume,
@@ -53,6 +54,20 @@ describe("recommendation website-foundation resume contract", () => {
       checkpoint: publicSourceForensics,
       commercialSnapshotRefs: checkpoint.pendingArtifactVerification.commercialSnapshotRefs
     });
+  });
+
+  it("reuses a complete V3 artifact checkpoint without returning to search or synthesis", () => {
+    const report = { artifactContract: "combined_geo_report_v3", reportId: "report-v3", jobId: "job-v3" };
+    const refs = [{ snapshotId: "snapshot-v3", cacheIdentity: "cache-v3", freshnessState: "fresh", actualCostMicros: 0, allocatedCostMicros: 0, avoidedCostMicros: 0 }];
+    const checkpoint = {
+      recovery: { schemaVersion: 1, phase: "artifact_verification", revision: 4, phaseAttempt: 0, resumeGeneration: 1,
+        identity: { jobId: "job-v3", reportId: "report-v3", productContract: "recommendation_forensics_v1", methodology: "public_search_source_forensics_v1", locale: "zh", authorityId: "authority-v3" },
+        inputHash: "input-v3", completedArtifacts: ["answer_first_v3"], remainingWork: ["artifact_verification"], priorTransitionId: null },
+      answerFirstV3: { identityHash: "answer-checkpoint" },
+      pendingArtifactVerification: { report, commercialSnapshotRefs: refs }
+    };
+    expect(combinedV3ArtifactVerificationResume(checkpoint as never)).toEqual({ report, checkpoint: checkpoint.answerFirstV3, commercialSnapshotRefs: refs });
+    expect(combinedV3ArtifactVerificationResume({ ...checkpoint, recovery: { phase: "grounded_answer_synthesis" } } as never)).toBeNull();
   });
 
   it("dispatches only from the persisted methodology and rejects a missing value", () => {

@@ -5,6 +5,7 @@ import { RecommendationReportArtifact } from "@/components/recommendation-report
 import { PublicSourceForensicsReportArtifact } from "@/components/public-source-forensics-report-artifact";
 import { CombinedGeoReportArtifact } from "@/components/combined-geo-report-artifact";
 import { CombinedGeoReportV2Artifact } from "@/components/combined-geo-report-v2-artifact";
+import { CombinedGeoReportV3Artifact } from "@/components/combined-geo-report-v3-artifact";
 import { loadPrivateReportArtifact } from "@/report/artifact-model";
 import { ARTIFACT_CSS } from "@/report/artifact-styles";
 import { reportAccessCookieName, tokenGrantsReportAccess } from "@/server/report-access";
@@ -33,7 +34,7 @@ export default async function PrivateHtmlReportPage({ params }: { params: Promis
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: ARTIFACT_CSS }} />
-      {model.productContract === "combined_geo_report_v2" ? <CombinedGeoReportV2Artifact model={model} /> : model.productContract === "combined_geo_report_v1" ? <CombinedGeoReportArtifact model={model} /> : model.productContract === "recommendation_forensics_v1"
+      {model.productContract === "combined_geo_report_v3" ? <CombinedGeoReportV3Artifact model={model} /> : model.productContract === "combined_geo_report_v2" ? <CombinedGeoReportV2Artifact model={model} /> : model.productContract === "combined_geo_report_v1" ? <CombinedGeoReportArtifact model={model} /> : model.productContract === "recommendation_forensics_v1"
         ? model.reportVersion===2?<PublicSourceForensicsReportArtifact model={model}/>:<RecommendationReportArtifact model={model}/>
         : <ReportArtifact model={model} />}
     </>

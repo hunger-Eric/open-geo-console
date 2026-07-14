@@ -1,14 +1,15 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type ProviderDiscoveryV1, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type ProviderDiscoveryV1, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
 import type { ReportEvidenceAssetRow } from "@/db/schema";
-import type { CombinedPrivateReportArtifactModel, CombinedPrivateReportArtifactModelV1 } from "./artifact-model";
+import type { CombinedPrivateReportArtifactModel, CombinedPrivateReportArtifactModelV1, CombinedPrivateReportArtifactModelV3 } from "./artifact-model";
 import { CombinedGeoReportArtifact } from "@/components/combined-geo-report-artifact";
 import { CombinedGeoReportV2Artifact } from "@/components/combined-geo-report-v2-artifact";
+import { CombinedGeoReportV3Artifact } from "@/components/combined-geo-report-v3-artifact";
 import { ARTIFACT_CSS } from "./artifact-styles";
 import { exportCanonicalArtifactHtmlPdf } from "./pdf-export";
 import { localizeTechnicalReportForArtifact } from "./technical-report-localization";
@@ -26,6 +27,9 @@ export interface ReadyCombinedArtifact {
 
 export interface ReadyCombinedArtifactV2 extends Omit<ReadyCombinedArtifact, "report"> {
   report: CombinedGeoReportV2;
+}
+export interface ReadyCombinedArtifactV3 extends Omit<ReadyCombinedArtifact, "report"> {
+  report: CombinedGeoReportV3;
 }
 
 export function combinedArtifactSystemCopy(locale: string, input: {
@@ -163,7 +167,7 @@ async function assertReadyEvidenceAssets(evidenceAssets: ReportEvidenceAssetRow[
   }
 }
 
-async function materializeReadyArtifact<T extends CombinedGeoReportV1 | CombinedGeoReportV2>(
+async function materializeReadyArtifact<T extends CombinedGeoReportV1 | CombinedGeoReportV2 | CombinedGeoReportV3>(
   report: T,
   model: CombinedPrivateReportArtifactModel,
   html: string
@@ -274,10 +278,137 @@ export async function buildReadyCombinedArtifactV2(input: {
   return materializeReadyArtifact(report, model, html);
 }
 
+export async function buildReadyCombinedArtifactV3(input: {
+  artifactRevisionId: string;
+  artifactRevision: number;
+  reportId: string;
+  orderId: string;
+  jobId: string;
+  originalPaidJobId: string;
+  targetUrl: string;
+  technicalReport: GeoAuditReport;
+  aiReport: AiWebsiteReportV1;
+  evidenceAssets: ReportEvidenceAssetRow[];
+  businessQuestionSet: ConfirmedBusinessQuestionSet;
+  answerCards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
+  engineProvenance: OpenGeoEngineProvenanceV3;
+  publicSourceForensics: RecommendationForensicReportV2;
+  providerDiscovery: ProviderDiscoveryV1;
+  languageValidationScope?: CombinedReportLanguageScope;
+  onReportPrepared?: (report: CombinedGeoReportV3) => void | Promise<void>;
+}): Promise<ReadyCombinedArtifactV3> {
+  await assertReadyEvidenceAssets(input.evidenceAssets);
+  const forensic = input.publicSourceForensics;
+  const systemCopy = combinedArtifactSystemCopy(forensic.locale, {
+    technicalPages: input.technicalReport.pages.length,
+    analyzedPages: input.aiReport.coverage.analyzedPages,
+    plannedPages: input.aiReport.coverage.plannedPages,
+    failedPages: input.aiReport.coverage.failedPages,
+    freshness: forensic.customerCostDisclosure.freshness,
+    evidenceCutoffAt: forensic.evidenceCutoffAt
+  });
+  const localizedAiReport: AiWebsiteReportV1 = {
+    ...input.aiReport,
+    coverage: { ...input.aiReport.coverage, samplingMethod: systemCopy.samplingMethod, limitations: systemCopy.limitations }
+  };
+  const localizedTechnicalReport = localizeTechnicalReportForArtifact(input.technicalReport, forensic.locale);
+  const report = requireReadyCombinedGeoReportV3({
+    version: 3,
+    artifactContract: "combined_geo_report_v3",
+    productCode: "recommendation_forensics_v1",
+    artifactRevisionId: input.artifactRevisionId,
+    artifactRevision: input.artifactRevision,
+    reportId: input.reportId,
+    orderId: input.orderId,
+    jobId: input.jobId,
+    originalPaidJobId: input.originalPaidJobId,
+    presentationTerminologyPolicy: GEO_TERMINOLOGY_POLICY,
+    targetUrl: input.targetUrl,
+    locale: forensic.locale,
+    region: forensic.region,
+    generatedAt: forensic.generatedAt,
+    evidenceCutoffAt: forensic.evidenceCutoffAt,
+    technicalInputIdentity: sha(JSON.stringify({ technical: input.technicalReport, ai: input.aiReport.provenance.contentHash })),
+    questionSetIdentity: input.businessQuestionSet.id,
+    technicalFoundation: {
+      technicalReport: localizedTechnicalReport,
+      aiReport: localizedAiReport,
+      evidenceAssets: input.evidenceAssets.filter((asset) => asset.status === "ready" && asset.contentHash).map((asset) => ({
+        assetId: asset.id, jobId: asset.jobId, sourceUrl: asset.sourceUrl, kind: asset.kind, contentHash: asset.contentHash!
+      }))
+    },
+    businessQuestionSet: input.businessQuestionSet,
+    answerCards: input.answerCards,
+    engineProvenance: input.engineProvenance,
+    providerDiscovery: input.providerDiscovery,
+    publicSourceForensics: forensic,
+    vendorTaskPackage: { version: "combined-vendor-task-v1", tasks: forensic.vendorTaskPackage.tasks },
+    methodology: {
+      htmlCanonical: true,
+      publicSearchSurface: `${forensic.authority.surface.surfaceId}/${forensic.authority.surface.surfaceVersion}`,
+      technicalCoverage: systemCopy.technicalCoverage,
+      evidenceFreshness: systemCopy.evidenceFreshness,
+      limitations: [...new Set([...systemCopy.limitations, ...forensic.limitations, input.providerDiscovery.limitation])],
+      nonCausal: true
+    }
+  });
+  assertCombinedGeoReportLanguage({ ...report, version: 1, artifactContract: "combined_geo_report_v1", businessQuestionAnswers: undefined }, input.languageValidationScope);
+  await input.onReportPrepared?.(report);
+  return materializePreparedCombinedArtifactV3(report, input.evidenceAssets);
+}
+
+export async function materializePreparedCombinedArtifactV3(
+  value: unknown,
+  evidenceAssets: ReportEvidenceAssetRow[]
+): Promise<ReadyCombinedArtifactV3> {
+  await assertReadyEvidenceAssets(evidenceAssets);
+  const report = requireReadyCombinedGeoReportV3(value);
+  const locale: "en" | "zh" = report.locale.toLowerCase().startsWith("zh") ? "zh" : "en";
+  const model: CombinedPrivateReportArtifactModelV3 = {
+    productContract: "combined_geo_report_v3", reportId: report.reportId, locale, combinedReport: report,
+    technicalReport: report.technicalFoundation.technicalReport, evidenceAssets,
+    artifactRevisionId: report.artifactRevisionId, pdfStorageKey: "pending"
+  };
+  const html = renderCanonicalCombinedArtifactHtml(model);
+  assertCombinedV3HtmlCompleteness(report, html);
+  return materializeReadyArtifact(report, model, html);
+}
+
+export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, html: string): void {
+  const required = [
+    report.artifactRevisionId,
+    ...report.answerCards.flatMap((card) => [
+      card.exactQuestion,
+      ...card.sentences.map(({ text }) => text),
+      ...card.sourceEvidence.flatMap((evidence) => [evidence.title, evidence.registrableDomain, evidence.canonicalUrl, evidence.exactExcerpt, evidence.ownershipCategory, evidence.observedAt]),
+      ...card.geoDiagnosis.targetRoles,
+      ...card.geoDiagnosis.competitorEntityIds,
+      ...card.geoDiagnosis.missingEvidenceFamilies,
+      card.geoDiagnosis.retestQuestion
+    ]),
+    ...report.technicalFoundation.technicalReport.findings.flatMap(({ title, description, recommendation }) => [title, description, recommendation]),
+    ...report.technicalFoundation.technicalReport.pages.flatMap(({ url, title, canonical, metaDescription, h1 }) => [url, title ?? "", canonical ?? "", metaDescription ?? "", ...h1]),
+    ...report.technicalFoundation.aiReport.findings.flatMap(({ title, impact, recommendation }) => [title, impact, recommendation])
+  ].filter(Boolean);
+  if (required.some((value) => !html.includes(String(value)))) throw new Error("Combined V3 HTML artifact failed completeness readiness.");
+  for (const card of report.answerCards) {
+    for (const sentence of card.sentences.filter(({ kind }) => kind === "grounded_claim")) {
+      const sentenceAt = html.indexOf(sentence.text);
+      const nextSentenceAt = report.answerCards.flatMap(({ sentences }) => sentences).map(({ text }) => html.indexOf(text)).filter((index) => index > sentenceAt).sort((a, b) => a - b)[0] ?? html.length;
+      for (const evidenceId of sentence.evidenceIds) {
+        const evidence = card.sourceEvidence.find((candidate) => candidate.evidenceId === evidenceId);
+        if (!evidence || html.indexOf(evidence.exactExcerpt, sentenceAt) >= nextSentenceAt) throw new Error("Combined V3 HTML artifact failed adjacent citation completeness readiness.");
+      }
+    }
+  }
+}
+
 export function renderCanonicalCombinedArtifactHtml(model: CombinedPrivateReportArtifactModel):string{
-  const markup=renderToStaticMarkup(model.productContract==="combined_geo_report_v2"
-    ? createElement(CombinedGeoReportV2Artifact,{model})
-    : createElement(CombinedGeoReportArtifact,{model:model as CombinedPrivateReportArtifactModelV1}));
+  const markup=renderToStaticMarkup(model.productContract==="combined_geo_report_v3"
+    ? createElement(CombinedGeoReportV3Artifact,{model})
+    : model.productContract==="combined_geo_report_v2"
+      ? createElement(CombinedGeoReportV2Artifact,{model})
+      : createElement(CombinedGeoReportArtifact,{model:model as CombinedPrivateReportArtifactModelV1}));
   return `<!doctype html><html lang="${model.locale}"><head><meta charset="utf-8"/><style>${ARTIFACT_CSS}</style></head><body>${markup}</body></html>`;
 }
 
