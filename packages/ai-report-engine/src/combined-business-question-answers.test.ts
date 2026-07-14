@@ -30,11 +30,12 @@ describe("combined business question answers", () => {
 
   it("constrains model output and records its input identity", async () => {
     const { questionSet, forensic, value } = fixture();
-    const completeJson = vi.fn(async () => ({ value: { answers: value.answers }, modelId: "served-model", rawContent: "{}" }));
+    const completeJson = vi.fn(async (_request: unknown) => ({ value: { answers: value.answers }, modelId: "served-model", rawContent: "{}" }));
     const result = await synthesizeCombinedBusinessQuestionAnswers({ configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 1 });
     expect(result.synthesis).toMatchObject({ mode: "evidence_constrained_model", modelId: "served-model" });
     expect(result.synthesis.inputHash).toMatch(/^[a-f0-9]{64}$/);
     expect(completeJson).toHaveBeenCalledOnce();
+    expect(JSON.stringify(completeJson.mock.calls[0]?.[0])).toContain("Write all report prose in English");
   });
 
   it("corrects Chinese answer language once", async () => {
@@ -83,15 +84,16 @@ describe("combined business question answers", () => {
     expect(completeJson).toHaveBeenCalledTimes(2);
   });
 
-  it("allows a bounded proper name repeated in the exact supplied evidence", async () => {
+  it("allows exact proper names from authoritative graph and appendix fields", async () => {
     const { questionSet, forensic, value } = fixture("zh-CN");
-    forensic.sourceGraph.evidence = forensic.sourceGraph.evidence.map((item) => ({
-      ...item,
-      verifiedExcerpt: `Acme 已公开核验与 ${item.registrableDomain} 相关的业务材料。`
-    }));
+    forensic.sourceGraph.entities = [{ canonicalName: "Acme", status: "resolved" }] as unknown as RecommendationForensicReportV2["sourceGraph"]["entities"];
+    forensic.sourceGraph.claims = [{ subjectName: "Beta Labs", status: "supported" }] as unknown as RecommendationForensicReportV2["sourceGraph"]["claims"];
+    forensic.websiteFoundationAppendix = { organizationProfile: {
+      organizationName: "Gamma Systems", brandNames: [], productsAndServices: ["Product One"], legalEntity: "Legal Co"
+    } } as unknown as RecommendationForensicReportV2["websiteFoundationAppendix"];
     const answers = value.answers.map((item, index) => ({
       ...item,
-      answer: `Acme 应依据两项独立公开证据更新第 ${index + 1} 项业务材料并持续核验。`
+      answer: `Acme、Beta Labs、Gamma Systems、Product One 与 Legal Co 应更新第 ${index + 1} 项业务材料。`
     }));
     const completeJson = vi.fn(async () => ({ value: { answers }, modelId: "served", rawContent: "{}" }));
 
@@ -101,7 +103,22 @@ describe("combined business question answers", () => {
       { maxAttempts: 1 }
     );
     expect(result.answers[0].answer).toContain("Acme");
+    expect(result.answers[0].answer).toContain("Product One");
     expect(completeJson).toHaveBeenCalledOnce();
+  });
+
+  it("does not allowlist generic prose repeated across evidence excerpts", async () => {
+    const { questionSet, forensic, value } = fixture("zh-CN");
+    forensic.sourceGraph.evidence = forensic.sourceGraph.evidence.map((item) => ({
+      ...item,
+      verifiedExcerpt: `Customer Growth Strategy appears in the supplied evidence from ${item.registrableDomain}.`
+    }));
+    const invalid = value.answers.map((item) => ({ ...item, answer: "客户应采用 Customer Growth Strategy 并继续核验公开材料。" }));
+    const completeJson = vi.fn(async () => ({ value: { answers: invalid }, modelId: "served", rawContent: "{}" }));
+    await expect(synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
+    )).rejects.toThrow(ReportLanguageValidationError);
+    expect(completeJson).toHaveBeenCalledTimes(2);
   });
 });
 

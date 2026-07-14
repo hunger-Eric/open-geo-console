@@ -224,6 +224,13 @@ function assertWebsiteReportLanguage(report: AiWebsiteReportV1, input: ReportSyn
   const roadmap = [...report.roadmap.immediate, ...report.roadmap.nextPhase, ...report.roadmap.ongoing];
   assertReportLanguage([
     { path: "organizationProfile.summary", text: report.organizationProfile.summary },
+    ...(report.organizationProfile.businessModel
+      ? [{ path: "organizationProfile.businessModel", text: report.organizationProfile.businessModel }]
+      : []),
+    ...report.organizationProfile.productsAndServices.map((text, index) => ({ path: `organizationProfile.productsAndServices[${index}]`, text })),
+    ...(report.organizationProfile.capabilities ?? []).map((text, index) => ({ path: `organizationProfile.capabilities[${index}]`, text })),
+    ...report.organizationProfile.targetAudiences.map((text, index) => ({ path: `organizationProfile.targetAudiences[${index}]`, text })),
+    ...report.organizationProfile.marketsAndRegions.map((text, index) => ({ path: `organizationProfile.marketsAndRegions[${index}]`, text })),
     { path: "organizationProfile.identityConsistency", text: report.organizationProfile.identityConsistency },
     { path: "executiveSummary.overview", text: report.executiveSummary.overview },
     ...report.executiveSummary.strengths.map((text, index) => ({ path: `executiveSummary.strengths[${index}]`, text })),
@@ -245,27 +252,26 @@ function assertWebsiteReportLanguage(report: AiWebsiteReportV1, input: ReportSyn
       { path: `roadmap[${itemIndex}].title`, text: item.title },
       { path: `roadmap[${itemIndex}].rationale`, text: item.rationale },
       ...item.actions.map((text, index) => ({ path: `roadmap[${itemIndex}].actions[${index}]`, text }))
-    ]),
-    { path: "coverage.samplingMethod", text: report.coverage.samplingMethod },
-    ...report.coverage.limitations.map((text, index) => ({ path: `coverage.limitations[${index}]`, text }))
-  ], input.locale, collectSourceGroundedAllowedTerms(input));
+    ])
+  ], input.locale, collectSourceGroundedAllowedTerms(report, input));
 }
 
-function collectSourceGroundedAllowedTerms(input: ReportSynthesisInput): string[] {
-  const explicitHints = (input.organizationHints ?? []).flatMap((rawValue) => {
-    const value = rawValue.trim();
-    if (!value || value.length > 80 || /[.!?;]/.test(value)) return [];
-    const words = value.split(/\s+/);
-    const nameLike = words.length <= 6 && words.every((word) =>
-      /^[A-Z][A-Za-z0-9&.-]*$/.test(word) || /^[A-Z]{2,}$/.test(word) || /^[\u3400-\u9fff]{2,12}$/u.test(word));
-    return nameLike ? [value] : [];
-  });
-  const titleTerms = input.pages.flatMap(({ title }) => {
-    const latin = title?.match(/\b(?:[A-Z][A-Za-z0-9&.-]*)(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3}\b/g) ?? [];
-    const cjk = title?.match(/[\u3400-\u9fff]{2,12}/gu) ?? [];
-    return [...latin, ...cjk];
-  });
-  return [...new Set([...explicitHints, ...titleTerms].filter((term) => term.length <= 80))];
+function collectSourceGroundedAllowedTerms(report: AiWebsiteReportV1, input: ReportSynthesisInput): string[] {
+  const profile = report.organizationProfile;
+  const candidates = [
+    profile.organizationName,
+    ...profile.brandNames,
+    ...profile.productsAndServices,
+    profile.legalEntity
+  ].filter((value): value is string => Boolean(value?.trim()) && value!.length <= 120);
+  const exactHints = new Set((input.organizationHints ?? []).map((value) => value.trim()).filter(Boolean));
+  const suppliedPageValues = input.pages.flatMap((page) => [
+    page.title ?? "",
+    page.description ?? "",
+    page.text,
+    ...Object.values(page.metadata ?? {}).flatMap((value) => Array.isArray(value) ? value : [value])
+  ]);
+  return [...new Set(candidates.filter((term) => exactHints.has(term) || suppliedPageValues.some((value) => value.includes(term))))];
 }
 
 function languageViolationFeedback(error: ReportLanguageValidationError): string[] {

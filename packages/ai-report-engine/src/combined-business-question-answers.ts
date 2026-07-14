@@ -174,7 +174,7 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
         synthesis: { mode: "evidence_constrained_model", modelId: completion.modelId, inputHash },
         answers: output.answers
       }, input.questionSet, input.forensic);
-      assertAnswerLanguage(parsed.answers, input.forensic.locale, collectQuestionAnswerAllowedTerms(compactInput));
+      assertAnswerLanguage(parsed.answers, input.forensic.locale, collectQuestionAnswerAllowedTerms(input.forensic));
       return parsed;
     } catch (error) {
       lastError = error;
@@ -202,22 +202,24 @@ function assertAnswerLanguage(
   );
 }
 
-function collectQuestionAnswerAllowedTerms(input: ReturnType<typeof compactSynthesisInput>): string[] {
-  const genericSentenceWords = new Set(["A", "An", "How", "Question", "The", "Verified", "What", "When", "Where", "Which", "Who", "Why"]);
-  const sourceValues = input.flatMap(({ question, evidence }) => [question, ...evidence.map(({ excerpt }) => excerpt)]);
-  const candidates = new Map<string, Set<number>>();
-  sourceValues.forEach((value, sourceIndex) => {
-    const latin = value.match(/\b(?:[A-Z][A-Za-z0-9&.-]*)(?:\s+[A-Z][A-Za-z0-9&.-]*){1,3}\b/g) ?? [];
-    const shaped = value.match(/\b(?:[A-Z]{2,}|[A-Za-z0-9]*[a-z][A-Z][A-Za-z0-9]*)\b/g) ?? [];
-    const capitalized = (value.match(/\b[A-Z][a-z][A-Za-z0-9]*\b/g) ?? []).filter((term) => !genericSentenceWords.has(term));
-    const cjk = value.match(/[\u3400-\u9fff]{2,12}/gu) ?? [];
-    for (const term of [...latin, ...shaped, ...capitalized, ...cjk].filter((item) => item.length <= 80)) {
-      const sources = candidates.get(term) ?? new Set<number>();
-      sources.add(sourceIndex);
-      candidates.set(term, sources);
-    }
-  });
-  return [...candidates].filter(([, sources]) => sources.size >= 2).map(([term]) => term);
+function collectQuestionAnswerAllowedTerms(forensic: RecommendationForensicReportV2): string[] {
+  const graphTerms = [
+    ...(forensic.sourceGraph.entities ?? [])
+      .filter(({ status }) => status === "resolved")
+      .map(({ canonicalName }) => canonicalName),
+    ...(forensic.sourceGraph.claims ?? [])
+      .filter(({ status }) => status === "supported")
+      .map(({ subjectName }) => subjectName)
+  ];
+  const profile = forensic.websiteFoundationAppendix?.organizationProfile;
+  const profileTerms = profile ? [
+    profile.organizationName,
+    ...profile.brandNames,
+    ...profile.productsAndServices,
+    profile.legalEntity
+  ] : [];
+  return [...new Set([...graphTerms, ...profileTerms]
+    .filter((value): value is string => Boolean(value?.trim()) && value!.length <= 120))];
 }
 
 function languageViolationFeedback(error: ReportLanguageValidationError): string[] {

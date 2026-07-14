@@ -219,7 +219,7 @@ export async function analyzePageBatch(
         if (candidate.length !== pages.length) {
           throw new Error(`The model returned ${candidate.length} of ${pages.length} required page analyses.`);
         }
-        assertPageAnalysisLanguage(candidate, input.locale, allowedTermsFromPageTitles(pages));
+        assertPageAnalysisLanguage(candidate, input.locale, collectPageAllowedTerms(pages));
         parsed = candidate;
         break;
       } catch (error) {
@@ -260,18 +260,42 @@ function assertPageAnalysisLanguage(analyses: readonly PageAnalysis[], locale: s
   ]), locale, allowedTerms);
 }
 
-function allowedTermsFromPageTitles(pages: readonly ExtractedPage[]): string[] {
-  return uniqueBoundedTerms(pages.map(({ title }) => title));
+function collectPageAllowedTerms(pages: readonly ExtractedPage[]): string[] {
+  const terms = new Set<string>();
+  const titleSegments = new Map<string, Set<number>>();
+  pages.forEach((page, pageIndex) => {
+    try {
+      for (const label of new URL(page.url).hostname.split(".")) {
+        if (/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label) && !HOSTNAME_NOISE.has(label.toLowerCase())) terms.add(label);
+      }
+    } catch {
+      // URL validity is enforced before analysis; an invalid value contributes no allowlist term.
+    }
+    for (const [key, rawValue] of Object.entries(page.metadata ?? {})) {
+      if (!SITE_NAME_METADATA_KEYS.has(key.toLowerCase().replace(/[^a-z]/g, ""))) continue;
+      for (const value of Array.isArray(rawValue) ? rawValue : [rawValue]) {
+        const term = boundedName(value);
+        if (term) terms.add(term);
+      }
+    }
+    for (const rawSegment of page.title?.split(/\s+(?:[-|\u2013\u2014])\s+|[|:\uFF1A]/) ?? []) {
+      const segment = boundedName(rawSegment);
+      if (!segment) continue;
+      const pagesWithSegment = titleSegments.get(segment) ?? new Set<number>();
+      pagesWithSegment.add(pageIndex);
+      titleSegments.set(segment, pagesWithSegment);
+    }
+  });
+  for (const [segment, pageIndexes] of titleSegments) if (pageIndexes.size >= 2) terms.add(segment);
+  return [...terms];
 }
 
-function uniqueBoundedTerms(values: readonly (string | undefined)[]): string[] {
-  const terms = values.flatMap((value) => {
-    if (!value) return [];
-    const latin = value.match(/\b(?:[A-Z][A-Za-z0-9&.-]*)(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3}\b/g) ?? [];
-    const cjk = value.match(/[\u3400-\u9fff]{2,12}/gu) ?? [];
-    return [...latin, ...cjk].filter((term) => term.length <= 80);
-  });
-  return [...new Set(terms)];
+const HOSTNAME_NOISE = new Set(["www", "com", "org", "net", "io", "co", "cn"]);
+const SITE_NAME_METADATA_KEYS = new Set(["sitename", "ogsitename", "applicationname"]);
+
+function boundedName(value: string): string | null {
+  const term = value.replace(/\s+/g, " ").trim();
+  return term && term.length <= 80 && term.split(" ").length <= 6 && !/[.!?;]/.test(term) ? term : null;
 }
 
 function languageViolationFeedback(error: ReportLanguageValidationError): string[] {

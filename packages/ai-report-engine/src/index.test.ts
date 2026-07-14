@@ -17,7 +17,8 @@ import {
   type AiWebsiteReportV1,
   type ExtractedPage,
   type JsonCompletionClient,
-  type JsonCompletionResult
+  type JsonCompletionResult,
+  type ReportSynthesisInput
 } from "./index";
 
 function mockClient(values: unknown[], modelId = "mock-model"): JsonCompletionClient {
@@ -228,6 +229,7 @@ describe("batch analysis and evidence", () => {
     const result = await analyzePageBatch(client, { pages: [page], locale: "en" });
     expect(result.analyses[0]?.findings).toHaveLength(1);
     expect(result.analyses[0]?.findings[0]?.title).toBe("Supported");
+    expect(JSON.stringify(vi.mocked(client.completeJson).mock.calls[0]?.[0])).toContain("Write all report prose in English");
   });
 
   it("rejects unknown URLs and unsupported quotes from a completed report", () => {
@@ -283,6 +285,7 @@ describe("batch analysis and evidence", () => {
   });
 
   it("corrects Chinese page prose once while preserving source-original evidence", async () => {
+    const namedPage = { ...page, metadata: { siteName: "Example" } };
     const english = { analyses: [{
       url: page.url,
       summary: "The page clearly explains the product for modern teams.",
@@ -307,7 +310,7 @@ describe("batch analysis and evidence", () => {
     }] };
     const client = mockClient([english, chinese]);
 
-    const result = await analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined });
+    const result = await analyzePageBatch(client, { pages: [namedPage], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined });
 
     expect(result.analyses[0]?.summary).toContain("该页面");
     expect(client.completeJson).toHaveBeenCalledTimes(2);
@@ -323,6 +326,22 @@ describe("batch analysis and evidence", () => {
       .rejects.toThrow(ReportLanguageValidationError);
     expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
+
+  it("does not allowlist one-off title prose in page analysis", async () => {
+    const titledPage = { ...page, title: "Customer Growth Strategy" };
+    const invalid = { analyses: [{ url: page.url, summary: "Customer Growth Strategy", organizationSignals: [], strengths: [], findings: [] }] };
+    const client = mockClient([invalid]);
+    await expect(analyzePageBatch(client, { pages: [titledPage], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined }))
+      .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows only a bounded hostname label for a one-page site identity", async () => {
+    const localized = { analyses: [{ url: page.url, summary: "example 提供清晰的网站分析服务。", organizationSignals: [], strengths: [], findings: [] }] };
+    const client = mockClient([localized]);
+    await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 1 }))
+      .resolves.toMatchObject({ analyses: [{ summary: expect.stringContaining("example") }] });
+  });
 });
 
 describe("report validation and synthesis", () => {
@@ -331,7 +350,8 @@ describe("report validation and synthesis", () => {
   });
 
   it("creates server-owned provenance and limits free reports to one finding", async () => {
-    const result = await synthesizeWebsiteReport(mockClient([reportModelOutput(4)], "served-model"), {
+    const client = mockClient([reportModelOutput(4)], "served-model");
+    const result = await synthesizeWebsiteReport(client, {
       targetUrl: page.url,
       tier: "free",
       locale: "en",
@@ -359,6 +379,7 @@ describe("report validation and synthesis", () => {
       generatedAt: "2026-07-10T00:00:00.000Z"
     });
     expect(result.report.provenance.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(vi.mocked(client.completeJson).mock.calls[0]?.[0])).toContain("Write all report prose in English");
   });
 
   it("normalizes nullable optional strings and duplicate model finding IDs", async () => {
@@ -406,6 +427,48 @@ describe("report validation and synthesis", () => {
     }
   });
 
+  it("does not gate server-owned English coverage during Chinese model correction", async () => {
+    const client = mockClient([chineseReportModelOutput()]);
+    const input = synthesisInput("zh-CN");
+    input.coverage.samplingMethod = "Production representative page sampling";
+    input.coverage.limitations = ["Only fetched pages are included in this deterministic coverage note."];
+    await expect(synthesizeWebsiteReportWithRecovery(client, input, { maxAttempts: 3, delay: async () => undefined }))
+      .resolves.toMatchObject({ report: { executiveSummary: { overview: expect.stringContaining("网站") } } });
+    expect(client.completeJson).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["businessModel", "Consulting services"],
+    ["productsAndServices", ["Consulting services"]],
+    ["capabilities", ["Delivers strategic consulting services"]],
+    ["targetAudiences", ["Global enterprise buyers"]],
+    ["marketsAndRegions", ["North American markets"]]
+  ] as const)("rejects English leakage in organizationProfile.%s", async (field, value) => {
+    const output = chineseReportModelOutput();
+    (output.organizationProfile as Record<string, unknown>)[field] = value;
+    await expect(synthesizeWebsiteReport(mockClient([output]), synthesisInput("zh-CN")))
+      .rejects.toThrow(ReportLanguageValidationError);
+  });
+
+  it("does not allowlist arbitrary one-off title prose during website synthesis", async () => {
+    const output = chineseReportModelOutput();
+    (output.organizationProfile as Record<string, unknown>).summary = "该网站采用 Rapid Customer Growth 方法提供服务。";
+    const input = synthesisInput("zh-CN");
+    input.pages = [{ ...page, title: "Rapid Customer Growth" }];
+    await expect(synthesizeWebsiteReport(mockClient([output]), input)).rejects.toThrow(ReportLanguageValidationError);
+  });
+
+  it("allows an exact generated product name only when grounded in supplied page content", async () => {
+    const output = chineseReportModelOutput();
+    const profile = output.organizationProfile as Record<string, unknown>;
+    profile.productsAndServices = ["Product One"];
+    profile.summary = "Example 为客户提供 Product One 产品。";
+    const input = synthesisInput("zh-CN");
+    input.pages = [{ ...page, text: `${page.text} Product One is the official product name.` }];
+    await expect(synthesizeWebsiteReport(mockClient([output]), input))
+      .resolves.toMatchObject({ report: { organizationProfile: { productsAndServices: ["Product One"] } } });
+  });
+
   it("fails website synthesis after one language correction", async () => {
     const client = mockClient([reportModelOutput(1)]);
     await expect(synthesizeWebsiteReportWithRecovery(client, synthesisInput("zh-CN"), { maxAttempts: 3, delay: async () => undefined }))
@@ -414,7 +477,7 @@ describe("report validation and synthesis", () => {
   });
 });
 
-function synthesisInput(locale: string) {
+function synthesisInput(locale: string): ReportSynthesisInput {
   return {
     targetUrl: page.url,
     tier: "deep" as const,
