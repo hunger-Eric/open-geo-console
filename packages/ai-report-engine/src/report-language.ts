@@ -66,6 +66,11 @@ const TECHNICAL_TERMS = new Set([
 ]);
 const TECHNICAL_HEADERS = new Set(["content-type", "x-robots-tag"]);
 const DOTTED_FILE_EXTENSIONS = new Set(["css", "html", "js", "json", "md", "txt", "xml"]);
+const HTML_TECHNICAL_TAGS = new Set([
+  "a", "article", "body", "br", "div", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header",
+  "html", "img", "li", "link", "main", "meta", "nav", "ol", "p", "script", "section", "span", "style", "table",
+  "tbody", "td", "th", "thead", "title", "tr", "ul"
+]);
 
 export function normalizeReportLanguage(locale: string): NormalizedReportLanguage {
   const language = locale.trim().toLowerCase().split(/[-_]/, 1)[0];
@@ -135,7 +140,8 @@ function sanitizeViolationPath(value: string, index: number): string {
 function sanitize(value: string, allowedTerms: readonly string[]): string {
   let result = value
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g, " ")
-    .replace(/<\/?[A-Za-z][^>]{0,120}>/g, " ")
+    .replace(/<\/?([A-Za-z][A-Za-z0-9-]*)[^>]{0,120}>/g, (markup, tagName: string) =>
+      HTML_TECHNICAL_TAGS.has(tagName.toLowerCase()) ? " " : markup)
     .replace(/https?:\/\/[^\s。！？；，、）】》)\]};,!"'<>]+/gi, " ")
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, " ")
     .replace(/`[^`]*`/g, " ");

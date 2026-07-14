@@ -145,6 +145,21 @@ describe("report language contract", () => {
       .toThrow(ReportLanguageValidationError);
   });
 
+  it.each(["<Update all content now>", "<Improve content quickly>"])(
+    "does not treat arbitrary angle-bracket prose as HTML markup: %s",
+    (text) => {
+      expect(() => assertReportLanguage([{ path: "markup", text: `请执行 ${text}。` }], "zh-CN"))
+        .toThrow(ReportLanguageValidationError);
+    }
+  );
+
+  it("ignores only explicit technical HTML tags and their attributes", () => {
+    expect(() => assertReportLanguage([{
+      path: "markup",
+      text: "请检查 <title>、</title> 和 <meta name=\"description\">。"
+    }], "zh-CN")).not.toThrow();
+  });
+
   it("requires explicit allowed terms for proper names", () => {
     const fields = [
       { path: "provider", text: "建议检查 Cloudflare 配置。" },
