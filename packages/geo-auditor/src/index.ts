@@ -4,6 +4,14 @@ import {
   type PageType
 } from "@open-geo-console/site-crawler";
 
+export {
+  analyzeTitlePatterns,
+  weightedTitleLength,
+  type TitlePatternKind,
+  type TitlePatternMatch,
+  type TitlePatternPage
+} from "./title-patterns";
+
 export type FindingSeverity = "critical" | "warning" | "info";
 export type FindingMessageParamValue = string | number | boolean;
 export type FindingMessageParams = Record<string, FindingMessageParamValue>;
