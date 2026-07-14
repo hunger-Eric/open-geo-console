@@ -392,6 +392,31 @@ describe("batch analysis and evidence", () => {
     expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
 
+  it("allows source-grounded Latin brands and acronyms directly joined to Chinese text", async () => {
+    const mixedPage = { ...page, text: "提供FBA头程服务，并支持Shopee虾皮店铺。" };
+    const output = { analyses: [{
+      url: page.url,
+      summary: "页面提供FBA头程服务，并支持Shopee虾皮店铺。",
+      organizationSignals: [], strengths: [], findings: []
+    }] };
+    const client = mockClient([output]);
+
+    await expect(analyzePageBatch(client, { pages: [mixedPage], locale: "zh-CN", retryDelay: async () => undefined }))
+      .resolves.toMatchObject({ analyses: [{ summary: output.analyses[0]!.summary }] });
+    expect(client.completeJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects Latin brands invented by the model during Chinese correction", async () => {
+    const invalid = { analyses: [{ url: page.url, summary: "建议增加 Google Reviews 和 Trustpilot。", organizationSignals: [], strengths: [], findings: [] }] };
+    const client = mockClient([invalid, {
+      corrections: [{ path: "analyses[0].summary", text: "建议增加 Google Reviews 和 Trustpilot。" }]
+    }]);
+
+    await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", retryDelay: async () => undefined }))
+      .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
+
   it.each(["grow your customer base quickly", "Customer Growth Strategy", "AI Customer Growth Strategy", "customer-growth strategy"])(
     "does not promote repeated ordinary title prose: %s",
     async (title) => {

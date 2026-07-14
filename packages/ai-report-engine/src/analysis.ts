@@ -392,6 +392,9 @@ function collectPageAllowedTerms(pages: readonly ExtractedPage[]): string[] {
       const name = value.replace(/\s+/g, " ").trim();
       if (name && name.length <= 120) terms.add(name);
     }
+    for (const match of page.text.matchAll(/([A-Za-z][A-Za-z0-9+.-]{1,39})(?=[\u3400-\u9fff])/gu)) {
+      terms.add(match[1]!);
+    }
   }
   return [...terms];
 }
