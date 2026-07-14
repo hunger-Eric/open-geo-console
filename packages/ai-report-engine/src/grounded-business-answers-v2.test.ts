@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { parseGroundedBusinessAnswersV2, type GroundedAnswerEvidence } from "./grounded-business-answers-v2";
 
 describe("grounded business answers v2", () => {
+  it("allows an empty claim list when no direct evidence exists", () => {
+    const value=validAnswersV2();
+    value.answers[0]!.claims=[];
+    expect(parseGroundedBusinessAnswersV2(value,{...evidenceContext(),locale:"en"}).answers[0].claims).toEqual([]);
+  });
   it("requires evidence for every factual answer claim", () => {
     const value = validAnswersV2();
     value.answers[0]!.claims[0]!.evidenceIds = [];

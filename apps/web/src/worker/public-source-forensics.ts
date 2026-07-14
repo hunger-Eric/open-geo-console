@@ -56,6 +56,7 @@ export const FAIL_CLOSED_ARTIFACT_READINESS: ArtifactReadinessGate = { async ver
 export async function runPublicSourceForensicsPipeline(input: {
   reportId: string; jobId: string; locale: string; region: string; targetUrl: string;
   websiteFoundation: AiWebsiteReportV1; businessQuestionSet?: ConfirmedBusinessQuestionSet; dependencies: PublicSourceForensicsDependencies; signal?: AbortSignal;
+  fanoutOverrides?: ReadonlyMap<string, SearchQueryFanout>;
 }): Promise<{ report: RecommendationForensicReportV2; checkpoint: PublicSourcePipelineCheckpoint; commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[] }> {
   input.signal?.throwIfAborted();
   const existing = await input.dependencies.getReport(input.jobId);
@@ -71,7 +72,8 @@ export async function runPublicSourceForensicsPipeline(input: {
       ...(profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value })))] });
   if (questions.questions.length !== 3 || (!input.businessQuestionSet && questions.confidence !== "high")) throw new PublicSourceQuestionGenerationError();
   const excludedIdentities: CustomerIdentityExclusion[] = [{ kind: "customer_domain", value: new URL(input.targetUrl).hostname }, ...profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value }))];
-  const fanouts = createPublicSourceQuestionFanouts({ questions, authority, excludedIdentities });
+  const fanouts = createPublicSourceQuestionFanouts({ questions, authority, excludedIdentities }).map((fanout) => input.fanoutOverrides?.get(fanout.questionId) ?? fanout);
+  if (fanouts.some((fanout) => fanout.surface.surfaceId !== authority.surface.surfaceId || fanout.surface.surfaceVersion !== authority.surface.surfaceVersion || fanout.questionSetVersion !== questions.questionSetVersion)) throw new PublicSourceAuthorityUnavailableError("Public-source fanout override identity is invalid.");
   const prior = await input.dependencies.getCheckpoint(input.jobId);
   const websiteFoundationHash = sha(input.websiteFoundation);
   if (prior && (prior.methodology !== "public_search_source_forensics_v1" || prior.questionSetVersion !== questions.questionSetVersion ||

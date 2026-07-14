@@ -1,10 +1,4 @@
-import type {
-  ProviderClaim,
-  ProviderPolicySelectionInput,
-  ProviderQualificationInput,
-  ProviderQualificationPolicy,
-  ProviderQualificationResult
-} from "./provider-discovery-types";
+import type { ProviderClaim, ProviderPolicySelectionInput, ProviderQualificationInput, ProviderQualificationPolicy, ProviderQualificationResult } from "./provider-discovery-types";
 import { uniqueSorted } from "./provider-discovery-types";
 
 export const GENERIC_PROVIDER_POLICY: ProviderQualificationPolicy = Object.freeze({

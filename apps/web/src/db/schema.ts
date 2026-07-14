@@ -27,7 +27,7 @@ export type ReportTier = "free" | "deep";
 export type ReportLocale = "en" | "zh";
 export type ReportTechnicalStatus = "pending" | "processing" | "completed" | "failed";
 export type ScanJobReason = "standard" | "system_recovery" | "locale_correction" | "staging_regeneration" | "paid_report_correction" | "staging_artifact_refresh";
-export type ArtifactRevisionKind = "generation" | "correction" | "presentation_refresh";
+export type ArtifactRevisionKind = "generation" | "correction" | "presentation_refresh" | "evidence_refresh";
 export type ScanJobStage =
   | "queued"
   | "discovering"
@@ -71,7 +71,7 @@ export type OrderRefundStatus = "not_required" | "pending" | "submitted" | "refu
 export type OrderDeliveryStatus = "not_queued" | "queued" | "sent" | "delivered" | "bounced" | "failed";
 export type PaymentEventProcessingStatus = "received" | "processed" | "ignored" | "failed";
 export type ReportProductContract = "legacy_website_audit_v1" | "recommendation_forensics_v1";
-export type ReportArtifactContract = ReportProductContract | "combined_geo_report_v1";
+export type ReportArtifactContract = ReportProductContract | "combined_geo_report_v1" | "combined_geo_report_v2";
 export type ReportArtifactScope = ReportArtifactContract;
 export type RecommendationFulfillmentMethodology =
   | "answer_engine_recommendation_forensics_v1"
@@ -233,9 +233,9 @@ export const scanJobs = pgTable(
           OR (${table.fulfillmentMethodology} = 'public_search_source_forensics_v1' AND ${table.recommendationReportVersion} = 2)))
     )`),
     check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration', 'paid_report_correction', 'staging_artifact_refresh')`),
-    check("scan_jobs_artifact_contract_check", sql`${table.artifactContract} IS NULL OR ${table.artifactContract} IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1')`),
-    check("scan_jobs_correction_credit_check", sql`${table.reason} <> 'paid_report_correction' OR (${table.creditReservationId} IS NULL AND ${table.artifactContract} = 'combined_geo_report_v1' AND ${table.correctionId} IS NOT NULL AND ${table.businessQuestionSetId} IS NOT NULL)`),
-    check("scan_jobs_refresh_credit_check", sql`${table.reason} <> 'staging_artifact_refresh' OR (${table.creditReservationId} IS NULL AND ${table.artifactContract} = 'combined_geo_report_v1' AND ${table.correctionId} IS NULL AND ${table.businessQuestionSetId} IS NOT NULL AND ${table.tier} = 'deep')`),
+    check("scan_jobs_artifact_contract_check", sql`${table.artifactContract} IS NULL OR ${table.artifactContract} IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2')`),
+    check("scan_jobs_correction_credit_check", sql`${table.reason} <> 'paid_report_correction' OR (${table.creditReservationId} IS NULL AND ${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2') AND ${table.correctionId} IS NOT NULL AND ${table.businessQuestionSetId} IS NOT NULL)`),
+    check("scan_jobs_refresh_credit_check", sql`${table.reason} <> 'staging_artifact_refresh' OR (${table.creditReservationId} IS NULL AND ${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2') AND ${table.correctionId} IS NULL AND ${table.businessQuestionSetId} IS NOT NULL AND ${table.tier} = 'deep')`),
     check(
       "scan_jobs_stage_check",
       sql`${table.stage} IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')`
@@ -1119,10 +1119,10 @@ export const reportArtifactRevisions = pgTable(
     uniqueIndex("report_artifact_revisions_one_active_uidx").on(table.reportId).where(sql`${table.status} = 'active'`),
     foreignKey({ columns: [table.sourceArtifactRevisionId], foreignColumns: [table.id], name: "report_artifact_revisions_source_fkey" }).onDelete("restrict"),
     check("report_artifact_revisions_revision_check", sql`${table.revision} > 0`),
-    check("report_artifact_revisions_contract_check", sql`${table.artifactContract} IN ('combined_geo_report_v1')`),
+    check("report_artifact_revisions_contract_check", sql`${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2')`),
     check("report_artifact_revisions_status_check", sql`${table.status} IN ('pending','ready','active','failed')`),
-    check("report_artifact_revisions_kind_check", sql`${table.revisionKind} IN ('generation','correction','presentation_refresh')`),
-    check("report_artifact_revisions_lineage_check", sql`(${table.revisionKind} = 'presentation_refresh' AND ${table.sourceArtifactRevisionId} IS NOT NULL AND ${table.correctionId} IS NULL) OR (${table.revisionKind} <> 'presentation_refresh' AND ${table.sourceArtifactRevisionId} IS NULL)`),
+    check("report_artifact_revisions_kind_check", sql`${table.revisionKind} IN ('generation','correction','presentation_refresh','evidence_refresh')`),
+    check("report_artifact_revisions_lineage_check", sql`(${table.revisionKind} IN ('presentation_refresh','evidence_refresh') AND ${table.sourceArtifactRevisionId} IS NOT NULL AND ${table.correctionId} IS NULL) OR (${table.revisionKind} NOT IN ('presentation_refresh','evidence_refresh') AND ${table.sourceArtifactRevisionId} IS NULL)`),
     check("report_artifact_revisions_ready_check", sql`${table.status} NOT IN ('ready','active') OR (${table.readyAt} IS NOT NULL AND ${table.htmlSha256} IS NOT NULL AND ${table.pdfSha256} IS NOT NULL AND ${table.pdfStorageKey} IS NOT NULL)`)
   ]
 );

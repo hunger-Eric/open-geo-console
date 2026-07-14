@@ -103,6 +103,12 @@ The command requires the staging deployment profile and staging database marker.
 
 Acceptance must record the new revision ID, authorized customer HTML link and hash, internal PDF hash/storage key/page count, source ownership per question, preserved technical citations/screenshots, application-level anonymous `404` for the HTML artifact, and zero commercial side effects. Confirm that completion email contains only the secure HTML link. Do not request, access, or publish a customer PDF endpoint. Never run this command with production environment files or deploy the schema/Worker to production as part of staging acceptance.
 
+### Provider-discovery V2 acceptance
+
+`combined_geo_report_v2` is a prospective opt-in. Deploy schema v20 and matching Web/free/deep Worker code to protected staging first; do not rewrite existing V1 orders or revisions, and do not set the V2 contract in production. The V2 staging refresh lineage is `evidence_refresh`, which must retain the active artifact until the four snapshot refs, exact provider passages/claims, customer HTML, private PDF readiness and atomic revision activation all pass.
+
+Before a live report, run `npm run test:postgres:staging-security` with an isolated disposable `OGC_TEST_DATABASE_ADMIN_URL`, then run the read-only staging `db:audit`. A timeout or conditional skip is not acceptance. The full evidence checklist, empty-strict-list case and recovery drills are in `docs/operations/provider-discovery-v2-acceptance.md`.
+
 Automated acceptance:
 
 ```powershell

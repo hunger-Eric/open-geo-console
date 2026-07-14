@@ -59,6 +59,16 @@ describe("private report access locale", () => {
     expect(response.headers.get("location")).toBe("https://example.test/reports/report-1/report.html");
   });
 
+  it("redirects the persisted combined V2 scope to the canonical HTML artifact", async () => {
+    mocks.redeemReportAccessToken.mockResolvedValue({ reportId: "report-1", artifactScope: "combined_geo_report_v2", expiresAt: new Date("2026-08-01T00:00:00Z") });
+    mocks.getGeoReport.mockResolvedValue({ reportLocale: "zh" });
+    const response = await POST(new Request("https://example.test/api/reports/report-1/access", {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "token=secret"
+    }), { params: Promise.resolve({ id: "report-1" }) });
+    expect(response.headers.get("location")).toBe("https://example.test/reports/report-1/report.html");
+    expect(response.headers.get("set-cookie")).toContain("ogc_report_report-1_combined_v2=secret");
+  });
+
   it("does not silently default a legacy report to English", async () => {
     mocks.inspectReportAccessToken.mockResolvedValue({ reportId: "report-1", artifactScope: "legacy_website_audit_v1", expiresAt: new Date("2026-08-01T00:00:00Z") });
     mocks.getGeoReport.mockResolvedValue({ reportLocale: null });

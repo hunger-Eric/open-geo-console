@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { RetrievedPublicSourceFact } from "@open-geo-console/citation-intelligence";
+import type { ProviderEvidencePassage, RetrievedPublicSourceFact } from "@open-geo-console/citation-intelligence";
 import {
   createMarketSnapshotIdentity,
   deterministicId,
@@ -29,6 +29,7 @@ import {
   waitForMarketSnapshot,
   type SourceEvidenceInput
 } from "@/db/market-snapshots";
+import { appendMarketSourcePassages } from "@/db/provider-evidence";
 import { createConcurrencyGate, mapWithConcurrency, type ConcurrencyGate } from "./bounded-scheduler";
 import { createPublicSourceRetrievalPlan } from "./public-source-plan";
 
@@ -75,6 +76,10 @@ export interface ResolvePublicSourceSnapshotInput {
   retrievalGate?: ConcurrencyGate;
   forceRefresh?: boolean;
   forceRefreshAfter?: string;
+  maxSourceRetrievals?: number;
+  maxAvailableSources?: number;
+  maxSourcesPerDomain?: number;
+  selectProviderPassages?: (input: { fact: RetrievedPublicSourceFact; sourceEvidenceId: string }) => ProviderEvidencePassage[];
   snapshotMetadata?: {
     snapshotKind: "standard_question" | "provider_discovery" | "candidate_verification";
     parentSnapshotId?: string | null;
@@ -210,7 +215,12 @@ async function resolveExisting(input: ResolvePublicSourceSnapshotInput & { ident
 }
 
 async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput; snapshotId: string; token: Parameters<typeof appendMarketSourceEvidence>[0]["token"]; observations: Array<{ observation: MarketSearchObservation; attemptId: string; storedQueryId: string }>; evidenceCutoff: Date }): Promise<RetrievedPublicSourceFact[]> {
-  const plan = createPublicSourceRetrievalPlan(input.observations.map(({ observation }) => observation));
+  const maxSourceRetrievals = positive(input.input.maxSourceRetrievals ?? 12, "maxSourceRetrievals");
+  const maxAvailableSources = positive(input.input.maxAvailableSources ?? 3, "maxAvailableSources");
+  const plan = createPublicSourceRetrievalPlan(input.observations.map(({ observation }) => observation), {
+    maxSources: maxSourceRetrievals,
+    maxPerDomain: positive(input.input.maxSourcesPerDomain ?? 2, "maxSourcesPerDomain")
+  });
   const existingBundle = await getMarketSnapshotBundle(input.snapshotId);
   const existingFacts = existingBundle ? factsFromBundle(existingBundle, input.input.fanout) : [];
   const existingSourceKeys = new Set(existingBundle?.sources.map((source) => `${source.observationId}\n${source.canonicalUrl}`) ?? []);
@@ -224,7 +234,7 @@ async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput
   }
   ).map(({ observation, result, canonicalUrl, registrableDomain }) => gate.run(async () => {
     input.input.signal?.throwIfAborted();
-    if (input.input.retrieveSource && availableCount >= 3) return null;
+    if (input.input.retrieveSource && availableCount >= maxAvailableSources) return null;
     const storedQueryId = storedQueryIds.get(observation.observationId);
     if (!storedQueryId) throw new PublicSourceSnapshotUnavailableError();
     const base = { id: deterministicId("market-source", [input.snapshotId, storedQueryId, String(result.surfaceResultOrder), canonicalUrl]), snapshotId: input.snapshotId, observationId: observationId(input.snapshotId, storedQueryId, result.surfaceResultOrder, canonicalUrl), canonicalUrl, registrableDomain, retrievedAt: input.evidenceCutoff, expiresAt: new Date(input.evidenceCutoff.getTime() + 30 * 24 * 60 * 60 * 1_000) };
@@ -258,6 +268,10 @@ async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput
         throw error;
       }
       return null;
+    }
+    if (value.fact.retrievalState === "available" && input.input.selectProviderPassages) {
+      const passages = input.input.selectProviderPassages({ fact: value.fact, sourceEvidenceId: base.id });
+      if (passages.length) await appendMarketSourcePassages({ token: input.token, passages });
     }
     if (value.fact.retrievalState === "available") availableCount += 1;
     return value.fact;

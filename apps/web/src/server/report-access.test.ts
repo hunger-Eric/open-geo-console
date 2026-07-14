@@ -11,6 +11,7 @@ describe("artifact-scoped report access", () => {
   it("keeps the legacy cookie stable and assigns a separate recommendation cookie", () => {
     expect(reportAccessCookieName("report-1", "legacy_website_audit_v1")).toBe("ogc_report_report-1");
     expect(reportAccessCookieName("report-1", "recommendation_forensics_v1")).toBe("ogc_report_report-1_recommendation");
+    expect(reportAccessCookieName("report-1", "combined_geo_report_v2")).toBe("ogc_report_report-1_combined_v2");
   });
 
   it("rejects a legacy token before recommendation artifact loading", async () => {

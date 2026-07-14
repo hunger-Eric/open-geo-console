@@ -49,7 +49,7 @@ export function parseGroundedBusinessAnswersV2(value: unknown, context: Grounded
     const questionId = text(row.questionId, `${path}.questionId`);
     exact(row.purpose, purposes[answerIndex], `${path}.purpose`);
     const claims = array(row.claims, `${path}.claims`).map((value, claimIndex) => parseClaim(value, `${path}.claims[${claimIndex}]`, questionId, evidence));
-    if (claims.length < 1 || claims.length > 6) throw new TypeError(`${path}.claims requires one to six factual claims.`);
+    if (claims.length > 6) throw new TypeError(`${path}.claims accepts at most six factual claims.`);
     if (new Set(claims.map(({ claimId }) => claimId)).size !== claims.length) throw new TypeError(`${path}.claims requires unique claim IDs.`);
     return { questionId, purpose: purposes[answerIndex], claims };
   }) as [GroundedBusinessAnswerV2, GroundedBusinessAnswerV2];

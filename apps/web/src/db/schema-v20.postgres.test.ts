@@ -23,6 +23,10 @@ describeDisposablePostgres("schema v20 provider evidence persistence", () => {
       expect(columns.map(({ column_name }) => column_name)).toEqual(expect.arrayContaining(["snapshot_kind", "parent_snapshot_id", "candidate_set_hash", "query_plan_version"]));
       const tables = await sql<{ passages: string | null; claims: string | null }[]>`SELECT to_regclass('market_source_passages')::text passages,to_regclass('market_provider_claims')::text claims`;
       expect(tables[0]).toEqual({ passages: "market_source_passages", claims: "market_provider_claims" });
+      const constraints = await sql<{ definition: string }[]>`SELECT pg_get_constraintdef(oid) definition FROM pg_constraint WHERE conname IN ('scan_jobs_artifact_contract_check','report_access_tokens_artifact_scope_check','report_artifact_revisions_contract_check','report_artifact_revisions_lineage_check')`;
+      const definitions = constraints.map(({ definition }) => definition).join("\n");
+      expect(definitions).toContain("combined_geo_report_v2");
+      expect(definitions).toContain("evidence_refresh");
 
       await sql`INSERT INTO public_search_surface_authorities(authority_version,surface_id,surface_version,environment,locale_capabilities,region_capabilities,terms_reviewed_at,evidence_references,captured_at,active) VALUES('authority','surface','v1','staging','["en"]','["US"]',now(),'["review"]',now(),true)`;
       await sql`INSERT INTO market_snapshot_questions(id,cache_identity,normalized_question,question_hash,locale,region,surface_authority_version,surface_id,surface_version,fanout_version,completion_version,snapshot_kind,query_plan_version) VALUES('historical','historical-cache','question','hash','en','US','authority','surface','v1','legacy',1,'standard_question','legacy-standard-v1')`;

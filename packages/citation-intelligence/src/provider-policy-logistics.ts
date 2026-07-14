@@ -28,7 +28,7 @@ export const LOGISTICS_SELF_OPERATED_POLICY: ProviderQualificationPolicy = Objec
     { id: "customs_operation", label: { zh: "清关主体", en: "Customs operation" }, states: ["in_house_licensed", "managed_partner", "partner", "unknown"], mandatoryForFullChain: true },
     { id: "last_mile", label: { zh: "末端派送", en: "Last mile" }, states: ["self_operated", "partner", "mixed", "unknown"], mandatoryForFullChain: true },
     { id: "fixed_route", label: { zh: "固定专线", en: "Fixed dedicated route" }, states: ["verified", "unverified"], mandatoryForFullChain: true },
-    { id: "outsourcing", label: { zh: "外包与混货", en: "Outsourcing and cargo mixing" }, states: ["no_outsourcing_verified", "outsourcing_present", "mixed", "unknown"], mandatoryForFullChain: true }
+    { id: "outsourcing", label: { zh: "外包与拼货", en: "Outsourcing and cargo mixing" }, states: ["no_outsourcing_verified", "outsourcing_present", "mixed", "unknown"], mandatoryForFullChain: true }
   ],
   classifyEntityRole: classifyLogisticsRole,
   qualify: (input: ProviderQualificationInput) => qualifyProviders(input, LOGISTICS_SELF_OPERATED_POLICY)

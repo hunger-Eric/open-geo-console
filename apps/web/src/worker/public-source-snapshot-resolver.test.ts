@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createSearchQueryFanout,
@@ -9,6 +9,8 @@ import {
 } from "@open-geo-console/public-search-observer";
 import { activatePublicSearchSurfaceAuthority, installPublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
+import { getMarketProviderEvidenceBundle } from "@/db/provider-evidence";
+import { PROVIDER_PASSAGE_SELECTOR_VERSION, selectProviderPassages } from "@open-geo-console/citation-intelligence";
 import { PublicSourceSnapshotAuthorityMismatchError, PublicSourceSnapshotUnavailableError, resolvePublicSourceSnapshot } from "./public-source-snapshot-resolver";
 import { createConcurrencyGate } from "./bounded-scheduler";
 
@@ -156,6 +158,30 @@ describe("public-source snapshot resolver", () => {
     ]);
   });
 
+  it("persists selected provider passages before completing the snapshot lease", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const resolved = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-provider-passages",
+      retrieveSource: async ({ observation, result }) => {
+        const value = availableRetrieval(observation, result);
+        const excerpt = "Alpha Logistics provides self-operated freight using an owned fleet on a fixed route.";
+        return { ...value, fact: { ...value.fact, normalizedText: excerpt, verifiedExcerpt: excerpt }, source: { ...value.source, excerpt, excerptHash: hash(excerpt), contentHash: hash(excerpt) } };
+      },
+      selectProviderPassages: ({ fact, sourceEvidenceId }) => selectProviderPassages({
+        sourceEvidenceId, normalizedText: fact.normalizedText ?? "", candidateNames: ["Alpha Logistics"], serviceTerms: ["freight"],
+        controlTerms: ["self-operated", "owned"], capabilityTerms: ["fleet", "fixed route"], selectorVersion: PROVIDER_PASSAGE_SELECTOR_VERSION
+      })
+    });
+    const provider = await getMarketProviderEvidenceBundle([resolved.snapshotId]);
+    expect(provider.passages).toEqual([expect.objectContaining({ sourceEvidenceId: expect.any(String), exactExcerpt: expect.stringContaining("owned fleet") })]);
+  });
+
   it("downgrades credential-like public content without failing the snapshot", async () => {
     const authority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
@@ -232,3 +258,4 @@ function availableRetrieval(observation: Parameters<NonNullable<Parameters<typeo
     source: { retrievalState: "available" as const, excerpt: `Evidence for ${result.title}`, excerptHash: digest, contentHash: digest, sourceCategory: "unknown" as const, entities: [], claims: [], contradictions: [], evidenceFamilyIdentity: digest }
   };
 }
+function hash(value: string): string { return createHash("sha256").update(value).digest("hex"); }

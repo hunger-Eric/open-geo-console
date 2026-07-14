@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { ensureDatabase, getDb, getSqlClient } from "./index";
 import { hmacSecret, requireSecret } from "./secrets";
+import { resolveCombinedReportContract } from "@/report/combined-report-contract";
 import {
   paymentEvents,
   paymentOrders,
@@ -577,6 +578,7 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
     const reservation = reservations[0];
     if (!reservation) throw new Error("The paid order credit reservation could not be created.");
 
+    const combinedReportContract = resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: process.env.OGC_COMBINED_REPORT_CONTRACT });
     let jobId = order.fulfillment_job_id ?? reservation.job_id;
     if (!jobId) {
       jobId = ids.jobId;
@@ -585,7 +587,7 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
           (id, report_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, artifact_contract, business_question_set_id, locale, reason, stage, credit_reservation_id)
         VALUES
           (${jobId}, ${order.report_id}, 'deep', ${productContractForCode(order.product_code)}, ${order.fulfillment_methodology}, ${order.recommendation_report_version},
-           ${order.product_code === "recommendation_forensics_v1" && order.business_question_set_id ? "combined_geo_report_v1" : productContractForCode(order.product_code)}, ${order.business_question_set_id},
+           ${order.product_code === "recommendation_forensics_v1" && order.business_question_set_id ? combinedReportContract : productContractForCode(order.product_code)}, ${order.business_question_set_id},
            ${order.report_locale}, 'standard', 'queued', ${reservation.id})
       `;
     }
@@ -603,7 +605,7 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
         await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`artifact-revision:${order.report_id}`},0))`;
         const revisions=await tx<Array<{revision:number}>>`SELECT COALESCE(max(revision),0)::integer AS revision FROM report_artifact_revisions WHERE report_id=${order.report_id}`;
         await tx`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,revision,artifact_contract,status,payload_identity_hash)
-          VALUES(${ids.artifactRevisionId},${order.report_id},${order.id},${jobId},${(revisions[0]?.revision ?? 0)+1},'combined_geo_report_v1','pending',${`${order.business_question_set_id}:${jobId}`})`;
+          VALUES(${ids.artifactRevisionId},${order.report_id},${order.id},${jobId},${(revisions[0]?.revision ?? 0)+1},${combinedReportContract},'pending',${`${order.business_question_set_id}:${jobId}`})`;
       }
     }
 

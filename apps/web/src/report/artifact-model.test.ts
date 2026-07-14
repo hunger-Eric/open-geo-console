@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}), { virtual: true });
 
 const mocks = vi.hoisted(() => ({
-  getAiReport: vi.fn(), getGeoReport: vi.fn(), getRecommendation: vi.fn(), getSourceForensic: vi.fn(), listEvidenceAssets: vi.fn()
+  getAiReport: vi.fn(), getGeoReport: vi.fn(), getRecommendation: vi.fn(), getSourceForensic: vi.fn(), getActiveCombined: vi.fn(), listEvidenceAssets: vi.fn()
 }));
 vi.mock("@/db/ai-reports", () => ({ getAiReport: mocks.getAiReport }));
 vi.mock("@/db/reports", () => ({ getGeoReport: mocks.getGeoReport }));
 vi.mock("@/db/recommendation-authority", () => ({ getRecommendationForensicReportForReport: mocks.getRecommendation }));
 vi.mock("@/db/source-forensic-reports", () => ({ getSourceForensicReportForReport: mocks.getSourceForensic }));
+vi.mock("@/db/combined-reports", () => ({ getActiveCombinedGeoReport: mocks.getActiveCombined }));
 vi.mock("@/db/evidence-assets", () => ({ listEvidenceAssets: mocks.listEvidenceAssets }));
 
 import { loadPrivateReportArtifact } from "./artifact-model";
@@ -20,6 +21,7 @@ describe("private artifact model product isolation", () => {
     mocks.listEvidenceAssets.mockResolvedValue([]);
     mocks.getRecommendation.mockResolvedValue(null);
     mocks.getSourceForensic.mockResolvedValue(null);
+    mocks.getActiveCombined.mockResolvedValue(null);
   });
 
   it("dispatches an exact V2 methodology without exposing a V1 fallback", async () => {
@@ -36,6 +38,13 @@ describe("private artifact model product isolation", () => {
     expect(result?.productContract).toBe("legacy_website_audit_v1");
     expect(mocks.getAiReport).toHaveBeenCalledWith("report-1", "deep", "legacy_website_audit_v1");
     expect(mocks.getRecommendation).not.toHaveBeenCalled();
+  });
+
+  it("loads an active V2 artifact only under its exact access scope", async () => {
+    const report={artifactContract:"combined_geo_report_v2",locale:"zh-CN",technicalFoundation:{technicalReport:{url:"https://example.com"},evidenceAssets:[]}};
+    mocks.getActiveCombined.mockResolvedValue({artifactRevisionId:"revision-v2",pdfStorageKey:"private.pdf",report});
+    await expect(loadPrivateReportArtifact("report-1","combined_geo_report_v2")).resolves.toMatchObject({productContract:"combined_geo_report_v2",locale:"zh",artifactRevisionId:"revision-v2"});
+    await expect(loadPrivateReportArtifact("report-1","combined_geo_report_v1")).resolves.toBeNull();
   });
 
   it("requires a same-job recommendation foundation and never falls back to legacy", async () => {

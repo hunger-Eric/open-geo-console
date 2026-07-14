@@ -121,6 +121,58 @@ export async function appendMarketProviderClaims(input: {
   });
 }
 
+/**
+ * Claim extraction intentionally runs after the immutable search snapshot is
+ * complete. This append-only boundary verifies that every referenced passage
+ * belongs to that exact completed snapshot before accepting idempotent claims.
+ */
+export async function appendCompletedMarketProviderClaims(input: {
+  snapshotId: string;
+  claims: readonly ProviderClaimPersistenceInput[];
+}): Promise<StoredProviderClaim[]> {
+  const snapshotId = bounded(input.snapshotId, "snapshotId", 256);
+  if (!Array.isArray(input.claims) || input.claims.length < 1) throw new TypeError("Provider claims must be non-empty.");
+  const rows = input.claims.map(parseClaim);
+  assertUnique(rows.map(({ id }) => id), "Provider claim IDs");
+  if (isMemoryPersistence()) {
+    const snapshot = memoryListMarketSnapshotQuestions().find(({ id }) => id === snapshotId);
+    if (!snapshot || snapshot.status !== "completed") throw new Error("Provider claims require their exact completed market snapshot.");
+    const passages = memoryListMarketSourcePassages();
+    const sources = new Map(memoryListMarketSourceEvidence().map((row) => [row.id, row]));
+    const output: StoredProviderClaim[] = [];
+    for (const row of rows) {
+      const passage = passages.find(({ id }) => id === row.passageId);
+      const source = passage && sources.get(passage.sourceEvidenceId);
+      if (!passage || source?.snapshotId !== snapshotId || !passage.exactExcerpt.includes(row.exactExcerpt)) throw new TypeError("Provider claim is not bound to the completed snapshot passage.");
+      const existing = memoryListMarketProviderClaims().find(({ id }) => id === row.id);
+      if (existing) assertClaimEqual(existing, row); else memorySaveMarketProviderClaim(row);
+      output.push(existing ?? row);
+    }
+    return clone(output);
+  }
+  await ensureDatabase();
+  return getSqlClient().begin(async (tx) => {
+    const snapshot = (await tx<Array<{ id: string }>>`SELECT id FROM market_snapshot_questions WHERE id=${snapshotId} AND status='completed' FOR SHARE`)[0];
+    if (!snapshot) throw new Error("Provider claims require their exact completed market snapshot.");
+    const passages = await requirePassagesForSnapshot(tx, snapshotId, rows.map(({ passageId }) => passageId));
+    for (const row of rows) if (!passages.get(row.passageId)?.includes(row.exactExcerpt)) throw new TypeError("Provider claim is not bound to the completed snapshot passage.");
+    const output: StoredProviderClaim[] = [];
+    for (const row of rows) {
+      await tx`INSERT INTO market_provider_claims
+        (id,passage_id,provider_entity_id,canonical_name,generic_role,policy_role,capability,operating_mode,
+         service_scope,route_scope,exact_excerpt,claim_hash,extraction_model,extraction_contract,validation_status,rejection_reason)
+        VALUES (${row.id},${row.passageId},${row.providerEntityId},${row.canonicalName},${row.genericRole},${row.policyRole},
+          ${row.capability},${row.operatingMode},${JSON.stringify(row.serviceScope)}::jsonb,${JSON.stringify(row.routeScope)}::jsonb,
+          ${row.exactExcerpt},${row.claimHash},${row.extractionModel},${row.extractionContract},${row.validationStatus},${row.rejectionReason})
+        ON CONFLICT (id) DO NOTHING`;
+      const stored = dbClaim((await tx<Array<Record<string, unknown>>>`SELECT * FROM market_provider_claims WHERE id=${row.id}`)[0]!);
+      assertClaimEqual(stored, row);
+      output.push(stored);
+    }
+    return output;
+  });
+}
+
 export async function getMarketProviderEvidenceBundle(snapshotIds: readonly string[]): Promise<MarketProviderEvidenceBundle> {
   const ids = [...new Set(snapshotIds.map((id) => bounded(id, "snapshotId", 256)))].sort();
   if (!ids.length) return { snapshotIds: [], passages: [], claims: [] };
@@ -196,6 +248,12 @@ async function requirePassagesForToken(tx: postgres.TransactionSql, token: Snaps
   const ids = [...new Set(passageIds)];
   const rows = await tx<Array<{ id: string; exact_excerpt: string }>>`SELECT passage.id,passage.exact_excerpt FROM market_source_passages passage JOIN market_source_evidence source ON source.id=passage.source_evidence_id JOIN market_snapshot_questions snapshot ON snapshot.id=source.snapshot_id WHERE passage.id=ANY(${ids}) AND snapshot.cache_identity=${token.cacheIdentity} AND snapshot.status='refreshing'`;
   if (rows.length !== ids.length) throw new Error("Provider claim passage does not belong to the active snapshot lease.");
+  return new Map(rows.map((row) => [row.id, row.exact_excerpt]));
+}
+async function requirePassagesForSnapshot(tx: postgres.TransactionSql, snapshotId: string, passageIds: string[]): Promise<Map<string, string>> {
+  const ids = [...new Set(passageIds)];
+  const rows = await tx<Array<{ id: string; exact_excerpt: string }>>`SELECT passage.id,passage.exact_excerpt FROM market_source_passages passage JOIN market_source_evidence source ON source.id=passage.source_evidence_id WHERE passage.id=ANY(${ids}) AND source.snapshot_id=${snapshotId}`;
+  if (rows.length !== ids.length) throw new Error("Provider claim passage does not belong to the completed snapshot.");
   return new Map(rows.map((row) => [row.id, row.exact_excerpt]));
 }
 function requireMemoryLease(token: SnapshotLeaseToken): void {

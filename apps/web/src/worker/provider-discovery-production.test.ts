@@ -1,0 +1,57 @@
+import { describe, expect, it, vi } from "vitest";
+import type { ConfirmedBusinessQuestionSet, PublicSearchSurfaceAuthority } from "@open-geo-console/public-search-observer";
+import { createProductionProviderDiscoveryContext, isLikelyCompanyOwnedProviderDomain } from "./provider-discovery-production";
+import { runProviderDiscoveryPipeline } from "./provider-discovery-pipeline";
+
+const mocks = vi.hoisted(() => ({ resolve: vi.fn(), providerBundle: vi.fn(), snapshotBundle: vi.fn(), appendClaims: vi.fn() }));
+vi.mock("./public-source-snapshot-resolver", () => ({ resolvePublicSourceSnapshot: mocks.resolve }));
+vi.mock("@/db/provider-evidence", () => ({
+  getMarketProviderEvidenceBundle: mocks.providerBundle,
+  appendCompletedMarketProviderClaims: mocks.appendClaims,
+  providerClaimPersistenceHash: () => "d".repeat(64)
+}));
+vi.mock("@/db/market-snapshots", () => ({ getMarketSnapshotBundle: mocks.snapshotBundle }));
+
+describe("production provider discovery composition", () => {
+  it("only treats a candidate domain as company-owned when the identity matches", () => {
+    expect(isLikelyCompanyOwnedProviderDomain("Alpha Logistics", "alpha.example")).toBe(true);
+    expect(isLikelyCompanyOwnedProviderDomain("Top logistics providers", "industry-directory.example")).toBe(false);
+  });
+
+  it("reuses discovery, verification and two standard question snapshots", async () => {
+    let checkpoint = null;
+    mocks.resolve.mockImplementation(async (input: { question: { kind: string }; snapshotMetadata?: { snapshotKind: string }; fanout: { queries: unknown[] } }) => {
+      const kind = input.snapshotMetadata?.snapshotKind ?? input.question.kind;
+      const snapshotId = kind === "provider_discovery" ? "snapshot-discovery" : kind === "candidate_verification" ? "snapshot-verification" : kind === "capability_fit" ? "snapshot-q2" : "snapshot-q3";
+      return { snapshotId, cacheIdentity: `${snapshotId}-cache`, questionId: "question", observedAt: "2030-01-01T00:00:00.000Z", ageMs: 0,
+        collectedForThisRun: true, refreshAttempted: true, refreshFailed: false, sufficientlyEvidenced: true, availableSourceCount: 1,
+        observations: [{ observationId: `${snapshotId}-observation`, queryId: "query", exactQuery: "query", requestedAt: "2030-01-01T00:00:00.000Z", completedAt: "2030-01-01T00:00:00.000Z", status: "complete", usage: { requestCount: 1, resultCount: 1 }, results: [{ surfaceResultOrder: 1, url: "https://alpha.example/logistics", title: "Alpha Logistics", snippet: "Self operated freight", displayedHost: "alpha.example" }] }],
+        retrievals: [], actualCostMicros: 1, allocatedCostMicros: 1, avoidedCostMicros: 0 };
+    });
+    const passage = { id: "passage-alpha", sourceEvidenceId: "source-alpha", passageOrder: 0, exactExcerpt: "Alpha Logistics provides self operated freight with an owned fleet.", excerptHash: "a".repeat(64), relevanceScore: 100,
+      matchedEntityTerms: ["Alpha Logistics"], matchedServiceTerms: ["freight"], matchedControlTerms: ["self operated", "owned"], matchedCapabilityTerms: ["fleet"], selectorVersion: "provider-passage-selector-v1", createdAt: new Date() };
+    mocks.providerBundle.mockResolvedValue({ snapshotIds: ["snapshot-verification"], passages: [passage], claims: [] });
+    mocks.snapshotBundle.mockResolvedValue({ snapshot: { id: "snapshot-verification", status: "completed", cacheIdentity: "verification-cache" }, attempts: [], queries: [],
+      observations: [{ id: "observation-alpha", title: "Alpha Logistics" }], sources: [{ id: "source-alpha", observationId: "observation-alpha", canonicalUrl: "https://alpha.example/logistics", registrableDomain: "alpha.example", sourceCategory: "company_owned", retrievalState: "available", retrievedAt: new Date("2030-01-01T00:00:00.000Z") }] });
+    mocks.appendClaims.mockResolvedValue([]);
+    const runtime = { adapter: { id: "fixture", surface, authority, search: vi.fn() }, authority, identity: { adapterId: "fixture", providerId: "fixture", productId: "search", modelId: "fixture", adapterVersion: "v1", surface } };
+    const context = createProductionProviderDiscoveryContext({ runtime, questionSet: questions(), websiteCategories: ["logistics"], websiteFoundationHash: "f".repeat(64), workerId: "worker", evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
+      extractionModel: "fixture-model", extractionClient: { configuredModel: "fixture-model", completeJson: vi.fn(async () => ({ modelId: "fixture-model", value: { claims: [{ subjectName: "Alpha Logistics", genericRole: "service_provider", policyRole: "carrier", capability: "linehaul_fleet", operatingMode: "self_operated", serviceScope: ["freight"], routeScope: [], exactExcerpt: passage.exactExcerpt }] } })) },
+      getCheckpoint: async () => checkpoint, saveCheckpoint: async (value) => { checkpoint = structuredClone(value) as never; } });
+    const result = await runProviderDiscoveryPipeline({ identity: context.identity, dependencies: context.dependencies, hardDeadlineAt: "2030-01-01T01:00:00.000Z" });
+    expect(context.snapshotIds()).toEqual({ discovery: "snapshot-discovery", verification: "snapshot-verification", standard: ["snapshot-q2", "snapshot-q3"] });
+    expect(result.providerDiscovery.strict).toEqual([]);
+    expect(result.providerDiscovery.candidates).toEqual([expect.objectContaining({ canonicalName: "Alpha Logistics" })]);
+    expect(result.providerDiscovery.execution.plannedQueries).toBeLessThanOrEqual(30);
+    expect(mocks.appendClaims).toHaveBeenCalledOnce();
+    expect(mocks.resolve.mock.calls.map(([request]) => request.maxSourceRetrievals).reduce((total, value) => total + (value ?? 0), 0)).toBe(60);
+  });
+});
+
+const surface = { surfaceId: "fixture", providerId: "fixture", productId: "search", surfaceKind: "documented_api" as const, contractVersion: "1", surfaceVersion: "v1", adapterVersion: "v1", locale: "en", region: "US" };
+const authority: PublicSearchSurfaceAuthority = { authorityId: "authority", environment: "test", surface, active: true, certifiedAt: "2030-01-01T00:00:00.000Z", evidenceReference: "review", supportedLocales: ["en"], supportedRegions: ["US"] };
+function questions(): ConfirmedBusinessQuestionSet { const base = { generatedText: "", evidenceUrls: [], edited: false, neutralizationVersion: "business-question-neutralization-v1" as const }; return { version: "business-question-set-v1", id: "questions", revision: 1, locale: "en", region: "US", confidence: "high", requiresAcknowledgement: false, profileEvidenceIdentity: "profile", identityExclusions: [], acknowledgedLowConfidence: false, confirmedAt: "2030-01-01T00:00:00.000Z", contentHash: "questions-hash", questions: [
+  { ...base, purpose: "core_service_discovery", service: "self operated logistics", audience: "buyers", marketRegion: "US", neutralPublicText: "Which providers offer self operated dedicated logistics services?", privateText: "Which providers offer self operated dedicated logistics services?", neutralContentHash: "q1" },
+  { ...base, purpose: "customer_region_fit", service: "logistics", audience: "buyers", marketRegion: "US", neutralPublicText: "Which logistics services fit buyers in the target region?", privateText: "Which logistics services fit buyers in the target region?", neutralContentHash: "q2" },
+  { ...base, purpose: "purchase_delivery_risk", service: "logistics", audience: "buyers", marketRegion: "US", neutralPublicText: "What logistics delivery conditions and risks should buyers compare?", privateText: "What logistics delivery conditions and risks should buyers compare?", neutralContentHash: "q3" }
+] } as ConfirmedBusinessQuestionSet; }

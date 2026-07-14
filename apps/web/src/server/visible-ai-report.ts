@@ -12,10 +12,11 @@ export async function getVisibleReportBundle(
 ): Promise<VisibleReportBundle> {
   const freeReportPromise = getAiReport(reportId, "free");
   const cookieStore = await cookies();
-  const combinedToken = cookieStore.get(reportAccessCookieName(reportId, "combined_geo_report_v1"))?.value;
-  const hasCombinedAccess = await tokenGrantsReportAccess(combinedToken, reportId, "combined_geo_report_v1");
+  const active = await getActiveCombinedGeoReport(reportId);
+  const combinedScope = active?.report.artifactContract;
+  const combinedToken = combinedScope ? cookieStore.get(reportAccessCookieName(reportId, combinedScope))?.value : undefined;
+  const hasCombinedAccess = combinedScope ? await tokenGrantsReportAccess(combinedToken, reportId, combinedScope) : false;
   if (hasCombinedAccess) {
-    const active = await getActiveCombinedGeoReport(reportId);
     if (!active) throw new Error("The active combined report artifact is unavailable.");
     return {
       tier: "deep",

@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getPaymentOrder, issueReportAccessToken, getGeoReport, productContractForCode } = vi.hoisted(() => ({
+const { getPaymentOrder, issueReportAccessToken, getGeoReport, getActiveCombinedGeoReport, productContractForCode } = vi.hoisted(() => ({
   getPaymentOrder: vi.fn(),
   issueReportAccessToken: vi.fn(),
   getGeoReport: vi.fn(),
+  getActiveCombinedGeoReport: vi.fn(),
   productContractForCode: vi.fn((code: string) => code === "recommendation_forensics_v1" ? "recommendation_forensics_v1" : "legacy_website_audit_v1")
 }));
 
 vi.mock("@/db/commercial-orders", () => ({ getPaymentOrder, productContractForCode }));
 vi.mock("@/db/report-tokens", () => ({ issueReportAccessToken }));
 vi.mock("@/db/reports", () => ({ getGeoReport }));
+vi.mock("@/db/combined-reports", () => ({ getActiveCombinedGeoReport }));
 
 import { GET } from "./route";
 
@@ -28,6 +30,7 @@ describe("staging report operator access", () => {
       productCode: "deep_report_v1"
     });
     getGeoReport.mockResolvedValue({ reportLocale: "zh" });
+    getActiveCombinedGeoReport.mockResolvedValue(null);
     issueReportAccessToken.mockResolvedValue({ rawToken: "secret", expiresAt: new Date("2026-07-12T00:00:00Z") });
   });
 
@@ -49,6 +52,14 @@ describe("staging report operator access", () => {
     expect(response.headers.get("location")).toBe("https://staging.example/zh/reports/report-1/analysis");
     expect(response.headers.get("set-cookie")).toContain("ogc_report_report-1=secret");
     expect(issueReportAccessToken).toHaveBeenCalledWith(expect.objectContaining({ reportId: "report-1", ttlDays: 1 }));
+  });
+
+  it("issues the exact active V2 artifact scope", async () => {
+    getGeoReport.mockResolvedValue({ reportLocale: "zh", activeArtifactRevisionId: "revision-v2" });
+    getActiveCombinedGeoReport.mockResolvedValue({ report: { artifactContract: "combined_geo_report_v2" } });
+    const response = await GET(new Request("https://staging.example/zh/reports/report-1/staging-access?order=order-1"), context);
+    expect(response.headers.get("location")).toBe("https://staging.example/reports/report-1/report.html");
+    expect(issueReportAccessToken).toHaveBeenCalledWith(expect.objectContaining({ artifactScope: "combined_geo_report_v2" }));
   });
 
   it("returns 404 outside protected staging test mode", async () => {

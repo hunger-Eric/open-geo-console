@@ -29,6 +29,14 @@ describe("provider query plans", () => {
     expect(left.id).not.toBe(right.id);
   });
 
+  it("keeps an evidence-coverage snapshot valid when discovery finds no candidates", () => {
+    const discovery = createProviderDiscoveryQueryPlan(input());
+    const verification = createProviderVerificationQueryPlan({ ...input(), parentPlanId: discovery.id, candidates: [] });
+    expect(verification.candidates).toEqual([]);
+    expect(verification.queries).toHaveLength(1);
+    expect(verification.queries[0]?.derivationRuleId).toBe("candidate-verification-empty-set-v1");
+  });
+
   it("rejects customer identity in either stage", () => {
     const excludedIdentities: CustomerIdentityExclusion[] = [{ kind: "customer_brand", value: "Private Brand" }];
     expect(() => createProviderDiscoveryQueryPlan({

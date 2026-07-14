@@ -6,7 +6,8 @@ export function reportAccessCookieName(
   artifactScope: ReportArtifactScope = "legacy_website_audit_v1"
 ): string {
   const suffix = artifactScope === "recommendation_forensics_v1" ? "_recommendation"
-    : artifactScope === "combined_geo_report_v1" ? "_combined" : "";
+    : artifactScope === "combined_geo_report_v1" ? "_combined"
+    : artifactScope === "combined_geo_report_v2" ? "_combined_v2" : "";
   return `ogc_report_${reportId.replace(/[^a-zA-Z0-9_-]/g, "")}${suffix}`;
 }
 
@@ -32,6 +33,9 @@ export async function tokenGrantsReportAccess(
 }
 
 export async function resolveRequestArtifactScope(request: Request, reportId: string): Promise<ReportArtifactScope | null> {
+  if (await requestHasReportAccess(request, reportId, "combined_geo_report_v2")) {
+    return "combined_geo_report_v2";
+  }
   if (await requestHasReportAccess(request, reportId, "combined_geo_report_v1")) {
     return "combined_geo_report_v1";
   }

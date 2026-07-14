@@ -11,8 +11,14 @@ import {
   resolveRecommendationFoundationTarget,
   sourceEvidenceHash
 } from "./processor";
+import { resolveCombinedReportContract } from "@/report/combined-report-contract";
 
 describe("recommendation website-foundation resume contract", () => {
+  it("selects the combined artifact contract only from reviewed deployment configuration", () => {
+    expect(resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: "combined_geo_report_v2" })).toBe("combined_geo_report_v2");
+    expect(resolveCombinedReportContract({})).toBe("combined_geo_report_v1");
+    expect(() => resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: "request" })).toThrow(/reviewed/i);
+  });
   it("resumes a correction artifact gate without resolving completed snapshots again", () => {
     const report = { reportId: "report-1", jobId: "job-1" } as RecommendationForensicReportV2;
     const publicSourceForensics = checkpointValue();

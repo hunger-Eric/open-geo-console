@@ -105,6 +105,11 @@ export function createProviderVerificationQueryPlan(input: ProviderQueryPlanInpu
     assertProviderTextHasNoCustomerIdentity(exactQuery, input.excludedIdentities);
     return query(input, `candidate-verification-${candidate.entityId}`, exactQuery, 5);
   });
+  if (queries.length === 0) {
+    const exactQuery = normalize(`${input.question.derivation.subject} ${verificationTerms.join(" ")}`);
+    assertProviderTextHasNoCustomerIdentity(exactQuery, input.excludedIdentities);
+    queries.push(query(input, "candidate-verification-empty-set", exactQuery, 5));
+  }
   const candidateSetHash = sha(JSON.stringify(candidates.map(({ entityId, canonicalName, rank }) => ({ entityId, canonicalName, rank }))));
   const identity = identityInput(input, { kind: "candidate_verification", parentPlanId: input.parentPlanId, candidateSetHash, queries: queries.map(({ exactQuery, derivationRuleId }) => ({ exactQuery, derivationRuleId })) });
   return {

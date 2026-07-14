@@ -10,10 +10,12 @@ import {
   appendMarketSourceEvidence,
   beginMarketSearchAttempt,
   completeMarketSearchAttempt,
+  completeMarketSnapshotLease,
   createMarketSnapshotRefresh
 } from "./market-snapshots";
 import {
   appendMarketProviderClaims,
+  appendCompletedMarketProviderClaims,
   appendMarketSourcePassages,
   getMarketProviderEvidenceBundle,
   providerClaimPersistenceHash,
@@ -63,6 +65,22 @@ describe("provider evidence memory repository", () => {
     await expect(appendMarketSourcePassages({ token: fixture.token, passages: [{ ...passages[0]!, exactExcerpt: "changed", excerptHash: sha("changed") }] })).rejects.toThrow(/immutable/i);
     const base = { passageId: passages[0]!.passageId, providerEntityId: "provider:alpha", canonicalName: "Alpha Logistics", genericRole: "service_provider", policyRole: "domestic_linehaul", capability: "transport_control", operatingMode: "owned", serviceScope: ["freight"], routeScope: [], exactExcerpt: "not present", validationStatus: "accepted" as const, rejectionReason: null };
     await expect(appendMarketProviderClaims({ token: fixture.token, claims: [{ ...base, id: "bad", claimHash: providerClaimPersistenceHash(base), extractionModel: "fixture", extractionContract: "v1" }] })).rejects.toThrow(/not bound/i);
+  });
+
+  it("appends immutable extracted claims after the exact snapshot completes", async () => {
+    const fixture = await sourceFixture();
+    const passage = selectProviderPassages({
+      sourceEvidenceId: fixture.sourceId,
+      normalizedText: "Alpha Logistics provides self-operated freight with its owned fleet and warehouse on the Shanghai Chengdu route.",
+      candidateNames: ["Alpha Logistics"], serviceTerms: ["freight"], controlTerms: ["self-operated", "owned"],
+      capabilityTerms: ["fleet", "warehouse"], selectorVersion: PROVIDER_PASSAGE_SELECTOR_VERSION
+    })[0]!;
+    await appendMarketSourcePassages({ token: fixture.token, passages: [passage] });
+    await completeMarketSnapshotLease({ snapshotId: fixture.snapshotId, token: fixture.token, queryFanoutHash: sha("fanout"), completedAt: new Date() });
+    const base = { passageId: passage.passageId, providerEntityId: "provider:alpha", canonicalName: "Alpha Logistics", genericRole: "service_provider", policyRole: "carrier", capability: "linehaul_fleet", operatingMode: "self_operated", serviceScope: ["freight"], routeScope: ["Shanghai-Chengdu"], exactExcerpt: passage.exactExcerpt, validationStatus: "accepted" as const, rejectionReason: null };
+    const claim = { ...base, id: "provider-claim:completed", claimHash: providerClaimPersistenceHash(base), extractionModel: "fixture", extractionContract: "provider-claim-extraction-v1" };
+    await expect(appendCompletedMarketProviderClaims({ snapshotId: fixture.snapshotId, claims: [claim] })).resolves.toMatchObject([{ id: claim.id }]);
+    await expect(appendCompletedMarketProviderClaims({ snapshotId: fixture.snapshotId, claims: [claim] })).resolves.toMatchObject([{ id: claim.id }]);
   });
 });
 

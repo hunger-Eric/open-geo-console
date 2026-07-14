@@ -10,10 +10,11 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request, context: { params: Promise<{ id: string; assetId: string }> }) {
   const { id, assetId } = await context.params;
   const legacyAccess=await requestHasReportAccess(request,id,"legacy_website_audit_v1");
-  const combinedAccess=legacyAccess?false:await requestHasReportAccess(request,id,"combined_geo_report_v1");
+  const active=legacyAccess?null:await getActiveCombinedGeoReport(id);
+  const combinedAccess=Boolean(active&&await requestHasReportAccess(request,id,active.report.artifactContract));
   if(!legacyAccess&&!combinedAccess)return privateError(404);
   const asset = await getEvidenceAsset(id, assetId);
-  if(combinedAccess){const active=await getActiveCombinedGeoReport(id);if(!active||!asset||![active.report.originalPaidJobId,active.report.jobId].includes(asset.jobId))return privateError(404);}
+  if(combinedAccess&&(!active||!asset||![active.report.originalPaidJobId,active.report.jobId].includes(asset.jobId)))return privateError(404);
   if (!asset || asset.status !== "ready" || !asset.storageKey) return privateError(404);
   const object = await createEvidenceStorage().get(asset.storageKey);
   if (!object) return privateError(404);

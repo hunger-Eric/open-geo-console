@@ -1,9 +1,9 @@
 /* eslint-disable @next/next/no-img-element -- protected evidence images must render in the canonical printable HTML */
-import type { CombinedPrivateReportArtifactModel } from "@/report/artifact-model";
+import type { CombinedPrivateReportArtifactModelV1 } from "@/report/artifact-model";
 import { analyzeTitlePatterns, type TitlePatternKind } from "@open-geo-console/geo-auditor";
 import React from "react";
 
-export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateReportArtifactModel }) {
+export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateReportArtifactModelV1 }) {
   const report = model.combinedReport;
   const ai = report.technicalFoundation.aiReport;
   const technical = report.technicalFoundation.technicalReport;
@@ -102,7 +102,7 @@ interface SourceTitleDisplay {
 }
 
 function titlePatternDisplays(
-  technical: CombinedPrivateReportArtifactModel["combinedReport"]["technicalFoundation"]["technicalReport"]
+  technical: CombinedPrivateReportArtifactModelV1["combinedReport"]["technicalFoundation"]["technicalReport"]
 ): Map<string, SourceTitleDisplay> {
   const messageKeys = new Set(technical.findings.map((finding) => finding.messageKey));
   const enabledKinds = new Set<TitlePatternKind>();

@@ -1,5 +1,5 @@
 import "server-only";
-import type { AiWebsiteReportV1, CombinedGeoReportV1, RecommendationForensicReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import type { AiWebsiteReportV1, CombinedGeoReportV1, CombinedGeoReportV2, RecommendationForensicReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import { getAiReport } from "@/db/ai-reports";
 import { listEvidenceAssets } from "@/db/evidence-assets";
@@ -9,7 +9,7 @@ import { getSourceForensicReportForReport } from "@/db/source-forensic-reports";
 import { getActiveCombinedGeoReport } from "@/db/combined-reports";
 import type { ReportArtifactScope, ReportEvidenceAssetRow, ReportLocale } from "@/db/schema";
 
-export interface CombinedPrivateReportArtifactModel {
+export interface CombinedPrivateReportArtifactModelV1 {
   productContract: "combined_geo_report_v1";
   reportId: string;
   locale: ReportLocale;
@@ -19,6 +19,11 @@ export interface CombinedPrivateReportArtifactModel {
   artifactRevisionId: string;
   pdfStorageKey: string;
 }
+export interface CombinedPrivateReportArtifactModelV2 extends Omit<CombinedPrivateReportArtifactModelV1, "productContract" | "combinedReport"> {
+  productContract: "combined_geo_report_v2";
+  combinedReport: CombinedGeoReportV2;
+}
+export type CombinedPrivateReportArtifactModel = CombinedPrivateReportArtifactModelV1 | CombinedPrivateReportArtifactModelV2;
 
 export interface LegacyPrivateReportArtifactModel {
   productContract: "legacy_website_audit_v1";
@@ -59,25 +64,28 @@ export async function loadPrivateReportArtifact(
   reportId: string,
   productContract: ReportArtifactScope = "legacy_website_audit_v1"
 ): Promise<PrivateReportArtifactModel | null> {
-  if (productContract === "combined_geo_report_v1") {
+  if (productContract === "combined_geo_report_v1" || productContract === "combined_geo_report_v2") {
     const active = await getActiveCombinedGeoReport(reportId);
     if (!active) return null;
+    if (active.report.artifactContract !== productContract) return null;
     const language = active.report.locale.toLowerCase().split(/[-_]/, 1)[0];
     if (language !== "en" && language !== "zh") return null;
+    const locale: ReportLocale = language;
     const evidenceJobIds = [...new Set(active.report.technicalFoundation.evidenceAssets.map((asset) => asset.jobId))];
     const referencedAssetIds = new Set(active.report.technicalFoundation.evidenceAssets.map((asset) => asset.assetId));
     const evidenceAssets = (await Promise.all(evidenceJobIds.map((jobId) => listEvidenceAssets(reportId, jobId))))
       .flat().filter((asset) => referencedAssetIds.has(asset.id));
-    return {
-      productContract,
+    const common = {
       reportId,
-      locale: language,
-      combinedReport: active.report,
+      locale,
       technicalReport: active.report.technicalFoundation.technicalReport,
       evidenceAssets,
       artifactRevisionId: active.artifactRevisionId,
       pdfStorageKey: active.pdfStorageKey
     };
+    return productContract === "combined_geo_report_v2"
+      ? { ...common, productContract, combinedReport: active.report as CombinedGeoReportV2 }
+      : { ...common, productContract, combinedReport: active.report as CombinedGeoReportV1 };
   }
   if (productContract === "recommendation_forensics_v1") {
     const [report, v1, v2, foundation] = await Promise.all([

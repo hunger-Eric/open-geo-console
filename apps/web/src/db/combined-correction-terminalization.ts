@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { requireReadyCombinedGeoReport, type CombinedGeoReportV1 } from "@open-geo-console/ai-report-engine";
+import { requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, type CombinedGeoReportV1, type CombinedGeoReportV2 } from "@open-geo-console/ai-report-engine";
 import { ensureDatabase, getSqlClient } from "./index";
 import type { PaidPublicSourceSnapshotRef } from "./public-source-commerce";
 import { JobTransitionService } from "@/worker/job-transition-service";
@@ -13,18 +13,18 @@ export async function terminalizeCombinedCorrection(input: {
   pdfSha256: string;
   pdfStorageKey: string;
   pageCount: number;
-}): Promise<{ report: CombinedGeoReportV1; emailDeliveryId: string }> {
-  const report = requireReadyCombinedGeoReport(input.report);
+}): Promise<{ report: CombinedGeoReportV1 | CombinedGeoReportV2; emailDeliveryId: string }> {
+  const report = readyCombined(input.report);
   if (!input.workerId.trim() || !input.checkpointIdentityHash.trim() || input.pageCount < 5) throw new Error("Combined correction readiness identity is incomplete.");
   await ensureDatabase();
   return getSqlClient().begin(async (tx) => {
     const job = (await tx<Array<{ execution_state:string;checkpoint_revision:number;lease_owner:string|null;lease_expires_at:string|null;credit_reservation_id:string|null;checkpoint:Record<string,unknown>;correction_id:string|null;business_question_set_id:string|null;artifact_contract:string|null }>>`
       SELECT execution_state,checkpoint_revision,lease_owner,lease_expires_at,credit_reservation_id,checkpoint,correction_id,business_question_set_id,artifact_contract
       FROM scan_jobs WHERE id=${report.jobId} AND report_id=${report.reportId} FOR UPDATE`)[0];
-    const checkpoint=(job?.checkpoint?.publicSourceForensics ?? null) as {identityHash?:unknown}|null;
+    const checkpoint=combinedCheckpoint(job?.checkpoint, report.artifactContract);
     if (!job || job.execution_state!=="running" || job.lease_owner!==input.workerId || !job.lease_expires_at || Date.parse(job.lease_expires_at)<=Date.now() ||
         job.credit_reservation_id!==null || job.correction_id===null || job.business_question_set_id!==report.questionSetIdentity ||
-        job.artifact_contract!=="combined_geo_report_v1" || checkpoint?.identityHash!==input.checkpointIdentityHash) {
+        job.artifact_contract!==report.artifactContract || checkpoint?.identityHash!==input.checkpointIdentityHash) {
       throw new Error("Combined correction requires its exact active non-billable leased job.");
     }
     const correction=(await tx<Array<{ id:string;order_id:string;original_paid_job_id:string;question_set_id:string;state:string }>>`
@@ -74,15 +74,15 @@ export async function terminalizeCombinedCorrection(input: {
 export async function terminalizePaidCombinedReport(input: {
   report: unknown; workerId: string; checkpointIdentityHash: string; snapshotRefs: readonly PaidPublicSourceSnapshotRef[];
   htmlSha256:string;pdfSha256:string;pdfStorageKey:string;pageCount:number;
-}):Promise<{report:CombinedGeoReportV1;emailDeliveryId:string}>{
-  const report=requireReadyCombinedGeoReport(input.report);
+}):Promise<{report:CombinedGeoReportV1|CombinedGeoReportV2;emailDeliveryId:string}>{
+  const report=readyCombined(input.report);
   if(report.publicSourceForensics.commercialOutcome!=="completed"||input.pageCount<5)throw new Error("Only a complete ready combined report may settle a paid order.");
   await ensureDatabase();
   return getSqlClient().begin(async(tx)=>{
     const job=(await tx<Array<{execution_state:string;checkpoint_revision:number;lease_owner:string|null;lease_expires_at:string|null;credit_reservation_id:string|null;checkpoint:Record<string,unknown>;business_question_set_id:string|null;artifact_contract:string|null}>>`
       SELECT execution_state,checkpoint_revision,lease_owner,lease_expires_at,credit_reservation_id,checkpoint,business_question_set_id,artifact_contract FROM scan_jobs WHERE id=${report.jobId} AND report_id=${report.reportId} FOR UPDATE`)[0];
-    const checkpoint=(job?.checkpoint?.publicSourceForensics??null)as{identityHash?:unknown}|null;
-    if(!job||job.execution_state!=="running"||job.lease_owner!==input.workerId||!job.lease_expires_at||Date.parse(job.lease_expires_at)<=Date.now()||!job.credit_reservation_id||job.business_question_set_id!==report.questionSetIdentity||job.artifact_contract!=="combined_geo_report_v1"||checkpoint?.identityHash!==input.checkpointIdentityHash)throw new Error("Paid combined activation requires its exact leased job and reservation.");
+    const checkpoint=combinedCheckpoint(job?.checkpoint,report.artifactContract);
+    if(!job||job.execution_state!=="running"||job.lease_owner!==input.workerId||!job.lease_expires_at||Date.parse(job.lease_expires_at)<=Date.now()||!job.credit_reservation_id||job.business_question_set_id!==report.questionSetIdentity||job.artifact_contract!==report.artifactContract||checkpoint?.identityHash!==input.checkpointIdentityHash)throw new Error("Paid combined activation requires its exact leased job and reservation.");
     const order=(await tx<Array<{id:string;report_locale:string;fulfillment_status:string;refund_status:string}>>`SELECT id,report_locale,fulfillment_status,refund_status FROM payment_orders WHERE id=${report.orderId} AND fulfillment_job_id=${report.jobId} AND report_id=${report.reportId} AND payment_status='paid' FOR UPDATE`)[0];
     if(!order||order.refund_status!=="not_required"||!["queued","processing"].includes(order.fulfillment_status))throw new Error("The paid combined order is not activatable.");
     const credit=(await tx<Array<{id:string;status:string;job_id:string|null}>>`SELECT id,status,job_id FROM credit_ledger WHERE id=${job.credit_reservation_id} FOR UPDATE`)[0];
@@ -117,3 +117,13 @@ export function snapshotReferenceBinding(reportCutoff:string,snapshotCompletedAt
   return {evidenceCutoff:new Date(cutoff).toISOString(),freshnessState:age<=7*24*60*60_000?"fresh":age<=30*24*60*60_000?"historical":"insufficient"};
 }
 function sha(parts:string[]):string{return createHash("sha256").update(parts.join("\0")).digest("hex");}
+function readyCombined(value:unknown):CombinedGeoReportV1|CombinedGeoReportV2{
+  const contract=value&&typeof value==="object"&&!Array.isArray(value)?(value as {artifactContract?:unknown}).artifactContract:null;
+  if(contract==="combined_geo_report_v2")return requireReadyCombinedGeoReportV2(value);
+  if(contract==="combined_geo_report_v1")return requireReadyCombinedGeoReport(value);
+  throw new TypeError("Combined artifact contract is unsupported.");
+}
+function combinedCheckpoint(checkpoint:Record<string,unknown>|undefined,contract:string):{identityHash?:unknown}|null{
+  if(!checkpoint)return null;
+  return (contract==="combined_geo_report_v2"?checkpoint.providerDiscovery:checkpoint.publicSourceForensics) as {identityHash?:unknown}|null;
+}

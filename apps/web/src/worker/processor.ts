@@ -11,9 +11,11 @@ import {
   preparePlanningCandidates,
   parseCombinedBusinessQuestionAnswers,
   synthesizeCombinedBusinessQuestionAnswers,
+  synthesizeGroundedBusinessAnswersV2,
   synthesizeWebsiteReportWithRecovery,
   type AiWebsiteReportV1,
   type CombinedBusinessQuestionAnswers,
+  type GroundedAnswerEvidence,
   type RecommendationForensicReportV2,
   type ExtractedPage,
   type PageAnalysis,
@@ -35,12 +37,14 @@ import {
 } from "@/db/reports";
 import { getAiReport, saveAiReport } from "@/db/ai-reports";
 import { getConfirmedBusinessQuestionSet } from "@/db/business-questions";
+import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
+import { getMarketSnapshotBundle } from "@/db/market-snapshots";
 import { getCorrectionExecutionContext } from "@/db/report-corrections";
 import { listEvidenceAssets } from "@/db/evidence-assets";
 import { terminalizeCombinedCorrection, terminalizePaidCombinedReport } from "@/db/combined-correction-terminalization";
 import { getPendingPaidCombinedContext } from "@/db/combined-reports";
 import { failStagingCombinedArtifactRefresh, getStagingCombinedArtifactRefreshContext, terminalizeStagingCombinedArtifactRefresh } from "@/db/staging-combined-artifact-refresh";
-import { buildReadyCombinedArtifact } from "@/report/combined-artifact-readiness";
+import { buildReadyCombinedArtifact, buildReadyCombinedArtifactV2 } from "@/report/combined-artifact-readiness";
 import { createEvidenceStorage } from "@/evidence/storage";
 import {
   getCrawlEvidence,
@@ -52,7 +56,7 @@ import type { JobCheckpoint, ReportEvidenceAssetRow, ScanJobRow } from "@/db/sch
 import { projectFreeAiReport } from "@/report/visibility";
 import { createSafeFetch } from "@/server/safe-fetch";
 import { captureReportVisualEvidence } from "./visual-evidence";
-import { createProductionPublicSourceForensicsDependencies } from "@/public-source-forensics/production-runtime";
+import { createProductionPublicSourceForensicsDependencies, resolveProductionPublicSearchRuntime } from "@/public-source-forensics/production-runtime";
 import { createPublicSourceArtifactReadinessGate } from "@/public-source-forensics/artifact-readiness";
 import { exportCanonicalArtifactHtmlPdf } from "@/report/pdf-export";
 import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline, type ArtifactReadinessGate, type PublicSourceCommercialSnapshotRef, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
@@ -65,6 +69,8 @@ import { createPublicSourceAttemptBudget } from "./public-source-execution-budge
 import { phaseForStage, recoveryEnvelope } from "./job-state";
 import type { StagingLiveDrill } from "./staging-live-drill";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
+import { createProductionProviderDiscoveryContext } from "./provider-discovery-production";
+import { runProviderDiscoveryPipeline, type ProviderDiscoveryCheckpointV1 } from "./provider-discovery-pipeline";
 import {
   calculateEffectiveCoverage,
   determineResumeStage,
@@ -96,6 +102,7 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
     report: RecommendationForensicReportV2;
     commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
   };
+  providerDiscovery?: ProviderDiscoveryCheckpointV1;
   combinedQuestionAnswers?: CombinedBusinessQuestionAnswers;
   discoverySnapshot?: DiscoverySnapshot;
   pageAnalysisContentHashes?: Record<string, string>;
@@ -141,6 +148,15 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       if(!context) throw new Error("The staging artifact-refresh identity is unavailable.");
       const evidenceAssets=await loadReferencedEvidenceAssets(context.sourceReport);
       await assertReusableEvidenceAssets(evidenceAssets);
+      if(context.sourceReport.artifactContract==="combined_geo_report_v2"){
+        await finalizeProviderDiscoveryCombinedJob({job,workerId,checkpoint,websiteFoundation:context.sourceReport.technicalFoundation.aiReport,
+          technicalReport:context.sourceReport.technicalFoundation.technicalReport,targetUrl:context.sourceReport.targetUrl,
+          coverage:{plannedPages:job.plannedPages,successfulPages:job.successfulPages,failedPages:job.failedPages},checkpointJob,
+          signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill,evidenceAssets,
+          artifactContext:{orderId:context.orderId,artifactRevisionId:context.artifactRevisionId,artifactRevision:context.artifactRevision},
+          originalPaidJobId:context.sourceReport.originalPaidJobId,forceSnapshotRefreshAfter:context.sourceReport.generatedAt});
+        return;
+      }
       await finalizeStagingArtifactRefreshJob({job,workerId,checkpoint,context,evidenceAssets,checkpointJob,
         signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill});
       return;
@@ -154,6 +170,13 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       if (foundationMatches) {
         const evidenceAssets = await listEvidenceAssets(job.reportId, context.originalPaidJobId);
         if (await areReusableEvidenceAssets(evidenceAssets)) {
+          if(job.artifactContract==="combined_geo_report_v2"){
+            await finalizeProviderDiscoveryCombinedJob({job,workerId,checkpoint,websiteFoundation:foundation.payload,
+              technicalReport:foundation.technicalPayload!,targetUrl:foundation.payload.targetUrl,coverage:{plannedPages:job.plannedPages,successfulPages:job.successfulPages,failedPages:job.failedPages},
+              checkpointJob,signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill,evidenceAssets,
+              artifactContext:{orderId:context.orderId,artifactRevisionId:context.artifactRevisionId,artifactRevision:context.artifactRevision},originalPaidJobId:context.originalPaidJobId});
+            return;
+          }
           await finalizeCorrectionJob({ job, workerId, checkpoint, websiteFoundation: foundation.payload,
             technicalReport: foundation.technicalPayload!, targetUrl: foundation.payload.targetUrl, evidenceAssets, context,
             checkpointJob, signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill });
@@ -426,6 +449,13 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         if (!context) throw new Error("The correction execution identity is unavailable after technical regeneration.");
         const evidenceAssets = await listEvidenceAssets(job.reportId, job.id);
         await assertReusableEvidenceAssets(evidenceAssets);
+        if(job.artifactContract==="combined_geo_report_v2"){
+          await finalizeProviderDiscoveryCombinedJob({job,workerId,checkpoint,websiteFoundation:reportToPersist,
+            targetUrl:discovery.targetUrl,technicalReport:technicalReport!,evidenceAssets,artifactContext:{orderId:context.orderId,artifactRevisionId:context.artifactRevisionId,artifactRevision:context.artifactRevision},
+            originalPaidJobId:context.originalPaidJobId,coverage:{plannedPages:effectiveCoverage.effectivePlannedPages,successfulPages:effectiveCoverage.analyzedPages,failedPages:failureCount(checkpoint)},
+            checkpointJob,signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill});
+          return;
+        }
         await finalizeCorrectionJob({ job, workerId, checkpoint, websiteFoundation: reportToPersist,
           targetUrl: discovery.targetUrl, technicalReport: technicalReport!, evidenceAssets, context,
           checkpointJob, signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill });
@@ -531,7 +561,7 @@ export function resolveRecommendationFoundationTarget(
   return checkpoint.discoverySnapshot?.targetUrl ?? foundation?.payload.targetUrl ?? submittedUrl;
 }
 
-async function loadReferencedEvidenceAssets(sourceReport: import("@open-geo-console/ai-report-engine").CombinedGeoReportV1):Promise<ReportEvidenceAssetRow[]>{
+async function loadReferencedEvidenceAssets(sourceReport: import("@open-geo-console/ai-report-engine").CombinedGeoReportV1 | import("@open-geo-console/ai-report-engine").CombinedGeoReportV2):Promise<ReportEvidenceAssetRow[]>{
   const references=sourceReport.technicalFoundation.evidenceAssets;
   const ids=new Set(references.map(({assetId})=>assetId));
   const jobIds=[...new Set(references.map(({jobId})=>jobId))];
@@ -683,6 +713,10 @@ async function finalizeRecommendationJob(input: {
   liveDrill?: StagingLiveDrill;
 }): Promise<void> {
   if (input.fulfillmentTarget === "recommendation_v2") {
+    if (input.job.artifactContract === "combined_geo_report_v2") {
+      await finalizeProviderDiscoveryCombinedJob(input);
+      return;
+    }
     let checkpoint = input.checkpoint;
     const artifactReadiness = input.job.artifactContract === "combined_geo_report_v1"
       ? { async verify() { /* canonical combined readiness runs after public-source synthesis */ } }
@@ -751,6 +785,165 @@ async function finalizeRecommendationJob(input: {
     return;
   }
   throw new HistoricalRecommendationRuntimeRetiredError();
+}
+
+async function finalizeProviderDiscoveryCombinedJob(input: {
+  job: ScanJobRow;
+  workerId: string;
+  checkpoint: WorkerCheckpoint;
+  websiteFoundation: AiWebsiteReportV1;
+  technicalReport: GeoAuditReport;
+  targetUrl: string;
+  coverage: { plannedPages: number; successfulPages: number; failedPages: number };
+  checkpointJob: WorkerCheckpointWriter;
+  signal?: AbortSignal;
+  remainingMs: number;
+  liveDrill?: StagingLiveDrill;
+  evidenceAssets?: ReportEvidenceAssetRow[];
+  artifactContext?: { orderId: string; artifactRevisionId: string; artifactRevision: number };
+  originalPaidJobId?: string;
+  forceSnapshotRefreshAfter?: string;
+}): Promise<void> {
+  let checkpoint = input.checkpoint;
+  const businessQuestionSet = input.job.businessQuestionSetId
+    ? await getConfirmedBusinessQuestionSet(input.job.reportId, input.job.businessQuestionSetId)
+    : null;
+  const pending = input.artifactContext ?? await getPendingPaidCombinedContext(input.job.id);
+  if (!businessQuestionSet || !pending) throw new Error("The V2 combined job requires its exact locked questions and pending artifact revision.");
+  const evidenceAssets = input.evidenceAssets ?? await listEvidenceAssets(input.job.reportId, input.job.id);
+  await assertReusableEvidenceAssets(evidenceAssets);
+  createPublicSourceAttemptBudget(input.remainingMs);
+  const runtime = await resolveProductionPublicSearchRuntime({ environment: process.env, getAuthority: getActivePublicSearchSurfaceAuthority });
+  const client = createConfiguredClient();
+  const evidenceCutoffAt = checkpoint.providerDiscovery?.evidenceCutoffAt ?? new Date().toISOString();
+  const providerContext = createProductionProviderDiscoveryContext({
+    runtime,
+    questionSet: businessQuestionSet,
+    websiteCategories: [input.websiteFoundation.organizationProfile.businessModel ?? "", ...input.websiteFoundation.organizationProfile.productsAndServices].filter(Boolean),
+    websiteFoundationHash: createHash("sha256").update(JSON.stringify(input.websiteFoundation)).digest("hex"),
+    workerId: `provider-discovery:${input.job.id}:${input.workerId}`,
+    evidenceCutoffAt,
+    extractionClient: client,
+    extractionModel: client.configuredModel,
+    forceSnapshotRefreshAfter: input.forceSnapshotRefreshAfter,
+    getCheckpoint: async () => checkpoint.providerDiscovery ?? null,
+    saveCheckpoint: async (providerDiscovery) => {
+      const next = { ...checkpoint, providerDiscovery };
+      const updated = await input.checkpointJob({ stage: "synthesizing", phase: providerDiscovery.phase === "complete" ? "grounded_answer_synthesis" : providerDiscovery.phase, progress: providerPhaseProgress(providerDiscovery.phase), checkpoint: next as JobCheckpoint, ...input.coverage });
+      checkpoint = normalizeCheckpoint(updated.checkpoint);
+    }
+  });
+  const providerResult = await runProviderDiscoveryPipeline({
+    identity: providerContext.identity,
+    dependencies: providerContext.dependencies,
+    hardDeadlineAt: new Date(Date.now() + Math.max(1_000, input.remainingMs)).toISOString(),
+    signal: input.signal
+  });
+  input.signal?.throwIfAborted();
+  const dependencies = createWorkerPublicSourceForensicsDependencies({
+    job: input.job,
+    workerId: input.workerId,
+    coverage: input.coverage,
+    readCheckpoint: () => checkpoint,
+    onCheckpointSaved: async (next) => { checkpoint = next; },
+    checkpointJob: input.checkpointJob,
+    retrieveSource: createWorkerPublicSourceRetriever(),
+    artifactReadiness: { async verify() { /* canonical combined V2 readiness runs below */ } },
+    forceSnapshotRefreshAfter: input.forceSnapshotRefreshAfter,
+    liveDrill: input.liveDrill,
+    signal: input.signal,
+    collaborators: { resolveSnapshot: providerContext.resolveForensicSnapshot, getReport: getSourceForensicReportForJob, saveReport: saveSourceForensicReport }
+  }, runtime);
+  const forensicResult = await runPublicSourceForensicsPipeline({
+    reportId: input.job.reportId,
+    jobId: input.job.id,
+    ...resolvePublicSourceRunScope(dependencies),
+    targetUrl: input.targetUrl,
+    websiteFoundation: input.websiteFoundation,
+    businessQuestionSet,
+    dependencies,
+    fanoutOverrides: new Map([[providerContext.discoveryFanout.questionId, providerContext.discoveryFanout]]),
+    signal: input.signal
+  });
+  if (forensicResult.report.commercialOutcome !== "completed") throw new Error("V2 combined activation requires complete claim-bound public-source coverage.");
+  const groundedAnswerEvidence = groundedEvidenceFromForensic(forensicResult.report);
+  const questionIds = forensicResult.report.questions.questions.slice(1).map(({ id }) => id) as [string, string];
+  const groundedAnswers = await synthesizeGroundedBusinessAnswersV2(client, {
+    questionSet: businessQuestionSet,
+    questionIds,
+    evidence: groundedAnswerEvidence,
+    locale: forensicResult.report.locale,
+    signal: input.signal
+  });
+  const ready = await buildReadyCombinedArtifactV2({
+    artifactRevisionId: pending.artifactRevisionId,
+    artifactRevision: pending.artifactRevision,
+    reportId: input.job.reportId,
+    orderId: pending.orderId,
+    jobId: input.job.id,
+    originalPaidJobId: input.originalPaidJobId ?? input.job.id,
+    targetUrl: input.targetUrl,
+    technicalReport: input.technicalReport,
+    aiReport: input.websiteFoundation,
+    evidenceAssets,
+    businessQuestionSet,
+    businessQuestionAnswers: groundedAnswers,
+    groundedAnswerEvidence,
+    publicSourceForensics: forensicResult.report,
+    providerDiscovery: providerResult.providerDiscovery
+  });
+  const verificationSnapshotId = providerResult.checkpoint.verificationSnapshotId;
+  if (!verificationSnapshotId) throw new Error("V2 provider verification snapshot is unavailable at terminalization.");
+  const verificationRef = await providerVerificationCommercialRef(verificationSnapshotId);
+  const snapshotRefs = uniqueSnapshotRefs([...forensicResult.commercialSnapshotRefs, verificationRef]);
+  if (snapshotRefs.length !== 4) throw new Error("V2 combined reports require exactly four immutable market snapshots.");
+  const terminalInput = {
+    report: ready.report,
+    workerId: input.workerId,
+    checkpointIdentityHash: providerResult.checkpoint.identityHash,
+    snapshotRefs,
+    htmlSha256: ready.htmlSha256,
+    pdfSha256: ready.pdfSha256,
+    pdfStorageKey: ready.pdfStorageKey,
+    pageCount: ready.pageCount
+  };
+  if(input.job.reason==="staging_artifact_refresh") await terminalizeStagingCombinedArtifactRefresh(terminalInput);
+  else if(input.job.reason==="paid_report_correction") await terminalizeCombinedCorrection(terminalInput);
+  else await terminalizePaidCombinedReport(terminalInput);
+}
+
+function groundedEvidenceFromForensic(report: RecommendationForensicReportV2): GroundedAnswerEvidence[] {
+  const questionFanouts = report.questions.questions.slice(1).map((question) => ({ question, queryIds: new Set(report.fanouts.find(({ questionId }) => questionId === question.id)?.queries.map(({ id }) => id) ?? []) }));
+  return questionFanouts.flatMap(({ question, queryIds }) => report.sourceGraph.evidence.flatMap((evidence) => {
+    if (!evidence.queryVariantIds.some((id) => queryIds.has(id)) || !evidence.verifiedExcerpt) return [];
+    const relevant = groundedExcerptRelevant(evidence.verifiedExcerpt, `${question.normalizedText} ${question.derivation.subject}`);
+    return [{ evidenceId: evidence.evidenceId, questionId: question.id, subjectKey: `question:${question.id}`, registrableDomain: evidence.registrableDomain,
+      exactExcerpt: evidence.verifiedExcerpt, eligible: evidence.retrievalReadiness.ready && relevant, direct: evidence.retrievalReadiness.ready && relevant && !evidence.metadataOnly }];
+  }));
+}
+
+function groundedExcerptRelevant(excerpt:string,question:string):boolean{
+  const normalizedQuestion=question.normalize("NFKC").toLocaleLowerCase();
+  const terms=[...(normalizedQuestion.match(/[a-z0-9][a-z0-9-]{2,}/g)??[]),...(normalizedQuestion.match(/[\p{Script=Han}]{2,}/gu)??[]).flatMap((run)=>run.length<=6?[run]:Array.from({length:run.length-1},(_,index)=>run.slice(index,index+2)))];
+  const ignored=new Set(["which","what","where","provide","哪些","什么","如何","是否"]),text=excerpt.normalize("NFKC").toLocaleLowerCase();
+  return [...new Set(terms)].filter((term)=>!ignored.has(term)).some((term)=>text.includes(term));
+}
+
+async function providerVerificationCommercialRef(snapshotId: string): Promise<PublicSourceCommercialSnapshotRef> {
+  const bundle = await getMarketSnapshotBundle(snapshotId);
+  if (!bundle || bundle.snapshot.status !== "completed") throw new Error("Provider verification snapshot is not complete.");
+  const actualCostMicros = bundle.attempts.reduce((total, attempt) => total + (attempt.providerCostMicros ?? 0), 0);
+  return { snapshotId, cacheIdentity: bundle.snapshot.cacheIdentity, freshnessState: "fresh", actualCostMicros, allocatedCostMicros: actualCostMicros, avoidedCostMicros: 0 };
+}
+
+function uniqueSnapshotRefs(values: PublicSourceCommercialSnapshotRef[]): PublicSourceCommercialSnapshotRef[] {
+  return [...new Map(values.map((value) => [value.snapshotId, value])).values()];
+}
+
+function providerPhaseProgress(phase: ProviderDiscoveryCheckpointV1["phase"]): number {
+  const values: Record<ProviderDiscoveryCheckpointV1["phase"], number> = { provider_discovery_search: 91, candidate_resolution: 92, candidate_verification: 93,
+    provider_source_retrieval: 94, provider_passage_selection: 95, provider_claim_extraction: 96, provider_qualification: 97, grounded_answer_synthesis: 98, complete: 98 };
+  return values[phase];
 }
 
 /**
@@ -864,7 +1057,7 @@ function questionFromFanout(questionId: string, fanout: SearchQueryFanout): Cano
   if (questionId !== fanout.questionId || !fanout.questionSetVersion.trim()) {
     throw new PublicSourceAuthorityUnavailableError("Public-source fanout identity is invalid.");
   }
-  const canonical = fanout.queries.find((query) => query.derivationRuleId === "query-canonical-v1");
+  const canonical = fanout.queries.find((query) => query.derivationRuleId === "query-canonical-v1" || query.derivationRuleId === "provider-discovery-canonical-v1");
   if (!canonical || canonical.questionId !== questionId || canonical.locale !== fanout.surface.locale || canonical.region !== fanout.surface.region) {
     throw new PublicSourceAuthorityUnavailableError("Public-source canonical query is unavailable.");
   }

@@ -10,6 +10,7 @@ The deterministic and model-generated report dimensions are deliberately separat
 4. Free jobs deterministically analyze only the homepage without a model planning call. Deep jobs ask the configured OpenAI-compatible model to plan every eligible page on small sites or up to 50 representative pages, then analyze batches and synthesize `AiWebsiteReportV1`.
 5. The engine verifies every formal citation against fetched URL/text evidence. Unsupported findings are discarded.
 6. For deep reports, the Worker captures report-bound visual evidence for verified citations, then persists the final report, metadata and required excerpts before atomically terminalizing the job and its credit. Screenshot failure is non-fatal.
+7. Prospective `combined_geo_report_v2` jobs resolve the first buyer question through provider discovery and candidate verification, persist relevant passages before snapshot completion, validate model-extracted exact-excerpt claims deterministically, and qualify strict suppliers separately from unresolved candidates. The remaining two questions synthesize only directly relevant grounded evidence and may return no claims.
 
 The Worker owns crawling and model calls. Web requests never run deep analysis inline.
 
@@ -61,6 +62,8 @@ PostgreSQL tables:
 - `free_site_trials`, `staging_free_regenerations`, `anonymous_rate_buckets`, `free_ai_daily_budgets`, `free_ai_budget_reservations` — 30-day site reuse, staging-only regeneration reservations, rolling anonymous limiting and an exact global AI budget.
 - `access_keys`, `credit_ledger` — HMAC-only keys and idempotent credit transactions.
 - `report_access_tokens` — HMAC-only private report links.
+- `market_snapshot_questions`, `market_source_evidence`, `market_source_passages`, `market_provider_claims` — immutable public-search snapshots, safely retrieved evidence, selected exact passages and validated provider claims. Candidate-verification snapshots are ancestry-bound to a completed discovery snapshot.
+- `report_artifact_revisions`, `combined_report_payloads` — versioned V1/V2 customer HTML payloads and activation lineage; `evidence_refresh` is protected-staging-only.
 - `payment_orders`, `payment_events`, `payment_refunds` — immutable one-time purchases, verified provider events and cash refunds.
 - `job_dispatch_outbox`, `worker_presence`, `batch_runs` — Queue hints, operational presence and recorded batch drains; none replace job authority.
 - `email_deliveries`, `email_delivery_events` — durable email intents, provider IDs and monotonic delivery state.

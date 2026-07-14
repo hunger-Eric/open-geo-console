@@ -929,6 +929,8 @@ git commit -m "docs: record provider discovery v2 readiness"
 
 ### Task 12: Protected-Staging Acceptance and Production Gate
 
+Local implementation through Task 11 is complete as of 2026-07-14: full deterministic tests, lint, build and diff checks pass. Real PostgreSQL V20 suites are included in the staging-security command but remain conditionally skipped without an isolated admin URL; the available staging database connection timed out during the security suite and read-only audit. Task 12 therefore remains open and production V2 admission remains disabled. Use `docs/operations/provider-discovery-v2-acceptance.md` as the live evidence checklist.
+
 **Files:**
 - Modify after live evidence exists: `docs/operations/provider-discovery-v2-acceptance.md`
 - Modify after live evidence exists: `docs/PROJECT-STATE.md`

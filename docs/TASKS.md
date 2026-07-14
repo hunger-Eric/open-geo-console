@@ -92,6 +92,16 @@
 - [x] Route customer HTML sections and private evidence through the active combined revision; remove customer PDF handlers and return application-level `404` for unauthorized or retired routes.
 - [x] Complete the real protected-staging correction for order `5f999610-17d5-4df9-9aa0-a6cce5e5b741`: three fresh snapshots, 22 source-evidence rows, ten screenshots, a 19-page internal readiness PDF, atomic activation, one delivered correction email, zero new billing/refund effects, and real Chromium acceptance.
 
+## Provider discovery evidence quality V2
+
+- [x] Add generic/logistics policy selection, two-stage bounded query plans, relevant-passage selection, exact-excerpt claim extraction, deterministic Tier A/B qualification, and candidate rejection reasons.
+- [x] Add schema v20 snapshot ancestry plus append-only provider passage/claim persistence, and include its disposable PostgreSQL suites in `test:postgres:staging-security`.
+- [x] Integrate prospective `combined_geo_report_v2` jobs, four snapshot refs, recoverable checkpoints, artifact revision/access/email dispatch, staging `evidence_refresh`, canonical customer HTML, and private same-HTML PDF readiness.
+- [x] Render Q1 strict suppliers and candidates separately; render Q2/Q3 only from directly relevant source evidence; expose exact excerpts and honest query/retrieval metrics without internal IDs.
+- [x] Pass the full deterministic suite (`165` files passed, `17` skipped; `988` tests passed, `38` skipped), lint, production build, focused provider tests, and `git diff --check` on 2026-07-14.
+- [ ] Restore staging PostgreSQL responsiveness and configure isolated `OGC_TEST_DATABASE_ADMIN_URL`; rerun the full staging security suite and `db:audit` to obtain authoritative database evidence.
+- [ ] Deploy and opt in only protected staging, then complete the live paid logistics, empty-strict-list, recovery, browser/access and private-readiness acceptance in `docs/operations/provider-discovery-v2-acceptance.md`. Keep production on V1 until explicit authorization.
+
 ## Public-source recommendation forensics V2 (provider-independent adapter framework; live admission blocked)
 
 - [x] Approve `public_search_source_forensics_v1`, its non-model-attribution boundary, canonical buyer questions, shared market snapshots, customer isolation, freshness, evidence and commercial rules.
