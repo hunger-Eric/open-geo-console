@@ -74,12 +74,57 @@ describe("report language contract", () => {
     ).toThrow(ReportLanguageValidationError);
   });
 
+  it.each([
+    "这是结论。(https://example.com)UPDATE",
+    "这是结论。https://example.com;UPDATE"
+  ])("stops URL sanitization at ASCII delimiters: %s", (text) => {
+    expect(() => assertReportLanguage([{ path: "overview", text }], "zh-CN"))
+      .toThrow(ReportLanguageValidationError);
+  });
+
   it("allows a URL without adjacent English prose", () => {
     expect(() =>
       assertReportLanguage(
-        [{ path: "overview", text: "这是结论。https://example.com/docs/getting-started。" }],
+        [{
+          path: "overview",
+          text: "这是结论。https://example.com/docs/getting-started?lang=zh&view=full。"
+        }],
         "zh-CN"
       )
+    ).not.toThrow();
+  });
+
+  it("allows bounded deterministic report identifiers", () => {
+    const identifiers = [
+      "robots.txt",
+      "llms.txt",
+      "sitemap.xml",
+      "hreflang",
+      "canonical",
+      "X-Robots-Tag",
+      "Content-Type",
+      "example.com",
+      "www.example.com"
+    ];
+    expect(() =>
+      assertReportLanguage(
+        identifiers.map((identifier, index) => ({
+          path: `identifiers[${index}]`,
+          text: `建议检查 ${identifier} 配置。`
+        })),
+        "zh-CN"
+      )
+    ).not.toThrow();
+  });
+
+  it("requires explicit allowed terms for proper names", () => {
+    const fields = [
+      { path: "provider", text: "建议检查 Cloudflare 配置。" },
+      { path: "tool", text: "建议检查 Bing Webmaster Tools 配置。" }
+    ];
+    expect(() => assertReportLanguage(fields, "zh-CN")).toThrow(ReportLanguageValidationError);
+    expect(() =>
+      assertReportLanguage(fields, "zh-CN", ["Cloudflare", "Bing Webmaster Tools"])
     ).not.toThrow();
   });
 

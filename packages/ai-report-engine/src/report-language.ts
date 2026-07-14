@@ -33,11 +33,13 @@ const MAX_VIOLATION_PATH_LENGTH = 120;
 const SAFE_FIELD_PATH = /^[A-Za-z][A-Za-z0-9_]*(?:\[\d+\]|\.[A-Za-z][A-Za-z0-9_]*)*$/;
 const TECHNICAL_TERMS = new Set([
   "api",
+  "canonical",
   "cli",
   "css",
   "faqpage",
   "geo",
   "graphql",
+  "hreflang",
   "html",
   "http",
   "https",
@@ -53,6 +55,8 @@ const TECHNICAL_TERMS = new Set([
   "typescript",
   "xml"
 ]);
+const TECHNICAL_HEADERS = new Set(["content-type", "x-robots-tag"]);
+const DOTTED_FILE_EXTENSIONS = new Set(["css", "html", "js", "json", "md", "txt", "xml"]);
 
 export function normalizeReportLanguage(locale: string): NormalizedReportLanguage {
   const language = locale.trim().toLowerCase().split(/[-_]/, 1)[0];
@@ -95,10 +99,23 @@ function containsOrdinaryEnglishWord(value: string): boolean {
 }
 
 function isTechnicalToken(value: string): boolean {
-  if (TECHNICAL_TERMS.has(value.toLowerCase())) return true;
+  const normalized = value.toLowerCase();
+  if (TECHNICAL_TERMS.has(normalized) || TECHNICAL_HEADERS.has(normalized)) return true;
+  if (isSafeDottedFilename(value) || isSafeDomain(value)) return true;
   if (/^[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*$/.test(value)) return true;
   if (/^[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*$/.test(value)) return true;
   return /\d|_|\//.test(value);
+}
+
+function isSafeDottedFilename(value: string): boolean {
+  if (value.length > 128) return false;
+  const match = /^([A-Za-z0-9][A-Za-z0-9_-]{0,63})\.([A-Za-z0-9]+)$/.exec(value);
+  return match !== null && DOTTED_FILE_EXTENSIONS.has(match[2]?.toLowerCase() ?? "");
+}
+
+function isSafeDomain(value: string): boolean {
+  if (value.length > 253) return false;
+  return /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/.test(value);
 }
 
 function sanitizeViolationPath(value: string, index: number): string {
@@ -108,7 +125,7 @@ function sanitizeViolationPath(value: string, index: number): string {
 
 function sanitize(value: string, allowedTerms: readonly string[]): string {
   let result = value
-    .replace(/https?:\/\/[^\s。！？；，、）】》"'<>]+/gi, " ")
+    .replace(/https?:\/\/[^\s。！？；，、）】》)\]};,!"'<>]+/gi, " ")
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, " ")
     .replace(/`[^`]*`/g, " ");
 
