@@ -14,3 +14,5 @@ export * from "./combined-geo-report";
 export * from "./combined-business-question-answers";
 export * from "./report-language";
 export * from "./provider-claim-extraction";
+export * from "./grounded-business-answers-v2";
+export * from "./combined-geo-report-v2";
