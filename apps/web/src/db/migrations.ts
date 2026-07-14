@@ -35,7 +35,7 @@ export const V9_DATABASE_MIGRATIONS = [
       CONSTRAINT scan_jobs_product_contract_check
       CHECK (product_contract IN ('legacy_website_audit_v1','recommendation_forensics_v1')),
     locale text NOT NULL CONSTRAINT scan_jobs_locale_check CHECK (locale IN ('en','zh')),
-    reason text NOT NULL DEFAULT 'standard' CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration')),
+    reason text NOT NULL DEFAULT 'standard' CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration','paid_report_correction','staging_artifact_refresh')),
     stage text NOT NULL DEFAULT 'queued' CONSTRAINT scan_jobs_stage_check CHECK (stage IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')),
     progress integer NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
     checkpoint jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -104,7 +104,7 @@ export const V9_DATABASE_MIGRATIONS = [
   `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_locale_check CHECK (locale IN ('en','zh'))`,
   `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_reason_check`,
   `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_reason_check
-   CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration'))`,
+   CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration','paid_report_correction','staging_artifact_refresh'))`,
   `CREATE TABLE IF NOT EXISTS crawl_evidence (
     id text PRIMARY KEY,
     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
@@ -214,7 +214,7 @@ export const V9_DATABASE_MIGRATIONS = [
   `ALTER TABLE report_access_tokens ADD COLUMN IF NOT EXISTS artifact_scope text NOT NULL DEFAULT 'legacy_website_audit_v1'`,
   `ALTER TABLE report_access_tokens DROP CONSTRAINT IF EXISTS report_access_tokens_artifact_scope_check`,
   `ALTER TABLE report_access_tokens ADD CONSTRAINT report_access_tokens_artifact_scope_check
-   CHECK (artifact_scope IN ('legacy_website_audit_v1','recommendation_forensics_v1'))`,
+   CHECK (artifact_scope IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1'))`,
   `CREATE INDEX IF NOT EXISTS report_access_tokens_report_scope_idx ON report_access_tokens (report_id, artifact_scope)`,
   `CREATE TABLE IF NOT EXISTS payment_orders (
     id text PRIMARY KEY,
@@ -1593,7 +1593,7 @@ export const V18_DATABASE_MIGRATIONS = [
   `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS correction_id text`,
   `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS business_question_set_id text`,
   `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_reason_check`,
-  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration','paid_report_correction'))`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration','paid_report_correction','staging_artifact_refresh'))`,
   `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_artifact_contract_check`,
   `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_artifact_contract_check CHECK (artifact_contract IS NULL OR artifact_contract IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1'))`,
   `ALTER TABLE report_access_tokens DROP CONSTRAINT IF EXISTS report_access_tokens_artifact_scope_check`,
