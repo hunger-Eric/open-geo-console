@@ -79,6 +79,7 @@
 - [x] Verify private asset authorization, screenshot fallback states, desktop/mobile HTML browser QA, and internal PDF readiness.
 - [x] Configure Preview-only private staging object storage and visually verify a fresh paid deep report's evidence images, authorized HTML reads, private internal PDF storage, and anonymous object-store denial.
 - [x] Enforce immutable new-report locale through model prompts, one bounded correction, a prospective final gate, localized system copy, and `repair_wait` on exhausted validation.
+- [x] Localize deterministic technical finding titles, descriptions, recommendations, and machine-readable asset summaries when materializing new combined revisions; preserve and label source-original page titles, H1 values, and URLs without rewriting historical artifacts.
 
 ## Combined paid report and one-time correction
 

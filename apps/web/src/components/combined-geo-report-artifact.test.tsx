@@ -71,6 +71,40 @@ describe("CombinedGeoReportArtifact", () => {
     expect(visibleText).toContain("证据不足");
     expect(visibleText).not.toMatch(/>info<|>insufficient</);
   });
+
+  it("renders localized deterministic findings and labels source-original page values", () => {
+    const model = combinedArtifactFixture();
+    model.locale = "zh";
+    model.combinedReport.technicalFoundation.technicalReport.findings = [{
+      id: "page.h1Structure",
+      severity: "warning",
+      title: "H1 结构需要调整",
+      description: "预期只有一个 H1，实际发现 0 个。",
+      recommendation: "每个页面使用一个描述清晰的 H1，并将 H2 用于章节结构。"
+    }];
+    model.combinedReport.technicalFoundation.technicalReport.pages = [{
+      url: "https://example.com/",
+      status: 200,
+      title: "Original English Page Title",
+      metaDescription: "Original source description",
+      h1: ["Original English H1"],
+      h2: [],
+      canonical: "https://example.com/",
+      hasOpenGraph: true,
+      hasJsonLd: true,
+      readableTextLength: 1000,
+      internalLinks: 3
+    }];
+
+    const html = renderToStaticMarkup(createElement(CombinedGeoReportArtifact, { model }));
+
+    expect(html).toContain("H1 结构需要调整");
+    expect(html).toContain("预期只有一个 H1，实际发现 0 个。");
+    expect(html).toContain("页面标题、H1 和 URL 为来源原文");
+    expect(html).toContain("Original English Page Title");
+    expect(html).toContain("Original English H1");
+    expect(html).not.toContain("H1 structure needs attention");
+  });
 });
 
 export function combinedArtifactFixture(): CombinedPrivateReportArtifactModel {
