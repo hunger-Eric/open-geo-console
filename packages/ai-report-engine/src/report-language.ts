@@ -53,38 +53,6 @@ const TECHNICAL_TERMS = new Set([
   "typescript",
   "xml"
 ]);
-const ORDINARY_ENGLISH_VERBS = new Set([
-  "add",
-  "change",
-  "create",
-  "fix",
-  "improve",
-  "include",
-  "make",
-  "need",
-  "needs",
-  "remove",
-  "replace",
-  "should",
-  "update",
-  "use"
-]);
-const ORDINARY_ENGLISH_FUNCTION_WORDS = new Set([
-  "a",
-  "all",
-  "an",
-  "and",
-  "for",
-  "from",
-  "in",
-  "is",
-  "of",
-  "on",
-  "the",
-  "this",
-  "to",
-  "with"
-]);
 
 export function normalizeReportLanguage(locale: string): NormalizedReportLanguage {
   const language = locale.trim().toLowerCase().split(/[-_]/, 1)[0];
@@ -110,7 +78,7 @@ export function assertReportLanguage(
     if ((field.kind ?? "prose") !== "prose") continue;
 
     const candidate = sanitize(field.text, allowedTerms);
-    if (language === "zh" && containsOrdinaryEnglishClause(candidate)) {
+    if (language === "zh" && containsOrdinaryEnglishWord(candidate)) {
       violations.push({ path: field.path, reason: "unexpected_english_sentence" });
     }
     if (language === "en" && /[\u3400-\u9fff]{2,}/u.test(candidate)) {
@@ -121,30 +89,15 @@ export function assertReportLanguage(
   if (violations.length) throw new ReportLanguageValidationError(violations);
 }
 
-function containsOrdinaryEnglishClause(value: string): boolean {
-  return value.split(/[.!?。！？;；\r\n]+/u).some((fragment) => {
-    const words = fragment.match(/[A-Za-z][A-Za-z0-9]*(?:[-_./][A-Za-z0-9]+)*/g) ?? [];
-    const proseWords = words.filter((word) => !isTechnicalToken(word));
-    if (proseWords.length < 2) return false;
-
-    const normalized = proseWords.map((word) => word.toLowerCase());
-    const looksLikeProperName = proseWords.every((word) => /^[A-Z][a-z]+$/.test(word));
-    if (looksLikeProperName) return false;
-
-    const hasVerb = normalized.some((word) =>
-      ORDINARY_ENGLISH_VERBS.has(word) || /(?:ed|ing)$/.test(word)
-    );
-    if (hasVerb) return true;
-
-    const hasFunctionWord = normalized.some((word) => ORDINARY_ENGLISH_FUNCTION_WORDS.has(word));
-    return proseWords.length >= 4 && hasFunctionWord;
-  });
+function containsOrdinaryEnglishWord(value: string): boolean {
+  const words = value.match(/[A-Za-z][A-Za-z0-9]*(?:[-_./][A-Za-z0-9]+)*/g) ?? [];
+  return words.some((word) => !isTechnicalToken(word));
 }
 
 function isTechnicalToken(value: string): boolean {
   if (TECHNICAL_TERMS.has(value.toLowerCase())) return true;
-  if (/^[A-Z][A-Z0-9._/-]*$/.test(value)) return true;
-  if (/^[A-Za-z]+[A-Z][A-Za-z0-9]*$/.test(value)) return true;
+  if (/^[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*$/.test(value)) return true;
+  if (/^[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*$/.test(value)) return true;
   return /\d|_|\//.test(value);
 }
 
@@ -155,7 +108,7 @@ function sanitizeViolationPath(value: string, index: number): string {
 
 function sanitize(value: string, allowedTerms: readonly string[]): string {
   let result = value
-    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/https?:\/\/[^\s。！？；，、）】》"'<>]+/gi, " ")
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, " ")
     .replace(/`[^`]*`/g, " ");
 

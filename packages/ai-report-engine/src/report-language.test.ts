@@ -35,13 +35,23 @@ describe("report language contract", () => {
   it.each([
     "这是结论。Update the website now.",
     "这是结论。The site needs work.",
-    "这是结论。Fix metadata. Improve content."
+    "这是结论。Fix metadata. Improve content.",
+    "Executive Summary",
+    "Key Findings",
+    "Recommended Next Steps",
+    "Improve Content Quality",
+    "Content is weak.",
+    "Customers cannot find us.",
+    "We recommend clearer answers.",
+    "Rewrite weak content now.",
+    "EXECUTIVE SUMMARY",
+    "UPDATE"
   ])("rejects short ordinary English clauses in Chinese prose: %s", (text) => {
     expect(() => assertReportLanguage([{ path: "overview", text }], "zh-CN"))
       .toThrow(ReportLanguageValidationError);
   });
 
-  it("allows deterministic technical tokens without caller-provided terms", () => {
+  it("allows deterministic technical tokens and caller-provided proper names", () => {
     expect(() =>
       assertReportLanguage(
         [
@@ -49,6 +59,25 @@ describe("report language contract", () => {
           { path: "reference", text: "建议查看 Google Search Console。" },
           { path: "organization", text: "建议关注 Acme Building Group。" }
         ],
+        "zh-CN",
+        ["Google Search Console", "Acme Building Group"]
+      )
+    ).not.toThrow();
+  });
+
+  it("does not let an adjacent URL swallow later English prose", () => {
+    expect(() =>
+      assertReportLanguage(
+        [{ path: "overview", text: "这是结论。https://example.com。Update the page now." }],
+        "zh-CN"
+      )
+    ).toThrow(ReportLanguageValidationError);
+  });
+
+  it("allows a URL without adjacent English prose", () => {
+    expect(() =>
+      assertReportLanguage(
+        [{ path: "overview", text: "这是结论。https://example.com/docs/getting-started。" }],
         "zh-CN"
       )
     ).not.toThrow();
