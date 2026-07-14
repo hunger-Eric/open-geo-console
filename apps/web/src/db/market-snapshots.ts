@@ -50,10 +50,15 @@ const PUBLIC_METADATA_KEYS = new Set([
   "registrabledomain", "language", "locale", "region", "mimetype", "publishedat", "updatedat", "retrievedat", "rank",
   "resulttype", "sourcekind", "inputtokens", "outputtokens", "totaltokens", "searchrequests", "currency", "costmicros",
   "billedunits", "requestunits", "cachehits", "billing", "unit", "count", "requestcount", "resultcount",
-  "estimatedcostmicros", "providerreportedcostmicros", "costuncertain"
+  "estimatedcostmicros", "providerreportedcostmicros", "costuncertain",
+  "snapshotkind", "parentsnapshotid", "candidatesethash", "queryplanversion", "selectorversion",
+  "policyid", "policyversion", "passageid", "claimid", "capability", "operatingmode", "servicescope", "routescope",
+  "validationstatus", "rejectionreason", "extractionmodel", "extractioncontract", "relevancescore"
 ]);
 
 export interface LeaseToken { cacheIdentity: string; leaseOwner: string; attemptNumber: number }
+export type SnapshotLeaseToken = LeaseToken;
+export type MarketSnapshotKind = "standard_question" | "provider_discovery" | "candidate_verification";
 export type LeaseClaim = { acquired: true; takeover: boolean; token: LeaseToken; expiresAt: Date } |
   { acquired: false; state: "held" | "completed"; lease: MarketSnapshotLeaseRow };
 
@@ -178,6 +183,7 @@ export async function heartbeatMarketSnapshotLease(input: { token: LeaseToken; l
 
 export async function createMarketSnapshotRefresh(input: {
   identity: MarketSnapshotIdentity; authorityVersion: string; leaseOwner?: string; token?: LeaseToken; questionHash: string;
+  snapshotKind?: MarketSnapshotKind; parentSnapshotId?: string | null; candidateSetHash?: string | null; queryPlanVersion?: string;
 }): Promise<MarketSnapshotQuestionRow> {
   const identity = exactIdentity(input.identity);
   const tokenInput = input.token ?? await legacyToken(identity.id, input.leaseOwner);
@@ -185,11 +191,13 @@ export async function createMarketSnapshotRefresh(input: {
   if (expected.cacheIdentity !== identity.id) throw new Error("Lease and snapshot cache identities do not match.");
   const authorityVersion = bounded(input.authorityVersion, "authorityVersion", 256);
   const questionHash = hashText(input.questionHash, "questionHash");
+  const snapshotMetadata = parseSnapshotMetadata(input);
   if (isMemoryPersistence()) {
     requireMemoryLease(expected);
     assertMemoryAuthority(identity, authorityVersion);
+    assertMemorySnapshotAncestry(snapshotMetadata);
     const completionVersion = Math.max(0, ...memoryListMarketSnapshotQuestions().filter((row) => row.cacheIdentity === identity.id).map((row) => row.completionVersion)) + 1;
-    const row = snapshotRow(identity, authorityVersion, questionHash, completionVersion);
+    const row = snapshotRow(identity, authorityVersion, questionHash, completionVersion, snapshotMetadata);
     memorySaveMarketSnapshotQuestion(row);
     return clone(row);
   }
@@ -200,12 +208,14 @@ export async function createMarketSnapshotRefresh(input: {
     const versions = await tx<Array<{ version: number }>>`
       SELECT COALESCE(MAX(completion_version),0)+1 AS version FROM market_snapshot_questions WHERE cache_identity=${identity.id}
     `;
-    const row = snapshotRow(identity, authorityVersion, questionHash, Number(versions[0]?.version ?? 1));
+    const row = snapshotRow(identity, authorityVersion, questionHash, Number(versions[0]?.version ?? 1), snapshotMetadata);
     await tx`INSERT INTO market_snapshot_questions (
       id, cache_identity, normalized_question, question_hash, locale, region,
-      surface_authority_version, surface_id, surface_version, fanout_version, status, completion_version
+      surface_authority_version, surface_id, surface_version, fanout_version, snapshot_kind, parent_snapshot_id,
+      candidate_set_hash, query_plan_version, status, completion_version
     ) VALUES (${row.id},${row.cacheIdentity},${row.normalizedQuestion},${row.questionHash},${row.locale},${row.region},
-      ${row.surfaceAuthorityVersion},${row.surfaceId},${row.surfaceVersion},${row.fanoutVersion},'refreshing',${row.completionVersion})`;
+      ${row.surfaceAuthorityVersion},${row.surfaceId},${row.surfaceVersion},${row.fanoutVersion},${row.snapshotKind},
+      ${row.parentSnapshotId},${row.candidateSetHash},${row.queryPlanVersion},'refreshing',${row.completionVersion})`;
     return row;
   });
 }
@@ -665,8 +675,31 @@ function exactIdentity(value: MarketSnapshotIdentity): MarketSnapshotIdentity {
   assertNoPrivateIdentity(parsed.normalizedQuestion);
   return parsed;
 }
-function snapshotRow(identity: MarketSnapshotIdentity, authorityVersion: string, questionHash: string, completionVersion: number): MarketSnapshotQuestionRow {
-  return { id: deterministicId("snapshot", [identity.id, String(completionVersion)]), cacheIdentity: identity.id, normalizedQuestion: identity.normalizedQuestion, questionHash, locale: identity.locale, region: identity.region, surfaceAuthorityVersion: authorityVersion, surfaceId: identity.surfaceId, surfaceVersion: identity.surfaceVersion, fanoutVersion: identity.fanoutVersion, status: "refreshing", completionVersion, queryFanoutHash: null, completedAt: null, createdAt: new Date() };
+interface ParsedSnapshotMetadata {
+  snapshotKind: MarketSnapshotKind;
+  parentSnapshotId: string | null;
+  candidateSetHash: string | null;
+  queryPlanVersion: string;
+}
+function parseSnapshotMetadata(input: {
+  snapshotKind?: MarketSnapshotKind; parentSnapshotId?: string | null; candidateSetHash?: string | null; queryPlanVersion?: string;
+}): ParsedSnapshotMetadata {
+  const snapshotKind = input.snapshotKind ?? "standard_question";
+  if (!["standard_question", "provider_discovery", "candidate_verification"].includes(snapshotKind)) throw new TypeError("Unsupported market snapshot kind.");
+  const parentSnapshotId = input.parentSnapshotId == null ? null : bounded(input.parentSnapshotId, "parentSnapshotId", 256);
+  const candidateSetHash = input.candidateSetHash == null ? null : hashText(input.candidateSetHash, "candidateSetHash");
+  const queryPlanVersion = bounded(input.queryPlanVersion ?? "legacy-standard-v1", "queryPlanVersion", 128);
+  const verification = snapshotKind === "candidate_verification";
+  if (verification !== (parentSnapshotId !== null && candidateSetHash !== null)) throw new TypeError("Candidate verification requires exact parent snapshot and candidate-set identities.");
+  return { snapshotKind, parentSnapshotId, candidateSetHash, queryPlanVersion };
+}
+function assertMemorySnapshotAncestry(metadata: ParsedSnapshotMetadata): void {
+  if (metadata.snapshotKind !== "candidate_verification") return;
+  const parent = memoryGetMarketSnapshotQuestion(metadata.parentSnapshotId!);
+  if (!parent || parent.snapshotKind !== "provider_discovery" || parent.status !== "completed") throw new Error("Candidate verification requires a completed provider-discovery parent snapshot.");
+}
+function snapshotRow(identity: MarketSnapshotIdentity, authorityVersion: string, questionHash: string, completionVersion: number, metadata: ParsedSnapshotMetadata): MarketSnapshotQuestionRow {
+  return { id: deterministicId("snapshot", [identity.id, String(completionVersion)]), cacheIdentity: identity.id, normalizedQuestion: identity.normalizedQuestion, questionHash, locale: identity.locale, region: identity.region, surfaceAuthorityVersion: authorityVersion, surfaceId: identity.surfaceId, surfaceVersion: identity.surfaceVersion, fanoutVersion: identity.fanoutVersion, snapshotKind: metadata.snapshotKind, parentSnapshotId: metadata.parentSnapshotId, candidateSetHash: metadata.candidateSetHash, queryPlanVersion: metadata.queryPlanVersion, status: "refreshing", completionVersion, queryFanoutHash: null, completedAt: null, createdAt: new Date() };
 }
 function leaseRow(cacheIdentity: string, leaseOwner: string, attemptNumber: number, now: Date, duration: number): MarketSnapshotLeaseRow { return { cacheIdentity, leaseOwner, state: "active", acquiredAt: now, heartbeatAt: now, expiresAt: new Date(now.getTime() + duration), attemptNumber, terminalSnapshotId: null, updatedAt: now }; }
 function attemptRow(snapshot: MarketSnapshotQuestionRow, queryId: string, attemptNumber: number, idempotencyReference: string, configuredCostMicros: number): MarketSearchAttemptRow { const now = new Date(); return { id: deterministicId("search-attempt", [snapshot.id, String(attemptNumber), idempotencyReference]), snapshotId: snapshot.id, queryId, authorityVersion: snapshot.surfaceAuthorityVersion, attemptNumber, requestStatus: "pending", idempotencyReference, usage: {}, configuredCostMicros, providerCostMicros: null, costUncertain: false, sanitizedError: null, startedAt: now, completedAt: null, createdAt: now }; }
@@ -704,7 +737,7 @@ function sha(value: string): string { return createHash("sha256").update(value).
 function delay(ms: number, signal?: AbortSignal): Promise<void> { return new Promise((resolve) => { const finish = () => { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); resolve(); }; const onAbort = () => finish(); const timer = setTimeout(finish, Math.max(0, ms)); signal?.addEventListener("abort", onAbort, { once: true }); }); }
 function clone<T>(value: T): T { return structuredClone(value); }
 
-function dbSnapshot(row: Record<string, unknown>): MarketSnapshotQuestionRow { return { id: String(row.id), cacheIdentity: String(row.cache_identity), normalizedQuestion: String(row.normalized_question), questionHash: String(row.question_hash), locale: String(row.locale), region: String(row.region), surfaceAuthorityVersion: String(row.surface_authority_version), surfaceId: String(row.surface_id), surfaceVersion: String(row.surface_version), fanoutVersion: String(row.fanout_version), status: String(row.status), completionVersion: Number(row.completion_version), queryFanoutHash: row.query_fanout_hash == null ? null : String(row.query_fanout_hash), completedAt: row.completed_at == null ? null : new Date(row.completed_at as string | Date), createdAt: new Date(row.created_at as string | Date) }; }
+function dbSnapshot(row: Record<string, unknown>): MarketSnapshotQuestionRow { return { id: String(row.id), cacheIdentity: String(row.cache_identity), normalizedQuestion: String(row.normalized_question), questionHash: String(row.question_hash), locale: String(row.locale), region: String(row.region), surfaceAuthorityVersion: String(row.surface_authority_version), surfaceId: String(row.surface_id), surfaceVersion: String(row.surface_version), fanoutVersion: String(row.fanout_version), snapshotKind: String(row.snapshot_kind ?? "standard_question"), parentSnapshotId: row.parent_snapshot_id == null ? null : String(row.parent_snapshot_id), candidateSetHash: row.candidate_set_hash == null ? null : String(row.candidate_set_hash), queryPlanVersion: String(row.query_plan_version ?? "legacy-standard-v1"), status: String(row.status), completionVersion: Number(row.completion_version), queryFanoutHash: row.query_fanout_hash == null ? null : String(row.query_fanout_hash), completedAt: row.completed_at == null ? null : new Date(row.completed_at as string | Date), createdAt: new Date(row.created_at as string | Date) }; }
 function dbQuery(row: Record<string, unknown>): MarketSnapshotQueryRow { return { id: String(row.id), snapshotId: String(row.snapshot_id), queryOrder: Number(row.query_order), queryText: String(row.query_text), queryHash: String(row.query_hash), derivationRule: String(row.derivation_rule), createdAt: new Date(row.created_at as string | Date) }; }
 function dbAttempt(row: Record<string, unknown>): MarketSearchAttemptRow { return { id: String(row.id), snapshotId: String(row.snapshot_id), queryId: String(row.query_id), authorityVersion: String(row.authority_version), attemptNumber: Number(row.attempt_number), requestStatus: String(row.request_status), idempotencyReference: String(row.idempotency_reference), usage: row.usage, configuredCostMicros: Number(row.configured_cost_micros), providerCostMicros: row.provider_cost_micros == null ? null : Number(row.provider_cost_micros), costUncertain: Boolean(row.cost_uncertain), sanitizedError: row.sanitized_error == null ? null : String(row.sanitized_error), startedAt: new Date(row.started_at as string | Date), completedAt: row.completed_at == null ? null : new Date(row.completed_at as string | Date), createdAt: new Date(row.created_at as string | Date) }; }
 function dbObservation(row: Record<string, unknown>): MarketSearchObservationRow { return { id: String(row.id), snapshotId: String(row.snapshot_id), queryId: String(row.query_id), attemptId: String(row.attempt_id), surfaceResultOrder: Number(row.surface_result_order), resultUrl: String(row.result_url), canonicalUrl: String(row.canonical_url), title: String(row.title), snippet: row.snippet == null ? null : String(row.snippet), resultStatus: String(row.result_status), resultMetadata: row.result_metadata, contentHash: String(row.content_hash), observedAt: new Date(row.observed_at as string | Date), createdAt: new Date(row.created_at as string | Date) }; }

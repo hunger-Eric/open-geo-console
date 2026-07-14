@@ -17,8 +17,8 @@ describeDisposablePostgres("schema v19 staging presentation refresh",()=>{
     const sql=postgres(withDatabase(adminUrl!,databaseName),{max:1,prepare:false});
     try{
       await sql.begin(async(tx)=>{for(const statement of DATABASE_MIGRATIONS)await tx.unsafe(statement);});
-      expect(DATABASE_SCHEMA_VERSION).toBe(19);
-      expect(DATABASE_MIGRATIONS.slice(-V19_DATABASE_MIGRATIONS.length)).toEqual(V19_DATABASE_MIGRATIONS);
+      expect(DATABASE_SCHEMA_VERSION).toBe(20);
+      expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining([...V19_DATABASE_MIGRATIONS]));
       await sql`INSERT INTO scan_reports(id,url,payload,report_locale) VALUES('report','https://example.com','{}','en')`;
       await sql`INSERT INTO scan_jobs(id,report_id,tier,product_contract,locale,fulfillment_methodology,recommendation_report_version)
         VALUES('original','report','deep','recommendation_forensics_v1','en','public_search_source_forensics_v1',2)`;

@@ -58,7 +58,7 @@ describe("database deployment marker", () => {
 
 describe("database schema marker", () => {
   it("uses the recoverable analysis-ledger schema with cascade-safe event cleanup", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(19);
+    expect(DATABASE_SCHEMA_VERSION).toBe(20);
   });
 
   it("contains the complete additive V2 authority and methodology migration", () => {
@@ -74,6 +74,8 @@ describe("database schema marker", () => {
       "market_search_attempts",
       "market_search_observations",
       "market_source_evidence",
+      "market_source_passages",
+      "market_provider_claims",
       "market_snapshot_leases",
       "report_market_snapshot_refs",
       "report_source_forensics"
@@ -91,6 +93,8 @@ describe("database schema marker", () => {
     expect(sql).toContain("context.transaction_id = txid_current()");
     expect(sql).toContain("ogc_reject_private_identity_in_shared_market_data");
     expect(sql).toContain("combined_geo_report_v1");
+    expect(sql).toContain("candidate_verification");
+    expect(sql).toContain("query_plan_version");
   });
 
   it("adds an append-only recovery ledger without replacing the legacy stage projection", () => {

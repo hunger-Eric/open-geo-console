@@ -1791,6 +1791,111 @@ export const V19_DATABASE_MIGRATIONS = [
    )`
 ] as const;
 
+export const V20_DATABASE_MIGRATIONS = [
+  `ALTER TABLE market_snapshot_questions ADD COLUMN IF NOT EXISTS snapshot_kind text NOT NULL DEFAULT 'standard_question'`,
+  `ALTER TABLE market_snapshot_questions ADD COLUMN IF NOT EXISTS parent_snapshot_id text`,
+  `ALTER TABLE market_snapshot_questions ADD COLUMN IF NOT EXISTS candidate_set_hash text`,
+  `ALTER TABLE market_snapshot_questions ADD COLUMN IF NOT EXISTS query_plan_version text NOT NULL DEFAULT 'legacy-standard-v1'`,
+  `ALTER TABLE market_snapshot_questions DROP CONSTRAINT IF EXISTS market_snapshot_questions_parent_fkey`,
+  `ALTER TABLE market_snapshot_questions ADD CONSTRAINT market_snapshot_questions_parent_fkey FOREIGN KEY(parent_snapshot_id) REFERENCES market_snapshot_questions(id) ON DELETE RESTRICT`,
+  `ALTER TABLE market_snapshot_questions DROP CONSTRAINT IF EXISTS market_snapshot_questions_kind_check`,
+  `ALTER TABLE market_snapshot_questions ADD CONSTRAINT market_snapshot_questions_kind_check CHECK (snapshot_kind IN ('standard_question','provider_discovery','candidate_verification'))`,
+  `ALTER TABLE market_snapshot_questions DROP CONSTRAINT IF EXISTS market_snapshot_questions_query_plan_check`,
+  `ALTER TABLE market_snapshot_questions ADD CONSTRAINT market_snapshot_questions_query_plan_check CHECK (length(btrim(query_plan_version)) > 0)`,
+  `ALTER TABLE market_snapshot_questions DROP CONSTRAINT IF EXISTS market_snapshot_questions_ancestry_shape_check`,
+  `ALTER TABLE market_snapshot_questions ADD CONSTRAINT market_snapshot_questions_ancestry_shape_check CHECK (
+     (snapshot_kind IN ('standard_question','provider_discovery') AND parent_snapshot_id IS NULL AND candidate_set_hash IS NULL)
+     OR (snapshot_kind='candidate_verification' AND parent_snapshot_id IS NOT NULL AND candidate_set_hash ~ '^[a-f0-9]{64}$')
+   )`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_provider_snapshot_ancestry() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE parent_kind text; parent_status text;
+   BEGIN
+     IF NEW.snapshot_kind <> 'candidate_verification' THEN RETURN NEW; END IF;
+     SELECT snapshot_kind,status INTO parent_kind,parent_status FROM market_snapshot_questions WHERE id=NEW.parent_snapshot_id;
+     IF parent_kind IS DISTINCT FROM 'provider_discovery' OR parent_status IS DISTINCT FROM 'completed' THEN
+       RAISE EXCEPTION 'Candidate verification requires a completed provider-discovery parent snapshot.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_snapshot_questions_provider_ancestry_trigger ON market_snapshot_questions`,
+  `CREATE TRIGGER market_snapshot_questions_provider_ancestry_trigger BEFORE INSERT OR UPDATE OF snapshot_kind,parent_snapshot_id,candidate_set_hash ON market_snapshot_questions FOR EACH ROW EXECUTE FUNCTION ogc_validate_provider_snapshot_ancestry()`,
+  `CREATE TABLE IF NOT EXISTS market_source_passages (
+     id text PRIMARY KEY,
+     source_evidence_id text NOT NULL REFERENCES market_source_evidence(id) ON DELETE RESTRICT,
+     passage_order integer NOT NULL,
+     exact_excerpt text NOT NULL,
+     excerpt_hash text NOT NULL,
+     relevance_score integer NOT NULL,
+     matched_entity_terms jsonb NOT NULL DEFAULT '[]'::jsonb,
+     matched_service_terms jsonb NOT NULL DEFAULT '[]'::jsonb,
+     matched_control_terms jsonb NOT NULL DEFAULT '[]'::jsonb,
+     matched_capability_terms jsonb NOT NULL DEFAULT '[]'::jsonb,
+     selector_version text NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT market_source_passages_source_order_key UNIQUE(source_evidence_id,passage_order),
+     CONSTRAINT market_source_passages_source_hash_key UNIQUE(source_evidence_id,excerpt_hash),
+     CONSTRAINT market_source_passages_order_check CHECK(passage_order >= 0),
+     CONSTRAINT market_source_passages_excerpt_check CHECK(char_length(btrim(exact_excerpt)) BETWEEN 1 AND 1200),
+     CONSTRAINT market_source_passages_hash_check CHECK(excerpt_hash ~ '^[a-f0-9]{64}$'),
+     CONSTRAINT market_source_passages_score_check CHECK(relevance_score BETWEEN 0 AND 100),
+     CONSTRAINT market_source_passages_selector_check CHECK(length(btrim(selector_version)) > 0),
+     CONSTRAINT market_source_passages_entity_privacy_check CHECK(ogc_public_jsonb_metadata_valid(matched_entity_terms)),
+     CONSTRAINT market_source_passages_service_privacy_check CHECK(ogc_public_jsonb_metadata_valid(matched_service_terms)),
+     CONSTRAINT market_source_passages_control_privacy_check CHECK(ogc_public_jsonb_metadata_valid(matched_control_terms)),
+     CONSTRAINT market_source_passages_capability_privacy_check CHECK(ogc_public_jsonb_metadata_valid(matched_capability_terms))
+   )`,
+  `CREATE INDEX IF NOT EXISTS market_source_passages_source_score_idx ON market_source_passages(source_evidence_id,relevance_score DESC)`,
+  `CREATE OR REPLACE FUNCTION ogc_limit_market_source_passages() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     PERFORM pg_advisory_xact_lock(hashtextextended(NEW.source_evidence_id,0));
+     IF EXISTS (SELECT 1 FROM market_source_passages WHERE id=NEW.id) THEN RETURN NEW; END IF;
+     IF (SELECT count(*) FROM market_source_passages WHERE source_evidence_id=NEW.source_evidence_id) >= 3 THEN
+       RAISE EXCEPTION 'A market source retains at most three relevant passages.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_source_passages_limit_trigger ON market_source_passages`,
+  `CREATE TRIGGER market_source_passages_limit_trigger BEFORE INSERT ON market_source_passages FOR EACH ROW EXECUTE FUNCTION ogc_limit_market_source_passages()`,
+  `DROP TRIGGER IF EXISTS market_source_passages_immutability_trigger ON market_source_passages`,
+  `CREATE TRIGGER market_source_passages_immutability_trigger BEFORE UPDATE OR DELETE ON market_source_passages FOR EACH ROW EXECUTE FUNCTION ogc_prevent_market_immutable_row_mutation()`,
+  `DROP TRIGGER IF EXISTS market_source_passages_private_identity_guard ON market_source_passages`,
+  `CREATE TRIGGER market_source_passages_private_identity_guard BEFORE INSERT OR UPDATE ON market_source_passages FOR EACH ROW EXECUTE FUNCTION ogc_reject_private_identity_in_shared_market_data()`,
+  `CREATE TABLE IF NOT EXISTS market_provider_claims (
+     id text PRIMARY KEY,
+     passage_id text NOT NULL REFERENCES market_source_passages(id) ON DELETE RESTRICT,
+     provider_entity_id text NOT NULL,
+     canonical_name text NOT NULL,
+     generic_role text NOT NULL,
+     policy_role text NOT NULL,
+     capability text NOT NULL,
+     operating_mode text NOT NULL,
+     service_scope jsonb NOT NULL DEFAULT '[]'::jsonb,
+     route_scope jsonb NOT NULL DEFAULT '[]'::jsonb,
+     exact_excerpt text NOT NULL,
+     claim_hash text NOT NULL,
+     extraction_model text NOT NULL,
+     extraction_contract text NOT NULL,
+     validation_status text NOT NULL,
+     rejection_reason text,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT market_provider_claims_passage_hash_key UNIQUE(passage_id,claim_hash),
+     CONSTRAINT market_provider_claims_excerpt_check CHECK(char_length(btrim(exact_excerpt)) BETWEEN 1 AND 1200),
+     CONSTRAINT market_provider_claims_hash_check CHECK(claim_hash ~ '^[a-f0-9]{64}$'),
+     CONSTRAINT market_provider_claims_status_check CHECK(validation_status IN ('accepted','rejected')),
+     CONSTRAINT market_provider_claims_rejection_check CHECK(
+       (validation_status='accepted' AND rejection_reason IS NULL)
+       OR (validation_status='rejected' AND char_length(btrim(rejection_reason)) BETWEEN 1 AND 240)
+     ),
+     CONSTRAINT market_provider_claims_service_privacy_check CHECK(ogc_public_jsonb_metadata_valid(service_scope)),
+     CONSTRAINT market_provider_claims_route_privacy_check CHECK(ogc_public_jsonb_metadata_valid(route_scope))
+   )`,
+  `CREATE INDEX IF NOT EXISTS market_provider_claims_provider_idx ON market_provider_claims(provider_entity_id,validation_status)`,
+  `DROP TRIGGER IF EXISTS market_provider_claims_immutability_trigger ON market_provider_claims`,
+  `CREATE TRIGGER market_provider_claims_immutability_trigger BEFORE UPDATE OR DELETE ON market_provider_claims FOR EACH ROW EXECUTE FUNCTION ogc_prevent_market_immutable_row_mutation()`,
+  `DROP TRIGGER IF EXISTS market_provider_claims_private_identity_guard ON market_provider_claims`,
+  `CREATE TRIGGER market_provider_claims_private_identity_guard BEFORE INSERT OR UPDATE ON market_provider_claims FOR EACH ROW EXECUTE FUNCTION ogc_reject_private_identity_in_shared_market_data()`
+] as const;
+
 export const DATABASE_MIGRATIONS = [
   ...V9_DATABASE_MIGRATIONS,
   ...V10_DATABASE_MIGRATIONS,
@@ -1802,5 +1907,6 @@ export const DATABASE_MIGRATIONS = [
   ...V16_DATABASE_MIGRATIONS,
   ...V17_DATABASE_MIGRATIONS,
   ...V18_DATABASE_MIGRATIONS,
-  ...V19_DATABASE_MIGRATIONS
+  ...V19_DATABASE_MIGRATIONS,
+  ...V20_DATABASE_MIGRATIONS
 ] as const;

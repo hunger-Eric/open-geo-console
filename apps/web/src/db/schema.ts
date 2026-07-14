@@ -551,6 +551,10 @@ export const marketSnapshotQuestions = pgTable(
     surfaceId: text("surface_id").notNull(),
     surfaceVersion: text("surface_version").notNull(),
     fanoutVersion: text("fanout_version").notNull(),
+    snapshotKind: text("snapshot_kind").notNull().default("standard_question"),
+    parentSnapshotId: text("parent_snapshot_id"),
+    candidateSetHash: text("candidate_set_hash"),
+    queryPlanVersion: text("query_plan_version").notNull().default("legacy-standard-v1"),
     status: text("status").notNull().default("refreshing"),
     completionVersion: integer("completion_version").notNull(),
     queryFanoutHash: text("query_fanout_hash"),
@@ -567,6 +571,11 @@ export const marketSnapshotQuestions = pgTable(
       ],
       name: "market_snapshot_questions_authority_scope_fkey"
     }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.parentSnapshotId],
+      foreignColumns: [table.id],
+      name: "market_snapshot_questions_parent_fkey"
+    }).onDelete("restrict"),
     uniqueIndex("market_snapshot_questions_identity_version_uidx").on(table.cacheIdentity, table.completionVersion),
     uniqueIndex("market_snapshot_questions_id_cache_uidx").on(table.id, table.cacheIdentity),
     uniqueIndex("market_snapshot_questions_id_authority_uidx").on(table.id, table.surfaceAuthorityVersion),
@@ -576,6 +585,12 @@ export const marketSnapshotQuestions = pgTable(
     check("market_snapshot_questions_locale_region_check", sql`length(btrim(${table.locale})) > 0 AND length(btrim(${table.region})) > 0`),
     check("market_snapshot_questions_completion_version_check", sql`${table.completionVersion} > 0`),
     check("market_snapshot_questions_status_check", sql`${table.status} IN ('refreshing','completed','failed')`),
+    check("market_snapshot_questions_kind_check", sql`${table.snapshotKind} IN ('standard_question','provider_discovery','candidate_verification')`),
+    check("market_snapshot_questions_query_plan_check", sql`length(btrim(${table.queryPlanVersion})) > 0`),
+    check("market_snapshot_questions_ancestry_shape_check", sql`(
+      (${table.snapshotKind} IN ('standard_question','provider_discovery') AND ${table.parentSnapshotId} IS NULL AND ${table.candidateSetHash} IS NULL)
+      OR (${table.snapshotKind} = 'candidate_verification' AND ${table.parentSnapshotId} IS NOT NULL AND ${table.candidateSetHash} ~ '^[a-f0-9]{64}$')
+    )`),
     check("market_snapshot_questions_terminal_check", sql`(
       (${table.status} = 'completed' AND ${table.completedAt} IS NOT NULL AND ${table.queryFanoutHash} IS NOT NULL)
       OR (${table.status} <> 'completed' AND ${table.completedAt} IS NULL)
@@ -733,6 +748,76 @@ export const marketSourceEvidence = pgTable(
   ]
 );
 export type MarketSourceEvidenceRow = typeof marketSourceEvidence.$inferSelect;
+
+export const marketSourcePassages = pgTable(
+  "market_source_passages",
+  {
+    id: text("id").primaryKey(),
+    sourceEvidenceId: text("source_evidence_id").notNull().references(() => marketSourceEvidence.id, { onDelete: "restrict" }),
+    passageOrder: integer("passage_order").notNull(),
+    exactExcerpt: text("exact_excerpt").notNull(),
+    excerptHash: text("excerpt_hash").notNull(),
+    relevanceScore: integer("relevance_score").notNull(),
+    matchedEntityTerms: jsonb("matched_entity_terms").$type<string[]>().notNull().default([]),
+    matchedServiceTerms: jsonb("matched_service_terms").$type<string[]>().notNull().default([]),
+    matchedControlTerms: jsonb("matched_control_terms").$type<string[]>().notNull().default([]),
+    matchedCapabilityTerms: jsonb("matched_capability_terms").$type<string[]>().notNull().default([]),
+    selectorVersion: text("selector_version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("market_source_passages_source_order_uidx").on(table.sourceEvidenceId, table.passageOrder),
+    uniqueIndex("market_source_passages_source_hash_uidx").on(table.sourceEvidenceId, table.excerptHash),
+    index("market_source_passages_source_score_idx").on(table.sourceEvidenceId, table.relevanceScore),
+    check("market_source_passages_order_check", sql`${table.passageOrder} >= 0`),
+    check("market_source_passages_excerpt_check", sql`char_length(btrim(${table.exactExcerpt})) BETWEEN 1 AND 1200`),
+    check("market_source_passages_hash_check", sql`${table.excerptHash} ~ '^[a-f0-9]{64}$'`),
+    check("market_source_passages_score_check", sql`${table.relevanceScore} BETWEEN 0 AND 100`),
+    check("market_source_passages_selector_check", sql`length(btrim(${table.selectorVersion})) > 0`),
+    check("market_source_passages_entity_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.matchedEntityTerms})`),
+    check("market_source_passages_service_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.matchedServiceTerms})`),
+    check("market_source_passages_control_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.matchedControlTerms})`),
+    check("market_source_passages_capability_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.matchedCapabilityTerms})`)
+  ]
+);
+export type MarketSourcePassageRow = typeof marketSourcePassages.$inferSelect;
+
+export const marketProviderClaims = pgTable(
+  "market_provider_claims",
+  {
+    id: text("id").primaryKey(),
+    passageId: text("passage_id").notNull().references(() => marketSourcePassages.id, { onDelete: "restrict" }),
+    providerEntityId: text("provider_entity_id").notNull(),
+    canonicalName: text("canonical_name").notNull(),
+    genericRole: text("generic_role").notNull(),
+    policyRole: text("policy_role").notNull(),
+    capability: text("capability").notNull(),
+    operatingMode: text("operating_mode").notNull(),
+    serviceScope: jsonb("service_scope").$type<string[]>().notNull().default([]),
+    routeScope: jsonb("route_scope").$type<string[]>().notNull().default([]),
+    exactExcerpt: text("exact_excerpt").notNull(),
+    claimHash: text("claim_hash").notNull(),
+    extractionModel: text("extraction_model").notNull(),
+    extractionContract: text("extraction_contract").notNull(),
+    validationStatus: text("validation_status").notNull(),
+    rejectionReason: text("rejection_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("market_provider_claims_passage_hash_uidx").on(table.passageId, table.claimHash),
+    index("market_provider_claims_provider_idx").on(table.providerEntityId, table.validationStatus),
+    check("market_provider_claims_excerpt_check", sql`char_length(btrim(${table.exactExcerpt})) BETWEEN 1 AND 1200`),
+    check("market_provider_claims_hash_check", sql`${table.claimHash} ~ '^[a-f0-9]{64}$'`),
+    check("market_provider_claims_status_check", sql`${table.validationStatus} IN ('accepted','rejected')`),
+    check("market_provider_claims_rejection_check", sql`(
+      (${table.validationStatus} = 'accepted' AND ${table.rejectionReason} IS NULL)
+      OR (${table.validationStatus} = 'rejected' AND char_length(btrim(${table.rejectionReason})) BETWEEN 1 AND 240)
+    )`),
+    check("market_provider_claims_service_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.serviceScope})`),
+    check("market_provider_claims_route_privacy_check", sql`ogc_public_jsonb_metadata_valid(${table.routeScope})`)
+  ]
+);
+export type MarketProviderClaimRow = typeof marketProviderClaims.$inferSelect;
 
 export const marketSnapshotLeases = pgTable(
   "market_snapshot_leases",
