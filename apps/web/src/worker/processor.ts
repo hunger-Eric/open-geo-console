@@ -590,7 +590,7 @@ export function createWorkerPublicSourceForensicsDependencies(
   };
   return {
     authority: runtime.authority,
-    resolveSnapshot: async ({ questionId, fanout, evidenceCutoffAt }) => collaborators.resolveSnapshot({
+    resolveSnapshot: async ({ questionId, fanout, evidenceCutoffAt, retrievalGate }) => collaborators.resolveSnapshot({
       authority: runtime.authority,
       adapter: runtime.adapter,
       question: questionFromFanout(questionId, fanout),
@@ -598,6 +598,7 @@ export function createWorkerPublicSourceForensicsDependencies(
       evidenceCutoffAt,
       leaseOwner: `public-source:${input.job.id}:${input.workerId}`,
       retrieveSource: input.retrieveSource,
+      retrievalGate,
       signal: input.signal
     }),
     getCheckpoint: async (jobId) => {

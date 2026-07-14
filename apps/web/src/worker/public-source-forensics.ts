@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { buildPublicSourceEvidenceGraph, type RetrievedPublicSourceFact } from "@open-geo-console/citation-intelligence";
-import { createSearchQueryFanout, generateCanonicalBuyerQuestions, type MarketSearchObservation, type PublicSearchSurfaceAuthority, type SearchQueryFanout } from "@open-geo-console/public-search-observer";
+import { createSearchQueryFanout, DEFAULT_QUERY_BUDGET, generateCanonicalBuyerQuestions, type MarketSearchObservation, type PublicSearchSurfaceAuthority, type SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import type { AiWebsiteReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import { decidePublicSourceCommercialCoverage } from "@/public-source-forensics/coverage";
 import { buildPublicSourceForensicReport, type PublicSourceForensicReportBuilderInput } from "@/public-source-forensics/report-builder";
+import { createConcurrencyGate, type ConcurrencyGate } from "./bounded-scheduler";
 
 export interface ResolvedPublicSourceSnapshot {
   snapshotId: string; cacheIdentity: string; questionId: string; observedAt: string; ageMs: number;
@@ -29,7 +30,7 @@ export interface PublicSourceCommercialSnapshotRef {
 
 export interface PublicSourceForensicsDependencies {
   authority: PublicSearchSurfaceAuthority;
-  resolveSnapshot(input: { questionId: string; fanout: SearchQueryFanout; evidenceCutoffAt: string }): Promise<ResolvedPublicSourceSnapshot>;
+  resolveSnapshot(input: { questionId: string; fanout: SearchQueryFanout; evidenceCutoffAt: string; retrievalGate: ConcurrencyGate }): Promise<ResolvedPublicSourceSnapshot>;
   getCheckpoint(jobId: string): Promise<PublicSourcePipelineCheckpoint | null>;
   saveCheckpoint(jobId: string, checkpoint: PublicSourcePipelineCheckpoint): Promise<void>;
   getReport(jobId: string): Promise<RecommendationForensicReportV2 | null>;
@@ -68,7 +69,8 @@ export async function runPublicSourceForensicsPipeline(input: {
     excludedIdentities: [{ kind: "customer_domain", value: new URL(input.targetUrl).hostname },
       ...(profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value })))] });
   if (questions.confidence !== "high" || questions.questions.length < 3) throw new PublicSourceQuestionGenerationError();
-  const fanouts = questions.questions.map((question) => createSearchQueryFanout({ question, surface: authority.surface,
+  const fanouts = questions.questions.map((question) => createSearchQueryFanout({ question, surface: authority.surface, resultDepth: 3,
+    budget: { ...DEFAULT_QUERY_BUDGET, maxResults: 3 },
     excludedIdentities: [{ kind: "customer_domain", value: new URL(input.targetUrl).hostname }, ...profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value }))] }));
   const prior = await input.dependencies.getCheckpoint(input.jobId);
   const websiteFoundationHash = sha(input.websiteFoundation);
@@ -77,9 +79,10 @@ export async function runPublicSourceForensicsPipeline(input: {
       prior.locale !== input.locale || prior.region !== input.region ||
       prior.adapterIdentityHash !== adapterIdentityHash(authority))) throw new PublicSourceResumeIdentityMismatchError();
   const evidenceCutoffAt = prior?.evidenceCutoffAt ?? (input.dependencies.now ?? (() => new Date()))().toISOString();
+  const retrievalGate = createConcurrencyGate(4);
   const snapshots = await Promise.all(fanouts.map(async (fanout) => {
     input.signal?.throwIfAborted();
-    return input.dependencies.resolveSnapshot({ questionId: fanout.questionId, fanout, evidenceCutoffAt });
+    return input.dependencies.resolveSnapshot({ questionId: fanout.questionId, fanout, evidenceCutoffAt, retrievalGate });
   }));
   input.signal?.throwIfAborted();
   const actualCostMicros = snapshots.reduce((sum, item) => sum + item.actualCostMicros, 0);

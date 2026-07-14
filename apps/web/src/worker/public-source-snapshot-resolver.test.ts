@@ -44,7 +44,7 @@ describe("public-source snapshot resolver", () => {
     expect(bundle?.queries).toHaveLength(fanout.queries.length);
     expect(bundle?.attempts.every((attempt) => attempt.requestStatus === "succeeded")).toBe(true);
     expect(bundle?.observations).toHaveLength(fanout.queries.length);
-    expect(bundle?.sources).toHaveLength(fanout.queries.length);
+    expect(bundle?.sources).toHaveLength(1);
     expect(bundle?.sources.every((source) => source.retrievalState === "not_retrieved" && source.excerpt === null && source.contentHash === null)).toBe(true);
     expect(JSON.stringify(bundle)).not.toContain("generated prose");
 
@@ -52,6 +52,22 @@ describe("public-source snapshot resolver", () => {
     expect(reused).toMatchObject({ snapshotId: first.snapshotId, collectedForThisRun: false, refreshAttempted: false, refreshFailed: false, actualCostMicros: 0 });
     expect(reused.avoidedCostMicros).toBeGreaterThan(0);
     expect(search).toHaveBeenCalledTimes(fanout.queries.length);
+  });
+
+  it("runs no more than two search requests for one question at a time", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    let active = 0;
+    let peak = 0;
+    const search = vi.fn(async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 3));
+      active -= 1;
+      return observationPayload("complete");
+    });
+    await resolvePublicSourceSnapshot({ authority, adapter: fixtureAdapter(authority, search), question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-concurrency" });
+    expect(peak).toBe(2);
   });
 
   it("never reuses a completed snapshot under a different authority version", async () => {

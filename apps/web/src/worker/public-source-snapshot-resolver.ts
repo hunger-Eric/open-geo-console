@@ -12,7 +12,7 @@ import {
   type SearchQueryFanout,
   type SearchQueryVariant
 } from "@open-geo-console/public-search-observer";
-import { canonicalizePublicSourceUrl, getPublicSourceDomainIdentity } from "@open-geo-console/citation-intelligence";
+import { canonicalizePublicSourceUrl } from "@open-geo-console/citation-intelligence";
 import {
   acquireMarketSnapshotLease,
   appendMarketSearchObservations,
@@ -28,6 +28,8 @@ import {
   waitForMarketSnapshot,
   type SourceEvidenceInput
 } from "@/db/market-snapshots";
+import { createConcurrencyGate, mapWithConcurrency, type ConcurrencyGate } from "./bounded-scheduler";
+import { createPublicSourceRetrievalPlan } from "./public-source-plan";
 
 export interface ResolvedPublicSourceSnapshotValue {
   snapshotId: string;
@@ -68,6 +70,7 @@ export interface ResolvePublicSourceSnapshotInput {
   waitDeadlineMs?: number;
   signal?: AbortSignal;
   retrieveSource?: PublicSourceRetriever;
+  retrievalGate?: ConcurrencyGate;
 }
 
 const DEFAULT_LEASE_DURATION_MS = 5 * 60_000;
@@ -106,10 +109,8 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     }));
     await appendMarketSnapshotQueries({ snapshotId: currentSnapshotId, token: claim.token, queries });
 
-    const observations: MarketSearchObservation[] = [];
-    const successful: Array<{ observation: MarketSearchObservation; attemptId: string }> = [];
-    for (const [queryOrder, query] of input.fanout.queries.entries()) {
-      if (input.signal?.aborted) throw new PublicSourceSnapshotUnavailableError();
+    const queryResults = await mapWithConcurrency(input.fanout.queries, 2, async (query, queryOrder) => {
+      input.signal?.throwIfAborted();
       const storedQuery = queries[queryOrder]!;
       const attempt = await beginMarketSearchAttempt({
         snapshotId: currentSnapshotId, queryId: storedQuery.id, token: claim.token,
@@ -123,9 +124,10 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
         attemptId: attempt.id, token: claim.token, requestStatus, usage: observation.usage, providerCostMicros,
         costUncertain: observation.usage.costUncertain ?? providerCostMicros === null, sanitizedError: observation.sanitizedError ?? null
       });
-      observations.push(observation);
-      if (requestStatus === "succeeded" || requestStatus === "partial") successful.push({ observation, attemptId: attempt.id });
-    }
+      return { observation, attemptId: attempt.id, successful: requestStatus === "succeeded" || requestStatus === "partial" };
+    }, input.signal);
+    const observations = queryResults.map(({ observation }) => observation);
+    const successful = queryResults.filter(({ successful: value }) => value).map(({ observation, attemptId }) => ({ observation, attemptId }));
     if (successful.length === 0) throw new PublicSourceSnapshotUnavailableError();
 
     const rows = successful.flatMap(({ observation, attemptId }) => observationRows(currentSnapshotId, attemptId, observation));
@@ -142,6 +144,7 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     });
   } catch (error) {
     await releaseFailedMarketSnapshotLease({ token: claim.token, ...(snapshotId ? { snapshotId } : {}) }).catch(() => undefined);
+    if (input.signal?.aborted) throw input.signal.reason;
     if (error instanceof PublicSourceSnapshotUnavailableError || error instanceof PublicSourceSnapshotAuthorityMismatchError) throw error;
     throw new PublicSourceSnapshotUnavailableError();
   }
@@ -170,23 +173,24 @@ async function resolveExisting(input: ResolvePublicSourceSnapshotInput & { ident
 }
 
 async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput; snapshotId: string; token: Parameters<typeof appendMarketSourceEvidence>[0]["token"]; observations: Array<{ observation: MarketSearchObservation; attemptId: string }>; evidenceCutoff: Date }): Promise<RetrievedPublicSourceFact[]> {
-  const rows: SourceEvidenceInput[] = [];
-  const retrievals: RetrievedPublicSourceFact[] = [];
-  for (const { observation } of input.observations) for (const result of observation.results) {
-    const canonicalUrl = canonicalizePublicSourceUrl(result.url);
-    const domain = getPublicSourceDomainIdentity(canonicalUrl).registrableDomain;
-    const base = { id: deterministicId("market-source", [input.snapshotId, observation.queryId, String(result.surfaceResultOrder), canonicalUrl]), snapshotId: input.snapshotId, observationId: observationId(input.snapshotId, observation.queryId, result.surfaceResultOrder, canonicalUrl), canonicalUrl, registrableDomain: domain, retrievedAt: input.evidenceCutoff, expiresAt: new Date(input.evidenceCutoff.getTime() + 30 * 24 * 60 * 60 * 1_000) };
+  const plan = createPublicSourceRetrievalPlan(input.observations.map(({ observation }) => observation));
+  const gate = input.input.retrievalGate ?? createConcurrencyGate(4);
+  let availableCount = 0;
+  const retrieved = await Promise.all(plan.map(({ observation, result, canonicalUrl, registrableDomain }) => gate.run(async () => {
+    input.input.signal?.throwIfAborted();
+    if (input.input.retrieveSource && availableCount >= 3) return null;
+    const base = { id: deterministicId("market-source", [input.snapshotId, observation.queryId, String(result.surfaceResultOrder), canonicalUrl]), snapshotId: input.snapshotId, observationId: observationId(input.snapshotId, observation.queryId, result.surfaceResultOrder, canonicalUrl), canonicalUrl, registrableDomain, retrievedAt: input.evidenceCutoff, expiresAt: new Date(input.evidenceCutoff.getTime() + 30 * 24 * 60 * 60 * 1_000) };
     if (!input.input.retrieveSource) {
-      rows.push({ ...base, retrievalState: "not_retrieved", sourceCategory: "unknown", entities: [], claims: [], contradictions: [], evidenceFamilyIdentity: deterministicId("evidence-family", [canonicalUrl]) });
-      continue;
+      await appendMarketSourceEvidence({ token: input.token, sources: [{ ...base, retrievalState: "not_retrieved", sourceCategory: "unknown", entities: [], claims: [], contradictions: [], evidenceFamilyIdentity: deterministicId("evidence-family", [canonicalUrl]) }] });
+      return null;
     }
-    const retrieved = await input.input.retrieveSource({ observation, result, signal: input.input.signal ?? new AbortController().signal });
-    if (retrieved.fact.observationId !== observation.observationId || retrieved.fact.queryId !== observation.queryId || canonicalizePublicSourceUrl(retrieved.fact.resultUrl) !== canonicalUrl) throw new PublicSourceSnapshotUnavailableError();
-    rows.push({ ...base, ...retrieved.source });
-    retrievals.push(retrieved.fact);
-  }
-  if (rows.length) await appendMarketSourceEvidence({ token: input.token, sources: rows });
-  return retrievals;
+    const value = await input.input.retrieveSource({ observation, result, signal: input.input.signal ?? new AbortController().signal });
+    if (value.fact.observationId !== observation.observationId || value.fact.queryId !== observation.queryId || canonicalizePublicSourceUrl(value.fact.resultUrl) !== canonicalUrl) throw new PublicSourceSnapshotUnavailableError();
+    await appendMarketSourceEvidence({ token: input.token, sources: [{ ...base, ...value.source }] });
+    if (value.fact.retrievalState === "available") availableCount += 1;
+    return value.fact;
+  }, input.input.signal)));
+  return retrieved.filter((value): value is RetrievedPublicSourceFact => value !== null);
 }
 
 function materialize(input: { snapshot: Awaited<ReturnType<typeof completeMarketSnapshotLease>>; questionId: string; observations: MarketSearchObservation[]; retrievals: RetrievedPublicSourceFact[]; collectedForThisRun: boolean; evidenceCutoff: Date }): ResolvedPublicSourceSnapshotValue {
