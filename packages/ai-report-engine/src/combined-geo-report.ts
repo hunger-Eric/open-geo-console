@@ -70,6 +70,15 @@ export function assertCombinedGeoReportLanguage(
   const addList = (path: string, values: readonly string[] | undefined) =>
     values?.forEach((value, index) => add(`${path}[${index}]`, value));
 
+  const technical = report.technicalFoundation.technicalReport;
+  technical.findings.forEach((finding, index) => {
+    add(`technicalFoundation.technicalReport.findings[${index}].title`, finding.title);
+    add(`technicalFoundation.technicalReport.findings[${index}].description`, finding.description);
+    add(`technicalFoundation.technicalReport.findings[${index}].recommendation`, finding.recommendation);
+  });
+  Object.entries(technical.machineReadableAssets).forEach(([key, asset]) =>
+    add(`technicalFoundation.technicalReport.machineReadableAssets.${key}.summary`, asset.summary));
+
   const ai = report.technicalFoundation.aiReport;
   add("technicalFoundation.aiReport.organizationProfile.summary", ai.organizationProfile.summary);
   add("technicalFoundation.aiReport.organizationProfile.identityConsistency", ai.organizationProfile.identityConsistency);
@@ -131,7 +140,9 @@ export function assertCombinedGeoReportLanguage(
     ...forensic.sourceGraph.claims.filter(({ status }) => status === "supported").map(({ subjectName }) => subjectName)
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 120);
   const scopedFields = scope === "presentation_refresh"
-    ? fields.filter(({ path }) => !path.startsWith("technicalFoundation.") && !path.startsWith("businessQuestionSet."))
+    ? fields.filter(({ path }) =>
+        !path.startsWith("technicalFoundation.aiReport.") &&
+        !path.startsWith("businessQuestionSet."))
     : fields;
   assertReportLanguage(scopedFields, report.locale, [...new Set(allowedTerms)]);
 }

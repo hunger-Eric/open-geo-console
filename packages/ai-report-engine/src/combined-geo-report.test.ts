@@ -49,7 +49,46 @@ describe("prospective combined report language gate", () => {
     report.businessQuestionAnswers!.answers[0]!.answer = "New English customer answer.";
     expect(() => assertCombinedGeoReportLanguage(report, "presentation_refresh")).toThrow(ReportLanguageValidationError);
   });
+
+  it("rejects untranslated deterministic technical prose in a new Chinese report", () => {
+    const report = fixture("zh-CN");
+    report.technicalFoundation.technicalReport = englishTechnicalReport();
+
+    expect(() => assertCombinedGeoReportLanguage(report)).toThrow(ReportLanguageValidationError);
+  });
+
+  it("still validates newly projected technical prose during presentation refresh", () => {
+    const report = fixture("zh-CN");
+    report.technicalFoundation.aiReport.organizationProfile.summary = "Historical English technical summary.";
+    report.businessQuestionSet.questions[0]!.privateText = "Historical English business question?";
+    report.technicalFoundation.technicalReport = englishTechnicalReport();
+
+    expect(() => assertCombinedGeoReportLanguage(report, "presentation_refresh"))
+      .toThrow(ReportLanguageValidationError);
+  });
 });
+
+function englishTechnicalReport(): CombinedGeoReportV1["technicalFoundation"]["technicalReport"] {
+  return {
+    url: "https://example.com/",
+    scannedAt: "2030-01-01T00:00:00.000Z",
+    score: 80,
+    pages: [],
+    findings: [{
+      id: "page.h1Structure",
+      severity: "warning",
+      title: "H1 structure needs attention",
+      description: "Expected one H1, found 0.",
+      recommendation: "Use one descriptive H1 per page and reserve H2 for section structure."
+    }],
+    recommendations: ["Use one descriptive H1 per page and reserve H2 for section structure."],
+    machineReadableAssets: {
+      robotsTxt: { url: "https://example.com/robots.txt", present: true, summary: "robots.txt is available." },
+      sitemapXml: { url: "https://example.com/sitemap.xml", present: false, summary: "sitemap.xml was not found." },
+      llmsTxt: { url: "https://example.com/llms.txt", present: false, summary: "llms.txt was not found." }
+    }
+  };
+}
 
 function fixture(locale: string): CombinedGeoReportV1 {
   const zh = locale.startsWith("zh");
@@ -69,7 +108,11 @@ function fixture(locale: string): CombinedGeoReportV1 {
   const answers = [0, 1, 2].map((index) => ({ answer: prose(`Grounded answer ${index + 1}.`, `基于证据的回答 ${index + 1}。`) }));
   return {
     locale,
-    technicalFoundation: { aiReport, technicalReport: {}, evidenceAssets: [] },
+    technicalFoundation: {
+      aiReport,
+      technicalReport: { findings: [], machineReadableAssets: {} },
+      evidenceAssets: []
+    },
     businessQuestionSet: { questions },
     businessQuestionAnswers: { answers },
     publicSourceForensics: {

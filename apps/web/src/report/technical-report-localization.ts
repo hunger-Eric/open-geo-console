@@ -17,15 +17,18 @@ export function localizeTechnicalReportForArtifact(
       recommendation: localized.localizedRecommendation
     };
   });
-  const machineReadableAssets = Object.fromEntries(
-    (Object.entries(report.machineReadableAssets) as Array<[
-      keyof GeoAuditReport["machineReadableAssets"],
-      GeoAuditReport["machineReadableAssets"][keyof GeoAuditReport["machineReadableAssets"]]
-    ]>).map(([key, asset]) => [key, {
+  const localizeAsset = (key: keyof GeoAuditReport["machineReadableAssets"]) => {
+    const asset = report.machineReadableAssets[key];
+    return {
       ...asset,
       summary: localizedAssetSummary(key, asset.present, dictionary)
-    }])
-  ) as GeoAuditReport["machineReadableAssets"];
+    };
+  };
+  const machineReadableAssets: GeoAuditReport["machineReadableAssets"] = {
+    robotsTxt: localizeAsset("robotsTxt"),
+    sitemapXml: localizeAsset("sitemapXml"),
+    llmsTxt: localizeAsset("llmsTxt")
+  };
 
   return {
     ...report,

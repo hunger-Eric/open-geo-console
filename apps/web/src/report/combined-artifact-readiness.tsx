@@ -10,6 +10,7 @@ import type { CombinedPrivateReportArtifactModel } from "./artifact-model";
 import { CombinedGeoReportArtifact } from "@/components/combined-geo-report-artifact";
 import { ARTIFACT_CSS } from "./artifact-styles";
 import { exportCanonicalArtifactHtmlPdf } from "./pdf-export";
+import { localizeTechnicalReportForArtifact } from "./technical-report-localization";
 import { createEvidenceStorage, evidenceStorageKey } from "@/evidence/storage";
 
 export interface ReadyCombinedArtifact {
@@ -91,6 +92,7 @@ export async function buildReadyCombinedArtifact(input: {
       limitations: systemCopy.limitations
     }
   };
+  const localizedTechnicalReport = localizeTechnicalReportForArtifact(input.technicalReport, forensic.locale);
   const report = requireReadyCombinedGeoReport({
     version: 1,
     artifactContract: "combined_geo_report_v1",
@@ -109,7 +111,7 @@ export async function buildReadyCombinedArtifact(input: {
     technicalInputIdentity: sha(JSON.stringify({ technical: input.technicalReport, ai: input.aiReport.provenance.contentHash })),
     questionSetIdentity: input.businessQuestionSet.id,
     technicalFoundation: {
-      technicalReport: input.technicalReport,
+      technicalReport: localizedTechnicalReport,
       aiReport: localizedAiReport,
       evidenceAssets: input.evidenceAssets.filter((asset) => asset.status === "ready" && asset.contentHash).map((asset) => ({
         assetId: asset.id,
@@ -135,7 +137,7 @@ export async function buildReadyCombinedArtifact(input: {
   assertCombinedGeoReportLanguage(report, input.languageValidationScope);
   const locale: "en" | "zh" = report.locale.toLowerCase().startsWith("zh") ? "zh" : "en";
   const model = { productContract: "combined_geo_report_v1" as const, reportId: input.reportId, locale,
-    combinedReport: report, technicalReport: input.technicalReport, evidenceAssets: input.evidenceAssets,
+    combinedReport: report, technicalReport: report.technicalFoundation.technicalReport, evidenceAssets: input.evidenceAssets,
     artifactRevisionId: input.artifactRevisionId, pdfStorageKey: "pending" };
   const html = renderCanonicalCombinedArtifactHtml(model);
   for (const required of [report.artifactRevisionId,
