@@ -554,7 +554,7 @@ async function finalizeStagingArtifactRefreshJob(input:{
       createWorkerPublicSourceForensicsDependencies({job:input.job,workerId:input.workerId,
         coverage:{plannedPages:input.job.plannedPages,successfulPages:input.job.successfulPages,failedPages:input.job.failedPages},
         readCheckpoint:()=>checkpoint,onCheckpointSaved:async(next)=>{checkpoint=next;},checkpointJob:input.checkpointJob,
-        retrieveSource:createWorkerPublicSourceRetriever(),artifactReadiness:{async verify(){}},forceSnapshotRefreshAfter:input.job.createdAt.toISOString(),
+        retrieveSource:createWorkerPublicSourceRetriever(),artifactReadiness:{async verify(){}},forceSnapshotRefreshAfter:source.generatedAt,
         liveDrill:input.liveDrill,signal:input.signal},runtime)});
     return runPublicSourceForensicsPipeline({reportId:input.job.reportId,jobId:input.job.id,...resolvePublicSourceRunScope(dependencies),
       targetUrl:source.targetUrl,websiteFoundation:source.technicalFoundation.aiReport,businessQuestionSet:questionSet,dependencies,signal:input.signal});
