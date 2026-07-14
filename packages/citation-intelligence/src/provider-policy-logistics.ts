@@ -1,5 +1,6 @@
-import type { ProviderClaim, ProviderPolicySelectionInput, ProviderQualificationInput, ProviderQualificationPolicy, ProviderQualificationResult } from "./provider-discovery-types";
-import { normalizeProviderPolicyText, uniqueSorted } from "./provider-discovery-types";
+import type { ProviderClaim, ProviderPolicySelectionInput, ProviderQualificationInput, ProviderQualificationPolicy } from "./provider-discovery-types";
+import { normalizeProviderPolicyText } from "./provider-discovery-types";
+import { qualifyProviders } from "./provider-qualification";
 
 const LOGISTICS_TERMS = ["物流", "专线", "运输", "货运", "logistics", "freight", "transport", "delivery"];
 const CONTROL_TERMS = ["自营", "自有", "直营", "包机", "固定线路", "self-operated", "owned", "dedicated", "direct-operated"];
@@ -30,7 +31,7 @@ export const LOGISTICS_SELF_OPERATED_POLICY: ProviderQualificationPolicy = Objec
     { id: "outsourcing", label: { zh: "外包与混货", en: "Outsourcing and cargo mixing" }, states: ["no_outsourcing_verified", "outsourcing_present", "mixed", "unknown"], mandatoryForFullChain: true }
   ],
   classifyEntityRole: classifyLogisticsRole,
-  qualify: (input: ProviderQualificationInput) => candidateProjection(input.claims)
+  qualify: (input: ProviderQualificationInput) => qualifyProviders(input, LOGISTICS_SELF_OPERATED_POLICY)
 });
 
 function classifyLogisticsRole(claims: readonly ProviderClaim[]): string {
@@ -41,35 +42,4 @@ function classifyLogisticsRole(claims: readonly ProviderClaim[]): string {
   if (roles.includes("freight_forwarder")) return "freight_forwarder";
   if (roles.includes("warehouse_operator")) return "warehouse_operator";
   return roles.find(Boolean) ?? "unknown";
-}
-
-function candidateProjection(claims: readonly ProviderClaim[]): ProviderQualificationResult {
-  const groups = new Map<string, ProviderClaim[]>();
-  for (const claim of claims) groups.set(claim.subjectEntityId, [...(groups.get(claim.subjectEntityId) ?? []), claim]);
-  const candidates = [];
-  const rejected = [];
-  for (const items of groups.values()) {
-    const first = items[0]!;
-    const role = classifyLogisticsRole(items);
-    const evidenceIds = uniqueSorted(items.map(({ sourceEvidenceId }) => sourceEvidenceId));
-    if (role === "software_vendor") {
-      rejected.push({ entityId: first.subjectEntityId, canonicalName: first.subjectName, reason: "software_only" as const, evidenceIds });
-      continue;
-    }
-    candidates.push({
-      entityId: first.subjectEntityId,
-      canonicalName: first.subjectName,
-      genericRole: first.genericRole,
-      policyRole: role,
-      leadEvidenceIds: evidenceIds,
-      missingProof: ["Direct evidence for the required self-operated logistics stages is required."]
-    });
-  }
-  return {
-    policyId: "logistics_self_operated_v1",
-    policyVersion: "1",
-    strict: [],
-    candidates: candidates.sort((left, right) => left.canonicalName.localeCompare(right.canonicalName)),
-    rejected: rejected.sort((left, right) => left.canonicalName.localeCompare(right.canonicalName))
-  };
 }

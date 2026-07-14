@@ -18,3 +18,5 @@ export * from "./provider-policy-generic";
 export * from "./provider-policy-logistics";
 export * from "./provider-policy-registry";
 export * from "./provider-passages";
+export * from "./provider-claims";
+export * from "./provider-qualification";
