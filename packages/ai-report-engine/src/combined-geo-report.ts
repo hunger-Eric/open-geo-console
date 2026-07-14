@@ -57,7 +57,12 @@ export interface CombinedGeoReportV1 {
  * Prospective publication gate for newly materialized combined reports.
  * Parsing historical artifacts deliberately does not invoke this validation.
  */
-export function assertCombinedGeoReportLanguage(report: CombinedGeoReportV1): void {
+export type CombinedReportLanguageScope = "all" | "presentation_refresh";
+
+export function assertCombinedGeoReportLanguage(
+  report: CombinedGeoReportV1,
+  scope: CombinedReportLanguageScope = "all"
+): void {
   const fields: ReportLanguageField[] = [];
   const add = (path: string, value: string | null | undefined) => {
     if (value?.trim()) fields.push({ path, text: value });
@@ -125,7 +130,10 @@ export function assertCombinedGeoReportLanguage(report: CombinedGeoReportV1): vo
     ...forensic.sourceGraph.entities.filter(({ status }) => status === "resolved").map(({ canonicalName }) => canonicalName),
     ...forensic.sourceGraph.claims.filter(({ status }) => status === "supported").map(({ subjectName }) => subjectName)
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 120);
-  assertReportLanguage(fields, report.locale, [...new Set(allowedTerms)]);
+  const scopedFields = scope === "presentation_refresh"
+    ? fields.filter(({ path }) => !path.startsWith("technicalFoundation.") && !path.startsWith("businessQuestionSet."))
+    : fields;
+  assertReportLanguage(scopedFields, report.locale, [...new Set(allowedTerms)]);
 }
 
 export function parseCombinedGeoReportV1(value: unknown): CombinedGeoReportV1 {

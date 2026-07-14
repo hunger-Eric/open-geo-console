@@ -565,7 +565,8 @@ async function finalizeStagingArtifactRefreshJob(input:{
   const ready=await buildReadyCombinedArtifact({artifactRevisionId:input.context.artifactRevisionId,artifactRevision:input.context.artifactRevision,
     reportId:input.job.reportId,orderId:input.context.orderId,jobId:input.job.id,originalPaidJobId:source.originalPaidJobId,
     targetUrl:source.targetUrl,technicalReport:source.technicalFoundation.technicalReport,aiReport:source.technicalFoundation.aiReport,
-    evidenceAssets:input.evidenceAssets,businessQuestionSet:questionSet,businessQuestionAnswers:resolvedAnswers.answers,publicSourceForensics:result.report});
+    evidenceAssets:input.evidenceAssets,businessQuestionSet:questionSet,businessQuestionAnswers:resolvedAnswers.answers,
+    publicSourceForensics:result.report,languageValidationScope:"presentation_refresh"});
   await terminalizeStagingCombinedArtifactRefresh({report:ready.report,workerId:input.workerId,checkpointIdentityHash:result.checkpoint.identityHash,
     snapshotRefs:result.commercialSnapshotRefs,htmlSha256:ready.htmlSha256,pdfSha256:ready.pdfSha256,pdfStorageKey:ready.pdfStorageKey,pageCount:ready.pageCount});
 }

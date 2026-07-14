@@ -40,6 +40,15 @@ describe("prospective combined report language gate", () => {
     report.vendorTaskPackage.tasks[0]!.text = "Update";
     expect(() => assertCombinedGeoReportLanguage(report)).toThrow(ReportLanguageValidationError);
   });
+
+  it("revalidates new presentation prose while preserving a historical technical and question foundation", () => {
+    const report = fixture("zh-CN");
+    report.technicalFoundation.aiReport.organizationProfile.summary = "Historical English technical summary.";
+    report.businessQuestionSet.questions[0]!.privateText = "Historical English business question?";
+    expect(() => assertCombinedGeoReportLanguage(report, "presentation_refresh")).not.toThrow();
+    report.businessQuestionAnswers!.answers[0]!.answer = "New English customer answer.";
+    expect(() => assertCombinedGeoReportLanguage(report, "presentation_refresh")).toThrow(ReportLanguageValidationError);
+  });
 });
 
 function fixture(locale: string): CombinedGeoReportV1 {

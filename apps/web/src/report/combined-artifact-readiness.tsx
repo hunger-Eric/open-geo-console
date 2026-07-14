@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertCombinedGeoReportLanguage, requireReadyCombinedGeoReport, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, requireReadyCombinedGeoReport, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedReportLanguageScope, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -62,6 +62,7 @@ export async function buildReadyCombinedArtifact(input: {
   businessQuestionSet: ConfirmedBusinessQuestionSet;
   businessQuestionAnswers: CombinedBusinessQuestionAnswers;
   publicSourceForensics: RecommendationForensicReportV2;
+  languageValidationScope?: CombinedReportLanguageScope;
 }): Promise<ReadyCombinedArtifact> {
   if (input.evidenceAssets.some((asset) => asset.status !== "ready" || !asset.contentHash || !asset.storageKey)) {
     throw new Error("Every combined-report screenshot must be ready before artifact activation.");
@@ -131,7 +132,7 @@ export async function buildReadyCombinedArtifact(input: {
       nonCausal: true
     }
   });
-  assertCombinedGeoReportLanguage(report);
+  assertCombinedGeoReportLanguage(report, input.languageValidationScope);
   const locale: "en" | "zh" = report.locale.toLowerCase().startsWith("zh") ? "zh" : "en";
   const model = { productContract: "combined_geo_report_v1" as const, reportId: input.reportId, locale,
     combinedReport: report, technicalReport: input.technicalReport, evidenceAssets: input.evidenceAssets,
