@@ -407,14 +407,14 @@ describe("batch analysis and evidence", () => {
     expect(client.completeJson).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects Latin brands invented by the model during Chinese correction", async () => {
+  it("removes Latin brands invented by the model during Chinese correction", async () => {
     const invalid = { analyses: [{ url: page.url, summary: "建议增加 Google Reviews 和 Trustpilot。", organizationSignals: [], strengths: [], findings: [] }] };
     const client = mockClient([invalid, {
       corrections: [{ path: "analyses[0].summary", text: "建议增加 Google Reviews 和 Trustpilot。" }]
     }]);
 
     await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", retryDelay: async () => undefined }))
-      .rejects.toThrow(ReportLanguageValidationError);
+      .resolves.toMatchObject({ analyses: [{ summary: "建议增加 英文术语 和 英文术语。" }] });
     expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
 

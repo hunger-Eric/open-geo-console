@@ -5,6 +5,7 @@ import {
   ReportLanguageValidationError,
   assertGeoTerminology,
   assertReportLanguage,
+  normalizeReportCorrectionText,
   reportLanguageCorrectionFeedback,
   reportLanguageInstruction
 } from "./report-language";
@@ -318,8 +319,12 @@ export async function analyzePageBatch(
         const candidate = isLanguageCorrectionCall
           ? (() => {
               const corrections = parsePageLanguageCorrections(completion.value, fieldsToCorrect.map(({ path }) => path));
-              return languageCorrectionDraft && corrections
-                ? applyPageLanguageCorrections(languageCorrectionDraft, corrections)
+              const normalized = corrections?.map((correction) => ({
+                ...correction,
+                text: normalizeReportCorrectionText(correction.text, input.locale, allowedTerms)
+              }));
+              return languageCorrectionDraft && normalized
+                ? applyPageLanguageCorrections(languageCorrectionDraft, normalized)
                 : null;
             })()
           : parseBatch(completion.value, pages);

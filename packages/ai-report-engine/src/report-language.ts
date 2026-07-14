@@ -106,6 +106,25 @@ export function reportLanguageCorrectionFeedback(
   });
 }
 
+export function normalizeReportCorrectionText(
+  text: string,
+  locale: string,
+  allowedTerms: readonly string[] = []
+): string {
+  if (normalizeReportLanguage(locale) !== "zh" || (text.match(/[\u3400-\u9fff]/gu) ?? []).length < 4) return text;
+  const protectedTerms: string[] = [];
+  let result = text.replace(/\bSEO\b/giu, "GEO");
+  for (const term of [...allowedTerms].filter((value) => value.trim()).sort((a, b) => b.length - a.length)) {
+    result = result.split(term).join(`\uE000${protectedTerms.push(term) - 1}\uE001`);
+  }
+  result = result
+    .replace(/[A-Za-z][A-Za-z0-9]*(?:[-_./][A-Za-z0-9]+)*/g, (token) =>
+      isTechnicalToken(token) ? token : "英文术语"
+    )
+    .replace(/英文术语(?:\s+英文术语)+/g, "英文术语");
+  return result.replace(/\uE000(\d+)\uE001/g, (_match, index: string) => protectedTerms[Number(index)] ?? "");
+}
+
 export function assertGeoTerminology(
   fields: readonly ReportLanguageField[],
   policy: ReportTerminologyPolicy

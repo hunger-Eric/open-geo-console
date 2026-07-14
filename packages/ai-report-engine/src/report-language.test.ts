@@ -4,11 +4,24 @@ import {
   ReportLanguageValidationError,
   assertGeoTerminology,
   assertReportLanguage,
+  normalizeReportCorrectionText,
   normalizeReportLanguage,
   reportLanguageInstruction
 } from "./report-language";
 
 describe("report language contract", () => {
+  it("deterministically removes unapproved Latin fragments from otherwise Chinese corrections", () => {
+    expect(normalizeReportCorrectionText("\u5efa\u8bae\u5c06 OUR SERVICES \u6539\u4e3a\u4e2d\u6587\u6807\u9898\u3002", "zh-CN"))
+      .toBe("\u5efa\u8bae\u5c06 \u82f1\u6587\u672f\u8bed \u6539\u4e3a\u4e2d\u6587\u6807\u9898\u3002");
+    expect(normalizeReportCorrectionText("\u5efa\u8bae\u4f18\u5316 CTA \u884c\u52a8\u53f7\u53ec\uff0c\u5e76\u4fdd\u7559 Shopee \u54c1\u724c\u3002", "zh-CN", ["Shopee"]))
+      .toBe("\u5efa\u8bae\u4f18\u5316 CTA \u884c\u52a8\u53f7\u53ec\uff0c\u5e76\u4fdd\u7559 Shopee \u54c1\u724c\u3002");
+  });
+
+  it("does not disguise an entire English correction as Chinese", () => {
+    expect(normalizeReportCorrectionText("Rewrite the heading in Chinese.", "zh-CN"))
+      .toBe("Rewrite the heading in Chinese.");
+  });
+
   it("normalizes only supported report languages", () => {
     expect(normalizeReportLanguage("zh-CN")).toBe("zh");
     expect(normalizeReportLanguage("en_US")).toBe("en");

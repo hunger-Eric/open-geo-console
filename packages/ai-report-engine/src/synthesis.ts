@@ -13,6 +13,7 @@ import {
   ReportLanguageValidationError,
   assertGeoTerminology,
   assertReportLanguage,
+  normalizeReportCorrectionText,
   reportLanguageCorrectionFeedback,
   reportLanguageInstruction
 } from "./report-language";
@@ -280,7 +281,13 @@ async function correctWebsiteReportLanguage(
     ]
   });
   const corrections = parseWebsiteLanguageCorrections(completion.value, fieldsToCorrect.map(({ path }) => path));
-  const corrected = corrections ? applyWebsiteLanguageCorrections(error.draft.report, corrections) : null;
+  const normalizedCorrections = corrections?.map((correction) => ({
+    ...correction,
+    text: normalizeReportCorrectionText(correction.text, input.locale, allowedTerms)
+  }));
+  const corrected = normalizedCorrections
+    ? applyWebsiteLanguageCorrections(error.draft.report, normalizedCorrections)
+    : null;
   if (!corrected) throw error;
   assertWebsiteReportLanguage(corrected, input);
   return { ...error.draft, report: corrected };
