@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element -- protected evidence images must render in the canonical printable HTML */
 import type { CombinedPrivateReportArtifactModel } from "@/report/artifact-model";
-import type React from "react";
+import React from "react";
 
 export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateReportArtifactModel }) {
   const report = model.combinedReport;
