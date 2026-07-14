@@ -17,8 +17,8 @@ describeDisposablePostgres("schema v20 provider evidence persistence", () => {
     const sql = postgres(withDatabase(adminUrl!, databaseName), { max: 1, prepare: false });
     try {
       await sql.begin(async (tx) => { for (const statement of DATABASE_MIGRATIONS) await tx.unsafe(statement); });
-      expect(DATABASE_SCHEMA_VERSION).toBe(20);
-      expect(DATABASE_MIGRATIONS.slice(-V20_DATABASE_MIGRATIONS.length)).toEqual(V20_DATABASE_MIGRATIONS);
+      expect(DATABASE_SCHEMA_VERSION).toBe(21);
+      expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining([...V20_DATABASE_MIGRATIONS]));
       const columns = await sql<{ column_name: string }[]>`SELECT column_name FROM information_schema.columns WHERE table_name='market_snapshot_questions'`;
       expect(columns.map(({ column_name }) => column_name)).toEqual(expect.arrayContaining(["snapshot_kind", "parent_snapshot_id", "candidate_set_hash", "query_plan_version"]));
       const tables = await sql<{ passages: string | null; claims: string | null }[]>`SELECT to_regclass('market_source_passages')::text passages,to_regclass('market_provider_claims')::text claims`;

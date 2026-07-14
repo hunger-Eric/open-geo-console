@@ -1913,6 +1913,20 @@ export const V20_DATABASE_MIGRATIONS = [
   `CREATE TRIGGER market_provider_claims_private_identity_guard BEFORE INSERT OR UPDATE ON market_provider_claims FOR EACH ROW EXECUTE FUNCTION ogc_reject_private_identity_in_shared_market_data()`
 ] as const;
 
+export const V21_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_artifact_contract_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_artifact_contract_check CHECK (artifact_contract IS NULL OR artifact_contract IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3'))`,
+  `ALTER TABLE report_access_tokens DROP CONSTRAINT IF EXISTS report_access_tokens_artifact_scope_check`,
+  `ALTER TABLE report_access_tokens ADD CONSTRAINT report_access_tokens_artifact_scope_check CHECK (artifact_scope IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_correction_credit_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_correction_credit_check CHECK (reason <> 'paid_report_correction' OR (credit_reservation_id IS NULL AND artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND correction_id IS NOT NULL AND business_question_set_id IS NOT NULL))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_refresh_credit_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_refresh_credit_check CHECK (reason <> 'staging_artifact_refresh' OR (credit_reservation_id IS NULL AND artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND correction_id IS NULL AND business_question_set_id IS NOT NULL AND tier='deep'))`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_contract_check`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_artifact_contract_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_contract_check CHECK (artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3'))`
+] as const;
+
 export const DATABASE_MIGRATIONS = [
   ...V9_DATABASE_MIGRATIONS,
   ...V10_DATABASE_MIGRATIONS,
@@ -1925,5 +1939,6 @@ export const DATABASE_MIGRATIONS = [
   ...V17_DATABASE_MIGRATIONS,
   ...V18_DATABASE_MIGRATIONS,
   ...V19_DATABASE_MIGRATIONS,
-  ...V20_DATABASE_MIGRATIONS
+  ...V20_DATABASE_MIGRATIONS,
+  ...V21_DATABASE_MIGRATIONS
 ] as const;
