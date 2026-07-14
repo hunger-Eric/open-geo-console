@@ -29,6 +29,7 @@ export class JobExecutionLease {
   private readonly clearIntervalImpl: typeof clearInterval;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
+  private readonly startedAt: number;
   private lastCheckpointAt: number;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   private deadlineTimer: ReturnType<typeof setTimeout> | undefined;
@@ -44,7 +45,8 @@ export class JobExecutionLease {
     this.clearIntervalImpl = options.clearIntervalImpl ?? clearInterval;
     this.setTimeoutImpl = options.setTimeoutImpl ?? setTimeout;
     this.clearTimeoutImpl = options.clearTimeoutImpl ?? clearTimeout;
-    this.lastCheckpointAt = this.now();
+    this.startedAt = this.now();
+    this.lastCheckpointAt = this.startedAt;
   }
 
   start(): void {
@@ -57,6 +59,14 @@ export class JobExecutionLease {
   checkpointed(): void {
     this.throwIfAborted();
     this.lastCheckpointAt = this.now();
+  }
+
+  elapsedMs(): number {
+    return Math.max(0, this.now() - this.startedAt);
+  }
+
+  remainingMs(): number {
+    return Math.max(0, this.options.hardDeadlineMs - this.elapsedMs());
   }
 
   throwIfAborted(): void {

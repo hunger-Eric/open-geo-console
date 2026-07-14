@@ -21,4 +21,12 @@ describe("JobExecutionLease", () => {
   it("rejects an unusably short configured deadline", () => {
     expect(() => new JobExecutionLease({ hardDeadlineMs: 999, heartbeat: async () => true })).toThrow("OGC_JOB_HARD_DEADLINE_MS");
   });
+
+  it("reports elapsed and remaining attempt time from the injected clock", () => {
+    let now = 10_000;
+    const lease = new JobExecutionLease({ hardDeadlineMs: 900_000, heartbeat: async () => true, now: () => now });
+    now += 120_000;
+    expect(lease.elapsedMs()).toBe(120_000);
+    expect(lease.remainingMs()).toBe(780_000);
+  });
 });

@@ -48,6 +48,7 @@ import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-
 import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { JobExecutionLease, configuredJobHardDeadlineMs } from "./job-execution";
 import { normalizeJobError } from "./job-errors";
+import { createPublicSourceAttemptBudget } from "./public-source-execution-budget";
 import { phaseForStage, recoveryEnvelope } from "./job-state";
 import type { StagingLiveDrill } from "./staging-live-drill";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
@@ -129,7 +130,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
           job, workerId, checkpoint, websiteFoundation: existingFoundation.payload,
           targetUrl: canonicalTarget,
           coverage: { plannedPages: job.plannedPages, successfulPages: job.successfulPages, failedPages: job.failedPages },
-          fulfillmentTarget, checkpointJob, liveDrill: options.liveDrill
+          fulfillmentTarget, checkpointJob, liveDrill: options.liveDrill,
+          signal: execution.controller.signal, remainingMs: execution.remainingMs()
         });
         return;
       }
@@ -385,7 +387,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
           successfulPages: effectiveCoverage.analyzedPages,
           failedPages: failureCount(checkpoint)
         },
-        signal: execution.controller.signal, checkpointJob, liveDrill: options.liveDrill
+        signal: execution.controller.signal, remainingMs: execution.remainingMs(), checkpointJob, liveDrill: options.liveDrill
       });
       return;
     }
@@ -486,6 +488,7 @@ async function finalizeRecommendationJob(input: {
   fulfillmentTarget: "recommendation_v1" | "recommendation_v2";
   checkpointJob: WorkerCheckpointWriter;
   signal?: AbortSignal;
+  remainingMs: number;
   liveDrill?: StagingLiveDrill;
 }): Promise<void> {
   if (input.fulfillmentTarget === "recommendation_v2") {
@@ -510,6 +513,7 @@ async function finalizeRecommendationJob(input: {
       return;
     }
     if (checkpointPhase() === "public_source_preflight") input.liveDrill?.inject({ jobId: input.job.id, fault: "v2_runtime" });
+    createPublicSourceAttemptBudget(input.remainingMs);
     const dependencies = await createProductionPublicSourceForensicsDependencies(process.env, {
       createDependencies: async (runtime) => createWorkerPublicSourceForensicsDependencies({
         job: input.job,
