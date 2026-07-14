@@ -84,5 +84,6 @@ describe("business question contracts", () => {
     expect(publicSet.questions).toHaveLength(3);
     expect(JSON.stringify(publicSet)).not.toMatch(/Shun Express|shun-express\.com/i);
     expect(publicSet.questions.map(({normalizedText})=>normalizedText)).toEqual(confirmed.questions.map(({neutralPublicText})=>neutralPublicText));
+    expect(publicSet.questions[2]!.derivation.subject.length).toBeLessThan(publicSet.questions[2]!.normalizedText.length);
   });
 });

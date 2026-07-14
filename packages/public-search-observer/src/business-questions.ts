@@ -193,13 +193,27 @@ export function toCanonicalBuyerQuestionSet(set: ConfirmedBusinessQuestionSet): 
       derivation: {
         ruleId: `confirmed-${question.purpose}-v1`,
         evidenceSourceIds: [`profile-evidence:${set.profileEvidenceIdentity}`],
-        subject: question.neutralPublicText,
+        subject: publicSearchSubject(question.purpose, question.neutralPublicText, set.locale),
         supportingTerm: question.purpose === "customer_region_fit" ? question.neutralPublicText : undefined,
         broadened: set.confidence === "low"
       }
     })),
     limitations: set.confidence === "low" ? ["The customer confirmed a low-confidence business profile before public search."] : []
   });
+}
+
+function publicSearchSubject(purpose:BusinessQuestionPurpose,text:string,locale:string):string{
+  if(purpose!=="purchase_delivery_risk")return text;
+  if(locale.toLowerCase().startsWith("zh")){
+    const service=/采购(.+?)时/.exec(text)?.[1]?.trim();
+    const capability=/比较(.+?)[、，,]交付条件/.exec(text)?.[1]?.trim();
+    if(service&&capability)return `${service} ${capability}`;
+    if(capability)return capability;
+  }else{
+    const subject=/compare (.+?)(?:,| and )\s*delivery conditions/i.exec(text)?.[1]?.trim();
+    if(subject)return subject;
+  }
+  return text;
 }
 
 function strongest(values: readonly string[], profile: BusinessQuestionProfile, fallback: string): string {
