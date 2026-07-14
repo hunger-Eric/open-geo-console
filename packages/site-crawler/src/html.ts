@@ -24,6 +24,7 @@ export interface ExtractedPageContent {
   headings: PageHeading[];
   jsonLd: unknown[];
   jsonLdTypes: string[];
+  officialNames: string[];
   text: string;
   wordCount: number;
   links: string[];
@@ -151,6 +152,52 @@ export function extractJsonLd(html: string): { values: unknown[]; types: string[
   return { values, types: [...types] };
 }
 
+const OFFICIAL_NAME_TYPES = new Set(["organization", "corporation", "localbusiness", "brand", "product", "service", "softwareapplication"]);
+const MAX_OFFICIAL_NAMES = 32;
+const MAX_OFFICIAL_NAME_LENGTH = 120;
+
+function collectOfficialNames(values: readonly unknown[]): string[] {
+  const names = new Set<string>();
+  const visited = new Set<object>();
+  let visitedNodes = 0;
+  const add = (value: unknown): void => {
+    if (names.size >= MAX_OFFICIAL_NAMES || typeof value !== "string") return;
+    const name = value.replace(/\s+/g, " ").trim();
+    if (name && name.length <= MAX_OFFICIAL_NAME_LENGTH && !/[\u0000-\u001f\u007f]/u.test(name)) names.add(name);
+  };
+  const addField = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(add);
+    else add(value);
+  };
+  const visit = (value: unknown, depth: number): void => {
+    if (depth > 12 || visitedNodes >= 1_000 || names.size >= MAX_OFFICIAL_NAMES) return;
+    if (Array.isArray(value)) {
+      visitedNodes += 1;
+      value.forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    if (!value || typeof value !== "object" || visited.has(value)) return;
+    visited.add(value);
+    visitedNodes += 1;
+    const record = value as Record<string, unknown>;
+    const types = (Array.isArray(record["@type"]) ? record["@type"] : [record["@type"]])
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.split(/[\/#]/).pop()?.toLowerCase() ?? "");
+    if (types.some((type) => OFFICIAL_NAME_TYPES.has(type))) {
+      addField(record.name);
+      addField(record.legalName);
+      addField(record.alternateName);
+      for (const brand of Array.isArray(record.brand) ? record.brand : [record.brand]) {
+        if (typeof brand === "string") add(brand);
+        else if (brand && typeof brand === "object" && !Array.isArray(brand)) addField((brand as Record<string, unknown>).name);
+      }
+    }
+    Object.values(record).forEach((child) => visit(child, depth + 1));
+  };
+  values.forEach((value) => visit(value, 0));
+  return [...names];
+}
+
 export function extractReadableText(html: string, maximumCharacters = 200_000): string {
   const body = html.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i)?.[1] ?? html;
   const withoutBoilerplate = body
@@ -211,6 +258,7 @@ export function extractPageContent(
     headings,
     jsonLd: jsonLd.values,
     jsonLdTypes: jsonLd.types,
+    officialNames: collectOfficialNames(jsonLd.values),
     text,
     wordCount: text ? text.split(/\s+/u).filter(Boolean).length : 0,
     links: extractLinks(html, url),

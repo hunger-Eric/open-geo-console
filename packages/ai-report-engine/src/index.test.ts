@@ -363,6 +363,14 @@ describe("batch analysis and evidence", () => {
     await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 1 }))
       .resolves.toMatchObject({ analyses: [{ summary: expect.stringContaining("example") }] });
   });
+
+  it("allows an official name owned by structured website metadata", async () => {
+    const officialPage = { ...page, metadata: { officialNames: ["Google Analytics"] } };
+    const localized = { analyses: [{ url: page.url, summary: "该页面介绍 Google Analytics 产品。", organizationSignals: [], strengths: [], findings: [] }] };
+    const client = mockClient([localized]);
+    await expect(analyzePageBatch(client, { pages: [officialPage], locale: "zh-CN", maxAttempts: 1 }))
+      .resolves.toMatchObject({ analyses: [{ summary: expect.stringContaining("Google Analytics") }] });
+  });
 });
 
 describe("report validation and synthesis", () => {
@@ -479,6 +487,29 @@ describe("report validation and synthesis", () => {
     await expect(synthesizeWebsiteReport(mockClient([output]), input)).rejects.toThrow(ReportLanguageValidationError);
   });
 
+  it.each([
+    ["organizationName", "AI Customer Growth Strategy"],
+    ["brandNames", ["Grow Revenue in 30 Days"]],
+    ["legalEntity", "cloud-first-growth"]
+  ] as const)("does not let model-controlled organizationProfile.%s authorize prose", async (field, value) => {
+    const output = chineseReportModelOutput();
+    const profile = output.organizationProfile as Record<string, unknown>;
+    profile[field] = value;
+    const leaked = Array.isArray(value) ? value[0]! : value;
+    const input = synthesisInput("zh-CN");
+    input.pages = [{ ...page, text: `${page.text} ${leaked}` }];
+    await expect(synthesizeWebsiteReport(mockClient([output]), input)).rejects.toThrow(ReportLanguageValidationError);
+  });
+
+  it("does not let a model-controlled Chinese brand authorize Chinese prose in English", async () => {
+    const output = reportModelOutput(1);
+    const profile = output.organizationProfile as Record<string, unknown>;
+    profile.brandNames = ["快速增长客户收入"];
+    const input = synthesisInput("en");
+    input.pages = [{ ...page, text: `${page.text} 快速增长客户收入` }];
+    await expect(synthesizeWebsiteReport(mockClient([output]), input)).rejects.toThrow(ReportLanguageValidationError);
+  });
+
   it("allows an exact source-grounded brand even when it is also a product", async () => {
     const output = chineseReportModelOutput();
     const profile = output.organizationProfile as Record<string, unknown>;
@@ -486,7 +517,7 @@ describe("report validation and synthesis", () => {
     profile.productsAndServices = ["Google Analytics"];
     profile.summary = "Example 为客户提供 Google Analytics 产品。";
     const input = synthesisInput("zh-CN");
-    input.pages = [{ ...page, text: `${page.text} Google Analytics is an exact brand name.` }];
+    input.pages = [{ ...page, metadata: { officialNames: ["Example", "Google Analytics"] } }];
     await expect(synthesizeWebsiteReport(mockClient([output]), input))
       .resolves.toMatchObject({ report: { organizationProfile: { productsAndServices: ["Google Analytics"] } } });
   });
@@ -518,7 +549,7 @@ function synthesisInput(locale: string): ReportSynthesisInput {
     tier: "deep" as const,
     locale,
     organizationHints: ["Example"],
-    pages: [page],
+    pages: [{ ...page, metadata: { officialNames: ["Example"] } }],
     pageAnalyses: [],
     coverage: {
       discoveredPages: 1, plannedPages: 1, analyzedPages: 1, failedPages: 0,

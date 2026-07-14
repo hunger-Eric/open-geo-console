@@ -270,6 +270,11 @@ function collectPageAllowedTerms(pages: readonly ExtractedPage[]): string[] {
     } catch {
       // URL validity is enforced before analysis; an invalid value contributes no allowlist term.
     }
+    const officialNames = page.metadata?.officialNames;
+    for (const value of Array.isArray(officialNames) ? officialNames.slice(0, 32) : []) {
+      const name = value.replace(/\s+/g, " ").trim();
+      if (name && name.length <= 120) terms.add(name);
+    }
   }
   return [...terms];
 }

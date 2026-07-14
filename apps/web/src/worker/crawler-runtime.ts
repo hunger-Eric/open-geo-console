@@ -189,6 +189,7 @@ export async function fetchEvidencePage(
         language: extracted.language ?? "",
         headings: extracted.headings.map((heading) => `${heading.level}:${heading.text}`),
         jsonLdTypes: extracted.jsonLdTypes,
+        officialNames: extracted.officialNames,
         wordCount: String(extracted.wordCount),
         browserRendered: String(browserRendered)
       }

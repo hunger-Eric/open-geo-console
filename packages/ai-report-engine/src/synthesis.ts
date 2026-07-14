@@ -223,6 +223,13 @@ export async function synthesizeWebsiteReportWithRecovery(
 function assertWebsiteReportLanguage(report: AiWebsiteReportV1, input: ReportSynthesisInput): void {
   const roadmap = [...report.roadmap.immediate, ...report.roadmap.nextPhase, ...report.roadmap.ongoing];
   assertReportLanguage([
+    ...(report.organizationProfile.organizationName
+      ? [{ path: "organizationProfile.organizationName", text: report.organizationProfile.organizationName }]
+      : []),
+    ...report.organizationProfile.brandNames.map((text, index) => ({ path: `organizationProfile.brandNames[${index}]`, text })),
+    ...(report.organizationProfile.legalEntity
+      ? [{ path: "organizationProfile.legalEntity", text: report.organizationProfile.legalEntity }]
+      : []),
     { path: "organizationProfile.summary", text: report.organizationProfile.summary },
     ...(report.organizationProfile.businessModel
       ? [{ path: "organizationProfile.businessModel", text: report.organizationProfile.businessModel }]
@@ -253,35 +260,29 @@ function assertWebsiteReportLanguage(report: AiWebsiteReportV1, input: ReportSyn
       { path: `roadmap[${itemIndex}].rationale`, text: item.rationale },
       ...item.actions.map((text, index) => ({ path: `roadmap[${itemIndex}].actions[${index}]`, text }))
     ])
-  ], input.locale, collectSourceGroundedAllowedTerms(report, input));
+  ], input.locale, collectSourceGroundedAllowedTerms(input));
 }
 
-function collectSourceGroundedAllowedTerms(report: AiWebsiteReportV1, input: ReportSynthesisInput): string[] {
-  const profile = report.organizationProfile;
-  const authoritativeNames = [
-    profile.organizationName,
-    ...profile.brandNames,
-    profile.legalEntity
-  ].filter((value): value is string => Boolean(value?.trim()) && value!.length <= 120);
-  const organizationHints = (input.organizationHints ?? [])
-    .map((value) => value.trim())
-    .filter(isNameShapedOrganizationHint);
-  const suppliedPageValues = input.pages.flatMap((page) => [
-    page.title ?? "",
-    page.description ?? "",
-    page.text,
-    ...Object.values(page.metadata ?? {}).flatMap((value) => Array.isArray(value) ? value : [value])
-  ]);
-  return [...new Set([...authoritativeNames, ...organizationHints]
-    .filter((term) => suppliedPageValues.some((value) => value.includes(term))))];
+function collectSourceGroundedAllowedTerms(input: ReportSynthesisInput): string[] {
+  const terms = new Set<string>();
+  for (const page of input.pages) {
+    const officialNames = page.metadata?.officialNames;
+    for (const value of Array.isArray(officialNames) ? officialNames.slice(0, 32) : []) {
+      const name = value.replace(/\s+/g, " ").trim();
+      if (name && name.length <= 120) terms.add(name);
+    }
+    try {
+      for (const label of new URL(page.url).hostname.split(".")) {
+        if (/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label) && !HOSTNAME_NOISE.has(label.toLowerCase())) terms.add(label);
+      }
+    } catch {
+      // Invalid page URLs contribute no allowlist term.
+    }
+  }
+  return [...terms];
 }
 
-function isNameShapedOrganizationHint(value: string): boolean {
-  if (!value || value.length > 120) return false;
-  const tokens = value.split(/\s+/);
-  return tokens.length <= 6 && tokens.every((token) =>
-    /^[A-Z][A-Za-z0-9&.-]*$/.test(token) || /^[\u3400-\u9fff]{2,12}$/u.test(token));
-}
+const HOSTNAME_NOISE = new Set(["www", "com", "org", "net", "io", "co", "cn"]);
 
 function languageViolationFeedback(error: ReportLanguageValidationError): string[] {
   return error.violations.map(({ path, reason }) => `${path}: ${reason}`);
