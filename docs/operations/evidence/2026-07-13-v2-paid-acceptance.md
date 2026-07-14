@@ -99,3 +99,25 @@ On 2026-07-14, the failure-path code was reviewed and committed as `c63dfc5aa0e5
 - `staging-worker-free` and `staging-worker-deep` were rebuilt and force-recreated from image `sha256:ad98e0e7fdb9dc27064b8eba76def7af50ab576b8d6c64e93a2f915e078dcde3`, whose OCI revision label is the reviewed commit above. Both logged ready state under `OGC_DEPLOYMENT_PROFILE=staging`.
 
 Gate result: **PASS for repair and controlled rebuild.** This is not a replacement for Gate 4: a fresh paid V2 order is still required to prove live deadline unwind, source evidence persistence, artifacts, and settlement.
+
+## Gate 6 — Fresh paid V2 end-to-end acceptance
+
+Verified against protected staging on 2026-07-14. The order was created only after both staging Worker lanes were rebuilt from reviewed revision `1698f04f25d0a79618d780735508ce41c4ac3205`.
+
+- Order: `5f999610-17d5-4df9-9aa0-a6cce5e5b741`
+- Report: `a71d7481-c5dc-4e2a-a042-b9be878feab8`
+- Deep job: `dd2cff0b-ba16-43b0-aded-55fdc767e656`
+- Commercial state: `paid / completed / not_required / delivered`
+- Job state: `completed`, progress `100`, execution state `completed`, no error or remaining lease
+- Credit: `settled`; refunds: `0`; payment events: `1`
+- Public-source persistence: `3` distinct completed snapshot refs and `14` available `market_source_evidence` rows
+- Private artifact: V2 `public_search_source_forensics_v1`, report version `2`, product contract `recommendation_forensics_v1`
+- Browser artifact: protected Chrome rendered the substantive HTML with `12/18` query coverage and `13` evidence-graph entries; the scoped PDF opened as `application/pdf`; a protection-bypassed request without the report cookie returned application-level `404`
+- Delivery: `payment_confirmed` and `report_ready` both reached `delivered` through the protected Preview commerce runner
+- Database audit: no terminal commercial job retained a reserved credit
+
+The evidence sanitizer now distinguishes public page content from internal secrets. Publicly published business email addresses and public server IP addresses may remain in shared evidence excerpts; internal IDs, client IPs, credentials, authorization headers, API keys, and report-access tokens remain prohibited. A credential-like source is isolated or downgraded without discarding the other public evidence.
+
+The fixed staging alias was moved to Preview deployment `dpl_H2bivyfzFHBGPEYLBrmX4ULvbQD8`, built from commit `16ff32b`. This deployment contains the compatible `zh` / `zh-CN` appendix validation and Worker-side V2 artifact rendering fixes. Production was not modified.
+
+Gate result: **PASS.** The fresh paid V2 chain reached persisted public evidence, private HTML, same-contract PDF, atomic settlement, and delivered test email without refund or duplicate payment.
