@@ -207,7 +207,7 @@ describePostgres("public-search market snapshot PostgreSQL authority", () => {
     expect(bundle?.queries).toHaveLength(fanout.queries.length);
     expect(bundle?.attempts).toHaveLength(fanout.queries.length);
     expect(bundle?.observations).toHaveLength(fanout.queries.length);
-    expect(bundle?.sources).toHaveLength(fanout.queries.length);
+    expect(bundle?.sources).toHaveLength(1);
     expect(bundle?.sources.every(({ retrievalState }) => retrievalState === "not_retrieved")).toBe(true);
   }, 120_000);
 

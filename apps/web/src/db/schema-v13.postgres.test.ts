@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
-import { DATABASE_SCHEMA_VERSION } from "./index";
 import {
   DATABASE_MIGRATIONS,
   V10_DATABASE_MIGRATIONS,
@@ -58,22 +57,18 @@ describeDisposablePostgres("schema v13-to-v14 disposable PostgreSQL migration", 
       await executeStatements(upgrade, V14_DATABASE_MIGRATIONS);
       await upgrade`UPDATE ogc_schema_state SET version=14, updated_at=now() WHERE singleton=true`;
 
-      await executeStatements(bootstrap, DATABASE_MIGRATIONS);
+      const v14Migrations = [
+        ...V9_DATABASE_MIGRATIONS, ...V10_DATABASE_MIGRATIONS, ...V11_DATABASE_MIGRATIONS,
+        ...V12_DATABASE_MIGRATIONS, ...V13_DATABASE_MIGRATIONS, ...V14_DATABASE_MIGRATIONS
+      ];
+      await executeStatements(bootstrap, v14Migrations);
       await bootstrap`CREATE TABLE ogc_schema_state (
         singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton = true),
         version integer NOT NULL CHECK (version > 0),
         updated_at timestamptz NOT NULL DEFAULT now())`;
       await bootstrap`INSERT INTO ogc_schema_state (singleton, version) VALUES (true, 14)`;
 
-      expect(DATABASE_SCHEMA_VERSION).toBe(14);
-      expect(DATABASE_MIGRATIONS).toEqual([
-        ...V9_DATABASE_MIGRATIONS,
-        ...V10_DATABASE_MIGRATIONS,
-        ...V11_DATABASE_MIGRATIONS,
-        ...V12_DATABASE_MIGRATIONS,
-        ...V13_DATABASE_MIGRATIONS,
-        ...V14_DATABASE_MIGRATIONS
-      ]);
+      expect(DATABASE_MIGRATIONS.slice(0, v14Migrations.length)).toEqual(v14Migrations);
       expect(await schemaShape(upgrade)).toEqual(await schemaShape(bootstrap));
       await expectV13ExpiryGuards(upgrade, suffix);
     } finally {

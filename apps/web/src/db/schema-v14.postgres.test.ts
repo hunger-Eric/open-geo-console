@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
-import { DATABASE_SCHEMA_VERSION } from "./index";
 import {
   DATABASE_MIGRATIONS,
   V10_DATABASE_MIGRATIONS,
@@ -46,17 +45,13 @@ describeDisposablePostgres("schema v14 disposable PostgreSQL migration", () => {
          terms_reviewed_at,evidence_references,active,captured_at)
         VALUES ('legacy-v13','legacy-surface','v1','staging','["zh-CN"]','["CN"]',now(),'[]',false,now())`;
       await executeStatements(upgrade, V14_DATABASE_MIGRATIONS);
-      await executeStatements(bootstrap, DATABASE_MIGRATIONS);
+      const v14Migrations = [
+        ...V9_DATABASE_MIGRATIONS, ...V10_DATABASE_MIGRATIONS, ...V11_DATABASE_MIGRATIONS,
+        ...V12_DATABASE_MIGRATIONS, ...V13_DATABASE_MIGRATIONS, ...V14_DATABASE_MIGRATIONS
+      ];
+      await executeStatements(bootstrap, v14Migrations);
 
-      expect(DATABASE_SCHEMA_VERSION).toBe(14);
-      expect(DATABASE_MIGRATIONS).toEqual([
-        ...V9_DATABASE_MIGRATIONS,
-        ...V10_DATABASE_MIGRATIONS,
-        ...V11_DATABASE_MIGRATIONS,
-        ...V12_DATABASE_MIGRATIONS,
-        ...V13_DATABASE_MIGRATIONS,
-        ...V14_DATABASE_MIGRATIONS
-      ]);
+      expect(DATABASE_MIGRATIONS.slice(0, v14Migrations.length)).toEqual(v14Migrations);
       await expect(upgrade`SELECT adapter_id,provider_id,product_id,model_id,adapter_version
         FROM public_search_surface_authorities WHERE authority_version='legacy-v13'`)
         .resolves.toEqual([{

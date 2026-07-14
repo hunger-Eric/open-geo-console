@@ -512,9 +512,6 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
     if (order.provider_payment_id && order.provider_payment_id !== input.providerPaymentId) {
       throw new CommercialOrderConflictError("The payment order is already bound to another provider payment.");
     }
-    if (order.product_code === "recommendation_forensics_v1" && !order.business_question_set_id) {
-      throw new CommercialOrderConflictError("The paid order is missing its locked business question set.");
-    }
     const cutoff = order.legacy_retirement_cutoff_at ? new Date(order.legacy_retirement_cutoff_at) : null;
     const lateRetiredLegacyPayment = order.product_code === "deep_report_v1" && cutoff &&
       (Boolean(order.legacy_retired_at) || !input.providerCreatedAt || input.providerCreatedAt > cutoff);
@@ -588,7 +585,7 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
           (id, report_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, artifact_contract, business_question_set_id, locale, reason, stage, credit_reservation_id)
         VALUES
           (${jobId}, ${order.report_id}, 'deep', ${productContractForCode(order.product_code)}, ${order.fulfillment_methodology}, ${order.recommendation_report_version},
-           ${order.product_code === "recommendation_forensics_v1" ? "combined_geo_report_v1" : "legacy_website_audit_v1"}, ${order.business_question_set_id},
+           ${order.product_code === "recommendation_forensics_v1" && order.business_question_set_id ? "combined_geo_report_v1" : productContractForCode(order.product_code)}, ${order.business_question_set_id},
            ${order.report_locale}, 'standard', 'queued', ${reservation.id})
       `;
     }
@@ -600,7 +597,7 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
       UPDATE payment_orders SET fulfillment_job_id = COALESCE(fulfillment_job_id, ${jobId}), updated_at = now()
       WHERE id = ${order.id}
     `;
-    if (order.product_code === "recommendation_forensics_v1") {
+    if (order.product_code === "recommendation_forensics_v1" && order.business_question_set_id) {
       const artifacts=await tx<Array<{id:string}>>`SELECT id FROM report_artifact_revisions WHERE job_id=${jobId} LIMIT 1`;
       if(!artifacts[0]) {
         await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`artifact-revision:${order.report_id}`},0))`;
