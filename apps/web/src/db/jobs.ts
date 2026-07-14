@@ -280,6 +280,16 @@ export async function claimScanJob(
       USING scan_jobs job
       WHERE regeneration.job_id = job.id AND job.stage = 'failed'
     `;
+    await tx`
+      UPDATE report_artifact_revisions artifact
+      SET status = 'failed'
+      FROM scan_jobs job
+      WHERE artifact.job_id = job.id
+        AND job.reason = 'staging_artifact_refresh'
+        AND job.stage = 'failed'
+        AND artifact.revision_kind = 'presentation_refresh'
+        AND artifact.status = 'pending'
+    `;
   });
   const claimedId = await JobTransitionService.claim(workerId, tier, leaseSeconds);
   return claimedId ? getScanJob(claimedId) : null;

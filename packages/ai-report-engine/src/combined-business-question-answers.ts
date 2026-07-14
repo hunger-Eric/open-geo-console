@@ -146,17 +146,25 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
     const isLanguageCorrectionCall = languageFeedback.length > 0;
     try {
       const languageInstruction = reportLanguageInstruction(input.forensic.locale);
+      const chinese = input.forensic.locale.toLowerCase().startsWith("zh");
       const completion = await client.completeJson({
         signal: input.signal,
         temperature: 0.1,
         maxTokens: 2_000,
         messages: [
-          { role: "system", content: input.forensic.locale.toLowerCase().startsWith("zh")
-            ? `你只能根据给定且已验证的公开来源摘录，撰写简洁直接的业务回答。只返回 JSON。${languageInstruction}`
+          { role: "system", content: chinese
+            ? `你是一名中文商业分析师。所有 answer 字段必须使用简体中文完整改写，即使问题和来源摘录是英文，也不得直接用英文句子作答。只能依据给定且已验证的公开来源摘录；只返回 JSON。${languageInstruction}`
             : `You write concise business answers grounded exclusively in supplied verified public-source excerpts. Return JSON only. ${languageInstruction}` },
           { role: "user", content: JSON.stringify({
-            task: input.forensic.locale.toLowerCase().startsWith("zh") ? "用一个简短中文段落直接回答每个业务问题。" : "Answer each business question directly in one short paragraph.",
-            rules: [
+            task: chinese ? "逐一直接回答三个业务问题；每个 answer 只写一个简短的简体中文段落。" : "Answer each business question directly in one short paragraph.",
+            requiredAnswerLanguage: chinese ? "简体中文；来源中的英文事实必须翻译和归纳为中文，不得复制英文句子。" : "English",
+            rules: chinese ? [
+              "只使用归属该问题的已验证证据。",
+              "综合至少两个不同域名的证据。",
+              "不要说明研究方法。",
+              "answer 中不得出现 URL、证据 ID、等级或无来源支持的断言。",
+              "官方名称或品牌可保留原文，其余叙述必须是简体中文。"
+            ] : [
               languageInstruction,
               "Use only the supplied evidence for that exact question.",
               "Select at least two evidence records from at least two different domains.",
