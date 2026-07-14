@@ -4,6 +4,34 @@ import { executePublicSourceRetrieval } from "./public-source-retriever";
 const publicResolver = async () => [{ address: "8.8.8.8", family: 4 as const }];
 
 describe("V2 public-source retriever", () => {
+  it("propagates a pre-existing Worker deadline without issuing network work", async () => {
+    const controller = new AbortController();
+    const reason = new Error("Worker deadline exceeded");
+    controller.abort(reason);
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    await expect(executePublicSourceRetrieval({
+      observationId: "obs-1", queryId: "query-1", resultUrl: "https://source.example/article"
+    }, { fetchImpl, resolver: publicResolver, signal: controller.signal })).rejects.toBe(reason);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("propagates abort during robots retrieval", async () => {
+    const controller = new AbortController();
+    const reason = new Error("Worker deadline exceeded during robots");
+    const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    })) as unknown as typeof fetch;
+    const pending = executePublicSourceRetrieval({
+      observationId: "obs-1", queryId: "query-1", resultUrl: "https://source.example/article"
+    }, { fetchImpl, resolver: publicResolver, signal: controller.signal });
+
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    controller.abort(reason);
+
+    await expect(pending).rejects.toBe(reason);
+  });
+
   it("retrieves only robots-authorized public text through safe fetch", async () => {
     const requested: string[] = [];
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {

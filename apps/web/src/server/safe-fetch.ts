@@ -46,10 +46,13 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
     options.allowBenchmarkNetwork ?? process.env.OGC_ALLOW_BENCHMARK_NETWORK === "true";
 
   return async (input, init = {}) => {
+    const inheritedSignal = init.signal;
+    inheritedSignal?.throwIfAborted();
     let current = typeof input === "string" || input instanceof URL ? new URL(input) : new URL(input.url);
     let resolved = await resolveSafeUrl(current, { resolver, allowBenchmarkNetwork });
 
     for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
+      inheritedSignal?.throwIfAborted();
       await options.beforeRequest?.(new URL(current.href));
       const pinned = resolved.addresses[0]!;
       const pinnedFamily: 4 | 6 = pinned.family === 6 ? 6 : 4;
@@ -66,7 +69,6 @@ export function createSafeFetch(options: SafeFetchOptions = {}): typeof fetch {
       });
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(new DOMException("Safe fetch timed out.", "TimeoutError")), timeoutMs);
-      const inheritedSignal = init.signal;
       const abort = () => controller.abort(inheritedSignal?.reason);
       inheritedSignal?.addEventListener("abort", abort, { once: true });
       try {

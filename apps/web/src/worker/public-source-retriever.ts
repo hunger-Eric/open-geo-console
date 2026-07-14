@@ -34,6 +34,7 @@ export async function executePublicSourceRetrieval(input: {
   queryId: string;
   resultUrl: string;
 }, options: PublicSourceRetrieverOptions = {}): Promise<RetrievedPublicSourceFact> {
+  options.signal?.throwIfAborted();
   const request = createPublicSourceRetrievalRequest(input);
   const robotsPolicies = new Map<string, RobotsPolicy>();
   const robotsCheckedOrigins = new Set<string>();
@@ -116,6 +117,7 @@ export async function executePublicSourceRetrieval(input: {
       verifiedExcerpt: normalizedText.slice(0, EXCERPT_MAX_CHARACTERS)
     });
   } catch (error) {
+    if (options.signal?.aborted) throw options.signal.reason;
     const common = retrievalCommon(request, visitedUrls, undefined, robotsCheckedOrigins);
     if (error instanceof PublicSourceRobotsDeniedError) {
       return unavailableResult({

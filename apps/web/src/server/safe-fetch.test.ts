@@ -4,6 +4,19 @@ import { createCloudflareDohResolver, createSafeFetch } from "./safe-fetch";
 const publicResolver = async () => [{ address: "8.8.8.8", family: 4 as const }];
 
 describe("createSafeFetch", () => {
+  it("performs no resolution or request for an already-aborted caller", async () => {
+    const controller = new AbortController();
+    const reason = new Error("job deadline");
+    controller.abort(reason);
+    const resolver = vi.fn(publicResolver);
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    await expect(createSafeFetch({ resolver, fetchImpl })("https://example.com", { signal: controller.signal }))
+      .rejects.toBe(reason);
+    expect(resolver).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("resolves public addresses through the fixed Cloudflare DoH endpoint", async () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
@@ -66,6 +79,26 @@ describe("createSafeFetch", () => {
     controller.abort(new DOMException("Worker deadline exceeded.", "AbortError"));
 
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(dispatcher.destroy).toHaveBeenCalledTimes(1);
+    expect(dispatcher.close).not.toHaveBeenCalled();
+  });
+
+  it("destroys the pinned dispatcher when abort arrives while reading the body", async () => {
+    const controller = new AbortController();
+    const reason = new Error("phase expired");
+    const dispatcher = { close: vi.fn(async () => {}), destroy: vi.fn(async () => {}) };
+    let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const body = new ReadableStream<Uint8Array>({ start(controller) { bodyController = controller; } });
+    const fetchImpl = vi.fn(async () => new Response(body, { headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
+    const pending = createSafeFetch({ fetchImpl, resolver: publicResolver, dispatcherFactory: () => dispatcher })(
+      "https://example.com", { signal: controller.signal }
+    );
+
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    controller.abort(reason);
+    bodyController?.error(reason);
+
+    await expect(pending).rejects.toBe(reason);
     expect(dispatcher.destroy).toHaveBeenCalledTimes(1);
     expect(dispatcher.close).not.toHaveBeenCalled();
   });
