@@ -330,7 +330,7 @@ export async function analyzePageBatch(
         break;
       } catch (error) {
         lastError = error;
-        if (isLanguageCorrectionCall) throw languageCorrectionError ?? error;
+        if (isLanguageCorrectionCall) throw error;
         if (error instanceof ReportLanguageValidationError) {
           if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
           languageCorrectionUsed = true;
