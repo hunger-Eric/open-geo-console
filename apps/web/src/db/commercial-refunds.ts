@@ -10,6 +10,7 @@ import {
 import { getPaymentOrder } from "./commercial-orders";
 import { JobTransitionService } from "@/worker/job-transition-service";
 import { validateRecoveryCheckpoint } from "@/worker/job-recovery";
+import { recoveryEnvelope, stageForPhase } from "@/worker/job-state";
 import type { JobCheckpoint, ScanJobPhase, ScanJobRow } from "./schema";
 
 const TERMINAL_EMAIL_TEMPLATE_VERSION = "v1";
@@ -385,11 +386,13 @@ export async function recoverHistoricalPaidJob(input: {
       FOR UPDATE
     `;
     if (delivered[0]) throw new Error("A failure or refund promise was already sent or delivered.");
+    const recovery = recoveryEnvelope(row.checkpoint);
+    if (!recovery) throw new Error("The failed job checkpoint has no recoverable phase.");
     validateRecoveryCheckpoint({
       job: { id: row.job_id, reportId: row.report_id, productContract: row.product_contract,
         fulfillmentMethodology: row.fulfillment_methodology, locale: row.locale,
-        checkpointRevision: row.checkpoint_revision, currentPhase: row.current_phase },
-      checkpoint: row.checkpoint, phase: row.current_phase, inputHash: input.inputHash
+        checkpointRevision: row.checkpoint_revision, currentPhase: recovery.phase },
+      checkpoint: row.checkpoint, phase: recovery.phase, inputHash: input.inputHash
     });
     const restored = await tx<{ id: string }[]>`
       UPDATE access_keys SET credits_remaining=credits_remaining-${row.credits},
@@ -406,13 +409,14 @@ export async function recoverHistoricalPaidJob(input: {
         delivery_status='not_queued', updated_at=now() WHERE id=${row.order_id}
     `;
     await tx`
-      UPDATE scan_jobs SET stage='queued', execution_state='queued', retry_not_before=NULL,
+      UPDATE scan_jobs SET stage=${stageForPhase(recovery.phase)}, execution_state='queued', current_phase=${recovery.phase},
+        phase_attempt=0, retry_not_before=NULL,
         repair_reason_code=NULL, repair_deadline_at=NULL, resume_generation=resume_generation+1,
         credit_reservation_id=${row.credit_id}, error_code=NULL, public_error=NULL, updated_at=now()
       WHERE id=${row.job_id} AND execution_state='failed'
     `;
     await JobTransitionService.appendTransition(tx, { jobId: row.job_id, fromState: "failed", toState: "queued",
-      phase: row.current_phase, checkpointRevision: row.checkpoint_revision, reasonCode: "historical_recovery" });
+      phase: recovery.phase, checkpointRevision: row.checkpoint_revision, reasonCode: "historical_recovery" });
     return { jobId: row.job_id, orderId: row.order_id };
   });
 }
