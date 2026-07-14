@@ -160,6 +160,15 @@ describe("report language contract", () => {
     }], "zh-CN")).not.toThrow();
   });
 
+  it.each([
+    "<div Improve content now>",
+    "<div data-note=\"Improve content now\">",
+    "<img alt=\"Improve customer trust\">"
+  ])("does not hide English in arbitrary HTML attributes: %s", (markup) => {
+    expect(() => assertReportLanguage([{ path: "markup", text: `请检查 ${markup}。` }], "zh-CN"))
+      .toThrow(ReportLanguageValidationError);
+  });
+
   it("requires explicit allowed terms for proper names", () => {
     const fields = [
       { path: "provider", text: "建议检查 Cloudflare 配置。" },

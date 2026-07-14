@@ -140,8 +140,7 @@ function sanitizeViolationPath(value: string, index: number): string {
 function sanitize(value: string, allowedTerms: readonly string[]): string {
   let result = value
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g, " ")
-    .replace(/<\/?([A-Za-z][A-Za-z0-9-]*)[^>]{0,120}>/g, (markup, tagName: string) =>
-      HTML_TECHNICAL_TAGS.has(tagName.toLowerCase()) ? " " : markup)
+    .replace(/<[^<>]{1,240}>/g, (markup) => isSafeTechnicalHtmlMarkup(markup) ? " " : markup)
     .replace(/https?:\/\/[^\s。！？；，、）】》)\]};,!"'<>]+/gi, " ")
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, " ")
     .replace(/`[^`]*`/g, " ");
@@ -150,4 +149,10 @@ function sanitize(value: string, allowedTerms: readonly string[]): string {
     if (term.trim()) result = result.split(term).join(" ");
   }
   return result;
+}
+
+function isSafeTechnicalHtmlMarkup(markup: string): boolean {
+  const bareTag = /^<\s*\/?\s*([A-Za-z][A-Za-z0-9-]*)\s*\/?\s*>$/.exec(markup);
+  if (bareTag) return HTML_TECHNICAL_TAGS.has(bareTag[1]!.toLowerCase());
+  return /^<\s*meta\s+name\s*=\s*(["'])(?:description|robots|viewport)\1\s*\/?\s*>$/i.test(markup);
 }
