@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { requireReadyCombinedGeoReport, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, requireReadyCombinedGeoReport, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -20,6 +20,32 @@ export interface ReadyCombinedArtifact {
   pdfSha256: string;
   pdfStorageKey: string;
   pageCount: number;
+}
+
+export function combinedArtifactSystemCopy(locale: string, input: {
+  technicalPages: number;
+  analyzedPages: number;
+  plannedPages: number;
+  failedPages: number;
+  freshness: "fresh" | "mixed" | "stale";
+  evidenceCutoffAt: string;
+}) {
+  if (locale.toLowerCase().startsWith("zh")) {
+    const freshness = { fresh: "最新", mixed: "混合时效", stale: "陈旧" }[input.freshness];
+    return {
+      technicalCoverage: `${input.technicalPages} 个技术页面；AI 已分析 ${input.analyzedPages}/${input.plannedPages} 个页面`,
+      evidenceFreshness: `${freshness}；证据截止 ${input.evidenceCutoffAt}`,
+      samplingMethod: `对 ${input.plannedPages} 个计划页面进行代表性抽样，完成 ${input.analyzedPages} 个页面的分析。`,
+      limitations: input.failedPages > 0 ? [`有 ${input.failedPages} 个计划页面未完成分析。`] : []
+    };
+  }
+  const freshness = { fresh: "Fresh", mixed: "Mixed freshness", stale: "Stale" }[input.freshness];
+  return {
+    technicalCoverage: `${input.technicalPages} technical pages; AI analyzed ${input.analyzedPages}/${input.plannedPages} pages`,
+    evidenceFreshness: `${freshness}; evidence cutoff ${input.evidenceCutoffAt}`,
+    samplingMethod: `Representative sampling across ${input.plannedPages} planned pages completed analysis for ${input.analyzedPages} pages.`,
+    limitations: input.failedPages > 0 ? [`${input.failedPages} planned pages could not be analyzed.`] : []
+  };
 }
 
 export async function buildReadyCombinedArtifact(input: {
@@ -48,6 +74,22 @@ export async function buildReadyCombinedArtifact(input: {
     }
   }
   const forensic = input.publicSourceForensics;
+  const systemCopy = combinedArtifactSystemCopy(forensic.locale, {
+    technicalPages: input.technicalReport.pages.length,
+    analyzedPages: input.aiReport.coverage.analyzedPages,
+    plannedPages: input.aiReport.coverage.plannedPages,
+    failedPages: input.aiReport.coverage.failedPages,
+    freshness: forensic.customerCostDisclosure.freshness,
+    evidenceCutoffAt: forensic.evidenceCutoffAt
+  });
+  const localizedAiReport: AiWebsiteReportV1 = {
+    ...input.aiReport,
+    coverage: {
+      ...input.aiReport.coverage,
+      samplingMethod: systemCopy.samplingMethod,
+      limitations: systemCopy.limitations
+    }
+  };
   const report = requireReadyCombinedGeoReport({
     version: 1,
     artifactContract: "combined_geo_report_v1",
@@ -67,7 +109,7 @@ export async function buildReadyCombinedArtifact(input: {
     questionSetIdentity: input.businessQuestionSet.id,
     technicalFoundation: {
       technicalReport: input.technicalReport,
-      aiReport: input.aiReport,
+      aiReport: localizedAiReport,
       evidenceAssets: input.evidenceAssets.filter((asset) => asset.status === "ready" && asset.contentHash).map((asset) => ({
         assetId: asset.id,
         jobId: asset.jobId,
@@ -83,12 +125,13 @@ export async function buildReadyCombinedArtifact(input: {
     methodology: {
       htmlCanonical: true,
       publicSearchSurface: `${forensic.authority.surface.surfaceId}/${forensic.authority.surface.surfaceVersion}`,
-      technicalCoverage: `${input.technicalReport.pages.length} technical pages; ${input.aiReport.coverage.analyzedPages}/${input.aiReport.coverage.plannedPages} AI-analyzed pages`,
-      evidenceFreshness: `${forensic.customerCostDisclosure.freshness}; cutoff ${forensic.evidenceCutoffAt}`,
-      limitations: [...new Set([...input.aiReport.coverage.limitations, ...forensic.limitations])],
+      technicalCoverage: systemCopy.technicalCoverage,
+      evidenceFreshness: systemCopy.evidenceFreshness,
+      limitations: [...new Set([...systemCopy.limitations, ...forensic.limitations])],
       nonCausal: true
     }
   });
+  assertCombinedGeoReportLanguage(report);
   const locale: "en" | "zh" = report.locale.toLowerCase().startsWith("zh") ? "zh" : "en";
   const model = { productContract: "combined_geo_report_v1" as const, reportId: input.reportId, locale,
     combinedReport: report, technicalReport: input.technicalReport, evidenceAssets: input.evidenceAssets,

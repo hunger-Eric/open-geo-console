@@ -72,11 +72,12 @@ export function redactDiagnostic(value: string, configuredSecrets: readonly stri
 export function normalizeJobError(error: unknown, context: JobErrorContext, now = new Date()): NormalizedJobError {
   const known = error instanceof JobError ? error : null;
   const source = error instanceof Error ? error : new Error("Non-error value thrown by job execution.");
+  const languageValidationFailure = source.name === "ReportLanguageValidationError";
   const secrets = context.configuredSecrets ?? [];
   const message = redactDiagnostic(source.message || "Unexpected internal error.", secrets, 1_000);
   const stack = source.stack ? redactDiagnostic(source.stack, secrets) : null;
-  const classification = known?.classification ?? classifyUnknown(source);
-  const code = known?.code ?? "unexpected_internal_error";
+  const classification = known?.classification ?? (languageValidationFailure ? "operator_repairable" : classifyUnknown(source));
+  const code = known?.code ?? (languageValidationFailure ? "report_language_validation_failed" : "unexpected_internal_error");
   const causes = collectCauses(source, secrets);
   const fingerprint = createHash("sha256").update(JSON.stringify({
     code, type: source.name || "Error", phase: context.phase, message: normalizeFingerprintMessage(message)

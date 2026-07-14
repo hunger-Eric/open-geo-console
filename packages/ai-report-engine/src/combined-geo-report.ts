@@ -4,6 +4,7 @@ import { parseAiWebsiteReportV1 } from "./validation";
 import type { AiWebsiteReportV1 } from "./types";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import { parseCombinedBusinessQuestionAnswers, type CombinedBusinessQuestionAnswers } from "./combined-business-question-answers";
+import { assertReportLanguage, type ReportLanguageField } from "./report-language";
 
 export const COMBINED_GEO_REPORT_VERSION = 1 as const;
 export const COMBINED_GEO_REPORT_CONTRACT = "combined_geo_report_v1" as const;
@@ -50,6 +51,84 @@ export interface CombinedGeoReportV1 {
     limitations: string[];
     nonCausal: true;
   };
+}
+
+/**
+ * Prospective publication gate for newly materialized combined reports.
+ * Parsing historical artifacts deliberately does not invoke this validation.
+ */
+export function assertCombinedGeoReportLanguage(report: CombinedGeoReportV1): void {
+  const fields: ReportLanguageField[] = [];
+  const add = (path: string, value: string | null | undefined) => {
+    if (value?.trim()) fields.push({ path, text: value });
+  };
+  const addList = (path: string, values: readonly string[] | undefined) =>
+    values?.forEach((value, index) => add(`${path}[${index}]`, value));
+
+  const ai = report.technicalFoundation.aiReport;
+  add("technicalFoundation.aiReport.organizationProfile.summary", ai.organizationProfile.summary);
+  add("technicalFoundation.aiReport.organizationProfile.identityConsistency", ai.organizationProfile.identityConsistency);
+  add("technicalFoundation.aiReport.executiveSummary.overview", ai.executiveSummary.overview);
+  addList("technicalFoundation.aiReport.executiveSummary.strengths", ai.executiveSummary.strengths);
+  addList("technicalFoundation.aiReport.executiveSummary.keyRisks", ai.executiveSummary.keyRisks);
+  addList("technicalFoundation.aiReport.executiveSummary.topPriorities", ai.executiveSummary.topPriorities);
+  ai.dimensionScores.forEach((score, index) => add(`technicalFoundation.aiReport.dimensionScores[${index}].explanation`, score.explanation));
+  ai.pageTypeAnalyses.forEach((analysis, index) => {
+    addList(`technicalFoundation.aiReport.pageTypeAnalyses[${index}].strengths`, analysis.strengths);
+    addList(`technicalFoundation.aiReport.pageTypeAnalyses[${index}].commonIssues`, analysis.commonIssues);
+    addList(`technicalFoundation.aiReport.pageTypeAnalyses[${index}].recommendations`, analysis.recommendations);
+  });
+  ai.findings.forEach((finding, index) => {
+    add(`technicalFoundation.aiReport.findings[${index}].title`, finding.title);
+    add(`technicalFoundation.aiReport.findings[${index}].impact`, finding.impact);
+    add(`technicalFoundation.aiReport.findings[${index}].recommendation`, finding.recommendation);
+    add(`technicalFoundation.aiReport.findings[${index}].rewriteExample`, finding.rewriteExample);
+  });
+  (["immediate", "nextPhase", "ongoing"] as const).forEach((phase) => {
+    ai.roadmap[phase].forEach((item, index) => {
+      add(`technicalFoundation.aiReport.roadmap.${phase}[${index}].title`, item.title);
+      add(`technicalFoundation.aiReport.roadmap.${phase}[${index}].rationale`, item.rationale);
+      addList(`technicalFoundation.aiReport.roadmap.${phase}[${index}].actions`, item.actions);
+    });
+  });
+  add("technicalFoundation.aiReport.coverage.samplingMethod", ai.coverage.samplingMethod);
+  addList("technicalFoundation.aiReport.coverage.limitations", ai.coverage.limitations);
+
+  report.businessQuestionSet.questions.forEach((question, index) =>
+    add(`businessQuestionSet.questions[${index}].privateText`, question.privateText));
+  report.businessQuestionAnswers?.answers.forEach((answer, index) =>
+    add(`businessQuestionAnswers.answers[${index}].answer`, answer.answer));
+
+  const forensic = report.publicSourceForensics;
+  forensic.customerComparison.forEach((section, index) => {
+    add(`publicSourceForensics.customerComparison[${index}].title`, section.title);
+    add(`publicSourceForensics.customerComparison[${index}].text`, section.text);
+  });
+  add("publicSourceForensics.executiveVerdict.title", forensic.executiveVerdict.title);
+  add("publicSourceForensics.executiveVerdict.text", forensic.executiveVerdict.text);
+  forensic.executivePriorities.forEach((section, index) => {
+    add(`publicSourceForensics.executivePriorities[${index}].title`, section.title);
+    add(`publicSourceForensics.executivePriorities[${index}].text`, section.text);
+  });
+  addList("publicSourceForensics.limitations", forensic.limitations);
+  report.vendorTaskPackage.tasks.forEach((task, index) => {
+    add(`vendorTaskPackage.tasks[${index}].title`, task.title);
+    add(`vendorTaskPackage.tasks[${index}].text`, task.text);
+    addList(`vendorTaskPackage.tasks[${index}].actions`, task.actions);
+    addList(`vendorTaskPackage.tasks[${index}].acceptanceCriteria`, task.acceptanceCriteria);
+  });
+  add("methodology.technicalCoverage", report.methodology.technicalCoverage);
+  add("methodology.evidenceFreshness", report.methodology.evidenceFreshness);
+  addList("methodology.limitations", report.methodology.limitations);
+
+  const allowedTerms = [
+    ai.organizationProfile.organizationName,
+    ai.organizationProfile.legalEntity,
+    ...ai.organizationProfile.brandNames,
+    ...forensic.sourceGraph.entities.filter(({ status }) => status === "resolved").map(({ canonicalName }) => canonicalName),
+    ...forensic.sourceGraph.claims.filter(({ status }) => status === "supported").map(({ subjectName }) => subjectName)
+  ].filter((value): value is string => Boolean(value?.trim()) && value.length <= 120);
+  assertReportLanguage(fields, report.locale, [...new Set(allowedTerms)]);
 }
 
 export function parseCombinedGeoReportV1(value: unknown): CombinedGeoReportV1 {

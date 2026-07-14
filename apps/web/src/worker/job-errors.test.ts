@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeJobError, PublicSourceRuntimeError, redactDiagnostic, retryDelayMs } from "./job-errors";
+import { ReportLanguageValidationError } from "@open-geo-console/ai-report-engine";
 
 const context = { jobId: "job-1", phase: "public_source_preflight" as const, phaseAttempt: 1, resumeGeneration: 0, configuredSecrets: ["super-secret"] };
 
@@ -18,5 +19,16 @@ describe("job error normalization", () => {
     const normalized = normalizeJobError(new PublicSourceRuntimeError("disabled", "public_source_runtime_disabled"), context, new Date("2030-01-01T00:00:00Z"));
     expect(normalized).toMatchObject({ classification: "operator_repairable", code: "public_source_runtime_disabled", retryableAt: null });
     expect(retryDelayMs(99, "ffff")).toBeLessThanOrEqual(15 * 60_000 + 5_000);
+  });
+
+  it("routes an exhausted report-language gate to operator repair without an automatic retry", () => {
+    const normalized = normalizeJobError(new ReportLanguageValidationError([
+      { path: "executiveSummary.overview", reason: "unexpected_english_sentence" }
+    ]), context);
+    expect(normalized).toMatchObject({
+      classification: "operator_repairable",
+      code: "report_language_validation_failed",
+      retryableAt: null
+    });
   });
 });
