@@ -172,6 +172,13 @@ describe("report language contract", () => {
     }], "zh-CN")).not.toThrow();
   });
 
+  it("allows the bounded CTA technical acronym in Chinese prose", () => {
+    expect(() => assertReportLanguage([{
+      path: "recommendation",
+      text: "\u5efa\u8bae\u7edf\u4e00\u9875\u9762\u7684 CTA \u884c\u52a8\u53f7\u53ec\u3002"
+    }], "zh-CN")).not.toThrow();
+  });
+
   it("allows bounded source identifiers and timestamps without allowing English prose", () => {
     expect(() => assertReportLanguage([{
       path: "technical",

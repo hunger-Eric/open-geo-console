@@ -40,6 +40,7 @@ const TECHNICAL_TERMS = new Set([
   "canonical",
   "cli",
   "css",
+  "cta",
   "faqpage",
   "faq",
   "geo",
