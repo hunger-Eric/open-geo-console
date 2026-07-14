@@ -288,7 +288,7 @@ function toObservations(bundle: NonNullable<Awaited<ReturnType<typeof getMarketS
     const storedQuery = bundle.queries.find(({ id }) => id === attempt.queryId);
     const query = storedQuery && fanout.queries[storedQuery.queryOrder];
     if (!storedQuery || !query || query.exactQuery !== storedQuery.queryText || !attempt.completedAt) throw new PublicSourceSnapshotUnavailableError();
-    const status = attempt.requestStatus === "succeeded" ? "complete" : attempt.requestStatus === "timeout" ? "timed_out" : attempt.requestStatus;
+    const status = observationStatus(attempt.requestStatus);
     return { observationId: attempt.id, surface, queryId: query.id, exactQuery: query.exactQuery, requestedAt: attempt.startedAt.toISOString(), completedAt: attempt.completedAt.toISOString(), status,
       results: bundle.observations.filter((row) => row.attemptId === attempt.id && row.resultStatus === "returned").map((row) => ({ surfaceResultOrder: row.surfaceResultOrder, url: row.resultUrl, title: row.title, snippet: row.snippet ?? "", displayedHost: String((row.resultMetadata as { domain?: unknown })?.domain ?? new URL(row.resultUrl).hostname), metadata: { rank: row.surfaceResultOrder } })),
       usage: attempt.usage as MarketSearchObservation["usage"], ...(attempt.sanitizedError ? { sanitizedError: attempt.sanitizedError } : {}) };
@@ -308,6 +308,12 @@ function assertExactRuntime(input: ResolvePublicSourceSnapshotInput): void {
 
 function sameQuery(query: SearchQueryVariant, fanout: SearchQueryFanout): boolean { return query.questionId === fanout.questionId && query.fanoutVersion === fanout.fanoutVersion && query.locale === fanout.surface.locale && query.region === fanout.surface.region; }
 function attemptStatus(status: SearchObservationStatus): "succeeded" | "partial" | "timeout" | Exclude<SearchObservationStatus, "complete" | "partial" | "timed_out"> { return status === "complete" ? "succeeded" : status === "timed_out" ? "timeout" : status; }
+function observationStatus(status: string): SearchObservationStatus {
+  if (status === "succeeded") return "complete";
+  if (status === "timeout") return "timed_out";
+  if (status === "partial" || status === "rate_limited" || status === "unavailable" || status === "malformed" || status === "aborted" || status === "authentication" || status === "unsupported") return status;
+  throw new PublicSourceSnapshotUnavailableError();
+}
 function observationId(snapshotId: string, queryId: string, order: number, canonicalUrl: string): string { return deterministicId("market-observation", [snapshotId, queryId, String(order), canonicalUrl]); }
 function snapshotQueryId(snapshotId: string, queryId: string): string { return deterministicId("market-snapshot-query", [snapshotId, queryId]); }
 function fanoutHash(fanout: SearchQueryFanout): string { return sha(JSON.stringify({ questionId: fanout.questionId, questionSetVersion: fanout.questionSetVersion, fanoutVersion: fanout.fanoutVersion, surface: fanout.surface, queries: fanout.queries.map(({ id, exactQuery, derivationRuleId, resultDepth }) => ({ id, exactQuery, derivationRuleId, resultDepth })) })); }
