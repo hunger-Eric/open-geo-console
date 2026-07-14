@@ -296,18 +296,15 @@ describe("batch analysis and evidence", () => {
         recommendation: "Add named sources beside each important claim.", confidence: "high"
       }]
     }] };
-    const chinese = { analyses: [{
-      url: page.url,
-      summary: "该页面清楚介绍了 example 产品及其目标用户。",
-      organizationSignals: ["组织名称与产品说明保持一致。"],
-      strengths: ["开头说明容易理解。"],
-      findings: [{
-        title: "信任证据需要更具体", severity: "warning", impact: "读者目前难以核验重要主张。",
-        evidence: [{ url: page.url, quote: "Example builds evidence-first website reports" }],
-        recommendation: "在重要主张旁补充具名来源。", confidence: "high"
-      }]
-    }] };
-    const client = mockClient([english, chinese]);
+    const corrections = { corrections: [
+      { path: "analyses[0].summary", text: "该页面清楚介绍了 example 产品及其目标用户。" },
+      { path: "analyses[0].organizationSignals[0]", text: "组织名称与产品说明保持一致。" },
+      { path: "analyses[0].strengths[0]", text: "开头说明容易理解。" },
+      { path: "analyses[0].findings[0].title", text: "信任证据需要更具体" },
+      { path: "analyses[0].findings[0].impact", text: "读者目前难以核验重要主张。" },
+      { path: "analyses[0].findings[0].recommendation", text: "在重要主张旁补充具名来源。" }
+    ] };
+    const client = mockClient([english, corrections]);
 
     const result = await analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined });
 
@@ -320,16 +317,27 @@ describe("batch analysis and evidence", () => {
       .toContain("keep verbatim source text only inside evidence quote fields");
     const correctionPayload = JSON.parse(vi.mocked(client.completeJson).mock.calls[1]![0].messages[1]!.content);
     expect(correctionPayload.pages).toBeUndefined();
-    expect(correctionPayload.draft).toEqual(english);
+    expect(correctionPayload.draft).toBeUndefined();
+    expect(correctionPayload.fieldsToCorrect).toEqual([
+      { path: "analyses[0].summary", text: "The page clearly explains the product for modern teams." },
+      { path: "analyses[0].organizationSignals[0]", text: "The organization is presented consistently." },
+      { path: "analyses[0].strengths[0]", text: "The opening statement is easy to understand." },
+      { path: "analyses[0].findings[0].title", text: "The trust evidence needs more detail." },
+      { path: "analyses[0].findings[0].impact", text: "Readers cannot verify every claim." },
+      { path: "analyses[0].findings[0].recommendation", text: "Add named sources beside each important claim." }
+    ]);
     expect(correctionPayload.allowedOriginalTerms).toEqual(["example"]);
     expect(correctionPayload.rules).toContain("Translate or omit every other Latin-script word outside evidence quote fields.");
+    expect(result.analyses[0]?.findings[0]?.evidence).toEqual(english.analyses[0]!.findings[0]!.evidence);
   });
 
   it("corrects legacy SEO terminology in page analysis using the existing single correction", async () => {
     const analysis = (summary: string) => ({ analyses: [{
       url: page.url, summary, organizationSignals: [], strengths: [], findings: []
     }] });
-    const client = mockClient([analysis("Improve SEO visibility."), analysis("Improve GEO visibility.")]);
+    const client = mockClient([analysis("Improve SEO visibility."), {
+      corrections: [{ path: "analyses[0].summary", text: "Improve GEO visibility." }]
+    }]);
 
     const result = await analyzePageBatch(client, { pages: [page], locale: "en", maxAttempts: 3, retryDelay: async () => undefined });
 
@@ -349,6 +357,27 @@ describe("batch analysis and evidence", () => {
   it("fails page analysis after one language correction", async () => {
     const invalid = { analyses: [{ url: page.url, summary: "The page clearly explains the product for modern teams.", organizationSignals: [], strengths: [], findings: [] }] };
     const client = mockClient([invalid]);
+    await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined }))
+      .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { name: "missing", correction: { corrections: [] } },
+    { name: "extra", correction: { corrections: [
+      { path: "analyses[0].summary", text: "该页面说明清楚。" },
+      { path: "analyses[0].strengths[0]", text: "不得新增路径。" }
+    ] } },
+    { name: "duplicate", correction: { corrections: [
+      { path: "analyses[0].summary", text: "该页面说明清楚。" },
+      { path: "analyses[0].summary", text: "重复路径。" }
+    ] } },
+    { name: "evidence", correction: { corrections: [
+      { path: "analyses[0].findings[0].evidence[0].quote", text: "不得修改证据。" }
+    ] } }
+  ])("rejects a $name field-level language correction", async ({ correction }) => {
+    const invalid = { analyses: [{ url: page.url, summary: "The page clearly explains the product.", organizationSignals: [], strengths: [], findings: [] }] };
+    const client = mockClient([invalid, correction]);
     await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined }))
       .rejects.toThrow(ReportLanguageValidationError);
     expect(client.completeJson).toHaveBeenCalledTimes(2);

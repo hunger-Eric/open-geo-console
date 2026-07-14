@@ -151,6 +151,79 @@ function pageForPrompt(page: ExtractedPage, maxCharacters: number): Record<strin
   };
 }
 
+interface PageLanguageCorrection {
+  path: string;
+  text: string;
+}
+
+function parsePageLanguageCorrections(value: unknown, expectedPaths: readonly string[]): PageLanguageCorrection[] | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = (value as Record<string, unknown>).corrections;
+  if (!Array.isArray(raw) || raw.length !== expectedPaths.length) return null;
+  const expected = new Set(expectedPaths);
+  const seen = new Set<string>();
+  const corrections: PageLanguageCorrection[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") return null;
+    const record = item as Record<string, unknown>;
+    if (
+      typeof record.path !== "string" ||
+      !expected.has(record.path) ||
+      seen.has(record.path) ||
+      typeof record.text !== "string" ||
+      record.text.trim().length === 0 ||
+      record.text.length > 4_000
+    ) return null;
+    seen.add(record.path);
+    corrections.push({ path: record.path, text: record.text.trim() });
+  }
+  return seen.size === expected.size ? corrections : null;
+}
+
+function applyPageLanguageCorrections(
+  draft: readonly PageAnalysis[],
+  corrections: readonly PageLanguageCorrection[]
+): PageAnalysis[] | null {
+  const corrected = draft.map((analysis) => ({
+    ...analysis,
+    organizationSignals: [...analysis.organizationSignals],
+    strengths: [...analysis.strengths],
+    findings: analysis.findings.map((finding) => ({
+      ...finding,
+      evidence: finding.evidence.map((citation) => ({ ...citation }))
+    }))
+  }));
+  for (const { path, text } of corrections) {
+    let match = /^analyses\[(\d+)]\.(summary)$/.exec(path);
+    if (match) {
+      const analysis = corrected[Number(match[1])];
+      if (!analysis) return null;
+      analysis.summary = text;
+      continue;
+    }
+    match = /^analyses\[(\d+)]\.(organizationSignals|strengths)\[(\d+)]$/.exec(path);
+    if (match) {
+      const analysis = corrected[Number(match[1])];
+      const collection = match[2] === "organizationSignals" ? analysis?.organizationSignals : analysis?.strengths;
+      const index = Number(match[3]);
+      if (!collection || index >= collection.length) return null;
+      collection[index] = text;
+      continue;
+    }
+    match = /^analyses\[(\d+)]\.findings\[(\d+)]\.(title|impact|recommendation|rewriteExample)$/.exec(path);
+    if (match) {
+      const finding = corrected[Number(match[1])]?.findings[Number(match[2])];
+      if (!finding) return null;
+      const field = match[3] as "title" | "impact" | "recommendation" | "rewriteExample";
+      if (field === "rewriteExample" && finding.rewriteExample === undefined) return null;
+      finding[field] = text;
+      continue;
+    }
+    return null;
+  }
+  return corrected;
+}
+
 export async function analyzePageBatch(
   client: JsonCompletionClient,
   input: AnalyzePagesInput
@@ -171,12 +244,16 @@ export async function analyzePageBatch(
     let lastError: unknown;
     let languageCorrectionUsed = false;
     let languageFeedback: string[] = [];
-    let languageCorrectionDraft: unknown;
+    let languageCorrectionDraft: PageAnalysis[] | undefined;
+    let languageCorrectionError: ReportLanguageValidationError | undefined;
+    let fieldsToCorrect: Array<{ path: string; text: string }> = [];
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const isLanguageCorrectionCall = languageFeedback.length > 0;
       try {
         const languageInstruction = reportLanguageInstruction(input.locale);
-        const outputShape = {
+        const outputShape = isLanguageCorrectionCall ? {
+          corrections: [{ path: "exact supplied field path", text: "replacement prose only" }]
+        } : {
           analyses: [{
             url: "exact supplied URL",
             pageType: "supplied page type",
@@ -213,13 +290,14 @@ export async function analyzePageBatch(
               languageInstruction,
               "Rewrite every flagged prose field in the required language.",
               "Translate or omit every other Latin-script word outside evidence quote fields.",
-              "Preserve all evidence quotes, evidence URLs, page URLs, page types, severities, and confidence values exactly."
+              "Return exactly one correction for every supplied field path, with no missing, duplicate, or extra paths.",
+              "Return only replacement prose; do not add evidence, brands, platforms, claims, or other fields."
             ],
             correctionRequired: languageFeedback,
             allowedOriginalTerms: allowedTerms,
             locale: input.locale,
             outputShape,
-            draft: languageCorrectionDraft
+            fieldsToCorrect
           } : {
             task: "Analyze each website page for organization clarity, information architecture, content citability, trust evidence, entity consistency and GEO understandability.",
             rules: [
@@ -234,21 +312,34 @@ export async function analyzePageBatch(
       ]
         });
         modelId = completion.modelId;
-        const candidate = parseBatch(completion.value, pages);
-        if (candidate.length !== pages.length) {
-          throw new Error(`The model returned ${candidate.length} of ${pages.length} required page analyses.`);
+        const candidate = isLanguageCorrectionCall
+          ? (() => {
+              const corrections = parsePageLanguageCorrections(completion.value, fieldsToCorrect.map(({ path }) => path));
+              return languageCorrectionDraft && corrections
+                ? applyPageLanguageCorrections(languageCorrectionDraft, corrections)
+                : null;
+            })()
+          : parseBatch(completion.value, pages);
+        if (!candidate || candidate.length !== pages.length) {
+          if (isLanguageCorrectionCall && languageCorrectionError) throw languageCorrectionError;
+          throw new Error(`The model returned ${candidate?.length ?? 0} of ${pages.length} required page analyses.`);
         }
-        languageCorrectionDraft = completion.value;
+        if (!isLanguageCorrectionCall) languageCorrectionDraft = candidate;
         assertPageAnalysisLanguage(candidate, input.locale, allowedTerms);
         parsed = candidate;
         break;
       } catch (error) {
         lastError = error;
-        if (isLanguageCorrectionCall) throw error;
+        if (isLanguageCorrectionCall) throw languageCorrectionError ?? error;
         if (error instanceof ReportLanguageValidationError) {
           if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
           languageCorrectionUsed = true;
+          languageCorrectionError = error;
           languageFeedback = reportLanguageCorrectionFeedback(error, input.locale);
+          const violationPaths = new Set(error.violations.map(({ path }) => path));
+          fieldsToCorrect = pageAnalysisLanguageFields(languageCorrectionDraft ?? [])
+            .filter(({ path }) => violationPaths.has(path));
+          if (fieldsToCorrect.length !== violationPaths.size) throw error;
         }
         if (attempt < maxAttempts) await retryDelay(Math.min(2_000, 250 * (2 ** (attempt - 1))));
       }
@@ -266,8 +357,8 @@ export async function analyzePageBatch(
   return { analyses, modelId };
 }
 
-function assertPageAnalysisLanguage(analyses: readonly PageAnalysis[], locale: string, allowedTerms: readonly string[]): void {
-  const fields = analyses.flatMap((analysis, analysisIndex) => [
+function pageAnalysisLanguageFields(analyses: readonly PageAnalysis[]): Array<{ path: string; text: string }> {
+  return analyses.flatMap((analysis, analysisIndex) => [
     { path: `analyses[${analysisIndex}].summary`, text: analysis.summary },
     ...analysis.organizationSignals.map((text, index) => ({ path: `analyses[${analysisIndex}].organizationSignals[${index}]`, text })),
     ...analysis.strengths.map((text, index) => ({ path: `analyses[${analysisIndex}].strengths[${index}]`, text })),
@@ -278,6 +369,10 @@ function assertPageAnalysisLanguage(analyses: readonly PageAnalysis[], locale: s
       ...(finding.rewriteExample ? [{ path: `analyses[${analysisIndex}].findings[${findingIndex}].rewriteExample`, text: finding.rewriteExample }] : [])
     ])
   ]);
+}
+
+function assertPageAnalysisLanguage(analyses: readonly PageAnalysis[], locale: string, allowedTerms: readonly string[]): void {
+  const fields = pageAnalysisLanguageFields(analyses);
   assertReportLanguage(fields, locale, allowedTerms);
   assertGeoTerminology(fields, GEO_TERMINOLOGY_POLICY);
 }
