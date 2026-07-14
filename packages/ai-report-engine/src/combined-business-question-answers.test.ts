@@ -130,6 +130,24 @@ describe("combined business question answers", () => {
     expect(completeJson).toHaveBeenCalledTimes(2);
   });
 
+  it("allows official brand-style terms that occur in verified evidence", async () => {
+    const { questionSet, forensic, value } = fixture("zh-CN");
+    forensic.sourceGraph.evidence = forensic.sourceGraph.evidence.map((item) => ({
+      ...item,
+      verifiedExcerpt: `Panli integrates AMERICAN NEW LOGISTICS with U-shipment, ERP and TMS for ${item.registrableDomain}.`
+    }));
+    const answers = value.answers.map((item) => ({
+      ...item,
+      answer: "Panli 可结合 AMERICAN NEW LOGISTICS、U-shipment、ERP 和 TMS 提供已验证的业务支持。"
+    }));
+    const completeJson = vi.fn(async () => ({ value: { answers }, modelId: "served", rawContent: "{}" }));
+
+    const result = await synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 1 }
+    );
+    expect(result.answers[0].answer).toBe(answers[0]!.answer);
+  });
+
   it.each(["Customer Growth Strategy", "Product One", "Google Analytics", "Cloudflare Workers"])(
     "does not treat an appendix product as an allowed proper name: %s",
     async (product) => {

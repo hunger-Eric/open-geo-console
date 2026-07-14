@@ -228,8 +228,40 @@ function collectQuestionAnswerAllowedTerms(forensic: RecommendationForensicRepor
       .filter(({ status }) => status === "supported")
       .map(({ subjectName }) => subjectName)
   ];
-  return [...new Set(graphTerms
+  const evidenceTerms = forensic.sourceGraph.evidence.flatMap((evidence) => [
+    ...evidenceOfficialTerms(evidence.verifiedExcerpt ?? ""),
+    ...domainBrandTerms(evidence.registrableDomain)
+  ]);
+  return [...new Set([...graphTerms, ...evidenceTerms]
     .filter((value): value is string => Boolean(value?.trim()) && value!.length <= 120))];
+}
+
+function evidenceOfficialTerms(excerpt: string): string[] {
+  const matches = [...excerpt.matchAll(/[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)*/g)];
+  const terms = new Set<string>();
+  for (const [index, match] of matches.entries()) {
+    const value = match[0];
+    if (/^[A-Z]{2,10}$/.test(value) || /[-_]/.test(value) || /[a-z][A-Z]/.test(value)) terms.add(value);
+    if (!/^[A-Z][a-z0-9]{2,}$/.test(value)) continue;
+    const previous = matches[index - 1];
+    const next = matches[index + 1];
+    const adjacentCapitalized = (other: RegExpMatchArray | undefined, before: boolean) => {
+      if (!other || !/^[A-Z][a-z0-9]{2,}$/.test(other[0])) return false;
+      const gap = before
+        ? excerpt.slice((other.index ?? 0) + other[0].length, match.index ?? 0)
+        : excerpt.slice((match.index ?? 0) + value.length, other.index ?? 0);
+      return /^\s+$/.test(gap);
+    };
+    if (!adjacentCapitalized(previous, true) && !adjacentCapitalized(next, false)) terms.add(value);
+  }
+  for (const match of excerpt.matchAll(/\b[A-Z][A-Z0-9]*(?:\s+[A-Z][A-Z0-9]*)+\b/g)) terms.add(match[0]);
+  return [...terms];
+}
+
+function domainBrandTerms(domain: string): string[] {
+  const label = domain.split(".")[0]?.split("-")[0] ?? "";
+  if (!/^[a-z][a-z0-9]{2,20}$/i.test(label)) return [];
+  return [label, label[0]!.toUpperCase() + label.slice(1)];
 }
 
 function languageViolationFeedback(error: ReportLanguageValidationError): string[] {
