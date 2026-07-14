@@ -10,6 +10,7 @@ import {
 import { activatePublicSearchSurfaceAuthority, installPublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
 import { PublicSourceSnapshotAuthorityMismatchError, PublicSourceSnapshotUnavailableError, resolvePublicSourceSnapshot } from "./public-source-snapshot-resolver";
+import { createConcurrencyGate } from "./bounded-scheduler";
 
 const surface: PublicSearchSurface = {
   surfaceId: "fixture-public-search", providerId: "fixture-provider", productId: "fixture-search",
@@ -70,6 +71,51 @@ describe("public-source snapshot resolver", () => {
     expect(peak).toBe(2);
   });
 
+  it("resumes a fully searched snapshot and skips source evidence persisted before abort", async () => {
+    const authority = await installAuthority("review-one");
+    const search = vi.fn(async () => ({
+      ...observationPayload("complete"),
+      results: ["one", "two"].map((path, index) => ({ surfaceResultOrder: index + 1, url: `https://source-${path}.example.test/page`, title: path, snippet: path, displayedHost: `source-${path}.example.test` })),
+      usage: { requestCount: 1, resultCount: 2, estimatedCostMicros: 42, costUncertain: false }
+    }));
+    const adapter = fixtureAdapter(authority, search);
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const controller = new AbortController();
+    const deadline = new Error("worker deadline");
+    let firstAttemptRetrievals = 0;
+    const firstInput = {
+      authority, adapter, question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-resume-first",
+      signal: controller.signal, retrievalGate: createConcurrencyGate(1),
+      retrieveSource: async ({ observation, result }: Parameters<NonNullable<Parameters<typeof resolvePublicSourceSnapshot>[0]["retrieveSource"]>>[0]) => {
+        firstAttemptRetrievals += 1;
+        if (firstAttemptRetrievals === 2) {
+          controller.abort(deadline);
+          throw deadline;
+        }
+        return availableRetrieval(observation, result);
+      }
+    };
+    await expect(resolvePublicSourceSnapshot(firstInput)).rejects.toBe(deadline);
+    expect(firstAttemptRetrievals).toBe(2);
+    expect(controller.signal.reason).toBe(deadline);
+
+    let resumedRetrievals = 0;
+    const resumed = await resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-resume-second",
+      retrievalGate: createConcurrencyGate(1),
+      retrieveSource: async ({ observation, result }) => {
+        resumedRetrievals += 1;
+        return availableRetrieval(observation, result);
+      }
+    });
+    const bundle = await getMarketSnapshotBundle(resumed.snapshotId);
+    expect(search).toHaveBeenCalledTimes(fanout.queries.length);
+    expect(resumedRetrievals).toBe(1);
+    expect(bundle?.sources).toHaveLength(2);
+    expect(resumed.retrievals).toHaveLength(2);
+    expect(resumed.sufficientlyEvidenced).toBe(true);
+  });
+
   it("never reuses a completed snapshot under a different authority version", async () => {
     const firstAuthority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
@@ -107,5 +153,13 @@ function observationPayload(status: "complete" | "unavailable") {
     observationId: `adapter-observation-${status}`, surface, queryId: "placeholder", exactQuery: "placeholder", requestedAt: now, completedAt: now,
     status, results: status === "complete" ? [{ surfaceResultOrder: 1, url: "https://directory.example.test/shenzhen-taiwan", title: "深圳台湾货运目录", snippet: "公开目录条目", displayedHost: "directory.example.test" }] : [],
     usage: { requestCount: 1, resultCount: status === "complete" ? 1 : 0, estimatedCostMicros: 42, costUncertain: false }
+  };
+}
+
+function availableRetrieval(observation: Parameters<NonNullable<Parameters<typeof resolvePublicSourceSnapshot>[0]["retrieveSource"]>>[0]["observation"], result: Parameters<NonNullable<Parameters<typeof resolvePublicSourceSnapshot>[0]["retrieveSource"]>>[0]["result"]) {
+  const digest = "a".repeat(64);
+  return {
+    fact: { observationId: observation.observationId, queryId: observation.queryId, resultUrl: result.url, finalUrl: result.url, retrievalState: "available" as const, publiclyRoutable: true, robotsAllowed: true, accessBarrier: "none" as const, normalizedText: `Evidence for ${result.title}`, normalizedContentHash: `sha256:${digest}`, verifiedExcerpt: `Evidence for ${result.title}` },
+    source: { retrievalState: "available" as const, excerpt: `Evidence for ${result.title}`, excerptHash: digest, contentHash: digest, sourceCategory: "unknown" as const, entities: [], claims: [], contradictions: [], evidenceFamilyIdentity: digest }
   };
 }

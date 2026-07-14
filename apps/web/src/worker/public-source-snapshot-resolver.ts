@@ -22,6 +22,7 @@ import {
   completeMarketSearchAttempt,
   completeMarketSnapshotLease,
   createMarketSnapshotRefresh,
+  findResumableMarketSnapshot,
   findExactMarketSnapshot,
   getMarketSnapshotBundle,
   releaseFailedMarketSnapshotLease,
@@ -97,7 +98,8 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
 
   let snapshotId: string | undefined;
   try {
-    const snapshot = await createMarketSnapshotRefresh({
+    const resumed = claim.takeover ? await findResumableMarketSnapshot({ identity, authorityVersion: input.authority.authorityId }) : null;
+    const snapshot = resumed ?? await createMarketSnapshotRefresh({
       identity, authorityVersion: input.authority.authorityId, token: claim.token, questionHash: sha(input.question.normalizedText)
     });
     const currentSnapshotId = snapshot.id;
@@ -107,31 +109,41 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     const queries = input.fanout.queries.map((query, queryOrder) => ({
       id: snapshotQueryId(currentSnapshotId, query.id), queryOrder, queryText: query.exactQuery, queryHash: sha(query.exactQuery), derivationRule: query.derivationRuleId
     }));
-    await appendMarketSnapshotQueries({ snapshotId: currentSnapshotId, token: claim.token, queries });
-
-    const queryResults = await mapWithConcurrency(input.fanout.queries, 2, async (query, queryOrder) => {
-      input.signal?.throwIfAborted();
-      const storedQuery = queries[queryOrder]!;
-      const attempt = await beginMarketSearchAttempt({
-        snapshotId: currentSnapshotId, queryId: storedQuery.id, token: claim.token,
-        idempotencyReference: deterministicId("public-search-attempt", [currentSnapshotId, storedQuery.id]), configuredCostMicros: input.fanout.budget.maxCostMicros
-      });
-      const observed = await observePublicSearch({ adapter: input.adapter, query, budget: input.fanout.budget, signal: input.signal ?? new AbortController().signal });
-      const observation = { ...observed, queryId: storedQuery.id };
-      const requestStatus = attemptStatus(observation.status);
-      const providerCostMicros = observation.usage.providerReportedCostMicros ?? observation.usage.estimatedCostMicros ?? null;
-      await completeMarketSearchAttempt({
-        attemptId: attempt.id, token: claim.token, requestStatus, usage: observation.usage, providerCostMicros,
-        costUncertain: observation.usage.costUncertain ?? providerCostMicros === null, sanitizedError: observation.sanitizedError ?? null
-      });
-      return { observation, attemptId: attempt.id, successful: requestStatus === "succeeded" || requestStatus === "partial" };
-    }, input.signal);
-    const observations = queryResults.map(({ observation }) => observation);
-    const successful = queryResults.filter(({ successful: value }) => value).map(({ observation, attemptId }) => ({ observation, attemptId }));
+    let observations: MarketSearchObservation[];
+    let successful: Array<{ observation: MarketSearchObservation; attemptId: string }>;
+    if (resumed) {
+      const bundle = await getMarketSnapshotBundle(currentSnapshotId);
+      if (!bundle || !isResumableSearchLedger(bundle, queries)) throw new PublicSourceSnapshotUnavailableError();
+      observations = toObservations(bundle, input.authority.surface);
+      successful = observations.map((observation) => ({ observation, attemptId: observation.observationId }));
+    } else {
+      await appendMarketSnapshotQueries({ snapshotId: currentSnapshotId, token: claim.token, queries });
+      const queryResults = await mapWithConcurrency(input.fanout.queries, 2, async (query, queryOrder) => {
+        input.signal?.throwIfAborted();
+        const storedQuery = queries[queryOrder]!;
+        const attempt = await beginMarketSearchAttempt({
+          snapshotId: currentSnapshotId, queryId: storedQuery.id, token: claim.token,
+          idempotencyReference: deterministicId("public-search-attempt", [currentSnapshotId, storedQuery.id]), configuredCostMicros: input.fanout.budget.maxCostMicros
+        });
+        const observed = await observePublicSearch({ adapter: input.adapter, query, budget: input.fanout.budget, signal: input.signal ?? new AbortController().signal });
+        const observation = { ...observed, queryId: storedQuery.id };
+        const requestStatus = attemptStatus(observation.status);
+        const providerCostMicros = observation.usage.providerReportedCostMicros ?? observation.usage.estimatedCostMicros ?? null;
+        await completeMarketSearchAttempt({
+          attemptId: attempt.id, token: claim.token, requestStatus, usage: observation.usage, providerCostMicros,
+          costUncertain: observation.usage.costUncertain ?? providerCostMicros === null, sanitizedError: observation.sanitizedError ?? null
+        });
+        return { observation, attemptId: attempt.id, successful: requestStatus === "succeeded" || requestStatus === "partial" };
+      }, input.signal);
+      observations = queryResults.map(({ observation }) => observation);
+      successful = queryResults.filter(({ successful: value }) => value).map(({ observation, attemptId }) => ({ observation, attemptId }));
+    }
     if (successful.length === 0) throw new PublicSourceSnapshotUnavailableError();
 
-    const rows = successful.flatMap(({ observation, attemptId }) => observationRows(currentSnapshotId, attemptId, observation));
-    if (rows.length) await appendMarketSearchObservations({ token: claim.token, observations: rows });
+    if (!resumed) {
+      const rows = successful.flatMap(({ observation, attemptId }) => observationRows(currentSnapshotId, attemptId, observation));
+      if (rows.length) await appendMarketSearchObservations({ token: claim.token, observations: rows });
+    }
     const retrievals = await appendRetrievals({ input, snapshotId: currentSnapshotId, token: claim.token, observations: successful, evidenceCutoff });
     const completed = await completeMarketSnapshotLease({ snapshotId: currentSnapshotId, token: claim.token, queryFanoutHash: fanoutHash(input.fanout), completedAt: new Date() });
     return materialize({
@@ -143,7 +155,7 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
       evidenceCutoff
     });
   } catch (error) {
-    await releaseFailedMarketSnapshotLease({ token: claim.token, ...(snapshotId ? { snapshotId } : {}) }).catch(() => undefined);
+    await releaseFailedMarketSnapshotLease({ token: claim.token, ...(snapshotId ? { snapshotId } : {}), preserveRefreshingSnapshot: input.signal?.aborted === true }).catch(() => undefined);
     if (input.signal?.aborted) throw input.signal.reason;
     if (error instanceof PublicSourceSnapshotUnavailableError || error instanceof PublicSourceSnapshotAuthorityMismatchError) throw error;
     throw new PublicSourceSnapshotUnavailableError();
@@ -174,9 +186,14 @@ async function resolveExisting(input: ResolvePublicSourceSnapshotInput & { ident
 
 async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput; snapshotId: string; token: Parameters<typeof appendMarketSourceEvidence>[0]["token"]; observations: Array<{ observation: MarketSearchObservation; attemptId: string }>; evidenceCutoff: Date }): Promise<RetrievedPublicSourceFact[]> {
   const plan = createPublicSourceRetrievalPlan(input.observations.map(({ observation }) => observation));
+  const existingBundle = await getMarketSnapshotBundle(input.snapshotId);
+  const existingFacts = existingBundle ? factsFromBundle(existingBundle) : [];
+  const existingSourceKeys = new Set(existingBundle?.sources.map((source) => `${source.observationId}\n${source.canonicalUrl}`) ?? []);
   const gate = input.input.retrievalGate ?? createConcurrencyGate(4);
-  let availableCount = 0;
-  const retrieved = await Promise.all(plan.map(({ observation, result, canonicalUrl, registrableDomain }) => gate.run(async () => {
+  let availableCount = existingFacts.length;
+  const retrieved = await Promise.all(plan.filter(({ observation, result, canonicalUrl }) =>
+    !existingSourceKeys.has(`${observationId(input.snapshotId, observation.queryId, result.surfaceResultOrder, canonicalUrl)}\n${canonicalUrl}`)
+  ).map(({ observation, result, canonicalUrl, registrableDomain }) => gate.run(async () => {
     input.input.signal?.throwIfAborted();
     if (input.input.retrieveSource && availableCount >= 3) return null;
     const base = { id: deterministicId("market-source", [input.snapshotId, observation.queryId, String(result.surfaceResultOrder), canonicalUrl]), snapshotId: input.snapshotId, observationId: observationId(input.snapshotId, observation.queryId, result.surfaceResultOrder, canonicalUrl), canonicalUrl, registrableDomain, retrievedAt: input.evidenceCutoff, expiresAt: new Date(input.evidenceCutoff.getTime() + 30 * 24 * 60 * 60 * 1_000) };
@@ -190,7 +207,24 @@ async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput
     if (value.fact.retrievalState === "available") availableCount += 1;
     return value.fact;
   }, input.input.signal)));
-  return retrieved.filter((value): value is RetrievedPublicSourceFact => value !== null);
+  return [...existingFacts, ...retrieved.filter((value): value is RetrievedPublicSourceFact => value !== null)];
+}
+
+function isResumableSearchLedger(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>, queries: Array<{ id: string; queryOrder: number; queryText: string; queryHash: string; derivationRule: string }>): boolean {
+  return bundle.snapshot.status === "refreshing" && bundle.queries.length === queries.length &&
+    queries.every((query, index) => bundle.queries[index]?.id === query.id && bundle.queries[index]?.queryText === query.queryText) &&
+    bundle.attempts.length === queries.length && bundle.attempts.every(({ requestStatus }) => requestStatus === "succeeded" || requestStatus === "partial") &&
+    queries.every(({ id }) => bundle.attempts.some((attempt) => attempt.queryId === id) && bundle.observations.some((observation) => observation.queryId === id));
+}
+
+function factsFromBundle(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>): RetrievedPublicSourceFact[] {
+  return bundle.sources.flatMap((source) => {
+    if (source.retrievalState !== "available" || !source.excerpt || !source.contentHash) return [];
+    const storedObservation = bundle.observations.find((observation) => observation.id === source.observationId);
+    const attempt = storedObservation && bundle.attempts.find((candidate) => candidate.id === storedObservation.attemptId);
+    if (!storedObservation || !attempt) return [];
+    return [{ observationId: attempt.id, queryId: storedObservation.queryId, resultUrl: source.canonicalUrl, finalUrl: source.canonicalUrl, retrievalState: "available" as const, publiclyRoutable: true, robotsAllowed: true, accessBarrier: "none" as const, normalizedText: source.excerpt, normalizedContentHash: source.contentHash, verifiedExcerpt: source.excerpt }];
+  });
 }
 
 function materialize(input: { snapshot: Awaited<ReturnType<typeof completeMarketSnapshotLease>>; questionId: string; observations: MarketSearchObservation[]; retrievals: RetrievedPublicSourceFact[]; collectedForThisRun: boolean; evidenceCutoff: Date }): ResolvedPublicSourceSnapshotValue {

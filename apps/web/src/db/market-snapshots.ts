@@ -209,6 +209,25 @@ export async function createMarketSnapshotRefresh(input: {
   });
 }
 
+export async function findResumableMarketSnapshot(input: {
+  identity: MarketSnapshotIdentity;
+  authorityVersion: string;
+}): Promise<MarketSnapshotQuestionRow | null> {
+  const identity = exactIdentity(input.identity);
+  const authorityVersion = bounded(input.authorityVersion, "authorityVersion", 256);
+  const rows = isMemoryPersistence()
+    ? memoryListMarketSnapshotQuestions()
+    : (await (async () => {
+        await ensureDatabase();
+        return (await getSqlClient()<Array<Record<string, unknown>>>`
+          SELECT * FROM market_snapshot_questions
+          WHERE cache_identity=${identity.id} AND surface_authority_version=${authorityVersion} AND status='refreshing'
+          ORDER BY completion_version DESC
+        `).map(dbSnapshot);
+      })());
+  return clone(rows.find((row) => row.status === "refreshing" && row.surfaceAuthorityVersion === authorityVersion && exactRow(row, identity)) ?? null);
+}
+
 export async function appendMarketSnapshotQueries(input: {
   snapshotId: string; leaseOwner?: string; token?: LeaseToken; queries: readonly SnapshotQueryInput[];
 }): Promise<MarketSnapshotQueryRow[]> {
@@ -367,7 +386,9 @@ export async function appendMarketSourceEvidence(input: { token: LeaseToken; sou
       if (!snapshot || snapshot.cacheIdentity !== tokenInput.cacheIdentity) throw new Error("Lease token cannot write a foreign snapshot identity.");
       const observation = memoryListMarketSearchObservations(source.snapshotId).find(({ id }) => id === source.observationId);
       if (!observation || observation.canonicalUrl !== source.canonicalUrl) throw new Error("Source evidence must match its observation canonical URL.");
-      memorySaveMarketSourceEvidence({ ...source, createdAt: new Date() });
+      const existing = memoryListMarketSourceEvidence(source.snapshotId).find(({ id }) => id === source.id);
+      if (existing) assertSourceEvidenceEqual(existing, source);
+      else memorySaveMarketSourceEvidence({ ...source, createdAt: new Date() });
     }
     return clone(sources.map((source) => ({ ...source, createdAt: new Date() })));
   }
@@ -377,7 +398,10 @@ export async function appendMarketSourceEvidence(input: { token: LeaseToken; sou
     for (const row of sources) {
       const scoped = await tx<Array<{ id: string }>>`SELECT id FROM market_snapshot_questions WHERE id=${row.snapshotId} AND cache_identity=${tokenInput.cacheIdentity} AND status='refreshing'`;
       if (!scoped[0]) throw new Error("Lease token cannot write a foreign snapshot identity.");
-      await tx`INSERT INTO market_source_evidence (id,snapshot_id,observation_id,canonical_url,registrable_domain,retrieval_state,excerpt,excerpt_hash,content_hash,source_category,entities,claims,contradictions,evidence_family_identity,retrieved_at,expires_at) VALUES (${row.id},${row.snapshotId},${row.observationId},${row.canonicalUrl},${row.registrableDomain},${row.retrievalState},${row.excerpt},${row.excerptHash},${row.contentHash},${row.sourceCategory},${JSON.stringify(row.entities)}::jsonb,${JSON.stringify(row.claims)}::jsonb,${JSON.stringify(row.contradictions)}::jsonb,${row.evidenceFamilyIdentity},${row.retrievedAt.toISOString()},${row.expiresAt.toISOString()})`;
+      await tx`INSERT INTO market_source_evidence (id,snapshot_id,observation_id,canonical_url,registrable_domain,retrieval_state,excerpt,excerpt_hash,content_hash,source_category,entities,claims,contradictions,evidence_family_identity,retrieved_at,expires_at) VALUES (${row.id},${row.snapshotId},${row.observationId},${row.canonicalUrl},${row.registrableDomain},${row.retrievalState},${row.excerpt},${row.excerptHash},${row.contentHash},${row.sourceCategory},${JSON.stringify(row.entities)}::jsonb,${JSON.stringify(row.claims)}::jsonb,${JSON.stringify(row.contradictions)}::jsonb,${row.evidenceFamilyIdentity},${row.retrievedAt.toISOString()},${row.expiresAt.toISOString()}) ON CONFLICT (id) DO NOTHING`;
+      const persisted = (await tx<Array<Record<string, unknown>>>`SELECT * FROM market_source_evidence WHERE id=${row.id}`)[0];
+      if (!persisted) throw new Error("Source evidence idempotent write disappeared.");
+      assertSourceEvidenceEqual(dbSource(persisted), row);
     }
     return sources.map((row) => ({ ...row, createdAt: new Date() }));
   });
@@ -428,14 +452,14 @@ export async function completeMarketSnapshotLease(input: {
   });
 }
 
-export async function releaseFailedMarketSnapshotLease(input: { token: LeaseToken; snapshotId?: string }): Promise<void> {
+export async function releaseFailedMarketSnapshotLease(input: { token: LeaseToken; snapshotId?: string; preserveRefreshingSnapshot?: boolean }): Promise<void> {
   const expected = parseToken(input.token);
   if (isMemoryPersistence()) {
     const lease = requireMemoryLease(expected);
     if (input.snapshotId) {
       const snapshot = memoryGetMarketSnapshotQuestion(input.snapshotId);
       if (snapshot && snapshot.cacheIdentity !== expected.cacheIdentity) throw new Error("Lease token cannot fail a foreign snapshot identity.");
-      if (snapshot?.status === "refreshing") memorySaveMarketSnapshotQuestion({ ...snapshot, status: "failed" });
+      if (snapshot?.status === "refreshing" && !input.preserveRefreshingSnapshot) memorySaveMarketSnapshotQuestion({ ...snapshot, status: "failed" });
     }
     memorySaveMarketSnapshotLease({ ...lease, state: "failed", terminalSnapshotId: null, updatedAt: new Date() });
     return;
@@ -443,7 +467,7 @@ export async function releaseFailedMarketSnapshotLease(input: { token: LeaseToke
   await ensureDatabase();
   await getSqlClient().begin(async (tx) => {
     await requireLeaseTx(tx, expected);
-    if (input.snapshotId) await tx`UPDATE market_snapshot_questions SET status='failed' WHERE id=${input.snapshotId} AND cache_identity=${expected.cacheIdentity} AND status='refreshing'`;
+    if (input.snapshotId && !input.preserveRefreshingSnapshot) await tx`UPDATE market_snapshot_questions SET status='failed' WHERE id=${input.snapshotId} AND cache_identity=${expected.cacheIdentity} AND status='refreshing'`;
     const rows = await tx<Array<{ cache_identity: string }>>`UPDATE market_snapshot_leases SET state='failed',terminal_snapshot_id=NULL,updated_at=clock_timestamp() WHERE cache_identity=${expected.cacheIdentity} AND lease_owner=${expected.leaseOwner} AND attempt_number=${expected.attemptNumber} AND state='active' RETURNING cache_identity`;
     if (!rows[0]) throw new Error("Market snapshot lease failure lost its compare-and-swap.");
   });
@@ -665,6 +689,13 @@ function publicUrl(value: unknown): string { const text = bounded(value, "url", 
 function exactRow(row: MarketSnapshotQuestionRow, identity: MarketSnapshotIdentity): boolean { return row.cacheIdentity === identity.id && row.normalizedQuestion === identity.normalizedQuestion && row.locale === identity.locale && row.region === identity.region && row.surfaceId === identity.surfaceId && row.surfaceVersion === identity.surfaceVersion && row.fanoutVersion === identity.fanoutVersion; }
 function assertAttemptCompletionEqual(actual: MarketSearchAttemptRow, expected: MarketSearchAttemptRow): void { if (actual.requestStatus !== expected.requestStatus || JSON.stringify(actual.usage) !== JSON.stringify(expected.usage) || actual.providerCostMicros !== expected.providerCostMicros || actual.costUncertain !== expected.costUncertain || actual.sanitizedError !== expected.sanitizedError) throw new Error("Market search attempt completion is immutable."); }
 function assertAttemptStartEqual(actual: MarketSearchAttemptRow, expected: { snapshotId: string; queryId: string; configuredCostMicros: number }): void { if (actual.snapshotId !== expected.snapshotId || actual.queryId !== expected.queryId || actual.configuredCostMicros !== expected.configuredCostMicros) throw new Error("Market search attempt idempotency identity conflict."); }
+function assertSourceEvidenceEqual(actual: Omit<MarketSourceEvidenceRow, "createdAt"> | MarketSourceEvidenceRow, expected: Omit<MarketSourceEvidenceRow, "createdAt">): void {
+  const scalarKeys = ["id", "snapshotId", "observationId", "canonicalUrl", "registrableDomain", "retrievalState", "excerpt", "excerptHash", "contentHash", "sourceCategory", "evidenceFamilyIdentity"] as const;
+  if (scalarKeys.some((key) => actual[key] !== expected[key]) ||
+      JSON.stringify(actual.entities) !== JSON.stringify(expected.entities) || JSON.stringify(actual.claims) !== JSON.stringify(expected.claims) ||
+      JSON.stringify(actual.contradictions) !== JSON.stringify(expected.contradictions) || actual.retrievedAt.getTime() !== expected.retrievedAt.getTime() ||
+      actual.expiresAt.getTime() !== expected.expiresAt.getTime()) throw new Error("Market source evidence is immutable.");
+}
 function assertRefBindingEqual(actual: ReportMarketSnapshotRefRow[], reportId: string, jobId: string, cutoff: Date, refs: readonly { snapshotId: string; actualCostMicros: number; allocatedCostMicros: number; avoidedCostMicros: number }[]): void { const expected = [...refs].sort((a,b)=>a.snapshotId.localeCompare(b.snapshotId)); const stored = [...actual].sort((a,b)=>a.snapshotId.localeCompare(b.snapshotId)); if (stored.length !== expected.length || stored.some((row,index)=>row.reportId!==reportId || row.jobId!==jobId || row.snapshotId!==expected[index]!.snapshotId || row.evidenceCutoff.getTime()!==cutoff.getTime() || row.actualCostMicros!==expected[index]!.actualCostMicros || row.allocatedCostMicros!==expected[index]!.allocatedCostMicros || row.avoidedCostMicros!==expected[index]!.avoidedCostMicros)) throw new Error("Report market snapshot binding immutability conflict."); }
 function sha(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function delay(ms: number, signal?: AbortSignal): Promise<void> { return new Promise((resolve) => { const finish = () => { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); resolve(); }; const onAbort = () => finish(); const timer = setTimeout(finish, Math.max(0, ms)); signal?.addEventListener("abort", onAbort, { once: true }); }); }
