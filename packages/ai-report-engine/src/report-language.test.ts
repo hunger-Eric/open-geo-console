@@ -164,6 +164,13 @@ describe("report language contract", () => {
     ).not.toThrow();
   });
 
+  it("allows single-letter placeholders in Chinese prose", () => {
+    expect(() => assertReportLanguage([{
+      path: "recommendation",
+      text: "拥有超过 X 年经验的团队，成功率保持在 Y%。"
+    }], "zh-CN")).not.toThrow();
+  });
+
   it("allows bounded source identifiers and timestamps without allowing English prose", () => {
     expect(() => assertReportLanguage([{
       path: "technical",

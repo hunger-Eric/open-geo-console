@@ -130,6 +130,7 @@ function containsOrdinaryEnglishWord(value: string): boolean {
 
 function isTechnicalToken(value: string): boolean {
   const normalized = value.toLowerCase();
+  if (/^[A-Za-z]$/.test(value)) return true;
   if (TECHNICAL_TERMS.has(normalized) || TECHNICAL_HEADERS.has(normalized)) return true;
   if (isSafeDottedFilename(value) || isSafeDomain(value)) return true;
   if (/^[a-z][a-z0-9]*[A-Z][A-Za-z0-9]*$/.test(value)) return true;
