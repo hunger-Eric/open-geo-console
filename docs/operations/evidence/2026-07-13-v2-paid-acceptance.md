@@ -89,3 +89,13 @@ Final commercial state verified at `2026-07-13T15:41:11.341Z`:
 | `refund_succeeded` | `43f81202-533d-4489-83a8-b89896c6c8ed` | `bfe0affd0975c497` | `2026-07-13T15:40:55.188Z` | `email.delivered`, processed |
 
 Gate result: **FAIL — public-source safe retrieval exceeded the Worker hard deadline and did not unwind cleanly.** Payment, refund, credit, and all three email outcomes are settled, but the V2 customer artifact chain did not reach evidence persistence, HTML/PDF, or successful atomic settlement. V2 paid acceptance remains blocked.
+
+## Gate 5 — Abort-unwind repair and controlled staging rebuild
+
+On 2026-07-14, the failure-path code was reviewed and committed as `c63dfc5aa0e5e65a366a1f75a2c165d4bc7ba9b9`.
+
+- `safe-fetch` now calls the per-request Undici dispatcher's abrupt `destroy()` path when its caller or deadline signal aborts; normal completed requests still use graceful `close()`.
+- The focused safe-fetch, V2 retriever, and isolated PostgreSQL market-snapshot suites passed (`14` tests); Web lint and production build passed.
+- `staging-worker-free` and `staging-worker-deep` were rebuilt and force-recreated from image `sha256:ad98e0e7fdb9dc27064b8eba76def7af50ab576b8d6c64e93a2f915e078dcde3`, whose OCI revision label is the reviewed commit above. Both logged ready state under `OGC_DEPLOYMENT_PROFILE=staging`.
+
+Gate result: **PASS for repair and controlled rebuild.** This is not a replacement for Gate 4: a fresh paid V2 order is still required to prove live deadline unwind, source evidence persistence, artifacts, and settlement.
