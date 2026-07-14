@@ -3,6 +3,7 @@ import {
   inferTemplateKey,
   type PageType
 } from "@open-geo-console/site-crawler";
+import { analyzeTitlePatterns } from "./title-patterns";
 
 export {
   analyzeTitlePatterns,
@@ -22,6 +23,8 @@ export type FindingMessageKey =
   | "asset.missingRobotsTxt"
   | "page.badStatus"
   | "page.weakTitle"
+  | "page.duplicateTitles"
+  | "page.dominantTitleTemplate"
   | "page.missingMetaDescription"
   | "page.h1Structure"
   | "page.missingCanonical"
@@ -90,6 +93,22 @@ export const FINDING_MESSAGE_CATALOG = {
     title: "Weak or missing title",
     description: "AI crawlers rely on clear titles to identify page purpose.",
     recommendation: "Add a specific title that names the company, product, or page intent."
+  },
+  "page.duplicateTitles": {
+    severity: "warning",
+    title: "Multiple pages reuse the same title",
+    description: (params) =>
+      `${params.affectedCount} pages expose the same title, reducing page-specific GEO identity.`,
+    recommendation:
+      "Give each page a concise title that states its distinct purpose and keep only a short reusable brand identifier."
+  },
+  "page.dominantTitleTemplate": {
+    severity: "warning",
+    title: "Page titles are dominated by a shared template",
+    description: (params) =>
+      `${params.affectedCount} pages share a ${params.sharedLength}-character title segment that outweighs their page-specific meaning.`,
+    recommendation:
+      "Lead with the page's distinct purpose and reduce the repeated portion to a concise brand identifier so generative engines can select and cite the right page."
   },
   "page.missingMetaDescription": {
     severity: "warning",
@@ -451,6 +470,35 @@ export function buildFindings(
         url: page.url
       }));
     }
+  }
+
+  for (const match of analyzeTitlePatterns(pages)) {
+    const representativeUrls = match.affectedUrls.slice(0, 3);
+    const messageKey: FindingMessageKey = match.kind === "exact_duplicate"
+      ? "page.duplicateTitles"
+      : "page.dominantTitleTemplate";
+    const patternPosition = match.kind === "dominant_prefix"
+      ? "prefix"
+      : match.kind === "dominant_suffix"
+        ? "suffix"
+        : "full";
+    findings.push({
+      ...createFinding({
+        id: `title-pattern-${hashId(`${match.kind}:${match.affectedUrls.join("|")}`)}`,
+        messageKey,
+        params: {
+          patternPosition,
+          sharedLength: match.sharedLength,
+          affectedCount: match.affectedUrls.length
+        },
+        url: representativeUrls[0]
+      }),
+      aggregation: {
+        affectedCount: match.affectedUrls.length,
+        representativeUrls,
+        templateKey: `title-pattern:${match.kind}`
+      }
+    });
   }
 
   if (homepage && isSuccessfulStatus(homepage.status) && !homepage.hasOpenGraph) {

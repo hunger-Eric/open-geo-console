@@ -241,6 +241,64 @@ describe("geo auditor", () => {
     expect(calculateScore([aggregatedFinding("page.h1Structure", 1)], [])).toBe(80);
     expect(calculateScore([aggregatedFinding("page.missingCanonical", 1)], [])).toBe(85);
   });
+
+  it("emits one grouped GEO finding for exact duplicate titles", () => {
+    const pages = [
+      page("https://example.com/first", { title: "Shared service title" }),
+      page("https://example.com/second", { title: " shared   service title " })
+    ];
+
+    const findings = buildFindings("https://example.com/", pages, availableAssets());
+    const titleFindings = findings.filter(({ messageKey }) =>
+      messageKey === "page.duplicateTitles" || messageKey === "page.dominantTitleTemplate"
+    );
+
+    expect(titleFindings).toHaveLength(1);
+    expect(titleFindings[0]).toMatchObject({
+      severity: "warning",
+      messageKey: "page.duplicateTitles",
+      params: { patternPosition: "full", affectedCount: 2 },
+      aggregation: {
+        affectedCount: 2,
+        representativeUrls: ["https://example.com/first", "https://example.com/second"],
+        templateKey: "title-pattern:exact_duplicate"
+      }
+    });
+  });
+
+  it("emits one grouped GEO finding for a dominant title suffix with capped scoring", () => {
+    const shared = "凌顺国际物流-16年老牌货代，专业提供台湾海快专线、台湾海运专线、菲律宾海运专线及跨境物流实时追踪";
+    const names = ["首页", "国际转运流程", "集团简介", "新闻动态", "国际集运"];
+    const pages = names.map((name, index) =>
+      page(`https://example.com/${index || ""}`, {
+        title: index === 0 ? shared : `${name}-${shared}`
+      })
+    );
+
+    const findings = buildFindings("https://example.com/", pages, availableAssets());
+    const titleFindings = findings.filter(({ messageKey }) =>
+      messageKey === "page.duplicateTitles" || messageKey === "page.dominantTitleTemplate"
+    );
+    const finding = titleFindings[0];
+
+    expect(titleFindings).toHaveLength(1);
+    expect(finding).toMatchObject({
+      severity: "warning",
+      messageKey: "page.dominantTitleTemplate",
+      params: {
+        patternPosition: "suffix",
+        sharedLength: [...shared].length,
+        affectedCount: 5
+      },
+      aggregation: {
+        affectedCount: 5,
+        templateKey: "title-pattern:dominant_suffix"
+      }
+    });
+    expect(finding?.aggregation?.representativeUrls).toHaveLength(3);
+    expect(finding?.params).not.toHaveProperty("sharedSegment");
+    expect(calculateScore(titleFindings, pages)).toBe(82);
+  });
 });
 
 function page(url: string, overrides: Partial<AuditedPage> = {}): AuditedPage {

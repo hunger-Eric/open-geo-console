@@ -449,6 +449,19 @@ export const en = {
       description: "AI crawlers rely on clear titles to identify page purpose.",
       recommendation: "Add a specific title that names the company, product, or page intent."
     },
+    "page.duplicateTitles": {
+      title: "Multiple pages reuse the same title",
+      description: "{affectedCount} pages expose the same title, reducing page-specific GEO identity.",
+      recommendation:
+        "Give each page a concise title that states its distinct purpose and keep only a short reusable brand identifier."
+    },
+    "page.dominantTitleTemplate": {
+      title: "Page titles are dominated by a shared template",
+      description:
+        "{affectedCount} pages share a {sharedLength}-character title segment that outweighs their page-specific meaning.",
+      recommendation:
+        "Lead with the page's distinct purpose and reduce the repeated portion to a concise brand identifier so generative engines can select and cite the right page."
+    },
     "page.missingMetaDescription": {
       title: "Missing meta description",
       description: "The page lacks a concise summary for search and AI preview contexts.",

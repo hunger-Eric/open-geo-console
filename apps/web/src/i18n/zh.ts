@@ -442,6 +442,17 @@ export const zh = {
       description: "AI 爬虫依赖清晰标题来判断页面用途。",
       recommendation: "补充明确的页面标题，写清公司、产品或页面意图。"
     },
+    "page.duplicateTitles": {
+      title: "多个页面重复使用同一标题",
+      description: "{affectedCount} 个页面使用相同标题，削弱了生成式引擎对页面独立用途的识别。",
+      recommendation: "为每个页面使用简洁、用途明确的独立标题，仅保留短小的通用品牌标识。"
+    },
+    "page.dominantTitleTemplate": {
+      title: "页面标题被共享模板主导",
+      description: "{affectedCount} 个页面共享长度为 {sharedLength} 个字符的标题片段，页面独有语义占比过低。",
+      recommendation:
+        "优先表达当前页面的独特用途，并将重复部分缩减为简洁的品牌标识，以便生成式引擎准确选择和引用页面。"
+    },
     "page.missingMetaDescription": {
       title: "缺少 meta description",
       description: "页面缺少可用于搜索和 AI 预览场景的简明摘要。",

@@ -29,6 +29,25 @@ describe("localizeTechnicalReportForArtifact", () => {
     });
     expect(localized.machineReadableAssets.robotsTxt.summary).toBe("robots.txt is available.");
   });
+
+  it("localizes dominant title-template findings without mutating fallback prose", () => {
+    const source = fixture();
+    source.findings = [createFinding({
+      id: "dominant-title-template",
+      messageKey: "page.dominantTitleTemplate",
+      params: { patternPosition: "suffix", sharedLength: 42, affectedCount: 5 },
+      url: "https://example.com/"
+    })];
+
+    const localized = localizeTechnicalReportForArtifact(source, "zh-CN");
+
+    expect(localized.findings[0]).toMatchObject({
+      title: "页面标题被共享模板主导",
+      description: "5 个页面共享长度为 42 个字符的标题片段，页面独有语义占比过低。",
+      recommendation: expect.stringContaining("生成式引擎")
+    });
+    expect(source.findings[0]!.title).toBe("Page titles are dominated by a shared template");
+  });
 });
 
 function fixture(): GeoAuditReport {
