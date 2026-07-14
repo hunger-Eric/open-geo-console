@@ -18,6 +18,7 @@ import {
   createProviderDiscoveryQueryPlan,
   createProviderVerificationQueryPlan,
   PROVIDER_QUERY_PLAN_VERSION,
+  assertNoCustomerIdentity,
   toCanonicalBuyerQuestionSet,
   type ConfirmedBusinessQuestionSet,
   type CustomerIdentityExclusion,
@@ -117,7 +118,7 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
         retrieveSource: createLegacyRetriever(), maxSourceRetrievals: 6, maxAvailableSources: 3, maxSourcesPerDomain: 2,
         snapshotMetadata: { snapshotKind: "provider_discovery", queryPlanVersion: PROVIDER_QUERY_PLAN_VERSION }
       });
-      candidates = resolveCandidates(discoveryResolved.observations, candidateDomains);
+      candidates = resolveProviderCandidates(discoveryResolved.observations, candidateDomains, excludedIdentities);
       return {
         snapshotId: discoveryResolved.snapshotId,
         candidates,
@@ -216,18 +217,38 @@ function toFanout(plan: { version: string; questionId: string; surface: SearchQu
   return { questionId: plan.questionId, questionSetVersion, fanoutVersion: plan.version, surface: plan.surface, queries: plan.queries, budget: plan.budget };
 }
 
-function resolveCandidates(observations: Awaited<ReturnType<typeof resolvePublicSourceSnapshot>>["observations"], domains: Map<string, string>): ProviderCandidateQueryIdentity[] {
+export function resolveProviderCandidates(
+  observations: Awaited<ReturnType<typeof resolvePublicSourceSnapshot>>["observations"],
+  domains: Map<string, string>,
+  excludedIdentities: readonly CustomerIdentityExclusion[]
+): ProviderCandidateQueryIdentity[] {
   const byDomain = new Map<string, { name: string; domain: string; order: number }>();
   for (const observation of observations) for (const result of observation.results) {
     const domain = safeDomain(result.url);
     if (!domain || byDomain.has(domain)) continue;
-    byDomain.set(domain, { name: candidateName(result.title, domain), domain, order: result.surfaceResultOrder });
+    const name = candidateName(result.title, domain);
+    if (!isPublicProviderCandidate(name, domain, excludedIdentities)) continue;
+    byDomain.set(domain, { name, domain, order: result.surfaceResultOrder });
   }
   return [...byDomain.values()].sort((left, right) => left.order - right.order || left.domain.localeCompare(right.domain)).slice(0, 12).map((value, rank) => {
     const entityId = `provider:${sha({ name: value.name.toLocaleLowerCase(), domain: value.domain })}`;
     domains.set(entityId, value.domain);
     return { entityId, canonicalName: value.name, rank };
   });
+}
+
+function isPublicProviderCandidate(
+  name: string,
+  domain: string,
+  excludedIdentities: readonly CustomerIdentityExclusion[]
+): boolean {
+  try {
+    assertNoCustomerIdentity(name, excludedIdentities);
+    assertNoCustomerIdentity(domain, excludedIdentities);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function candidateName(title: string, domain: string): string {

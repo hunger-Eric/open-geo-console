@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ConfirmedBusinessQuestionSet, PublicSearchSurfaceAuthority } from "@open-geo-console/public-search-observer";
-import { createProductionProviderDiscoveryContext, isLikelyCompanyOwnedProviderDomain } from "./provider-discovery-production";
+import { createProductionProviderDiscoveryContext, isLikelyCompanyOwnedProviderDomain, resolveProviderCandidates } from "./provider-discovery-production";
 import { runProviderDiscoveryPipeline } from "./provider-discovery-pipeline";
 
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), providerBundle: vi.fn(), snapshotBundle: vi.fn(), appendClaims: vi.fn() }));
@@ -16,6 +16,23 @@ describe("production provider discovery composition", () => {
   it("only treats a candidate domain as company-owned when the identity matches", () => {
     expect(isLikelyCompanyOwnedProviderDomain("Alpha Logistics", "alpha.example")).toBe(true);
     expect(isLikelyCompanyOwnedProviderDomain("Top logistics providers", "industry-directory.example")).toBe(false);
+  });
+
+  it("drops customer and identity-colliding search titles before provider verification", () => {
+    const domains = new Map<string, string>();
+    const observations = [{ results: [
+      { surfaceResultOrder: 1, url: "https://shun-express.com/", title: "行业服务", snippet: "", displayedHost: "shun-express.com" },
+      { surfaceResultOrder: 2, url: "https://directory.example/logistics", title: "物流", snippet: "", displayedHost: "directory.example" },
+      { surfaceResultOrder: 3, url: "https://alpha.example/logistics", title: "Alpha Logistics", snippet: "", displayedHost: "alpha.example" }
+    ] }] as never;
+
+    const candidates = resolveProviderCandidates(observations, domains, [
+      { kind: "private_identity", value: "凌顺国际物流" },
+      { kind: "private_identity", value: "shun-express.com" }
+    ]);
+
+    expect(candidates.map(({ canonicalName }) => canonicalName)).toEqual(["Alpha Logistics"]);
+    expect([...domains.values()]).toEqual(["alpha.example"]);
   });
 
   it("reuses discovery, verification and two standard question snapshots", async () => {
