@@ -221,6 +221,28 @@ describe("public-source snapshot resolver", () => {
       .rejects.toBeInstanceOf(PublicSourceSnapshotAuthorityMismatchError);
   });
 
+  it("refreshes a completed same-authority lease when its terminal snapshot is outside the evidence cutoff", async () => {
+    const authority = await installAuthority("review-one");
+    const search = vi.fn(async () => observationPayload("complete"));
+    const adapter = fixtureAdapter(authority, search);
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const first = await resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-cutoff-first"
+    });
+
+    const refreshed = await resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout,
+      evidenceCutoffAt: "2020-01-01T00:00:00.000Z",
+      leaseOwner: "worker-cutoff-refresh"
+    });
+
+    expect(refreshed).toMatchObject({ collectedForThisRun: true, refreshAttempted: true });
+    expect(refreshed.snapshotId).not.toBe(first.snapshotId);
+    expect(search).toHaveBeenCalledTimes(fanout.queries.length * 2);
+  });
+
   it("releases a failed lease and throws a safe error when every query fails", async () => {
     const authority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });

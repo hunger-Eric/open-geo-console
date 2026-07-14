@@ -105,7 +105,16 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
   const leaseDurationMs = positive(input.leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS, "leaseDurationMs");
   const claim = await acquireMarketSnapshotLease({ cacheIdentity: identity.id, leaseOwner: input.leaseOwner, leaseDurationMs, forceRefresh });
   if (!claim.acquired) {
-    if (claim.state === "completed") throw new PublicSourceSnapshotAuthorityMismatchError();
+    if (claim.state === "completed") {
+      const terminal = claim.lease.terminalSnapshotId
+        ? await getMarketSnapshotBundle(claim.lease.terminalSnapshotId)
+        : null;
+      if (!terminal || terminal.snapshot.surfaceAuthorityVersion !== input.authority.authorityId) {
+        throw new PublicSourceSnapshotAuthorityMismatchError();
+      }
+      if (forceRefresh) throw new PublicSourceSnapshotAuthorityMismatchError();
+      return resolvePublicSourceSnapshot({ ...input, forceRefresh: true, leaseDurationMs });
+    }
     const waited = await waitForMarketSnapshot({ identity, deadline: new Date(Date.now() + positive(input.waitDeadlineMs ?? DEFAULT_WAIT_DEADLINE_MS, "waitDeadlineMs")), signal: input.signal });
     if (waited.status === "completed") return resolveExisting({ ...input, identity, evidenceCutoff, snapshotId: waited.snapshot.id, ageMs: Math.max(0, evidenceCutoff.getTime() - (waited.snapshot.completedAt?.getTime() ?? evidenceCutoff.getTime())) });
     if (waited.status === "takeover_available" || waited.status === "released_retryable") {
