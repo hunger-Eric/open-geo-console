@@ -243,13 +243,13 @@ export async function analyzePageBatch(
     const allowedTerms = collectPageAllowedTerms(pages);
     let parsed: PageAnalysis[] | undefined;
     let lastError: unknown;
-    let languageCorrectionUsed = false;
     let languageFeedback: string[] = [];
     let languageCorrectionDraft: PageAnalysis[] | undefined;
     let languageCorrectionError: ReportLanguageValidationError | undefined;
     let fieldsToCorrect: Array<{ path: string; text: string }> = [];
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const isLanguageCorrectionCall = languageFeedback.length > 0;
+      let correctionCandidateApplied = false;
       try {
         const languageInstruction = reportLanguageInstruction(input.locale);
         const outputShape = isLanguageCorrectionCall ? {
@@ -332,16 +332,18 @@ export async function analyzePageBatch(
           if (isLanguageCorrectionCall && languageCorrectionError) throw languageCorrectionError;
           throw new Error(`The model returned ${candidate?.length ?? 0} of ${pages.length} required page analyses.`);
         }
-        if (!isLanguageCorrectionCall) languageCorrectionDraft = candidate;
+        languageCorrectionDraft = candidate;
+        correctionCandidateApplied = isLanguageCorrectionCall;
         assertPageAnalysisLanguage(candidate, input.locale, allowedTerms);
         parsed = candidate;
         break;
       } catch (error) {
         lastError = error;
-        if (isLanguageCorrectionCall) throw error;
+        if (isLanguageCorrectionCall && (!correctionCandidateApplied || !(error instanceof ReportLanguageValidationError))) {
+          throw error;
+        }
         if (error instanceof ReportLanguageValidationError) {
-          if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
-          languageCorrectionUsed = true;
+          if (attempt >= maxAttempts) throw error;
           languageCorrectionError = error;
           languageFeedback = reportLanguageCorrectionFeedback(error, input.locale);
           const violationPaths = new Set(error.violations.map(({ path }) => path));

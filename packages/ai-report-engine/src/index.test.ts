@@ -332,6 +332,38 @@ describe("batch analysis and evidence", () => {
     expect(result.analyses[0]?.findings[0]?.evidence).toEqual(english.analyses[0]!.findings[0]!.evidence);
   });
 
+  it("retries a well-formed correction that still leaks English without re-analyzing the page", async () => {
+    const invalid = { analyses: [{
+      url: page.url,
+      summary: "The page clearly explains the product for modern teams.",
+      organizationSignals: [],
+      strengths: [],
+      findings: []
+    }] };
+    const stillEnglish = { corrections: [{
+      path: "analyses[0].summary",
+      text: "Rewrite the summary in Chinese for modern teams."
+    }] };
+    const corrected = { corrections: [{
+      path: "analyses[0].summary",
+      text: "该页面清楚说明了产品及其目标用户。"
+    }] };
+    const client = mockClient([invalid, stillEnglish, corrected]);
+
+    const result = await analyzePageBatch(client, {
+      pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined
+    });
+
+    expect(result.analyses[0]?.summary).toBe("该页面清楚说明了产品及其目标用户。");
+    expect(client.completeJson).toHaveBeenCalledTimes(3);
+    const retryPayload = JSON.parse(vi.mocked(client.completeJson).mock.calls[2]![0].messages[1]!.content);
+    expect(retryPayload.pages).toBeUndefined();
+    expect(retryPayload.fieldsToCorrect).toEqual([{
+      path: "analyses[0].summary",
+      text: "Rewrite the summary in Chinese for modern teams."
+    }]);
+  });
+
   it("corrects legacy SEO terminology in page analysis using the existing single correction", async () => {
     const analysis = (summary: string) => ({ analyses: [{
       url: page.url, summary, organizationSignals: [], strengths: [], findings: []
