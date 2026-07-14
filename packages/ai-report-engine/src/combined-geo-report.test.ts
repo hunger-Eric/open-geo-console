@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertCombinedGeoReportLanguage, type CombinedGeoReportV1 } from "./combined-geo-report";
+import { assertCombinedGeoReportLanguage, parseCombinedGeoReportV1, type CombinedGeoReportV1 } from "./combined-geo-report";
 import { ReportLanguageValidationError } from "./report-language";
 
 describe("prospective combined report language gate", () => {
@@ -65,6 +65,45 @@ describe("prospective combined report language gate", () => {
 
     expect(() => assertCombinedGeoReportLanguage(report, "presentation_refresh"))
       .toThrow(ReportLanguageValidationError);
+  });
+
+  it("rejects SEO prose only for new geo_v1 artifacts", () => {
+    const current = fixture("en");
+    current.presentationTerminologyPolicy = "geo_v1";
+    current.vendorTaskPackage.tasks[0]!.text = "Improve SEO visibility.";
+    expect(() => assertCombinedGeoReportLanguage(current)).toThrow(ReportLanguageValidationError);
+
+    const historical = fixture("en");
+    historical.vendorTaskPackage.tasks[0]!.text = "Improve SEO visibility.";
+    expect(() => assertCombinedGeoReportLanguage(historical)).not.toThrow();
+  });
+
+  it("keeps source-original SEO evidence outside the prospective terminology gate", () => {
+    const report = fixture("en");
+    report.presentationTerminologyPolicy = "geo_v1";
+    report.technicalFoundation.aiReport.findings[0]!.evidence[0]!.quote = "Our SEO service remains source-original evidence.";
+    expect(() => assertCombinedGeoReportLanguage(report)).not.toThrow();
+  });
+
+  it("keeps the presentation-refresh scope for terminology validation", () => {
+    const report = fixture("en");
+    report.presentationTerminologyPolicy = "geo_v1";
+    report.technicalFoundation.aiReport.executiveSummary.overview = "Historical SEO technical summary.";
+    report.businessQuestionSet.questions[0]!.privateText = "Historical SEO business question?";
+    expect(() => assertCombinedGeoReportLanguage(report, "presentation_refresh")).not.toThrow();
+
+    report.businessQuestionAnswers!.answers[0]!.answer = "New SEO customer answer.";
+    expect(() => assertCombinedGeoReportLanguage(report, "presentation_refresh"))
+      .toThrow(ReportLanguageValidationError);
+  });
+
+  it("rejects unsupported presentation terminology policies before deeper parsing", () => {
+    expect(() => parseCombinedGeoReportV1({
+      version: 1,
+      artifactContract: "combined_geo_report_v1",
+      productCode: "recommendation_forensics_v1",
+      presentationTerminologyPolicy: "seo_v1"
+    })).toThrow(/presentationTerminologyPolicy/);
   });
 });
 

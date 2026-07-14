@@ -4,7 +4,12 @@ import { parseAiWebsiteReportV1 } from "./validation";
 import type { AiWebsiteReportV1 } from "./types";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import { parseCombinedBusinessQuestionAnswers, type CombinedBusinessQuestionAnswers } from "./combined-business-question-answers";
-import { assertReportLanguage, type ReportLanguageField } from "./report-language";
+import {
+  GEO_TERMINOLOGY_POLICY,
+  assertGeoTerminology,
+  assertReportLanguage,
+  type ReportLanguageField
+} from "./report-language";
 
 export const COMBINED_GEO_REPORT_VERSION = 1 as const;
 export const COMBINED_GEO_REPORT_CONTRACT = "combined_geo_report_v1" as const;
@@ -29,6 +34,7 @@ export interface CombinedGeoReportV1 {
   originalPaidJobId: string;
   targetUrl: string;
   locale: string;
+  presentationTerminologyPolicy?: typeof GEO_TERMINOLOGY_POLICY;
   region: string;
   generatedAt: string;
   evidenceCutoffAt: string;
@@ -63,6 +69,22 @@ export function assertCombinedGeoReportLanguage(
   report: CombinedGeoReportV1,
   scope: CombinedReportLanguageScope = "all"
 ): void {
+  const { fields, allowedTerms } = combinedReportProseFields(report);
+  const scopedFields = scope === "presentation_refresh"
+    ? fields.filter(({ path }) =>
+        !path.startsWith("technicalFoundation.aiReport.") &&
+        !path.startsWith("businessQuestionSet."))
+    : fields;
+  assertReportLanguage(scopedFields, report.locale, [...new Set(allowedTerms)]);
+  if (report.presentationTerminologyPolicy) {
+    assertGeoTerminology(scopedFields, report.presentationTerminologyPolicy);
+  }
+}
+
+function combinedReportProseFields(report: CombinedGeoReportV1): {
+  fields: ReportLanguageField[];
+  allowedTerms: string[];
+} {
   const fields: ReportLanguageField[] = [];
   const add = (path: string, value: string | null | undefined) => {
     if (value?.trim()) fields.push({ path, text: value });
@@ -108,8 +130,6 @@ export function assertCombinedGeoReportLanguage(
   add("technicalFoundation.aiReport.coverage.samplingMethod", ai.coverage.samplingMethod);
   addList("technicalFoundation.aiReport.coverage.limitations", ai.coverage.limitations);
 
-  report.businessQuestionSet.questions.forEach((question, index) =>
-    add(`businessQuestionSet.questions[${index}].privateText`, question.privateText));
   report.businessQuestionAnswers?.answers.forEach((answer, index) =>
     add(`businessQuestionAnswers.answers[${index}].answer`, answer.answer));
 
@@ -139,12 +159,7 @@ export function assertCombinedGeoReportLanguage(
     ...forensic.sourceGraph.entities.filter(({ status }) => status === "resolved").map(({ canonicalName }) => canonicalName),
     ...forensic.sourceGraph.claims.filter(({ status }) => status === "supported").map(({ subjectName }) => subjectName)
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= 120);
-  const scopedFields = scope === "presentation_refresh"
-    ? fields.filter(({ path }) =>
-        !path.startsWith("technicalFoundation.aiReport.") &&
-        !path.startsWith("businessQuestionSet."))
-    : fields;
-  assertReportLanguage(scopedFields, report.locale, [...new Set(allowedTerms)]);
+  return { fields, allowedTerms };
 }
 
 export function parseCombinedGeoReportV1(value: unknown): CombinedGeoReportV1 {
@@ -152,6 +167,12 @@ export function parseCombinedGeoReportV1(value: unknown): CombinedGeoReportV1 {
   exact(report.version, COMBINED_GEO_REPORT_VERSION, "version");
   exact(report.artifactContract, COMBINED_GEO_REPORT_CONTRACT, "artifactContract");
   exact(report.productCode, "recommendation_forensics_v1", "productCode");
+  if (report.presentationTerminologyPolicy !== undefined) {
+    exact(report.presentationTerminologyPolicy, GEO_TERMINOLOGY_POLICY, "presentationTerminologyPolicy");
+  }
+  const presentationTerminologyPolicy = report.presentationTerminologyPolicy as
+    | typeof GEO_TERMINOLOGY_POLICY
+    | undefined;
   const artifactRevisionId = text(report.artifactRevisionId, "artifactRevisionId");
   const artifactRevision = positive(report.artifactRevision, "artifactRevision");
   const reportId = text(report.reportId, "reportId");
@@ -205,8 +226,10 @@ export function parseCombinedGeoReportV1(value: unknown): CombinedGeoReportV1 {
   text(methodology.technicalCoverage, "methodology.technicalCoverage");
   text(methodology.evidenceFreshness, "methodology.evidenceFreshness");
   const limitations = array(methodology.limitations, "methodology.limitations").map((item, index) => text(item, `methodology.limitations[${index}]`));
+  const { presentationTerminologyPolicy: _unvalidatedPolicy, ...historicalPayload } = value as CombinedGeoReportV1;
   return {
-    ...(value as CombinedGeoReportV1),
+    ...historicalPayload,
+    ...(presentationTerminologyPolicy ? { presentationTerminologyPolicy } : {}),
     artifactRevisionId, artifactRevision, reportId, orderId, jobId, targetUrl, locale, region, evidenceCutoffAt,
     technicalFoundation: { technicalReport, aiReport, evidenceAssets },
     businessQuestionSet,

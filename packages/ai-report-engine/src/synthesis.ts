@@ -9,7 +9,9 @@ import {
 } from "./types";
 import { parseAiWebsiteReportV1 } from "./validation";
 import {
+  GEO_TERMINOLOGY_POLICY,
   ReportLanguageValidationError,
+  assertGeoTerminology,
   assertReportLanguage,
   reportLanguageInstruction
 } from "./report-language";
@@ -222,7 +224,7 @@ export async function synthesizeWebsiteReportWithRecovery(
 
 function assertWebsiteReportLanguage(report: AiWebsiteReportV1, input: ReportSynthesisInput): void {
   const roadmap = [...report.roadmap.immediate, ...report.roadmap.nextPhase, ...report.roadmap.ongoing];
-  assertReportLanguage([
+  const fields = [
     ...(report.organizationProfile.organizationName
       ? [{ path: "organizationProfile.organizationName", text: report.organizationProfile.organizationName }]
       : []),
@@ -260,7 +262,9 @@ function assertWebsiteReportLanguage(report: AiWebsiteReportV1, input: ReportSyn
       { path: `roadmap[${itemIndex}].rationale`, text: item.rationale },
       ...item.actions.map((text, index) => ({ path: `roadmap[${itemIndex}].actions[${index}]`, text }))
     ])
-  ], input.locale, collectSourceGroundedAllowedTerms(input));
+  ];
+  assertReportLanguage(fields, input.locale, collectSourceGroundedAllowedTerms(input));
+  assertGeoTerminology(fields, GEO_TERMINOLOGY_POLICY);
 }
 
 function collectSourceGroundedAllowedTerms(input: ReportSynthesisInput): string[] {

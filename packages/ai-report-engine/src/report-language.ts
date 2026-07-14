@@ -9,8 +9,11 @@ export interface ReportLanguageField {
 
 export interface ReportLanguageViolation {
   path: string;
-  reason: "unexpected_english_sentence" | "unexpected_chinese_prose";
+  reason: "unexpected_english_sentence" | "unexpected_chinese_prose" | "legacy_seo_terminology";
 }
+
+export const GEO_TERMINOLOGY_POLICY = "geo_v1" as const;
+export type ReportTerminologyPolicy = typeof GEO_TERMINOLOGY_POLICY;
 
 export class ReportLanguageValidationError extends TypeError {
   readonly violations: ReportLanguageViolation[];
@@ -71,6 +74,7 @@ const HTML_TECHNICAL_TAGS = new Set([
   "html", "img", "li", "link", "main", "meta", "nav", "ol", "p", "script", "section", "span", "style", "table",
   "tbody", "td", "th", "thead", "title", "tr", "ul"
 ]);
+const LEGACY_SEO_TERM = /\bSEO\b|\bsearch[ -]engine optimi[sz]ation\b|搜索引擎优化/iu;
 
 export function normalizeReportLanguage(locale: string): NormalizedReportLanguage {
   const language = locale.trim().toLowerCase().split(/[-_]/, 1)[0];
@@ -79,9 +83,21 @@ export function normalizeReportLanguage(locale: string): NormalizedReportLanguag
 }
 
 export function reportLanguageInstruction(locale: string): string {
+  const terminology = " Use GEO terminology. Do not use SEO, Search Engine Optimization, or equivalent legacy terminology in report prose.";
   return normalizeReportLanguage(locale) === "zh"
-    ? "Write all report prose in Simplified Chinese. Keep only unavoidable official names, brands, product names, URLs, code, email addresses, and identifiers in their original form. Preserve verbatim evidence in its source language. Do not repeat the prose in English."
-    : "Write all report prose in English. Keep only unavoidable official names and verbatim evidence in their source language. Do not repeat the prose in Chinese.";
+    ? `Write all report prose in Simplified Chinese. Keep only unavoidable official names, brands, product names, URLs, code, email addresses, and identifiers in their original form. Preserve verbatim evidence in its source language. Do not repeat the prose in English.${terminology}`
+    : `Write all report prose in English. Keep only unavoidable official names and verbatim evidence in their source language. Do not repeat the prose in Chinese.${terminology}`;
+}
+
+export function assertGeoTerminology(
+  fields: readonly ReportLanguageField[],
+  policy: ReportTerminologyPolicy
+): void {
+  if (policy !== GEO_TERMINOLOGY_POLICY) return;
+  const violations = fields
+    .filter((field) => (field.kind ?? "prose") === "prose" && LEGACY_SEO_TERM.test(field.text))
+    .map(({ path }) => ({ path, reason: "legacy_seo_terminology" as const }));
+  if (violations.length) throw new ReportLanguageValidationError(violations);
 }
 
 export function assertReportLanguage(

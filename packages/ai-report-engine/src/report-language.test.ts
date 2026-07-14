@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  GEO_TERMINOLOGY_POLICY,
   ReportLanguageValidationError,
+  assertGeoTerminology,
   assertReportLanguage,
   normalizeReportLanguage,
   reportLanguageInstruction
@@ -16,6 +18,37 @@ describe("report language contract", () => {
   it("gives the model an explicit non-bilingual Chinese instruction", () => {
     expect(reportLanguageInstruction("zh-CN")).toContain("Simplified Chinese");
     expect(reportLanguageInstruction("zh-CN")).toContain("Do not repeat the prose in English");
+    expect(reportLanguageInstruction("zh-CN")).toContain("Use GEO terminology");
+    expect(reportLanguageInstruction("zh-CN")).toContain("Do not use SEO");
+  });
+
+  it.each(["SEO", "seo", "Search Engine Optimization", "search-engine optimisation", "搜索引擎优化"])(
+    "rejects legacy terminology in GEO report prose: %s",
+    (term) => {
+      expect(() => assertGeoTerminology(
+        [{ path: "finding.title", text: `Improve ${term} visibility.` }],
+        GEO_TERMINOLOGY_POLICY
+      )).toThrow(ReportLanguageValidationError);
+    }
+  );
+
+  it("reports the stable legacy terminology reason", () => {
+    try {
+      assertGeoTerminology([{ path: "finding.title", text: "Improve SEO visibility." }], GEO_TERMINOLOGY_POLICY);
+      throw new Error("Expected GEO terminology validation to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ReportLanguageValidationError);
+      expect((error as ReportLanguageValidationError).violations).toEqual([
+        { path: "finding.title", reason: "legacy_seo_terminology" }
+      ]);
+    }
+  });
+
+  it("allows legacy terminology only in source-original fields and identifiers", () => {
+    expect(() => assertGeoTerminology([
+      { path: "evidence.quote", text: "Our SEO service", kind: "source_original" },
+      { path: "task.vendor", text: "seo", kind: "identifier" }
+    ], GEO_TERMINOLOGY_POLICY)).not.toThrow();
   });
 
   it("rejects sentence-scale English leakage in Chinese prose", () => {

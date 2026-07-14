@@ -3,7 +3,9 @@ import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-sear
 import type { JsonCompletionClient } from "./client";
 import { sha256Hex } from "./evidence";
 import {
+  GEO_TERMINOLOGY_POLICY,
   ReportLanguageValidationError,
+  assertGeoTerminology,
   assertReportLanguage,
   reportLanguageInstruction
 } from "./report-language";
@@ -217,11 +219,13 @@ function assertAnswerLanguage(
   locale: string,
   allowedTerms: readonly string[]
 ): void {
+  const fields = answers.map((answer, index) => ({ path: `answers[${index}].answer`, text: answer.answer }));
   assertReportLanguage(
-    answers.map((answer, index) => ({ path: `answers[${index}].answer`, text: answer.answer })),
+    fields,
     locale,
     allowedTerms
   );
+  assertGeoTerminology(fields, GEO_TERMINOLOGY_POLICY);
 }
 
 function collectQuestionAnswerAllowedTerms(forensic: RecommendationForensicReportV2): string[] {

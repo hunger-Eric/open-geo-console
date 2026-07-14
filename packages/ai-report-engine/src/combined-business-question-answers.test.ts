@@ -86,6 +86,34 @@ describe("combined business question answers", () => {
     expect(completeJson).toHaveBeenCalledTimes(2);
   });
 
+  it("corrects legacy SEO terminology using the existing single correction", async () => {
+    const { questionSet, forensic, value } = fixture("en");
+    const legacy = value.answers.map((item) => ({ ...item, answer: "Improve SEO visibility using the verified evidence." }));
+    const current = value.answers.map((item) => ({ ...item, answer: "Improve GEO visibility using the verified evidence." }));
+    const completeJson = vi.fn()
+      .mockResolvedValueOnce({ value: { answers: legacy }, modelId: "served", rawContent: "{}" })
+      .mockResolvedValueOnce({ value: { answers: current }, modelId: "served", rawContent: "{}" });
+
+    const result = await synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
+    );
+
+    expect(result.answers[0]?.answer).toContain("GEO");
+    expect(completeJson).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(completeJson.mock.calls[1]?.[0])).toContain("legacy_seo_terminology");
+  });
+
+  it("fails combined answers after one legacy terminology correction", async () => {
+    const { questionSet, forensic, value } = fixture("en");
+    const invalid = value.answers.map((item) => ({ ...item, answer: "Improve SEO visibility using the verified evidence." }));
+    const completeJson = vi.fn(async () => ({ value: { answers: invalid }, modelId: "served", rawContent: "{}" }));
+
+    await expect(synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
+    )).rejects.toThrow(ReportLanguageValidationError);
+    expect(completeJson).toHaveBeenCalledTimes(2);
+  });
+
   it("preserves ordinary retries for non-language failures", async () => {
     const { questionSet, forensic, value } = fixture();
     const completeJson = vi.fn()

@@ -318,6 +318,27 @@ describe("batch analysis and evidence", () => {
     }
   });
 
+  it("corrects legacy SEO terminology in page analysis using the existing single correction", async () => {
+    const analysis = (summary: string) => ({ analyses: [{
+      url: page.url, summary, organizationSignals: [], strengths: [], findings: []
+    }] });
+    const client = mockClient([analysis("Improve SEO visibility."), analysis("Improve GEO visibility.")]);
+
+    const result = await analyzePageBatch(client, { pages: [page], locale: "en", maxAttempts: 3, retryDelay: async () => undefined });
+
+    expect(result.analyses[0]?.summary).toContain("GEO");
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(vi.mocked(client.completeJson).mock.calls[1]?.[0])).toContain("legacy_seo_terminology");
+  });
+
+  it("fails page analysis after one legacy terminology correction", async () => {
+    const invalid = { analyses: [{ url: page.url, summary: "Improve SEO visibility.", organizationSignals: [], strengths: [], findings: [] }] };
+    const client = mockClient([invalid]);
+    await expect(analyzePageBatch(client, { pages: [page], locale: "en", maxAttempts: 3, retryDelay: async () => undefined }))
+      .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
+
   it("fails page analysis after one language correction", async () => {
     const invalid = { analyses: [{ url: page.url, summary: "The page clearly explains the product for modern teams.", organizationSignals: [], strengths: [], findings: [] }] };
     const client = mockClient([invalid]);
@@ -454,6 +475,29 @@ describe("report validation and synthesis", () => {
     for (const call of vi.mocked(client.completeJson).mock.calls) {
       expect(JSON.stringify(call[0])).toContain("Simplified Chinese");
     }
+  });
+
+  it("corrects legacy SEO terminology in synthesis using the existing single correction", async () => {
+    const invalid = reportModelOutput(1);
+    const valid = reportModelOutput(1);
+    (invalid.executiveSummary as Record<string, unknown>).overview = "Improve SEO visibility with clearer evidence.";
+    (valid.executiveSummary as Record<string, unknown>).overview = "Improve GEO visibility with clearer evidence.";
+    const client = mockClient([invalid, valid]);
+
+    const result = await synthesizeWebsiteReportWithRecovery(client, synthesisInput("en"), { maxAttempts: 3, delay: async () => undefined });
+
+    expect(result.report.executiveSummary.overview).toContain("GEO");
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(vi.mocked(client.completeJson).mock.calls[1]?.[0])).toContain("legacy_seo_terminology");
+  });
+
+  it("fails synthesis after one legacy terminology correction", async () => {
+    const invalid = reportModelOutput(1);
+    (invalid.executiveSummary as Record<string, unknown>).overview = "Improve SEO visibility with clearer evidence.";
+    const client = mockClient([invalid]);
+    await expect(synthesizeWebsiteReportWithRecovery(client, synthesisInput("en"), { maxAttempts: 3, delay: async () => undefined }))
+      .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
 
   it("does not gate server-owned English coverage during Chinese model correction", async () => {

@@ -1,7 +1,9 @@
 import type { JsonCompletionClient } from "./client";
 import { validateEvidenceCitation } from "./evidence";
 import {
+  GEO_TERMINOLOGY_POLICY,
   ReportLanguageValidationError,
+  assertGeoTerminology,
   assertReportLanguage,
   reportLanguageInstruction
 } from "./report-language";
@@ -247,7 +249,7 @@ export async function analyzePageBatch(
 }
 
 function assertPageAnalysisLanguage(analyses: readonly PageAnalysis[], locale: string, allowedTerms: readonly string[]): void {
-  assertReportLanguage(analyses.flatMap((analysis, analysisIndex) => [
+  const fields = analyses.flatMap((analysis, analysisIndex) => [
     { path: `analyses[${analysisIndex}].summary`, text: analysis.summary },
     ...analysis.organizationSignals.map((text, index) => ({ path: `analyses[${analysisIndex}].organizationSignals[${index}]`, text })),
     ...analysis.strengths.map((text, index) => ({ path: `analyses[${analysisIndex}].strengths[${index}]`, text })),
@@ -257,7 +259,9 @@ function assertPageAnalysisLanguage(analyses: readonly PageAnalysis[], locale: s
       { path: `analyses[${analysisIndex}].findings[${findingIndex}].recommendation`, text: finding.recommendation },
       ...(finding.rewriteExample ? [{ path: `analyses[${analysisIndex}].findings[${findingIndex}].rewriteExample`, text: finding.rewriteExample }] : [])
     ])
-  ]), locale, allowedTerms);
+  ]);
+  assertReportLanguage(fields, locale, allowedTerms);
+  assertGeoTerminology(fields, GEO_TERMINOLOGY_POLICY);
 }
 
 function collectPageAllowedTerms(pages: readonly ExtractedPage[]): string[] {
