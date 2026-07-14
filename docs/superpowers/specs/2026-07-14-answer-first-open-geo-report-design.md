@@ -116,7 +116,7 @@ Each V3 artifact persists an `engineProvenance` record containing:
 - Synthesis model and prompt contract versions.
 - Persisted locale and region.
 - Search, evidence-cutoff, synthesis, and artifact timestamps.
-- Input, evidence, answer, HTML, and private readiness hashes.
+- Input, evidence, and answer hashes. HTML/PDF hashes, private storage key, and page count remain on the artifact-revision readiness record; they cannot be embedded in the HTML payload whose hash they identify.
 
 Customer copy names the Open GEO engine. The methodology appendix may disclose the certified search surface and synthesis model accurately, but it may not relabel the result as an external consumer platform observation.
 
@@ -222,4 +222,3 @@ Generate one new Chinese paid report and verify:
 ## 15. Documentation Impact
 
 Implementation must update the project state, tasks, decisions, report workspace, AI report engine contract, commercial operations, protected-staging runbook, and a dated acceptance record. Documentation must distinguish Open GEO engine results from external platform observations and must not market the output as AI ranking.
-
