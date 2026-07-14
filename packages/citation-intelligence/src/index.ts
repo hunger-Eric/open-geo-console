@@ -13,3 +13,7 @@ export * from "./public-source-graph";
 export * from "./public-source-opportunities";
 export * from "./retrieval-readiness";
 export * from "./source-eligibility";
+export * from "./provider-discovery-types";
+export * from "./provider-policy-generic";
+export * from "./provider-policy-logistics";
+export * from "./provider-policy-registry";
