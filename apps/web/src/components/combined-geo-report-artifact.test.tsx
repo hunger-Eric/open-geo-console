@@ -25,6 +25,25 @@ describe("CombinedGeoReportArtifact", () => {
     expect(html).toContain("Technical proof quote");
     expect(html).toContain("/api/reports/report/evidence/asset-1");
   });
+
+  it("localizes application-owned values and labels source-original evidence", () => {
+    const model = combinedArtifactFixture();
+    model.locale = "zh";
+    const report = model.combinedReport;
+    report.technicalFoundation.aiReport.dimensionScores = [{ dimension: "organizationClarity", score: 80, explanation: "组织说明清晰" }] as never;
+    report.technicalFoundation.aiReport.pageTypeAnalyses = [{ pageType: "home", sampledUrls: [], strengths: [], commonIssues: [], recommendations: [], evidence: [] }] as never;
+    report.technicalFoundation.aiReport.findings[0]!.severity = "critical" as never;
+    report.vendorTaskPackage.tasks = [{ id: "task", vendor: "website", title: "更新内容", text: "改进页面", actions: ["编辑内容"], acceptanceCriteria: ["内容清晰"] }] as never;
+    const html = renderToStaticMarkup(createElement(CombinedGeoReportArtifact, { model }));
+    const visibleText = html.replace(/<[^>]+>/g, " ");
+    expect(visibleText).toContain("组织清晰度");
+    expect(visibleText).toContain("首页");
+    expect(visibleText).toContain("严重");
+    expect(visibleText).toContain("网站");
+    expect(visibleText).toContain("来源原文");
+    expect(visibleText).toContain("Technical proof quote");
+    expect(visibleText).not.toMatch(/organizationClarity|core_service_discovery|>critical<|>website<|>home</);
+  });
 });
 
 export function combinedArtifactFixture(): CombinedPrivateReportArtifactModel {
