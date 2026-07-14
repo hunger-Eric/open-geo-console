@@ -97,7 +97,7 @@ export function analyzeTitlePatterns(
   pages: readonly TitlePatternPage[]
 ): TitlePatternMatch[] {
   const eligible: EligibleTitle[] = pages.flatMap((page) => {
-    if (page.status < 200 || page.status >= 400 || !page.title?.trim()) {
+    if (page.status < 200 || page.status >= 300 || !page.title?.trim()) {
       return [];
     }
     const title = normalize(page.title);

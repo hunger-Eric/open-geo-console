@@ -93,6 +93,17 @@ describe("title pattern analysis", () => {
     ).toEqual([]);
   });
 
+  it("does not treat redirect responses as successful title evidence", () => {
+    expect(
+      analyzeTitlePatterns([
+        { url: "https://example.com/a", status: 301, title: `A-${suffix}` },
+        { url: "https://example.com/b", status: 302, title: `B-${suffix}` },
+        { url: "https://example.com/c", status: 307, title: `C-${suffix}` },
+        { url: "https://example.com/live", status: 200, title: "Distinct live page" }
+      ])
+    ).toEqual([]);
+  });
+
   it("finds a dominant shared prefix", () => {
     const prefix =
       "International logistics evidence and service overview for generated answers";
