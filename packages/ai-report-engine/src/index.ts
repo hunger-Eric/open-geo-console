@@ -11,3 +11,4 @@ export * from "./recommendation-forensic-v2-claims";
 export * from "./recommendation-forensic-dispatch";
 export * from "./recommendation-forensic-cost";
 export * from "./combined-geo-report";
+export * from "./combined-business-question-answers";

@@ -1769,6 +1769,28 @@ export const V18_DATABASE_MIGRATIONS = [
   `CREATE TRIGGER market_source_evidence_private_identity_guard BEFORE INSERT OR UPDATE ON market_source_evidence FOR EACH ROW EXECUTE FUNCTION ogc_reject_private_identity_in_shared_market_data()`
 ] as const;
 
+export const V19_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_reason_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration','paid_report_correction','staging_artifact_refresh'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_refresh_credit_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_refresh_credit_check CHECK (
+     reason <> 'staging_artifact_refresh' OR
+     (credit_reservation_id IS NULL AND artifact_contract='combined_geo_report_v1' AND correction_id IS NULL AND business_question_set_id IS NOT NULL AND tier='deep')
+   )`,
+  `ALTER TABLE report_artifact_revisions ADD COLUMN IF NOT EXISTS source_artifact_revision_id text`,
+  `ALTER TABLE report_artifact_revisions ADD COLUMN IF NOT EXISTS revision_kind text NOT NULL DEFAULT 'generation'`,
+  `UPDATE report_artifact_revisions SET revision_kind='correction' WHERE correction_id IS NOT NULL AND revision_kind='generation'`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_source_fkey`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_source_fkey FOREIGN KEY(source_artifact_revision_id) REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_kind_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_kind_check CHECK (revision_kind IN ('generation','correction','presentation_refresh'))`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_lineage_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_lineage_check CHECK (
+     (revision_kind='presentation_refresh' AND source_artifact_revision_id IS NOT NULL AND correction_id IS NULL)
+     OR (revision_kind<>'presentation_refresh' AND source_artifact_revision_id IS NULL)
+   )`
+] as const;
+
 export const DATABASE_MIGRATIONS = [
   ...V9_DATABASE_MIGRATIONS,
   ...V10_DATABASE_MIGRATIONS,
@@ -1779,5 +1801,6 @@ export const DATABASE_MIGRATIONS = [
   ...V15_DATABASE_MIGRATIONS,
   ...V16_DATABASE_MIGRATIONS,
   ...V17_DATABASE_MIGRATIONS,
-  ...V18_DATABASE_MIGRATIONS
+  ...V18_DATABASE_MIGRATIONS,
+  ...V19_DATABASE_MIGRATIONS
 ] as const;

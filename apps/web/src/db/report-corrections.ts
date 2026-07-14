@@ -62,8 +62,8 @@ export async function confirmApprovedReportCorrection(input: { finalTexts: reado
       artifact_contract,correction_id,business_question_set_id,locale,reason,stage,credit_reservation_id)
       VALUES(${jobId},${APPROVED_CORRECTION_TARGET.reportId},'deep','recommendation_forensics_v1','public_search_source_forensics_v1',2,
         'combined_geo_report_v1',${correction.id},${questions.id},${language(questions.locale)},'paid_report_correction','queued',NULL)`;
-    await tx`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,correction_id,revision,artifact_contract,status,payload_identity_hash)
-      VALUES(${artifactRevisionId},${APPROVED_CORRECTION_TARGET.reportId},${APPROVED_CORRECTION_TARGET.orderId},${jobId},${correction.id},${(revisions[0]?.revision ?? 0)+1},
+    await tx`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,correction_id,revision,revision_kind,artifact_contract,status,payload_identity_hash)
+      VALUES(${artifactRevisionId},${APPROVED_CORRECTION_TARGET.reportId},${APPROVED_CORRECTION_TARGET.orderId},${jobId},${correction.id},${(revisions[0]?.revision ?? 0)+1},'correction',
         'combined_geo_report_v1','pending',${`${questions.contentHash}:${jobId}`})`;
     await tx`UPDATE report_corrections SET correction_job_id=${jobId},state='queued' WHERE id=${correction.id} AND correction_job_id IS NULL`;
     await tx`INSERT INTO job_dispatch_outbox(id,job_id,tier,schema_version,state) VALUES(${dispatchId},${jobId},'deep',1,'pending')`;

@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { parseCombinedGeoReportV1, type CombinedGeoReportV1, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import { requireReadyCombinedGeoReport, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
 import type { ReportEvidenceAssetRow } from "@/db/schema";
+import type { CombinedPrivateReportArtifactModel } from "./artifact-model";
 import { CombinedGeoReportArtifact } from "@/components/combined-geo-report-artifact";
 import { ARTIFACT_CSS } from "./artifact-styles";
 import { exportCanonicalArtifactHtmlPdf } from "./pdf-export";
@@ -33,6 +34,7 @@ export async function buildReadyCombinedArtifact(input: {
   aiReport: AiWebsiteReportV1;
   evidenceAssets: ReportEvidenceAssetRow[];
   businessQuestionSet: ConfirmedBusinessQuestionSet;
+  businessQuestionAnswers: CombinedBusinessQuestionAnswers;
   publicSourceForensics: RecommendationForensicReportV2;
 }): Promise<ReadyCombinedArtifact> {
   if (input.evidenceAssets.some((asset) => asset.status !== "ready" || !asset.contentHash || !asset.storageKey)) {
@@ -46,7 +48,7 @@ export async function buildReadyCombinedArtifact(input: {
     }
   }
   const forensic = input.publicSourceForensics;
-  const report = parseCombinedGeoReportV1({
+  const report = requireReadyCombinedGeoReport({
     version: 1,
     artifactContract: "combined_geo_report_v1",
     productCode: "recommendation_forensics_v1",
@@ -75,6 +77,7 @@ export async function buildReadyCombinedArtifact(input: {
       }))
     },
     businessQuestionSet: input.businessQuestionSet,
+    businessQuestionAnswers: input.businessQuestionAnswers,
     publicSourceForensics: forensic,
     vendorTaskPackage: { version: "combined-vendor-task-v1", tasks: forensic.vendorTaskPackage.tasks },
     methodology: {
@@ -90,10 +93,11 @@ export async function buildReadyCombinedArtifact(input: {
   const model = { productContract: "combined_geo_report_v1" as const, reportId: input.reportId, locale,
     combinedReport: report, technicalReport: input.technicalReport, evidenceAssets: input.evidenceAssets,
     artifactRevisionId: input.artifactRevisionId, pdfStorageKey: "pending" };
-  const markup = renderToStaticMarkup(createElement(CombinedGeoReportArtifact, { model }));
-  const html = `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"/><style>${ARTIFACT_CSS}</style></head><body>${markup}</body></html>`;
+  const html = renderCanonicalCombinedArtifactHtml(model);
   for (const required of [report.artifactRevisionId,
-    ...report.businessQuestionSet.questions.flatMap((question) => [question.privateText, question.neutralPublicText]),
+    ...report.businessQuestionSet.questions.map((question) => question.privateText),
+    ...report.businessQuestionAnswers!.answers.flatMap((answer) => [answer.answer,
+      ...answer.sourceEvidenceIds.map((evidenceId) => report.publicSourceForensics.sourceGraph.evidence.find((evidence) => evidence.evidenceId === evidenceId)?.canonicalUrl ?? "")]),
     ...report.technicalFoundation.technicalReport.findings.map(({ title }) => title),
     ...report.technicalFoundation.technicalReport.pages.map(({ url }) => url),
     ...report.technicalFoundation.aiReport.findings.map(({ title }) => title),
@@ -107,6 +111,11 @@ export async function buildReadyCombinedArtifact(input: {
   const pdfStorageKey = evidenceStorageKey(input.reportId, input.artifactRevisionId, "pdf");
   await storage.put(pdfStorageKey, pdf, "application/pdf");
   return { report, html, pdf, htmlSha256: sha(html), pdfSha256: sha(pdf), pdfStorageKey, pageCount };
+}
+
+export function renderCanonicalCombinedArtifactHtml(model: CombinedPrivateReportArtifactModel):string{
+  const markup=renderToStaticMarkup(createElement(CombinedGeoReportArtifact,{model}));
+  return `<!doctype html><html lang="${model.locale}"><head><meta charset="utf-8"/><style>${ARTIFACT_CSS}</style></head><body>${markup}</body></html>`;
 }
 
 function sha(value: string | Uint8Array): string { return createHash("sha256").update(value).digest("hex"); }

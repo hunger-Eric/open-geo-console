@@ -5,51 +5,80 @@ import type { CombinedPrivateReportArtifactModel } from "@/report/artifact-model
 import { CombinedGeoReportArtifact } from "./combined-geo-report-artifact";
 
 describe("CombinedGeoReportArtifact", () => {
-  it("renders in the Worker Node runtime without relying on a global React", () => {
-    const model = {
-      productContract: "combined_geo_report_v1",
-      reportId: "report",
-      locale: "en",
-      artifactRevisionId: "artifact",
-      evidenceAssets: [],
-      combinedReport: {
-        artifactContract: "combined_geo_report_v1",
-        artifactRevision: 1,
-        targetUrl: "https://example.com/",
-        evidenceCutoffAt: "2026-07-14T00:00:00.000Z",
-        technicalFoundation: {
-          technicalReport: { score: 80, findings: [], pages: [], machineReadableAssets: {} },
-          aiReport: {
-            organizationProfile: { organizationName: "Example" },
-            executiveSummary: { overview: "Overview" },
-            dimensionScores: [],
-            findings: [],
-            pageTypeAnalyses: [],
-            coverage: { limitations: [] },
-            roadmap: { immediate: [], nextPhase: [], ongoing: [] },
-          },
-        },
-        businessQuestionSet: { questions: [] },
-        publicSourceForensics: {
-          questions: { questions: [] },
-          fanouts: [],
-          sourceGraph: { evidence: [] },
-          snapshotRefs: [],
-          coverage: { status: "complete", completedQueryCount: 0, expectedQueryCount: 0 },
-          limitations: [],
-        },
-        vendorTaskPackage: { tasks: [] },
-        methodology: {
-          technicalCoverage: "full",
-          publicSearchSurface: "test",
-          evidenceFreshness: "fresh",
-          limitations: [],
-        },
-      },
-    } as unknown as CombinedPrivateReportArtifactModel;
+  it("renders three concise grounded answers and their question-scoped source links", () => {
+    const html = renderToStaticMarkup(createElement(CombinedGeoReportArtifact, { model: combinedArtifactFixture() }));
+    const publicSection = html.slice(html.indexOf("data-business-question-section"), html.indexOf("</section>", html.indexOf("data-business-question-section")));
 
-    const html = renderToStaticMarkup(createElement(CombinedGeoReportArtifact, { model }));
+    expect(html.match(/class="business-question-answer"/g)).toHaveLength(3);
+    for (let index = 1; index <= 3; index += 1) {
+      expect(publicSection).toContain(`Direct grounded answer ${index}`);
+      expect(publicSection).toContain(`href="https://source-${index}-a.example/fact"`);
+      expect(publicSection).toContain(`href="https://source-${index}-b.example/fact"`);
+    }
+    expect(publicSection).not.toMatch(/SENTINEL_EXCERPT|Neutral public query|query-|snapshot-|evidence-|verifiedExcerpt|Grade [A-D]/i);
+  });
+
+  it("preserves website citations and screenshot evidence while using the Worker Node runtime", () => {
+    const html = renderToStaticMarkup(createElement(CombinedGeoReportArtifact, { model: combinedArtifactFixture() }));
     expect(html).toContain("data-artifact-revision=\"artifact\"");
-    expect(html).toContain("combined-geo-artifact");
+    expect(html).toContain("https://example.com/technical-proof");
+    expect(html).toContain("Technical proof quote");
+    expect(html).toContain("/api/reports/report/evidence/asset-1");
   });
 });
+
+export function combinedArtifactFixture(): CombinedPrivateReportArtifactModel {
+  const purposes = ["core_service_discovery", "customer_region_fit", "purchase_delivery_risk"] as const;
+  const publicQuestions = purposes.map((purpose, index) => ({ id: `public-question-${index + 1}`, purpose, normalizedText: `Neutral public query ${index + 1}` }));
+  const evidence = publicQuestions.flatMap((question, index) => ["a", "b"].map((suffix) => ({
+    evidenceId: `evidence-${index + 1}-${suffix}`,
+    canonicalUrl: `https://source-${index + 1}-${suffix}.example/fact`,
+    registrableDomain: `source-${index + 1}-${suffix}.example`,
+    grade: "B",
+    verifiedExcerpt: `SENTINEL_EXCERPT_${index + 1}_${suffix}`,
+    queryVariantIds: [`query-${index + 1}-${suffix}`]
+  })));
+  return {
+    productContract: "combined_geo_report_v1",
+    reportId: "report",
+    locale: "en",
+    artifactRevisionId: "artifact",
+    pdfStorageKey: "reports/report.pdf",
+    evidenceAssets: [{ id: "asset-1", findingId: "technical-finding", citationIndex: 0, status: "ready" }],
+    technicalReport: { score: 80, findings: [], pages: [], machineReadableAssets: {} },
+    combinedReport: {
+      artifactContract: "combined_geo_report_v1",
+      artifactRevision: 1,
+      targetUrl: "https://example.com/",
+      evidenceCutoffAt: "2026-07-14T00:00:00.000Z",
+      technicalFoundation: {
+        technicalReport: { score: 80, findings: [], pages: [], machineReadableAssets: {} },
+        aiReport: {
+          organizationProfile: { organizationName: "Example" },
+          executiveSummary: { overview: "Overview" },
+          dimensionScores: [],
+          findings: [{ id: "technical-finding", title: "Technical finding", severity: "high", impact: "Impact", recommendation: "Fix it", evidence: [{ quote: "Technical proof quote", url: "https://example.com/technical-proof" }] }],
+          pageTypeAnalyses: [],
+          coverage: { limitations: [] },
+          roadmap: { immediate: [], nextPhase: [], ongoing: [] }
+        }
+      },
+      businessQuestionSet: { questions: purposes.map((purpose, index) => ({ purpose, privateText: `Business question ${index + 1}` })) },
+      businessQuestionAnswers: {
+        version: "combined-business-question-answers-v1",
+        synthesis: { mode: "evidence_constrained_model", modelId: "fixture", inputHash: "hash" },
+        answers: publicQuestions.map((question, index) => ({ questionId: question.id, purpose: question.purpose, answer: `Direct grounded answer ${index + 1}.`, sourceEvidenceIds: [`evidence-${index + 1}-a`, `evidence-${index + 1}-b`] }))
+      },
+      publicSourceForensics: {
+        questions: { questions: publicQuestions },
+        fanouts: publicQuestions.map((question, index) => ({ questionId: question.id, queries: [{ id: `query-${index + 1}-a` }, { id: `query-${index + 1}-b` }] })),
+        sourceGraph: { evidence },
+        snapshotRefs: publicQuestions.map((question, index) => ({ questionId: question.id, snapshotId: `snapshot-${index + 1}`, freshness: "fresh", observedAt: "2026-07-14T00:00:00.000Z" })),
+        coverage: { status: "complete", completedQueryCount: 6, expectedQueryCount: 6 },
+        limitations: []
+      },
+      vendorTaskPackage: { tasks: [] },
+      methodology: { technicalCoverage: "full", publicSearchSurface: "test", evidenceFreshness: "fresh", limitations: [] }
+    }
+  } as unknown as CombinedPrivateReportArtifactModel;
+}

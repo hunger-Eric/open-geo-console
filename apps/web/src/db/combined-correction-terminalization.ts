@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { parseCombinedGeoReportV1, type CombinedGeoReportV1 } from "@open-geo-console/ai-report-engine";
+import { requireReadyCombinedGeoReport, type CombinedGeoReportV1 } from "@open-geo-console/ai-report-engine";
 import { ensureDatabase, getSqlClient } from "./index";
 import type { PaidPublicSourceSnapshotRef } from "./public-source-commerce";
 import { JobTransitionService } from "@/worker/job-transition-service";
@@ -14,7 +14,7 @@ export async function terminalizeCombinedCorrection(input: {
   pdfStorageKey: string;
   pageCount: number;
 }): Promise<{ report: CombinedGeoReportV1; emailDeliveryId: string }> {
-  const report = parseCombinedGeoReportV1(input.report);
+  const report = requireReadyCombinedGeoReport(input.report);
   if (!input.workerId.trim() || !input.checkpointIdentityHash.trim() || input.pageCount < 5) throw new Error("Combined correction readiness identity is incomplete.");
   await ensureDatabase();
   return getSqlClient().begin(async (tx) => {
@@ -75,7 +75,7 @@ export async function terminalizePaidCombinedReport(input: {
   report: unknown; workerId: string; checkpointIdentityHash: string; snapshotRefs: readonly PaidPublicSourceSnapshotRef[];
   htmlSha256:string;pdfSha256:string;pdfStorageKey:string;pageCount:number;
 }):Promise<{report:CombinedGeoReportV1;emailDeliveryId:string}>{
-  const report=parseCombinedGeoReportV1(input.report);
+  const report=requireReadyCombinedGeoReport(input.report);
   if(report.publicSourceForensics.commercialOutcome!=="completed"||input.pageCount<5)throw new Error("Only a complete ready combined report may settle a paid order.");
   await ensureDatabase();
   return getSqlClient().begin(async(tx)=>{

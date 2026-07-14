@@ -181,3 +181,9 @@ Every analysis job records an explicit phase and execution state independently f
 HTML is the sole report composition. The complete report, section routes, private screenshots and PDF resolve one active artifact revision, and PDF is exported from that HTML. A free correction is a unique non-billable entitlement on the original paid order: it creates no charge, credit reservation, settlement or refund; failed preparation leaves the prior artifact active; successful readiness atomically switches the revision and enqueues one artifact-keyed completion email.
 
 Caller/deadline abort is control flow, not source inaccessibility. It must retain its reason through DNS, robots, redirect validation, headers, body streaming and bounded dispatcher destruction, and no new public sources may be scheduled after the hard deadline.
+
+## 2026-07-14: Combined business questions render answers, not evidence transcripts
+
+Each `combined_geo_report_v1` business question presents the private question, one short answer synthesized only from its verified Grade A/B public evidence, and the selected source links. At least two independent domains are required per answer. Excerpts, summaries, query/snapshot/evidence IDs, grades and matching diagnostics remain persisted for validation but are not customer-facing. Technical website quotes, URLs and screenshots remain unchanged.
+
+Schema v19 adds a staging-only, non-billable presentation-refresh lineage. It reuses the active revision's locked questions and technical evidence, recollects public sources, checkpoints answer synthesis, and activates a new same-HTML/PDF revision atomically. Failure cannot demote the current active artifact or create commercial/email effects. Historical non-combined report contracts are unchanged.

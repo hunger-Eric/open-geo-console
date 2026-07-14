@@ -8,11 +8,7 @@ export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateRep
   const technical = report.technicalFoundation.technicalReport;
   const forensic = report.publicSourceForensics;
   const zh = model.locale === "zh";
-  const sourceEvidenceByQuestion = forensic.questions.questions.map((publicQuestion) => {
-    const fanout = forensic.fanouts.find((candidate) => candidate.questionId === publicQuestion.id);
-    const queryIds = new Set(fanout?.queries.map(({ id }) => id) ?? []);
-    return forensic.sourceGraph.evidence.filter((evidence) => evidence.queryVariantIds.some((id) => queryIds.has(id)));
-  });
+  const answers = report.businessQuestionAnswers?.answers ?? [];
   return <main className="recommendation-artifact combined-geo-artifact" data-artifact-revision={model.artifactRevisionId}>
     <nav className="artifact-actions no-print" aria-label="Report formats"><a href={`/reports/${model.reportId}/report.html`}>HTML</a><a className="primary" href={`/api/reports/${model.reportId}/artifacts/report.pdf`}>PDF</a></nav>
     <header className="cover artifact-section">
@@ -39,7 +35,23 @@ export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateRep
     <Section number="04" title={zh ? "页面类型分析" : "Page-type analysis"}>{ai.pageTypeAnalyses.map((page) => <article className="vendor-task" key={page.pageType}><h3>{page.pageType}</h3><p>{page.sampledUrls.join(" · ")}</p><div className="vendor-columns"><List title={zh ? "优势" : "Strengths"} values={page.strengths}/><List title={zh ? "常见问题" : "Common issues"} values={page.commonIssues}/><List title={zh ? "建议" : "Recommendations"} values={page.recommendations}/></div></article>)}</Section>
 
     <Section number="05" title={zh ? "三个业务问题与公开来源取证" : "Three business questions and public-source forensics"}>
-      {report.businessQuestionSet.questions.map((question, index) => <article className="vendor-task" key={question.purpose}><p className="citation-category">{question.purpose}</p><h3>{question.privateText}</h3><p><strong>{zh ? "公开搜索变体" : "Public search variant"}:</strong> {question.neutralPublicText}</p><p>{forensic.questions.questions[index]?.id} · {forensic.snapshotRefs.find((snapshot) => snapshot.questionId === forensic.questions.questions[index]?.id)?.snapshotId}</p><div className="citation-list">{sourceEvidenceByQuestion[index]?.map((evidence) => <SourceEvidence key={evidence.evidenceId} evidence={evidence} zh={zh} />)}</div></article>)}
+      <div data-business-question-section="true" className="business-question-list">
+        {report.businessQuestionSet.questions.map((question, index) => {
+          const answer = answers[index];
+          const publicQuestion = forensic.questions.questions[index];
+          const snapshot = publicQuestion ? forensic.snapshotRefs.find((item) => item.questionId === publicQuestion.id) : undefined;
+          const evidenceById = new Map(forensic.sourceGraph.evidence.map((item) => [item.evidenceId, item]));
+          const sources = answer?.sourceEvidenceIds.map((id) => evidenceById.get(id)).filter((item) => item !== undefined) ?? [];
+          return <article className="business-question-card" data-question-purpose={question.purpose} key={question.purpose}>
+            <p className="citation-category">{zh ? `业务问题 ${index + 1}` : `Business question ${index + 1}`}</p>
+            <h3>{question.privateText}</h3>
+            <p className="business-question-answer">{answer?.answer ?? (zh ? "此问题的综合回答尚未生成。" : "This question's grounded answer has not been generated yet.")}</p>
+            {sources.length > 0 ? <div className="business-question-source-block"><h4>{zh ? "支撑来源" : "Supporting sources"}</h4><ul className="business-question-sources">
+              {sources.map((source) => <li key={source.evidenceId}><a href={source.canonicalUrl}>{source.registrableDomain}</a><span>{source.canonicalUrl}</span>{snapshot ? <time dateTime={snapshot.observedAt}>{snapshot.freshness} · {snapshot.observedAt}</time> : null}</li>)}
+            </ul></div> : null}
+          </article>;
+        })}
+      </div>
     </Section>
 
     <Section number="06" title={zh ? "90 天路线图" : "90-day roadmap"}><div className="roadmap-grid"><Roadmap title={zh ? "立即执行" : "Immediate"} items={ai.roadmap.immediate}/><Roadmap title={zh ? "下一阶段" : "Next phase"} items={ai.roadmap.nextPhase}/><Roadmap title={zh ? "持续优化" : "Ongoing"} items={ai.roadmap.ongoing}/></div></Section>
@@ -51,4 +63,3 @@ export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateRep
 function Section({ number, title, children }: { number: string; title: string; children: React.ReactNode }) { return <section className="artifact-section"><div className="section-heading"><span>{number}</span><h2>{title}</h2></div>{children}</section>; }
 function List({ title, values }: { title: string; values: readonly string[] }) { return <div><h4>{title}</h4><ul>{values.map((value)=><li key={value}>{value}</li>)}</ul></div>; }
 function Roadmap({ title, items }: { title: string; items: Array<{ title:string; rationale:string; actions:string[] }> }) { return <div className="roadmap-column"><h3>{title}</h3>{items.map((item)=><article key={item.title}><h4>{item.title}</h4><p>{item.rationale}</p><ul>{item.actions.map((action)=><li key={action}>{action}</li>)}</ul></article>)}</div>; }
-function SourceEvidence({ evidence, zh }: { evidence: import("@open-geo-console/citation-intelligence").PublicSourceEvidence; zh: boolean }) { return <article className="citation-row"><div className="grade-mark">{evidence.grade}</div><div><p>{evidence.ownershipCategory} · {evidence.registrableDomain}</p><h3><a href={evidence.canonicalUrl}>{evidence.canonicalUrl}</a></h3><p>{evidence.verifiedExcerpt ?? (zh ? "无可保留摘录" : "No retained excerpt")}</p><small>{evidence.queryVariantIds.join(", ")}</small></div></article>; }

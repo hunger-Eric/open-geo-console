@@ -58,7 +58,7 @@ describe("database deployment marker", () => {
 
 describe("database schema marker", () => {
   it("uses the recoverable analysis-ledger schema with cascade-safe event cleanup", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(18);
+    expect(DATABASE_SCHEMA_VERSION).toBe(19);
   });
 
   it("contains the complete additive V2 authority and methodology migration", () => {

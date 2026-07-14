@@ -3,6 +3,7 @@ import { parseRecommendationForensicReportV2, type RecommendationForensicReportV
 import { parseAiWebsiteReportV1 } from "./validation";
 import type { AiWebsiteReportV1 } from "./types";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
+import { parseCombinedBusinessQuestionAnswers, type CombinedBusinessQuestionAnswers } from "./combined-business-question-answers";
 
 export const COMBINED_GEO_REPORT_VERSION = 1 as const;
 export const COMBINED_GEO_REPORT_CONTRACT = "combined_geo_report_v1" as const;
@@ -39,6 +40,7 @@ export interface CombinedGeoReportV1 {
   };
   businessQuestionSet: ConfirmedBusinessQuestionSet;
   publicSourceForensics: RecommendationForensicReportV2;
+  businessQuestionAnswers?: CombinedBusinessQuestionAnswers;
   vendorTaskPackage: { version: "combined-vendor-task-v1"; tasks: V2VendorTask[] };
   methodology: {
     htmlCanonical: true;
@@ -92,6 +94,9 @@ export function parseCombinedGeoReportV1(value: unknown): CombinedGeoReportV1 {
   if (publicQuestions.length !== 3 || publicQuestions.some((question, index) => question !== neutralQuestions[index])) {
     throw new TypeError("Public-source questions must exactly match the neutral question variants.");
   }
+  const businessQuestionAnswers = report.businessQuestionAnswers === undefined
+    ? undefined
+    : parseCombinedBusinessQuestionAnswers(report.businessQuestionAnswers, businessQuestionSet, publicSourceForensics);
   const taskPackage = object(report.vendorTaskPackage, "vendorTaskPackage");
   exact(taskPackage.version, "combined-vendor-task-v1", "vendorTaskPackage.version");
   const tasks = array(taskPackage.tasks, "vendorTaskPackage.tasks") as unknown as V2VendorTask[];
@@ -111,10 +116,17 @@ export function parseCombinedGeoReportV1(value: unknown): CombinedGeoReportV1 {
     technicalFoundation: { technicalReport, aiReport, evidenceAssets },
     businessQuestionSet,
     publicSourceForensics,
+    ...(businessQuestionAnswers ? { businessQuestionAnswers } : {}),
     vendorTaskPackage: { version: "combined-vendor-task-v1", tasks },
     methodology: { htmlCanonical: true, nonCausal: true, publicSearchSurface: methodology.publicSearchSurface as string,
       technicalCoverage: methodology.technicalCoverage as string, evidenceFreshness: methodology.evidenceFreshness as string, limitations }
   };
+}
+
+export function requireReadyCombinedGeoReport(value: unknown): CombinedGeoReportV1 & { businessQuestionAnswers: CombinedBusinessQuestionAnswers } {
+  const report = parseCombinedGeoReportV1(value);
+  if (!report.businessQuestionAnswers) throw new TypeError("Ready combined report requires three grounded business-question answers.");
+  return report as CombinedGeoReportV1 & { businessQuestionAnswers: CombinedBusinessQuestionAnswers };
 }
 
 function parseTechnicalReport(value: unknown): GeoAuditReport {

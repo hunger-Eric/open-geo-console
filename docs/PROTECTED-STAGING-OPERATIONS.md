@@ -91,6 +91,18 @@ Both modes verify the deployment profile and database marker and refuse producti
 
 ## Acceptance
 
+### Combined-report presentation refresh
+
+The approved existing report can be refreshed without creating a charge, credit, correction, refund, email, or production write:
+
+```powershell
+npm run staging:combined:refresh -- --report a71d7481-c5dc-4e2a-a042-b9be878feab8
+```
+
+The command requires the staging deployment profile and staging database marker. It creates a deep `staging_artifact_refresh` job bound to the active revision and locked question set. The Worker reuses the active technical foundation and screenshots, recollects public sources, and requires one short evidence-constrained answer per question with at least two verified Grade A/B sources from independent domains. The current revision remains active until the shared HTML component, stored PDF, hashes, screenshot readback, and atomic activation all pass. A failed terminal job marks only the pending revision failed. To intentionally refresh an already refreshed revision, inspect it first and pass `--from-revision <active-artifact-revision-id>`.
+
+Acceptance must record the new revision ID, HTML/PDF hashes and links, source ownership per question, preserved technical citations/screenshots, application-level anonymous `404`, and zero commercial side effects. Never run this command with production environment files or deploy the schema/Worker to production as part of staging acceptance.
+
 Automated acceptance:
 
 ```powershell

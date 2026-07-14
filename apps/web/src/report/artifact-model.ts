@@ -64,8 +64,10 @@ export async function loadPrivateReportArtifact(
     if (!active) return null;
     const language = active.report.locale.toLowerCase().split(/[-_]/, 1)[0];
     if (language !== "en" && language !== "zh") return null;
-    const evidenceJobIds = [...new Set([active.report.originalPaidJobId, active.report.jobId])];
-    const evidenceAssets = (await Promise.all(evidenceJobIds.map((jobId) => listEvidenceAssets(reportId, jobId)))).flat();
+    const evidenceJobIds = [...new Set(active.report.technicalFoundation.evidenceAssets.map((asset) => asset.jobId))];
+    const referencedAssetIds = new Set(active.report.technicalFoundation.evidenceAssets.map((asset) => asset.assetId));
+    const evidenceAssets = (await Promise.all(evidenceJobIds.map((jobId) => listEvidenceAssets(reportId, jobId))))
+      .flat().filter((asset) => referencedAssetIds.has(asset.id));
     return {
       productContract,
       reportId,
