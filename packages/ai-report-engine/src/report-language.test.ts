@@ -117,6 +117,20 @@ describe("report language contract", () => {
     ).not.toThrow();
   });
 
+  it("allows bounded technical vocabulary in Chinese prose", () => {
+    expect(() =>
+      assertReportLanguage(
+        [
+          { path: "aiVisibility", text: "建议改善 AI 可见性。" },
+          { path: "canonicalUrl", text: "建议修复 canonical URL。" },
+          { path: "faq", text: "建议新增 FAQ。" },
+          { path: "serp", text: "建议跟踪 SERP 表现。" }
+        ],
+        "zh-CN"
+      )
+    ).not.toThrow();
+  });
+
   it("requires explicit allowed terms for proper names", () => {
     const fields = [
       { path: "provider", text: "建议检查 Cloudflare 配置。" },

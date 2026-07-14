@@ -32,11 +32,13 @@ const MAX_VIOLATIONS = 20;
 const MAX_VIOLATION_PATH_LENGTH = 120;
 const SAFE_FIELD_PATH = /^[A-Za-z][A-Za-z0-9_]*(?:\[\d+\]|\.[A-Za-z][A-Za-z0-9_]*)*$/;
 const TECHNICAL_TERMS = new Set([
+  "ai",
   "api",
   "canonical",
   "cli",
   "css",
   "faqpage",
+  "faq",
   "geo",
   "graphql",
   "hreflang",
@@ -51,8 +53,10 @@ const TECHNICAL_TERMS = new Set([
   "schema",
   "sdk",
   "seo",
+  "serp",
   "sql",
   "typescript",
+  "url",
   "xml"
 ]);
 const TECHNICAL_HEADERS = new Set(["content-type", "x-robots-tag"]);
