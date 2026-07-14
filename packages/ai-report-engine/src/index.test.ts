@@ -285,7 +285,6 @@ describe("batch analysis and evidence", () => {
   });
 
   it("corrects Chinese page prose once while preserving source-original evidence", async () => {
-    const namedPage = { ...page, metadata: { siteName: "Example" } };
     const english = { analyses: [{
       url: page.url,
       summary: "The page clearly explains the product for modern teams.",
@@ -299,7 +298,7 @@ describe("batch analysis and evidence", () => {
     }] };
     const chinese = { analyses: [{
       url: page.url,
-      summary: "该页面清楚介绍了 Example 产品及其目标用户。",
+      summary: "该页面清楚介绍了 example 产品及其目标用户。",
       organizationSignals: ["组织名称与产品说明保持一致。"],
       strengths: ["开头说明容易理解。"],
       findings: [{
@@ -310,7 +309,7 @@ describe("batch analysis and evidence", () => {
     }] };
     const client = mockClient([english, chinese]);
 
-    const result = await analyzePageBatch(client, { pages: [namedPage], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined });
+    const result = await analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined });
 
     expect(result.analyses[0]?.summary).toContain("该页面");
     expect(client.completeJson).toHaveBeenCalledTimes(2);
@@ -336,7 +335,7 @@ describe("batch analysis and evidence", () => {
     expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
 
-  it.each(["grow your customer base quickly", "Customer Growth Strategy"])(
+  it.each(["grow your customer base quickly", "Customer Growth Strategy", "AI Customer Growth Strategy", "customer-growth strategy"])(
     "does not promote repeated ordinary title prose: %s",
     async (title) => {
       const second = { ...page, url: "https://example.com/about", pageType: "about" as const, title };
@@ -348,6 +347,15 @@ describe("batch analysis and evidence", () => {
       expect(client.completeJson).toHaveBeenCalledTimes(2);
     }
   );
+
+  it("does not treat site-name metadata prose as language authority", async () => {
+    const metadataPage = { ...page, metadata: { siteName: "Customer Growth Strategy" } };
+    const invalid = { analyses: [{ url: page.url, summary: "Customer Growth Strategy", organizationSignals: [], strengths: [], findings: [] }] };
+    const client = mockClient([invalid]);
+    await expect(analyzePageBatch(client, { pages: [metadataPage], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined }))
+      .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
 
   it("allows only a bounded hostname label for a one-page site identity", async () => {
     const localized = { analyses: [{ url: page.url, summary: "example 提供清晰的网站分析服务。", organizationSignals: [], strengths: [], findings: [] }] };
@@ -471,18 +479,19 @@ describe("report validation and synthesis", () => {
     await expect(synthesizeWebsiteReport(mockClient([output]), input)).rejects.toThrow(ReportLanguageValidationError);
   });
 
-  it("allows an exact distinctive product name only when grounded in supplied page content", async () => {
+  it("allows an exact source-grounded brand even when it is also a product", async () => {
     const output = chineseReportModelOutput();
     const profile = output.organizationProfile as Record<string, unknown>;
-    profile.productsAndServices = ["Product 360"];
-    profile.summary = "Example 为客户提供 Product 360 产品。";
+    profile.brandNames = ["Example", "Google Analytics"];
+    profile.productsAndServices = ["Google Analytics"];
+    profile.summary = "Example 为客户提供 Google Analytics 产品。";
     const input = synthesisInput("zh-CN");
-    input.pages = [{ ...page, text: `${page.text} Product 360 is the official product name.` }];
+    input.pages = [{ ...page, text: `${page.text} Google Analytics is an exact brand name.` }];
     await expect(synthesizeWebsiteReport(mockClient([output]), input))
-      .resolves.toMatchObject({ report: { organizationProfile: { productsAndServices: ["Product 360"] } } });
+      .resolves.toMatchObject({ report: { organizationProfile: { productsAndServices: ["Google Analytics"] } } });
   });
 
-  it.each(["freight forwarding and customs clearance", "Customer Growth Strategy"])(
+  it.each(["freight forwarding and customs clearance", "Customer Growth Strategy", "Product One", "Google Analytics", "Cloudflare Workers"])(
     "rejects source-grounded generic product prose in Chinese: %s",
     async (product) => {
       const output = chineseReportModelOutput();

@@ -262,8 +262,7 @@ function assertPageAnalysisLanguage(analyses: readonly PageAnalysis[], locale: s
 
 function collectPageAllowedTerms(pages: readonly ExtractedPage[]): string[] {
   const terms = new Set<string>();
-  const titleSegments = new Map<string, Set<number>>();
-  pages.forEach((page, pageIndex) => {
+  for (const page of pages) {
     try {
       for (const label of new URL(page.url).hostname.split(".")) {
         if (/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label) && !HOSTNAME_NOISE.has(label.toLowerCase())) terms.add(label);
@@ -271,44 +270,11 @@ function collectPageAllowedTerms(pages: readonly ExtractedPage[]): string[] {
     } catch {
       // URL validity is enforced before analysis; an invalid value contributes no allowlist term.
     }
-    for (const [key, rawValue] of Object.entries(page.metadata ?? {})) {
-      if (!SITE_NAME_METADATA_KEYS.has(key.toLowerCase().replace(/[^a-z]/g, ""))) continue;
-      for (const value of Array.isArray(rawValue) ? rawValue : [rawValue]) {
-        const term = boundedName(value);
-        if (term) terms.add(term);
-      }
-    }
-    for (const rawSegment of page.title?.split(/\s+(?:[-|\u2013\u2014])\s+|[|:\uFF1A]/) ?? []) {
-      const segment = boundedName(rawSegment);
-      if (!segment) continue;
-      const pagesWithSegment = titleSegments.get(segment) ?? new Set<number>();
-      pagesWithSegment.add(pageIndex);
-      titleSegments.set(segment, pagesWithSegment);
-    }
-  });
-  for (const [segment, pageIndexes] of titleSegments) {
-    if (pageIndexes.size >= 2 && isDistinctiveProperName(segment)) terms.add(segment);
   }
   return [...terms];
 }
 
 const HOSTNAME_NOISE = new Set(["www", "com", "org", "net", "io", "co", "cn"]);
-const SITE_NAME_METADATA_KEYS = new Set(["sitename", "ogsitename", "applicationname"]);
-
-function boundedName(value: string): string | null {
-  const term = value.replace(/\s+/g, " ").trim();
-  return term && term.length <= 80 && term.split(" ").length <= 6 && !/[.!?;]/.test(term) ? term : null;
-}
-
-function isDistinctiveProperName(value: string): boolean {
-  const term = value.trim();
-  if (/^[\u3400-\u9fff]{2,12}$/u.test(term)) return true;
-  return term.split(/\s+/).some((token) =>
-    /\d/.test(token) ||
-    /[a-z][A-Z]/.test(token) ||
-    /^[A-Z]{2,}$/.test(token) ||
-    /[-&+._]/.test(token));
-}
 
 function languageViolationFeedback(error: ReportLanguageValidationError): string[] {
   return error.violations.map(({ path, reason }) => `${path}: ${reason}`);

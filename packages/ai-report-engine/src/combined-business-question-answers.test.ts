@@ -89,7 +89,7 @@ describe("combined business question answers", () => {
     forensic.sourceGraph.entities = [{ canonicalName: "Acme", status: "resolved" }] as unknown as RecommendationForensicReportV2["sourceGraph"]["entities"];
     forensic.sourceGraph.claims = [{ subjectName: "Beta Labs", status: "supported" }] as unknown as RecommendationForensicReportV2["sourceGraph"]["claims"];
     forensic.websiteFoundationAppendix = { organizationProfile: {
-      organizationName: "Gamma Systems", brandNames: [], productsAndServices: ["Product 360"], legalEntity: "Legal Co"
+      organizationName: "Gamma Systems", brandNames: ["Product 360"], productsAndServices: ["Product 360"], legalEntity: "Legal Co"
     } } as unknown as RecommendationForensicReportV2["websiteFoundationAppendix"];
     const answers = value.answers.map((item, index) => ({
       ...item,
@@ -121,18 +121,21 @@ describe("combined business question answers", () => {
     expect(completeJson).toHaveBeenCalledTimes(2);
   });
 
-  it("does not treat a generic appendix product phrase as an allowed proper name", async () => {
+  it.each(["Customer Growth Strategy", "Product One", "Google Analytics", "Cloudflare Workers"])(
+    "does not treat an appendix product as an allowed proper name: %s",
+    async (product) => {
     const { questionSet, forensic, value } = fixture("zh-CN");
     forensic.websiteFoundationAppendix = { organizationProfile: {
-      organizationName: null, brandNames: [], productsAndServices: ["Customer Growth Strategy"], legalEntity: null
+      organizationName: null, brandNames: [], productsAndServices: [product], legalEntity: null
     } } as unknown as RecommendationForensicReportV2["websiteFoundationAppendix"];
-    const invalid = value.answers.map((item) => ({ ...item, answer: "客户应采用 Customer Growth Strategy 并持续核验公开材料。" }));
+    const invalid = value.answers.map((item) => ({ ...item, answer: `客户应采用 ${product} 并持续核验公开材料。` }));
     const completeJson = vi.fn(async () => ({ value: { answers: invalid }, modelId: "served", rawContent: "{}" }));
     await expect(synthesizeCombinedBusinessQuestionAnswers(
       { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
     )).rejects.toThrow(ReportLanguageValidationError);
     expect(completeJson).toHaveBeenCalledTimes(2);
-  });
+    }
+  );
 });
 
 function fixture(locale = "en") {

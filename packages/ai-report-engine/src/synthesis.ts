@@ -263,27 +263,24 @@ function collectSourceGroundedAllowedTerms(report: AiWebsiteReportV1, input: Rep
     ...profile.brandNames,
     profile.legalEntity
   ].filter((value): value is string => Boolean(value?.trim()) && value!.length <= 120);
-  const distinctiveProducts = profile.productsAndServices
-    .filter((value) => value.length <= 120 && isDistinctiveProperName(value));
-  const exactHints = new Set((input.organizationHints ?? []).map((value) => value.trim()).filter(Boolean));
+  const organizationHints = (input.organizationHints ?? [])
+    .map((value) => value.trim())
+    .filter(isNameShapedOrganizationHint);
   const suppliedPageValues = input.pages.flatMap((page) => [
     page.title ?? "",
     page.description ?? "",
     page.text,
     ...Object.values(page.metadata ?? {}).flatMap((value) => Array.isArray(value) ? value : [value])
   ]);
-  return [...new Set([...authoritativeNames, ...distinctiveProducts]
-    .filter((term) => exactHints.has(term) || suppliedPageValues.some((value) => value.includes(term))))];
+  return [...new Set([...authoritativeNames, ...organizationHints]
+    .filter((term) => suppliedPageValues.some((value) => value.includes(term))))];
 }
 
-function isDistinctiveProperName(value: string): boolean {
-  const term = value.trim();
-  if (/^[\u3400-\u9fff]{2,12}$/u.test(term)) return true;
-  return term.split(/\s+/).some((token) =>
-    /\d/.test(token) ||
-    /[a-z][A-Z]/.test(token) ||
-    /^[A-Z]{2,}$/.test(token) ||
-    /[-&+._]/.test(token));
+function isNameShapedOrganizationHint(value: string): boolean {
+  if (!value || value.length > 120) return false;
+  const tokens = value.split(/\s+/);
+  return tokens.length <= 6 && tokens.every((token) =>
+    /^[A-Z][A-Za-z0-9&.-]*$/.test(token) || /^[\u3400-\u9fff]{2,12}$/u.test(token));
 }
 
 function languageViolationFeedback(error: ReportLanguageValidationError): string[] {
