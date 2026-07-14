@@ -61,7 +61,7 @@ npm run staging:correction:confirm -- --questions-file <ignored-json-path>
 
 Confirmation creates the unique non-billable correction job and dispatches it. Never prepare or confirm against production, create a replacement order, or manually alter charge/credit/refund rows.
 
-Keep the old active artifact until the new HTML, same-HTML PDF and private evidence all pass readiness. After completion, audit one correction, one locked question set, three questions, one active revision, one artifact-keyed correction email, zero new billing/refund side effects, and identity-free shared snapshot/search/evidence payloads. The accepted concrete drill and browser checklist are recorded under `docs/operations/evidence/2026-07-14-combined-report-correction-acceptance.md`.
+Keep the old active artifact until the new customer HTML, private same-HTML PDF readiness artifact, and private evidence all pass readiness. After completion, audit one correction, one locked question set, three questions, one active revision, one artifact-keyed correction email containing only the secure HTML link, zero new billing/refund side effects, and identity-free shared snapshot/search/evidence payloads. Confirm the internal PDF hash, storage key, and page count from authoritative state; do not request a customer PDF endpoint. The accepted concrete drill and browser checklist are recorded under `docs/operations/evidence/2026-07-14-combined-report-correction-acceptance.md`.
 
 ## Local staging cleanup
 
@@ -99,9 +99,9 @@ The approved existing report can be refreshed without creating a charge, credit,
 npm run staging:combined:refresh -- --report a71d7481-c5dc-4e2a-a042-b9be878feab8
 ```
 
-The command requires the staging deployment profile and staging database marker. It creates a deep `staging_artifact_refresh` job bound to the active revision and locked question set. The Worker reuses the active technical foundation and screenshots, recollects public sources, and requires one short evidence-constrained answer per question with at least two verified Grade A/B sources from independent domains. The current revision remains active until the shared HTML component, stored PDF, hashes, screenshot readback, and atomic activation all pass. A failed terminal job marks only the pending revision failed. To intentionally refresh an already refreshed revision, inspect it first and pass `--from-revision <active-artifact-revision-id>`.
+The command requires the staging deployment profile and staging database marker. It creates a deep `staging_artifact_refresh` job bound to the active revision and locked question set. The Worker reuses the active technical foundation and screenshots, recollects public sources, and requires one short evidence-constrained answer per question with at least two verified Grade A/B sources from independent domains. The current revision remains active until the customer HTML hash, private same-HTML PDF hash/storage key/page count, screenshot readback, and atomic activation all pass. A failed terminal job marks only the pending revision failed. To intentionally refresh an already refreshed revision, inspect it first and pass `--from-revision <active-artifact-revision-id>`.
 
-Acceptance must record the new revision ID, HTML/PDF hashes and links, source ownership per question, preserved technical citations/screenshots, application-level anonymous `404`, and zero commercial side effects. Never run this command with production environment files or deploy the schema/Worker to production as part of staging acceptance.
+Acceptance must record the new revision ID, authorized customer HTML link and hash, internal PDF hash/storage key/page count, source ownership per question, preserved technical citations/screenshots, application-level anonymous `404` for the HTML artifact, and zero commercial side effects. Confirm that completion email contains only the secure HTML link. Do not request, access, or publish a customer PDF endpoint. Never run this command with production environment files or deploy the schema/Worker to production as part of staging acceptance.
 
 Automated acceptance:
 

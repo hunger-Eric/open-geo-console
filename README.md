@@ -8,7 +8,7 @@ Open GEO Console is an open-source AI Search Console for company websites. It co
 2. Receive a persisted technical GEO report immediately.
 3. The free preview analyzes the submitted homepage and exposes one verified technical/AI foundation finding while capacity remains.
 4. The paid product contract asks three evidence-derived, non-brand buyer questions on one exactly certified public-search surface, reuses identity-safe market snapshots, retrieves public evidence, and produces `RecommendationForensicReportV2`. The buyer receives an executive layer; existing website/content/SEO/communications vendors receive a separate task package. Public-search result order is never presented as AI rank or recommendation.
-5. Paid reports are delivered as private HTML and same-HTML PDF by secure email link within 24 hours or receive a full refund. Access logs can be imported separately; log evidence never changes the technical GEO score.
+5. Paid reports are delivered as private HTML through a secure email link within 24 hours or receive a full refund. The Worker privately renders the same HTML to PDF only for readiness and storage; customers receive no PDF route or email attachment/link. Access logs can be imported separately; log evidence never changes the technical GEO score.
 
 The V2 framework remains fail-closed: MiMo is the first compile-time registered public-search adapter, but no signed live artifact or active authority exists, and environment flags cannot open catalog/checkout without an exact non-fixture runtime. Historical V1 reports remain readable, but OpenAI/Perplexity answer-provider code is retired from active admission and Worker wiring.
 
@@ -22,7 +22,7 @@ AI findings must cite URLs from the current crawl and quote text present in reta
 - Versioned `RecommendationForensicReportV2` with canonical buyer questions/fanout, immutable public-search snapshots, public-source evidence graphs, exact freshness/cost provenance, three executive priorities, and a separate vendor task package.
 - Fail-closed public-search authority/registry matching, path-confined signed certification artifacts, deterministic cache reuse, completed/limited/failed commercial coverage and atomic settlement/refund/delivery intent.
 - HTTP crawling with DNS-pinned SSRF protection and Playwright fallback for JavaScript-rendered pages.
-- HTML-first private deep reports with Worker-captured visual evidence and PDF export from the same canonical HTML.
+- HTML-only private deep reports with Worker-captured visual evidence; the Worker exports the same canonical HTML to privately stored PDF only as an internal readiness gate.
 - Progressive report jobs with PostgreSQL leases, page-level recovery, resumable checkpoints and seven-day source-evidence retention.
 - Thirty-day free preview deduplication per registrable site, two distinct free sites per HMAC client IP in a rolling 24-hour window, Turnstile, and a configurable global AI-preview budget with technical-only fallback.
 - HMAC-only report-credit keys, idempotent credit reservation/settlement/refund, and private report links using HttpOnly cookies.
@@ -38,7 +38,7 @@ AI findings must cite URLs from the current crawl and quote text present in reta
 - `packages/crawler-rules` — AI crawler identity rules.
 - `packages/log-parser` — access-log parsing and sanitized bot evidence.
 
-Recommendation forensics uses `packages/public-search-observer` for surface/authority/question/fanout/observation/coverage contracts and `packages/citation-intelligence` for public-source graphs, entity resolution, evidence families, grades and opportunity hypotheses. `packages/answer-engine-observer` remains the frozen historical V1 contract. `apps/web` owns certification/runtime authority, PostgreSQL snapshots, commercial outcomes, scoped access and HTML/PDF delivery. Adapter code and deterministic fixtures are never proof of a live surface.
+Recommendation forensics uses `packages/public-search-observer` for surface/authority/question/fanout/observation/coverage contracts and `packages/citation-intelligence` for public-source graphs, entity resolution, evidence families, grades and opportunity hypotheses. `packages/answer-engine-observer` remains the frozen historical V1 contract. `apps/web` owns certification/runtime authority, PostgreSQL snapshots, commercial outcomes, scoped access, customer HTML delivery, and private internal PDF readiness/storage. Adapter code and deterministic fixtures are never proof of a live surface.
 
 ## Local Setup
 
@@ -130,7 +130,7 @@ Chinese is the default interface and uses unprefixed canonical URLs such as `/`,
 - `POST /api/reports/link-reissue` generically requests a rate-limited replacement link without revealing whether an order/email pair exists.
 - `POST /api/webhooks/airwallex` and `POST /api/webhooks/resend` verify raw-body signatures before idempotent processing.
 - `PUT|DELETE /api/reports/:id/bot-evidence` replaces or removes sanitized crawler evidence.
-- `GET /reports/:id/report.html` serves the product-scoped canonical authorized private report; explicit legacy/recommendation HTML and PDF routes prevent a token for one product contract from opening the other.
+- `GET /reports/:id/report.html` serves the product-scoped canonical authorized private report; explicit legacy/recommendation HTML routes prevent a token for one product contract from opening the other. Internal readiness PDFs have no customer route and are never linked by completion email.
 - `GET /api/reports/:id/evidence/:assetId` streams a report-bound private screenshot after the existing access-cookie check; it never returns an object-store URL.
 
 See [AI Report Engine](docs/AI-REPORT-ENGINE.md) and [Report Workspace](docs/REPORT-WORKSPACE.md) for data and route contracts.
