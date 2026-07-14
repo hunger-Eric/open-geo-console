@@ -1,5 +1,6 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
-import type { AiWebsiteReportV1, RecommendationForensicReportV1, SourceClassificationAuthoritySnapshot } from "@open-geo-console/ai-report-engine";
+import type { AiWebsiteReportV1, CombinedGeoReportV1, RecommendationForensicReportV1, SourceClassificationAuthoritySnapshot } from "@open-geo-console/ai-report-engine";
+import type { BusinessQuestionCandidateSet, ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { AnswerExecutionStateLedger, CertificationAuthoritySnapshot } from "@open-geo-console/answer-engine-observer";
 import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
 import type {
@@ -25,7 +26,7 @@ import {
 export type ReportTier = "free" | "deep";
 export type ReportLocale = "en" | "zh";
 export type ReportTechnicalStatus = "pending" | "processing" | "completed" | "failed";
-export type ScanJobReason = "standard" | "system_recovery" | "locale_correction" | "staging_regeneration";
+export type ScanJobReason = "standard" | "system_recovery" | "locale_correction" | "staging_regeneration" | "paid_report_correction";
 export type ScanJobStage =
   | "queued"
   | "discovering"
@@ -67,7 +68,8 @@ export type OrderRefundStatus = "not_required" | "pending" | "submitted" | "refu
 export type OrderDeliveryStatus = "not_queued" | "queued" | "sent" | "delivered" | "bounced" | "failed";
 export type PaymentEventProcessingStatus = "received" | "processed" | "ignored" | "failed";
 export type ReportProductContract = "legacy_website_audit_v1" | "recommendation_forensics_v1";
-export type ReportArtifactScope = ReportProductContract;
+export type ReportArtifactContract = ReportProductContract | "combined_geo_report_v1";
+export type ReportArtifactScope = ReportArtifactContract;
 export type RecommendationFulfillmentMethodology =
   | "answer_engine_recommendation_forensics_v1"
   | "public_search_source_forensics_v1";
@@ -81,7 +83,8 @@ export type EmailTemplateType =
   | "report_failed_refund"
   | "refund_succeeded"
   | "refund_assistance"
-  | "link_reissue";
+  | "link_reissue"
+  | "corrected_report_ready";
 export type EmailDeliveryState = "queued" | "sent" | "delivered" | "bounced" | "failed";
 export type JobDispatchState = "pending" | "published" | "abandoned";
 export type BatchRunStatus = "running" | "succeeded" | "partial" | "failed";
@@ -142,6 +145,7 @@ export const scanReports = pgTable(
     admissionIdempotencyHmac: text("admission_idempotency_hmac"),
     reportLocale: text("report_locale").$type<ReportLocale>(),
     localeCorrectionUsedAt: timestamp("locale_correction_used_at", { withTimezone: true }),
+    activeArtifactRevisionId: text("active_artifact_revision_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
@@ -176,6 +180,9 @@ export const scanJobs = pgTable(
     productContract: text("product_contract").$type<ReportProductContract>().notNull().default("legacy_website_audit_v1"),
     fulfillmentMethodology: text("fulfillment_methodology").$type<RecommendationFulfillmentMethodology>(),
     recommendationReportVersion: integer("recommendation_report_version").$type<RecommendationReportVersion>(),
+    artifactContract: text("artifact_contract").$type<ReportArtifactContract>(),
+    correctionId: text("correction_id"),
+    businessQuestionSetId: text("business_question_set_id"),
     locale: text("locale").$type<ReportLocale>().notNull(),
     reason: text("reason").$type<ScanJobReason>().notNull().default("standard"),
     stage: text("stage").$type<ScanJobStage>().notNull().default("queued"),
@@ -208,6 +215,7 @@ export const scanJobs = pgTable(
     index("scan_jobs_tier_lease_idx").on(table.tier, table.leaseExpiresAt),
     index("scan_jobs_report_idx").on(table.reportId, table.createdAt),
     uniqueIndex("scan_jobs_id_report_uidx").on(table.id, table.reportId),
+    uniqueIndex("scan_jobs_correction_uidx").on(table.correctionId).where(sql`${table.correctionId} IS NOT NULL`),
     uniqueIndex("scan_jobs_recommendation_contract_scope_uidx").on(
       table.id, table.reportId, table.productContract, table.fulfillmentMethodology, table.recommendationReportVersion
     ),
@@ -221,7 +229,9 @@ export const scanJobs = pgTable(
         AND ((${table.fulfillmentMethodology} = 'answer_engine_recommendation_forensics_v1' AND ${table.recommendationReportVersion} = 1)
           OR (${table.fulfillmentMethodology} = 'public_search_source_forensics_v1' AND ${table.recommendationReportVersion} = 2)))
     )`),
-    check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration')`),
+    check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration', 'paid_report_correction')`),
+    check("scan_jobs_artifact_contract_check", sql`${table.artifactContract} IS NULL OR ${table.artifactContract} IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1')`),
+    check("scan_jobs_correction_credit_check", sql`${table.reason} <> 'paid_report_correction' OR (${table.creditReservationId} IS NULL AND ${table.artifactContract} = 'combined_geo_report_v1' AND ${table.correctionId} IS NOT NULL AND ${table.businessQuestionSetId} IS NOT NULL)`),
     check(
       "scan_jobs_stage_check",
       sql`${table.stage} IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')`
@@ -846,6 +856,7 @@ export const paymentOrders = pgTable(
     customerEmailHmac: text("customer_email_hmac").notNull(),
     emailKeyVersion: text("email_key_version").notNull(),
     productCode: text("product_code").notNull(),
+    businessQuestionSetId: text("business_question_set_id"),
     fulfillmentMethodology: text("fulfillment_methodology").$type<RecommendationFulfillmentMethodology>(),
     recommendationReportVersion: integer("recommendation_report_version").$type<RecommendationReportVersion>(),
     catalogVersion: text("catalog_version").notNull(),
@@ -909,6 +920,136 @@ export const paymentOrders = pgTable(
 );
 
 export type PaymentOrderRow = typeof paymentOrders.$inferSelect;
+
+export const reportBusinessQuestionSets = pgTable(
+  "report_business_question_sets",
+  {
+    id: text("id").primaryKey(),
+    reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "cascade" }),
+    orderId: text("order_id").references(() => paymentOrders.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    locale: text("locale").notNull(),
+    region: text("region").notNull(),
+    status: text("status").notNull(),
+    confidence: text("confidence").notNull(),
+    acknowledgedLowConfidence: boolean("acknowledged_low_confidence").notNull().default(false),
+    generationRuleVersion: text("generation_rule_version").notNull(),
+    neutralizationVersion: text("neutralization_version").notNull(),
+    profileEvidenceIdentity: text("profile_evidence_identity").notNull(),
+    contentHash: text("content_hash"),
+    neutralContentHash: text("neutral_content_hash"),
+    payload: jsonb("payload").$type<BusinessQuestionCandidateSet | ConfirmedBusinessQuestionSet>(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("report_business_question_sets_report_revision_uidx").on(table.reportId, table.revision),
+    uniqueIndex("report_business_question_sets_order_revision_uidx").on(table.orderId, table.revision),
+    check("report_business_question_sets_revision_check", sql`${table.revision} > 0`),
+    check("report_business_question_sets_status_check", sql`${table.status} IN ('candidate','confirmed','locked','neutralization_failed')`),
+    check("report_business_question_sets_confidence_check", sql`${table.confidence} IN ('low','high')`),
+    check("report_business_question_sets_confirmation_check", sql`${table.status} NOT IN ('confirmed','locked') OR (${table.confirmedAt} IS NOT NULL AND ${table.contentHash} IS NOT NULL AND ${table.neutralContentHash} IS NOT NULL AND ${table.payload} IS NOT NULL)`)
+  ]
+);
+export type ReportBusinessQuestionSetRow = typeof reportBusinessQuestionSets.$inferSelect;
+
+export const reportBusinessQuestions = pgTable(
+  "report_business_questions",
+  {
+    id: text("id").primaryKey(),
+    questionSetId: text("question_set_id").notNull().references(() => reportBusinessQuestionSets.id, { onDelete: "cascade" }),
+    ordinal: integer("ordinal").notNull(),
+    purpose: text("purpose").notNull(),
+    generatedText: text("generated_text").notNull(),
+    privateText: text("private_text"),
+    neutralPublicText: text("neutral_public_text").notNull(),
+    edited: boolean("edited").notNull().default(false),
+    neutralContentHash: text("neutral_content_hash").notNull(),
+    derivation: jsonb("derivation").notNull().default({})
+  },
+  (table) => [
+    uniqueIndex("report_business_questions_set_ordinal_uidx").on(table.questionSetId, table.ordinal),
+    uniqueIndex("report_business_questions_set_purpose_uidx").on(table.questionSetId, table.purpose),
+    check("report_business_questions_ordinal_check", sql`${table.ordinal} BETWEEN 1 AND 3`),
+    check("report_business_questions_purpose_check", sql`${table.purpose} IN ('core_service_discovery','customer_region_fit','purchase_delivery_risk')`)
+  ]
+);
+export type ReportBusinessQuestionRow = typeof reportBusinessQuestions.$inferSelect;
+
+export const reportCorrections = pgTable(
+  "report_corrections",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id").notNull().references(() => paymentOrders.id, { onDelete: "restrict" }),
+    reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "restrict" }),
+    originalPaidJobId: text("original_paid_job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
+    correctionJobId: text("correction_job_id").references(() => scanJobs.id, { onDelete: "restrict" }),
+    questionSetId: text("question_set_id").notNull().references(() => reportBusinessQuestionSets.id, { onDelete: "restrict" }),
+    activeArtifactRevisionId: text("active_artifact_revision_id"),
+    state: text("state").notNull().default("review_required"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true })
+  },
+  (table) => [
+    uniqueIndex("report_corrections_order_uidx").on(table.orderId),
+    uniqueIndex("report_corrections_job_uidx").on(table.correctionJobId),
+    uniqueIndex("report_corrections_question_set_uidx").on(table.questionSetId),
+    check("report_corrections_state_check", sql`${table.state} IN ('review_required','queued','running','repair_wait','completed','failed')`)
+  ]
+);
+export type ReportCorrectionRow = typeof reportCorrections.$inferSelect;
+
+export const reportArtifactRevisions = pgTable(
+  "report_artifact_revisions",
+  {
+    id: text("id").primaryKey(),
+    reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "restrict" }),
+    orderId: text("order_id").notNull().references(() => paymentOrders.id, { onDelete: "restrict" }),
+    jobId: text("job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
+    correctionId: text("correction_id").references(() => reportCorrections.id, { onDelete: "restrict" }),
+    revision: integer("revision").notNull(),
+    artifactContract: text("artifact_contract").$type<ReportArtifactContract>().notNull(),
+    status: text("status").notNull().default("pending"),
+    payloadIdentityHash: text("payload_identity_hash").notNull(),
+    htmlSha256: text("html_sha256"),
+    pdfSha256: text("pdf_sha256"),
+    pdfStorageKey: text("pdf_storage_key"),
+    readiness: jsonb("readiness").notNull().default({}),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("report_artifact_revisions_report_revision_uidx").on(table.reportId, table.revision),
+    uniqueIndex("report_artifact_revisions_job_uidx").on(table.jobId),
+    uniqueIndex("report_artifact_revisions_correction_uidx").on(table.correctionId).where(sql`${table.correctionId} IS NOT NULL`),
+    uniqueIndex("report_artifact_revisions_one_active_uidx").on(table.reportId).where(sql`${table.status} = 'active'`),
+    check("report_artifact_revisions_revision_check", sql`${table.revision} > 0`),
+    check("report_artifact_revisions_contract_check", sql`${table.artifactContract} IN ('combined_geo_report_v1')`),
+    check("report_artifact_revisions_status_check", sql`${table.status} IN ('pending','ready','active','failed')`),
+    check("report_artifact_revisions_ready_check", sql`${table.status} NOT IN ('ready','active') OR (${table.readyAt} IS NOT NULL AND ${table.htmlSha256} IS NOT NULL AND ${table.pdfSha256} IS NOT NULL AND ${table.pdfStorageKey} IS NOT NULL)`)
+  ]
+);
+export type ReportArtifactRevisionRow = typeof reportArtifactRevisions.$inferSelect;
+
+export const combinedGeoReports = pgTable(
+  "combined_geo_reports",
+  {
+    artifactRevisionId: text("artifact_revision_id").primaryKey().references(() => reportArtifactRevisions.id, { onDelete: "restrict" }),
+    reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "restrict" }),
+    orderId: text("order_id").notNull().references(() => paymentOrders.id, { onDelete: "restrict" }),
+    jobId: text("job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
+    questionSetId: text("question_set_id").notNull().references(() => reportBusinessQuestionSets.id, { onDelete: "restrict" }),
+    payload: jsonb("payload").$type<CombinedGeoReportV1>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("combined_geo_reports_report_job_uidx").on(table.reportId, table.jobId)
+  ]
+);
+export type CombinedGeoReportRow = typeof combinedGeoReports.$inferSelect;
 
 export const paymentEvents = pgTable(
   "payment_events",

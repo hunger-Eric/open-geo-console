@@ -34,6 +34,7 @@ export async function saveGeoReport(
     admissionIdempotencyHmac: existingMemoryRow?.admissionIdempotencyHmac ?? null,
     reportLocale: reportLocale ?? existingMemoryRow?.reportLocale ?? null,
     localeCorrectionUsedAt: existingMemoryRow?.localeCorrectionUsedAt ?? null,
+    activeArtifactRevisionId: existingMemoryRow?.activeArtifactRevisionId ?? null,
     createdAt: new Date()
   };
 
@@ -78,6 +79,7 @@ export async function createGeoReportShell(input: CreateGeoReportShellInput): Pr
     admissionIdempotencyHmac: input.admissionIdempotencyHmac ?? null,
     reportLocale: input.reportLocale,
     localeCorrectionUsedAt: null,
+    activeArtifactRevisionId: null,
     createdAt: new Date()
   };
   if (isMemoryPersistence()) return memorySaveReport(row);

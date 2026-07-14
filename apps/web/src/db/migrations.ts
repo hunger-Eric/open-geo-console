@@ -1586,6 +1586,189 @@ export const V17_DATABASE_MIGRATIONS = [
    END $$`
 ] as const;
 
+export const V18_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_reports ADD COLUMN IF NOT EXISTS active_artifact_revision_id text`,
+  `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS business_question_set_id text`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS artifact_contract text`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS correction_id text`,
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS business_question_set_id text`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_reason_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration','paid_report_correction'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_artifact_contract_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_artifact_contract_check CHECK (artifact_contract IS NULL OR artifact_contract IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1'))`,
+  `ALTER TABLE report_access_tokens DROP CONSTRAINT IF EXISTS report_access_tokens_artifact_scope_check`,
+  `ALTER TABLE report_access_tokens ADD CONSTRAINT report_access_tokens_artifact_scope_check CHECK (artifact_scope IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1'))`,
+  `ALTER TABLE email_deliveries DROP CONSTRAINT IF EXISTS email_deliveries_template_type_check`,
+  `ALTER TABLE email_deliveries ADD CONSTRAINT email_deliveries_template_type_check CHECK (template_type IN ('payment_confirmed','report_ready','limited_report_refund','report_failed_refund','refund_succeeded','refund_assistance','link_reissue','corrected_report_ready'))`,
+  `CREATE TABLE IF NOT EXISTS report_business_question_sets (
+     id text PRIMARY KEY,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE CASCADE,
+     order_id text REFERENCES payment_orders(id) ON DELETE RESTRICT,
+     revision integer NOT NULL CHECK (revision > 0),
+     locale text NOT NULL,
+     region text NOT NULL,
+     status text NOT NULL CHECK (status IN ('candidate','confirmed','locked','neutralization_failed')),
+     confidence text NOT NULL CHECK (confidence IN ('low','high')),
+     acknowledged_low_confidence boolean NOT NULL DEFAULT false,
+     generation_rule_version text NOT NULL,
+     neutralization_version text NOT NULL,
+     profile_evidence_identity text NOT NULL,
+     content_hash text,
+     neutral_content_hash text,
+     payload jsonb,
+     confirmed_at timestamptz,
+     locked_at timestamptz,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     updated_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT report_business_question_sets_confirmation_check CHECK (
+       status NOT IN ('confirmed','locked') OR
+       (confirmed_at IS NOT NULL AND content_hash IS NOT NULL AND neutral_content_hash IS NOT NULL AND payload IS NOT NULL)
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_business_question_sets_report_revision_uidx ON report_business_question_sets(report_id,revision)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_business_question_sets_order_revision_uidx ON report_business_question_sets(order_id,revision) WHERE order_id IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS report_business_questions (
+     id text PRIMARY KEY,
+     question_set_id text NOT NULL REFERENCES report_business_question_sets(id) ON DELETE CASCADE,
+     ordinal integer NOT NULL CHECK (ordinal BETWEEN 1 AND 3),
+     purpose text NOT NULL CHECK (purpose IN ('core_service_discovery','customer_region_fit','purchase_delivery_risk')),
+     generated_text text NOT NULL,
+     private_text text,
+     neutral_public_text text NOT NULL,
+     edited boolean NOT NULL DEFAULT false,
+     neutral_content_hash text NOT NULL,
+     derivation jsonb NOT NULL DEFAULT '{}'::jsonb,
+     UNIQUE(question_set_id,ordinal),
+     UNIQUE(question_set_id,purpose)
+   )`,
+  `CREATE OR REPLACE FUNCTION ogc_reject_locked_business_question_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE parent_status text;
+   BEGIN
+     IF TG_OP='DELETE' AND pg_trigger_depth() > 1 THEN RETURN OLD; END IF;
+     SELECT status INTO parent_status FROM report_business_question_sets
+       WHERE id=COALESCE(NEW.question_set_id,OLD.question_set_id);
+     IF parent_status IN ('confirmed','locked') THEN
+       RAISE EXCEPTION 'Confirmed business questions are immutable.';
+     END IF;
+     RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_business_questions_immutability ON report_business_questions`,
+  `CREATE TRIGGER report_business_questions_immutability BEFORE INSERT OR UPDATE OR DELETE ON report_business_questions
+     FOR EACH ROW EXECUTE FUNCTION ogc_reject_locked_business_question_mutation()`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_locked_business_question_set() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF NEW.status IN ('confirmed','locked') THEN
+       IF (SELECT count(*) FROM report_business_questions WHERE question_set_id=NEW.id) <> 3 THEN
+         RAISE EXCEPTION 'A confirmed business question set requires exactly three questions.';
+       END IF;
+       IF (SELECT array_agg(purpose ORDER BY ordinal) FROM report_business_questions WHERE question_set_id=NEW.id)
+          <> ARRAY['core_service_discovery','customer_region_fit','purchase_delivery_risk'] THEN
+         RAISE EXCEPTION 'Business question purposes and ordinals are invalid.';
+       END IF;
+       IF NEW.confidence='low' AND NEW.acknowledged_low_confidence IS NOT TRUE THEN
+         RAISE EXCEPTION 'Low-confidence business questions require acknowledgement.';
+       END IF;
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_business_question_sets_validate ON report_business_question_sets`,
+  `CREATE TRIGGER report_business_question_sets_validate BEFORE INSERT OR UPDATE ON report_business_question_sets FOR EACH ROW EXECUTE FUNCTION ogc_validate_locked_business_question_set()`,
+  `CREATE TABLE IF NOT EXISTS report_corrections (
+     id text PRIMARY KEY,
+     order_id text NOT NULL UNIQUE REFERENCES payment_orders(id) ON DELETE RESTRICT,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     original_paid_job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     correction_job_id text UNIQUE REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     question_set_id text NOT NULL UNIQUE REFERENCES report_business_question_sets(id) ON DELETE RESTRICT,
+     active_artifact_revision_id text,
+     state text NOT NULL DEFAULT 'review_required' CHECK (state IN ('review_required','queued','running','repair_wait','completed','failed')),
+     created_at timestamptz NOT NULL DEFAULT now(),
+     completed_at timestamptz
+   )`,
+  `CREATE TABLE IF NOT EXISTS report_artifact_revisions (
+     id text PRIMARY KEY,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     order_id text NOT NULL REFERENCES payment_orders(id) ON DELETE RESTRICT,
+     job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     correction_id text REFERENCES report_corrections(id) ON DELETE RESTRICT,
+     revision integer NOT NULL CHECK (revision > 0),
+     artifact_contract text NOT NULL CHECK (artifact_contract='combined_geo_report_v1'),
+     status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','ready','active','failed')),
+     payload_identity_hash text NOT NULL,
+     html_sha256 text,
+     pdf_sha256 text,
+     pdf_storage_key text,
+     readiness jsonb NOT NULL DEFAULT '{}'::jsonb,
+     ready_at timestamptz,
+     activated_at timestamptz,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT report_artifact_revisions_ready_check CHECK (
+       status NOT IN ('ready','active') OR
+       (ready_at IS NOT NULL AND html_sha256 IS NOT NULL AND pdf_sha256 IS NOT NULL AND pdf_storage_key IS NOT NULL)
+     ),
+     UNIQUE(report_id,revision)
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_artifact_revisions_one_active_uidx ON report_artifact_revisions(report_id) WHERE status='active'`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_artifact_revisions_job_uidx ON report_artifact_revisions(job_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_artifact_revisions_correction_uidx ON report_artifact_revisions(correction_id) WHERE correction_id IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS combined_geo_reports (
+     artifact_revision_id text PRIMARY KEY REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     order_id text NOT NULL REFERENCES payment_orders(id) ON DELETE RESTRICT,
+     job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     question_set_id text NOT NULL REFERENCES report_business_question_sets(id) ON DELETE RESTRICT,
+     payload jsonb NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     UNIQUE(report_id,job_id)
+   )`,
+  `ALTER TABLE payment_orders DROP CONSTRAINT IF EXISTS payment_orders_business_question_set_id_fkey`,
+  `ALTER TABLE payment_orders ADD CONSTRAINT payment_orders_business_question_set_id_fkey FOREIGN KEY(business_question_set_id) REFERENCES report_business_question_sets(id) ON DELETE RESTRICT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS payment_orders_business_question_set_uidx ON payment_orders(business_question_set_id) WHERE business_question_set_id IS NOT NULL`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_correction_id_fkey`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_correction_id_fkey FOREIGN KEY(correction_id) REFERENCES report_corrections(id) ON DELETE RESTRICT`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_business_question_set_id_fkey`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_business_question_set_id_fkey FOREIGN KEY(business_question_set_id) REFERENCES report_business_question_sets(id) ON DELETE RESTRICT`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_correction_credit_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_correction_credit_check CHECK (
+     reason <> 'paid_report_correction' OR
+     (credit_reservation_id IS NULL AND artifact_contract='combined_geo_report_v1' AND correction_id IS NOT NULL AND business_question_set_id IS NOT NULL)
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS scan_jobs_correction_uidx ON scan_jobs(correction_id) WHERE correction_id IS NOT NULL`,
+  `ALTER TABLE scan_reports DROP CONSTRAINT IF EXISTS scan_reports_active_artifact_revision_id_fkey`,
+  `ALTER TABLE scan_reports ADD CONSTRAINT scan_reports_active_artifact_revision_id_fkey FOREIGN KEY(active_artifact_revision_id) REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT`,
+  `ALTER TABLE report_corrections DROP CONSTRAINT IF EXISTS report_corrections_active_artifact_revision_id_fkey`,
+  `ALTER TABLE report_corrections ADD CONSTRAINT report_corrections_active_artifact_revision_id_fkey FOREIGN KEY(active_artifact_revision_id) REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT`,
+  `CREATE OR REPLACE FUNCTION ogc_reject_private_identity_in_shared_market_data() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE shared_payload text := lower(to_jsonb(NEW)::text); identity text;
+   BEGIN
+     FOR identity IN
+       SELECT value FROM (
+         SELECT sets.order_id AS value FROM report_business_question_sets sets WHERE sets.order_id IS NOT NULL
+         UNION ALL SELECT sets.report_id FROM report_business_question_sets sets
+         UNION ALL SELECT questions.private_text FROM report_business_questions questions
+           WHERE questions.private_text IS NOT NULL AND questions.private_text <> questions.neutral_public_text
+         UNION ALL SELECT jsonb_array_elements_text(sets.payload->'identityExclusions') FROM report_business_question_sets sets
+           WHERE jsonb_typeof(sets.payload->'identityExclusions')='array'
+       ) forbidden WHERE value IS NOT NULL AND length(btrim(value)) >= 4
+     LOOP
+       IF position(lower(identity) in shared_payload) > 0 THEN
+         RAISE EXCEPTION 'Shared market data contains private customer identity.';
+       END IF;
+     END LOOP;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_snapshot_questions_private_identity_guard ON market_snapshot_questions`,
+  `CREATE TRIGGER market_snapshot_questions_private_identity_guard BEFORE INSERT OR UPDATE ON market_snapshot_questions FOR EACH ROW EXECUTE FUNCTION ogc_reject_private_identity_in_shared_market_data()`,
+  `DROP TRIGGER IF EXISTS market_snapshot_queries_private_identity_guard ON market_snapshot_queries`,
+  `CREATE TRIGGER market_snapshot_queries_private_identity_guard BEFORE INSERT OR UPDATE ON market_snapshot_queries FOR EACH ROW EXECUTE FUNCTION ogc_reject_private_identity_in_shared_market_data()`,
+  `DROP TRIGGER IF EXISTS market_search_attempts_private_identity_guard ON market_search_attempts`,
+  `CREATE TRIGGER market_search_attempts_private_identity_guard BEFORE INSERT OR UPDATE ON market_search_attempts FOR EACH ROW EXECUTE FUNCTION ogc_reject_private_identity_in_shared_market_data()`,
+  `DROP TRIGGER IF EXISTS market_search_observations_private_identity_guard ON market_search_observations`,
+  `CREATE TRIGGER market_search_observations_private_identity_guard BEFORE INSERT OR UPDATE ON market_search_observations FOR EACH ROW EXECUTE FUNCTION ogc_reject_private_identity_in_shared_market_data()`,
+  `DROP TRIGGER IF EXISTS market_source_evidence_private_identity_guard ON market_source_evidence`,
+  `CREATE TRIGGER market_source_evidence_private_identity_guard BEFORE INSERT OR UPDATE ON market_source_evidence FOR EACH ROW EXECUTE FUNCTION ogc_reject_private_identity_in_shared_market_data()`
+] as const;
+
 export const DATABASE_MIGRATIONS = [
   ...V9_DATABASE_MIGRATIONS,
   ...V10_DATABASE_MIGRATIONS,
@@ -1595,5 +1778,6 @@ export const DATABASE_MIGRATIONS = [
   ...V14_DATABASE_MIGRATIONS,
   ...V15_DATABASE_MIGRATIONS,
   ...V16_DATABASE_MIGRATIONS,
-  ...V17_DATABASE_MIGRATIONS
+  ...V17_DATABASE_MIGRATIONS,
+  ...V18_DATABASE_MIGRATIONS
 ] as const;
