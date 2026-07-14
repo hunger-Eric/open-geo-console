@@ -173,3 +173,11 @@ The re-signed inactive MiMo authority uses an independently generated HMAC store
 ## 2026-07-13: Analysis recovery is phase-ledgered, not job-attempt-led
 
 Every analysis job records an explicit phase and execution state independently from displayed progress and commercial outcome. PostgreSQL transition and redacted error events are append-only and commit with the state write; `stage` remains a compatibility projection. Transient failures use phase-local bounded backoff, while typed configuration, authority, storage and collaborator failures release the lease into non-terminal `repair_wait` without issuing a refund or failure email. Repair resumes only after an internal readiness probe and checkpoint identity/revision/input validation; customer routes cannot force it. Historical failed jobs are reopenable only through one all-or-nothing pending-refund transaction before any refund submission or failure/refund promise delivery; otherwise the original order is immutable and requires separately audited replacement fulfillment.
+
+## 2026-07-14: One paid order owns one combined report and at most one free correction
+
+`recommendation_forensics_v1` remains the commercial SKU, while `combined_geo_report_v1` is the customer artifact contract. A paid order locks exactly three purpose-fixed questions. Private wording may name the customer; shared public-search state may contain only validated neutral variants. Failure to neutralize is a correctable stop, never permission to search.
+
+HTML is the sole report composition. The complete report, section routes, private screenshots and PDF resolve one active artifact revision, and PDF is exported from that HTML. A free correction is a unique non-billable entitlement on the original paid order: it creates no charge, credit reservation, settlement or refund; failed preparation leaves the prior artifact active; successful readiness atomically switches the revision and enqueues one artifact-keyed completion email.
+
+Caller/deadline abort is control flow, not source inaccessibility. It must retain its reason through DNS, robots, redirect validation, headers, body streaming and bounded dispatcher destruction, and no new public sources may be scheduled after the hard deadline.

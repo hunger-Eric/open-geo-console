@@ -45,6 +45,24 @@ Vercel Sensitive values are intentionally not decryptable through `vercel env pu
 
 If a workstation proxy uses the reserved `198.18.0.0/15` Fake-IP DNS range, the crawler will and must reject the target as an SSRF risk. Do not allowlist the range or disable URL safety. Set `OGC_PUBLIC_DNS_DOH_URL=https://cloudflare-dns.com/dns-query` for that Worker process; both crawl and screenshot-browser validation then use the fixed public resolver while retaining blocked-address checks and safe-fetch IP pinning.
 
+### One-time paid-report correction
+
+The correction CLI is protected-staging only and refuses any non-preview runtime, non-staging deployment profile, or non-staging database marker. Preparation is idempotent and does not create a correction job or perform public search:
+
+```powershell
+npm run staging:correction:prepare
+```
+
+This approved operator command is intentionally fixed to the order/report/original-job identities in the 2026-07-14 correction design; it is not a general correction endpoint. Present the returned three private candidates and neutral public variants to the customer. After explicit confirmation, create an ignored JSON file containing `questions` as exactly three strings and `acknowledgedLowConfidence` as a boolean, then run:
+
+```powershell
+npm run staging:correction:confirm -- --questions-file <ignored-json-path>
+```
+
+Confirmation creates the unique non-billable correction job and dispatches it. Never prepare or confirm against production, create a replacement order, or manually alter charge/credit/refund rows.
+
+Keep the old active artifact until the new HTML, same-HTML PDF and private evidence all pass readiness. After completion, audit one correction, one locked question set, three questions, one active revision, one artifact-keyed correction email, zero new billing/refund side effects, and identity-free shared snapshot/search/evidence payloads. The accepted concrete drill and browser checklist are recorded under `docs/operations/evidence/2026-07-14-combined-report-correction-acceptance.md`.
+
 ## Local staging cleanup
 
 There is no HTTP quota reset or administrator bypass. To clear isolated staging free-site reuse and rolling-limit rows:

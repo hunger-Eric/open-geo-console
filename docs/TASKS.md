@@ -79,6 +79,16 @@
 - [x] Verify private asset authorization, screenshot fallback states, desktop/mobile HTML browser QA, and PDF export QA.
 - [x] Configure Preview-only private staging object storage and visually verify a fresh paid deep report's real issue crop, context thumbnail, compact screenshots, viewport fallback, authorized HTML/PDF reads, and anonymous object-store denial.
 
+## Combined paid report and one-time correction
+
+- [x] Keep the commercial SKU `recommendation_forensics_v1` while introducing the canonical artifact contract `combined_geo_report_v1`.
+- [x] Bind exactly three editable, purpose-fixed business questions before checkout; require explicit low-confidence acknowledgement and lock the final private/public variants after payment.
+- [x] Prevent customer identity and private question text from entering shared snapshots, queries, attempts, observations, or `market_source_evidence`.
+- [x] Add schema-v18 correction, question-set, combined-payload and artifact-revision persistence with one correction per order and one active artifact per report.
+- [x] Render full technical evidence, public-source forensics, scores, roadmap, vendor tasks, method and limitations from one canonical HTML component; export PDF from the same HTML.
+- [x] Route HTML sections, PDF and private evidence through the active combined revision and return application-level `404` for anonymous access.
+- [x] Complete the real protected-staging correction for order `5f999610-17d5-4df9-9aa0-a6cce5e5b741`: three fresh snapshots, 22 source-evidence rows, ten screenshots, 19-page PDF, atomic activation, one delivered correction email, zero new billing/refund effects, and real Chromium acceptance.
+
 ## Public-source recommendation forensics V2 (provider-independent adapter framework; live admission blocked)
 
 - [x] Approve `public_search_source_forensics_v1`, its non-model-attribution boundary, canonical buyer questions, shared market snapshots, customer isolation, freshness, evidence and commercial rules.
