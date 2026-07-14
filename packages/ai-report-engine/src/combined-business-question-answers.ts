@@ -169,10 +169,17 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
         ]
       });
       const output = record(completion.value, "$model");
+      const modelAnswers = array(output.answers, "$model.answers");
+      if (modelAnswers.length !== 3) throw new TypeError("$model.answers must contain exactly three answers.");
+      const boundAnswers = compactInput.map((question, index) => {
+        const modelAnswer = record(modelAnswers[index], `$model.answers[${index}]`);
+        return { questionId: question.questionId, purpose: question.purpose, answer: modelAnswer.answer,
+          sourceEvidenceIds: question.evidence.map(({ evidenceId }) => evidenceId) };
+      });
       const parsed = parseCombinedBusinessQuestionAnswers({
         version: COMBINED_BUSINESS_QUESTION_ANSWERS_VERSION,
         synthesis: { mode: "evidence_constrained_model", modelId: completion.modelId, inputHash },
-        answers: output.answers
+        answers: boundAnswers
       }, input.questionSet, input.forensic);
       assertAnswerLanguage(parsed.answers, input.forensic.locale, collectQuestionAnswerAllowedTerms(input.forensic));
       return parsed;
@@ -230,13 +237,22 @@ function compactSynthesisInput(questionSet: ConfirmedBusinessQuestionSet, forens
     questionId: selection.questionId,
     purpose: selection.purpose,
     question: selection.privateQuestion,
-    evidence: selection.evidence.map((evidence) => ({
+    evidence: distinctDomainEvidence(selection.evidence).map((evidence) => ({
       evidenceId: evidence.evidenceId,
       domain: evidence.registrableDomain,
       url: evidence.canonicalUrl,
       excerpt: evidence.verifiedExcerpt!.slice(0, 1_200)
     }))
   }));
+}
+
+function distinctDomainEvidence(evidence: PublicSourceEvidence[]): PublicSourceEvidence[] {
+  const domains = new Set<string>();
+  return evidence.filter((item) => {
+    if (domains.has(item.registrableDomain)) return false;
+    domains.add(item.registrableDomain);
+    return true;
+  }).slice(0, 3);
 }
 
 async function delayWithAbort(delay: (milliseconds: number) => Promise<void>, milliseconds: number, signal?: AbortSignal) {

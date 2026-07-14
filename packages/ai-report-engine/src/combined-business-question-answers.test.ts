@@ -30,9 +30,10 @@ describe("combined business question answers", () => {
 
   it("constrains model output and records its input identity", async () => {
     const { questionSet, forensic, value } = fixture();
-    const completeJson = vi.fn(async (_request: unknown) => ({ value: { answers: value.answers }, modelId: "served-model", rawContent: "{}" }));
+    const completeJson = vi.fn(async (_request: unknown) => ({ value: { answers: value.answers.map((answer) => ({ ...answer, sourceEvidenceIds: ["model-hallucinated-id"] })) }, modelId: "served-model", rawContent: "{}" }));
     const result = await synthesizeCombinedBusinessQuestionAnswers({ configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 1 });
     expect(result.synthesis).toMatchObject({ mode: "evidence_constrained_model", modelId: "served-model" });
+    expect(result.answers.every(({ sourceEvidenceIds }) => sourceEvidenceIds.length >= 2 && !sourceEvidenceIds.includes("model-hallucinated-id"))).toBe(true);
     expect(result.synthesis.inputHash).toMatch(/^[a-f0-9]{64}$/);
     expect(completeJson).toHaveBeenCalledOnce();
     expect(JSON.stringify(completeJson.mock.calls[0]?.[0])).toContain("Write all report prose in English");
