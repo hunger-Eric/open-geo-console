@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { CombinedGeoReportArtifact } from "@/components/combined-geo-report-artifact";
-import { combinedArtifactFixture } from "@/components/combined-geo-report-artifact.test";
+import { combinedArtifactFixture, combinedV3ArtifactFixture } from "@/components/combined-artifact-fixtures";
 import { assertCombinedV3HtmlCompleteness, combinedArtifactSystemCopy, renderCanonicalCombinedArtifactHtml } from "./combined-artifact-readiness";
 
 describe("combined artifact canonical rendering",()=>{
@@ -63,40 +63,3 @@ describe("combined artifact canonical rendering",()=>{
     expect(() => assertCombinedV3HtmlCompleteness(model.combinedReport, html)).toThrow(/completeness/i);
   });
 });
-
-function combinedV3ArtifactFixture() {
-  const base = combinedArtifactFixture();
-  const questions = [1, 2, 3].map((index) => ({
-    purpose: ["core_service_discovery", "customer_region_fit", "purchase_delivery_risk"][index - 1],
-    privateText: `V3 exact question ${index}`
-  }));
-  const answerCards = [1, 2, 3].map((index) => ({
-    questionId: `public-question-${index}`,
-    exactQuestion: `V3 exact question ${index}`,
-    status: "answered",
-    sentences: [{ sentenceId: `v3-sentence-${index}`, kind: "grounded_claim", text: `V3 grounded answer sentence ${index}.`, evidenceIds: [`v3-evidence-${index}`], confidence: "verified" }],
-    sourceEvidence: [{ evidenceId: `v3-evidence-${index}`, questionId: `public-question-${index}`, subjectKey: "example", canonicalUrl: `https://v3-source-${index}.example/page`, title: `V3 Source ${index}`, registrableDomain: `v3-source-${index}.example`, ownershipCategory: "third_party_editorial", exactExcerpt: `V3 exact source excerpt ${index}`, observedAt: "2026-07-15T00:00:00.000Z", eligible: true, direct: true }],
-    coverage: { plannedQueries: 1, completedQueries: 1, returnedResults: 1, safelyRetrievedPages: 1, reasons: [] },
-    geoDiagnosis: { targetMentioned: true, targetFirstSentence: 1, targetRoles: ["answer subject"], competitorEntityIds: [], citedOwnership: { target_owned: 0, competitor_owned: 0, third_party_editorial: 1, directory: 0, government: 0, other: 0 }, missingEvidenceFamilies: [`V3 missing evidence ${index}`], retestQuestion: `V3 retest question ${index}` }
-  }));
-  return {
-    ...base,
-    productContract: "combined_geo_report_v3",
-    artifactRevisionId: "artifact-v3",
-    combinedReport: {
-      ...base.combinedReport,
-      version: 3,
-      artifactContract: "combined_geo_report_v3",
-      artifactRevisionId: "artifact-v3",
-      artifactRevision: 3,
-      presentationTerminologyPolicy: "geo_v1",
-      businessQuestionSet: { ...base.combinedReport.businessQuestionSet, questions },
-      answerCards,
-      engineProvenance: { engineId: "open_geo_public_search_answer_v1", searchSurface: "test/v1", queryPlanVersion: "v1", passageSelectorVersion: "v1", synthesisModel: "fixture", synthesisPromptVersion: "v1", locale: "en", region: "US", searchedAt: "2026-07-15T00:00:00.000Z", evidenceCutoffAt: "2026-07-15T00:00:00.000Z", synthesizedAt: "2026-07-15T00:00:00.000Z", inputHash: "a".repeat(64), evidenceHash: "b".repeat(64), answerHash: "c".repeat(64) },
-      technicalFoundation: {
-        ...base.combinedReport.technicalFoundation,
-        technicalReport: { score: 72, machineReadableAssets: {}, findings: [{ id: "v3-tech", severity: "warning", title: "V3 technical finding", description: "V3 technical description", recommendation: "V3 technical recommendation" }], pages: [{ url: "https://example.com/page", status: 200, title: "V3 Page Title", metaDescription: "V3 page description", h1: ["V3 Page H1"], h2: [], canonical: "https://example.com/page", hasOpenGraph: true, hasJsonLd: true, readableTextLength: 500, internalLinks: 2 }] }
-      }
-    }
-  } as never;
-}

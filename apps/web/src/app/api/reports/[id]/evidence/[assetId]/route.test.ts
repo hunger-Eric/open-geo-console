@@ -67,4 +67,14 @@ describe("private report evidence route", () => {
     expect(response.status).toBe(200);
     expect(requestHasReportAccess).toHaveBeenCalledWith(expect.any(Request), "report-1", "combined_geo_report_v2");
   });
+
+  it("authorizes V3 technical evidence only through the exact active V3 scope", async () => {
+    requestHasReportAccess.mockImplementation(async (_request: Request, _id: string, scope: string) => scope === "combined_geo_report_v3");
+    getActiveCombinedGeoReport.mockResolvedValue({ report: { artifactContract: "combined_geo_report_v3", originalPaidJobId: "job-v3", jobId: "job-v3" } });
+    getEvidenceAsset.mockResolvedValue({ jobId: "job-v3", status: "ready", storageKey: "reports/report-1/evidence/asset-1.jpg" });
+    getObject.mockResolvedValue({ body: new Uint8Array([1]), contentType: "image/jpeg" });
+    const response = await GET(new Request("https://example.com/api/reports/report-1/evidence/asset-1"), context);
+    expect(response.status).toBe(200);
+    expect(requestHasReportAccess).toHaveBeenCalledWith(expect.any(Request), "report-1", "combined_geo_report_v3");
+  });
 });

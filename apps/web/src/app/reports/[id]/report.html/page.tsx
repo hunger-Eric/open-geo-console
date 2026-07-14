@@ -18,8 +18,11 @@ export default async function PrivateHtmlReportPage({ params }: { params: Promis
   const recommendationToken = cookieStore.get(reportAccessCookieName(id, "recommendation_forensics_v1"))?.value;
   const combinedToken = cookieStore.get(reportAccessCookieName(id, "combined_geo_report_v1"))?.value;
   const combinedV2Token = cookieStore.get(reportAccessCookieName(id, "combined_geo_report_v2"))?.value;
+  const combinedV3Token = cookieStore.get(reportAccessCookieName(id, "combined_geo_report_v3"))?.value;
   const legacyToken = cookieStore.get(reportAccessCookieName(id, "legacy_website_audit_v1"))?.value;
-  const productContract = await tokenGrantsReportAccess(combinedV2Token, id, "combined_geo_report_v2")
+  const productContract = await tokenGrantsReportAccess(combinedV3Token, id, "combined_geo_report_v3")
+    ? "combined_geo_report_v3"
+    : await tokenGrantsReportAccess(combinedV2Token, id, "combined_geo_report_v2")
     ? "combined_geo_report_v2"
     : await tokenGrantsReportAccess(combinedToken, id, "combined_geo_report_v1")
     ? "combined_geo_report_v1"

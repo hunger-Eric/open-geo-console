@@ -29,7 +29,7 @@ export async function GET(request: Request, context: RouteContext) {
     idempotencyKey: `staging-operator-preview/${order.id}/${artifactScope}`,
     artifactScope
   });
-  const destination = artifactScope === "recommendation_forensics_v1" || artifactScope === "combined_geo_report_v1" || artifactScope === "combined_geo_report_v2"
+  const destination = artifactScope === "recommendation_forensics_v1" || artifactScope === "combined_geo_report_v1" || artifactScope === "combined_geo_report_v2" || artifactScope === "combined_geo_report_v3"
     ? new URL(`/reports/${id}/report.html`, request.url)
     : new URL(`/${report.reportLocale}/reports/${id}/analysis`, request.url);
   const response = NextResponse.redirect(destination, 303);

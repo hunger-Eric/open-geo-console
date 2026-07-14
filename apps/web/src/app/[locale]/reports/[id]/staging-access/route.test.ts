@@ -78,6 +78,15 @@ describe("staging report operator access", () => {
     expect(issueReportAccessToken).toHaveBeenCalledWith(expect.objectContaining({ artifactScope: "combined_geo_report_v2" }));
   });
 
+  it("issues the exact active V3 artifact scope only in protected staging", async () => {
+    getGeoReport.mockResolvedValue({ reportLocale: "zh", activeArtifactRevisionId: "revision-v3" });
+    getActiveCombinedGeoReport.mockResolvedValue({ report: { artifactContract: "combined_geo_report_v3" } });
+    const response = await GET(new Request("https://staging.example/zh/reports/report-1/staging-access?order=order-1"), context);
+    expect(response.headers.get("location")).toBe("https://staging.example/reports/report-1/report.html");
+    expect(response.headers.get("set-cookie")).toContain("ogc_report_report-1_combined_v3=secret");
+    expect(issueReportAccessToken).toHaveBeenCalledWith(expect.objectContaining({ artifactScope: "combined_geo_report_v3" }));
+  });
+
   it("returns 404 outside protected staging test mode", async () => {
     process.env.OGC_DEPLOYMENT_PROFILE = "production";
 

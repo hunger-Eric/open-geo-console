@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { CombinedPrivateReportArtifactModelV2 } from "@/report/artifact-model";
-import { combinedArtifactFixture } from "./combined-geo-report-artifact.test";
+import { combinedArtifactFixture } from "./combined-artifact-fixtures";
 import { CombinedGeoReportV2Artifact } from "./combined-geo-report-v2-artifact";
 
 describe("combined GEO report V2 artifact", () => {
