@@ -3,6 +3,7 @@ import {
   AI_WEBSITE_REPORT_VERSION,
   AI_REPORT_PROMPT_VERSION,
   OpenAiCompatibleClient,
+  ReportLanguageValidationError,
   ReportValidationError,
   analyzePageBatch,
   planPagesWithRecovery,
@@ -10,6 +11,7 @@ import {
   planPages,
   preparePlanningCandidates,
   synthesizeWebsiteReport,
+  synthesizeWebsiteReportWithRecovery,
   validateEvidenceCitation,
   verifyReportEvidence,
   type AiWebsiteReportV1,
@@ -279,6 +281,48 @@ describe("batch analysis and evidence", () => {
     expect(client.completeJson).not.toHaveBeenCalled();
     expect(result.analyses).toEqual([existing]);
   });
+
+  it("corrects Chinese page prose once while preserving source-original evidence", async () => {
+    const english = { analyses: [{
+      url: page.url,
+      summary: "The page clearly explains the product for modern teams.",
+      organizationSignals: ["The organization is presented consistently."],
+      strengths: ["The opening statement is easy to understand."],
+      findings: [{
+        title: "The trust evidence needs more detail.", severity: "warning", impact: "Readers cannot verify every claim.",
+        evidence: [{ url: page.url, quote: "Example builds evidence-first website reports" }],
+        recommendation: "Add named sources beside each important claim.", confidence: "high"
+      }]
+    }] };
+    const chinese = { analyses: [{
+      url: page.url,
+      summary: "该页面清楚介绍了 Example 产品及其目标用户。",
+      organizationSignals: ["组织名称与产品说明保持一致。"],
+      strengths: ["开头说明容易理解。"],
+      findings: [{
+        title: "信任证据需要更具体", severity: "warning", impact: "读者目前难以核验重要主张。",
+        evidence: [{ url: page.url, quote: "Example builds evidence-first website reports" }],
+        recommendation: "在重要主张旁补充具名来源。", confidence: "high"
+      }]
+    }] };
+    const client = mockClient([english, chinese]);
+
+    const result = await analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined });
+
+    expect(result.analyses[0]?.summary).toContain("该页面");
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    for (const call of vi.mocked(client.completeJson).mock.calls) {
+      expect(JSON.stringify(call[0])).toContain("Simplified Chinese");
+    }
+  });
+
+  it("fails page analysis after one language correction", async () => {
+    const invalid = { analyses: [{ url: page.url, summary: "The page clearly explains the product for modern teams.", organizationSignals: [], strengths: [], findings: [] }] };
+    const client = mockClient([invalid]);
+    await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined }))
+      .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("report validation and synthesis", () => {
@@ -346,4 +390,58 @@ describe("report validation and synthesis", () => {
     expect(result.report.findings[1]?.rewriteExample).toBeUndefined();
     expect(result.report.findings[1]?.evidence[0]?.pageElement).toBeUndefined();
   });
+
+  it("corrects Chinese report prose once and keeps English evidence quotes", async () => {
+    const invalid = reportModelOutput(1);
+    const valid = chineseReportModelOutput();
+    const client = mockClient([invalid, valid]);
+
+    const result = await synthesizeWebsiteReportWithRecovery(client, synthesisInput("zh-CN"), { maxAttempts: 3, delay: async () => undefined });
+
+    expect(result.report.executiveSummary.overview).toContain("网站");
+    expect(result.report.findings[0]?.evidence[0]?.quote).toBe("Example builds evidence-first website reports");
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    for (const call of vi.mocked(client.completeJson).mock.calls) {
+      expect(JSON.stringify(call[0])).toContain("Simplified Chinese");
+    }
+  });
+
+  it("fails website synthesis after one language correction", async () => {
+    const client = mockClient([reportModelOutput(1)]);
+    await expect(synthesizeWebsiteReportWithRecovery(client, synthesisInput("zh-CN"), { maxAttempts: 3, delay: async () => undefined }))
+      .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
 });
+
+function synthesisInput(locale: string) {
+  return {
+    targetUrl: page.url,
+    tier: "deep" as const,
+    locale,
+    organizationHints: ["Example"],
+    pages: [page],
+    pageAnalyses: [],
+    coverage: {
+      discoveredPages: 1, plannedPages: 1, analyzedPages: 1, failedPages: 0,
+      samplingMethod: locale.startsWith("zh") ? "选取代表性页面" : "Representative page",
+      pageTypesCovered: ["home" as const], limitations: []
+    }
+  };
+}
+
+function chineseReportModelOutput(): Record<string, unknown> {
+  const output = reportModelOutput(1);
+  const profile = output.organizationProfile as Record<string, unknown>;
+  profile.summary = "Example 为产品团队提供网站分析报告。";
+  profile.businessModel = "软件服务";
+  profile.productsAndServices = ["网站分析报告"];
+  profile.targetAudiences = ["产品团队"];
+  profile.identityConsistency = "抽样页面使用一致的组织名称。";
+  output.executiveSummary = { overview: "网站清楚介绍了产品。", strengths: ["产品说明清晰"], keyRisks: ["信任细节不足"], topPriorities: ["补充来源证据"] };
+  for (const item of output.dimensionScores as Array<Record<string, unknown>>) item.explanation = "结论来自已核验页面证据。";
+  output.pageTypeAnalyses = [{ pageType: "home", sampledUrls: [page.url], strengths: ["开头说明清晰"], commonIssues: ["细节较少"], recommendations: ["补充具体信息"], evidence: [{ url: page.url, quote: "Example builds evidence-first website reports" }] }];
+  output.findings = [{ id: "finding-0", title: "补充信任证据", severity: "warning", impact: "读者需要更多证据。", evidence: [{ url: page.url, quote: "Example builds evidence-first website reports" }], recommendation: "补充来源证据。", confidence: "high" }];
+  output.roadmap = { immediate: [{ title: "补充证据", rationale: "提高可信度", actions: ["添加来源"], relatedFindingIds: ["finding-0"] }], nextPhase: [], ongoing: [] };
+  return output;
+}

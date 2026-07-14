@@ -1,5 +1,10 @@
 import type { JsonCompletionClient } from "./client";
 import { validateEvidenceCitation } from "./evidence";
+import {
+  ReportLanguageValidationError,
+  assertReportLanguage,
+  reportLanguageInstruction
+} from "./report-language";
 import type {
   Confidence,
   ExtractedPage,
@@ -160,8 +165,12 @@ export async function analyzePageBatch(
     const pages = pendingPages.slice(start, start + batchSize);
     let parsed: PageAnalysis[] | undefined;
     let lastError: unknown;
+    let languageCorrectionUsed = false;
+    let languageFeedback: string[] = [];
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const isLanguageCorrectionCall = languageFeedback.length > 0;
       try {
+        const languageInstruction = reportLanguageInstruction(input.locale);
         const completion = await client.completeJson({
       signal: input.signal,
       temperature: 0.1,
@@ -170,12 +179,17 @@ export async function analyzePageBatch(
         {
           role: "system",
           content:
-            "You are an evidence-first GEO website analyst. Return JSON only. Analyze only supplied page text. Every formal finding must contain at least one verbatim quote copied from the supplied page and its exact URL. Do not make external ownership, market, traffic, ranking, or performance claims."
+            `You are an evidence-first GEO website analyst. Return JSON only. Analyze only supplied page text. Every formal finding must contain at least one verbatim quote copied from the supplied page and its exact URL. Do not make external ownership, market, traffic, ranking, or performance claims. ${languageInstruction}`
         },
         {
           role: "user",
           content: JSON.stringify({
             task: "Analyze each website page for organization clarity, information architecture, content citability, trust evidence, entity consistency and GEO understandability.",
+            rules: [
+              languageInstruction,
+              "Keep evidence quotes verbatim in their source language."
+            ],
+            ...(languageFeedback.length ? { correctionRequired: languageFeedback } : {}),
             locale: input.locale,
             outputShape: {
               analyses: [{
@@ -205,10 +219,17 @@ export async function analyzePageBatch(
         if (candidate.length !== pages.length) {
           throw new Error(`The model returned ${candidate.length} of ${pages.length} required page analyses.`);
         }
+        assertPageAnalysisLanguage(candidate, input.locale, allowedTermsFromPageTitles(pages));
         parsed = candidate;
         break;
       } catch (error) {
         lastError = error;
+        if (isLanguageCorrectionCall) throw error;
+        if (error instanceof ReportLanguageValidationError) {
+          if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
+          languageCorrectionUsed = true;
+          languageFeedback = languageViolationFeedback(error);
+        }
         if (attempt < maxAttempts) await retryDelay(Math.min(2_000, 250 * (2 ** (attempt - 1))));
       }
     }
@@ -223,6 +244,38 @@ export async function analyzePageBatch(
   }
 
   return { analyses, modelId };
+}
+
+function assertPageAnalysisLanguage(analyses: readonly PageAnalysis[], locale: string, allowedTerms: readonly string[]): void {
+  assertReportLanguage(analyses.flatMap((analysis, analysisIndex) => [
+    { path: `analyses[${analysisIndex}].summary`, text: analysis.summary },
+    ...analysis.organizationSignals.map((text, index) => ({ path: `analyses[${analysisIndex}].organizationSignals[${index}]`, text })),
+    ...analysis.strengths.map((text, index) => ({ path: `analyses[${analysisIndex}].strengths[${index}]`, text })),
+    ...analysis.findings.flatMap((finding, findingIndex) => [
+      { path: `analyses[${analysisIndex}].findings[${findingIndex}].title`, text: finding.title },
+      { path: `analyses[${analysisIndex}].findings[${findingIndex}].impact`, text: finding.impact },
+      { path: `analyses[${analysisIndex}].findings[${findingIndex}].recommendation`, text: finding.recommendation },
+      ...(finding.rewriteExample ? [{ path: `analyses[${analysisIndex}].findings[${findingIndex}].rewriteExample`, text: finding.rewriteExample }] : [])
+    ])
+  ]), locale, allowedTerms);
+}
+
+function allowedTermsFromPageTitles(pages: readonly ExtractedPage[]): string[] {
+  return uniqueBoundedTerms(pages.map(({ title }) => title));
+}
+
+function uniqueBoundedTerms(values: readonly (string | undefined)[]): string[] {
+  const terms = values.flatMap((value) => {
+    if (!value) return [];
+    const latin = value.match(/\b(?:[A-Z][A-Za-z0-9&.-]*)(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3}\b/g) ?? [];
+    const cjk = value.match(/[\u3400-\u9fff]{2,12}/gu) ?? [];
+    return [...latin, ...cjk].filter((term) => term.length <= 80);
+  });
+  return [...new Set(terms)];
+}
+
+function languageViolationFeedback(error: ReportLanguageValidationError): string[] {
+  return error.violations.map(({ path, reason }) => `${path}: ${reason}`);
 }
 
 export function createFallbackPageAnalysis(page: ExtractedPage): PageAnalysis {

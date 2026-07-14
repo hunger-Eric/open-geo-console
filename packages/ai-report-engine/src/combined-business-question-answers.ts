@@ -2,6 +2,11 @@ import type { PublicSourceEvidence } from "@open-geo-console/citation-intelligen
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { JsonCompletionClient } from "./client";
 import { sha256Hex } from "./evidence";
+import {
+  ReportLanguageValidationError,
+  assertReportLanguage,
+  reportLanguageInstruction
+} from "./report-language";
 import type { RecommendationForensicReportV2 } from "./recommendation-forensic-v2";
 
 export const COMBINED_BUSINESS_QUESTION_ANSWERS_VERSION = "combined-business-question-answers-v1" as const;
@@ -134,24 +139,29 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const delay = options.delay ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let lastError: unknown;
+  let languageCorrectionUsed = false;
+  let languageFeedback: string[] = [];
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     input.signal?.throwIfAborted();
+    const isLanguageCorrectionCall = languageFeedback.length > 0;
     try {
+      const languageInstruction = reportLanguageInstruction(input.forensic.locale);
       const completion = await client.completeJson({
         signal: input.signal,
         temperature: 0.1,
         maxTokens: 2_000,
         messages: [
-          { role: "system", content: "You write concise business answers grounded exclusively in supplied verified public-source excerpts. Return JSON only." },
+          { role: "system", content: `You write concise business answers grounded exclusively in supplied verified public-source excerpts. Return JSON only. ${languageInstruction}` },
           { role: "user", content: JSON.stringify({
             task: "Answer each business question directly in one short paragraph.",
             rules: [
+              languageInstruction,
               "Use only the supplied evidence for that exact question.",
               "Select at least two evidence records from at least two different domains.",
               "Do not explain the research method.",
-              "Do not include URLs, evidence IDs, grades, or unsupported claims in answer text.",
-              "Write in the supplied locale."
+              "Do not include URLs, evidence IDs, grades, or unsupported claims in answer text."
             ],
+            ...(languageFeedback.length ? { correctionRequired: languageFeedback } : {}),
             locale: input.forensic.locale,
             requiredShape: { answers: [{ questionId: "exact id", purpose: "exact purpose", answer: "one concise paragraph", sourceEvidenceIds: ["exact supplied ids"] }] },
             questions: compactInput
@@ -159,17 +169,59 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
         ]
       });
       const output = record(completion.value, "$model");
-      return parseCombinedBusinessQuestionAnswers({
+      const parsed = parseCombinedBusinessQuestionAnswers({
         version: COMBINED_BUSINESS_QUESTION_ANSWERS_VERSION,
         synthesis: { mode: "evidence_constrained_model", modelId: completion.modelId, inputHash },
         answers: output.answers
       }, input.questionSet, input.forensic);
+      assertAnswerLanguage(parsed.answers, input.forensic.locale, collectQuestionAnswerAllowedTerms(compactInput));
+      return parsed;
     } catch (error) {
       lastError = error;
+      if (isLanguageCorrectionCall) throw error;
+      if (error instanceof ReportLanguageValidationError) {
+        if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
+        languageCorrectionUsed = true;
+        languageFeedback = languageViolationFeedback(error);
+      }
       if (attempt < maxAttempts) await delayWithAbort(delay, Math.min(2_000, 250 * 2 ** (attempt - 1)), input.signal);
     }
   }
   throw lastError;
+}
+
+function assertAnswerLanguage(
+  answers: readonly CombinedBusinessQuestionAnswer[],
+  locale: string,
+  allowedTerms: readonly string[]
+): void {
+  assertReportLanguage(
+    answers.map((answer, index) => ({ path: `answers[${index}].answer`, text: answer.answer })),
+    locale,
+    allowedTerms
+  );
+}
+
+function collectQuestionAnswerAllowedTerms(input: ReturnType<typeof compactSynthesisInput>): string[] {
+  const genericSentenceWords = new Set(["A", "An", "How", "Question", "The", "Verified", "What", "When", "Where", "Which", "Who", "Why"]);
+  const sourceValues = input.flatMap(({ question, evidence }) => [question, ...evidence.map(({ excerpt }) => excerpt)]);
+  const candidates = new Map<string, Set<number>>();
+  sourceValues.forEach((value, sourceIndex) => {
+    const latin = value.match(/\b(?:[A-Z][A-Za-z0-9&.-]*)(?:\s+[A-Z][A-Za-z0-9&.-]*){1,3}\b/g) ?? [];
+    const shaped = value.match(/\b(?:[A-Z]{2,}|[A-Za-z0-9]*[a-z][A-Z][A-Za-z0-9]*)\b/g) ?? [];
+    const capitalized = (value.match(/\b[A-Z][a-z][A-Za-z0-9]*\b/g) ?? []).filter((term) => !genericSentenceWords.has(term));
+    const cjk = value.match(/[\u3400-\u9fff]{2,12}/gu) ?? [];
+    for (const term of [...latin, ...shaped, ...capitalized, ...cjk].filter((item) => item.length <= 80)) {
+      const sources = candidates.get(term) ?? new Set<number>();
+      sources.add(sourceIndex);
+      candidates.set(term, sources);
+    }
+  });
+  return [...candidates].filter(([, sources]) => sources.size >= 2).map(([term]) => term);
+}
+
+function languageViolationFeedback(error: ReportLanguageValidationError): string[] {
+  return error.violations.map(({ path, reason }) => `${path}: ${reason}`);
 }
 
 function compactSynthesisInput(questionSet: ConfirmedBusinessQuestionSet, forensic: RecommendationForensicReportV2) {
@@ -203,4 +255,3 @@ function array(value: unknown, path: string): unknown[] { if (!Array.isArray(val
 function text(value: unknown, path: string): string { if (typeof value !== "string" || !value.trim()) throw new TypeError(`${path} must be non-empty text.`); return value; }
 function stringArray(value: unknown, path: string): string[] { return array(value, path).map((item, index) => text(item, `${path}[${index}]`)); }
 function exact(value: unknown, expected: unknown, path: string): void { if (value !== expected) throw new TypeError(`${path} must equal ${String(expected)}.`); }
-

@@ -7,6 +7,7 @@ import {
   selectQuestionAnswerEvidence,
   synthesizeCombinedBusinessQuestionAnswers
 } from "./combined-business-question-answers";
+import { ReportLanguageValidationError } from "./report-language";
 
 describe("combined business question answers", () => {
   it("requires three ordered answers grounded in two independent sources per question", () => {
@@ -35,11 +36,78 @@ describe("combined business question answers", () => {
     expect(result.synthesis.inputHash).toMatch(/^[a-f0-9]{64}$/);
     expect(completeJson).toHaveBeenCalledOnce();
   });
+
+  it("corrects Chinese answer language once", async () => {
+    const { questionSet, forensic, value } = fixture("zh-CN");
+    const english = value.answers.map((item) => ({
+      ...item,
+      answer: "The customer should update all public materials from the verified evidence."
+    }));
+    const chinese = value.answers.map((item, index) => ({
+      ...item,
+      answer: `客户应依据已经核验的公开证据更新第 ${index + 1} 项业务材料并持续检查内容一致性。`
+    }));
+    const completeJson = vi.fn()
+      .mockResolvedValueOnce({ value: { answers: english }, modelId: "served", rawContent: "{}" })
+      .mockResolvedValueOnce({ value: { answers: chinese }, modelId: "served", rawContent: "{}" });
+
+    const result = await synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson },
+      { questionSet, forensic },
+      { maxAttempts: 3, delay: async () => undefined }
+    );
+
+    expect(result.answers[0].answer).toContain("客户应依据");
+    expect(completeJson).toHaveBeenCalledTimes(2);
+    for (const call of completeJson.mock.calls) {
+      expect(JSON.stringify(call[0])).toContain("Simplified Chinese");
+    }
+    const correction = JSON.parse(completeJson.mock.calls[1]![0].messages[1].content).correctionRequired;
+    expect(correction).toEqual(["answers[0].answer: unexpected_english_sentence", "answers[1].answer: unexpected_english_sentence", "answers[2].answer: unexpected_english_sentence"]);
+    expect(JSON.stringify(correction)).not.toContain("customer should update");
+  });
+
+  it("does not make a third model call after a repeated language violation", async () => {
+    const { questionSet, forensic, value } = fixture("zh-CN");
+    const invalid = value.answers.map((item) => ({
+      ...item,
+      answer: "The customer should update all public materials from the verified evidence."
+    }));
+    const completeJson = vi.fn(async () => ({ value: { answers: invalid }, modelId: "served", rawContent: "{}" }));
+
+    await expect(synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson },
+      { questionSet, forensic },
+      { maxAttempts: 3, delay: async () => undefined }
+    )).rejects.toThrow(ReportLanguageValidationError);
+    expect(completeJson).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows a bounded proper name repeated in the exact supplied evidence", async () => {
+    const { questionSet, forensic, value } = fixture("zh-CN");
+    forensic.sourceGraph.evidence = forensic.sourceGraph.evidence.map((item) => ({
+      ...item,
+      verifiedExcerpt: `Acme 已公开核验与 ${item.registrableDomain} 相关的业务材料。`
+    }));
+    const answers = value.answers.map((item, index) => ({
+      ...item,
+      answer: `Acme 应依据两项独立公开证据更新第 ${index + 1} 项业务材料并持续核验。`
+    }));
+    const completeJson = vi.fn(async () => ({ value: { answers }, modelId: "served", rawContent: "{}" }));
+
+    const result = await synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson },
+      { questionSet, forensic },
+      { maxAttempts: 1 }
+    );
+    expect(result.answers[0].answer).toContain("Acme");
+    expect(completeJson).toHaveBeenCalledOnce();
+  });
 });
 
-function fixture() {
+function fixture(locale = "en") {
   const purposes = ["core_service_discovery", "customer_region_fit", "purchase_delivery_risk"] as const;
-  const questionSet = { id: "question-set", revision: 1, locale: "en", region: "US", status: "locked", confidence: "high",
+  const questionSet = { id: "question-set", revision: 1, locale, region: "US", status: "locked", confidence: "high",
     confirmedAt: "2030-01-01T00:00:00.000Z", lockedAt: "2030-01-01T00:00:00.000Z", contentHash: "hash", neutralContentHash: "neutral",
     questions: purposes.map((purpose, index) => ({ id: `private-${index + 1}`, ordinal: index + 1, purpose, generatedText: `Question ${index + 1}`,
       privateText: `Which option answers business question ${index + 1}?`, neutralPublicText: `Neutral question ${index + 1}`, neutralContentHash: `neutral-${index + 1}` }))
@@ -47,7 +115,7 @@ function fixture() {
   const publicQuestions = purposes.map((_, index) => ({ id: `question-${index + 1}`, normalizedText: `Neutral question ${index + 1}` }));
   const evidence = publicQuestions.flatMap((question, index) => ["a", "b"].map((suffix) => source(question.id, `query-${index + 1}-${suffix}`, `source-${index + 1}-${suffix}.example`)));
   const forensic = {
-    locale: "en", questions: { questions: publicQuestions },
+    locale, questions: { questions: publicQuestions },
     fanouts: publicQuestions.map((question, index) => ({ questionId: question.id, queries: ["a", "b"].map((suffix) => ({ id: `query-${index + 1}-${suffix}` })) })),
     sourceGraph: { evidence }
   } as unknown as RecommendationForensicReportV2;
@@ -64,4 +132,3 @@ function source(questionId: string, queryId: string, domain: string): PublicSour
     entityIds: [], claimIds: [], evidenceFamilyId: `family-${queryId}`, retrievalReadiness: { version: "retrieval-readiness-v1", signals: [], ready: true },
     sourceEligibility: { version: "source-eligibility-v1", signals: [], eligible: true }, grade: "B" };
 }
-
