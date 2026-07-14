@@ -336,6 +336,19 @@ describe("batch analysis and evidence", () => {
     expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
 
+  it.each(["grow your customer base quickly", "Customer Growth Strategy"])(
+    "does not promote repeated ordinary title prose: %s",
+    async (title) => {
+      const second = { ...page, url: "https://example.com/about", pageType: "about" as const, title };
+      const pages = [{ ...page, title }, second];
+      const invalid = { analyses: pages.map((item) => ({ url: item.url, summary: title, organizationSignals: [], strengths: [], findings: [] })) };
+      const client = mockClient([invalid]);
+      await expect(analyzePageBatch(client, { pages, locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined }))
+        .rejects.toThrow(ReportLanguageValidationError);
+      expect(client.completeJson).toHaveBeenCalledTimes(2);
+    }
+  );
+
   it("allows only a bounded hostname label for a one-page site identity", async () => {
     const localized = { analyses: [{ url: page.url, summary: "example 提供清晰的网站分析服务。", organizationSignals: [], strengths: [], findings: [] }] };
     const client = mockClient([localized]);
@@ -458,16 +471,29 @@ describe("report validation and synthesis", () => {
     await expect(synthesizeWebsiteReport(mockClient([output]), input)).rejects.toThrow(ReportLanguageValidationError);
   });
 
-  it("allows an exact generated product name only when grounded in supplied page content", async () => {
+  it("allows an exact distinctive product name only when grounded in supplied page content", async () => {
     const output = chineseReportModelOutput();
     const profile = output.organizationProfile as Record<string, unknown>;
-    profile.productsAndServices = ["Product One"];
-    profile.summary = "Example 为客户提供 Product One 产品。";
+    profile.productsAndServices = ["Product 360"];
+    profile.summary = "Example 为客户提供 Product 360 产品。";
     const input = synthesisInput("zh-CN");
-    input.pages = [{ ...page, text: `${page.text} Product One is the official product name.` }];
+    input.pages = [{ ...page, text: `${page.text} Product 360 is the official product name.` }];
     await expect(synthesizeWebsiteReport(mockClient([output]), input))
-      .resolves.toMatchObject({ report: { organizationProfile: { productsAndServices: ["Product One"] } } });
+      .resolves.toMatchObject({ report: { organizationProfile: { productsAndServices: ["Product 360"] } } });
   });
+
+  it.each(["freight forwarding and customs clearance", "Customer Growth Strategy"])(
+    "rejects source-grounded generic product prose in Chinese: %s",
+    async (product) => {
+      const output = chineseReportModelOutput();
+      const profile = output.organizationProfile as Record<string, unknown>;
+      profile.productsAndServices = [product];
+      profile.summary = `Example 提供 ${product} 服务。`;
+      const input = synthesisInput("zh-CN");
+      input.pages = [{ ...page, text: `${page.text} ${product}` }];
+      await expect(synthesizeWebsiteReport(mockClient([output]), input)).rejects.toThrow(ReportLanguageValidationError);
+    }
+  );
 
   it("fails website synthesis after one language correction", async () => {
     const client = mockClient([reportModelOutput(1)]);

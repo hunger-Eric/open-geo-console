@@ -286,7 +286,9 @@ function collectPageAllowedTerms(pages: readonly ExtractedPage[]): string[] {
       titleSegments.set(segment, pagesWithSegment);
     }
   });
-  for (const [segment, pageIndexes] of titleSegments) if (pageIndexes.size >= 2) terms.add(segment);
+  for (const [segment, pageIndexes] of titleSegments) {
+    if (pageIndexes.size >= 2 && isDistinctiveProperName(segment)) terms.add(segment);
+  }
   return [...terms];
 }
 
@@ -296,6 +298,16 @@ const SITE_NAME_METADATA_KEYS = new Set(["sitename", "ogsitename", "applicationn
 function boundedName(value: string): string | null {
   const term = value.replace(/\s+/g, " ").trim();
   return term && term.length <= 80 && term.split(" ").length <= 6 && !/[.!?;]/.test(term) ? term : null;
+}
+
+function isDistinctiveProperName(value: string): boolean {
+  const term = value.trim();
+  if (/^[\u3400-\u9fff]{2,12}$/u.test(term)) return true;
+  return term.split(/\s+/).some((token) =>
+    /\d/.test(token) ||
+    /[a-z][A-Z]/.test(token) ||
+    /^[A-Z]{2,}$/.test(token) ||
+    /[-&+._]/.test(token));
 }
 
 function languageViolationFeedback(error: ReportLanguageValidationError): string[] {

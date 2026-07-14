@@ -215,11 +215,21 @@ function collectQuestionAnswerAllowedTerms(forensic: RecommendationForensicRepor
   const profileTerms = profile ? [
     profile.organizationName,
     ...profile.brandNames,
-    ...profile.productsAndServices,
+    ...profile.productsAndServices.filter(isDistinctiveProperName),
     profile.legalEntity
   ] : [];
   return [...new Set([...graphTerms, ...profileTerms]
     .filter((value): value is string => Boolean(value?.trim()) && value!.length <= 120))];
+}
+
+function isDistinctiveProperName(value: string): boolean {
+  const term = value.trim();
+  if (/^[\u3400-\u9fff]{2,12}$/u.test(term)) return true;
+  return term.split(/\s+/).some((token) =>
+    /\d/.test(token) ||
+    /[a-z][A-Z]/.test(token) ||
+    /^[A-Z]{2,}$/.test(token) ||
+    /[-&+._]/.test(token));
 }
 
 function languageViolationFeedback(error: ReportLanguageValidationError): string[] {

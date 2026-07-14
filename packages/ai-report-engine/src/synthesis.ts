@@ -258,12 +258,13 @@ function assertWebsiteReportLanguage(report: AiWebsiteReportV1, input: ReportSyn
 
 function collectSourceGroundedAllowedTerms(report: AiWebsiteReportV1, input: ReportSynthesisInput): string[] {
   const profile = report.organizationProfile;
-  const candidates = [
+  const authoritativeNames = [
     profile.organizationName,
     ...profile.brandNames,
-    ...profile.productsAndServices,
     profile.legalEntity
   ].filter((value): value is string => Boolean(value?.trim()) && value!.length <= 120);
+  const distinctiveProducts = profile.productsAndServices
+    .filter((value) => value.length <= 120 && isDistinctiveProperName(value));
   const exactHints = new Set((input.organizationHints ?? []).map((value) => value.trim()).filter(Boolean));
   const suppliedPageValues = input.pages.flatMap((page) => [
     page.title ?? "",
@@ -271,7 +272,18 @@ function collectSourceGroundedAllowedTerms(report: AiWebsiteReportV1, input: Rep
     page.text,
     ...Object.values(page.metadata ?? {}).flatMap((value) => Array.isArray(value) ? value : [value])
   ]);
-  return [...new Set(candidates.filter((term) => exactHints.has(term) || suppliedPageValues.some((value) => value.includes(term))))];
+  return [...new Set([...authoritativeNames, ...distinctiveProducts]
+    .filter((term) => exactHints.has(term) || suppliedPageValues.some((value) => value.includes(term))))];
+}
+
+function isDistinctiveProperName(value: string): boolean {
+  const term = value.trim();
+  if (/^[\u3400-\u9fff]{2,12}$/u.test(term)) return true;
+  return term.split(/\s+/).some((token) =>
+    /\d/.test(token) ||
+    /[a-z][A-Z]/.test(token) ||
+    /^[A-Z]{2,}$/.test(token) ||
+    /[-&+._]/.test(token));
 }
 
 function languageViolationFeedback(error: ReportLanguageValidationError): string[] {

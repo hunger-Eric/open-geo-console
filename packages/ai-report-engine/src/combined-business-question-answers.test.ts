@@ -89,11 +89,11 @@ describe("combined business question answers", () => {
     forensic.sourceGraph.entities = [{ canonicalName: "Acme", status: "resolved" }] as unknown as RecommendationForensicReportV2["sourceGraph"]["entities"];
     forensic.sourceGraph.claims = [{ subjectName: "Beta Labs", status: "supported" }] as unknown as RecommendationForensicReportV2["sourceGraph"]["claims"];
     forensic.websiteFoundationAppendix = { organizationProfile: {
-      organizationName: "Gamma Systems", brandNames: [], productsAndServices: ["Product One"], legalEntity: "Legal Co"
+      organizationName: "Gamma Systems", brandNames: [], productsAndServices: ["Product 360"], legalEntity: "Legal Co"
     } } as unknown as RecommendationForensicReportV2["websiteFoundationAppendix"];
     const answers = value.answers.map((item, index) => ({
       ...item,
-      answer: `Acme、Beta Labs、Gamma Systems、Product One 与 Legal Co 应更新第 ${index + 1} 项业务材料。`
+      answer: `Acme、Beta Labs、Gamma Systems、Product 360 与 Legal Co 应更新第 ${index + 1} 项业务材料。`
     }));
     const completeJson = vi.fn(async () => ({ value: { answers }, modelId: "served", rawContent: "{}" }));
 
@@ -103,7 +103,7 @@ describe("combined business question answers", () => {
       { maxAttempts: 1 }
     );
     expect(result.answers[0].answer).toContain("Acme");
-    expect(result.answers[0].answer).toContain("Product One");
+    expect(result.answers[0].answer).toContain("Product 360");
     expect(completeJson).toHaveBeenCalledOnce();
   });
 
@@ -114,6 +114,19 @@ describe("combined business question answers", () => {
       verifiedExcerpt: `Customer Growth Strategy appears in the supplied evidence from ${item.registrableDomain}.`
     }));
     const invalid = value.answers.map((item) => ({ ...item, answer: "客户应采用 Customer Growth Strategy 并继续核验公开材料。" }));
+    const completeJson = vi.fn(async () => ({ value: { answers: invalid }, modelId: "served", rawContent: "{}" }));
+    await expect(synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
+    )).rejects.toThrow(ReportLanguageValidationError);
+    expect(completeJson).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not treat a generic appendix product phrase as an allowed proper name", async () => {
+    const { questionSet, forensic, value } = fixture("zh-CN");
+    forensic.websiteFoundationAppendix = { organizationProfile: {
+      organizationName: null, brandNames: [], productsAndServices: ["Customer Growth Strategy"], legalEntity: null
+    } } as unknown as RecommendationForensicReportV2["websiteFoundationAppendix"];
+    const invalid = value.answers.map((item) => ({ ...item, answer: "客户应采用 Customer Growth Strategy 并持续核验公开材料。" }));
     const completeJson = vi.fn(async () => ({ value: { answers: invalid }, modelId: "served", rawContent: "{}" }));
     await expect(synthesizeCombinedBusinessQuestionAnswers(
       { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
