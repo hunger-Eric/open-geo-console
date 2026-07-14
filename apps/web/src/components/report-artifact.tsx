@@ -22,8 +22,7 @@ const copy = {
     sources: "Source list",
     coverage: "Coverage",
     generated: "Generated",
-    html: "HTML report",
-    pdf: "PDF report"
+    html: "HTML report"
   },
   zh: {
     label: "私密深度报告",
@@ -43,8 +42,7 @@ const copy = {
     sources: "来源列表",
     coverage: "覆盖范围",
     generated: "生成时间",
-    html: "HTML 报告",
-    pdf: "PDF 报告"
+    html: "HTML 报告"
   }
 } as const;
 
@@ -60,7 +58,6 @@ export function ReportArtifact({ model }: { model: LegacyPrivateReportArtifactMo
     <main>
       <nav className="artifact-actions no-print" aria-label="Report formats">
         <a href={`/reports/${model.reportId}/legacy-report.html`}>{t.html}</a>
-        <a className="primary" href={`/api/reports/${model.reportId}/artifacts/legacy-report.pdf`}>{t.pdf}</a>
       </nav>
 
       <header className="cover artifact-section">

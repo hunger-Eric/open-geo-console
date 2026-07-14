@@ -11,7 +11,7 @@ export function CombinedGeoReportArtifact({ model }: { model: CombinedPrivateRep
   const label = (kind: ArtifactLabelKind, value: string) => artifactValueLabel(kind, value, zh);
   const answers = report.businessQuestionAnswers?.answers ?? [];
   return <main className="recommendation-artifact combined-geo-artifact" data-artifact-revision={model.artifactRevisionId}>
-    <nav className="artifact-actions no-print" aria-label="Report formats"><a href={`/reports/${model.reportId}/report.html`}>HTML</a><a className="primary" href={`/api/reports/${model.reportId}/artifacts/report.pdf`}>PDF</a></nav>
+    <nav className="artifact-actions no-print" aria-label="Report formats"><a href={`/reports/${model.reportId}/report.html`}>HTML</a></nav>
     <header className="cover artifact-section">
       <p className="eyebrow">OPEN GEO CONSOLE · {zh ? "GEO 综合报告" : "Combined GEO report"}</p>
       <h1>{ai.organizationProfile.organizationName ?? report.targetUrl}</h1>

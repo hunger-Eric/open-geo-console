@@ -92,4 +92,21 @@ describe("ResendEmailGateway", () => {
     expect(rendered.html).not.toContain("<script>");
     expect(rendered.html).not.toContain("<b>bad</b>");
   });
+
+  it.each([
+    ["report_ready", "en"], ["report_ready", "zh"],
+    ["corrected_report_ready", "en"], ["corrected_report_ready", "zh"]
+  ] as const)(
+    "delivers %s in %s with only the secure HTML report link",
+    (template, locale) => {
+      const reportUrl = "https://example.com/reports/report-1/report.html?access=secure";
+      const rendered = renderTransactionalEmail({
+        template, locale, orderReference: "OGC-HTML", siteLabel: "example.com", reportUrl
+      });
+      expect(rendered.html).toContain(reportUrl.replaceAll("&", "&amp;"));
+      expect(rendered.text).toContain(reportUrl);
+      expect(rendered.html).not.toMatch(/PDF|\.pdf/i);
+      expect(rendered.text).not.toMatch(/PDF|\.pdf/i);
+    }
+  );
 });

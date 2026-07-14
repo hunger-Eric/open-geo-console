@@ -58,7 +58,7 @@ export default async function ReportPage({
   return (
     <ReportView
       aiReport={visible.aiReport}
-      canPrint={visible.canPrint}
+      htmlEnabled={visible.canPrint}
       dictionary={getDictionary(locale)}
       evidence={evidence?.summary ?? null}
       locale={locale}

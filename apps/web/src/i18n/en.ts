@@ -17,7 +17,6 @@ export const en = {
     loadSample: "Load sample",
     copyLink: "Copy link",
     copiedLink: "Copied",
-    printReport: "Print / PDF",
     switchToEnglish: "English",
     switchToChinese: "中文",
     backToScanner: "Back to scanner",
@@ -71,7 +70,7 @@ export const en = {
     auditedPages: "Audited pages",
     technicalAppendix: "Technical appendix",
     noFindings: "No findings. This site is in good shape.",
-    shareDescription: "Share this report URL or print it as a client-ready PDF.",
+    shareDescription: "Share this report using its secure HTML link.",
     logNextTitle: "Add AI crawler evidence",
     logNextDescription:
       "Upload or paste access logs to see whether known AI crawlers have visited this site.",
@@ -186,7 +185,6 @@ export const en = {
     previousPage: "Previous",
     nextPage: "Next",
     pageStatus: "Page {page} of {total}",
-    printTitle: "Complete GEO report",
     backToReport: "Back to report",
     errors: {
       emptyLogs: "Paste or import access logs before analyzing.",
@@ -205,8 +203,6 @@ export const en = {
     homepagePreviewNotice: "This free preview analyzed the homepage only.",
     detectedPagesEstimate: "Approximately {count} site URLs were detected without fetching or analyzing their content.",
     lockedDeepFeatures: "Unlock the deep report for complete site findings, page evidence, dimension explanations, rewrites, and the 90-day roadmap.",
-    printLockedTitle: "Print and PDF are included with the deep report",
-    printLockedDescription: "The free preview covers the homepage only. Unlock the private deep report to export the complete evidence and action plan.",
     technicalScore: "Technical score",
     aiDimensions: "AI dimension scores",
     organizationProfile: "Organization profile",

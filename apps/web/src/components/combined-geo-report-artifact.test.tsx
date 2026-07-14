@@ -24,6 +24,8 @@ describe("CombinedGeoReportArtifact", () => {
     expect(html).toContain("https://example.com/technical-proof");
     expect(html).toContain("Technical proof quote");
     expect(html).toContain("/api/reports/report/evidence/asset-1");
+    expect(html).toContain("/reports/report/report.html");
+    expect(html).not.toMatch(/\.pdf\b|>PDF</i);
   });
 
   it("localizes application-owned values and labels source-original evidence", () => {

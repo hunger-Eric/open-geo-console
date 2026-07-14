@@ -10,7 +10,7 @@ import { getVisibleReportBundle } from "@/server/visible-ai-report";
 import { cookies } from "next/headers";
 import { reportAccessCookieName, tokenGrantsReportAccess } from "@/server/report-access";
 
-const sections = ["analysis", "issues", "bots", "technical", "print"] as const;
+const sections = ["analysis", "issues", "bots", "technical"] as const;
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +68,7 @@ export default async function ReportWorkspaceSectionPage({
   return (
     <ReportView
       aiReport={visible.aiReport}
-      canPrint={visible.canPrint}
+      htmlEnabled={visible.canPrint}
       dictionary={dictionary}
       evidence={evidence?.summary ?? null}
       locale={locale}
