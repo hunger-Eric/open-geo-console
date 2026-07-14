@@ -170,10 +170,29 @@ export async function analyzePageBatch(
     let lastError: unknown;
     let languageCorrectionUsed = false;
     let languageFeedback: string[] = [];
+    let languageCorrectionDraft: unknown;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const isLanguageCorrectionCall = languageFeedback.length > 0;
       try {
         const languageInstruction = reportLanguageInstruction(input.locale);
+        const outputShape = {
+          analyses: [{
+            url: "exact supplied URL",
+            pageType: "supplied page type",
+            summary: "evidence-grounded summary",
+            organizationSignals: ["signal"],
+            strengths: ["strength"],
+            findings: [{
+              title: "finding",
+              severity: "critical|warning|opportunity",
+              impact: "impact",
+              evidence: [{ url: "exact supplied URL", quote: "verbatim supplied text", pageElement: "optional" }],
+              recommendation: "specific action",
+              rewriteExample: "optional example",
+              confidence: "low|medium|high"
+            }]
+          }]
+        };
         const completion = await client.completeJson({
       signal: input.signal,
       temperature: 0.1,
@@ -181,37 +200,31 @@ export async function analyzePageBatch(
       messages: [
         {
           role: "system",
-          content:
-            `You are an evidence-first GEO website analyst. Return JSON only. Analyze only supplied page text. Every formal finding must contain at least one verbatim quote copied from the supplied page and its exact URL. Do not make external ownership, market, traffic, ranking, or performance claims. ${languageInstruction}`
+          content: isLanguageCorrectionCall
+            ? `You are a strict GEO report-language editor. Return JSON only. Rewrite only the flagged report-prose fields. Preserve URLs, page types, severities, confidence values, and every evidence object exactly. ${languageInstruction}`
+            : `You are an evidence-first GEO website analyst. Return JSON only. Analyze only supplied page text. Every formal finding must contain at least one verbatim quote copied from the supplied page and its exact URL. Do not make external ownership, market, traffic, ranking, or performance claims. ${languageInstruction}`
         },
         {
           role: "user",
-          content: JSON.stringify({
+          content: JSON.stringify(isLanguageCorrectionCall ? {
+            task: "Correct the supplied draft without re-analyzing the source pages.",
+            rules: [
+              languageInstruction,
+              "Rewrite every flagged prose field in the required language.",
+              "Preserve all evidence quotes, evidence URLs, page URLs, page types, severities, and confidence values exactly."
+            ],
+            correctionRequired: languageFeedback,
+            locale: input.locale,
+            outputShape,
+            draft: languageCorrectionDraft
+          } : {
             task: "Analyze each website page for organization clarity, information architecture, content citability, trust evidence, entity consistency and GEO understandability.",
             rules: [
               languageInstruction,
               "Keep evidence quotes verbatim in their source language."
             ],
-            ...(languageFeedback.length ? { correctionRequired: languageFeedback } : {}),
             locale: input.locale,
-            outputShape: {
-              analyses: [{
-                url: "exact supplied URL",
-                pageType: "supplied page type",
-                summary: "evidence-grounded summary",
-                organizationSignals: ["signal"],
-                strengths: ["strength"],
-                findings: [{
-                  title: "finding",
-                  severity: "critical|warning|opportunity",
-                  impact: "impact",
-                  evidence: [{ url: "exact supplied URL", quote: "verbatim supplied text", pageElement: "optional" }],
-                  recommendation: "specific action",
-                  rewriteExample: "optional example",
-                  confidence: "low|medium|high"
-                }]
-              }]
-            },
+            outputShape,
             pages: pages.map((page) => pageForPrompt(page, maxCharacters))
           })
         }
@@ -222,6 +235,7 @@ export async function analyzePageBatch(
         if (candidate.length !== pages.length) {
           throw new Error(`The model returned ${candidate.length} of ${pages.length} required page analyses.`);
         }
+        languageCorrectionDraft = completion.value;
         assertPageAnalysisLanguage(candidate, input.locale, collectPageAllowedTerms(pages));
         parsed = candidate;
         break;

@@ -318,6 +318,9 @@ describe("batch analysis and evidence", () => {
     }
     expect(JSON.stringify(vi.mocked(client.completeJson).mock.calls[1]?.[0]))
       .toContain("keep verbatim source text only inside evidence quote fields");
+    const correctionPayload = JSON.parse(vi.mocked(client.completeJson).mock.calls[1]![0].messages[1]!.content);
+    expect(correctionPayload.pages).toBeUndefined();
+    expect(correctionPayload.draft).toEqual(english);
   });
 
   it("corrects legacy SEO terminology in page analysis using the existing single correction", async () => {
