@@ -63,7 +63,7 @@ import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline
 import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-runtime";
 import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { JobExecutionLease, configuredJobHardDeadlineMs } from "./job-execution";
-import { normalizeJobError } from "./job-errors";
+import { normalizeJobError, PublicSourceRuntimeError } from "./job-errors";
 import { assertStagingCommandEnvironment } from "@/security/deployment-policy";
 import { createPublicSourceAttemptBudget } from "./public-source-execution-budget";
 import { phaseForStage, recoveryEnvelope } from "./job-state";
@@ -71,6 +71,7 @@ import type { StagingLiveDrill } from "./staging-live-drill";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
 import { createProductionProviderDiscoveryContext } from "./provider-discovery-production";
 import { runProviderDiscoveryPipeline, type ProviderDiscoveryCheckpointV1 } from "./provider-discovery-pipeline";
+import { resolveAnswerFirstV3, type AnswerFirstV3Checkpoint, type AnswerFirstV3StoredSource } from "./answer-first-v3";
 import {
   calculateEffectiveCoverage,
   determineResumeStage,
@@ -103,6 +104,7 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
     commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
   };
   providerDiscovery?: ProviderDiscoveryCheckpointV1;
+  answerFirstV3?: AnswerFirstV3Checkpoint;
   combinedQuestionAnswers?: CombinedBusinessQuestionAnswers;
   discoverySnapshot?: DiscoverySnapshot;
   pageAnalysisContentHashes?: Record<string, string>;
@@ -826,6 +828,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
   const providerContext = createProductionProviderDiscoveryContext({
     runtime,
     questionSet: businessQuestionSet,
+    artifactContract: input.job.artifactContract === "combined_geo_report_v3" ? "combined_geo_report_v3" : "combined_geo_report_v2",
     websiteCategories: [input.websiteFoundation.organizationProfile.businessModel ?? "", ...input.websiteFoundation.organizationProfile.productsAndServices].filter(Boolean),
     websiteFoundationHash: createHash("sha256").update(JSON.stringify(input.websiteFoundation)).digest("hex"),
     workerId: `provider-discovery:${input.job.id}:${input.workerId}`,
@@ -872,7 +875,35 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     fanoutOverrides: new Map([[providerContext.discoveryFanout.questionId, providerContext.discoveryFanout]]),
     signal: input.signal
   });
-  if (forensicResult.report.commercialOutcome !== "completed") throw new Error("V2 combined activation requires complete claim-bound public-source coverage.");
+  if (input.job.artifactContract === "combined_geo_report_v2" && forensicResult.report.commercialOutcome !== "completed") throw new Error("V2 combined activation requires complete claim-bound public-source coverage.");
+  if (input.job.artifactContract === "combined_geo_report_v3") {
+    const verificationSnapshotId = providerResult.checkpoint.verificationSnapshotId;
+    if (!verificationSnapshotId) throw new Error("V3 provider verification snapshot is unavailable before answer synthesis.");
+    const storedSources = await loadAnswerFirstV3StoredSources([
+      verificationSnapshotId,
+      ...forensicResult.report.snapshotRefs.map(({ snapshotId }) => snapshotId)
+    ]);
+    await resolveAnswerFirstV3({
+      questionSet: businessQuestionSet,
+      providerDiscovery: providerResult.providerDiscovery,
+      forensicReport: forensicResult.report,
+      storedSources,
+      targetUrl: input.targetUrl,
+      targetAliases: businessQuestionSet.identityExclusions,
+      client,
+      searchSurface: `${forensicResult.report.authority.authorityId}:${forensicResult.report.authority.surface.surfaceId}:${forensicResult.report.authority.surface.surfaceVersion}`,
+      queryPlanVersion: providerContext.identity.queryPlanVersion,
+      passageSelectorVersion: providerContext.identity.passageSelectorVersion,
+      checkpoint: checkpoint.answerFirstV3,
+      signal: input.signal,
+      saveCheckpoint: async (answerFirstV3) => {
+        const next = { ...checkpoint, answerFirstV3 };
+        const updated = await input.checkpointJob({ stage: "synthesizing", phase: "grounded_answer_synthesis", progress: 98, checkpoint: next as JobCheckpoint, ...input.coverage });
+        checkpoint = normalizeCheckpoint(updated.checkpoint);
+      }
+    });
+    throw new PublicSourceRuntimeError("combined_v3_artifact_readiness_pending", "V3 answer checkpoint is ready but matching artifact readiness is not yet configured.");
+  }
   const groundedAnswerEvidence = groundedEvidenceFromForensic(forensicResult.report);
   const questionIds = forensicResult.report.questions.questions.slice(1).map(({ id }) => id) as [string, string];
   const groundedAnswers = await synthesizeGroundedBusinessAnswersV2(client, {
@@ -945,6 +976,37 @@ async function providerVerificationCommercialRef(snapshotId: string): Promise<Pu
 
 function uniqueSnapshotRefs(values: PublicSourceCommercialSnapshotRef[]): PublicSourceCommercialSnapshotRef[] {
   return [...new Map(values.map((value) => [value.snapshotId, value])).values()];
+}
+
+async function loadAnswerFirstV3StoredSources(snapshotIds: readonly string[]): Promise<AnswerFirstV3StoredSource[]> {
+  const output: AnswerFirstV3StoredSource[] = [];
+  for (const snapshotId of [...new Set(snapshotIds)]) {
+    const bundle = await getMarketSnapshotBundle(snapshotId);
+    if (!bundle) throw new Error("V3 answer evidence snapshot is unavailable.");
+    const observations = new Map(bundle.observations.map((observation) => [observation.id, observation]));
+    for (const source of bundle.sources) {
+      const observation = observations.get(source.observationId);
+      if (!observation || source.retrievalState !== "available" || !source.excerpt) continue;
+      if (!isAnswerFirstSourceCategory(source.sourceCategory)) continue;
+      output.push({
+        sourceEvidenceId: source.id,
+        observationId: source.observationId,
+        queryId: observation.queryId,
+        canonicalUrl: source.canonicalUrl,
+        title: observation.title,
+        registrableDomain: source.registrableDomain,
+        exactExcerpt: source.excerpt,
+        sourceCategory: source.sourceCategory,
+        observedAt: observation.observedAt.toISOString(),
+        retrievalReady: true
+      });
+    }
+  }
+  return output;
+}
+
+function isAnswerFirstSourceCategory(value: string): value is AnswerFirstV3StoredSource["sourceCategory"] {
+  return ["company_owned", "earned_editorial", "directory_or_reference", "community_or_ugc", "institution", "social", "unknown"].includes(value);
 }
 
 function providerPhaseProgress(phase: ProviderDiscoveryCheckpointV1["phase"]): number {

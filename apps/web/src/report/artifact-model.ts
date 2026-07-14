@@ -64,6 +64,7 @@ export async function loadPrivateReportArtifact(
   reportId: string,
   productContract: ReportArtifactScope = "legacy_website_audit_v1"
 ): Promise<PrivateReportArtifactModel | null> {
+  if (productContract === "combined_geo_report_v3") return null;
   if (productContract === "combined_geo_report_v1" || productContract === "combined_geo_report_v2") {
     const active = await getActiveCombinedGeoReport(reportId);
     if (!active) return null;

@@ -49,6 +49,7 @@ export interface ProductionProviderDiscoveryRuntime {
 export interface ProductionProviderDiscoveryInput {
   runtime: ProductionProviderDiscoveryRuntime;
   questionSet: ConfirmedBusinessQuestionSet;
+  artifactContract: "combined_geo_report_v2" | "combined_geo_report_v3";
   websiteCategories: string[];
   websiteFoundationHash: string;
   workerId: string;
@@ -79,7 +80,7 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
   const discoveryFanout = toFanout(discoveryPlan, canonical.questionSetVersion);
   const identity: ProviderDiscoveryIdentity = {
     methodology: "public_search_source_forensics_v1",
-    artifactContract: "combined_geo_report_v2",
+    artifactContract: input.artifactContract,
     policyId: policy.policyId,
     policyVersion: policy.version,
     queryPlanVersion: PROVIDER_QUERY_PLAN_VERSION,

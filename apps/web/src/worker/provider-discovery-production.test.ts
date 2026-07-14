@@ -35,10 +35,11 @@ describe("production provider discovery composition", () => {
       observations: [{ id: "observation-alpha", title: "Alpha Logistics" }], sources: [{ id: "source-alpha", observationId: "observation-alpha", canonicalUrl: "https://alpha.example/logistics", registrableDomain: "alpha.example", sourceCategory: "company_owned", retrievalState: "available", retrievedAt: new Date("2030-01-01T00:00:00.000Z") }] });
     mocks.appendClaims.mockResolvedValue([]);
     const runtime = { adapter: { id: "fixture", surface, authority, search: vi.fn() }, authority, identity: { adapterId: "fixture", providerId: "fixture", productId: "search", modelId: "fixture", adapterVersion: "v1", surface } };
-    const context = createProductionProviderDiscoveryContext({ runtime, questionSet: questions(), websiteCategories: ["logistics"], websiteFoundationHash: "f".repeat(64), workerId: "worker", evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
+    const context = createProductionProviderDiscoveryContext({ runtime, questionSet: questions(), artifactContract: "combined_geo_report_v3", websiteCategories: ["logistics"], websiteFoundationHash: "f".repeat(64), workerId: "worker", evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
       extractionModel: "fixture-model", extractionClient: { configuredModel: "fixture-model", completeJson: vi.fn(async () => ({ modelId: "fixture-model", value: { claims: [{ subjectName: "Alpha Logistics", genericRole: "service_provider", policyRole: "carrier", capability: "linehaul_fleet", operatingMode: "self_operated", serviceScope: ["freight"], routeScope: [], exactExcerpt: passage.exactExcerpt }] } })) },
       getCheckpoint: async () => checkpoint, saveCheckpoint: async (value) => { checkpoint = structuredClone(value) as never; } });
     const result = await runProviderDiscoveryPipeline({ identity: context.identity, dependencies: context.dependencies, hardDeadlineAt: "2030-01-01T01:00:00.000Z" });
+    expect(context.identity.artifactContract).toBe("combined_geo_report_v3");
     expect(context.snapshotIds()).toEqual({ discovery: "snapshot-discovery", verification: "snapshot-verification", standard: ["snapshot-q2", "snapshot-q3"] });
     expect(result.providerDiscovery.strict).toEqual([]);
     expect(result.providerDiscovery.candidates).toEqual([expect.objectContaining({ canonicalName: "Alpha Logistics" })]);

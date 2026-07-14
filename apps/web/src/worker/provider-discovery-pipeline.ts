@@ -11,7 +11,7 @@ export type ProviderPipelinePhase = Extract<ScanJobPhase,
 
 export interface ProviderDiscoveryIdentity {
   methodology: "public_search_source_forensics_v1";
-  artifactContract: "combined_geo_report_v2";
+  artifactContract: "combined_geo_report_v2" | "combined_geo_report_v3";
   policyId: string;
   policyVersion: string;
   queryPlanVersion: string;
@@ -139,7 +139,7 @@ async function save(deps: ProviderDiscoveryPipelineDependencies, current: Provid
 function checkpointFor(identity: ProviderDiscoveryIdentity, identityHash: string): ProviderDiscoveryCheckpointV1 { return { version: PROVIDER_DISCOVERY_CHECKPOINT_VERSION, identityHash, ...identity, phase: "provider_discovery_search", discoverySnapshotId: null, verificationSnapshotId: null, standardQuestionSnapshotIds: [], candidateSetHash: null, claimSetHash: null, artifacts: {} }; }
 function validateCheckpointIdentity(checkpoint: ProviderDiscoveryCheckpointV1, identity: ProviderDiscoveryIdentity, identityHash: string): void { if (checkpoint.version !== PROVIDER_DISCOVERY_CHECKPOINT_VERSION || checkpoint.identityHash !== identityHash || identityKeys.some((key) => checkpoint[key] !== identity[key])) throw new ProviderDiscoveryResumeIdentityMismatchError("Provider discovery checkpoint identity does not match this run."); }
 const identityKeys: (keyof ProviderDiscoveryIdentity)[] = ["methodology","artifactContract","policyId","policyVersion","queryPlanVersion","passageSelectorVersion","claimExtractionContract","claimExtractionModel","evidenceCutoffAt","adapterIdentityHash","websiteFoundationHash","questionSetIdentity"];
-function parseIdentity(value: ProviderDiscoveryIdentity): ProviderDiscoveryIdentity { const output={...value}; for(const key of identityKeys) if(typeof output[key]!=="string"||!output[key].trim()) throw new ProviderDiscoveryPipelineContractError(`Provider discovery identity ${key} is required.`); timestamp(output.evidenceCutoffAt,"evidenceCutoffAt"); return output; }
+function parseIdentity(value: ProviderDiscoveryIdentity): ProviderDiscoveryIdentity { const output={...value}; for(const key of identityKeys) if(typeof output[key]!=="string"||!output[key].trim()) throw new ProviderDiscoveryPipelineContractError(`Provider discovery identity ${key} is required.`); if(!["combined_geo_report_v2","combined_geo_report_v3"].includes(output.artifactContract))throw new ProviderDiscoveryPipelineContractError("Provider discovery artifact contract is unsupported."); timestamp(output.evidenceCutoffAt,"evidenceCutoffAt"); return output; }
 function validateDiscovery(value: ProviderDiscoveryStage): void { if(!value.snapshotId.trim()||value.candidates.length>12||value.plannedQueries<0||value.completedQueries<0||value.completedQueries>value.plannedQueries) throw new ProviderDiscoveryPipelineContractError("Provider discovery stage is invalid."); }
 function validatePassages(values: ProviderEvidencePassage[]): void { const counts=new Map<string,number>(); for(const value of values) counts.set(value.sourceEvidenceId,(counts.get(value.sourceEvidenceId)??0)+1); if([...counts.values()].some((count)=>count>3)) throw new ProviderDiscoveryPipelineContractError("A source cannot retain more than three passages."); }
 function hashCandidates(values: readonly ProviderCandidateQueryIdentity[]): string { return sha([...values].sort((a,b)=>a.rank-b.rank||a.entityId.localeCompare(b.entityId)).map(({entityId,canonicalName,rank})=>({entityId,canonicalName,rank}))); }
