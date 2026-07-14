@@ -111,12 +111,16 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
       id: snapshotQueryId(currentSnapshotId, query.id), queryOrder, queryText: query.exactQuery, queryHash: sha(query.exactQuery), derivationRule: query.derivationRuleId
     }));
     let observations: MarketSearchObservation[];
-    let successful: Array<{ observation: MarketSearchObservation; attemptId: string }>;
+    let successful: Array<{ observation: MarketSearchObservation; attemptId: string; storedQueryId: string }>;
     if (resumed) {
       const bundle = await getMarketSnapshotBundle(currentSnapshotId);
       if (!bundle || !isResumableSearchLedger(bundle, queries)) throw new PublicSourceSnapshotUnavailableError();
-      observations = toObservations(bundle, input.authority.surface);
-      successful = observations.map((observation) => ({ observation, attemptId: observation.observationId }));
+      observations = toObservations(bundle, input.authority.surface, input.fanout);
+      successful = observations.filter(({ status }) => status === "complete" || status === "partial").map((observation) => {
+        const attempt = bundle.attempts.find(({ id }) => id === observation.observationId);
+        if (!attempt) throw new PublicSourceSnapshotUnavailableError();
+        return { observation, attemptId: attempt.id, storedQueryId: attempt.queryId };
+      });
     } else {
       await appendMarketSnapshotQueries({ snapshotId: currentSnapshotId, token: claim.token, queries });
       const queryResults = await mapWithConcurrency(input.fanout.queries, 2, async (query, queryOrder) => {
@@ -130,28 +134,28 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
         // Provider observation identifiers are not guaranteed to be unique
         // across fanout queries. The persisted attempt is the authoritative,
         // snapshot-scoped observation identity used by retrieval provenance.
-        const observation = { ...observed, observationId: attempt.id, queryId: storedQuery.id };
+        const observation = { ...observed, observationId: attempt.id, queryId: query.id };
         const requestStatus = attemptStatus(observation.status);
         const providerCostMicros = observation.usage.providerReportedCostMicros ?? observation.usage.estimatedCostMicros ?? null;
         await completeMarketSearchAttempt({
           attemptId: attempt.id, token: claim.token, requestStatus, usage: observation.usage, providerCostMicros,
           costUncertain: observation.usage.costUncertain ?? providerCostMicros === null, sanitizedError: observation.sanitizedError ?? null
         });
-        return { observation, attemptId: attempt.id, successful: requestStatus === "succeeded" || requestStatus === "partial" };
+        return { observation, attemptId: attempt.id, storedQueryId: storedQuery.id, successful: requestStatus === "succeeded" || requestStatus === "partial" };
       }, input.signal);
       observations = queryResults.map(({ observation }) => observation);
-      successful = queryResults.filter(({ successful: value }) => value).map(({ observation, attemptId }) => ({ observation, attemptId }));
+      successful = queryResults.filter(({ successful: value }) => value).map(({ observation, attemptId, storedQueryId }) => ({ observation, attemptId, storedQueryId }));
     }
     if (successful.length === 0) throw new PublicSourceSnapshotUnavailableError();
 
     if (!resumed) {
-      const rows = successful.flatMap(({ observation, attemptId }) => observationRows(currentSnapshotId, attemptId, observation));
+      const rows = successful.flatMap(({ observation, attemptId, storedQueryId }) => observationRows(currentSnapshotId, attemptId, storedQueryId, observation));
       if (rows.length) await appendMarketSearchObservations({ token: claim.token, observations: rows });
     }
     await appendRetrievals({ input, snapshotId: currentSnapshotId, token: claim.token, observations: successful, evidenceCutoff });
     const persistedBundle = await getMarketSnapshotBundle(currentSnapshotId);
     if (!persistedBundle) throw new PublicSourceSnapshotUnavailableError();
-    const retrievals = factsFromBundle(persistedBundle);
+    const retrievals = factsFromBundle(persistedBundle, input.fanout);
     const completed = await completeMarketSnapshotLease({ snapshotId: currentSnapshotId, token: claim.token, queryFanoutHash: fanoutHash(input.fanout), completedAt: new Date() });
     return materialize({
       snapshot: completed,
@@ -174,14 +178,8 @@ async function resolveExisting(input: ResolvePublicSourceSnapshotInput & { ident
   if (!bundle || bundle.snapshot.status !== "completed" || bundle.snapshot.surfaceAuthorityVersion !== input.authority.authorityId) {
     throw new PublicSourceSnapshotAuthorityMismatchError();
   }
-  const observations = toObservations(bundle, input.authority.surface);
-  const retrievals = bundle.sources.flatMap((source) => {
-    if (source.retrievalState !== "available" || !source.excerpt || !source.contentHash) return [];
-    const storedObservation = bundle.observations.find((observation) => observation.id === source.observationId);
-    const attempt = storedObservation && bundle.attempts.find((candidate) => candidate.id === storedObservation.attemptId);
-    if (!storedObservation || !attempt) return [];
-    return [{ observationId: attempt.id, queryId: storedObservation.queryId, resultUrl: source.canonicalUrl, finalUrl: source.canonicalUrl, retrievalState: "available" as const, publiclyRoutable: true, robotsAllowed: true, accessBarrier: "none" as const, normalizedText: source.excerpt, normalizedContentHash: source.contentHash, verifiedExcerpt: source.excerpt }];
-  });
+  const observations = toObservations(bundle, input.authority.surface, input.fanout);
+  const retrievals = factsFromBundle(bundle, input.fanout);
   const cost = knownCost(bundle.attempts);
   return {
     snapshotId: bundle.snapshot.id, cacheIdentity: bundle.snapshot.cacheIdentity, questionId: input.question.id,
@@ -191,19 +189,25 @@ async function resolveExisting(input: ResolvePublicSourceSnapshotInput & { ident
   };
 }
 
-async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput; snapshotId: string; token: Parameters<typeof appendMarketSourceEvidence>[0]["token"]; observations: Array<{ observation: MarketSearchObservation; attemptId: string }>; evidenceCutoff: Date }): Promise<RetrievedPublicSourceFact[]> {
+async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput; snapshotId: string; token: Parameters<typeof appendMarketSourceEvidence>[0]["token"]; observations: Array<{ observation: MarketSearchObservation; attemptId: string; storedQueryId: string }>; evidenceCutoff: Date }): Promise<RetrievedPublicSourceFact[]> {
   const plan = createPublicSourceRetrievalPlan(input.observations.map(({ observation }) => observation));
   const existingBundle = await getMarketSnapshotBundle(input.snapshotId);
-  const existingFacts = existingBundle ? factsFromBundle(existingBundle) : [];
+  const existingFacts = existingBundle ? factsFromBundle(existingBundle, input.input.fanout) : [];
   const existingSourceKeys = new Set(existingBundle?.sources.map((source) => `${source.observationId}\n${source.canonicalUrl}`) ?? []);
+  const storedQueryIds = new Map(input.observations.map(({ observation, storedQueryId }) => [observation.observationId, storedQueryId]));
   const gate = input.input.retrievalGate ?? createConcurrencyGate(4);
   let availableCount = existingFacts.length;
-  const retrieved = await Promise.all(plan.filter(({ observation, result, canonicalUrl }) =>
-    !existingSourceKeys.has(`${observationId(input.snapshotId, observation.queryId, result.surfaceResultOrder, canonicalUrl)}\n${canonicalUrl}`)
+  const retrieved = await Promise.all(plan.filter(({ observation, result, canonicalUrl }) => {
+    const storedQueryId = storedQueryIds.get(observation.observationId);
+    if (!storedQueryId) throw new PublicSourceSnapshotUnavailableError();
+    return !existingSourceKeys.has(`${observationId(input.snapshotId, storedQueryId, result.surfaceResultOrder, canonicalUrl)}\n${canonicalUrl}`);
+  }
   ).map(({ observation, result, canonicalUrl, registrableDomain }) => gate.run(async () => {
     input.input.signal?.throwIfAborted();
     if (input.input.retrieveSource && availableCount >= 3) return null;
-    const base = { id: deterministicId("market-source", [input.snapshotId, observation.queryId, String(result.surfaceResultOrder), canonicalUrl]), snapshotId: input.snapshotId, observationId: observationId(input.snapshotId, observation.queryId, result.surfaceResultOrder, canonicalUrl), canonicalUrl, registrableDomain, retrievedAt: input.evidenceCutoff, expiresAt: new Date(input.evidenceCutoff.getTime() + 30 * 24 * 60 * 60 * 1_000) };
+    const storedQueryId = storedQueryIds.get(observation.observationId);
+    if (!storedQueryId) throw new PublicSourceSnapshotUnavailableError();
+    const base = { id: deterministicId("market-source", [input.snapshotId, storedQueryId, String(result.surfaceResultOrder), canonicalUrl]), snapshotId: input.snapshotId, observationId: observationId(input.snapshotId, storedQueryId, result.surfaceResultOrder, canonicalUrl), canonicalUrl, registrableDomain, retrievedAt: input.evidenceCutoff, expiresAt: new Date(input.evidenceCutoff.getTime() + 30 * 24 * 60 * 60 * 1_000) };
     if (!input.input.retrieveSource) {
       await appendMarketSourceEvidence({ token: input.token, sources: [{ ...base, retrievalState: "not_retrieved", sourceCategory: "unknown", entities: [], claims: [], contradictions: [], evidenceFamilyIdentity: deterministicId("evidence-family", [canonicalUrl]) }] });
       return null;
@@ -248,13 +252,15 @@ function isResumableSearchLedger(bundle: NonNullable<Awaited<ReturnType<typeof g
     queries.every(({ id }) => bundle.attempts.some((attempt) => attempt.queryId === id) && bundle.observations.some((observation) => observation.queryId === id));
 }
 
-function factsFromBundle(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>): RetrievedPublicSourceFact[] {
+function factsFromBundle(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>, fanout: SearchQueryFanout): RetrievedPublicSourceFact[] {
   return bundle.sources.flatMap((source) => {
     if (source.retrievalState !== "available" || !source.excerpt || !source.contentHash) return [];
     const storedObservation = bundle.observations.find((observation) => observation.id === source.observationId);
     const attempt = storedObservation && bundle.attempts.find((candidate) => candidate.id === storedObservation.attemptId);
-    if (!storedObservation || !attempt) return [];
-    return [{ observationId: attempt.id, queryId: storedObservation.queryId, resultUrl: source.canonicalUrl, finalUrl: source.canonicalUrl, retrievalState: "available" as const, publiclyRoutable: true, robotsAllowed: true, accessBarrier: "none" as const, normalizedText: source.excerpt, normalizedContentHash: source.contentHash, verifiedExcerpt: source.excerpt }];
+    const storedQuery = storedObservation && bundle.queries.find((query) => query.id === storedObservation.queryId);
+    const query = storedQuery && fanout.queries[storedQuery.queryOrder];
+    if (!storedObservation || !attempt || !storedQuery || !query || query.exactQuery !== storedQuery.queryText) return [];
+    return [{ observationId: attempt.id, queryId: query.id, resultUrl: source.canonicalUrl, finalUrl: source.canonicalUrl, retrievalState: "available" as const, publiclyRoutable: true, robotsAllowed: true, accessBarrier: "none" as const, normalizedText: source.excerpt, normalizedContentHash: source.contentHash, verifiedExcerpt: source.excerpt }];
   });
 }
 
@@ -268,21 +274,22 @@ function materialize(input: { snapshot: Awaited<ReturnType<typeof completeMarket
   };
 }
 
-function observationRows(snapshotId: string, attemptId: string, observation: MarketSearchObservation) {
+function observationRows(snapshotId: string, attemptId: string, storedQueryId: string, observation: MarketSearchObservation) {
   return observation.results.map((result) => {
     const canonicalUrl = canonicalizePublicSourceUrl(result.url);
-    return { id: observationId(snapshotId, observation.queryId, result.surfaceResultOrder, canonicalUrl), snapshotId, queryId: observation.queryId, attemptId,
+    return { id: observationId(snapshotId, storedQueryId, result.surfaceResultOrder, canonicalUrl), snapshotId, queryId: storedQueryId, attemptId,
       surfaceResultOrder: result.surfaceResultOrder, resultUrl: result.url, canonicalUrl, title: result.title, snippet: result.snippet,
       resultStatus: "returned" as const, resultMetadata: { domain: result.displayedHost, rank: result.surfaceResultOrder }, contentHash: sha(canonicalUrl), observedAt: date(observation.completedAt, "observation.completedAt") };
   });
 }
 
-function toObservations(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>, surface: PublicSearchSurfaceAdapter["surface"]): MarketSearchObservation[] {
+function toObservations(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>, surface: PublicSearchSurfaceAdapter["surface"], fanout: SearchQueryFanout): MarketSearchObservation[] {
   return bundle.attempts.filter(({ requestStatus }) => requestStatus !== "pending").map((attempt) => {
-    const query = bundle.queries.find(({ id }) => id === attempt.queryId);
-    if (!query || !attempt.completedAt) throw new PublicSourceSnapshotUnavailableError();
+    const storedQuery = bundle.queries.find(({ id }) => id === attempt.queryId);
+    const query = storedQuery && fanout.queries[storedQuery.queryOrder];
+    if (!storedQuery || !query || query.exactQuery !== storedQuery.queryText || !attempt.completedAt) throw new PublicSourceSnapshotUnavailableError();
     const status = attempt.requestStatus === "succeeded" ? "complete" : attempt.requestStatus === "timeout" ? "timed_out" : attempt.requestStatus;
-    return { observationId: attempt.id, surface, queryId: attempt.queryId, exactQuery: query.queryText, requestedAt: attempt.startedAt.toISOString(), completedAt: attempt.completedAt.toISOString(), status,
+    return { observationId: attempt.id, surface, queryId: query.id, exactQuery: query.exactQuery, requestedAt: attempt.startedAt.toISOString(), completedAt: attempt.completedAt.toISOString(), status,
       results: bundle.observations.filter((row) => row.attemptId === attempt.id && row.resultStatus === "returned").map((row) => ({ surfaceResultOrder: row.surfaceResultOrder, url: row.resultUrl, title: row.title, snippet: row.snippet ?? "", displayedHost: String((row.resultMetadata as { domain?: unknown })?.domain ?? new URL(row.resultUrl).hostname), metadata: { rank: row.surfaceResultOrder } })),
       usage: attempt.usage as MarketSearchObservation["usage"], ...(attempt.sanitizedError ? { sanitizedError: attempt.sanitizedError } : {}) };
   });

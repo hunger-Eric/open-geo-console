@@ -43,6 +43,7 @@ describe("public-source snapshot resolver", () => {
     expect(first).toMatchObject({ collectedForThisRun: true, refreshAttempted: true, refreshFailed: false, sufficientlyEvidenced: false });
     expect(first.observations).toEqual(expect.arrayContaining([expect.objectContaining({ status: "complete", results: expect.arrayContaining([expect.objectContaining({ url: "https://directory.example.test/shenzhen-taiwan" })]) })]));
     expect(new Set(first.observations.map(({ observationId }) => observationId)).size).toBe(fanout.queries.length);
+    expect(first.observations.map(({ queryId }) => queryId).sort()).toEqual(fanout.queries.map(({ id }) => id).sort());
     expect(bundle?.queries).toHaveLength(fanout.queries.length);
     expect(bundle?.attempts.every((attempt) => attempt.requestStatus === "succeeded")).toBe(true);
     expect(bundle?.observations).toHaveLength(fanout.queries.length);
