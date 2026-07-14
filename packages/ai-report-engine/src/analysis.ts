@@ -166,6 +166,7 @@ export async function analyzePageBatch(
 
   for (let start = 0; start < pendingPages.length; start += batchSize) {
     const pages = pendingPages.slice(start, start + batchSize);
+    const allowedTerms = collectPageAllowedTerms(pages);
     let parsed: PageAnalysis[] | undefined;
     let lastError: unknown;
     let languageCorrectionUsed = false;
@@ -211,9 +212,11 @@ export async function analyzePageBatch(
             rules: [
               languageInstruction,
               "Rewrite every flagged prose field in the required language.",
+              "Translate or omit every other Latin-script word outside evidence quote fields.",
               "Preserve all evidence quotes, evidence URLs, page URLs, page types, severities, and confidence values exactly."
             ],
             correctionRequired: languageFeedback,
+            allowedOriginalTerms: allowedTerms,
             locale: input.locale,
             outputShape,
             draft: languageCorrectionDraft
@@ -236,7 +239,7 @@ export async function analyzePageBatch(
           throw new Error(`The model returned ${candidate.length} of ${pages.length} required page analyses.`);
         }
         languageCorrectionDraft = completion.value;
-        assertPageAnalysisLanguage(candidate, input.locale, collectPageAllowedTerms(pages));
+        assertPageAnalysisLanguage(candidate, input.locale, allowedTerms);
         parsed = candidate;
         break;
       } catch (error) {

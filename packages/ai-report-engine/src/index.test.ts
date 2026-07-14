@@ -321,6 +321,8 @@ describe("batch analysis and evidence", () => {
     const correctionPayload = JSON.parse(vi.mocked(client.completeJson).mock.calls[1]![0].messages[1]!.content);
     expect(correctionPayload.pages).toBeUndefined();
     expect(correctionPayload.draft).toEqual(english);
+    expect(correctionPayload.allowedOriginalTerms).toEqual(["example"]);
+    expect(correctionPayload.rules).toContain("Translate or omit every other Latin-script word outside evidence quote fields.");
   });
 
   it("corrects legacy SEO terminology in page analysis using the existing single correction", async () => {
