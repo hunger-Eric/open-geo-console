@@ -554,7 +554,7 @@ async function finalizeStagingArtifactRefreshJob(input:{
       createWorkerPublicSourceForensicsDependencies({job:input.job,workerId:input.workerId,
         coverage:{plannedPages:input.job.plannedPages,successfulPages:input.job.successfulPages,failedPages:input.job.failedPages},
         readCheckpoint:()=>checkpoint,onCheckpointSaved:async(next)=>{checkpoint=next;},checkpointJob:input.checkpointJob,
-        retrieveSource:createWorkerPublicSourceRetriever(),artifactReadiness:{async verify(){}},forceSnapshotRefresh:true,
+        retrieveSource:createWorkerPublicSourceRetriever(),artifactReadiness:{async verify(){}},forceSnapshotRefreshAfter:input.job.createdAt.toISOString(),
         liveDrill:input.liveDrill,signal:input.signal},runtime)});
     return runPublicSourceForensicsPipeline({reportId:input.job.reportId,jobId:input.job.id,...resolvePublicSourceRunScope(dependencies),
       targetUrl:source.targetUrl,websiteFoundation:source.technicalFoundation.aiReport,businessQuestionSet:questionSet,dependencies,signal:input.signal});
@@ -776,7 +776,7 @@ export interface WorkerPublicSourceForensicsDependencyInput {
   checkpointJob: WorkerCheckpointWriter;
   retrieveSource?: PublicSourceRetriever;
   artifactReadiness?: ArtifactReadinessGate;
-  forceSnapshotRefresh?: boolean;
+  forceSnapshotRefreshAfter?: string;
   liveDrill?: StagingLiveDrill;
   signal?: AbortSignal;
   collaborators?: WorkerPublicSourceForensicsCollaborators;
@@ -813,7 +813,7 @@ export function createWorkerPublicSourceForensicsDependencies(
       leaseOwner: `public-source:${input.job.id}:${input.workerId}`,
       retrieveSource: input.retrieveSource,
       retrievalGate,
-      forceRefresh: input.forceSnapshotRefresh,
+      forceRefreshAfter: input.forceSnapshotRefreshAfter,
       signal: input.signal
     }),
     getCheckpoint: async (jobId) => {

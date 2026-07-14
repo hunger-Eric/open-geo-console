@@ -61,6 +61,8 @@ describe("public-source snapshot resolver", () => {
     expect(refreshed).toMatchObject({ collectedForThisRun: true, refreshAttempted: true });
     expect(refreshed.snapshotId).not.toBe(first.snapshotId);
     expect(search).toHaveBeenCalledTimes(fanout.queries.length * 2);
+    const resumedRefresh = await resolvePublicSourceSnapshot({ ...input, forceRefreshAfter: "2020-01-01T00:00:00.000Z", evidenceCutoffAt: "2030-01-05T00:00:00.000Z" });
+    expect(resumedRefresh).toMatchObject({ snapshotId: refreshed.snapshotId, collectedForThisRun: false });
   });
 
   it("runs no more than two search requests for one question at a time", async () => {
