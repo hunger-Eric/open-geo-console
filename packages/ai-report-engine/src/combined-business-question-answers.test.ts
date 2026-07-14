@@ -67,6 +67,7 @@ describe("combined business question answers", () => {
     const correction = JSON.parse(completeJson.mock.calls[1]![0].messages[1].content).correctionRequired;
     expect(correction).toEqual(["answers[0].answer: unexpected_english_sentence", "answers[1].answer: unexpected_english_sentence", "answers[2].answer: unexpected_english_sentence"]);
     expect(JSON.stringify(correction)).not.toContain("customer should update");
+    expect(JSON.parse(completeJson.mock.calls[1]![0].messages[1].content).correctionInstruction).toContain("翻译、音译或省略");
   });
 
   it("does not make a third model call after a repeated language violation", async () => {
@@ -191,6 +192,38 @@ describe("combined business question answers", () => {
       { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 1 }
     );
     expect(result.answers[0].answer).toContain("Google Analytics");
+  });
+
+  it("does not authorize Update or Improve from a confirmed question", async () => {
+    const { questionSet, forensic, value } = fixture("zh-CN");
+    questionSet.questions[0]!.privateText = "是否需要 Update 或 Improve？";
+    const invalid = value.answers.map((item) => ({ ...item, answer: "客户应当 Update 并继续核验公开材料。" }));
+    const completeJson = vi.fn(async () => ({ value: { answers: invalid }, modelId: "served", rawContent: "{}" }));
+    await expect(synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson }, { questionSet, forensic }, { maxAttempts: 3, delay: async () => undefined }
+    )).rejects.toThrow(ReportLanguageValidationError);
+  });
+
+  it("allows Shopee only when the evidence graph resolves it as an entity", async () => {
+    const withoutAuthority = fixture("zh-CN");
+    withoutAuthority.questionSet.questions[0]!.privateText = "哪些方案适合 Shopee 等平台？";
+    const answers = withoutAuthority.value.answers.map((item) => ({ ...item, answer: "Shopee 的公开材料需要继续核验并确认业务适用性。" }));
+    const rejectedCompletion = vi.fn(async () => ({ value: { answers }, modelId: "served", rawContent: "{}" }));
+    await expect(synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson: rejectedCompletion },
+      { questionSet: withoutAuthority.questionSet, forensic: withoutAuthority.forensic },
+      { maxAttempts: 3, delay: async () => undefined }
+    )).rejects.toThrow(ReportLanguageValidationError);
+
+    const withAuthority = fixture("zh-CN");
+    withAuthority.questionSet.questions[0]!.privateText = "哪些方案适合 Shopee 等平台？";
+    withAuthority.forensic.sourceGraph.entities = [{ canonicalName: "Shopee", status: "resolved" }] as unknown as RecommendationForensicReportV2["sourceGraph"]["entities"];
+    const acceptedCompletion = vi.fn(async () => ({ value: { answers }, modelId: "served", rawContent: "{}" }));
+    await expect(synthesizeCombinedBusinessQuestionAnswers(
+      { configuredModel: "configured", completeJson: acceptedCompletion },
+      { questionSet: withAuthority.questionSet, forensic: withAuthority.forensic },
+      { maxAttempts: 1 }
+    )).resolves.toBeDefined();
   });
 });
 

@@ -5,7 +5,6 @@ import { sha256Hex } from "./evidence";
 import {
   ReportLanguageValidationError,
   assertReportLanguage,
-  extractConfirmedQuestionOfficialTerms,
   reportLanguageInstruction
 } from "./report-language";
 import type { RecommendationForensicReportV2 } from "./recommendation-forensic-v2";
@@ -172,7 +171,12 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
               "Do not explain the research method.",
               "Do not include URLs, evidence IDs, grades, or unsupported claims in answer text."
             ],
-            ...(languageFeedback.length ? { correctionRequired: languageFeedback } : {}),
+            ...(languageFeedback.length ? {
+              correctionRequired: languageFeedback,
+              correctionInstruction: chinese
+                ? "重新改写被标记的 answer：除 B2B、URL 等必要技术标识外，将所有拉丁字母名称翻译、音译或省略；不得重复上一版句子。"
+                : "Rewrite every flagged answer entirely in English without repeating the prior sentence."
+            } : {}),
             locale: input.forensic.locale,
             requiredShape: { answers: [{ questionId: "exact id", purpose: "exact purpose", answer: "one concise paragraph", sourceEvidenceIds: ["exact supplied ids"] }] },
             questions: compactInput
@@ -192,7 +196,7 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
         synthesis: { mode: "evidence_constrained_model", modelId: completion.modelId, inputHash },
         answers: boundAnswers
       }, input.questionSet, input.forensic);
-      assertAnswerLanguage(parsed.answers, input.forensic.locale, collectQuestionAnswerAllowedTerms(input.questionSet, input.forensic));
+      assertAnswerLanguage(parsed.answers, input.forensic.locale, collectQuestionAnswerAllowedTerms(input.forensic));
       return parsed;
     } catch (error) {
       lastError = error;
@@ -220,7 +224,7 @@ function assertAnswerLanguage(
   );
 }
 
-function collectQuestionAnswerAllowedTerms(questionSet: ConfirmedBusinessQuestionSet, forensic: RecommendationForensicReportV2): string[] {
+function collectQuestionAnswerAllowedTerms(forensic: RecommendationForensicReportV2): string[] {
   const graphTerms = [
     ...(forensic.sourceGraph.entities ?? [])
       .filter(({ status }) => status === "resolved")
@@ -229,7 +233,7 @@ function collectQuestionAnswerAllowedTerms(questionSet: ConfirmedBusinessQuestio
       .filter(({ status }) => status === "supported")
       .map(({ subjectName }) => subjectName)
   ];
-  return [...new Set([...graphTerms, ...extractConfirmedQuestionOfficialTerms(questionSet.questions.map(({ privateText }) => privateText))]
+  return [...new Set(graphTerms
     .filter((value): value is string => Boolean(value?.trim()) && value!.length <= 120))];
 }
 
