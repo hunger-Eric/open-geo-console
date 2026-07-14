@@ -16,12 +16,13 @@ import {
 
 const PUBLIC_SOURCE_CRAWLER_USER_AGENT = "OpenGeoConsoleBot";
 const ROBOTS_MAX_BYTES = 64 * 1024;
-const EXCERPT_MAX_CHARACTERS = 1_000;
+const LEGACY_EXCERPT_MAX_CHARACTERS = 1_000;
 
 export interface PublicSourceRetrieverOptions {
   fetchImpl?: typeof fetch;
   resolver?: HostnameResolver;
   signal?: AbortSignal;
+  excerptMode?: "none" | "legacy_prefix";
 }
 
 /**
@@ -114,7 +115,9 @@ export async function executePublicSourceRetrieval(input: {
       accessBarrier: "none",
       contentBytes: new TextEncoder().encode(raw).byteLength,
       normalizedText,
-      verifiedExcerpt: normalizedText.slice(0, EXCERPT_MAX_CHARACTERS)
+      ...(options.excerptMode === "legacy_prefix"
+        ? { verifiedExcerpt: normalizedText.slice(0, LEGACY_EXCERPT_MAX_CHARACTERS) }
+        : {})
     });
   } catch (error) {
     if (options.signal?.aborted) throw options.signal.reason;

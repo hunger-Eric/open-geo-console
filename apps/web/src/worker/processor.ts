@@ -888,7 +888,7 @@ function createWorkerPublicSourceRetriever(): PublicSourceRetriever {
       observationId: observation.observationId,
       queryId: observation.queryId,
       resultUrl: result.url
-    }, { signal });
+    }, { signal, excerptMode: "legacy_prefix" });
     return {
       fact,
       source: {

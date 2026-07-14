@@ -70,10 +70,21 @@ describe("V2 public-source retriever", () => {
     expect(requested).toEqual(["https://source.example/robots.txt", "https://source.example/article"]);
     expect(fact).toMatchObject({
       retrievalState: "available", publiclyRoutable: true, robotsAllowed: true,
-      accessBarrier: "none", normalizedText: "Public freight evidence.", verifiedExcerpt: "Public freight evidence."
+      accessBarrier: "none", normalizedText: "Public freight evidence."
     });
+    expect(fact).not.toHaveProperty("verifiedExcerpt");
     expect(fact).not.toHaveProperty("body");
     expect(fact).not.toHaveProperty("html");
+  });
+
+  it("provides the prefix excerpt only through explicit V1 compatibility mode", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/robots.txt")
+      ? new Response("User-agent: *\nAllow: /")
+      : new Response("<main>Legacy public evidence.</main>", { headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
+    const fact = await executePublicSourceRetrieval({
+      observationId: "obs-legacy", queryId: "query-legacy", resultUrl: "https://source.example/legacy"
+    }, { fetchImpl, resolver: publicResolver, excerptMode: "legacy_prefix" });
+    expect(fact.verifiedExcerpt).toBe("Legacy public evidence.");
   });
 
   it("fails closed without content when robots denies the source", async () => {
