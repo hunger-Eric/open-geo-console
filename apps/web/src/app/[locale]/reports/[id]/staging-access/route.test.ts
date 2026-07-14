@@ -54,6 +54,22 @@ describe("staging report operator access", () => {
     expect(issueReportAccessToken).toHaveBeenCalledWith(expect.objectContaining({ reportId: "report-1", ttlDays: 1 }));
   });
 
+  it("allows a completed limited report to be opened as a complimentary staging delivery", async () => {
+    getPaymentOrder.mockResolvedValue({
+      id: "order-limited",
+      reportId: "report-1",
+      paymentStatus: "paid",
+      fulfillmentStatus: "completed_limited",
+      productCode: "recommendation_forensics_v1"
+    });
+
+    const response = await GET(new Request("https://staging.example/zh/reports/report-1/staging-access?order=order-limited"), context);
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("https://staging.example/reports/report-1/report.html");
+    expect(issueReportAccessToken).toHaveBeenCalledWith(expect.objectContaining({ artifactScope: "recommendation_forensics_v1" }));
+  });
+
   it("issues the exact active V2 artifact scope", async () => {
     getGeoReport.mockResolvedValue({ reportLocale: "zh", activeArtifactRevisionId: "revision-v2" });
     getActiveCombinedGeoReport.mockResolvedValue({ report: { artifactContract: "combined_geo_report_v2" } });
@@ -71,7 +87,7 @@ describe("staging report operator access", () => {
     expect(getPaymentOrder).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when the order is not paid and completed for this report", async () => {
+  it("returns 404 when the order is not paid and deliverable for this report", async () => {
     getPaymentOrder.mockResolvedValue({
       id: "order-1",
       reportId: "report-1",

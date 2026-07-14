@@ -14,8 +14,10 @@ export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const orderId = new URL(request.url).searchParams.get("order") ?? "";
   const [order, report, active] = await Promise.all([getPaymentOrder(orderId), getGeoReport(id), getActiveCombinedGeoReport(id)]);
+  const isDeliverable = order?.fulfillmentStatus === "completed"
+    || order?.fulfillmentStatus === "completed_limited";
   if (!order || !report?.reportLocale || order.reportId !== id
-    || order.paymentStatus !== "paid" || order.fulfillmentStatus !== "completed") {
+    || order.paymentStatus !== "paid" || !isDeliverable) {
     return new NextResponse(null, { status: 404 });
   }
 
