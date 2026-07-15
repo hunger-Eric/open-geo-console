@@ -66,7 +66,7 @@ async function sendDelivery(delivery: EmailDeliveryRow, owner: string, gateway: 
   ]);
   if (!recipient || !order || recipient.emailKeyVersion !== "v1") throw new Error("commercial_email_recipient_unavailable");
   let reportUrl: string | undefined;
-  if (delivery.templateType === "report_ready" || delivery.templateType === "limited_report_refund" || delivery.templateType === "link_reissue" || delivery.templateType === "corrected_report_ready") {
+  if (delivery.templateType === "report_ready" || delivery.templateType === "limited_report_refund" || delivery.templateType === "link_reissue" || delivery.templateType === "corrected_report_ready" || delivery.templateType === "replacement_report_ready") {
     const activeCombined = await getActiveCombinedGeoReport(delivery.reportId);
     const artifactScope = activeCombined?.report.artifactContract ?? productContractForCode(order.productCode);
     if (delivery.templateType === "link_reissue" && delivery.attempts === 1) {

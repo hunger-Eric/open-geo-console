@@ -96,7 +96,8 @@ describe("ResendEmailGateway", () => {
 
   it.each([
     ["report_ready", "en"], ["report_ready", "zh"],
-    ["corrected_report_ready", "en"], ["corrected_report_ready", "zh"]
+    ["corrected_report_ready", "en"], ["corrected_report_ready", "zh"],
+    ["replacement_report_ready", "en"], ["replacement_report_ready", "zh"]
   ] as const)(
     "delivers %s in %s with only the secure HTML report link",
     (template, locale) => {

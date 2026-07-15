@@ -41,8 +41,10 @@ import { getConfirmedBusinessQuestionSet } from "@/db/business-questions";
 import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
 import { getCorrectionExecutionContext } from "@/db/report-corrections";
+import { getReplacementExecutionContext, syncReplacementExecutionState } from "@/db/report-replacement-fulfillments";
 import { listEvidenceAssets } from "@/db/evidence-assets";
 import { terminalizeCombinedCorrection, terminalizePaidCombinedReport } from "@/db/combined-correction-terminalization";
+import { terminalizeCombinedReplacement } from "@/db/combined-replacement-terminalization";
 import { getPendingPaidCombinedContext } from "@/db/combined-reports";
 import { failStagingCombinedArtifactRefresh, getStagingCombinedArtifactRefreshContext, terminalizeStagingCombinedArtifactRefresh } from "@/db/staging-combined-artifact-refresh";
 import { buildReadyCombinedArtifact, buildReadyCombinedArtifactV2, buildReadyCombinedArtifactV3, materializePreparedCombinedArtifactV3 } from "@/report/combined-artifact-readiness";
@@ -163,6 +165,26 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       await finalizeStagingArtifactRefreshJob({job,workerId,checkpoint,context,evidenceAssets,checkpointJob,
         signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill});
       return;
+    }
+    if (job.reason === "replacement_fulfillment") {
+      await syncReplacementExecutionState(job.id, "running");
+      const foundation = await getAiReport(job.reportId, "deep", "recommendation_forensics_v1");
+      const context = await getReplacementExecutionContext(job.id);
+      if (!context) throw new Error("The replacement execution identity is unavailable.");
+      const foundationMatches = foundation?.technicalPayload && foundation.isPrivate && foundation.payload.tier === "deep" &&
+        foundation.reportId === job.reportId && foundation.locale === job.locale && sameTarget(foundation.payload.targetUrl, storedReport.url);
+      if (foundationMatches) {
+        const evidenceAssets = await listEvidenceAssets(job.reportId, context.originalFailedJobId);
+        if (await areReusableEvidenceAssets(evidenceAssets)) {
+          await finalizeProviderDiscoveryCombinedJob({ job, workerId, checkpoint, websiteFoundation: foundation.payload,
+            technicalReport: foundation.technicalPayload!, targetUrl: foundation.payload.targetUrl,
+            coverage: { plannedPages: job.plannedPages, successfulPages: job.successfulPages, failedPages: job.failedPages }, checkpointJob,
+            signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill, evidenceAssets,
+            artifactContext: { orderId: context.orderId, artifactRevisionId: context.artifactRevisionId, artifactRevision: context.artifactRevision },
+            originalPaidJobId: context.originalFailedJobId });
+          return;
+        }
+      }
     }
     if (job.reason === "paid_report_correction") {
       const foundation = await getAiReport(job.reportId, "deep", "recommendation_forensics_v1");
@@ -447,6 +469,19 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         failedPages: failureCount(checkpoint)
       });
       checkpoint = normalizeCheckpoint(preflightCheckpoint.checkpoint);
+      if (job.reason === "replacement_fulfillment") {
+        const context = await getReplacementExecutionContext(job.id);
+        if (!context) throw new Error("The replacement execution identity is unavailable after technical regeneration.");
+        const evidenceAssets = await listEvidenceAssets(job.reportId, job.id);
+        await assertReusableEvidenceAssets(evidenceAssets);
+        await finalizeProviderDiscoveryCombinedJob({ job, workerId, checkpoint, websiteFoundation: reportToPersist,
+          targetUrl: discovery.targetUrl, technicalReport: technicalReport!, evidenceAssets,
+          artifactContext: { orderId: context.orderId, artifactRevisionId: context.artifactRevisionId, artifactRevision: context.artifactRevision },
+          originalPaidJobId: context.originalFailedJobId,
+          coverage: { plannedPages: effectiveCoverage.effectivePlannedPages, successfulPages: effectiveCoverage.analyzedPages, failedPages: failureCount(checkpoint) },
+          checkpointJob, signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill });
+        return;
+      }
       if (job.reason === "paid_report_correction") {
         const context = await getCorrectionExecutionContext(job.id);
         if (!context) throw new Error("The correction execution identity is unavailable after technical regeneration.");
@@ -523,9 +558,10 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         });
       }
     }
-    if (job.tier === "deep" && failedJob.stage === "failed" && !["paid_report_correction","staging_artifact_refresh"].includes(job.reason)) {
+    if (job.tier === "deep" && failedJob.stage === "failed" && !["paid_report_correction","staging_artifact_refresh","replacement_fulfillment"].includes(job.reason)) {
       await recordCommercialOutcomeSafely(job.id, "failed");
     }
+    if (job.reason === "replacement_fulfillment") await syncReplacementExecutionState(job.id, failedJob.executionState);
     if(job.reason==="staging_artifact_refresh"&&failedJob.stage==="failed")await failStagingCombinedArtifactRefresh(job.id);
   } finally {
     execution.stop();
@@ -1013,6 +1049,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     pageCount: ready.pageCount
   };
   if(input.job.reason==="staging_artifact_refresh") await terminalizeStagingCombinedArtifactRefresh(terminalInput);
+  else if(input.job.reason==="replacement_fulfillment") await terminalizeCombinedReplacement(terminalInput);
   else if(input.job.reason==="paid_report_correction") await terminalizeCombinedCorrection(terminalInput);
   else await terminalizePaidCombinedReport(terminalInput);
 }
@@ -1026,6 +1063,7 @@ async function terminalizeReadyCombinedArtifact(
   const terminalInput = { report: ready.report, workerId: input.workerId, checkpointIdentityHash, snapshotRefs,
     htmlSha256: ready.htmlSha256, pdfSha256: ready.pdfSha256, pdfStorageKey: ready.pdfStorageKey, pageCount: ready.pageCount };
   if(input.job.reason==="staging_artifact_refresh") await terminalizeStagingCombinedArtifactRefresh(terminalInput);
+  else if(input.job.reason==="replacement_fulfillment") await terminalizeCombinedReplacement(terminalInput);
   else if(input.job.reason==="paid_report_correction") await terminalizeCombinedCorrection(terminalInput);
   else await terminalizePaidCombinedReport(terminalInput);
 }

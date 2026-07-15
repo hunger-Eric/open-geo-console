@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V21_DATABASE_MIGRATIONS, V22_DATABASE_MIGRATIONS, V23_DATABASE_MIGRATIONS } from "./migrations";
+import { DATABASE_MIGRATIONS, V21_DATABASE_MIGRATIONS, V22_DATABASE_MIGRATIONS, V23_DATABASE_MIGRATIONS, V24_DATABASE_MIGRATIONS } from "./migrations";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const describeDisposablePostgres = adminUrl ? describe : describe.skip;
@@ -19,7 +19,7 @@ describeDisposablePostgres("schema v21 prospective V3 artifact scope", () => {
     await admin.unsafe(`CREATE DATABASE ${quote(databaseName)}`);
     const sql = postgres(withDatabase(adminUrl!, databaseName), { max: 1, prepare: false });
     try {
-      const v20 = DATABASE_MIGRATIONS.slice(0, -(V21_DATABASE_MIGRATIONS.length + V22_DATABASE_MIGRATIONS.length + V23_DATABASE_MIGRATIONS.length));
+      const v20 = DATABASE_MIGRATIONS.slice(0, -(V21_DATABASE_MIGRATIONS.length + V22_DATABASE_MIGRATIONS.length + V23_DATABASE_MIGRATIONS.length + V24_DATABASE_MIGRATIONS.length));
       await sql.begin(async (tx) => { for (const statement of v20) await tx.unsafe(statement); });
       await sql`INSERT INTO scan_reports(id,url,payload,report_locale) VALUES('report-v21','https://example.com','{}','zh')`;
       await sql`INSERT INTO report_access_tokens(id,report_id,token_prefix,token_hmac,expires_at,artifact_scope) VALUES
@@ -28,7 +28,7 @@ describeDisposablePostgres("schema v21 prospective V3 artifact scope", () => {
 
       await sql.begin(async (tx) => { for (const statement of V21_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
       await sql.begin(async (tx) => { for (const statement of V22_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
-      expect(DATABASE_SCHEMA_VERSION).toBe(23);
+      expect(DATABASE_SCHEMA_VERSION).toBe(24);
       expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining([...V21_DATABASE_MIGRATIONS, ...V22_DATABASE_MIGRATIONS]));
       expect(await sql<{ artifact_scope: string }[]>`SELECT artifact_scope FROM report_access_tokens ORDER BY artifact_scope`)
         .toEqual([{ artifact_scope: "combined_geo_report_v1" }, { artifact_scope: "combined_geo_report_v2" }]);

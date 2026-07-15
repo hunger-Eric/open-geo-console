@@ -133,6 +133,14 @@ export async function getReplacementExecutionContext(jobId: string): Promise<{
   } : null;
 }
 
+export async function syncReplacementExecutionState(jobId: string, executionState: string): Promise<void> {
+  await ensureDatabase();
+  const state = executionState === "running" ? "running" : executionState === "repair_wait" ? "repair_wait" : executionState === "failed" ? "failed" : null;
+  if (!state) return;
+  await getSqlClient()`UPDATE report_replacement_fulfillments replacement SET state=${state}
+    FROM scan_jobs job WHERE replacement.replacement_job_id=${jobId} AND job.id=${jobId} AND replacement.state<>'completed'`;
+}
+
 type SqlClient = ReturnType<typeof getSqlClient> | postgres.TransactionSql;
 
 async function readExisting(sql: SqlClient): Promise<ReplacementFulfillmentSummary | null> {

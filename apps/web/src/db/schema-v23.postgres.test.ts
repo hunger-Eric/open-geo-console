@@ -21,8 +21,8 @@ describeDisposablePostgres("schema v23 replacement fulfillment lineage", () => {
     const sql = postgres(withDatabase(adminUrl!, databaseName), { max: 1, prepare: false });
     try {
       await sql.begin(async (tx) => { for (const statement of DATABASE_MIGRATIONS) await tx.unsafe(statement); });
-      expect(DATABASE_SCHEMA_VERSION).toBe(23);
-      expect(DATABASE_MIGRATIONS.slice(-V23_DATABASE_MIGRATIONS.length)).toEqual(V23_DATABASE_MIGRATIONS);
+      expect(DATABASE_SCHEMA_VERSION).toBe(24);
+      expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining([...V23_DATABASE_MIGRATIONS]));
 
       await sql`INSERT INTO scan_reports(id,url,payload,report_locale,technical_status) VALUES('report-1','https://example.com','{}','zh','completed')`;
       await sql`INSERT INTO scan_jobs(id,report_id,tier,product_contract,locale,fulfillment_methodology,recommendation_report_version,artifact_contract,stage)

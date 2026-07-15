@@ -8,7 +8,7 @@ import {
   getDatabasePoolSize,
   shouldRunDatabaseMigrations
 } from "./index";
-import { DATABASE_MIGRATIONS, V22_DATABASE_MIGRATIONS, V23_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V22_DATABASE_MIGRATIONS, V23_DATABASE_MIGRATIONS, V24_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 
 describe("database path selection", () => {
   const originalOpenGeoDbPath = process.env.OPEN_GEO_DB_PATH;
@@ -58,7 +58,7 @@ describe("database deployment marker", () => {
 
 describe("database schema marker", () => {
   it("uses the recoverable analysis-ledger schema with cascade-safe event cleanup", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(23);
+    expect(DATABASE_SCHEMA_VERSION).toBe(24);
   });
 
   it("contains the complete additive V2 authority and methodology migration", () => {
@@ -128,9 +128,10 @@ describe("database schema marker", () => {
   });
 
   it("runs only forward migrations when upgrading an existing schema", () => {
-    expect(databaseMigrationsAfter(21)).toEqual([...V22_DATABASE_MIGRATIONS, ...V23_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(22)).toEqual([...V23_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(23)).toEqual([]);
+    expect(databaseMigrationsAfter(21)).toEqual([...V22_DATABASE_MIGRATIONS, ...V23_DATABASE_MIGRATIONS, ...V24_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(22)).toEqual([...V23_DATABASE_MIGRATIONS, ...V24_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(23)).toEqual([...V24_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(24)).toEqual([]);
     expect(databaseMigrationsAfter(undefined)).toEqual([...DATABASE_MIGRATIONS]);
   });
 

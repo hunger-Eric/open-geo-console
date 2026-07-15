@@ -87,7 +87,8 @@ export type EmailTemplateType =
   | "refund_succeeded"
   | "refund_assistance"
   | "link_reissue"
-  | "corrected_report_ready";
+  | "corrected_report_ready"
+  | "replacement_report_ready";
 export type EmailDeliveryState = "queued" | "sent" | "delivered" | "bounced" | "failed";
 export type JobDispatchState = "pending" | "published" | "abandoned";
 export type BatchRunStatus = "running" | "succeeded" | "partial" | "failed";
@@ -1315,7 +1316,7 @@ export const emailDeliveries = pgTable(
     index("email_deliveries_order_idx").on(table.orderId, table.createdAt),
     index("email_deliveries_order_template_idx").on(table.orderId, table.templateType, table.createdAt),
     index("email_deliveries_retry_idx").on(table.state, table.nextRetryAt),
-    check("email_deliveries_template_type_check", sql`${table.templateType} IN ('payment_confirmed','report_ready','limited_report_refund','report_failed_refund','refund_succeeded','refund_assistance','link_reissue')`),
+    check("email_deliveries_template_type_check", sql`${table.templateType} IN ('payment_confirmed','report_ready','limited_report_refund','report_failed_refund','refund_succeeded','refund_assistance','link_reissue','corrected_report_ready','replacement_report_ready')`),
     check("email_deliveries_locale_check", sql`${table.locale} IN ('en','zh')`),
     check("email_deliveries_provider_check", sql`${table.provider} IN ('resend')`),
     check("email_deliveries_state_check", sql`${table.state} IN ('queued','sent','delivered','bounced','failed')`),

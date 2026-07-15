@@ -1972,6 +1972,11 @@ export const V23_DATABASE_MIGRATIONS = [
    )`
 ] as const;
 
+export const V24_DATABASE_MIGRATIONS = [
+  `ALTER TABLE email_deliveries DROP CONSTRAINT IF EXISTS email_deliveries_template_type_check`,
+  `ALTER TABLE email_deliveries ADD CONSTRAINT email_deliveries_template_type_check CHECK (template_type IN ('payment_confirmed','report_ready','limited_report_refund','report_failed_refund','refund_succeeded','refund_assistance','link_reissue','corrected_report_ready','replacement_report_ready'))`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -1987,7 +1992,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 20, migrations: V20_DATABASE_MIGRATIONS },
   { version: 21, migrations: V21_DATABASE_MIGRATIONS },
   { version: 22, migrations: V22_DATABASE_MIGRATIONS },
-  { version: 23, migrations: V23_DATABASE_MIGRATIONS }
+  { version: 23, migrations: V23_DATABASE_MIGRATIONS },
+  { version: 24, migrations: V24_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {
