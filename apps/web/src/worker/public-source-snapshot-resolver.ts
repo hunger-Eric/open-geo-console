@@ -31,6 +31,7 @@ import {
 } from "@/db/market-snapshots";
 import { appendMarketSourcePassages } from "@/db/provider-evidence";
 import { createConcurrencyGate, mapWithConcurrency, type ConcurrencyGate } from "./bounded-scheduler";
+import { JobError } from "./job-errors";
 import { createPublicSourceRetrievalPlan } from "./public-source-plan";
 
 export interface ResolvedPublicSourceSnapshotValue {
@@ -125,10 +126,11 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     if (waited.status === "takeover_available" || waited.status === "released_retryable") {
       return resolvePublicSourceSnapshot({ ...input, leaseDurationMs, waitDeadlineMs: input.waitDeadlineMs });
     }
-    throw new PublicSourceSnapshotUnavailableError();
+    throw new PublicSourceSnapshotUnavailableError("lease_wait");
   }
 
   let snapshotId: string | undefined;
+  let failureStage: PublicSourceSnapshotFailureStage = "search_execution";
   try {
     const resumable = claim.takeover && !forceRefresh ? await findResumableMarketSnapshot({ identity, authorityVersion: input.authority.authorityId }) : null;
     const resumed = resumable && snapshotMetadataMatches(resumable, input.snapshotMetadata) ? resumable : null;
@@ -151,6 +153,7 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     let observations: MarketSearchObservation[];
     let successful: Array<{ observation: MarketSearchObservation; attemptId: string; storedQueryId: string }>;
     if (resumed) {
+      failureStage = "snapshot_materialization";
       const bundle = await getMarketSnapshotBundle(currentSnapshotId);
       if (!bundle || !isResumableSearchLedger(bundle, queries)) {
         await releaseFailedMarketSnapshotLease({ token: claim.token, snapshotId: currentSnapshotId });
@@ -160,10 +163,11 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
       observations = toObservations(bundle, input.authority.surface, input.fanout);
       successful = observations.filter(({ status }) => status === "complete" || status === "partial").map((observation) => {
         const attempt = bundle.attempts.find(({ id }) => id === observation.observationId);
-        if (!attempt) throw new PublicSourceSnapshotUnavailableError();
+        if (!attempt) throw new PublicSourceSnapshotUnavailableError("snapshot_materialization");
         return { observation, attemptId: attempt.id, storedQueryId: attempt.queryId };
       });
     } else {
+      failureStage = "search_execution";
       await appendMarketSnapshotQueries({ snapshotId: currentSnapshotId, token: claim.token, queries });
       const queryResults = await mapWithConcurrency(input.fanout.queries, 2, async (query, queryOrder) => {
         input.signal?.throwIfAborted();
@@ -188,17 +192,23 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
       observations = queryResults.map(({ observation }) => observation);
       successful = queryResults.filter(({ successful: value }) => value).map(({ observation, attemptId, storedQueryId }) => ({ observation, attemptId, storedQueryId }));
     }
-    if (successful.length === 0) throw new PublicSourceSnapshotUnavailableError();
+    if (successful.length === 0) throw new PublicSourceSnapshotUnavailableError("search_execution");
 
     if (!resumed) {
+      failureStage = "observation_normalization";
       const rows = successful.flatMap(({ observation, attemptId, storedQueryId }) => observationRows(currentSnapshotId, attemptId, storedQueryId, observation));
+      failureStage = "observation_persistence";
       if (rows.length) await appendMarketSearchObservations({ token: claim.token, observations: rows });
     }
+    failureStage = "source_retrieval";
     await appendRetrievals({ input, snapshotId: currentSnapshotId, token: claim.token, observations: successful, evidenceCutoff });
+    failureStage = "snapshot_materialization";
     const persistedBundle = await getMarketSnapshotBundle(currentSnapshotId);
-    if (!persistedBundle) throw new PublicSourceSnapshotUnavailableError();
+    if (!persistedBundle) throw new PublicSourceSnapshotUnavailableError("snapshot_materialization");
     const retrievals = factsFromBundle(persistedBundle, input.fanout);
+    failureStage = "snapshot_completion";
     const completed = await completeMarketSnapshotLease({ snapshotId: currentSnapshotId, token: claim.token, queryFanoutHash: fanoutHash(input.fanout), completedAt: new Date() });
+    failureStage = "snapshot_materialization";
     return materialize({
       snapshot: completed,
       questionId: input.question.id,
@@ -211,7 +221,7 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     await releaseFailedMarketSnapshotLease({ token: claim.token, ...(snapshotId ? { snapshotId } : {}), preserveRefreshingSnapshot: input.signal?.aborted === true }).catch(() => undefined);
     if (input.signal?.aborted) throw input.signal.reason;
     if (error instanceof PublicSourceSnapshotUnavailableError || error instanceof PublicSourceSnapshotAuthorityMismatchError) throw error;
-    throw new PublicSourceSnapshotUnavailableError();
+    throw new PublicSourceSnapshotUnavailableError(failureStage, { cause: error });
   }
 }
 
@@ -247,21 +257,21 @@ async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput
   let availableCount = existingFacts.length;
   const retrieved = await Promise.all(plan.filter(({ observation, result, canonicalUrl }) => {
     const storedQueryId = storedQueryIds.get(observation.observationId);
-    if (!storedQueryId) throw new PublicSourceSnapshotUnavailableError();
+    if (!storedQueryId) throw new PublicSourceSnapshotUnavailableError("source_retrieval");
     return !existingSourceKeys.has(`${observationId(input.snapshotId, storedQueryId, result.surfaceResultOrder, canonicalUrl)}\n${canonicalUrl}`);
   }
   ).map(({ observation, result, canonicalUrl, registrableDomain }) => gate.run(async () => {
     input.input.signal?.throwIfAborted();
     if (input.input.retrieveSource && availableCount >= maxAvailableSources) return null;
     const storedQueryId = storedQueryIds.get(observation.observationId);
-    if (!storedQueryId) throw new PublicSourceSnapshotUnavailableError();
+    if (!storedQueryId) throw new PublicSourceSnapshotUnavailableError("source_retrieval");
     const base = { id: deterministicId("market-source", [input.snapshotId, storedQueryId, String(result.surfaceResultOrder), canonicalUrl]), snapshotId: input.snapshotId, observationId: observationId(input.snapshotId, storedQueryId, result.surfaceResultOrder, canonicalUrl), canonicalUrl, registrableDomain, retrievedAt: input.evidenceCutoff, expiresAt: new Date(input.evidenceCutoff.getTime() + 30 * 24 * 60 * 60 * 1_000) };
     if (!input.input.retrieveSource) {
       await appendMarketSourceEvidence({ token: input.token, sources: [{ ...base, retrievalState: "not_retrieved", sourceCategory: "unknown", entities: [], claims: [], contradictions: [], evidenceFamilyIdentity: deterministicId("evidence-family", [canonicalUrl]) }] });
       return null;
     }
     const value = await input.input.retrieveSource({ observation, result, signal: input.input.signal ?? new AbortController().signal });
-    if (value.fact.observationId !== observation.observationId || value.fact.queryId !== observation.queryId || canonicalizePublicSourceUrl(value.fact.resultUrl) !== canonicalUrl) throw new PublicSourceSnapshotUnavailableError();
+    if (value.fact.observationId !== observation.observationId || value.fact.queryId !== observation.queryId || canonicalizePublicSourceUrl(value.fact.resultUrl) !== canonicalUrl) throw new PublicSourceSnapshotUnavailableError("source_retrieval");
     try {
       await appendMarketSourceEvidence({ token: input.token, sources: [{ ...base, ...value.source }] });
     } catch (error) {
@@ -341,7 +351,7 @@ function toObservations(bundle: NonNullable<Awaited<ReturnType<typeof getMarketS
   return bundle.attempts.filter(({ requestStatus }) => requestStatus !== "pending").map((attempt) => {
     const storedQuery = bundle.queries.find(({ id }) => id === attempt.queryId);
     const query = storedQuery && fanout.queries[storedQuery.queryOrder];
-    if (!storedQuery || !query || query.exactQuery !== storedQuery.queryText || !attempt.completedAt) throw new PublicSourceSnapshotUnavailableError();
+    if (!storedQuery || !query || query.exactQuery !== storedQuery.queryText || !attempt.completedAt) throw new PublicSourceSnapshotUnavailableError("snapshot_materialization");
     const status = observationStatus(attempt.requestStatus);
     return { observationId: attempt.id, surface, queryId: query.id, exactQuery: query.exactQuery, requestedAt: attempt.startedAt.toISOString(), completedAt: attempt.completedAt.toISOString(), status,
       results: bundle.observations.filter((row) => row.attemptId === attempt.id && row.resultStatus === "returned").map((row) => ({ surfaceResultOrder: row.surfaceResultOrder, url: row.resultUrl, title: row.title, snippet: row.snippet ?? "", displayedHost: String((row.resultMetadata as { domain?: unknown })?.domain ?? new URL(row.resultUrl).hostname), metadata: { rank: row.surfaceResultOrder } })),
@@ -366,7 +376,7 @@ function observationStatus(status: string): SearchObservationStatus {
   if (status === "succeeded") return "complete";
   if (status === "timeout") return "timed_out";
   if (status === "partial" || status === "rate_limited" || status === "unavailable" || status === "malformed" || status === "aborted" || status === "authentication" || status === "unsupported") return status;
-  throw new PublicSourceSnapshotUnavailableError();
+  throw new PublicSourceSnapshotUnavailableError("snapshot_materialization");
 }
 function observationId(snapshotId: string, queryId: string, order: number, canonicalUrl: string): string { return deterministicId("market-observation", [snapshotId, queryId, String(order), canonicalUrl]); }
 function snapshotQueryId(snapshotId: string, queryId: string): string { return deterministicId("market-snapshot-query", [snapshotId, queryId]); }
@@ -385,4 +395,25 @@ function date(value: string, label: string): Date { const parsed = new Date(valu
 function positive(value: number, label: string): number { if (!Number.isSafeInteger(value) || value < 1 || value > 60 * 60_000) throw new TypeError(`${label} is invalid.`); return value; }
 
 export class PublicSourceSnapshotAuthorityMismatchError extends Error {}
-export class PublicSourceSnapshotUnavailableError extends Error {}
+export type PublicSourceSnapshotFailureStage =
+  | "lease_wait"
+  | "search_execution"
+  | "observation_normalization"
+  | "observation_persistence"
+  | "source_retrieval"
+  | "snapshot_completion"
+  | "snapshot_materialization";
+
+export class PublicSourceSnapshotUnavailableError extends JobError {
+  constructor(
+    readonly stage: PublicSourceSnapshotFailureStage = "snapshot_materialization",
+    options?: ErrorOptions
+  ) {
+    super(
+      `Public-source snapshot is unavailable at ${stage}.`,
+      `public_source_snapshot_${stage}`,
+      "transient",
+      options
+    );
+  }
+}

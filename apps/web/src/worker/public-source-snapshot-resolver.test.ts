@@ -9,6 +9,7 @@ import {
 } from "@open-geo-console/public-search-observer";
 import { activatePublicSearchSurfaceAuthority, installPublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
+import * as marketSnapshots from "@/db/market-snapshots";
 import { getMarketProviderEvidenceBundle } from "@/db/provider-evidence";
 import { PROVIDER_PASSAGE_SELECTOR_VERSION, selectProviderPassages } from "@open-geo-console/citation-intelligence";
 import { PublicSourceSnapshotAuthorityMismatchError, PublicSourceSnapshotUnavailableError, resolvePublicSourceSnapshot } from "./public-source-snapshot-resolver";
@@ -345,6 +346,64 @@ describe("public-source snapshot resolver", () => {
     await expect(resolvePublicSourceSnapshot({ authority, adapter: fixtureAdapter(authority, async () => observationPayload("unavailable")), question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-failed" }))
       .rejects.toBeInstanceOf(PublicSourceSnapshotUnavailableError);
     await expect(resolvePublicSourceSnapshot({ authority, adapter: fixtureAdapter(authority, async () => observationPayload("complete")), question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-retry" })).resolves.toMatchObject({ collectedForThisRun: true });
+  });
+
+  it("classifies observation persistence failures and releases the lease", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const append = vi.spyOn(marketSnapshots, "appendMarketSearchObservations")
+      .mockRejectedValueOnce(new Error("database unavailable"));
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-observation-persistence-failed"
+    })).rejects.toMatchObject({
+      name: "PublicSourceSnapshotUnavailableError",
+      stage: "observation_persistence",
+      code: "public_source_snapshot_observation_persistence"
+    });
+    append.mockRestore();
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-observation-persistence-retry"
+    })).resolves.toMatchObject({ collectedForThisRun: true });
+  });
+
+  it("classifies source retrieval failures and releases the lease", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-source-retrieval-failed",
+      retrieveSource: async () => { throw new Error("retrieval transport failed"); }
+    })).rejects.toMatchObject({
+      name: "PublicSourceSnapshotUnavailableError",
+      stage: "source_retrieval",
+      code: "public_source_snapshot_source_retrieval"
+    });
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-source-retrieval-retry"
+    })).resolves.toMatchObject({ collectedForThisRun: true });
   });
 });
 
