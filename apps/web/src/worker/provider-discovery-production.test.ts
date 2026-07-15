@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ConfirmedBusinessQuestionSet, PublicSearchSurfaceAuthority } from "@open-geo-console/public-search-observer";
 import {
+  bindQuestionScopedDirectEvidence,
   createProductionProviderDiscoveryContext,
   isLikelyCompanyOwnedProviderDomain,
   resolveProviderCandidates,
@@ -18,6 +19,27 @@ vi.mock("@/db/provider-evidence", () => ({
 vi.mock("@/db/market-snapshots", () => ({ getMarketSnapshotBundle: mocks.snapshotBundle }));
 
 describe("production provider discovery composition", () => {
+  it("binds only body excerpts that match the question to a traceable domain subject", () => {
+    const fact = {
+      observationId: "observation-1", queryId: "query-1", resultUrl: "https://www.ycs-express.com/service", finalUrl: "https://www.ycs-express.com/service",
+      retrievalState: "available" as const, publiclyRoutable: true, robotsAllowed: true, accessBarrier: "none" as const,
+      contentBytes: 3_000_000, normalizedText: "YCS音速国际物流公开提供台湾海运、空运和清关服务。",
+      normalizedContentHash: `sha256:${"a".repeat(64)}`
+    };
+    const question = { normalizedText: "哪些服务商公开提供台湾海运、空运或海快专线？", derivation: { subject: "台湾海运 空运 海快专线" } };
+    const bound = bindQuestionScopedDirectEvidence({ fact, question, sourceTitle: "YCS音速国际物流" });
+
+    expect(bound.verifiedExcerpt).toContain("台湾海运、空运和清关服务");
+    expect(bound.entityMentions).toEqual([expect.objectContaining({ registrableDomain: "ycs-express.com" })]);
+    expect(bound.claims).toEqual([expect.objectContaining({ directFactSupport: true, preciseEntityMapping: true, value: bound.verifiedExcerpt })]);
+
+    const unrelated = bindQuestionScopedDirectEvidence({
+      fact: { ...fact, normalizedText: "餐厅协会活动页面与播客目录。" }, question, sourceTitle: "Search results"
+    });
+    expect(unrelated.verifiedExcerpt).toBeUndefined();
+    expect(unrelated.claims).toBeUndefined();
+  });
+
   it("only treats a candidate domain as company-owned when the identity matches", () => {
     expect(isLikelyCompanyOwnedProviderDomain("Alpha Logistics", "alpha.example")).toBe(true);
     expect(isLikelyCompanyOwnedProviderDomain("Top logistics providers", "industry-directory.example")).toBe(false);

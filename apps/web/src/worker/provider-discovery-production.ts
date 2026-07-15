@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import {
   PROVIDER_PASSAGE_SELECTOR_VERSION,
+  getPublicSourceDomainIdentity,
   selectProviderPassages,
   selectProviderQualificationPolicy,
   validateProviderClaimCandidate,
   type ProviderClaim,
   type ProviderEvidencePassage,
-  type ProviderQualificationPolicy
+  type ProviderQualificationPolicy,
+  type RetrievedPublicSourceFact
 } from "@open-geo-console/citation-intelligence";
 import {
   extractProviderClaimCandidates,
@@ -204,6 +206,7 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
     return resolvePublicSourceSnapshot({
       ...request,
       fanout: discoveryFanout,
+      retrieveSource: createQuestionRetriever(question),
       snapshotMetadata: { snapshotKind: "provider_discovery", queryPlanVersion: PROVIDER_QUERY_PLAN_VERSION }
     });
   };
@@ -305,21 +308,42 @@ function createLegacyRetriever(): PublicSourceRetriever {
 }
 
 function createQuestionRetriever(question: { normalizedText: string; derivation: { subject: string } }): PublicSourceRetriever {
-  const terms = relevanceTerms(`${question.normalizedText} ${question.derivation.subject}`);
   return async ({ observation, result, signal }) => {
     const raw = await executePublicSourceRetrieval({ observationId: observation.observationId, queryId: observation.queryId, resultUrl: result.url }, { signal });
-    const excerpt = raw.normalizedText ? relevantExcerpt(raw.normalizedText, terms) : null;
-    const fact = excerpt ? { ...raw, verifiedExcerpt: excerpt } : raw;
+    const fact = bindQuestionScopedDirectEvidence({ fact: raw, question, sourceTitle: result.title });
+    const excerpt = fact.verifiedExcerpt ?? null;
     return { fact, source: { retrievalState: fact.retrievalState === "available" ? "available" : "inaccessible",
       ...(fact.retrievalState === "available" && excerpt ? { excerpt, excerptHash: digest(fact.normalizedContentHash), contentHash: digest(fact.normalizedContentHash) } : {}),
       sourceCategory: "unknown", entities: fact.entityMentions ?? [], claims: fact.claims ?? [], contradictions: [], evidenceFamilyIdentity: sha(fact.finalUrl ?? fact.resultUrl) } };
   };
 }
 
-function relevantExcerpt(text: string, terms: string[]): string {
+export function bindQuestionScopedDirectEvidence(input: {
+  fact: RetrievedPublicSourceFact;
+  question: { normalizedText: string; derivation: { subject: string } };
+  sourceTitle: string;
+}): RetrievedPublicSourceFact {
+  if (input.fact.retrievalState !== "available" || !input.fact.normalizedText?.trim()) return input.fact;
+  const excerpt = relevantExcerpt(input.fact.normalizedText, relevanceTerms(`${input.question.normalizedText} ${input.question.derivation.subject}`));
+  const canonicalUrl = input.fact.finalUrl ?? input.fact.resultUrl;
+  if (!excerpt) return { ...input.fact, verifiedExcerpt: undefined, entityMentions: undefined, claims: undefined };
+  let registrableDomain: string;
+  try { registrableDomain = getPublicSourceDomainIdentity(canonicalUrl).registrableDomain; } catch { return input.fact; }
+  const subjectName = candidateName(input.sourceTitle, registrableDomain);
+  const entityId = `public-source-subject:${sha({ subjectName: subjectName.toLocaleLowerCase(), registrableDomain })}`;
+  return {
+    ...input.fact,
+    verifiedExcerpt: excerpt,
+    entityMentions: [{ name: subjectName, entityId, registrableDomain, contextTerms: relevanceTerms(input.question.derivation.subject) }],
+    claims: [{ subjectName, predicate: "public_page_statement", value: excerpt, directFactSupport: true, preciseEntityMapping: true }]
+  };
+}
+
+function relevantExcerpt(text: string, terms: string[]): string | null {
   const chunks = text.match(/.{1,900}(?:[。！？.!?]|$)/gu) ?? [text.slice(0, 900)];
-  return chunks.map((value) => ({ value: value.trim(), score: terms.filter((term) => value.toLocaleLowerCase().includes(term)).length }))
-    .sort((left, right) => right.score - left.score || left.value.length - right.value.length)[0]!.value.slice(0, 1_000);
+  const selected = chunks.map((value) => ({ value: value.trim(), score: terms.filter((term) => value.toLocaleLowerCase().includes(term)).length }))
+    .sort((left, right) => right.score - left.score || left.value.length - right.value.length)[0];
+  return selected && selected.score > 0 ? selected.value.slice(0, 1_000) : null;
 }
 function relevanceTerms(value: string): string[] {
   const normalized = value.normalize("NFKC").toLocaleLowerCase();

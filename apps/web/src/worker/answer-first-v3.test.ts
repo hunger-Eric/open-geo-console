@@ -71,6 +71,37 @@ describe("answer-first V3 Worker service", () => {
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
+  it("synthesizes a limited answer from one eligible direct source", async () => {
+    const base = fixture();
+    const input = {
+      ...base,
+      storedSources: base.storedSources.filter(({ sourceEvidenceId }) => sourceEvidenceId !== "provider-source-b"),
+      providerDiscovery: {
+        ...base.providerDiscovery,
+        strict: base.providerDiscovery.strict.map((provider) => ({ ...provider, evidenceIds: ["provider-evidence-a"] })),
+        evidence: base.providerDiscovery.evidence.filter(({ evidenceId }) => evidenceId === "provider-evidence-a")
+      }
+    };
+    const evidence = buildAnswerFirstV3Evidence(input);
+    const client = {
+      configuredModel: "fixture-model",
+      completeJson: vi.fn(async () => ({
+        modelId: "fixture-model",
+        value: { answers: questionIds(input.questionSet).map((questionId, index) => {
+          const scoped = evidence.filter((item) => item.questionId === questionId);
+          return {
+            questionId,
+            sentences: [{ sentenceId: `sentence-${index}`, text: "公开正文提供了与该问题直接相关的信息。", evidenceIds: scoped.map(({ evidenceId }) => evidenceId), confidence: scoped.length >= 2 ? "verified" : "limited" }]
+          };
+        }) }
+      }))
+    };
+
+    const result = await resolveAnswerFirstV3({ ...input, client });
+    expect(result.answerCards[0]).toMatchObject({ status: "limited", sourceEvidence: [expect.objectContaining({ registrableDomain: "alpha.example" })] });
+    expect(result.answerCards[0].sentences.some(({ kind }) => kind === "scope_note")).toBe(true);
+  });
+
   it("rejects unsupported model sentences after one bounded correction", async () => {
     const input = fixture();
     const client = {
