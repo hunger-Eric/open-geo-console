@@ -42,6 +42,7 @@ The paid report `0631932e-72b8-4c6f-b492-820e2533e23e` now has an active V3 repl
 
 - Provide an isolated `OGC_TEST_DATABASE_ADMIN_URL`. Deterministic verification and the live staging `db:audit` pass, but the full staging-security runner still does not exit reliably after its PostgreSQL cases.
 - Complete a fully answered V3 acceptance with independently retrievable direct evidence for all three questions; the delivered replacement is truthful but limited (one limited answer, two insufficient cards).
+- Review and plan the approved prospective adaptive public-source acquisition design in `docs/superpowers/specs/2026-07-15-adaptive-public-source-acquisition-design.md`. It separates collection failure from evidence absence, adds question-isolated adaptive retrieval and typed attempt evidence, and is not implemented yet.
 - Restore a sanctioned Airwallex Sandbox refund path for refund `80ebc58e-3140-4d74-b9bd-f8b265088b83`; the internal credit is already refunded, but the provider cash refund is terminal `airwallex_authentication_invalid_configuration` and must not be represented as complete.
 - Restore a sanctioned Airwallex Sandbox refund path for refund `6e2dd3e9-0478-4225-a5e8-1ce976351826`; the current provider attempt is terminal `airwallex_authentication_http_401`, so do not mutate PostgreSQL to pretend cash was returned.
 - Complete one new English V3 report only after all pre-order provider gates pass again. Terminal historical jobs remain immutable; any future remediation must use the audited replacement boundary.
