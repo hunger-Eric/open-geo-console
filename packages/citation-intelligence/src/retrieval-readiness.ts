@@ -7,6 +7,7 @@ export interface RetrievalReadinessInput {
   robotsAllowed: boolean;
   accessBarrierAbsent: boolean;
   boundedContent: boolean;
+  boundedExcerptAvailable?: boolean;
   usableText: boolean;
 }
 
@@ -34,7 +35,8 @@ export function scoreRetrievalReadiness(input: RetrievalReadinessInput): Retriev
     explanation,
     passed: values[id]
   }));
-  const ready = input.retrievalState === "available" && signals.every(({ passed }) => passed);
+  const ready = input.retrievalState === "available" && signals.every(({ id, passed }) =>
+    passed || (id === "bounded_content" && input.boundedExcerptAvailable === true));
   return {
     version: "retrieval-readiness-v1",
     signals,
