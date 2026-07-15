@@ -89,6 +89,9 @@
 - [x] Complete the provider refund and three redirected-email deliveries for order `dee37006-7924-4965-8ef3-181d447f27db` through the protected Preview commerce runner.
 - [x] Repair the V3 answer boundary so unqualified but safely retrieved Q1 body evidence can produce a limited answer, reject non-entity search titles, separate six coverage counters, and diversify bounded retrieval candidates. The full deterministic suite, lint, build, staging `db:audit`, customer-PDF surface scan and private-PDF readiness checks pass.
 - [x] Deploy the repair to protected Preview `dpl_4EQQpkeqyM1v9zuw7NnR5AhXWw6P`, repoint only the fixed staging alias after Ready, and rebuild only the staging free/deep Worker services from the matching source image. Schema remains v21; production was untouched.
+- [x] Implement the paid-acceptance remediation with TDD: stage-specific public-search errors, privacy-safe observation filtering, compact source-driven questions, typed provider failures/probes, truthful payment-return state, and private-report `404` coverage. Full deterministic tests, lint, build and staging `db:audit` pass.
+- [x] Align protected Preview `dpl_56sV5LHa7Gb9W95VEVCCbvUtAeuj`, fixed staging alias, staging-only Workers and schema v22 to source revision `fa4cdb28dbc9f877a7ac2c124b66d5cc122e46c7`; production and historical reports remained untouched.
+- [ ] Restore `OGC_PUBLIC_SEARCH_MIMO_BASE_URL` in the protected-staging probe environment and rerun all pre-order gates. The 2026-07-15 attempt stopped at the first MiMo gate, before Airwallex/Resend probes or any new order.
 - [ ] Complete a fully answered/deliverable V3 acceptance on a target with independently retrievable direct public evidence.
 - [ ] Complete real Chrome desktop/mobile/report/404 acceptance for the repaired Preview. Chrome control initialization failed before navigation, so no browser evidence or new checkout link was fabricated.
 
