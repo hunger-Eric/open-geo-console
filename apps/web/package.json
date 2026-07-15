@@ -26,6 +26,7 @@
     "commerce:all": "node --env-file-if-exists=.env.local --import tsx src/scripts/commercial-operations.ts all",
     "commerce:retire-legacy": "node --env-file-if-exists=.env.local --import tsx src/scripts/retire-legacy-checkouts.ts",
     "commerce:staging:all": "node --env-file=.env.staging.local --import tsx src/scripts/staging-commercial-operations.ts all",
+    "commerce:staging:probe": "node --env-file-if-exists=../../.vercel/.env.preview.local --env-file=.env.staging.local --import tsx src/scripts/staging-provider-probe.ts",
     "browser:install": "playwright install chromium",
     "access-key:create": "node --env-file-if-exists=.env.local --import tsx src/scripts/create-access-key.ts",
     "ai:probe": "node --env-file-if-exists=.env.local --import tsx src/scripts/ai-probe.ts",

@@ -22,10 +22,11 @@ import {
 import { issueReportAccessToken, revokeReportAccessTokens } from "@/db/report-tokens";
 import type { EmailDeliveryRow, PaymentRefundRow } from "@/db/schema";
 import { revealCustomerEmail } from "./customer-email";
-import { ResendEmailGateway, ResendRequestError } from "@/email/resend";
+import { ResendEmailGateway } from "@/email/resend";
 import type { EmailTemplate } from "@/email/gateway";
 import { AirwallexGateway } from "@/payments/airwallex";
 import { getActiveCombinedGeoReport } from "@/db/combined-reports";
+import { isPermanentCommerceProviderError, safeCommerceFailureCode } from "./provider-error";
 
 export interface CommercialOperationResult {
   claimed: number;
@@ -44,12 +45,12 @@ export async function processQueuedCommercialEmails(limit = 25): Promise<Commerc
       await sendDelivery(delivery, owner, gateway);
       result.succeeded += 1;
     } catch (error) {
-      const permanent = error instanceof ResendRequestError && error.status >= 400 && error.status < 500 && error.status !== 409 && error.status !== 429;
+      const permanent = isPermanentCommerceProviderError(error);
       if (permanent || delivery.attempts >= 5) {
-        await markEmailFailed({ id: delivery.id, owner, errorCode: safeErrorCode(error) });
+        await markEmailFailed({ id: delivery.id, owner, errorCode: safeCommerceFailureCode(error) });
         result.failed += 1;
       } else {
-        await scheduleEmailRetry({ id: delivery.id, owner, errorCode: safeErrorCode(error), nextRetryAt: retryAt(delivery.attempts) });
+        await scheduleEmailRetry({ id: delivery.id, owner, errorCode: safeCommerceFailureCode(error), nextRetryAt: retryAt(delivery.attempts) });
         result.retried += 1;
       }
     }
@@ -105,12 +106,12 @@ export async function processPendingCommercialRefunds(limit = 25): Promise<Comme
       await submitRefund(refund, owner, gateway);
       result.succeeded += 1;
     } catch (error) {
-      if (refund.attempts >= 5) {
-        await markRefundFailed({ id: refund.id, owner, errorCode: safeErrorCode(error) });
+      if (isPermanentCommerceProviderError(error) || refund.attempts >= 5) {
+        await markRefundFailed({ id: refund.id, owner, errorCode: safeCommerceFailureCode(error) });
         await queueRefundAssistance(refund);
         result.failed += 1;
       } else {
-        await scheduleRefundRetry({ id: refund.id, owner, errorCode: safeErrorCode(error), nextRetryAt: retryAt(refund.attempts) });
+        await scheduleRefundRetry({ id: refund.id, owner, errorCode: safeCommerceFailureCode(error), nextRetryAt: retryAt(refund.attempts) });
         result.retried += 1;
       }
     }
@@ -170,11 +171,6 @@ function emptyResult(claimed: number): CommercialOperationResult {
 function retryAt(attempts: number): Date {
   const seconds = Math.min(3_600, 15 * 2 ** Math.max(0, attempts - 1));
   return new Date(Date.now() + seconds * 1_000);
-}
-
-function safeErrorCode(error: unknown): string {
-  const name = error instanceof Error ? error.name : "unknown_error";
-  return name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "unknown_error";
 }
 
 function requiredBaseUrl(): string {
