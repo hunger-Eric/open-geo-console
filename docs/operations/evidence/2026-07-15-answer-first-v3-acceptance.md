@@ -161,3 +161,19 @@ The job therefore terminalized `failed / terminalization / unexpected_internal_e
 - Mobile evidence: `C:\Users\fengc\.codex\visualizations\2026\07\15\019f64c5-8dc3-72d0-90a7-678ff375780b\v3-paid-failure-mobile-390x844.png`.
 
 Production database, production Workers, production aliases and production deployments were not changed. Historical failed order `d738b38f-63cb-4886-bdda-c8f745bf5b81` was not reopened or represented as successful. No second paid order was created after this hard stop.
+
+## 2026-07-15 deterministic-confidence repair acceptance attempt
+
+Commit `f54b0fe` was deployed to protected Preview `https://open-geo-console-idzi5bhqp-itheheda-6857s-projects.vercel.app`, the fixed staging alias, and matching staging-only free/deep Workers. Before checkout, the full deterministic suite (1,055 passed, 41 skipped), lint, build, real MiMo probe, protected Preview Airwallex/redirected-Resend probe, staging commerce drain, and database audit passed.
+
+- Free report / job: `0631932e-72b8-4c6f-b492-820e2533e23e` / `719db08c-ada0-4fa8-8197-16135db9f74a`.
+- Paid order / deep job: `98974ea3-369e-43bc-b84b-602d96382b02` / `9f3221a2-1a3b-47c8-9c3e-eda2b8be52dd`.
+- Credit / V3 revision: `3365535d-b58b-4130-9d4f-eb6d9e184694` / `cf76433c-c1de-43b6-ba75-cf3fc98500d5`.
+- One signed `payment_intent.succeeded` event was processed. It created exactly one reserved credit, one deep job, and one pending V3 revision; no second order was created.
+- The job analyzed 6 of 7 planned pages, then exhausted three phase retries at `public_source_preflight` with `public_source_snapshot_snapshot_materialization`. It failed before provider discovery and V3 answer-card synthesis, so this run neither reproduces nor validates the repaired confidence downgrade.
+- The artifact remained pending, with no readiness hashes, activation, or customer V3 HTML.
+- Commercial convergence marked the order fulfillment failed and refunded the internal credit. Staging `db:audit` passed with no terminal reserved credit.
+- Cash refund `80ebc58e-3140-4d74-b9bd-f8b265088b83` failed with `airwallex_authentication_invalid_configuration`; no provider refund ID or cash-success state was fabricated. Local staging email delivery also remained queued after retryable provider errors.
+- The real browser payment-return page resolves to the truthful terminal message that automatic refund did not complete and support assistance is required.
+
+This paid chain is terminal and cannot be reopened. A replacement Sandbox order requires a deterministic snapshot-materialization fix, full verification, aligned staging deployment, and all pre-order gates to pass again. Production and historical orders remained untouched.
