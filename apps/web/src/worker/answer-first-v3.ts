@@ -16,6 +16,7 @@ import {
   type RecommendationForensicReportV2
 } from "@open-geo-console/ai-report-engine";
 import { toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
+import { JobError } from "./job-errors";
 
 export const ANSWER_FIRST_V3_CHECKPOINT_VERSION = "answer-first-v3-checkpoint-v1" as const;
 export const ANSWER_FIRST_V3_SYNTHESIS_PROMPT_VERSION = "open-geo-answer-synthesis-v1" as const;
@@ -184,7 +185,13 @@ export async function resolveAnswerFirstV3(input: ResolveAnswerFirstV3Input): Pr
 
   const synthesisInput = { ...context, evidence, coverageByQuestion, signal: input.signal };
   const inputHash = await openGeoAnswerInputHashV3(synthesisInput);
-  const answerCards = await synthesizeOpenGeoAnswerCardsV3(input.client, synthesisInput);
+  let answerCards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
+  try {
+    answerCards = await synthesizeOpenGeoAnswerCardsV3(input.client, synthesisInput);
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    throw new AnswerFirstV3ModelContractInvalidError({ cause: error });
+  }
   const now = (input.now ?? (() => new Date()))().toISOString();
   const searchedAt = earliestTimestamp(input.forensicReport.snapshotRefs.map(({ observedAt }) => observedAt), input.forensicReport.evidenceCutoffAt);
   const engineProvenance: OpenGeoEngineProvenanceV3 = {
@@ -334,3 +341,14 @@ function earliestTimestamp(values: readonly string[], fallback: string): string 
 function hash(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 
 export class AnswerFirstV3ResumeIdentityMismatchError extends Error {}
+
+export class AnswerFirstV3ModelContractInvalidError extends JobError {
+  constructor(options?: ErrorOptions) {
+    super(
+      "Answer-first V3 model response failed contract validation.",
+      "answer_first_v3_model_contract_invalid",
+      "permanent",
+      options
+    );
+  }
+}

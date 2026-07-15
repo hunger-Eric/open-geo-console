@@ -1,10 +1,11 @@
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import { toCanonicalBuyerQuestionSet } from "@open-geo-console/public-search-observer";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   OPEN_GEO_ANSWER_V3_VERSION,
   diagnoseOpenGeoAnswerCardV3,
   parseOpenGeoAnswerCardsV3,
+  synthesizeOpenGeoAnswerCardsV3,
   type OpenGeoAnswerCardV3,
   type OpenGeoAnswerEvidenceV3
 } from "./open-geo-answer-v3";
@@ -52,6 +53,63 @@ describe("Open GEO answer V3 contract", () => {
     value[0] = { ...value[0], sourceEvidence: value[0].sourceEvidence.slice(0, 1) };
     value[0].sentences[0]!.evidenceIds = ["evidence-q1-a"];
     expect(() => parseOpenGeoAnswerCardsV3(value, context)).toThrow(/two independent/i);
+  });
+
+  it("deterministically downgrades a model verified claim backed by one domain", async () => {
+    const context = {
+      ...fixtureContext(),
+      locale: "en",
+      missingEvidenceFamiliesByQuestion: [[], [], []] as [string[], string[], string[]]
+    };
+    const ids = canonicalIds(context.questionSet);
+    const evidence = ids.flatMap((questionId, index) => evidenceFor(questionId, index));
+    const client = {
+      configuredModel: "fixture-model",
+      completeJson: vi.fn(async () => ({
+        modelId: "fixture-model",
+        rawContent: "fixture-answer-cards",
+        value: {
+          answers: ids.map((questionId, index) => ({
+            questionId,
+            sentences: [{
+              sentenceId: `sentence-q${index + 1}`,
+              text: "The reviewed public sources directly support this bounded factual conclusion.",
+              evidenceIds: index === 0
+                ? [`evidence-q${index + 1}-a`]
+                : [`evidence-q${index + 1}-a`, `evidence-q${index + 1}-b`],
+              confidence: "verified"
+            }]
+          }))
+        }
+      }))
+    };
+    const completeCoverage = {
+      plannedQueries: 2,
+      completedQueries: 2,
+      returnedResults: 2,
+      attemptedRetrievals: 2,
+      safelyRetrievedPages: 2,
+      eligibleDirectEvidence: 2,
+      reasons: []
+    };
+
+    const result = await synthesizeOpenGeoAnswerCardsV3(client, {
+      ...context,
+      evidence,
+      coverageByQuestion: [completeCoverage, completeCoverage, completeCoverage]
+    });
+
+    expect(result[0]).toMatchObject({
+      status: "limited",
+      sentences: [
+        expect.objectContaining({ kind: "grounded_claim", confidence: "limited" }),
+        expect.objectContaining({
+          kind: "scope_note",
+          text: "This conclusion has only one source or incomplete retrieval coverage and is not independently verified."
+        })
+      ]
+    });
+    expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
   it("rejects cross-question and cross-subject evidence", () => {

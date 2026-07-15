@@ -223,12 +223,18 @@ export async function synthesizeOpenGeoAnswerCardsV3(
           const sentence = record(value, `$model.answers[${cardIndex}].sentences[${sentenceIndex}]`);
           const evidenceIds = stringArray(sentence.evidenceIds, `$model.answers[${cardIndex}].sentences[${sentenceIndex}].evidenceIds`);
           if (evidenceIds.some((id) => !permitted.has(id))) throw new TypeError("Model sentence cites unsupported evidence.");
+          const citedEvidence = evidenceIds.map((id) => permitted.get(id)!);
+          const requestedConfidence = oneOf(sentence.confidence, ["verified", "limited"] as const, "confidence");
+          const subjectCount = new Set(citedEvidence.map(({ subjectKey }) => subjectKey)).size;
+          const independentDomainCount = new Set(citedEvidence.map(({ registrableDomain }) => registrableDomain.toLocaleLowerCase())).size;
           return {
             sentenceId: text(sentence.sentenceId, "sentenceId"),
             kind: "grounded_claim" as const,
             text: text(sentence.text, "text"),
             evidenceIds,
-            confidence: oneOf(sentence.confidence, ["verified", "limited"] as const, "confidence")
+            confidence: requestedConfidence === "verified" && subjectCount === 1 && independentDomainCount >= 2
+              ? "verified" as const
+              : "limited" as const
           };
         });
         const coverage = parseCoverage(input.coverageByQuestion[cardIndex], `coverageByQuestion[${cardIndex}]`);

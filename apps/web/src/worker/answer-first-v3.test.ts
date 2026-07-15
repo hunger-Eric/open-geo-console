@@ -3,6 +3,7 @@ import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-sear
 import { toCanonicalBuyerQuestionSet } from "@open-geo-console/public-search-observer";
 import { describe, expect, it, vi } from "vitest";
 import {
+  AnswerFirstV3ModelContractInvalidError,
   AnswerFirstV3ResumeIdentityMismatchError,
   buildAnswerFirstV3Evidence,
   resolveAnswerFirstV3,
@@ -101,7 +102,7 @@ describe("answer-first V3 Worker service", () => {
       configuredModel: "fixture-model",
       completeJson: vi.fn(async () => ({ modelId: "fixture-model", value: { answers: questionIds(input.questionSet).map((questionId) => ({
         questionId,
-        sentences: questionId === q1 ? [{ sentenceId: "sentence-q1", text: "永利八达通公开提供海外仓一件代发、中转补仓及逆向物流服务。", evidenceIds: evidence.map(({ evidenceId }) => evidenceId), confidence: "limited" }] : []
+        sentences: questionId === q1 ? [{ sentenceId: "sentence-q1", text: "永利八达通公开提供海外仓一件代发、中转补仓及逆向物流服务。", evidenceIds: evidence.map(({ evidenceId }) => evidenceId), confidence: "verified" }] : []
       })) } }))
     };
 
@@ -109,6 +110,11 @@ describe("answer-first V3 Worker service", () => {
 
     expect(result.answerCards[0].status).toBe("limited");
     expect(result.answerCards[0].sourceEvidence).toHaveLength(1);
+    expect(result.answerCards[0].sentences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "grounded_claim", confidence: "limited" }),
+      expect.objectContaining({ kind: "scope_note" })
+    ]));
+    expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
   it("keeps Q2 and Q3 evidence bound to their own question and subject", () => {
@@ -130,6 +136,24 @@ describe("answer-first V3 Worker service", () => {
     expect(result.checkpoint.answerCards).toHaveLength(3);
     expect(saveCheckpoint).toHaveBeenCalledOnce();
     expect(client.completeJson).toHaveBeenCalledOnce();
+  });
+
+  it("classifies a persistent non-three-entry model response as a V3 model contract error", async () => {
+    const input = fixture();
+    const client = modelClient(buildAnswerFirstV3Evidence(input), input.questionSet);
+    client.completeJson.mockImplementation(async () => ({
+      modelId: "fixture-model",
+      value: { answers: [] }
+    }));
+
+    const result = resolveAnswerFirstV3({ ...input, client });
+    await expect(result).rejects.toMatchObject({
+      name: "AnswerFirstV3ModelContractInvalidError",
+      code: "answer_first_v3_model_contract_invalid",
+      classification: "permanent"
+    });
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    await expect(result).rejects.toBeInstanceOf(AnswerFirstV3ModelContractInvalidError);
   });
 
   it("synthesizes a limited answer from one eligible direct source", async () => {
@@ -215,7 +239,10 @@ describe("answer-first V3 Worker service", () => {
         })) }
       }))
     };
-    await expect(resolveAnswerFirstV3({ ...input, client })).rejects.toThrow(/unsupported evidence/i);
+    await expect(resolveAnswerFirstV3({ ...input, client })).rejects.toMatchObject({
+      code: "answer_first_v3_model_contract_invalid",
+      cause: expect.objectContaining({ message: expect.stringMatching(/unsupported evidence/i) })
+    });
     expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
 
