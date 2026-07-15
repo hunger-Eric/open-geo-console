@@ -122,3 +122,42 @@ The existing staging refresh lineage requires an active V1/V2 source artifact. R
 ## Commercial terminality
 
 Refund intent `eadf87eb-fc3c-4674-9be8-b1322ffe62ba` succeeded on its fourth bounded attempt at `2026-07-15T04:57:59.343Z`, bound to provider refund `rfd_hkdmcczsvhkeob5qfmn_0ly540`. The credit remains refunded, all three transactional emails are delivered, and `db:audit` confirms no terminal commercial job retains a reserved credit. The evidence-insufficient job and its non-active artifact remain terminal and must not be reopened.
+
+## 2026-07-15 protected-staging paid continuation
+
+The earlier local provider block was a tooling-boundary error: Vercel Sensitive variables were available only inside protected Preview runtime. Commit `9953510` added a protected staging-only provider probe; Airwallex retrieved historical intent `int_hkdmp9krrhkepyhp2bz` and Resend returned provider email `037265a4-b0ad-4e32-aec3-96dfeb41edcf`. MiMo's three bounded cases, deterministic tests, lint, build and staging `db:audit` passed before checkout.
+
+### Aligned runtime and identities
+
+- Source/Worker revision: `995351020966ef9413d39ec6d6d0a989f9289c3c`.
+- Preview deployment: `dpl_GbzJtSVVMESqi1eJdBY64WGgDHkW` (`https://open-geo-console-m6f5wy0de-itheheda-6857s-projects.vercel.app`).
+- Free report/job: `d2bb14cc-ea2d-48d5-a8a2-6d9a35c1aeb3` / `6c332552-3404-4cc5-b730-ab2d86fbace4`.
+- Paid order / Airwallex intent: `d98f2c1a-4b9a-44d4-ae34-d74d8c9d01dd` / `int_hkdmcczsvhkewg8jfql`.
+- Deep job / credit: `22e50f13-da98-426a-8ff4-03fcca2eaa8f` / `9c73f1a7-1e9d-4d3f-acb1-76af0ba5ce8f`.
+- V3 artifact revision: `360f9cb0-463f-4cfe-82e8-55e3e2119246`, revision 1, `pending`, never ready or active.
+- Refund intent: `6e2dd3e9-0478-4225-a5e8-1ce976351826`.
+
+The signed payment Webhook created exactly one processed payment event, one credit, one deep job and one artifact revision. The deep job analyzed 6 of 7 planned pages and persisted five completed snapshots: provider discovery (30 observations), candidate verification (39 observations, 8 available sources across 7 domains), Q2 (9 observations), Q3 (6 observations), and the resumed provider discovery snapshot (25 observations).
+
+### Hard-stop result
+
+Append-only error events identify the actual product failure:
+
+1. `public_source_attempt_deferred` safely resumed a complete website foundation with a fresh public-source budget.
+2. `public_source_snapshot_source_retrieval` recorded a lost/expired market-snapshot lease and resumed from checkpoint.
+3. Artifact revision 42 failed three times because `$answerCards[0].sentences[0] verified confidence requires two independent registrable domains.`
+4. The terminal recovery attempt failed because the model did not return exactly three ordered answer entries.
+
+The job therefore terminalized `failed / terminalization / unexpected_internal_error` at 99%. The report has no active artifact revision and no customer `combined_geo_report_v3` HTML. This is not a deliverable website report and must not be described as one.
+
+### Commercial and browser convergence
+
+- Order: `paid / failed / failed-refund / delivered`.
+- Credit: `refunded`; staging `db:audit` passed with no terminal reserved credit.
+- Emails: `payment_confirmed`, `report_failed_refund`, and `refund_assistance` all reached `delivered`.
+- Airwallex cash refund: terminal `failed` with `airwallex_authentication_http_401`; no provider refund ID exists. PostgreSQL was not altered to claim cash success.
+- The customer page truthfully renders “自动退款未能完成，请联系支持团队协助核验并处理退款。” and the browser console has no application errors.
+- Desktop evidence: `C:\Users\fengc\.codex\visualizations\2026\07\15\019f64c5-8dc3-72d0-90a7-678ff375780b\v3-paid-failure-desktop-1440x1024.png`.
+- Mobile evidence: `C:\Users\fengc\.codex\visualizations\2026\07\15\019f64c5-8dc3-72d0-90a7-678ff375780b\v3-paid-failure-mobile-390x844.png`.
+
+Production database, production Workers, production aliases and production deployments were not changed. Historical failed order `d738b38f-63cb-4886-bdda-c8f745bf5b81` was not reopened or represented as successful. No second paid order was created after this hard stop.

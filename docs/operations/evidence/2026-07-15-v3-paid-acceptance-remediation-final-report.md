@@ -2,146 +2,57 @@
 
 ## Executive decision
 
-**Overall status: blocked before checkout; customer-deliverable V3 acceptance is not complete.**
+**Overall status: failed closed after Sandbox payment; no customer V3 website analysis report was activated.**
 
-The planned deterministic remediation, protected-staging deployment alignment, staging-only Worker alignment, database audit, and real MiMo public-search gate completed successfully. The next read-only provider gate stopped with `airwallex_authentication_invalid_configuration` before it could retrieve the historical Sandbox payment intent or send the redirected Resend probe email. Per the fail-closed plan, no new order was created and no payment, entitlement, deep job, artifact activation, delivery email, or browser acceptance was attempted.
+All deterministic gates, MiMo preflight, protected Preview Airwallex retrieval, redirected Resend probe, deployment alignment and pre-order database audit passed. A new CNY 199 Sandbox payment then created exactly one entitlement/deep job. The job analyzed 6/7 planned pages and collected real provider/search evidence, but V3 artifact validation rejected an overclaimed `verified` Q1 sentence and the recovery model later returned a non-three-entry answer payload. The artifact stayed pending and non-active.
 
-This result must not be represented as a successful paid V3 acceptance.
+Commercial cleanup delivered all three emails and refunded the internal credit. The Airwallex cash refund itself failed with `airwallex_authentication_http_401`, so the customer page truthfully requests refund assistance. This run must not be represented as a successful report or successful cash refund.
 
-## Scope and safety boundaries
-
-- Repository: `E:\project\open-geo-console`
-- Target used by the acceptance plan: `https://shun-express.com/`
-- Execution environment: protected staging Preview and staging-only Docker Workers.
-- Production database, production Workers, production alias, production deployment, and historical reports were not modified.
-- Failed historical order `d738b38f-63cb-4886-bdda-c8f745bf5b81` was not reopened, mutated, or represented as successful. The provider probe failed at local authentication configuration before retrieving it.
-- The user-provided plan remains untracked at `docs/superpowers/plans/2026-07-15-v3-paid-acceptance-remediation.md` and was not silently added to implementation commits.
-
-## Completed remediation
-
-| Commit | Result |
-| --- | --- |
-| `830a4de` | Classifies public-source snapshot failures by stage. |
-| `b9a7962` | Filters privacy-invalid provider rows before persistence while retaining valid observations. |
-| `5666675` | Produces compact, source-driven buyer questions with bounded examples and markets. |
-| `70e1eb1` | Adds typed commerce-provider failures and the read-only staging provider probe. |
-| `53092df` | Keeps pending payment returns polling and renders truthful refund-failure state. |
-| `fa4cdb2` | Covers missing, anonymous, and wrong-scope private HTML report reads as application `404`. |
-| `7df74bc` | Fixes the public-search probe to consume the merged staging Worker runtime env. |
-
-The MiMo probe regression was verified red/green: source env files contained empty Sensitive-value placeholders, while the staging Workers correctly used merged `.data/workstation-docker/staging.env` values. The durable operator rule is recorded in `AGENTS.md` and `docs/PROTECTED-STAGING-OPERATIONS.md` by commit `2d57066`.
-
-## Verification evidence
-
-| Check | Result |
-| --- | --- |
-| Focused probe configuration tests | 2 files, 2 tests passed |
-| Full `npm test` after the probe repair | 175 files passed, 19 skipped; 1,049 tests passed, 41 skipped |
-| `npm run lint` | Passed |
-| `npm run build` for the deployed remediation source | Passed locally and in Vercel Preview |
-| Staging `db:audit` | Passed; no terminal commercial job retains a reserved credit |
-| Database identity | `staging`, schema version `22` |
-| CodeGraph | Synchronized and up to date for the remediation source |
-| `git diff --check` | Passed before each remediation/documentation commit |
-
-PostgreSQL-only observer tests remained skipped where no isolated `OGC_TEST_DATABASE_ADMIN_URL` was supplied; those skips are not presented as live PostgreSQL acceptance.
-
-## Protected-staging identities
-
-| Identity | Value |
-| --- | --- |
-| Deployed remediation source | `fa4cdb28dbc9f877a7ac2c124b66d5cc122e46c7` |
-| Preview deployment | `dpl_56sV5LHa7Gb9W95VEVCCbvUtAeuj` |
-| Preview URL | `https://open-geo-console-63n3rf4hc-itheheda-6857s-projects.vercel.app` |
-| Fixed protected alias | `https://open-geo-console-staging-itheheda.vercel.app` |
-| Staging Worker image revision | `fa4cdb28dbc9f877a7ac2c124b66d5cc122e46c7` |
-| Local probe repair | `7df74bc` — local operator command only; no new Preview was required for this CLI env-source correction |
-
-Only `staging-worker-free` and `staging-worker-deep` were rebuilt/recreated from the aligned image. Both reported ready with `OGC_DEPLOYMENT_PROFILE=staging`.
-
-## Provider gates
-
-### MiMo public search — passed
-
-The corrected command used the same merged runtime env as the staging Docker Workers. All three bounded cases completed:
-
-| Case | Status | Sources |
-| --- | --- | --- |
-| `official-factual` | Passed | 3 domains |
-| `chinese-b2b-discovery` | Passed | 3 domains |
-| `narrow-structured-search` | Passed | 3 domains |
-
-Authentication, rate-limit, timeout, and malformed-response failure semantics were all present in the probe result.
-
-### Airwallex / Resend — blocked
-
-The read-only provider command was invoked with historical payment intent `int_hkdmp9krrhkepyhp2bz` and order `d738b38f-63cb-4886-bdda-c8f745bf5b81`. It stopped with `airwallex_authentication_invalid_configuration` before provider retrieval. Available local staging, pulled Preview, process, user, and machine sources did not expose non-empty Airwallex credentials to the probe. Resend was therefore not reached.
-
-No secret values were printed, logged, copied into tracked files, or substituted from production.
-
-## Commercial and report outcomes
-
-### New remediation attempt
-
-| Object | Result |
-| --- | --- |
-| New free report | Not created |
-| New Airwallex order | Not created |
-| New payment intent | Not created |
-| New entitlement / credit reservation | Not created |
-| New deep task/job | Not created |
-| New artifact revision | Not created |
-| New refund intent | Not created |
-| New email intent | Not created |
-| Active customer V3 HTML | Not produced |
-
-There are no new report, order, task/job, payment-intent, entitlement, or artifact-revision IDs to report.
-
-### Preserved historical V3 chain
-
-These terminal identities are historical context only and were not reopened:
+## Runtime identities
 
 | Object | ID / state |
 | --- | --- |
-| Report | `98caffd1-c8af-4ceb-88ab-063194ea74b7` |
-| Paid order | `dee37006-7924-4965-8ef3-181d447f27db` — terminal refunded/delivered |
-| Deep task/job | `7607a664-05c6-4b47-800e-03d420894aea` — terminal failed |
-| Artifact revision | `ae8f0485-ff26-4457-92bc-3fcd7002e970` — ready but non-active |
-| Refund intent | `eadf87eb-fc3c-4674-9be8-b1322ffe62ba` — succeeded |
+| Source/Worker revision | `995351020966ef9413d39ec6d6d0a989f9289c3c` |
+| Preview deployment | `dpl_GbzJtSVVMESqi1eJdBY64WGgDHkW` |
+| Preview URL | `https://open-geo-console-m6f5wy0de-itheheda-6857s-projects.vercel.app` |
+| Free report/job | `d2bb14cc-ea2d-48d5-a8a2-6d9a35c1aeb3` / `6c332552-3404-4cc5-b730-ab2d86fbace4` |
+| Paid order / intent | `d98f2c1a-4b9a-44d4-ae34-d74d8c9d01dd` / `int_hkdmcczsvhkewg8jfql` |
+| Deep job | `22e50f13-da98-426a-8ff4-03fcca2eaa8f` — terminal failed |
+| Credit | `9c73f1a7-1e9d-4d3f-acb1-76af0ba5ce8f` — refunded |
+| Artifact revision | `360f9cb0-463f-4cfe-82e8-55e3e2119246` — pending, non-active |
+| Refund intent | `6e2dd3e9-0478-4225-a5e8-1ce976351826` — failed |
 
-The earlier chain proves fail-closed refund/email/non-activation behavior, not successful V3 product acceptance.
+## Passed evidence
 
-## Product and browser acceptance
+- Full deterministic suite: 176 files passed, 19 skipped; 1,052 tests passed, 41 skipped.
+- Lint and build passed.
+- Real MiMo probe passed all three bounded cases.
+- Protected Preview provider probe returned Airwallex retrieval success and Resend provider email `037265a4-b0ad-4e32-aec3-96dfeb41edcf`.
+- Payment Webhook persisted exactly one processed event, credit, deep job and artifact revision.
+- Deep crawl analyzed 6/7 planned pages.
+- Candidate verification persisted 39 observations and 8 available sources across 7 domains.
+- Three transactional emails reached `delivered`.
+- Final staging `db:audit` passed: no terminal commercial job retains a reserved credit.
+- Customer failure/refund-assistance UI rendered at 1440×1024 and 390×844 with no browser console errors.
 
-- Three newly generated answer cards: not available because no new report was admitted.
-- New V3 HTML activation: not attempted.
-- New delivery email: not attempted.
-- Commercial convergence for a new order: not applicable because no order was created.
-- Desktop 1440×1024 browser verification: not attempted.
-- Mobile 390×844 browser verification: not attempted.
-- Authorized `report.html` and anonymous/wrong-scope `404` browser verification: not attempted for a new report.
-- Screenshot paths: none.
+## Failed evidence
 
-Historical screenshots or browser observations are not reused as evidence for this remediation attempt.
+- V3 Q1 emitted `verified` confidence while its first grounded sentence had fewer than two independent registrable domains.
+- Artifact verification retried the same contract failure three times under `unexpected_internal_error`.
+- Terminal recovery returned fewer or more than exactly three ordered answer entries.
+- Deep job terminalized failed at 99%; no V3 HTML became ready or active.
+- Airwallex cash refund failed with `airwallex_authentication_http_401`; no provider refund ID was issued.
+- Authorized `report.html`, three accepted answer cards, report-ready email and desktop/mobile report rendering do not exist for this run.
 
-## Required continuation
+## Browser evidence
 
-1. Restore an authorized protected-staging Airwallex Sandbox credential source for the read-only provider probe without copying production secrets or writing secrets into tracked files.
-2. Rerun the Airwallex/Resend provider probe against the immutable historical identifiers. Stop again if either provider fails.
-3. Run protected-staging commerce reconciliation and staging `db:audit`; confirm no new `unknown_error` and no terminal reserved credit.
-4. Only after every pre-order gate passes, create one new protected-staging Airwallex Sandbox order and complete it with the official success test card.
-5. Prove exactly one signed-Webhook entitlement/deep job, complete the V3 Worker path, activate the new HTML only if all three cards meet product acceptance, settle email/commercial state, and record all new IDs.
-6. Complete real desktop and 390×844 mobile browser acceptance and store new screenshots outside the repository.
+- Desktop: `C:\Users\fengc\.codex\visualizations\2026\07\15\019f64c5-8dc3-72d0-90a7-678ff375780b\v3-paid-failure-desktop-1440x1024.png`.
+- Mobile: `C:\Users\fengc\.codex\visualizations\2026\07\15\019f64c5-8dc3-72d0-90a7-678ff375780b\v3-paid-failure-mobile-390x844.png`.
 
-## Final classification
+## Safety statement
 
-- Deterministic remediation: **passed**.
-- Protected-staging source/Worker/database alignment: **passed**.
-- MiMo provider preflight: **passed**.
-- Airwallex provider preflight: **blocked**.
-- Resend provider preflight: **not reached**.
-- New Sandbox checkout/payment: **not created**.
-- New V3 report/card/email/browser acceptance: **not completed**.
-- Production and historical-state preservation: **passed**.
+Production database, production Workers, production deployment and production aliases were not changed. Historical failed order `d738b38f-63cb-4886-bdda-c8f745bf5b81` was not reopened, mutated or represented as successful. No second order was created after the hard stop, and PostgreSQL was not changed to fake a provider refund or artifact activation.
 
-The only truthful final status is: **remediation implemented and partially validated; paid V3 acceptance remains blocked before checkout**.
+## Required next repair
+
+Before any further paid attempt, add TDD coverage that downgrades one-domain claims to `limited`, preserves exactly three ordered answer entries across recovery, and maps these validation failures to a specific bounded code. Separately restore a sanctioned Airwallex Sandbox refund/reconciliation path for refund `6e2dd3e9-0478-4225-a5e8-1ce976351826`. Only after both repairs and all pre-order gates pass may a new paid acceptance attempt be created.
