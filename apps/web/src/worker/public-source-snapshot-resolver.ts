@@ -147,7 +147,11 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     let successful: Array<{ observation: MarketSearchObservation; attemptId: string; storedQueryId: string }>;
     if (resumed) {
       const bundle = await getMarketSnapshotBundle(currentSnapshotId);
-      if (!bundle || !isResumableSearchLedger(bundle, queries)) throw new PublicSourceSnapshotUnavailableError();
+      if (!bundle || !isResumableSearchLedger(bundle, queries)) {
+        await releaseFailedMarketSnapshotLease({ token: claim.token, snapshotId: currentSnapshotId });
+        snapshotId = undefined;
+        return resolvePublicSourceSnapshot({ ...input, leaseDurationMs, waitDeadlineMs: input.waitDeadlineMs });
+      }
       observations = toObservations(bundle, input.authority.surface, input.fanout);
       successful = observations.filter(({ status }) => status === "complete" || status === "partial").map((observation) => {
         const attempt = bundle.attempts.find(({ id }) => id === observation.observationId);

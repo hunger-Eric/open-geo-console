@@ -160,6 +160,35 @@ describe("public-source snapshot resolver", () => {
     expect(resumed).toMatchObject({ collectedForThisRun: true, sufficientlyEvidenced: true, availableSourceCount: 1 });
   });
 
+  it("replaces an incomplete pending search ledger after Worker interruption", async () => {
+    const authority = await installAuthority("review-one");
+    const controller = new AbortController();
+    const deadline = new Error("worker stopped during provider search");
+    let interrupted = false;
+    const search = vi.fn(async () => {
+      if (!interrupted) {
+        interrupted = true;
+        controller.abort(deadline);
+        throw deadline;
+      }
+      return observationPayload("complete");
+    });
+    const adapter = fixtureAdapter(authority, search);
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+
+    await expect(resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-interrupted-first",
+      signal: controller.signal
+    })).rejects.toBe(deadline);
+
+    const resumed = await resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-interrupted-second"
+    });
+
+    expect(resumed).toMatchObject({ collectedForThisRun: true, refreshAttempted: true });
+    expect(search.mock.calls.length).toBeGreaterThan(fanout.queries.length);
+  });
+
   it("persists public contact evidence without treating it as private customer identity", async () => {
     const authority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
