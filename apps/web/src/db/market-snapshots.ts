@@ -502,6 +502,7 @@ export async function findExactMarketSnapshot(input: { identity: MarketSnapshotI
 
 export async function waitForMarketSnapshot(input: {
   identity: MarketSnapshotIdentity; deadline: Date; minBackoffMs?: number; maxBackoffMs?: number; signal?: AbortSignal;
+  acceptSnapshot?: (snapshot: MarketSnapshotQuestionRow) => boolean;
 }): Promise<{ status: "completed"; snapshot: MarketSnapshotQuestionRow } | { status: "takeover_available" | "released_retryable" | "deadline" | "aborted" }> {
   const identity = exactIdentity(input.identity);
   const deadline = validDate(input.deadline, "deadline");
@@ -511,12 +512,14 @@ export async function waitForMarketSnapshot(input: {
     if (input.signal?.aborted) return { status: "aborted" };
     const now = await databaseTime();
     const found = await findExactMarketSnapshot({ identity, evidenceCutoff: now });
-    if (found) return { status: "completed", snapshot: found.snapshot };
+    if (found && (!input.acceptSnapshot || input.acceptSnapshot(found.snapshot))) return { status: "completed", snapshot: found.snapshot };
     const lease = await readLease(identity.id);
     if (lease?.state === "completed" && lease.terminalSnapshotId) {
       const bundle = await getMarketSnapshotBundle(lease.terminalSnapshotId);
       if (bundle?.snapshot.status === "completed" && exactRow(bundle.snapshot, identity)) {
-        return { status: "completed", snapshot: bundle.snapshot };
+        return !input.acceptSnapshot || input.acceptSnapshot(bundle.snapshot)
+          ? { status: "completed", snapshot: bundle.snapshot }
+          : { status: "released_retryable" };
       }
       throw new Error("Completed market snapshot lease has no exact terminal evidence.");
     }

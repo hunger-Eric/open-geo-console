@@ -83,6 +83,41 @@ describe("public-source snapshot resolver", () => {
     expect(peak).toBe(2);
   });
 
+  it("waits for the matching metadata refresh instead of returning an older completed snapshot", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const discovery = await resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, async () => observationPayload("complete")), question, fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-metadata-discovery",
+      snapshotMetadata: { snapshotKind: "provider_discovery", queryPlanVersion: "provider-query-plan-v1" }
+    });
+    let releaseSearch!: () => void;
+    const searchGate = new Promise<void>((resolve) => { releaseSearch = resolve; });
+    const search = vi.fn(async () => {
+      await searchGate;
+      return observationPayload("complete");
+    });
+    const candidateInput = {
+      authority, adapter: fixtureAdapter(authority, search), question, fanout,
+      evidenceCutoffAt: "2030-01-05T00:00:00.000Z",
+      snapshotMetadata: {
+        snapshotKind: "candidate_verification" as const,
+        parentSnapshotId: discovery.snapshotId,
+        candidateSetHash: "a".repeat(64),
+        queryPlanVersion: "provider-query-plan-v1"
+      }
+    };
+
+    const first = resolvePublicSourceSnapshot({ ...candidateInput, leaseOwner: "worker-metadata-first", waitDeadlineMs: 5_000 });
+    await vi.waitFor(() => expect(search).toHaveBeenCalled());
+    const second = resolvePublicSourceSnapshot({ ...candidateInput, leaseOwner: "worker-metadata-second", waitDeadlineMs: 5_000 });
+    releaseSearch();
+
+    const [created, reused] = await Promise.all([first, second]);
+    expect(reused.snapshotId).toBe(created.snapshotId);
+    expect(reused.collectedForThisRun).toBe(false);
+  });
+
   it("resumes a fully searched snapshot and skips source evidence persisted before abort", async () => {
     const authority = await installAuthority("review-one");
     const search = vi.fn(async () => ({

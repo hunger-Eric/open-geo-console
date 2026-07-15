@@ -115,7 +115,12 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
       if (forceRefresh) throw new PublicSourceSnapshotAuthorityMismatchError();
       return resolvePublicSourceSnapshot({ ...input, forceRefresh: true, leaseDurationMs });
     }
-    const waited = await waitForMarketSnapshot({ identity, deadline: new Date(Date.now() + positive(input.waitDeadlineMs ?? DEFAULT_WAIT_DEADLINE_MS, "waitDeadlineMs")), signal: input.signal });
+    const waited = await waitForMarketSnapshot({
+      identity,
+      deadline: new Date(Date.now() + positive(input.waitDeadlineMs ?? DEFAULT_WAIT_DEADLINE_MS, "waitDeadlineMs")),
+      signal: input.signal,
+      acceptSnapshot: (snapshot) => snapshotMetadataMatches(snapshot, input.snapshotMetadata)
+    });
     if (waited.status === "completed") return resolveExisting({ ...input, identity, evidenceCutoff, snapshotId: waited.snapshot.id, ageMs: Math.max(0, evidenceCutoff.getTime() - (waited.snapshot.completedAt?.getTime() ?? evidenceCutoff.getTime())) });
     if (waited.status === "takeover_available" || waited.status === "released_retryable") {
       return resolvePublicSourceSnapshot({ ...input, leaseDurationMs, waitDeadlineMs: input.waitDeadlineMs });
