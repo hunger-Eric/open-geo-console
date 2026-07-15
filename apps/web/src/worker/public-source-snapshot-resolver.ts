@@ -26,6 +26,7 @@ import {
   findResumableMarketSnapshot,
   findExactMarketSnapshot,
   getMarketSnapshotBundle,
+  heartbeatMarketSnapshotLease,
   releaseFailedMarketSnapshotLease,
   validateMarketSearchObservationInput,
   waitForMarketSnapshot,
@@ -134,6 +135,11 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
 
   let snapshotId: string | undefined;
   let failureStage: PublicSourceSnapshotFailureStage = "search_execution";
+  const heartbeatIntervalMs = Math.max(5, Math.min(60_000, Math.floor(leaseDurationMs / 3)));
+  const heartbeat = setInterval(() => {
+    void heartbeatMarketSnapshotLease({ token: claim.token, leaseDurationMs }).catch(() => undefined);
+  }, heartbeatIntervalMs);
+  heartbeat.unref?.();
   try {
     const resumable = claim.takeover && !forceRefresh ? await findResumableMarketSnapshot({ identity, authorityVersion: input.authority.authorityId }) : null;
     const resumed = resumable && snapshotMetadataMatches(resumable, input.snapshotMetadata) ? resumable : null;
@@ -240,6 +246,8 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     if (input.signal?.aborted) throw input.signal.reason;
     if (error instanceof PublicSourceSnapshotUnavailableError || error instanceof PublicSourceSnapshotAuthorityMismatchError) throw error;
     throw new PublicSourceSnapshotUnavailableError(failureStage, { cause: error });
+  } finally {
+    clearInterval(heartbeat);
   }
 }
 

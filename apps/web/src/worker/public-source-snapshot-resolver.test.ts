@@ -105,6 +105,27 @@ describe("public-source snapshot resolver", () => {
     expect(peak).toBe(2);
   });
 
+  it("renews the snapshot lease while slow source retrieval is still running", async () => {
+    const authority = await installAuthority("review-slow-retrieval");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const retrieveSource = vi.fn(async ({ observation, result }) => {
+      await new Promise((resolve) => setTimeout(resolve, 45));
+      return availableRetrieval(observation, result);
+    });
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-slow-retrieval",
+      leaseDurationMs: 20,
+      retrieveSource,
+      maxSourceRetrievals: 1
+    })).resolves.toMatchObject({ collectedForThisRun: true, availableSourceCount: 1 });
+  });
+
   it("waits for the matching metadata refresh instead of returning an older completed snapshot", async () => {
     const authority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
