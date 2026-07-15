@@ -96,8 +96,8 @@ export function buildAnswerFirstV3Evidence(input: BuildAnswerFirstV3EvidenceInpu
   for (const evidence of input.forensicReport.sourceGraph.evidence) {
     if (!evidence.verifiedExcerpt || !evidence.retrievalReadiness.ready || !evidence.sourceEligibility.eligible ||
         !evidence.directFactSupport || evidence.metadataOnly || evidence.contradictory || evidence.entityAmbiguous) continue;
-    const questionIndex = querySets.findIndex((queryIds, index) => index > 0 && evidence.queryVariantIds.some((id) => queryIds.has(id)));
-    if (questionIndex < 1) continue;
+    const questionIndex = querySets.findIndex((queryIds) => evidence.queryVariantIds.some((id) => queryIds.has(id)));
+    if (questionIndex < 0) continue;
     const subjectKeys = evidenceSubjects(input.forensicReport, evidence.evidenceId, evidence.entityIds);
     if (subjectKeys.length !== 1) continue;
     const stored = evidence.observationRefs.map(({ observationId }) => storedByObservation.get(observationId))

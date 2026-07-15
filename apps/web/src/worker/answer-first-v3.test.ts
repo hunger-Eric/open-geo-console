@@ -27,6 +27,29 @@ describe("answer-first V3 Worker service", () => {
     });
   });
 
+  it("projects ordinary eligible direct evidence for Q1 without provider qualification", () => {
+    const input = fixture();
+    const q1 = questionIds(input.questionSet)[0];
+    const ordinarySource = source("source-q1-general", "observation-q1-general", "query-q1-general", "https://public-provider.example/taiwan", "Public provider", "public-provider.example", "该服务商公开提供台湾海运和空运服务。", "earned_editorial");
+    const evidence = buildAnswerFirstV3Evidence({
+      ...input,
+      providerDiscovery: { ...input.providerDiscovery, strict: [], candidates: [], evidence: [] },
+      storedSources: [...input.storedSources, ordinarySource],
+      forensicReport: {
+        ...input.forensicReport,
+        fanouts: input.forensicReport.fanouts.map((fanout, index) => index === 0 ? { ...fanout, queries: [{ id: "query-q1-general" }] } : fanout),
+        sourceGraph: {
+          ...input.forensicReport.sourceGraph,
+          evidence: [graphEvidence("graph-q1-general", q1, "query-q1-general", "observation-q1-general", ordinarySource.canonicalUrl, ordinarySource.registrableDomain, ordinarySource.exactExcerpt, "entity-public-provider", "independent_editorial")]
+        }
+      }
+    });
+
+    expect(evidence.filter(({ questionId }) => questionId === q1)).toEqual([
+      expect.objectContaining({ subjectKey: "entity-public-provider", canonicalUrl: ordinarySource.canonicalUrl })
+    ]);
+  });
+
   it("keeps Q2 and Q3 evidence bound to their own question and subject", () => {
     const input = fixture();
     const evidence = buildAnswerFirstV3Evidence(input);
