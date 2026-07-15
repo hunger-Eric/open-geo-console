@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { runStagingProviderProbe } from "./staging-provider-probe";
+import {runStagingProviderProbe} from "@/commerce/staging-provider-probe";
 
 describe("protected staging provider probe", () => {
   it("returns only allowlisted provider evidence", async () => {
