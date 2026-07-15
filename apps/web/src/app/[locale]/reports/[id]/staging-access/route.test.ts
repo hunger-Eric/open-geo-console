@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getPaymentOrder, issueReportAccessToken, getGeoReport, getActiveCombinedGeoReport, productContractForCode } = vi.hoisted(() => ({
+const { getPaymentOrder, issueReportAccessToken, getGeoReport, getActiveCombinedGeoReport, hasCompletedReportReplacement, productContractForCode } = vi.hoisted(() => ({
   getPaymentOrder: vi.fn(),
   issueReportAccessToken: vi.fn(),
   getGeoReport: vi.fn(),
   getActiveCombinedGeoReport: vi.fn(),
+  hasCompletedReportReplacement: vi.fn(),
   productContractForCode: vi.fn((code: string) => code === "recommendation_forensics_v1" ? "recommendation_forensics_v1" : "legacy_website_audit_v1")
 }));
 
@@ -12,6 +13,7 @@ vi.mock("@/db/commercial-orders", () => ({ getPaymentOrder, productContractForCo
 vi.mock("@/db/report-tokens", () => ({ issueReportAccessToken }));
 vi.mock("@/db/reports", () => ({ getGeoReport }));
 vi.mock("@/db/combined-reports", () => ({ getActiveCombinedGeoReport }));
+vi.mock("@/db/report-replacement-fulfillments", () => ({ hasCompletedReportReplacement }));
 
 import { GET } from "./route";
 
@@ -31,6 +33,7 @@ describe("staging report operator access", () => {
     });
     getGeoReport.mockResolvedValue({ reportLocale: "zh" });
     getActiveCombinedGeoReport.mockResolvedValue(null);
+    hasCompletedReportReplacement.mockResolvedValue(false);
     issueReportAccessToken.mockResolvedValue({ rawToken: "secret", expiresAt: new Date("2026-07-12T00:00:00Z") });
   });
 
@@ -84,6 +87,22 @@ describe("staging report operator access", () => {
     const response = await GET(new Request("https://staging.example/zh/reports/report-1/staging-access?order=order-1"), context);
     expect(response.headers.get("location")).toBe("https://staging.example/reports/report-1/report.html");
     expect(response.headers.get("set-cookie")).toContain("ogc_report_report-1_combined_v3=secret");
+    expect(issueReportAccessToken).toHaveBeenCalledWith(expect.objectContaining({ artifactScope: "combined_geo_report_v3" }));
+  });
+
+  it("opens a completed replacement while preserving the failed original order state", async () => {
+    getPaymentOrder.mockResolvedValue({
+      id: "order-1", reportId: "report-1", paymentStatus: "paid", fulfillmentStatus: "failed",
+      productCode: "recommendation_forensics_v1"
+    });
+    getGeoReport.mockResolvedValue({ reportLocale: "zh", activeArtifactRevisionId: "replacement-v3" });
+    getActiveCombinedGeoReport.mockResolvedValue({ report: { artifactContract: "combined_geo_report_v3" } });
+    hasCompletedReportReplacement.mockResolvedValue(true);
+
+    const response = await GET(new Request("https://staging.example/en/reports/report-1/staging-access?order=order-1"), context);
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("https://staging.example/reports/report-1/report.html");
     expect(issueReportAccessToken).toHaveBeenCalledWith(expect.objectContaining({ artifactScope: "combined_geo_report_v3" }));
   });
 

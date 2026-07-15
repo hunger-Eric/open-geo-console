@@ -24,6 +24,16 @@ export interface ReplacementInspection {
   existing: ReplacementFulfillmentSummary | null;
 }
 
+export async function hasCompletedReportReplacement(orderId: string, reportId: string): Promise<boolean> {
+  await ensureDatabase();
+  const rows = await getSqlClient()<Array<{ present: boolean }>>`
+    SELECT EXISTS(
+      SELECT 1 FROM report_replacement_fulfillments
+      WHERE order_id=${orderId} AND report_id=${reportId} AND state='completed' AND active_artifact_revision_id IS NOT NULL
+    ) AS present`;
+  return rows[0]?.present === true;
+}
+
 interface EligibilityRow {
   payment_status: string;
   fulfillment_status: string;

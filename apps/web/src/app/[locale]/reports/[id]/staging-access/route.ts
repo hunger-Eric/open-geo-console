@@ -3,6 +3,7 @@ import { getPaymentOrder, productContractForCode } from "@/db/commercial-orders"
 import { issueReportAccessToken } from "@/db/report-tokens";
 import { getGeoReport } from "@/db/reports";
 import { getActiveCombinedGeoReport } from "@/db/combined-reports";
+import { hasCompletedReportReplacement } from "@/db/report-replacement-fulfillments";
 import { reportAccessCookieName } from "@/server/report-access";
 
 type RouteContext = { params: Promise<{ locale: string; id: string }> };
@@ -13,9 +14,12 @@ export async function GET(request: Request, context: RouteContext) {
   }
   const { id } = await context.params;
   const orderId = new URL(request.url).searchParams.get("order") ?? "";
-  const [order, report, active] = await Promise.all([getPaymentOrder(orderId), getGeoReport(id), getActiveCombinedGeoReport(id)]);
+  const [order, report, active, replacementCompleted] = await Promise.all([
+    getPaymentOrder(orderId), getGeoReport(id), getActiveCombinedGeoReport(id), hasCompletedReportReplacement(orderId, id)
+  ]);
   const isDeliverable = order?.fulfillmentStatus === "completed"
-    || order?.fulfillmentStatus === "completed_limited";
+    || order?.fulfillmentStatus === "completed_limited"
+    || replacementCompleted;
   if (!order || !report?.reportLocale || order.reportId !== id
     || order.paymentStatus !== "paid" || !isDeliverable) {
     return new NextResponse(null, { status: 404 });
