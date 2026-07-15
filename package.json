@@ -44,6 +44,8 @@
     "staging:correction:prepare": "npm run staging:correction:prepare --workspace apps/web --",
     "staging:correction:confirm": "npm run staging:correction:confirm --workspace apps/web --",
     "staging:combined:refresh": "npm run staging:combined:refresh --workspace apps/web --",
+    "staging:replacement:inspect": "npm run staging:replacement:inspect --workspace apps/web --",
+    "staging:replacement:prepare": "npm run staging:replacement:prepare --workspace apps/web --",
     "test:postgres:staging-security": "npm run test:postgres:staging-security --workspace apps/web",
     "db:migrate:sqlite": "npm run db:migrate:sqlite --workspace apps/web --",
     "build": "npm run build --workspaces --if-present",
