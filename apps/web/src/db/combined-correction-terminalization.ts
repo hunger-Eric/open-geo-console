@@ -138,6 +138,7 @@ function sha(parts:string[]):string{return createHash("sha256").update(parts.joi
 export function combinedV3CommercialOutcome(cards:readonly Pick<OpenGeoAnswerCardV3,"status"|"sentences">[]):"completed"|"completed_limited"|"failed"{
   if(cards.length!==3)throw new TypeError("V3 commercial outcome requires exactly three answer cards.");
   if(cards.every(({status})=>status==="answered"))return "completed";
+  if(cards.every(({status})=>status!=="insufficient"))return "completed_limited";
   return cards.some(({sentences})=>sentences.some(({kind,evidenceIds})=>kind==="grounded_claim"&&evidenceIds.length>0))?"completed_limited":"failed";
 }
 function readyCombined(value:unknown):CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3{

@@ -46,6 +46,26 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(visible).not.toMatch(/\bSEO\b|ChatGPT|Gemini|Kimi|Doubao|豆包|\.pdf\b|download pdf|print report|PDF 下载|打印报告/i);
   });
 
+  it("renders all three unresolved questions with explicit nonblank conclusions",()=>{
+    const model=combinedV3ArtifactFixture();
+    model.combinedReport.answerCards=model.combinedReport.answerCards.map((card,index)=>({
+      ...card,
+      status:"unresolved" as const,
+      sourceEvidence:[],
+      sentences:[{
+        sentenceId:`unresolved-${index + 1}`,
+        kind:"scope_note" as const,
+        text:`Search returned results for question ${index + 1}, but the page text could not yet be verified.`,
+        evidenceIds:[]
+      }]
+    })) as typeof model.combinedReport.answerCards;
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    expect(html.match(/data-open-geo-answer-card="true"/g)).toHaveLength(3);
+    expect(html.match(/data-answer-sentence="unresolved-/g)).toHaveLength(3);
+    expect(html.match(/Not yet verifiable/g)).toHaveLength(3);
+    for(let index=1;index<=3;index+=1)expect(html).toContain(`Search returned results for question ${index}`);
+  });
+
   it("uses the saved Chinese locale for the Open GEO answer label",()=>{
     const model=combinedV3ArtifactFixture();
     model.locale="zh";

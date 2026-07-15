@@ -38,16 +38,16 @@ export interface OpenGeoAnswerEvidenceV3 {
 
 export interface OpenGeoAnswerSentenceV3 {
   sentenceId: string;
-  kind: "grounded_claim" | "scope_note";
+  kind: "grounded_claim" | "observed_claim" | "scope_note";
   text: string;
   evidenceIds: string[];
-  confidence?: "verified" | "limited";
+  confidence?: "verified" | "limited" | "observed";
 }
 
 export interface OpenGeoAnswerCardV3 {
   questionId: string;
   exactQuestion: string;
-  status: "answered" | "limited" | "insufficient";
+  status: "answered" | "limited" | "observed" | "unresolved" | "insufficient";
   sentences: OpenGeoAnswerSentenceV3[];
   sourceEvidence: OpenGeoAnswerEvidenceV3[];
   coverage: {
@@ -240,11 +240,12 @@ export async function synthesizeOpenGeoAnswerCardsV3(
         const coverage = parseCoverage(input.coverageByQuestion[cardIndex], `coverageByQuestion[${cardIndex}]`);
         const hasShortfall = coverage.completedQueries < coverage.plannedQueries || coverage.reasons.length > 0;
         const status: OpenGeoAnswerCardV3["status"] = claims.length === 0
-          ? "insufficient"
+          ? "unresolved"
           : claims.some(({ confidence }) => confidence === "limited") || hasShortfall ? "limited" : "answered";
         const sourceEvidence = [...new Set(claims.flatMap(({ evidenceIds }) => evidenceIds))].map((id) => permitted.get(id)!);
         const sentences: OpenGeoAnswerSentenceV3[] = [...claims];
         if (status === "limited") sentences.push(deterministicLimitedNote(question.id, input.locale));
+        if (status === "unresolved") sentences.push(deterministicUnresolvedNote(question.id, input.locale, coverage));
         const draft = { questionId: question.id, exactQuestion: question.exactQuestion, status, sentences, sourceEvidence, coverage };
         return {
           ...draft,
@@ -297,7 +298,7 @@ function parseCard(
   const row = record(value, path);
   exact(row.questionId, canonical.id, `${path}.questionId`);
   exact(row.exactQuestion, canonical.exactQuestion, `${path}.exactQuestion`);
-  const status = oneOf(row.status, ["answered", "limited", "insufficient"] as const, `${path}.status`);
+  const status = oneOf(row.status, ["answered", "limited", "observed", "unresolved", "insufficient"] as const, `${path}.status`);
   if (status === "insufficient" && array(row.sentences, `${path}.sentences`).length > 0) {
     throw new TypeError(`${path} insufficient evidence cannot contain model-authored answer prose.`);
   }
@@ -307,17 +308,29 @@ function parseCard(
   const sentences = array(row.sentences, `${path}.sentences`).map((item, index) => parseSentence(item, `${path}.sentences[${index}]`, evidenceMap, context.locale));
   if (new Set(sentences.map(({ sentenceId }) => sentenceId)).size !== sentences.length) throw new TypeError(`${path} sentence IDs must be unique.`);
   const claims = sentences.filter(({ kind }) => kind === "grounded_claim");
+  const observedClaims = sentences.filter(({ kind }) => kind === "observed_claim");
   const coverage = parseCoverage(row.coverage, `${path}.coverage`, sourceEvidence.length);
   const materialShortfall = coverage.completedQueries < coverage.plannedQueries || coverage.reasons.length > 0;
   if (status === "answered" && (!claims.length || claims.some(({ confidence }) => confidence !== "verified") || materialShortfall)) {
     throw new TypeError(`${path} answered status requires grounded verified claims and complete coverage.`);
   }
+  if ((status === "answered" || status === "limited") && observedClaims.length) throw new TypeError(`${path} direct answer status cannot contain observational claims.`);
   if (status === "limited") {
     if (!claims.length || (!materialShortfall && claims.every(({ confidence }) => confidence === "verified"))) throw new TypeError(`${path} limited status requires a grounded limitation.`);
     const expectedNote = deterministicLimitedNote(canonical.id, context.locale);
     if (!sentences.some((sentence) => sentence.kind === "scope_note" && sentence.text === expectedNote.text)) {
       throw new TypeError(`${path} limited status requires deterministic limitation copy.`);
     }
+  }
+  if (status === "unresolved") {
+    if (claims.length || observedClaims.length || sourceEvidence.length) throw new TypeError(`${path} unresolved status cannot contain factual claims or page evidence.`);
+    const expectedNote = deterministicUnresolvedNote(canonical.id, context.locale, coverage);
+    if (sentences.length !== 1 || sentences[0]?.kind !== "scope_note" || sentences[0].text !== expectedNote.text) {
+      throw new TypeError(`${path} unresolved status requires deterministic exhausted-coverage copy.`);
+    }
+  }
+  if (status === "observed" && (claims.length || !observedClaims.length || sentences.some(({ kind }) => kind === "scope_note"))) {
+    throw new TypeError(`${path} observed status requires only search-observation claims.`);
   }
   const expectedDiagnosis = diagnoseOpenGeoAnswerCardV3({ sentences, sourceEvidence }, {
     exactQuestion: canonical.exactQuestion,
@@ -357,7 +370,7 @@ function parseSentence(
   locale: string
 ): OpenGeoAnswerSentenceV3 {
   const row = record(value, path);
-  const kind = oneOf(row.kind, ["grounded_claim", "scope_note"] as const, `${path}.kind`);
+  const kind = oneOf(row.kind, ["grounded_claim", "observed_claim", "scope_note"] as const, `${path}.kind`);
   const sentenceText = text(row.text, `${path}.text`).replace(/\s+/g, " ").trim();
   const evidenceIds = stringArray(row.evidenceIds, `${path}.evidenceIds`);
   if (new Set(evidenceIds).size !== evidenceIds.length) throw new TypeError(`${path} evidence IDs must be unique.`);
@@ -365,12 +378,13 @@ function parseSentence(
     if (evidenceIds.length || row.confidence !== undefined) throw new TypeError(`${path} scope notes cannot cite evidence or claim confidence.`);
     return { sentenceId: text(row.sentenceId, `${path}.sentenceId`), kind, text: sentenceText, evidenceIds: [] };
   }
-  if (!evidenceIds.length) throw new TypeError(`${path} grounded claims require evidence.`);
+  if (!evidenceIds.length) throw new TypeError(`${path} claims require evidence.`);
   const sources = evidenceIds.map((id) => evidence.get(id));
-  if (sources.some((source) => !source || !source.eligible || !source.direct)) throw new TypeError(`${path} contains unsupported or indirect evidence.`);
+  if (sources.some((source) => !source || !source.eligible || (kind === "grounded_claim" && !source.direct) || (kind === "observed_claim" && source.direct))) throw new TypeError(`${path} contains evidence outside its allowed grade.`);
   if (new Set(sources.map((source) => source!.questionId)).size !== 1) throw new TypeError(`${path} evidence must bind to the same question.`);
   if (new Set(sources.map((source) => source!.subjectKey)).size !== 1) throw new TypeError(`${path} evidence must bind to the same subject.`);
-  const confidence = oneOf(row.confidence, ["verified", "limited"] as const, `${path}.confidence`);
+  const confidence = oneOf(row.confidence, ["verified", "limited", "observed"] as const, `${path}.confidence`);
+  if ((kind === "observed_claim") !== (confidence === "observed")) throw new TypeError(`${path} observational confidence and sentence kind must agree.`);
   const domains = new Set(sources.map((source) => source!.registrableDomain.toLocaleLowerCase()));
   if (confidence === "verified" && domains.size < 2) throw new TypeError(`${path} verified confidence requires two independent registrable domains.`);
   if (sentenceText.length < (locale.toLowerCase().startsWith("zh") ? 6 : 12) || sentenceText.length > 600) throw new TypeError(`${path}.text must be one bounded factual sentence.`);
@@ -416,6 +430,21 @@ function deterministicLimitedNote(questionId: string, locale: string): OpenGeoAn
     text: locale.toLowerCase().startsWith("zh")
       ? "当前结论仅有单一来源或检索覆盖不足，尚不能视为独立交叉验证。"
       : "This conclusion has only one source or incomplete retrieval coverage and is not independently verified.",
+    evidenceIds: []
+  };
+}
+
+function deterministicUnresolvedNote(
+  questionId: string,
+  locale: string,
+  coverage: OpenGeoAnswerCardV3["coverage"]
+): OpenGeoAnswerSentenceV3 {
+  return {
+    sentenceId: `unresolved-${questionId}`,
+    kind: "scope_note",
+    text: locale.toLowerCase().startsWith("zh")
+      ? `\u672c\u6b21\u516c\u5f00\u641c\u7d22\u8fd4\u56de ${coverage.returnedResults} \u6761\u7ed3\u679c\uff0c\u5e76\u5c1d\u8bd5\u6293\u53d6 ${coverage.attemptedRetrievals} \u4e2a\u9875\u9762\uff1b\u5f53\u524d\u53ef\u6838\u9a8c\u6b63\u6587\u4ecd\u4e0d\u8db3\uff0c\u56e0\u6b64\u65e0\u6cd5\u7ed9\u51fa\u53ef\u9760\u7684\u4e8b\u5b9e\u7ed3\u8bba\u3002`
+      : `The public search returned ${coverage.returnedResults} results and attempted ${coverage.attemptedRetrievals} pages; there is still insufficient verifiable page text for a reliable factual conclusion.`,
     evidenceIds: []
   };
 }

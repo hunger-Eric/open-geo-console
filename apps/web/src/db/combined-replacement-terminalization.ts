@@ -3,7 +3,7 @@ import { requireReadyCombinedGeoReportV3, type CombinedGeoReportV3 } from "@open
 import { JobTransitionService } from "@/worker/job-transition-service";
 import { ensureDatabase, getSqlClient } from "./index";
 import type { PaidPublicSourceSnapshotRef } from "./public-source-commerce";
-import { snapshotReferenceBinding } from "./combined-correction-terminalization";
+import { combinedV3CommercialOutcome, snapshotReferenceBinding } from "./combined-correction-terminalization";
 
 export async function terminalizeCombinedReplacement(input: {
   report: unknown;
@@ -17,6 +17,7 @@ export async function terminalizeCombinedReplacement(input: {
 }): Promise<{ report: CombinedGeoReportV3; emailDeliveryId: string }> {
   const report = requireReadyCombinedGeoReportV3(input.report);
   if (!input.workerId.trim() || !input.checkpointIdentityHash.trim() || input.pageCount < 5) throw new Error("Replacement readiness identity is incomplete.");
+  if (combinedV3CommercialOutcome(report.answerCards) === "failed") throw new Error("Replacement activation requires a deliverable three-question report.");
   await ensureDatabase();
   return getSqlClient().begin(async (tx) => {
     const job = (await tx<Array<{

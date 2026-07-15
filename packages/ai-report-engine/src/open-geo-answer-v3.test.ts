@@ -112,6 +112,51 @@ describe("Open GEO answer V3 contract", () => {
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
+  it("emits a nonblank deterministic unresolved conclusion after retrieval is exhausted", async () => {
+    const context = {
+      ...fixtureContext(),
+      locale: "en",
+      missingEvidenceFamiliesByQuestion: [[], [], []] as [string[], string[], string[]]
+    };
+    const ids = canonicalIds(context.questionSet);
+    const client = {
+      configuredModel: "fixture-model",
+      completeJson: vi.fn(async () => ({
+        modelId: "fixture-model",
+        rawContent: "fixture-unresolved-cards",
+        value: { answers: ids.map((questionId) => ({ questionId, sentences: [] })) }
+      }))
+    };
+    const exhaustedCoverage = {
+      plannedQueries: 6,
+      completedQueries: 6,
+      returnedResults: 8,
+      attemptedRetrievals: 6,
+      safelyRetrievedPages: 0,
+      eligibleDirectEvidence: 0,
+      reasons: ["No safely retrieved page supplied direct evidence."]
+    };
+
+    const result = await synthesizeOpenGeoAnswerCardsV3(client, {
+      ...context,
+      evidence: [],
+      coverageByQuestion: [exhaustedCoverage, exhaustedCoverage, exhaustedCoverage]
+    });
+
+    expect(result).toHaveLength(3);
+    for (const card of result) {
+      expect(card).toMatchObject({
+        status: "unresolved",
+        sourceEvidence: [],
+        sentences: [{
+          kind: "scope_note",
+          evidenceIds: [],
+          text: "The public search returned 8 results and attempted 6 pages; there is still insufficient verifiable page text for a reliable factual conclusion."
+        }]
+      });
+    }
+  });
+
   it("rejects cross-question and cross-subject evidence", () => {
     const context = fixtureContext();
     const crossQuestion = cards(context);

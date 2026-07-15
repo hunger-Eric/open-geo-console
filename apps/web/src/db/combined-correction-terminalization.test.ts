@@ -20,7 +20,7 @@ describe("combined snapshot reference cutoff", () => {
 });
 
 describe("combined V3 commercial outcome", () => {
-  const card = (status: "answered" | "limited" | "insufficient", groundedClaims: number) => ({
+  const card = (status: "answered" | "limited" | "unresolved" | "insufficient", groundedClaims: number) => ({
     status,
     sentences: Array.from({ length: groundedClaims }, (_, index) => ({
       sentenceId: `sentence-${index}`,
@@ -40,5 +40,9 @@ describe("combined V3 commercial outcome", () => {
 
   it("refunds a report with no grounded answer as failed", () => {
     expect(combinedV3CommercialOutcome([card("insufficient", 0), card("insufficient", 0), card("insufficient", 0)] as never)).toBe("failed");
+  });
+
+  it("activates an exhausted three-question report as completed_limited with a refund", () => {
+    expect(combinedV3CommercialOutcome([card("unresolved", 0), card("unresolved", 0), card("unresolved", 0)] as never)).toBe("completed_limited");
   });
 });
