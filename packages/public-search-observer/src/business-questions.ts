@@ -78,20 +78,19 @@ export function generateBusinessQuestionCandidates(input: {
   const revision = input.revision ?? 1;
   if (!Number.isSafeInteger(revision) || revision < 1) throw new TypeError("revision must be a positive integer.");
   const profile = input.profile;
-  const service = strongest(profile.productsAndServices, profile, profile.businessModel || localized(locale, "business services", "企业服务"));
+  const service = marketCategory(strongest(profile.productsAndServices, profile, profile.businessModel || localized(locale, "business services", "企业服务")), locale);
   const audience = strongest(profile.targetAudiences, profile, localized(locale, "business buyers", "企业采购方"));
   const marketRegion = strongest(profile.marketsAndRegions, profile, region === "global" ? localized(locale, "the target market", "目标市场") : region);
-  const capability = strongest(profile.capabilities, profile, localized(locale, "service capability", "服务能力"));
   const evidenceUrls = [...new Set(profile.evidence.map(({ url }) => bounded(url, "evidence.url", 2_000)))];
   const zh = locale.toLowerCase().startsWith("zh");
   const texts: [string, string, string] = zh ? [
-    `哪些供应商或方案能够提供${service}？`,
-    `哪些${service}供应商适合${marketRegion}的${audience}？`,
-    `采购${service}时，应如何比较${capability}、交付条件与风险？`
+    `哪些服务商公开提供${service}？`,
+    `哪些面向${marketRegion}的${service}方案适合${audience}，分别适用于什么需求与交付条件？`,
+    `采购${service}时，应核验哪些服务范围、交付条件、限制与风险？`
   ] : [
-    `Which providers or approaches can deliver ${service}?`,
-    `Which ${service} providers fit ${audience} in ${marketRegion}?`,
-    `How should buyers compare ${capability}, delivery conditions, and material risks for ${service}?`
+    `Which providers publicly offer ${service}?`,
+    `Which ${service} options fit ${audience} in ${marketRegion}, and for which needs and delivery conditions?`,
+    `When buying ${service}, which service scope, delivery conditions, limitations, and material risks should be verified?`
   ];
   const purposes: [BusinessQuestionPurpose, BusinessQuestionPurpose, BusinessQuestionPurpose] = [
     "core_service_discovery", "customer_region_fit", "purchase_delivery_risk"
@@ -230,6 +229,19 @@ function strongest(values: readonly string[], profile: BusinessQuestionProfile, 
     };
   });
   return supported.sort((left, right) => right.score - left.score || left.index - right.index)[0]?.value ?? fallback;
+}
+
+function marketCategory(value: string, locale: string): string {
+  const normalized = value.normalize("NFKC").trim();
+  if (locale.toLowerCase().startsWith("zh")) {
+    const withoutOwnership = normalized.replace(/(?:自营|直营|自有|自主运营|自建)/gu, "").trim();
+    const parenthetical = /[（(]([^）)]+)[）)]/u.exec(withoutOwnership)?.[1]?.trim();
+    const category = parenthetical && /[/、，,]/u.test(parenthetical) ? parenthetical : withoutOwnership;
+    return category.replace(/[（(][^）)]*[）)]/gu, "").replace(/\s*[/，,]\s*/gu, "、").replace(/、+/gu, "、").trim();
+  }
+  return normalized
+    .replace(/\b(?:self[- ]operated|direct[- ]operated|company[- ]owned|owned|in[- ]house)\b/giu, "")
+    .replace(/\s+/gu, " ").replace(/^[-–—,:;\s]+|[-–—,:;\s]+$/gu, "").trim();
 }
 
 function exclusions(profile: BusinessQuestionProfile): string[] {

@@ -40,6 +40,25 @@ describe("business question contracts", () => {
     expect(set.questions[0].generatedText).not.toContain("AAA generic freight");
   });
 
+  it("keeps target-owned operating claims out of neutral market questions", () => {
+    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
+      ...profile,
+      productsAndServices: ["自营专线（台湾海快/海运/空运专线）"],
+      capabilities: ["全球17个网点运营"],
+      targetAudiences: ["外贸企业"],
+      marketsAndRegions: ["台湾"],
+      summary: "该公司声明自营台湾海快、海运和空运专线，并运营全球17个网点。",
+      evidence: [{ url: "https://shun-express.com/service", quote: "自营台湾海快、海运和空运专线，全球17个网点运营。" }]
+    } });
+
+    expect(set.questions.map(({ purpose }) => purpose)).toEqual([
+      "core_service_discovery", "customer_region_fit", "purchase_delivery_risk"
+    ]);
+    expect(set.questions.map(({ generatedText }) => generatedText).join(" ")).not.toMatch(/自营|直营|自有|17个网点/);
+    expect(set.questions[0].generatedText).toMatch(/台湾.*海快.*海运.*空运/);
+    expect(set.questions[2].generatedText).toMatch(/服务范围.*交付条件.*限制.*风险/);
+  });
+
   it("requires acknowledgement before confirming a low-confidence set", () => {
     const candidates = generateBusinessQuestionCandidates({ locale: "en", region: "global", profile: {
       ...profile, confidence: "low", productsAndServices: [], targetAudiences: [], marketsAndRegions: [], evidence: []
