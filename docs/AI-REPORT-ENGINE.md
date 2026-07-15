@@ -10,7 +10,7 @@ The deterministic and model-generated report dimensions are deliberately separat
 4. Free jobs deterministically analyze only the homepage without a model planning call. Deep jobs ask the configured OpenAI-compatible model to plan every eligible page on small sites or up to 50 representative pages, then analyze batches and synthesize `AiWebsiteReportV1`.
 5. The engine verifies every formal citation against fetched URL/text evidence. Unsupported findings are discarded.
 6. For deep reports, the Worker captures report-bound visual evidence for verified citations, then persists the final report, metadata and required excerpts before atomically terminalizing the job and its credit. Screenshot failure is non-fatal.
-7. Prospective `combined_geo_report_v2` jobs resolve the first buyer question through provider discovery and candidate verification, persist relevant passages before snapshot completion, validate model-extracted exact-excerpt claims deterministically, and qualify strict suppliers separately from unresolved candidates. Prospective `combined_geo_report_v3` jobs project eligible direct evidence into exactly three answer-first cards; sentences stay bound to one question and one subject, while insufficient cards contain no model-authored answer prose.
+7. Prospective `combined_geo_report_v2` jobs resolve the first buyer question through provider discovery and candidate verification, persist relevant passages before snapshot completion, validate model-extracted exact-excerpt claims deterministically, and qualify strict suppliers separately from unresolved candidates. Prospective `combined_geo_report_v3` jobs project eligible direct evidence into exactly three answer-first cards; safely retrieved Q1 candidate-verification body text remains eligible even when provider qualification or claim extraction is empty. Search titles may assist identity resolution but cannot supply facts, and questions/notices/generic role headings are not provider identities. Sentences stay bound to one question and one traceable subject, one source is `limited`, two independent registrable domains are required for `verified`, and insufficient cards contain no model-authored answer prose.
 
 The Worker owns crawling and model calls. Web requests never run deep analysis inline.
 
@@ -40,6 +40,8 @@ The Worker owns crawling and model calls. Web requests never run deep analysis i
 - model, prompt, language, generation-time and content-hash provenance.
 
 The free tier returns one verified homepage finding. Its technical score covers only the homepage and the standard robots/sitemap/llms assets. The deep AI and technical payloads are private and are returned only when the report-specific HttpOnly cookie validates.
+
+Each V3 answer card stores six non-interchangeable coverage counts: planned queries, completed queries, returned search observations, attempted retrievals, safely retrieved pages and eligible direct evidence. Returned results come from immutable search observations, never the final admitted evidence count. Retrieval candidates remain inside the shared 30-query/60-page budget; the planner spreads attempts across queries and defers PDF/download candidates behind ordinary pages without weakening safe URL resolution, SSRF, robots, content or excerpt checks.
 
 ## Language and Artifact Readiness
 

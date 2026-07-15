@@ -1,5 +1,12 @@
 # Answer-first V3 protected-staging acceptance — 2026-07-15
 
+## Outcome classification
+
+- Commercial failure/refund/email/non-activation path: passed.
+- Private HTML/PDF readiness for the failed artifact: passed.
+- Answer-first V3 product acceptance: failed; all three cards were `insufficient` despite real Q1 search and retrieved-body evidence.
+- Customer-deliverable V3 acceptance: incomplete. The original report/order/job/artifact/refund are terminal and were not reopened.
+
 ## Scope and boundaries
 
 - Target: `https://shun-express.com/`
@@ -29,6 +36,31 @@
 5. Answer-card coverage reasons are deterministic localized report prose; legacy language-invalid answer checkpoints regenerate (`2726349`).
 6. Language correction preserves complete target hostnames and narrowly restores the legacy `shun-express.英文术语` form from the known target URL (`8042799`).
 
+These six items prove recovery and commercial terminality only. They did not prove that V3 could produce a useful answer.
+
+## Read-only staging diagnosis after the failed run
+
+- Q1 completed 22 of 30 queries, returned 90 search observations and safely retrieved nine pages. Candidate-verification storage included direct 永利八达通 body text describing `100,000 m2` overseas-warehouse area, globally distributed self-operated warehouses, drop shipping, transfer/replenishment and reverse logistics.
+- Search-result headings such as “您的海外仓服务供应商” and “有哪些比较好的美国海外仓……” were incorrectly promoted to provider subjects. They could not match the real brand in the body, provider claim extraction returned zero claims, and the safely retrieved page never entered the permitted answer evidence map.
+- Q2/Q3 returned 12 and 15 search observations respectively. Their six selected retrievals per question all failed; the cards incorrectly displayed zero returned results because eligible evidence URL count was used as the search-result count.
+
+## Local automated repair evidence
+
+- Commit `92879e6` rejects question/article/notice/generic-role titles as provider identities and admits question-relevant candidate-verification body evidence into Q1 under a traceable domain subject even when qualification/claims are empty.
+- Commit `c8ca110` separates planned/completed queries, returned observations, attempted retrievals, safe pages and eligible direct evidence; historical V3 payload parsing remains backward compatible.
+- Commit `511047f` spreads the fixed retrieval budget across queries and prioritizes ordinary pages ahead of PDF/download candidates without changing the 30-query/60-retrieval or safety boundaries.
+- `npm test`: 170 files passed, 19 skipped; 1,028 tests passed, 40 skipped.
+- `npm run lint`, `npm run build`, staging `db:audit`, `git diff --check`, focused V3/readiness suites and CodeGraph sync/impact checks passed.
+- Customer route/copy/email PDF search had no matches. Private PDF export, hash, storage-key and page-count readiness references remain present.
+
+## Repaired protected Preview deployment
+
+- Deployment: `dpl_4EQQpkeqyM1v9zuw7NnR5AhXWw6P`
+- Preview: `https://open-geo-console-3r9vntoku-itheheda-6857s-projects.vercel.app`
+- Vercel target/status: `preview / Ready`; Functions built in `sin1`.
+- Fixed staging alias was updated only after Ready. Staging free/deep Docker Workers were rebuilt from the same source image; schema remains v21. Production was not changed.
+- This deployment evidence is not a new answer-report acceptance. No new V3 artifact was generated or activated.
+
 ## Runtime evidence
 
 - Signed payment Webhook created exactly one paid deep job for the order.
@@ -49,6 +81,12 @@
 - Focused answer/language/artifact suites: 5 files and 125 tests passed after the final fixes.
 - CodeGraph: 518 files, 5,846 nodes, 15,502 edges; index up to date.
 - Google Chrome 150 automation: desktop 1440×1024 and mobile 390×844 homepage rendered with HTTP 200; protected staging commerce rendered with HTTP 200; the failed report's operator-access route returned HTTP 404 as required.
+
+The bullets above describe the original failed run and its then-current Preview. They do not validate the repaired Preview. Real Chrome control could not initialize for the repaired deployment, so no new desktop/mobile/report/404 browser evidence is claimed.
+
+## Remaining protected-staging boundary
+
+The existing staging refresh lineage requires an active V1/V2 source artifact. Revision `ae8f0485-ff26-4457-92bc-3fcd7002e970` is a non-active V3 generation artifact, and its Airwallex refund has completed; code rejects reopening submitted/completed refunds and terminal jobs. A new full run therefore requires a new Sandbox checkout unless a separately audited replacement-fulfillment mechanism is added. No headless browser was used to pay, no new payment was requested, and no payment link was fabricated while Chrome control was unavailable.
 
 ## Commercial terminality
 
