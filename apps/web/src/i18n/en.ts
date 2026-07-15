@@ -282,6 +282,7 @@ export const en = {
     paymentFailed: "The report could not be completed. The refund workflow is being handled automatically.",
     paymentRefundPending: "A full refund has been requested and is awaiting provider confirmation.",
     paymentRefunded: "The full refund has been confirmed.",
+    paymentRefundFailed: "The automatic refund could not be completed. Contact support so the refund can be reviewed and handled.",
     paymentStatusUnavailable: "We could not load this order status for the current report.",
     paymentRefresh: "Refresh status",
     paymentRefreshStopped: "Automatic updates have paused. Refresh to check the latest verified status."

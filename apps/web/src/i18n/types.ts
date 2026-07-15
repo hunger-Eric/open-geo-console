@@ -240,6 +240,7 @@ export interface Dictionary {
     paymentFailed: string;
     paymentRefundPending: string;
     paymentRefunded: string;
+    paymentRefundFailed: string;
     paymentStatusUnavailable: string;
     paymentRefresh: string;
     paymentRefreshStopped: string;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getDictionary } from "@/i18n";
-import { fetchPaymentReturnStatus, getPaymentReturnView, type PublicOrderStatus } from "./payment-return";
+import { fetchPaymentReturnStatus, getPaymentReturnView, isTerminalPaymentReturn, type PublicOrderStatus } from "./payment-return";
 
 const base: PublicOrderStatus = {
   orderId: "order-1", paymentStatus: "pending", fulfillmentStatus: "not_started",
@@ -28,6 +28,22 @@ describe("payment return presentation", () => {
   it("prioritizes trusted refund state over the return hint", () => {
     expect(getPaymentReturnView({ ...base, paymentStatus: "paid", refundStatus: "refunded" }, "success", dictionary).message)
       .toBe(dictionary.commerce.paymentRefunded);
+  });
+
+  it("states that operator help is required when the authoritative refund failed", () => {
+    const status = { ...base, paymentStatus: "paid" as const, fulfillmentStatus: "failed" as const, refundStatus: "failed" as const };
+    expect(getPaymentReturnView(status, "success", dictionary).message)
+      .toBe(dictionary.commerce.paymentRefundFailed);
+    expect(isTerminalPaymentReturn(status)).toBe(true);
+  });
+
+  it("keeps polling a failed report while its refund is still pending", () => {
+    expect(isTerminalPaymentReturn({
+      ...base,
+      paymentStatus: "paid",
+      fulfillmentStatus: "failed",
+      refundStatus: "pending"
+    })).toBe(false);
   });
 });
 

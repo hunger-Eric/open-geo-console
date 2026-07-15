@@ -278,6 +278,7 @@ export const zh = {
     paymentFailed: "报告未能完成，系统正在自动处理退款。",
     paymentRefundPending: "全额退款已提交，正在等待支付机构确认。",
     paymentRefunded: "全额退款已确认。",
+    paymentRefundFailed: "自动退款未能完成，请联系支持团队协助核验并处理退款。",
     paymentStatusUnavailable: "无法读取当前报告对应的订单状态。",
     paymentRefresh: "刷新状态",
     paymentRefreshStopped: "自动更新已暂停，请刷新以读取最新验签状态。"

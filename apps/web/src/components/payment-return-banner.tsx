@@ -8,6 +8,22 @@ import { fetchPaymentReturnStatus, getPaymentReturnView, isTerminalPaymentReturn
 
 interface ReturnContext { orderId: string; hint: ReturnHint }
 
+export function PaymentRefreshButton({ label, loading, onClick }: { label: string; loading: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="button-secondary min-h-10 shrink-0"
+      disabled={loading}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      <RefreshCw aria-hidden="true" className={`size-4 ${loading ? "animate-spin" : ""}`} />
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
+}
+
 export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dictionary; reportId: string }) {
   const searchParams = useSearchParams();
   const context = useMemo<ReturnContext | null>(() => {
@@ -115,18 +131,14 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
             </div>
           ) : null}
         </div>
-        <button
-          type="button"
-          className="button-secondary min-h-10 shrink-0"
-          disabled={loading}
+        <PaymentRefreshButton
+          label={dictionary.commerce.paymentRefresh}
+          loading={loading}
           onClick={() => {
             setPollingStopped(false);
             void loadStatus();
           }}
-        >
-          <RefreshCw aria-hidden="true" className={`size-4 ${loading ? "animate-spin" : ""}`} />
-          <span className="hidden sm:inline">{dictionary.commerce.paymentRefresh}</span>
-        </button>
+        />
       </div>
     </section>
   );
