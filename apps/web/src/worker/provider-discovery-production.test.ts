@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ConfirmedBusinessQuestionSet, PublicSearchSurfaceAuthority } from "@open-geo-console/public-search-observer";
-import { createProductionProviderDiscoveryContext, isLikelyCompanyOwnedProviderDomain, resolveProviderCandidates } from "./provider-discovery-production";
+import {
+  createProductionProviderDiscoveryContext,
+  isLikelyCompanyOwnedProviderDomain,
+  resolveProviderCandidates,
+  sanitizePreVerificationCheckpoint
+} from "./provider-discovery-production";
 import { runProviderDiscoveryPipeline } from "./provider-discovery-pipeline";
 
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), providerBundle: vi.fn(), snapshotBundle: vi.fn(), appendClaims: vi.fn() }));
@@ -33,6 +38,35 @@ describe("production provider discovery composition", () => {
 
     expect(candidates.map(({ canonicalName }) => canonicalName)).toEqual(["Alpha Logistics"]);
     expect([...domains.values()]).toEqual(["alpha.example"]);
+  });
+
+  it("sanitizes a persisted pre-verification candidate set and invalidates only its old hash", () => {
+    const checkpoint = {
+      phase: "candidate_verification",
+      candidateSetHash: "old-candidate-hash",
+      artifacts: {
+        discovery: {
+          snapshotId: "snapshot-discovery",
+          plannedQueries: 6,
+          completedQueries: 3,
+          returnedObservations: 14,
+          candidates: [
+            { entityId: "generic", canonicalName: "物流", rank: 7 },
+            { entityId: "alpha", canonicalName: "Alpha Logistics", rank: 1 }
+          ]
+        }
+      }
+    } as never;
+
+    const sanitized = sanitizePreVerificationCheckpoint(checkpoint, [
+      { kind: "private_identity", value: "凌顺国际物流" }
+    ]);
+
+    expect(sanitized?.artifacts.discovery?.candidates).toEqual([
+      { entityId: "alpha", canonicalName: "Alpha Logistics", rank: 1 }
+    ]);
+    expect(sanitized?.candidateSetHash).toBeNull();
+    expect(sanitized?.phase).toBe("candidate_resolution");
   });
 
   it("reuses discovery, verification and two standard question snapshots", async () => {

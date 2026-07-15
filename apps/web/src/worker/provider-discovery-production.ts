@@ -108,7 +108,7 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
   const candidateDomains = new Map<string, string>();
 
   const dependencies: ProviderDiscoveryPipelineDependencies = {
-    getCheckpoint: input.getCheckpoint,
+    getCheckpoint: async () => sanitizePreVerificationCheckpoint(await input.getCheckpoint(), excludedIdentities),
     saveCheckpoint: input.saveCheckpoint,
     runDiscovery: async (signal) => {
       discoveryResolved = await resolvePublicSourceSnapshot({
@@ -132,7 +132,7 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
       if (!candidateDomains.size) {
         const bundle = await requireSnapshotBundle(discovery.snapshotId);
         const domains = unique(bundle.observations.map(({ canonicalUrl }) => safeDomain(canonicalUrl)).filter((value): value is string => Boolean(value)));
-        candidates.forEach((candidate, index) => { const domain = domains[index]; if (domain) candidateDomains.set(candidate.entityId, domain); });
+        candidates.forEach((candidate) => { const domain = domains[candidate.rank]; if (domain) candidateDomains.set(candidate.entityId, domain); });
       }
       const verificationPlan = createProviderVerificationQueryPlan({ ...planInput, parentPlanId: discoveryPlan.id, candidates });
       if (verificationPlan.candidateSetHash !== candidateSetHash) throw new Error("Provider verification candidate identity changed.");
@@ -237,18 +237,32 @@ export function resolveProviderCandidates(
   });
 }
 
+export function sanitizePreVerificationCheckpoint(
+  checkpoint: ProviderDiscoveryCheckpointV1 | null,
+  excludedIdentities: readonly CustomerIdentityExclusion[]
+): ProviderDiscoveryCheckpointV1 | null {
+  const discovery = checkpoint?.artifacts.discovery;
+  if (!checkpoint || !discovery || checkpoint.artifacts.verification) return checkpoint;
+  const candidates = discovery.candidates.filter(({ canonicalName }) => isPublicIdentityText(canonicalName, excludedIdentities));
+  if (candidates.length === discovery.candidates.length) return checkpoint;
+  return {
+    ...checkpoint,
+    phase: "candidate_resolution",
+    candidateSetHash: null,
+    artifacts: { ...checkpoint.artifacts, discovery: { ...discovery, candidates } }
+  };
+}
+
 function isPublicProviderCandidate(
   name: string,
   domain: string,
   excludedIdentities: readonly CustomerIdentityExclusion[]
 ): boolean {
-  try {
-    assertNoCustomerIdentity(name, excludedIdentities);
-    assertNoCustomerIdentity(domain, excludedIdentities);
-    return true;
-  } catch {
-    return false;
-  }
+  return isPublicIdentityText(name, excludedIdentities) && isPublicIdentityText(domain, excludedIdentities);
+}
+
+function isPublicIdentityText(value: string, excludedIdentities: readonly CustomerIdentityExclusion[]): boolean {
+  try { assertNoCustomerIdentity(value, excludedIdentities); return true; } catch { return false; }
 }
 
 function candidateName(title: string, domain: string): string {
