@@ -434,7 +434,7 @@ export async function completeMarketSnapshotLease(input: {
     const expected = input.token ? parseToken(input.token) : await legacyToken(input.cacheIdentity ?? snapshot.cacheIdentity, input.leaseOwner);
     if (expected.cacheIdentity !== snapshot.cacheIdentity) throw new Error("Lease token cannot complete a foreign snapshot identity.");
     requireMemoryLease(expected);
-    assertCompletionLedger(snapshotId);
+    assertCompletionLedger(snapshotId, snapshot.snapshotKind === "candidate_verification");
     const completedAt = input.completedAt ? validDate(input.completedAt, "completedAt") : new Date();
     const next = { ...snapshot, status: "completed", queryFanoutHash, completedAt };
     memorySaveMarketSnapshotQuestion(next);
@@ -447,8 +447,9 @@ export async function completeMarketSnapshotLease(input: {
   return getSqlClient().begin(async (tx) => {
     const lease = await requireLeaseTx(tx, parseToken(expected));
     const completedAt = input.completedAt ? validDate(input.completedAt, "completedAt") : null;
-    const ledger = (await tx<Array<{ query_count: number; terminal_query_count: number; successful_count: number; pending_count: number }>>`
+    const ledger = (await tx<Array<{ query_count: number; terminal_query_count: number; successful_count: number; pending_count: number; snapshot_kind: string }>>`
       SELECT
+        (SELECT snapshot_kind FROM market_snapshot_questions snapshot WHERE snapshot.id=${snapshotId}) AS snapshot_kind,
         (SELECT count(*)::integer FROM market_snapshot_queries query WHERE query.snapshot_id=${snapshotId}) AS query_count,
         (SELECT count(DISTINCT attempt.query_id)::integer FROM market_search_attempts attempt
           WHERE attempt.snapshot_id=${snapshotId} AND attempt.request_status IN ('succeeded','partial','timeout','rate_limited','unavailable','malformed','aborted','authentication','unsupported')) AS terminal_query_count,
@@ -457,7 +458,8 @@ export async function completeMarketSnapshotLease(input: {
         (SELECT count(*)::integer FROM market_search_attempts attempt
           WHERE attempt.snapshot_id=${snapshotId} AND attempt.request_status='pending') AS pending_count
     `)[0];
-    if (!ledger || ledger.query_count < 1 || ledger.terminal_query_count !== ledger.query_count || ledger.successful_count < 1 || ledger.pending_count !== 0) {
+    const exhaustedVerification = ledger?.snapshot_kind === "candidate_verification" && ledger.successful_count === 0;
+    if (!ledger || ledger.query_count < 1 || ledger.terminal_query_count !== ledger.query_count || (!exhaustedVerification && ledger.successful_count < 1) || ledger.pending_count !== 0) {
       throw new Error("Completed snapshot requires a terminal attempt per query, no pending request, and at least one successful/partial ledger.");
     }
     const rows = await tx<Array<Record<string, unknown>>>`UPDATE market_snapshot_questions SET status='completed',query_fanout_hash=${queryFanoutHash},completed_at=COALESCE(${completedAt?.toISOString() ?? null}::timestamptz,clock_timestamp()) WHERE id=${snapshotId} AND cache_identity=${lease.cache_identity as string} AND status='refreshing' RETURNING *`;
@@ -672,9 +674,9 @@ function markUnfinishedAttemptsUncertainMemory(cacheIdentity: string, now: Date)
   const ids = new Set(memoryListMarketSnapshotQuestions().filter((row) => row.cacheIdentity === cacheIdentity).map(({ id }) => id));
   for (const row of memoryListMarketSearchAttempts()) if (ids.has(row.snapshotId) && row.requestStatus === "pending") memorySaveMarketSearchAttempt({ ...row, requestStatus: "timeout", costUncertain: true, completedAt: now, sanitizedError: "Lease expired before request outcome was recorded." });
 }
-function assertCompletionLedger(snapshotId: string): void {
+function assertCompletionLedger(snapshotId: string, allowExhausted: boolean): void {
   const queries = memoryListMarketSnapshotQueries(snapshotId), attempts = memoryListMarketSearchAttempts(snapshotId);
-  if (!queries.length || attempts.some((attempt) => attempt.requestStatus === "pending") || !queries.every((query) => attempts.some((attempt) => attempt.queryId === query.id && TERMINAL_ATTEMPT_STATES.has(attempt.requestStatus))) || !attempts.some((attempt) => SUCCESS_ATTEMPT_STATES.has(attempt.requestStatus))) throw new Error("Completed snapshot requires a terminal attempt per query, no pending request, and at least one successful/partial ledger.");
+  if (!queries.length || attempts.some((attempt) => attempt.requestStatus === "pending") || !queries.every((query) => attempts.some((attempt) => attempt.queryId === query.id && TERMINAL_ATTEMPT_STATES.has(attempt.requestStatus))) || (!allowExhausted && !attempts.some((attempt) => SUCCESS_ATTEMPT_STATES.has(attempt.requestStatus)))) throw new Error("Completed snapshot requires a terminal attempt per query, no pending request, and at least one successful/partial ledger unless candidate verification is exhausted.");
 }
 function exactIdentity(value: MarketSnapshotIdentity): MarketSnapshotIdentity {
   const parsed = parseMarketSnapshotIdentity(value);

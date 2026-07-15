@@ -195,7 +195,8 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
       observations = queryResults.map(({ observation }) => observation);
       successful = queryResults.filter(({ successful: value }) => value).map(({ observation, attemptId, storedQueryId }) => ({ observation, attemptId, storedQueryId }));
     }
-    if (successful.length === 0) throw new PublicSourceSnapshotUnavailableError("search_execution");
+    const exhaustedCandidateVerification = successful.length === 0 && input.snapshotMetadata?.snapshotKind === "candidate_verification";
+    if (successful.length === 0 && !exhaustedCandidateVerification) throw new PublicSourceSnapshotUnavailableError("search_execution");
 
     if (!resumed) {
       failureStage = "observation_normalization";

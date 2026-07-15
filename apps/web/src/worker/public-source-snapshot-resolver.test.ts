@@ -369,6 +369,42 @@ describe("public-source snapshot resolver", () => {
     await expect(resolvePublicSourceSnapshot({ authority, adapter: fixtureAdapter(authority, async () => observationPayload("complete")), question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-retry" })).resolves.toMatchObject({ collectedForThisRun: true });
   });
 
+  it("completes exhausted candidate verification from failed supplemental searches", async () => {
+    const authority = await installAuthority("review-candidate-exhaustion");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const discovery = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-candidate-discovery",
+      snapshotMetadata: { snapshotKind: "provider_discovery", queryPlanVersion: "provider-query-plan-v1" }
+    });
+
+    const verification = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("unavailable")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-05T00:00:00.000Z",
+      leaseOwner: "worker-candidate-exhausted",
+      snapshotMetadata: {
+        snapshotKind: "candidate_verification",
+        parentSnapshotId: discovery.snapshotId,
+        candidateSetHash: "b".repeat(64),
+        queryPlanVersion: "provider-query-plan-v1"
+      }
+    });
+    const bundle = await getMarketSnapshotBundle(verification.snapshotId);
+
+    expect(verification).toMatchObject({ collectedForThisRun: true, availableSourceCount: 0, sufficientlyEvidenced: false });
+    expect(verification.observations).toHaveLength(fanout.queries.length);
+    expect(verification.observations.every(({ status }) => status === "unavailable")).toBe(true);
+    expect(bundle?.snapshot.status).toBe("completed");
+    expect(bundle?.attempts.every(({ requestStatus }) => !["pending", "succeeded", "partial"].includes(requestStatus))).toBe(true);
+  });
+
   it("classifies observation persistence failures and releases the lease", async () => {
     const authority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
