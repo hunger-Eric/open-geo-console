@@ -29,4 +29,20 @@ describe("private canonical HTML report page",()=>{
     expect(mocks.loadPrivateReportArtifact).toHaveBeenCalledWith("report-v3","combined_geo_report_v3");
     expect(mocks.tokenGrantsReportAccess.mock.calls[0]).toEqual(["v3-token","report-v3","combined_geo_report_v3"]);
   });
+
+  it("returns the application 404 for a valid token bound to another artifact scope", async () => {
+    mocks.cookies.mockResolvedValue({ get: vi.fn(() => ({ value: "older-token" })) });
+    mocks.tokenGrantsReportAccess.mockResolvedValue(false);
+    await expect(PrivateHtmlReportPage({ params: Promise.resolve({ id: "report-v3" }) }))
+      .rejects.toThrow("APP_404");
+    expect(mocks.loadPrivateReportArtifact).not.toHaveBeenCalled();
+  });
+
+  it("returns the application 404 when an authorized artifact does not exist", async () => {
+    mocks.cookies.mockResolvedValue({ get: vi.fn(() => ({ value: "v3-token" })) });
+    mocks.tokenGrantsReportAccess.mockResolvedValue(true);
+    mocks.loadPrivateReportArtifact.mockResolvedValue(null);
+    await expect(PrivateHtmlReportPage({ params: Promise.resolve({ id: "report-v3" }) }))
+      .rejects.toThrow("APP_404");
+  });
 });
