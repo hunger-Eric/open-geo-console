@@ -71,6 +71,18 @@ npm run staging:correction:confirm -- --questions-file <ignored-json-path>
 
 Confirmation creates the unique non-billable correction job and dispatches it. Never prepare or confirm against production, create a replacement order, or manually alter charge/credit/refund rows.
 
+### Audited paid-report replacement
+
+The replacement command is intentionally bound in code to one approved paid failure lineage. It creates no order, charge or credit reservation and never mutates the original job/refund outcome:
+
+```powershell
+npm run staging:replacement:inspect
+npm run staging:replacement:prepare -- --confirm --authorization-ref <operator-reference>
+npm run staging:replacement:resume -- --confirm --authorization-ref <operator-reference>
+```
+
+`prepare` is idempotent. `resume` accepts only the approved failed model-contract checkpoint or its answer-complete language-gate repair state. A successful terminalization activates the replacement revision and queues replacement delivery; a failed attempt leaves the artifact pending and the original commercial state unchanged.
+
 Keep the old active artifact until the new customer HTML, private same-HTML PDF readiness artifact, and private evidence all pass readiness. After completion, audit one correction, one locked question set, three questions, one active revision, one artifact-keyed correction email containing only the secure HTML link, zero new billing/refund side effects, and identity-free shared snapshot/search/evidence payloads. Confirm the internal PDF hash, storage key, and page count from authoritative state; do not request a customer PDF endpoint. The accepted concrete drill and browser checklist are recorded under `docs/operations/evidence/2026-07-14-combined-report-correction-acceptance.md`.
 
 ## Local staging cleanup
@@ -131,7 +143,7 @@ npm run test:postgres:staging-security
 
 Browser acceptance must prove anonymous denial, authenticated access, more than two distinct staging sites, same-site reuse, forced-new report identity, duplicate-click idempotency, and separation from production data. Provider acceptance additionally requires a real CodingPlan staging call, an Airwallex Sandbox signed Webhook, and a redirected Resend message. Production acceptance must prove the third distinct site returns `429` and staging variables do not change that result.
 
-For an authenticated operator preview of an exact paid staging order, open `/{locale}/reports/{reportId}/staging-access?order={orderId}`. The route issues a one-day cookie only when the persisted order/report pair is paid and deliverable (`completed` or fully refunded `completed_limited`), redirects to the scoped HTML artifact, and remains `404` outside protected staging test mode. It does not create a customer PDF or bypass normal emailed access in production.
+For an authenticated operator preview of an exact paid staging order, open `/en/reports/{reportId}/staging-access?order={orderId}` (Chinese is the unprefixed canonical interface, so `/zh` redirects). The route issues a one-day cookie only when the persisted order/report pair is paid and either the original fulfillment is deliverable (`completed`/`completed_limited`) or an audited replacement is completed with an active artifact. It redirects to the exact scoped HTML artifact and remains `404` outside protected staging test mode. It does not create a customer PDF or bypass normal emailed access in production.
 
 ## Cloudflare production checklist
 
