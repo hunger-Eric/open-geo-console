@@ -150,26 +150,32 @@ export async function resumeApprovedReplacementModelRepair(input: { confirm: boo
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`replacement:${APPROVED_REPLACEMENT_TARGET.orderId}`},0))`;
     const rows = await tx<Array<{
       replacement_id: string; replacement_state: string; job_id: string; execution_state: string; error_code: string | null;
-      current_phase: string; checkpoint_revision: number; recovery_phase: string | null; artifact_revision_id: string; artifact_status: string;
+      current_phase: string; checkpoint_revision: number; recovery_phase: string | null; has_answer_first_v3: boolean;
+      artifact_revision_id: string; artifact_status: string;
     }>>`SELECT replacement.id AS replacement_id,replacement.state AS replacement_state,job.id AS job_id,job.execution_state,job.error_code,
       job.current_phase,job.checkpoint_revision,job.checkpoint->'recovery'->>'phase' AS recovery_phase,
+      job.checkpoint ? 'answerFirstV3' AS has_answer_first_v3,
       artifact.id AS artifact_revision_id,artifact.status AS artifact_status
       FROM report_replacement_fulfillments replacement
       JOIN scan_jobs job ON job.id=replacement.replacement_job_id
       JOIN report_artifact_revisions artifact ON artifact.replacement_fulfillment_id=replacement.id
       WHERE replacement.order_id=${APPROVED_REPLACEMENT_TARGET.orderId} FOR UPDATE OF replacement,job,artifact`;
     const row = rows[0];
-    if (!row || row.replacement_state !== "failed" || row.execution_state !== "failed" ||
-        row.error_code !== "answer_first_v3_model_contract_invalid" || row.recovery_phase !== "artifact_verification" || row.artifact_status !== "pending") {
+    const failedModelContract = row?.replacement_state === "failed" && row.execution_state === "failed" &&
+      row.error_code === "answer_first_v3_model_contract_invalid" && row.recovery_phase === "artifact_verification";
+    const repairedAnswerCheckpoint = row?.replacement_state === "repair_wait" && row.execution_state === "repair_wait" &&
+      row.error_code === "report_language_validation_failed" && row.recovery_phase === "grounded_answer_synthesis" && row.has_answer_first_v3;
+    if (!row || row.artifact_status !== "pending" || (!failedModelContract && !repairedAnswerCheckpoint)) {
       throw new Error("The approved replacement is not eligible for model-contract repair resume.");
     }
-    await tx`UPDATE scan_jobs SET stage='synthesizing',execution_state='queued',current_phase='artifact_verification',phase_attempt=0,
+    const resumePhase = repairedAnswerCheckpoint ? "grounded_answer_synthesis" : "artifact_verification";
+    await tx`UPDATE scan_jobs SET stage='synthesizing',execution_state='queued',current_phase=${resumePhase},phase_attempt=0,
       retry_not_before=NULL,repair_reason_code=NULL,repair_deadline_at=NULL,resume_generation=resume_generation+1,
       lease_owner=NULL,lease_expires_at=NULL,error_code=NULL,public_error=NULL,updated_at=now()
-      WHERE id=${row.job_id} AND execution_state='failed'`;
+      WHERE id=${row.job_id} AND execution_state=${row.execution_state}`;
     await tx`UPDATE report_replacement_fulfillments SET state='queued',operator_authorization_ref=${authorizationRef} WHERE id=${row.replacement_id}`;
     await tx`INSERT INTO scan_job_transition_events(id,job_id,from_execution_state,to_execution_state,phase,checkpoint_revision,reason_code)
-      VALUES(${randomUUID()},${row.job_id},'failed','queued','artifact_verification',${row.checkpoint_revision},'replacement_model_contract_repair_approved')`;
+      VALUES(${randomUUID()},${row.job_id},${row.execution_state},'queued',${resumePhase},${row.checkpoint_revision},'replacement_model_contract_repair_approved')`;
     return { replacementId: row.replacement_id, jobId: row.job_id, artifactRevisionId: row.artifact_revision_id, state: "queued" };
   });
 }

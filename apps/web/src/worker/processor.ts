@@ -16,6 +16,7 @@ import {
   type AiWebsiteReportV1,
   type CombinedBusinessQuestionAnswers,
   type CombinedGeoReportV3,
+  type CombinedReportLanguageScope,
   type GroundedAnswerEvidence,
   type RecommendationForensicReportV2,
   type ExtractedPage,
@@ -732,6 +733,12 @@ export function combinedV3ArtifactVerificationResume(checkpoint: WorkerCheckpoin
   return {report,checkpoint:checkpoint.answerFirstV3,commercialSnapshotRefs:checkpoint.pendingArtifactVerification!.commercialSnapshotRefs};
 }
 
+export function combinedV3LanguageValidationScope(
+  reason: ScanJobRow["reason"]
+): CombinedReportLanguageScope | undefined {
+  return reason === "replacement_fulfillment" ? "presentation_refresh" : undefined;
+}
+
 async function resolveCombinedQuestionAnswers(input: {
   checkpoint: WorkerCheckpoint;
   questionSet: ConfirmedBusinessQuestionSet;
@@ -998,6 +1005,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       engineProvenance: answerResult.checkpoint.engineProvenance,
       publicSourceForensics: forensicResult.report,
       providerDiscovery: providerResult.providerDiscovery,
+      languageValidationScope: combinedV3LanguageValidationScope(input.job.reason),
       onReportPrepared: async (report) => {
         const next = { ...checkpoint, pendingArtifactVerification: { report, commercialSnapshotRefs: snapshotRefs } };
         const updated = await input.checkpointJob({ stage: "synthesizing", phase: "artifact_verification", progress: 99, checkpoint: next as JobCheckpoint, ...input.coverage });

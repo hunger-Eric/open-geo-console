@@ -5,6 +5,7 @@ import type { AiReportRow, ScanJobRow } from "@/db/schema";
 import {
   createWorkerPublicSourceForensicsDependencies,
   combinedV3ArtifactVerificationResume,
+  combinedV3LanguageValidationScope,
   correctionArtifactVerificationResume,
   isMatchingRecommendationWebsiteFoundation,
   publicSourceArtifactVerificationResume,
@@ -17,6 +18,11 @@ import {
 import { resolveCombinedReportContract } from "@/report/combined-report-contract";
 
 describe("recommendation website-foundation resume contract", () => {
+  it("does not revalidate an already accepted historical AI foundation during replacement delivery", () => {
+    expect(combinedV3LanguageValidationScope("replacement_fulfillment")).toBe("presentation_refresh");
+    expect(combinedV3LanguageValidationScope("standard")).toBeUndefined();
+  });
+
   it("selects the combined artifact contract only from reviewed deployment configuration", () => {
     expect(resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: "combined_geo_report_v2" })).toBe("combined_geo_report_v2");
     expect(resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: "combined_geo_report_v3" })).toBe("combined_geo_report_v3");
