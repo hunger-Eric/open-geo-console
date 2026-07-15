@@ -482,7 +482,7 @@ export const zh = {
     "homepage.missingOpenGraph": {
       title: "首页缺少 OpenGraph 元数据",
       description: "在问答或社交预览场景中，展示效果可能不够稳定。",
-      recommendation: "为首页添加 OpenGraph title、description、URL 和 image 元数据。"
+      recommendation: "为首页添加 OpenGraph 标题、描述、URL 和图片元数据。"
     }
   },
   errors: {

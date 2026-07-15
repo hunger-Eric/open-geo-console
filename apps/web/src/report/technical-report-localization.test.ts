@@ -48,6 +48,22 @@ describe("localizeTechnicalReportForArtifact", () => {
     });
     expect(source.findings[0]!.title).toBe("Page titles are dominated by a shared template");
   });
+
+  it("uses Chinese field names in the OpenGraph recommendation", () => {
+    const source = fixture();
+    source.findings = [createFinding({
+      id: "homepage.missingOpenGraph",
+      messageKey: "homepage.missingOpenGraph",
+      params: {},
+      url: "https://example.com/"
+    })];
+
+    const localized = localizeTechnicalReportForArtifact(source, "zh-CN");
+
+    expect(localized.findings[0]?.recommendation).toBe(
+      "为首页添加 OpenGraph 标题、描述、URL 和图片元数据。"
+    );
+  });
 });
 
 function fixture(): GeoAuditReport {

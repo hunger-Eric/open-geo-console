@@ -58,6 +58,12 @@ export function combinedArtifactSystemCopy(locale: string, input: {
   };
 }
 
+export function localizedProviderDiscoveryLimitation(locale: string, source: string): string {
+  return locale.toLowerCase().startsWith("zh")
+    ? "缺少公开证据并不证明供应商缺乏某项能力；证据有限的实体仍保留为候选。"
+    : source;
+}
+
 export async function buildReadyCombinedArtifact(input: {
   artifactRevisionId: string;
   artifactRevision: number;
@@ -348,7 +354,11 @@ export async function buildReadyCombinedArtifactV3(input: {
       publicSearchSurface: `${forensic.authority.surface.surfaceId}/${forensic.authority.surface.surfaceVersion}`,
       technicalCoverage: systemCopy.technicalCoverage,
       evidenceFreshness: systemCopy.evidenceFreshness,
-      limitations: [...new Set([...systemCopy.limitations, ...forensic.limitations, input.providerDiscovery.limitation])],
+      limitations: [...new Set([
+        ...systemCopy.limitations,
+        ...forensic.limitations,
+        localizedProviderDiscoveryLimitation(forensic.locale, input.providerDiscovery.limitation)
+      ])],
       nonCausal: true
     }
   });

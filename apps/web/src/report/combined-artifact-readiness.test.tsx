@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { CombinedGeoReportArtifact } from "@/components/combined-geo-report-artifact";
 import { combinedArtifactFixture, combinedV3ArtifactFixture } from "@/components/combined-artifact-fixtures";
-import { assertCombinedV3HtmlCompleteness, combinedArtifactSystemCopy, renderCanonicalCombinedArtifactHtml } from "./combined-artifact-readiness";
+import { assertCombinedV3HtmlCompleteness, combinedArtifactSystemCopy, localizedProviderDiscoveryLimitation, renderCanonicalCombinedArtifactHtml } from "./combined-artifact-readiness";
 
 describe("combined artifact canonical rendering",()=>{
   it("wraps the exact shared HTML component used by the report route and PDF readiness",()=>{
@@ -26,6 +26,15 @@ describe("combined artifact canonical rendering",()=>{
       samplingMethod: "对 3 个计划页面进行代表性抽样，完成 2 个页面的分析。",
       limitations: ["有 1 个计划页面未完成分析。"]
     });
+  });
+
+  it("localizes the deterministic provider-discovery limitation for Chinese V3 reports", () => {
+    const source = "Missing public evidence does not prove that a provider lacks a capability; evidence-limited entities remain candidates.";
+
+    expect(localizedProviderDiscoveryLimitation("zh-CN", source)).toBe(
+      "缺少公开证据并不证明供应商缺乏某项能力；证据有限的实体仍保留为候选。"
+    );
+    expect(localizedProviderDiscoveryLimitation("en", source)).toBe(source);
   });
 
   it("renders the prospective GEO terminology policy in canonical HTML", () => {
