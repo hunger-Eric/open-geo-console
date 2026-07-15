@@ -1931,6 +1931,47 @@ export const V22_DATABASE_MIGRATIONS = [
   `DROP INDEX IF EXISTS report_market_snapshot_refs_job_cache_uidx`
 ] as const;
 
+export const V23_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS replacement_fulfillment_id text`,
+  `ALTER TABLE report_artifact_revisions ADD COLUMN IF NOT EXISTS replacement_fulfillment_id text`,
+  `CREATE TABLE IF NOT EXISTS report_replacement_fulfillments (
+     id text PRIMARY KEY,
+     order_id text NOT NULL UNIQUE REFERENCES payment_orders(id) ON DELETE RESTRICT,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     original_failed_job_id text NOT NULL UNIQUE REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     failed_artifact_revision_id text NOT NULL UNIQUE REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT,
+     question_set_id text NOT NULL REFERENCES report_business_question_sets(id) ON DELETE RESTRICT,
+     replacement_job_id text UNIQUE REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     active_artifact_revision_id text UNIQUE REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT,
+     reason_code text NOT NULL CHECK (reason_code='paid_report_not_delivered'),
+     state text NOT NULL CHECK (state IN ('prepared','queued','running','repair_wait','completed','failed')),
+     operator_authorization_ref text NOT NULL CHECK (length(btrim(operator_authorization_ref)) > 0),
+     created_at timestamptz NOT NULL DEFAULT now(),
+     completed_at timestamptz
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS scan_jobs_replacement_fulfillment_uidx ON scan_jobs(replacement_fulfillment_id) WHERE replacement_fulfillment_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_artifact_revisions_replacement_uidx ON report_artifact_revisions(replacement_fulfillment_id) WHERE replacement_fulfillment_id IS NOT NULL`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_replacement_fulfillment_fkey`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_replacement_fulfillment_fkey FOREIGN KEY(replacement_fulfillment_id) REFERENCES report_replacement_fulfillments(id) ON DELETE RESTRICT`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_replacement_fkey`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_replacement_fkey FOREIGN KEY(replacement_fulfillment_id) REFERENCES report_replacement_fulfillments(id) ON DELETE RESTRICT`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_reason_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration','paid_report_correction','staging_artifact_refresh','replacement_fulfillment'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_replacement_fulfillment_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_replacement_fulfillment_check CHECK (
+     (reason='replacement_fulfillment' AND replacement_fulfillment_id IS NOT NULL AND credit_reservation_id IS NULL AND artifact_contract='combined_geo_report_v3' AND correction_id IS NULL AND business_question_set_id IS NOT NULL AND tier='deep')
+     OR (reason<>'replacement_fulfillment' AND replacement_fulfillment_id IS NULL)
+   )`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_kind_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_kind_check CHECK (revision_kind IN ('generation','correction','presentation_refresh','evidence_refresh','replacement'))`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_lineage_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_lineage_check CHECK (
+     (revision_kind IN ('presentation_refresh','evidence_refresh') AND source_artifact_revision_id IS NOT NULL AND correction_id IS NULL AND replacement_fulfillment_id IS NULL)
+     OR (revision_kind='replacement' AND source_artifact_revision_id IS NULL AND correction_id IS NULL AND replacement_fulfillment_id IS NOT NULL)
+     OR (revision_kind IN ('generation','correction') AND source_artifact_revision_id IS NULL AND replacement_fulfillment_id IS NULL)
+   )`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -1945,7 +1986,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 19, migrations: V19_DATABASE_MIGRATIONS },
   { version: 20, migrations: V20_DATABASE_MIGRATIONS },
   { version: 21, migrations: V21_DATABASE_MIGRATIONS },
-  { version: 22, migrations: V22_DATABASE_MIGRATIONS }
+  { version: 22, migrations: V22_DATABASE_MIGRATIONS },
+  { version: 23, migrations: V23_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

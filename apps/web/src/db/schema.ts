@@ -26,8 +26,8 @@ import {
 export type ReportTier = "free" | "deep";
 export type ReportLocale = "en" | "zh";
 export type ReportTechnicalStatus = "pending" | "processing" | "completed" | "failed";
-export type ScanJobReason = "standard" | "system_recovery" | "locale_correction" | "staging_regeneration" | "paid_report_correction" | "staging_artifact_refresh";
-export type ArtifactRevisionKind = "generation" | "correction" | "presentation_refresh" | "evidence_refresh";
+export type ScanJobReason = "standard" | "system_recovery" | "locale_correction" | "staging_regeneration" | "paid_report_correction" | "staging_artifact_refresh" | "replacement_fulfillment";
+export type ArtifactRevisionKind = "generation" | "correction" | "presentation_refresh" | "evidence_refresh" | "replacement";
 export type ScanJobStage =
   | "queued"
   | "discovering"
@@ -185,6 +185,7 @@ export const scanJobs = pgTable(
     recommendationReportVersion: integer("recommendation_report_version").$type<RecommendationReportVersion>(),
     artifactContract: text("artifact_contract").$type<ReportArtifactContract>(),
     correctionId: text("correction_id"),
+    replacementFulfillmentId: text("replacement_fulfillment_id"),
     businessQuestionSetId: text("business_question_set_id"),
     locale: text("locale").$type<ReportLocale>().notNull(),
     reason: text("reason").$type<ScanJobReason>().notNull().default("standard"),
@@ -219,6 +220,7 @@ export const scanJobs = pgTable(
     index("scan_jobs_report_idx").on(table.reportId, table.createdAt),
     uniqueIndex("scan_jobs_id_report_uidx").on(table.id, table.reportId),
     uniqueIndex("scan_jobs_correction_uidx").on(table.correctionId).where(sql`${table.correctionId} IS NOT NULL`),
+    uniqueIndex("scan_jobs_replacement_fulfillment_uidx").on(table.replacementFulfillmentId).where(sql`${table.replacementFulfillmentId} IS NOT NULL`),
     uniqueIndex("scan_jobs_recommendation_contract_scope_uidx").on(
       table.id, table.reportId, table.productContract, table.fulfillmentMethodology, table.recommendationReportVersion
     ),
@@ -232,10 +234,11 @@ export const scanJobs = pgTable(
         AND ((${table.fulfillmentMethodology} = 'answer_engine_recommendation_forensics_v1' AND ${table.recommendationReportVersion} = 1)
           OR (${table.fulfillmentMethodology} = 'public_search_source_forensics_v1' AND ${table.recommendationReportVersion} = 2)))
     )`),
-    check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration', 'paid_report_correction', 'staging_artifact_refresh')`),
+    check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration', 'paid_report_correction', 'staging_artifact_refresh', 'replacement_fulfillment')`),
     check("scan_jobs_artifact_contract_check", sql`${table.artifactContract} IS NULL OR ${table.artifactContract} IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3')`),
     check("scan_jobs_correction_credit_check", sql`${table.reason} <> 'paid_report_correction' OR (${table.creditReservationId} IS NULL AND ${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND ${table.correctionId} IS NOT NULL AND ${table.businessQuestionSetId} IS NOT NULL)`),
     check("scan_jobs_refresh_credit_check", sql`${table.reason} <> 'staging_artifact_refresh' OR (${table.creditReservationId} IS NULL AND ${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND ${table.correctionId} IS NULL AND ${table.businessQuestionSetId} IS NOT NULL AND ${table.tier} = 'deep')`),
+    check("scan_jobs_replacement_fulfillment_check", sql`(${table.reason} = 'replacement_fulfillment' AND ${table.replacementFulfillmentId} IS NOT NULL AND ${table.creditReservationId} IS NULL AND ${table.artifactContract} = 'combined_geo_report_v3' AND ${table.correctionId} IS NULL AND ${table.businessQuestionSetId} IS NOT NULL AND ${table.tier} = 'deep') OR (${table.reason} <> 'replacement_fulfillment' AND ${table.replacementFulfillmentId} IS NULL)`),
     check(
       "scan_jobs_stage_check",
       sql`${table.stage} IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')`
@@ -1097,6 +1100,7 @@ export const reportArtifactRevisions = pgTable(
     orderId: text("order_id").notNull().references(() => paymentOrders.id, { onDelete: "restrict" }),
     jobId: text("job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
     correctionId: text("correction_id").references(() => reportCorrections.id, { onDelete: "restrict" }),
+    replacementFulfillmentId: text("replacement_fulfillment_id"),
     sourceArtifactRevisionId: text("source_artifact_revision_id"),
     revisionKind: text("revision_kind").$type<ArtifactRevisionKind>().notNull().default("generation"),
     revision: integer("revision").notNull(),
@@ -1115,17 +1119,48 @@ export const reportArtifactRevisions = pgTable(
     uniqueIndex("report_artifact_revisions_report_revision_uidx").on(table.reportId, table.revision),
     uniqueIndex("report_artifact_revisions_job_uidx").on(table.jobId),
     uniqueIndex("report_artifact_revisions_correction_uidx").on(table.correctionId).where(sql`${table.correctionId} IS NOT NULL`),
+    uniqueIndex("report_artifact_revisions_replacement_uidx").on(table.replacementFulfillmentId).where(sql`${table.replacementFulfillmentId} IS NOT NULL`),
     uniqueIndex("report_artifact_revisions_one_active_uidx").on(table.reportId).where(sql`${table.status} = 'active'`),
     foreignKey({ columns: [table.sourceArtifactRevisionId], foreignColumns: [table.id], name: "report_artifact_revisions_source_fkey" }).onDelete("restrict"),
     check("report_artifact_revisions_revision_check", sql`${table.revision} > 0`),
     check("report_artifact_revisions_contract_check", sql`${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3')`),
     check("report_artifact_revisions_status_check", sql`${table.status} IN ('pending','ready','active','failed')`),
-    check("report_artifact_revisions_kind_check", sql`${table.revisionKind} IN ('generation','correction','presentation_refresh','evidence_refresh')`),
-    check("report_artifact_revisions_lineage_check", sql`(${table.revisionKind} IN ('presentation_refresh','evidence_refresh') AND ${table.sourceArtifactRevisionId} IS NOT NULL AND ${table.correctionId} IS NULL) OR (${table.revisionKind} NOT IN ('presentation_refresh','evidence_refresh') AND ${table.sourceArtifactRevisionId} IS NULL)`),
+    check("report_artifact_revisions_kind_check", sql`${table.revisionKind} IN ('generation','correction','presentation_refresh','evidence_refresh','replacement')`),
+    check("report_artifact_revisions_lineage_check", sql`(${table.revisionKind} IN ('presentation_refresh','evidence_refresh') AND ${table.sourceArtifactRevisionId} IS NOT NULL AND ${table.correctionId} IS NULL AND ${table.replacementFulfillmentId} IS NULL) OR (${table.revisionKind} = 'replacement' AND ${table.sourceArtifactRevisionId} IS NULL AND ${table.correctionId} IS NULL AND ${table.replacementFulfillmentId} IS NOT NULL) OR (${table.revisionKind} IN ('generation','correction') AND ${table.sourceArtifactRevisionId} IS NULL AND ${table.replacementFulfillmentId} IS NULL)`),
     check("report_artifact_revisions_ready_check", sql`${table.status} NOT IN ('ready','active') OR (${table.readyAt} IS NOT NULL AND ${table.htmlSha256} IS NOT NULL AND ${table.pdfSha256} IS NOT NULL AND ${table.pdfStorageKey} IS NOT NULL)`)
   ]
 );
 export type ReportArtifactRevisionRow = typeof reportArtifactRevisions.$inferSelect;
+
+export const reportReplacementFulfillments = pgTable(
+  "report_replacement_fulfillments",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id").notNull().references(() => paymentOrders.id, { onDelete: "restrict" }),
+    reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "restrict" }),
+    originalFailedJobId: text("original_failed_job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
+    failedArtifactRevisionId: text("failed_artifact_revision_id").notNull().references(() => reportArtifactRevisions.id, { onDelete: "restrict" }),
+    questionSetId: text("question_set_id").notNull().references(() => reportBusinessQuestionSets.id, { onDelete: "restrict" }),
+    replacementJobId: text("replacement_job_id").references(() => scanJobs.id, { onDelete: "restrict" }),
+    activeArtifactRevisionId: text("active_artifact_revision_id").references(() => reportArtifactRevisions.id, { onDelete: "restrict" }),
+    reasonCode: text("reason_code").notNull(),
+    state: text("state").notNull().default("prepared"),
+    operatorAuthorizationRef: text("operator_authorization_ref").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true })
+  },
+  (table) => [
+    uniqueIndex("report_replacement_fulfillments_order_uidx").on(table.orderId),
+    uniqueIndex("report_replacement_fulfillments_original_job_uidx").on(table.originalFailedJobId),
+    uniqueIndex("report_replacement_fulfillments_failed_artifact_uidx").on(table.failedArtifactRevisionId),
+    uniqueIndex("report_replacement_fulfillments_job_uidx").on(table.replacementJobId).where(sql`${table.replacementJobId} IS NOT NULL`),
+    uniqueIndex("report_replacement_fulfillments_active_artifact_uidx").on(table.activeArtifactRevisionId).where(sql`${table.activeArtifactRevisionId} IS NOT NULL`),
+    check("report_replacement_fulfillments_reason_check", sql`${table.reasonCode} = 'paid_report_not_delivered'`),
+    check("report_replacement_fulfillments_state_check", sql`${table.state} IN ('prepared','queued','running','repair_wait','completed','failed')`),
+    check("report_replacement_fulfillments_authorization_check", sql`length(btrim(${table.operatorAuthorizationRef})) > 0`)
+  ]
+);
+export type ReportReplacementFulfillmentRow = typeof reportReplacementFulfillments.$inferSelect;
 
 export const combinedGeoReports = pgTable(
   "combined_geo_reports",
