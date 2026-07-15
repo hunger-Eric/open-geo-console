@@ -91,7 +91,8 @@
 - [x] Deploy the repair to protected Preview `dpl_4EQQpkeqyM1v9zuw7NnR5AhXWw6P`, repoint only the fixed staging alias after Ready, and rebuild only the staging free/deep Worker services from the matching source image. Schema remains v21; production was untouched.
 - [x] Implement the paid-acceptance remediation with TDD: stage-specific public-search errors, privacy-safe observation filtering, compact source-driven questions, typed provider failures/probes, truthful payment-return state, and private-report `404` coverage. Full deterministic tests, lint, build and staging `db:audit` pass.
 - [x] Align protected Preview `dpl_56sV5LHa7Gb9W95VEVCCbvUtAeuj`, fixed staging alias, staging-only Workers and schema v22 to source revision `fa4cdb28dbc9f877a7ac2c124b66d5cc122e46c7`; production and historical reports remained untouched.
-- [ ] Restore `OGC_PUBLIC_SEARCH_MIMO_BASE_URL` in the protected-staging probe environment and rerun all pre-order gates. The 2026-07-15 attempt stopped at the first MiMo gate, before Airwallex/Resend probes or any new order.
+- [x] Fix the public-search probe env regression in `7df74bc` and pass all three real MiMo staging cases using the same merged runtime env as the staging Workers.
+- [ ] Restore an authorized protected-staging Airwallex credential source and rerun the read-only Airwallex/Resend provider gate. The 2026-07-15 attempt stopped with `airwallex_authentication_invalid_configuration`, before commerce reconciliation or any new order.
 - [ ] Complete a fully answered/deliverable V3 acceptance on a target with independently retrievable direct public evidence.
 - [ ] Complete real Chrome desktop/mobile/report/404 acceptance for the repaired Preview. Chrome control initialization failed before navigation, so no browser evidence or new checkout link was fabricated.
 

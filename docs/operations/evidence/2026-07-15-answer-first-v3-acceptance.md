@@ -112,11 +112,12 @@ The existing staging refresh lineage requires an active V1/V2 source artifact. R
 
 ### Stop-gate result
 
-- The first pre-order gate, `npm run public-search:probe -- --adapter mimo --locale zh-CN --region CN`, failed before making an acceptance order because `OGC_PUBLIC_SEARCH_MIMO_BASE_URL` is absent from the staging probe environment.
-- Per the remediation plan, execution stopped at this gate. Airwallex/Resend commerce probes, staging commerce reconciliation, checkout, payment, deep fulfillment, activation, email delivery and desktop/mobile browser acceptance were not attempted.
+- The initial MiMo failure was a probe-launch regression, not missing provider configuration: the protected staging Workers use the merged `.data/workstation-docker/staging.env`, while the new npm probe originally read only placeholder source env files. Commit `7df74bc` adds a red/green regression test and points the probe at the same merged runtime env as the staging Workers.
+- The corrected real MiMo probe passed all three bounded cases (`official-factual`, `chinese-b2b-discovery`, and `narrow-structured-search`) with three source domains per case and the expected typed failure semantics.
+- The next gate, the read-only Airwallex/Resend staging provider probe for failed historical order `d738b38f-63cb-4886-bdda-c8f745bf5b81`, stopped with `airwallex_authentication_invalid_configuration`. The local staging and pulled Preview env sources contain only empty Airwallex placeholders, so execution stopped before Resend, commerce reconciliation, checkout, payment, deep fulfillment, activation, email delivery or browser acceptance.
 - No new report, order, payment intent, entitlement, job, artifact revision, refund or email intent was created. There are therefore no new report/order/task/revision IDs and no acceptance screenshots.
 - Failed historical order `d738b38f-63cb-4886-bdda-c8f745bf5b81` was not reopened, mutated, probed or represented as successful. The earlier terminal V3 chain documented above also remains immutable.
-- Customer-deliverable V3 acceptance remains blocked on restoring the staging MiMo base-URL configuration and rerunning every pre-order gate from the beginning.
+- Customer-deliverable V3 acceptance remains blocked on restoring an authorized protected-staging Airwallex credential source for the read-only provider probe, then rerunning that gate and every remaining pre-order check.
 
 ## Commercial terminality
 
