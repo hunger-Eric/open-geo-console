@@ -17,6 +17,7 @@
 - `npm run browser:install` installs Chromium for JavaScript-rendered page fallback.
 - `npm run db:audit` fails when a terminal commercial job still has a reserved credit.
 - `npm run worker:staging:free|deep` and `npm run commerce:staging:all` require `apps/web/.env.staging.local` and refuse a non-staging database marker.
+- `npm run public-search:probe -- --adapter mimo --locale zh-CN --region CN` reads `.data/workstation-docker/staging.env`, the merged runtime environment used by the staging Docker Workers. Do not point it back at source env files with empty Sensitive-value placeholders or diagnose MiMo as missing from those placeholders alone.
 - `npm run staging:free:cleanup -- --confirm` is the only quota/reuse cleanup path and refuses production.
 - `npm run lint` checks the Next.js workspace.
 - `npm test` runs package and app unit tests.

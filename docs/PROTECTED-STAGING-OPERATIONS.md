@@ -43,6 +43,16 @@ Protected staging uses `OGC_EVIDENCE_STORAGE=vercel-blob` and the Preview-only `
 
 Vercel Sensitive values are intentionally not decryptable through `vercel env pull`; the generated file contains empty placeholders for those names. For a local Worker drill, explicitly override each required empty placeholder with the separately held staging value in only that process. Merely loading another env file does not replace variables that already exist as empty placeholders. Never weaken the database marker guard, print values, or copy production secrets into `.env.staging.local`.
 
+### Public-search provider probe environment
+
+Run the protected-staging MiMo capability gate only after the staging Worker runtime environment has been generated:
+
+```powershell
+npm run public-search:probe -- --adapter mimo --locale zh-CN --region CN
+```
+
+The probe intentionally reads `.data/workstation-docker/staging.env`, which is the merged environment consumed by `staging-worker-free` and `staging-worker-deep`. Source files such as `apps/web/.env.staging.local`, `.vercel/.env.preview.local`, and `apps/web/.env.public-search.staging.local` may contain empty Sensitive-value placeholders even when the merged Worker runtime has valid MiMo values. Therefore, inspecting a source placeholder file alone is not evidence that `OGC_PUBLIC_SEARCH_MIMO_BASE_URL`, its API key, or model is missing. Verify the merged file by variable name/non-empty status without printing values, then require the real bounded probe to pass. Never substitute a production env file or copy secrets into tracked files.
+
 If a workstation proxy uses the reserved `198.18.0.0/15` Fake-IP DNS range, the crawler will and must reject the target as an SSRF risk. Do not allowlist the range or disable URL safety. Set `OGC_PUBLIC_DNS_DOH_URL=https://cloudflare-dns.com/dns-query` for that Worker process; both crawl and screenshot-browser validation then use the fixed public resolver while retaining blocked-address checks and safe-fetch IP pinning.
 
 ### One-time paid-report correction
