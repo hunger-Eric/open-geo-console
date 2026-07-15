@@ -31,6 +31,7 @@ export interface AnswerFirstV3StoredSource {
   sourceCategory: "company_owned" | "earned_editorial" | "directory_or_reference" | "community_or_ugc" | "institution" | "social" | "unknown";
   observedAt: string;
   retrievalReady: boolean;
+  snapshotKind?: "standard_question" | "provider_discovery" | "candidate_verification";
 }
 
 export interface AnswerFirstV3Checkpoint {
@@ -85,6 +86,24 @@ export function buildAnswerFirstV3Evidence(input: BuildAnswerFirstV3EvidenceInpu
       subjectKey,
       stored,
       exactExcerpt: evidence.exactExcerpt,
+      ownershipCategory: stored.sourceCategory === "company_owned"
+        ? (stored.registrableDomain.toLocaleLowerCase() === targetDomain ? "target_owned" : "competitor_owned")
+        : ownershipFromStored(stored.sourceCategory)
+    }));
+  }
+
+  const projectedProviderSourceIds = new Set(input.providerDiscovery.evidence.map(({ sourceEvidenceId }) => sourceEvidenceId));
+  const q1 = questions[0]!;
+  for (const stored of input.storedSources) {
+    if (stored.snapshotKind !== "candidate_verification" || projectedProviderSourceIds.has(stored.sourceEvidenceId) ||
+        !stored.retrievalReady || normalizeUrl(stored.canonicalUrl) === null) continue;
+    const exactExcerpt = questionRelevantExcerpt(stored.exactExcerpt, `${q1.normalizedText} ${q1.derivation.subject}`);
+    if (!exactExcerpt) continue;
+    projected.push(projectEvidence({
+      questionId: q1.id,
+      subjectKey: `source-domain:${stored.registrableDomain.toLocaleLowerCase()}`,
+      stored,
+      exactExcerpt,
       ownershipCategory: stored.sourceCategory === "company_owned"
         ? (stored.registrableDomain.toLocaleLowerCase() === targetDomain ? "target_owned" : "competitor_owned")
         : ownershipFromStored(stored.sourceCategory)
@@ -280,6 +299,20 @@ function evidenceSubjects(report: RecommendationForensicReportV2, evidenceId: st
     .filter(({ status, evidenceIds }) => status === "supported" && evidenceIds.includes(evidenceId))
     .map(({ subjectEntityId, subjectName }) => subjectEntityId ?? `subject:${normalize(subjectName)}`);
   return [...new Set([...entityIds, ...claims].filter(Boolean))];
+}
+function questionRelevantExcerpt(text: string, question: string): string | null {
+  const terms = relevanceTerms(question);
+  const chunks = text.match(/.{1,900}(?:[。！？.!?]|$)/gu) ?? [text.slice(0, 900)];
+  const selected = chunks.map((value) => ({ value: value.trim(), score: terms.filter((term) => value.toLocaleLowerCase().includes(term)).length }))
+    .sort((left, right) => right.score - left.score || left.value.length - right.value.length)[0];
+  return selected && selected.score > 0 ? selected.value.slice(0, 1_000) : null;
+}
+function relevanceTerms(value: string): string[] {
+  const normalized = value.normalize("NFKC").toLocaleLowerCase();
+  const latin = normalized.match(/[a-z0-9][a-z0-9-]{2,}/g) ?? [];
+  const chineseRuns = normalized.match(/[\p{Script=Han}]{2,}/gu) ?? [];
+  const chinese = chineseRuns.flatMap((run) => run.length <= 6 ? [run] : Array.from({ length: run.length - 1 }, (_, index) => run.slice(index, index + 2)));
+  return [...new Set([...latin, ...chinese])].filter((term) => !["which", "what", "where", "provide", "哪些", "什么", "如何", "是否"].includes(term));
 }
 function ownershipFromStored(category: AnswerFirstV3StoredSource["sourceCategory"]): OpenGeoAnswerOwnershipCategoryV3 { if (category === "earned_editorial") return "third_party_editorial"; if (category === "directory_or_reference") return "directory"; if (category === "institution") return "government"; return "other"; }
 function ownershipFromGraph(category: string): OpenGeoAnswerOwnershipCategoryV3 { if (category === "owned_customer") return "target_owned"; if (category === "owned_competitor") return "competitor_owned"; if (category === "independent_editorial") return "third_party_editorial"; if (category === "directory_or_reference") return "directory"; if (category === "institution" || category === "public_body") return "government"; return "other"; }

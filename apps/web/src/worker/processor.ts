@@ -1082,7 +1082,8 @@ async function loadAnswerFirstV3StoredSources(snapshotIds: readonly string[]): P
         exactExcerpt: source.excerpt,
         sourceCategory: source.sourceCategory,
         observedAt: observation.observedAt.toISOString(),
-        retrievalReady: true
+        retrievalReady: true,
+        snapshotKind: bundle.snapshot.snapshotKind as AnswerFirstV3StoredSource["snapshotKind"]
       });
     }
   }

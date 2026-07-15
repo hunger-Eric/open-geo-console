@@ -230,6 +230,7 @@ export function resolveProviderCandidates(
     const domain = safeDomain(result.url);
     if (!domain || byDomain.has(domain)) continue;
     const name = candidateName(result.title, domain);
+    if (!name) continue;
     if (!isPublicProviderCandidate(name, domain, excludedIdentities)) continue;
     byDomain.set(domain, { name, domain, order: result.surfaceResultOrder });
   }
@@ -268,10 +269,19 @@ function isPublicIdentityText(value: string, excludedIdentities: readonly Custom
   try { assertNoCustomerIdentity(value, excludedIdentities); return true; } catch { return false; }
 }
 
-function candidateName(title: string, domain: string): string {
-  const segment = title.normalize("NFKC").split(/\s+[|–—-]\s+/, 1)[0]?.replace(/\s+/g, " ").trim();
-  if (segment && segment.length >= 2 && segment.length <= 120) return segment;
-  return domain.split(".")[0]!.replace(/[-_]+/g, " ").replace(/\b\w/g, (value) => value.toUpperCase());
+function candidateName(title: string, domain: string): string | null {
+  const segment = title.normalize("NFKC").split(/\s*[|｜–—]\s*/u, 1)[0]?.replace(/\s+/g, " ").trim();
+  if (segment) return segment.length >= 2 && segment.length <= 120 && !looksLikeNonEntityTitle(segment) ? segment : null;
+  const domainName = domain.split(".")[0]!.replace(/[-_]+/g, " ").replace(/\b\w/g, (value) => value.toUpperCase()).trim();
+  return domainName.length >= 4 && !looksLikeNonEntityTitle(domainName) ? domainName : null;
+}
+
+function looksLikeNonEntityTitle(value: string): boolean {
+  const normalized = value.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim();
+  if (/[?？]$/u.test(normalized) || /^(?:哪些|哪家|什么|如何|是否|为什么|who|what|which|how|where)\b/iu.test(normalized)) return true;
+  if (/(?:您的|我们的|专业的?)?(?:海外仓|物流|运输|供应链)?(?:服务)?供应商$/u.test(normalized)) return true;
+  if (/(?:通知|公告|公示|申报|名单|指南|盘点|推荐|排行榜|哪(?:些|家)|比较好)/u.test(normalized)) return true;
+  return /^(?:服务商|供应商|物流|海外仓|行业服务|search results?)$/iu.test(normalized);
 }
 
 function createProviderRetriever(candidateDomains: ReadonlyMap<string, string>, candidates: readonly ProviderCandidateQueryIdentity[]): PublicSourceRetriever {
@@ -329,7 +339,7 @@ export function bindQuestionScopedDirectEvidence(input: {
   if (!excerpt) return { ...input.fact, verifiedExcerpt: undefined, entityMentions: undefined, claims: undefined };
   let registrableDomain: string;
   try { registrableDomain = getPublicSourceDomainIdentity(canonicalUrl).registrableDomain; } catch { return input.fact; }
-  const subjectName = candidateName(input.sourceTitle, registrableDomain);
+  const subjectName = candidateName(input.sourceTitle, registrableDomain) ?? `来源域名 ${registrableDomain}`;
   const entityId = `public-source-subject:${sha({ subjectName: subjectName.toLocaleLowerCase(), registrableDomain })}`;
   return {
     ...input.fact,
