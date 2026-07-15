@@ -49,6 +49,26 @@ describe("V2 public-source retriever", () => {
     await expect(pending).rejects.toBe(reason);
   });
 
+  it("contains a source-local safe-fetch timeout as inaccessible evidence", async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(async () => {
+      throw new DOMException("The source request timed out", "TimeoutError");
+    }) as unknown as typeof fetch;
+
+    const fact = await executePublicSourceRetrieval({
+      observationId: "obs-timeout", queryId: "query-timeout", resultUrl: "https://source.example/article"
+    }, { fetchImpl, resolver: publicResolver, signal: controller.signal });
+
+    expect(controller.signal.aborted).toBe(false);
+    expect(fact).toMatchObject({
+      retrievalState: "inaccessible",
+      publiclyRoutable: true,
+      robotsAllowed: false,
+      accessBarrier: "unknown"
+    });
+    expect(fact).not.toHaveProperty("normalizedText");
+  });
+
   it("retrieves only robots-authorized public text through safe fetch", async () => {
     const requested: string[] = [];
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
