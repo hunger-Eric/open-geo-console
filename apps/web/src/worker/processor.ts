@@ -154,7 +154,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       if(!context) throw new Error("The staging artifact-refresh identity is unavailable.");
       const evidenceAssets=await loadReferencedEvidenceAssets(context.sourceReport);
       await assertReusableEvidenceAssets(evidenceAssets);
-      if(context.sourceReport.artifactContract==="combined_geo_report_v2"){
+      if(context.sourceReport.artifactContract==="combined_geo_report_v2"||context.sourceReport.artifactContract==="combined_geo_report_v3"){
         await finalizeProviderDiscoveryCombinedJob({job,workerId,checkpoint,websiteFoundation:context.sourceReport.technicalFoundation.aiReport,
           technicalReport:context.sourceReport.technicalFoundation.technicalReport,targetUrl:context.sourceReport.targetUrl,
           coverage:{plannedPages:job.plannedPages,successfulPages:job.successfulPages,failedPages:job.failedPages},checkpointJob,
@@ -601,7 +601,7 @@ export function resolveRecommendationFoundationTarget(
   return checkpoint.discoverySnapshot?.targetUrl ?? foundation?.payload.targetUrl ?? submittedUrl;
 }
 
-async function loadReferencedEvidenceAssets(sourceReport: import("@open-geo-console/ai-report-engine").CombinedGeoReportV1 | import("@open-geo-console/ai-report-engine").CombinedGeoReportV2):Promise<ReportEvidenceAssetRow[]>{
+async function loadReferencedEvidenceAssets(sourceReport: import("@open-geo-console/ai-report-engine").CombinedGeoReportV1 | import("@open-geo-console/ai-report-engine").CombinedGeoReportV2 | import("@open-geo-console/ai-report-engine").CombinedGeoReportV3):Promise<ReportEvidenceAssetRow[]>{
   const references=sourceReport.technicalFoundation.evidenceAssets;
   const ids=new Set(references.map(({assetId})=>assetId));
   const jobIds=[...new Set(references.map(({jobId})=>jobId))];

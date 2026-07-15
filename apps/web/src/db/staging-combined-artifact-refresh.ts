@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import { parseCombinedGeoReportV1, parseCombinedGeoReportV2, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, type CombinedGeoReportV1, type CombinedGeoReportV2 } from "@open-geo-console/ai-report-engine";
+import { parseCombinedGeoReportV1, parseCombinedGeoReportV2, parseCombinedGeoReportV3, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3 } from "@open-geo-console/ai-report-engine";
 import { ensureDatabase, getSqlClient } from "./index";
 import type { PaidPublicSourceSnapshotRef } from "./public-source-commerce";
 import { snapshotReferenceBinding } from "./combined-correction-terminalization";
 import { JobTransitionService } from "@/worker/job-transition-service";
 
 export const STAGING_COMBINED_REFRESH_REPORT_ID = "a71d7481-c5dc-4e2a-a042-b9be878feab8";
+export const STAGING_V3_REPLACEMENT_REFRESH_REPORT_ID = "0631932e-72b8-4c6f-b492-820e2533e23e";
+export const STAGING_COMBINED_REFRESH_REPORT_IDS = [STAGING_COMBINED_REFRESH_REPORT_ID, STAGING_V3_REPLACEMENT_REFRESH_REPORT_ID] as const;
 
 export interface StagingCombinedArtifactRefreshContext {
   reportId: string;
@@ -14,17 +16,19 @@ export interface StagingCombinedArtifactRefreshContext {
   artifactRevisionId: string;
   artifactRevision: number;
   sourceArtifactRevisionId: string;
-  sourceReport: CombinedGeoReportV1 | CombinedGeoReportV2;
+  sourceReport: CombinedGeoReportV1 | CombinedGeoReportV2 | CombinedGeoReportV3;
 }
 
 export async function prepareStagingCombinedArtifactRefresh(reportId: string, expectedSourceRevisionId?: string): Promise<StagingCombinedArtifactRefreshContext> {
-  if (reportId !== STAGING_COMBINED_REFRESH_REPORT_ID) throw new Error("The staging refresh is restricted to the approved report.");
+  if (!STAGING_COMBINED_REFRESH_REPORT_IDS.includes(reportId as typeof STAGING_COMBINED_REFRESH_REPORT_IDS[number])) throw new Error("The staging refresh is restricted to an approved report.");
   await ensureDatabase();
   return getSqlClient().begin(async (tx) => {
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`artifact-revision:${reportId}`},0))`;
-    const source=(await tx<Array<{artifact_revision_id:string;artifact_contract:string;revision:number;revision_kind:string;order_id:string;job_id:string;question_set_id:string;payload:unknown;payment_status:string;fulfillment_status:string;refund_status:string;credit_status:string|null}>>`
+    const source=(await tx<Array<{artifact_revision_id:string;artifact_contract:string;revision:number;revision_kind:string;order_id:string;job_id:string;question_set_id:string;payload:unknown;payment_status:string;fulfillment_status:string;refund_status:string;credit_status:string|null;courtesy_non_billable:boolean;replacement_completed:boolean}>>`
       SELECT artifact.id AS artifact_revision_id,artifact.artifact_contract,artifact.revision,artifact.revision_kind,combined.order_id,combined.job_id,combined.question_set_id,combined.payload,
-        orders.payment_status,orders.fulfillment_status,orders.refund_status,credits.status AS credit_status
+        orders.payment_status,orders.fulfillment_status,orders.refund_status,credits.status AS credit_status,orders.courtesy_non_billable,
+        EXISTS(SELECT 1 FROM report_replacement_fulfillments replacement WHERE replacement.report_id=reports.id
+          AND replacement.state='completed' AND replacement.active_artifact_revision_id=artifact.id) AS replacement_completed
       FROM scan_reports reports
       JOIN report_artifact_revisions artifact ON artifact.id=reports.active_artifact_revision_id AND artifact.status='active'
       JOIN combined_geo_reports combined ON combined.artifact_revision_id=artifact.id
@@ -34,11 +38,15 @@ export async function prepareStagingCombinedArtifactRefresh(reportId: string, ex
     if(!source) throw new Error("The approved staging report has no active combined artifact.");
     if(["presentation_refresh","evidence_refresh"].includes(source.revision_kind)&&!expectedSourceRevisionId) throw new Error("A repeated refresh requires --from-revision with the inspected active artifact ID.");
     if(expectedSourceRevisionId && source.artifact_revision_id!==expectedSourceRevisionId) throw new Error("The active artifact revision changed; inspect it before refreshing again.");
-    if(source.payment_status!=="paid"||source.fulfillment_status!=="completed"||source.refund_status!=="not_required"||source.credit_status!=="settled") {
+    const settledOriginal=source.payment_status==="paid"&&source.fulfillment_status==="completed"&&source.refund_status==="not_required"&&source.credit_status==="settled";
+    const completedCourtesyReplacement=reportId===STAGING_V3_REPLACEMENT_REFRESH_REPORT_ID&&source.artifact_contract==="combined_geo_report_v3"&&
+      source.payment_status==="paid"&&source.fulfillment_status==="failed"&&source.refund_status==="failed"&&source.credit_status==="refunded"&&
+      source.courtesy_non_billable&&source.replacement_completed;
+    if(!settledOriginal&&!completedCourtesyReplacement) {
       throw new Error("The original commercial outcome is not settled and refreshable.");
     }
     const sourceReport=parseCombined(source.payload,source.artifact_contract);
-    const revisionKind=sourceReport.artifactContract==="combined_geo_report_v2"?"evidence_refresh":"presentation_refresh";
+    const revisionKind=sourceReport.artifactContract==="combined_geo_report_v1"?"presentation_refresh":"evidence_refresh";
     const locked=(await tx<Array<{id:string}>>`SELECT id FROM report_business_question_sets WHERE id=${source.question_set_id} AND report_id=${reportId} AND status='locked'`)[0];
     if(!locked||sourceReport.questionSetIdentity!==locked.id) throw new Error("The active report question set is not locked and reusable.");
     const existing=(await tx<Array<{job_id:string;artifact_revision_id:string;revision:number}>>`
@@ -83,15 +91,15 @@ export async function failStagingCombinedArtifactRefresh(jobId:string):Promise<v
 }
 
 export async function terminalizeStagingCombinedArtifactRefresh(input:{report:unknown;workerId:string;checkpointIdentityHash:string;
-  snapshotRefs:readonly PaidPublicSourceSnapshotRef[];htmlSha256:string;pdfSha256:string;pdfStorageKey:string;pageCount:number}):Promise<CombinedGeoReportV1|CombinedGeoReportV2>{
+  snapshotRefs:readonly PaidPublicSourceSnapshotRef[];htmlSha256:string;pdfSha256:string;pdfStorageKey:string;pageCount:number}):Promise<CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3>{
   const report=readyCombined(input.report);
-  if(report.reportId!==STAGING_COMBINED_REFRESH_REPORT_ID||input.pageCount<5||!input.workerId.trim()) throw new Error("Staging refresh readiness identity is incomplete.");
+  if(!STAGING_COMBINED_REFRESH_REPORT_IDS.includes(report.reportId as typeof STAGING_COMBINED_REFRESH_REPORT_IDS[number])||input.pageCount<5||!input.workerId.trim()) throw new Error("Staging refresh readiness identity is incomplete.");
   await ensureDatabase();
   return getSqlClient().begin(async(tx)=>{
     const job=(await tx<Array<{execution_state:string;checkpoint_revision:number;lease_owner:string|null;lease_expires_at:string|null;credit_reservation_id:string|null;checkpoint:Record<string,unknown>;reason:string;business_question_set_id:string|null}>>`
       SELECT execution_state,checkpoint_revision,lease_owner,lease_expires_at,credit_reservation_id,checkpoint,reason,business_question_set_id
       FROM scan_jobs WHERE id=${report.jobId} AND report_id=${report.reportId} FOR UPDATE`)[0];
-    const identity=((report.artifactContract==="combined_geo_report_v2"?job?.checkpoint?.providerDiscovery:job?.checkpoint?.publicSourceForensics) as {identityHash?:unknown}|undefined)?.identityHash;
+    const identity=((report.artifactContract==="combined_geo_report_v3"?job?.checkpoint?.answerFirstV3:report.artifactContract==="combined_geo_report_v2"?job?.checkpoint?.providerDiscovery:job?.checkpoint?.publicSourceForensics) as {identityHash?:unknown}|undefined)?.identityHash;
     if(!job||job.reason!=="staging_artifact_refresh"||job.execution_state!=="running"||job.lease_owner!==input.workerId||
       !job.lease_expires_at||Date.parse(job.lease_expires_at)<=Date.now()||job.credit_reservation_id!==null||
       job.business_question_set_id!==report.questionSetIdentity||identity!==input.checkpointIdentityHash) throw new Error("Refresh requires its exact active non-billable leased job.");
@@ -131,5 +139,5 @@ export async function terminalizeStagingCombinedArtifactRefresh(input:{report:un
 
 function language(locale:string):"en"|"zh"{return locale.toLowerCase().startsWith("zh")?"zh":"en";}
 function sha(parts:string[]):string{return createHash("sha256").update(parts.join("\0")).digest("hex");}
-function parseCombined(value:unknown,contract:string):CombinedGeoReportV1|CombinedGeoReportV2{return contract==="combined_geo_report_v2"?parseCombinedGeoReportV2(value):parseCombinedGeoReportV1(value);}
-function readyCombined(value:unknown):CombinedGeoReportV1|CombinedGeoReportV2{const contract=value&&typeof value==="object"&&!Array.isArray(value)?(value as {artifactContract?:unknown}).artifactContract:null;return contract==="combined_geo_report_v2"?requireReadyCombinedGeoReportV2(value):requireReadyCombinedGeoReport(value);}
+function parseCombined(value:unknown,contract:string):CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3{return contract==="combined_geo_report_v3"?parseCombinedGeoReportV3(value):contract==="combined_geo_report_v2"?parseCombinedGeoReportV2(value):parseCombinedGeoReportV1(value);}
+function readyCombined(value:unknown):CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3{const contract=value&&typeof value==="object"&&!Array.isArray(value)?(value as {artifactContract?:unknown}).artifactContract:null;return contract==="combined_geo_report_v3"?requireReadyCombinedGeoReportV3(value):contract==="combined_geo_report_v2"?requireReadyCombinedGeoReportV2(value):requireReadyCombinedGeoReport(value);}
