@@ -1,5 +1,5 @@
 /* eslint-disable @next/next/no-img-element -- protected evidence images must remain printable in canonical HTML */
-import type { ReactNode } from "react";
+import React, { type ReactNode } from "react";
 import type { OpenGeoAnswerOwnershipCategoryV3 } from "@open-geo-console/ai-report-engine";
 import type { CombinedPrivateReportArtifactModelV3 } from "@/report/artifact-model";
 
