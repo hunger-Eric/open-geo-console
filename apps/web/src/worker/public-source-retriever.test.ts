@@ -1,9 +1,28 @@
 import { describe, expect, it, vi } from "vitest";
-import { executePublicSourceRetrieval } from "./public-source-retriever";
+import { executePublicDocumentHttpAttempt, executePublicSourceRetrieval } from "./public-source-retriever";
 
 const publicResolver = async () => [{ address: "8.8.8.8", family: 4 as const }];
 
 describe("V2 public-source retriever", () => {
+  it("keeps unknown source-local failures out of evidence-absence states", async () => {
+    const attempt = await executePublicDocumentHttpAttempt({
+      observationId: "obs-typed", queryId: "query-typed", resultUrl: "https://source.example/article"
+    }, { fetchImpl: vi.fn(async () => { throw new DOMException("timed out", "TimeoutError"); }) as unknown as typeof fetch, resolver: publicResolver });
+    expect(attempt).toMatchObject({
+      method: "http", outcome: "internal_failure", retryEligible: true,
+      canonicalUrl: "https://source.example/article"
+    });
+  });
+
+  it("returns a typed available attempt beside normalized text", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/robots.txt")
+      ? new Response("User-agent: *\nAllow: /")
+      : new Response("<main>Typed freight evidence.</main>", { headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
+    const attempt = await executePublicDocumentHttpAttempt({
+      observationId: "obs-typed-ok", queryId: "query-typed-ok", resultUrl: "https://source.example/article"
+    }, { fetchImpl, resolver: publicResolver });
+    expect(attempt).toMatchObject({ outcome: "available", stage: "terminal", normalizedText: "Typed freight evidence." });
+  });
   it("propagates a pre-existing Worker deadline without issuing network work", async () => {
     const controller = new AbortController();
     const reason = new Error("Worker deadline exceeded");

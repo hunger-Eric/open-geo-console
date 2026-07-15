@@ -1,10 +1,11 @@
-import type { RetrievedPublicSourceFact } from "@open-geo-console/citation-intelligence";
+import { getPublicSourceDomainIdentity, type RetrievedPublicSourceFact } from "@open-geo-console/citation-intelligence";
 import {
   extractReadableText,
   isAllowedByRobots,
   parseRobotsTxt,
   UrlSafetyError,
   type HostnameResolver,
+  type PublicDocumentAttemptResult,
   type RobotsPolicy
 } from "@open-geo-console/site-crawler";
 import { createSafeFetch } from "@/server/safe-fetch";
@@ -23,6 +24,35 @@ export interface PublicSourceRetrieverOptions {
   resolver?: HostnameResolver;
   signal?: AbortSignal;
   excerptMode?: "none" | "legacy_prefix";
+}
+
+export async function executePublicDocumentHttpAttempt(input: {
+  observationId: string;
+  queryId: string;
+  resultUrl: string;
+}, options: PublicSourceRetrieverOptions = {}): Promise<PublicDocumentAttemptResult> {
+  const started = Date.now();
+  const canonicalUrl = createPublicSourceRetrievalRequest(input).resultUrl;
+  let registrableDomain: string;
+  try { registrableDomain = getPublicSourceDomainIdentity(canonicalUrl).registrableDomain; }
+  catch { registrableDomain = new URL(canonicalUrl).hostname.toLocaleLowerCase(); }
+  const fact = await executePublicSourceRetrieval(input, options);
+  const outcome = attemptOutcome(fact);
+  return {
+    method: "http",
+    stage: outcome === "available" ? "terminal" : attemptStage(outcome),
+    outcome,
+    canonicalUrl,
+    ...(fact.finalUrl ? { finalUrl: fact.finalUrl } : {}),
+    registrableDomain,
+    robotsOutcome: fact.robotsAllowed ? "allowed" : fact.retrievalState === "robots_denied" ? "denied" : "unavailable",
+    ...(fact.contentBytes === undefined ? {} : { contentBytes: fact.contentBytes }),
+    durationMs: Math.max(0, Date.now() - started),
+    ...(fact.normalizedText ? { normalizedText: fact.normalizedText } : {}),
+    ...(fact.normalizedContentHash ? { normalizedContentHash: fact.normalizedContentHash } : {}),
+    retryEligible: ["connect_timeout", "robots_unavailable", "http_429", "http_5xx", "internal_failure"].includes(outcome),
+    browserEligible: outcome === "javascript_shell"
+  };
 }
 
 /**
@@ -204,3 +234,20 @@ function unavailableResult(input: Parameters<typeof normalizePublicSourceRetriev
 }
 
 class PublicSourceRobotsDeniedError extends Error {}
+
+function attemptOutcome(fact: RetrievedPublicSourceFact): PublicDocumentAttemptResult["outcome"] {
+  if (fact.retrievalState === "available") return "available";
+  if (fact.retrievalState === "robots_denied") return "robots_denied";
+  if (fact.retrievalState === "unsafe_destination") return "unsafe_destination";
+  if (fact.retrievalState === "login_required" || fact.retrievalState === "paywalled") return "authentication_required";
+  if (fact.retrievalState === "captcha") return "challenge_detected";
+  return "internal_failure";
+}
+
+function attemptStage(outcome: PublicDocumentAttemptResult["outcome"]): PublicDocumentAttemptResult["stage"] {
+  if (outcome === "robots_denied" || outcome === "robots_unavailable") return "robots_evaluation";
+  if (outcome === "unsafe_destination" || outcome === "dns_failed") return "dns_validation";
+  if (outcome === "body_empty" || outcome === "javascript_shell" || outcome === "extraction_failed") return "content_extraction";
+  if (outcome.startsWith("http_") || outcome === "authentication_required" || outcome === "challenge_detected") return "http_response_validation";
+  return "terminal";
+}
