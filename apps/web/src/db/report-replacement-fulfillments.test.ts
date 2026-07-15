@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { APPROVED_REPLACEMENT_TARGET, prepareApprovedReportReplacement } from "./report-replacement-fulfillments";
+import { APPROVED_REPLACEMENT_TARGET, prepareApprovedReportReplacement, resumeApprovedReplacementModelRepair } from "./report-replacement-fulfillments";
 
 describe("approved replacement fulfillment guard", () => {
   it("is bound to the one approved paid failure lineage", () => {
@@ -15,5 +15,6 @@ describe("approved replacement fulfillment guard", () => {
   it("fails closed before database access without confirmation or a safe authorization reference", async () => {
     await expect(prepareApprovedReportReplacement({ confirm: false, authorizationRef: "approval-2026-07-15" })).rejects.toThrow("--confirm");
     await expect(prepareApprovedReportReplacement({ confirm: true, authorizationRef: "x" })).rejects.toThrow("authorization reference");
+    await expect(resumeApprovedReplacementModelRepair({ confirm: false, authorizationRef: "approval-2026-07-15" })).rejects.toThrow("--confirm");
   });
 });

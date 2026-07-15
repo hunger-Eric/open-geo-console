@@ -56,7 +56,7 @@ describe("job error normalization", () => {
     }), context);
 
     expect(normalized).toMatchObject({
-      classification: "permanent",
+      classification: "operator_repairable",
       code: "answer_first_v3_model_contract_invalid",
       type: "AnswerFirstV3ModelContractInvalidError",
       retryableAt: null

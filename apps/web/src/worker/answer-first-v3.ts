@@ -347,7 +347,7 @@ export class AnswerFirstV3ModelContractInvalidError extends JobError {
     super(
       "Answer-first V3 model response failed contract validation.",
       "answer_first_v3_model_contract_invalid",
-      "permanent",
+      "operator_repairable",
       options
     );
   }

@@ -150,9 +150,9 @@ describe("answer-first V3 Worker service", () => {
     await expect(result).rejects.toMatchObject({
       name: "AnswerFirstV3ModelContractInvalidError",
       code: "answer_first_v3_model_contract_invalid",
-      classification: "permanent"
+      classification: "operator_repairable"
     });
-    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    expect(client.completeJson).toHaveBeenCalledTimes(3);
     await expect(result).rejects.toBeInstanceOf(AnswerFirstV3ModelContractInvalidError);
   });
 
@@ -243,7 +243,7 @@ describe("answer-first V3 Worker service", () => {
       code: "answer_first_v3_model_contract_invalid",
       cause: expect.objectContaining({ message: expect.stringMatching(/unsupported evidence/i) })
     });
-    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    expect(client.completeJson).toHaveBeenCalledTimes(3);
   });
 
   it("reuses a matching answer checkpoint without search, retrieval, or model calls", async () => {

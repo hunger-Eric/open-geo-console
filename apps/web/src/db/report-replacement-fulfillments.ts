@@ -141,6 +141,39 @@ export async function syncReplacementExecutionState(jobId: string, executionStat
     FROM scan_jobs job WHERE replacement.replacement_job_id=${jobId} AND job.id=${jobId} AND replacement.state<>'completed'`;
 }
 
+export async function resumeApprovedReplacementModelRepair(input: { confirm: boolean; authorizationRef: string }): Promise<ReplacementFulfillmentSummary> {
+  if (!input.confirm) throw new Error("Explicit --confirm is required for replacement model repair.");
+  const authorizationRef = input.authorizationRef.trim();
+  if (!/^[A-Za-z0-9@._:/ -]{3,160}$/.test(authorizationRef)) throw new Error("A safe operator authorization reference is required.");
+  await ensureDatabase();
+  return getSqlClient().begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`replacement:${APPROVED_REPLACEMENT_TARGET.orderId}`},0))`;
+    const rows = await tx<Array<{
+      replacement_id: string; replacement_state: string; job_id: string; execution_state: string; error_code: string | null;
+      current_phase: string; checkpoint_revision: number; recovery_phase: string | null; artifact_revision_id: string; artifact_status: string;
+    }>>`SELECT replacement.id AS replacement_id,replacement.state AS replacement_state,job.id AS job_id,job.execution_state,job.error_code,
+      job.current_phase,job.checkpoint_revision,job.checkpoint->'recovery'->>'phase' AS recovery_phase,
+      artifact.id AS artifact_revision_id,artifact.status AS artifact_status
+      FROM report_replacement_fulfillments replacement
+      JOIN scan_jobs job ON job.id=replacement.replacement_job_id
+      JOIN report_artifact_revisions artifact ON artifact.replacement_fulfillment_id=replacement.id
+      WHERE replacement.order_id=${APPROVED_REPLACEMENT_TARGET.orderId} FOR UPDATE OF replacement,job,artifact`;
+    const row = rows[0];
+    if (!row || row.replacement_state !== "failed" || row.execution_state !== "failed" ||
+        row.error_code !== "answer_first_v3_model_contract_invalid" || row.recovery_phase !== "artifact_verification" || row.artifact_status !== "pending") {
+      throw new Error("The approved replacement is not eligible for model-contract repair resume.");
+    }
+    await tx`UPDATE scan_jobs SET stage='synthesizing',execution_state='queued',current_phase='artifact_verification',phase_attempt=0,
+      retry_not_before=NULL,repair_reason_code=NULL,repair_deadline_at=NULL,resume_generation=resume_generation+1,
+      lease_owner=NULL,lease_expires_at=NULL,error_code=NULL,public_error=NULL,updated_at=now()
+      WHERE id=${row.job_id} AND execution_state='failed'`;
+    await tx`UPDATE report_replacement_fulfillments SET state='queued',operator_authorization_ref=${authorizationRef} WHERE id=${row.replacement_id}`;
+    await tx`INSERT INTO scan_job_transition_events(id,job_id,from_execution_state,to_execution_state,phase,checkpoint_revision,reason_code)
+      VALUES(${randomUUID()},${row.job_id},'failed','queued','artifact_verification',${row.checkpoint_revision},'replacement_model_contract_repair_approved')`;
+    return { replacementId: row.replacement_id, jobId: row.job_id, artifactRevisionId: row.artifact_revision_id, state: "queued" };
+  });
+}
+
 type SqlClient = ReturnType<typeof getSqlClient> | postgres.TransactionSql;
 
 async function readExisting(sql: SqlClient): Promise<ReplacementFulfillmentSummary | null> {

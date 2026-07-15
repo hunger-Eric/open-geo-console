@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { closeDatabase, ensureDatabase, getDatabaseEnvironmentStatus } from "@/db";
-import { inspectApprovedReportReplacement, prepareApprovedReportReplacement } from "@/db/report-replacement-fulfillments";
+import { inspectApprovedReportReplacement, prepareApprovedReportReplacement, resumeApprovedReplacementModelRepair } from "@/db/report-replacement-fulfillments";
 import { prepareStagingCommand } from "./staging-guard";
 
 async function main() {
@@ -18,7 +18,14 @@ async function main() {
       console.log(JSON.stringify({ ok: true, ...result }, null, 2));
       return;
     }
-    throw new Error("Use inspect or prepare.");
+    if (command === "resume") {
+      const authorizationRef = argument("--authorization-ref");
+      if (!authorizationRef) throw new Error("--authorization-ref is required.");
+      const result = await resumeApprovedReplacementModelRepair({ confirm: process.argv.includes("--confirm"), authorizationRef });
+      console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      return;
+    }
+    throw new Error("Use inspect, prepare, or resume.");
   } finally {
     await closeDatabase();
   }

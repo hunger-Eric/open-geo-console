@@ -176,7 +176,7 @@ export async function synthesizeOpenGeoAnswerCardsV3(
   }));
   let correction: string[] | undefined;
   let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     input.signal?.throwIfAborted();
     try {
       const completion = await client.completeJson({
@@ -259,7 +259,7 @@ export async function synthesizeOpenGeoAnswerCardsV3(
       return parseOpenGeoAnswerCardsV3(cards, input);
     } catch (error) {
       lastError = error;
-      if (!(error instanceof TypeError) || attempt === 1) throw error;
+      if (!(error instanceof TypeError) || attempt === 2) throw error;
       correction = error instanceof ReportLanguageValidationError
         ? reportLanguageCorrectionFeedback(error, input.locale)
         : [`The prior JSON failed contract validation: ${error.message}`];
