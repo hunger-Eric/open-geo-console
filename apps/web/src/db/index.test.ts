@@ -8,7 +8,7 @@ import {
   getDatabasePoolSize,
   shouldRunDatabaseMigrations
 } from "./index";
-import { DATABASE_MIGRATIONS } from "./migrations";
+import { DATABASE_MIGRATIONS, V22_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 
 describe("database path selection", () => {
   const originalOpenGeoDbPath = process.env.OPEN_GEO_DB_PATH;
@@ -125,6 +125,12 @@ describe("database schema marker", () => {
   it("bootstraps an unmarked or older database", () => {
     expect(shouldRunDatabaseMigrations(undefined)).toBe(true);
     expect(shouldRunDatabaseMigrations(DATABASE_SCHEMA_VERSION - 1)).toBe(true);
+  });
+
+  it("runs only forward migrations when upgrading an existing schema", () => {
+    expect(databaseMigrationsAfter(21)).toEqual([...V22_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(22)).toEqual([]);
+    expect(databaseMigrationsAfter(undefined)).toEqual([...DATABASE_MIGRATIONS]);
   });
 
   it("refuses to run older code against a newer schema", () => {

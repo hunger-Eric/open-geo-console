@@ -1931,19 +1931,28 @@ export const V22_DATABASE_MIGRATIONS = [
   `DROP INDEX IF EXISTS report_market_snapshot_refs_job_cache_uidx`
 ] as const;
 
-export const DATABASE_MIGRATIONS = [
-  ...V9_DATABASE_MIGRATIONS,
-  ...V10_DATABASE_MIGRATIONS,
-  ...V11_DATABASE_MIGRATIONS,
-  ...V12_DATABASE_MIGRATIONS,
-  ...V13_DATABASE_MIGRATIONS,
-  ...V14_DATABASE_MIGRATIONS,
-  ...V15_DATABASE_MIGRATIONS,
-  ...V16_DATABASE_MIGRATIONS,
-  ...V17_DATABASE_MIGRATIONS,
-  ...V18_DATABASE_MIGRATIONS,
-  ...V19_DATABASE_MIGRATIONS,
-  ...V20_DATABASE_MIGRATIONS,
-  ...V21_DATABASE_MIGRATIONS,
-  ...V22_DATABASE_MIGRATIONS
+const DATABASE_MIGRATION_STEPS = [
+  { version: 9, migrations: V9_DATABASE_MIGRATIONS },
+  { version: 10, migrations: V10_DATABASE_MIGRATIONS },
+  { version: 11, migrations: V11_DATABASE_MIGRATIONS },
+  { version: 12, migrations: V12_DATABASE_MIGRATIONS },
+  { version: 13, migrations: V13_DATABASE_MIGRATIONS },
+  { version: 14, migrations: V14_DATABASE_MIGRATIONS },
+  { version: 15, migrations: V15_DATABASE_MIGRATIONS },
+  { version: 16, migrations: V16_DATABASE_MIGRATIONS },
+  { version: 17, migrations: V17_DATABASE_MIGRATIONS },
+  { version: 18, migrations: V18_DATABASE_MIGRATIONS },
+  { version: 19, migrations: V19_DATABASE_MIGRATIONS },
+  { version: 20, migrations: V20_DATABASE_MIGRATIONS },
+  { version: 21, migrations: V21_DATABASE_MIGRATIONS },
+  { version: 22, migrations: V22_DATABASE_MIGRATIONS }
 ] as const;
+
+export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {
+  const version = currentVersion ?? 0;
+  return DATABASE_MIGRATION_STEPS
+    .filter((step) => step.version > version)
+    .flatMap((step) => [...step.migrations]);
+}
+
+export const DATABASE_MIGRATIONS = databaseMigrationsAfter(undefined);

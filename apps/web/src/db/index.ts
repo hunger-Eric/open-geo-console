@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { DATABASE_MIGRATIONS } from "./migrations";
+import { databaseMigrationsAfter } from "./migrations";
 import * as schema from "./schema";
 
 let client: ReturnType<typeof postgres> | undefined;
@@ -88,7 +88,7 @@ async function ensureDatabaseSchema(): Promise<void> {
         await tx`SELECT pg_advisory_xact_lock(hashtextextended('ogc:schema-bootstrap', 0))`;
         const lockedVersion = await readDatabaseSchemaVersion(tx);
         if (!shouldRunDatabaseMigrations(lockedVersion)) return;
-        for (const migration of DATABASE_MIGRATIONS) {
+        for (const migration of databaseMigrationsAfter(lockedVersion)) {
           await tx.unsafe(migration);
         }
         await tx`CREATE TABLE IF NOT EXISTS ogc_schema_state (
