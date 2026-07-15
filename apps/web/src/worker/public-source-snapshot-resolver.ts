@@ -98,7 +98,7 @@ const DEFAULT_WAIT_DEADLINE_MS = 15_000;
 export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnapshotInput): Promise<ResolvedPublicSourceSnapshotValue> {
   assertExactRuntime(input);
   const evidenceCutoff = date(input.evidenceCutoffAt, "evidenceCutoffAt");
-  const identity = createMarketSnapshotIdentity({ question: input.question, surface: input.authority.surface, fanoutVersion: input.fanout.fanoutVersion });
+  const identity = createMarketSnapshotIdentity({ question: input.question, surface: input.authority.surface, fanout: input.fanout });
   const exactPrior = await findExactMarketSnapshot({ identity, evidenceCutoff });
   const prior = exactPrior && snapshotMetadataMatches(exactPrior.snapshot, input.snapshotMetadata) ? exactPrior : null;
   const metadataMismatch = Boolean(exactPrior && !prior);
@@ -394,13 +394,22 @@ function persistableObservationRows(snapshotId: string, attemptId: string, store
 function toObservations(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>, surface: PublicSearchSurfaceAdapter["surface"], fanout: SearchQueryFanout): MarketSearchObservation[] {
   return bundle.attempts.filter(({ requestStatus }) => requestStatus !== "pending").map((attempt) => {
     const storedQuery = bundle.queries.find(({ id }) => id === attempt.queryId);
-    const query = storedQuery && fanout.queries[storedQuery.queryOrder];
-    if (!storedQuery || !query || query.exactQuery !== storedQuery.queryText || !attempt.completedAt) throw new PublicSourceSnapshotUnavailableError("snapshot_materialization");
+    if (!storedQuery) throw materializationMismatch(bundle.snapshot.id, attempt.id, attempt.queryId, null, "missing_stored_query");
+    const query = fanout.queries[storedQuery.queryOrder];
+    if (!query) throw materializationMismatch(bundle.snapshot.id, attempt.id, storedQuery.id, storedQuery.queryOrder, "missing_runtime_query");
+    if (query.exactQuery !== storedQuery.queryText) throw materializationMismatch(bundle.snapshot.id, attempt.id, storedQuery.id, storedQuery.queryOrder, "query_text_mismatch");
+    if (!attempt.completedAt) throw materializationMismatch(bundle.snapshot.id, attempt.id, storedQuery.id, storedQuery.queryOrder, "attempt_incomplete");
     const status = observationStatus(attempt.requestStatus);
     return { observationId: attempt.id, surface, queryId: query.id, exactQuery: query.exactQuery, requestedAt: attempt.startedAt.toISOString(), completedAt: attempt.completedAt.toISOString(), status,
       results: bundle.observations.filter((row) => row.attemptId === attempt.id && row.resultStatus === "returned").map((row) => ({ surfaceResultOrder: row.surfaceResultOrder, url: row.resultUrl, title: row.title, snippet: row.snippet ?? "", displayedHost: String((row.resultMetadata as { domain?: unknown })?.domain ?? new URL(row.resultUrl).hostname), metadata: { rank: row.surfaceResultOrder } })),
       usage: attempt.usage as MarketSearchObservation["usage"], ...(attempt.sanitizedError ? { sanitizedError: attempt.sanitizedError } : {}) };
   });
+}
+
+type SnapshotMaterializationMismatchCategory = "missing_stored_query" | "missing_runtime_query" | "query_text_mismatch" | "attempt_incomplete";
+function materializationMismatch(snapshotId: string, attemptId: string, storedQueryId: string, queryOrder: number | null, category: SnapshotMaterializationMismatchCategory): PublicSourceSnapshotUnavailableError {
+  const detail = `category=${category} snapshot=${snapshotId} attempt=${attemptId} storedQuery=${storedQueryId} queryOrder=${queryOrder ?? "unknown"}`;
+  return new PublicSourceSnapshotUnavailableError("snapshot_materialization", { cause: new Error(detail) });
 }
 
 function assertExactRuntime(input: ResolvePublicSourceSnapshotInput): void {

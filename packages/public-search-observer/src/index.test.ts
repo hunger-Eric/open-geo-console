@@ -33,16 +33,17 @@ describe("public-search observer contracts", () => {
 
     const fanout = createSearchQueryFanout({ question: left.questions[0]!, surface: LOGISTICS_SURFACE });
     const identity = createMarketSnapshotIdentity({
-      question: left.questions[0]!, surface: LOGISTICS_SURFACE, fanoutVersion: fanout.fanoutVersion
+      question: left.questions[0]!, surface: LOGISTICS_SURFACE, fanout
     });
     expect(createMarketSnapshotIdentity({
-      question: right.questions[0]!, surface: structuredClone(LOGISTICS_SURFACE), fanoutVersion: fanout.fanoutVersion
+      question: right.questions[0]!, surface: structuredClone(LOGISTICS_SURFACE), fanout: structuredClone(fanout)
     })).toEqual(identity);
   });
 
   it("changes exact identity for every cache dimension and never fuzzy-matches", () => {
     const question = generateCanonicalBuyerQuestions(LOGISTICS_INPUT).questions[0]!;
-    const base = { question, surface: LOGISTICS_SURFACE, fanoutVersion: "public-search-fanout-v1" };
+    const fanout = createSearchQueryFanout({ question, surface: LOGISTICS_SURFACE });
+    const base = { question, surface: LOGISTICS_SURFACE, fanout };
     const id = createMarketSnapshotIdentity(base).id;
     const changed = [
       { ...base, question: { ...question, normalizedText: `${question.normalizedText}？` } },
@@ -50,9 +51,23 @@ describe("public-search observer contracts", () => {
       { ...base, question: { ...question, region: "TW" } },
       { ...base, surface: { ...LOGISTICS_SURFACE, surfaceId: "other-index" } },
       { ...base, surface: { ...LOGISTICS_SURFACE, surfaceVersion: "2026-08" } },
-      { ...base, fanoutVersion: "public-search-fanout-v2" }
+      { ...base, fanout: { ...fanout, fanoutVersion: "public-search-fanout-v2" } }
     ];
     expect(changed.map((input) => createMarketSnapshotIdentity(input).id)).not.toContain(id);
+  });
+
+  it("changes snapshot identity when the effective ordered query plan changes", () => {
+    const question = generateCanonicalBuyerQuestions(LOGISTICS_INPUT).questions[0]!;
+    const fanout = createSearchQueryFanout({ question, surface: LOGISTICS_SURFACE });
+    const policyFanout = {
+      ...fanout,
+      queries: fanout.queries.map((query, index) => index === 1
+        ? { ...query, exactQuery: `${question.normalizedText} 自有车队 固定运力` }
+        : query)
+    };
+
+    expect(createMarketSnapshotIdentity({ question, surface: LOGISTICS_SURFACE, fanout }).id)
+      .not.toBe(createMarketSnapshotIdentity({ question, surface: LOGISTICS_SURFACE, fanout: policyFanout }).id);
   });
 
   it("requires explicit evidence to expand beyond three questions and broadens low confidence", () => {

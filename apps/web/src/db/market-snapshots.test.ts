@@ -116,7 +116,12 @@ async function setup(variant = "") {
   const authority = installed.active ? installed : await activatePublicSearchSurfaceAuthority({ authorityVersion: installed.authorityVersion, environment: "staging", adapterId: installed.adapterId, providerId: installed.providerId, productId: installed.productId, modelId: installed.modelId, adapterVersion: installed.adapterVersion, surfaceId: installed.surfaceId, surfaceVersion: installed.surfaceVersion });
   const exactText = `深圳到台湾${variant}运输公司有哪些？`;
   const question = { id: `q1-${variant}`, questionSetVersion: "1", locale: surface.locale, region: surface.region, kind: "supplier_discovery" as const, exactText, normalizedText: exactText, derivation: { ruleId: "direct", evidenceSourceIds: ["public-site"], subject: `深圳到台湾${variant}运输`, broadened: false } };
-  return { identity: createMarketSnapshotIdentity({ question, surface, fanoutVersion: "fanout-v1" }), authorityVersion: authority.authorityVersion };
+  const fanout = {
+    fanoutVersion: "fanout-v1",
+    queries: [{ id: `query-${variant}`, questionId: question.id, fanoutVersion: "fanout-v1", locale: question.locale, region: question.region, exactQuery: question.normalizedText, derivationRuleId: "direct", resultDepth: 10 }],
+    budget: { maxRequests: 1, maxResults: 10, timeoutMs: 30_000, maxCostMicros: 1_000 }
+  };
+  return { identity: createMarketSnapshotIdentity({ question, surface, fanout }), authorityVersion: authority.authorityVersion };
 }
 
 async function completeFixture(identity: MarketSnapshotIdentity, authorityVersion: string, leaseOwner: string) {

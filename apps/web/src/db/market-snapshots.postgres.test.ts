@@ -39,7 +39,8 @@ describePostgres("public-search market snapshot PostgreSQL authority", () => {
   const originalDatabaseUrl = process.env.DATABASE_URL;
   const surface = { surfaceId: `surface-${suffix}`, providerId: "fixture-provider", productId: "fixture-search", surfaceKind: "documented_api" as const, contractVersion: "1", surfaceVersion: "fixture-v1", adapterVersion: "1", locale: "zh-CN", region: "CN" };
   const question = { id: `q-${suffix}`, questionSetVersion: "1", locale: surface.locale, region: surface.region, kind: "supplier_discovery" as const, exactText: "深圳到台湾的运输公司有哪些？", normalizedText: "深圳到台湾的运输公司有哪些？", derivation: { ruleId: "direct", evidenceSourceIds: ["public-fixture"], subject: "深圳到台湾运输", broadened: false } };
-  const identity = createMarketSnapshotIdentity({ question, surface, fanoutVersion: "fanout-v1" });
+  const fanout = createSearchQueryFanout({ question, surface });
+  const identity = createMarketSnapshotIdentity({ question, surface, fanout });
   const reportId = `market-report-${suffix}`;
   const jobId = `market-job-${suffix}`;
   const v1ReportId = `market-v1-report-${suffix}`;
@@ -99,7 +100,7 @@ describePostgres("public-search market snapshot PostgreSQL authority", () => {
     snapshotId = snapshot.id;
     const query = { id: `query-${suffix}`, queryOrder: 0, queryText: "深圳 台湾 运输公司", queryHash: sha("深圳 台湾 运输公司"), derivationRule: "direct" };
     const foreignQuestion = { ...question, id: `foreign-${suffix}`, exactText: "深圳到台湾拼箱运输公司有哪些？", normalizedText: "深圳到台湾拼箱运输公司有哪些？" };
-    const foreignIdentity = createMarketSnapshotIdentity({ question: foreignQuestion, surface, fanoutVersion: "fanout-v1" });
+    const foreignIdentity = createMarketSnapshotIdentity({ question: foreignQuestion, surface, fanout: createSearchQueryFanout({ question: foreignQuestion, surface }) });
     const foreignClaim = await acquireMarketSnapshotLease({ cacheIdentity: foreignIdentity.id, leaseOwner: `foreign-worker-${suffix}`, leaseDurationMs: 60_000 });
     if (!foreignClaim.acquired) throw new Error("Expected foreign fixture lease.");
     await createMarketSnapshotRefresh({ identity: foreignIdentity, authorityVersion, token: foreignClaim.token, questionHash: sha(foreignIdentity.normalizedQuestion) });
@@ -183,7 +184,7 @@ describePostgres("public-search market snapshot PostgreSQL authority", () => {
       evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
       leaseOwner: `snapshot-refresh-retry-${suffix}`
     });
-    const retryIdentity = createMarketSnapshotIdentity({ question: retryQuestion, surface, fanoutVersion: fanout.fanoutVersion });
+    const retryIdentity = createMarketSnapshotIdentity({ question: retryQuestion, surface, fanout });
     const snapshots = await getSqlClient()<Array<{ id: string; status: string; completion_version: number }>>`
       SELECT id, status, completion_version
       FROM market_snapshot_questions
@@ -239,7 +240,7 @@ describePostgres("public-search market snapshot PostgreSQL authority", () => {
 
   it("keeps direct observation batches atomic when one row is unsafe", async () => {
     const atomicQuestion = { ...question, id: `atomic-${suffix}`, normalizedText: `${question.normalizedText} atomic` };
-    const atomicIdentity = createMarketSnapshotIdentity({ question: atomicQuestion, surface, fanoutVersion: "fanout-v1" });
+    const atomicIdentity = createMarketSnapshotIdentity({ question: atomicQuestion, surface, fanout: createSearchQueryFanout({ question: atomicQuestion, surface }) });
     const claim = await acquireMarketSnapshotLease({ cacheIdentity: atomicIdentity.id, leaseOwner: `atomic-worker-${suffix}`, leaseDurationMs: 60_000 });
     if (!claim.acquired) throw new Error("Expected atomic fixture lease.");
     const snapshot = await createMarketSnapshotRefresh({ identity: atomicIdentity, authorityVersion, token: claim.token, questionHash: sha(atomicIdentity.normalizedQuestion) });

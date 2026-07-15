@@ -678,7 +678,7 @@ function assertCompletionLedger(snapshotId: string): void {
 }
 function exactIdentity(value: MarketSnapshotIdentity): MarketSnapshotIdentity {
   const parsed = parseMarketSnapshotIdentity(value);
-  const expected = deterministicId("market", [parsed.normalizedQuestion, parsed.locale, parsed.region, parsed.surfaceId, parsed.surfaceVersion, parsed.fanoutVersion].map((part) => part.trim().normalize("NFKC")));
+  const expected = deterministicId("market", [parsed.normalizedQuestion, parsed.locale, parsed.region, parsed.surfaceId, parsed.surfaceVersion, parsed.fanoutVersion, parsed.queryPlanHash].map((part) => part.trim().normalize("NFKC")));
   if (parsed.id !== expected) throw new TypeError("Market snapshot identity hash does not match its exact dimensions.");
   assertNoPrivateIdentity(parsed.normalizedQuestion);
   return parsed;

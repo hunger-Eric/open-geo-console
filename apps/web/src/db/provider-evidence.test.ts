@@ -89,7 +89,15 @@ async function sourceFixture() {
   const installed = await installPublicSearchSurfaceAuthority({ environment: "staging", adapterId: "fixture", providerId: surface.providerId, productId: surface.productId, modelId: "fixture", adapterVersion: surface.adapterVersion, surfaceId: surface.surfaceId, surfaceVersion: surface.surfaceVersion, localeCapabilities: [surface.locale], regionCapabilities: [surface.region], termsReviewedAt: "2030-01-01T00:00:00.000Z", evidenceReferences: ["review"], capturedAt: "2030-01-02T00:00:00.000Z", active: false });
   const authority = await activatePublicSearchSurfaceAuthority({ authorityVersion: installed.authorityVersion, environment: "staging", adapterId: installed.adapterId, providerId: installed.providerId, productId: installed.productId, modelId: installed.modelId, adapterVersion: installed.adapterVersion, surfaceId: installed.surfaceId, surfaceVersion: installed.surfaceVersion });
   const question = { id: "provider-q1", questionSetVersion: "v1", locale: "en", region: "US", kind: "supplier_discovery" as const, exactText: "Which providers offer self-operated logistics?", normalizedText: "Which providers offer self-operated logistics?", derivation: { ruleId: "locked", evidenceSourceIds: [], subject: "self-operated logistics", broadened: false } };
-  const identity = createMarketSnapshotIdentity({ question, surface, fanoutVersion: "provider-query-plan-v1" });
+  const fanout = {
+    questionId: question.id,
+    questionSetVersion: question.questionSetVersion,
+    fanoutVersion: "provider-query-plan-v1",
+    surface,
+    queries: [{ id: "provider-query", questionId: question.id, fanoutVersion: "provider-query-plan-v1", locale: question.locale, region: question.region, exactQuery: question.normalizedText, derivationRuleId: "canonical", resultDepth: 5 }],
+    budget: { maxRequests: 1, maxResults: 5, timeoutMs: 30_000, maxCostMicros: 100_000 }
+  };
+  const identity = createMarketSnapshotIdentity({ question, surface, fanout });
   const lease = await acquireMarketSnapshotLease({ cacheIdentity: identity.id, leaseOwner: "provider-worker", leaseDurationMs: 10_000 });
   if (!lease.acquired) throw new Error("Expected provider fixture lease.");
   const snapshot = await createMarketSnapshotRefresh({ identity, authorityVersion: authority.authorityVersion, token: lease.token, questionHash: sha(question.normalizedText), snapshotKind: "provider_discovery", queryPlanVersion: "provider-query-plan-v1" });

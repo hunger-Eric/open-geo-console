@@ -68,6 +68,27 @@ describe("public-source snapshot resolver", () => {
     expect(resumedRefresh).toMatchObject({ snapshotId: refreshed.snapshotId, collectedForThisRun: false });
   });
 
+  it("collects a new snapshot when the effective query plan changes under the same fanout version", async () => {
+    const authority = await installAuthority("review-query-plan-identity");
+    const search = vi.fn(async () => observationPayload("complete"));
+    const adapter = fixtureAdapter(authority, search);
+    const genericFanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const policyFanout = {
+      ...genericFanout,
+      queries: genericFanout.queries.map((query, index) => index === 1
+        ? { ...query, exactQuery: `${question.normalizedText} 自有车队 固定运力` }
+        : query)
+    };
+    const common = { authority, adapter, question, evidenceCutoffAt: "2030-01-04T00:00:00.000Z" };
+
+    const first = await resolvePublicSourceSnapshot({ ...common, fanout: genericFanout, leaseOwner: "worker-generic-policy" });
+    const second = await resolvePublicSourceSnapshot({ ...common, fanout: policyFanout, leaseOwner: "worker-logistics-policy" });
+
+    expect(second.snapshotId).not.toBe(first.snapshotId);
+    expect(second.collectedForThisRun).toBe(true);
+    expect(search).toHaveBeenCalledTimes(genericFanout.queries.length + policyFanout.queries.length);
+  });
+
   it("runs no more than two search requests for one question at a time", async () => {
     const authority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
