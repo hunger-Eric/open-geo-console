@@ -62,6 +62,21 @@ describe("production provider discovery composition", () => {
     expect([...domains.values()]).toEqual(["alpha.example"]);
   });
 
+  it("does not promote search questions, article headings, or generic provider roles into company identities", () => {
+    const domains = new Map<string, string>();
+    const observations = [{ results: [
+      { surfaceResultOrder: 1, url: "https://question.example/overseas-warehouse", title: "有哪些比较好的美国海外仓服务商？", snippet: "", displayedHost: "question.example" },
+      { surfaceResultOrder: 2, url: "https://generic.example/services", title: "您的海外仓服务供应商", snippet: "", displayedHost: "generic.example" },
+      { surfaceResultOrder: 3, url: "https://news.example/notice", title: "关于开展跨境物流企业申报工作的通知", snippet: "", displayedHost: "news.example" },
+      { surfaceResultOrder: 4, url: "https://winner.example/services", title: "永利八达通｜海外仓服务", snippet: "", displayedHost: "winner.example" }
+    ] }] as never;
+
+    const candidates = resolveProviderCandidates(observations, domains, []);
+
+    expect(candidates.map(({ canonicalName }) => canonicalName)).toEqual(["永利八达通"]);
+    expect([...domains.values()]).toEqual(["winner.example"]);
+  });
+
   it("sanitizes a persisted pre-verification candidate set and invalidates only its old hash", () => {
     const checkpoint = {
       phase: "candidate_verification",

@@ -50,6 +50,67 @@ describe("answer-first V3 Worker service", () => {
     ]);
   });
 
+  it("projects safely retrieved Q1 verification body evidence when provider qualification produced no provider claim", () => {
+    const input = fixture();
+    const q1 = questionIds(input.questionSet)[0];
+    const direct = {
+      ...source(
+        "source-q1-unqualified",
+        "observation-q1-unqualified",
+        "query-q1-unqualified",
+        "https://winner.example/overseas-warehouse",
+        "您的海外仓服务供应商",
+        "winner.example",
+        "永利八达通拥有100,000 m2海外仓面积，全球多点布局自营仓，并提供一件代发、中转补仓及专业的逆向物流服务。",
+        "company_owned"
+      ),
+      snapshotKind: "candidate_verification" as const
+    };
+
+    const evidence = buildAnswerFirstV3Evidence({
+      ...input,
+      providerDiscovery: { ...input.providerDiscovery, strict: [], candidates: [], evidence: [] },
+      storedSources: [direct],
+      forensicReport: { ...input.forensicReport, sourceGraph: { ...input.forensicReport.sourceGraph, evidence: [], claims: [], entities: [] } }
+    });
+
+    expect(evidence.filter(({ questionId }) => questionId === q1)).toEqual([
+      expect.objectContaining({
+        canonicalUrl: direct.canonicalUrl,
+        subjectKey: "source-domain:winner.example",
+        exactExcerpt: expect.stringContaining("100,000 m2海外仓面积")
+      })
+    ]);
+  });
+
+  it("keeps an unqualified but directly supported Q1 answer limited instead of insufficient", async () => {
+    const input = fixture();
+    const q1 = questionIds(input.questionSet)[0];
+    const direct = {
+      ...source("source-q1-unqualified", "observation-q1-unqualified", "query-q1-unqualified", "https://winner.example/overseas-warehouse", "您的海外仓服务供应商", "winner.example", "永利八达通提供海外仓一件代发、中转补仓及逆向物流服务。", "company_owned"),
+      snapshotKind: "candidate_verification" as const
+    };
+    const narrowed = {
+      ...input,
+      providerDiscovery: { ...input.providerDiscovery, strict: [], candidates: [], evidence: [], execution: { ...input.providerDiscovery.execution, coverage: "partial" as const } },
+      storedSources: [direct],
+      forensicReport: { ...input.forensicReport, sourceGraph: { ...input.forensicReport.sourceGraph, evidence: [], claims: [], entities: [] } }
+    };
+    const evidence = buildAnswerFirstV3Evidence(narrowed);
+    const client = {
+      configuredModel: "fixture-model",
+      completeJson: vi.fn(async () => ({ modelId: "fixture-model", value: { answers: questionIds(input.questionSet).map((questionId) => ({
+        questionId,
+        sentences: questionId === q1 ? [{ sentenceId: "sentence-q1", text: "永利八达通公开提供海外仓一件代发、中转补仓及逆向物流服务。", evidenceIds: evidence.map(({ evidenceId }) => evidenceId), confidence: "limited" }] : []
+      })) } }))
+    };
+
+    const result = await resolveAnswerFirstV3({ ...narrowed, client });
+
+    expect(result.answerCards[0].status).toBe("limited");
+    expect(result.answerCards[0].sourceEvidence).toHaveLength(1);
+  });
+
   it("keeps Q2 and Q3 evidence bound to their own question and subject", () => {
     const input = fixture();
     const evidence = buildAnswerFirstV3Evidence(input);
@@ -118,6 +179,10 @@ describe("answer-first V3 Worker service", () => {
       forensicReport: {
         ...base.forensicReport,
         coverage: { ...base.forensicReport.coverage, status: "partial" as const, reasons: ["insufficient_question_coverage"] },
+        snapshotRefs: base.forensicReport.snapshotRefs.map((snapshot, index) => index === 1 ? {
+          ...snapshot,
+          observationIds: Array.from({ length: 12 }, (_, observationIndex) => `q2-observation-${observationIndex}`)
+        } : snapshot),
         sourceGraph: { ...base.forensicReport.sourceGraph, evidence: [] }
       }
     };
@@ -134,6 +199,8 @@ describe("answer-first V3 Worker service", () => {
     expect(result.answerCards[0].coverage.reasons).toEqual(["公开检索覆盖不足；缺失证据不代表服务商不具备该能力。"]);
     expect(result.answerCards[1].coverage.reasons).toEqual(["该问题的公开检索覆盖不足。"]);
     expect(result.answerCards[2].coverage.reasons).toEqual(["该问题的公开检索覆盖不足。"]);
+    expect(result.answerCards[1].coverage.returnedResults).toBe(12);
+    expect(result.answerCards[1].coverage).toMatchObject({ attemptedRetrievals: 0, eligibleDirectEvidence: 0 });
   });
 
   it("rejects unsupported model sentences after one bounded correction", async () => {

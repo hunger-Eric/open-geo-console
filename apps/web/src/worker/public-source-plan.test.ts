@@ -19,6 +19,20 @@ describe("public source retrieval plan", () => {
     const urls = Array.from({ length: 20 }, (_, index) => `https://source-${index}.example/page`);
     expect(createPublicSourceRetrievalPlan([observation("q", urls)])).toHaveLength(12);
   });
+
+  it("uses the fixed budget on diverse retrievable pages before PDF and download candidates", () => {
+    const plan = createPublicSourceRetrievalPlan([
+      observation("q1", ["https://a.example/brochure.pdf", "https://a.example/services"]),
+      observation("q2", ["https://b.example/report.pdf", "https://b.example/warehouse"]),
+      observation("q3", ["https://c.example/download?id=1", "https://c.example/logistics"])
+    ], { maxSources: 3, maxPerDomain: 2 });
+
+    expect(plan.map(({ canonicalUrl }) => canonicalUrl)).toEqual([
+      "https://a.example/services",
+      "https://b.example/warehouse",
+      "https://c.example/logistics"
+    ]);
+  });
 });
 
 function observation(queryId: string, urls: string[]): MarketSearchObservation {
