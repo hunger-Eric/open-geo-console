@@ -387,6 +387,11 @@ export async function appendMarketSearchObservations(input: { token: LeaseToken;
   });
 }
 
+export function validateMarketSearchObservationInput(input: SearchObservationInput): SearchObservationInput {
+  parseObservation(input);
+  return input;
+}
+
 export async function appendMarketSourceEvidence(input: { token: LeaseToken; sources: readonly SourceEvidenceInput[] }): Promise<MarketSourceEvidenceRow[]> {
   const tokenInput = parseToken(input.token);
   const sources = input.sources.map(parseSource);

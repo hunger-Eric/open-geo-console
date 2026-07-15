@@ -13,6 +13,7 @@ import {
   type SearchQueryVariant
 } from "@open-geo-console/public-search-observer";
 import { canonicalizePublicSourceUrl } from "@open-geo-console/citation-intelligence";
+import { UrlSafetyError } from "@open-geo-console/site-crawler";
 import {
   acquireMarketSnapshotLease,
   appendMarketSearchObservations,
@@ -26,7 +27,9 @@ import {
   findExactMarketSnapshot,
   getMarketSnapshotBundle,
   releaseFailedMarketSnapshotLease,
+  validateMarketSearchObservationInput,
   waitForMarketSnapshot,
+  type SearchObservationInput,
   type SourceEvidenceInput
 } from "@/db/market-snapshots";
 import { appendMarketSourcePassages } from "@/db/provider-evidence";
@@ -196,9 +199,22 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
 
     if (!resumed) {
       failureStage = "observation_normalization";
-      const rows = successful.flatMap(({ observation, attemptId, storedQueryId }) => observationRows(currentSnapshotId, attemptId, storedQueryId, observation));
+      const persistable = successful.map(({ observation, attemptId, storedQueryId }) => {
+        const result = persistableObservationRows(currentSnapshotId, attemptId, storedQueryId, observation);
+        return {
+          rows: result.rows,
+          observation: {
+            ...observation,
+            results: observation.results.filter(({ surfaceResultOrder }) => result.acceptedResultOrders.has(surfaceResultOrder))
+          },
+          attemptId,
+          storedQueryId
+        };
+      });
+      const rows = persistable.flatMap(({ rows: value }) => value);
       failureStage = "observation_persistence";
       if (rows.length) await appendMarketSearchObservations({ token: claim.token, observations: rows });
+      successful = persistable.map(({ observation, attemptId, storedQueryId }) => ({ observation, attemptId, storedQueryId }));
     }
     failureStage = "source_retrieval";
     await appendRetrievals({ input, snapshotId: currentSnapshotId, token: claim.token, observations: successful, evidenceCutoff });
@@ -206,13 +222,14 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     const persistedBundle = await getMarketSnapshotBundle(currentSnapshotId);
     if (!persistedBundle) throw new PublicSourceSnapshotUnavailableError("snapshot_materialization");
     const retrievals = factsFromBundle(persistedBundle, input.fanout);
+    const persistedObservations = toObservations(persistedBundle, input.authority.surface, input.fanout);
     failureStage = "snapshot_completion";
     const completed = await completeMarketSnapshotLease({ snapshotId: currentSnapshotId, token: claim.token, queryFanoutHash: fanoutHash(input.fanout), completedAt: new Date() });
     failureStage = "snapshot_materialization";
     return materialize({
       snapshot: completed,
       questionId: input.question.id,
-      observations,
+      observations: persistedObservations,
       retrievals,
       collectedForThisRun: true,
       evidenceCutoff
@@ -338,13 +355,40 @@ function materialize(input: { snapshot: Awaited<ReturnType<typeof completeMarket
   };
 }
 
-function observationRows(snapshotId: string, attemptId: string, storedQueryId: string, observation: MarketSearchObservation) {
-  return observation.results.map((result) => {
-    const canonicalUrl = canonicalizePublicSourceUrl(result.url);
-    return { id: observationId(snapshotId, storedQueryId, result.surfaceResultOrder, canonicalUrl), snapshotId, queryId: storedQueryId, attemptId,
-      surfaceResultOrder: result.surfaceResultOrder, resultUrl: result.url, canonicalUrl, title: result.title, snippet: result.snippet,
-      resultStatus: "returned" as const, resultMetadata: { domain: result.displayedHost, rank: result.surfaceResultOrder }, contentHash: sha(canonicalUrl), observedAt: date(observation.completedAt, "observation.completedAt") };
-  });
+function persistableObservationRows(snapshotId: string, attemptId: string, storedQueryId: string, observation: MarketSearchObservation): {
+  rows: SearchObservationInput[];
+  acceptedResultOrders: Set<number>;
+  filteredCount: number;
+} {
+  const rows: SearchObservationInput[] = [];
+  const acceptedResultOrders = new Set<number>();
+  let filteredCount = 0;
+  for (const result of observation.results) {
+    try {
+      const canonicalUrl = canonicalizePublicSourceUrl(result.url);
+      const row = validateMarketSearchObservationInput({
+        id: observationId(snapshotId, storedQueryId, result.surfaceResultOrder, canonicalUrl),
+        snapshotId,
+        queryId: storedQueryId,
+        attemptId,
+        surfaceResultOrder: result.surfaceResultOrder,
+        resultUrl: result.url,
+        canonicalUrl,
+        title: result.title,
+        snippet: result.snippet,
+        resultStatus: "returned",
+        resultMetadata: { domain: result.displayedHost, rank: result.surfaceResultOrder },
+        contentHash: sha(canonicalUrl),
+        observedAt: date(observation.completedAt, "observation.completedAt")
+      });
+      rows.push(row);
+      acceptedResultOrders.add(result.surfaceResultOrder);
+    } catch (error) {
+      if (!(error instanceof TypeError) && !(error instanceof UrlSafetyError)) throw error;
+      filteredCount += 1;
+    }
+  }
+  return { rows, acceptedResultOrders, filteredCount };
 }
 
 function toObservations(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>, surface: PublicSearchSurfaceAdapter["surface"], fanout: SearchQueryFanout): MarketSearchObservation[] {

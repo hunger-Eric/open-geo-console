@@ -12,6 +12,7 @@ import { closeDatabase, ensureDatabase, getSqlClient } from "./index";
 import { claimScanJob } from "./jobs";
 import {
   acquireMarketSnapshotLease,
+  appendMarketSearchObservations,
   appendMarketSnapshotQueries,
   beginMarketSearchAttempt,
   bindReportMarketSnapshotRefsAtomic,
@@ -234,6 +235,34 @@ describePostgres("public-search market snapshot PostgreSQL authority", () => {
       { from_execution_state: "running", to_execution_state: "retry_wait", reason_code: "lease_expired" },
       { from_execution_state: "retry_wait", to_execution_state: "running", reason_code: "lease_claimed" }
     ]);
+  });
+
+  it("keeps direct observation batches atomic when one row is unsafe", async () => {
+    const atomicQuestion = { ...question, id: `atomic-${suffix}`, normalizedText: `${question.normalizedText} atomic` };
+    const atomicIdentity = createMarketSnapshotIdentity({ question: atomicQuestion, surface, fanoutVersion: "fanout-v1" });
+    const claim = await acquireMarketSnapshotLease({ cacheIdentity: atomicIdentity.id, leaseOwner: `atomic-worker-${suffix}`, leaseDurationMs: 60_000 });
+    if (!claim.acquired) throw new Error("Expected atomic fixture lease.");
+    const snapshot = await createMarketSnapshotRefresh({ identity: atomicIdentity, authorityVersion, token: claim.token, questionHash: sha(atomicIdentity.normalizedQuestion) });
+    const query = { id: `atomic-query-${suffix}`, queryOrder: 0, queryText: "atomic public query", queryHash: sha("atomic public query"), derivationRule: "direct" };
+    await appendMarketSnapshotQueries({ snapshotId: snapshot.id, token: claim.token, queries: [query] });
+    const attempt = await beginMarketSearchAttempt({ snapshotId: snapshot.id, queryId: query.id, token: claim.token, idempotencyReference: `atomic-attempt-${suffix}`, configuredCostMicros: 0 });
+    await completeMarketSearchAttempt({ attemptId: attempt.id, token: claim.token, requestStatus: "succeeded", usage: { requestCount: 1, resultCount: 2 }, providerCostMicros: 0, costUncertain: false });
+    const base = {
+      snapshotId: snapshot.id,
+      queryId: query.id,
+      attemptId: attempt.id,
+      resultStatus: "returned" as const,
+      resultMetadata: { domain: "valid.example", rank: 1 },
+      contentHash: sha("https://valid.example/services"),
+      observedAt: new Date("2030-01-02T00:00:00.000Z")
+    };
+
+    await expect(appendMarketSearchObservations({ token: claim.token, observations: [
+      { ...base, id: `atomic-valid-${suffix}`, surfaceResultOrder: 1, resultUrl: "https://valid.example/services", canonicalUrl: "https://valid.example/services", title: "Valid service", snippet: "Public logistics service" },
+      { ...base, id: `atomic-unsafe-${suffix}`, surfaceResultOrder: 2, resultUrl: "javascript:alert(1)", canonicalUrl: "javascript:alert(1)", title: "Unsafe result", snippet: "discard" }
+    ] })).rejects.toThrow(/public HTTP\(S\)|URL|protocol/i);
+    expect(await getSqlClient()<Array<{ count: number }>>`SELECT count(*)::int AS count FROM market_search_observations WHERE snapshot_id=${snapshot.id}`)
+      .toEqual([{ count: 0 }]);
   });
 });
 

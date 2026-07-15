@@ -405,6 +405,42 @@ describe("public-source snapshot resolver", () => {
       leaseOwner: "worker-source-retrieval-retry"
     })).resolves.toMatchObject({ collectedForThisRun: true });
   });
+
+  it("filters invalid provider results before persistence, retrieval, and materialization", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const retrieveSource = vi.fn(async ({ observation, result }) => availableRetrieval(observation, result));
+    const resolved = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => ({
+        ...observationPayload("complete"),
+        results: [
+          { surfaceResultOrder: 1, url: "https://valid.example/services?utm_source=search", title: "Valid service", snippet: "Public logistics service", displayedHost: "valid.example" },
+          { surfaceResultOrder: 2, url: "https://contact.example/ip", title: "Contact 203.0.113.42", snippet: "discard", displayedHost: "contact.example" },
+          { surfaceResultOrder: 3, url: "https://contact.example/email", title: "Contact private@example.test", snippet: "discard", displayedHost: "contact.example" }
+        ],
+        usage: { requestCount: 1, resultCount: 3, estimatedCostMicros: 42, costUncertain: false }
+      })),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-filter-invalid-results",
+      retrieveSource
+    });
+    const bundle = await getMarketSnapshotBundle(resolved.snapshotId);
+    const serialized = JSON.stringify({ bundle, resolved });
+
+    expect(bundle?.snapshot.status).toBe("completed");
+    expect(bundle?.observations).toHaveLength(fanout.queries.length);
+    expect(bundle?.observations.every(({ surfaceResultOrder }) => surfaceResultOrder === 1)).toBe(true);
+    expect(resolved.observations.every(({ results }) => results.length === 1 && results[0]?.surfaceResultOrder === 1)).toBe(true);
+    expect(retrieveSource).toHaveBeenCalled();
+    expect(retrieveSource.mock.calls.every(([input]) => input.result.surfaceResultOrder === 1)).toBe(true);
+    expect(resolved.availableSourceCount).toBe(resolved.retrievals.length);
+    expect(serialized).not.toContain("contact.example/ip");
+    expect(serialized).not.toContain("203.0.113.42");
+    expect(serialized).not.toContain("private@example.test");
+  });
 });
 
 async function installAuthority(reference: string): Promise<PublicSearchSurfaceAuthority> {
