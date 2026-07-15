@@ -27,7 +27,7 @@ export interface AnswerFirstV3StoredSource {
   canonicalUrl: string;
   title: string;
   registrableDomain: string;
-  exactExcerpt: string;
+  exactExcerpt: string | null;
   sourceCategory: "company_owned" | "earned_editorial" | "directory_or_reference" | "community_or_ugc" | "institution" | "social" | "unknown";
   observedAt: string;
   retrievalReady: boolean;
@@ -97,7 +97,7 @@ export function buildAnswerFirstV3Evidence(input: BuildAnswerFirstV3EvidenceInpu
   for (const stored of input.storedSources) {
     if (stored.snapshotKind !== "candidate_verification" || projectedProviderSourceIds.has(stored.sourceEvidenceId) ||
         !stored.retrievalReady || normalizeUrl(stored.canonicalUrl) === null) continue;
-    const exactExcerpt = questionRelevantExcerpt(stored.exactExcerpt, `${q1.normalizedText} ${q1.derivation.subject}`);
+    const exactExcerpt = stored.exactExcerpt && questionRelevantExcerpt(stored.exactExcerpt, `${q1.normalizedText} ${q1.derivation.subject}`);
     if (!exactExcerpt) continue;
     projected.push(projectEvidence({
       questionId: q1.id,
@@ -242,21 +242,31 @@ function projectEvidence(input: {
 function coverage(input: BuildAnswerFirstV3EvidenceInput, evidence: readonly OpenGeoAnswerEvidenceV3[]): [OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"]] {
   const questions = toCanonicalBuyerQuestionSet(input.questionSet).questions;
   return questions.map((question, index) => {
+    const fanout = input.forensicReport.fanouts.find(({ questionId }) => questionId === question.id);
+    const queryIds = new Set(fanout?.queries.map(({ id }) => id) ?? []);
+    const scopedSources = index === 0
+      ? input.storedSources
+      : input.storedSources.filter(({ queryId }) => queryIds.has(queryId));
+    const attemptedRetrievals = new Set(scopedSources.map(({ sourceEvidenceId }) => sourceEvidenceId)).size;
+    const safelyRetrievedPages = new Set(scopedSources.filter(({ retrievalReady }) => retrievalReady).map(({ canonicalUrl }) => canonicalUrl)).size;
+    const eligibleDirectEvidence = evidence.filter(({ questionId }) => questionId === question.id).length;
     if (index === 0) return {
       plannedQueries: input.providerDiscovery.execution.plannedQueries,
       completedQueries: input.providerDiscovery.execution.completedQueries,
       returnedResults: input.providerDiscovery.execution.returnedObservations,
-      safelyRetrievedPages: input.providerDiscovery.execution.safelyRetrievedPages,
+      attemptedRetrievals,
+      safelyRetrievedPages,
+      eligibleDirectEvidence,
       reasons: input.providerDiscovery.execution.coverage === "complete" ? [] : [coverageShortfallReason(input.forensicReport.locale, "provider")]
     };
-    const fanout = input.forensicReport.fanouts.find(({ questionId }) => questionId === question.id);
     const snapshot = input.forensicReport.snapshotRefs.find(({ questionId }) => questionId === question.id);
-    const questionEvidence = evidence.filter(({ questionId }) => questionId === question.id);
     return {
       plannedQueries: fanout?.queries.length ?? 0,
       completedQueries: snapshot ? fanout?.queries.length ?? 0 : 0,
-      returnedResults: new Set(questionEvidence.map(({ canonicalUrl }) => canonicalUrl)).size,
-      safelyRetrievedPages: new Set(questionEvidence.map(({ canonicalUrl }) => canonicalUrl)).size,
+      returnedResults: (snapshot?.observationIds ?? []).length,
+      attemptedRetrievals,
+      safelyRetrievedPages,
+      eligibleDirectEvidence,
       reasons: input.forensicReport.coverage.status === "complete" ? [] : [coverageShortfallReason(input.forensicReport.locale, "question")]
     };
   }) as [OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"]];

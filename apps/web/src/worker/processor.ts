@@ -1070,7 +1070,7 @@ async function loadAnswerFirstV3StoredSources(snapshotIds: readonly string[]): P
     const observations = new Map(bundle.observations.map((observation) => [observation.id, observation]));
     for (const source of bundle.sources) {
       const observation = observations.get(source.observationId);
-      if (!observation || source.retrievalState !== "available" || !source.excerpt) continue;
+      if (!observation) continue;
       if (!isAnswerFirstSourceCategory(source.sourceCategory)) continue;
       output.push({
         sourceEvidenceId: source.id,
@@ -1082,7 +1082,7 @@ async function loadAnswerFirstV3StoredSources(snapshotIds: readonly string[]): P
         exactExcerpt: source.excerpt,
         sourceCategory: source.sourceCategory,
         observedAt: observation.observedAt.toISOString(),
-        retrievalReady: true,
+        retrievalReady: source.retrievalState === "available" && Boolean(source.excerpt),
         snapshotKind: bundle.snapshot.snapshotKind as AnswerFirstV3StoredSource["snapshotKind"]
       });
     }

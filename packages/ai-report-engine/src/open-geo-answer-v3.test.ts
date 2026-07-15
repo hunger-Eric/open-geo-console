@@ -127,7 +127,7 @@ function cards(context: ReturnType<typeof fixtureContext>): [OpenGeoAnswerCardV3
         confidence: "verified"
       }],
       sourceEvidence: evidence,
-      coverage: { plannedQueries: 6, completedQueries: 6, returnedResults: 8, safelyRetrievedPages: 4, reasons: [] },
+      coverage: { plannedQueries: 6, completedQueries: 6, returnedResults: 8, attemptedRetrievals: 6, safelyRetrievedPages: 4, eligibleDirectEvidence: 2, reasons: [] },
       geoDiagnosis: emptyDiagnosis(question.privateText)
     } satisfies OpenGeoAnswerCardV3;
   }) as unknown as [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];

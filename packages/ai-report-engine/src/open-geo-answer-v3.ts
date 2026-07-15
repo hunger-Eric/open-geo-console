@@ -54,7 +54,9 @@ export interface OpenGeoAnswerCardV3 {
     plannedQueries: number;
     completedQueries: number;
     returnedResults: number;
+    attemptedRetrievals: number;
     safelyRetrievedPages: number;
+    eligibleDirectEvidence: number;
     reasons: string[];
   };
   geoDiagnosis: {
@@ -299,7 +301,7 @@ function parseCard(
   const sentences = array(row.sentences, `${path}.sentences`).map((item, index) => parseSentence(item, `${path}.sentences[${index}]`, evidenceMap, context.locale));
   if (new Set(sentences.map(({ sentenceId }) => sentenceId)).size !== sentences.length) throw new TypeError(`${path} sentence IDs must be unique.`);
   const claims = sentences.filter(({ kind }) => kind === "grounded_claim");
-  const coverage = parseCoverage(row.coverage, `${path}.coverage`);
+  const coverage = parseCoverage(row.coverage, `${path}.coverage`, sourceEvidence.length);
   const materialShortfall = coverage.completedQueries < coverage.plannedQueries || coverage.reasons.length > 0;
   if (status === "answered" && (!claims.length || claims.some(({ confidence }) => confidence !== "verified") || materialShortfall)) {
     throw new TypeError(`${path} answered status requires grounded verified claims and complete coverage.`);
@@ -369,7 +371,7 @@ function parseSentence(
   return { sentenceId: text(row.sentenceId, `${path}.sentenceId`), kind, text: sentenceText, evidenceIds, confidence };
 }
 
-function parseCoverage(value: unknown, path: string): OpenGeoAnswerCardV3["coverage"] {
+function parseCoverage(value: unknown, path: string, legacyEligibleEvidence = 0): OpenGeoAnswerCardV3["coverage"] {
   const row = record(value, path);
   const plannedQueries = nonnegative(row.plannedQueries, `${path}.plannedQueries`);
   const completedQueries = nonnegative(row.completedQueries, `${path}.completedQueries`);
@@ -378,7 +380,13 @@ function parseCoverage(value: unknown, path: string): OpenGeoAnswerCardV3["cover
     plannedQueries,
     completedQueries,
     returnedResults: nonnegative(row.returnedResults, `${path}.returnedResults`),
+    attemptedRetrievals: row.attemptedRetrievals === undefined
+      ? nonnegative(row.safelyRetrievedPages, `${path}.safelyRetrievedPages`)
+      : nonnegative(row.attemptedRetrievals, `${path}.attemptedRetrievals`),
     safelyRetrievedPages: nonnegative(row.safelyRetrievedPages, `${path}.safelyRetrievedPages`),
+    eligibleDirectEvidence: row.eligibleDirectEvidence === undefined
+      ? legacyEligibleEvidence
+      : nonnegative(row.eligibleDirectEvidence, `${path}.eligibleDirectEvidence`),
     reasons: array(row.reasons, `${path}.reasons`).map((item, index) => text(item, `${path}.reasons[${index}]`))
   };
 }

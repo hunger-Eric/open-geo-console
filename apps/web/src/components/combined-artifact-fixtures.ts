@@ -38,7 +38,7 @@ export function combinedV3ArtifactFixture(): CombinedPrivateReportArtifactModelV
     questionId: `public-question-${index}`, exactQuestion: `V3 exact question ${index}`, status: "answered",
     sentences: [{ sentenceId: `v3-sentence-${index}`, kind: "grounded_claim", text: `V3 grounded answer sentence ${index}.`, evidenceIds: [`v3-evidence-${index}`], confidence: "verified" }],
     sourceEvidence: [{ evidenceId: `v3-evidence-${index}`, questionId: `public-question-${index}`, subjectKey: "example", canonicalUrl: `https://v3-source-${index}.example/page`, title: `V3 Source ${index}`, registrableDomain: `v3-source-${index}.example`, ownershipCategory: "third_party_editorial", exactExcerpt: `V3 exact source excerpt ${index}`, observedAt: "2026-07-15T00:00:00.000Z", eligible: true, direct: true }],
-    coverage: { plannedQueries: 1, completedQueries: 1, returnedResults: 1, safelyRetrievedPages: 1, reasons: [] },
+    coverage: { plannedQueries: 1, completedQueries: 1, returnedResults: 1, attemptedRetrievals: 1, safelyRetrievedPages: 1, eligibleDirectEvidence: 1, reasons: [] },
     geoDiagnosis: { targetMentioned: true, targetFirstSentence: 1, targetRoles: ["answer subject"], competitorEntityIds: [], citedOwnership: { target_owned: 0, competitor_owned: 0, third_party_editorial: 1, directory: 0, government: 0, other: 0 }, missingEvidenceFamilies: [`V3 missing evidence ${index}`], retestQuestion: `V3 retest question ${index}` }
   }));
   return { ...base, productContract: "combined_geo_report_v3", artifactRevisionId: "artifact-v3", combinedReport: {
