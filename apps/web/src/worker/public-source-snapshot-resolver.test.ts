@@ -382,6 +382,36 @@ describe("public-source snapshot resolver", () => {
     expect(search).toHaveBeenCalledTimes(fanout.queries.length * 2);
   });
 
+  it("falls back to the exact completed snapshot when a forced network refresh fails", async () => {
+    const authority = await installAuthority("review-stale-if-error");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const first = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-stale-first"
+    });
+
+    const fallback = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("unavailable")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-05T00:00:00.000Z",
+      leaseOwner: "worker-stale-refresh",
+      forceRefresh: true
+    });
+
+    expect(fallback).toMatchObject({
+      snapshotId: first.snapshotId,
+      collectedForThisRun: false,
+      refreshAttempted: true,
+      refreshFailed: true
+    });
+  });
+
   it("releases a failed lease and throws a safe error when every query fails", async () => {
     const authority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });

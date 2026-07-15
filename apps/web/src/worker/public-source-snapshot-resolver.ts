@@ -244,6 +244,10 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
   } catch (error) {
     await releaseFailedMarketSnapshotLease({ token: claim.token, ...(snapshotId ? { snapshotId } : {}), preserveRefreshingSnapshot: input.signal?.aborted === true }).catch(() => undefined);
     if (input.signal?.aborted) throw input.signal.reason;
+    if (error instanceof PublicSourceSnapshotUnavailableError && prior && ["lease_wait", "search_execution", "source_retrieval"].includes(error.stage)) {
+      const fallback = await resolveExisting({ ...input, identity, evidenceCutoff, snapshotId: prior.snapshot.id, ageMs: prior.ageMs });
+      return { ...fallback, refreshAttempted: true, refreshFailed: true };
+    }
     if (error instanceof PublicSourceSnapshotUnavailableError || error instanceof PublicSourceSnapshotAuthorityMismatchError) throw error;
     throw new PublicSourceSnapshotUnavailableError(failureStage, { cause: error });
   } finally {
