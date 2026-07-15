@@ -20,6 +20,7 @@ import { resolveCombinedReportContract } from "@/report/combined-report-contract
 describe("recommendation website-foundation resume contract", () => {
   it("does not revalidate an already accepted historical AI foundation during replacement delivery", () => {
     expect(combinedV3LanguageValidationScope("replacement_fulfillment")).toBe("presentation_refresh");
+    expect(combinedV3LanguageValidationScope("staging_artifact_refresh")).toBe("presentation_refresh");
     expect(combinedV3LanguageValidationScope("standard")).toBeUndefined();
   });
 

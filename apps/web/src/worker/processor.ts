@@ -736,7 +736,7 @@ export function combinedV3ArtifactVerificationResume(checkpoint: WorkerCheckpoin
 export function combinedV3LanguageValidationScope(
   reason: ScanJobRow["reason"]
 ): CombinedReportLanguageScope | undefined {
-  return reason === "replacement_fulfillment" ? "presentation_refresh" : undefined;
+  return reason === "replacement_fulfillment" || reason === "staging_artifact_refresh" ? "presentation_refresh" : undefined;
 }
 
 async function resolveCombinedQuestionAnswers(input: {
