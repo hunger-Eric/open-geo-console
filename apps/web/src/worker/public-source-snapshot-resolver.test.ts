@@ -109,7 +109,7 @@ describe("public-source snapshot resolver", () => {
     const authority = await installAuthority("review-slow-retrieval");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
     const retrieveSource = vi.fn(async ({ observation, result }) => {
-      await new Promise((resolve) => setTimeout(resolve, 45));
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
       return availableRetrieval(observation, result);
     });
 
@@ -120,7 +120,7 @@ describe("public-source snapshot resolver", () => {
       fanout,
       evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
       leaseOwner: "worker-slow-retrieval",
-      leaseDurationMs: 20,
+      leaseDurationMs: 500,
       retrieveSource,
       maxSourceRetrievals: 1
     })).resolves.toMatchObject({ collectedForThisRun: true, availableSourceCount: 1 });
