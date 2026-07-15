@@ -71,4 +71,14 @@ describe("combined artifact canonical rendering",()=>{
     const html = renderCanonicalCombinedArtifactHtml(model).replace("V3 exact source excerpt 2", "citation omitted");
     expect(() => assertCombinedV3HtmlCompleteness(model.combinedReport, html)).toThrow(/completeness/i);
   });
+
+  it("accepts complete V3 prose after React escapes punctuation in canonical HTML", () => {
+    const model = combinedV3ArtifactFixture();
+    model.combinedReport.technicalFoundation.aiReport.findings[0]!.recommendation =
+      "将标题修正为正确的英文拼写'英文术语'。";
+    const html = renderCanonicalCombinedArtifactHtml(model);
+
+    expect(html).toContain("&#x27;英文术语&#x27;");
+    expect(() => assertCombinedV3HtmlCompleteness(model.combinedReport, html)).not.toThrow();
+  });
 });

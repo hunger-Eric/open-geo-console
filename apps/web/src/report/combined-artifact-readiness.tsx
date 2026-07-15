@@ -400,17 +400,34 @@ export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, ht
     ...report.technicalFoundation.technicalReport.pages.flatMap(({ url, title, canonical, metaDescription, h1 }) => [url, title ?? "", canonical ?? "", metaDescription ?? "", ...h1]),
     ...report.technicalFoundation.aiReport.findings.flatMap(({ title, impact, recommendation }) => [title, impact, recommendation])
   ].filter(Boolean);
-  if (required.some((value) => !html.includes(String(value)))) throw new Error("Combined V3 HTML artifact failed completeness readiness.");
+  if (required.some((value) => renderedHtmlIndexOf(html, String(value)) < 0)) throw new Error("Combined V3 HTML artifact failed completeness readiness.");
   for (const card of report.answerCards) {
     for (const sentence of card.sentences.filter(({ kind }) => kind === "grounded_claim")) {
-      const sentenceAt = html.indexOf(sentence.text);
-      const nextSentenceAt = report.answerCards.flatMap(({ sentences }) => sentences).map(({ text }) => html.indexOf(text)).filter((index) => index > sentenceAt).sort((a, b) => a - b)[0] ?? html.length;
+      const sentenceAt = renderedHtmlIndexOf(html, sentence.text);
+      const nextSentenceAt = report.answerCards.flatMap(({ sentences }) => sentences).map(({ text }) => renderedHtmlIndexOf(html, text)).filter((index) => index > sentenceAt).sort((a, b) => a - b)[0] ?? html.length;
       for (const evidenceId of sentence.evidenceIds) {
         const evidence = card.sourceEvidence.find((candidate) => candidate.evidenceId === evidenceId);
-        if (!evidence || html.indexOf(evidence.exactExcerpt, sentenceAt) >= nextSentenceAt) throw new Error("Combined V3 HTML artifact failed adjacent citation completeness readiness.");
+        const evidenceAt = evidence ? renderedHtmlIndexOf(html, evidence.exactExcerpt, sentenceAt) : -1;
+        if (!evidence || evidenceAt < sentenceAt || evidenceAt >= nextSentenceAt) throw new Error("Combined V3 HTML artifact failed adjacent citation completeness readiness.");
       }
     }
   }
+}
+
+function renderedHtmlIndexOf(html: string, value: string, fromIndex = 0): number {
+  const indices = [value, escapeReactHtml(value)]
+    .map((candidate) => html.indexOf(candidate, fromIndex))
+    .filter((index) => index >= 0);
+  return indices.length ? Math.min(...indices) : -1;
+}
+
+function escapeReactHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("<", "&lt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#x27;");
 }
 
 export function renderCanonicalCombinedArtifactHtml(model: CombinedPrivateReportArtifactModel):string{
