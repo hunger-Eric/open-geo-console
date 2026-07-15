@@ -174,8 +174,8 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
       return claims;
     },
     qualify: async ({ claims: values }) => policy.qualify({ claims: values }),
-    projectProviderDiscovery: async ({ discovery, retrieval, passages: selected, claims: values, qualification }) => {
-      verificationBundle ??= await requireSnapshotBundle(verificationResolved?.snapshotId ?? "");
+    projectProviderDiscovery: async ({ discovery, verification, retrieval, passages: selected, claims: values, qualification }) => {
+      verificationBundle ??= await requireSnapshotBundle(verification.snapshotId);
       return projectProviderDiscovery({ policy, discovery, retrieval, passages: selected, claims: values, qualification, bundle: verificationBundle,
         extractionModel: input.extractionModel, verificationPlannedQueries: verificationFanout?.queries.length ?? 0,
         verificationCompletedQueries: verificationResolved ? completedQueries(verificationResolved.observations) : 0,

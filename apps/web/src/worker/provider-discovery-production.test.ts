@@ -97,6 +97,34 @@ describe("production provider discovery composition", () => {
     expect(result.providerDiscovery.execution.plannedQueries).toBeLessThanOrEqual(30);
     expect(mocks.appendClaims).toHaveBeenCalledOnce();
     expect(mocks.resolve.mock.calls.map(([request]) => request.maxSourceRetrievals).reduce((total, value) => total + (value ?? 0), 0)).toBe(60);
+
+    const resumedCheckpoint = structuredClone(checkpoint) as NonNullable<typeof checkpoint> & {
+      artifacts: Record<string, unknown>;
+    };
+    delete resumedCheckpoint.artifacts.providerDiscovery;
+    resumedCheckpoint.phase = "grounded_answer_synthesis";
+    mocks.snapshotBundle.mockClear();
+    const resumedContext = createProductionProviderDiscoveryContext({
+      runtime,
+      questionSet: questions(),
+      artifactContract: "combined_geo_report_v3",
+      websiteCategories: ["logistics"],
+      websiteFoundationHash: "f".repeat(64),
+      workerId: "worker",
+      evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
+      extractionModel: "fixture-model",
+      extractionClient: { configuredModel: "fixture-model", completeJson: vi.fn() },
+      getCheckpoint: async () => resumedCheckpoint,
+      saveCheckpoint: async () => undefined
+    });
+
+    await runProviderDiscoveryPipeline({
+      identity: resumedContext.identity,
+      dependencies: resumedContext.dependencies,
+      hardDeadlineAt: "2030-01-01T01:00:00.000Z"
+    });
+    expect(mocks.snapshotBundle).toHaveBeenCalledWith("snapshot-verification");
+    expect(mocks.snapshotBundle).not.toHaveBeenCalledWith("");
   });
 });
 
