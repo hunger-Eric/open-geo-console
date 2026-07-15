@@ -128,6 +128,38 @@ describe("public-source snapshot resolver", () => {
     expect(resumed.sufficientlyEvidenced).toBe(true);
   });
 
+  it("resumes a terminal mixed search ledger after retrieval abort", async () => {
+    const authority = await installAuthority("review-one");
+    let searchCalls = 0;
+    const search = vi.fn(async () => observationPayload(searchCalls++ === 0 ? "complete" : "unavailable"));
+    const adapter = fixtureAdapter(authority, search);
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const controller = new AbortController();
+    const deadline = new Error("worker deadline after partial search success");
+
+    await expect(resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-mixed-first",
+      signal: controller.signal,
+      retrieveSource: async () => {
+        controller.abort(deadline);
+        throw deadline;
+      }
+    })).rejects.toBe(deadline);
+
+    let resumedRetrievals = 0;
+    const resumed = await resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-mixed-second",
+      retrieveSource: async ({ observation, result }) => {
+        resumedRetrievals += 1;
+        return availableRetrieval(observation, result);
+      }
+    });
+
+    expect(search).toHaveBeenCalledTimes(fanout.queries.length);
+    expect(resumedRetrievals).toBe(1);
+    expect(resumed).toMatchObject({ collectedForThisRun: true, sufficientlyEvidenced: true, availableSourceCount: 1 });
+  });
+
   it("persists public contact evidence without treating it as private customer identity", async () => {
     const authority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });

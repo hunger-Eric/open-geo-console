@@ -289,10 +289,12 @@ async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput
 }
 
 function isResumableSearchLedger(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>, queries: Array<{ id: string; queryOrder: number; queryText: string; queryHash: string; derivationRule: string }>): boolean {
+  const terminalStatuses = new Set(["succeeded", "partial", "timeout", "rate_limited", "unavailable", "malformed", "aborted", "authentication", "unsupported"]);
   return bundle.snapshot.status === "refreshing" && bundle.queries.length === queries.length &&
     queries.every((query, index) => bundle.queries[index]?.id === query.id && bundle.queries[index]?.queryText === query.queryText) &&
-    bundle.attempts.length === queries.length && bundle.attempts.every(({ requestStatus }) => requestStatus === "succeeded" || requestStatus === "partial") &&
-    queries.every(({ id }) => bundle.attempts.some((attempt) => attempt.queryId === id) && bundle.observations.some((observation) => observation.queryId === id));
+    bundle.attempts.length === queries.length && bundle.attempts.every(({ requestStatus }) => terminalStatuses.has(requestStatus)) &&
+    bundle.attempts.some(({ requestStatus }) => requestStatus === "succeeded" || requestStatus === "partial") &&
+    queries.every(({ id }) => bundle.attempts.some((attempt) => attempt.queryId === id));
 }
 
 function factsFromBundle(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>, fanout: SearchQueryFanout): RetrievedPublicSourceFact[] {
