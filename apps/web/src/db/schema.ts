@@ -755,6 +755,78 @@ export const marketSourceEvidence = pgTable(
 );
 export type MarketSourceEvidenceRow = typeof marketSourceEvidence.$inferSelect;
 
+export const publicSourceRetrievalAttempts = pgTable(
+  "public_source_retrieval_attempts",
+  {
+    id: text("id").primaryKey(),
+    reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "restrict" }),
+    jobId: text("job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
+    questionId: text("question_id").notNull().references(() => reportBusinessQuestions.id, { onDelete: "restrict" }),
+    snapshotId: text("snapshot_id").notNull().references(() => marketSnapshotQuestions.id, { onDelete: "restrict" }),
+    observationId: text("observation_id").notNull().references(() => marketSearchObservations.id, { onDelete: "restrict" }),
+    canonicalUrl: text("canonical_url").notNull(),
+    finalUrl: text("final_url"),
+    registrableDomain: text("registrable_domain").notNull(),
+    method: text("method").$type<"http" | "browser">().notNull(),
+    attemptOrder: integer("attempt_order").notNull(),
+    stage: text("stage").notNull(),
+    outcome: text("outcome").notNull(),
+    httpStatus: integer("http_status"),
+    robotsOutcome: text("robots_outcome"),
+    contentType: text("content_type"),
+    contentBytes: integer("content_bytes"),
+    durationMs: integer("duration_ms").notNull(),
+    extractorVersion: text("extractor_version"),
+    decoderVersion: text("decoder_version"),
+    browserPolicyVersion: text("browser_policy_version"),
+    retryEligible: boolean("retry_eligible").notNull(),
+    browserEligible: boolean("browser_eligible").notNull(),
+    safeDetail: text("safe_detail"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull()
+  },
+  (table) => [
+    uniqueIndex("public_source_retrieval_attempts_scope_uidx").on(table.snapshotId, table.questionId, table.canonicalUrl, table.method, table.attemptOrder),
+    index("public_source_retrieval_attempts_question_idx").on(table.reportId, table.jobId, table.questionId, table.attemptOrder),
+    check("public_source_retrieval_attempts_method_check", sql`${table.method} IN ('http','browser')`),
+    check("public_source_retrieval_attempts_url_check", sql`${table.canonicalUrl} ~ '^https?://' AND (${table.finalUrl} IS NULL OR ${table.finalUrl} ~ '^https?://')`),
+    check("public_source_retrieval_attempts_order_check", sql`${table.attemptOrder} >= 0`),
+    check("public_source_retrieval_attempts_duration_check", sql`${table.durationMs} >= 0`)
+  ]
+);
+export type PublicSourceRetrievalAttemptRow = typeof publicSourceRetrievalAttempts.$inferSelect;
+
+export const questionAcquisitionCheckpoints = pgTable(
+  "question_acquisition_checkpoints",
+  {
+    identityHash: text("identity_hash").primaryKey(),
+    reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "restrict" }),
+    jobId: text("job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
+    questionId: text("question_id").notNull().references(() => reportBusinessQuestions.id, { onDelete: "restrict" }),
+    snapshotId: text("snapshot_id").notNull().references(() => marketSnapshotQuestions.id, { onDelete: "restrict" }),
+    candidatePoolHash: text("candidate_pool_hash").notNull(),
+    state: text("state").$type<"collecting" | "evidence_target_met" | "exhausted" | "collection_failed">().notNull(),
+    plannedCandidates: integer("planned_candidates").notNull(),
+    attemptedCandidates: integer("attempted_candidates").notNull(),
+    remainingCandidates: integer("remaining_candidates").notNull(),
+    returnedObservations: integer("returned_observations").notNull(),
+    extractedDocuments: integer("extracted_documents").notNull(),
+    eligibleEvidenceIds: jsonb("eligible_evidence_ids").$type<string[]>().notNull().default([]),
+    independentDomains: jsonb("independent_domains").$type<string[]>().notNull().default([]),
+    queryRewritesUsed: integer("query_rewrites_used").notNull(),
+    httpBudgetUsed: integer("http_budget_used").notNull(),
+    browserBudgetUsed: integer("browser_budget_used").notNull(),
+    revision: integer("revision").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("question_acquisition_checkpoints_job_question_uidx").on(table.jobId, table.questionId),
+    check("question_acquisition_checkpoints_hash_check", sql`${table.identityHash} ~ '^[a-f0-9]{64}$' AND ${table.candidatePoolHash} ~ '^[a-f0-9]{64}$'`),
+    check("question_acquisition_checkpoints_count_check", sql`${table.plannedCandidates} >= 0 AND ${table.attemptedCandidates} >= 0 AND ${table.remainingCandidates} >= 0 AND ${table.revision} >= 1`)
+  ]
+);
+export type QuestionAcquisitionCheckpointRow = typeof questionAcquisitionCheckpoints.$inferSelect;
+
 export const marketSourcePassages = pgTable(
   "market_source_passages",
   {

@@ -1977,6 +1977,79 @@ export const V24_DATABASE_MIGRATIONS = [
   `ALTER TABLE email_deliveries ADD CONSTRAINT email_deliveries_template_type_check CHECK (template_type IN ('payment_confirmed','report_ready','limited_report_refund','report_failed_refund','refund_succeeded','refund_assistance','link_reissue','corrected_report_ready','replacement_report_ready'))`
 ] as const;
 
+export const V25_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS public_source_retrieval_attempts (
+     id text PRIMARY KEY,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     question_id text NOT NULL REFERENCES report_business_questions(id) ON DELETE RESTRICT,
+     snapshot_id text NOT NULL REFERENCES market_snapshot_questions(id) ON DELETE RESTRICT,
+     observation_id text NOT NULL REFERENCES market_search_observations(id) ON DELETE RESTRICT,
+     canonical_url text NOT NULL,
+     final_url text,
+     registrable_domain text NOT NULL,
+     method text NOT NULL,
+     attempt_order integer NOT NULL,
+     stage text NOT NULL,
+     outcome text NOT NULL,
+     http_status integer,
+     robots_outcome text,
+     content_type text,
+     content_bytes integer,
+     duration_ms integer NOT NULL,
+     extractor_version text,
+     decoder_version text,
+     browser_policy_version text,
+     retry_eligible boolean NOT NULL,
+     browser_eligible boolean NOT NULL,
+     safe_detail text,
+     started_at timestamptz NOT NULL,
+     completed_at timestamptz NOT NULL,
+     CONSTRAINT public_source_retrieval_attempts_method_check CHECK(method IN ('http','browser')),
+     CONSTRAINT public_source_retrieval_attempts_stage_check CHECK(stage IN ('candidate_selected','dns_validation','robots_evaluation','http_request','http_response_validation','document_decoding','content_extraction','question_relevance','subject_resolution','evidence_classification','terminal')),
+     CONSTRAINT public_source_retrieval_attempts_outcome_check CHECK(outcome IN ('available','duplicate','domain_cap','question_budget_exhausted','unsafe_destination','dns_failed','connect_timeout','tls_failed','robots_denied','robots_unavailable','redirect_invalid','redirect_limit','http_403','http_404','http_429','http_5xx','challenge_detected','authentication_required','unsupported_content_type','response_too_large','body_empty','javascript_shell','decoding_failed','extraction_failed','irrelevant_to_question','subject_ambiguous','contradictory','evidence_rejected','caller_aborted','phase_deadline','worker_deadline','internal_failure')),
+     CONSTRAINT public_source_retrieval_attempts_url_check CHECK(canonical_url ~ '^https?://' AND (final_url IS NULL OR final_url ~ '^https?://')),
+     CONSTRAINT public_source_retrieval_attempts_order_check CHECK(attempt_order >= 0),
+     CONSTRAINT public_source_retrieval_attempts_status_check CHECK(http_status IS NULL OR http_status BETWEEN 100 AND 599),
+     CONSTRAINT public_source_retrieval_attempts_robots_check CHECK(robots_outcome IS NULL OR robots_outcome IN ('allowed','denied','missing','unavailable')),
+     CONSTRAINT public_source_retrieval_attempts_size_check CHECK(content_bytes IS NULL OR content_bytes >= 0),
+     CONSTRAINT public_source_retrieval_attempts_duration_check CHECK(duration_ms >= 0),
+     CONSTRAINT public_source_retrieval_attempts_detail_check CHECK(safe_detail IS NULL OR char_length(safe_detail) <= 240),
+     CONSTRAINT public_source_retrieval_attempts_time_check CHECK(completed_at >= started_at)
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS public_source_retrieval_attempts_scope_uidx ON public_source_retrieval_attempts(snapshot_id,question_id,canonical_url,method,attempt_order)`,
+  `CREATE INDEX IF NOT EXISTS public_source_retrieval_attempts_question_idx ON public_source_retrieval_attempts(report_id,job_id,question_id,attempt_order)`,
+  `DROP TRIGGER IF EXISTS public_source_retrieval_attempts_immutability_trigger ON public_source_retrieval_attempts`,
+  `CREATE TRIGGER public_source_retrieval_attempts_immutability_trigger BEFORE UPDATE OR DELETE ON public_source_retrieval_attempts FOR EACH ROW EXECUTE FUNCTION ogc_prevent_market_immutable_row_mutation()`,
+  `CREATE TABLE IF NOT EXISTS question_acquisition_checkpoints (
+     identity_hash text PRIMARY KEY,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     question_id text NOT NULL REFERENCES report_business_questions(id) ON DELETE RESTRICT,
+     snapshot_id text NOT NULL REFERENCES market_snapshot_questions(id) ON DELETE RESTRICT,
+     candidate_pool_hash text NOT NULL,
+     state text NOT NULL,
+     planned_candidates integer NOT NULL,
+     attempted_candidates integer NOT NULL,
+     remaining_candidates integer NOT NULL,
+     returned_observations integer NOT NULL,
+     extracted_documents integer NOT NULL,
+     eligible_evidence_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+     independent_domains jsonb NOT NULL DEFAULT '[]'::jsonb,
+     query_rewrites_used integer NOT NULL,
+     http_budget_used integer NOT NULL,
+     browser_budget_used integer NOT NULL,
+     revision integer NOT NULL,
+     updated_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT question_acquisition_checkpoints_hash_check CHECK(identity_hash ~ '^[a-f0-9]{64}$' AND candidate_pool_hash ~ '^[a-f0-9]{64}$'),
+     CONSTRAINT question_acquisition_checkpoints_state_check CHECK(state IN ('collecting','evidence_target_met','exhausted','collection_failed')),
+     CONSTRAINT question_acquisition_checkpoints_count_check CHECK(planned_candidates >= 0 AND attempted_candidates >= 0 AND remaining_candidates >= 0 AND returned_observations >= 0 AND extracted_documents >= 0 AND query_rewrites_used >= 0 AND http_budget_used >= 0 AND browser_budget_used >= 0 AND revision >= 1),
+     CONSTRAINT question_acquisition_checkpoints_candidate_check CHECK(attempted_candidates + remaining_candidates <= planned_candidates),
+     CONSTRAINT question_acquisition_checkpoints_evidence_check CHECK(jsonb_typeof(eligible_evidence_ids)='array' AND jsonb_typeof(independent_domains)='array')
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS question_acquisition_checkpoints_job_question_uidx ON question_acquisition_checkpoints(job_id,question_id)`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -1993,7 +2066,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 21, migrations: V21_DATABASE_MIGRATIONS },
   { version: 22, migrations: V22_DATABASE_MIGRATIONS },
   { version: 23, migrations: V23_DATABASE_MIGRATIONS },
-  { version: 24, migrations: V24_DATABASE_MIGRATIONS }
+  { version: 24, migrations: V24_DATABASE_MIGRATIONS },
+  { version: 25, migrations: V25_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {
