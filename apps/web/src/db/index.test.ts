@@ -58,7 +58,7 @@ describe("database deployment marker", () => {
 
 describe("database schema marker", () => {
   it("uses the recoverable analysis-ledger schema with cascade-safe event cleanup", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(21);
+    expect(DATABASE_SCHEMA_VERSION).toBe(22);
   });
 
   it("contains the complete additive V2 authority and methodology migration", () => {
@@ -94,6 +94,7 @@ describe("database schema marker", () => {
     expect(sql).toContain("ogc_reject_private_identity_in_shared_market_data");
     expect(sql).toContain("combined_geo_report_v1");
     expect(sql).toContain("combined_geo_report_v3");
+    expect(sql).toContain("DROP INDEX IF EXISTS report_market_snapshot_refs_job_cache_uidx");
     expect(sql).toContain("candidate_verification");
     expect(sql).toContain("query_plan_version");
   });

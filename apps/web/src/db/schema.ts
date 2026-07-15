@@ -879,7 +879,6 @@ export const reportMarketSnapshotRefs = pgTable(
       name: "report_market_snapshot_refs_snapshot_cache_fkey"
     }).onDelete("restrict"),
     uniqueIndex("report_market_snapshot_refs_job_snapshot_uidx").on(table.jobId, table.snapshotId),
-    uniqueIndex("report_market_snapshot_refs_job_cache_uidx").on(table.jobId, table.cacheIdentity),
     index("report_market_snapshot_refs_report_idx").on(table.reportId, table.createdAt),
     check("report_market_snapshot_refs_freshness_check", sql`${table.freshnessState} IN ('fresh','historical','insufficient')`),
     check("report_market_snapshot_refs_cost_check", sql`${table.actualCostMicros} >= 0 AND ${table.allocatedCostMicros} >= 0 AND ${table.avoidedCostMicros} >= 0`)

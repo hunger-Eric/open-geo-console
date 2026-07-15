@@ -1927,6 +1927,10 @@ export const V21_DATABASE_MIGRATIONS = [
   `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_contract_check CHECK (artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3'))`
 ] as const;
 
+export const V22_DATABASE_MIGRATIONS = [
+  `DROP INDEX IF EXISTS report_market_snapshot_refs_job_cache_uidx`
+] as const;
+
 export const DATABASE_MIGRATIONS = [
   ...V9_DATABASE_MIGRATIONS,
   ...V10_DATABASE_MIGRATIONS,
@@ -1940,5 +1944,6 @@ export const DATABASE_MIGRATIONS = [
   ...V18_DATABASE_MIGRATIONS,
   ...V19_DATABASE_MIGRATIONS,
   ...V20_DATABASE_MIGRATIONS,
-  ...V21_DATABASE_MIGRATIONS
+  ...V21_DATABASE_MIGRATIONS,
+  ...V22_DATABASE_MIGRATIONS
 ] as const;
