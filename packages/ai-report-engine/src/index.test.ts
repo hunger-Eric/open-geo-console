@@ -326,7 +326,7 @@ describe("batch analysis and evidence", () => {
       { path: "analyses[0].findings[0].impact", text: "Readers cannot verify every claim." },
       { path: "analyses[0].findings[0].recommendation", text: "Add named sources beside each important claim." }
     ]);
-    expect(correctionPayload.allowedOriginalTerms).toEqual(["example"]);
+    expect(correctionPayload.allowedOriginalTerms).toEqual(["example.com", "example"]);
     expect(correctionPayload.rules).toContain("Translate or omit every other Latin-script word outside evidence quote fields.");
     expect(correctionPayload.rules).toContain("Treat allowedOriginalTerms as the complete and exclusive list of Latin-script text permitted in Chinese replacements.");
     expect(result.analyses[0]?.findings[0]?.evidence).toEqual(english.analyses[0]!.findings[0]!.evidence);

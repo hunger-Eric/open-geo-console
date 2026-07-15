@@ -113,7 +113,7 @@ export function normalizeReportCorrectionText(
 ): string {
   if (normalizeReportLanguage(locale) !== "zh" || (text.match(/[\u3400-\u9fff]/gu) ?? []).length < 4) return text;
   const protectedTerms: string[] = [];
-  let result = text.replace(/\bSEO\b/giu, "GEO");
+  let result = restoreAllowedDomainTerms(text, allowedTerms).replace(/\bSEO\b/giu, "GEO");
   for (const term of [...allowedTerms].filter((value) => value.trim()).sort((a, b) => b.length - a.length)) {
     result = result.split(term).join(`\uE000${protectedTerms.push(term) - 1}\uE001`);
   }
@@ -123,6 +123,17 @@ export function normalizeReportCorrectionText(
     )
     .replace(/英文术语(?:\s+英文术语)+/g, "英文术语");
   return result.replace(/\uE000(\d+)\uE001/g, (_match, index: string) => protectedTerms[Number(index)] ?? "");
+}
+
+export function restoreAllowedDomainTerms(text: string, allowedTerms: readonly string[]): string {
+  let restored = text;
+  for (const domain of [...new Set(allowedTerms.map((value) => value.trim()).filter(isSafeDomain))]) {
+    const labels = domain.split(".");
+    if (labels.length < 2) continue;
+    const legacy = `${labels.slice(0, -1).join(".")}.英文术语`;
+    restored = restored.replace(new RegExp(escapeRegExp(legacy), "giu"), domain);
+  }
+  return restored;
 }
 
 export function assertGeoTerminology(
@@ -183,6 +194,10 @@ function isSafeDottedFilename(value: string): boolean {
 function isSafeDomain(value: string): boolean {
   if (value.length > 253) return false;
   return /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/.test(value);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function sanitizeViolationPath(value: string, index: number): string {

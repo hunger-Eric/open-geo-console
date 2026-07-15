@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { CombinedGeoReportArtifact } from "@/components/combined-geo-report-artifact";
 import { combinedArtifactFixture, combinedV3ArtifactFixture } from "@/components/combined-artifact-fixtures";
-import { assertCombinedV3HtmlCompleteness, combinedArtifactSystemCopy, localizedProviderDiscoveryLimitation, renderCanonicalCombinedArtifactHtml } from "./combined-artifact-readiness";
+import { assertCombinedV3HtmlCompleteness, combinedArtifactSystemCopy, localizedProviderDiscoveryLimitation, renderCanonicalCombinedArtifactHtml, restoreWebsiteReportDomainsForArtifact } from "./combined-artifact-readiness";
 
 describe("combined artifact canonical rendering",()=>{
   it("wraps the exact shared HTML component used by the report route and PDF readiness",()=>{
@@ -35,6 +35,14 @@ describe("combined artifact canonical rendering",()=>{
       "缺少公开证据并不证明供应商缺乏某项能力；证据有限的实体仍保留为候选。"
     );
     expect(localizedProviderDiscoveryLimitation("en", source)).toBe(source);
+  });
+
+  it("repairs legacy translated target-domain suffixes before artifact validation", () => {
+    const report = combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport;
+    report.executiveSummary.overview = "凌顺物流网站（shun-express.英文术语）提供跨境物流服务。";
+
+    expect(restoreWebsiteReportDomainsForArtifact(report, "https://shun-express.com/").executiveSummary.overview)
+      .toBe("凌顺物流网站（shun-express.com）提供跨境物流服务。");
   });
 
   it("renders the prospective GEO terminology policy in canonical HTML", () => {

@@ -6,7 +6,8 @@ import {
   assertReportLanguage,
   normalizeReportCorrectionText,
   normalizeReportLanguage,
-  reportLanguageInstruction
+  reportLanguageInstruction,
+  restoreAllowedDomainTerms
 } from "./report-language";
 
 describe("report language contract", () => {
@@ -15,6 +16,13 @@ describe("report language contract", () => {
       .toBe("\u5efa\u8bae\u5c06 \u82f1\u6587\u672f\u8bed \u6539\u4e3a\u4e2d\u6587\u6807\u9898\u3002");
     expect(normalizeReportCorrectionText("\u5efa\u8bae\u4f18\u5316 CTA \u884c\u52a8\u53f7\u53ec\uff0c\u5e76\u4fdd\u7559 Shopee \u54c1\u724c\u3002", "zh-CN", ["Shopee"]))
       .toBe("\u5efa\u8bae\u4f18\u5316 CTA \u884c\u52a8\u53f7\u53ec\uff0c\u5e76\u4fdd\u7559 Shopee \u54c1\u724c\u3002");
+  });
+
+  it("restores a legacy translated TLD only when it matches an allowed complete domain", () => {
+    expect(restoreAllowedDomainTerms("网站（shun-express.英文术语）提供物流服务。", ["shun-express.com"]))
+      .toBe("网站（shun-express.com）提供物流服务。");
+    expect(restoreAllowedDomainTerms("网站（other.英文术语）提供物流服务。", ["shun-express.com"]))
+      .toBe("网站（other.英文术语）提供物流服务。");
   });
 
   it("does not disguise an entire English correction as Chinese", () => {

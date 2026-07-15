@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type ProviderDiscoveryV1, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type ProviderDiscoveryV1, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -90,14 +90,14 @@ export async function buildReadyCombinedArtifact(input: {
     freshness: forensic.customerCostDisclosure.freshness,
     evidenceCutoffAt: forensic.evidenceCutoffAt
   });
-  const localizedAiReport: AiWebsiteReportV1 = {
+  const localizedAiReport = restoreWebsiteReportDomainsForArtifact({
     ...input.aiReport,
     coverage: {
       ...input.aiReport.coverage,
       samplingMethod: systemCopy.samplingMethod,
       limitations: systemCopy.limitations
     }
-  };
+  }, input.targetUrl);
   const localizedTechnicalReport = localizeTechnicalReportForArtifact(input.technicalReport, forensic.locale);
   const report = requireReadyCombinedGeoReport({
     version: 1,
@@ -216,10 +216,10 @@ export async function buildReadyCombinedArtifactV2(input: {
     freshness: forensic.customerCostDisclosure.freshness,
     evidenceCutoffAt: forensic.evidenceCutoffAt
   });
-  const localizedAiReport: AiWebsiteReportV1 = {
+  const localizedAiReport = restoreWebsiteReportDomainsForArtifact({
     ...input.aiReport,
     coverage: { ...input.aiReport.coverage, samplingMethod: systemCopy.samplingMethod, limitations: systemCopy.limitations }
-  };
+  }, input.targetUrl);
   const localizedTechnicalReport = localizeTechnicalReportForArtifact(input.technicalReport, forensic.locale);
   const report = requireReadyCombinedGeoReportV2({
     version: 2,
@@ -284,6 +284,17 @@ export async function buildReadyCombinedArtifactV2(input: {
   return materializeReadyArtifact(report, model, html);
 }
 
+export function restoreWebsiteReportDomainsForArtifact(report: AiWebsiteReportV1, targetUrl: string): AiWebsiteReportV1 {
+  const hostname = new URL(targetUrl).hostname.toLocaleLowerCase().replace(/^www\./u, "");
+  const restore = (value: unknown): unknown => {
+    if (typeof value === "string") return restoreAllowedDomainTerms(value, [hostname]);
+    if (Array.isArray(value)) return value.map(restore);
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, restore(item)]));
+    return value;
+  };
+  return restore(report) as AiWebsiteReportV1;
+}
+
 export async function buildReadyCombinedArtifactV3(input: {
   artifactRevisionId: string;
   artifactRevision: number;
@@ -313,10 +324,10 @@ export async function buildReadyCombinedArtifactV3(input: {
     freshness: forensic.customerCostDisclosure.freshness,
     evidenceCutoffAt: forensic.evidenceCutoffAt
   });
-  const localizedAiReport: AiWebsiteReportV1 = {
+  const localizedAiReport = restoreWebsiteReportDomainsForArtifact({
     ...input.aiReport,
     coverage: { ...input.aiReport.coverage, samplingMethod: systemCopy.samplingMethod, limitations: systemCopy.limitations }
-  };
+  }, input.targetUrl);
   const localizedTechnicalReport = localizeTechnicalReportForArtifact(input.technicalReport, forensic.locale);
   const report = requireReadyCombinedGeoReportV3({
     version: 3,

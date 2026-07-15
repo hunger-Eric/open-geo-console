@@ -390,7 +390,9 @@ function collectSourceGroundedAllowedTerms(input: ReportSynthesisInput): string[
       if (name && name.length <= 120) terms.add(name);
     }
     try {
-      for (const label of new URL(page.url).hostname.split(".")) {
+      const hostname = new URL(page.url).hostname.toLocaleLowerCase().replace(/^www\./u, "");
+      if (hostname.includes(".")) terms.add(hostname);
+      for (const label of hostname.split(".")) {
         if (/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label) && !HOSTNAME_NOISE.has(label.toLowerCase())) terms.add(label);
       }
     } catch {
