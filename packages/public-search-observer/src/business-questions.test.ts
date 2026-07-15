@@ -59,6 +59,27 @@ describe("business question contracts", () => {
     expect(set.questions[2].generatedText).toMatch(/服务范围.*交付条件.*限制.*风险/);
   });
 
+  it("compacts long Chinese route lists into a source-driven service focus", () => {
+    const service = "台湾海快、海运、空运专线、菲律宾专线、阿联酋专线、沙特专线";
+    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
+      ...profile,
+      businessModel: "跨境物流服务商",
+      productsAndServices: [service],
+      targetAudiences: ["外贸企业"],
+      marketsAndRegions: ["台湾", "菲律宾", "中东"],
+      summary: `面向外贸企业提供${service}等跨境物流服务。`,
+      evidence: [{ url: "https://shun-express.com/service", quote: `公开提供${service}。` }]
+    } });
+
+    expect(set.questions.map(({ generatedText }) => generatedText)).toEqual([
+      "哪些服务商公开提供跨境物流服务（如台湾海快、海运、空运专线等）？",
+      "哪些跨境物流服务方案适合外贸企业进入台湾、菲律宾、中东市场，分别适用于什么货型、时效与交付条件？",
+      "采购跨境物流服务时，应核验哪些服务范围、交付条件、限制与风险？"
+    ]);
+    expect(set.questions[1].generatedText).not.toContain("面向台湾的台湾海快");
+    expect(set.questions[1].generatedText.match(/台湾海快/g)).toBeNull();
+  });
+
   it("requires acknowledgement before confirming a low-confidence set", () => {
     const candidates = generateBusinessQuestionCandidates({ locale: "en", region: "global", profile: {
       ...profile, confidence: "low", productsAndServices: [], targetAudiences: [], marketsAndRegions: [], evidence: []
