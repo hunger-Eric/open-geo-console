@@ -8,6 +8,7 @@ import {
   correctionArtifactVerificationResume,
   isMatchingRecommendationWebsiteFoundation,
   publicSourceArtifactVerificationResume,
+  publicSourceSynthesisResume,
   resolvePublicSourceRunScope,
   resolveRecommendationFulfillmentTarget,
   resolveRecommendationFoundationTarget,
@@ -68,6 +69,56 @@ describe("recommendation website-foundation resume contract", () => {
     };
     expect(combinedV3ArtifactVerificationResume(checkpoint as never)).toEqual({ report, checkpoint: checkpoint.answerFirstV3, commercialSnapshotRefs: refs });
     expect(combinedV3ArtifactVerificationResume({ ...checkpoint, recovery: { phase: "grounded_answer_synthesis" } } as never)).toBeNull();
+  });
+
+  it("reuses prepared public-source evidence while rebuilding a V3 artifact after repair", () => {
+    const report = {
+      version: 2,
+      reportId: "report-v3",
+      jobId: "job-v3",
+      snapshotRefs: [
+        { snapshotId: "snapshot-1" },
+        { snapshotId: "snapshot-2" },
+        { snapshotId: "snapshot-3" }
+      ]
+    } as RecommendationForensicReportV2;
+    const refs = ["snapshot-1", "snapshot-2", "snapshot-3"].map((snapshotId) => ({
+      snapshotId,
+      cacheIdentity: `cache-${snapshotId}`,
+      freshnessState: "fresh" as const,
+      actualCostMicros: 0,
+      allocatedCostMicros: 0,
+      avoidedCostMicros: 0
+    }));
+    const checkpoint = {
+      recovery: {
+        schemaVersion: 1,
+        phase: "grounded_answer_synthesis",
+        revision: 45,
+        phaseAttempt: 0,
+        resumeGeneration: 6,
+        identity: {
+          jobId: "job-v3",
+          reportId: "report-v3",
+          productContract: "recommendation_forensics_v1",
+          methodology: "public_search_source_forensics_v1",
+          locale: "zh",
+          authorityId: "authority-v3"
+        },
+        inputHash: "input-v3",
+        completedArtifacts: ["public_source"],
+        remainingWork: ["grounded_answer_synthesis"],
+        priorTransitionId: null
+      },
+      publicSourceForensics: checkpointValue(),
+      pendingArtifactVerification: { report, commercialSnapshotRefs: refs }
+    };
+
+    expect(publicSourceSynthesisResume(checkpoint as never)).toEqual({
+      report,
+      checkpoint: checkpoint.publicSourceForensics,
+      commercialSnapshotRefs: refs
+    });
   });
 
   it("dispatches only from the persisted methodology and rejects a missing value", () => {

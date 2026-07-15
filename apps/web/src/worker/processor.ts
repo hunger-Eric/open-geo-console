@@ -664,6 +664,27 @@ export function publicSourceArtifactVerificationResume(checkpoint: WorkerCheckpo
 
 export const correctionArtifactVerificationResume = publicSourceArtifactVerificationResume;
 
+export function publicSourceSynthesisResume(checkpoint: WorkerCheckpoint): {
+  report: RecommendationForensicReportV2;
+  checkpoint: PublicSourcePipelineCheckpoint;
+  commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
+} | null {
+  const recovery = recoveryEnvelope(checkpoint);
+  const prepared = checkpoint.pendingArtifactVerification;
+  if (!recovery || !["grounded_answer_synthesis", "artifact_verification", "terminalization"].includes(recovery.phase)
+    || !prepared || !checkpoint.publicSourceForensics || isCombinedGeoReportV3(prepared.report)) return null;
+  if (prepared.report.jobId !== recovery.identity.jobId || prepared.report.reportId !== recovery.identity.reportId) return null;
+  const reportSnapshotIds = new Set(prepared.report.snapshotRefs.map(({ snapshotId }) => snapshotId));
+  const commercialSnapshotIds = new Set(prepared.commercialSnapshotRefs.map(({ snapshotId }) => snapshotId));
+  if (!reportSnapshotIds.size || reportSnapshotIds.size !== commercialSnapshotIds.size
+    || [...reportSnapshotIds].some((snapshotId) => !commercialSnapshotIds.has(snapshotId))) return null;
+  return {
+    report: prepared.report,
+    checkpoint: checkpoint.publicSourceForensics,
+    commercialSnapshotRefs: prepared.commercialSnapshotRefs
+  };
+}
+
 export function combinedV3ArtifactVerificationResume(checkpoint: WorkerCheckpoint): {
   report: CombinedGeoReportV3;
   checkpoint: AnswerFirstV3Checkpoint;
@@ -884,17 +905,17 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     signal: input.signal,
     collaborators: { resolveSnapshot: providerContext.resolveForensicSnapshot, getReport: getSourceForensicReportForJob, saveReport: saveSourceForensicReport }
   }, runtime);
-  const forensicResult = await runPublicSourceForensicsPipeline({
-    reportId: input.job.reportId,
-    jobId: input.job.id,
-    ...resolvePublicSourceRunScope(dependencies),
-    targetUrl: input.targetUrl,
-    websiteFoundation: input.websiteFoundation,
-    businessQuestionSet,
-    dependencies,
-    fanoutOverrides: new Map([[providerContext.discoveryFanout.questionId, providerContext.discoveryFanout]]),
-    signal: input.signal
-  });
+  const forensicResult = publicSourceSynthesisResume(checkpoint) ?? await runPublicSourceForensicsPipeline({
+      reportId: input.job.reportId,
+      jobId: input.job.id,
+      ...resolvePublicSourceRunScope(dependencies),
+      targetUrl: input.targetUrl,
+      websiteFoundation: input.websiteFoundation,
+      businessQuestionSet,
+      dependencies,
+      fanoutOverrides: new Map([[providerContext.discoveryFanout.questionId, providerContext.discoveryFanout]]),
+      signal: input.signal
+    });
   if (input.job.artifactContract === "combined_geo_report_v2" && forensicResult.report.commercialOutcome !== "completed") throw new Error("V2 combined activation requires complete claim-bound public-source coverage.");
   if (input.job.artifactContract === "combined_geo_report_v3") {
     const verificationSnapshotId = providerResult.checkpoint.verificationSnapshotId;
