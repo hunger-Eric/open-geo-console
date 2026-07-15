@@ -83,6 +83,12 @@
 
 ## Combined paid report and one-time correction
 
+- [x] Implement the prospective answer-first `combined_geo_report_v3` contract with exactly three canonical question cards, direct-evidence-only sentences, deterministic coverage/diagnosis, immutable engine provenance, HTML-first rendering, and private PDF readiness.
+- [x] Fix the live V3 staging recovery faults: source-local timeouts, mixed terminal ledgers, interrupted snapshot takeover, metadata-aware waiters, localized coverage checkpoints, and hostname-safe language correction.
+- [x] Complete one real paid Chinese V3 fail-closed run on `https://shun-express.com/`: ready non-active HTML/private-PDF artifact, all three cards honestly insufficient, atomic failed job and refunded credit, and no customer artifact activation.
+- [x] Complete the provider refund and three redirected-email deliveries for order `dee37006-7924-4965-8ef3-181d447f27db` through the protected Preview commerce runner.
+- [ ] Complete a fully answered/deliverable V3 acceptance on a target with independently retrievable direct public evidence.
+
 - [ ] Complete protected-staging acceptance for the grounded three-question presentation in `docs/superpowers/plans/2026-07-14-combined-geo-report-question-answer-presentation.md`. The combined-only answer contract, compact renderer, customer HTML/internal-PDF readiness, schema-v19 refresh lineage and guarded operator command are locally implemented and verified; deployment, artifact activation, Chromium screenshots and runtime evidence remain.
 - [x] Keep the commercial SKU `recommendation_forensics_v1` while introducing the canonical artifact contract `combined_geo_report_v1`.
 - [x] Bind exactly three editable, purpose-fixed business questions before checkout; require explicit low-confidence acknowledgement and lock the final private/public variants after payment.
