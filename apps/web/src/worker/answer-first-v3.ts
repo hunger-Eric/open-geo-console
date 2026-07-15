@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   OPEN_GEO_ENGINE_ID,
+  ReportLanguageValidationError,
   openGeoAnswerEvidenceHashV3,
   openGeoAnswerHashV3,
   openGeoAnswerInputHashV3,
@@ -151,11 +152,15 @@ export async function resolveAnswerFirstV3(input: ResolveAnswerFirstV3Input): Pr
   const identityHash = hash(identity);
   if (input.checkpoint) {
     validateCheckpoint(input.checkpoint, identityHash, identity);
-    const answerCards = parseOpenGeoAnswerCardsV3(input.checkpoint.answerCards, context);
-    if (await openGeoAnswerHashV3(answerCards) !== input.checkpoint.engineProvenance.answerHash) {
-      throw new AnswerFirstV3ResumeIdentityMismatchError("Answer-first V3 checkpoint answer hash does not match its cards.");
+    try {
+      const answerCards = parseOpenGeoAnswerCardsV3(input.checkpoint.answerCards, context);
+      if (await openGeoAnswerHashV3(answerCards) !== input.checkpoint.engineProvenance.answerHash) {
+        throw new AnswerFirstV3ResumeIdentityMismatchError("Answer-first V3 checkpoint answer hash does not match its cards.");
+      }
+      return { checkpoint: input.checkpoint, answerCards, reused: true };
+    } catch (error) {
+      if (!(error instanceof ReportLanguageValidationError)) throw error;
     }
-    return { checkpoint: input.checkpoint, answerCards, reused: true };
   }
 
   const synthesisInput = { ...context, evidence, coverageByQuestion, signal: input.signal };
@@ -223,7 +228,7 @@ function coverage(input: BuildAnswerFirstV3EvidenceInput, evidence: readonly Ope
       completedQueries: input.providerDiscovery.execution.completedQueries,
       returnedResults: input.providerDiscovery.execution.returnedObservations,
       safelyRetrievedPages: input.providerDiscovery.execution.safelyRetrievedPages,
-      reasons: input.providerDiscovery.execution.coverage === "complete" ? [] : [input.providerDiscovery.limitation]
+      reasons: input.providerDiscovery.execution.coverage === "complete" ? [] : [coverageShortfallReason(input.forensicReport.locale, "provider")]
     };
     const fanout = input.forensicReport.fanouts.find(({ questionId }) => questionId === question.id);
     const snapshot = input.forensicReport.snapshotRefs.find(({ questionId }) => questionId === question.id);
@@ -233,9 +238,20 @@ function coverage(input: BuildAnswerFirstV3EvidenceInput, evidence: readonly Ope
       completedQueries: snapshot ? fanout?.queries.length ?? 0 : 0,
       returnedResults: new Set(questionEvidence.map(({ canonicalUrl }) => canonicalUrl)).size,
       safelyRetrievedPages: new Set(questionEvidence.map(({ canonicalUrl }) => canonicalUrl)).size,
-      reasons: input.forensicReport.coverage.status === "complete" ? [] : [...input.forensicReport.coverage.reasons]
+      reasons: input.forensicReport.coverage.status === "complete" ? [] : [coverageShortfallReason(input.forensicReport.locale, "question")]
     };
   }) as [OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"]];
+}
+
+function coverageShortfallReason(locale: string, scope: "provider" | "question"): string {
+  if (locale.toLocaleLowerCase().startsWith("zh")) {
+    return scope === "provider"
+      ? "公开检索覆盖不足；缺失证据不代表服务商不具备该能力。"
+      : "该问题的公开检索覆盖不足。";
+  }
+  return scope === "provider"
+    ? "Public-search coverage is incomplete; missing evidence does not prove that a provider lacks a capability."
+    : "Public-search coverage for this question is incomplete.";
 }
 
 function missingEvidenceFamilies(locale: string, evidence: readonly OpenGeoAnswerEvidenceV3[], questionIds: readonly [string, string, string]): [string[], string[], string[]] {

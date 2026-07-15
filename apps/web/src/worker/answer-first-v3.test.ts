@@ -102,6 +102,40 @@ describe("answer-first V3 Worker service", () => {
     expect(result.answerCards[0].sentences.some(({ kind }) => kind === "scope_note")).toBe(true);
   });
 
+  it("localizes internal coverage shortfalls before persisting Chinese answer cards", async () => {
+    const base = fixture();
+    const input = {
+      ...base,
+      providerDiscovery: {
+        ...base.providerDiscovery,
+        strict: [],
+        candidates: [],
+        evidence: [],
+        execution: { ...base.providerDiscovery.execution, coverage: "partial" as const },
+        limitation: "Missing public evidence does not prove that a provider lacks a capability."
+      },
+      storedSources: [],
+      forensicReport: {
+        ...base.forensicReport,
+        coverage: { ...base.forensicReport.coverage, status: "partial" as const, reasons: ["insufficient_question_coverage"] },
+        sourceGraph: { ...base.forensicReport.sourceGraph, evidence: [] }
+      }
+    };
+    const client = {
+      configuredModel: "fixture-model",
+      completeJson: vi.fn(async () => ({
+        modelId: "fixture-model",
+        value: { answers: questionIds(input.questionSet).map((questionId) => ({ questionId, sentences: [] })) }
+      }))
+    };
+
+    const result = await resolveAnswerFirstV3({ ...input, client });
+
+    expect(result.answerCards[0].coverage.reasons).toEqual(["公开检索覆盖不足；缺失证据不代表服务商不具备该能力。"]);
+    expect(result.answerCards[1].coverage.reasons).toEqual(["该问题的公开检索覆盖不足。"]);
+    expect(result.answerCards[2].coverage.reasons).toEqual(["该问题的公开检索覆盖不足。"]);
+  });
+
   it("rejects unsupported model sentences after one bounded correction", async () => {
     const input = fixture();
     const client = {
@@ -127,6 +161,29 @@ describe("answer-first V3 Worker service", () => {
     expect(second.reused).toBe(true);
     expect(second.answerCards).toEqual(first.answerCards);
     expect(secondClient.completeJson).not.toHaveBeenCalled();
+  });
+
+  it("regenerates a matching legacy checkpoint whose coverage prose fails the report locale", async () => {
+    const base = fixture();
+    const input = {
+      ...base,
+      providerDiscovery: { ...base.providerDiscovery, strict: [], candidates: [], evidence: [], execution: { ...base.providerDiscovery.execution, coverage: "partial" as const } },
+      storedSources: [],
+      forensicReport: { ...base.forensicReport, coverage: { ...base.forensicReport.coverage, status: "partial" as const }, sourceGraph: { ...base.forensicReport.sourceGraph, evidence: [] } }
+    };
+    const completion = vi.fn(async () => ({
+      modelId: "fixture-model",
+      value: { answers: questionIds(input.questionSet).map((questionId) => ({ questionId, sentences: [] })) }
+    }));
+    const first = await resolveAnswerFirstV3({ ...input, client: { configuredModel: "fixture-model", completeJson: completion } });
+    const legacy = structuredClone(first.checkpoint);
+    legacy.answerCards[0].coverage.reasons = ["Missing public evidence does not prove that a provider lacks a capability."];
+    const client = { configuredModel: "fixture-model", completeJson: vi.fn(completion.getMockImplementation()!) };
+
+    const regenerated = await resolveAnswerFirstV3({ ...input, client, checkpoint: legacy });
+
+    expect(regenerated.reused).toBe(false);
+    expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
   it("fails closed when evidence or question-set identity changes on resume", async () => {

@@ -17,6 +17,20 @@ describe("Open GEO answer V3 contract", () => {
     expect(OPEN_GEO_ANSWER_V3_VERSION).toBe("open-geo-answer-v3");
   });
 
+  it("rejects untranslated coverage reasons in Chinese answer cards", () => {
+    const context = fixtureContext();
+    const value = cards(context);
+    value[0] = {
+      ...value[0]!,
+      status: "insufficient",
+      sentences: [],
+      sourceEvidence: [],
+      coverage: { ...value[0]!.coverage, reasons: ["Missing public evidence does not prove that a provider lacks a capability."] }
+    };
+
+    expect(() => parseOpenGeoAnswerCardsV3(value, context)).toThrow(ReportLanguageValidationError);
+  });
+
   it("rejects missing, duplicate, and foreign question identities", () => {
     const context = fixtureContext();
     const value = cards(context);

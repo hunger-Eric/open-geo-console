@@ -116,6 +116,7 @@ export function parseOpenGeoAnswerCardsV3(
   }
   const generatedFields = parsed.flatMap((card, cardIndex) => [
     ...card.sentences.map((sentence, sentenceIndex) => ({ path: `answerCards[${cardIndex}].sentences[${sentenceIndex}].text`, text: sentence.text })),
+    ...card.coverage.reasons.map((text, index) => ({ path: `answerCards[${cardIndex}].coverage.reasons[${index}]`, text })),
     ...card.geoDiagnosis.targetRoles.map((text, index) => ({ path: `answerCards[${cardIndex}].geoDiagnosis.targetRoles[${index}]`, text })),
     ...card.geoDiagnosis.missingEvidenceFamilies.map((text, index) => ({ path: `answerCards[${cardIndex}].geoDiagnosis.missingEvidenceFamilies[${index}]`, text }))
   ]);
