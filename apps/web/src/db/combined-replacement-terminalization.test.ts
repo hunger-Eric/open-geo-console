@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GenerativeSearchAnswerCardV3 } from "@open-geo-console/ai-report-engine";
 import { combinedV3CommercialOutcome } from "./combined-correction-terminalization";
+import { replacementRefundAllowsActivation } from "./combined-replacement-terminalization";
 
 describe("combined replacement terminalization outcomes", () => {
   it("uses delivered generative answers instead of audit coverage", () => {
@@ -11,6 +12,14 @@ describe("combined replacement terminalization outcomes", () => {
   it("keeps an all-source-limited replacement non-deliverable", () => {
     const cards = [generative("source_limited",0),generative("source_limited",1),generative("source_limited",2)];
     expect(combinedV3CommercialOutcome(cards)).toBe("failed");
+  });
+
+  it("keeps replacement delivery independent from the real refund outcome", () => {
+    expect(replacementRefundAllowsActivation("pending")).toBe(true);
+    expect(replacementRefundAllowsActivation("submitted")).toBe(true);
+    expect(replacementRefundAllowsActivation("refunded")).toBe(true);
+    expect(replacementRefundAllowsActivation("failed")).toBe(true);
+    expect(replacementRefundAllowsActivation("not_required")).toBe(false);
   });
 });
 

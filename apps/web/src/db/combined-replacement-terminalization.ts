@@ -51,7 +51,7 @@ export async function terminalizeCombinedReplacement(input: {
       payment_status: string; fulfillment_status: string; refund_status: string; report_locale: string; courtesy_non_billable: boolean;
     }>>`SELECT payment_status,fulfillment_status,refund_status,report_locale,courtesy_non_billable FROM payment_orders
       WHERE id=${report.orderId} AND report_id=${report.reportId} FOR UPDATE`)[0];
-    if (!order || order.payment_status !== "paid" || order.fulfillment_status !== "failed" || order.refund_status !== "failed" || !order.courtesy_non_billable) {
+    if (!order || order.payment_status !== "paid" || order.fulfillment_status !== "failed" || !replacementRefundAllowsActivation(order.refund_status) || !order.courtesy_non_billable) {
       throw new Error("The original paid failure is not eligible for replacement activation.");
     }
 
@@ -99,3 +99,7 @@ export async function terminalizeCombinedReplacement(input: {
 }
 
 function sha(parts: string[]): string { return createHash("sha256").update(parts.join("\0")).digest("hex"); }
+
+export function replacementRefundAllowsActivation(status: string): boolean {
+  return ["pending", "submitted", "refunded", "failed"].includes(status);
+}
