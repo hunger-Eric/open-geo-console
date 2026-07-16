@@ -403,6 +403,17 @@ export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, ht
     ...report.answerCards.flatMap((card) => card.answerMode === "generative_search_v1"
       ? [card.exactQuestion, card.answerText, card.refusal?.reason ?? "", ...card.sources.flatMap((source) => [source.title, source.registrableDomain, source.canonicalUrl, source.citedText ?? ""]), ...card.geoDiagnosis.targetRoles, ...card.geoDiagnosis.competitorEntityIds, ...card.geoDiagnosis.missingEvidenceFamilies, card.geoDiagnosis.retestQuestion]
       : [card.exactQuestion, ...card.sentences.map(({ text }) => text), ...card.sourceEvidence.flatMap((evidence) => [evidence.title, evidence.registrableDomain, evidence.canonicalUrl, evidence.exactExcerpt, evidence.ownershipCategory, evidence.observedAt]), ...card.geoDiagnosis.targetRoles, ...card.geoDiagnosis.competitorEntityIds, ...card.geoDiagnosis.missingEvidenceFamilies, card.geoDiagnosis.retestQuestion]),
+    ...(report.sourceSelectionDiagnosis ? [
+      ...report.sourceSelectionDiagnosis.sourceProfiles.flatMap((profile) => [
+        profile.registrableDomain,
+        ...profile.contributions.flatMap(({ summary, answerExcerpt, sourceExcerpt }) => [summary, answerExcerpt, sourceExcerpt ?? ""]),
+        ...profile.observableFactors.flatMap(({ observation, evidenceExcerpt }) => [observation, evidenceExcerpt ?? ""]),
+        ...profile.targetGaps.map(({ comparison }) => comparison)
+      ]),
+      ...report.sourceSelectionDiagnosis.sharedPatterns.map(({ summary }) => summary),
+      ...report.sourceSelectionDiagnosis.targetActions.flatMap(({ title, rationale }) => [title, rationale]),
+      ...report.sourceSelectionDiagnosis.limitations.map(({ message }) => message)
+    ] : []),
     ...report.technicalFoundation.technicalReport.findings.flatMap(({ title, description, recommendation }) => [title, description, recommendation]),
     ...report.technicalFoundation.technicalReport.pages.flatMap(({ url, title, canonical, metaDescription, h1 }) => [url, title ?? "", canonical ?? "", metaDescription ?? "", ...h1]),
     ...report.technicalFoundation.aiReport.findings.flatMap(({ title, impact, recommendation }) => [title, impact, recommendation])

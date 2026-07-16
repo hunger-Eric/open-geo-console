@@ -116,6 +116,8 @@ describe("combined artifact canonical rendering",()=>{
     expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,html)).not.toThrow();
     expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,html.replace("Complete generated answer 2.","answer omitted"))).toThrow(/completeness/i);
     expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,html.replaceAll("https://returned.example/3","source omitted"))).toThrow(/completeness/i);
+    const actionTitle=model.combinedReport.sourceSelectionDiagnosis!.targetActions[0]!.title;
+    expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,html.replaceAll(actionTitle,"diagnosis action omitted"))).toThrow(/completeness/i);
   });
 
   it("rejects a generative artifact whose source is moved before its answer",()=>{

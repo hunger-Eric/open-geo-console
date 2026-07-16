@@ -10,8 +10,8 @@ import type { AnswerFirstV3StoredSource } from "./answer-first-v3";
 
 export interface SourceSelectionTargetPageSignal {
   url: string;
-  title: string | null;
-  metaDescription: string | null;
+  title?: string | null;
+  metaDescription?: string | null;
   h1: readonly string[];
   readableTextLength: number;
   hasJsonLd: boolean;
@@ -61,7 +61,14 @@ export function buildSourceSelectionDiagnosisForGenerativeV3(input: SourceSelect
 }
 
 export function sourceSelectionTargetFoundationHash(pages: readonly SourceSelectionTargetPageSignal[]): string {
-  const normalized = normalizedTargetPages(pages).map(({ id: _id, ...page }) => page);
+  const normalized = normalizedTargetPages(pages).map((page) => ({
+    url: page.url,
+    title: page.title,
+    metaDescription: page.metaDescription,
+    h1: page.h1,
+    readableTextLength: page.readableTextLength,
+    hasJsonLd: page.hasJsonLd
+  }));
   return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
 }
 
@@ -71,10 +78,10 @@ function normalizedTargetPages(pages: readonly SourceSelectionTargetPageSignal[]
     url: comparableUrl(page.url),
     title: cleanNullable(page.title),
     metaDescription: cleanNullable(page.metaDescription),
-    h1: page.h1.map((value) => value.trim()).filter(Boolean).toSorted(),
+    h1: page.h1.map((value) => value.trim()).filter(Boolean).sort(),
     readableTextLength: Math.max(0, Math.floor(page.readableTextLength)),
     hasJsonLd: page.hasJsonLd
-  })).toSorted((left, right) => left.url.localeCompare(right.url));
+  })).sort((left, right) => left.url.localeCompare(right.url));
 }
 
 function comparableUrl(value: string): string {
@@ -87,7 +94,7 @@ function comparableUrl(value: string): string {
   }
 }
 
-function cleanNullable(value: string | null): string | null {
+function cleanNullable(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
 }

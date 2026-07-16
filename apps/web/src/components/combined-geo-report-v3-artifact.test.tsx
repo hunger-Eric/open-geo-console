@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { buildSourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 import { combinedV3ArtifactFixture } from "./combined-artifact-fixtures";
 import { CombinedGeoReportV3Artifact } from "./combined-geo-report-v3-artifact";
 
@@ -28,6 +29,13 @@ function generativeModel() {
     geoDiagnosis:{...legacy.geoDiagnosis,citedOwnership:{...legacy.geoDiagnosis.citedOwnership,institution:0,community:0,social:0,unknown:1}},
     audit:{verifiedBodyCount:index===0?1:0,searchSourceOnlyCount:index===1?1:0,inaccessibleCount:index===2?1:0}
   })) as typeof model.combinedReport.answerCards;
+  model.combinedReport.sourceSelectionDiagnosis=buildSourceSelectionDiagnosisV1({
+    locale:"zh",answerHash:model.combinedReport.engineProvenance.answerHash,sourceHash:model.combinedReport.engineProvenance.evidenceHash,targetFoundationHash:"d".repeat(64),targetDomain:"example.com",
+    targetPages:[{id:"target-page",url:"https://example.com/page",title:"目标品牌",metaDescription:"跨境海运服务",h1:["目标品牌"],readableTextLength:500,hasJsonLd:true}],
+    questions:model.combinedReport.answerCards.map((card)=>card.answerMode==="generative_search_v1"?{
+      questionId:card.questionId,answerText:card.answerText,sources:card.sources.map((source)=>({...source,questionId:card.questionId,auditExcerpt:source.retrievalStatus==="verified_body"?source.citedText:null}))
+    }:{questionId:card.questionId,answerText:"",sources:[]})
+  });
   return model;
 }
 
@@ -110,6 +118,19 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).toContain("完整技术分析");
     expect(html).not.toMatch(/report\.pdf|Print \/ PDF|打印 \/ PDF/);
     expect(html.indexOf("data-answer-audit")).toBeGreaterThan(html.indexOf("服务商甲提供跨境海运方案 3"));
+  });
+
+  it("replaces the legacy counters with the source-centric diagnosis for prospective V3 reports",()=>{
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:generativeModel()}));
+    const diagnosisAt=html.indexOf("data-source-selection-diagnosis");
+    const technicalAt=html.indexOf("data-technical-analysis");
+    expect(diagnosisAt).toBeGreaterThan(0);
+    expect(diagnosisAt).toBeLessThan(technicalAt);
+    expect(html).toContain("来源选择诊断");
+    expect(html).toContain("provider.example");
+    expect(html).toContain("为答案贡献了什么");
+    expect(html).toContain("可观察入选因素");
+    expect(html).not.toContain("data-cross-question-diagnosis");
   });
 
   it("renders source-limited answers and typed refusals without turning audit failures into answer copy",()=>{

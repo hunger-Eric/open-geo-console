@@ -6,6 +6,7 @@ import type {
   OpenGeoAnswerOwnershipCategoryV3
 } from "@open-geo-console/ai-report-engine";
 import type { CombinedPrivateReportArtifactModelV3 } from "@/report/artifact-model";
+import { SourceSelectionDiagnosisSection } from "./source-selection-diagnosis-section";
 
 export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateReportArtifactModelV3 }) {
   const { combinedReport: report } = model;
@@ -45,11 +46,14 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
       </div>
     </section>
 
-    <section className="report-section cross-question-diagnosis" data-cross-question-diagnosis="true">
-      <p className="section-index">03</p><h2>{copy.crossQuestion}</h2>
-      <dl className="answer-metric-grid"><Meta label={copy.answered}>{answered}/3</Meta><Meta label={copy.limited}>{limited}/3</Meta><Meta label={copy.mentioned}>{mentioned}/3</Meta></dl>
-      <div className="cross-question-grid"><div><h3>{copy.competitors}</h3><p>{[...new Set(report.answerCards.flatMap(({geoDiagnosis})=>geoDiagnosis.competitorEntityIds))].join(", ")||copy.none}</p></div><div><h3>{copy.missing}</h3><ul>{[...new Set(report.answerCards.flatMap(({geoDiagnosis})=>geoDiagnosis.missingEvidenceFamilies))].map((item)=><li key={item}>{item}</li>)}</ul></div></div>
-    </section>
+    {report.sourceSelectionDiagnosis
+      ? <SourceSelectionDiagnosisSection
+          diagnosis={report.sourceSelectionDiagnosis}
+          locale={model.locale}
+          targetUrl={report.targetUrl}
+          questions={report.answerCards.map(({questionId,exactQuestion})=>({id:questionId,text:exactQuestion}))}
+        />
+      : <LegacyCrossQuestionDiagnosis report={report} locale={model.locale}/>}
 
     <section className="report-section" data-technical-analysis="true">
       <p className="section-index">04</p><h2>{copy.technical}</h2>
@@ -87,6 +91,18 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
 function Meta({label,children}:{label:string;children:ReactNode}){return <div><dt>{label}</dt><dd>{children}</dd></div>;}
 function List({label,items}:{label:string;items:readonly string[]}){return items.length?<div><strong>{label}</strong><ul>{items.map((item)=><li key={item}>{item}</li>)}</ul></div>:null;}
 function citationOrdinals(cards:CombinedPrivateReportArtifactModelV3["combinedReport"]["answerCards"]){const result=new Map<string,number>();for(const card of cards){if(card.answerMode === "generative_search_v1")continue;for(const sentence of card.sentences)for(const id of sentence.evidenceIds)if(!result.has(id))result.set(id,result.size+1);}return result;}
+
+function LegacyCrossQuestionDiagnosis({report,locale}:{report:CombinedPrivateReportArtifactModelV3["combinedReport"];locale:"en"|"zh"}){
+  const copy=locale==="zh"?ZH:EN;
+  const answered=report.answerCards.filter(({status})=>status==="answered").length;
+  const limited=report.answerCards.filter(({status})=>status!=="answered").length;
+  const mentioned=report.answerCards.filter(({geoDiagnosis})=>geoDiagnosis.targetMentioned).length;
+  return <section className="report-section cross-question-diagnosis" data-cross-question-diagnosis="true">
+    <p className="section-index">03</p><h2>{copy.crossQuestion}</h2>
+    <dl className="answer-metric-grid"><Meta label={copy.answered}>{answered}/3</Meta><Meta label={copy.limited}>{limited}/3</Meta><Meta label={copy.mentioned}>{mentioned}/3</Meta></dl>
+    <div className="cross-question-grid"><div><h3>{copy.competitors}</h3><p>{[...new Set(report.answerCards.flatMap(({geoDiagnosis})=>geoDiagnosis.competitorEntityIds))].join(", ")||copy.none}</p></div><div><h3>{copy.missing}</h3><ul>{[...new Set(report.answerCards.flatMap(({geoDiagnosis})=>geoDiagnosis.missingEvidenceFamilies))].map((item)=><li key={item}>{item}</li>)}</ul></div></div>
+  </section>;
+}
 
 function AnswerCardShell({cardIndex,status,question,locale,children}:{cardIndex:number;status:string;question:string;locale:"en"|"zh";children:ReactNode}){
   const copy=locale==="zh"?ZH:EN;

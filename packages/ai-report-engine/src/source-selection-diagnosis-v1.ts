@@ -138,7 +138,7 @@ export function buildSourceSelectionDiagnosisV1(input: SourceSelectionDiagnosisB
 
   const limitations: SourceSelectionLimitationV1[] = [];
   const sourceProfiles = [...sourceGroups.entries()].map(([domain, entries]) => {
-    const sorted = entries.toSorted((left, right) => left.questionIndex - right.questionIndex || left.source.providerResultOrder - right.source.providerResultOrder || left.source.sourceId.localeCompare(right.source.sourceId));
+    const sorted = [...entries].sort((left, right) => left.questionIndex - right.questionIndex || left.source.providerResultOrder - right.source.providerResultOrder || left.source.sourceId.localeCompare(right.source.sourceId));
     const coveredQuestionIds = [...new Set(sorted.map(({ source }) => source.questionId))];
     const contributions = sorted.map(({ source, answerText, questionIndex }) => contribution(source, answerText, questionIndex, zh, limitations));
     const observableFactors = factors(sorted.map(({ source }) => source), zh);
@@ -175,7 +175,7 @@ export function buildSourceSelectionDiagnosisV1(input: SourceSelectionDiagnosisB
       targetGaps,
       auditStatus
     } satisfies SourceSelectionProfileV1;
-  }).toSorted((left, right) => right.coveredQuestionIds.length - left.coveredQuestionIds.length || earliestOrder(left, sourceGroups) - earliestOrder(right, sourceGroups) || left.registrableDomain.localeCompare(right.registrableDomain));
+  }).sort((left, right) => right.coveredQuestionIds.length - left.coveredQuestionIds.length || earliestOrder(left, sourceGroups) - earliestOrder(right, sourceGroups) || left.registrableDomain.localeCompare(right.registrableDomain));
 
   const repeated = sourceProfiles.filter(({ coveredQuestionIds }) => coveredQuestionIds.length >= 2);
   const sharedPatterns: SourceSelectionPatternV1[] = repeated.length ? [{
@@ -482,4 +482,4 @@ function sha256(value: unknown, path: string): string { const result = bounded(v
 function bounded(value: unknown, path: string, max: number): string { if (typeof value !== "string" || !value.trim() || value.length > max) throw new TypeError(`${path} must be non-empty text no longer than ${max} characters.`); return value.trim(); }
 function nullableText(value: unknown, path: string, max: number): string | null { return value === null ? null : bounded(value, path, max); }
 function stringArray(value: unknown, path: string): string[] { return array(value, path).map((item, index) => bounded(item, `${path}[${index}]`, 500)); }
-function oneOf<const T extends readonly string[]>(value: unknown, allowed: T, path: string): T[number] { if (typeof value !== "string" || !allowed.includes(value)) throw new TypeError(`${path} must be one of ${allowed.join(", ")}.`); return value as T[number]; }
+function oneOf<const T extends readonly string[]>(value: unknown, allowed: T, path: string): T[number] { if (typeof value !== "string" || !allowed.includes(value as T[number])) throw new TypeError(`${path} must be one of ${allowed.join(", ")}.`); return value as T[number]; }
