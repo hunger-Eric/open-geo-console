@@ -16,7 +16,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-LEGACY-01
 describe("schema v26 V4 additive substrate", () => {
   it("registers only additive V4 tables and conditional HTML-only readiness", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(27);
+    expect(DATABASE_SCHEMA_VERSION).toBe(28);
     const sql = databaseMigrationsAfter(25).join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_site_snapshots");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_site_snapshot_pages");
@@ -154,7 +154,7 @@ describeDisposablePostgres("schema v26 V4 PostgreSQL constraints", () => {
         VALUES('nested-enhancement-job','report-v4','deep','recommendation_forensics_v1','two_stage_geo_report_v4',4,'combined_geo_report_v4','questions-v4','zh','v4_diagnosis_enhancement')`;
       await expect(sql`INSERT INTO report_artifact_revisions
         (id,report_id,order_id,job_id,revision,revision_kind,source_artifact_revision_id,artifact_contract,status,payload_identity_hash,html_sha256,ready_at)
-        VALUES('nested-enhancement','report-v4','order-v4','nested-enhancement-job',3,'diagnosis_enhancement','enhancement-revision','combined_geo_report_v4','ready','nested',${hash("nested")},now())`).rejects.toThrow("must extend a ready core V4 revision");
+        VALUES('nested-enhancement','report-v4','order-v4','nested-enhancement-job',3,'diagnosis_enhancement','enhancement-revision','combined_geo_report_v4','ready','nested',${hash("nested")},now())`).rejects.toThrow(/must preserve its ready core lineage|must extend a ready core V4 revision/i);
       await expect(sql`INSERT INTO report_artifact_revisions
         (id,report_id,order_id,job_id,revision,revision_kind,source_artifact_revision_id,artifact_contract,status,payload_identity_hash,html_sha256,ready_at)
         VALUES('v4-evidence-refresh','report-v4','order-v4','retry-job',3,'evidence_refresh','core-revision','combined_geo_report_v4','ready','old-kind',${hash("old-kind")},now())`).rejects.toMatchObject({ constraint_name: "report_artifact_revisions_v4_kind_check" });

@@ -247,6 +247,7 @@ export const scanJobs = pgTable(
     reportId: text("report_id")
       .notNull()
       .references(() => scanReports.id, { onDelete: "cascade" }),
+    siteSnapshotId: text("site_snapshot_id").references(() => reportV4SiteSnapshots.id, { onDelete: "restrict" }),
     tier: text("tier").$type<ReportTier>().notNull(),
     productContract: text("product_contract").$type<ReportProductContract>().notNull().default("legacy_website_audit_v1"),
     fulfillmentMethodology: text("fulfillment_methodology").$type<RecommendationFulfillmentMethodology>(),
@@ -286,12 +287,14 @@ export const scanJobs = pgTable(
     index("scan_jobs_tier_queue_idx").on(table.tier, table.stage, table.createdAt, table.id),
     index("scan_jobs_tier_lease_idx").on(table.tier, table.leaseExpiresAt),
     index("scan_jobs_report_idx").on(table.reportId, table.createdAt),
+    index("scan_jobs_site_snapshot_idx").on(table.siteSnapshotId),
     uniqueIndex("scan_jobs_id_report_uidx").on(table.id, table.reportId),
     uniqueIndex("scan_jobs_correction_uidx").on(table.correctionId).where(sql`${table.correctionId} IS NOT NULL`),
     uniqueIndex("scan_jobs_replacement_fulfillment_uidx").on(table.replacementFulfillmentId).where(sql`${table.replacementFulfillmentId} IS NOT NULL`),
     uniqueIndex("scan_jobs_recommendation_contract_scope_uidx").on(
       table.id, table.reportId, table.productContract, table.fulfillmentMethodology, table.recommendationReportVersion
     ),
+    uniqueIndex("scan_jobs_site_snapshot_binding_uidx").on(table.id, table.reportId, table.siteSnapshotId),
     check("scan_jobs_locale_check", sql`${table.locale} IN ('en', 'zh')`),
     check("scan_jobs_product_contract_check", sql`${table.productContract} IN ('legacy_website_audit_v1','recommendation_forensics_v1')`),
     check("scan_jobs_methodology_contract_check", sql`(
@@ -1084,6 +1087,7 @@ export const paymentOrders = pgTable(
     reportId: text("report_id")
       .notNull()
       .references(() => scanReports.id, { onDelete: "restrict" }),
+    siteSnapshotId: text("site_snapshot_id").references(() => reportV4SiteSnapshots.id, { onDelete: "restrict" }),
     fulfillmentJobId: text("fulfillment_job_id").references(() => scanJobs.id, { onDelete: "restrict" }),
     siteKey: text("site_key").notNull(),
     customerEmailEncrypted: text("customer_email_encrypted").notNull(),
@@ -1123,7 +1127,13 @@ export const paymentOrders = pgTable(
       .on(table.reportId, table.productCode)
       .where(sql`${table.paymentStatus} IN ('created','pending') OR (${table.paymentStatus} = 'paid' AND ${table.refundStatus} <> 'refunded')`),
     index("payment_orders_email_hmac_idx").on(table.customerEmailHmac, table.createdAt),
+    index("payment_orders_site_snapshot_idx").on(table.siteSnapshotId),
     index("payment_orders_sla_idx").on(table.fulfillmentStatus, table.deliveryDeadlineAt),
+    foreignKey({
+      columns: [table.fulfillmentJobId, table.reportId, table.siteSnapshotId],
+      foreignColumns: [scanJobs.id, scanJobs.reportId, scanJobs.siteSnapshotId],
+      name: "payment_orders_fulfillment_snapshot_fkey"
+    }).onDelete("restrict"),
     check("payment_orders_provider_check", sql`${table.provider} IN ('airwallex','stripe')`),
     check("payment_orders_report_locale_check", sql`${table.reportLocale} IN ('en','zh')`),
     check("payment_orders_currency_check", sql`${table.currency} IN ('CNY','USD','HKD')`),

@@ -2442,6 +2442,81 @@ export const V27_DATABASE_MIGRATIONS = [
   `CREATE TRIGGER report_artifact_revisions_v4_config_snapshot_trigger BEFORE INSERT OR UPDATE ON report_artifact_revisions FOR EACH ROW EXECUTE FUNCTION ogc_validate_v4_artifact_config_snapshot()`
 ] as const;
 
+export const V28_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS site_snapshot_id text`,
+  `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS site_snapshot_id text`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_site_snapshot_fkey`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_site_snapshot_fkey FOREIGN KEY(site_snapshot_id) REFERENCES report_v4_site_snapshots(id) ON DELETE RESTRICT`,
+  `ALTER TABLE payment_orders DROP CONSTRAINT IF EXISTS payment_orders_site_snapshot_fkey`,
+  `ALTER TABLE payment_orders ADD CONSTRAINT payment_orders_site_snapshot_fkey FOREIGN KEY(site_snapshot_id) REFERENCES report_v4_site_snapshots(id) ON DELETE RESTRICT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS scan_jobs_site_snapshot_binding_uidx ON scan_jobs(id,report_id,site_snapshot_id)`,
+  `ALTER TABLE payment_orders DROP CONSTRAINT IF EXISTS payment_orders_fulfillment_snapshot_fkey`,
+  `ALTER TABLE payment_orders ADD CONSTRAINT payment_orders_fulfillment_snapshot_fkey FOREIGN KEY(fulfillment_job_id,report_id,site_snapshot_id) REFERENCES scan_jobs(id,report_id,site_snapshot_id) MATCH SIMPLE ON DELETE RESTRICT`,
+  `CREATE INDEX IF NOT EXISTS scan_jobs_site_snapshot_idx ON scan_jobs(site_snapshot_id)`,
+  `CREATE INDEX IF NOT EXISTS payment_orders_site_snapshot_idx ON payment_orders(site_snapshot_id)`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_scan_job_site_snapshot_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_report_id text; snapshot_status text; snapshot_content_identity_hash text;
+   BEGIN
+     IF TG_OP='UPDATE' AND OLD.site_snapshot_id IS NOT NULL
+       AND NEW.site_snapshot_id IS DISTINCT FROM OLD.site_snapshot_id THEN
+       RAISE EXCEPTION 'A non-null site snapshot binding is immutable.';
+     END IF;
+     IF NEW.site_snapshot_id IS NULL THEN
+       RETURN NEW;
+     END IF;
+     IF NEW.tier IS DISTINCT FROM 'deep'
+       OR NEW.product_contract IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR NEW.fulfillment_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR NEW.recommendation_report_version IS DISTINCT FROM 4
+       OR NEW.artifact_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR NEW.reason IS DISTINCT FROM 'standard' THEN
+       RAISE EXCEPTION 'A non-null site snapshot requires an exact V4 standard core job.';
+     END IF;
+     SELECT report_id,status,content_identity_hash
+       INTO snapshot_report_id,snapshot_status,snapshot_content_identity_hash
+       FROM report_v4_site_snapshots WHERE id=NEW.site_snapshot_id;
+     IF snapshot_report_id IS DISTINCT FROM NEW.report_id THEN
+       RAISE EXCEPTION 'A site snapshot binding must belong to the same report.';
+     END IF;
+     IF snapshot_status NOT IN ('completed','completed_limited')
+       OR snapshot_content_identity_hash IS NULL THEN
+       RAISE EXCEPTION 'A site snapshot binding requires a terminal completed snapshot with a content hash.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS scan_jobs_site_snapshot_binding_trigger ON scan_jobs`,
+  `CREATE TRIGGER scan_jobs_site_snapshot_binding_trigger BEFORE INSERT OR UPDATE ON scan_jobs FOR EACH ROW EXECUTE FUNCTION ogc_validate_scan_job_site_snapshot_binding()`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_payment_order_site_snapshot_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_report_id text; snapshot_status text; snapshot_content_identity_hash text;
+   BEGIN
+     IF TG_OP='UPDATE' AND OLD.site_snapshot_id IS NOT NULL
+       AND NEW.site_snapshot_id IS DISTINCT FROM OLD.site_snapshot_id THEN
+       RAISE EXCEPTION 'A non-null site snapshot binding is immutable.';
+     END IF;
+     IF NEW.site_snapshot_id IS NULL THEN
+       RETURN NEW;
+     END IF;
+     IF NEW.product_code IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR NEW.fulfillment_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR NEW.recommendation_report_version IS DISTINCT FROM 4 THEN
+       RAISE EXCEPTION 'A non-null site snapshot requires an exact V4 order.';
+     END IF;
+     SELECT report_id,status,content_identity_hash
+       INTO snapshot_report_id,snapshot_status,snapshot_content_identity_hash
+       FROM report_v4_site_snapshots WHERE id=NEW.site_snapshot_id;
+     IF snapshot_report_id IS DISTINCT FROM NEW.report_id THEN
+       RAISE EXCEPTION 'A site snapshot binding must belong to the same report.';
+     END IF;
+     IF snapshot_status NOT IN ('completed','completed_limited')
+       OR snapshot_content_identity_hash IS NULL THEN
+       RAISE EXCEPTION 'A site snapshot binding requires a terminal completed snapshot with a content hash.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS payment_orders_site_snapshot_binding_trigger ON payment_orders`,
+  `CREATE TRIGGER payment_orders_site_snapshot_binding_trigger BEFORE INSERT OR UPDATE ON payment_orders FOR EACH ROW EXECUTE FUNCTION ogc_validate_payment_order_site_snapshot_binding()`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -2461,7 +2536,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 24, migrations: V24_DATABASE_MIGRATIONS },
   { version: 25, migrations: V25_DATABASE_MIGRATIONS },
   { version: 26, migrations: V26_DATABASE_MIGRATIONS },
-  { version: 27, migrations: V27_DATABASE_MIGRATIONS }
+  { version: 27, migrations: V27_DATABASE_MIGRATIONS },
+  { version: 28, migrations: V28_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

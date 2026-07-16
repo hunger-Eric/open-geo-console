@@ -8,7 +8,7 @@ import {
   getDatabasePoolSize,
   shouldRunDatabaseMigrations
 } from "./index";
-import { DATABASE_MIGRATIONS, V22_DATABASE_MIGRATIONS, V23_DATABASE_MIGRATIONS, V24_DATABASE_MIGRATIONS, V25_DATABASE_MIGRATIONS, V26_DATABASE_MIGRATIONS, V27_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V22_DATABASE_MIGRATIONS, V23_DATABASE_MIGRATIONS, V24_DATABASE_MIGRATIONS, V25_DATABASE_MIGRATIONS, V26_DATABASE_MIGRATIONS, V27_DATABASE_MIGRATIONS, V28_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 
 describe("database path selection", () => {
   const originalOpenGeoDbPath = process.env.OPEN_GEO_DB_PATH;
@@ -58,7 +58,7 @@ describe("database deployment marker", () => {
 
 describe("database schema marker", () => {
   it("uses the recoverable analysis-ledger schema with cascade-safe event cleanup", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(27);
+    expect(DATABASE_SCHEMA_VERSION).toBe(28);
   });
 
   it("contains the complete additive V2 authority and methodology migration", () => {
@@ -150,13 +150,14 @@ describe("database schema marker", () => {
   });
 
   it("runs only forward migrations when upgrading an existing schema", () => {
-    expect(databaseMigrationsAfter(21)).toEqual([...V22_DATABASE_MIGRATIONS, ...V23_DATABASE_MIGRATIONS, ...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS, ...V27_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(22)).toEqual([...V23_DATABASE_MIGRATIONS, ...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS, ...V27_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(23)).toEqual([...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS, ...V27_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(24)).toEqual([...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS, ...V27_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(25)).toEqual([...V26_DATABASE_MIGRATIONS, ...V27_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(26)).toEqual([...V27_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(27)).toEqual([]);
+    expect(databaseMigrationsAfter(21)).toEqual([...V22_DATABASE_MIGRATIONS, ...V23_DATABASE_MIGRATIONS, ...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS, ...V27_DATABASE_MIGRATIONS, ...V28_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(22)).toEqual([...V23_DATABASE_MIGRATIONS, ...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS, ...V27_DATABASE_MIGRATIONS, ...V28_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(23)).toEqual([...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS, ...V27_DATABASE_MIGRATIONS, ...V28_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(24)).toEqual([...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS, ...V27_DATABASE_MIGRATIONS, ...V28_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(25)).toEqual([...V26_DATABASE_MIGRATIONS, ...V27_DATABASE_MIGRATIONS, ...V28_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(26)).toEqual([...V27_DATABASE_MIGRATIONS, ...V28_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(27)).toEqual([...V28_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(28)).toEqual([]);
     expect(databaseMigrationsAfter(undefined)).toEqual([...DATABASE_MIGRATIONS]);
   });
 
