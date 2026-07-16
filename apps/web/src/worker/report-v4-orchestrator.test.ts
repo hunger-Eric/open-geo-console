@@ -18,6 +18,7 @@ import {
 // @requirement GEO-V4-DELIVERY-01
 // @requirement GEO-V4-DIAG-02
 // @requirement GEO-V4-PDF-01
+// @requirement GEO-V4-COMMERCE-01
 
 describe("V4 core-first orchestrator", () => {
   it("reuses one immutable snapshot, activates core before parallel local enhancement, and exposes verifier counters", async () => {
@@ -37,6 +38,8 @@ describe("V4 core-first orchestrator", () => {
       "config-snapshot-v4"
     ]);
     expect(harness.events.indexOf("activate:core")).toBeLessThan(harness.events.indexOf("audit:q1"));
+    expect(harness.events.indexOf("activate:core")).toBeLessThan(harness.events.indexOf("commerce:core"));
+    expect(harness.events.indexOf("commerce:core")).toBeLessThan(harness.events.indexOf("audit:q1"));
     expect(harness.events.indexOf("persist:core")).toBeLessThan(harness.events.indexOf("activate:core"));
     expect(harness.events.indexOf("diagnose:q2")).toBeLessThan(harness.events.indexOf("prepare:enhancement"));
     expect(result.enhancement).toEqual({
@@ -117,6 +120,8 @@ describe("V4 core-first orchestrator", () => {
     expect(harness.events).not.toContain("answer");
     expect(harness.events).not.toContain("persist:core");
     expect(harness.events).not.toContain("activate:core");
+    expect(harness.events.filter((event) => event === "commerce:core")).toHaveLength(1);
+    expect(harness.events.indexOf("commerce:core")).toBeLessThan(harness.events.indexOf("audit:q1"));
     expect(result.counters.modelCalls.websiteSynthesis).toBe(0);
     expect(result.counters.modelCalls.questionAnswer).toBe(0);
     expect(result.counters.wholeReportReruns).toBe(0);
@@ -264,11 +269,28 @@ describe("V4 core-first orchestrator", () => {
       expect(result.activeReport?.artifactRevisionId).toBe("core-revision");
       expect(harness.activeRevisionId).toBe("core-revision");
       expect(harness.events).toContain("activate:core");
+      expect(harness.events.filter((event) => event === "commerce:core")).toHaveLength(1);
       expect(result.enhancement.status).toBe("failed");
       expect(result.counters.revisions.coreActivated).toBe(1);
       expect(result.counters.revisions.enhancementActivated).toBe(0);
     }
   );
+
+  it("stops before all enhancement work when core commerce terminalization fails and leaves the core active", async () => {
+    const harness = createHarness({ failure: "commerce" });
+
+    await expect(runReportV4Orchestrator(baseInput(), harness.dependencies))
+      .rejects.toThrow(/commerce terminalization failed/i);
+
+    expect(harness.activeRevisionId).toBe("core-revision");
+    expect(harness.events.filter((event) => event === "commerce:core")).toHaveLength(1);
+    expect(harness.events).toContain("activate:core");
+    expect(harness.events).not.toContain("audit:q1");
+    expect(harness.events.some((event) => event.startsWith("diagnose:"))).toBe(false);
+    expect(harness.events).not.toContain("prepare:enhancement");
+    expect(harness.events).not.toContain("activate:enhancement");
+    expect(harness.events.join(" ")).not.toMatch(/pdf|pageCount|storage/i);
+  });
 
   it("propagates caller abort after core activation without writing an enhancement business failure", async () => {
     const controller = new AbortController();
@@ -287,7 +309,7 @@ describe("V4 core-first orchestrator", () => {
   });
 });
 
-type FailurePoint = "source" | "diagnosis" | "persist_enhancement" | "activate_enhancement";
+type FailurePoint = "commerce" | "source" | "diagnosis" | "persist_enhancement" | "activate_enhancement";
 
 interface HarnessOptions {
   readonly snapshotStatus?: "completed" | "completed_limited" | "unavailable";
@@ -351,6 +373,10 @@ function createHarness(options: HarnessOptions = {}) {
       revisionConfigSnapshotIds.push(input.configSnapshotId);
       events.push("activate:core");
       activeRevisionId = "core-revision";
+    },
+    async terminalizeCoreCommerce() {
+      events.push("commerce:core");
+      if (options.failure === "commerce") throw new Error("commerce terminalization failed");
     },
     async auditQuestionSources(input) {
       events.push(`audit:${input.question.questionId}`);

@@ -112,6 +112,10 @@ export interface ReportV4OrchestratorDependencies {
     input: ActivateReportV4CoreRevisionInput,
     signal?: AbortSignal
   ) => Promise<unknown>;
+  readonly terminalizeCoreCommerce: (input: {
+    readonly report: CombinedGeoReportV4;
+    readonly signal?: AbortSignal;
+  }) => Promise<unknown>;
   readonly auditQuestionSources: (input: {
     readonly question: CombinedGeoReportV4Question;
     readonly signal?: AbortSignal;
@@ -323,6 +327,9 @@ export async function runReportV4Orchestrator(
     });
     counters.revisions.coreActivated = 1;
   }
+
+  await dependencies.terminalizeCoreCommerce({ report: coreReport, signal });
+  throwIfAborted(signal);
 
   const enhancementUnits = await Promise.all(coreReport.questions.map((question) => enhanceQuestion({
     question,
