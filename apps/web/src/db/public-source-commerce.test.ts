@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { terminalizePaidReportV4Core } from "./public-source-commerce";
+import { terminalizePaidReportV4Core, terminalizeUnavailablePaidReportV4Core } from "./public-source-commerce";
 
 const database = vi.hoisted(() => ({
   ensureDatabase: vi.fn(),
@@ -136,6 +136,57 @@ describe("V4 core commercial terminalization admission", () => {
   });
 });
 
+describe("V4 all-questions-unavailable commercial terminalization admission", () => {
+  const unavailableInput = () => ({
+    reportId: "report-v4",
+    coreJobId: "job-v4",
+    orderId: "order-v4",
+    siteSnapshotId: "snapshot-v4",
+    questionSetId: "questions-v4",
+    configSnapshotId: "config-v4",
+    locale: "zh-CN",
+    workerId: "worker-v4"
+  });
+
+  // @requirement GEO-V4-COMMERCE-01
+  // @requirement GEO-V4-DELIVERY-01
+  // @requirement GEO-V4-PDF-01
+  it("rejects PDF-shaped unavailable terminalization input before touching PostgreSQL", async () => {
+    await expect(terminalizeUnavailablePaidReportV4Core({
+      ...unavailableInput(),
+      pdfSha256: "forbidden"
+    } as never)).rejects.toThrow(/PDF/i);
+    expect(database.ensureDatabase).not.toHaveBeenCalled();
+    expect(database.getSqlClient).not.toHaveBeenCalled();
+  });
+
+  // @requirement GEO-V4-COMMERCE-01
+  it("rejects missing lineage identities and unsupported locales before touching PostgreSQL", async () => {
+    await expect(terminalizeUnavailablePaidReportV4Core({ ...unavailableInput(), coreJobId: " " }))
+      .rejects.toThrow(/core job identity/i);
+    await expect(terminalizeUnavailablePaidReportV4Core({ ...unavailableInput(), locale: "fr-FR" }))
+      .rejects.toThrow(/locale|language/i);
+    expect(database.ensureDatabase).not.toHaveBeenCalled();
+    expect(database.getSqlClient).not.toHaveBeenCalled();
+  });
+
+  // @requirement GEO-V4-COMMERCE-01
+  it("refunds terminal unavailable checkpoints with mixed zero, one and two provider calls", async () => {
+    const fake = fakeUnavailableCommerceDatabase([0, 1, 2]);
+    database.getSqlClient.mockReturnValue({ begin: fake.begin });
+    const first = await terminalizeUnavailablePaidReportV4Core(unavailableInput());
+    expect(first).toMatchObject({ outcome: "unavailable", refundId: "refund-v4", emailDeliveryId: "email-v4" });
+    expect(fake.state).toMatchObject({
+      jobStage: "failed", jobExecution: "failed", orderStatus: "failed", orderRefundStatus: "pending",
+      creditStatus: "refunded", keyStatus: "active", creditsRemaining: 1, refunds: 1, emails: 1, transitions: 1
+    });
+    expect(await terminalizeUnavailablePaidReportV4Core(unavailableInput())).toMatchObject({
+      refundId: first.refundId, emailDeliveryId: first.emailDeliveryId
+    });
+    expect(fake.state).toMatchObject({ creditsRemaining: 1, refunds: 1, emails: 1, transitions: 1 });
+  });
+});
+
 function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhancementAlreadyActive = false, missingConfigSnapshot = false) {
   const state = {
     jobStage: "synthesizing",
@@ -200,6 +251,77 @@ function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhance
     if (sql.startsWith("INSERT INTO email_deliveries")) { state.emails = 1; return []; }
     if (sql.startsWith("SELECT id,order_id,report_id,template_type FROM email_deliveries")) return [{ id: "email-v4", order_id: "order-v4", report_id: "report-v4", template_type: "limited_report_refund" }];
     throw new Error(`Unexpected SQL in V4 commerce fixture: ${sql}; values=${values.length}`);
+  };
+  return { state, begin: async (work: (transaction: typeof tx) => Promise<unknown>) => work(tx) };
+}
+
+function fakeUnavailableCommerceDatabase(providerCallCounts: readonly number[]) {
+  const state = {
+    jobStage: "synthesizing", jobExecution: "running", orderStatus: "processing", orderRefundStatus: "not_required",
+    deliveryStatus: "not_queued", creditStatus: "reserved", keyStatus: "exhausted", creditsRemaining: 0,
+    refunds: 0, emails: 0, transitions: 0
+  };
+  const tx = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const sql = strings.join("?").replaceAll(/\s+/gu, " ").trim();
+    if (sql.includes("pg_advisory_xact_lock")) return [];
+    if (sql.includes("FROM scan_jobs WHERE id=") && sql.includes("site_snapshot_id")) return [{
+      id: "job-v4", report_id: "report-v4", site_snapshot_id: "snapshot-v4", locale: "zh", stage: state.jobStage,
+      execution_state: state.jobExecution, checkpoint_revision: 4, lease_owner: state.jobExecution === "running" ? "worker-v4" : null,
+      lease_expires_at: state.jobExecution === "running" ? "2099-01-01T00:00:00.000Z" : null,
+      credit_reservation_id: "credit-v4", product_contract: "recommendation_forensics_v1",
+      fulfillment_methodology: "two_stage_geo_report_v4", recommendation_report_version: 4,
+      artifact_contract: "combined_geo_report_v4", business_question_set_id: "questions-v4", reason: "standard",
+      correction_id: null, replacement_fulfillment_id: null
+    }];
+    if (sql.includes("FROM payment_orders WHERE id=")) return [{
+      id: "order-v4", report_id: "report-v4", site_snapshot_id: "snapshot-v4", fulfillment_job_id: "job-v4",
+      provider: "airwallex", amount_minor: 2900, currency: "USD", report_locale: "zh",
+      product_code: "recommendation_forensics_v1", fulfillment_methodology: "two_stage_geo_report_v4",
+      recommendation_report_version: 4, business_question_set_id: "questions-v4", payment_status: "paid",
+      fulfillment_status: state.orderStatus, refund_status: state.orderRefundStatus, delivery_status: state.deliveryStatus
+    }];
+    if (sql.includes("FROM report_v4_config_snapshots")) return [{
+      id: "config-v4", report_id: "report-v4", order_id: "order-v4", core_job_id: "job-v4", model_profile_hash: "model-hash"
+    }];
+    if (sql.includes("FROM report_v4_site_snapshots")) return [{
+      id: "snapshot-v4", report_id: "report-v4", status: "completed", content_identity_hash: "content-hash", analyzable_page_count: 3
+    }];
+    if (sql.includes("FROM report_business_question_sets")) return [{
+      id: "questions-v4", report_id: "report-v4", order_id: "order-v4", locale: "zh", status: "locked"
+    }];
+    if (sql.includes("FROM report_business_questions")) return [1, 2, 3].map((ordinal) => ({ id: `question-${ordinal}`, ordinal }));
+    if (sql.includes("FROM report_v4_question_checkpoints")) return [1, 2, 3].map((ordinal) => ({
+      identity_hash: `checkpoint-${ordinal}`, report_id: "report-v4", job_id: "job-v4", question_set_id: "questions-v4",
+      question_id: `question-${ordinal}`, snapshot_id: "snapshot-v4", ordinal, state: "unavailable",
+      model_config_identity_hash: "model-hash", provider_call_count: providerCallCounts[ordinal - 1],
+      answer_payload: null, answer_content_hash: null
+    }));
+    if (sql.includes("FROM scan_reports scan")) return [{
+      active_artifact_revision_id: null, artifacts: 0, combined_reports: 0, access_tokens: 0
+    }];
+    if (sql.includes("FROM credit_ledger credit JOIN access_keys")) return [{
+      id: "credit-v4", status: state.creditStatus, access_key_id: "key-v4", credits: 1, job_id: "job-v4",
+      report_id: "report-v4", payment_order_id: "order-v4", key_payment_order_id: "order-v4",
+      key_status: state.keyStatus, key_credits_remaining: state.creditsRemaining
+    }];
+    if (sql.startsWith("UPDATE scan_jobs SET")) { state.jobStage = "failed"; state.jobExecution = "failed"; return [{ id: "job-v4" }]; }
+    if (sql.startsWith("INSERT INTO scan_job_transition_events")) { state.transitions += 1; return []; }
+    if (sql.startsWith("UPDATE access_keys SET")) { state.keyStatus = "active"; state.creditsRemaining += 1; return [{ id: "key-v4" }]; }
+    if (sql.startsWith("UPDATE credit_ledger SET")) { state.creditStatus = "refunded"; return [{ id: "credit-v4" }]; }
+    if (sql.startsWith("UPDATE payment_orders SET")) { state.orderStatus = "failed"; state.orderRefundStatus = "pending"; state.deliveryStatus = "queued"; return [{ id: "order-v4" }]; }
+    if (sql.startsWith("INSERT INTO payment_refunds")) { state.refunds = 1; return []; }
+    if (sql.startsWith("INSERT INTO email_deliveries")) { state.emails = 1; return []; }
+    if (sql.includes("FROM scan_jobs job") && sql.includes("JOIN credit_ledger")) return [{
+      job_stage: state.jobStage, execution_state: state.jobExecution, credit_status: state.creditStatus,
+      fulfillment_status: state.orderStatus, refund_status: state.orderRefundStatus, artifacts: 0, combined_reports: 0, access_tokens: 0
+    }];
+    if (sql.startsWith("SELECT id,provider,reason,amount_minor,currency FROM payment_refunds")) return state.refunds ? [{
+      id: "refund-v4", provider: "airwallex", reason: "report_failed", amount_minor: 2900, currency: "USD"
+    }] : [];
+    if (sql.startsWith("SELECT id,order_id,report_id,template_type FROM email_deliveries")) return state.emails ? [{
+      id: "email-v4", order_id: "order-v4", report_id: "report-v4", template_type: "report_failed_refund"
+    }] : [];
+    throw new Error(`Unexpected SQL in unavailable V4 commerce fixture: ${sql}; values=${values.length}`);
   };
   return { state, begin: async (work: (transaction: typeof tx) => Promise<unknown>) => work(tx) };
 }
