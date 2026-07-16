@@ -1,6 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
-import { parseRecommendationForensicReportV2, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import { createHash, createHmac, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import type postgres from "postgres";
+import { normalizeReportLanguage, parseCombinedGeoReportV4, parseRecommendationForensicReportV2, type CombinedGeoReportV4, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import { ensureDatabase, getSqlClient } from "./index";
+import { hmacSecret, requireSecret } from "./secrets";
 import { prepareSourceForensicReportRow } from "./source-forensic-reports";
 import { snapshotReferenceBinding } from "./combined-correction-terminalization";
 import type { ScanJobCoverage } from "./jobs";
@@ -86,6 +89,284 @@ export async function terminalizePaidPublicSourceReport(input: {
     fault(input.faultAfter,"email");
     return {report,orderId:order.id,refundId,emailDeliveryId:storedEmail.id};
   });
+}
+
+export async function terminalizePaidReportV4Core(input: {
+  report: unknown;
+  workerId: string;
+  faultAfter?: "job" | "credit" | "order" | "access" | "email";
+  pdfSha256?: never;
+  pdfStorageKey?: never;
+  pageCount?: never;
+}): Promise<{
+  report: CombinedGeoReportV4;
+  outcome: "completed" | "completed_limited";
+  orderId: string;
+  refundId: string | null;
+  accessTokenId: string;
+  emailDeliveryId: string;
+}> {
+  if (["pdfSha256", "pdfStorageKey", "pageCount"].some((field) => Object.hasOwn(input, field))) {
+    throw new Error("V4 commercial terminalization rejects every PDF readiness input.");
+  }
+  const report = parseCombinedGeoReportV4(input.report);
+  if (!input.workerId.trim()) throw new Error("A V4 terminalization worker identity is required.");
+  const outcome = requireV4CommerceOutcome(report.status);
+  if (report.questions.some((question) => question.diagnosis !== undefined)) {
+    throw new Error("A V4 diagnosis enhancement cannot trigger commercial terminalization.");
+  }
+  const tokenSecret = requireSecret("OGC_TOKEN_HASH_SECRET");
+  await ensureDatabase();
+
+  return getSqlClient().begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`report-v4-commerce:${report.reportId}`},0))`;
+    const artifact = (await tx<Array<V4ArtifactCommerceRow>>`
+      SELECT core.id,core.report_id,core.order_id,core.job_id,core.revision_kind,core.artifact_contract,
+        core.status,core.html_sha256,core.pdf_sha256,core.pdf_storage_key,core.ready_at,core.config_snapshot_id,
+        combined.report_id AS combined_report_id,combined.order_id AS combined_order_id,
+        combined.job_id AS combined_job_id,combined.question_set_id,combined.payload,
+        scan.active_artifact_revision_id,scan.report_locale AS scan_report_locale,
+        config.report_id AS config_report_id,config.order_id AS config_order_id,config.core_job_id AS config_core_job_id,
+        active.revision_kind AS active_revision_kind,active.source_artifact_revision_id AS active_source_artifact_revision_id,
+        active.artifact_contract AS active_artifact_contract,active.status AS active_status,
+        active.order_id AS active_order_id,active.report_id AS active_report_id,
+        active.html_sha256 AS active_html_sha256,active.pdf_sha256 AS active_pdf_sha256,
+        active.pdf_storage_key AS active_pdf_storage_key,active.ready_at AS active_ready_at
+      FROM report_artifact_revisions core
+      JOIN combined_geo_reports combined ON combined.artifact_revision_id=core.id
+      JOIN scan_reports scan ON scan.id=core.report_id
+      LEFT JOIN report_v4_config_snapshots config ON config.id=core.config_snapshot_id
+      LEFT JOIN report_artifact_revisions active ON active.id=scan.active_artifact_revision_id
+      WHERE core.id=${report.artifactRevisionId} AND core.report_id=${report.reportId}
+      FOR UPDATE OF core,combined,scan
+    `)[0];
+    if (!artifact) throw new Error("The exact persisted V4 core artifact is required.");
+    assertV4CoreArtifact(artifact, report);
+
+    const job = (await tx<Array<V4JobCommerceRow>>`
+      SELECT id,report_id,locale,stage,execution_state,checkpoint_revision,lease_owner,lease_expires_at,
+        credit_reservation_id,product_contract,fulfillment_methodology,recommendation_report_version,
+        artifact_contract,business_question_set_id,reason,correction_id,replacement_fulfillment_id
+      FROM scan_jobs WHERE id=${artifact.job_id} AND report_id=${report.reportId} FOR UPDATE
+    `)[0];
+    if (!job || job.product_contract !== "recommendation_forensics_v1" ||
+        job.fulfillment_methodology !== "two_stage_geo_report_v4" || Number(job.recommendation_report_version) !== 4 ||
+        job.artifact_contract !== "combined_geo_report_v4" || job.business_question_set_id !== artifact.question_set_id ||
+        !v4LocaleMatches(report.locale, job.locale) ||
+        job.reason !== "standard" || job.correction_id !== null || job.replacement_fulfillment_id !== null ||
+        !job.credit_reservation_id) {
+      throw new Error("V4 commercial terminalization requires its exact standard paid core job.");
+    }
+    const order = (await tx<Array<V4OrderCommerceRow>>`
+      SELECT id,report_id,fulfillment_job_id,provider,amount_minor,currency,report_locale,product_code,
+        fulfillment_methodology,recommendation_report_version,business_question_set_id,payment_status,
+        fulfillment_status,refund_status,delivery_status
+      FROM payment_orders WHERE id=${artifact.order_id} FOR UPDATE
+    `)[0];
+    if (!order || order.report_id !== report.reportId || order.fulfillment_job_id !== job.id ||
+        order.product_code !== "recommendation_forensics_v1" || order.fulfillment_methodology !== "two_stage_geo_report_v4" ||
+        Number(order.recommendation_report_version) !== 4 || order.business_question_set_id !== artifact.question_set_id ||
+        !v4LocaleMatches(report.locale, order.report_locale) || order.payment_status !== "paid") {
+      throw new Error("V4 commercial terminalization requires its exact verified paid order.");
+    }
+    const credit = (await tx<Array<V4CreditCommerceRow>>`
+      SELECT id,status,access_key_id,credits,job_id,report_id,payment_order_id
+      FROM credit_ledger WHERE id=${job.credit_reservation_id} FOR UPDATE
+    `)[0];
+    if (!credit || credit.job_id !== job.id || credit.report_id !== report.reportId ||
+        credit.payment_order_id !== order.id || !Number.isSafeInteger(credit.credits) || credit.credits <= 0) {
+      throw new Error("The V4 paid credit reservation identity is invalid.");
+    }
+
+    const expectedCreditStatus = outcome === "completed" ? "settled" : "refunded";
+    const firstRun = job.execution_state === "running" && job.lease_owner === input.workerId &&
+      Boolean(job.lease_expires_at) && Date.parse(job.lease_expires_at!) > Date.now() &&
+      !["completed", "completed_limited", "failed"].includes(job.stage) && credit.status === "reserved" &&
+      ["queued", "processing"].includes(order.fulfillment_status) && order.refund_status === "not_required";
+    const idempotentReentry = job.execution_state === "completed" && job.stage === outcome &&
+      order.fulfillment_status === outcome && credit.status === expectedCreditStatus;
+    if (!firstRun && !idempotentReentry) throw new Error("V4 commercial state conflicts with this core artifact outcome.");
+    assertV4CoreActivationLineage(artifact, firstRun);
+
+    if (firstRun) {
+      const jobs = await tx<Array<{ id: string }>>`
+        UPDATE scan_jobs SET stage=${outcome},execution_state='completed',current_phase='terminalization',progress=100,
+          retry_not_before=NULL,repair_reason_code=NULL,repair_deadline_at=NULL,lease_owner=NULL,lease_expires_at=NULL,
+          error_code=NULL,public_error=NULL,updated_at=now()
+        WHERE id=${job.id} AND execution_state='running' AND credit_reservation_id=${credit.id}
+        RETURNING id
+      `;
+      if (jobs.length !== 1) throw new Error("The V4 core job could not be terminalized exactly once.");
+      await JobTransitionService.appendTransition(tx, {
+        jobId: job.id,
+        fromState: job.execution_state,
+        toState: "completed",
+        phase: "terminalization",
+        checkpointRevision: job.checkpoint_revision,
+        reasonCode: "report_v4_core_commerce_terminalized"
+      });
+      fault(input.faultAfter, "job");
+
+      if (outcome === "completed") {
+        const settled = await tx<Array<{ id: string }>>`
+          UPDATE credit_ledger SET status='settled',settled_at=now(),refunded_at=NULL
+          WHERE id=${credit.id} AND status='reserved' RETURNING id
+        `;
+        if (settled.length !== 1) throw new Error("The V4 paid credit could not be settled exactly once.");
+      } else {
+        const keys = await tx<Array<{ id: string }>>`
+          UPDATE access_keys SET credits_remaining=credits_remaining+${credit.credits},
+            status=CASE WHEN status='exhausted' THEN 'active' ELSE status END
+          WHERE id=${credit.access_key_id} RETURNING id
+        `;
+        if (keys.length !== 1) throw new Error("The V4 limited-report credit could not be returned.");
+        const refunded = await tx<Array<{ id: string }>>`
+          UPDATE credit_ledger SET status='refunded',refunded_at=now(),settled_at=NULL
+          WHERE id=${credit.id} AND status='reserved' RETURNING id
+        `;
+        if (refunded.length !== 1) throw new Error("The V4 paid credit could not be refunded exactly once.");
+      }
+      fault(input.faultAfter, "credit");
+
+      if (outcome === "completed_limited") {
+        await tx`INSERT INTO payment_refunds(id,order_id,provider,reason,amount_minor,currency,state,idempotency_key)
+          VALUES(${randomUUID()},${order.id},${order.provider},'completed_limited',${order.amount_minor},${order.currency},'pending',${`full_refund/${order.id}`})
+          ON CONFLICT(order_id) DO NOTHING`;
+      }
+      const orders = await tx<Array<{ id: string }>>`
+        UPDATE payment_orders SET fulfillment_status=${outcome},fulfilled_at=COALESCE(fulfilled_at,now()),
+          refund_status=CASE WHEN ${outcome}='completed_limited' AND refund_status='not_required' THEN 'pending' ELSE refund_status END,
+          delivery_status=CASE WHEN delivery_status='not_queued' THEN 'queued' ELSE delivery_status END,updated_at=now()
+        WHERE id=${order.id} AND fulfillment_status IN ('queued','processing') RETURNING id
+      `;
+      if (orders.length !== 1) throw new Error("The V4 paid order could not be terminalized exactly once.");
+      fault(input.faultAfter, "order");
+    }
+
+    const refundId = await requireV4RefundTruth(tx, order, outcome);
+    const template = outcome === "completed" ? "report_ready" : "limited_report_refund";
+    const businessKey = `${template}/${report.artifactRevisionId}/v1`;
+    const token = deterministicReportAccessToken(report.reportId, businessKey, tokenSecret);
+    const tokenId = randomUUID();
+    await tx`INSERT INTO report_access_tokens(id,report_id,token_prefix,token_hmac,artifact_scope,expires_at)
+      VALUES(${tokenId},${report.reportId},${token.displayPrefix},${hmacSecret(token.raw, tokenSecret)},'combined_geo_report_v4',now()+interval '30 days')
+      ON CONFLICT(token_hmac) DO NOTHING`;
+    const access = (await tx<Array<{ id: string; report_id: string; artifact_scope: string }>>`
+      SELECT id,report_id,artifact_scope FROM report_access_tokens
+      WHERE token_hmac=${hmacSecret(token.raw, tokenSecret)} FOR UPDATE
+    `)[0];
+    if (!access || access.report_id !== report.reportId || access.artifact_scope !== "combined_geo_report_v4") {
+      throw new Error("The V4 report access token identity conflicts with the core artifact.");
+    }
+    fault(input.faultAfter, "access");
+
+    const emailId = randomUUID();
+    await tx`INSERT INTO email_deliveries(id,order_id,report_id,template_type,template_version,locale,recipient_ref,provider,business_idempotency_key,state)
+      VALUES(${emailId},${order.id},${report.reportId},${template},'v1',${order.report_locale},${order.id},'resend',${businessKey},'queued')
+      ON CONFLICT(business_idempotency_key) DO NOTHING`;
+    const email = (await tx<Array<{ id: string; order_id: string; report_id: string; template_type: string }>>`
+      SELECT id,order_id,report_id,template_type FROM email_deliveries
+      WHERE business_idempotency_key=${businessKey} FOR UPDATE
+    `)[0];
+    if (!email || email.order_id !== order.id || email.report_id !== report.reportId || email.template_type !== template) {
+      throw new Error("The V4 terminal email identity conflicts with the core artifact.");
+    }
+    fault(input.faultAfter, "email");
+    return { report, outcome, orderId: order.id, refundId, accessTokenId: access.id, emailDeliveryId: email.id };
+  });
+}
+
+interface V4ArtifactCommerceRow {
+  id: string; report_id: string; order_id: string; job_id: string; revision_kind: string; artifact_contract: string;
+  status: string; html_sha256: string | null; pdf_sha256: string | null; pdf_storage_key: string | null; ready_at: string | null;
+  config_snapshot_id: string | null; config_report_id: string | null; config_order_id: string | null; config_core_job_id: string | null;
+  combined_report_id: string; combined_order_id: string; combined_job_id: string; question_set_id: string; payload: unknown;
+  active_artifact_revision_id: string | null; scan_report_locale: string;
+  active_revision_kind: string | null; active_source_artifact_revision_id: string | null; active_artifact_contract: string | null;
+  active_status: string | null; active_order_id: string | null; active_report_id: string | null; active_html_sha256: string | null;
+  active_pdf_sha256: string | null; active_pdf_storage_key: string | null; active_ready_at: string | null;
+}
+interface V4JobCommerceRow {
+  id: string; report_id: string; locale: string; stage: string; execution_state: string; checkpoint_revision: number; lease_owner: string | null;
+  lease_expires_at: string | null; credit_reservation_id: string | null; product_contract: string; fulfillment_methodology: string | null;
+  recommendation_report_version: number | null; artifact_contract: string | null; business_question_set_id: string | null;
+  reason: string; correction_id: string | null; replacement_fulfillment_id: string | null;
+}
+interface V4OrderCommerceRow {
+  id: string; report_id: string; fulfillment_job_id: string | null; provider: string; amount_minor: number; currency: string;
+  report_locale: string; product_code: string; fulfillment_methodology: string | null; recommendation_report_version: number | null;
+  business_question_set_id: string | null; payment_status: string; fulfillment_status: string; refund_status: string; delivery_status: string;
+}
+interface V4CreditCommerceRow {
+  id: string; status: string; access_key_id: string; credits: number; job_id: string | null; report_id: string; payment_order_id: string | null;
+}
+
+function assertV4CoreArtifact(row: V4ArtifactCommerceRow, report: CombinedGeoReportV4): void {
+  if (!row.config_snapshot_id || row.config_report_id !== row.report_id || row.config_order_id !== row.order_id ||
+      row.config_core_job_id !== row.job_id) {
+    throw new Error("V4 commerce requires the core artifact's exact immutable configuration snapshot binding.");
+  }
+  if (row.id !== report.artifactRevisionId || row.report_id !== report.reportId || row.revision_kind !== "generation" ||
+      row.combined_report_id !== row.report_id || row.combined_order_id !== row.order_id || row.combined_job_id !== row.job_id ||
+      !v4LocaleMatches(report.locale, row.scan_report_locale) ||
+      row.artifact_contract !== "combined_geo_report_v4" || !["active", "ready"].includes(row.status) ||
+      !row.html_sha256 || !row.ready_at || row.pdf_sha256 !== null || row.pdf_storage_key !== null) {
+    throw new Error("V4 commerce requires an HTML-only ready core generation revision.");
+  }
+  const persisted = parseCombinedGeoReportV4(row.payload);
+  if (!isDeepStrictEqual(persisted, report)) throw new Error("The V4 core payload identity conflicts with its persisted artifact.");
+}
+
+function assertV4CoreActivationLineage(row: V4ArtifactCommerceRow, firstRun: boolean): void {
+  if (row.status === "active" && row.active_artifact_revision_id === row.id) return;
+  // A ready core behind an active enhancement is valid only for an already-terminal idempotent reentry.
+  // The first commercial transition must observe the core itself as active before enhancement work may start.
+  if (!firstRun && row.status === "ready" && row.active_artifact_revision_id &&
+      row.active_revision_kind === "diagnosis_enhancement" && row.active_source_artifact_revision_id === row.id &&
+      row.active_artifact_contract === "combined_geo_report_v4" && row.active_status === "active" &&
+      row.active_order_id === row.order_id && row.active_report_id === row.report_id && row.active_html_sha256 && row.active_ready_at &&
+      row.active_pdf_sha256 === null && row.active_pdf_storage_key === null) return;
+  throw new Error("The V4 core artifact is not the active delivery revision or its exact enhanced ancestor.");
+}
+
+async function requireV4RefundTruth(
+  tx: postgres.TransactionSql,
+  order: V4OrderCommerceRow,
+  outcome: "completed" | "completed_limited"
+): Promise<string | null> {
+  const currentOrders = await tx<Array<{ refund_status: string }>>`
+    SELECT refund_status FROM payment_orders WHERE id=${order.id} FOR UPDATE
+  `;
+  const currentOrder = currentOrders[0];
+  if (currentOrders.length !== 1 || !currentOrder) throw new Error("The V4 paid order refund truth is unavailable.");
+  const refunds = await tx<Array<{ id: string; provider: string; reason: string; amount_minor: number; currency: string }>>`
+    SELECT id,provider,reason,amount_minor,currency FROM payment_refunds WHERE order_id=${order.id} FOR UPDATE
+  `;
+  if (outcome === "completed") {
+    if (refunds.length !== 0 || currentOrder.refund_status !== "not_required") throw new Error("A completed V4 order cannot carry refund side effects.");
+    return null;
+  }
+  const refund = refunds[0];
+  if (refunds.length !== 1 || !refund || refund.provider !== order.provider || refund.reason !== "completed_limited" ||
+      Number(refund.amount_minor) !== Number(order.amount_minor) || refund.currency !== order.currency || currentOrder.refund_status === "not_required") {
+    throw new Error("The V4 limited-report refund truth conflicts with the paid order.");
+  }
+  return refund.id;
+}
+
+function deterministicReportAccessToken(reportId: string, businessKey: string, secret: string): { raw: string; displayPrefix: string } {
+  const idempotencyKey = `${businessKey}/combined_geo_report_v4`;
+  const material = createHmac("sha256", secret).update(`report-access\0${reportId}\0combined_geo_report_v4\0${idempotencyKey}`).digest("base64url");
+  const raw = `ogc_report_${material}`;
+  return { raw, displayPrefix: raw.slice(0, 19) };
+}
+function requireV4CommerceOutcome(status: CombinedGeoReportV4["status"]): "completed" | "completed_limited" {
+  if (status === "unavailable") throw new Error("V4 commercial terminalization requires a deliverable core report.");
+  return status;
+}
+function v4LocaleMatches(generationLocale: string, persistedLocale: string): boolean {
+  try { return normalizeReportLanguage(generationLocale) === persistedLocale; }
+  catch { return false; }
 }
 function assertCoverage(value:ScanJobCoverage){for(const item of Object.values(value))if(!Number.isSafeInteger(item)||item<0)throw new Error("Coverage counts must be non-negative integers.");}
 function fault(actual:string|undefined,expected:string){if(actual===expected)throw new Error(`Injected fault after ${expected}.`);}
