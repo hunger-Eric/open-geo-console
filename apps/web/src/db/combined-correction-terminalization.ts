@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type OpenGeoAnswerCardV3 } from "@open-geo-console/ai-report-engine";
+import { requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type LegacyEvidenceBoundAnswerCardV3, type OpenGeoAnswerCardV3 } from "@open-geo-console/ai-report-engine";
 import { ensureDatabase, getSqlClient } from "./index";
 import type { PaidPublicSourceSnapshotRef } from "./public-source-commerce";
 import { JobTransitionService } from "@/worker/job-transition-service";
@@ -145,7 +145,8 @@ export function combinedV3CommercialOutcome(cards: readonly OpenGeoAnswerCardV3[
     if (generative.some((card) => card.status === "refused" && card.refusal === null)) return "failed";
     return generative.some((card) => card.status === "answered") ? "completed_limited" : "failed";
   }
-  const legacyCards = cards;
+  const legacyCards = cards.filter((card): card is LegacyEvidenceBoundAnswerCardV3 => card.answerMode !== "generative_search_v1");
+  if (legacyCards.length !== cards.length) throw new TypeError("V3 commercial outcome rejects mixed answer modes.");
   if(legacyCards.every(({status})=>status==="answered"))return "completed";
   if(legacyCards.every(({status})=>status!=="insufficient"))return "completed_limited";
   return legacyCards.some(({sentences})=>sentences.some(({kind,evidenceIds})=>kind==="grounded_claim"&&evidenceIds.length>0))?"completed_limited":"failed";

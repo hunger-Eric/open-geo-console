@@ -65,7 +65,6 @@ export interface AnswerFirstV3CheckpointV2 {
   promptVersion: typeof GENERATIVE_ANSWER_FIRST_V3_PROMPT_VERSION;
   locale: string;
   region: string;
-  targetUrl?: string;
   answerHash: string;
   sourceHash: string;
   engineProvenance: OpenGeoEngineProvenanceV3;
@@ -100,6 +99,7 @@ export interface ResolveGenerativeAnswerFirstV3Input {
   provider: GenerativeSearchAnswerProvider;
   locale: string;
   region: string;
+  targetUrl?: string;
   targetAliases?: readonly string[];
   competitors?: readonly { entityId: string; aliases: readonly string[] }[];
   auditSources?: readonly AnswerFirstV3StoredSource[];
@@ -273,10 +273,12 @@ export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAns
   reused: boolean;
 }> {
   const publicQuestions = toCanonicalBuyerQuestionSet(input.questionSet).questions;
-  const questions = input.questionSet.questions.map((question, index) => ({
+  const mappedQuestions = input.questionSet.questions.map((question, index) => ({
     id: publicQuestions[index]!.id,
     exactText: question.privateText
-  })) as readonly [{ id: string; exactText: string }, { id: string; exactText: string }, { id: string; exactText: string }];
+  }));
+  if (mappedQuestions.length !== 3) throw new TypeError("Generative answer-first V3 requires exactly three questions.");
+  const questions = [mappedQuestions[0]!, mappedQuestions[1]!, mappedQuestions[2]!] as const;
   const identity = {
     version: GENERATIVE_ANSWER_FIRST_V3_CHECKPOINT_VERSION,
     questionSetIdentity: input.questionSet.contentHash,
