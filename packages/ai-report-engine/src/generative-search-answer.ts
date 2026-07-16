@@ -82,6 +82,16 @@ export async function generativeSearchAnswerHash(value: unknown): Promise<string
   return createHash("sha256").update(normalized(parseGenerativeSearchAnswerResult(value, { expectedQuestionId: questionId, locale }))).digest("hex");
 }
 export async function generativeSearchSourceHash(value: readonly GenerativeSearchSource[]): Promise<string> {
-  const ordered = [...value].map((source) => ({ ...source })).sort((a, b) => a.providerResultOrder - b.providerResultOrder || a.canonicalUrl.localeCompare(b.canonicalUrl));
+  // PostgreSQL jsonb does not preserve the insertion order of object keys.
+  // Hash an explicit canonical projection so a persisted checkpoint retains
+  // the same identity after a Worker retry or operator-approved resume.
+  const ordered = value.map((source) => ({
+    sourceId: source.sourceId,
+    title: source.title,
+    canonicalUrl: source.canonicalUrl,
+    registrableDomain: source.registrableDomain,
+    citedText: source.citedText ?? null,
+    providerResultOrder: source.providerResultOrder
+  })).sort((a, b) => a.providerResultOrder - b.providerResultOrder || a.canonicalUrl.localeCompare(b.canonicalUrl));
   return createHash("sha256").update(JSON.stringify(ordered)).digest("hex");
 }

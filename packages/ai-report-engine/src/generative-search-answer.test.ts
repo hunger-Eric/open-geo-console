@@ -13,6 +13,18 @@ describe("parseGenerativeSearchAnswerResult", () => {
   it("produces a stable hash", async () => { await expect(generativeSearchAnswerHash(valid)).resolves.toMatch(/^[a-f0-9]{64}$/); });
   it("hashes a localized typed refusal", async () => { await expect(generativeSearchAnswerHash({ ...valid, answerText: "", sources: [], refusal: { code: "policy_refusal", reason: "服务商政策拒绝。" } })).resolves.toMatch(/^[a-f0-9]{64}$/); });
   it("hashes source arrays stably regardless of order", async () => { const parsed = parseGenerativeSearchAnswerResult(valid, { expectedQuestionId: "question-1", locale: "zh-CN" }); await expect(generativeSearchSourceHash(parsed.sources)).resolves.toBe(await generativeSearchSourceHash([...parsed.sources].reverse())); });
+  it("hashes persisted sources stably regardless of JSON object key order", async () => {
+    const parsed = parseGenerativeSearchAnswerResult(valid, { expectedQuestionId: "question-1", locale: "zh-CN" });
+    const reordered = parsed.sources.map((source) => ({
+      providerResultOrder: source.providerResultOrder,
+      citedText: source.citedText,
+      registrableDomain: source.registrableDomain,
+      canonicalUrl: source.canonicalUrl,
+      title: source.title,
+      sourceId: source.sourceId
+    }));
+    await expect(generativeSearchSourceHash(reordered)).resolves.toBe(await generativeSearchSourceHash(parsed.sources));
+  });
   it("rejects prose in the wrong locale", () => { expect(() => parseGenerativeSearchAnswerResult({ ...valid, answerText: "This is an ordinary English sentence." }, { expectedQuestionId: "question-1", locale: "zh-CN" })).toThrow(/language/i); });
   it("accepts predominantly Chinese answers with ordinary industry acronyms", () => {
     const parsed = parseGenerativeSearchAnswerResult({
