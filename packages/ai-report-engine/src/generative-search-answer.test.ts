@@ -14,4 +14,11 @@ describe("parseGenerativeSearchAnswerResult", () => {
   it("hashes a localized typed refusal", async () => { await expect(generativeSearchAnswerHash({ ...valid, answerText: "", sources: [], refusal: { code: "policy_refusal", reason: "服务商政策拒绝。" } })).resolves.toMatch(/^[a-f0-9]{64}$/); });
   it("hashes source arrays stably regardless of order", async () => { const parsed = parseGenerativeSearchAnswerResult(valid, { expectedQuestionId: "question-1", locale: "zh-CN" }); await expect(generativeSearchSourceHash(parsed.sources)).resolves.toBe(await generativeSearchSourceHash([...parsed.sources].reverse())); });
   it("rejects prose in the wrong locale", () => { expect(() => parseGenerativeSearchAnswerResult({ ...valid, answerText: "This is an ordinary English sentence." }, { expectedQuestionId: "question-1", locale: "zh-CN" })).toThrow(/language/i); });
+  it("accepts predominantly Chinese answers with ordinary industry acronyms", () => {
+    const parsed = parseGenerativeSearchAnswerResult({
+      ...valid,
+      answerText: "跨境物流方案应核验 FBA 头程、API 对接、ISO 认证和各目的地的清关交付条件。"
+    }, { expectedQuestionId: "question-1", locale: "zh-CN" });
+    expect(parsed.answerText).toContain("FBA");
+  });
 });

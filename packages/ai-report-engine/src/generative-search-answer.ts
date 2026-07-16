@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { canonicalizePublicSourceUrl, getPublicSourceDomainIdentity } from "@open-geo-console/citation-intelligence";
 import { isBlockedHostname, parseHttpUrl } from "@open-geo-console/site-crawler";
-import { assertReportLanguage } from "./report-language";
+import { assertReportLanguage, normalizeReportLanguage, ReportLanguageValidationError } from "./report-language";
 
 export type GenerativeSearchRefusalCode = "safety_refusal" | "policy_refusal" | "high_risk_refusal";
 export interface GenerativeSearchRefusal { code: GenerativeSearchRefusalCode; reason: string; }
@@ -29,7 +29,7 @@ export function parseGenerativeSearchAnswerResult(value: unknown, options: { exp
   }
   if (answerText && refusal) throw new TypeError("answerText and refusal may not be supplied together.");
   if (!answerText && !refusal) throw new TypeError("nonblank answerText is required unless a typed refusal is provided.");
-  assertReportLanguage([
+  assertGenerativeAnswerLanguage([
     ...(answerText ? [{ path: "answerText", text: answerText }] : []),
     ...(refusal ? [{ path: "refusal.reason", text: refusal.reason }] : [])
   ], options.locale);
@@ -48,6 +48,26 @@ export function parseGenerativeSearchAnswerResult(value: unknown, options: { exp
   const searchedAt = timestamp(row.searchedAt, "searchedAt"); const completedAt = timestamp(row.completedAt, "completedAt");
   if (Date.parse(completedAt) < Date.parse(searchedAt)) throw new TypeError("completedAt must be greater than or equal to searchedAt.");
   return { questionId, answerText, sources: [...byUrl.values()].sort((a,b) => a.providerResultOrder - b.providerResultOrder || a.canonicalUrl.localeCompare(b.canonicalUrl)), refusal, searchedAt, completedAt, providerResponseId: row.providerResponseId == null ? null : text(row.providerResponseId, "providerResponseId", 500) };
+}
+
+function assertGenerativeAnswerLanguage(
+  fields: readonly { path: string; text: string }[],
+  locale: string
+): void {
+  if (normalizeReportLanguage(locale) !== "zh") {
+    assertReportLanguage(fields, locale);
+    return;
+  }
+
+  const violations = fields.flatMap(({ path, text: value }) => {
+    const cjk = (value.match(/[\u3400-\u9fff]/gu) ?? []).length;
+    const latin = (value.match(/[A-Za-z]/gu) ?? []).length;
+    const latinBudget = Math.max(16, Math.floor(cjk * 0.25));
+    return cjk >= 2 && latin <= latinBudget
+      ? []
+      : [{ path, reason: "unexpected_english_sentence" as const }];
+  });
+  if (violations.length) throw new ReportLanguageValidationError(violations);
 }
 
 function normalized(value: GenerativeSearchAnswerResult): string { return JSON.stringify(value); }
