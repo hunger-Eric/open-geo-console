@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import type postgres from "postgres";
+import { canonicalizePublicSourceUrl } from "@open-geo-console/citation-intelligence";
 import { ensureDatabase, getSqlClient } from "./index";
 
 export type ReportV4Locale = "en" | "zh";
 
 export interface ReportV4ProductionCoreAggregate {
-  report: { id: string; locale: string | null; activeArtifactRevisionId: string | null };
+  report: { id: string; url: string; locale: string | null; activeArtifactRevisionId: string | null };
   coreJob: ReportV4ProductionCoreJob;
   orders: Array<{
     id: string; reportId: string; fulfillmentJobId: string | null; siteSnapshotId: string | null;
@@ -61,6 +62,7 @@ export interface ReportV4ProductionLineage {
 
 export interface ReportV4PaidCoreContext {
   report: ReportV4ProductionCoreAggregate["report"];
+  targetUrl: string;
   order: ReportV4ProductionCoreAggregate["orders"][number];
   coreJob: ReportV4ProductionCoreJob;
   siteSnapshot: ReportV4ProductionCoreAggregate["siteSnapshots"][number];
@@ -145,6 +147,7 @@ function validateCoreAggregate(value: ReportV4ProductionCoreAggregate, allowedAc
     throw new Error("The exact standard paid V4 core job lineage is invalid.");
   }
   const locale = requireLocale(job.locale);
+  const targetUrl = canonicalizePaidTargetUrl(value.report.url);
   if (value.report.locale !== locale) throw new Error("The immutable V4 report locale lineage conflicts.");
 
   const order = exactlyOne(value.orders, "paid V4 order");
@@ -215,8 +218,14 @@ function validateCoreAggregate(value: ReportV4ProductionCoreAggregate, allowedAc
     }
     if (value.activeAccessTokenCount < 1) throw new Error("The settled V4 core requires an active paid access token.");
   }
-  return { report: value.report, order, coreJob: job, siteSnapshot: snapshot, questionSet, questions,
+  return { report: value.report, targetUrl, order, coreJob: job, siteSnapshot: snapshot, questionSet, questions,
     config, credit, activeCoreArtifact, commercePhase: settled ? "settled" : "reserved" };
+}
+
+function canonicalizePaidTargetUrl(value: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new Error("The immutable V4 paid target URL is missing.");
+  try { return canonicalizePublicSourceUrl(value); }
+  catch { throw new Error("The immutable V4 paid target URL must be a valid HTTP(S) URL."); }
 }
 
 function assertSettledActiveCore(core: ReportV4PaidCoreContext): asserts core is ReportV4PaidCoreContext & { activeCoreArtifact: NonNullable<ReportV4PaidCoreContext["activeCoreArtifact"]> } {
@@ -368,8 +377,8 @@ async function loadPostgresCoreAggregate(sql: postgres.TransactionSql, coreJobId
   if (jobs.length === 0) return null;
   if (jobs.length !== 1) throw new Error("The V4 core job identity is duplicated.");
   const job = jobs[0]!;
-  const reports = await sql<Array<{ id: string; report_locale: string | null; active_artifact_revision_id: string | null }>>`
-    SELECT id,report_locale,active_artifact_revision_id FROM scan_reports WHERE id=${job.report_id}`;
+  const reports = await sql<Array<{ id: string; url: string | null; report_locale: string | null; active_artifact_revision_id: string | null }>>`
+    SELECT id,url,report_locale,active_artifact_revision_id FROM scan_reports WHERE id=${job.report_id}`;
   if (reports.length !== 1) throw new Error("The exact V4 report lineage is missing or duplicated.");
   const orders = await sql<Array<{ id:string;report_id:string;fulfillment_job_id:string|null;site_snapshot_id:string|null;product_code:string;fulfillment_methodology:string|null;recommendation_report_version:number|null;business_question_set_id:string|null;report_locale:string;payment_status:string;fulfillment_status:string;refund_status:string }>>`
     SELECT id,report_id,fulfillment_job_id,site_snapshot_id,product_code,fulfillment_methodology,recommendation_report_version,business_question_set_id,report_locale,payment_status,fulfillment_status,refund_status FROM payment_orders WHERE fulfillment_job_id=${job.id}`;
@@ -389,7 +398,7 @@ async function loadPostgresCoreAggregate(sql: postgres.TransactionSql, coreJobId
     FROM report_artifact_revisions WHERE report_id=${job.report_id} AND (job_id=${job.id} OR id=${activeId})`;
   const access = await sql<Array<{ count: number }>>`SELECT count(*)::int AS count FROM report_access_tokens WHERE report_id=${job.report_id} AND artifact_scope='combined_geo_report_v4' AND revoked_at IS NULL AND expires_at>now()`;
   return {
-    report: { id: reports[0]!.id, locale: reports[0]!.report_locale, activeArtifactRevisionId: activeId }, coreJob: mapCoreJob(job),
+    report: { id: reports[0]!.id, url: reports[0]!.url ?? "", locale: reports[0]!.report_locale, activeArtifactRevisionId: activeId }, coreJob: mapCoreJob(job),
     orders: orders.map((row) => ({ id:row.id,reportId:row.report_id,fulfillmentJobId:row.fulfillment_job_id,siteSnapshotId:row.site_snapshot_id,productCode:row.product_code,fulfillmentMethodology:row.fulfillment_methodology,recommendationReportVersion:row.recommendation_report_version,questionSetId:row.business_question_set_id,reportLocale:row.report_locale,paymentStatus:row.payment_status,fulfillmentStatus:row.fulfillment_status,refundStatus:row.refund_status })),
     siteSnapshots: snapshots.map((row) => ({ id:row.id,reportId:row.report_id,siteKey:row.site_key,status:row.status,collectorConfigIdentityHash:row.collector_config_identity_hash,contentIdentityHash:row.content_identity_hash })),
     questionSets: sets.map((row) => ({ id:row.id,reportId:row.report_id,orderId:row.order_id,region:row.region,locale:row.locale,status:row.status })),

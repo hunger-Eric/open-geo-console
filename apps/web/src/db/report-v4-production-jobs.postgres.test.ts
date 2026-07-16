@@ -64,7 +64,7 @@ describeDisposablePostgres("V4 production job lineage PostgreSQL repository", ()
     await expect(repo.loadDiagnosisEnhancementContext({ ...lineage, enhancementJobId: jobs[0]!.id }))
       .resolves.toMatchObject({
         enhancementJob: { id: jobs[0]!.id, creditReservationId: null },
-        core: { commercePhase: "settled", activeCoreArtifact: { id: ids.artifact } }
+        core: { commercePhase: "settled", targetUrl: "https://example.com/", activeCoreArtifact: { id: ids.artifact } }
       });
     await expect(repo.loadDiagnosisEnhancementContext({
       ...lineage, enhancementJobId: jobs[0]!.id, configSnapshotId: `v4-config-${sha("wrong")}`
@@ -84,6 +84,17 @@ describeDisposablePostgres("V4 production job lineage PostgreSQL repository", ()
       ...exactLineage(), enhancementJobId
     })).rejects.toThrow(/duplicate|exactly one|lineage/i);
     await sql`DELETE FROM scan_jobs WHERE id=${`out-of-band-${suffix}`}`;
+  });
+
+  it("fails closed when the authoritative paid report URL is missing or non-HTTP", async () => {
+    const sql = getSqlClient();
+    await sql`UPDATE scan_reports SET url=${"file:///not-a-paid-target"} WHERE id=${ids.report}`;
+    await expect(createReportV4ProductionJobRepository().loadPaidCoreContext({ coreJobId: ids.coreJob }))
+      .rejects.toThrow(/target URL|HTTP/i);
+    await sql`UPDATE scan_reports SET url=${""} WHERE id=${ids.report}`;
+    await expect(createReportV4ProductionJobRepository().loadPaidCoreContext({ coreJobId: ids.coreJob }))
+      .rejects.toThrow(/target URL/i);
+    await sql`UPDATE scan_reports SET url=${"https://example.com/"} WHERE id=${ids.report}`;
   });
 
   it("recovers from a crash after the exact enhancement supersedes its source core", async () => {

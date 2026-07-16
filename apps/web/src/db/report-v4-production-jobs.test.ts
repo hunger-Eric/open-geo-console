@@ -36,7 +36,7 @@ describe("V4 production core and diagnosis-enhancement job lineage", () => {
       questionSet: { id: "questions-1", region: "US" },
       questions: [{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }],
       config: { id: "config-1", modelProfileId: "model-1", reportProfileId: "report-profile-1" },
-      commercePhase: "settled"
+      commercePhase: "settled", targetUrl: "https://example.com/"
     });
     const reissued = exactAggregate();
     reissued.activeAccessTokenCount = 2;
@@ -54,6 +54,8 @@ describe("V4 production core and diagnosis-enhancement job lineage", () => {
       ["replacement", (value) => { value.coreJob.reason = "replacement_fulfillment"; value.coreJob.replacementFulfillmentId = "replacement-1"; }],
       ["unsettled terminal credit", (value) => { value.credits[0]!.status = "reserved"; }],
       ["missing paid access", (value) => { value.activeAccessTokenCount = 0; }]
+      , ["missing target URL", (value) => { value.report.url = ""; }]
+      , ["invalid target URL", (value) => { value.report.url = "file:///tmp/report"; }]
     ];
     for (const [label, mutate] of variants) {
       const aggregate = exactAggregate();
@@ -148,7 +150,7 @@ function exactLineage() {
 
 function exactAggregate(): ReportV4ProductionCoreAggregate {
   return {
-    report: { id: "report-1", locale: "en", activeArtifactRevisionId: "core-artifact-1" },
+    report: { id: "report-1", url: "https://example.com/?utm_source=test#fragment", locale: "en", activeArtifactRevisionId: "core-artifact-1" },
     coreJob: {
       id: "core-job", reportId: "report-1", siteSnapshotId: "snapshot-1", tier: "deep",
       productContract: "recommendation_forensics_v1", fulfillmentMethodology: "two_stage_geo_report_v4",
