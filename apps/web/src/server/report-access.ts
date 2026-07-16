@@ -8,7 +8,8 @@ export function reportAccessCookieName(
   const suffix = artifactScope === "recommendation_forensics_v1" ? "_recommendation"
     : artifactScope === "combined_geo_report_v1" ? "_combined"
     : artifactScope === "combined_geo_report_v2" ? "_combined_v2"
-    : artifactScope === "combined_geo_report_v3" ? "_combined_v3" : "";
+    : artifactScope === "combined_geo_report_v3" ? "_combined_v3"
+    : artifactScope === "combined_geo_report_v4" ? "_combined_v4" : "";
   return `ogc_report_${reportId.replace(/[^a-zA-Z0-9_-]/g, "")}${suffix}`;
 }
 
@@ -34,6 +35,9 @@ export async function tokenGrantsReportAccess(
 }
 
 export async function resolveRequestArtifactScope(request: Request, reportId: string): Promise<ReportArtifactScope | null> {
+  if (await requestHasReportAccess(request, reportId, "combined_geo_report_v4")) {
+    return "combined_geo_report_v4";
+  }
   if (await requestHasReportAccess(request, reportId, "combined_geo_report_v3")) {
     return "combined_geo_report_v3";
   }

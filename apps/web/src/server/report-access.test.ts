@@ -5,6 +5,8 @@ vi.mock("@/db/report-tokens", () => ({ verifyReportAccessToken }));
 
 import { reportAccessCookieName, requestHasReportAccess, resolveRequestArtifactScope, scopedReportAccessCookieHeader } from "./report-access";
 
+// @requirement GEO-V4-CONTRACT-01
+// @requirement GEO-V4-LEGACY-01
 describe("artifact-scoped report access", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -13,6 +15,31 @@ describe("artifact-scoped report access", () => {
     expect(reportAccessCookieName("report-1", "recommendation_forensics_v1")).toBe("ogc_report_report-1_recommendation");
     expect(reportAccessCookieName("report-1", "combined_geo_report_v2")).toBe("ogc_report_report-1_combined_v2");
     expect(reportAccessCookieName("report-1", "combined_geo_report_v3")).toBe("ogc_report_report-1_combined_v3");
+    expect(reportAccessCookieName("report-1", "combined_geo_report_v4")).toBe("ogc_report_report-1_combined_v4");
+  });
+
+  it("grants and prioritizes only the exact V4 scope before V3", async () => {
+    verifyReportAccessToken.mockImplementation(async (token: string) => token === "v4-token"
+      ? { reportId: "report-1", artifactScope: "combined_geo_report_v4" }
+      : { reportId: "report-1", artifactScope: "combined_geo_report_v3" });
+    const request = new Request("https://example.test/reports/report-1/report.html", {
+      headers: { cookie: "ogc_report_report-1_combined_v3=v3-token; ogc_report_report-1_combined_v4=v4-token" }
+    });
+
+    await expect(requestHasReportAccess(request, "report-1", "combined_geo_report_v4")).resolves.toBe(true);
+    await expect(resolveRequestArtifactScope(request, "report-1")).resolves.toBe("combined_geo_report_v4");
+    expect(verifyReportAccessToken).toHaveBeenLastCalledWith("v4-token");
+    expect(scopedReportAccessCookieHeader(request, "report-1", "combined_geo_report_v4"))
+      .toBe("ogc_report_report-1_combined_v4=v4-token");
+  });
+
+  it("rejects a V3 token stored in the independent V4 cookie", async () => {
+    verifyReportAccessToken.mockResolvedValue({ reportId: "report-1", artifactScope: "combined_geo_report_v3" });
+    const request = new Request("https://example.test/reports/report-1/report.html", {
+      headers: { cookie: "ogc_report_report-1_combined_v4=v3-token" }
+    });
+
+    await expect(requestHasReportAccess(request, "report-1", "combined_geo_report_v4")).resolves.toBe(false);
   });
 
   it("grants and prioritizes only the exact V3 scope", async () => {
