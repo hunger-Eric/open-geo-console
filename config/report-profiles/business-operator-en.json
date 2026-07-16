@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "profileId": "business-operator-en-v1",
+  "locale": "en",
+  "audiences": {
+    "primary": [
+      "Business owners",
+      "Marketing operators",
+      "Website operators"
+    ],
+    "secondary": [
+      "GEO specialists"
+    ]
+  },
+  "readingOrder": [
+    "conclusion",
+    "reason",
+    "action"
+  ],
+  "tone": [
+    "Professional",
+    "Direct",
+    "Business-readable",
+    "Light on implementation jargon"
+  ],
+  "terminology": {
+    "requiredGeoTerms": [
+      "GEO",
+      "generative answers",
+      "AI",
+      "official website",
+      "sources"
+    ],
+    "prohibitedSeoFraming": [
+      "SEO",
+      "search engine optimization",
+      "search ranking",
+      "keyword ranking",
+      "SERP"
+    ],
+    "prohibitedInternalLanguage": [
+      "checkpoint",
+      "snapshot",
+      "claim extraction",
+      "provider adapter",
+      "Token budget",
+      "retry count",
+      "state machine"
+    ],
+    "prohibitedPromptLeakage": [
+      "system prompt",
+      "developer message",
+      "user instructions",
+      "raw provider JSON",
+      "tool call arguments",
+      "validator error"
+    ]
+  },
+  "presentation": {
+    "conciseByDefault": true,
+    "detailedEvidenceCollapsed": true
+  },
+  "fieldBounds": {
+    "websiteSummary": {
+      "minChars": 20,
+      "maxChars": 600
+    },
+    "websiteListItem": {
+      "minChars": 8,
+      "maxChars": 240,
+      "minItems": 1,
+      "maxItems": 6
+    },
+    "questionAnswer": {
+      "minChars": 15,
+      "maxChars": 1200
+    },
+    "selectionSummary": {
+      "minChars": 15,
+      "maxChars": 200
+    },
+    "observableFactors": {
+      "minChars": 8,
+      "maxChars": 180,
+      "exactItems": 3
+    },
+    "targetGap": {
+      "minChars": 15,
+      "maxChars": 300
+    },
+    "recommendedActions": {
+      "minChars": 8,
+      "maxChars": 220,
+      "exactItems": 3
+    }
+  }
+}

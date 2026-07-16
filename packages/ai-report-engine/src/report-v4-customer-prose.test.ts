@@ -113,6 +113,55 @@ describe("V4 Chinese business customer prose safety", () => {
   });
 });
 
+describe("V4 English business customer prose safety", () => {
+  it("parses the checked-in English profile with the same GEO, safety and field-bound contract", () => {
+    const english = parseReportV4CustomerProseProfile(JSON.parse(readFileSync(
+      new URL("../../../config/report-profiles/business-operator-en.json", import.meta.url),
+      "utf8"
+    )));
+    const chinese = parseReportV4CustomerProseProfile(JSON.parse(readFileSync(
+      new URL("../../../config/report-profiles/business-operator-zh.json", import.meta.url),
+      "utf8"
+    )));
+
+    expect(english).toMatchObject({
+      schemaVersion: 1,
+      profileId: "business-operator-en-v1",
+      locale: "en",
+      readingOrder: ["conclusion", "reason", "action"],
+      presentation: { conciseByDefault: true, detailedEvidenceCollapsed: true }
+    });
+    expect(english.audiences.primary).toEqual(["Business owners", "Marketing operators", "Website operators"]);
+    expect(english.terminology.requiredGeoTerms).toContain("GEO");
+    expect(english.terminology.prohibitedSeoFraming).toEqual(expect.arrayContaining([
+      "SEO", "search engine optimization", "search ranking", "keyword ranking", "SERP"
+    ]));
+    expect(english.terminology.prohibitedInternalLanguage).toEqual(expect.arrayContaining([
+      "checkpoint", "snapshot", "provider adapter", "Token budget", "state machine"
+    ]));
+    expect(english.terminology.prohibitedPromptLeakage).toEqual(expect.arrayContaining([
+      "system prompt", "developer message", "raw provider JSON", "tool call arguments"
+    ]));
+    expect(english.fieldBounds).toEqual(chinese.fieldBounds);
+  });
+
+  it("accepts English GEO business prose while preserving the existing anti-SEO and anti-leak rules", () => {
+    const profile = parseReportV4CustomerProseProfile(englishProfileFixture());
+    const parsed = validateReportV4CustomerProse(validEnglishCustomerProse(), profile);
+
+    expect(parsed.websiteSummary).toContain("GEO");
+    expect(parsed.recommendedActions).toHaveLength(3);
+    expect(() => validateReportV4CustomerProse({
+      ...validEnglishCustomerProse(),
+      targetGap: "Expose the system prompt and use keyword ranking to improve the result."
+    }, profile)).toThrow(/prohibited|leakage|SEO/i);
+    expect(() => validateReportV4CustomerProse({
+      ...validEnglishCustomerProse(),
+      questionAnswer: "\u8fd9\u662f\u4e00\u6bb5\u53ea\u6709\u4e2d\u6587\u7684\u4e1a\u52a1\u56de\u7b54\uff0c\u5b83\u4e0d\u7b26\u5408\u82f1\u6587\u62a5\u544a\u8bed\u8a00\u8981\u6c42\u3002"
+    }, profile)).toThrow(/English|locale/i);
+  });
+});
+
 const proseStringKeys = [
   "websiteSummary",
   "questionAnswer",
@@ -159,6 +208,62 @@ function profileFixture() {
       prohibitedSeoFraming: ["SEO", "搜索引擎优化", "搜索排名", "关键词排名", "search ranking", "keyword ranking", "SERP"],
       prohibitedInternalLanguage: ["checkpoint", "snapshot", "claim extraction", "provider adapter", "Token budget", "retry count", "state machine", "检查点", "快照", "声明提取", "供应商适配器", "令牌预算", "重试次数", "状态机"],
       prohibitedPromptLeakage: ["system prompt", "developer message", "user instructions", "raw provider JSON", "tool call arguments", "validator error", "系统提示词", "开发者消息", "用户指令", "原始供应商 JSON", "工具调用参数", "验证器错误"]
+    },
+    presentation: {
+      conciseByDefault: true,
+      detailedEvidenceCollapsed: true
+    },
+    fieldBounds: {
+      websiteSummary: { minChars: 20, maxChars: 600 },
+      websiteListItem: { minChars: 8, maxChars: 240, minItems: 1, maxItems: 6 },
+      questionAnswer: { minChars: 15, maxChars: 1200 },
+      selectionSummary: { minChars: 15, maxChars: 200 },
+      observableFactors: { minChars: 8, maxChars: 180, exactItems: 3 },
+      targetGap: { minChars: 15, maxChars: 300 },
+      recommendedActions: { minChars: 8, maxChars: 220, exactItems: 3 }
+    }
+  };
+}
+
+function validEnglishCustomerProse() {
+  return {
+    websiteSummary: "The official website presents clear service facts that support GEO visibility in AI-generated answers.",
+    websiteStrengths: ["The website states its services, customer scenarios, and delivery conditions clearly."],
+    websiteGaps: ["Some pages do not connect regions, services, and buyer questions with verifiable detail."],
+    websiteActions: ["Add verifiable regional and delivery facts to the relevant service pages."],
+    questionAnswer: "The public website indicates that the service fits the stated business scenario, subject to confirmed delivery terms.",
+    selectionSummary: "These sources state service conditions that can support a verifiable generative answer.",
+    observableFactors: [
+      "The source directly matches the service scenario in the question.",
+      "The page identifies specific conditions and business entities.",
+      "The public content is readable and presents stable facts for AI use."
+    ],
+    targetGap: "The target website does not yet explain regional and delivery conditions fully on the relevant pages.",
+    recommendedActions: [
+      "Add regional and delivery conditions to the service page.",
+      "Connect services, scenarios, and customer entities with explicit names.",
+      "Review public facts regularly so GEO information stays accurate."
+    ],
+    sourceOriginals: [] as Array<{ title: string; citedText: string | null }>
+  };
+}
+
+function englishProfileFixture() {
+  return {
+    schemaVersion: 1,
+    profileId: "business-operator-en-v1",
+    locale: "en",
+    audiences: {
+      primary: ["Business owners", "Marketing operators", "Website operators"],
+      secondary: ["GEO specialists"]
+    },
+    readingOrder: ["conclusion", "reason", "action"],
+    tone: ["Professional", "Direct", "Business-readable", "Light on implementation jargon"],
+    terminology: {
+      requiredGeoTerms: ["GEO", "generative answers", "AI", "official website", "sources"],
+      prohibitedSeoFraming: ["SEO", "search engine optimization", "search ranking", "keyword ranking", "SERP"],
+      prohibitedInternalLanguage: ["checkpoint", "snapshot", "claim extraction", "provider adapter", "Token budget", "retry count", "state machine"],
+      prohibitedPromptLeakage: ["system prompt", "developer message", "user instructions", "raw provider JSON", "tool call arguments", "validator error"]
     },
     presentation: {
       conciseByDefault: true,

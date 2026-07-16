@@ -12,10 +12,12 @@ export interface ReportV4ExactListBounds extends ReportV4TextBounds {
   readonly exactItems: number;
 }
 
+export type ReportV4CustomerProseLocale = "zh-CN" | "en";
+
 export interface ReportV4CustomerProseProfile {
   readonly schemaVersion: 1;
   readonly profileId: string;
-  readonly locale: "zh-CN";
+  readonly locale: ReportV4CustomerProseLocale;
   readonly audiences: {
     readonly primary: readonly string[];
     readonly secondary: readonly string[];
@@ -72,6 +74,7 @@ const EXACT_LIST_BOUNDS_KEYS = new Set(["minChars", "maxChars", "exactItems"]);
 const CUSTOMER_PROSE_KEYS = new Set(["websiteSummary", "websiteStrengths", "websiteGaps", "websiteActions", "questionAnswer", "selectionSummary", "observableFactors", "targetGap", "recommendedActions", "sourceOriginals"]);
 const SOURCE_ORIGINAL_KEYS = new Set(["title", "citedText"]);
 const CJK_PATTERN = /[\u3400-\u9fff]/u;
+const LATIN_PATTERN = /\p{Script=Latin}/u;
 
 const BASELINE_PROHIBITED_PHRASES = [
   "system prompt", "developer message", "user instructions", "ignore previous instructions",
@@ -95,7 +98,7 @@ const PROHIBITED_CAUSAL_FRAMING = [
 export function parseReportV4CustomerProseProfile(value: unknown): ReportV4CustomerProseProfile {
   const root = strictObject(value, "$profile", PROFILE_KEYS);
   exact(root.schemaVersion, 1, "$profile.schemaVersion");
-  exact(root.locale, "zh-CN", "$profile.locale");
+  const locale = profileLocale(root.locale);
 
   const audiences = strictObject(root.audiences, "$profile.audiences", AUDIENCE_KEYS);
   const terminology = strictObject(root.terminology, "$profile.terminology", TERMINOLOGY_KEYS);
@@ -114,7 +117,7 @@ export function parseReportV4CustomerProseProfile(value: unknown): ReportV4Custo
   return deepFreeze({
     schemaVersion: 1,
     profileId: text(root.profileId, "$profile.profileId", 100),
-    locale: "zh-CN",
+    locale,
     audiences: {
       primary: textArray(audiences.primary, "$profile.audiences.primary", 1, 8, 100),
       secondary: textArray(audiences.secondary, "$profile.audiences.secondary", 1, 8, 100)
@@ -154,6 +157,7 @@ export function validateReportV4CustomerProse(
   const customerText = (field: unknown, path: string, bounds: ReportV4TextBounds) => {
     const parsed = boundedText(field, path, bounds);
     if (profile.locale === "zh-CN" && !CJK_PATTERN.test(parsed)) throw new TypeError(`${path} must contain customer-readable Chinese for the configured locale.`);
+    if (profile.locale === "en" && !LATIN_PATTERN.test(parsed)) throw new TypeError(`${path} must contain customer-readable English for the configured locale.`);
     assertSafeCustomerProse(parsed, path, forbidden);
     return parsed;
   };
@@ -286,6 +290,13 @@ function array(value: unknown, path: string): unknown[] {
 
 function positiveInteger(value: unknown, path: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) throw new TypeError(`${path} must be a positive integer.`);
+  return value;
+}
+
+function profileLocale(value: unknown): ReportV4CustomerProseLocale {
+  if (value !== "zh-CN" && value !== "en") {
+    throw new TypeError("$profile.locale must equal zh-CN or en.");
+  }
   return value;
 }
 
