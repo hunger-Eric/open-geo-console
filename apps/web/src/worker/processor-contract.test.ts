@@ -71,7 +71,13 @@ describe("recommendation website-foundation resume contract", () => {
       recovery: { schemaVersion: 1, phase: "artifact_verification", revision: 4, phaseAttempt: 0, resumeGeneration: 1,
         identity: { jobId: "job-v3", reportId: "report-v3", productContract: "recommendation_forensics_v1", methodology: "public_search_source_forensics_v1", locale: "zh", authorityId: "authority-v3" },
         inputHash: "input-v3", completedArtifacts: ["answer_first_v3"], remainingWork: ["artifact_verification"], priorTransitionId: null },
-      answerFirstV3: { identityHash: "answer-checkpoint" },
+      answerFirstV3: {
+        version: "answer-first-v3-checkpoint-v2",
+        stage: "cards_ready",
+        identityHash: "answer-checkpoint",
+        answerHash: "a".repeat(64),
+        sourceHash: "b".repeat(64)
+      },
       pendingArtifactVerification: { report, commercialSnapshotRefs: refs }
     };
     expect(combinedV3ArtifactVerificationResume(checkpoint as never)).toEqual({ report, checkpoint: checkpoint.answerFirstV3, commercialSnapshotRefs: refs });

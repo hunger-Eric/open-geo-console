@@ -1,14 +1,22 @@
 import { createHash } from "node:crypto";
 import {
+  generativeSearchAnswerHash,
+  generativeSearchSourceHash,
   OPEN_GEO_ENGINE_ID,
   ReportLanguageValidationError,
   openGeoAnswerEvidenceHashV3,
   openGeoAnswerHashV3,
   openGeoAnswerInputHashV3,
   parseOpenGeoAnswerCardsV3,
+  parseGenerativeSearchAnswerCardsV3,
+  parseGenerativeSearchAnswerResult,
   synthesizeOpenGeoAnswerCardsV3,
+  diagnoseGenerativeSearchAnswerCardV3,
+  type GenerativeSearchAnswerCardV3,
+  type GenerativeSearchAnswerProvider,
+  type GenerativeSearchAnswerResult,
   type JsonCompletionClient,
-  type OpenGeoAnswerCardV3,
+  type LegacyEvidenceBoundAnswerCardV3,
   type OpenGeoAnswerEvidenceV3,
   type OpenGeoAnswerOwnershipCategoryV3,
   type OpenGeoEngineProvenanceV3,
@@ -19,7 +27,9 @@ import { toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet } from "
 import { JobError } from "./job-errors";
 
 export const ANSWER_FIRST_V3_CHECKPOINT_VERSION = "answer-first-v3-checkpoint-v1" as const;
+export const GENERATIVE_ANSWER_FIRST_V3_CHECKPOINT_VERSION = "answer-first-v3-checkpoint-v2" as const;
 export const ANSWER_FIRST_V3_SYNTHESIS_PROMPT_VERSION = "open-geo-answer-synthesis-v1" as const;
+export const GENERATIVE_ANSWER_FIRST_V3_PROMPT_VERSION = "generative-search-answer-v1" as const;
 
 export interface AnswerFirstV3StoredSource {
   sourceEvidenceId: string;
@@ -35,14 +45,35 @@ export interface AnswerFirstV3StoredSource {
   snapshotKind?: "standard_question" | "provider_discovery" | "candidate_verification";
 }
 
-export interface AnswerFirstV3Checkpoint {
+export interface AnswerFirstV3CheckpointV1 {
   version: typeof ANSWER_FIRST_V3_CHECKPOINT_VERSION;
   identityHash: string;
   questionSetIdentity: string;
   evidenceHash: string;
   engineProvenance: OpenGeoEngineProvenanceV3;
-  answerCards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
+  answerCards: [LegacyEvidenceBoundAnswerCardV3, LegacyEvidenceBoundAnswerCardV3, LegacyEvidenceBoundAnswerCardV3];
 }
+
+export interface AnswerFirstV3CheckpointV2 {
+  version: typeof GENERATIVE_ANSWER_FIRST_V3_CHECKPOINT_VERSION;
+  stage: "answers_collected" | "cards_ready";
+  identityHash: string;
+  questionSetIdentity: string;
+  providerId: string;
+  model: string;
+  searchMode: string;
+  promptVersion: typeof GENERATIVE_ANSWER_FIRST_V3_PROMPT_VERSION;
+  locale: string;
+  region: string;
+  targetUrl?: string;
+  answerHash: string;
+  sourceHash: string;
+  engineProvenance: OpenGeoEngineProvenanceV3;
+  answerResults: [GenerativeSearchAnswerResult, GenerativeSearchAnswerResult, GenerativeSearchAnswerResult];
+  answerCards?: [GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3];
+}
+
+export type AnswerFirstV3Checkpoint = AnswerFirstV3CheckpointV1 | AnswerFirstV3CheckpointV2;
 
 export interface BuildAnswerFirstV3EvidenceInput {
   questionSet: ConfirmedBusinessQuestionSet;
@@ -58,8 +89,22 @@ export interface ResolveAnswerFirstV3Input extends BuildAnswerFirstV3EvidenceInp
   searchSurface: string;
   queryPlanVersion: string;
   passageSelectorVersion: string;
+  checkpoint?: AnswerFirstV3CheckpointV1 | null;
+  saveCheckpoint?(checkpoint: AnswerFirstV3CheckpointV1): Promise<void>;
+  now?: () => Date;
+  signal?: AbortSignal;
+}
+
+export interface ResolveGenerativeAnswerFirstV3Input {
+  questionSet: ConfirmedBusinessQuestionSet;
+  provider: GenerativeSearchAnswerProvider;
+  locale: string;
+  region: string;
+  targetAliases?: readonly string[];
+  competitors?: readonly { entityId: string; aliases: readonly string[] }[];
+  auditSources?: readonly AnswerFirstV3StoredSource[];
   checkpoint?: AnswerFirstV3Checkpoint | null;
-  saveCheckpoint?(checkpoint: AnswerFirstV3Checkpoint): Promise<void>;
+  saveCheckpoint?(checkpoint: AnswerFirstV3CheckpointV2): Promise<void>;
   now?: () => Date;
   signal?: AbortSignal;
 }
@@ -137,8 +182,8 @@ export function buildAnswerFirstV3Evidence(input: BuildAnswerFirstV3EvidenceInpu
 }
 
 export async function resolveAnswerFirstV3(input: ResolveAnswerFirstV3Input): Promise<{
-  checkpoint: AnswerFirstV3Checkpoint;
-  answerCards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
+  checkpoint: AnswerFirstV3CheckpointV1;
+  answerCards: [LegacyEvidenceBoundAnswerCardV3, LegacyEvidenceBoundAnswerCardV3, LegacyEvidenceBoundAnswerCardV3];
   reused: boolean;
 }> {
   const evidence = buildAnswerFirstV3Evidence(input);
@@ -173,7 +218,7 @@ export async function resolveAnswerFirstV3(input: ResolveAnswerFirstV3Input): Pr
   if (input.checkpoint) {
     validateCheckpoint(input.checkpoint, identityHash, identity);
     try {
-      const answerCards = parseOpenGeoAnswerCardsV3(input.checkpoint.answerCards, context);
+      const answerCards = parseOpenGeoAnswerCardsV3(input.checkpoint.answerCards, context) as [LegacyEvidenceBoundAnswerCardV3, LegacyEvidenceBoundAnswerCardV3, LegacyEvidenceBoundAnswerCardV3];
       if (await openGeoAnswerHashV3(answerCards) !== input.checkpoint.engineProvenance.answerHash) {
         throw new AnswerFirstV3ResumeIdentityMismatchError("Answer-first V3 checkpoint answer hash does not match its cards.");
       }
@@ -185,9 +230,9 @@ export async function resolveAnswerFirstV3(input: ResolveAnswerFirstV3Input): Pr
 
   const synthesisInput = { ...context, evidence, coverageByQuestion, signal: input.signal };
   const inputHash = await openGeoAnswerInputHashV3(synthesisInput);
-  let answerCards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
+  let answerCards: [LegacyEvidenceBoundAnswerCardV3, LegacyEvidenceBoundAnswerCardV3, LegacyEvidenceBoundAnswerCardV3];
   try {
-    answerCards = await synthesizeOpenGeoAnswerCardsV3(input.client, synthesisInput);
+    answerCards = await synthesizeOpenGeoAnswerCardsV3(input.client, synthesisInput) as [LegacyEvidenceBoundAnswerCardV3, LegacyEvidenceBoundAnswerCardV3, LegacyEvidenceBoundAnswerCardV3];
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
     throw new AnswerFirstV3ModelContractInvalidError({ cause: error });
@@ -210,7 +255,7 @@ export async function resolveAnswerFirstV3(input: ResolveAnswerFirstV3Input): Pr
     evidenceHash,
     answerHash: await openGeoAnswerHashV3(answerCards)
   };
-  const checkpoint: AnswerFirstV3Checkpoint = {
+  const checkpoint: AnswerFirstV3CheckpointV1 = {
     version: ANSWER_FIRST_V3_CHECKPOINT_VERSION,
     identityHash,
     questionSetIdentity: input.questionSet.contentHash,
@@ -220,6 +265,247 @@ export async function resolveAnswerFirstV3(input: ResolveAnswerFirstV3Input): Pr
   };
   await input.saveCheckpoint?.(checkpoint);
   return { checkpoint, answerCards, reused: false };
+}
+
+export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAnswerFirstV3Input): Promise<{
+  checkpoint: AnswerFirstV3CheckpointV2;
+  answerCards: [GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3];
+  reused: boolean;
+}> {
+  const publicQuestions = toCanonicalBuyerQuestionSet(input.questionSet).questions;
+  const questions = input.questionSet.questions.map((question, index) => ({
+    id: publicQuestions[index]!.id,
+    exactText: question.privateText
+  })) as readonly [{ id: string; exactText: string }, { id: string; exactText: string }, { id: string; exactText: string }];
+  const identity = {
+    version: GENERATIVE_ANSWER_FIRST_V3_CHECKPOINT_VERSION,
+    questionSetIdentity: input.questionSet.contentHash,
+    providerId: input.provider.providerId,
+    model: input.provider.model,
+    searchMode: input.provider.searchMode,
+    promptVersion: GENERATIVE_ANSWER_FIRST_V3_PROMPT_VERSION,
+    locale: input.locale,
+    region: input.region
+  };
+  const identityHash = hash(identity);
+  const resumed = input.checkpoint?.version === GENERATIVE_ANSWER_FIRST_V3_CHECKPOINT_VERSION
+    ? validateGenerativeCheckpoint(input.checkpoint, identityHash, identity)
+    : null;
+  if (input.checkpoint && !resumed) {
+    throw new AnswerFirstV3ResumeIdentityMismatchError("A legacy V3 checkpoint cannot create a generative-search answer card.");
+  }
+
+  let answerResults = resumed?.answerResults;
+  let providerCalls = false;
+  if (!answerResults) {
+    const signal = input.signal ?? new AbortController().signal;
+    answerResults = await Promise.all(questions.map(async (question, index) => {
+      let parsed = await callGenerativeProvider(input.provider, {
+        questionId: question.id,
+        question: question.exactText,
+        locale: input.locale,
+        region: input.region,
+        signal
+      });
+      if (index === 0 && parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
+        parsed = await callGenerativeProvider(input.provider, {
+          questionId: question.id,
+          question: `${question.exactText}\n${q1Correction(input.locale)}`,
+          locale: input.locale,
+          region: input.region,
+          signal
+        });
+        if (parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
+          throw new AnswerFirstV3ModelContractInvalidError({ cause: new TypeError("Question 1 answer is nonresponsive market-statistic-only output.") });
+        }
+      }
+      if (parsed.answerText && parsed.sources.length === 0) {
+        const answerWithoutSources = parsed;
+        const corrected = await callGenerativeProvider(input.provider, {
+          questionId: question.id,
+          question: `${question.exactText}\n${sourceCorrection(input.locale)}`,
+          locale: input.locale,
+          region: input.region,
+          signal
+        });
+        // A citation correction may enrich a valid answer, but it must never
+        // erase that answer by replacing it with a refusal or blank output.
+        if (corrected.answerText && corrected.refusal === null) parsed = corrected;
+        else parsed = answerWithoutSources;
+      }
+      if (index === 0 && parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
+        throw new AnswerFirstV3ModelContractInvalidError({ cause: new TypeError("Question 1 answer is nonresponsive market-statistic-only output.") });
+      }
+      return parsed;
+    })) as [GenerativeSearchAnswerResult, GenerativeSearchAnswerResult, GenerativeSearchAnswerResult];
+    providerCalls = true;
+  }
+
+  const perAnswerHashes = await Promise.all(answerResults.map((answer) => generativeSearchAnswerHash(answer)));
+  const perSourceHashes = await Promise.all(answerResults.map((answer) => generativeSearchSourceHash(answer.sources)));
+  const answerHash = hash(perAnswerHashes);
+  const sourceHash = hash(perSourceHashes);
+  if (resumed && (resumed.answerHash !== answerHash || resumed.sourceHash !== sourceHash ||
+      resumed.engineProvenance.answerHash !== answerHash || resumed.engineProvenance.evidenceHash !== sourceHash)) {
+    throw new AnswerFirstV3ResumeIdentityMismatchError("Generative answer checkpoint hashes do not match its persisted answers and sources.");
+  }
+  const searchedAt = earliestTimestamp(answerResults.map((answer) => answer.searchedAt), answerResults[0]!.searchedAt);
+  const evidenceCutoffAt = [...answerResults.map((answer) => answer.completedAt)].sort().at(-1)!;
+  const now = (input.now ?? (() => new Date()))().toISOString();
+  const engineProvenance: OpenGeoEngineProvenanceV3 = {
+    engineId: OPEN_GEO_ENGINE_ID,
+    searchSurface: `${input.provider.providerId}:${input.provider.searchMode}`,
+    queryPlanVersion: GENERATIVE_ANSWER_FIRST_V3_PROMPT_VERSION,
+    passageSelectorVersion: "audit-sidecar-v1",
+    synthesisModel: input.provider.model,
+    synthesisPromptVersion: GENERATIVE_ANSWER_FIRST_V3_PROMPT_VERSION,
+    locale: input.locale,
+    region: input.region,
+    searchedAt,
+    evidenceCutoffAt,
+    synthesizedAt: now,
+    inputHash: hash(identity),
+    evidenceHash: sourceHash,
+    answerHash
+  };
+  const collected: AnswerFirstV3CheckpointV2 = {
+    ...identity,
+    stage: "answers_collected",
+    identityHash,
+    answerHash,
+    sourceHash,
+    engineProvenance,
+    answerResults
+  };
+  if (providerCalls) await input.saveCheckpoint?.(collected);
+
+  const answerCards = await buildGenerativeCards(input, questions, answerResults, perAnswerHashes, perSourceHashes);
+  if (input.auditSources === undefined) return { checkpoint: collected, answerCards, reused: !providerCalls };
+
+  const ready: AnswerFirstV3CheckpointV2 = { ...collected, stage: "cards_ready", answerCards };
+  if (!resumed?.answerCards || JSON.stringify(resumed.answerCards) !== JSON.stringify(answerCards)) {
+    await input.saveCheckpoint?.(ready);
+  }
+  return { checkpoint: ready, answerCards, reused: !providerCalls };
+}
+
+async function callGenerativeProvider(
+  provider: GenerativeSearchAnswerProvider,
+  request: Parameters<GenerativeSearchAnswerProvider["answerWithSources"]>[0]
+): Promise<GenerativeSearchAnswerResult> {
+  const raw = await provider.answerWithSources(request);
+  try {
+    return parseGenerativeSearchAnswerResult(raw, { expectedQuestionId: request.questionId, locale: request.locale });
+  } catch (error) {
+    throw new AnswerFirstV3ModelContractInvalidError({ cause: error });
+  }
+}
+
+async function buildGenerativeCards(
+  input: ResolveGenerativeAnswerFirstV3Input,
+  questions: readonly [{ id: string; exactText: string }, { id: string; exactText: string }, { id: string; exactText: string }],
+  results: [GenerativeSearchAnswerResult, GenerativeSearchAnswerResult, GenerativeSearchAnswerResult],
+  answerHashes: readonly string[],
+  sourceHashes: readonly string[]
+): Promise<[GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3]> {
+  const auditByUrl = new Map((input.auditSources ?? []).map((source) => [normalizeComparableUrl(source.canonicalUrl), source]));
+  const drafts = results.map((result, index): GenerativeSearchAnswerCardV3 => {
+    const sources = result.sources.map((source) => {
+      const audit = auditByUrl.get(normalizeComparableUrl(source.canonicalUrl));
+      return {
+        ...source,
+        retrievalStatus: audit
+          ? (audit.retrievalReady && audit.exactExcerpt ? "verified_body" as const : audit.retrievalReady ? "search_source_only" as const : "inaccessible" as const)
+          : "search_source_only" as const,
+        ownershipCategory: audit ? generativeOwnershipFromStored(audit.sourceCategory, audit.registrableDomain, input.targetUrl) : "unknown" as const
+      };
+    });
+    const status = result.refusal ? "refused" as const : sources.length ? "answered" as const : "source_limited" as const;
+    const exactQuestion = questions[index]!.exactText;
+    const geoDiagnosis = diagnoseGenerativeSearchAnswerCardV3({ answerText: result.answerText, sources }, {
+      exactQuestion,
+      locale: input.locale,
+      targetAliases: input.targetAliases ?? [],
+      competitors: input.competitors ?? [],
+      missingEvidenceFamilies: []
+    });
+    const card: GenerativeSearchAnswerCardV3 = {
+      answerMode: "generative_search_v1",
+      questionId: result.questionId,
+      exactQuestion,
+      status,
+      answerText: result.answerText,
+      sources,
+      provenance: {
+        providerId: input.provider.providerId,
+        model: input.provider.model,
+        searchMode: input.provider.searchMode,
+        promptVersion: GENERATIVE_ANSWER_FIRST_V3_PROMPT_VERSION,
+        searchedAt: result.searchedAt,
+        completedAt: result.completedAt,
+        answerHash: answerHashes[index]!,
+        sourceHash: sourceHashes[index]!
+      },
+      refusal: result.refusal,
+      geoDiagnosis,
+      audit: {
+        verifiedBodyCount: sources.filter(({ retrievalStatus }) => retrievalStatus === "verified_body").length,
+        searchSourceOnlyCount: sources.filter(({ retrievalStatus }) => retrievalStatus === "search_source_only").length,
+        inaccessibleCount: sources.filter(({ retrievalStatus }) => retrievalStatus === "inaccessible").length
+      }
+    };
+    return card;
+  });
+  return parseGenerativeSearchAnswerCardsV3(drafts, {
+    questionSet: input.questionSet,
+    locale: input.locale,
+    targetAliases: input.targetAliases,
+    competitors: input.competitors
+  });
+}
+
+function q1Correction(locale: string): string {
+  return locale.toLowerCase().startsWith("zh")
+    ? "请直接列出至少一个具体服务商或服务方式，并说明其提供的服务；不要只回答市场规模或统计数据。"
+    : "Directly name at least one specific provider or service approach and explain the service; do not answer with market size or statistics alone.";
+}
+
+function sourceCorrection(locale: string): string {
+  return locale.toLowerCase().startsWith("zh")
+    ? "请保持直接完整回答，并在同一次回答中返回支持答案的公开 HTTP(S) 来源。"
+    : "Keep the direct complete answer and return the supporting public HTTP(S) sources in the same answer operation.";
+}
+
+function validateGenerativeCheckpoint(checkpoint: AnswerFirstV3CheckpointV2, identityHash: string, identity: {
+  questionSetIdentity: string; providerId: string; model: string; searchMode: string; locale: string; region: string;
+}): AnswerFirstV3CheckpointV2 {
+  if (checkpoint.identityHash !== identityHash || checkpoint.questionSetIdentity !== identity.questionSetIdentity ||
+      checkpoint.providerId !== identity.providerId || checkpoint.model !== identity.model || checkpoint.searchMode !== identity.searchMode ||
+      checkpoint.locale !== identity.locale || checkpoint.region !== identity.region) {
+    throw new AnswerFirstV3ResumeIdentityMismatchError("Generative answer checkpoint identity does not match this run.");
+  }
+  return checkpoint;
+}
+
+function isResponsiveProviderAnswer(answerText: string): boolean {
+  const normalized = answerText.normalize("NFKC").toLocaleLowerCase();
+  const namedProviderOrApproach = /(?:[\p{L}\p{N}]{1,30}(?:物流|供应链|货运|快递|shipping|logistics)|服务商[甲乙丙丁a-z0-9]|供应商[甲乙丙丁a-z0-9]|dhl|ups|fedex|顺丰|菜鸟|京东物流|极兔|海运|空运|铁路|专线|海外仓|多式联运|整柜|拼箱)/iu.test(normalized);
+  const serviceExplanation = /(?:提供|承运|运输|配送|仓储|清关|时效|交付|provide|shipping|delivery|freight|warehouse)/iu.test(normalized);
+  return namedProviderOrApproach && serviceExplanation;
+}
+
+function normalizeComparableUrl(value: string): string {
+  try { const url = new URL(value); url.hash = ""; return url.href; } catch { return value; }
+}
+
+function generativeOwnershipFromStored(category: AnswerFirstV3StoredSource["sourceCategory"], domain: string, targetUrl?: string): OpenGeoAnswerOwnershipCategoryV3 {
+  if (category === "company_owned") return targetUrl && registrableHost(targetUrl) === domain.toLocaleLowerCase() ? "target_owned" : "competitor_owned";
+  if (category === "earned_editorial") return "third_party_editorial";
+  if (category === "directory_or_reference") return "directory";
+  if (category === "community_or_ugc") return "community";
+  if (category === "institution") return "institution";
+  if (category === "social") return "social";
+  return "unknown";
 }
 
 function projectEvidence(input: {
@@ -246,7 +532,7 @@ function projectEvidence(input: {
   };
 }
 
-function coverage(input: BuildAnswerFirstV3EvidenceInput, evidence: readonly OpenGeoAnswerEvidenceV3[]): [OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"]] {
+function coverage(input: BuildAnswerFirstV3EvidenceInput, evidence: readonly OpenGeoAnswerEvidenceV3[]): [LegacyEvidenceBoundAnswerCardV3["coverage"], LegacyEvidenceBoundAnswerCardV3["coverage"], LegacyEvidenceBoundAnswerCardV3["coverage"]] {
   const questions = toCanonicalBuyerQuestionSet(input.questionSet).questions;
   return questions.map((question, index) => {
     const fanout = input.forensicReport.fanouts.find(({ questionId }) => questionId === question.id);
@@ -276,7 +562,7 @@ function coverage(input: BuildAnswerFirstV3EvidenceInput, evidence: readonly Ope
       eligibleDirectEvidence,
       reasons: input.forensicReport.coverage.status === "complete" ? [] : [coverageShortfallReason(input.forensicReport.locale, "question")]
     };
-  }) as [OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"]];
+  }) as [LegacyEvidenceBoundAnswerCardV3["coverage"], LegacyEvidenceBoundAnswerCardV3["coverage"], LegacyEvidenceBoundAnswerCardV3["coverage"]];
 }
 
 function coverageShortfallReason(locale: string, scope: "provider" | "question"): string {
@@ -299,7 +585,7 @@ function missingEvidenceFamilies(locale: string, evidence: readonly OpenGeoAnswe
   }) as [string[], string[], string[]];
 }
 
-function validateCheckpoint(checkpoint: AnswerFirstV3Checkpoint, identityHash: string, identity: { questionSetIdentity: string; evidenceHash: string; locale: string; region: string; engineId: string; searchSurface: string; queryPlanVersion: string; passageSelectorVersion: string; synthesisModel: string }): void {
+function validateCheckpoint(checkpoint: AnswerFirstV3CheckpointV1, identityHash: string, identity: { questionSetIdentity: string; evidenceHash: string; locale: string; region: string; engineId: string; searchSurface: string; queryPlanVersion: string; passageSelectorVersion: string; synthesisModel: string }): void {
   const provenance = checkpoint.engineProvenance;
   if (checkpoint.version !== ANSWER_FIRST_V3_CHECKPOINT_VERSION || checkpoint.identityHash !== identityHash ||
       checkpoint.questionSetIdentity !== identity.questionSetIdentity || checkpoint.evidenceHash !== identity.evidenceHash ||

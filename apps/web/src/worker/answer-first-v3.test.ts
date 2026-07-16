@@ -1,4 +1,4 @@
-import type { ProviderDiscoveryV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import type { GenerativeSearchAnswerProvider, GenerativeSearchAnswerResult, ProviderDiscoveryV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import { toCanonicalBuyerQuestionSet } from "@open-geo-console/public-search-observer";
 import { describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import {
   AnswerFirstV3ResumeIdentityMismatchError,
   buildAnswerFirstV3Evidence,
   resolveAnswerFirstV3,
+  resolveGenerativeAnswerFirstV3,
   type AnswerFirstV3StoredSource
 } from "./answer-first-v3";
 
@@ -290,6 +291,134 @@ describe("answer-first V3 Worker service", () => {
       .rejects.toBeInstanceOf(AnswerFirstV3ResumeIdentityMismatchError);
   });
 });
+
+describe("generative answer-first V3 Worker service", () => {
+  it("collects three answers in canonical order and keeps them when audit retrieval is unavailable", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const provider = generativeProvider(ids.map((id, index) => generatedAnswer(id, index)));
+    const result = await resolveGenerativeAnswerFirstV3({
+      questionSet, provider, locale: "zh-CN", region: "CN", auditSources: []
+    });
+
+    expect(provider.answerWithSources.mock.calls.slice(0, 3).map(([request]) => request.questionId)).toEqual(ids);
+    expect(result.answerCards.map(({ answerText }) => answerText)).toEqual([
+      "服务商甲提供跨境海运服务。",
+      "海运适合大件货物，空运适合高时效货物。",
+      "采购时应核验服务范围、时效、赔付与禁运限制。"
+    ]);
+    expect(result.answerCards.every(({ status }) => status === "answered")).toBe(true);
+    expect(result.answerCards.every(({ audit }) => audit.searchSourceOnlyCount === 1)).toBe(true);
+  });
+
+  it("runs one source correction and degrades to source_limited without erasing the answer", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const provider = generativeProvider([
+      generatedAnswer(ids[0], 0),
+      { ...generatedAnswer(ids[1], 1), sources: [] },
+      generatedAnswer(ids[2], 2),
+      { ...generatedAnswer(ids[1], 1), answerText: "空运适合高时效货物，海运适合大件货物。", sources: [] }
+    ]);
+
+    const result = await resolveGenerativeAnswerFirstV3({ questionSet, provider, locale: "zh-CN", region: "CN", auditSources: [] });
+
+    expect(provider.answerWithSources.mock.calls.filter(([request]) => request.questionId === ids[1])).toHaveLength(2);
+    expect(result.answerCards[1]).toMatchObject({ status: "source_limited", answerText: "空运适合高时效货物，海运适合大件货物。", sources: [] });
+  });
+
+  it("keeps the original ordinary answer when a source correction is refused", async () => {
+    const questionSet = questions(); const ids = questionIds(questionSet);
+    const original = { ...generatedAnswer(ids[1], 1), sources: [] };
+    const correctionRefusal = { ...original, answerText: "", refusal: { code: "policy_refusal" as const, reason: "服务商拒绝补充来源。" } };
+    const provider = generativeProvider([generatedAnswer(ids[0], 0), original, generatedAnswer(ids[2], 2), correctionRefusal]);
+    const result = await resolveGenerativeAnswerFirstV3({ questionSet, provider, locale: "zh-CN", region: "CN", auditSources: [] });
+    expect(result.answerCards[1]).toMatchObject({ status: "source_limited", answerText: original.answerText, refusal: null });
+  });
+
+  it("turns only a typed refusal into refused and propagates transport errors", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const refused = { ...generatedAnswer(ids[1], 1), answerText: "", sources: [], refusal: { code: "policy_refusal" as const, reason: "服务提供者拒绝回答该问题。" } };
+    const provider = generativeProvider([generatedAnswer(ids[0], 0), refused, generatedAnswer(ids[2], 2)]);
+    const result = await resolveGenerativeAnswerFirstV3({ questionSet, provider, locale: "zh-CN", region: "CN", auditSources: [] });
+    expect(result.answerCards[1]).toMatchObject({ status: "refused", refusal: { code: "policy_refusal" } });
+    expect(provider.answerWithSources.mock.calls.filter(([request]) => request.questionId === ids[1])).toHaveLength(1);
+
+    const failure = new Error("provider unavailable");
+    const broken = { providerId: "fixture", model: "fixture-model", searchMode: "native_web_search", answerWithSources: vi.fn(async () => { throw failure; }) } satisfies GenerativeSearchAnswerProvider;
+    await expect(resolveGenerativeAnswerFirstV3({ questionSet, provider: broken, locale: "zh-CN", region: "CN", auditSources: [] })).rejects.toBe(failure);
+  });
+
+  it("keeps provider answer identity stable across audit enrichment and resumes with zero provider calls", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const provider = generativeProvider(ids.map((id, index) => generatedAnswer(id, index)));
+    const collected = await resolveGenerativeAnswerFirstV3({ questionSet, provider, locale: "zh-CN", region: "CN" });
+    const audit = ids.map((id, index) => source(`audit-${index}`, `observation-${index}`, `query-${index}`, `https://${id}.example/service`, "来源", `${id}.example`, "已独立检索正文。", index === 0 ? "institution" : "earned_editorial"));
+    const enriched = await resolveGenerativeAnswerFirstV3({ questionSet, provider, locale: "zh-CN", region: "CN", auditSources: audit, checkpoint: collected.checkpoint });
+
+    expect(provider.answerWithSources).toHaveBeenCalledTimes(3);
+    expect(enriched.checkpoint.answerHash).toBe(collected.checkpoint.answerHash);
+    expect(enriched.checkpoint.sourceHash).toBe(collected.checkpoint.sourceHash);
+    expect(enriched.answerCards.map(({ answerText }) => answerText)).toEqual(collected.answerCards.map(({ answerText }) => answerText));
+    expect(enriched.answerCards[0].sources[0]).toMatchObject({ retrievalStatus: "verified_body", ownershipCategory: "institution" });
+
+    const resumedProvider = generativeProvider([]);
+    const resumed = await resolveGenerativeAnswerFirstV3({ questionSet, provider: resumedProvider, locale: "zh-CN", region: "CN", auditSources: audit, checkpoint: enriched.checkpoint });
+    expect(resumedProvider.answerWithSources).not.toHaveBeenCalled();
+    expect(resumed.answerCards).toEqual(enriched.answerCards);
+  });
+
+  it("rejects market-statistic-only Q1 after one bounded semantic correction", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const statistic = { ...generatedAnswer(ids[0], 0), answerText: "该市场规模达到一千亿元，同比增长百分之十。" };
+    const provider = generativeProvider([statistic, generatedAnswer(ids[1], 1), generatedAnswer(ids[2], 2), statistic]);
+    await expect(resolveGenerativeAnswerFirstV3({ questionSet, provider, locale: "zh-CN", region: "CN", auditSources: [] }))
+      .rejects.toMatchObject({ code: "answer_first_v3_model_contract_invalid" });
+    expect(provider.answerWithSources.mock.calls.filter(([request]) => request.questionId === ids[0])).toHaveLength(2);
+  });
+});
+
+function generatedAnswer(questionId: string, index: number): GenerativeSearchAnswerResult {
+  const answers = [
+    "服务商甲提供跨境海运服务。",
+    "海运适合大件货物，空运适合高时效货物。",
+    "采购时应核验服务范围、时效、赔付与禁运限制。"
+  ];
+  return {
+    questionId,
+    answerText: answers[index]!,
+    sources: [{
+      sourceId: `source-${index}`,
+      title: `来源${index + 1}`,
+      canonicalUrl: `https://${questionId}.example/service`,
+      registrableDomain: `${questionId}.example`,
+      citedText: null,
+      providerResultOrder: 1
+    }],
+    refusal: null,
+    searchedAt: `2030-01-01T00:00:0${index}.000Z`,
+    completedAt: `2030-01-01T00:00:1${index}.000Z`,
+    providerResponseId: `response-${index}`
+  };
+}
+
+function generativeProvider(results: GenerativeSearchAnswerResult[]) {
+  const queue = [...results];
+  type Request = Parameters<GenerativeSearchAnswerProvider["answerWithSources"]>[0];
+  return {
+    providerId: "fixture",
+    model: "fixture-model",
+    searchMode: "native_web_search",
+    answerWithSources: vi.fn(async (_request: Request) => {
+      const next = queue.shift();
+      if (!next) throw new Error("Unexpected provider call.");
+      return next;
+    })
+  } satisfies GenerativeSearchAnswerProvider;
+}
 
 function modelClient(evidence: ReturnType<typeof buildAnswerFirstV3Evidence>, questionSet: ConfirmedBusinessQuestionSet) {
   return {

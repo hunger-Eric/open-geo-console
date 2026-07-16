@@ -60,7 +60,7 @@ import type { JobCheckpoint, ReportEvidenceAssetRow, ScanJobRow } from "@/db/sch
 import { projectFreeAiReport } from "@/report/visibility";
 import { createSafeFetch } from "@/server/safe-fetch";
 import { captureReportVisualEvidence } from "./visual-evidence";
-import { createProductionPublicSourceForensicsDependencies, resolveProductionPublicSearchRuntime } from "@/public-source-forensics/production-runtime";
+import { createProductionPublicSourceForensicsDependencies, resolveGenerativeSearchAnswerProvider, resolveProductionPublicSearchRuntime } from "@/public-source-forensics/production-runtime";
 import { createPublicSourceArtifactReadinessGate } from "@/public-source-forensics/artifact-readiness";
 import { exportCanonicalArtifactHtmlPdf } from "@/report/pdf-export";
 import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline, type ArtifactReadinessGate, type PublicSourceCommercialSnapshotRef, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
@@ -75,7 +75,7 @@ import type { StagingLiveDrill } from "./staging-live-drill";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
 import { createProductionProviderDiscoveryContext } from "./provider-discovery-production";
 import { runProviderDiscoveryPipeline, type ProviderDiscoveryCheckpointV1 } from "./provider-discovery-pipeline";
-import { resolveAnswerFirstV3, type AnswerFirstV3Checkpoint, type AnswerFirstV3StoredSource } from "./answer-first-v3";
+import { resolveGenerativeAnswerFirstV3, type AnswerFirstV3Checkpoint, type AnswerFirstV3CheckpointV2, type AnswerFirstV3StoredSource } from "./answer-first-v3";
 import {
   calculateEffectiveCoverage,
   determineResumeStage,
@@ -908,6 +908,29 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
   createPublicSourceAttemptBudget(input.remainingMs);
   const runtime = await resolveProductionPublicSearchRuntime({ environment: process.env, getAuthority: getActivePublicSearchSurfaceAuthority });
   const client = createConfiguredClient();
+  let generativeCheckpoint: AnswerFirstV3CheckpointV2 | null = null;
+  if (input.job.artifactContract === "combined_geo_report_v3") {
+    const provider = resolveGenerativeSearchAnswerProvider(process.env, {
+      locale: runtime.authority.surface.locale,
+      region: runtime.authority.surface.region
+    });
+    const collected = await resolveGenerativeAnswerFirstV3({
+      questionSet: businessQuestionSet,
+      provider,
+      locale: runtime.authority.surface.locale,
+      region: runtime.authority.surface.region,
+      targetUrl: input.targetUrl,
+      targetAliases: businessQuestionSet.identityExclusions,
+      checkpoint: checkpoint.answerFirstV3,
+      signal: input.signal,
+      saveCheckpoint: async (answerFirstV3) => {
+        const next = { ...checkpoint, answerFirstV3 };
+        const updated = await input.checkpointJob({ stage: "synthesizing", phase: "grounded_answer_synthesis", progress: 90, checkpoint: next as JobCheckpoint, ...input.coverage });
+        checkpoint = normalizeCheckpoint(updated.checkpoint);
+      }
+    });
+    generativeCheckpoint = collected.checkpoint;
+  }
   const evidenceCutoffAt = checkpoint.providerDiscovery?.evidenceCutoffAt ?? new Date().toISOString();
   const providerContext = createProductionProviderDiscoveryContext({
     runtime,
@@ -967,18 +990,22 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       verificationSnapshotId,
       ...forensicResult.report.snapshotRefs.map(({ snapshotId }) => snapshotId)
     ]);
-    const answerResult = await resolveAnswerFirstV3({
+    const provider = resolveGenerativeSearchAnswerProvider(process.env, {
+      locale: runtime.authority.surface.locale,
+      region: runtime.authority.surface.region
+    });
+    const answerResult = await resolveGenerativeAnswerFirstV3({
       questionSet: businessQuestionSet,
-      providerDiscovery: providerResult.providerDiscovery,
-      forensicReport: forensicResult.report,
-      storedSources,
+      provider,
+      locale: runtime.authority.surface.locale,
+      region: runtime.authority.surface.region,
       targetUrl: input.targetUrl,
       targetAliases: businessQuestionSet.identityExclusions,
-      client,
-      searchSurface: `${forensicResult.report.authority.authorityId}:${forensicResult.report.authority.surface.surfaceId}:${forensicResult.report.authority.surface.surfaceVersion}`,
-      queryPlanVersion: providerContext.identity.queryPlanVersion,
-      passageSelectorVersion: providerContext.identity.passageSelectorVersion,
-      checkpoint: checkpoint.answerFirstV3,
+      competitors: forensicResult.report.sourceGraph.entities
+        .filter(({ status }) => status === "resolved")
+        .map(({ entityId, canonicalName }) => ({ entityId, aliases: [canonicalName] })),
+      auditSources: storedSources,
+      checkpoint: generativeCheckpoint ?? checkpoint.answerFirstV3,
       signal: input.signal,
       saveCheckpoint: async (answerFirstV3) => {
         const next = { ...checkpoint, answerFirstV3 };
