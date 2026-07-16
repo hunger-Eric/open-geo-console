@@ -7,9 +7,8 @@ export const en = {
     description: "Open-source AI Search Console for company websites."
   },
   nav: {
-    scanner: "Scanner",
-    logs: "Log report",
-    caseStudy: "First case"
+    scanner: "Website analysis",
+    logs: "Advanced log tool"
   },
   actions: {
     generateReport: "Generate GEO report",
@@ -18,37 +17,40 @@ export const en = {
     loadSample: "Load sample",
     copyLink: "Copy link",
     copiedLink: "Copied",
-    printReport: "Print / PDF",
     switchToEnglish: "English",
     switchToChinese: "中文",
     backToScanner: "Back to scanner",
     importLogs: "Import log file"
   },
   scanner: {
-    title: "Generate a shareable GEO report",
+    title: "Analyze your company website",
     description:
-      "Scan a company website for AI search readiness, then hand off a report with executive summary, evidence, and next fixes.",
+      "Get a free homepage check now. A private deep report analyzes the valid pages across your site with evidence-backed AI analysis.",
     urlLabel: "Company website URL",
     urlPlaceholder: "https://company.com",
-    recentReportsTitle: "Recent reports",
-    emptyRecentReports: "No saved scans yet. The default URL is the first public case study.",
-    nextTitle: "Next: AI crawler access",
+    forceFreshLabel: "Force a fresh report",
+    forceFreshDescription: "Staging only. Keep the current report available while a new crawl and report are generated.",
+    verifyingHuman: "Verifying",
+    acceptingReport: "Creating report",
+    scanProgressStarting: "Creating a secure report workspace. The website analysis will continue after it opens.",
+    scanProgressSlow: "Admission is taking longer than expected. Your request is still protected against duplicate submission.",
+    scanProgressExtended: "The service is slow to accept this request. Keep this page open; retrying is safe and will recover the same request.",
+    nextTitle: "Already have server access logs?",
     nextDescription:
-      "After the GEO report, add access logs to answer whether OpenAI, Claude, Perplexity, or ByteDance has visited.",
-    firstCaseUrl: "https://me.itheheda.online"
+      "Verify whether identifiable AI crawlers visited the site."
   },
   capabilities: {
-    geoAudit: {
-      title: "GEO audit",
-      text: "Machine-readable assets, structure, schema, and content checks."
+    freeHomepage: {
+      title: "Free homepage check",
+      text: "See the homepage technical score and the most important verified finding."
     },
-    crawlerLogs: {
-      title: "Crawler logs",
-      text: "OpenAI, Claude, Perplexity, ByteDance, and more."
+    evidenceAi: {
+      title: "Evidence-backed AI analysis",
+      text: "Every formal AI finding is checked against captured page evidence."
     },
-    selfHosted: {
-      title: "Self-hosted",
-      text: "Local SQLite, no account required, ready for open-source deployment."
+    privateDeep: {
+      title: "Private deep report",
+      text: "Analyze valid site pages, coverage limits, dimension scores, and a 90-day roadmap."
     }
   },
   report: {
@@ -68,7 +70,7 @@ export const en = {
     auditedPages: "Audited pages",
     technicalAppendix: "Technical appendix",
     noFindings: "No findings. This site is in good shape.",
-    shareDescription: "Share this report URL or print it as a client-ready PDF.",
+    shareDescription: "Share this report using its secure HTML link.",
     logNextTitle: "Add AI crawler evidence",
     logNextDescription:
       "Upload or paste access logs to see whether known AI crawlers have visited this site.",
@@ -81,6 +83,28 @@ export const en = {
     reportUnavailableTitle: "Report unavailable",
     reportUnavailableDescription:
       "This report is not available in server storage or this browser. Generate a new scan to create a fresh report.",
+    findingAggregation: {
+      affectedPages: "{count} affected pages",
+      representativePages: "Representative pages",
+      morePages: "+{count} more affected pages",
+      pageType: "Page type: {pageType}",
+      template: "Template: {template}",
+      pageTypeLabels: {
+        home: "Home",
+        product: "Product",
+        service: "Service",
+        about: "About",
+        pricing: "Pricing",
+        "case-study": "Case study",
+        contact: "Contact",
+        blog: "Blog",
+        news: "News",
+        help: "Help",
+        careers: "Careers",
+        legal: "Legal",
+        other: "Other"
+      }
+    },
     metricLabels: {
       critical: "Critical",
       warnings: "Warnings",
@@ -109,6 +133,159 @@ export const en = {
     },
     assetPresent: "{asset} is available.",
     assetMissing: "{asset} was not found or returned an empty response."
+  },
+  workspace: {
+    tabs: {
+      overview: "Overview",
+      analysis: "AI analysis",
+      issues: "Issues",
+      bots: "AI Bot evidence",
+      technical: "Technical"
+    },
+    currentSite: "Website context",
+    lastScan: "Last scan",
+    submittedAt: "Submitted",
+    overviewTitle: "Audit overview",
+    topFixes: "Highest-priority fixes",
+    viewIssueDetails: "View repair guide",
+    viewAllIssues: "View all issues",
+    botEvidenceTitle: "AI Bot evidence",
+    botEvidenceEmpty: "No access-log evidence has been added yet.",
+    botEvidenceDescription: "Add logs only when you need to verify real, recognizable AI bot visits.",
+    botsObserved: "Bots observed",
+    operatorsObserved: "Operators observed",
+    latestEvidence: "Latest evidence",
+    issuesTitle: "Issues and recommendations",
+    issuesDescription: "Work through findings in severity order. The score remains based on the website audit.",
+    botsTitle: "AI Bot evidence",
+    botsDescription: "Import access logs to add visit evidence without storing raw logs, IPs, or full paths.",
+    technicalTitle: "Technical details",
+    technicalDescription: "Machine-readable assets, audited pages, and implementation references.",
+    importTitle: "Import access logs",
+    importDescription: "Nginx combined logs and Cloudflare JSONL are supported. Raw logs are discarded after analysis.",
+    pasteLogs: "Paste logs instead",
+    analyzeAndSave: "Analyze and save summary",
+    analyzing: "Analyzing logs",
+    replaceEvidence: "Replace evidence",
+    removeEvidence: "Remove evidence",
+    removing: "Removing evidence",
+    localFallback: "Saved in this browser because shared server storage is unavailable.",
+    savedEvidence: "The sanitized evidence summary was saved.",
+    removedEvidence: "The saved evidence summary was removed.",
+    targetUrl: "Target website",
+    detectedBots: "Detected bots",
+    registry: "Full registry",
+    registryDescription: "Policy-only and unseen entries are reference data, not proof of a visit.",
+    noDetectedBots: "No recognizable AI bots were found in this log sample.",
+    advancedSimulator: "Advanced: external crawler simulator",
+    advancedSimulatorDescription: "Generate marked requests, then use imported logs to decide which attempts were observed.",
+    sourceLines: "Source lines",
+    updatedAt: "Updated",
+    fileReady: "Ready to analyze: {name}",
+    previousPage: "Previous",
+    nextPage: "Next",
+    pageStatus: "Page {page} of {total}",
+    backToReport: "Back to report",
+    errors: {
+      emptyLogs: "Paste or import access logs before analyzing.",
+      payloadTooLarge: "The log input exceeds the 5 MiB limit.",
+      saveFailed: "The analysis completed, but the shared summary could not be saved.",
+      deleteFailed: "Unable to remove the saved evidence summary."
+    }
+  },
+  aiReport: {
+    title: "Evidence-backed AI website analysis",
+    description: "A real model reads selected pages, checks its conclusions against captured evidence, and builds a traceable company website report.",
+    previewLabel: "Free AI preview",
+    deepLabel: "Deep report",
+    homepageScore: "Homepage technical score",
+    homepageScoreDescription: "This score uses the submitted homepage and the standard robots.txt, sitemap.xml, and llms.txt checks. It is not a site-wide score.",
+    homepagePreviewNotice: "This free preview analyzed the homepage only.",
+    detectedPagesEstimate: "Approximately {count} site URLs were detected without fetching or analyzing their content.",
+    lockedDeepFeatures: "Unlock the deep report for complete site findings, page evidence, dimension explanations, rewrites, and the 90-day roadmap.",
+    technicalScore: "Technical score",
+    aiDimensions: "AI dimension scores",
+    organizationProfile: "Organization profile",
+    executiveSummary: "Executive summary",
+    topFindings: "Highest-impact findings",
+    pageTypes: "Page-type analysis",
+    roadmap: "90-day roadmap",
+    coverage: "Coverage and limits",
+    evidence: "Evidence",
+    confidence: "Confidence",
+    unlockTitle: "Unlock the deep AI report",
+    unlockDescription: "Use one report credit to analyze up to 50 representative pages and reveal the complete evidence and action plan.",
+    accessKeyLabel: "Report access key",
+    unlockAction: "Unlock deep report",
+    unlocking: "Reserving credit",
+    startNewAnalysis: "Start a new analysis",
+    statusTitle: "Report status",
+    waitingDescription: "The report is being generated. Recoverable work is handled automatically.",
+    retryWaitDescription: "A temporary issue was detected. The report will resume automatically while preserving completed work.",
+    repairWaitDescription: "We are repairing a fulfillment dependency. Completed work is preserved and no action is required from you.",
+    acceptedDescription: "Your request is accepted. We are checking the website and will add results here as they become available.",
+    technicalFailedDescription: "The website could not be analyzed safely. You can start a new analysis with a reachable public URL.",
+    completedDescription: "Report completed — {count} pages analyzed.",
+    completedLimitedDescription: "Report completed — {count} valid pages analyzed. {failed} inaccessible pages were excluded, are listed in coverage limitations, and the credit was returned.",
+    failedDescription: "This analysis could not be completed. The report credit has been returned. You can start a new analysis later.",
+    unavailableDescription: "AI analysis has not been configured for this deployment.",
+    previewUnavailableDescription: "This free AI preview was not generated, but the homepage technical report is complete and remains available.",
+    reportLanguage: "Report language",
+    reportLanguageEnglish: "English",
+    reportLanguageChinese: "Chinese",
+    regenerateLanguage: "Regenerate in {language}",
+    correctionInProgress: "Regenerating the report in its intended language.",
+    siteTechnicalScore: "Site technical score — based on {count} valid pages",
+    queuePosition: "Queue position {position}",
+    queueJobsAhead: "{count} jobs are ahead in this report lane.",
+    queueActiveJobsInPool: "This report is next; the worker lane is processing another job.",
+    queueAwaitingClaim: "This report is next, but no background worker has claimed it yet. It will continue automatically when a worker starts; do not resubmit.",
+    activeTierPreview: "Free AI previews are currently being processed.",
+    activeTierDeep: "Deep reports are currently being processed.",
+    activeTierMixed: "Free previews and deep reports are currently being processed.",
+    progressValue: "Report generation is {progress}% complete",
+    stageDescriptions: {
+      queued: "Request accepted. The background worker will start automatically.",
+      discovering: "Checking URL safety and reading the submitted homepage.",
+      planning: "Preparing the evidence plan for this report.",
+      fetching: "Collecting readable website evidence.",
+      analyzing: "Analyzing the captured evidence.",
+      synthesizing: "Finalizing verified findings and recommendations.",
+      completed: "The report is complete.",
+      completed_limited: "The available report is complete with stated coverage limits.",
+      failed: "The report could not be completed."
+    }
+  },
+  commerce: {
+    offerTitle: "Unlock the full-site AI Search Visibility Audit",
+    offerDescription: "One purchase covers a private deep report for this site. The payment amount is fixed by the server-side catalog.",
+    scopeEvidence: "Evidence across up to 50 representative pages",
+    scopeFixes: "Prioritized fixes with page-level examples",
+    scopeRoadmap: "A practical 90-day action roadmap",
+    emailLabel: "Delivery email",
+    currencyLabel: "Payment currency",
+    deliveryPromise: "Delivered by email within 24 hours of payment or fully refunded.",
+    buyAction: "Unlock full-site analysis",
+    redirecting: "Opening secure checkout",
+    verifying: "Verifying",
+    unavailable: "Online purchase is not configured for this deployment.",
+    checkoutFailed: "Secure checkout could not be opened. Please try again.",
+    humanVerification: "Complete human verification to continue.",
+    operatorKeySummary: "Already have a report access key?",
+    paymentReturnTitle: "Payment and delivery status",
+    paymentConfirming: "You are back at your report. We are waiting for the signed payment confirmation; no further action is needed.",
+    paymentNotCompleted: "The checkout was closed before payment was confirmed. You can try again when you are ready.",
+    paymentCancelled: "The payment was cancelled. No report entitlement was created.",
+    paymentQueued: "Payment confirmed. Your private deep report is queued and will be delivered by email within 24 hours.",
+    paymentGenerating: "Payment confirmed. Your private deep report is being generated.",
+    paymentCompleted: "Your private deep report is complete. Check the delivery email for secure access.",
+    paymentFailed: "The report could not be completed. The refund workflow is being handled automatically.",
+    paymentRefundPending: "A full refund has been requested and is awaiting provider confirmation.",
+    paymentRefunded: "The full refund has been confirmed.",
+    paymentRefundFailed: "The automatic refund could not be completed. Contact support so the refund can be reviewed and handled.",
+    paymentStatusUnavailable: "We could not load this order status for the current report.",
+    paymentRefresh: "Refresh status",
+    paymentRefreshStopped: "Automatic updates have paused. Refresh to check the latest verified status."
   },
   logs: {
     title: "AI Bot Visibility Report",
@@ -200,8 +377,8 @@ export const en = {
     simulator: {
       title: "External AI crawler simulator",
       description:
-        "Run the simulator against the first-case site, then compare the attempted crawl requests with the logs you paste or import below.",
-      targetUrlLabel: "First-case URL",
+        "Run the simulator against the website you enter, then compare the attempted crawl requests with the logs you paste or import below.",
+      targetUrlLabel: "Website URL",
       runButton: "Run simulator",
       runningButton: "Running simulator",
       compareButton: "Compare with imported logs",
@@ -273,6 +450,19 @@ export const en = {
       description: "AI crawlers rely on clear titles to identify page purpose.",
       recommendation: "Add a specific title that names the company, product, or page intent."
     },
+    "page.duplicateTitles": {
+      title: "Multiple pages reuse the same title",
+      description: "{affectedCount} pages expose the same title, reducing page-specific GEO identity.",
+      recommendation:
+        "Give each page a concise title that states its distinct purpose and keep only a short reusable brand identifier."
+    },
+    "page.dominantTitleTemplate": {
+      title: "Page titles are dominated by a shared template",
+      description:
+        "{affectedCount} pages share a {sharedLength}-character title segment that outweighs their page-specific meaning.",
+      recommendation:
+        "Lead with the page's distinct purpose and reduce the repeated portion to a concise brand identifier so generative engines can select and cite the right page."
+    },
     "page.missingMetaDescription": {
       title: "Missing meta description",
       description: "The page lacks a concise summary for search and AI preview contexts.",
@@ -308,6 +498,12 @@ export const en = {
   errors: {
     emptyUrl: "Enter a company website URL.",
     unsupportedUrl: "Only HTTP and HTTPS URLs are supported.",
-    scanFailed: "Unable to scan this website."
+    scanFailed: "Unable to scan this website.",
+    humanVerificationRequired: "Complete human verification before starting the diagnosis.",
+    freePreviewLimitReached: "The free preview supports two different websites per network in any 24-hour period. Please try again later.",
+    stagingFreePreviewLimitReached: "The protected staging Preview has reached its rolling 24-hour website limit.",
+    stagingConcurrencyLimitReached: "Two staging reports are already running. Wait for one to finish and try again.",
+    forceFreshUnavailable: "Forced regeneration is available only on the protected staging Preview.",
+    deploymentConfigurationInvalid: "This deployment is not configured with a safe environment identity."
   }
 } satisfies Dictionary;

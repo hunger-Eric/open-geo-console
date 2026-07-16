@@ -88,6 +88,38 @@ export interface LogAnalysisResult {
   policyHints: PolicyHint[];
 }
 
+export interface BotEvidenceSummaryBot {
+  ruleId: string;
+  operator: AiCrawlerOperator;
+  bot: string;
+  intent: CrawlerIntent;
+  detectability: CrawlerDetectability;
+  hits: number;
+  latestDate?: string;
+}
+
+export interface BotEvidenceSummaryOperator {
+  operator: AiCrawlerOperator;
+  detectedBots: string[];
+  totalHits: number;
+  latestDate?: string;
+}
+
+export interface BotEvidenceSummary {
+  analysisVersion: 1;
+  analyzedAt: string;
+  totalLines: number;
+  parsedLines: number;
+  aiCrawlerHits: number;
+  missingUserAgent: boolean;
+  registryRuleCount: number;
+  detectedBotCount: number;
+  operators: BotEvidenceSummaryOperator[];
+  bots: BotEvidenceSummaryBot[];
+}
+
+const UNKNOWN_TIMESTAMP = "1970-01-01T00:00:00.000Z";
+
 const NGINX_COMBINED =
   /^(?<ip>\S+) \S+ \S+ \[(?<time>[^\]]+)] "(?<method>[A-Z]+) (?<path>\S+)(?: [^"]+)?" (?<status>\d{3}) \S+ "(?<referer>[^"]*)" "(?<userAgent>[^"]*)"$/;
 
@@ -116,7 +148,7 @@ export function parseCloudflareJsonLine(line: string): NormalizedLogEntry | null
     const method = stringField(data, ["ClientRequestMethod", "Method", "method"]) ?? "GET";
     const timestamp =
       stringField(data, ["EdgeStartTimestamp", "Datetime", "timestamp", "date"]) ??
-      new Date().toISOString();
+      UNKNOWN_TIMESTAMP;
 
     if (!path || typeof status !== "number") {
       return null;
@@ -145,8 +177,50 @@ export function parseLogs(input: string): NormalizedLogEntry[] {
 }
 
 export function analyzeLogs(input: string): LogAnalysisResult {
-  const totalLines = input.split(/\r?\n/).filter((line) => line.trim() !== "").length;
   const entries = parseLogs(input);
+  return analyzeParsedLogs(input, entries);
+}
+
+export function buildBotEvidenceSummary(
+  result: LogAnalysisResult,
+  analyzedAt = new Date().toISOString()
+): BotEvidenceSummary {
+  const bots = result.botCoverage
+    .filter((row) => row.status === "detected")
+    .map((row) => ({
+      ruleId: row.ruleId,
+      operator: row.operator,
+      bot: row.bot,
+      intent: row.intent,
+      detectability: row.detectability,
+      hits: row.hits,
+      latestDate: row.latestDate
+    }));
+
+  return {
+    analysisVersion: 1,
+    analyzedAt,
+    totalLines: result.totalLines,
+    parsedLines: result.parsedLines,
+    aiCrawlerHits: result.aiCrawlerHits,
+    missingUserAgent: result.missingUserAgent,
+    registryRuleCount: result.botCoverage.length,
+    detectedBotCount: bots.length,
+    operators: result.operatorSummary.map((summary) => ({
+      operator: summary.operator,
+      detectedBots: [...summary.detectedBots],
+      totalHits: summary.totalHits,
+      latestDate: summary.latestDate
+    })),
+    bots
+  };
+}
+
+export function analyzeParsedLogs(
+  input: string,
+  entries: NormalizedLogEntry[]
+): LogAnalysisResult {
+  const totalLines = input.split(/\r?\n/).filter((line) => line.trim() !== "").length;
   const missingUserAgent = entries.length > 0 && entries.every((entry) => !entry.userAgent);
   const visits = entries.flatMap((entry) => {
     const match = matchUserAgent(entry.userAgent);
@@ -302,17 +376,36 @@ function rulePolicyHint(rule: CrawlerRule, type: PolicyHintType): PolicyHint {
 }
 
 function parseNginxDate(value: string): string {
-  const parsed = Date.parse(value.replace(" ", "T"));
-  if (!Number.isNaN(parsed)) {
-    return new Date(parsed).toISOString();
+  const match = value.match(
+    /^(\d{2})\/([A-Za-z]{3})\/(\d{4}):(\d{2}):(\d{2}):(\d{2}) ([+-])(\d{2})(\d{2})$/
+  );
+  if (match) {
+    const [, day, monthName, year, hour, minute, second, sign, offsetHour, offsetMinute] =
+      match;
+    const month = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(
+      monthName.toLowerCase()
+    );
+    if (month !== -1) {
+      const localTime = Date.UTC(
+        Number(year),
+        month,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second)
+      );
+      const offset = (Number(offsetHour) * 60 + Number(offsetMinute)) * (sign === "+" ? 1 : -1);
+      return new Date(localTime - offset * 60_000).toISOString();
+    }
   }
+
   const fallback = Date.parse(value);
-  return Number.isNaN(fallback) ? new Date().toISOString() : new Date(fallback).toISOString();
+  return Number.isNaN(fallback) ? UNKNOWN_TIMESTAMP : new Date(fallback).toISOString();
 }
 
 function normalizeDate(value: string): string {
   const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? new Date().toISOString() : new Date(parsed).toISOString();
+  return Number.isNaN(parsed) ? UNKNOWN_TIMESTAMP : new Date(parsed).toISOString();
 }
 
 function normalizeUserAgent(value: string | null | undefined): string | undefined {

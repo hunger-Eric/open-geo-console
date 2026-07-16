@@ -1,0 +1,126 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: open_geo_console
+      POSTGRES_USER: open_geo
+      POSTGRES_PASSWORD: open_geo
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - open-geo-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U open_geo -d open_geo_console"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker-free:
+    image: "${OGC_APP_IMAGE:-open-geo-console:local}"
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    profiles: ["workers"]
+    working_dir: /app/apps/web
+    command: ["node", "--import", "tsx", "src/worker/drain-entry.ts", "realtime", "free"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    environment: &worker-environment
+      DATABASE_URL: "${DATABASE_URL:-postgres://open_geo:open_geo@postgres:5432/open_geo_console}"
+      OGC_DATABASE_POOL_SIZE: "${OGC_DATABASE_POOL_SIZE:-10}"
+      OGC_DEPLOYMENT_PROFILE: "${OGC_DEPLOYMENT_PROFILE:-staging}"
+      VERCEL_ENV: "${VERCEL_ENV:-preview}"
+      FULFILLMENT_MODE: "realtime"
+      OGC_JOB_QUEUE_PROVIDER: "postgres"
+      OGC_WORKER_POLL_MS: "${OGC_WORKER_POLL_MS:-5000}"
+      OGC_AI_BASE_URL: "${OGC_AI_BASE_URL:-}"
+      OGC_AI_API_KEY: "${OGC_AI_API_KEY:-}"
+      OGC_AI_MODEL: "${OGC_AI_MODEL:-}"
+      OGC_AI_JSON_RESPONSE_FORMAT: "${OGC_AI_JSON_RESPONSE_FORMAT:-false}"
+      OGC_AI_TIMEOUT_MS: "${OGC_AI_TIMEOUT_MS:-180000}"
+      OGC_BROWSER_HEADLESS: "${OGC_BROWSER_HEADLESS:-true}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker-deep:
+    image: "${OGC_APP_IMAGE:-open-geo-console:local}"
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    profiles: ["workers"]
+    working_dir: /app/apps/web
+    command: ["node", "--import", "tsx", "src/worker/drain-entry.ts", "realtime", "deep"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    environment: *worker-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  staging-worker-free:
+    image: "${OGC_APP_IMAGE:-open-geo-console:local}"
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    profiles: ["workstation"]
+    working_dir: /app/apps/web
+    command: ["node", "--import", "tsx", "src/worker/drain-entry.ts", "realtime", "free"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    env_file:
+      - path: ./.data/workstation-docker/staging.env
+        format: raw
+
+  staging-worker-deep:
+    image: "${OGC_APP_IMAGE:-open-geo-console:local}"
+    profiles: ["workstation"]
+    working_dir: /app/apps/web
+    command: ["node", "--import", "tsx", "src/worker/drain-entry.ts", "realtime", "deep"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    env_file:
+      - path: ./.data/workstation-docker/staging.env
+        format: raw
+
+  production-worker-free:
+    image: "${OGC_APP_IMAGE:-open-geo-console:local}"
+    profiles: ["workstation"]
+    working_dir: /app/apps/web
+    command: ["node", "--import", "tsx", "src/worker/drain-entry.ts", "realtime", "free"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    env_file:
+      - path: ./.data/workstation-docker/production.env
+        format: raw
+
+  production-commerce:
+    image: "${OGC_APP_IMAGE:-open-geo-console:local}"
+    profiles: ["workstation"]
+    command: ["sh", "-c", "while true; do npm run commerce:all; sleep $${OGC_COMMERCE_INTERVAL_SECONDS:-300}; done"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    env_file:
+      - path: ./.data/workstation-docker/production-commerce.env
+        format: raw
+
+  production-worker-deep:
+    image: "${OGC_APP_IMAGE:-open-geo-console:local}"
+    profiles: ["workstation-production-deep"]
+    working_dir: /app/apps/web
+    command: ["node", "--import", "tsx", "src/worker/drain-entry.ts", "realtime", "deep"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    env_file:
+      - path: ./.data/workstation-docker/production.env
+        format: raw
+
+volumes:
+  open-geo-postgres:

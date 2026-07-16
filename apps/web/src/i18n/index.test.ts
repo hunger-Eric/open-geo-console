@@ -10,7 +10,7 @@ describe("i18n helpers", () => {
 
   it("localizes and switches paths", () => {
     expect(localizePath("en", "/reports/123")).toBe("/en/reports/123");
-    expect(localizePath("zh", "/en/reports/123")).toBe("/zh/reports/123");
+    expect(localizePath("zh", "/en/reports/123")).toBe("/reports/123");
     expect(switchLocalePath("/zh/logs", "en")).toBe("/en/logs");
   });
 

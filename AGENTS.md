@@ -4,11 +4,22 @@
 
 - This is a standalone monorepo for the open-source Open GEO Console MVP.
 - Use `npm` workspaces. Do not switch to pnpm/yarn unless the project docs are updated.
-- Keep v1 self-hostable and unauthenticated: no login, billing, teams, or SaaS-only flows.
+- Keep the engine self-hostable. There are no user accounts, teams, or subscriptions. One-time report payments, internal report-credit entitlements, and report-specific access tokens are allowed.
 
 ## Core Commands
 
 - `npm run dev` starts the web app.
+- `npm run worker:free` and `npm run worker:deep` start the two independent AI report lanes; production must service both.
+- In the default `FULFILLMENT_MODE=batch_24h`, the lane commands drain PostgreSQL and exit. Use `worker:realtime:free|deep` only on persistent infrastructure.
+- `npm run commerce:all` reconciles commercial outcomes, enforces the 24-hour SLA, submits refunds, and sends queued email.
+- `powershell -File scripts/start-workstation-workers.ps1` builds and starts the Docker Desktop staging free/deep, production free/deep, and production commerce services. Each deep lane remains gated on its environment's private evidence storage.
+- Any test or acceptance workflow that builds a new Docker image must remove the superseded test image after the replacement test containers are running and verified. Never force-remove an image still referenced by any container, and never delete staging or production images as a side effect of test cleanup; recreate the intended test containers first, verify their exact image ID, then remove only the old unreferenced test image.
+- `npm run worker` is a low-level entry point and requires `OGC_WORKER_TIER=free|deep`.
+- `npm run browser:install` installs Chromium for JavaScript-rendered page fallback.
+- `npm run db:audit` fails when a terminal commercial job still has a reserved credit.
+- `npm run worker:staging:free|deep` and `npm run commerce:staging:all` require `apps/web/.env.staging.local` and refuse a non-staging database marker.
+- `npm run public-search:probe -- --adapter mimo --locale zh-CN --region CN` reads `.data/workstation-docker/staging.env`, the merged runtime environment used by the staging Docker Workers. Do not point it back at source env files with empty Sensitive-value placeholders or diagnose MiMo as missing from those placeholders alone.
+- `npm run staging:free:cleanup -- --confirm` is the only quota/reuse cleanup path and refuses production.
 - `npm run lint` checks the Next.js workspace.
 - `npm test` runs package and app unit tests.
 - `npm run build` builds packages and the web app.
@@ -18,7 +29,28 @@
 - `packages/crawler-rules` owns AI User-Agent classification.
 - `packages/log-parser` owns log normalization and aggregation.
 - `packages/geo-auditor` owns website audit logic and report JSON shape.
-- `apps/web` owns persistence, routes, and UI.
+- `packages/site-crawler` owns safe URL resolution, site identity, discovery, extraction, and representative-page selection.
+- `packages/ai-report-engine` owns model transport, prompts, report contracts, structured validation, and evidence verification.
+- `packages/public-search-observer` owns V2 public-search surfaces, authorities, canonical buyer questions, fanout, observations, coverage, registry, and prohibited-claim contracts. An adapter's existence is not certification.
+- `packages/answer-engine-observer` owns frozen historical V1 answer-snapshot contracts; active checkout and V2 Worker graphs must not import its provider adapters.
+- `packages/citation-intelligence` owns V2 public-source evidence graphs, entity resolution, evidence families, source eligibility/readiness, Grade A-D evidence, and non-causal opportunity hypotheses while preserving V1 exports.
+- `apps/web` owns PostgreSQL persistence, task orchestration, routes, access controls, and UI.
+
+## Production Boundaries
+
+- PostgreSQL is the only production report authority; do not restore SQLite or browser-local report persistence.
+- Every deployed Web/Worker process requires `OGC_DEPLOYMENT_PROFILE`, and its PostgreSQL `deployment_environment` marker must match before work is accepted.
+- Production free-site limits are always two distinct sites per rolling 24 hours; never add request-controlled or administrator bypasses. Forced regeneration exists only for protected staging Preview deployments.
+- Cloudflare Queue is notification-only. Payment, job, dispatch, refund, email, and access authority remains in PostgreSQL.
+- Persistent self-hosted Workers may use `OGC_JOB_QUEUE_PROVIDER=postgres` with `FULFILLMENT_MODE=realtime`; this polls the authoritative job table without creating empty batch-run records.
+- The web process creates jobs and serves reports. The worker is the only process that crawls pages or calls the configured model.
+- Only a verified payment Webhook may mark an order paid and create its exactly-once entitlement/deep job.
+- Free reports audit only the submitted homepage plus standard assets. Multi-page technical and AI evidence belongs to the authorized private deep bundle.
+- Terminal commercial jobs must use the atomic job-and-credit terminalization boundary; never split a terminal stage write from settlement/refund.
+- A report's persisted generation locale is immutable after it is established; interface-route locale changes UI chrome, not stored report prose.
+- Customer report delivery is HTML-only; keep Chromium PDF generation, hashes, page-count checks and storage private to Worker readiness, with no customer PDF route, action or email claim.
+- Client-IP rate limits trust Vercel's `x-vercel-forwarded-for` / overwritten `x-forwarded-for` headers only when `VERCEL=1` or `OGC_TRUST_VERCEL_HEADERS=true`; other proxy headers require an explicitly trusted proxy that overwrites them.
+- Never persist or log raw model API keys, report-credit keys, report access tokens, or unhashed client IPs.
 
 ## Verification
 

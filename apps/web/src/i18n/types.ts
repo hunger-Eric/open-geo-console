@@ -23,7 +23,7 @@ export interface Dictionary {
     title: string;
     description: string;
   };
-  nav: Record<"scanner" | "logs" | "caseStudy", string>;
+  nav: Record<"scanner" | "logs", string>;
   actions: Record<
     | "generateReport"
     | "openSampleLogReport"
@@ -31,7 +31,6 @@ export interface Dictionary {
     | "loadSample"
     | "copyLink"
     | "copiedLink"
-    | "printReport"
     | "switchToEnglish"
     | "switchToChinese"
     | "backToScanner"
@@ -43,13 +42,17 @@ export interface Dictionary {
     description: string;
     urlLabel: string;
     urlPlaceholder: string;
-    recentReportsTitle: string;
-    emptyRecentReports: string;
+    forceFreshLabel: string;
+    forceFreshDescription: string;
+    verifyingHuman: string;
+    acceptingReport: string;
+    scanProgressStarting: string;
+    scanProgressSlow: string;
+    scanProgressExtended: string;
     nextTitle: string;
     nextDescription: string;
-    firstCaseUrl: string;
   };
-  capabilities: Record<"geoAudit" | "crawlerLogs" | "selfHosted", { title: string; text: string }>;
+  capabilities: Record<"freeHomepage" | "evidenceAi" | "privateDeep", { title: string; text: string }>;
   report: {
     title: string;
     generatedFor: string;
@@ -77,12 +80,170 @@ export interface Dictionary {
     loadingReport: string;
     reportUnavailableTitle: string;
     reportUnavailableDescription: string;
+    findingAggregation: {
+      affectedPages: string;
+      representativePages: string;
+      morePages: string;
+      pageType: string;
+      template: string;
+      pageTypeLabels: Record<
+        | "home"
+        | "product"
+        | "service"
+        | "about"
+        | "pricing"
+        | "case-study"
+        | "contact"
+        | "blog"
+        | "news"
+        | "help"
+        | "careers"
+        | "legal"
+        | "other",
+        string
+      >;
+    };
     metricLabels: Record<"critical" | "warnings" | "pages" | "assets", string>;
     tableHeaders: Record<"url" | "status" | "h1" | "schema" | "text" | "links", string>;
     fields: Record<"present" | "missing" | "yes" | "no" | "error", string>;
     assetLabels: Record<"robotsTxt" | "sitemapXml" | "llmsTxt", string>;
     assetPresent: string;
     assetMissing: string;
+  };
+  workspace: {
+    tabs: Record<"overview" | "analysis" | "issues" | "bots" | "technical", string>;
+    currentSite: string;
+    lastScan: string;
+    submittedAt: string;
+    overviewTitle: string;
+    topFixes: string;
+    viewIssueDetails: string;
+    viewAllIssues: string;
+    botEvidenceTitle: string;
+    botEvidenceEmpty: string;
+    botEvidenceDescription: string;
+    botsObserved: string;
+    operatorsObserved: string;
+    latestEvidence: string;
+    issuesTitle: string;
+    issuesDescription: string;
+    botsTitle: string;
+    botsDescription: string;
+    technicalTitle: string;
+    technicalDescription: string;
+    importTitle: string;
+    importDescription: string;
+    pasteLogs: string;
+    analyzeAndSave: string;
+    analyzing: string;
+    replaceEvidence: string;
+    removeEvidence: string;
+    removing: string;
+    localFallback: string;
+    savedEvidence: string;
+    removedEvidence: string;
+    targetUrl: string;
+    detectedBots: string;
+    registry: string;
+    registryDescription: string;
+    noDetectedBots: string;
+    advancedSimulator: string;
+    advancedSimulatorDescription: string;
+    sourceLines: string;
+    updatedAt: string;
+    fileReady: string;
+    previousPage: string;
+    nextPage: string;
+    pageStatus: string;
+    backToReport: string;
+    errors: Record<"emptyLogs" | "payloadTooLarge" | "saveFailed" | "deleteFailed", string>;
+  };
+  aiReport: {
+    title: string;
+    description: string;
+    previewLabel: string;
+    deepLabel: string;
+    homepageScore: string;
+    homepageScoreDescription: string;
+    homepagePreviewNotice: string;
+    detectedPagesEstimate: string;
+    lockedDeepFeatures: string;
+    technicalScore: string;
+    aiDimensions: string;
+    organizationProfile: string;
+    executiveSummary: string;
+    topFindings: string;
+    pageTypes: string;
+    roadmap: string;
+    coverage: string;
+    evidence: string;
+    confidence: string;
+    unlockTitle: string;
+    unlockDescription: string;
+    accessKeyLabel: string;
+    unlockAction: string;
+    unlocking: string;
+    startNewAnalysis: string;
+    statusTitle: string;
+    waitingDescription: string;
+    retryWaitDescription: string;
+    repairWaitDescription: string;
+    acceptedDescription: string;
+    technicalFailedDescription: string;
+    completedDescription: string;
+    completedLimitedDescription: string;
+    failedDescription: string;
+    unavailableDescription: string;
+    previewUnavailableDescription: string;
+    reportLanguage: string;
+    reportLanguageEnglish: string;
+    reportLanguageChinese: string;
+    regenerateLanguage: string;
+    correctionInProgress: string;
+    siteTechnicalScore: string;
+    queuePosition: string;
+    queueJobsAhead: string;
+    queueActiveJobsInPool: string;
+    queueAwaitingClaim: string;
+    activeTierPreview: string;
+    activeTierDeep: string;
+    activeTierMixed: string;
+    progressValue: string;
+    stageDescriptions: Record<
+      "queued" | "discovering" | "planning" | "fetching" | "analyzing" | "synthesizing" | "completed" | "completed_limited" | "failed",
+      string
+    >;
+  };
+  commerce: {
+    offerTitle: string;
+    offerDescription: string;
+    scopeEvidence: string;
+    scopeFixes: string;
+    scopeRoadmap: string;
+    emailLabel: string;
+    currencyLabel: string;
+    deliveryPromise: string;
+    buyAction: string;
+    redirecting: string;
+    verifying: string;
+    unavailable: string;
+    checkoutFailed: string;
+    humanVerification: string;
+    operatorKeySummary: string;
+    paymentReturnTitle: string;
+    paymentConfirming: string;
+    paymentNotCompleted: string;
+    paymentCancelled: string;
+    paymentQueued: string;
+    paymentGenerating: string;
+    paymentCompleted: string;
+    paymentFailed: string;
+    paymentRefundPending: string;
+    paymentRefunded: string;
+    paymentRefundFailed: string;
+    paymentStatusUnavailable: string;
+    paymentRefresh: string;
+    paymentRefreshStopped: string;
   };
   logs: {
     title: string;
@@ -167,5 +328,16 @@ export interface Dictionary {
   };
   severity: Record<SeverityKey, string>;
   findings: Record<string, FindingMessage>;
-  errors: Record<"emptyUrl" | "unsupportedUrl" | "scanFailed", string>;
+  errors: Record<
+    | "emptyUrl"
+    | "unsupportedUrl"
+    | "scanFailed"
+    | "humanVerificationRequired"
+    | "freePreviewLimitReached"
+    | "stagingFreePreviewLimitReached"
+    | "stagingConcurrencyLimitReached"
+    | "forceFreshUnavailable"
+    | "deploymentConfigurationInvalid",
+    string
+  >;
 }

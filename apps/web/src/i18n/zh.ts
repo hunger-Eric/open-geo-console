@@ -7,9 +7,8 @@ export const zh = {
     description: "面向企业官网的开源 AI Search Console。"
   },
   nav: {
-    scanner: "体检入口",
-    logs: "日志报告",
-    caseStudy: "首个案例"
+    scanner: "网站分析",
+    logs: "高级日志工具"
   },
   actions: {
     generateReport: "生成 GEO 报告",
@@ -18,37 +17,39 @@ export const zh = {
     loadSample: "载入示例",
     copyLink: "复制链接",
     copiedLink: "已复制",
-    printReport: "打印 / PDF",
     switchToEnglish: "English",
     switchToChinese: "中文",
     backToScanner: "返回体检入口",
     importLogs: "导入日志文件"
   },
   scanner: {
-    title: "生成一份可分享的 GEO 体检报告",
+    title: "分析你的企业官网",
     description:
-      "输入企业官网，检查 AI 搜索可读性，并生成包含管理摘要、证据和修复优先级的交付报告。",
+      "免费预览检查首页；私密深度报告会分析站内有效页面，并提供有证据支撑的 AI 分析。",
     urlLabel: "企业官网 URL",
     urlPlaceholder: "https://company.com",
-    recentReportsTitle: "最近报告",
-    emptyRecentReports: "还没有保存的扫描。默认网址是第一个公开案例。",
-    nextTitle: "下一步：AI 爬虫访问",
-    nextDescription:
-      "完成 GEO 体检后，接入访问日志，确认 OpenAI、Claude、Perplexity 或字节等 AI 爬虫是否来过。",
-    firstCaseUrl: "https://me.itheheda.online"
+    forceFreshLabel: "强制重新生成报告",
+    forceFreshDescription: "仅测试站可用。生成新的抓取与报告期间，旧报告仍保持可访问。",
+    verifyingHuman: "正在验证",
+    acceptingReport: "正在创建报告",
+    scanProgressStarting: "正在创建安全的报告工作区；打开后，网站分析会继续在后台运行。",
+    scanProgressSlow: "接单速度比预期慢，请求仍受重复提交保护。",
+    scanProgressExtended: "服务接收请求较慢，请保持页面打开；重新尝试也会恢复同一个请求。",
+    nextTitle: "已经有服务器访问日志？",
+    nextDescription: "验证可识别的 AI 爬虫是否真实访问过该站点。"
   },
   capabilities: {
-    geoAudit: {
-      title: "GEO 体检",
-      text: "检查机器可读资产、页面结构、Schema 和正文可读性。"
+    freeHomepage: {
+      title: "免费首页检查",
+      text: "查看首页技术评分和最重要的一条已核验证据问题。"
     },
-    crawlerLogs: {
-      title: "爬虫日志",
-      text: "识别 OpenAI、Claude、Perplexity、字节等 AI 爬虫访问。"
+    evidenceAi: {
+      title: "有证据支撑的 AI 分析",
+      text: "每条正式 AI 结论都会和已抓取的页面证据核对。"
     },
-    selfHosted: {
-      title: "自托管",
-      text: "本地 SQLite，无需账号，适合开源部署。"
+    privateDeep: {
+      title: "私密深度报告",
+      text: "分析站内有效页面、覆盖限制、AI 维度评分和 90 天路线图。"
     }
   },
   report: {
@@ -68,7 +69,7 @@ export const zh = {
     auditedPages: "已体检页面",
     technicalAppendix: "技术附录",
     noFindings: "未发现问题。这个站点状态良好。",
-    shareDescription: "你可以分享此报告链接，或打印为客户可读的 PDF。",
+    shareDescription: "你可以通过安全 HTML 链接分享此报告。",
     logNextTitle: "补充 AI 爬虫访问证据",
     logNextDescription: "上传或粘贴访问日志，查看已知 AI 爬虫是否访问过该站点。",
     legacyFindingLabel: "旧版问题",
@@ -78,6 +79,28 @@ export const zh = {
     loadingReport: "正在读取浏览器中保存的报告副本。",
     reportUnavailableTitle: "报告不可用",
     reportUnavailableDescription: "服务端存储和当前浏览器都没有找到这份报告。请重新扫描生成新报告。",
+    findingAggregation: {
+      affectedPages: "影响 {count} 个页面",
+      representativePages: "代表 URL",
+      morePages: "另有 {count} 个受影响页面",
+      pageType: "页面类型：{pageType}",
+      template: "页面模板：{template}",
+      pageTypeLabels: {
+        home: "首页",
+        product: "产品",
+        service: "服务",
+        about: "关于",
+        pricing: "定价",
+        "case-study": "案例",
+        contact: "联系",
+        blog: "博客",
+        news: "新闻",
+        help: "帮助",
+        careers: "招聘",
+        legal: "法务",
+        other: "其他"
+      }
+    },
     metricLabels: {
       critical: "严重",
       warnings: "警告",
@@ -106,6 +129,159 @@ export const zh = {
     },
     assetPresent: "{asset} 可访问。",
     assetMissing: "{asset} 未找到，或返回内容为空。"
+  },
+  workspace: {
+    tabs: {
+      overview: "概览",
+      analysis: "AI 分析",
+      issues: "问题",
+      bots: "AI Bot 证据",
+      technical: "技术"
+    },
+    currentSite: "网站上下文",
+    lastScan: "最近扫描",
+    submittedAt: "提交时间",
+    overviewTitle: "体检概览",
+    topFixes: "最高优先级修复",
+    viewIssueDetails: "查看修复指引",
+    viewAllIssues: "查看全部问题",
+    botEvidenceTitle: "AI Bot 证据",
+    botEvidenceEmpty: "尚未补充访问日志证据。",
+    botEvidenceDescription: "只有需要验证真实、可识别的 AI bot 访问时，才需要导入日志。",
+    botsObserved: "已观测 bot",
+    operatorsObserved: "已观测公司",
+    latestEvidence: "最近证据",
+    issuesTitle: "问题与修复建议",
+    issuesDescription: "按严重程度依次处理；GEO 评分始终只基于网站体检。",
+    botsTitle: "AI Bot 证据",
+    botsDescription: "导入访问日志补充访问证据，不保存原始日志、IP 或完整路径。",
+    technicalTitle: "技术详情",
+    technicalDescription: "机器可读资产、已体检页面和实施参考。",
+    importTitle: "导入访问日志",
+    importDescription: "支持 Nginx combined 日志与 Cloudflare JSONL；分析完成后丢弃原始日志。",
+    pasteLogs: "改为粘贴日志",
+    analyzeAndSave: "分析并保存摘要",
+    analyzing: "正在分析日志",
+    replaceEvidence: "替换证据",
+    removeEvidence: "移除证据",
+    removing: "正在移除证据",
+    localFallback: "共享存储不可用，摘要仅保存在当前浏览器。",
+    savedEvidence: "脱敏证据摘要已保存。",
+    removedEvidence: "已移除保存的证据摘要。",
+    targetUrl: "目标网站",
+    detectedBots: "已识别 bot",
+    registry: "完整 registry",
+    registryDescription: "策略 token 和未出现条目只用于参考，不代表真实访问。",
+    noDetectedBots: "这份日志中没有发现可识别的 AI bot。",
+    advancedSimulator: "高级：外部爬虫模拟器",
+    advancedSimulatorDescription: "生成带标记的请求，再由导入日志判断哪些尝试真正被观测到。",
+    sourceLines: "日志行数",
+    updatedAt: "更新时间",
+    fileReady: "等待分析：{name}",
+    previousPage: "上一页",
+    nextPage: "下一页",
+    pageStatus: "第 {page} / {total} 页",
+    backToReport: "返回报告",
+    errors: {
+      emptyLogs: "请先粘贴或导入访问日志。",
+      payloadTooLarge: "日志内容超过 5 MiB 限制。",
+      saveFailed: "分析已完成，但共享摘要无法保存。",
+      deleteFailed: "无法移除已保存的证据摘要。"
+    }
+  },
+  aiReport: {
+    title: "有证据支撑的 AI 官网分析",
+    description: "真实大模型读取经过筛选的官网页面，逐条核验结论与抓取证据，并生成可追溯的企业官网报告。",
+    previewLabel: "免费 AI 预览",
+    deepLabel: "深度报告",
+    homepageScore: "首页技术评分",
+    homepageScoreDescription: "此评分只基于提交的首页以及 robots.txt、sitemap.xml、llms.txt 标准检查，不代表全站评分。",
+    homepagePreviewNotice: "免费预览只分析了首页。",
+    detectedPagesEstimate: "检测到约 {count} 个站内 URL，但尚未抓取或分析这些页面的内容。",
+    lockedDeepFeatures: "解锁深度报告后可查看完整网站问题、页面证据、维度解释、改写示例和 90 天行动路线图。",
+    technicalScore: "技术评分",
+    aiDimensions: "AI 维度评分",
+    organizationProfile: "企业身份画像",
+    executiveSummary: "执行摘要",
+    topFindings: "最高影响问题",
+    pageTypes: "页面类型分析",
+    roadmap: "90 天行动路线图",
+    coverage: "覆盖范围与限制",
+    evidence: "证据",
+    confidence: "置信度",
+    unlockTitle: "解锁深度 AI 报告",
+    unlockDescription: "消耗一次报告额度，分析最多 50 个代表页面并查看完整证据和行动方案。",
+    accessKeyLabel: "报告访问 Key",
+    unlockAction: "解锁深度报告",
+    unlocking: "正在预留额度",
+    startNewAnalysis: "开始新的分析",
+    statusTitle: "报告状态",
+    waitingDescription: "报告正在生成，可恢复的工作会由系统自动处理。",
+    retryWaitDescription: "系统遇到临时问题，已完成的工作会保留，报告将自动继续。",
+    repairWaitDescription: "服务正在修复履约依赖，已完成的工作会保留，你无需重复提交。",
+    acceptedDescription: "请求已接收，系统正在检查网站；结果准备好后会自动显示在这里。",
+    technicalFailedDescription: "系统无法安全地分析这个网站，请使用可公开访问的网址重新生成。",
+    completedDescription: "报告已完成 — 已分析 {count} 个页面。",
+    completedLimitedDescription: "报告已完成 — 已分析 {count} 个有效页面，排除 {failed} 个不可访问页面；限制已列出，报告额度已退回。",
+    failedDescription: "本次分析无法完成，报告额度已经退回。你可以稍后开始新的分析。",
+    unavailableDescription: "当前部署尚未配置 AI 分析服务。",
+    previewUnavailableDescription: "本次免费 AI 预览未生成，但首页技术报告已经完成，可以正常查看。",
+    reportLanguage: "报告语言",
+    reportLanguageEnglish: "英文",
+    reportLanguageChinese: "中文",
+    regenerateLanguage: "用{language}重新生成",
+    correctionInProgress: "正在按报告设定语言重新生成。",
+    siteTechnicalScore: "全站技术评分 — 基于 {count} 个有效页面",
+    queuePosition: "当前排队第 {position} 位",
+    queueJobsAhead: "同类报告队列前面还有 {count} 个任务。",
+    queueActiveJobsInPool: "当前任务已经排在最前，Worker 仍在处理同类任务。",
+    queueAwaitingClaim: "当前任务已经排在最前，后台 Worker 尚未领取；启动后会自动继续，无需重复提交。",
+    activeTierPreview: "当前正在处理免费 AI 预览。",
+    activeTierDeep: "当前正在处理深度报告。",
+    activeTierMixed: "当前同时在处理免费预览和深度报告。",
+    progressValue: "报告生成已完成 {progress}%",
+    stageDescriptions: {
+      queued: "请求已接收，后台 Worker 会自动开始处理。",
+      discovering: "正在检查网址安全并读取提交的首页。",
+      planning: "正在准备这份报告的证据计划。",
+      fetching: "正在收集可读取的网站证据。",
+      analyzing: "正在分析已采集的证据。",
+      synthesizing: "正在整理经过验证的问题和建议。",
+      completed: "报告已完成。",
+      completed_limited: "报告已完成，并标明了覆盖范围限制。",
+      failed: "报告未能完成。"
+    }
+  },
+  commerce: {
+    offerTitle: "解锁全站 AI 搜索可见性深度诊断",
+    offerDescription: "一次购买对应当前网站的一份私密深度报告，付款金额始终由服务端价格目录确定。",
+    scopeEvidence: "覆盖最多 50 个代表页面的证据",
+    scopeFixes: "按优先级排列的修复建议与页面示例",
+    scopeRoadmap: "可执行的 90 天行动路线图",
+    emailLabel: "报告接收邮箱",
+    currencyLabel: "付款币种",
+    deliveryPromise: "付款后 24 小时内通过邮件交付，否则全额退款。",
+    buyAction: "解锁全站分析",
+    redirecting: "正在打开安全收银台",
+    verifying: "正在验证",
+    unavailable: "当前部署尚未配置在线购买。",
+    checkoutFailed: "暂时无法打开安全收银台，请重试。",
+    humanVerification: "请先完成人机验证。",
+    operatorKeySummary: "已经有报告访问 Key？",
+    paymentReturnTitle: "付款与交付状态",
+    paymentConfirming: "你已返回原报告页。系统正在等待已验签的付款确认，无需重复付款。",
+    paymentNotCompleted: "收银台已在付款确认前关闭。你可以准备好后重新发起付款。",
+    paymentCancelled: "付款已取消，系统没有创建报告权益。",
+    paymentQueued: "付款已确认。私密深度报告已进入队列，将在 24 小时内通过邮件交付。",
+    paymentGenerating: "付款已确认，私密深度报告正在生成。",
+    paymentCompleted: "私密深度报告已完成，请通过交付邮件安全访问。",
+    paymentFailed: "报告未能完成，系统正在自动处理退款。",
+    paymentRefundPending: "全额退款已提交，正在等待支付机构确认。",
+    paymentRefunded: "全额退款已确认。",
+    paymentRefundFailed: "自动退款未能完成，请联系支持团队协助核验并处理退款。",
+    paymentStatusUnavailable: "无法读取当前报告对应的订单状态。",
+    paymentRefresh: "刷新状态",
+    paymentRefreshStopped: "自动更新已暂停，请刷新以读取最新验签状态。"
   },
   logs: {
     title: "AI Bot 可见性报告",
@@ -194,8 +370,8 @@ export const zh = {
     simulator: {
       title: "外部 AI 爬虫模拟器",
       description:
-        "先对首个案例站点运行模拟器，再把生成的尝试请求与下方粘贴或导入的访问日志进行对比。",
-      targetUrlLabel: "首个案例 URL",
+        "对你输入的网站运行模拟器，再把生成的尝试请求与下方粘贴或导入的访问日志进行对比。",
+      targetUrlLabel: "网站 URL",
       runButton: "运行模拟器",
       runningButton: "正在运行模拟器",
       compareButton: "与导入日志对比",
@@ -267,6 +443,17 @@ export const zh = {
       description: "AI 爬虫依赖清晰标题来判断页面用途。",
       recommendation: "补充明确的页面标题，写清公司、产品或页面意图。"
     },
+    "page.duplicateTitles": {
+      title: "多个页面重复使用同一标题",
+      description: "{affectedCount} 个页面使用相同标题，削弱了生成式引擎对页面独立用途的识别。",
+      recommendation: "为每个页面使用简洁、用途明确的独立标题，仅保留短小的通用品牌标识。"
+    },
+    "page.dominantTitleTemplate": {
+      title: "页面标题被共享模板主导",
+      description: "{affectedCount} 个页面共享长度为 {sharedLength} 个字符的标题片段，页面独有语义占比过低。",
+      recommendation:
+        "优先表达当前页面的独特用途，并将重复部分缩减为简洁的品牌标识，以便生成式引擎准确选择和引用页面。"
+    },
     "page.missingMetaDescription": {
       title: "缺少 meta description",
       description: "页面缺少可用于搜索和 AI 预览场景的简明摘要。",
@@ -296,12 +483,18 @@ export const zh = {
     "homepage.missingOpenGraph": {
       title: "首页缺少 OpenGraph 元数据",
       description: "在问答或社交预览场景中，展示效果可能不够稳定。",
-      recommendation: "为首页添加 OpenGraph title、description、URL 和 image 元数据。"
+      recommendation: "为首页添加 OpenGraph 标题、描述、URL 和图片元数据。"
     }
   },
   errors: {
     emptyUrl: "请输入企业官网 URL。",
     unsupportedUrl: "仅支持 HTTP 和 HTTPS URL。",
-    scanFailed: "暂时无法扫描该网站。"
+    scanFailed: "暂时无法扫描该网站。",
+    humanVerificationRequired: "开始诊断前，请先完成人机验证。",
+    freePreviewLimitReached: "每个网络地址在任意 24 小时内最多免费分析 2 个不同网站，请稍后再试。",
+    stagingFreePreviewLimitReached: "受保护测试站已达到滚动 24 小时网站额度上限。",
+    stagingConcurrencyLimitReached: "已有两个测试报告正在运行，请等待其中一个完成后再试。",
+    forceFreshUnavailable: "强制重新生成仅在受保护测试站可用。",
+    deploymentConfigurationInvalid: "当前部署没有配置安全且一致的环境身份。"
   }
 } satisfies Dictionary;

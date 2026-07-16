@@ -19,7 +19,10 @@ export function formatDateTime(
     timeStyle: "short"
   }
 ): string {
-  return new Intl.DateTimeFormat(getIntlLocale(locale), options).format(new Date(value));
+  return new Intl.DateTimeFormat(getIntlLocale(locale), {
+    timeZone: "UTC",
+    ...options
+  }).format(new Date(value));
 }
 
 export function formatNumber(

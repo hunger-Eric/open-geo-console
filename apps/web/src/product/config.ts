@@ -1,20 +1,18 @@
-import { FileText, Globe2, Languages, Printer, Radar, ServerCog, Share2, Upload } from "lucide-react";
+import { FileCheck2, FileText, Globe2, Languages, Share2, Sparkles, Upload } from "lucide-react";
 
 export const navItems = [
   { key: "scanner", href: "/", external: false },
-  { key: "logs", href: "/logs", external: false },
-  { key: "caseStudy", href: "https://me.itheheda.online", external: true }
+  { key: "logs", href: "/logs", external: false }
 ] as const;
 
 export const scannerCapabilities = [
-  { key: "geoAudit", icon: FileText },
-  { key: "crawlerLogs", icon: ServerCog },
-  { key: "selfHosted", icon: Radar }
+  { key: "freeHomepage", icon: FileText },
+  { key: "evidenceAi", icon: Sparkles },
+  { key: "privateDeep", icon: FileCheck2 }
 ] as const;
 
 export const reportActions = [
   { key: "copyLink", icon: Share2, action: "copy" },
-  { key: "printReport", icon: Printer, action: "print" },
   { key: "uploadLogsNext", icon: Upload, action: "logs" }
 ] as const;
 

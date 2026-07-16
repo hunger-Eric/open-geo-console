@@ -2,31 +2,16 @@ import { NextResponse } from "next/server";
 import {
   analyzeSimulatorLogs,
   isNetworkFailure,
-  maybeRunSimulatorMatcher,
-  SimulatorInputError,
-  type MatchLogsRequest
+  readJsonRequest,
+  SimulatorInputError
 } from "../_lib/simulator-api";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as MatchLogsRequest;
-    const parsed = analyzeSimulatorLogs(body);
-    const simulatorComparison = await maybeRunSimulatorMatcher({
-      runId: parsed.comparison.runId,
-      attempted: parsed.attempted,
-      logInput: body.logInput ?? "",
-      analysis: parsed.analysis,
-      entries: parsed.entries
-    });
-
-    return NextResponse.json({
-      runId: parsed.comparison.runId,
-      analysis: parsed.analysis,
-      comparison: parsed.comparison,
-      simulatorComparison
-    });
+    const body = await readJsonRequest(request);
+    return NextResponse.json(analyzeSimulatorLogs(body));
   } catch (error) {
     if (error instanceof SimulatorInputError) {
       return jsonError(error.code, error.message, 400);
