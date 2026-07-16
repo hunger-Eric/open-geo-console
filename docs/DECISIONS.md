@@ -229,3 +229,9 @@ The protected-staging refresh boundary may create a new non-billable V3 evidence
 ## 2026-07-16: Generative web-search answers are the V3 product mainline
 
 For each of the three locked ordinary questions, one model operation must generate the answer and expose its web-search URL citations. Source retrieval, eligibility, ownership, and readiness remain an independent audit sidecar. That sidecar may add warnings or labels, but it cannot suppress an already generated answer or decide the commercial outcome. Only an explicit typed refusal is answerless; citation weakness becomes `source_limited`. This deliberately separates the customer promise, "answer the question and list the sources", from the stricter forensic evidence graph.
+
+## 2026-07-16: Source-selection diagnosis explains observable adoption without claiming model causality
+
+Prospective V3 reports persist `source_selection_diagnosis_v1` only after the same-response answer/source hashes and target-page foundation are fixed. It groups returned sources by domain, traces what each source contributed, records independently observable usefulness signals and compares them with the target. It does not expose a score, hidden ranking weight, citation probability or causal guarantee. Source inaccessibility degrades the relevant profile and limitation copy; it cannot remove an answer or change commercial settlement.
+
+The diagnosis is checkpointed as a nonblocking sidecar so a target-foundation change may rebuild it without repeating provider answer calls. New V3 readiness requires the diagnosis and all of its customer-visible prose in canonical HTML. Historical V3 payloads remain readable without reparsing or mutation and continue to render the prior cross-question summary.
