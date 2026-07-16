@@ -147,6 +147,30 @@ export async function finalizeReportV4PreAdmissionSnapshot(
   });
 }
 
+export async function loadReportV4PreAdmissionSnapshot(
+  input: ReportV4SiteSnapshotIdentityInput
+): Promise<ReportV4SiteSnapshotBundle | null> {
+  const expected = validateIdentity(input);
+  if (isMemoryPersistence()) {
+    const state = memoryState();
+    const boundId = state.reportBindings.get(expected.reportId);
+    if (!boundId) return null;
+    const snapshot = state.snapshots.get(boundId);
+    if (!snapshot) throw new Error("The bound V4 site snapshot is missing.");
+    assertIdentity(snapshot, expected);
+    return clone({ snapshot, pages: state.pages.get(snapshot.id) ?? [] });
+  }
+  await ensureDatabase();
+  const rows = await getSqlClient()<Array<Record<string, unknown>>>`
+    SELECT * FROM report_v4_site_snapshots WHERE report_id=${expected.reportId} ORDER BY created_at,id
+  `;
+  if (rows.length > 1) throw new Error("Multiple V4 site snapshots are bound to the same report; refusing implicit selection.");
+  if (!rows[0]) return null;
+  const snapshot = dbSnapshot(rows[0]);
+  assertIdentity(snapshot, expected);
+  return loadBundle(snapshot);
+}
+
 export async function resolvePaidReportV4SiteSnapshot(
   input: ResolvePaidReportV4SiteSnapshotInput
 ): Promise<ReportV4SiteSnapshotBundle> {

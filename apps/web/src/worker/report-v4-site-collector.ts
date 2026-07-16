@@ -37,6 +37,11 @@ export interface ReportV4SiteCollectorDependencies {
     signal?: AbortSignal
   ) => Promise<ReportV4HtmlRead>;
   readonly extractAnalyzableText: (read: ReportV4HtmlRead) => string;
+  readonly discoverCandidates?: (
+    read: ReportV4HtmlRead,
+    sourceCandidate: ReportV4SiteCandidate,
+    signal?: AbortSignal
+  ) => Promise<ReadonlyArray<ReportV4SiteCandidate>>;
 }
 
 export type ReportV4SiteCollectorExclusionReason =
@@ -53,6 +58,7 @@ export interface ReportV4SiteCollectionResult {
   readonly outcome: "unavailable" | "standard" | "custom_service";
   readonly analyzablePageCount: number;
   readonly pages: ReportV4CollectedPage[];
+  readonly discoveredCandidates: ReportV4SiteCandidate[];
   readonly exclusions: Array<{
     url: string;
     normalizedUrl?: string;
@@ -67,6 +73,7 @@ export async function collectReportV4Site(
 ): Promise<ReportV4SiteCollectionResult> {
   const pages: ReportV4CollectedPage[] = [];
   const exclusions: ReportV4SiteCollectionResult["exclusions"] = [];
+  const discoveredCandidates: ReportV4SiteCandidate[] = [];
   const admittedUrls = new Set<string>();
 
   for (const candidate of candidates) {
@@ -87,7 +94,8 @@ export async function collectReportV4Site(
     let raw: ReportV4HtmlRead;
     try {
       raw = await dependencies.readRawHtml(candidate, signal);
-    } catch {
+    } catch (error) {
+      rethrowAbortOrConcurrentError(error, signal);
       exclusions.push({ url: candidate.url, reason: "raw_fetch_failed" });
       continue;
     }
@@ -108,7 +116,10 @@ export async function collectReportV4Site(
     const rawClassification = classifyRead(candidate.siteUrl, raw, rawText);
     if (rawClassification.status === "analyzable") {
       const result = admitPage(rawClassification.page, "direct_readable", admittedUrls, pages, exclusions);
-      if (result === "capacity_exceeded") return customService(pages, exclusions);
+      if (result === "capacity_exceeded") return customService(pages, exclusions, discoveredCandidates);
+      if (result === "admitted" && dependencies.discoverCandidates) {
+        discoveredCandidates.push(...await discoverCandidates(dependencies, raw, candidate, signal));
+      }
       continue;
     }
     if (rawClassification.reason !== "empty_analyzable_body") {
@@ -119,7 +130,8 @@ export async function collectReportV4Site(
     let rendered: ReportV4HtmlRead;
     try {
       rendered = await dependencies.renderBrowserHtml(raw.url, signal);
-    } catch {
+    } catch (error) {
+      rethrowAbortOrConcurrentError(error, signal);
       exclusions.push({ url: raw.url, reason: "browser_render_failed" });
       continue;
     }
@@ -143,13 +155,16 @@ export async function collectReportV4Site(
       continue;
     }
     const result = admitPage(renderedClassification.page, "js_dependent", admittedUrls, pages, exclusions);
-    if (result === "capacity_exceeded") return customService(pages, exclusions);
+    if (result === "capacity_exceeded") return customService(pages, exclusions, discoveredCandidates);
+    if (result === "admitted" && dependencies.discoverCandidates) {
+      discoveredCandidates.push(...await discoverCandidates(dependencies, rendered, candidate, signal));
+    }
   }
 
   if (pages.length === 0) {
-    return { outcome: "unavailable", analyzablePageCount: 0, pages: [], exclusions };
+    return { outcome: "unavailable", analyzablePageCount: 0, pages: [], exclusions, discoveredCandidates };
   }
-  return { outcome: "standard", analyzablePageCount: pages.length, pages, exclusions };
+  return { outcome: "standard", analyzablePageCount: pages.length, pages, exclusions, discoveredCandidates };
 }
 
 function classifyReadMetadata(siteUrl: string, read: ReportV4HtmlRead) {
@@ -186,14 +201,16 @@ function admitPage(
 
 function customService(
   pages: ReportV4CollectedPage[],
-  exclusions: ReportV4SiteCollectionResult["exclusions"]
+  exclusions: ReportV4SiteCollectionResult["exclusions"],
+  discoveredCandidates: ReportV4SiteCandidate[]
 ): ReportV4SiteCollectionResult {
   const thresholdPages = pages.slice(0, V4_STANDARD_ANALYZABLE_PAGE_LIMIT + 1);
   return {
     outcome: "custom_service",
     analyzablePageCount: thresholdPages.length,
     pages: thresholdPages,
-    exclusions
+    exclusions,
+    discoveredCandidates
   };
 }
 
@@ -205,4 +222,25 @@ function exclusionFromClassification(
     ...(classification.normalizedUrl ? { normalizedUrl: classification.normalizedUrl } : {}),
     reason: classification.reason
   };
+}
+
+async function discoverCandidates(
+  dependencies: ReportV4SiteCollectorDependencies,
+  read: ReportV4HtmlRead,
+  candidate: ReportV4SiteCandidate,
+  signal?: AbortSignal
+): Promise<ReadonlyArray<ReportV4SiteCandidate>> {
+  try {
+    return await dependencies.discoverCandidates!(read, candidate, signal);
+  } catch (error) {
+    rethrowAbortOrConcurrentError(error, signal);
+    throw error;
+  }
+}
+
+function rethrowAbortOrConcurrentError(error: unknown, signal?: AbortSignal): void {
+  if (signal && error === signal.reason) throw signal.reason;
+  if (!signal?.aborted) return;
+  if (error instanceof Error && error.name === "AbortError") throw signal.reason ?? error;
+  throw error;
 }

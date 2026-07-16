@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   beginReportV4PreAdmissionSnapshot,
   finalizeReportV4PreAdmissionSnapshot,
+  loadReportV4PreAdmissionSnapshot,
   resolvePaidReportV4SiteSnapshot,
   type ReportV4SiteSnapshotPageInput
 } from "./report-v4-site-snapshots";
@@ -12,6 +13,32 @@ describe("V4 pre-admission site snapshot repository", () => {
   beforeEach(() => {
     delete process.env.DATABASE_URL;
     process.env.OPEN_GEO_DB_PATH = `memory-v4-site-${randomUUID()}`;
+  });
+
+  it("loads the exact collecting or terminal snapshot for recoverable admission", async () => {
+    const identity = fixtureIdentity("recoverable");
+    await expect(loadReportV4PreAdmissionSnapshot(identity)).resolves.toBeNull();
+
+    await beginReportV4PreAdmissionSnapshot(identity);
+    await expect(loadReportV4PreAdmissionSnapshot(identity)).resolves.toMatchObject({
+      snapshot: { ...identity, status: "collecting" },
+      pages: []
+    });
+    await expect(loadReportV4PreAdmissionSnapshot({ ...identity, siteKey: "wrong.example" }))
+      .rejects.toThrow(/identity/i);
+
+    await finalizeReportV4PreAdmissionSnapshot({
+      ...identity,
+      status: "completed",
+      completedAt: new Date("2030-01-01T00:05:00.000Z"),
+      contentIdentityHash: sha("recoverable-content"),
+      candidateUrlCount: 1,
+      pages: pages(1)
+    });
+    await expect(loadReportV4PreAdmissionSnapshot(identity)).resolves.toMatchObject({
+      snapshot: { status: "completed", contentIdentityHash: sha("recoverable-content") },
+      pages: [expect.objectContaining({ normalizedUrl: "https://example.com/page-1" })]
+    });
   });
 
   it("binds one immutable pre-admission identity and paid generation only resolves that exact terminal snapshot", async () => {

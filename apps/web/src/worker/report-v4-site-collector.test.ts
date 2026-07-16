@@ -8,6 +8,7 @@ import {
 
 // @requirement GEO-V4-CRAWL-02
 // @requirement GEO-V4-CRAWL-03
+// @requirement GEO-V4-CRAWL-04
 
 function candidate(index = 1, overrides: Partial<ReportV4SiteCandidate> = {}): ReportV4SiteCandidate {
   return {
@@ -228,5 +229,93 @@ describe("V4 site collector", () => {
     await collectReportV4Site([candidate()], deps, controller.signal);
     expect(deps.readRawHtml).toHaveBeenCalledWith(candidate(), controller.signal);
     expect(deps.renderBrowserHtml).toHaveBeenCalledWith("https://example.com/page-1", controller.signal);
+  });
+
+  it("propagates an aborted collection instead of recording a target-page failure", async () => {
+    const controller = new AbortController();
+    const reason = new Error("worker lease aborted");
+    controller.abort(reason);
+    const deps = dependencies({
+      readRawHtml: vi.fn(async () => { throw reason; })
+    });
+
+    await expect(collectReportV4Site([candidate()], deps, controller.signal)).rejects.toBe(reason);
+  });
+
+  it("preserves independent raw and browser errors when an abort happens concurrently", async () => {
+    const rawController = new AbortController();
+    const rawAbortReason = new Error("raw deadline");
+    const rawInfrastructureError = new Error("raw socket infrastructure failed");
+    const rawDeps = dependencies({
+      readRawHtml: vi.fn(async () => {
+        rawController.abort(rawAbortReason);
+        throw rawInfrastructureError;
+      })
+    });
+    await expect(collectReportV4Site([candidate()], rawDeps, rawController.signal))
+      .rejects.toBe(rawInfrastructureError);
+
+    const browserController = new AbortController();
+    const browserAbortReason = new Error("browser deadline");
+    const browserInfrastructureError = new Error("browser infrastructure failed");
+    const browserDeps = dependencies({
+      readRawHtml: vi.fn(async () => read(1, { html: "EMPTY" })),
+      renderBrowserHtml: vi.fn(async () => {
+        browserController.abort(browserAbortReason);
+        throw browserInfrastructureError;
+      })
+    });
+    await expect(collectReportV4Site([candidate()], browserDeps, browserController.signal))
+      .rejects.toBe(browserInfrastructureError);
+  });
+
+  it("normalizes a discovery AbortError to the exact signal reason", async () => {
+    const controller = new AbortController();
+    const reason = new Error("collector deadline reason");
+    const deps = dependencies({
+      discoverCandidates: vi.fn(async () => {
+        controller.abort(reason);
+        throw new DOMException("The operation was aborted", "AbortError");
+      })
+    });
+
+    await expect(collectReportV4Site([candidate()], deps, controller.signal)).rejects.toBe(reason);
+  });
+
+  it("returns dynamically discovered candidates only from the successful admitted read", async () => {
+    const discovered = [candidate(2), candidate(3)];
+    const discoverCandidates = vi.fn(async () => discovered);
+    const rawDeps = dependencies({ discoverCandidates });
+
+    await expect(collectReportV4Site([candidate()], rawDeps)).resolves.toMatchObject({
+      discoveredCandidates: discovered
+    });
+    expect(discoverCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ html: "readable page 1" }),
+      candidate(),
+      undefined
+    );
+
+    const browserDiscoverCandidates = vi.fn(async () => discovered);
+    const browserDeps = dependencies({
+      readRawHtml: vi.fn(async () => read(1, { html: "EMPTY" })),
+      renderBrowserHtml: vi.fn(async () => read(1, { html: "browser readable" })),
+      discoverCandidates: browserDiscoverCandidates
+    });
+    await collectReportV4Site([candidate()], browserDeps);
+    expect(browserDiscoverCandidates).toHaveBeenCalledTimes(1);
+    expect(browserDiscoverCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ html: "browser readable" }),
+      candidate(),
+      undefined
+    );
+  });
+
+  it("propagates discovery infrastructure failures instead of classifying them as page exclusions", async () => {
+    const deps = dependencies({
+      discoverCandidates: vi.fn(async () => { throw new Error("discovery repository unavailable"); })
+    });
+
+    await expect(collectReportV4Site([candidate()], deps)).rejects.toThrow("discovery repository unavailable");
   });
 });
