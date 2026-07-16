@@ -135,11 +135,20 @@ export function snapshotReferenceBinding(reportCutoff:string,snapshotCompletedAt
   return {evidenceCutoff:new Date(cutoff).toISOString(),freshnessState:age<=7*24*60*60_000?"fresh":age<=30*24*60*60_000?"historical":"insufficient"};
 }
 function sha(parts:string[]):string{return createHash("sha256").update(parts.join("\0")).digest("hex");}
-export function combinedV3CommercialOutcome(cards:readonly Pick<OpenGeoAnswerCardV3,"status"|"sentences">[]):"completed"|"completed_limited"|"failed"{
+export function combinedV3CommercialOutcome(cards: readonly OpenGeoAnswerCardV3[]): "completed" | "completed_limited" | "failed" {
   if(cards.length!==3)throw new TypeError("V3 commercial outcome requires exactly three answer cards.");
-  if(cards.every(({status})=>status==="answered"))return "completed";
-  if(cards.every(({status})=>status!=="insufficient"))return "completed_limited";
-  return cards.some(({sentences})=>sentences.some(({kind,evidenceIds})=>kind==="grounded_claim"&&evidenceIds.length>0))?"completed_limited":"failed";
+  const modes = new Set(cards.map((card) => card.answerMode ?? "legacy_evidence_bound_v1"));
+  if (modes.size !== 1) throw new TypeError("V3 commercial outcome rejects mixed answer modes.");
+  if (cards.every((card) => card.answerMode === "generative_search_v1")) {
+    const generative = cards;
+    if (generative.every((card) => card.status === "answered")) return "completed";
+    if (generative.some((card) => card.status === "refused" && card.refusal === null)) return "failed";
+    return generative.some((card) => card.status === "answered") ? "completed_limited" : "failed";
+  }
+  const legacyCards = cards;
+  if(legacyCards.every(({status})=>status==="answered"))return "completed";
+  if(legacyCards.every(({status})=>status!=="insufficient"))return "completed_limited";
+  return legacyCards.some(({sentences})=>sentences.some(({kind,evidenceIds})=>kind==="grounded_claim"&&evidenceIds.length>0))?"completed_limited":"failed";
 }
 function readyCombined(value:unknown):CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3{
   const contract=value&&typeof value==="object"&&!Array.isArray(value)?(value as {artifactContract?:unknown}).artifactContract:null;
