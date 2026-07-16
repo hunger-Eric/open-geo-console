@@ -8,7 +8,7 @@ import {
   getDatabasePoolSize,
   shouldRunDatabaseMigrations
 } from "./index";
-import { DATABASE_MIGRATIONS, V22_DATABASE_MIGRATIONS, V23_DATABASE_MIGRATIONS, V24_DATABASE_MIGRATIONS, V25_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V22_DATABASE_MIGRATIONS, V23_DATABASE_MIGRATIONS, V24_DATABASE_MIGRATIONS, V25_DATABASE_MIGRATIONS, V26_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 
 describe("database path selection", () => {
   const originalOpenGeoDbPath = process.env.OPEN_GEO_DB_PATH;
@@ -58,7 +58,7 @@ describe("database deployment marker", () => {
 
 describe("database schema marker", () => {
   it("uses the recoverable analysis-ledger schema with cascade-safe event cleanup", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(25);
+    expect(DATABASE_SCHEMA_VERSION).toBe(26);
   });
 
   it("contains the complete additive V2 authority and methodology migration", () => {
@@ -101,6 +101,26 @@ describe("database schema marker", () => {
     expect(sql).toContain("question_acquisition_checkpoints");
   });
 
+  it("isolates V4 methodology, enhancement lineage, limited snapshots, and terminal checkpoints", () => {
+    const sql = V26_DATABASE_MIGRATIONS.join("\n");
+    expect(sql).toContain("two_stage_geo_report_v4");
+    expect(sql).toContain("scan_jobs_v4_methodology_check");
+    expect(sql).toContain("artifact_contract='combined_geo_report_v4' AND fulfillment_methodology='two_stage_geo_report_v4' AND recommendation_report_version=4");
+    expect(sql).toContain("artifact_contract<>'combined_geo_report_v4') AND (fulfillment_methodology IS NULL OR fulfillment_methodology<>'two_stage_geo_report_v4'");
+    expect(sql).toContain("diagnosis_enhancement");
+    expect(sql).toContain("report_artifact_revisions_v4_kind_check");
+    expect(sql).toContain("report_artifact_revisions_v4_diagnosis_source_trigger");
+    expect(sql).toContain("revision_kind IN ('generation','correction','presentation_refresh','evidence_refresh','replacement','diagnosis_enhancement')");
+    expect(sql).toContain("artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND revision_kind<>'diagnosis_enhancement'");
+    expect(sql).toContain("status IN ('collecting','completed','completed_limited','unavailable','custom_service')");
+    expect(sql).toContain("status='completed_limited'");
+    expect(sql).toContain("OLD.state IN ('answered','unavailable')");
+    expect(sql).toContain("report_v4_question_checkpoints_terminal_immutability_trigger");
+    expect(sql).toContain("fulfillment_methodology = 'answer_engine_recommendation_forensics_v1' AND recommendation_report_version = 1");
+    expect(sql).toContain("fulfillment_methodology = 'public_search_source_forensics_v1' AND recommendation_report_version = 2");
+    expect(sql).toContain("pdf_sha256 IS NOT NULL AND pdf_storage_key IS NOT NULL");
+  });
+
   it("adds an append-only recovery ledger without replacing the legacy stage projection", () => {
     const sql = DATABASE_MIGRATIONS.join("\n");
     for (const column of ["execution_state", "current_phase", "checkpoint_revision", "phase_attempt", "resume_generation", "retry_not_before", "repair_reason_code", "repair_deadline_at"]) {
@@ -130,11 +150,12 @@ describe("database schema marker", () => {
   });
 
   it("runs only forward migrations when upgrading an existing schema", () => {
-    expect(databaseMigrationsAfter(21)).toEqual([...V22_DATABASE_MIGRATIONS, ...V23_DATABASE_MIGRATIONS, ...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(22)).toEqual([...V23_DATABASE_MIGRATIONS, ...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(23)).toEqual([...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(24)).toEqual([...V25_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(25)).toEqual([]);
+    expect(databaseMigrationsAfter(21)).toEqual([...V22_DATABASE_MIGRATIONS, ...V23_DATABASE_MIGRATIONS, ...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(22)).toEqual([...V23_DATABASE_MIGRATIONS, ...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(23)).toEqual([...V24_DATABASE_MIGRATIONS, ...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(24)).toEqual([...V25_DATABASE_MIGRATIONS, ...V26_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(25)).toEqual([...V26_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(26)).toEqual([]);
     expect(databaseMigrationsAfter(undefined)).toEqual([...DATABASE_MIGRATIONS]);
   });
 

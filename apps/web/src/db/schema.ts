@@ -26,8 +26,8 @@ import {
 export type ReportTier = "free" | "deep";
 export type ReportLocale = "en" | "zh";
 export type ReportTechnicalStatus = "pending" | "processing" | "completed" | "failed";
-export type ScanJobReason = "standard" | "system_recovery" | "locale_correction" | "staging_regeneration" | "paid_report_correction" | "staging_artifact_refresh" | "replacement_fulfillment";
-export type ArtifactRevisionKind = "generation" | "correction" | "presentation_refresh" | "evidence_refresh" | "replacement";
+export type ScanJobReason = "standard" | "system_recovery" | "locale_correction" | "staging_regeneration" | "paid_report_correction" | "staging_artifact_refresh" | "replacement_fulfillment" | "v4_diagnosis_enhancement";
+export type ArtifactRevisionKind = "generation" | "correction" | "presentation_refresh" | "evidence_refresh" | "replacement" | "diagnosis_enhancement";
 export type ScanJobStage =
   | "queued"
   | "discovering"
@@ -71,12 +71,13 @@ export type OrderRefundStatus = "not_required" | "pending" | "submitted" | "refu
 export type OrderDeliveryStatus = "not_queued" | "queued" | "sent" | "delivered" | "bounced" | "failed";
 export type PaymentEventProcessingStatus = "received" | "processed" | "ignored" | "failed";
 export type ReportProductContract = "legacy_website_audit_v1" | "recommendation_forensics_v1";
-export type ReportArtifactContract = ReportProductContract | "combined_geo_report_v1" | "combined_geo_report_v2" | "combined_geo_report_v3";
-export type ReportArtifactScope = ReportArtifactContract;
+export type ReportArtifactContract = ReportProductContract | "combined_geo_report_v1" | "combined_geo_report_v2" | "combined_geo_report_v3" | "combined_geo_report_v4";
+export type ReportArtifactScope = Exclude<ReportArtifactContract, "combined_geo_report_v4">;
 export type RecommendationFulfillmentMethodology =
   | "answer_engine_recommendation_forensics_v1"
-  | "public_search_source_forensics_v1";
-export type RecommendationReportVersion = 1 | 2;
+  | "public_search_source_forensics_v1"
+  | "two_stage_geo_report_v4";
+export type RecommendationReportVersion = 1 | 2 | 4;
 export type PaymentRefundReason = "completed_limited" | "report_failed" | "sla_missed" | "operator_approved";
 export type PaymentRefundState = "pending" | "submitted" | "succeeded" | "failed";
 export type EmailTemplateType =
@@ -163,6 +164,72 @@ export const scanReports = pgTable(
 
 export type ScanReportRow = typeof scanReports.$inferSelect;
 
+export type ReportV4SiteSnapshotStatus = "collecting" | "completed" | "completed_limited" | "unavailable" | "custom_service";
+export type ReportV4SiteSnapshotReadMode = "direct_readable" | "js_dependent";
+
+export const reportV4SiteSnapshots = pgTable(
+  "report_v4_site_snapshots",
+  {
+    id: text("id").primaryKey(),
+    reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "restrict" }),
+    siteKey: text("site_key").notNull(),
+    status: text("status").$type<ReportV4SiteSnapshotStatus>().notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    collectorConfigIdentityHash: text("collector_config_identity_hash").notNull(),
+    contentIdentityHash: text("content_identity_hash"),
+    candidateUrlCount: integer("candidate_url_count").notNull().default(0),
+    analyzablePageCount: integer("analyzable_page_count").notNull().default(0),
+    excludedPageCount: integer("excluded_page_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("report_v4_site_snapshots_report_identity_uidx").on(table.id, table.reportId),
+    index("report_v4_site_snapshots_report_status_idx").on(table.reportId, table.status, table.capturedAt),
+    check("report_v4_site_snapshots_site_check", sql`length(btrim(${table.siteKey})) > 0`),
+    check("report_v4_site_snapshots_status_check", sql`${table.status} IN ('collecting','completed','completed_limited','unavailable','custom_service')`),
+    check("report_v4_site_snapshots_hash_check", sql`${table.collectorConfigIdentityHash} ~ '^[a-f0-9]{64}$' AND (${table.contentIdentityHash} IS NULL OR ${table.contentIdentityHash} ~ '^[a-f0-9]{64}$')`),
+    check("report_v4_site_snapshots_count_check", sql`${table.candidateUrlCount} >= 0 AND ${table.analyzablePageCount} >= 0 AND ${table.excludedPageCount} >= 0 AND ${table.candidateUrlCount} >= ${table.analyzablePageCount} + ${table.excludedPageCount}`),
+    check("report_v4_site_snapshots_terminal_shape_check", sql`(
+      (${table.status}='collecting' AND ${table.completedAt} IS NULL AND ${table.contentIdentityHash} IS NULL)
+      OR (${table.status}='completed' AND ${table.completedAt} IS NOT NULL AND ${table.completedAt} >= ${table.capturedAt} AND ${table.contentIdentityHash} IS NOT NULL AND ${table.analyzablePageCount} BETWEEN 1 AND 50)
+      OR (${table.status}='completed_limited' AND ${table.completedAt} IS NOT NULL AND ${table.completedAt} >= ${table.capturedAt} AND ${table.contentIdentityHash} IS NOT NULL AND ${table.analyzablePageCount} BETWEEN 1 AND 50 AND ${table.excludedPageCount} > 0)
+      OR (${table.status}='unavailable' AND ${table.completedAt} IS NOT NULL AND ${table.completedAt} >= ${table.capturedAt} AND ${table.contentIdentityHash} IS NOT NULL AND ${table.analyzablePageCount}=0)
+      OR (${table.status}='custom_service' AND ${table.completedAt} IS NOT NULL AND ${table.completedAt} >= ${table.capturedAt} AND ${table.contentIdentityHash} IS NOT NULL AND ${table.analyzablePageCount} >= 51)
+    )`)
+  ]
+);
+export type ReportV4SiteSnapshotRow = typeof reportV4SiteSnapshots.$inferSelect;
+
+export const reportV4SiteSnapshotPages = pgTable(
+  "report_v4_site_snapshot_pages",
+  {
+    id: text("id").primaryKey(),
+    snapshotId: text("snapshot_id").notNull().references(() => reportV4SiteSnapshots.id, { onDelete: "restrict" }),
+    ordinal: integer("ordinal").notNull(),
+    normalizedUrl: text("normalized_url").notNull(),
+    analyzable: boolean("analyzable").notNull(),
+    readMode: text("read_mode").$type<ReportV4SiteSnapshotReadMode>(),
+    summary: text("summary"),
+    contentHash: text("content_hash"),
+    exclusionReason: text("exclusion_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("report_v4_site_snapshot_pages_ordinal_uidx").on(table.snapshotId, table.ordinal),
+    uniqueIndex("report_v4_site_snapshot_pages_url_uidx").on(table.snapshotId, table.normalizedUrl),
+    check("report_v4_site_snapshot_pages_ordinal_check", sql`${table.ordinal} > 0`),
+    check("report_v4_site_snapshot_pages_url_check", sql`${table.normalizedUrl} ~ '^https?://'`),
+    check("report_v4_site_snapshot_pages_read_mode_check", sql`${table.readMode} IS NULL OR ${table.readMode} IN ('direct_readable','js_dependent')`),
+    check("report_v4_site_snapshot_pages_hash_check", sql`${table.contentHash} IS NULL OR ${table.contentHash} ~ '^[a-f0-9]{64}$'`),
+    check("report_v4_site_snapshot_pages_shape_check", sql`(
+      (${table.analyzable}=true AND ${table.readMode} IS NOT NULL AND ${table.summary} IS NOT NULL AND length(btrim(${table.summary})) > 0 AND ${table.contentHash} IS NOT NULL AND ${table.exclusionReason} IS NULL)
+      OR (${table.analyzable}=false AND ${table.readMode} IS NULL AND ${table.summary} IS NULL AND ${table.contentHash} IS NULL AND ${table.exclusionReason} IS NOT NULL AND length(btrim(${table.exclusionReason})) > 0)
+    )`)
+  ]
+);
+export type ReportV4SiteSnapshotPageRow = typeof reportV4SiteSnapshotPages.$inferSelect;
+
 export const reportBotEvidence = pgTable("report_bot_evidence", {
   reportId: text("report_id")
     .primaryKey()
@@ -233,13 +300,16 @@ export const scanJobs = pgTable(
         AND ${table.fulfillmentMethodology} IS NOT NULL
         AND ${table.recommendationReportVersion} IS NOT NULL
         AND ((${table.fulfillmentMethodology} = 'answer_engine_recommendation_forensics_v1' AND ${table.recommendationReportVersion} = 1)
-          OR (${table.fulfillmentMethodology} = 'public_search_source_forensics_v1' AND ${table.recommendationReportVersion} = 2)))
+          OR (${table.fulfillmentMethodology} = 'public_search_source_forensics_v1' AND ${table.recommendationReportVersion} = 2)
+          OR (${table.fulfillmentMethodology} = 'two_stage_geo_report_v4' AND ${table.recommendationReportVersion} = 4)))
     )`),
-    check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration', 'paid_report_correction', 'staging_artifact_refresh', 'replacement_fulfillment')`),
-    check("scan_jobs_artifact_contract_check", sql`${table.artifactContract} IS NULL OR ${table.artifactContract} IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3')`),
+    check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration', 'paid_report_correction', 'staging_artifact_refresh', 'replacement_fulfillment', 'v4_diagnosis_enhancement')`),
+    check("scan_jobs_artifact_contract_check", sql`${table.artifactContract} IS NULL OR ${table.artifactContract} IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3','combined_geo_report_v4')`),
     check("scan_jobs_correction_credit_check", sql`${table.reason} <> 'paid_report_correction' OR (${table.creditReservationId} IS NULL AND ${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND ${table.correctionId} IS NOT NULL AND ${table.businessQuestionSetId} IS NOT NULL)`),
     check("scan_jobs_refresh_credit_check", sql`${table.reason} <> 'staging_artifact_refresh' OR (${table.creditReservationId} IS NULL AND ${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND ${table.correctionId} IS NULL AND ${table.businessQuestionSetId} IS NOT NULL AND ${table.tier} = 'deep')`),
     check("scan_jobs_replacement_fulfillment_check", sql`(${table.reason} = 'replacement_fulfillment' AND ${table.replacementFulfillmentId} IS NOT NULL AND ${table.creditReservationId} IS NULL AND ${table.artifactContract} = 'combined_geo_report_v3' AND ${table.correctionId} IS NULL AND ${table.businessQuestionSetId} IS NOT NULL AND ${table.tier} = 'deep') OR (${table.reason} <> 'replacement_fulfillment' AND ${table.replacementFulfillmentId} IS NULL)`),
+    check("scan_jobs_v4_methodology_check", sql`(${table.artifactContract}='combined_geo_report_v4' AND ${table.fulfillmentMethodology}='two_stage_geo_report_v4' AND ${table.recommendationReportVersion}=4) OR ((${table.artifactContract} IS NULL OR ${table.artifactContract}<>'combined_geo_report_v4') AND (${table.fulfillmentMethodology} IS NULL OR ${table.fulfillmentMethodology}<>'two_stage_geo_report_v4'))`),
+    check("scan_jobs_v4_enhancement_check", sql`${table.reason} <> 'v4_diagnosis_enhancement' OR (${table.tier}='deep' AND ${table.productContract}='recommendation_forensics_v1' AND ${table.fulfillmentMethodology}='two_stage_geo_report_v4' AND ${table.recommendationReportVersion}=4 AND ${table.artifactContract}='combined_geo_report_v4' AND ${table.businessQuestionSetId} IS NOT NULL AND ${table.creditReservationId} IS NULL AND ${table.correctionId} IS NULL AND ${table.replacementFulfillmentId} IS NULL)`),
     check(
       "scan_jobs_stage_check",
       sql`${table.stage} IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')`
@@ -1063,7 +1133,8 @@ export const paymentOrders = pgTable(
         AND ${table.fulfillmentMethodology} IS NOT NULL
         AND ${table.recommendationReportVersion} IS NOT NULL
         AND ((${table.fulfillmentMethodology} = 'answer_engine_recommendation_forensics_v1' AND ${table.recommendationReportVersion} = 1)
-          OR (${table.fulfillmentMethodology} = 'public_search_source_forensics_v1' AND ${table.recommendationReportVersion} = 2)))
+          OR (${table.fulfillmentMethodology} = 'public_search_source_forensics_v1' AND ${table.recommendationReportVersion} = 2)
+          OR (${table.fulfillmentMethodology} = 'two_stage_geo_report_v4' AND ${table.recommendationReportVersion} = 4)))
       OR (${table.productCode} <> 'recommendation_forensics_v1' AND ${table.fulfillmentMethodology} IS NULL AND ${table.recommendationReportVersion} IS NULL)
     )`),
     check("payment_orders_tax_amount_check", sql`${table.taxAmountMinor} IS NULL OR ${table.taxAmountMinor} >= 0`),
@@ -1109,6 +1180,7 @@ export const reportBusinessQuestionSets = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
+    uniqueIndex("report_business_question_sets_v4_identity_uidx").on(table.id, table.reportId),
     uniqueIndex("report_business_question_sets_report_revision_uidx").on(table.reportId, table.revision),
     uniqueIndex("report_business_question_sets_order_revision_uidx").on(table.orderId, table.revision),
     check("report_business_question_sets_revision_check", sql`${table.revision} > 0`),
@@ -1134,6 +1206,7 @@ export const reportBusinessQuestions = pgTable(
     derivation: jsonb("derivation").notNull().default({})
   },
   (table) => [
+    uniqueIndex("report_business_questions_v4_identity_uidx").on(table.id, table.questionSetId, table.ordinal),
     uniqueIndex("report_business_questions_set_ordinal_uidx").on(table.questionSetId, table.ordinal),
     uniqueIndex("report_business_questions_set_purpose_uidx").on(table.questionSetId, table.purpose),
     check("report_business_questions_ordinal_check", sql`${table.ordinal} BETWEEN 1 AND 3`),
@@ -1141,6 +1214,46 @@ export const reportBusinessQuestions = pgTable(
   ]
 );
 export type ReportBusinessQuestionRow = typeof reportBusinessQuestions.$inferSelect;
+
+export type ReportV4QuestionCheckpointState = "queued" | "answering" | "retrying" | "answered" | "unavailable";
+
+export const reportV4QuestionCheckpoints = pgTable(
+  "report_v4_question_checkpoints",
+  {
+    identityHash: text("identity_hash").primaryKey(),
+    reportId: text("report_id").notNull(),
+    jobId: text("job_id").notNull(),
+    questionSetId: text("question_set_id").notNull(),
+    questionId: text("question_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    state: text("state").$type<ReportV4QuestionCheckpointState>().notNull(),
+    questionIdentityHash: text("question_identity_hash").notNull(),
+    modelConfigIdentityHash: text("model_config_identity_hash").notNull(),
+    inputIdentityHash: text("input_identity_hash").notNull(),
+    providerCallCount: integer("provider_call_count").notNull().default(0),
+    answerPayload: jsonb("answer_payload").$type<unknown>(),
+    sourcePayload: jsonb("source_payload").$type<unknown[]>().notNull().default([]),
+    answerContentHash: text("answer_content_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("report_v4_question_checkpoints_job_ordinal_uidx").on(table.jobId, table.ordinal),
+    uniqueIndex("report_v4_question_checkpoints_job_question_uidx").on(table.jobId, table.questionId),
+    foreignKey({ columns: [table.jobId, table.reportId], foreignColumns: [scanJobs.id, scanJobs.reportId], name: "report_v4_question_checkpoints_job_report_fkey" }).onDelete("restrict"),
+    foreignKey({ columns: [table.questionId, table.questionSetId, table.ordinal], foreignColumns: [reportBusinessQuestions.id, reportBusinessQuestions.questionSetId, reportBusinessQuestions.ordinal], name: "report_v4_question_checkpoints_question_fkey" }).onDelete("restrict"),
+    foreignKey({ columns: [table.questionSetId, table.reportId], foreignColumns: [reportBusinessQuestionSets.id, reportBusinessQuestionSets.reportId], name: "report_v4_question_checkpoints_question_set_fkey" }).onDelete("restrict"),
+    foreignKey({ columns: [table.snapshotId, table.reportId], foreignColumns: [reportV4SiteSnapshots.id, reportV4SiteSnapshots.reportId], name: "report_v4_question_checkpoints_snapshot_fkey" }).onDelete("restrict"),
+    check("report_v4_question_checkpoints_ordinal_check", sql`${table.ordinal} BETWEEN 1 AND 3`),
+    check("report_v4_question_checkpoints_state_check", sql`${table.state} IN ('queued','answering','retrying','answered','unavailable')`),
+    check("report_v4_question_checkpoints_hash_check", sql`${table.identityHash} ~ '^[a-f0-9]{64}$' AND ${table.questionIdentityHash} ~ '^[a-f0-9]{64}$' AND ${table.modelConfigIdentityHash} ~ '^[a-f0-9]{64}$' AND ${table.inputIdentityHash} ~ '^[a-f0-9]{64}$' AND (${table.answerContentHash} IS NULL OR ${table.answerContentHash} ~ '^[a-f0-9]{64}$')`),
+    check("report_v4_question_checkpoints_call_count_check", sql`${table.providerCallCount} BETWEEN 0 AND 2`),
+    check("report_v4_question_checkpoints_source_check", sql`jsonb_typeof(${table.sourcePayload})='array' AND jsonb_array_length(${table.sourcePayload}) <= 5`),
+    check("report_v4_question_checkpoints_answer_shape_check", sql`(${table.state}='answered' AND ${table.providerCallCount} BETWEEN 1 AND 2 AND ${table.answerPayload} IS NOT NULL AND ${table.answerContentHash} IS NOT NULL) OR (${table.state}<>'answered' AND ${table.answerPayload} IS NULL AND ${table.answerContentHash} IS NULL)`)
+  ]
+);
+export type ReportV4QuestionCheckpointRow = typeof reportV4QuestionCheckpoints.$inferSelect;
 
 export const reportCorrections = pgTable(
   "report_corrections",
@@ -1196,11 +1309,12 @@ export const reportArtifactRevisions = pgTable(
     uniqueIndex("report_artifact_revisions_one_active_uidx").on(table.reportId).where(sql`${table.status} = 'active'`),
     foreignKey({ columns: [table.sourceArtifactRevisionId], foreignColumns: [table.id], name: "report_artifact_revisions_source_fkey" }).onDelete("restrict"),
     check("report_artifact_revisions_revision_check", sql`${table.revision} > 0`),
-    check("report_artifact_revisions_contract_check", sql`${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3')`),
+    check("report_artifact_revisions_contract_check", sql`${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3','combined_geo_report_v4')`),
     check("report_artifact_revisions_status_check", sql`${table.status} IN ('pending','ready','active','failed')`),
-    check("report_artifact_revisions_kind_check", sql`${table.revisionKind} IN ('generation','correction','presentation_refresh','evidence_refresh','replacement')`),
-    check("report_artifact_revisions_lineage_check", sql`(${table.revisionKind} IN ('presentation_refresh','evidence_refresh') AND ${table.sourceArtifactRevisionId} IS NOT NULL AND ${table.correctionId} IS NULL AND ${table.replacementFulfillmentId} IS NULL) OR (${table.revisionKind} = 'replacement' AND ${table.sourceArtifactRevisionId} IS NULL AND ${table.correctionId} IS NULL AND ${table.replacementFulfillmentId} IS NOT NULL) OR (${table.revisionKind} IN ('generation','correction') AND ${table.sourceArtifactRevisionId} IS NULL AND ${table.replacementFulfillmentId} IS NULL)`),
-    check("report_artifact_revisions_ready_check", sql`${table.status} NOT IN ('ready','active') OR (${table.readyAt} IS NOT NULL AND ${table.htmlSha256} IS NOT NULL AND ${table.pdfSha256} IS NOT NULL AND ${table.pdfStorageKey} IS NOT NULL)`)
+    check("report_artifact_revisions_kind_check", sql`${table.revisionKind} IN ('generation','correction','presentation_refresh','evidence_refresh','replacement','diagnosis_enhancement')`),
+    check("report_artifact_revisions_lineage_check", sql`(${table.revisionKind} IN ('presentation_refresh','evidence_refresh','diagnosis_enhancement') AND ${table.sourceArtifactRevisionId} IS NOT NULL AND ${table.correctionId} IS NULL AND ${table.replacementFulfillmentId} IS NULL) OR (${table.revisionKind} = 'replacement' AND ${table.sourceArtifactRevisionId} IS NULL AND ${table.correctionId} IS NULL AND ${table.replacementFulfillmentId} IS NOT NULL) OR (${table.revisionKind} IN ('generation','correction') AND ${table.sourceArtifactRevisionId} IS NULL AND ${table.replacementFulfillmentId} IS NULL)`),
+    check("report_artifact_revisions_v4_kind_check", sql`(${table.artifactContract}='combined_geo_report_v4' AND ${table.revisionKind} IN ('generation','diagnosis_enhancement')) OR (${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND ${table.revisionKind}<>'diagnosis_enhancement')`),
+    check("report_artifact_revisions_ready_check", sql`${table.status} NOT IN ('ready','active') OR (${table.readyAt} IS NOT NULL AND ${table.htmlSha256} IS NOT NULL AND ((${table.artifactContract}='combined_geo_report_v4' AND ${table.pdfSha256} IS NULL AND ${table.pdfStorageKey} IS NULL) OR (${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND ${table.pdfSha256} IS NOT NULL AND ${table.pdfStorageKey} IS NOT NULL)))`)
   ]
 );
 export type ReportArtifactRevisionRow = typeof reportArtifactRevisions.$inferSelect;
