@@ -65,6 +65,13 @@ export interface LoadReportV4PageSummariesInput {
   readonly contentIdentityHash: string;
 }
 
+export interface LoadReportV4PageSummaryByLineageInput {
+  readonly reportId: string;
+  readonly snapshotId: string;
+  readonly pageUrl: string;
+  readonly contentHash: string;
+}
+
 export interface PersistedReportV4PageSummary {
   readonly identityHash: string;
   readonly reportId: string;
@@ -93,6 +100,7 @@ export interface ReportV4PageSummaryStore {
 export interface ReportV4PageSummaryRepository {
   persist(input: PersistReportV4PageSummaryInput): Promise<PersistedReportV4PageSummary>;
   loadForWebsiteSynthesis(input: LoadReportV4PageSummariesInput): Promise<readonly ReportV4PageSummary[]>;
+  loadByExactLineage(input: LoadReportV4PageSummaryByLineageInput): Promise<ReportV4PageSummary | null>;
 }
 
 export interface ReportV4PageSummarySql {
@@ -119,7 +127,8 @@ export function createReportV4PageSummaryRepository(
 ): ReportV4PageSummaryRepository {
   return {
     persist: (input) => persistWithStore(input, store),
-    loadForWebsiteSynthesis: (input) => loadWithStore(input, store)
+    loadForWebsiteSynthesis: (input) => loadWithStore(input, store),
+    loadByExactLineage: (input) => loadByExactLineageWithStore(input, store)
   };
 }
 
@@ -135,6 +144,13 @@ export async function loadReportV4PageSummariesForWebsiteSynthesis(
   repository: ReportV4PageSummaryRepository = createReportV4PageSummaryRepository()
 ): Promise<readonly ReportV4PageSummary[]> {
   return repository.loadForWebsiteSynthesis(input);
+}
+
+export async function loadReportV4PageSummaryByExactLineage(
+  input: LoadReportV4PageSummaryByLineageInput,
+  repository: ReportV4PageSummaryRepository = createReportV4PageSummaryRepository()
+): Promise<ReportV4PageSummary | null> {
+  return repository.loadByExactLineage(input);
 }
 
 export function createMemoryReportV4PageSummaryStore(
@@ -262,6 +278,37 @@ async function loadWithStore(
     }
     assertWebsiteSynthesisBounds(parsed.map(({ summary }) => summary));
     return deepFreeze(parsed.map(({ summary }) => summary));
+  });
+}
+
+async function loadByExactLineageWithStore(
+  inputValue: LoadReportV4PageSummaryByLineageInput,
+  store: ReportV4PageSummaryStore
+): Promise<ReportV4PageSummary | null> {
+  const reportId = requiredText(inputValue.reportId, "reportId");
+  const snapshotId = requiredText(inputValue.snapshotId, "snapshotId");
+  const pageUrl = httpUrl(inputValue.pageUrl, "pageUrl");
+  const contentHash = sha256(inputValue.contentHash, "page contentHash");
+  return store.transaction(async (tx) => {
+    const rawSnapshot = await tx.findSnapshot(reportId, snapshotId);
+    if (!rawSnapshot) return null;
+    const snapshot = parseSnapshot(rawSnapshot);
+    if (!PAID_SYNTHESIS_STATUSES.has(snapshot.status)) return null;
+    const pages = (await tx.listPages(snapshotId)).map(parsePage);
+    const matches = pages.filter((page) => page.analyzable && page.normalizedUrl === pageUrl && page.contentHash === contentHash);
+    if (matches.length > 1) throw new Error("The exact V4 page lineage query returned multiple matching pages.");
+    const page = matches[0];
+    if (!page) return null;
+    const rows = (await tx.listSummaries(snapshotId)).filter((row) => row.pageId === page.id);
+    if (rows.length > 1) throw new Error("The exact V4 page summary query returned multiple rows for one page.");
+    const row = rows[0];
+    if (!row) return null;
+    const parsed = parsePersisted(row, page);
+    if (parsed.reportId !== reportId || parsed.snapshotId !== snapshotId || parsed.summary.url !== pageUrl
+      || parsed.summary.contentHash !== contentHash) {
+      throw new Error("Persisted V4 page summary exact lineage drift was detected.");
+    }
+    return parsed.summary;
   });
 }
 

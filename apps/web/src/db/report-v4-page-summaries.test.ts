@@ -4,6 +4,7 @@ import {
   createMemoryReportV4PageSummaryStore,
   createPostgresReportV4PageSummaryStore,
   createReportV4PageSummaryRepository,
+  loadReportV4PageSummaryByExactLineage,
   type ReportV4PageSummaryPostgresDatabase,
   type ReportV4PageSummaryRow,
   type ReportV4PageSummarySnapshotRow,
@@ -110,6 +111,23 @@ describe("V4 hierarchical page-summary persistence", () => {
     expect(loaded.map(({ pageId }) => pageId)).toEqual(["page-1", "page-2"]);
     expect(Object.isFrozen(loaded)).toBe(true);
     expect(Object.isFrozen(loaded[0]!.chunks[0]!.sourceLocations)).toBe(true);
+  });
+
+  it("loads only an exact persisted page by immutable URL and content lineage", async () => {
+    const terminal = memoryRepository();
+    const persisted = await terminal.persist(input("page-1"));
+    const repository = createReportV4PageSummaryRepository(createMemoryReportV4PageSummaryStore({
+      snapshots: [snapshot("completed", 2)], pages: pages(), summaries: [storedRow(persisted)]
+    }));
+    await expect(loadReportV4PageSummaryByExactLineage({
+      reportId: "report-1", snapshotId: "snapshot-1", pageUrl: "https://example.com/page-1", contentHash: hash(retainedText("page-1"))
+    }, repository)).resolves.toEqual(persisted.summary);
+    await expect(loadReportV4PageSummaryByExactLineage({
+      reportId: "report-1", snapshotId: "snapshot-1", pageUrl: "https://example.com/page-1", contentHash: hash("drift")
+    }, repository)).resolves.toBeNull();
+    await expect(loadReportV4PageSummaryByExactLineage({
+      reportId: "other-report", snapshotId: "snapshot-1", pageUrl: "https://example.com/page-1", contentHash: hash(retainedText("page-1"))
+    }, repository)).resolves.toBeNull();
   });
 
   it("fails closed on missing, extra and ineligible terminal snapshot summaries", async () => {

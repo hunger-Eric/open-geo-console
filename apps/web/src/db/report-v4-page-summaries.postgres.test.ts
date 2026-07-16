@@ -5,7 +5,8 @@ import { DATABASE_MIGRATIONS } from "./migrations";
 import {
   createPostgresReportV4PageSummaryStore,
   createReportV4PageSummaryPostgresDatabase,
-  createReportV4PageSummaryRepository
+  createReportV4PageSummaryRepository,
+  loadReportV4PageSummaryByExactLineage
 } from "./report-v4-page-summaries";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
@@ -60,6 +61,11 @@ describeDisposablePostgres("V4 page-summary repository PostgreSQL parity", () =>
     });
     expect(loaded.map(({ pageId }) => pageId)).toEqual(["snapshot-main-page-1", "snapshot-main-page-2"]);
     expect(Object.isFrozen(loaded[0]!.chunks)).toBe(true);
+    await expect(loadReportV4PageSummaryByExactLineage({
+      reportId: "report-main", snapshotId: "snapshot-main",
+      pageUrl: "https://example.com/snapshot-main-page-1",
+      contentHash: hash(retainedText("snapshot-main-page-1"))
+    }, repository)).resolves.toEqual(loaded[0]);
     await expect(repository.loadForWebsiteSynthesis({
       reportId: "wrong-report", snapshotId: "snapshot-main", contentIdentityHash: hash("snapshot-main")
     }))
