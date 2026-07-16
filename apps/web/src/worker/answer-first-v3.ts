@@ -23,8 +23,13 @@ import {
   type ProviderDiscoveryV1,
   type RecommendationForensicReportV2
 } from "@open-geo-console/ai-report-engine";
+import type { SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 import { toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import { JobError } from "./job-errors";
+import {
+  buildSourceSelectionDiagnosisForGenerativeV3,
+  type SourceSelectionTargetPageSignal
+} from "./source-selection-diagnosis";
 
 export const ANSWER_FIRST_V3_CHECKPOINT_VERSION = "answer-first-v3-checkpoint-v1" as const;
 export const GENERATIVE_ANSWER_FIRST_V3_CHECKPOINT_VERSION = "answer-first-v3-checkpoint-v2" as const;
@@ -56,7 +61,7 @@ export interface AnswerFirstV3CheckpointV1 {
 
 export interface AnswerFirstV3CheckpointV2 {
   version: typeof GENERATIVE_ANSWER_FIRST_V3_CHECKPOINT_VERSION;
-  stage: "answers_collected" | "cards_ready";
+  stage: "answers_collected" | "cards_ready" | "diagnosis_ready";
   identityHash: string;
   questionSetIdentity: string;
   providerId: string;
@@ -70,6 +75,7 @@ export interface AnswerFirstV3CheckpointV2 {
   engineProvenance: OpenGeoEngineProvenanceV3;
   answerResults: [GenerativeSearchAnswerResult, GenerativeSearchAnswerResult, GenerativeSearchAnswerResult];
   answerCards?: [GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3];
+  sourceSelectionDiagnosis?: SourceSelectionDiagnosisV1;
 }
 
 export type AnswerFirstV3Checkpoint = AnswerFirstV3CheckpointV1 | AnswerFirstV3CheckpointV2;
@@ -103,6 +109,7 @@ export interface ResolveGenerativeAnswerFirstV3Input {
   targetAliases?: readonly string[];
   competitors?: readonly { entityId: string; aliases: readonly string[] }[];
   auditSources?: readonly AnswerFirstV3StoredSource[];
+  targetPages?: readonly SourceSelectionTargetPageSignal[];
   checkpoint?: AnswerFirstV3Checkpoint | null;
   saveCheckpoint?(checkpoint: AnswerFirstV3CheckpointV2): Promise<void>;
   now?: () => Date;
@@ -384,8 +391,24 @@ export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAns
   const answerCards = await buildGenerativeCards(input, questions, answerResults, perAnswerHashes, perSourceHashes);
   if (input.auditSources === undefined) return { checkpoint: collected, answerCards, reused: !providerCalls };
 
-  const ready: AnswerFirstV3CheckpointV2 = { ...collected, stage: "cards_ready", answerCards };
-  if (!resumed?.answerCards || JSON.stringify(resumed.answerCards) !== JSON.stringify(answerCards)) {
+  const cardsReady: AnswerFirstV3CheckpointV2 = { ...collected, stage: "cards_ready", answerCards };
+  const ready: AnswerFirstV3CheckpointV2 = input.targetPages !== undefined && input.targetUrl
+    ? {
+        ...cardsReady,
+        stage: "diagnosis_ready",
+        sourceSelectionDiagnosis: buildSourceSelectionDiagnosisForGenerativeV3({
+          answerCards,
+          auditSources: input.auditSources,
+          targetUrl: input.targetUrl,
+          targetPages: input.targetPages,
+          locale: input.locale,
+          answerHash,
+          sourceHash
+        })
+      }
+    : cardsReady;
+  if (!resumed?.answerCards || JSON.stringify(resumed.answerCards) !== JSON.stringify(answerCards) ||
+      JSON.stringify(resumed.sourceSelectionDiagnosis) !== JSON.stringify(ready.sourceSelectionDiagnosis)) {
     await input.saveCheckpoint?.(ready);
   }
   return { checkpoint: ready, answerCards, reused: !providerCalls };

@@ -356,18 +356,38 @@ describe("generative answer-first V3 Worker service", () => {
     const provider = generativeProvider(ids.map((id, index) => generatedAnswer(id, index)));
     const collected = await resolveGenerativeAnswerFirstV3({ questionSet, provider, locale: "zh-CN", region: "CN" });
     const audit = ids.map((id, index) => source(`audit-${index}`, `observation-${index}`, `query-${index}`, `https://${id}.example/service`, "来源", `${id}.example`, "已独立检索正文。", index === 0 ? "institution" : "earned_editorial"));
-    const enriched = await resolveGenerativeAnswerFirstV3({ questionSet, provider, locale: "zh-CN", region: "CN", auditSources: audit, checkpoint: collected.checkpoint });
+    const targetPages = [{ url: "https://target.example/", status: 200, title: "Target", metaDescription: "跨境物流", h1: ["Target"], h2: [], canonical: "https://target.example/", hasOpenGraph: true, hasJsonLd: false, readableTextLength: 300, internalLinks: 2 }];
+    const enriched = await resolveGenerativeAnswerFirstV3({ questionSet, provider, locale: "zh-CN", region: "CN", targetUrl: "https://target.example/", targetPages, auditSources: audit, checkpoint: collected.checkpoint });
 
     expect(provider.answerWithSources).toHaveBeenCalledTimes(3);
     expect(enriched.checkpoint.answerHash).toBe(collected.checkpoint.answerHash);
     expect(enriched.checkpoint.sourceHash).toBe(collected.checkpoint.sourceHash);
+    expect(enriched.checkpoint.stage).toBe("diagnosis_ready");
+    expect(enriched.checkpoint.sourceSelectionDiagnosis?.version).toBe("source_selection_diagnosis_v1");
     expect(enriched.answerCards.map(({ answerText }) => answerText)).toEqual(collected.answerCards.map(({ answerText }) => answerText));
     expect(enriched.answerCards[0].sources[0]).toMatchObject({ retrievalStatus: "verified_body", ownershipCategory: "institution" });
 
     const resumedProvider = generativeProvider([]);
-    const resumed = await resolveGenerativeAnswerFirstV3({ questionSet, provider: resumedProvider, locale: "zh-CN", region: "CN", auditSources: audit, checkpoint: enriched.checkpoint });
+    const resumed = await resolveGenerativeAnswerFirstV3({ questionSet, provider: resumedProvider, locale: "zh-CN", region: "CN", targetUrl: "https://target.example/", targetPages, auditSources: audit, checkpoint: enriched.checkpoint });
     expect(resumedProvider.answerWithSources).not.toHaveBeenCalled();
     expect(resumed.answerCards).toEqual(enriched.answerCards);
+    expect(resumed.checkpoint.sourceSelectionDiagnosis).toEqual(enriched.checkpoint.sourceSelectionDiagnosis);
+
+    const changedProvider = generativeProvider([]);
+    const changed = await resolveGenerativeAnswerFirstV3({
+      questionSet,
+      provider: changedProvider,
+      locale: "zh-CN",
+      region: "CN",
+      targetUrl: "https://target.example/",
+      targetPages: [{ ...targetPages[0]!, hasJsonLd: true }],
+      auditSources: audit,
+      checkpoint: enriched.checkpoint
+    });
+    expect(changedProvider.answerWithSources).not.toHaveBeenCalled();
+    expect(changed.checkpoint.answerHash).toBe(enriched.checkpoint.answerHash);
+    expect(changed.checkpoint.sourceHash).toBe(enriched.checkpoint.sourceHash);
+    expect(changed.checkpoint.sourceSelectionDiagnosis?.inputIdentity.targetFoundationHash).not.toBe(enriched.checkpoint.sourceSelectionDiagnosis?.inputIdentity.targetFoundationHash);
   });
 
   it("rejects market-statistic-only Q1 after one bounded semantic correction", async () => {
