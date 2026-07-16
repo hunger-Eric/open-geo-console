@@ -71,7 +71,7 @@ export async function runGenerativeAnswerProbeCommand(
     question: options.question,
     locale: options.locale,
     region: options.region,
-    signal: dependencies.signal ?? AbortSignal.timeout(120_000)
+    signal: dependencies.signal ?? AbortSignal.timeout(180_000)
   });
   return {
     profile: staging.profile,
