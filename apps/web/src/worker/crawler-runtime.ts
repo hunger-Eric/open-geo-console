@@ -16,6 +16,11 @@ import {
 import type { ExtractedPage, PageCandidate, PageType, PlannedPage } from "@open-geo-console/ai-report-engine";
 import { createHash } from "node:crypto";
 import { configuredPublicDnsResolver, createSafeFetch } from "@/server/safe-fetch";
+import type {
+  ReportV4HtmlRead,
+  ReportV4SiteCandidate,
+  ReportV4SiteCollectorDependencies
+} from "./report-v4-site-collector";
 
 const CRAWLER_USER_AGENT = "OpenGeoConsoleBot/1.0 (+https://github.com/open-geo-console)";
 const MAX_SITEMAP_DOCUMENTS = 200;
@@ -37,6 +42,94 @@ export interface FetchedEvidencePage {
   httpStatus: number;
   contentHash: string;
   browserRendered: boolean;
+}
+
+export interface ReportV4AdmissionDiscovery {
+  targetUrl: string;
+  siteKey: string;
+  candidates: ReportV4SiteCandidate[];
+  robotsPolicy: RobotsPolicy;
+}
+
+export interface ReportV4AdmissionBrowserDocument {
+  url: string;
+  html: string;
+}
+
+export async function discoverReportV4AdmissionSite(
+  targetUrl: string,
+  signal?: AbortSignal,
+  fetchImpl: typeof fetch = createSafeFetch()
+): Promise<ReportV4AdmissionDiscovery> {
+  const discovered = await discoverSite(targetUrl, "deep", fetchImpl, signal);
+  return {
+    targetUrl: discovered.targetUrl,
+    siteKey: discovered.siteKey,
+    robotsPolicy: discovered.robotsPolicy,
+    candidates: discovered.deterministicCandidates.map(({ url }) => reportV4Candidate(
+      discovered.targetUrl,
+      url,
+      discovered.robotsPolicy
+    ))
+  };
+}
+
+export function createReportV4AdmissionCollectorDependencies(input: {
+  targetUrl: string;
+  robotsPolicy: RobotsPolicy;
+  fetchImpl?: typeof fetch;
+  renderBrowser?: (url: string, signal?: AbortSignal) => Promise<ReportV4AdmissionBrowserDocument | null>;
+}): ReportV4SiteCollectorDependencies {
+  const fetchImpl = input.fetchImpl ?? createSafeFetch();
+  const renderBrowser = input.renderBrowser ?? renderReportV4AdmissionHtml;
+  return {
+    async readRawHtml(candidate, signal) {
+      if (!isAllowedByRobots(candidate.url, input.robotsPolicy)) {
+        return excludedByRobots(candidate.url);
+      }
+      const response = await fetchImpl(candidate.url, {
+        signal,
+        headers: { "user-agent": CRAWLER_USER_AGENT }
+      });
+      const finalUrl = response.headers.get("x-ogc-final-url") ?? candidate.url;
+      const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+      if (response.status !== 401 && response.status !== 403 && !response.ok) {
+        throw new CrawlPageError("unsupported-content", `Page returned HTTP ${response.status}.`, {
+          status: response.status,
+          disposition: response.status >= 500 || response.status === 429 ? "transient" : "permanent"
+        });
+      }
+      return {
+        url: finalUrl,
+        networkSafety: "public",
+        access: response.status === 401 || response.status === 403 ? "login_required" : "public",
+        contentType,
+        html: await response.text(),
+        ...(!isAllowedByRobots(finalUrl, input.robotsPolicy) ? { explicitExclusion: "robots_denied" as const } : {})
+      };
+    },
+    async renderBrowserHtml(url, signal) {
+      if (!isAllowedByRobots(url, input.robotsPolicy)) return excludedByRobots(url);
+      const rendered = await renderBrowser(url, signal);
+      if (!rendered) throw new Error("Browser rendering returned no readable document.");
+      return {
+        url: rendered.url,
+        networkSafety: "public",
+        access: "public",
+        contentType: "text/html",
+        html: rendered.html,
+        ...(!isAllowedByRobots(rendered.url, input.robotsPolicy) ? { explicitExclusion: "robots_denied" as const } : {})
+      };
+    },
+    extractAnalyzableText(read) {
+      return extractPageContent(read.html, read.url, { maximumReadableCharacters: 100_000 }).text;
+    },
+    async discoverCandidates(read) {
+      const discovery = new SiteDiscovery(input.targetUrl);
+      discovery.addHtmlDocument(read.html, read.url);
+      return discovery.getUrls().map(({ url }) => reportV4Candidate(input.targetUrl, url, input.robotsPolicy));
+    }
+  };
 }
 
 export async function discoverSite(
@@ -81,7 +174,8 @@ export async function discoverSite(
       if (tier === "deep") {
         for (const url of nested) if (!visitedSitemaps.has(url)) sitemapQueue.push(url);
       }
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw signal.reason ?? error;
       // A broken optional sitemap must not discard usable homepage/link discovery.
     }
   }
@@ -161,7 +255,7 @@ export async function fetchEvidencePage(
   if (extracted.browserFallback.required) {
     let rendered: string | null;
     try {
-      rendered = await renderWithBrowser(finalUrl, signal);
+      rendered = (await renderReportV4AdmissionHtml(finalUrl, signal))?.html ?? null;
     } catch (error) {
       throw new CrawlPageError(
         "browser",
@@ -201,7 +295,10 @@ export async function fetchEvidencePage(
   };
 }
 
-async function renderWithBrowser(url: string, signal?: AbortSignal): Promise<string | null> {
+export async function renderReportV4AdmissionHtml(
+  url: string,
+  signal?: AbortSignal
+): Promise<ReportV4AdmissionBrowserDocument | null> {
   signal?.throwIfAborted();
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: process.env.OGC_BROWSER_HEADLESS !== "false" });
@@ -230,11 +327,34 @@ async function renderWithBrowser(url: string, signal?: AbortSignal): Promise<str
     await page.goto(url, { waitUntil: "networkidle", timeout: 30_000 });
     signal?.throwIfAborted();
     await resolveSafeUrl(page.url(), { allowBenchmarkNetwork, resolver });
+    const finalUrl = page.url();
     const html = await page.content();
-    return Buffer.byteLength(html, "utf8") <= 2 * 1024 * 1024 ? html : null;
+    return Buffer.byteLength(html, "utf8") <= 2 * 1024 * 1024 ? { url: finalUrl, html } : null;
   } finally {
     await browser.close();
   }
+}
+
+function reportV4Candidate(siteUrl: string, url: string, robotsPolicy: RobotsPolicy): ReportV4SiteCandidate {
+  return {
+    siteUrl,
+    url,
+    networkSafety: "public",
+    access: "public",
+    contentType: "text/html",
+    ...(!isAllowedByRobots(url, robotsPolicy) ? { explicitExclusion: "robots_denied" as const } : {})
+  };
+}
+
+function excludedByRobots(url: string): ReportV4HtmlRead {
+  return {
+    url,
+    networkSafety: "public",
+    access: "public",
+    contentType: "text/html",
+    html: "",
+    explicitExclusion: "robots_denied"
+  };
 }
 
 export function toAiPageType(pageType: CrawlPageType): PageType {

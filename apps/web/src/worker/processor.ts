@@ -87,6 +87,7 @@ import {
   processReportV4PreAdmissionJob,
   type ReportV4PreAdmissionRunner
 } from "./report-v4-pre-admission";
+import { createProductionReportV4AdmissionRunner } from "./report-v4-admission-production";
 
 interface StoredPageEvidence {
   page: ExtractedPage;
@@ -147,12 +148,17 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
   };
   let checkpoint = normalizeCheckpoint(job.checkpoint);
   try {
+    const reportV4PreAdmissionRunner = selectReportV4PreAdmissionRunner(
+      job,
+      options.reportV4PreAdmissionRunner,
+      () => createProductionReportV4AdmissionRunner({ checkpointJob })
+    );
     if (await processReportV4PreAdmissionJob({
       job,
       workerId,
       signal: execution.controller.signal,
       remainingMs: () => execution.remainingMs(),
-      runner: options.reportV4PreAdmissionRunner,
+      runner: reportV4PreAdmissionRunner,
       terminalizeJob: terminalizeScanJob
     })) return;
     const fulfillmentTarget = resolveRecommendationFulfillmentTarget(job);
@@ -582,6 +588,15 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
   } finally {
     execution.stop();
   }
+}
+
+export function selectReportV4PreAdmissionRunner(
+  job: Pick<ScanJobRow, "reason">,
+  injected: ReportV4PreAdmissionRunner | undefined,
+  createDefault: () => ReportV4PreAdmissionRunner
+): ReportV4PreAdmissionRunner | undefined {
+  if (injected) return injected;
+  return job.reason === "v4_pre_admission" ? createDefault() : undefined;
 }
 
 export function resolveRecommendationFulfillmentTarget(
