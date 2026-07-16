@@ -26,9 +26,9 @@ export async function GET(request: Request, context: RouteContext) {
   const readsV4Artifact = artifactScope === "combined_geo_report_v4";
 
   const [freeJob, freeAiReport, deepJob, deepAiReport, activeV4Report] = await Promise.all([
-    getLatestScanJob(id, "free"),
+    getLatestScanJob(id, "free", { excludeReasons: ["v4_pre_admission"] }),
     readsV4Artifact ? Promise.resolve(null) : getAiReport(id, "free"),
-    hasDeepAccess ? getLatestScanJob(id, "deep") : Promise.resolve(null),
+    hasDeepAccess ? getLatestScanJob(id, "deep", { excludeReasons: ["v4_pre_admission"] }) : Promise.resolve(null),
     hasDeepAccess && !readsV4Artifact ? getAiReport(id, "deep") : Promise.resolve(null),
     readsV4Artifact ? getActiveCombinedGeoReport(id, "combined_geo_report_v4") : Promise.resolve(null)
   ]);

@@ -9,6 +9,7 @@ import {
   getSqlClient
 } from "./index";
 import { terminalizeScanJob } from "./jobs";
+import { getReportV4PreAdmissionJob } from "./report-v4-admission-jobs";
 import { admitFreeScan } from "./scan-admission";
 import {
   attachStagingFreeRegeneration,
@@ -126,6 +127,53 @@ describePostgres("protected staging PostgreSQL integration", () => {
     expect(otherIp.outcome).toBe("created");
   }, 60_000);
 
+  it("atomically creates exactly one dispatched V4 pre-admission job only after standard preview success", async () => {
+    const successReport = await insertReport(`${sitePrefix}-admission-success.test`, "admission-success");
+    const failedReport = await insertReport(`${sitePrefix}-admission-failed.test`, "admission-failed");
+    const successJob = await insertLeasedJob(successReport, "worker-admission-success", "standard");
+    const failedJob = await insertLeasedJob(failedReport, "worker-admission-failed", "standard");
+
+    await terminalizeScanJob(successJob, "worker-admission-success", {
+      stage: "completed",
+      coverage: { plannedPages: 1, successfulPages: 1, failedPages: 0 }
+    });
+    await terminalizeScanJob(failedJob, "worker-admission-failed", {
+      stage: "failed",
+      coverage: { plannedPages: 1, successfulPages: 0, failedPages: 1 },
+      error: { code: "preview_failed", publicMessage: "Preview failed." }
+    });
+
+    const admission = await getReportV4PreAdmissionJob(successReport);
+    expect(admission).toMatchObject({
+      reportId: successReport,
+      tier: "deep",
+      productContract: "recommendation_forensics_v1",
+      fulfillmentMethodology: "two_stage_geo_report_v4",
+      recommendationReportVersion: 4,
+      artifactContract: "combined_geo_report_v4",
+      reason: "v4_pre_admission",
+      siteSnapshotId: null,
+      businessQuestionSetId: null,
+      creditReservationId: null
+    });
+    expect(await getReportV4PreAdmissionJob(failedReport)).toBeNull();
+
+    const [counts] = await getSqlClient()<Array<Record<string, number>>>`
+      SELECT
+        count(DISTINCT dispatch.id)::integer AS dispatches,
+        count(DISTINCT artifact.id)::integer AS artifacts,
+        count(DISTINCT credit.id)::integer AS credits,
+        count(DISTINCT payment.id)::integer AS payments
+      FROM scan_jobs admission
+      LEFT JOIN job_dispatch_outbox dispatch ON dispatch.job_id=admission.id
+      LEFT JOIN report_artifact_revisions artifact ON artifact.job_id=admission.id
+      LEFT JOIN credit_ledger credit ON credit.job_id=admission.id
+      LEFT JOIN payment_orders payment ON payment.fulfillment_job_id=admission.id
+      WHERE admission.report_id=${successReport} AND admission.reason='v4_pre_admission'
+    `;
+    expect(counts).toMatchObject({ dispatches: 1, artifacts: 0, credits: 0, payments: 0 });
+  }, 60_000);
+
   it("rejects a runtime profile that disagrees with the database marker", async () => {
     const database = await getDatabaseEnvironmentStatus();
     expect(database.profile).toBe("staging");
@@ -190,13 +238,17 @@ describePostgres("protected staging PostgreSQL integration", () => {
     return id;
   }
 
-  async function insertLeasedJob(reportId: string, owner: string): Promise<string> {
+  async function insertLeasedJob(
+    reportId: string,
+    owner: string,
+    reason: "standard" | "staging_regeneration" = "staging_regeneration"
+  ): Promise<string> {
     const id = randomUUID();
     await getSqlClient()`
       INSERT INTO scan_jobs
         (id, report_id, tier, locale, reason, stage, progress, attempts, max_attempts, lease_owner, lease_expires_at)
       VALUES
-        (${id}, ${reportId}, 'free', 'en', 'staging_regeneration', 'analyzing', 80, 1, 3, ${owner}, now() + interval '5 minutes')
+        (${id}, ${reportId}, 'free', 'en', ${reason}, 'analyzing', 80, 1, 3, ${owner}, now() + interval '5 minutes')
     `;
     return id;
   }

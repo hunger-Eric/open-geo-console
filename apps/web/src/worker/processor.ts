@@ -83,6 +83,10 @@ import {
   type CompletedPageAnalysis,
   type RecoveryCheckpoint
 } from "./recovery";
+import {
+  processReportV4PreAdmissionJob,
+  type ReportV4PreAdmissionRunner
+} from "./report-v4-pre-admission";
 
 interface StoredPageEvidence {
   page: ExtractedPage;
@@ -117,7 +121,10 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
   technicalCompleted?: boolean;
 }
 
-export async function processScanJob(job: ScanJobRow, workerId: string, options: { liveDrill?: StagingLiveDrill } = {}): Promise<void> {
+export async function processScanJob(job: ScanJobRow, workerId: string, options: {
+  liveDrill?: StagingLiveDrill;
+  reportV4PreAdmissionRunner?: ReportV4PreAdmissionRunner;
+} = {}): Promise<void> {
   const execution = new JobExecutionLease({
     hardDeadlineMs: configuredJobHardDeadlineMs(),
     heartbeat: () => heartbeatScanJob(job.id, workerId)
@@ -140,6 +147,14 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
   };
   let checkpoint = normalizeCheckpoint(job.checkpoint);
   try {
+    if (await processReportV4PreAdmissionJob({
+      job,
+      workerId,
+      signal: execution.controller.signal,
+      remainingMs: () => execution.remainingMs(),
+      runner: options.reportV4PreAdmissionRunner,
+      terminalizeJob: terminalizeScanJob
+    })) return;
     const fulfillmentTarget = resolveRecommendationFulfillmentTarget(job);
     if (fulfillmentTarget === "recommendation_v1") throw new HistoricalRecommendationRuntimeRetiredError();
     // Retention cleanup is housekeeping, not a prerequisite for a paid
@@ -559,7 +574,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         });
       }
     }
-    if (job.tier === "deep" && failedJob.stage === "failed" && !["paid_report_correction","staging_artifact_refresh","replacement_fulfillment"].includes(job.reason)) {
+    if (job.tier === "deep" && job.reason !== "v4_pre_admission" && failedJob.stage === "failed" && !["paid_report_correction","staging_artifact_refresh","replacement_fulfillment"].includes(job.reason)) {
       await recordCommercialOutcomeSafely(job.id, "failed");
     }
     if (job.reason === "replacement_fulfillment") await syncReplacementExecutionState(job.id, failedJob.executionState);

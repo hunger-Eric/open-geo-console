@@ -2517,6 +2517,28 @@ export const V28_DATABASE_MIGRATIONS = [
   `CREATE TRIGGER payment_orders_site_snapshot_binding_trigger BEFORE INSERT OR UPDATE ON payment_orders FOR EACH ROW EXECUTE FUNCTION ogc_validate_payment_order_site_snapshot_binding()`
 ] as const;
 
+export const V29_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_reason_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration','paid_report_correction','staging_artifact_refresh','replacement_fulfillment','v4_diagnosis_enhancement','v4_pre_admission'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_v4_pre_admission_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_v4_pre_admission_check CHECK (
+     reason<>'v4_pre_admission' OR (
+       tier='deep'
+       AND product_contract='recommendation_forensics_v1'
+       AND fulfillment_methodology='two_stage_geo_report_v4'
+       AND recommendation_report_version=4
+       AND artifact_contract='combined_geo_report_v4'
+       AND site_snapshot_id IS NULL
+       AND business_question_set_id IS NULL
+       AND credit_reservation_id IS NULL
+       AND correction_id IS NULL
+       AND replacement_fulfillment_id IS NULL
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS scan_jobs_v4_pre_admission_report_uidx
+   ON scan_jobs(report_id) WHERE reason='v4_pre_admission'`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -2537,7 +2559,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 25, migrations: V25_DATABASE_MIGRATIONS },
   { version: 26, migrations: V26_DATABASE_MIGRATIONS },
   { version: 27, migrations: V27_DATABASE_MIGRATIONS },
-  { version: 28, migrations: V28_DATABASE_MIGRATIONS }
+  { version: 28, migrations: V28_DATABASE_MIGRATIONS },
+  { version: 29, migrations: V29_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

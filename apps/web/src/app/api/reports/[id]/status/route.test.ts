@@ -74,6 +74,9 @@ describe("report status artifact scopes", () => {
     expect(mocks.resolveRequestArtifactScope).toHaveBeenCalledWith(expect.any(Request), "report-1");
     expect(mocks.getActiveCombinedGeoReport).toHaveBeenCalledWith("report-1", "combined_geo_report_v4");
     expect(mocks.getAiReport).not.toHaveBeenCalled();
+    expect(mocks.getLatestScanJob).toHaveBeenCalledWith("report-1", "deep", {
+      excludeReasons: ["v4_pre_admission"]
+    });
   });
 
   // @requirement GEO-V4-COMMERCE-01
@@ -103,5 +106,8 @@ describe("report status artifact scopes", () => {
     expect(await response.json()).toMatchObject({ hasDeepAccess: false, hasAiReport: true, aiReportLocale: "zh" });
     expect(mocks.getActiveCombinedGeoReport).not.toHaveBeenCalled();
     expect(mocks.getLatestScanJob).not.toHaveBeenCalledWith("report-1", "deep");
+    expect(mocks.getLatestScanJob).toHaveBeenCalledWith("report-1", "free", {
+      excludeReasons: ["v4_pre_admission"]
+    });
   });
 });

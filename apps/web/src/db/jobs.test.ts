@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveScanJobQueueStatus, retryScanJob } from "./jobs";
+import { assertFulfillmentPair, deriveScanJobQueueStatus, retryScanJob } from "./jobs";
 
 describe("scan job queue status", () => {
   it("reports jobs ahead using the same deterministic queue position", () => {
@@ -54,5 +54,34 @@ describe("scan job queue status", () => {
 describe("terminal-job retry boundary", () => {
   it("rejects the legacy direct retry path before it can reopen credits or refunds", async () => {
     await expect(retryScanJob("job-1")).rejects.toThrow(/restricted historical recovery/i);
+  });
+});
+
+describe("scan job fulfillment identity", () => {
+  it("opens the V4 pair only for the pre-admission reason", () => {
+    expect(() => assertFulfillmentPair(
+      "recommendation_forensics_v1",
+      "two_stage_geo_report_v4",
+      4,
+      "v4_pre_admission"
+    )).not.toThrow();
+    expect(() => assertFulfillmentPair(
+      "recommendation_forensics_v1",
+      "two_stage_geo_report_v4",
+      4,
+      "standard"
+    )).not.toThrow();
+    expect(() => assertFulfillmentPair(
+      "recommendation_forensics_v1",
+      "public_search_source_forensics_v1",
+      2,
+      "v4_pre_admission"
+    )).toThrow(/exact V4|pre-admission/i);
+    expect(() => assertFulfillmentPair(
+      "recommendation_forensics_v1",
+      "two_stage_geo_report_v4",
+      4,
+      "locale_correction"
+    )).toThrow(/standard|pre-admission/i);
   });
 });

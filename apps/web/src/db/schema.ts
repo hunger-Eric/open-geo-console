@@ -26,7 +26,7 @@ import {
 export type ReportTier = "free" | "deep";
 export type ReportLocale = "en" | "zh";
 export type ReportTechnicalStatus = "pending" | "processing" | "completed" | "failed";
-export type ScanJobReason = "standard" | "system_recovery" | "locale_correction" | "staging_regeneration" | "paid_report_correction" | "staging_artifact_refresh" | "replacement_fulfillment" | "v4_diagnosis_enhancement";
+export type ScanJobReason = "standard" | "system_recovery" | "locale_correction" | "staging_regeneration" | "paid_report_correction" | "staging_artifact_refresh" | "replacement_fulfillment" | "v4_diagnosis_enhancement" | "v4_pre_admission";
 export type ArtifactRevisionKind = "generation" | "correction" | "presentation_refresh" | "evidence_refresh" | "replacement" | "diagnosis_enhancement";
 export type ScanJobStage =
   | "queued"
@@ -295,6 +295,7 @@ export const scanJobs = pgTable(
       table.id, table.reportId, table.productContract, table.fulfillmentMethodology, table.recommendationReportVersion
     ),
     uniqueIndex("scan_jobs_site_snapshot_binding_uidx").on(table.id, table.reportId, table.siteSnapshotId),
+    uniqueIndex("scan_jobs_v4_pre_admission_report_uidx").on(table.reportId).where(sql`${table.reason} = 'v4_pre_admission'`),
     check("scan_jobs_locale_check", sql`${table.locale} IN ('en', 'zh')`),
     check("scan_jobs_product_contract_check", sql`${table.productContract} IN ('legacy_website_audit_v1','recommendation_forensics_v1')`),
     check("scan_jobs_methodology_contract_check", sql`(
@@ -306,13 +307,14 @@ export const scanJobs = pgTable(
           OR (${table.fulfillmentMethodology} = 'public_search_source_forensics_v1' AND ${table.recommendationReportVersion} = 2)
           OR (${table.fulfillmentMethodology} = 'two_stage_geo_report_v4' AND ${table.recommendationReportVersion} = 4)))
     )`),
-    check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration', 'paid_report_correction', 'staging_artifact_refresh', 'replacement_fulfillment', 'v4_diagnosis_enhancement')`),
+    check("scan_jobs_reason_check", sql`${table.reason} IN ('standard', 'system_recovery', 'locale_correction', 'staging_regeneration', 'paid_report_correction', 'staging_artifact_refresh', 'replacement_fulfillment', 'v4_diagnosis_enhancement', 'v4_pre_admission')`),
     check("scan_jobs_artifact_contract_check", sql`${table.artifactContract} IS NULL OR ${table.artifactContract} IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3','combined_geo_report_v4')`),
     check("scan_jobs_correction_credit_check", sql`${table.reason} <> 'paid_report_correction' OR (${table.creditReservationId} IS NULL AND ${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND ${table.correctionId} IS NOT NULL AND ${table.businessQuestionSetId} IS NOT NULL)`),
     check("scan_jobs_refresh_credit_check", sql`${table.reason} <> 'staging_artifact_refresh' OR (${table.creditReservationId} IS NULL AND ${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND ${table.correctionId} IS NULL AND ${table.businessQuestionSetId} IS NOT NULL AND ${table.tier} = 'deep')`),
     check("scan_jobs_replacement_fulfillment_check", sql`(${table.reason} = 'replacement_fulfillment' AND ${table.replacementFulfillmentId} IS NOT NULL AND ${table.creditReservationId} IS NULL AND ${table.artifactContract} = 'combined_geo_report_v3' AND ${table.correctionId} IS NULL AND ${table.businessQuestionSetId} IS NOT NULL AND ${table.tier} = 'deep') OR (${table.reason} <> 'replacement_fulfillment' AND ${table.replacementFulfillmentId} IS NULL)`),
     check("scan_jobs_v4_methodology_check", sql`(${table.artifactContract}='combined_geo_report_v4' AND ${table.fulfillmentMethodology}='two_stage_geo_report_v4' AND ${table.recommendationReportVersion}=4) OR ((${table.artifactContract} IS NULL OR ${table.artifactContract}<>'combined_geo_report_v4') AND (${table.fulfillmentMethodology} IS NULL OR ${table.fulfillmentMethodology}<>'two_stage_geo_report_v4'))`),
     check("scan_jobs_v4_enhancement_check", sql`${table.reason} <> 'v4_diagnosis_enhancement' OR (${table.tier}='deep' AND ${table.productContract}='recommendation_forensics_v1' AND ${table.fulfillmentMethodology}='two_stage_geo_report_v4' AND ${table.recommendationReportVersion}=4 AND ${table.artifactContract}='combined_geo_report_v4' AND ${table.businessQuestionSetId} IS NOT NULL AND ${table.creditReservationId} IS NULL AND ${table.correctionId} IS NULL AND ${table.replacementFulfillmentId} IS NULL)`),
+    check("scan_jobs_v4_pre_admission_check", sql`${table.reason} <> 'v4_pre_admission' OR (${table.tier}='deep' AND ${table.productContract}='recommendation_forensics_v1' AND ${table.fulfillmentMethodology}='two_stage_geo_report_v4' AND ${table.recommendationReportVersion}=4 AND ${table.artifactContract}='combined_geo_report_v4' AND ${table.siteSnapshotId} IS NULL AND ${table.businessQuestionSetId} IS NULL AND ${table.creditReservationId} IS NULL AND ${table.correctionId} IS NULL AND ${table.replacementFulfillmentId} IS NULL)`),
     check(
       "scan_jobs_stage_check",
       sql`${table.stage} IN ('queued','discovering','planning','fetching','analyzing','synthesizing','completed','completed_limited','failed')`
