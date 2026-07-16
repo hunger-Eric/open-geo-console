@@ -11,6 +11,10 @@ import {
   ReportLanguageValidationError,
   ReportValidationError,
   analyzePageBatch,
+  buildModelOperationTokenBudget,
+  createModelProfileRegistry,
+  createModelProviderCapabilityRegistry,
+  createModelTokenEstimatorRegistry,
   evaluateModelTokenBudget,
   planPagesWithRecovery,
   parseAiWebsiteReportV1,
@@ -62,6 +66,10 @@ describe("combined report public exports", () => {
     expect(MODEL_PROFILE_OPERATIONS).toEqual(["pageAnalysis", "websiteSynthesis", "questionAnswer", "sourceDiagnosis"]);
     expect([
       parseModelProfile,
+      createModelProfileRegistry,
+      createModelProviderCapabilityRegistry,
+      createModelTokenEstimatorRegistry,
+      buildModelOperationTokenBudget,
       evaluateModelTokenBudget,
       runWithModelTokenBudget,
       parseReportV4SiteSynthesisInput,
@@ -70,7 +78,7 @@ describe("combined report public exports", () => {
       parseReportV4DiagnosisOutput,
       parseReportV4CustomerProseProfile,
       validateReportV4CustomerProse
-    ]).toEqual(Array.from({ length: 9 }, () => expect.any(Function)));
+    ]).toEqual(Array.from({ length: 13 }, () => expect.any(Function)));
   });
 });
 

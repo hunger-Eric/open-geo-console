@@ -44,6 +44,9 @@ describe("model profile parsing", () => {
       structuredOutput: true,
       tokenizer: "fixture-tokenizer"
     });
+    expect(Object.isFrozen(parsed)).toBe(true);
+    expect(Object.isFrozen(parsed.operations)).toBe(true);
+    expect(Object.isFrozen(parsed.operations.questionAnswer)).toBe(true);
   });
 
   it.each(["profileId", "provider", "adapterId"] as const)("requires a nonblank %s", (field) => {
@@ -73,6 +76,14 @@ describe("model profile parsing", () => {
     const field = validProfile() as { operations: Record<string, Record<string, unknown>> };
     field.operations.pageAnalysis!["temperature"] = 0;
     expect(() => parseModelProfile(field)).toThrow(/unknown.*temperature/i);
+
+    const secret = validProfile() as Record<string, unknown>;
+    secret.apiKey = "must-not-enter-profile";
+    expect(() => parseModelProfile(secret)).toThrow(/unknown.*apiKey|secret/i);
+
+    const operationSecret = validProfile() as { operations: Record<string, Record<string, unknown>> };
+    operationSecret.operations.pageAnalysis!.authorization = "Bearer secret";
+    expect(() => parseModelProfile(operationSecret)).toThrow(/unknown.*authorization|secret/i);
   });
 
   it.each(["contextWindowTokens", "maxInputTokens", "maxOutputTokens", "timeoutMs"] as const)(
