@@ -300,6 +300,13 @@ function buildInvocationTokenBudget(
   });
 }
 
+export function buildReportV4MimoStructuredTokenBudget(
+  runtime: ReportV4ModelRuntimeConfig,
+  input: Pick<ReportV4MimoStructuredInvokeInput, "operation" | "systemText" | "inputText">
+): ModelTokenBudgetInput {
+  return buildInvocationTokenBudget(requireApprovedLockedRuntime(runtime), input);
+}
+
 function parseProviderPayload(payload: unknown): {
   readonly value: unknown;
   readonly annotations: readonly unknown[];
