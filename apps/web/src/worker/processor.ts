@@ -906,19 +906,18 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     return;
   }
   createPublicSourceAttemptBudget(input.remainingMs);
-  const runtime = await resolveProductionPublicSearchRuntime({ environment: process.env, getAuthority: getActivePublicSearchSurfaceAuthority });
   const client = createConfiguredClient();
   let generativeCheckpoint: AnswerFirstV3CheckpointV2 | null = null;
   if (input.job.artifactContract === "combined_geo_report_v3") {
     const provider = resolveGenerativeSearchAnswerProvider(process.env, {
-      locale: runtime.authority.surface.locale,
-      region: runtime.authority.surface.region
+      locale: businessQuestionSet.locale,
+      region: businessQuestionSet.region
     });
     const collected = await resolveGenerativeAnswerFirstV3({
       questionSet: businessQuestionSet,
       provider,
-      locale: runtime.authority.surface.locale,
-      region: runtime.authority.surface.region,
+      locale: businessQuestionSet.locale,
+      region: businessQuestionSet.region,
       targetUrl: input.targetUrl,
       targetAliases: businessQuestionSet.identityExclusions,
       checkpoint: checkpoint.answerFirstV3,
@@ -931,6 +930,9 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     });
     generativeCheckpoint = collected.checkpoint;
   }
+  // Public-search authority and retrieval belong to the audit sidecar. Resolve
+  // them only after the ordinary answers have been safely checkpointed.
+  const runtime = await resolveProductionPublicSearchRuntime({ environment: process.env, getAuthority: getActivePublicSearchSurfaceAuthority });
   const evidenceCutoffAt = checkpoint.providerDiscovery?.evidenceCutoffAt ?? new Date().toISOString();
   const providerContext = createProductionProviderDiscoveryContext({
     runtime,
