@@ -15,7 +15,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-CRAWL-04
 describe("schema v30 V4 runtime persistence substrate", () => {
   it("adds only hierarchical summaries, diagnosis checkpoints and one enhancement per core", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(31);
+    expect(DATABASE_SCHEMA_VERSION).toBe(32);
     const sql = databaseMigrationsAfter(29).join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_page_summaries");
     expect(sql).toContain("source_length integer NOT NULL");
@@ -77,6 +77,9 @@ describeDisposablePostgres("schema v30 V4 runtime persistence PostgreSQL constra
   });
 
   it("persists immutable bounded page summaries and exact resumable diagnosis checkpoints", async () => {
+    const pageText = "p".repeat(120);
+    const wrongPageText = "w".repeat(120);
+    const invalidPageText = "i".repeat(20);
     await sql`INSERT INTO scan_reports(id,url,site_key,report_locale,technical_status)
       VALUES('report-v30','https://v30.example/','v30.example','en','completed')`;
     await sql`INSERT INTO report_v4_site_snapshots
@@ -85,36 +88,40 @@ describeDisposablePostgres("schema v30 V4 runtime persistence PostgreSQL constra
     await sql`INSERT INTO report_v4_site_snapshot_pages
       (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,retained_cleaned_text,content_hash)
       VALUES
-       ('page-v30','snapshot-v30',1,'https://v30.example/','true','direct_readable','Homepage summary','page-v30',${hash("page-v30")}),
-       ('page-v30-wrong','snapshot-v30',2,'https://v30.example/wrong','true','direct_readable','Wrong-content fixture','page-v30-wrong',${hash("page-v30-wrong")}),
-       ('page-v30-invalid','snapshot-v30',3,'https://v30.example/invalid','true','direct_readable','Invalid-location fixture','page-v30-invalid',${hash("page-v30-invalid")})`;
+       ('page-v30','snapshot-v30',1,'https://v30.example/','true','direct_readable','Homepage summary',${pageText},${hash(pageText)}),
+       ('page-v30-wrong','snapshot-v30',2,'https://v30.example/wrong','true','direct_readable','Wrong-content fixture',${wrongPageText},${hash(wrongPageText)}),
+       ('page-v30-invalid','snapshot-v30',3,'https://v30.example/invalid','true','direct_readable','Invalid-location fixture',${invalidPageText},${hash(invalidPageText)})`;
 
     const chunks = [{
       order: 1,
       summary: "The homepage clearly describes the service and delivery region.",
       sourceLocations: [{ locationId: "page-v30:0-48", startOffset: 0, endOffset: 48 }]
     }];
+    await expect(sql`INSERT INTO report_v4_page_summaries
+      (identity_hash,report_id,snapshot_id,page_id,content_hash,source_length,chunks)
+      VALUES(${hash("summary-before-terminal")},'report-v30','snapshot-v30','page-v30',${hash(pageText)},120,${sql.json(chunks)})`)
+      .rejects.toThrow(/completed/i);
+    await sql`UPDATE report_v4_site_snapshots SET status='completed',completed_at=now(),content_identity_hash=${hash("snapshot-v30")},
+      candidate_url_count=3,analyzable_page_count=3,excluded_page_count=0 WHERE id='snapshot-v30'`;
     await sql`INSERT INTO report_v4_page_summaries
       (identity_hash,report_id,snapshot_id,page_id,content_hash,source_length,chunks)
-      VALUES(${hash("summary-v30")},'report-v30','snapshot-v30','page-v30',${hash("page-v30")},120,${sql.json(chunks)})`;
+      VALUES(${hash("summary-v30")},'report-v30','snapshot-v30','page-v30',${hash(pageText)},120,${sql.json(chunks)})`;
     await expect(sql`UPDATE report_v4_page_summaries SET source_length=121 WHERE page_id='page-v30'`)
       .rejects.toThrow(/immutable/i);
     await expect(sql`INSERT INTO report_v4_page_summaries
       (identity_hash,report_id,snapshot_id,page_id,content_hash,source_length,chunks)
       VALUES(${hash("summary-wrong-content")},'report-v30','snapshot-v30','page-v30-wrong',${hash("wrong-page")},120,${sql.json(chunks)})`)
-      .rejects.toMatchObject({ constraint_name: "report_v4_page_summaries_page_content_fkey" });
+      .rejects.toThrow(/content hash/i);
     await expect(sql`INSERT INTO report_v4_page_summaries
       (identity_hash,report_id,snapshot_id,page_id,content_hash,source_length,chunks)
-      VALUES(${hash("summary-invalid-location")},'report-v30','snapshot-v30','page-v30-invalid',${hash("page-v30-invalid")},20,
+      VALUES(${hash("summary-invalid-location")},'report-v30','snapshot-v30','page-v30-invalid',${hash(invalidPageText)},20,
        ${sql.json([{ order: 1, summary: "Invalid", sourceLocations: [{ locationId: "bad", startOffset: 0, endOffset: 21 }] }])})`)
       .rejects.toMatchObject({ constraint_name: "report_v4_page_summaries_chunks_check" });
 
-    await sql`UPDATE report_v4_site_snapshots SET status='completed',completed_at=now(),content_identity_hash=${hash("snapshot-v30")},
-      candidate_url_count=3,analyzable_page_count=3,excluded_page_count=0 WHERE id='snapshot-v30'`;
-    await expect(sql`INSERT INTO report_v4_page_summaries
+    await sql`INSERT INTO report_v4_page_summaries
       (identity_hash,report_id,snapshot_id,page_id,content_hash,source_length,chunks)
-      VALUES(${hash("summary-after-terminal")},'report-v30','snapshot-v30','page-v30-wrong',${hash("page-v30-wrong")},120,
-       ${sql.json(chunks)})`).rejects.toThrow(/only while its snapshot is collecting/i);
+      VALUES(${hash("summary-after-terminal")},'report-v30','snapshot-v30','page-v30-wrong',${hash(wrongPageText)},120,
+       ${sql.json(chunks)})`;
     await sql`INSERT INTO report_v4_site_snapshots
       (id,report_id,site_key,status,captured_at,completed_at,collector_config_identity_hash,content_identity_hash,
        candidate_url_count,analyzable_page_count,excluded_page_count)

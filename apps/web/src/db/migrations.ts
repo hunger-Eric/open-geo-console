@@ -2909,6 +2909,47 @@ export const V31_DATABASE_MIGRATIONS = [
    ) NOT VALID`
 ] as const;
 
+export const V32_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_js_source_location_length(candidate text)
+   RETURNS integer LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
+     SELECT COALESCE(sum(CASE WHEN ascii(character) > 65535 THEN 2 ELSE 1 END),0)::integer
+     FROM regexp_split_to_table(candidate,'') AS characters(character)
+   $$`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_page_summary_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_status text;
+     page_analyzable boolean;
+     page_read_mode text;
+     retained_text text;
+     page_content_hash text;
+   BEGIN
+     IF TG_OP <> 'INSERT' THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary is immutable.';
+     END IF;
+     SELECT status INTO snapshot_status
+       FROM report_v4_site_snapshots
+       WHERE id=NEW.snapshot_id AND report_id=NEW.report_id;
+     IF snapshot_status IS NULL OR snapshot_status NOT IN ('completed','completed_limited') THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary requires an exact completed or completed_limited snapshot.';
+     END IF;
+     SELECT analyzable,read_mode,retained_cleaned_text,content_hash
+       INTO page_analyzable,page_read_mode,retained_text,page_content_hash
+       FROM report_v4_site_snapshot_pages
+       WHERE id=NEW.page_id AND snapshot_id=NEW.snapshot_id;
+     IF NOT FOUND OR page_analyzable IS DISTINCT FROM true OR page_read_mode IS NULL
+       OR retained_text IS NULL OR length(btrim(retained_text))=0 OR page_content_hash IS NULL THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary requires an exact analyzable retained snapshot page.';
+     END IF;
+     IF NEW.content_hash IS DISTINCT FROM page_content_hash
+       OR page_content_hash IS DISTINCT FROM encode(sha256(convert_to(retained_text,'UTF8')),'hex') THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary content hash must match its exact retained snapshot text.';
+     END IF;
+     IF NEW.source_length IS DISTINCT FROM ogc_js_source_location_length(retained_text) THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary source length must match its retained snapshot text.';
+     END IF;
+     RETURN NEW;
+   END $$`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -2932,7 +2973,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 28, migrations: V28_DATABASE_MIGRATIONS },
   { version: 29, migrations: V29_DATABASE_MIGRATIONS },
   { version: 30, migrations: V30_DATABASE_MIGRATIONS },
-  { version: 31, migrations: V31_DATABASE_MIGRATIONS }
+  { version: 31, migrations: V31_DATABASE_MIGRATIONS },
+  { version: 32, migrations: V32_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

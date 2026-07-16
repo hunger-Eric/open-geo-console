@@ -34,6 +34,7 @@ export interface ReportV4SnapshotPageRow {
   readonly normalizedUrl: string;
   readonly analyzable: boolean;
   readonly readMode: "direct_readable" | "js_dependent" | null;
+  readonly retainedCleanedText: string | null;
   readonly contentHash: string | null;
 }
 
@@ -204,7 +205,7 @@ async function persistWithStore(
   const candidate = buildCandidate(inputValue);
   return store.transaction(async (tx) => {
     const lineage = await tx.lockPage(candidate.reportId, candidate.snapshotId, candidate.pageId);
-    if (!lineage) throw new Error("The exact V4 collecting snapshot page lineage was not found.");
+    if (!lineage) throw new Error("The exact V4 terminal snapshot page lineage was not found.");
     const snapshot = parseSnapshot(lineage.snapshot);
     const page = parsePage(lineage.page);
     assertWritableLineage(snapshot, page, candidate);
@@ -309,7 +310,9 @@ function assertWritableLineage(
   page: ReportV4SnapshotPageRow,
   candidate: Candidate
 ): void {
-  if (snapshot.status !== "collecting") throw new Error("A V4 page summary may be persisted only for a collecting snapshot.");
+  if (!PAID_SYNTHESIS_STATUSES.has(snapshot.status) || snapshot.contentIdentityHash === null) {
+    throw new Error("A V4 page summary may be persisted only for an exact completed or completed_limited terminal snapshot.");
+  }
   if (snapshot.id !== candidate.snapshotId || snapshot.reportId !== candidate.reportId
     || page.id !== candidate.pageId || page.snapshotId !== candidate.snapshotId) {
     throw new Error("The exact V4 snapshot/page/report lineage does not match the persistence request.");
@@ -317,6 +320,7 @@ function assertWritableLineage(
   if (!page.analyzable || page.readMode === null || page.contentHash === null) {
     throw new Error("Only an analyzable V4 snapshot page can receive a hierarchical summary.");
   }
+  assertExactRetainedText(page, candidate.summary.sourceLength);
   if (page.readMode !== candidate.summary.readability || page.normalizedUrl !== candidate.summary.url
     || page.contentHash !== candidate.summary.contentHash) {
     throw new Error("The V4 page URL, readability or content identity has drifted from the exact snapshot page.");
@@ -344,6 +348,7 @@ function parsePersisted(
     || !page.analyzable || page.readMode === null) {
     throw new Error("Persisted V4 page summary no longer matches its exact analyzable snapshot page lineage.");
   }
+  assertExactRetainedText(page, sourceLength);
   const summary = parseReportV4PageAnalysisOutput({ chunks: row.chunks }, {
     pageId,
     url: page.normalizedUrl,
@@ -389,7 +394,7 @@ function postgresTransaction(sql: ReportV4PageSummarySql): ReportV4PageSummaryTr
       const rows = await sql`
         SELECT snapshot.id AS snapshot_id,snapshot.report_id,snapshot.status AS snapshot_status,
           snapshot.content_identity_hash,snapshot.analyzable_page_count,page.id AS page_id,page.ordinal,page.normalized_url,
-          page.analyzable,page.read_mode,page.content_hash
+          page.analyzable,page.read_mode,page.retained_cleaned_text,page.content_hash
         FROM report_v4_site_snapshots snapshot
         JOIN report_v4_site_snapshot_pages page ON page.snapshot_id=snapshot.id
         WHERE snapshot.id=${snapshotId} AND snapshot.report_id=${reportId} AND page.id=${pageId}
@@ -408,7 +413,7 @@ function postgresTransaction(sql: ReportV4PageSummarySql): ReportV4PageSummaryTr
     },
     async listPages(snapshotId) {
       const rows = await sql`
-        SELECT id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,content_hash
+        SELECT id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,retained_cleaned_text,content_hash
         FROM report_v4_site_snapshot_pages WHERE snapshot_id=${snapshotId} ORDER BY ordinal,id
       `;
       return rows.map(postgresPage);
@@ -460,6 +465,7 @@ function postgresLineage(row: Record<string, unknown>): ReportV4PageSummaryLinea
       normalized_url: row.normalized_url,
       analyzable: row.analyzable,
       read_mode: row.read_mode,
+      retained_cleaned_text: row.retained_cleaned_text,
       content_hash: row.content_hash
     })
   };
@@ -483,6 +489,7 @@ function postgresPage(row: Record<string, unknown>): ReportV4SnapshotPageRow {
     normalizedUrl: row.normalized_url,
     analyzable: row.analyzable,
     readMode: row.read_mode,
+    retainedCleanedText: row.retained_cleaned_text,
     contentHash: row.content_hash
   });
 }
@@ -530,6 +537,7 @@ function parsePage(row: {
   readonly normalizedUrl: unknown;
   readonly analyzable: unknown;
   readonly readMode: unknown;
+  readonly retainedCleanedText: unknown;
   readonly contentHash: unknown;
 }): ReportV4SnapshotPageRow {
   const analyzable = row.analyzable === true;
@@ -548,8 +556,22 @@ function parsePage(row: {
     normalizedUrl: httpUrl(row.normalizedUrl, "page normalizedUrl"),
     analyzable,
     readMode: readMode as ReportV4SnapshotPageRow["readMode"],
+    retainedCleanedText: row.retainedCleanedText == null ? null : String(row.retainedCleanedText),
     contentHash
   });
+}
+
+function assertExactRetainedText(page: ReportV4SnapshotPageRow, sourceLength: number): void {
+  const retainedText = page.retainedCleanedText;
+  if (retainedText === null || !retainedText.trim()) {
+    throw new Error("The exact terminal V4 snapshot page has no retained cleaned text; legacy previews cannot be summarized.");
+  }
+  if (page.contentHash !== createHash("sha256").update(retainedText).digest("hex")) {
+    throw new Error("The V4 snapshot page content hash has drifted from its exact retained cleaned text.");
+  }
+  if (sourceLength !== retainedText.length) {
+    throw new Error("The V4 page-summary source length must equal the retained text JavaScript source-location length.");
+  }
 }
 
 function strictObject(value: unknown, name: string, allowed: ReadonlySet<string>): Record<string, unknown> {

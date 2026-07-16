@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createMemoryReportV4PageSummaryStore,
   createPostgresReportV4PageSummaryStore,
@@ -23,25 +23,84 @@ describe("V4 hierarchical page-summary persistence", () => {
       .rejects.toThrow(/unknown field rawProviderResponse/i);
   });
 
-  it("persists once, resumes exactly and fails closed on same-page drift", async () => {
+  it("persists a terminal retained-text page once, resumes concurrently and performs zero fetches", async () => {
     const repository = memoryRepository();
-    const first = await repository.persist(input("page-1"));
-    const resumed = await repository.persist(input("page-1"));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("must not fetch or recrawl"));
+    const [first, resumed] = await Promise.all([
+      repository.persist(input("page-1")),
+      repository.persist(input("page-1"))
+    ]);
     expect(resumed).toEqual(first);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
     expect(first.identityHash).toMatch(/^[a-f0-9]{64}$/u);
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first.summary.chunks)).toBe(true);
     expect(first).not.toHaveProperty("rawHtml");
     await expect(repository.persist({ ...input("page-1"), output: output("drift") }))
       .rejects.toThrow(/drift|immutable|idempotency/i);
-    await expect(repository.persist({ ...input("page-1"), sourceLength: 121 }))
-      .rejects.toThrow(/drift|immutable|idempotency/i);
+  });
+
+  it("accepts completed_limited but rejects collecting, unavailable and custom_service snapshots", async () => {
+    await expect(memoryRepository("completed_limited").persist(input("page-1"))).resolves.toBeDefined();
+    for (const status of ["collecting", "unavailable", "custom_service"] as const) {
+      await expect(memoryRepository(status).persist(input("page-1")))
+        .rejects.toThrow(/completed|completed_limited|terminal/i);
+    }
+  });
+
+  it("uses JavaScript UTF-16 source-location length for retained non-BMP text", async () => {
+    const retainedCleanedText = "A\ud83d\ude00B";
+    const exactPage = {
+      ...page("page-1", 1),
+      retainedCleanedText,
+      contentHash: hash(retainedCleanedText)
+    };
+    const repository = memoryRepository("completed", [exactPage]);
+    await expect(repository.persist({
+      ...input("page-1"),
+      contentHash: hash(retainedCleanedText),
+      sourceLength: retainedCleanedText.length,
+      output: {
+        chunks: [{
+          order: 1,
+          summary: "Non-BMP source location",
+          sourceLocations: [{ locationId: "astral:0-4", startOffset: 0, endOffset: 4 }]
+        }]
+      }
+    })).resolves.toBeDefined();
+    expect(retainedCleanedText.length).toBe(4);
+  });
+
+  it("rejects legacy null text and exact retained-text length, hash, URL, readability or lineage drift", async () => {
+    const legacy = memoryRepository("completed", [{ ...page("page-1", 1), retainedCleanedText: null }]);
+    await expect(legacy.persist(input("page-1"))).rejects.toThrow(/retained|legacy|text/i);
+
+    await expect(memoryRepository().persist({ ...input("page-1"), sourceLength: input("page-1").sourceLength + 1 }))
+      .rejects.toThrow(/source length|retained|drift/i);
+
+    const hashDriftPage = { ...page("page-1", 1), contentHash: hash("not-the-retained-text") };
+    await expect(memoryRepository("completed", [hashDriftPage]).persist({
+      ...input("page-1"),
+      contentHash: hashDriftPage.contentHash!
+    })).rejects.toThrow(/content hash|retained|drift/i);
+
+    await expect(memoryRepository().persist({ ...input("page-1"), url: "https://example.com/drift" }))
+      .rejects.toThrow(/URL|drift/i);
+    await expect(memoryRepository().persist({ ...input("page-1"), readability: "js_dependent" }))
+      .rejects.toThrow(/readability|drift/i);
+    await expect(memoryRepository().persist({ ...input("page-1"), reportId: "other-report" }))
+      .rejects.toThrow(/lineage|not found/i);
+    await expect(memoryRepository().persist({ ...input("page-1"), snapshotId: "other-snapshot" }))
+      .rejects.toThrow(/lineage|not found/i);
+    await expect(memoryRepository().persist({ ...input("page-1"), pageId: "other-page" }))
+      .rejects.toThrow(/lineage|not found/i);
   });
 
   it("loads one strict frozen summary for every analyzable page in ordinal order", async () => {
-    const collecting = memoryRepository();
-    const second = await collecting.persist(input("page-2"));
-    const first = await collecting.persist(input("page-1"));
+    const terminal = memoryRepository();
+    const second = await terminal.persist(input("page-2"));
+    const first = await terminal.persist(input("page-1"));
     const repository = createReportV4PageSummaryRepository(createMemoryReportV4PageSummaryStore({
       snapshots: [snapshot("completed", 2)],
       pages: pages(),
@@ -54,8 +113,8 @@ describe("V4 hierarchical page-summary persistence", () => {
   });
 
   it("fails closed on missing, extra and ineligible terminal snapshot summaries", async () => {
-    const collecting = memoryRepository();
-    const first = await collecting.persist(input("page-1"));
+    const terminal = memoryRepository();
+    const first = await terminal.persist(input("page-1"));
     const missing = createReportV4PageSummaryRepository(createMemoryReportV4PageSummaryStore({
       snapshots: [snapshot("completed", 2)], pages: pages(), summaries: [storedRow(first)]
     }));
@@ -64,7 +123,7 @@ describe("V4 hierarchical page-summary persistence", () => {
 
     const extra = createReportV4PageSummaryRepository(createMemoryReportV4PageSummaryStore({
       snapshots: [snapshot("completed", 2)],
-      pages: [...pages(), { ...page("page-extra", 3), analyzable: false, readMode: null, contentHash: null }],
+      pages: [...pages(), { ...page("page-extra", 3), analyzable: false, readMode: null, contentHash: null, retainedCleanedText: null }],
       summaries: [storedRow(first), { ...storedRow(first), pageId: "page-extra", identityHash: hash("extra") }]
     }));
     await expect(extra.loadForWebsiteSynthesis(exactLoad()))
@@ -79,7 +138,7 @@ describe("V4 hierarchical page-summary persistence", () => {
     }
   });
 
-  it("uses a transaction and locks the exact collecting snapshot page in PostgreSQL", async () => {
+  it("uses a transaction and locks the exact terminal retained-text snapshot page in PostgreSQL", async () => {
     const statements: Array<{ sql: string; values: readonly unknown[] }> = [];
     const persisted: ReportV4PageSummaryRow[] = [];
     const database: ReportV4PageSummaryPostgresDatabase = {
@@ -112,9 +171,14 @@ describe("V4 hierarchical page-summary persistence", () => {
   });
 });
 
-function memoryRepository() {
+function memoryRepository(
+  status: ReportV4PageSummarySnapshotRow["status"] = "completed",
+  seededPages: readonly ReportV4SnapshotPageRow[] = pages()
+) {
   return createReportV4PageSummaryRepository(createMemoryReportV4PageSummaryStore({
-    snapshots: [snapshot("collecting", 0)], pages: pages(), summaries: []
+    snapshots: [snapshot(status, seededPages.filter(({ analyzable }) => analyzable).length)],
+    pages: seededPages,
+    summaries: []
   }));
 }
 
@@ -130,9 +194,10 @@ function exactLoad() {
 }
 
 function page(id: string, ordinal: number): ReportV4SnapshotPageRow {
+  const text = retainedText(id);
   return {
     id, snapshotId: "snapshot-1", ordinal, normalizedUrl: `https://example.com/${id}`,
-    analyzable: true, readMode: "direct_readable", contentHash: hash(id)
+    analyzable: true, readMode: "direct_readable", contentHash: hash(text), retainedCleanedText: text
   };
 }
 
@@ -141,11 +206,16 @@ function pages(): ReportV4SnapshotPageRow[] {
 }
 
 function input(pageId: "page-1" | "page-2") {
+  const text = retainedText(pageId);
   return {
     reportId: "report-1", snapshotId: "snapshot-1", pageId,
-    url: `https://example.com/${pageId}`, contentHash: hash(pageId),
-    readability: "direct_readable" as const, sourceLength: 120, output: output(pageId)
+    url: `https://example.com/${pageId}`, contentHash: hash(text),
+    readability: "direct_readable" as const, sourceLength: text.length, output: output(pageId)
   };
+}
+
+function retainedText(pageId: string): string {
+  return `${pageId}:`.padEnd(120, "x");
 }
 
 function output(label: string) {
@@ -161,11 +231,12 @@ function storedRow(value: Awaited<ReturnType<ReturnType<typeof memoryRepository>
 }
 
 function postgresLineage() {
+  const text = retainedText("page-1");
   return {
-    snapshot_id: "snapshot-1", report_id: "report-1", snapshot_status: "collecting", content_identity_hash: null,
-    analyzable_page_count: 0,
+    snapshot_id: "snapshot-1", report_id: "report-1", snapshot_status: "completed",
+    content_identity_hash: hash("snapshot-1"), analyzable_page_count: 2,
     page_id: "page-1", ordinal: 1, normalized_url: "https://example.com/page-1", analyzable: true,
-    read_mode: "direct_readable", content_hash: hash("page-1")
+    read_mode: "direct_readable", retained_cleaned_text: text, content_hash: hash(text)
   };
 }
 
