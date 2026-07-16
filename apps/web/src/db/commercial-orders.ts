@@ -7,6 +7,7 @@ import {
   paymentEvents,
   paymentOrders,
   reportBusinessQuestionSets,
+  reportV4SiteSnapshots,
   type CommerceCurrency,
   type PaymentEventRow,
   type PaymentOrderRow,
@@ -39,6 +40,12 @@ export interface CreatePaymentOrderInput {
 }
 
 export class CommercialOrderConflictError extends Error {}
+
+export type CreateReportV4PaymentOrderInput = Omit<CreatePaymentOrderInput, "productCode">;
+
+const REPORT_V4_PRODUCT_CODE = "recommendation_forensics_v1";
+const REPORT_V4_FULFILLMENT_METHODOLOGY = "two_stage_geo_report_v4";
+const REPORT_V4_VERSION = 4;
 
 export async function createPaymentOrder(input: CreatePaymentOrderInput): Promise<PaymentOrderRow> {
   assertOrderInput(input);
@@ -104,6 +111,91 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
   return existing;
 }
 
+export async function createReportV4PaymentOrder(input: CreateReportV4PaymentOrderInput): Promise<PaymentOrderRow> {
+  const legacyShape = { ...input, productCode: REPORT_V4_PRODUCT_CODE };
+  assertOrderInput(legacyShape);
+  await ensureDatabase();
+  return getDb().transaction(async (tx) => {
+    const snapshots = await tx.select().from(reportV4SiteSnapshots)
+      .where(eq(reportV4SiteSnapshots.reportId, input.reportId));
+    if (snapshots.length !== 1) {
+      throw new CommercialOrderConflictError(snapshots.length === 0
+        ? "One completed pre-admission V4 site snapshot is required before checkout."
+        : "Multiple V4 site snapshots exist for this report; checkout is blocked.");
+    }
+    const snapshot = snapshots[0]!;
+    if (snapshot.siteKey !== input.siteKey) {
+      throw new CommercialOrderConflictError("The pre-admission V4 site snapshot does not match this site.");
+    }
+    if (!["completed", "completed_limited"].includes(snapshot.status) || !snapshot.contentIdentityHash) {
+      throw new CommercialOrderConflictError("The pre-admission V4 site snapshot is not eligible for paid checkout.");
+    }
+
+    const [previous] = await tx.select().from(paymentOrders)
+      .where(eq(paymentOrders.checkoutIdempotencyHmac, input.checkoutIdempotencyHmac)).limit(1);
+    if (previous) {
+      if (!matchesImmutableReportV4Order(previous, input, snapshot.id)) {
+        throw new CommercialOrderConflictError("The checkout idempotency key conflicts with another order.");
+      }
+      return previous;
+    }
+
+    const [questionSet] = await tx.select().from(reportBusinessQuestionSets).where(and(
+      eq(reportBusinessQuestionSets.id, input.businessQuestionSetId),
+      eq(reportBusinessQuestionSets.reportId, input.reportId),
+      eq(reportBusinessQuestionSets.status, "confirmed"),
+      isNull(reportBusinessQuestionSets.orderId)
+    )).limit(1);
+    if (!questionSet || (questionSet.confidence === "low" && !questionSet.acknowledgedLowConfidence)) {
+      throw new CommercialOrderConflictError("Three confirmed business questions are required before checkout.");
+    }
+
+    const rows = await tx.insert(paymentOrders).values({
+      id: randomUUID(),
+      checkoutIdempotencyHmac: input.checkoutIdempotencyHmac,
+      provider: input.provider,
+      reportId: input.reportId,
+      siteSnapshotId: snapshot.id,
+      siteKey: input.siteKey,
+      customerEmailEncrypted: input.customerEmailEncrypted,
+      customerEmailHmac: input.customerEmailHmac,
+      emailKeyVersion: input.emailKeyVersion,
+      productCode: REPORT_V4_PRODUCT_CODE,
+      businessQuestionSetId: input.businessQuestionSetId,
+      fulfillmentMethodology: REPORT_V4_FULFILLMENT_METHODOLOGY,
+      recommendationReportVersion: REPORT_V4_VERSION,
+      catalogVersion: input.catalogVersion,
+      termsVersion: input.termsVersion,
+      refundPolicyVersion: input.refundPolicyVersion,
+      reportLocale: input.reportLocale,
+      currency: input.currency,
+      amountMinor: input.amountMinor,
+      taxAmountMinor: input.taxAmountMinor ?? null
+    }).onConflictDoNothing({ target: paymentOrders.checkoutIdempotencyHmac }).returning();
+    if (rows[0]) {
+      const locked = await tx.update(reportBusinessQuestionSets).set({
+        orderId: rows[0].id,
+        status: "locked",
+        lockedAt: new Date(),
+        updatedAt: new Date()
+      }).where(and(
+        eq(reportBusinessQuestionSets.id, input.businessQuestionSetId),
+        eq(reportBusinessQuestionSets.status, "confirmed"),
+        isNull(reportBusinessQuestionSets.orderId)
+      )).returning({ id: reportBusinessQuestionSets.id });
+      if (locked.length !== 1) throw new CommercialOrderConflictError("The business question set changed during checkout.");
+      return rows[0];
+    }
+
+    const [existing] = await tx.select().from(paymentOrders)
+      .where(eq(paymentOrders.checkoutIdempotencyHmac, input.checkoutIdempotencyHmac)).limit(1);
+    if (!existing || !matchesImmutableReportV4Order(existing, input, snapshot.id)) {
+      throw new CommercialOrderConflictError("The checkout idempotency key conflicts with another order.");
+    }
+    return existing;
+  });
+}
+
 export async function getPaymentOrder(id: string): Promise<PaymentOrderRow | null> {
   await ensureDatabase();
   const [row] = await getDb().select().from(paymentOrders).where(eq(paymentOrders.id, id)).limit(1);
@@ -153,6 +245,25 @@ export async function getActivePaymentOrderForReport(
     SELECT id FROM payment_orders
     WHERE report_id = ${reportId}
       AND product_code = ${productCode}
+      AND (
+        payment_status IN ('created','pending')
+        OR (payment_status = 'paid' AND refund_status <> 'refunded')
+      )
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  return rows[0] ? getPaymentOrder(rows[0].id) : null;
+}
+
+export async function getActiveReportV4PaymentOrderForReport(reportId: string): Promise<PaymentOrderRow | null> {
+  await ensureDatabase();
+  const rows = await getSqlClient()<{ id: string }[]>`
+    SELECT id FROM payment_orders
+    WHERE report_id = ${reportId}
+      AND product_code = ${REPORT_V4_PRODUCT_CODE}
+      AND fulfillment_methodology = ${REPORT_V4_FULFILLMENT_METHODOLOGY}
+      AND recommendation_report_version = ${REPORT_V4_VERSION}
+      AND site_snapshot_id IS NOT NULL
       AND (
         payment_status IN ('created','pending')
         OR (payment_status = 'paid' AND refund_status <> 'refunded')
@@ -446,6 +557,19 @@ export interface RetiredLegacyPaidRefundResult {
  * or after this short transaction, never while its locks are held.
  */
 export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): Promise<PaidFulfillmentResult | RetiredLegacyPaidRefundResult> {
+  return applyPaidPaymentEventInternal(input, "legacy");
+}
+
+export async function applyReportV4PaidPaymentEvent(input: ApplyPaidPaymentEventInput): Promise<PaidFulfillmentResult> {
+  const result = await applyPaidPaymentEventInternal(input, "report_v4");
+  if ("retiredRefund" in result) throw new Error("A V4 paid event cannot enter legacy retirement handling.");
+  return result;
+}
+
+async function applyPaidPaymentEventInternal(
+  input: ApplyPaidPaymentEventInput,
+  expectedContract: "legacy" | "report_v4"
+): Promise<PaidFulfillmentResult | RetiredLegacyPaidRefundResult> {
   assertPaymentEventInput(input);
   if (!input.orderId || !input.providerPaymentId) {
     throw new Error("A paid event requires order and provider payment IDs.");
@@ -497,12 +621,15 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
       fulfillment_methodology: RecommendationFulfillmentMethodology | null;
       recommendation_report_version: RecommendationReportVersion | null;
       business_question_set_id: string | null;
+      site_snapshot_id: string | null;
+      site_key: string;
       legacy_retirement_cutoff_at: Date | null;
       legacy_retired_at: Date | null;
     }>>`
       SELECT id, provider, provider_payment_id, payment_status, report_id, report_locale, fulfillment_job_id, product_code,
              fulfillment_methodology,
              recommendation_report_version, business_question_set_id,
+             site_snapshot_id, site_key,
              legacy_retirement_cutoff_at, legacy_retired_at
       FROM payment_orders WHERE id = ${input.orderId} FOR UPDATE
     `;
@@ -512,6 +639,25 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
     }
     if (order.provider_payment_id && order.provider_payment_id !== input.providerPaymentId) {
       throw new CommercialOrderConflictError("The payment order is already bound to another provider payment.");
+    }
+    const reportV4Order = isReportV4PaymentOrderShape(order);
+    if (expectedContract === "report_v4") {
+      if (!reportV4Order) throw new CommercialOrderConflictError("The paid event does not match an exact V4 payment order.");
+      const snapshots = await tx<Array<{ id: string }>>`
+        SELECT id FROM report_v4_site_snapshots
+        WHERE id=${order.site_snapshot_id} AND report_id=${order.report_id} AND site_key=${order.site_key}
+          AND status IN ('completed','completed_limited') AND content_identity_hash IS NOT NULL
+      `;
+      const questionSets = await tx<Array<{ id: string }>>`
+        SELECT id FROM report_business_question_sets
+        WHERE id=${order.business_question_set_id} AND report_id=${order.report_id}
+          AND order_id=${order.id} AND status='locked'
+      `;
+      if (snapshots.length !== 1 || questionSets.length !== 1) {
+        throw new CommercialOrderConflictError("The V4 paid order lost its exact snapshot or question binding.");
+      }
+    } else if (hasReportV4OrderMarkers(order)) {
+      throw new CommercialOrderConflictError("A V4 paid order must use the V4 fulfillment boundary.");
     }
     const cutoff = order.legacy_retirement_cutoff_at ? new Date(order.legacy_retirement_cutoff_at) : null;
     const lateRetiredLegacyPayment = order.product_code === "deep_report_v1" && cutoff &&
@@ -578,18 +724,43 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
     const reservation = reservations[0];
     if (!reservation) throw new Error("The paid order credit reservation could not be created.");
 
-    const combinedReportContract = resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: process.env.OGC_COMBINED_REPORT_CONTRACT });
+    const combinedReportContract = expectedContract === "report_v4"
+      ? "combined_geo_report_v4"
+      : resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: process.env.OGC_COMBINED_REPORT_CONTRACT });
     let jobId = order.fulfillment_job_id ?? reservation.job_id;
     if (!jobId) {
       jobId = ids.jobId;
       await tx`
         INSERT INTO scan_jobs
-          (id, report_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, artifact_contract, business_question_set_id, locale, reason, stage, credit_reservation_id)
+          (id, report_id, site_snapshot_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, artifact_contract, business_question_set_id, locale, reason, stage, credit_reservation_id)
         VALUES
-          (${jobId}, ${order.report_id}, 'deep', ${productContractForCode(order.product_code)}, ${order.fulfillment_methodology}, ${order.recommendation_report_version},
+          (${jobId}, ${order.report_id}, ${expectedContract === "report_v4" ? order.site_snapshot_id : null}, 'deep', ${productContractForCode(order.product_code)}, ${order.fulfillment_methodology}, ${order.recommendation_report_version},
            ${order.product_code === "recommendation_forensics_v1" && order.business_question_set_id ? combinedReportContract : productContractForCode(order.product_code)}, ${order.business_question_set_id},
            ${order.report_locale}, 'standard', 'queued', ${reservation.id})
       `;
+    }
+    if (expectedContract === "report_v4") {
+      const jobs = await tx<Array<{
+        report_id: string; site_snapshot_id: string | null; tier: string; product_contract: string;
+        fulfillment_methodology: string | null; recommendation_report_version: number | null;
+        artifact_contract: string | null; business_question_set_id: string | null; reason: string;
+        credit_reservation_id: string | null; correction_id: string | null; replacement_fulfillment_id: string | null;
+      }>>`
+        SELECT report_id,site_snapshot_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,
+          artifact_contract,business_question_set_id,reason,credit_reservation_id,correction_id,replacement_fulfillment_id
+        FROM scan_jobs WHERE id=${jobId} FOR UPDATE
+      `;
+      const job = jobs[0];
+      if (!job || job.report_id !== order.report_id || job.site_snapshot_id !== order.site_snapshot_id
+        || job.tier !== "deep" || job.product_contract !== REPORT_V4_PRODUCT_CODE
+        || job.fulfillment_methodology !== REPORT_V4_FULFILLMENT_METHODOLOGY
+        || job.recommendation_report_version !== REPORT_V4_VERSION
+        || job.artifact_contract !== "combined_geo_report_v4"
+        || job.business_question_set_id !== order.business_question_set_id || job.reason !== "standard"
+        || job.credit_reservation_id !== reservation.id || job.correction_id !== null
+        || job.replacement_fulfillment_id !== null) {
+        throw new CommercialOrderConflictError("The V4 paid event does not bind one exact standard core job.");
+      }
     }
     await tx`
       UPDATE credit_ledger SET job_id = COALESCE(job_id, ${jobId})
@@ -599,7 +770,7 @@ export async function applyPaidPaymentEvent(input: ApplyPaidPaymentEventInput): 
       UPDATE payment_orders SET fulfillment_job_id = COALESCE(fulfillment_job_id, ${jobId}), updated_at = now()
       WHERE id = ${order.id}
     `;
-    if (order.product_code === "recommendation_forensics_v1" && order.business_question_set_id) {
+    if (expectedContract !== "report_v4" && order.product_code === "recommendation_forensics_v1" && order.business_question_set_id) {
       const artifacts=await tx<Array<{id:string}>>`SELECT id FROM report_artifact_revisions WHERE job_id=${jobId} LIMIT 1`;
       if(!artifacts[0]) {
         await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`artifact-revision:${order.report_id}`},0))`;
@@ -674,6 +845,39 @@ export function recommendationReportVersionForProductAdmission(productCode: stri
   throw new CommercialOrderConflictError("The paid order uses an unsupported recommendation report version.");
 }
 
+export function isReportV4PaymentOrder(order: PaymentOrderRow | null): order is PaymentOrderRow {
+  return Boolean(order
+    && order.productCode === REPORT_V4_PRODUCT_CODE
+    && order.fulfillmentMethodology === REPORT_V4_FULFILLMENT_METHODOLOGY
+    && order.recommendationReportVersion === REPORT_V4_VERSION
+    && order.siteSnapshotId
+    && order.businessQuestionSetId);
+}
+
+function isReportV4PaymentOrderShape(order: {
+  product_code: string;
+  fulfillment_methodology: RecommendationFulfillmentMethodology | null;
+  recommendation_report_version: RecommendationReportVersion | null;
+  site_snapshot_id: string | null;
+  business_question_set_id: string | null;
+}): boolean {
+  return order.product_code === REPORT_V4_PRODUCT_CODE
+    && order.fulfillment_methodology === REPORT_V4_FULFILLMENT_METHODOLOGY
+    && order.recommendation_report_version === REPORT_V4_VERSION
+    && Boolean(order.site_snapshot_id)
+    && Boolean(order.business_question_set_id);
+}
+
+function hasReportV4OrderMarkers(order: {
+  fulfillment_methodology: RecommendationFulfillmentMethodology | null;
+  recommendation_report_version: RecommendationReportVersion | null;
+  site_snapshot_id: string | null;
+}): boolean {
+  return order.fulfillment_methodology === REPORT_V4_FULFILLMENT_METHODOLOGY
+    || order.recommendation_report_version === REPORT_V4_VERSION
+    || order.site_snapshot_id !== null;
+}
+
 function assertOrderInput(input: CreatePaymentOrderInput): void {
   const required = [
     input.checkoutIdempotencyHmac,
@@ -712,6 +916,29 @@ export function matchesImmutableOrder(row: PaymentOrderRow, input: CreatePayment
     && row.businessQuestionSetId === input.businessQuestionSetId
     && row.fulfillmentMethodology === fulfillmentMethodologyForProductAdmission(input.productCode)
     && row.recommendationReportVersion === recommendationReportVersionForProductAdmission(input.productCode)
+    && row.catalogVersion === input.catalogVersion
+    && row.termsVersion === input.termsVersion
+    && row.refundPolicyVersion === input.refundPolicyVersion
+    && row.reportLocale === input.reportLocale
+    && row.currency === input.currency
+    && row.amountMinor === input.amountMinor
+    && row.taxAmountMinor === (input.taxAmountMinor ?? null);
+}
+
+export function matchesImmutableReportV4Order(
+  row: PaymentOrderRow,
+  input: CreateReportV4PaymentOrderInput,
+  siteSnapshotId: string
+): boolean {
+  return row.provider === input.provider
+    && row.reportId === input.reportId
+    && row.siteSnapshotId === siteSnapshotId
+    && row.siteKey === input.siteKey
+    && row.customerEmailHmac === input.customerEmailHmac
+    && row.productCode === REPORT_V4_PRODUCT_CODE
+    && row.businessQuestionSetId === input.businessQuestionSetId
+    && row.fulfillmentMethodology === REPORT_V4_FULFILLMENT_METHODOLOGY
+    && row.recommendationReportVersion === REPORT_V4_VERSION
     && row.catalogVersion === input.catalogVersion
     && row.termsVersion === input.termsVersion
     && row.refundPolicyVersion === input.refundPolicyVersion
