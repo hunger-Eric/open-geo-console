@@ -70,6 +70,7 @@ export interface LoadReportV4PageSummaryByLineageInput {
   readonly snapshotId: string;
   readonly pageUrl: string;
   readonly contentHash: string;
+  readonly snapshotContentIdentityHash: string;
 }
 
 export interface PersistedReportV4PageSummary {
@@ -289,11 +290,13 @@ async function loadByExactLineageWithStore(
   const snapshotId = requiredText(inputValue.snapshotId, "snapshotId");
   const pageUrl = httpUrl(inputValue.pageUrl, "pageUrl");
   const contentHash = sha256(inputValue.contentHash, "page contentHash");
+  const snapshotContentIdentityHash = sha256(inputValue.snapshotContentIdentityHash, "snapshot contentIdentityHash");
   return store.transaction(async (tx) => {
     const rawSnapshot = await tx.findSnapshot(reportId, snapshotId);
     if (!rawSnapshot) return null;
     const snapshot = parseSnapshot(rawSnapshot);
     if (!PAID_SYNTHESIS_STATUSES.has(snapshot.status)) return null;
+    if (snapshot.contentIdentityHash !== snapshotContentIdentityHash) return null;
     const pages = (await tx.listPages(snapshotId)).map(parsePage);
     const matches = pages.filter((page) => page.analyzable && page.normalizedUrl === pageUrl && page.contentHash === contentHash);
     if (matches.length > 1) throw new Error("The exact V4 page lineage query returned multiple matching pages.");

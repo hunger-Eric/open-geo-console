@@ -120,13 +120,13 @@ describe("V4 hierarchical page-summary persistence", () => {
       snapshots: [snapshot("completed", 2)], pages: pages(), summaries: [storedRow(persisted)]
     }));
     await expect(loadReportV4PageSummaryByExactLineage({
-      reportId: "report-1", snapshotId: "snapshot-1", pageUrl: "https://example.com/page-1", contentHash: hash(retainedText("page-1"))
+      reportId: "report-1", snapshotId: "snapshot-1", pageUrl: "https://example.com/page-1", contentHash: hash(retainedText("page-1")), snapshotContentIdentityHash: hash("snapshot-1")
     }, repository)).resolves.toEqual(persisted.summary);
     await expect(loadReportV4PageSummaryByExactLineage({
-      reportId: "report-1", snapshotId: "snapshot-1", pageUrl: "https://example.com/page-1", contentHash: hash("drift")
+      reportId: "report-1", snapshotId: "snapshot-1", pageUrl: "https://example.com/page-1", contentHash: hash("drift"), snapshotContentIdentityHash: hash("snapshot-1")
     }, repository)).resolves.toBeNull();
     await expect(loadReportV4PageSummaryByExactLineage({
-      reportId: "other-report", snapshotId: "snapshot-1", pageUrl: "https://example.com/page-1", contentHash: hash(retainedText("page-1"))
+      reportId: "other-report", snapshotId: "snapshot-1", pageUrl: "https://example.com/page-1", contentHash: hash(retainedText("page-1")), snapshotContentIdentityHash: hash("snapshot-1")
     }, repository)).resolves.toBeNull();
   });
 
