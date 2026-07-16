@@ -115,6 +115,24 @@ export function loadReportV4ModelRuntimeConfig(
   return APPROVED_RUNTIMES[profileId];
 }
 
+/**
+ * Re-admits an immutable report snapshot against the exact V4 profile that was
+ * capability-resolved at process startup. Resumed reports must not silently
+ * inherit a different profile from the current process environment.
+ */
+export function resolveReportV4LockedModelRuntime(value: unknown): ReportV4ModelRuntimeConfig {
+  let lockedProfile: ModelProfile;
+  try {
+    lockedProfile = parseModelProfile(value);
+  } catch (error) {
+    throw new Error("The locked Report V4 model profile is invalid and cannot be admitted.", { cause: error });
+  }
+  if (stableJson(lockedProfile) !== stableJson(modelProfile)) {
+    throw new Error("The locked Report V4 model profile has drifted from the approved capability profile.");
+  }
+  return runtime;
+}
+
 function operationCapability(
   operation: "pageAnalysis" | "websiteSynthesis" | "questionAnswer" | "sourceDiagnosis",
   endpointCapability: string,
@@ -126,4 +144,16 @@ function operationCapability(
     nativeWebSearch,
     structuredOutput: true
   };
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const row = value as Record<string, unknown>;
+    return `{${Object.keys(row)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(row[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }

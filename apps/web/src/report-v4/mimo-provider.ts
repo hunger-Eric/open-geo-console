@@ -1,7 +1,8 @@
 import {
   buildModelOperationTokenBudget,
   runWithModelTokenBudget,
-  type ModelProfileOperation
+  type ModelProfileOperation,
+  type ModelTokenBudgetInput
 } from "@open-geo-console/ai-report-engine";
 import {
   canonicalizePublicSourceUrl,
@@ -21,7 +22,11 @@ import {
   type ReportV4QuestionProviderErrorCode,
   type ReportV4QuestionProviderInput
 } from "../worker/report-v4-question-answerer";
-import { loadReportV4ModelRuntimeConfig } from "./model-runtime-config";
+import {
+  loadReportV4ModelRuntimeConfig,
+  resolveReportV4LockedModelRuntime,
+  type ReportV4ModelRuntimeConfig
+} from "./model-runtime-config";
 
 const MIMO_BASE_URL = "https://api.xiaomimimo.com/v1" as const;
 const PROVIDER_SAFETY_MARGIN_TOKENS = 4_096;
@@ -49,10 +54,22 @@ export interface ReportV4MimoStructuredInvoker {
   invoke(input: ReportV4MimoStructuredInvokeInput): Promise<unknown>;
 }
 
-interface ProviderDependencies {
+export interface ProviderDependencies {
   readonly environment: NodeJS.ProcessEnv;
   readonly fetch?: typeof globalThis.fetch;
   readonly now?: () => Date;
+  readonly lockedModelProfile?: unknown;
+  readonly lockedRuntime?: ReportV4ModelRuntimeConfig;
+}
+
+export interface ReportV4MimoQuestionTokenBudgetInput {
+  readonly runtime: ReportV4ModelRuntimeConfig;
+  readonly input: ReportV4QuestionProviderInput;
+}
+
+export interface ReportV4MimoDiagnosisTokenBudgetInput {
+  readonly runtime: ReportV4ModelRuntimeConfig;
+  readonly request: ReportV4DiagnosisProviderRequest;
 }
 
 interface ProviderEnvelope {
@@ -114,20 +131,7 @@ export function createReportV4MimoQuestionAnswerProvider(
       input.signal.throwIfAborted();
       let envelope: ProviderEnvelope;
       try {
-        envelope = await context.invokeOnce({
-          operation: "questionAnswer",
-          systemText: questionSystemText(),
-          inputText: JSON.stringify({
-            question: boundedText(input.question, "question", 12_000),
-            locale: boundedText(input.locale, "locale", 100),
-            region: boundedText(input.region, "region", 100)
-          }),
-          signal: input.signal,
-          webSearchLocation: {
-            country: boundedText(input.region, "region", 100),
-            region: boundedText(input.region, "region", 100)
-          }
-        });
+        envelope = await context.invokeOnce(questionInvocation(input));
       } catch (error) {
         propagateAbort(input.signal);
         throw mapQuestionError(error);
@@ -155,18 +159,7 @@ export function createReportV4MimoDiagnosisProvider(
     async generate(request: ReportV4DiagnosisProviderRequest): Promise<unknown> {
       request.signal.throwIfAborted();
       try {
-        const inputText = diagnosisInputText(request);
-        if (inputText.length > MAX_DIAGNOSIS_INPUT_LENGTH) {
-          throw new ReportV4MimoProviderError("configuration", "The V4 diagnosis input exceeds its retained bound.");
-        }
-        return (await context.invokeOnce({
-          operation: "sourceDiagnosis",
-          systemText: request.kind === "correct"
-            ? diagnosisCorrectionSystemText(request.field)
-            : diagnosisSystemText(request.kind),
-          inputText,
-          signal: request.signal
-        })).value;
+        return (await context.invokeOnce(diagnosisInvocation(request))).value;
       } catch (error) {
         propagateAbort(request.signal);
         throw mapDiagnosisError(error);
@@ -175,9 +168,23 @@ export function createReportV4MimoDiagnosisProvider(
   });
 }
 
+export function buildReportV4MimoQuestionTokenBudget(
+  value: ReportV4MimoQuestionTokenBudgetInput
+): ModelTokenBudgetInput {
+  const runtime = requireApprovedLockedRuntime(value.runtime);
+  return buildInvocationTokenBudget(runtime, questionInvocation(value.input));
+}
+
+export function buildReportV4MimoDiagnosisTokenBudget(
+  value: ReportV4MimoDiagnosisTokenBudgetInput
+): ModelTokenBudgetInput {
+  const runtime = requireApprovedLockedRuntime(value.runtime);
+  return buildInvocationTokenBudget(runtime, diagnosisInvocation(value.request));
+}
+
 function createProviderContext(dependencies: ProviderDependencies): ProviderContext {
   const config = readReportV4MimoProviderConfig(dependencies.environment);
-  const runtime = loadReportV4ModelRuntimeConfig(dependencies.environment);
+  const runtime = resolveProviderRuntime(dependencies);
   const providerFetch = dependencies.fetch ?? globalThis.fetch;
   if (typeof providerFetch !== "function") throw new Error("A fetch implementation is required for Report V4 MiMo.");
   const now = dependencies.now ?? (() => new Date());
@@ -188,17 +195,7 @@ function createProviderContext(dependencies: ProviderDependencies): ProviderCont
       input.signal.throwIfAborted();
       const operationProfile = runtime.modelProfile.operations[input.operation];
       const location = parseWebSearchLocation(input.operation, input.webSearchLocation);
-      const budget = buildModelOperationTokenBudget({
-        profile: runtime.modelProfile,
-        operation: input.operation,
-        estimate: {
-          systemText: input.systemText,
-          inputText: input.inputText,
-          reservedOutputTokens: operationProfile.maxOutputTokens,
-          providerSafetyMarginTokens: PROVIDER_SAFETY_MARGIN_TOKENS
-        },
-        estimators: runtime.tokenEstimators
-      });
+      const budget = buildInvocationTokenBudget(runtime, input);
 
       return runWithModelTokenBudget(budget, async () => {
         input.signal.throwIfAborted();
@@ -258,6 +255,48 @@ function createProviderContext(dependencies: ProviderDependencies): ProviderCont
         });
       });
     }
+  });
+}
+
+function resolveProviderRuntime(dependencies: ProviderDependencies): ReportV4ModelRuntimeConfig {
+  if (dependencies.lockedModelProfile !== undefined && dependencies.lockedRuntime !== undefined) {
+    throw new Error("Provide exactly one locked Report V4 model profile or runtime.");
+  }
+  if (dependencies.lockedModelProfile !== undefined) {
+    return resolveReportV4LockedModelRuntime(dependencies.lockedModelProfile);
+  }
+  if (dependencies.lockedRuntime !== undefined) {
+    return requireApprovedLockedRuntime(dependencies.lockedRuntime);
+  }
+  return loadReportV4ModelRuntimeConfig(dependencies.environment);
+}
+
+function requireApprovedLockedRuntime(value: ReportV4ModelRuntimeConfig): ReportV4ModelRuntimeConfig {
+  if (!value || typeof value !== "object") {
+    throw new Error("The locked Report V4 model runtime is invalid.");
+  }
+  const approved = resolveReportV4LockedModelRuntime(value.modelProfile);
+  if (value !== approved) {
+    throw new Error("The locked Report V4 model runtime has drifted from the approved runtime.");
+  }
+  return approved;
+}
+
+function buildInvocationTokenBudget(
+  runtime: ReportV4ModelRuntimeConfig,
+  input: Pick<ReportV4MimoStructuredInvokeInput, "operation" | "systemText" | "inputText">
+): ModelTokenBudgetInput {
+  const operationProfile = runtime.modelProfile.operations[input.operation];
+  return buildModelOperationTokenBudget({
+    profile: runtime.modelProfile,
+    operation: input.operation,
+    estimate: {
+      systemText: input.systemText,
+      inputText: input.inputText,
+      reservedOutputTokens: operationProfile.maxOutputTokens,
+      providerSafetyMarginTokens: PROVIDER_SAFETY_MARGIN_TOKENS
+    },
+    estimators: runtime.tokenEstimators
   });
 }
 
@@ -344,6 +383,36 @@ function parseRefusal(value: unknown): unknown {
     throw new TypeError("refusal code is invalid.");
   }
   return Object.freeze({ code, reason: boundedText(row.reason, "refusal reason", 500) });
+}
+
+function questionInvocation(input: ReportV4QuestionProviderInput): ReportV4MimoStructuredInvokeInput {
+  const region = boundedText(input.region, "region", 100);
+  return Object.freeze({
+    operation: "questionAnswer",
+    systemText: questionSystemText(),
+    inputText: JSON.stringify({
+      question: boundedText(input.question, "question", 12_000),
+      locale: boundedText(input.locale, "locale", 100),
+      region
+    }),
+    signal: input.signal,
+    webSearchLocation: Object.freeze({ country: region, region })
+  });
+}
+
+function diagnosisInvocation(request: ReportV4DiagnosisProviderRequest): ReportV4MimoStructuredInvokeInput {
+  const inputText = diagnosisInputText(request);
+  if (inputText.length > MAX_DIAGNOSIS_INPUT_LENGTH) {
+    throw new ReportV4MimoProviderError("configuration", "The V4 diagnosis input exceeds its retained bound.");
+  }
+  return Object.freeze({
+    operation: "sourceDiagnosis",
+    systemText: request.kind === "correct"
+      ? diagnosisCorrectionSystemText(request.field)
+      : diagnosisSystemText(request.kind),
+    inputText,
+    signal: request.signal
+  });
 }
 
 function diagnosisInputText(request: ReportV4DiagnosisProviderRequest): string {

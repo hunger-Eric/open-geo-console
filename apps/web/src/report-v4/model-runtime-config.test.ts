@@ -8,7 +8,8 @@ import profilePayload from "../../../../config/model-profiles/report-v4-mimo-v2.
 import {
   REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
   REPORT_V4_MODEL_CAPABILITY_EVIDENCE,
-  loadReportV4ModelRuntimeConfig
+  loadReportV4ModelRuntimeConfig,
+  resolveReportV4LockedModelRuntime
 } from "./model-runtime-config";
 
 // @requirement GEO-V4-CONTRACT-01
@@ -142,6 +143,45 @@ describe("Report V4 production model runtime configuration", () => {
     expect(serialized).not.toMatch(/apiKey|baseUrl|authorization|secret/i);
   });
 
+  it("resolves an exact locked profile without consulting current environment admission", () => {
+    const first = resolveReportV4LockedModelRuntime(structuredClone(profilePayload));
+    const second = resolveReportV4LockedModelRuntime(structuredClone(profilePayload));
+
+    expect(first).toBe(second);
+    expect(first.modelProfile).toEqual(parseModelProfile(profilePayload));
+    expect(first.modelProfile.operations.questionAnswer.model).toBe("mimo-v2.5-pro");
+    expect(first.resolvedProfile.operations.questionAnswer.nativeWebSearch).toBe(true);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.modelProfile)).toBe(true);
+    expect(Object.isFrozen(first.resolvedProfile)).toBe(true);
+  });
+
+  it.each([
+    ["profile", (profile: Record<string, unknown>) => { profile.profileId = "unknown-profile"; }],
+    ["provider", (profile: Record<string, unknown>) => { profile.provider = "unknown-provider"; }],
+    ["adapter", (profile: Record<string, unknown>) => { profile.adapterId = "unknown-adapter"; }],
+    ["model", (profile: Record<string, unknown>) => {
+      operation(profile, "questionAnswer").model = "different-model";
+    }],
+    ["tokenizer", (profile: Record<string, unknown>) => {
+      operation(profile, "questionAnswer").tokenizer = "unknown-tokenizer";
+    }],
+    ["web-search capability", (profile: Record<string, unknown>) => {
+      operation(profile, "questionAnswer").nativeWebSearch = false;
+    }],
+    ["structured-output capability", (profile: Record<string, unknown>) => {
+      operation(profile, "sourceDiagnosis").structuredOutput = false;
+    }],
+    ["limits", (profile: Record<string, unknown>) => {
+      operation(profile, "pageAnalysis").maxInputTokens = 1;
+    }]
+  ])("rejects locked-profile %s drift instead of resolving another runtime", (_label, mutate) => {
+    const candidate = structuredClone(profilePayload) as Record<string, unknown>;
+    mutate(candidate);
+
+    expect(() => resolveReportV4LockedModelRuntime(candidate)).toThrow(/locked|approved|profile|capability|drift/i);
+  });
+
   it("rejects an oversized smallest unit before making any provider call", async () => {
     const runtime = loadReportV4ModelRuntimeConfig(environment());
     const provider = vi.fn(async () => "provider-result");
@@ -168,4 +208,8 @@ describe("Report V4 production model runtime configuration", () => {
 
 function environment(): NodeJS.ProcessEnv {
   return { OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_MIMO_V25_PRO_PROFILE_ID };
+}
+
+function operation(profile: Record<string, unknown>, name: string): Record<string, unknown> {
+  return (profile.operations as Record<string, Record<string, unknown>>)[name]!;
 }

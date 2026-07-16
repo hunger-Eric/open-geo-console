@@ -1,13 +1,23 @@
 import { readFileSync } from "node:fs";
-import { ModelTokenBudgetError } from "@open-geo-console/ai-report-engine";
+import {
+  ModelTokenBudgetError,
+  buildModelOperationTokenBudget,
+  evaluateModelTokenBudget
+} from "@open-geo-console/ai-report-engine";
 import { describe, expect, it, vi } from "vitest";
 import {
   ReportV4DiagnosisProviderError,
   type ReportV4DiagnosisProviderRequest
 } from "../worker/report-v4-diagnosis-enhancer";
 import { ReportV4QuestionProviderError } from "../worker/report-v4-question-answerer";
-import { REPORT_V4_MIMO_V25_PRO_PROFILE_ID } from "./model-runtime-config";
+import profilePayload from "../../../../config/model-profiles/report-v4-mimo-v2.5-pro.json";
 import {
+  REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
+  resolveReportV4LockedModelRuntime
+} from "./model-runtime-config";
+import {
+  buildReportV4MimoDiagnosisTokenBudget,
+  buildReportV4MimoQuestionTokenBudget,
   createReportV4MimoDiagnosisProvider,
   createReportV4MimoQuestionAnswerProvider,
   createReportV4MimoStructuredInvoker,
@@ -105,6 +115,151 @@ describe("Report V4 dedicated MiMo provider", () => {
     })).rejects.toMatchObject({ code: "transport", retryable: true });
     expect(failingFetch).toHaveBeenCalledTimes(1);
   });
+
+  it("uses an explicit locked profile when environment profile admission is missing or different", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return response({ answerText: "A complete answer.", refusal: null });
+    });
+    const provider = createReportV4MimoQuestionAnswerProvider({
+      environment: providerEnvironment({ OGC_REPORT_V4_MODEL_PROFILE_ID: "different-current-profile" }),
+      lockedModelProfile: structuredClone(profilePayload),
+      fetch,
+      now: timeline()
+    });
+
+    await expect(provider.answerWithSources(questionInput())).resolves.toMatchObject({
+      questionId: "question-local-1",
+      answerText: "A complete answer."
+    });
+    expect(requests[0]).toMatchObject({
+      model: "mimo-v2.5-pro",
+      max_completion_tokens: profilePayload.operations.questionAnswer.maxOutputTokens
+    });
+
+    const missingEnvironmentProvider = createReportV4MimoQuestionAnswerProvider({
+      environment: providerEnvironment(),
+      lockedRuntime: resolveReportV4LockedModelRuntime(profilePayload),
+      fetch,
+      now: timeline()
+    });
+    await expect(missingEnvironmentProvider.answerWithSources(questionInput())).resolves.toMatchObject({
+      answerText: "A complete answer."
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["provider", (profile: Record<string, unknown>) => { profile.provider = "other-provider"; }],
+    ["adapter", (profile: Record<string, unknown>) => { profile.adapterId = "other-adapter"; }],
+    ["tokenizer", (profile: Record<string, unknown>) => {
+      modelOperation(profile, "questionAnswer").tokenizer = "other-tokenizer";
+    }],
+    ["capability", (profile: Record<string, unknown>) => {
+      modelOperation(profile, "questionAnswer").nativeWebSearch = false;
+    }],
+    ["limit", (profile: Record<string, unknown>) => {
+      modelOperation(profile, "sourceDiagnosis").maxOutputTokens = 1;
+    }]
+  ])("rejects locked %s drift before fetch", (_label, mutate) => {
+    const fetch = vi.fn(async () => response({ ok: true }));
+    const candidate = structuredClone(profilePayload) as Record<string, unknown>;
+    mutate(candidate);
+
+    expect(() => createReportV4MimoQuestionAnswerProvider({
+      environment: providerEnvironment(),
+      lockedModelProfile: candidate,
+      fetch
+    })).toThrow(/locked|approved|profile|capability|drift/i);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reconstructed locked runtime before fetch even when its nested profile looks approved", () => {
+    const fetch = vi.fn(async () => response({ ok: true }));
+    const approved = resolveReportV4LockedModelRuntime(profilePayload);
+    const reconstructed = { ...approved };
+
+    expect(() => createReportV4MimoQuestionAnswerProvider({
+      environment: providerEnvironment(),
+      lockedRuntime: reconstructed,
+      fetch
+    })).toThrow(/locked|approved|runtime|drift/i);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("builds the question budget from the exact request text and margin used by fetch", async () => {
+    const runtime = resolveReportV4LockedModelRuntime(profilePayload);
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return response({ answerText: "A complete answer.", refusal: null });
+    });
+    const input = questionInput();
+    const first = buildReportV4MimoQuestionTokenBudget({ runtime, input });
+    const second = buildReportV4MimoQuestionTokenBudget({ runtime, input });
+
+    await createReportV4MimoQuestionAnswerProvider({
+      environment: providerEnvironment(), lockedRuntime: runtime, fetch, now: timeline()
+    }).answerWithSources(input);
+
+    const messages = bodies[0]!.messages as Array<{ role: string; content: string }>;
+    const expected = buildModelOperationTokenBudget({
+      profile: runtime.modelProfile,
+      operation: "questionAnswer",
+      estimate: {
+        systemText: messages[0]!.content,
+        inputText: messages[1]!.content,
+        reservedOutputTokens: runtime.modelProfile.operations.questionAnswer.maxOutputTokens,
+        providerSafetyMarginTokens: 4_096
+      },
+      estimators: runtime.tokenEstimators
+    });
+    expect(first).toEqual(expected);
+    expect(second).toEqual(first);
+    expect(evaluateModelTokenBudget(first)).toEqual(evaluateModelTokenBudget(expected));
+    expect(JSON.parse(messages[1]!.content)).toEqual({
+      question: input.question,
+      locale: input.locale,
+      region: input.region
+    });
+  });
+
+  it.each(["diagnose", "retry", "correct"] as const)(
+    "builds the %s diagnosis budget from the exact request text and margin used by fetch",
+    async (kind) => {
+      const runtime = resolveReportV4LockedModelRuntime(profilePayload);
+      let body: Record<string, unknown> | undefined;
+      const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return response({ ok: true });
+      });
+      const request = diagnosisRequest(kind);
+      const budget = buildReportV4MimoDiagnosisTokenBudget({ runtime, request });
+
+      await createReportV4MimoDiagnosisProvider({
+        environment: providerEnvironment(), lockedRuntime: runtime, fetch
+      }).generate(request);
+
+      const messages = body!.messages as Array<{ role: string; content: string }>;
+      const expected = buildModelOperationTokenBudget({
+        profile: runtime.modelProfile,
+        operation: "sourceDiagnosis",
+        estimate: {
+          systemText: messages[0]!.content,
+          inputText: messages[1]!.content,
+          reservedOutputTokens: runtime.modelProfile.operations.sourceDiagnosis.maxOutputTokens,
+          providerSafetyMarginTokens: 4_096
+        },
+        estimators: runtime.tokenEstimators
+      });
+      expect(budget).toEqual(expected);
+      expect(buildReportV4MimoDiagnosisTokenBudget({ runtime, request })).toEqual(budget);
+      expect(messages[0]!.content).toContain(kind === "correct" ? "Correct only" : `${kind} request`);
+      expect(JSON.parse(messages[1]!.content)).toMatchObject({ kind });
+      expect(body!.tools).toBeUndefined();
+    }
+  );
 
   it.each([
     [401, "authentication", false],
@@ -278,6 +433,18 @@ function environment(): NodeJS.ProcessEnv {
     OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
     OGC_REPORT_V4_MIMO_API_KEY: "v4-secret"
   };
+}
+
+function providerEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
+    OGC_REPORT_V4_MIMO_API_KEY: "v4-secret",
+    ...overrides
+  };
+}
+
+function modelOperation(profile: Record<string, unknown>, name: string): Record<string, unknown> {
+  return (profile.operations as Record<string, Record<string, unknown>>)[name]!;
 }
 
 function questionInput() {
