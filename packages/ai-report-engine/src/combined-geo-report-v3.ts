@@ -11,6 +11,11 @@ import {
   type OpenGeoAnswerCardV3,
   type OpenGeoEngineProvenanceV3
 } from "./open-geo-answer-v3";
+import {
+  parseSourceSelectionDiagnosisV1,
+  type SourceSelectionDiagnosisV1,
+  type SourceSelectionSourceInputV1
+} from "./source-selection-diagnosis-v1";
 
 export const COMBINED_GEO_REPORT_V3_VERSION = 3 as const;
 export const COMBINED_GEO_REPORT_V3_CONTRACT = "combined_geo_report_v3" as const;
@@ -20,6 +25,7 @@ export interface CombinedGeoReportV3 extends Omit<CombinedGeoReportV2, "version"
   artifactContract: typeof COMBINED_GEO_REPORT_V3_CONTRACT;
   engineProvenance: OpenGeoEngineProvenanceV3;
   answerCards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
+  sourceSelectionDiagnosis?: SourceSelectionDiagnosisV1;
 }
 
 export function parseCombinedGeoReportV3(value: unknown): CombinedGeoReportV3 {
@@ -78,14 +84,55 @@ export function parseCombinedGeoReportV3(value: unknown): CombinedGeoReportV3 {
     competitors,
     missingEvidenceFamiliesByQuestion: preliminaryCards.map((card) => card.geoDiagnosis?.missingEvidenceFamilies ?? []) as [string[], string[], string[]]
   });
+  const sourceSelectionDiagnosis = root.sourceSelectionDiagnosis === undefined
+    ? undefined
+    : parseV3SourceSelectionDiagnosis(root.sourceSelectionDiagnosis, answerCards, base, provenance);
   const { businessQuestionAnswers: _businessQuestionAnswers, ...v3Base } = base;
   return {
     ...v3Base,
     version: COMBINED_GEO_REPORT_V3_VERSION,
     artifactContract: COMBINED_GEO_REPORT_V3_CONTRACT,
     engineProvenance: provenance,
-    answerCards
+    answerCards,
+    ...(sourceSelectionDiagnosis ? { sourceSelectionDiagnosis } : {})
   };
+}
+
+function parseV3SourceSelectionDiagnosis(
+  value: unknown,
+  cards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3],
+  base: CombinedGeoReportV2,
+  provenance: OpenGeoEngineProvenanceV3
+): SourceSelectionDiagnosisV1 {
+  if (cards.some((card) => card.answerMode !== "generative_search_v1")) throw new TypeError("Source selection diagnosis requires generative-search V3 cards.");
+  const verifiedExcerptByUrl = new Map<string, string>();
+  for (const evidence of base.publicSourceForensics.sourceGraph.evidence) {
+    if (evidence.verifiedExcerpt) verifiedExcerptByUrl.set(comparableUrl(evidence.canonicalUrl), evidence.verifiedExcerpt);
+  }
+  const questions = cards.map((card) => {
+    if (card.answerMode !== "generative_search_v1") throw new TypeError("Source selection diagnosis requires generative-search V3 cards.");
+    return {
+      questionId: card.questionId,
+      answerText: card.answerText,
+      sources: card.sources.map((source): SourceSelectionSourceInputV1 => ({
+        questionId: card.questionId,
+        sourceId: source.sourceId,
+        title: source.title,
+        canonicalUrl: source.canonicalUrl,
+        registrableDomain: source.registrableDomain,
+        citedText: source.citedText,
+        auditExcerpt: verifiedExcerptByUrl.get(comparableUrl(source.canonicalUrl)) ?? null,
+        retrievalStatus: source.retrievalStatus,
+        ownershipCategory: source.ownershipCategory,
+        providerResultOrder: source.providerResultOrder
+      }))
+    };
+  });
+  const diagnosis = parseSourceSelectionDiagnosisV1(value, { questions, allowPersistedIndependentExcerpts: true });
+  if (diagnosis.inputIdentity.answerHash !== provenance.answerHash || diagnosis.inputIdentity.sourceHash !== provenance.evidenceHash) {
+    throw new TypeError("Source selection diagnosis answer/source identity does not match V3 provenance.");
+  }
+  return diagnosis;
 }
 
 export function requireReadyCombinedGeoReportV3(value: unknown): CombinedGeoReportV3 {
@@ -117,6 +164,7 @@ function limitedCopy(locale: string): string {
   return locale.toLowerCase().startsWith("zh") ? "当前结论尚缺少两个独立域名的交叉验证。" : "This claim lacks verification from two independent domains.";
 }
 function normalize(value: string): string { return value.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
+function comparableUrl(value: string): string { try { const url = new URL(value); url.hash = ""; return url.href; } catch { return value.trim(); } }
 function object(value: unknown, path: string): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${path} must be an object.`); return value as Record<string, unknown>; }
 function array(value: unknown, path: string): unknown[] { if (!Array.isArray(value)) throw new TypeError(`${path} must be an array.`); return value; }
 function text(value: unknown, path: string): string { if (typeof value !== "string" || !value.trim()) throw new TypeError(`${path} must be non-empty text.`); return value.trim(); }

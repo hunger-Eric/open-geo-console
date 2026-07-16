@@ -5,6 +5,7 @@ import { CombinedGeoReportArtifact } from "@/components/combined-geo-report-arti
 import { combinedArtifactFixture, combinedV3ArtifactFixture } from "@/components/combined-artifact-fixtures";
 import { assertCombinedV3HtmlCompleteness, combinedArtifactSystemCopy, localizedProviderDiscoveryLimitation, renderCanonicalCombinedArtifactHtml, restoreWebsiteReportDomainsForArtifact } from "./combined-artifact-readiness";
 import { ARTIFACT_CSS } from "./artifact-styles";
+import { buildSourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 
 function generativeV3Fixture(){
   const model=combinedV3ArtifactFixture();
@@ -15,6 +16,11 @@ function generativeV3Fixture(){
     provenance:{providerId:"mimo",model:"mimo-v2.5-pro",searchMode:"native_web_search",promptVersion:"generative-search-answer-v1" as const,searchedAt:"2030-01-01T00:00:00.000Z",completedAt:"2030-01-01T00:00:01.000Z",answerHash:"a".repeat(64),sourceHash:"b".repeat(64)},refusal:null,
     geoDiagnosis:{...legacy.geoDiagnosis,citedOwnership:{...legacy.geoDiagnosis.citedOwnership,institution:0,community:0,social:0,unknown:1}},audit:{verifiedBodyCount:0,searchSourceOnlyCount:1,inaccessibleCount:0}
   })) as typeof model.combinedReport.answerCards;
+  model.combinedReport.sourceSelectionDiagnosis=buildSourceSelectionDiagnosisV1({
+    locale:"en",answerHash:"a".repeat(64),sourceHash:"b".repeat(64),targetFoundationHash:"c".repeat(64),targetDomain:"example.com",
+    targetPages:[{id:"https://example.com/page",url:"https://example.com/page",title:"V3 Page Title",metaDescription:"V3 page description",h1:["V3 Page H1"],readableTextLength:500,hasJsonLd:true}],
+    questions:model.combinedReport.answerCards.map((card)=>card.answerMode==="generative_search_v1"?{questionId:card.questionId,answerText:card.answerText,sources:card.sources.map((source)=>({...source,questionId:card.questionId,auditExcerpt:null}))}:{questionId:card.questionId,answerText:"",sources:[]})
+  });
   return model;
 }
 
@@ -105,6 +111,7 @@ describe("combined artifact canonical rendering",()=>{
 
   it("requires every generative answer and same-operation source in answer-first canonical HTML",()=>{
     const model=generativeV3Fixture();
+    expect(model.combinedReport.sourceSelectionDiagnosis?.version).toBe("source_selection_diagnosis_v1");
     const html=renderCanonicalCombinedArtifactHtml(model);
     expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,html)).not.toThrow();
     expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,html.replace("Complete generated answer 2.","answer omitted"))).toThrow(/completeness/i);

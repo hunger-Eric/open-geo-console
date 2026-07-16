@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type ProviderDiscoveryV1, type RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -308,6 +308,7 @@ export async function buildReadyCombinedArtifactV3(input: {
   evidenceAssets: ReportEvidenceAssetRow[];
   businessQuestionSet: ConfirmedBusinessQuestionSet;
   answerCards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
+  sourceSelectionDiagnosis: SourceSelectionDiagnosisV1;
   engineProvenance: OpenGeoEngineProvenanceV3;
   publicSourceForensics: RecommendationForensicReportV2;
   providerDiscovery: ProviderDiscoveryV1;
@@ -356,6 +357,7 @@ export async function buildReadyCombinedArtifactV3(input: {
     },
     businessQuestionSet: input.businessQuestionSet,
     answerCards: input.answerCards,
+    sourceSelectionDiagnosis: input.sourceSelectionDiagnosis,
     engineProvenance: input.engineProvenance,
     providerDiscovery: input.providerDiscovery,
     publicSourceForensics: forensic,

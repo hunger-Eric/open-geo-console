@@ -1007,6 +1007,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         .filter(({ status }) => status === "resolved")
         .map(({ entityId, canonicalName }) => ({ entityId, aliases: [canonicalName] })),
       auditSources: storedSources,
+      targetPages: input.technicalReport.pages,
       checkpoint: generativeCheckpoint ?? checkpoint.answerFirstV3,
       signal: input.signal,
       saveCheckpoint: async (answerFirstV3) => {
@@ -1018,6 +1019,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     const verificationRef = await providerVerificationCommercialRef(verificationSnapshotId);
     const snapshotRefs = uniqueSnapshotRefs([...forensicResult.commercialSnapshotRefs, verificationRef]);
     if (snapshotRefs.length !== 4) throw new Error("V3 combined reports require exactly four immutable market snapshots.");
+    if (!answerResult.checkpoint.sourceSelectionDiagnosis) throw new Error("Prospective V3 artifact requires source selection diagnosis.");
     const ready = await buildReadyCombinedArtifactV3({
       artifactRevisionId: pending.artifactRevisionId,
       artifactRevision: pending.artifactRevision,
@@ -1031,6 +1033,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       evidenceAssets,
       businessQuestionSet,
       answerCards: answerResult.answerCards,
+      sourceSelectionDiagnosis: answerResult.checkpoint.sourceSelectionDiagnosis,
       engineProvenance: answerResult.checkpoint.engineProvenance,
       publicSourceForensics: forensicResult.report,
       providerDiscovery: providerResult.providerDiscovery,

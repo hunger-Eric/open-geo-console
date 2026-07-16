@@ -273,7 +273,10 @@ export function buildSourceSelectionDiagnosisV1(input: SourceSelectionDiagnosisB
 
 export function parseSourceSelectionDiagnosisV1(
   value: unknown,
-  context: { questions: Array<{ questionId: string; answerText: string; sources: SourceSelectionSourceInputV1[] }> }
+  context: {
+    questions: Array<{ questionId: string; answerText: string; sources: SourceSelectionSourceInputV1[] }>;
+    allowPersistedIndependentExcerpts?: boolean;
+  }
 ): SourceSelectionDiagnosisV1 {
   rejectProhibitedKeys(value);
   const root = object(value, "$sourceSelectionDiagnosis");
@@ -316,7 +319,10 @@ export function parseSourceSelectionDiagnosisV1(
       const answerExcerpt = nullableText(contribution.answerExcerpt, "contribution.answerExcerpt", 2_000);
       if (answerExcerpt && !questionById.get(questionId)?.answerText.includes(answerExcerpt)) throw new TypeError("Contribution answer excerpt must be an exact persisted answer substring.");
       const sourceExcerpt = nullableText(contribution.sourceExcerpt, "contribution.sourceExcerpt", 2_000);
-      if (sourceExcerpt && sourceExcerpt !== source.citedText && sourceExcerpt !== source.auditExcerpt) throw new TypeError("Contribution source excerpt is not bound to the persisted source.");
+      if (sourceExcerpt && sourceExcerpt !== source.citedText && sourceExcerpt !== source.auditExcerpt &&
+          !(context.allowPersistedIndependentExcerpts && contribution.basis === "independently_verified")) {
+        throw new TypeError("Contribution source excerpt is not bound to the persisted source.");
+      }
       validateBasisConfidence(contribution.basis, contribution.confidence, "contribution");
     }
     for (const factorValue of array(profile.observableFactors, `${profileIndex}.observableFactors`)) {
