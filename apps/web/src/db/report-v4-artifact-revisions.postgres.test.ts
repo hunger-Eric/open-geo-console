@@ -6,6 +6,7 @@ import {
   activateReportV4DiagnosisEnhancement,
   createPostgresReportV4ArtifactRevisionExecutor,
   createReportV4ArtifactRevisionPostgresDatabase,
+  prepareReportV4CoreGeneration,
   prepareReportV4DiagnosisEnhancement,
 } from "./report-v4-artifact-revisions";
 import { DATABASE_MIGRATIONS } from "./migrations";
@@ -18,13 +19,15 @@ const configIdentityHash = "e".repeat(64);
 const configSnapshotId = `v4-config-${configIdentityHash}`;
 
 // @requirement GEO-V4-DELIVERY-01
+// @requirement GEO-V4-PDF-01
+// @requirement GEO-V4-COMMERCE-01
 describeDisposablePostgres("V4 artifact revision PostgreSQL executor", () => {
   afterAll(async () => {
     await admin!.unsafe(`DROP DATABASE IF EXISTS ${quote(databaseName)} WITH (FORCE)`);
     await admin!.end({ timeout: 5 });
   }, 60_000);
 
-  it("locks, allocates, readies, activates and atomically advances the HTML-only report pointer", async () => {
+  it("concurrently prepares one pending core before payload persistence, then readies and activates HTML-only revisions", async () => {
     await admin!.unsafe(`CREATE DATABASE ${quote(databaseName)}`);
     const sql = postgres(withDatabase(adminUrl!, databaseName), { max: 2, prepare: false });
     try {
@@ -43,6 +46,13 @@ describeDisposablePostgres("V4 artifact revision PostgreSQL executor", () => {
         payloadIdentityHash: "a".repeat(64),
         htmlSha256: "b".repeat(64)
       };
+      const coreIdentity = {
+        artifactRevisionId: coreInput.artifactRevisionId,
+        reportId: coreInput.reportId,
+        orderId: coreInput.orderId,
+        jobId: coreInput.jobId,
+        configSnapshotId: coreInput.configSnapshotId
+      };
       const enhancementIdentity = {
         artifactRevisionId: "enhancement-revision",
         reportId: "report-v4",
@@ -51,6 +61,38 @@ describeDisposablePostgres("V4 artifact revision PostgreSQL executor", () => {
         configSnapshotId,
         sourceArtifactRevisionId: "core-revision"
       };
+
+      const [firstPreparation, resumedPreparation] = await Promise.all([
+        prepareReportV4CoreGeneration(coreIdentity, executor),
+        prepareReportV4CoreGeneration(coreIdentity, executor)
+      ]);
+      expect(resumedPreparation).toEqual(firstPreparation);
+      expect(firstPreparation).toMatchObject({ revision: 1, status: "pending", htmlSha256: null });
+
+      const pendingRows = await sql<Array<{
+        status: string;
+        html_sha256: string | null;
+        pdf_sha256: string | null;
+        pdf_storage_key: string | null;
+      }>>`
+        SELECT status,html_sha256,pdf_sha256,pdf_storage_key
+        FROM report_artifact_revisions WHERE job_id='core-job'
+      `;
+      expect(pendingRows).toEqual([{
+        status: "pending",
+        html_sha256: null,
+        pdf_sha256: null,
+        pdf_storage_key: null
+      }]);
+      expect(await sql<Array<{ active_artifact_revision_id: string | null }>>`
+        SELECT active_artifact_revision_id FROM scan_reports WHERE id='report-v4'
+      `).toEqual([{ active_artifact_revision_id: null }]);
+
+      await expect(activateReportV4CoreRevision({
+        ...coreInput,
+        artifactRevisionId: "other-core",
+        jobId: "other-job"
+      }, executor)).rejects.toThrow(/distinct.*core|core.*already/i);
 
       expect(await activateReportV4CoreRevision(coreInput, executor)).toMatchObject({
         revision: 1,

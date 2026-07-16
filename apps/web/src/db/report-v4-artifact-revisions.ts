@@ -36,6 +36,7 @@ export interface ReportV4PendingRevisionInsert {
 export interface ReportV4ArtifactRevisionTransaction {
   lockReport(reportId: string): Promise<void>;
   getRevision(id: string): Promise<ReportV4ArtifactRevisionRow | null>;
+  getCoreRevision(reportId: string): Promise<ReportV4ArtifactRevisionRow | null>;
   getActiveRevision(reportId: string): Promise<ReportV4ArtifactRevisionRow | null>;
   nextRevision(reportId: string): Promise<number>;
   insertRevision(input: ReportV4PendingRevisionInsert): Promise<ReportV4ArtifactRevisionRow>;
@@ -78,12 +79,15 @@ export function createReportV4ArtifactRevisionPostgresDatabase(
   };
 }
 
-export interface ActivateReportV4CoreRevisionInput {
+export interface ReportV4CoreGenerationIdentity {
   readonly artifactRevisionId: string;
   readonly reportId: string;
   readonly orderId: string;
   readonly jobId: string;
   readonly configSnapshotId: string;
+}
+
+export interface ActivateReportV4CoreRevisionInput extends ReportV4CoreGenerationIdentity {
   readonly payloadIdentityHash: string;
   readonly htmlSha256: string;
 }
@@ -102,9 +106,8 @@ export interface ActivateReportV4DiagnosisEnhancementInput extends ReportV4Diagn
   readonly htmlSha256: string;
 }
 
-const CORE_FIELDS = new Set([
-  "artifactRevisionId", "reportId", "orderId", "jobId", "configSnapshotId", "payloadIdentityHash", "htmlSha256"
-]);
+const CORE_IDENTITY_FIELDS = new Set(["artifactRevisionId", "reportId", "orderId", "jobId", "configSnapshotId"]);
+const CORE_FIELDS = new Set([...CORE_IDENTITY_FIELDS, "payloadIdentityHash", "htmlSha256"]);
 const ENHANCEMENT_IDENTITY_FIELDS = new Set([
   "artifactRevisionId", "reportId", "orderId", "jobId", "configSnapshotId", "sourceArtifactRevisionId"
 ]);
@@ -118,6 +121,34 @@ export function createPostgresReportV4ArtifactRevisionExecutor(
   return {
     transaction: (work) => database.transaction((sql) => work(postgresArtifactRevisionTransaction(sql)))
   };
+}
+
+export async function prepareReportV4CoreGeneration(
+  input: ReportV4CoreGenerationIdentity,
+  executor: ReportV4ArtifactRevisionExecutor
+): Promise<ReportV4ArtifactRevisionRow> {
+  strictInput(input, CORE_IDENTITY_FIELDS, "V4 core generation preparation");
+  const identity = coreIdentity(input);
+
+  return executor.transaction(async (tx) => {
+    await tx.lockReport(identity.reportId);
+    const existing = await tx.getRevision(identity.id);
+    if (existing) {
+      assertRevisionIdentity(existing, identity);
+      if (existing.status === "failed") throw new Error("A failed V4 core generation cannot be prepared again.");
+      return existing;
+    }
+    const existingCore = await tx.getCoreRevision(identity.reportId);
+    if (existingCore) {
+      throw new Error("A distinct V4 core generation revision already exists for this report.");
+    }
+    const active = await tx.getActiveRevision(identity.reportId);
+    if (active) throw new Error("A distinct V4 artifact revision is already active for this report.");
+    return tx.insertRevision({
+      ...identity,
+      revision: await tx.nextRevision(identity.reportId)
+    });
+  });
 }
 
 export async function activateReportV4CoreRevision(
@@ -140,6 +171,8 @@ export async function activateReportV4CoreRevision(
       }
       if (revision.status === "failed") throw new Error("A failed V4 core revision cannot be activated.");
     } else {
+      const existingCore = await tx.getCoreRevision(identity.reportId);
+      if (existingCore) throw new Error("A distinct V4 core generation revision already exists for this report.");
       const active = await tx.getActiveRevision(identity.reportId);
       if (active) throw new Error("A distinct V4 core revision is already active for this report.");
       revision = await tx.insertRevision({
@@ -283,6 +316,18 @@ function postgresArtifactRevisionTransaction(sql: ReportV4ArtifactRevisionSql): 
         FOR UPDATE
       `;
       return parseOptionalPostgresRevision(rows, "V4 artifact revision lookup");
+    },
+
+    async getCoreRevision(reportId) {
+      const rows = await sql`
+        SELECT id,report_id,order_id,job_id,config_snapshot_id,revision,revision_kind,source_artifact_revision_id,
+          artifact_contract,status,payload_identity_hash,html_sha256,pdf_sha256,pdf_storage_key
+        FROM report_artifact_revisions
+        WHERE report_id=${requiredText(reportId, "reportId")}
+          AND artifact_contract='combined_geo_report_v4' AND revision_kind='generation'
+        FOR UPDATE
+      `;
+      return parseOptionalPostgresRevision(rows, "V4 core generation revision lookup");
     },
 
     async getActiveRevision(reportId) {
@@ -490,7 +535,7 @@ function dbNullableText(value: unknown, field: string): string | null {
   return value === null ? null : dbText(value, field);
 }
 
-function coreIdentity(input: ActivateReportV4CoreRevisionInput): Omit<ReportV4PendingRevisionInsert, "revision"> {
+function coreIdentity(input: ReportV4CoreGenerationIdentity): Omit<ReportV4PendingRevisionInsert, "revision"> {
   return {
     id: requiredText(input.artifactRevisionId, "artifactRevisionId"),
     reportId: requiredText(input.reportId, "reportId"),

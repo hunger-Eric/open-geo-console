@@ -5,6 +5,7 @@ import {
   assertReportV4ArtifactRevisionKind,
   createPostgresReportV4ArtifactRevisionExecutor,
   failReportV4DiagnosisEnhancement,
+  prepareReportV4CoreGeneration,
   prepareReportV4DiagnosisEnhancement,
   type ReportV4ArtifactRevisionExecutor,
   type ReportV4ArtifactRevisionPostgresDatabase,
@@ -15,6 +16,8 @@ import {
 } from "./report-v4-artifact-revisions";
 
 // @requirement GEO-V4-DELIVERY-01
+// @requirement GEO-V4-PDF-01
+// @requirement GEO-V4-COMMERCE-01
 
 const coreInput = {
   artifactRevisionId: "core-revision",
@@ -24,6 +27,14 @@ const coreInput = {
   configSnapshotId: "config-snapshot-1",
   payloadIdentityHash: "a".repeat(64),
   htmlSha256: "b".repeat(64)
+};
+
+const coreIdentity = {
+  artifactRevisionId: coreInput.artifactRevisionId,
+  reportId: coreInput.reportId,
+  orderId: coreInput.orderId,
+  jobId: coreInput.jobId,
+  configSnapshotId: coreInput.configSnapshotId
 };
 
 const enhancementIdentity = {
@@ -36,6 +47,88 @@ const enhancementIdentity = {
 };
 
 describe("V4 artifact revision repository", () => {
+  it("prepares one exact pending HTML-only core before payload persistence and activates it with exact hashes", async () => {
+    const executor = new MemoryExecutor();
+
+    const pending = await prepareReportV4CoreGeneration(coreIdentity, executor);
+
+    expect(pending).toMatchObject({
+      id: "core-revision",
+      revision: 1,
+      revisionKind: "generation",
+      sourceArtifactRevisionId: null,
+      status: "pending",
+      payloadIdentityHash: null,
+      htmlSha256: null
+    });
+    expect(executor.activeByReport.has("report-1")).toBe(false);
+    expect(JSON.stringify(pending)).not.toMatch(/pdf|pageCount|storage/i);
+
+    const active = await activateReportV4CoreRevision(coreInput, executor);
+    expect(active).toMatchObject({
+      id: pending.id,
+      revision: pending.revision,
+      status: "active",
+      payloadIdentityHash: coreInput.payloadIdentityHash,
+      htmlSha256: coreInput.htmlSha256
+    });
+  });
+
+  it("serializes concurrent core preparation and rejects drift or a distinct pending core", async () => {
+    const executor = new MemoryExecutor();
+
+    const [first, second] = await Promise.all([
+      prepareReportV4CoreGeneration(coreIdentity, executor),
+      prepareReportV4CoreGeneration(coreIdentity, executor)
+    ]);
+
+    expect(second).toEqual(first);
+    expect(executor.log.filter((entry) => entry.startsWith("insert:"))).toEqual(["insert:core-revision:pending"]);
+    expect(executor.activeByReport.has("report-1")).toBe(false);
+
+    await expect(prepareReportV4CoreGeneration({
+      ...coreIdentity,
+      orderId: "other-order"
+    }, executor)).rejects.toThrow(/identity conflict/i);
+    await expect(prepareReportV4CoreGeneration({
+      ...coreIdentity,
+      artifactRevisionId: "other-core",
+      jobId: "other-job"
+    }, executor)).rejects.toThrow(/distinct.*core|core.*already/i);
+    await expect(activateReportV4CoreRevision({
+      ...coreInput,
+      artifactRevisionId: "other-core",
+      jobId: "other-job"
+    }, executor)).rejects.toThrow(/distinct.*core|core.*already/i);
+
+    expect(executor.rows).toHaveLength(1);
+    expect(executor.rows.get("core-revision")).toEqual(first);
+  });
+
+  it("keeps preparation free of PDF/readiness inputs and rejects activation hash drift after preparation", async () => {
+    const executor = new MemoryExecutor();
+    for (const extra of [
+      { pdfSha256: "pdf" },
+      { pdfStorageKey: "private/key" },
+      { pageCount: 5 },
+      { payloadIdentityHash: "a".repeat(64) },
+      { htmlSha256: "b".repeat(64) }
+    ]) {
+      await expect(prepareReportV4CoreGeneration({ ...coreIdentity, ...extra }, executor))
+        .rejects.toThrow(/unknown.*(?:pdf|pageCount|payloadIdentityHash|htmlSha256)/i);
+    }
+    expect(executor.transactions).toBe(0);
+
+    await prepareReportV4CoreGeneration(coreIdentity, executor);
+    const active = await activateReportV4CoreRevision(coreInput, executor);
+    await expect(activateReportV4CoreRevision({
+      ...coreInput,
+      htmlSha256: "c".repeat(64)
+    }, executor)).rejects.toThrow(/idempotency conflict.*HTML|HTML.*identity changed/i);
+    expect(executor.rows.get(active.id)).toEqual(active);
+    expect(executor.activeByReport.get("report-1")).toBe(active.id);
+  });
+
   it("atomically readies and activates an HTML-only core generation revision", async () => {
     const executor = new MemoryExecutor();
 
@@ -215,7 +308,7 @@ describe("V4 artifact revision repository", () => {
   it("rejects a second distinct core and rolls back a failed enhancement activation", async () => {
     const executor = new MemoryExecutor();
     await activateReportV4CoreRevision(coreInput, executor);
-    await expect(activateReportV4CoreRevision({ ...coreInput, artifactRevisionId: "other-core", jobId: "other-job" }, executor)).rejects.toThrow(/core.*already active/i);
+    await expect(activateReportV4CoreRevision({ ...coreInput, artifactRevisionId: "other-core", jobId: "other-job" }, executor)).rejects.toThrow(/distinct.*core|core.*already/i);
     await prepareReportV4DiagnosisEnhancement(enhancementIdentity, executor);
     executor.failNextActivePointer = true;
 
@@ -371,6 +464,9 @@ class MemoryExecutor implements ReportV4ArtifactRevisionExecutor {
     return {
       lockReport: async (reportId) => { this.log.push(`lock:${reportId}`); },
       getRevision: async (id) => rows.get(id) ?? null,
+      getCoreRevision: async (reportId) => [...rows.values()].find((row) => (
+        row.reportId === reportId && row.revisionKind === "generation"
+      )) ?? null,
       getActiveRevision: async (reportId) => rows.get(active.get(reportId) ?? "") ?? null,
       nextRevision: async (reportId) => Math.max(0, ...[...rows.values()].filter((row) => row.reportId === reportId).map((row) => row.revision)) + 1,
       insertRevision: async (row) => {
