@@ -6,6 +6,7 @@ import {
   createPostgresReportV4ConfigSnapshotStore,
   createReportV4ConfigSnapshotPostgresDatabase,
   createReportV4ConfigSnapshotRepository,
+  getReportV4ConfigSnapshotById,
   lockReportV4ConfigSnapshot
 } from "./report-v4-config-snapshots";
 
@@ -36,6 +37,8 @@ describeDisposablePostgres("V4 configuration snapshot PostgreSQL repository", ()
 
       const first = await lockReportV4ConfigSnapshot(input, repository);
       expect(await lockReportV4ConfigSnapshot(input, repository)).toEqual(first);
+      expect(await getReportV4ConfigSnapshotById(first.id, repository)).toEqual(first);
+      expect(await getReportV4ConfigSnapshotById(`v4-config-${"0".repeat(64)}`, repository)).toBeNull();
       await expect(lockReportV4ConfigSnapshot({
         ...input,
         modelProfile: { ...input.modelProfile, provider: "different-provider" }
