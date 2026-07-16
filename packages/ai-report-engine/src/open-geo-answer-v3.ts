@@ -2,8 +2,11 @@ import {
   toCanonicalBuyerQuestionSet,
   type ConfirmedBusinessQuestionSet
 } from "@open-geo-console/public-search-observer";
+import { canonicalizePublicSourceUrl, getPublicSourceDomainIdentity } from "@open-geo-console/citation-intelligence";
+import { isBlockedHostname, parseHttpUrl } from "@open-geo-console/site-crawler";
 import type { JsonCompletionClient } from "./client";
 import { sha256Hex } from "./evidence";
+import type { GenerativeSearchRefusal, GenerativeSearchSource } from "./generative-search-answer";
 import {
   ReportLanguageValidationError,
   assertReportLanguage,
@@ -20,7 +23,13 @@ export type OpenGeoAnswerOwnershipCategoryV3 =
   | "third_party_editorial"
   | "directory"
   | "government"
-  | "other";
+  | "other" | "institution" | "community" | "social" | "unknown";
+
+export interface OpenGeoAnswerDiagnosisV3 {
+  targetMentioned: boolean; targetFirstSentence: number | null; targetRoles: string[];
+  competitorEntityIds: string[]; citedOwnership: Record<OpenGeoAnswerOwnershipCategoryV3, number>;
+  missingEvidenceFamilies: string[]; retestQuestion: string;
+}
 
 export interface OpenGeoAnswerEvidenceV3 {
   evidenceId: string;
@@ -44,7 +53,8 @@ export interface OpenGeoAnswerSentenceV3 {
   confidence?: "verified" | "limited" | "observed";
 }
 
-export interface OpenGeoAnswerCardV3 {
+export interface LegacyEvidenceBoundAnswerCardV3 {
+  answerMode?: "legacy_evidence_bound_v1";
   questionId: string;
   exactQuestion: string;
   status: "answered" | "limited" | "observed" | "unresolved" | "insufficient";
@@ -59,16 +69,17 @@ export interface OpenGeoAnswerCardV3 {
     eligibleDirectEvidence: number;
     reasons: string[];
   };
-  geoDiagnosis: {
-    targetMentioned: boolean;
-    targetFirstSentence: number | null;
-    targetRoles: string[];
-    competitorEntityIds: string[];
-    citedOwnership: Record<OpenGeoAnswerOwnershipCategoryV3, number>;
-    missingEvidenceFamilies: string[];
-    retestQuestion: string;
-  };
+  geoDiagnosis: OpenGeoAnswerDiagnosisV3;
 }
+export interface GenerativeSearchAnswerSourceV3 extends GenerativeSearchSource { retrievalStatus: "verified_body" | "search_source_only" | "inaccessible"; ownershipCategory: OpenGeoAnswerOwnershipCategoryV3; }
+export interface GenerativeSearchAnswerProvenanceV3 { providerId:string; model:string; searchMode:string; promptVersion:"generative-search-answer-v1"; searchedAt:string; completedAt:string; answerHash:string; sourceHash:string; }
+export interface GenerativeSearchAnswerCardV3 {
+  answerMode:"generative_search_v1"; questionId:string; exactQuestion:string;
+  status:"answered"|"source_limited"|"refused"; answerText:string; sources:GenerativeSearchAnswerSourceV3[];
+  provenance:GenerativeSearchAnswerProvenanceV3; refusal:GenerativeSearchRefusal|null; geoDiagnosis:OpenGeoAnswerDiagnosisV3;
+  audit:{verifiedBodyCount:number;searchSourceOnlyCount:number;inaccessibleCount:number};
+}
+export type OpenGeoAnswerCardV3 = LegacyEvidenceBoundAnswerCardV3 | GenerativeSearchAnswerCardV3;
 
 export interface OpenGeoEngineProvenanceV3 {
   engineId: typeof OPEN_GEO_ENGINE_ID;
@@ -97,12 +108,12 @@ export interface OpenGeoAnswerCardsV3Context {
 
 export interface OpenGeoAnswerSynthesisV3Input extends OpenGeoAnswerCardsV3Context {
   evidence: readonly OpenGeoAnswerEvidenceV3[];
-  coverageByQuestion: readonly [OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"], OpenGeoAnswerCardV3["coverage"]];
+  coverageByQuestion: readonly [LegacyEvidenceBoundAnswerCardV3["coverage"], LegacyEvidenceBoundAnswerCardV3["coverage"], LegacyEvidenceBoundAnswerCardV3["coverage"]];
   signal?: AbortSignal;
 }
 
 const OWNERSHIP_CATEGORIES: readonly OpenGeoAnswerOwnershipCategoryV3[] = [
-  "target_owned", "competitor_owned", "third_party_editorial", "directory", "government", "other"
+  "target_owned", "competitor_owned", "third_party_editorial", "directory", "government", "other", "institution", "community", "social", "unknown"
 ];
 
 export function parseOpenGeoAnswerCardsV3(
@@ -112,16 +123,22 @@ export function parseOpenGeoAnswerCardsV3(
   const rows = array(value, "$answerCards");
   if (rows.length !== 3) throw new TypeError("Open GEO V3 requires exactly three answer cards.");
   const canonical = canonicalQuestions(context.questionSet);
-  const parsed = rows.map((value, cardIndex) => parseCard(value, cardIndex, canonical[cardIndex]!, context));
+  const parsed = rows.map((value, cardIndex) => record(value, `$answerCards[${cardIndex}]`).answerMode === "generative_search_v1"
+    ? parseGenerativeCard(value, cardIndex, canonical[cardIndex]!, context)
+    : parseCard(value, cardIndex, canonical[cardIndex]!, context));
   if (new Set(parsed.map(({ questionId }) => questionId)).size !== 3) {
     throw new TypeError("Open GEO V3 answer-card question IDs must be unique.");
   }
-  const generatedFields = parsed.flatMap((card, cardIndex) => [
-    ...card.sentences.map((sentence, sentenceIndex) => ({ path: `answerCards[${cardIndex}].sentences[${sentenceIndex}].text`, text: sentence.text })),
-    ...card.coverage.reasons.map((text, index) => ({ path: `answerCards[${cardIndex}].coverage.reasons[${index}]`, text })),
-    ...card.geoDiagnosis.targetRoles.map((text, index) => ({ path: `answerCards[${cardIndex}].geoDiagnosis.targetRoles[${index}]`, text })),
-    ...card.geoDiagnosis.missingEvidenceFamilies.map((text, index) => ({ path: `answerCards[${cardIndex}].geoDiagnosis.missingEvidenceFamilies[${index}]`, text }))
-  ]);
+  const generatedFields = parsed.flatMap((card, cardIndex) => {
+    if (card.answerMode === "generative_search_v1") { const generated = card as GenerativeSearchAnswerCardV3; return [{ path: `answerCards[${cardIndex}].answerText`, text: generated.answerText }, ...(generated.refusal ? [{path:`answerCards[${cardIndex}].refusal.reason`,text:generated.refusal.reason}] : []), ...generated.geoDiagnosis.targetRoles.map((text, index) => ({ path: `answerCards[${cardIndex}].geoDiagnosis.targetRoles[${index}]`, text })), ...generated.geoDiagnosis.missingEvidenceFamilies.map((text,index)=>({path:`answerCards[${cardIndex}].geoDiagnosis.missingEvidenceFamilies[${index}]`,text}))]; }
+    const legacy = card as LegacyEvidenceBoundAnswerCardV3;
+    return [
+      ...legacy.sentences.map((sentence, sentenceIndex) => ({ path: `answerCards[${cardIndex}].sentences[${sentenceIndex}].text`, text: sentence.text })),
+      ...legacy.coverage.reasons.map((text, index) => ({ path: `answerCards[${cardIndex}].coverage.reasons[${index}]`, text })),
+      ...card.geoDiagnosis.targetRoles.map((text, index) => ({ path: `answerCards[${cardIndex}].geoDiagnosis.targetRoles[${index}]`, text })),
+      ...card.geoDiagnosis.missingEvidenceFamilies.map((text, index) => ({ path: `answerCards[${cardIndex}].geoDiagnosis.missingEvidenceFamilies[${index}]`, text }))
+    ];
+  });
   const allowedTerms = [
     ...(context.targetAliases ?? []),
     ...(context.competitors ?? []).flatMap(({ aliases }) => aliases)
@@ -131,7 +148,7 @@ export function parseOpenGeoAnswerCardsV3(
 }
 
 export function diagnoseOpenGeoAnswerCardV3(
-  card: Pick<OpenGeoAnswerCardV3, "sentences" | "sourceEvidence">,
+  card: Pick<LegacyEvidenceBoundAnswerCardV3, "sentences" | "sourceEvidence">,
   input: {
     exactQuestion: string;
     targetAliases: readonly string[];
@@ -159,6 +176,51 @@ export function diagnoseOpenGeoAnswerCardV3(
     retestQuestion: input.exactQuestion
   };
 }
+
+export function diagnoseGenerativeSearchAnswerCardV3(card: Pick<GenerativeSearchAnswerCardV3, "answerText"|"sources">, input: { exactQuestion:string; locale?:string; targetAliases:readonly string[]; competitors:readonly {entityId:string;aliases:readonly string[]}[]; missingEvidenceFamilies:readonly string[] }): OpenGeoAnswerDiagnosisV3 {
+  const sentences = card.answerText.split(/(?<=[.!?。！？])\s+/u).filter(Boolean);
+  const targetFirstIndex = sentences.findIndex((s) => includesAlias(s, input.targetAliases));
+  const competitorEntityIds = input.competitors.filter(({aliases}) => sentences.some((s) => includesAlias(s, aliases))).map(({entityId}) => entityId);
+  const citedOwnership = ownershipCounts();
+  for (const source of card.sources) citedOwnership[source.ownershipCategory] += 1;
+  const targetRole = (input.locale ?? "").toLowerCase().startsWith("zh") ? "答案主体" : "answer subject";
+  return { targetMentioned: targetFirstIndex >= 0, targetFirstSentence: targetFirstIndex >= 0 ? targetFirstIndex + 1 : null, targetRoles: targetFirstIndex >= 0 ? [targetRole] : [], competitorEntityIds: [...new Set(competitorEntityIds)], citedOwnership, missingEvidenceFamilies: [...new Set(input.missingEvidenceFamilies.map((x) => x.trim()).filter(Boolean))], retestQuestion: input.exactQuestion };
+}
+
+export function parseGenerativeSearchAnswerCardsV3(value: unknown, context: OpenGeoAnswerCardsV3Context): [GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3] {
+  const rows = array(value, "$answerCards"); if (rows.length !== 3) throw new TypeError("Open GEO V3 requires exactly three answer cards.");
+  const canonical = canonicalQuestions(context.questionSet);
+  return rows.map((item, index) => parseGenerativeCard(item, index, canonical[index]!, context)) as [GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3];
+}
+
+function parseGenerativeCard(value: unknown, cardIndex:number, canonical:{id:string;exactQuestion:string}, context:OpenGeoAnswerCardsV3Context): GenerativeSearchAnswerCardV3 {
+  const path = `$answerCards[${cardIndex}]`, row = record(value,path);
+  exact(row.answerMode,"generative_search_v1",`${path}.answerMode`); exact(row.questionId,canonical.id,`${path}.questionId`); exact(row.exactQuestion,canonical.exactQuestion,`${path}.exactQuestion`);
+  if ("sentences" in row) throw new TypeError(`${path} generative cards cannot contain legacy sentences.`);
+  const status = oneOf(row.status,["answered","source_limited","refused"] as const,`${path}.status`); const answerText = optionalBoundedText(row.answerText,`${path}.answerText`,12_000);
+  const rawSources = array(row.sources,`${path}.sources`); if (rawSources.length > 20) throw new TypeError(`${path}.sources must contain at most 20 items.`);
+  const sources = rawSources.map((x,i)=>parseGenerativeSource(x,`${path}.sources[${i}]`)).sort((a,b)=>a.providerResultOrder-b.providerResultOrder||a.canonicalUrl.localeCompare(b.canonicalUrl));
+  if (new Set(sources.map((s) => s.canonicalUrl)).size !== sources.length) throw new TypeError(`${path}.sources must not contain duplicate URLs.`);
+  const refusal = row.refusal == null ? null : parseRefusal(row.refusal,`${path}.refusal`);
+  if (status === "answered" && (!answerText || !sources.length || refusal)) throw new TypeError(`${path} answered requires answerText and a source.`);
+  if (status === "source_limited" && (!answerText || sources.length || refusal)) throw new TypeError(`${path} source_limited requires answerText and zero sources.`);
+  if (status === "refused" && (answerText || sources.length || !refusal)) throw new TypeError(`${path} refused requires typed refusal and no answer.`);
+  const p = record(row.provenance,`${path}.provenance`);
+  const provenance: GenerativeSearchAnswerProvenanceV3 = { providerId:text(p.providerId,`${path}.provenance.providerId`), model:text(p.model,`${path}.provenance.model`), searchMode:text(p.searchMode,`${path}.provenance.searchMode`), promptVersion:oneOf(p.promptVersion,["generative-search-answer-v1"] as const,`${path}.provenance.promptVersion`), searchedAt:timestamp(p.searchedAt,`${path}.provenance.searchedAt`), completedAt:timestamp(p.completedAt,`${path}.provenance.completedAt`), answerHash:hash(p.answerHash,`${path}.provenance.answerHash`), sourceHash:hash(p.sourceHash,`${path}.provenance.sourceHash`) };
+  if (Date.parse(provenance.completedAt) < Date.parse(provenance.searchedAt)) throw new TypeError(`${path}.provenance.completedAt must follow searchedAt.`);
+  const audit = record(row.audit,`${path}.audit`); const parsedAudit = {verifiedBodyCount:nonnegative(audit.verifiedBodyCount,`${path}.audit.verifiedBodyCount`),searchSourceOnlyCount:nonnegative(audit.searchSourceOnlyCount,`${path}.audit.searchSourceOnlyCount`),inaccessibleCount:nonnegative(audit.inaccessibleCount,`${path}.audit.inaccessibleCount`)};
+  const geoDiagnosis = diagnoseGenerativeSearchAnswerCardV3({answerText,sources},{exactQuestion:canonical.exactQuestion,locale:context.locale,targetAliases:context.targetAliases??[],competitors:context.competitors??[],missingEvidenceFamilies:context.missingEvidenceFamiliesByQuestion?.[cardIndex]??[]});
+  return {answerMode:"generative_search_v1",questionId:canonical.id,exactQuestion:canonical.exactQuestion,status,answerText,sources,provenance,refusal,geoDiagnosis,audit:parsedAudit};
+}
+
+function parseGenerativeSource(value:unknown,path:string):GenerativeSearchAnswerSourceV3 {
+  const row=record(value,path); let canonicalUrl:string; let registrableDomain:string;
+  try { const parsed=parseHttpUrl(boundedText(row.canonicalUrl,`${path}.canonicalUrl`,2_000)); if(isBlockedHostname(parsed.hostname)) throw new Error("private destination"); canonicalUrl=canonicalizePublicSourceUrl(parsed.href); registrableDomain=getPublicSourceDomainIdentity(canonicalUrl).registrableDomain; }
+  catch { throw new TypeError(`${path}.canonicalUrl must be a public HTTP(S) URL.`); }
+  return {sourceId:boundedText(row.sourceId,`${path}.sourceId`,500),title:boundedText(row.title,`${path}.title`,500),canonicalUrl,registrableDomain,citedText:row.citedText==null?null:boundedText(row.citedText,`${path}.citedText`,2_000),providerResultOrder:nonnegative(row.providerResultOrder,`${path}.providerResultOrder`),retrievalStatus:oneOf(row.retrievalStatus,["verified_body","search_source_only","inaccessible"] as const,`${path}.retrievalStatus`),ownershipCategory:oneOf(row.ownershipCategory,OWNERSHIP_CATEGORIES,`${path}.ownershipCategory`)};
+}
+function parseRefusal(value:unknown,path:string):GenerativeSearchRefusal { const row=record(value,path); const code=oneOf(row.code,["safety_refusal","policy_refusal","high_risk_refusal"] as const,`${path}.code`); return {code,reason:boundedText(row.reason,`${path}.reason`,500)}; }
+function hash(value: unknown, path: string): string { const result = text(value, path); if (!/^[a-f0-9]{64}$/u.test(result)) throw new TypeError(`${path} must be a SHA-256 hash.`); return result; }
 
 export async function synthesizeOpenGeoAnswerCardsV3(
   client: JsonCompletionClient,
@@ -391,7 +453,7 @@ function parseSentence(
   return { sentenceId: text(row.sentenceId, `${path}.sentenceId`), kind, text: sentenceText, evidenceIds, confidence };
 }
 
-function parseCoverage(value: unknown, path: string, legacyEligibleEvidence = 0): OpenGeoAnswerCardV3["coverage"] {
+function parseCoverage(value: unknown, path: string, legacyEligibleEvidence = 0): LegacyEvidenceBoundAnswerCardV3["coverage"] {
   const row = record(value, path);
   const plannedQueries = nonnegative(row.plannedQueries, `${path}.plannedQueries`);
   const completedQueries = nonnegative(row.completedQueries, `${path}.completedQueries`);
@@ -418,7 +480,10 @@ function parseDiagnosis(value: unknown, path: string): void {
   stringArray(row.targetRoles, `${path}.targetRoles`);
   stringArray(row.competitorEntityIds, `${path}.competitorEntityIds`);
   const ownership = record(row.citedOwnership, `${path}.citedOwnership`);
-  OWNERSHIP_CATEGORIES.forEach((category) => nonnegative(ownership[category], `${path}.citedOwnership.${category}`));
+  OWNERSHIP_CATEGORIES.forEach((category) => {
+    if (ownership[category] === undefined && ["institution", "community", "social", "unknown"].includes(category)) return;
+    nonnegative(ownership[category], `${path}.citedOwnership.${category}`);
+  });
   stringArray(row.missingEvidenceFamilies, `${path}.missingEvidenceFamilies`);
   text(row.retestQuestion, `${path}.retestQuestion`);
 }
@@ -437,7 +502,7 @@ function deterministicLimitedNote(questionId: string, locale: string): OpenGeoAn
 function deterministicUnresolvedNote(
   questionId: string,
   locale: string,
-  coverage: OpenGeoAnswerCardV3["coverage"]
+  coverage: LegacyEvidenceBoundAnswerCardV3["coverage"]
 ): OpenGeoAnswerSentenceV3 {
   return {
     sentenceId: `unresolved-${questionId}`,
@@ -461,7 +526,7 @@ function canonicalQuestions(questionSet: ConfirmedBusinessQuestionSet): readonly
 }
 
 function ownershipCounts(): Record<OpenGeoAnswerOwnershipCategoryV3, number> {
-  return { target_owned: 0, competitor_owned: 0, third_party_editorial: 0, directory: 0, government: 0, other: 0 };
+  return { target_owned: 0, competitor_owned: 0, third_party_editorial: 0, directory: 0, government: 0, other: 0, institution: 0, community: 0, social: 0, unknown: 0 };
 }
 function includesAlias(textValue: string, aliases: readonly string[]): boolean { const normalized = normalize(textValue); return aliases.some((alias) => alias.trim() && normalized.includes(normalize(alias))); }
 function normalize(value: string): string { return value.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
@@ -469,6 +534,8 @@ function localized(seed: string, zh: string, en: string): string { return /[\u34
 function record(value: unknown, path: string): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${path} must be an object.`); return value as Record<string, unknown>; }
 function array(value: unknown, path: string): unknown[] { if (!Array.isArray(value)) throw new TypeError(`${path} must be an array.`); return value; }
 function text(value: unknown, path: string): string { if (typeof value !== "string" || !value.trim()) throw new TypeError(`${path} must be non-empty text.`); return value.trim(); }
+function boundedText(value: unknown, path: string, maximum: number): string { const result=text(value,path); if(result.length>maximum)throw new TypeError(`${path} exceeds the retained bound.`); return result; }
+function optionalBoundedText(value: unknown, path: string, maximum: number): string { if(typeof value!=="string")throw new TypeError(`${path} must be text.`); const result=value.trim(); if(result.length>maximum)throw new TypeError(`${path} exceeds the retained bound.`); return result; }
 function exact(value: unknown, expected: unknown, path: string): void { if (value !== expected) throw new TypeError(`${path} must equal ${String(expected)}.`); }
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], path: string): T { if (!allowed.includes(value as T)) throw new TypeError(`${path} is unsupported.`); return value as T; }
 function nonnegative(value: unknown, path: string): number { if (!Number.isSafeInteger(value) || Number(value) < 0) throw new TypeError(`${path} must be a non-negative integer.`); return Number(value); }

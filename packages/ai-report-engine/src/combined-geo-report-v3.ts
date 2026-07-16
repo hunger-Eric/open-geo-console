@@ -29,7 +29,7 @@ export function parseCombinedGeoReportV3(value: unknown): CombinedGeoReportV3 {
   const provenance = parseEngineProvenance(root.engineProvenance);
   const questionSet = object(root.businessQuestionSet, "$combined.businessQuestionSet") as unknown as CombinedGeoReportV2["businessQuestionSet"];
   const preliminaryCards = array(root.answerCards, "$combined.answerCards") as unknown as OpenGeoAnswerCardV3[];
-  const groundedAnswerEvidence = preliminaryCards.flatMap((card) => card.sourceEvidence ?? []).map((evidence) => ({
+  const groundedAnswerEvidence = preliminaryCards.flatMap((card) => ("sourceEvidence" in card ? card.sourceEvidence ?? [] : [])).map((evidence) => ({
     evidenceId: evidence.evidenceId,
     questionId: evidence.questionId,
     subjectKey: evidence.subjectKey,
@@ -42,7 +42,7 @@ export function parseCombinedGeoReportV3(value: unknown): CombinedGeoReportV3 {
   const projectedAnswers = preliminaryCards.slice(1).map((card, answerIndex) => ({
     questionId: publicQuestionIds[answerIndex + 1],
     purpose: answerIndex === 0 ? "customer_region_fit" : "purchase_delivery_risk",
-    claims: (card.sentences ?? []).filter(({ kind }) => kind === "grounded_claim").map((sentence) => {
+    claims: ("sentences" in card ? (card.sentences ?? []).filter(({ kind }) => kind === "grounded_claim").map((sentence) => {
       const firstEvidence = (card.sourceEvidence ?? []).find(({ evidenceId }) => sentence.evidenceIds.includes(evidenceId));
       return {
         claimId: sentence.sentenceId,
@@ -52,7 +52,7 @@ export function parseCombinedGeoReportV3(value: unknown): CombinedGeoReportV3 {
         confidence: sentence.confidence,
         ...(sentence.confidence === "limited" ? { limitation: limitedCopy(String(root.locale ?? "")) } : {})
       };
-    })
+    }) : [])
   }));
   const base = parseCombinedGeoReportV2({
     ...root,
