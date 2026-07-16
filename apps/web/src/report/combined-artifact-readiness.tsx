@@ -398,24 +398,28 @@ export async function materializePreparedCombinedArtifactV3(
 export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, html: string): void {
   const required = [
     report.artifactRevisionId,
-    ...report.answerCards.flatMap((card) => [
-      card.exactQuestion,
-      ...card.sentences.map(({ text }) => text),
-      ...card.sourceEvidence.flatMap((evidence) => [evidence.title, evidence.registrableDomain, evidence.canonicalUrl, evidence.exactExcerpt, evidence.ownershipCategory, evidence.observedAt]),
-      ...card.geoDiagnosis.targetRoles,
-      ...card.geoDiagnosis.competitorEntityIds,
-      ...card.geoDiagnosis.missingEvidenceFamilies,
-      card.geoDiagnosis.retestQuestion
-    ]),
+    ...report.answerCards.flatMap((card) => card.answerMode === "generative_search_v1"
+      ? [card.exactQuestion, card.answerText, card.refusal?.reason ?? "", ...card.sources.flatMap((source) => [source.title, source.registrableDomain, source.canonicalUrl, source.citedText ?? ""]), ...card.geoDiagnosis.targetRoles, ...card.geoDiagnosis.competitorEntityIds, ...card.geoDiagnosis.missingEvidenceFamilies, card.geoDiagnosis.retestQuestion]
+      : [card.exactQuestion, ...card.sentences.map(({ text }) => text), ...card.sourceEvidence.flatMap((evidence) => [evidence.title, evidence.registrableDomain, evidence.canonicalUrl, evidence.exactExcerpt, evidence.ownershipCategory, evidence.observedAt]), ...card.geoDiagnosis.targetRoles, ...card.geoDiagnosis.competitorEntityIds, ...card.geoDiagnosis.missingEvidenceFamilies, card.geoDiagnosis.retestQuestion]),
     ...report.technicalFoundation.technicalReport.findings.flatMap(({ title, description, recommendation }) => [title, description, recommendation]),
     ...report.technicalFoundation.technicalReport.pages.flatMap(({ url, title, canonical, metaDescription, h1 }) => [url, title ?? "", canonical ?? "", metaDescription ?? "", ...h1]),
     ...report.technicalFoundation.aiReport.findings.flatMap(({ title, impact, recommendation }) => [title, impact, recommendation])
   ].filter(Boolean);
   if (required.some((value) => renderedHtmlIndexOf(html, String(value)) < 0)) throw new Error("Combined V3 HTML artifact failed completeness readiness.");
   for (const card of report.answerCards) {
+    if (card.answerMode === "generative_search_v1") {
+      const answerOrRefusal = card.status === "refused" ? card.refusal!.reason : card.answerText;
+      const answerAt = renderedHtmlIndexOf(html, answerOrRefusal);
+      const nextQuestionAt = report.answerCards.map(({ exactQuestion }) => renderedHtmlIndexOf(html, exactQuestion)).filter((index) => index > answerAt).sort((a, b) => a - b)[0] ?? html.length;
+      for (const source of card.sources) {
+        const sourceAt = renderedHtmlIndexOf(html, source.canonicalUrl, answerAt);
+        if (sourceAt <= answerAt || sourceAt >= nextQuestionAt) throw new Error("Combined V3 HTML artifact failed answer-first source completeness readiness.");
+      }
+      continue;
+    }
     for (const sentence of card.sentences.filter(({ kind }) => kind === "grounded_claim")) {
       const sentenceAt = renderedHtmlIndexOf(html, sentence.text);
-      const nextSentenceAt = report.answerCards.flatMap(({ sentences }) => sentences).map(({ text }) => renderedHtmlIndexOf(html, text)).filter((index) => index > sentenceAt).sort((a, b) => a - b)[0] ?? html.length;
+      const nextSentenceAt = report.answerCards.flatMap((candidate) => candidate.answerMode === "generative_search_v1" ? [] : candidate.sentences).map(({ text }) => renderedHtmlIndexOf(html, text)).filter((index) => index > sentenceAt).sort((a, b) => a - b)[0] ?? html.length;
       for (const evidenceId of sentence.evidenceIds) {
         const evidence = card.sourceEvidence.find((candidate) => candidate.evidenceId === evidenceId);
         const evidenceAt = evidence ? renderedHtmlIndexOf(html, evidence.exactExcerpt, sentenceAt) : -1;

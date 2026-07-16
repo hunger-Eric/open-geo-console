@@ -72,6 +72,8 @@ export async function loadPrivateReportArtifact(
     const active = await getActiveCombinedGeoReport(reportId);
     if (!active) return null;
     if (active.report.artifactContract !== productContract) return null;
+    if (typeof active.artifactRevisionId !== "string" || !active.artifactRevisionId.trim()
+      || typeof active.pdfStorageKey !== "string" || !active.pdfStorageKey.trim()) return null;
     const language = active.report.locale.toLowerCase().split(/[-_]/, 1)[0];
     if (language !== "en" && language !== "zh") return null;
     const locale: ReportLocale = language;

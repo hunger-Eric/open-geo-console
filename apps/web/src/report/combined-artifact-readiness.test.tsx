@@ -4,6 +4,19 @@ import { describe, expect, it } from "vitest";
 import { CombinedGeoReportArtifact } from "@/components/combined-geo-report-artifact";
 import { combinedArtifactFixture, combinedV3ArtifactFixture } from "@/components/combined-artifact-fixtures";
 import { assertCombinedV3HtmlCompleteness, combinedArtifactSystemCopy, localizedProviderDiscoveryLimitation, renderCanonicalCombinedArtifactHtml, restoreWebsiteReportDomainsForArtifact } from "./combined-artifact-readiness";
+import { ARTIFACT_CSS } from "./artifact-styles";
+
+function generativeV3Fixture(){
+  const model=combinedV3ArtifactFixture();
+  model.combinedReport.answerCards=model.combinedReport.answerCards.map((legacy,index)=>({
+    answerMode:"generative_search_v1" as const,questionId:legacy.questionId,exactQuestion:legacy.exactQuestion,status:"answered" as const,
+    answerText:`Complete generated answer ${index+1}.`,
+    sources:[{sourceId:`source-${index+1}`,title:`Returned source ${index+1}`,canonicalUrl:`https://returned.example/${index+1}`,registrableDomain:"returned.example",citedText:`Returned cited text ${index+1}`,providerResultOrder:index+1,retrievalStatus:"search_source_only" as const,ownershipCategory:"unknown" as const}],
+    provenance:{providerId:"mimo",model:"mimo-v2.5-pro",searchMode:"native_web_search",promptVersion:"generative-search-answer-v1" as const,searchedAt:"2030-01-01T00:00:00.000Z",completedAt:"2030-01-01T00:00:01.000Z",answerHash:"a".repeat(64),sourceHash:"b".repeat(64)},refusal:null,
+    geoDiagnosis:{...legacy.geoDiagnosis,citedOwnership:{...legacy.geoDiagnosis.citedOwnership,institution:0,community:0,social:0,unknown:1}},audit:{verifiedBodyCount:0,searchSourceOnlyCount:1,inaccessibleCount:0}
+  })) as typeof model.combinedReport.answerCards;
+  return model;
+}
 
 describe("combined artifact canonical rendering",()=>{
   it("wraps the exact shared HTML component used by the report route and PDF readiness",()=>{
@@ -88,5 +101,30 @@ describe("combined artifact canonical rendering",()=>{
 
     expect(html).toContain("&#x27;英文术语&#x27;");
     expect(() => assertCombinedV3HtmlCompleteness(model.combinedReport, html)).not.toThrow();
+  });
+
+  it("requires every generative answer and same-operation source in answer-first canonical HTML",()=>{
+    const model=generativeV3Fixture();
+    const html=renderCanonicalCombinedArtifactHtml(model);
+    expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,html)).not.toThrow();
+    expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,html.replace("Complete generated answer 2.","answer omitted"))).toThrow(/completeness/i);
+    expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,html.replaceAll("https://returned.example/3","source omitted"))).toThrow(/completeness/i);
+  });
+
+  it("rejects a generative artifact whose source is moved before its answer",()=>{
+    const model=generativeV3Fixture();
+    const html=renderCanonicalCombinedArtifactHtml(model);
+    const answer="Complete generated answer 1.";
+    const source="https://returned.example/1";
+    const answerAt=html.indexOf(answer);
+    const withoutSource=html.replaceAll(source,"");
+    const reordered=withoutSource.slice(0,answerAt)+source+withoutSource.slice(answerAt);
+    expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,reordered)).toThrow(/answer-first/i);
+  });
+
+  it("wraps long returned source URLs on desktop and mobile without horizontal overflow",()=>{
+    expect(ARTIFACT_CSS).toMatch(/\.source-url[^}]*overflow-wrap:anywhere[^}]*word-break:break-word/);
+    expect(ARTIFACT_CSS).toMatch(/@media\(max-width:760px\)[\s\S]*\.source-url/);
+    expect(ARTIFACT_CSS).toContain(".source-content,.source-content a,.generated-answer{max-width:100%;overflow-wrap:anywhere;word-break:break-word}");
   });
 });

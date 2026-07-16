@@ -54,6 +54,12 @@ describe("private artifact model product isolation", () => {
     await expect(loadPrivateReportArtifact("report-1","combined_geo_report_v2")).resolves.toBeNull();
   });
 
+  it("does not expose an active combined artifact without its private PDF storage identity",async()=>{
+    const report={artifactContract:"combined_geo_report_v3",locale:"zh-CN",technicalFoundation:{technicalReport:{url:"https://example.com"},evidenceAssets:[]}};
+    mocks.getActiveCombined.mockResolvedValue({artifactRevisionId:"revision-v3",pdfStorageKey:"",report});
+    await expect(loadPrivateReportArtifact("report-1","combined_geo_report_v3")).resolves.toBeNull();
+  });
+
   it("requires a same-job recommendation foundation and never falls back to legacy", async () => {
     mocks.getRecommendation.mockResolvedValue({ jobId: "new-job", provenanceAndLimitations: { locale: "en" } });
     mocks.getAiReport.mockResolvedValue({ isPrivate: true, jobId: "legacy-job", payload: { legacy: true }, technicalPayload: { url: "https://example.com" } });

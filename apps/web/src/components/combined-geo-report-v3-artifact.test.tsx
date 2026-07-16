@@ -4,6 +4,33 @@ import { describe, expect, it } from "vitest";
 import { combinedV3ArtifactFixture } from "./combined-artifact-fixtures";
 import { CombinedGeoReportV3Artifact } from "./combined-geo-report-v3-artifact";
 
+function generativeModel() {
+  const model=combinedV3ArtifactFixture();
+  model.locale="zh";
+  model.combinedReport.answerCards=model.combinedReport.answerCards.map((legacy,index)=>({
+    answerMode:"generative_search_v1" as const,
+    questionId:legacy.questionId,
+    exactQuestion:legacy.exactQuestion,
+    status:"answered" as const,
+    answerText:`服务商甲提供跨境海运方案 ${index+1}。`,
+    sources:[{
+      sourceId:`generated-source-${index+1}`,
+      title:`服务商甲来源 ${index+1}`,
+      canonicalUrl:`https://provider.example/services/${index+1}`,
+      registrableDomain:"provider.example",
+      citedText:`跨境海运服务 ${index+1}`,
+      providerResultOrder:index+1,
+      retrievalStatus:(["verified_body","search_source_only","inaccessible"] as const)[index]!,
+      ownershipCategory:"unknown" as const
+    }],
+    provenance:{providerId:"mimo",model:"mimo-v2.5-pro",searchMode:"native_web_search",promptVersion:"generative-search-answer-v1" as const,searchedAt:"2030-01-01T00:00:00.000Z",completedAt:"2030-01-01T00:00:01.000Z",answerHash:"a".repeat(64),sourceHash:"b".repeat(64)},
+    refusal:null,
+    geoDiagnosis:{...legacy.geoDiagnosis,citedOwnership:{...legacy.geoDiagnosis.citedOwnership,institution:0,community:0,social:0,unknown:1}},
+    audit:{verifiedBodyCount:index===0?1:0,searchSourceOnlyCount:index===1?1:0,inaccessibleCount:index===2?1:0}
+  })) as typeof model.combinedReport.answerCards;
+  return model;
+}
+
 describe("CombinedGeoReportV3Artifact",()=>{
   it("renders answer-first content in the fixed order with derived adjacent citations",()=>{
     const model=combinedV3ArtifactFixture();
@@ -72,5 +99,30 @@ describe("CombinedGeoReportV3Artifact",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
     expect(html).toContain("Open GEO 生成式答案");
     expect(html).toContain("完整技术分析");
+  });
+
+  it("renders each complete generative answer before the sources returned by the same operation",()=>{
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:generativeModel()}));
+    expect(html.indexOf("服务商甲提供跨境海运方案 1")).toBeLessThan(html.indexOf("provider.example/services/1"));
+    expect(html).toContain("正文已独立核验");
+    expect(html).toContain("仅模型搜索来源");
+    expect(html).toContain("当前无法访问");
+    expect(html).toContain("完整技术分析");
+    expect(html).not.toMatch(/report\.pdf|Print \/ PDF|打印 \/ PDF/);
+    expect(html.indexOf("data-answer-audit")).toBeGreaterThan(html.indexOf("服务商甲提供跨境海运方案 3"));
+  });
+
+  it("renders source-limited answers and typed refusals without turning audit failures into answer copy",()=>{
+    const model=generativeModel();
+    const sourceLimited=model.combinedReport.answerCards[1]!;
+    const refused=model.combinedReport.answerCards[2]!;
+    if(sourceLimited.answerMode!=="generative_search_v1"||refused.answerMode!=="generative_search_v1")throw new TypeError("generative fixture mismatch");
+    model.combinedReport.answerCards[1]={...sourceLimited,status:"source_limited",sources:[],audit:{verifiedBodyCount:0,searchSourceOnlyCount:0,inaccessibleCount:0}};
+    model.combinedReport.answerCards[2]={...refused,status:"refused",answerText:"",sources:[],refusal:{code:"policy_refusal",reason:"该请求涉及受限制的高风险操作。"},audit:{verifiedBodyCount:0,searchSourceOnlyCount:0,inaccessibleCount:0}};
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    expect(html).toContain("服务商甲提供跨境海运方案 2");
+    expect(html).toContain("同次回答没有可安全展示的公开来源");
+    expect(html).toContain("该请求涉及受限制的高风险操作。");
+    expect(html).not.toContain("当前可核验正文仍不足");
   });
 });
