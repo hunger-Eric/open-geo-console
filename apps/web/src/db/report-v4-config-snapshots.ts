@@ -49,6 +49,13 @@ export interface ReportV4ConfigSnapshotRepository {
   getById(id: string): Promise<ReportV4ConfigSnapshotRow | null>;
 }
 
+export interface ReportV4ConfigSnapshotSqlTransaction {
+  <T extends Record<string, unknown> = Record<string, unknown>>(
+    strings: TemplateStringsArray,
+    ...values: readonly ReportV4ConfigSnapshotSqlValue[]
+  ): Promise<T[]>;
+}
+
 export interface ReportV4ConfigSnapshotSql {
   <T extends Record<string, unknown> = Record<string, unknown>>(
     strings: TemplateStringsArray,
@@ -76,6 +83,45 @@ export async function lockReportV4ConfigSnapshot(
   repository: ReportV4ConfigSnapshotRepository = createReportV4ConfigSnapshotRepository()
 ): Promise<ReportV4ConfigSnapshotRow> {
   return repository.lock(input);
+}
+
+/** Transaction-aware V4 snapshot lock used by payment webhooks. */
+export async function lockReportV4ConfigSnapshotInTransaction(
+  sql: ReportV4ConfigSnapshotSqlTransaction,
+  input: LockReportV4ConfigSnapshotInput
+): Promise<ReportV4ConfigSnapshotRow> {
+  const candidate = buildSnapshot(input);
+  const reportId = requiredText(candidate.reportId, "reportId");
+  await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`report-v4-config:${reportId}`}, 0))`;
+  const rows = await sql<Record<string, unknown>>`
+    SELECT id,report_id,order_id,core_job_id,identity_hash,
+      model_profile_id,model_profile_hash,model_profile_payload,
+      report_profile_id,report_profile_hash,report_profile_payload,created_at
+    FROM report_v4_config_snapshots WHERE report_id=${reportId} FOR UPDATE
+  `;
+  if (rows.length > 1) throw new Error("A V4 report returned multiple immutable configuration snapshots.");
+  if (rows[0]) {
+    const existing = parsePostgresSnapshot(rows[0]);
+    assertExactSnapshot(existing, candidate);
+    return existing;
+  }
+  const inserted = await sql<Record<string, unknown>>`
+    INSERT INTO report_v4_config_snapshots (
+      id,report_id,order_id,core_job_id,identity_hash,
+      model_profile_id,model_profile_hash,model_profile_payload,
+      report_profile_id,report_profile_hash,report_profile_payload
+    ) VALUES (
+      ${candidate.id},${candidate.reportId},${candidate.orderId},${candidate.coreJobId},${candidate.identityHash},
+      ${candidate.modelProfileId},${candidate.modelProfileHash},${stableJson(candidate.modelProfile)}::text::jsonb,
+      ${candidate.reportProfileId},${candidate.reportProfileHash},${stableJson(candidate.reportProfile)}::text::jsonb
+    ) RETURNING id,report_id,order_id,core_job_id,identity_hash,
+      model_profile_id,model_profile_hash,model_profile_payload,
+      report_profile_id,report_profile_hash,report_profile_payload,created_at
+  `;
+  if (inserted.length !== 1) throw new Error("V4 configuration snapshot insert must affect exactly one row.");
+  const parsed = parsePostgresSnapshot(inserted[0]!);
+  assertExactSnapshot(parsed, candidate);
+  return parsed;
 }
 
 export async function getReportV4ConfigSnapshotById(

@@ -71,8 +71,17 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
       payloadHash: hash("event-v4-main"),
       selectedFields: { providerStatus: "SUCCEEDED" }
     };
-    const paid = await applyReportV4PaidPaymentEvent(eventInput);
-    const duplicate = await applyReportV4PaidPaymentEvent(eventInput);
+    const previousModelProfile = process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
+    let paid: Awaited<ReturnType<typeof applyReportV4PaidPaymentEvent>>;
+    let duplicate: Awaited<ReturnType<typeof applyReportV4PaidPaymentEvent>>;
+    try {
+      process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = "report-v4-mimo-v2.5-pro-v1";
+      paid = await applyReportV4PaidPaymentEvent(eventInput);
+      duplicate = await applyReportV4PaidPaymentEvent(eventInput);
+    } finally {
+      if (previousModelProfile === undefined) delete process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
+      else process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = previousModelProfile;
+    }
 
     expect(duplicate).toMatchObject({ duplicate: true, jobId: paid.jobId, dispatchId: paid.dispatchId, emailDeliveryId: paid.emailDeliveryId });
     const [state] = await getSqlClient()<Array<{
@@ -81,7 +90,7 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
       recommendation_report_version: number; artifact_contract: string; business_question_set_id: string;
       reason: string; correction_id: string | null; replacement_fulfillment_id: string | null;
       event_count: number; job_count: number; credit_count: number; access_count: number;
-      dispatch_count: number; email_count: number; artifact_count: number;
+      dispatch_count: number; email_count: number; artifact_count: number; config_count: number;
     }>>`
       SELECT orders.payment_status,orders.fulfillment_status,orders.fulfillment_job_id,
         jobs.site_snapshot_id,jobs.tier,jobs.product_contract,jobs.fulfillment_methodology,
@@ -93,7 +102,8 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
         (SELECT count(*)::int FROM access_keys WHERE payment_order_id=orders.id) access_count,
         (SELECT count(*)::int FROM job_dispatch_outbox WHERE job_id=orders.fulfillment_job_id) dispatch_count,
         (SELECT count(*)::int FROM email_deliveries WHERE order_id=orders.id) email_count,
-        (SELECT count(*)::int FROM report_artifact_revisions WHERE job_id=orders.fulfillment_job_id) artifact_count
+        (SELECT count(*)::int FROM report_artifact_revisions WHERE job_id=orders.fulfillment_job_id) artifact_count,
+        (SELECT count(*)::int FROM report_v4_config_snapshots WHERE report_id=orders.report_id) config_count
       FROM payment_orders orders JOIN scan_jobs jobs ON jobs.id=orders.fulfillment_job_id
       WHERE orders.id=${firstOrder.id}
     `;
@@ -117,8 +127,14 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
       access_count: 1,
       dispatch_count: 1,
       email_count: 1,
-      artifact_count: 0
+      artifact_count: 0,
+      config_count: 1
     });
+    const [config] = await getSqlClient()<Array<{ report_id: string; order_id: string; core_job_id: string; model_profile_id: string; report_profile_id: string }>>`
+      SELECT report_id,order_id,core_job_id,model_profile_id,report_profile_id
+      FROM report_v4_config_snapshots WHERE report_id='report-main'`;
+    expect(config).toMatchObject({ report_id: "report-main", order_id: firstOrder.id, core_job_id: paid.jobId,
+      model_profile_id: "report-v4-mimo-v2.5-pro-v1", report_profile_id: "business-operator-en-v1" });
   }, 120_000);
 
   it("does not reuse a V2 order with the same checkout idempotency identity as a V4 order", async () => {
@@ -139,6 +155,72 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
       recommendation_report_version: 2,
       site_snapshot_id: null
     });
+  });
+
+  it("rolls back the entire verified event when the immutable V4 profile is unavailable", async () => {
+    await seedCheckoutFixture("rollback", "completed");
+    const order = await createReportV4PaymentOrder(orderInput("rollback"));
+    const before = await getSqlClient()<Array<{ events: number; jobs: number; credits: number; outbox: number; emails: number; configs: number; payment_status: string; fulfillment_status: string; fulfillment_job_id: string | null }>>`
+      SELECT
+        (SELECT count(*)::int FROM payment_events WHERE order_id=${order.id}) events,
+        (SELECT count(*)::int FROM scan_jobs WHERE report_id='report-rollback') jobs,
+        (SELECT count(*)::int FROM credit_ledger WHERE payment_order_id=${order.id}) credits,
+        (SELECT count(*)::int FROM job_dispatch_outbox d JOIN scan_jobs j ON j.id=d.job_id WHERE j.report_id='report-rollback') outbox,
+        (SELECT count(*)::int FROM email_deliveries WHERE order_id=${order.id}) emails,
+        (SELECT count(*)::int FROM report_v4_config_snapshots WHERE report_id='report-rollback') configs,
+        (SELECT payment_status FROM payment_orders WHERE id=${order.id}) payment_status,
+        (SELECT fulfillment_status FROM payment_orders WHERE id=${order.id}) fulfillment_status,
+        (SELECT fulfillment_job_id FROM payment_orders WHERE id=${order.id}) fulfillment_job_id`;
+    const previous = process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
+    try {
+      process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = "missing-profile";
+      await expect(applyReportV4PaidPaymentEvent({
+        provider: "airwallex", providerEventId: "event-v4-rollback", eventType: "payment_intent.succeeded",
+        orderId: order.id, providerPaymentId: "int-v4-rollback", providerCreatedAt: new Date(),
+        payloadHash: hash("event-v4-rollback")
+      })).rejects.toThrow(/profile/i);
+    } finally {
+      if (previous === undefined) delete process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
+      else process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = previous;
+    }
+    const [after] = await getSqlClient()<Array<{ events: number; jobs: number; credits: number; outbox: number; emails: number; configs: number; payment_status: string; fulfillment_status: string; fulfillment_job_id: string | null }>>`
+      SELECT
+        (SELECT count(*)::int FROM payment_events WHERE order_id=${order.id}) events,
+        (SELECT count(*)::int FROM scan_jobs WHERE report_id='report-rollback') jobs,
+        (SELECT count(*)::int FROM credit_ledger WHERE payment_order_id=${order.id}) credits,
+        (SELECT count(*)::int FROM job_dispatch_outbox d JOIN scan_jobs j ON j.id=d.job_id WHERE j.report_id='report-rollback') outbox,
+        (SELECT count(*)::int FROM email_deliveries WHERE order_id=${order.id}) emails,
+        (SELECT count(*)::int FROM report_v4_config_snapshots WHERE report_id='report-rollback') configs,
+        (SELECT payment_status FROM payment_orders WHERE id=${order.id}) payment_status,
+        (SELECT fulfillment_status FROM payment_orders WHERE id=${order.id}) fulfillment_status,
+        (SELECT fulfillment_job_id FROM payment_orders WHERE id=${order.id}) fulfillment_job_id`;
+    expect(after).toEqual(before[0]);
+  });
+
+  it("rejects replay when the existing immutable snapshot drifts from the current approved profile", async () => {
+    const [order] = await getSqlClient()<Array<{ id: string; payment_status: string; fulfillment_status: string; fulfillment_job_id: string | null }>>`
+      SELECT id,payment_status,fulfillment_status,fulfillment_job_id FROM payment_orders WHERE report_id='report-main'`;
+    const before = await getSqlClient()<Array<{ events: number; configs: number }>>`
+      SELECT (SELECT count(*)::int FROM payment_events WHERE order_id=${order.id}) events,
+             (SELECT count(*)::int FROM report_v4_config_snapshots WHERE report_id='report-main') configs`;
+    const previous = process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
+    try {
+      process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = "drifted-profile";
+      await expect(applyReportV4PaidPaymentEvent({
+        provider: "airwallex", providerEventId: "event-v4-main", eventType: "payment_intent.succeeded",
+        orderId: order.id, providerPaymentId: "int-v4-main", providerCreatedAt: new Date(), payloadHash: hash("event-v4-main")
+      })).rejects.toThrow(/profile/i);
+    } finally {
+      if (previous === undefined) delete process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
+      else process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = previous;
+    }
+    const [after] = await getSqlClient()<Array<{ events: number; configs: number }>>`
+      SELECT (SELECT count(*)::int FROM payment_events WHERE order_id=${order.id}) events,
+             (SELECT count(*)::int FROM report_v4_config_snapshots WHERE report_id='report-main') configs`;
+    expect(after).toEqual(before[0]);
+    await expect(getSqlClient()<Array<{ payment_status: string; fulfillment_status: string; fulfillment_job_id: string | null }>>`
+      SELECT payment_status,fulfillment_status,fulfillment_job_id FROM payment_orders WHERE id=${order.id}`
+    ).resolves.toEqual([{ payment_status: order.payment_status, fulfillment_status: order.fulfillment_status, fulfillment_job_id: order.fulfillment_job_id }]);
   });
 });
 

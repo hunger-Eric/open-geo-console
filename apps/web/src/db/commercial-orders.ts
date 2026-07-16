@@ -3,6 +3,9 @@ import { and, eq, isNull } from "drizzle-orm";
 import { ensureDatabase, getDb, getSqlClient } from "./index";
 import { hmacSecret, requireSecret } from "./secrets";
 import { resolveCombinedReportContract } from "@/report/combined-report-contract";
+import { loadReportV4ModelRuntimeConfig } from "@/report-v4/model-runtime-config";
+import { loadReportV4ReportRuntimeConfig } from "@/report-v4/report-runtime-config";
+import { lockReportV4ConfigSnapshotInTransaction } from "./report-v4-config-snapshots";
 import {
   paymentEvents,
   paymentOrders,
@@ -770,6 +773,19 @@ async function applyPaidPaymentEventInternal(
       UPDATE payment_orders SET fulfillment_job_id = COALESCE(fulfillment_job_id, ${jobId}), updated_at = now()
       WHERE id = ${order.id}
     `;
+    if (expectedContract === "report_v4") {
+      const paidLocale = order.report_locale === "en" || order.report_locale === "zh" ? order.report_locale : null;
+      if (!paidLocale) throw new CommercialOrderConflictError("The V4 paid order has an unsupported immutable locale.");
+      const modelRuntime = loadReportV4ModelRuntimeConfig(process.env);
+      const reportRuntime = loadReportV4ReportRuntimeConfig(paidLocale);
+      await lockReportV4ConfigSnapshotInTransaction(tx, {
+        reportId: order.report_id,
+        orderId: order.id,
+        coreJobId: jobId,
+        modelProfile: modelRuntime.modelProfile,
+        reportProfile: reportRuntime.reportProfile
+      });
+    }
     if (expectedContract !== "report_v4" && order.product_code === "recommendation_forensics_v1" && order.business_question_set_id) {
       const artifacts=await tx<Array<{id:string}>>`SELECT id FROM report_artifact_revisions WHERE job_id=${jobId} LIMIT 1`;
       if(!artifacts[0]) {
