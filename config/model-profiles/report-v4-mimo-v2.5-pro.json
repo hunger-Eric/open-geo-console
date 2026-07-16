@@ -1,0 +1,47 @@
+{
+  "profileId": "report-v4-mimo-v2.5-pro-v1",
+  "provider": "xiaomi-mimo",
+  "adapterId": "mimo-openai-chat-completions-v1",
+  "operations": {
+    "pageAnalysis": {
+      "model": "mimo-v2.5-pro",
+      "contextWindowTokens": 262144,
+      "maxInputTokens": 65536,
+      "maxOutputTokens": 8192,
+      "timeoutMs": 120000,
+      "nativeWebSearch": false,
+      "structuredOutput": true,
+      "tokenizer": "mimo-v2.5-pro-utf8-conservative-v1"
+    },
+    "websiteSynthesis": {
+      "model": "mimo-v2.5-pro",
+      "contextWindowTokens": 262144,
+      "maxInputTokens": 131072,
+      "maxOutputTokens": 16384,
+      "timeoutMs": 180000,
+      "nativeWebSearch": false,
+      "structuredOutput": true,
+      "tokenizer": "mimo-v2.5-pro-utf8-conservative-v1"
+    },
+    "questionAnswer": {
+      "model": "mimo-v2.5-pro",
+      "contextWindowTokens": 262144,
+      "maxInputTokens": 65536,
+      "maxOutputTokens": 16384,
+      "timeoutMs": 180000,
+      "nativeWebSearch": true,
+      "structuredOutput": true,
+      "tokenizer": "mimo-v2.5-pro-utf8-conservative-v1"
+    },
+    "sourceDiagnosis": {
+      "model": "mimo-v2.5-pro",
+      "contextWindowTokens": 262144,
+      "maxInputTokens": 65536,
+      "maxOutputTokens": 8192,
+      "timeoutMs": 120000,
+      "nativeWebSearch": false,
+      "structuredOutput": true,
+      "tokenizer": "mimo-v2.5-pro-utf8-conservative-v1"
+    }
+  }
+}
