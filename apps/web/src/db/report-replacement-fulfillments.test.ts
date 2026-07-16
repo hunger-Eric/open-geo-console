@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { APPROVED_REPLACEMENT_TARGET, prepareApprovedReportReplacement, resumeApprovedReplacementModelRepair } from "./report-replacement-fulfillments";
+import { APPROVED_REPLACEMENT_TARGET, prepareApprovedReportReplacement, replacementProviderClaimRepairPhase, resumeApprovedReplacementModelRepair } from "./report-replacement-fulfillments";
 
 describe("approved replacement fulfillment guard", () => {
   it("is bound to the one approved paid failure lineage", () => {
@@ -16,5 +16,13 @@ describe("approved replacement fulfillment guard", () => {
     await expect(prepareApprovedReportReplacement({ confirm: false, authorizationRef: "approval-2026-07-15" })).rejects.toThrow("--confirm");
     await expect(prepareApprovedReportReplacement({ confirm: true, authorizationRef: "x" })).rejects.toThrow("authorization reference");
     await expect(resumeApprovedReplacementModelRepair({ confirm: false, authorizationRef: "approval-2026-07-15" })).rejects.toThrow("--confirm");
+  });
+
+  it("reopens only the exact terminal replacement provider-claim checkpoint", () => {
+    const eligible = { replacement_state: "running", execution_state: "failed", error_code: "lease_exhausted", current_phase: "terminalization", provider_discovery_phase: "provider_claim_extraction" };
+    expect(replacementProviderClaimRepairPhase(eligible)).toBe("provider_claim_extraction");
+    expect(replacementProviderClaimRepairPhase({ ...eligible, execution_state: "running" })).toBeNull();
+    expect(replacementProviderClaimRepairPhase({ ...eligible, provider_discovery_phase: "candidate_verification" })).toBeNull();
+    expect(replacementProviderClaimRepairPhase({ ...eligible, error_code: "artifact_unavailable" })).toBeNull();
   });
 });

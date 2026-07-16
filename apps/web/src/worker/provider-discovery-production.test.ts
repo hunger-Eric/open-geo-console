@@ -173,6 +173,43 @@ describe("production provider discovery composition", () => {
     expect(mocks.snapshotBundle).toHaveBeenCalledWith("snapshot-verification");
     expect(mocks.snapshotBundle).not.toHaveBeenCalledWith("");
 
+    let rejectedClaimCheckpoint = structuredClone(checkpoint) as NonNullable<typeof checkpoint> & {
+      claimSetHash: string | null;
+      phase: string;
+      artifacts: Record<string, unknown>;
+    };
+    delete rejectedClaimCheckpoint.artifacts.claims;
+    delete rejectedClaimCheckpoint.artifacts.qualification;
+    delete rejectedClaimCheckpoint.artifacts.providerDiscovery;
+    rejectedClaimCheckpoint.claimSetHash = null;
+    rejectedClaimCheckpoint.phase = "provider_claim_extraction";
+    mocks.appendClaims.mockClear();
+    const rejectedClaimClient = { configuredModel: "fixture-model", completeJson: vi.fn(async () => ({ modelId: "fixture-model", value: { claims: [{ subjectName: "Alpha Logistics", genericRole: "service_provider", policyRole: "carrier", capability: "linehaul_fleet", operatingMode: "self_operated", serviceScope: ["freight"], routeScope: [], exactExcerpt: "Unsupported model paraphrase." }] } })) };
+    const rejectedClaimContext = createProductionProviderDiscoveryContext({
+      runtime,
+      questionSet: questions(),
+      artifactContract: "combined_geo_report_v3",
+      websiteCategories: ["logistics"],
+      websiteFoundationHash: "f".repeat(64),
+      workerId: "worker",
+      evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
+      extractionModel: "fixture-model",
+      extractionClient: rejectedClaimClient,
+      getCheckpoint: async () => rejectedClaimCheckpoint as never,
+      saveCheckpoint: async (value) => { rejectedClaimCheckpoint = structuredClone(value) as typeof rejectedClaimCheckpoint; }
+    });
+
+    const rejectedClaimResult = await runProviderDiscoveryPipeline({
+      identity: rejectedClaimContext.identity,
+      dependencies: rejectedClaimContext.dependencies,
+      hardDeadlineAt: "2030-01-01T01:00:00.000Z"
+    });
+    expect(rejectedClaimClient.completeJson).toHaveBeenCalledTimes(3);
+    expect(rejectedClaimResult.checkpoint.artifacts.claims).toEqual([]);
+    expect(rejectedClaimResult.providerDiscovery.strict).toEqual([]);
+    expect(rejectedClaimResult.providerDiscovery.candidates).toEqual([expect.objectContaining({ canonicalName: "Alpha Logistics" })]);
+    expect(mocks.appendClaims).not.toHaveBeenCalled();
+
     const resumedCheckpoint = structuredClone(checkpoint) as NonNullable<typeof checkpoint> & {
       artifacts: Record<string, unknown>;
     };

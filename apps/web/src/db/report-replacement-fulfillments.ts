@@ -161,10 +161,12 @@ export async function resumeApprovedReplacementModelRepair(input: { confirm: boo
     const rows = await tx<Array<{
       replacement_id: string; replacement_state: string; job_id: string; execution_state: string; error_code: string | null;
       current_phase: string; checkpoint_revision: number; recovery_phase: string | null; has_answer_first_v3: boolean;
+      provider_discovery_phase: string | null;
       artifact_revision_id: string; artifact_status: string;
     }>>`SELECT replacement.id AS replacement_id,replacement.state AS replacement_state,job.id AS job_id,job.execution_state,job.error_code,
       job.current_phase,job.checkpoint_revision,job.checkpoint->'recovery'->>'phase' AS recovery_phase,
       job.checkpoint ? 'answerFirstV3' AS has_answer_first_v3,
+      job.checkpoint->'providerDiscovery'->>'phase' AS provider_discovery_phase,
       artifact.id AS artifact_revision_id,artifact.status AS artifact_status
       FROM report_replacement_fulfillments replacement
       JOIN scan_jobs job ON job.id=replacement.replacement_job_id
@@ -175,10 +177,11 @@ export async function resumeApprovedReplacementModelRepair(input: { confirm: boo
       row.error_code === "answer_first_v3_model_contract_invalid" && row.recovery_phase === "artifact_verification";
     const repairedAnswerCheckpoint = row?.replacement_state === "repair_wait" && row.execution_state === "repair_wait" &&
       row.error_code === "report_language_validation_failed" && row.recovery_phase === "grounded_answer_synthesis" && row.has_answer_first_v3;
-    if (!row || row.artifact_status !== "pending" || (!failedModelContract && !repairedAnswerCheckpoint)) {
+    const repairedProviderClaimCheckpoint = row ? replacementProviderClaimRepairPhase(row) : null;
+    if (!row || row.artifact_status !== "pending" || (!failedModelContract && !repairedAnswerCheckpoint && !repairedProviderClaimCheckpoint)) {
       throw new Error("The approved replacement is not eligible for model-contract repair resume.");
     }
-    const resumePhase = repairedAnswerCheckpoint ? "grounded_answer_synthesis" : "artifact_verification";
+    const resumePhase = repairedProviderClaimCheckpoint ?? (repairedAnswerCheckpoint ? "grounded_answer_synthesis" : "artifact_verification");
     await tx`UPDATE scan_jobs SET stage='synthesizing',execution_state='queued',current_phase=${resumePhase},phase_attempt=0,
       retry_not_before=NULL,repair_reason_code=NULL,repair_deadline_at=NULL,resume_generation=resume_generation+1,
       lease_owner=NULL,lease_expires_at=NULL,error_code=NULL,public_error=NULL,updated_at=now()
@@ -240,3 +243,19 @@ function eligibilityReasons(row: EligibilityRow | undefined, existing: Replaceme
 }
 
 function language(locale: string): "en" | "zh" { return locale.toLowerCase().startsWith("zh") ? "zh" : "en"; }
+
+export function replacementProviderClaimRepairPhase(input: {
+  replacement_state: string;
+  execution_state: string;
+  error_code: string | null;
+  current_phase: string;
+  provider_discovery_phase: string | null;
+}): "provider_claim_extraction" | null {
+  return ["running", "failed"].includes(input.replacement_state)
+    && input.execution_state === "failed"
+    && ["lease_exhausted", "unexpected_internal_error"].includes(input.error_code ?? "")
+    && input.current_phase === "terminalization"
+    && input.provider_discovery_phase === "provider_claim_extraction"
+    ? "provider_claim_extraction"
+    : null;
+}

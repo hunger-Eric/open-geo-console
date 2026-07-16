@@ -385,8 +385,14 @@ async function extractClaims(input: { client: JsonCompletionClient; locale: stri
     if (!sourcePassages.length) continue;
     const observation = input.bundle.observations.find(({ id }) => id === source.observationId);
     for (const candidate of input.candidates.filter(({ canonicalName }) => sourcePassages.some(({ matchedEntityTerms }) => matchedEntityTerms.some((term) => same(term, canonicalName))))) {
-      const extracted = await extractProviderClaimCandidates(input.client, { locale: input.locale, question: input.question, policy: input.policy, candidate,
-        source: { sourceEvidenceId: source.id, canonicalUrl: source.canonicalUrl, title: observation?.title ?? source.registrableDomain, registrableDomain: source.registrableDomain }, passages: sourcePassages, signal: input.signal });
+      let extracted: Awaited<ReturnType<typeof extractProviderClaimCandidates>>;
+      try {
+        extracted = await extractProviderClaimCandidates(input.client, { locale: input.locale, question: input.question, policy: input.policy, candidate,
+          source: { sourceEvidenceId: source.id, canonicalUrl: source.canonicalUrl, title: observation?.title ?? source.registrableDomain, registrableDomain: source.registrableDomain }, passages: sourcePassages, signal: input.signal });
+      } catch (error) {
+        if (isModelClaimContractError(error)) continue;
+        throw error;
+      }
       for (const candidateClaim of extracted.candidates) {
         const passage = sourcePassages.find(({ exactExcerpt }) => exactExcerpt.includes(candidateClaim.exactExcerpt));
         if (!passage) continue;
@@ -440,6 +446,7 @@ function safeDomain(value: string): string | null { try { return new URL(value).
 function institutional(value: string): boolean { const domain = safeDomain(value) ?? ""; return /(?:\.gov|\.edu|\.org)(?:\.[a-z]{2})?$/.test(domain); }
 function digest(value?: string): string | null { if (!value) return null; const result = value.startsWith("sha256:") ? value.slice(7) : value; if (!/^[a-f0-9]{64}$/i.test(result)) throw new Error("Provider source content hash is invalid."); return result.toLocaleLowerCase(); }
 function same(left: string, right: string) { return left.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim() === right.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim(); }
+function isModelClaimContractError(error: unknown) { return error instanceof TypeError && /^\$model(?:\.|\b)/.test(error.message); }
 function unique(values: readonly string[]) { return [...new Set(values)].sort(); }
 function sha(value: unknown) { return createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex"); }
 function candidateHash(values: readonly ProviderCandidateQueryIdentity[]) { return sha([...values].sort((a, b) => a.rank - b.rank || a.entityId.localeCompare(b.entityId)).map(({ entityId, canonicalName, rank }) => ({ entityId, canonicalName, rank }))); }
