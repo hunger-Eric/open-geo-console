@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
 import { getAiReport } from "@/db/ai-reports";
+import { getActiveCombinedGeoReport } from "@/db/combined-reports";
 import { getJobCreditStatus, getLatestScanJob, getScanJobQueueStatus } from "@/db/jobs";
 import { getGeoReport } from "@/db/reports";
 import { publicStateForStage } from "@/report/job-status";
-import { requestHasReportAccess } from "@/server/report-access";
+import { resolveRequestArtifactScope } from "@/server/report-access";
 
 type RouteContext = { params: Promise<{ id: string }> };
 const PRIVATE_NO_STORE = { "Cache-Control": "private, no-store" };
 
 export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params;
-  const [report, hasDeepAccess] = await Promise.all([
+  const [report, artifactScope] = await Promise.all([
     getGeoReport(id),
-    requestHasReportAccess(request, id)
+    resolveRequestArtifactScope(request, id)
   ]);
   if (!report) {
     return NextResponse.json(
@@ -21,18 +22,24 @@ export async function GET(request: Request, context: RouteContext) {
     );
   }
 
-  const [freeJob, freeAiReport, deepJob, deepAiReport] = await Promise.all([
+  const hasDeepAccess = artifactScope !== null;
+  const readsV4Artifact = artifactScope === "combined_geo_report_v4";
+
+  const [freeJob, freeAiReport, deepJob, deepAiReport, activeV4Report] = await Promise.all([
     getLatestScanJob(id, "free"),
-    getAiReport(id, "free"),
+    readsV4Artifact ? Promise.resolve(null) : getAiReport(id, "free"),
     hasDeepAccess ? getLatestScanJob(id, "deep") : Promise.resolve(null),
-    hasDeepAccess ? getAiReport(id, "deep") : Promise.resolve(null)
+    hasDeepAccess && !readsV4Artifact ? getAiReport(id, "deep") : Promise.resolve(null),
+    readsV4Artifact ? getActiveCombinedGeoReport(id, "combined_geo_report_v4") : Promise.resolve(null)
   ]);
   const job = deepJob ?? freeJob;
   const aiReport = deepAiReport ?? freeAiReport;
   const queue = job ? await getScanJobQueueStatus(job.id) : null;
   const creditStatus = job ? await getJobCreditStatus(job.id) : null;
   const reportLocale = report.reportLocale;
-  const aiReportLocale = aiReport?.locale === "zh" ? "zh" : aiReport?.locale === "en" ? "en" : null;
+  const aiReportLocale = activeV4Report
+    ? compactReportLocale(activeV4Report.report.locale)
+    : aiReport?.locale === "zh" ? "zh" : aiReport?.locale === "en" ? "en" : null;
   const localeCorrectionAvailable = Boolean(
     hasDeepAccess
       && reportLocale
@@ -58,7 +65,7 @@ export async function GET(request: Request, context: RouteContext) {
         waitReason: job.executionState === "queued" ? queue?.waitReason ?? null : null,
         activeTier: job.executionState === "queued" ? queue?.activeTier ?? null : null
       } : null,
-      hasAiReport: Boolean(aiReport),
+      hasAiReport: Boolean(activeV4Report ?? aiReport),
       hasTechnicalReport: Boolean(report.payload),
       technicalStatus: report.technicalStatus,
       technicalErrorCode: report.technicalErrorCode,
@@ -73,4 +80,9 @@ export async function GET(request: Request, context: RouteContext) {
     },
     { headers: PRIVATE_NO_STORE }
   );
+}
+
+function compactReportLocale(locale: string): "en" | "zh" | null {
+  const compact = locale.toLowerCase().split(/[-_]/u, 1)[0];
+  return compact === "en" || compact === "zh" ? compact : null;
 }

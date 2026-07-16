@@ -79,6 +79,42 @@ describe("private report access locale", () => {
     expect(response.headers.get("set-cookie")).toContain("ogc_report_report-1_combined_v3=secret");
   });
 
+  // @requirement GEO-V4-COMMERCE-01
+  // @requirement GEO-V4-PDF-01
+  it("redirects the persisted combined V4 scope to the canonical HTML artifact without a PDF surface", async () => {
+    mocks.redeemReportAccessToken.mockResolvedValue({ reportId: "report-1", artifactScope: "combined_geo_report_v4", expiresAt: new Date("2026-08-01T00:00:00Z") });
+    mocks.getGeoReport.mockResolvedValue({ reportLocale: "zh" });
+    const response = await POST(new Request("https://example.test/api/reports/report-1/access", {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "token=secret"
+    }), { params: Promise.resolve({ id: "report-1" }) });
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("https://example.test/reports/report-1/report.html");
+    expect(response.headers.get("location")).not.toMatch(/pdf/i);
+    expect(response.headers.get("set-cookie")).toContain("ogc_report_report-1_combined_v4=secret");
+  });
+
+  // @requirement GEO-V4-COMMERCE-01
+  it("rejects an anonymous or wrong-report redemption without setting access", async () => {
+    mocks.redeemReportAccessToken.mockResolvedValue({
+      reportId: "another-report",
+      artifactScope: "combined_geo_report_v4",
+      expiresAt: new Date("2026-08-01T00:00:00Z")
+    });
+    const anonymous = await POST(new Request("https://example.test/api/reports/report-1/access", {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "token="
+    }), { params: Promise.resolve({ id: "report-1" }) });
+    const wrongReport = await POST(new Request("https://example.test/api/reports/report-1/access", {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "token=secret"
+    }), { params: Promise.resolve({ id: "report-1" }) });
+    expect(anonymous.status).toBe(403);
+    expect(wrongReport.status).toBe(403);
+    expect(anonymous.headers.get("set-cookie")).toBeNull();
+    expect(wrongReport.headers.get("set-cookie")).toBeNull();
+    expect(mocks.redeemReportAccessToken).toHaveBeenCalledTimes(1);
+    expect(mocks.redeemReportAccessToken).toHaveBeenCalledWith("secret");
+    expect(mocks.getGeoReport).not.toHaveBeenCalled();
+  });
+
   it("does not silently default a legacy report to English", async () => {
     mocks.inspectReportAccessToken.mockResolvedValue({ reportId: "report-1", artifactScope: "legacy_website_audit_v1", expiresAt: new Date("2026-08-01T00:00:00Z") });
     mocks.getGeoReport.mockResolvedValue({ reportLocale: null });
