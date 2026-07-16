@@ -407,12 +407,11 @@ function generatedAnswer(questionId: string, index: number): GenerativeSearchAns
 
 function generativeProvider(results: GenerativeSearchAnswerResult[]) {
   const queue = [...results];
-  type Request = Parameters<GenerativeSearchAnswerProvider["answerWithSources"]>[0];
   return {
     providerId: "fixture",
     model: "fixture-model",
     searchMode: "native_web_search",
-    answerWithSources: vi.fn(async (_request: Request) => {
+    answerWithSources: vi.fn(async () => {
       const next = queue.shift();
       if (!next) throw new Error("Unexpected provider call.");
       return next;
