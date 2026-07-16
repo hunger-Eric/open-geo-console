@@ -14,7 +14,7 @@ const response = (value: unknown) => new Response(JSON.stringify({ choices: [{ m
 
 describe("dedicated V4 site synthesis MiMo adapter", () => {
   it("sends bounded page analysis with no tools and parses the contract", async () => {
-    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => response({ chunks: page.chunks }));
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => response({ chunks: page.chunks }));
     const provider = createReportV4MimoSiteSynthesisProvider({ environment: env(), fetch, lockedModelProfile: profilePayload });
     await expect(provider.analyzePage({ context, retainedText: "retained" }, new AbortController().signal)).resolves.toEqual(page);
     const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
@@ -24,7 +24,7 @@ describe("dedicated V4 site synthesis MiMo adapter", () => {
   });
 
   it("synthesizes only validated summaries and rejects malformed output", async () => {
-    const fetch = vi.fn(async () => response({ summary: "ok", strengths: ["s"], gaps: ["g"], actions: ["a"] }));
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => response({ summary: "ok", strengths: ["s"], gaps: ["g"], actions: ["a"] }));
     const provider = createReportV4MimoSiteSynthesisProvider({ environment: env(), fetch, lockedRuntime: resolveReportV4LockedModelRuntime(profilePayload) });
     await expect(provider.synthesizeWebsite({ targetUrl: "https://example.com/", locale: "en", pages: [page] }, new AbortController().signal)).resolves.toMatchObject({ summary: "ok" });
     const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
@@ -33,7 +33,7 @@ describe("dedicated V4 site synthesis MiMo adapter", () => {
   });
 
   it("fails before fetch for drift and oversized input", async () => {
-    const fetch = vi.fn(async () => response({ chunks: page.chunks }));
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => response({ chunks: page.chunks }));
     const drift = structuredClone(profilePayload) as Record<string, unknown>;
     drift.profileId = "drift";
     expect(() => createReportV4MimoSiteSynthesisProvider({ environment: env(), fetch, lockedModelProfile: drift })).toThrow(/drift|approved|invalid/i);
