@@ -108,7 +108,7 @@ export async function collectReportV4Site(
     const rawClassification = classifyRead(candidate.siteUrl, raw, rawText);
     if (rawClassification.status === "analyzable") {
       const result = admitPage(rawClassification.page, "direct_readable", admittedUrls, pages, exclusions);
-      if (result === "capacity_exceeded") return customService(exclusions);
+      if (result === "capacity_exceeded") return customService(pages, exclusions);
       continue;
     }
     if (rawClassification.reason !== "empty_analyzable_body") {
@@ -143,7 +143,7 @@ export async function collectReportV4Site(
       continue;
     }
     const result = admitPage(renderedClassification.page, "js_dependent", admittedUrls, pages, exclusions);
-    if (result === "capacity_exceeded") return customService(exclusions);
+    if (result === "capacity_exceeded") return customService(pages, exclusions);
   }
 
   if (pages.length === 0) {
@@ -185,12 +185,14 @@ function admitPage(
 }
 
 function customService(
+  pages: ReportV4CollectedPage[],
   exclusions: ReportV4SiteCollectionResult["exclusions"]
 ): ReportV4SiteCollectionResult {
+  const thresholdPages = pages.slice(0, V4_STANDARD_ANALYZABLE_PAGE_LIMIT + 1);
   return {
     outcome: "custom_service",
-    analyzablePageCount: V4_STANDARD_ANALYZABLE_PAGE_LIMIT + 1,
-    pages: [],
+    analyzablePageCount: thresholdPages.length,
+    pages: thresholdPages,
     exclusions
   };
 }

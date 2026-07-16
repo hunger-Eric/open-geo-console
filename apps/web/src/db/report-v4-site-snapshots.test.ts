@@ -93,6 +93,28 @@ describe("V4 pre-admission site snapshot repository", () => {
     await expect(finalizeFixture("fifty-one", "custom_service", pages(51), 51)).resolves.toMatchObject({
       snapshot: { status: "custom_service", analyzablePageCount: 51 }
     });
+    await expect(finalizeFixture("fifty-two-custom", "custom_service", pages(52), 52)).rejects.toThrow(/custom.*exactly 51/i);
+  });
+
+  it("persists the exact 51-page custom-service threshold evidence in ordinal order", async () => {
+    const terminal = await finalizeFixture("threshold-evidence", "custom_service", pages(51).reverse(), 51);
+
+    expect(terminal.snapshot).toMatchObject({
+      status: "custom_service",
+      candidateUrlCount: 51,
+      analyzablePageCount: 51,
+      excludedPageCount: 0
+    });
+    expect(terminal.pages).toHaveLength(51);
+    expect(terminal.pages.map(({ ordinal }) => ordinal)).toEqual(Array.from({ length: 51 }, (_, index) => index + 1));
+    expect(terminal.pages[0]).toMatchObject({
+      normalizedUrl: "https://example.com/page-1",
+      contentHash: sha("page-1")
+    });
+    expect(terminal.pages[50]).toMatchObject({
+      normalizedUrl: "https://example.com/page-51",
+      contentHash: sha("page-51")
+    });
   });
 
   it("fails closed before paid generation for unavailable and custom-service snapshots without creating or refreshing", async () => {

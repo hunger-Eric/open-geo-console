@@ -253,7 +253,7 @@ function validateTerminalInput(input: FinalizeReportV4PreAdmissionSnapshotInput)
   if (completedAt < identity.capturedAt) throw new Error("Snapshot completion cannot precede capture.");
   if (!TERMINAL_STATUSES.has(input.status)) throw new Error("A legal V4 site snapshot terminal status is required.");
   if (!Number.isSafeInteger(input.candidateUrlCount) || input.candidateUrlCount < 0) throw new Error("candidateUrlCount must be non-negative.");
-  const snapshotPages = input.pages.map(validatePage);
+  const snapshotPages = input.pages.map(validatePage).sort((left, right) => left.ordinal - right.ordinal);
   assertUnique(snapshotPages.map(({ id }) => id), "page id");
   assertUnique(snapshotPages.map(({ ordinal }) => String(ordinal)), "page ordinal");
   assertUnique(snapshotPages.map(({ normalizedUrl }) => normalizedUrl), "page URL");
@@ -272,8 +272,8 @@ function validateTerminalInput(input: FinalizeReportV4PreAdmissionSnapshotInput)
   if (input.status === "unavailable" && analyzablePageCount !== 0) {
     throw new Error("An unavailable snapshot must have zero analyzable pages.");
   }
-  if (input.status === "custom_service" && analyzablePageCount < 51) {
-    throw new Error("A custom service snapshot requires the explicit 51st analyzable page.");
+  if (input.status === "custom_service" && analyzablePageCount !== 51) {
+    throw new Error("A custom service snapshot requires exactly 51 analyzable pages as threshold evidence.");
   }
   return { ...identity, status: input.status, completedAt, contentIdentityHash, candidateUrlCount: input.candidateUrlCount, pages: snapshotPages, analyzablePageCount, excludedPageCount };
 }

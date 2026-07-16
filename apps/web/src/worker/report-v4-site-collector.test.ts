@@ -174,15 +174,48 @@ describe("V4 site collector", () => {
     expect(deps.renderBrowserHtml).not.toHaveBeenCalled();
   });
 
-  it("stops on the fifty-first admitted page and returns custom_service without truncated pages", async () => {
+  it("stops on the fifty-first admitted page and retains exactly the threshold evidence", async () => {
     const deps = dependencies();
     const candidates = Array.from({ length: 52 }, (_, index) => candidate(index + 1));
 
     const result = await collectReportV4Site(candidates, deps);
-    expect(result).toMatchObject({ outcome: "custom_service", analyzablePageCount: 51, pages: [] });
+    expect(result).toMatchObject({ outcome: "custom_service", analyzablePageCount: 51 });
+    expect(result.pages).toHaveLength(51);
+    expect(result.pages[0]).toMatchObject({
+      normalizedUrl: "https://example.com/page-1",
+      analyzableText: "readable page 1",
+      readability: "direct_readable"
+    });
+    expect(result.pages[50]).toMatchObject({
+      normalizedUrl: "https://example.com/page-51",
+      analyzableText: "readable page 51",
+      readability: "direct_readable"
+    });
     expect(deps.readRawHtml).toHaveBeenCalledTimes(51);
     expect(deps.readRawHtml).not.toHaveBeenCalledWith(candidate(52), expect.anything());
     expect(deps.renderBrowserHtml).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates normalized URLs before the threshold and still stops on 51 unique pages", async () => {
+    const deps = dependencies();
+    const duplicateFirstPage = candidate(999, { url: "https://EXAMPLE.com/page-1#duplicate" });
+    const uniqueCandidates = Array.from({ length: 52 }, (_, index) => candidate(index + 1));
+
+    const result = await collectReportV4Site([
+      uniqueCandidates[0]!,
+      duplicateFirstPage,
+      ...uniqueCandidates.slice(1)
+    ], deps);
+
+    expect(result).toMatchObject({ outcome: "custom_service", analyzablePageCount: 51 });
+    expect(result.pages).toHaveLength(51);
+    expect(new Set(result.pages.map(({ normalizedUrl }) => normalizedUrl))).toHaveLength(51);
+    expect(result.exclusions).toContainEqual(expect.objectContaining({
+      normalizedUrl: "https://example.com/page-1",
+      reason: "duplicate"
+    }));
+    expect(deps.readRawHtml).toHaveBeenCalledTimes(52);
+    expect(deps.readRawHtml).not.toHaveBeenCalledWith(candidate(52), expect.anything());
   });
 
   it("passes the caller abort/deadline signal unchanged to raw and browser dependencies", async () => {
