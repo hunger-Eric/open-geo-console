@@ -17,5 +17,6 @@ export * from "./provider-claim-extraction";
 export * from "./grounded-business-answers-v2";
 export * from "./combined-geo-report-v2";
 export * from "./open-geo-answer-v3";
+export * from "./source-selection-diagnosis-v1";
 export * from "./combined-geo-report-v3";
 export * from "./generative-search-answer";
