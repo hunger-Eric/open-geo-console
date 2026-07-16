@@ -21,6 +21,7 @@ const coreInput = {
   reportId: "report-1",
   orderId: "order-1",
   jobId: "core-job",
+  configSnapshotId: "config-snapshot-1",
   payloadIdentityHash: "a".repeat(64),
   htmlSha256: "b".repeat(64)
 };
@@ -30,7 +31,8 @@ const enhancementIdentity = {
   reportId: "report-1",
   orderId: "order-1",
   jobId: "enhancement-job",
-  sourceArtifactRevisionId: "core-revision"
+  sourceArtifactRevisionId: "core-revision",
+  configSnapshotId: "config-snapshot-1"
 };
 
 describe("V4 artifact revision repository", () => {
@@ -46,7 +48,8 @@ describe("V4 artifact revision repository", () => {
       revisionKind: "generation",
       status: "active",
       htmlSha256: "b".repeat(64),
-      sourceArtifactRevisionId: null
+      sourceArtifactRevisionId: null,
+      configSnapshotId: "config-snapshot-1"
     });
     expect(executor.activeByReport.get("report-1")).toBe("core-revision");
     expect(JSON.stringify(revision)).not.toMatch(/pdf|pageCount|storage/i);
@@ -109,6 +112,25 @@ describe("V4 artifact revision repository", () => {
     expect(executor.rows.has("enhancement-revision")).toBe(false);
   });
 
+  it("binds core and enhancement revisions to one immutable configuration snapshot", async () => {
+    const executor = new MemoryExecutor();
+    await activateReportV4CoreRevision(coreInput, executor);
+
+    await expect(prepareReportV4DiagnosisEnhancement({
+      ...enhancementIdentity,
+      configSnapshotId: "different-config-snapshot"
+    }, executor)).rejects.toThrow(/same.*configuration snapshot|snapshot.*core/i);
+    expect(executor.rows.has("enhancement-revision")).toBe(false);
+
+    await prepareReportV4DiagnosisEnhancement(enhancementIdentity, executor);
+    await expect(activateReportV4DiagnosisEnhancement({
+      ...enhancementIdentity,
+      configSnapshotId: "different-config-snapshot",
+      payloadIdentityHash: "c".repeat(64),
+      htmlSha256: "d".repeat(64)
+    }, executor)).rejects.toThrow(/identity|configuration snapshot|snapshot/i);
+  });
+
   it("requires diagnosis preparation and first activation to start from the report's current active core", async () => {
     const prepareExecutor = new MemoryExecutor();
     await activateReportV4CoreRevision(coreInput, prepareExecutor);
@@ -128,6 +150,16 @@ describe("V4 artifact revision repository", () => {
       payloadIdentityHash: "c".repeat(64),
       htmlSha256: "d".repeat(64)
     }, activateExecutor)).rejects.toThrow(/current active core/i);
+  });
+
+  it("rejects a ready but no longer active core as a new enhancement source", async () => {
+    const executor = new MemoryExecutor();
+    await activateReportV4CoreRevision(coreInput, executor);
+    executor.rows.set("core-revision", { ...executor.rows.get("core-revision")!, status: "ready" });
+
+    await expect(prepareReportV4DiagnosisEnhancement(enhancementIdentity, executor))
+      .rejects.toThrow(/active core|source.*active/i);
+    expect(executor.rows.has("enhancement-revision")).toBe(false);
   });
 
   it("forbids correction, replacement and evidence_refresh revision kinds", () => {
@@ -238,6 +270,7 @@ describe("V4 artifact revision repository", () => {
         reportId: "report-1",
         orderId: "order-1",
         jobId: "core-job",
+        configSnapshotId: "config-snapshot-1",
         revision: 1,
         revisionKind: "generation",
         sourceArtifactRevisionId: null,
@@ -277,6 +310,7 @@ describe("V4 artifact revision repository", () => {
         reportId: "report-1",
         orderId: "order-1",
         jobId: "core-job",
+        configSnapshotId: "config-snapshot-1",
         revision: 1,
         revisionKind: "generation",
         sourceArtifactRevisionId: null,
@@ -414,6 +448,7 @@ function postgresRow(overrides: Partial<Record<string, unknown>> = {}): Record<s
     report_id: "report-1",
     order_id: "order-1",
     job_id: "core-job",
+    config_snapshot_id: "config-snapshot-1",
     revision: 1,
     revision_kind: "generation",
     source_artifact_revision_id: null,

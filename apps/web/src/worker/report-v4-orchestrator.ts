@@ -27,6 +27,7 @@ export interface ReportV4OrchestratorInput {
   readonly reportId: string;
   readonly orderId: string;
   readonly coreJobId: string;
+  readonly configSnapshotId: string;
   readonly coreArtifactRevisionId: string;
   readonly enhancementJobId: string;
   readonly enhancementArtifactRevisionId: string;
@@ -314,6 +315,7 @@ export async function runReportV4Orchestrator(
         reportId: parsedInput.reportId,
         orderId: parsedInput.orderId,
         jobId: parsedInput.coreJobId,
+        configSnapshotId: parsedInput.configSnapshotId,
         payloadIdentityHash: identity.payloadIdentityHash,
         htmlSha256: identity.htmlSha256
       }, signal);
@@ -382,6 +384,7 @@ export async function runReportV4Orchestrator(
         reportId: parsedInput.reportId,
         orderId: parsedInput.orderId,
         jobId: parsedInput.enhancementJobId,
+        configSnapshotId: parsedInput.configSnapshotId,
         sourceArtifactRevisionId: parsedInput.coreArtifactRevisionId
       };
       await dependencies.prepareEnhancementRevision(enhancementIdentity, signal);
@@ -524,6 +527,7 @@ function parseInput(input: ReportV4OrchestratorInput): ReportV4OrchestratorInput
     reportId,
     orderId: boundedText(input.orderId, "orderId", 500),
     coreJobId: boundedText(input.coreJobId, "coreJobId", 500),
+    configSnapshotId: boundedText(input.configSnapshotId, "configSnapshotId", 500),
     coreArtifactRevisionId: boundedText(input.coreArtifactRevisionId, "coreArtifactRevisionId", 500),
     enhancementJobId: boundedText(input.enhancementJobId, "enhancementJobId", 500),
     enhancementArtifactRevisionId: boundedText(input.enhancementArtifactRevisionId, "enhancementArtifactRevisionId", 500),

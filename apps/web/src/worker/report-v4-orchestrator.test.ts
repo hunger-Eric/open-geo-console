@@ -31,6 +31,11 @@ describe("V4 core-first orchestrator", () => {
     expect(result.activeReport?.artifactRevisionId).toBe("enhancement-revision");
     expect(result.activeReport?.questions.map((question) => Boolean(question.diagnosis))).toEqual([true, true, false]);
     expect(harness.snapshotInputs).toEqual([harness.snapshot, harness.snapshot]);
+    expect(harness.revisionConfigSnapshotIds).toEqual([
+      "config-snapshot-v4",
+      "config-snapshot-v4",
+      "config-snapshot-v4"
+    ]);
     expect(harness.events.indexOf("activate:core")).toBeLessThan(harness.events.indexOf("audit:q1"));
     expect(harness.events.indexOf("persist:core")).toBeLessThan(harness.events.indexOf("activate:core"));
     expect(harness.events.indexOf("diagnose:q2")).toBeLessThan(harness.events.indexOf("prepare:enhancement"));
@@ -301,6 +306,7 @@ function createHarness(options: HarnessOptions = {}) {
   const events: string[] = [];
   const snapshot = snapshotBundle(options.snapshotStatus ?? "completed", options.analyzablePages ?? 2);
   const snapshotInputs: ReportV4SiteSnapshotBundle[] = [];
+  const revisionConfigSnapshotIds: string[] = [];
   let activeRevisionId = options.activeReport?.artifactRevisionId ?? null;
   let now = 1_000;
   const dependencies: ReportV4OrchestratorDependencies = {
@@ -341,7 +347,8 @@ function createHarness(options: HarnessOptions = {}) {
         htmlSha256: input.stage === "core" ? "b".repeat(64) : "d".repeat(64)
       };
     },
-    async activateCoreRevision() {
+    async activateCoreRevision(input) {
+      revisionConfigSnapshotIds.push(input.configSnapshotId);
       events.push("activate:core");
       activeRevisionId = "core-revision";
     },
@@ -371,10 +378,12 @@ function createHarness(options: HarnessOptions = {}) {
       }
       return { status: "completed", diagnosis: diagnosis(input.question), providerAttempts: 1 };
     },
-    async prepareEnhancementRevision() {
+    async prepareEnhancementRevision(input) {
+      revisionConfigSnapshotIds.push(input.configSnapshotId);
       events.push("prepare:enhancement");
     },
-    async activateEnhancementRevision() {
+    async activateEnhancementRevision(input) {
+      revisionConfigSnapshotIds.push(input.configSnapshotId);
       events.push("activate:enhancement");
       if (options.failure === "activate_enhancement") throw new Error("enhancement activation failed");
       activeRevisionId = "enhancement-revision";
@@ -385,6 +394,7 @@ function createHarness(options: HarnessOptions = {}) {
     events,
     snapshot,
     snapshotInputs,
+    revisionConfigSnapshotIds,
     get activeRevisionId() { return activeRevisionId; }
   };
 }
@@ -401,6 +411,7 @@ function baseInput(): ReportV4OrchestratorInput {
     reportId: "report-v4",
     orderId: "order-v4",
     coreJobId: "core-job",
+    configSnapshotId: "config-snapshot-v4",
     coreArtifactRevisionId: "core-revision",
     enhancementJobId: "enhancement-job",
     enhancementArtifactRevisionId: "enhancement-revision",

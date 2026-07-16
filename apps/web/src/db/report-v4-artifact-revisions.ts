@@ -11,6 +11,7 @@ export interface ReportV4ArtifactRevisionRow {
   readonly reportId: string;
   readonly orderId: string;
   readonly jobId: string;
+  readonly configSnapshotId: string;
   readonly revision: number;
   readonly revisionKind: ReportV4ArtifactRevisionKind;
   readonly sourceArtifactRevisionId: string | null;
@@ -25,6 +26,7 @@ export interface ReportV4PendingRevisionInsert {
   readonly reportId: string;
   readonly orderId: string;
   readonly jobId: string;
+  readonly configSnapshotId: string;
   readonly revision: number;
   readonly revisionKind: ReportV4ArtifactRevisionKind;
   readonly sourceArtifactRevisionId: string | null;
@@ -81,6 +83,7 @@ export interface ActivateReportV4CoreRevisionInput {
   readonly reportId: string;
   readonly orderId: string;
   readonly jobId: string;
+  readonly configSnapshotId: string;
   readonly payloadIdentityHash: string;
   readonly htmlSha256: string;
 }
@@ -90,6 +93,7 @@ export interface ReportV4DiagnosisEnhancementIdentity {
   readonly reportId: string;
   readonly orderId: string;
   readonly jobId: string;
+  readonly configSnapshotId: string;
   readonly sourceArtifactRevisionId: string;
 }
 
@@ -99,10 +103,10 @@ export interface ActivateReportV4DiagnosisEnhancementInput extends ReportV4Diagn
 }
 
 const CORE_FIELDS = new Set([
-  "artifactRevisionId", "reportId", "orderId", "jobId", "payloadIdentityHash", "htmlSha256"
+  "artifactRevisionId", "reportId", "orderId", "jobId", "configSnapshotId", "payloadIdentityHash", "htmlSha256"
 ]);
 const ENHANCEMENT_IDENTITY_FIELDS = new Set([
-  "artifactRevisionId", "reportId", "orderId", "jobId", "sourceArtifactRevisionId"
+  "artifactRevisionId", "reportId", "orderId", "jobId", "configSnapshotId", "sourceArtifactRevisionId"
 ]);
 const ENHANCEMENT_ACTIVATION_FIELDS = new Set([
   ...ENHANCEMENT_IDENTITY_FIELDS, "payloadIdentityHash", "htmlSha256"
@@ -192,7 +196,6 @@ export async function activateReportV4DiagnosisEnhancement(
     const revision = await tx.getRevision(identity.id);
     if (!revision) throw new Error("The V4 diagnosis enhancement must be prepared before activation.");
     assertRevisionIdentity(revision, identity);
-    const source = await requireCoreSource(identity, tx);
     const active = await tx.getActiveRevision(identity.reportId);
     if (revision.status === "active") {
       assertReadyHashes(revision, payloadIdentityHash, htmlSha256);
@@ -201,6 +204,7 @@ export async function activateReportV4DiagnosisEnhancement(
       }
       return revision;
     }
+    const source = await requireCoreSource(identity, tx);
     if (revision.status === "failed") throw new Error("A failed V4 diagnosis enhancement cannot be activated.");
     if (active?.id !== source.id) throw new Error("V4 diagnosis enhancement activation requires the report's current active core.");
     const ready = await ensureReady(revision, payloadIdentityHash, htmlSha256, tx);
@@ -271,7 +275,7 @@ function postgresArtifactRevisionTransaction(sql: ReportV4ArtifactRevisionSql): 
 
     async getRevision(id) {
       const rows = await sql`
-        SELECT id,report_id,order_id,job_id,revision,revision_kind,source_artifact_revision_id,
+        SELECT id,report_id,order_id,job_id,config_snapshot_id,revision,revision_kind,source_artifact_revision_id,
           artifact_contract,status,payload_identity_hash,html_sha256,pdf_sha256,pdf_storage_key
         FROM report_artifact_revisions
         WHERE id=${requiredText(id, "artifactRevisionId")}
@@ -283,7 +287,7 @@ function postgresArtifactRevisionTransaction(sql: ReportV4ArtifactRevisionSql): 
 
     async getActiveRevision(reportId) {
       const rows = await sql`
-        SELECT id,report_id,order_id,job_id,revision,revision_kind,source_artifact_revision_id,
+        SELECT id,report_id,order_id,job_id,config_snapshot_id,revision,revision_kind,source_artifact_revision_id,
           artifact_contract,status,payload_identity_hash,html_sha256,pdf_sha256,pdf_storage_key
         FROM report_artifact_revisions
         WHERE report_id=${requiredText(reportId, "reportId")}
@@ -310,14 +314,14 @@ function postgresArtifactRevisionTransaction(sql: ReportV4ArtifactRevisionSql): 
       requireLockedReport(normalized.reportId, lockedReports);
       const rows = await sql`
         INSERT INTO report_artifact_revisions (
-          id,report_id,order_id,job_id,revision,revision_kind,source_artifact_revision_id,
+          id,report_id,order_id,job_id,config_snapshot_id,revision,revision_kind,source_artifact_revision_id,
           artifact_contract,status,payload_identity_hash,html_sha256,pdf_sha256,pdf_storage_key,ready_at,activated_at
         ) VALUES (
-          ${normalized.id},${normalized.reportId},${normalized.orderId},${normalized.jobId},${normalized.revision},
+          ${normalized.id},${normalized.reportId},${normalized.orderId},${normalized.jobId},${normalized.configSnapshotId},${normalized.revision},
           ${normalized.revisionKind},${normalized.sourceArtifactRevisionId},'combined_geo_report_v4','pending',
           ${pendingPayloadIdentity(normalized)},NULL,NULL,NULL,NULL,NULL
         ) ON CONFLICT DO NOTHING
-        RETURNING id,report_id,order_id,job_id,revision,revision_kind,source_artifact_revision_id,
+        RETURNING id,report_id,order_id,job_id,config_snapshot_id,revision,revision_kind,source_artifact_revision_id,
           artifact_contract,status,payload_identity_hash,html_sha256,pdf_sha256,pdf_storage_key
       `;
       if (rows.length !== 1) throw new Error("V4 artifact revision insert must affect exactly one row.");
@@ -332,7 +336,7 @@ function postgresArtifactRevisionTransaction(sql: ReportV4ArtifactRevisionSql): 
           pdf_sha256=NULL,pdf_storage_key=NULL
         WHERE id=${requiredText(id, "artifactRevisionId")} AND status='pending'
           AND artifact_contract='combined_geo_report_v4'
-        RETURNING id,report_id,order_id,job_id,revision,revision_kind,source_artifact_revision_id,
+        RETURNING id,report_id,order_id,job_id,config_snapshot_id,revision,revision_kind,source_artifact_revision_id,
           artifact_contract,status,payload_identity_hash,html_sha256,pdf_sha256,pdf_storage_key
       `;
       return parseOptionalPostgresRevision(rows, "V4 artifact readiness transition");
@@ -346,14 +350,14 @@ function postgresArtifactRevisionTransaction(sql: ReportV4ArtifactRevisionSql): 
             UPDATE report_artifact_revisions SET status=${to},activated_at=clock_timestamp(),
               pdf_sha256=NULL,pdf_storage_key=NULL
             WHERE id=${normalizedId} AND status=${from} AND artifact_contract='combined_geo_report_v4'
-            RETURNING id,report_id,order_id,job_id,revision,revision_kind,source_artifact_revision_id,
+            RETURNING id,report_id,order_id,job_id,config_snapshot_id,revision,revision_kind,source_artifact_revision_id,
               artifact_contract,status,payload_identity_hash,html_sha256,pdf_sha256,pdf_storage_key
           `
         : await sql`
             UPDATE report_artifact_revisions SET status=${to},activated_at=NULL,
               pdf_sha256=NULL,pdf_storage_key=NULL
             WHERE id=${normalizedId} AND status=${from} AND artifact_contract='combined_geo_report_v4'
-            RETURNING id,report_id,order_id,job_id,revision,revision_kind,source_artifact_revision_id,
+            RETURNING id,report_id,order_id,job_id,config_snapshot_id,revision,revision_kind,source_artifact_revision_id,
               artifact_contract,status,payload_identity_hash,html_sha256,pdf_sha256,pdf_storage_key
           `;
       return parseOptionalPostgresRevision(rows, "V4 artifact status transition");
@@ -408,6 +412,7 @@ function postgresPendingRevision(input: ReportV4PendingRevisionInsert): ReportV4
     reportId: requiredText(input.reportId, "reportId"),
     orderId: requiredText(input.orderId, "orderId"),
     jobId: requiredText(input.jobId, "jobId"),
+    configSnapshotId: requiredText(input.configSnapshotId, "configSnapshotId"),
     revision: input.revision,
     revisionKind,
     sourceArtifactRevisionId,
@@ -443,6 +448,7 @@ function parsePostgresRevision(row: Record<string, unknown>, operation: string):
   const revisionKind = assertReportV4ArtifactRevisionKind(dbText(row.revision_kind, `${operation}.revision_kind`));
   const status = dbStatus(row.status, `${operation}.status`);
   const sourceArtifactRevisionId = dbNullableText(row.source_artifact_revision_id, `${operation}.source_artifact_revision_id`);
+  const configSnapshotId = dbText(row.config_snapshot_id, `${operation}.config_snapshot_id`);
   if ((revisionKind === "generation") !== (sourceArtifactRevisionId === null)) {
     throw new Error(`${operation} returned invalid V4 artifact lineage.`);
   }
@@ -459,6 +465,7 @@ function parsePostgresRevision(row: Record<string, unknown>, operation: string):
     reportId: dbText(row.report_id, `${operation}.report_id`),
     orderId: dbText(row.order_id, `${operation}.order_id`),
     jobId: dbText(row.job_id, `${operation}.job_id`),
+    configSnapshotId,
     revision: Number(row.revision),
     revisionKind,
     sourceArtifactRevisionId,
@@ -489,6 +496,7 @@ function coreIdentity(input: ActivateReportV4CoreRevisionInput): Omit<ReportV4Pe
     reportId: requiredText(input.reportId, "reportId"),
     orderId: requiredText(input.orderId, "orderId"),
     jobId: requiredText(input.jobId, "jobId"),
+    configSnapshotId: requiredText(input.configSnapshotId, "configSnapshotId"),
     revisionKind: "generation",
     sourceArtifactRevisionId: null,
     artifactContract: REPORT_V4_ARTIFACT_CONTRACT
@@ -501,6 +509,7 @@ function enhancementIdentity(input: ReportV4DiagnosisEnhancementIdentity): Omit<
     reportId: requiredText(input.reportId, "reportId"),
     orderId: requiredText(input.orderId, "orderId"),
     jobId: requiredText(input.jobId, "jobId"),
+    configSnapshotId: requiredText(input.configSnapshotId, "configSnapshotId"),
     revisionKind: "diagnosis_enhancement",
     sourceArtifactRevisionId: requiredText(input.sourceArtifactRevisionId, "sourceArtifactRevisionId"),
     artifactContract: REPORT_V4_ARTIFACT_CONTRACT
@@ -517,8 +526,11 @@ async function requireCoreSource(
     || source.reportId !== identity.reportId || source.orderId !== identity.orderId) {
     throw new Error("A V4 diagnosis enhancement must point to a same report and order core generation revision.");
   }
-  if (source.status !== "ready" && source.status !== "active") {
-    throw new Error("A V4 diagnosis enhancement requires a ready or active core generation revision.");
+  if (source.status !== "active") {
+    throw new Error("A V4 diagnosis enhancement requires the report's current active core generation revision.");
+  }
+  if (source.configSnapshotId !== identity.configSnapshotId) {
+    throw new Error("A V4 diagnosis enhancement must use the same immutable configuration snapshot as its core revision.");
   }
   return source;
 }
@@ -550,6 +562,7 @@ function assertRevisionIdentity(
   identity: Omit<ReportV4PendingRevisionInsert, "revision">
 ): void {
   if (revision.reportId !== identity.reportId || revision.orderId !== identity.orderId || revision.jobId !== identity.jobId
+    || revision.configSnapshotId !== identity.configSnapshotId
     || revision.revisionKind !== identity.revisionKind || revision.sourceArtifactRevisionId !== identity.sourceArtifactRevisionId
     || revision.artifactContract !== identity.artifactContract) {
     throw new Error("V4 artifact revision idempotency identity conflict.");

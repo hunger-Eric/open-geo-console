@@ -14,6 +14,8 @@ const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const describeDisposablePostgres = adminUrl ? describe : describe.skip;
 const databaseName = `ogc_v4_artifacts_${randomUUID().replaceAll("-", "")}`;
 const admin = adminUrl ? postgres(adminUrl, { max: 1, prepare: false }) : null;
+const configIdentityHash = "e".repeat(64);
+const configSnapshotId = `v4-config-${configIdentityHash}`;
 
 // @requirement GEO-V4-DELIVERY-01
 describeDisposablePostgres("V4 artifact revision PostgreSQL executor", () => {
@@ -37,6 +39,7 @@ describeDisposablePostgres("V4 artifact revision PostgreSQL executor", () => {
         reportId: "report-v4",
         orderId: "order-v4",
         jobId: "core-job",
+        configSnapshotId,
         payloadIdentityHash: "a".repeat(64),
         htmlSha256: "b".repeat(64)
       };
@@ -45,6 +48,7 @@ describeDisposablePostgres("V4 artifact revision PostgreSQL executor", () => {
         reportId: "report-v4",
         orderId: "order-v4",
         jobId: "enhancement-job",
+        configSnapshotId,
         sourceArtifactRevisionId: "core-revision"
       };
 
@@ -116,11 +120,16 @@ async function seedV4Report(sql: ReturnType<typeof postgres>): Promise<void> {
     VALUES('enhancement-job','report-v4','deep','recommendation_forensics_v1','two_stage_geo_report_v4',4,
       'combined_geo_report_v4','questions-v4','zh','v4_diagnosis_enhancement')`;
   await sql`INSERT INTO payment_orders
-    (id,checkout_idempotency_hmac,provider,report_id,site_key,customer_email_encrypted,customer_email_hmac,email_key_version,
+    (id,checkout_idempotency_hmac,provider,report_id,fulfillment_job_id,business_question_set_id,site_key,customer_email_encrypted,customer_email_hmac,email_key_version,
      product_code,fulfillment_methodology,recommendation_report_version,catalog_version,terms_version,refund_policy_version,
-     report_locale,currency,amount_minor)
-    VALUES('order-v4','checkout-v4','airwallex','report-v4','example.com','cipher','email','v1',
-      'recommendation_forensics_v1','two_stage_geo_report_v4',4,'v1','v1','v1','zh','USD',100)`;
+     report_locale,currency,amount_minor,payment_status)
+    VALUES('order-v4','checkout-v4','airwallex','report-v4','core-job','questions-v4','example.com','cipher','email','v1',
+      'recommendation_forensics_v1','two_stage_geo_report_v4',4,'v1','v1','v1','zh','USD',100,'paid')`;
+  await sql`INSERT INTO report_v4_config_snapshots
+    (id,report_id,order_id,core_job_id,identity_hash,model_profile_id,model_profile_hash,model_profile_payload,
+     report_profile_id,report_profile_hash,report_profile_payload)
+    VALUES(${configSnapshotId},'report-v4','order-v4','core-job',${configIdentityHash},'model-v4',${"b".repeat(64)},'{}'::jsonb,
+      'report-v4',${"c".repeat(64)},'{}'::jsonb)`;
 }
 
 function quote(value: string): string {

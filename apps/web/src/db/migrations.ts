@@ -2266,6 +2266,182 @@ export const V26_DATABASE_MIGRATIONS = [
   `CREATE TRIGGER report_v4_question_checkpoints_terminal_immutability_trigger BEFORE UPDATE OR DELETE ON report_v4_question_checkpoints FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_terminal_checkpoint_mutation()`
 ] as const;
 
+export const V27_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS report_v4_config_snapshots (
+     id text PRIMARY KEY,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     order_id text NOT NULL REFERENCES payment_orders(id) ON DELETE RESTRICT,
+     core_job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     identity_hash text NOT NULL,
+     model_profile_id text NOT NULL,
+     model_profile_hash text NOT NULL,
+     model_profile_payload jsonb NOT NULL,
+     report_profile_id text NOT NULL,
+     report_profile_hash text NOT NULL,
+     report_profile_payload jsonb NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT report_v4_config_snapshots_hash_check CHECK(
+       identity_hash ~ '^[a-f0-9]{64}$'
+       AND model_profile_hash ~ '^[a-f0-9]{64}$'
+       AND report_profile_hash ~ '^[a-f0-9]{64}$'
+     ),
+     CONSTRAINT report_v4_config_snapshots_identity_id_check CHECK(id = 'v4-config-' || identity_hash),
+     CONSTRAINT report_v4_config_snapshots_profile_id_check CHECK(
+       length(btrim(model_profile_id)) > 0 AND length(btrim(report_profile_id)) > 0
+     ),
+     CONSTRAINT report_v4_config_snapshots_payload_check CHECK(
+       jsonb_typeof(model_profile_payload)='object' AND jsonb_typeof(report_profile_payload)='object'
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_config_snapshots_report_uidx ON report_v4_config_snapshots(report_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_config_snapshots_order_uidx ON report_v4_config_snapshots(order_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_config_snapshots_core_job_uidx ON report_v4_config_snapshots(core_job_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_config_snapshots_binding_uidx ON report_v4_config_snapshots(id,report_id,order_id,core_job_id)`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_report_v4_config_snapshot_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE order_report_id text; order_fulfillment_job_id text; order_payment_status text; order_question_set_id text;
+     order_product_code text; order_methodology text; order_version integer;
+     job_report_id text; job_tier text; job_product_contract text; job_methodology text;
+     job_version integer; job_artifact_contract text; job_reason text; job_question_set_id text;
+   BEGIN
+     SELECT report_id,fulfillment_job_id,payment_status,business_question_set_id,product_code,fulfillment_methodology,recommendation_report_version
+       INTO order_report_id,order_fulfillment_job_id,order_payment_status,order_question_set_id,order_product_code,order_methodology,order_version
+       FROM payment_orders WHERE id=NEW.order_id;
+     SELECT report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,artifact_contract,reason,business_question_set_id
+       INTO job_report_id,job_tier,job_product_contract,job_methodology,job_version,job_artifact_contract,job_reason,job_question_set_id
+       FROM scan_jobs WHERE id=NEW.core_job_id;
+     IF order_report_id IS DISTINCT FROM NEW.report_id
+       OR order_fulfillment_job_id IS DISTINCT FROM NEW.core_job_id
+       OR order_payment_status IS DISTINCT FROM 'paid'
+       OR order_question_set_id IS NULL
+       OR order_question_set_id IS DISTINCT FROM job_question_set_id
+       OR order_product_code IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR order_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR order_version IS DISTINCT FROM 4
+       OR job_report_id IS DISTINCT FROM NEW.report_id
+       OR job_tier IS DISTINCT FROM 'deep'
+       OR job_product_contract IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR job_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR job_version IS DISTINCT FROM 4
+       OR job_artifact_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR job_reason IS DISTINCT FROM 'standard'
+       OR job_question_set_id IS NULL THEN
+       RAISE EXCEPTION 'A V4 configuration snapshot requires one exact paid order and standard core V4 job binding.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_config_snapshots_binding_trigger ON report_v4_config_snapshots`,
+  `CREATE TRIGGER report_v4_config_snapshots_binding_trigger BEFORE INSERT ON report_v4_config_snapshots FOR EACH ROW EXECUTE FUNCTION ogc_validate_report_v4_config_snapshot_binding()`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_config_snapshot_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     RAISE EXCEPTION 'A V4 runtime configuration snapshot is immutable.';
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_config_snapshots_immutability_trigger ON report_v4_config_snapshots`,
+  `CREATE TRIGGER report_v4_config_snapshots_immutability_trigger BEFORE UPDATE OR DELETE ON report_v4_config_snapshots FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_config_snapshot_mutation()`,
+  `ALTER TABLE report_artifact_revisions ADD COLUMN IF NOT EXISTS config_snapshot_id text`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_config_snapshot_fkey`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_config_snapshot_fkey FOREIGN KEY(config_snapshot_id) REFERENCES report_v4_config_snapshots(id) ON DELETE RESTRICT`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_v4_config_shape_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_v4_config_shape_check CHECK (
+     artifact_contract='combined_geo_report_v4' OR config_snapshot_id IS NULL
+   )`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_v4_artifact_config_snapshot() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_report_id text; snapshot_order_id text; snapshot_core_job_id text;
+     source_contract text; source_kind text; source_status text; source_report_id text;
+     source_order_id text; source_config_snapshot_id text;
+     core_job_question_set_id text; enhancement_job_report_id text; enhancement_job_tier text;
+     enhancement_job_product_contract text; enhancement_job_methodology text; enhancement_job_version integer;
+     enhancement_job_artifact_contract text; enhancement_job_reason text; enhancement_job_question_set_id text;
+     report_active_revision_id text;
+   BEGIN
+     IF TG_OP='UPDATE' AND OLD.config_snapshot_id IS NOT NULL AND (
+       NEW.config_snapshot_id IS DISTINCT FROM OLD.config_snapshot_id
+       OR NEW.report_id IS DISTINCT FROM OLD.report_id
+       OR NEW.order_id IS DISTINCT FROM OLD.order_id
+       OR NEW.job_id IS DISTINCT FROM OLD.job_id
+       OR NEW.revision_kind IS DISTINCT FROM OLD.revision_kind
+       OR NEW.source_artifact_revision_id IS DISTINCT FROM OLD.source_artifact_revision_id
+       OR NEW.artifact_contract IS DISTINCT FROM OLD.artifact_contract
+     ) THEN
+       RAISE EXCEPTION 'A bound V4 artifact configuration and lineage identity is immutable.';
+     END IF;
+     IF NEW.artifact_contract <> 'combined_geo_report_v4' THEN
+       IF NEW.config_snapshot_id IS NOT NULL THEN
+         RAISE EXCEPTION 'Historical artifact contracts cannot bind a V4 configuration snapshot.';
+       END IF;
+       RETURN NEW;
+     END IF;
+     IF NEW.config_snapshot_id IS NULL THEN
+       IF NEW.revision_kind='diagnosis_enhancement' THEN
+         SELECT artifact_contract,revision_kind,status,report_id,order_id
+           INTO source_contract,source_kind,source_status,source_report_id,source_order_id
+           FROM report_artifact_revisions WHERE id=NEW.source_artifact_revision_id;
+         IF source_contract IS DISTINCT FROM 'combined_geo_report_v4'
+           OR source_kind IS DISTINCT FROM 'generation'
+           OR source_status NOT IN ('ready','active')
+           OR source_report_id IS DISTINCT FROM NEW.report_id
+           OR source_order_id IS DISTINCT FROM NEW.order_id THEN
+           RAISE EXCEPTION 'A historical V4 diagnosis enhancement must preserve its ready core lineage.';
+         END IF;
+       END IF;
+       RETURN NEW;
+     END IF;
+     SELECT report_id,order_id,core_job_id
+       INTO snapshot_report_id,snapshot_order_id,snapshot_core_job_id
+       FROM report_v4_config_snapshots WHERE id=NEW.config_snapshot_id;
+     IF snapshot_report_id IS DISTINCT FROM NEW.report_id OR snapshot_order_id IS DISTINCT FROM NEW.order_id THEN
+       RAISE EXCEPTION 'A V4 artifact configuration snapshot must match the same report and order.';
+     END IF;
+     IF NEW.revision_kind='generation' THEN
+       IF snapshot_core_job_id IS DISTINCT FROM NEW.job_id THEN
+         RAISE EXCEPTION 'A V4 core revision must use the configuration snapshot locked by its core job.';
+       END IF;
+       RETURN NEW;
+     END IF;
+     SELECT business_question_set_id INTO core_job_question_set_id
+       FROM scan_jobs WHERE id=snapshot_core_job_id;
+     SELECT report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,
+       artifact_contract,reason,business_question_set_id
+       INTO enhancement_job_report_id,enhancement_job_tier,enhancement_job_product_contract,
+       enhancement_job_methodology,enhancement_job_version,enhancement_job_artifact_contract,
+       enhancement_job_reason,enhancement_job_question_set_id
+       FROM scan_jobs WHERE id=NEW.job_id;
+     IF enhancement_job_report_id IS DISTINCT FROM NEW.report_id
+       OR enhancement_job_tier IS DISTINCT FROM 'deep'
+       OR enhancement_job_product_contract IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR enhancement_job_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR enhancement_job_version IS DISTINCT FROM 4
+       OR enhancement_job_artifact_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR enhancement_job_reason IS DISTINCT FROM 'v4_diagnosis_enhancement'
+       OR enhancement_job_question_set_id IS NULL
+       OR enhancement_job_question_set_id IS DISTINCT FROM core_job_question_set_id THEN
+       RAISE EXCEPTION 'A V4 diagnosis enhancement requires the exact same-report V4 enhancement job and core question set.';
+     END IF;
+     SELECT artifact_contract,revision_kind,status,report_id,order_id,config_snapshot_id
+       INTO source_contract,source_kind,source_status,source_report_id,source_order_id,source_config_snapshot_id
+       FROM report_artifact_revisions WHERE id=NEW.source_artifact_revision_id;
+     IF source_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR source_kind IS DISTINCT FROM 'generation'
+       OR source_report_id IS DISTINCT FROM NEW.report_id
+       OR source_order_id IS DISTINCT FROM NEW.order_id
+       OR source_config_snapshot_id IS DISTINCT FROM NEW.config_snapshot_id THEN
+       RAISE EXCEPTION 'A V4 diagnosis enhancement must extend the active same-report/order core using the same configuration snapshot.';
+     END IF;
+     IF source_status IS DISTINCT FROM 'active' THEN
+       SELECT active_artifact_revision_id INTO report_active_revision_id
+         FROM scan_reports WHERE id=NEW.report_id;
+       IF NOT (TG_OP='UPDATE' AND OLD.status='ready' AND NEW.status='active'
+         AND source_status='ready'
+         AND report_active_revision_id IS NOT DISTINCT FROM NEW.source_artifact_revision_id) THEN
+         RAISE EXCEPTION 'A V4 diagnosis enhancement source must remain active except during its atomic ready-to-active handoff.';
+       END IF;
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_artifact_revisions_v4_diagnosis_source_trigger ON report_artifact_revisions`,
+  `DROP TRIGGER IF EXISTS report_artifact_revisions_v4_config_snapshot_trigger ON report_artifact_revisions`,
+  `CREATE TRIGGER report_artifact_revisions_v4_config_snapshot_trigger BEFORE INSERT OR UPDATE ON report_artifact_revisions FOR EACH ROW EXECUTE FUNCTION ogc_validate_v4_artifact_config_snapshot()`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -2284,7 +2460,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 23, migrations: V23_DATABASE_MIGRATIONS },
   { version: 24, migrations: V24_DATABASE_MIGRATIONS },
   { version: 25, migrations: V25_DATABASE_MIGRATIONS },
-  { version: 26, migrations: V26_DATABASE_MIGRATIONS }
+  { version: 26, migrations: V26_DATABASE_MIGRATIONS },
+  { version: 27, migrations: V27_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

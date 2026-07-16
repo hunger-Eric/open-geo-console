@@ -1,5 +1,5 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
-import type { AiWebsiteReportV1, CombinedGeoReportV1, RecommendationForensicReportV1, SourceClassificationAuthoritySnapshot } from "@open-geo-console/ai-report-engine";
+import type { AiWebsiteReportV1, CombinedGeoReportV1, ModelProfile, RecommendationForensicReportV1, ReportV4CustomerProseProfile, SourceClassificationAuthoritySnapshot } from "@open-geo-console/ai-report-engine";
 import type { BusinessQuestionCandidateSet, ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { AnswerExecutionStateLedger, CertificationAuthoritySnapshot } from "@open-geo-console/answer-engine-observer";
 import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
@@ -1278,6 +1278,35 @@ export const reportCorrections = pgTable(
 );
 export type ReportCorrectionRow = typeof reportCorrections.$inferSelect;
 
+export const reportV4ConfigSnapshots = pgTable(
+  "report_v4_config_snapshots",
+  {
+    id: text("id").primaryKey(),
+    reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "restrict" }),
+    orderId: text("order_id").notNull().references(() => paymentOrders.id, { onDelete: "restrict" }),
+    coreJobId: text("core_job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
+    identityHash: text("identity_hash").notNull(),
+    modelProfileId: text("model_profile_id").notNull(),
+    modelProfileHash: text("model_profile_hash").notNull(),
+    modelProfilePayload: jsonb("model_profile_payload").$type<ModelProfile>().notNull(),
+    reportProfileId: text("report_profile_id").notNull(),
+    reportProfileHash: text("report_profile_hash").notNull(),
+    reportProfilePayload: jsonb("report_profile_payload").$type<ReportV4CustomerProseProfile>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("report_v4_config_snapshots_report_uidx").on(table.reportId),
+    uniqueIndex("report_v4_config_snapshots_order_uidx").on(table.orderId),
+    uniqueIndex("report_v4_config_snapshots_core_job_uidx").on(table.coreJobId),
+    uniqueIndex("report_v4_config_snapshots_binding_uidx").on(table.id, table.reportId, table.orderId, table.coreJobId),
+    check("report_v4_config_snapshots_hash_check", sql`${table.identityHash} ~ '^[a-f0-9]{64}$' AND ${table.modelProfileHash} ~ '^[a-f0-9]{64}$' AND ${table.reportProfileHash} ~ '^[a-f0-9]{64}$'`),
+    check("report_v4_config_snapshots_identity_id_check", sql`${table.id} = 'v4-config-' || ${table.identityHash}`),
+    check("report_v4_config_snapshots_profile_id_check", sql`length(btrim(${table.modelProfileId})) > 0 AND length(btrim(${table.reportProfileId})) > 0`),
+    check("report_v4_config_snapshots_payload_check", sql`jsonb_typeof(${table.modelProfilePayload})='object' AND jsonb_typeof(${table.reportProfilePayload})='object'`)
+  ]
+);
+export type ReportV4ConfigSnapshotSchemaRow = typeof reportV4ConfigSnapshots.$inferSelect;
+
 export const reportArtifactRevisions = pgTable(
   "report_artifact_revisions",
   {
@@ -1285,6 +1314,7 @@ export const reportArtifactRevisions = pgTable(
     reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "restrict" }),
     orderId: text("order_id").notNull().references(() => paymentOrders.id, { onDelete: "restrict" }),
     jobId: text("job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
+    configSnapshotId: text("config_snapshot_id").references(() => reportV4ConfigSnapshots.id, { onDelete: "restrict" }),
     correctionId: text("correction_id").references(() => reportCorrections.id, { onDelete: "restrict" }),
     replacementFulfillmentId: text("replacement_fulfillment_id"),
     sourceArtifactRevisionId: text("source_artifact_revision_id"),
@@ -1314,6 +1344,7 @@ export const reportArtifactRevisions = pgTable(
     check("report_artifact_revisions_kind_check", sql`${table.revisionKind} IN ('generation','correction','presentation_refresh','evidence_refresh','replacement','diagnosis_enhancement')`),
     check("report_artifact_revisions_lineage_check", sql`(${table.revisionKind} IN ('presentation_refresh','evidence_refresh','diagnosis_enhancement') AND ${table.sourceArtifactRevisionId} IS NOT NULL AND ${table.correctionId} IS NULL AND ${table.replacementFulfillmentId} IS NULL) OR (${table.revisionKind} = 'replacement' AND ${table.sourceArtifactRevisionId} IS NULL AND ${table.correctionId} IS NULL AND ${table.replacementFulfillmentId} IS NOT NULL) OR (${table.revisionKind} IN ('generation','correction') AND ${table.sourceArtifactRevisionId} IS NULL AND ${table.replacementFulfillmentId} IS NULL)`),
     check("report_artifact_revisions_v4_kind_check", sql`(${table.artifactContract}='combined_geo_report_v4' AND ${table.revisionKind} IN ('generation','diagnosis_enhancement')) OR (${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND ${table.revisionKind}<>'diagnosis_enhancement')`),
+    check("report_artifact_revisions_v4_config_shape_check", sql`${table.artifactContract}='combined_geo_report_v4' OR ${table.configSnapshotId} IS NULL`),
     check("report_artifact_revisions_ready_check", sql`${table.status} NOT IN ('ready','active') OR (${table.readyAt} IS NOT NULL AND ${table.htmlSha256} IS NOT NULL AND ((${table.artifactContract}='combined_geo_report_v4' AND ${table.pdfSha256} IS NULL AND ${table.pdfStorageKey} IS NULL) OR (${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND ${table.pdfSha256} IS NOT NULL AND ${table.pdfStorageKey} IS NOT NULL)))`)
   ]
 );
