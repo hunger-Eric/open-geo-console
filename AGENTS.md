@@ -13,6 +13,7 @@
 - In the default `FULFILLMENT_MODE=batch_24h`, the lane commands drain PostgreSQL and exit. Use `worker:realtime:free|deep` only on persistent infrastructure.
 - `npm run commerce:all` reconciles commercial outcomes, enforces the 24-hour SLA, submits refunds, and sends queued email.
 - `powershell -File scripts/start-workstation-workers.ps1` builds and starts the Docker Desktop staging free/deep, production free/deep, and production commerce services. Each deep lane remains gated on its environment's private evidence storage.
+- Any test or acceptance workflow that builds a new Docker image must remove the superseded test image after the replacement test containers are running and verified. Never force-remove an image still referenced by any container, and never delete staging or production images as a side effect of test cleanup; recreate the intended test containers first, verify their exact image ID, then remove only the old unreferenced test image.
 - `npm run worker` is a low-level entry point and requires `OGC_WORKER_TIER=free|deep`.
 - `npm run browser:install` installs Chromium for JavaScript-rendered page fallback.
 - `npm run db:audit` fails when a terminal commercial job still has a reserved credit.
