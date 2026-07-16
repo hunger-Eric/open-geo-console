@@ -4,7 +4,7 @@ import { V25_DATABASE_MIGRATIONS } from "./migrations";
 
 describe("schema v25 public-source acquisition ledger", () => {
   it("adds immutable attempts and monotonic question checkpoints", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(29);
+    expect(DATABASE_SCHEMA_VERSION).toBe(30);
     const sql = V25_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS public_source_retrieval_attempts");
     expect(sql).toContain("public_source_retrieval_attempts_immutability_trigger");

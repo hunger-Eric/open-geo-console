@@ -2539,6 +2539,356 @@ export const V29_DATABASE_MIGRATIONS = [
    ON scan_jobs(report_id) WHERE reason='v4_pre_admission'`
 ] as const;
 
+export const V30_DATABASE_MIGRATIONS = [
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_site_snapshot_pages_content_binding_uidx
+   ON report_v4_site_snapshot_pages(id,snapshot_id,content_hash)`,
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_page_summary_chunks_valid(candidate jsonb,retained_source_length integer)
+   RETURNS boolean LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+   DECLARE chunk jsonb; location jsonb; expected_order integer := 1;
+     location_id text; seen_location_ids text[] := ARRAY[]::text[];
+     start_offset integer; end_offset integer;
+   BEGIN
+     IF retained_source_length <= 0 OR jsonb_typeof(candidate) <> 'array'
+       OR jsonb_array_length(candidate) NOT BETWEEN 1 AND 8 THEN
+       RETURN false;
+     END IF;
+     FOR chunk IN SELECT value FROM jsonb_array_elements(candidate) LOOP
+       IF jsonb_typeof(chunk) <> 'object'
+         OR chunk - 'order' - 'summary' - 'sourceLocations' <> '{}'::jsonb
+         OR jsonb_typeof(chunk->'order') <> 'number'
+         OR (chunk->>'order') !~ '^[1-9][0-9]*$'
+         OR (chunk->>'order')::integer <> expected_order
+         OR jsonb_typeof(chunk->'summary') <> 'string'
+         OR length(btrim(chunk->>'summary')) NOT BETWEEN 1 AND 2000
+         OR jsonb_typeof(chunk->'sourceLocations') <> 'array'
+         OR jsonb_array_length(chunk->'sourceLocations') NOT BETWEEN 1 AND 16 THEN
+         RETURN false;
+       END IF;
+       FOR location IN SELECT value FROM jsonb_array_elements(chunk->'sourceLocations') LOOP
+         IF jsonb_typeof(location) <> 'object'
+           OR location - 'locationId' - 'startOffset' - 'endOffset' <> '{}'::jsonb
+           OR jsonb_typeof(location->'locationId') <> 'string'
+           OR length(btrim(location->>'locationId')) NOT BETWEEN 1 AND 500
+           OR jsonb_typeof(location->'startOffset') <> 'number'
+           OR jsonb_typeof(location->'endOffset') <> 'number'
+           OR (location->>'startOffset') !~ '^(0|[1-9][0-9]*)$'
+           OR (location->>'endOffset') !~ '^[1-9][0-9]*$' THEN
+           RETURN false;
+         END IF;
+         location_id := location->>'locationId';
+         start_offset := (location->>'startOffset')::integer;
+         end_offset := (location->>'endOffset')::integer;
+         IF location_id = ANY(seen_location_ids) OR end_offset <= start_offset OR end_offset > retained_source_length THEN
+           RETURN false;
+         END IF;
+         seen_location_ids := array_append(seen_location_ids,location_id);
+       END LOOP;
+       expected_order := expected_order + 1;
+     END LOOP;
+     RETURN true;
+   EXCEPTION WHEN numeric_value_out_of_range OR invalid_text_representation THEN
+     RETURN false;
+   END $$`,
+  `CREATE TABLE IF NOT EXISTS report_v4_page_summaries (
+     identity_hash text PRIMARY KEY,
+     report_id text NOT NULL,
+     snapshot_id text NOT NULL,
+     page_id text NOT NULL,
+     content_hash text NOT NULL,
+     source_length integer NOT NULL,
+     chunks jsonb NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT report_v4_page_summaries_snapshot_report_fkey
+       FOREIGN KEY(snapshot_id,report_id) REFERENCES report_v4_site_snapshots(id,report_id) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_page_summaries_page_content_fkey
+       FOREIGN KEY(page_id,snapshot_id,content_hash)
+       REFERENCES report_v4_site_snapshot_pages(id,snapshot_id,content_hash) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_page_summaries_hash_check CHECK(
+       identity_hash ~ '^[a-f0-9]{64}$' AND content_hash ~ '^[a-f0-9]{64}$'
+     ),
+     CONSTRAINT report_v4_page_summaries_source_length_check CHECK(source_length > 0),
+     CONSTRAINT report_v4_page_summaries_chunks_check CHECK(
+       ogc_report_v4_page_summary_chunks_valid(chunks,source_length)
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_page_summaries_page_uidx ON report_v4_page_summaries(page_id)`,
+  `CREATE INDEX IF NOT EXISTS report_v4_page_summaries_snapshot_idx ON report_v4_page_summaries(snapshot_id,page_id)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_page_summary_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_status text;
+   BEGIN
+     IF TG_OP <> 'INSERT' THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary is immutable.';
+     END IF;
+     SELECT status INTO snapshot_status FROM report_v4_site_snapshots WHERE id=NEW.snapshot_id;
+     IF snapshot_status IS DISTINCT FROM 'collecting' THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary may be persisted only while its snapshot is collecting.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_page_summaries_immutability_trigger ON report_v4_page_summaries`,
+  `CREATE TRIGGER report_v4_page_summaries_immutability_trigger
+   BEFORE INSERT OR UPDATE OR DELETE ON report_v4_page_summaries
+   FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_page_summary_mutation()`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_artifact_revisions_v4_diagnosis_source_uidx
+   ON report_artifact_revisions(source_artifact_revision_id)
+   WHERE artifact_contract='combined_geo_report_v4' AND revision_kind='diagnosis_enhancement'`,
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_source_audit_payload_valid(candidate jsonb,expected_question_id text)
+   RETURNS boolean LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+   DECLARE audit jsonb; source_id text; canonical_url text;
+     seen_source_ids text[] := ARRAY[]::text[]; seen_urls text[] := ARRAY[]::text[];
+   BEGIN
+     IF jsonb_typeof(candidate) <> 'array' OR jsonb_array_length(candidate) > 5 THEN
+       RETURN false;
+     END IF;
+     FOR audit IN SELECT value FROM jsonb_array_elements(candidate) LOOP
+       IF jsonb_typeof(audit) <> 'object'
+         OR audit - 'questionId' - 'sourceId' - 'canonicalUrl' - 'status' - 'summary' <> '{}'::jsonb
+         OR NOT (audit ?& ARRAY['questionId','sourceId','canonicalUrl','status'])
+         OR jsonb_typeof(audit->'questionId') <> 'string'
+         OR audit->>'questionId' <> expected_question_id
+         OR jsonb_typeof(audit->'sourceId') <> 'string'
+         OR length(btrim(audit->>'sourceId')) NOT BETWEEN 1 AND 500
+         OR jsonb_typeof(audit->'canonicalUrl') <> 'string'
+         OR length(audit->>'canonicalUrl') NOT BETWEEN 1 AND 5000
+         OR audit->>'canonicalUrl' !~ '^https?://[^[:space:]]+$'
+         OR jsonb_typeof(audit->'status') <> 'string'
+         OR audit->>'status' NOT IN ('available','inaccessible')
+         OR (audit ? 'summary' AND (
+           jsonb_typeof(audit->'summary') <> 'string'
+           OR length(btrim(audit->>'summary')) NOT BETWEEN 1 AND 5000
+           OR audit->>'status' <> 'available'
+         )) THEN
+         RETURN false;
+       END IF;
+       source_id := audit->>'sourceId';
+       canonical_url := audit->>'canonicalUrl';
+       IF source_id = ANY(seen_source_ids) OR canonical_url = ANY(seen_urls) THEN
+         RETURN false;
+       END IF;
+       seen_source_ids := array_append(seen_source_ids,source_id);
+       seen_urls := array_append(seen_urls,canonical_url);
+     END LOOP;
+     RETURN true;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_diagnosis_payload_valid(candidate jsonb)
+   RETURNS boolean LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+   DECLARE factor jsonb; action jsonb; ref jsonb; expected_priority integer := 1;
+     detailed_refs text[] := ARRAY[]::text[]; item_refs text[]; ref_value text;
+   BEGIN
+     IF jsonb_typeof(candidate) <> 'object'
+       OR candidate - 'selectionSummary' - 'observableFactors' - 'targetGap'
+         - 'recommendedActions' - 'detailedEvidenceRefs' <> '{}'::jsonb
+       OR NOT (candidate ?& ARRAY['selectionSummary','observableFactors','targetGap','recommendedActions','detailedEvidenceRefs'])
+       OR jsonb_typeof(candidate->'selectionSummary') <> 'string'
+       OR length(btrim(candidate->>'selectionSummary')) NOT BETWEEN 1 AND 5000
+       OR jsonb_typeof(candidate->'targetGap') <> 'string'
+       OR length(btrim(candidate->>'targetGap')) NOT BETWEEN 1 AND 5000
+       OR jsonb_typeof(candidate->'observableFactors') <> 'array'
+       OR jsonb_array_length(candidate->'observableFactors') <> 3
+       OR jsonb_typeof(candidate->'recommendedActions') <> 'array'
+       OR jsonb_array_length(candidate->'recommendedActions') <> 3
+       OR jsonb_typeof(candidate->'detailedEvidenceRefs') <> 'array'
+       OR jsonb_array_length(candidate->'detailedEvidenceRefs') NOT BETWEEN 1 AND 100 THEN
+       RETURN false;
+     END IF;
+     FOR ref IN SELECT value FROM jsonb_array_elements(candidate->'detailedEvidenceRefs') LOOP
+       IF jsonb_typeof(ref) <> 'string' OR length(btrim(ref #>> '{}')) NOT BETWEEN 1 AND 500 THEN
+         RETURN false;
+       END IF;
+       ref_value := ref #>> '{}';
+       IF ref_value = ANY(detailed_refs) THEN RETURN false; END IF;
+       detailed_refs := array_append(detailed_refs,ref_value);
+     END LOOP;
+     FOR factor IN SELECT value FROM jsonb_array_elements(candidate->'observableFactors') LOOP
+       IF jsonb_typeof(factor) <> 'object'
+         OR factor - 'kind' - 'observation' - 'evidenceRefs' <> '{}'::jsonb
+         OR NOT (factor ?& ARRAY['kind','observation','evidenceRefs'])
+         OR jsonb_typeof(factor->'kind') <> 'string'
+         OR factor->>'kind' NOT IN (
+           'problem_match','factual_specificity','entity_clarity','source_role',
+           'accessibility','freshness','target_clarity'
+         )
+         OR jsonb_typeof(factor->'observation') <> 'string'
+         OR length(btrim(factor->>'observation')) NOT BETWEEN 1 AND 5000
+         OR jsonb_typeof(factor->'evidenceRefs') <> 'array'
+         OR jsonb_array_length(factor->'evidenceRefs') NOT BETWEEN 1 AND 100 THEN
+         RETURN false;
+       END IF;
+       item_refs := ARRAY[]::text[];
+       FOR ref IN SELECT value FROM jsonb_array_elements(factor->'evidenceRefs') LOOP
+         IF jsonb_typeof(ref) <> 'string' OR length(btrim(ref #>> '{}')) NOT BETWEEN 1 AND 500 THEN RETURN false; END IF;
+         ref_value := ref #>> '{}';
+         IF NOT (ref_value = ANY(detailed_refs)) OR ref_value = ANY(item_refs) THEN RETURN false; END IF;
+         item_refs := array_append(item_refs,ref_value);
+       END LOOP;
+     END LOOP;
+     FOR action IN SELECT value FROM jsonb_array_elements(candidate->'recommendedActions') LOOP
+       IF jsonb_typeof(action) <> 'object'
+         OR action - 'priority' - 'action' - 'evidenceRefs' <> '{}'::jsonb
+         OR NOT (action ?& ARRAY['priority','action','evidenceRefs'])
+         OR jsonb_typeof(action->'priority') <> 'number'
+         OR (action->>'priority') !~ '^[1-3]$'
+         OR (action->>'priority')::integer <> expected_priority
+         OR jsonb_typeof(action->'action') <> 'string'
+         OR length(btrim(action->>'action')) NOT BETWEEN 1 AND 5000
+         OR jsonb_typeof(action->'evidenceRefs') <> 'array'
+         OR jsonb_array_length(action->'evidenceRefs') NOT BETWEEN 1 AND 100 THEN
+         RETURN false;
+       END IF;
+       item_refs := ARRAY[]::text[];
+       FOR ref IN SELECT value FROM jsonb_array_elements(action->'evidenceRefs') LOOP
+         IF jsonb_typeof(ref) <> 'string' OR length(btrim(ref #>> '{}')) NOT BETWEEN 1 AND 500 THEN RETURN false; END IF;
+         ref_value := ref #>> '{}';
+         IF NOT (ref_value = ANY(detailed_refs)) OR ref_value = ANY(item_refs) THEN RETURN false; END IF;
+         item_refs := array_append(item_refs,ref_value);
+       END LOOP;
+       expected_priority := expected_priority + 1;
+     END LOOP;
+     RETURN true;
+   EXCEPTION WHEN numeric_value_out_of_range OR invalid_text_representation THEN
+     RETURN false;
+   END $$`,
+  `CREATE TABLE IF NOT EXISTS report_v4_diagnosis_checkpoints (
+     identity_hash text PRIMARY KEY,
+     report_id text NOT NULL,
+     enhancement_job_id text NOT NULL,
+     core_artifact_revision_id text NOT NULL REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT,
+     config_snapshot_id text REFERENCES report_v4_config_snapshots(id) ON DELETE RESTRICT NOT NULL,
+     question_set_id text NOT NULL,
+     question_id text NOT NULL,
+     snapshot_id text NOT NULL,
+     ordinal integer NOT NULL,
+     state text NOT NULL,
+     input_identity_hash text NOT NULL,
+     provider_call_count integer NOT NULL DEFAULT 0,
+     source_audit_payload jsonb NOT NULL DEFAULT '[]'::jsonb,
+     diagnosis_payload jsonb,
+     diagnosis_content_hash text,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     updated_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT report_v4_diagnosis_checkpoints_job_report_fkey
+       FOREIGN KEY(enhancement_job_id,report_id) REFERENCES scan_jobs(id,report_id) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_diagnosis_checkpoints_question_fkey
+       FOREIGN KEY(question_id,question_set_id,ordinal)
+       REFERENCES report_business_questions(id,question_set_id,ordinal) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_diagnosis_checkpoints_question_set_fkey
+       FOREIGN KEY(question_set_id,report_id) REFERENCES report_business_question_sets(id,report_id) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_diagnosis_checkpoints_snapshot_fkey
+       FOREIGN KEY(snapshot_id,report_id) REFERENCES report_v4_site_snapshots(id,report_id) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_diagnosis_checkpoints_ordinal_check CHECK(ordinal BETWEEN 1 AND 3),
+     CONSTRAINT report_v4_diagnosis_checkpoints_state_check CHECK(state IN ('queued','running','completed','failed')),
+     CONSTRAINT report_v4_diagnosis_checkpoints_hash_check CHECK(
+       identity_hash ~ '^[a-f0-9]{64}$' AND input_identity_hash ~ '^[a-f0-9]{64}$'
+       AND (diagnosis_content_hash IS NULL OR diagnosis_content_hash ~ '^[a-f0-9]{64}$')
+     ),
+     CONSTRAINT report_v4_diagnosis_checkpoints_call_count_check CHECK(provider_call_count BETWEEN 0 AND 2),
+     CONSTRAINT report_v4_diagnosis_checkpoints_source_audit_check CHECK(
+       ogc_report_v4_source_audit_payload_valid(source_audit_payload,question_id)
+     ),
+     CONSTRAINT report_v4_diagnosis_checkpoints_payload_check CHECK(
+       (diagnosis_payload IS NULL OR ogc_report_v4_diagnosis_payload_valid(diagnosis_payload))
+       AND (
+         (state='queued' AND provider_call_count=0 AND jsonb_array_length(source_audit_payload)=0
+           AND diagnosis_payload IS NULL AND diagnosis_content_hash IS NULL)
+         OR (state='running' AND diagnosis_payload IS NULL AND diagnosis_content_hash IS NULL)
+         OR (state='completed' AND provider_call_count BETWEEN 1 AND 2
+           AND diagnosis_payload IS NOT NULL AND diagnosis_content_hash IS NOT NULL)
+         OR (state='failed' AND diagnosis_payload IS NULL AND diagnosis_content_hash IS NULL)
+       )
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_diagnosis_checkpoints_job_ordinal_uidx
+   ON report_v4_diagnosis_checkpoints(enhancement_job_id,ordinal)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_diagnosis_checkpoints_job_question_uidx
+   ON report_v4_diagnosis_checkpoints(enhancement_job_id,question_id)`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_report_v4_diagnosis_checkpoint_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE enhancement_report_id text; enhancement_tier text; enhancement_product text;
+     enhancement_methodology text; enhancement_version integer; enhancement_contract text;
+     enhancement_reason text; enhancement_question_set_id text; enhancement_credit_id text;
+     core_report_id text; source_core_job_id text; core_config_id text; core_kind text; core_contract text;
+     core_status text; core_source_id text; config_report_id text; config_core_job_id text;
+     core_question_set_id text; core_snapshot_id text; report_active_revision_id text;
+   BEGIN
+     SELECT report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,
+       artifact_contract,reason,business_question_set_id,credit_reservation_id
+       INTO enhancement_report_id,enhancement_tier,enhancement_product,enhancement_methodology,
+       enhancement_version,enhancement_contract,enhancement_reason,enhancement_question_set_id,enhancement_credit_id
+       FROM scan_jobs WHERE id=NEW.enhancement_job_id;
+     SELECT report_id,job_id,config_snapshot_id,revision_kind,artifact_contract,status,source_artifact_revision_id
+       INTO core_report_id,source_core_job_id,core_config_id,core_kind,core_contract,core_status,core_source_id
+       FROM report_artifact_revisions WHERE id=NEW.core_artifact_revision_id;
+     SELECT report_id,core_job_id INTO config_report_id,config_core_job_id
+       FROM report_v4_config_snapshots WHERE id=NEW.config_snapshot_id;
+     SELECT business_question_set_id,site_snapshot_id INTO core_question_set_id,core_snapshot_id
+       FROM scan_jobs WHERE id=source_core_job_id;
+     SELECT active_artifact_revision_id INTO report_active_revision_id
+       FROM scan_reports WHERE id=NEW.report_id;
+     IF enhancement_report_id IS DISTINCT FROM NEW.report_id
+       OR enhancement_tier IS DISTINCT FROM 'deep'
+       OR enhancement_product IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR enhancement_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR enhancement_version IS DISTINCT FROM 4
+       OR enhancement_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR enhancement_reason IS DISTINCT FROM 'v4_diagnosis_enhancement'
+       OR enhancement_credit_id IS NOT NULL
+       OR enhancement_question_set_id IS DISTINCT FROM NEW.question_set_id
+       OR core_report_id IS DISTINCT FROM NEW.report_id
+       OR core_config_id IS DISTINCT FROM NEW.config_snapshot_id
+       OR core_kind IS DISTINCT FROM 'generation'
+       OR core_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR core_status IS DISTINCT FROM 'active'
+       OR core_source_id IS NOT NULL
+       OR config_report_id IS DISTINCT FROM NEW.report_id
+       OR config_core_job_id IS DISTINCT FROM source_core_job_id
+       OR core_question_set_id IS DISTINCT FROM NEW.question_set_id
+       OR core_snapshot_id IS DISTINCT FROM NEW.snapshot_id
+       OR report_active_revision_id IS DISTINCT FROM NEW.core_artifact_revision_id THEN
+       RAISE EXCEPTION 'A V4 diagnosis checkpoint requires its exact active core, configuration, snapshot, questions and enhancement job.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_diagnosis_checkpoints_binding_trigger ON report_v4_diagnosis_checkpoints`,
+  `CREATE TRIGGER report_v4_diagnosis_checkpoints_binding_trigger
+   BEFORE INSERT ON report_v4_diagnosis_checkpoints
+   FOR EACH ROW EXECUTE FUNCTION ogc_validate_report_v4_diagnosis_checkpoint_binding()`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_diagnosis_checkpoint_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP='DELETE' THEN
+       RAISE EXCEPTION 'A V4 diagnosis checkpoint is immutable and cannot be deleted.';
+     END IF;
+     IF NEW.identity_hash IS DISTINCT FROM OLD.identity_hash
+       OR NEW.report_id IS DISTINCT FROM OLD.report_id
+       OR NEW.enhancement_job_id IS DISTINCT FROM OLD.enhancement_job_id
+       OR NEW.core_artifact_revision_id IS DISTINCT FROM OLD.core_artifact_revision_id
+       OR NEW.config_snapshot_id IS DISTINCT FROM OLD.config_snapshot_id
+       OR NEW.question_set_id IS DISTINCT FROM OLD.question_set_id
+       OR NEW.question_id IS DISTINCT FROM OLD.question_id
+       OR NEW.snapshot_id IS DISTINCT FROM OLD.snapshot_id
+       OR NEW.ordinal IS DISTINCT FROM OLD.ordinal
+       OR NEW.input_identity_hash IS DISTINCT FROM OLD.input_identity_hash THEN
+       RAISE EXCEPTION 'A V4 diagnosis checkpoint identity is immutable.';
+     END IF;
+     IF OLD.state IN ('completed','failed') THEN
+       RAISE EXCEPTION 'A terminal V4 diagnosis checkpoint is immutable.';
+     END IF;
+     IF NEW.provider_call_count < OLD.provider_call_count
+       OR NEW.provider_call_count > OLD.provider_call_count + 1 THEN
+       RAISE EXCEPTION 'A V4 diagnosis provider call count may advance by at most one.';
+     END IF;
+     IF NEW.state <> OLD.state AND NOT (
+       (OLD.state='queued' AND NEW.state IN ('running','failed'))
+       OR (OLD.state='running' AND NEW.state IN ('completed','failed'))
+     ) THEN
+       RAISE EXCEPTION 'The V4 diagnosis checkpoint state transition is invalid.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_diagnosis_checkpoints_terminal_immutability_trigger ON report_v4_diagnosis_checkpoints`,
+  `CREATE TRIGGER report_v4_diagnosis_checkpoints_terminal_immutability_trigger
+   BEFORE UPDATE OR DELETE ON report_v4_diagnosis_checkpoints
+   FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_diagnosis_checkpoint_mutation()`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -2560,7 +2910,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 26, migrations: V26_DATABASE_MIGRATIONS },
   { version: 27, migrations: V27_DATABASE_MIGRATIONS },
   { version: 28, migrations: V28_DATABASE_MIGRATIONS },
-  { version: 29, migrations: V29_DATABASE_MIGRATIONS }
+  { version: 29, migrations: V29_DATABASE_MIGRATIONS },
+  { version: 30, migrations: V30_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

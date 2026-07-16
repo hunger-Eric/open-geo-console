@@ -1,5 +1,5 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
-import type { AiWebsiteReportV1, CombinedGeoReportV1, ModelProfile, RecommendationForensicReportV1, ReportV4CustomerProseProfile, SourceClassificationAuthoritySnapshot } from "@open-geo-console/ai-report-engine";
+import type { AiWebsiteReportV1, CombinedGeoReportV1, ModelProfile, RecommendationForensicReportV1, ReportV4CustomerProseProfile, ReportV4PageSummaryChunk, SourceClassificationAuthoritySnapshot } from "@open-geo-console/ai-report-engine";
 import type { BusinessQuestionCandidateSet, ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { AnswerExecutionStateLedger, CertificationAuthoritySnapshot } from "@open-geo-console/answer-engine-observer";
 import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
@@ -218,6 +218,7 @@ export const reportV4SiteSnapshotPages = pgTable(
   (table) => [
     uniqueIndex("report_v4_site_snapshot_pages_ordinal_uidx").on(table.snapshotId, table.ordinal),
     uniqueIndex("report_v4_site_snapshot_pages_url_uidx").on(table.snapshotId, table.normalizedUrl),
+    uniqueIndex("report_v4_site_snapshot_pages_content_binding_uidx").on(table.id, table.snapshotId, table.contentHash),
     check("report_v4_site_snapshot_pages_ordinal_check", sql`${table.ordinal} > 0`),
     check("report_v4_site_snapshot_pages_url_check", sql`${table.normalizedUrl} ~ '^https?://'`),
     check("report_v4_site_snapshot_pages_read_mode_check", sql`${table.readMode} IS NULL OR ${table.readMode} IN ('direct_readable','js_dependent')`),
@@ -229,6 +230,38 @@ export const reportV4SiteSnapshotPages = pgTable(
   ]
 );
 export type ReportV4SiteSnapshotPageRow = typeof reportV4SiteSnapshotPages.$inferSelect;
+
+export const reportV4PageSummaries = pgTable(
+  "report_v4_page_summaries",
+  {
+    identityHash: text("identity_hash").primaryKey(),
+    reportId: text("report_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    pageId: text("page_id").notNull(),
+    contentHash: text("content_hash").notNull(),
+    sourceLength: integer("source_length").notNull(),
+    chunks: jsonb("chunks").$type<ReportV4PageSummaryChunk[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("report_v4_page_summaries_page_uidx").on(table.pageId),
+    index("report_v4_page_summaries_snapshot_idx").on(table.snapshotId, table.pageId),
+    foreignKey({
+      columns: [table.snapshotId, table.reportId],
+      foreignColumns: [reportV4SiteSnapshots.id, reportV4SiteSnapshots.reportId],
+      name: "report_v4_page_summaries_snapshot_report_fkey"
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.pageId, table.snapshotId, table.contentHash],
+      foreignColumns: [reportV4SiteSnapshotPages.id, reportV4SiteSnapshotPages.snapshotId, reportV4SiteSnapshotPages.contentHash],
+      name: "report_v4_page_summaries_page_content_fkey"
+    }).onDelete("restrict"),
+    check("report_v4_page_summaries_hash_check", sql`${table.identityHash} ~ '^[a-f0-9]{64}$' AND ${table.contentHash} ~ '^[a-f0-9]{64}$'`),
+    check("report_v4_page_summaries_source_length_check", sql`${table.sourceLength} > 0`),
+    check("report_v4_page_summaries_chunks_check", sql`ogc_report_v4_page_summary_chunks_valid(${table.chunks},${table.sourceLength})`)
+  ]
+);
+export type ReportV4PageSummaryRow = typeof reportV4PageSummaries.$inferSelect;
 
 export const reportBotEvidence = pgTable("report_bot_evidence", {
   reportId: text("report_id")
@@ -1349,6 +1382,8 @@ export const reportArtifactRevisions = pgTable(
     uniqueIndex("report_artifact_revisions_correction_uidx").on(table.correctionId).where(sql`${table.correctionId} IS NOT NULL`),
     uniqueIndex("report_artifact_revisions_replacement_uidx").on(table.replacementFulfillmentId).where(sql`${table.replacementFulfillmentId} IS NOT NULL`),
     uniqueIndex("report_artifact_revisions_one_active_uidx").on(table.reportId).where(sql`${table.status} = 'active'`),
+    uniqueIndex("report_artifact_revisions_v4_diagnosis_source_uidx").on(table.sourceArtifactRevisionId)
+      .where(sql`${table.artifactContract}='combined_geo_report_v4' AND ${table.revisionKind}='diagnosis_enhancement'`),
     foreignKey({ columns: [table.sourceArtifactRevisionId], foreignColumns: [table.id], name: "report_artifact_revisions_source_fkey" }).onDelete("restrict"),
     check("report_artifact_revisions_revision_check", sql`${table.revision} > 0`),
     check("report_artifact_revisions_contract_check", sql`${table.artifactContract} IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3','combined_geo_report_v4')`),
@@ -1361,6 +1396,62 @@ export const reportArtifactRevisions = pgTable(
   ]
 );
 export type ReportArtifactRevisionRow = typeof reportArtifactRevisions.$inferSelect;
+
+export type ReportV4DiagnosisCheckpointState = "queued" | "running" | "completed" | "failed";
+
+export const reportV4DiagnosisCheckpoints = pgTable(
+  "report_v4_diagnosis_checkpoints",
+  {
+    identityHash: text("identity_hash").primaryKey(),
+    reportId: text("report_id").notNull(),
+    enhancementJobId: text("enhancement_job_id").notNull(),
+    coreArtifactRevisionId: text("core_artifact_revision_id").notNull().references(() => reportArtifactRevisions.id, { onDelete: "restrict" }),
+    configSnapshotId: text("config_snapshot_id").notNull().references(() => reportV4ConfigSnapshots.id, { onDelete: "restrict" }),
+    questionSetId: text("question_set_id").notNull(),
+    questionId: text("question_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    state: text("state").$type<ReportV4DiagnosisCheckpointState>().notNull(),
+    inputIdentityHash: text("input_identity_hash").notNull(),
+    providerCallCount: integer("provider_call_count").notNull().default(0),
+    sourceAuditPayload: jsonb("source_audit_payload").$type<unknown[]>().notNull().default([]),
+    diagnosisPayload: jsonb("diagnosis_payload").$type<Record<string, unknown>>(),
+    diagnosisContentHash: text("diagnosis_content_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("report_v4_diagnosis_checkpoints_job_ordinal_uidx").on(table.enhancementJobId, table.ordinal),
+    uniqueIndex("report_v4_diagnosis_checkpoints_job_question_uidx").on(table.enhancementJobId, table.questionId),
+    foreignKey({
+      columns: [table.enhancementJobId, table.reportId],
+      foreignColumns: [scanJobs.id, scanJobs.reportId],
+      name: "report_v4_diagnosis_checkpoints_job_report_fkey"
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.questionId, table.questionSetId, table.ordinal],
+      foreignColumns: [reportBusinessQuestions.id, reportBusinessQuestions.questionSetId, reportBusinessQuestions.ordinal],
+      name: "report_v4_diagnosis_checkpoints_question_fkey"
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.questionSetId, table.reportId],
+      foreignColumns: [reportBusinessQuestionSets.id, reportBusinessQuestionSets.reportId],
+      name: "report_v4_diagnosis_checkpoints_question_set_fkey"
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.snapshotId, table.reportId],
+      foreignColumns: [reportV4SiteSnapshots.id, reportV4SiteSnapshots.reportId],
+      name: "report_v4_diagnosis_checkpoints_snapshot_fkey"
+    }).onDelete("restrict"),
+    check("report_v4_diagnosis_checkpoints_ordinal_check", sql`${table.ordinal} BETWEEN 1 AND 3`),
+    check("report_v4_diagnosis_checkpoints_state_check", sql`${table.state} IN ('queued','running','completed','failed')`),
+    check("report_v4_diagnosis_checkpoints_hash_check", sql`${table.identityHash} ~ '^[a-f0-9]{64}$' AND ${table.inputIdentityHash} ~ '^[a-f0-9]{64}$' AND (${table.diagnosisContentHash} IS NULL OR ${table.diagnosisContentHash} ~ '^[a-f0-9]{64}$')`),
+    check("report_v4_diagnosis_checkpoints_call_count_check", sql`${table.providerCallCount} BETWEEN 0 AND 2`),
+    check("report_v4_diagnosis_checkpoints_source_audit_check", sql`ogc_report_v4_source_audit_payload_valid(${table.sourceAuditPayload},${table.questionId})`),
+    check("report_v4_diagnosis_checkpoints_payload_check", sql`(${table.diagnosisPayload} IS NULL OR ogc_report_v4_diagnosis_payload_valid(${table.diagnosisPayload})) AND ((${table.state}='queued' AND ${table.providerCallCount}=0 AND jsonb_array_length(${table.sourceAuditPayload})=0 AND ${table.diagnosisPayload} IS NULL AND ${table.diagnosisContentHash} IS NULL) OR (${table.state}='running' AND ${table.diagnosisPayload} IS NULL AND ${table.diagnosisContentHash} IS NULL) OR (${table.state}='completed' AND ${table.providerCallCount} BETWEEN 1 AND 2 AND ${table.diagnosisPayload} IS NOT NULL AND ${table.diagnosisContentHash} IS NOT NULL) OR (${table.state}='failed' AND ${table.diagnosisPayload} IS NULL AND ${table.diagnosisContentHash} IS NULL))`)
+  ]
+);
+export type ReportV4DiagnosisCheckpointRow = typeof reportV4DiagnosisCheckpoints.$inferSelect;
 
 export const reportReplacementFulfillments = pgTable(
   "report_replacement_fulfillments",
