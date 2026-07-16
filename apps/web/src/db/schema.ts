@@ -72,7 +72,7 @@ export type OrderDeliveryStatus = "not_queued" | "queued" | "sent" | "delivered"
 export type PaymentEventProcessingStatus = "received" | "processed" | "ignored" | "failed";
 export type ReportProductContract = "legacy_website_audit_v1" | "recommendation_forensics_v1";
 export type ReportArtifactContract = ReportProductContract | "combined_geo_report_v1" | "combined_geo_report_v2" | "combined_geo_report_v3" | "combined_geo_report_v4";
-export type ReportArtifactScope = Exclude<ReportArtifactContract, "combined_geo_report_v4">;
+export type ReportArtifactScope = ReportArtifactContract;
 export type RecommendationFulfillmentMethodology =
   | "answer_engine_recommendation_forensics_v1"
   | "public_search_source_forensics_v1"
