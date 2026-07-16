@@ -73,73 +73,166 @@ function workspace(input: ReportV4RequirementRegistry, options: {
 
 function protectedStagingEvidence(input: ReportV4RequirementRegistry): Record<string, unknown> {
   return {
-    schemaVersion: "report_v4_protected_staging_acceptance_v1",
+    schemaVersion: "report_v4_protected_staging_acceptance_v2",
     environment: "protected_staging",
     contract: "combined_geo_report_v4",
-    recordedAt: "2026-07-17T00:16:00.000Z",
+    recordedAt: "2030-01-01T00:24:00.000Z",
     deployment: {
-      previewDeploymentId: "dpl_reportv4protectedstaging",
-      protectedAliasUrl: "https://open-geo-console-staging.example.com/",
-      webSourceRevision: "0123456789abcdef0123456789abcdef01234567",
-      workerSourceRevision: "0123456789abcdef0123456789abcdef01234567"
-    },
-    configuration: {
-      configurationSnapshotId: `v4-config-${"c".repeat(64)}`,
-      modelProfileId: "mimo-v2.5-pro-v4",
-      modelProfileSha256: "a".repeat(64),
-      reportProfileId: "business-operator-zh-v4",
-      reportProfileSha256: "b".repeat(64),
-      providerOperations: {
-        pageAnalysis: { provider: "mimo", model: "mimo-v2.5-pro", operationId: "page-analysis-v4" },
-        websiteSynthesis: { provider: "mimo", model: "mimo-v2.5-pro", operationId: "website-synthesis-v4" },
-        questionAnswer: { provider: "mimo", model: "mimo-v2.5-pro", operationId: "question-answer-v4" },
-        sourceDiagnosis: { provider: "mimo", model: "mimo-v2.5-pro", operationId: "source-diagnosis-v4" }
-      }
+      previewDeploymentId: "preview-v4-acceptance-1",
+      protectedAliasUrl: "https://protected-staging.example.com/",
+      webSourceRevision: "d".repeat(40),
+      workerSourceRevision: "d".repeat(40)
     },
     identities: {
-      reportId: "00000000-0000-4000-8000-000000000001",
-      orderId: "00000000-0000-4000-8000-000000000002",
-      fulfillmentJobId: "00000000-0000-4000-8000-000000000003",
-      siteSnapshotId: "00000000-0000-4000-8000-000000000004",
-      coreArtifactRevisionId: "00000000-0000-4000-8000-000000000005",
-      enhancementArtifactRevisionId: "00000000-0000-4000-8000-000000000006"
+      reportId: id(1),
+      orderId: id(2),
+      coreJobId: id(3),
+      enhancementJobId: id(4),
+      coreArtifactRevisionId: id(5),
+      enhancementArtifactRevisionId: id(6),
+      siteSnapshotId: siteSnapshotId()
+    },
+    lineage: {
+      configuration: {
+        configSnapshotId: `v4-config-${"c".repeat(64)}`,
+        modelProfileHash: "a".repeat(64),
+        reportProfileHash: "b".repeat(64)
+      },
+      core: {
+        reportId: id(1),
+        orderId: id(2),
+        jobId: id(3),
+        artifactRevisionId: id(5),
+        configSnapshotId: `v4-config-${"c".repeat(64)}`
+      },
+      enhancement: {
+        reportId: id(1),
+        orderId: id(2),
+        jobId: id(4),
+        artifactRevisionId: id(6),
+        sourceArtifactRevisionId: id(5),
+        configSnapshotId: `v4-config-${"c".repeat(64)}`
+      }
     },
     timings: {
-      crawlStartedAt: "2026-07-17T00:00:00.000Z",
-      crawlCompletedAt: "2026-07-17T00:09:00.000Z",
-      paymentConfirmedAt: "2026-07-17T00:10:00.000Z",
-      coreActivatedAt: "2026-07-17T00:14:00.000Z",
-      enhancementCompletedAt: "2026-07-17T00:16:00.000Z"
+      crawlStartedAt: "2030-01-01T00:00:00.000Z",
+      crawlDeadlineAt: "2030-01-01T00:10:00.000Z",
+      crawlCompletedAt: "2030-01-01T00:09:00.000Z",
+      paymentConfirmedAt: "2030-01-01T00:10:00.000Z",
+      coreActivatedAt: "2030-01-01T00:14:00.000Z",
+      enhancementStartedAt: "2030-01-01T00:14:01.000Z",
+      enhancementCompletedAt: "2030-01-01T00:23:00.000Z"
     },
-    counters: {
-      crawl: { runs: 1, candidatePages: 12, analyzablePages: 8, jsDependentPages: 2, excludedPages: 4, networkReadsAfterPayment: 0 },
-      modelCalls: { websiteSynthesis: 1, questionAnswer: 4, diagnosis: 4, total: 9 },
-      retries: {
-        questions: [{ questionId: "q1", count: 1 }, { questionId: "q2", count: 0 }, { questionId: "q3", count: 0 }],
-        diagnoses: [{ questionId: "q1", count: 0 }, { questionId: "q2", count: 1 }, { questionId: "q3", count: 0 }]
-      },
-      sourceReads: { raw: 6, browser: 1, total: 7 },
-      revisions: { coreActivated: 1, enhancementActivated: 1, coreHtmlAssemblies: 1, enhancementHtmlAssemblies: 1 },
+    crawl: {
+      siteSnapshotId: siteSnapshotId(),
+      runs: 1,
+      candidatePages: 63,
+      analyzablePages: 50,
+      jsDependentPages: 1,
+      excludedPages: 13,
+      rawReads: 50,
+      browserReads: 1,
+      browserFallbacks: 1,
+      networkReadsAfterPayment: 0,
+      reusedSnapshotAfterPayment: true
+    },
+    providerCalls: {
+      pageAnalysis: { calls: 50, retries: 0, retryPolicy: "none" },
+      websiteSynthesis: 1,
+      questions: [attempt("q-1"), attempt("q-2"), attempt("q-3")],
+      diagnoses: [attempt("q-1"), attempt("q-2"), attempt("q-3")],
+      total: 57
+    },
+    tokenBudgetRejection: {
+      operation: "page_analysis",
+      oversizedSmallestUnit: true,
+      rejectedBeforeProvider: true,
+      providerCallDelta: 0,
+      retryDelta: 0
+    },
+    customerHtml: {
+      promptLeakCount: 0,
+      rawProviderPayloadLeakCount: 0,
+      internalWorkflowTermCount: 0,
+      seoFramingCount: 0
+    },
+    sources: {
+      questions: [sourceCount("q-1", 3), sourceCount("q-2", 2), sourceCount("q-3", 4)],
+      independentReadFailure: {
+        questionId: "q-2",
+        sourceId: "source-q2-1",
+        readStatus: "inaccessible",
+        answerPreserved: true,
+        linkPreserved: true
+      }
+    },
+    delivery: {
+      customerFormats: ["html"],
+      coreHtmlAssemblies: 1,
+      enhancementHtmlAssemblies: 1,
+      pdfOperations: 0
+    },
+    mainline: {
       wholeReportReruns: 0,
       providerClaimCalls: 0,
       qualificationCalls: 0,
       fourSnapshotCalls: 0,
-      replacementFulfillmentCalls: 0,
-      pdfOperations: 0
+      replacementFulfillmentCalls: 0
     },
-    browser: {
-      authorizedDesktop: { viewportWidth: 1440, viewportHeight: 900, statusCode: 200, reportVisible: true, screenshotEvidenceRef: "artifacts/report-v4-desktop.png", noOverflow: true, relevantConsoleErrorCount: 0 },
-      authorizedNarrow: { viewportWidth: 390, viewportHeight: 844, statusCode: 200, reportVisible: true, screenshotEvidenceRef: "artifacts/report-v4-narrow.png", noOverflow: true, relevantConsoleErrorCount: 0 },
-      anonymous: { statusCode: 404, reportVisible: false },
-      wrongScope: { statusCode: 404, reportVisible: false }
+    diagnosisFailure: {
+      injected: true,
+      identities: {
+        reportId: id(101),
+        orderId: id(102),
+        coreJobId: id(103),
+        coreArtifactRevisionId: id(104)
+      },
+      coreArtifactRevisionIdBefore: id(104),
+      coreArtifactRevisionIdAfter: id(104),
+      coreRemainedActive: true,
+      answerUnchanged: true,
+      accessUnchanged: true,
+      commerceSideEffectsDelta: { payments: 0, credits: 0, refunds: 0, emails: 0, accessGrants: 0 }
+    },
+    questionFailure: {
+      injected: true,
+      identities: {
+        reportId: id(201),
+        orderId: id(202),
+        coreJobId: id(203),
+        coreArtifactRevisionId: id(204)
+      },
+      questions: [
+        answeredQuestion("failure-q-1"),
+        failedQuestion("failure-q-2"),
+        answeredQuestion("failure-q-3")
+      ],
+      totalQuestionCalls: 4,
+      coreStatus: "completed_limited",
+      coreDelivered: true,
+      wholeReportReruns: 0,
+      commerce: {
+        paymentCount: 1,
+        creditSettlementCount: 1,
+        accessGrantCount: 1,
+        coreReportReadyEmailCount: 1,
+        refundCount: 0,
+        duplicateSideEffectCount: 0
+      },
+      accessStateValid: true
     },
     commerce: {
       paymentCount: 1,
-      fulfillmentJobCount: 1,
+      coreJobCount: 1,
+      enhancementJobCount: 1,
+      creditBoundJobCount: 1,
+      enhancementCreditCount: 0,
       creditReservationCount: 1,
       creditSettlementCount: 1,
       accessGrantCount: 1,
-      deliveryEmailCount: 1,
+      paymentConfirmationEmailCount: 1,
+      coreReportReadyEmailCount: 1,
+      enhancementSideEffects: { payments: 0, credits: 0, refunds: 0, emails: 0, accessGrants: 0 },
       refundCount: 0,
       duplicatePaymentCount: 0,
       duplicateCreditCount: 0,
@@ -148,6 +241,12 @@ function protectedStagingEvidence(input: ReportV4RequirementRegistry): Record<st
       duplicateRefundCount: 0,
       auditExitCode: 0
     },
+    browser: {
+      authorizedDesktop: browserCheck(1440, "artifacts/report-v4-desktop.png"),
+      authorizedNarrow: browserCheck(390, "artifacts/report-v4-narrow.png"),
+      anonymous: { statusCode: 404, reportVisible: false },
+      wrongScope: { statusCode: 404, reportVisible: false }
+    },
     legacy: {
       v1Readable: true,
       v2Readable: true,
@@ -155,32 +254,63 @@ function protectedStagingEvidence(input: ReportV4RequirementRegistry): Record<st
       historicalPdfReadable: true,
       historicalPdfMutationCount: 0
     },
-    faultInjection: {
-      diagnosisFailure: {
-        injected: true,
-        identities: {
-          reportId: "00000000-0000-4000-8000-000000000007",
-          orderId: "00000000-0000-4000-8000-000000000008",
-          fulfillmentJobId: "00000000-0000-4000-8000-000000000009",
-          coreArtifactRevisionId: "00000000-0000-4000-8000-000000000010"
-        },
-        coreArtifactRevisionIdBefore: "00000000-0000-4000-8000-000000000010",
-        coreArtifactRevisionIdAfter: "00000000-0000-4000-8000-000000000010",
-        coreRemainedActive: true,
-        answerUnchanged: true,
-        accessUnchanged: true,
-        commerceSideEffectsDelta: { payments: 0, credits: 0, refunds: 0, emails: 0, accessGrants: 0 }
-      }
-    },
     productionUnchanged: true,
-    requirementResults: input.requirements.map(({ id, verificationCommands }) => ({
-      requirementId: id,
+    requirementResults: input.requirements.map((requirement) => ({
+      requirementId: requirement.id,
       status: "PASS",
-      verificationCommands: verificationCommands.map((command) => ({ command, exitCode: 0 }))
+      verificationCommands: requirement.verificationCommands.map((command) => ({ command, exitCode: 0 }))
     }))
   };
 }
 
+function attempt(questionId: string) {
+  return { questionId, calls: 1, retries: 0, status: "completed" };
+}
+
+function sourceCount(questionId: string, displayedSourceCount: number) {
+  return { questionId, displayedSourceCount };
+}
+
+function answeredQuestion(questionId: string) {
+  return {
+    questionId,
+    status: "answered",
+    calls: 1,
+    retries: 0,
+    answerCheckpointUnchanged: true,
+    sourceCheckpointUnchanged: true
+  };
+}
+
+function failedQuestion(questionId: string) {
+  return {
+    questionId,
+    status: "unavailable",
+    calls: 2,
+    retries: 1,
+    terminalFailureRecorded: true
+  };
+}
+
+function browserCheck(viewportWidth: number, screenshotEvidenceRef: string) {
+  return {
+    viewportWidth,
+    viewportHeight: 900,
+    statusCode: 200,
+    reportVisible: true,
+    noHorizontalOverflow: true,
+    relevantConsoleErrorCount: 0,
+    screenshotEvidenceRef
+  };
+}
+
+function id(value: number): string {
+  return `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
+}
+
+function siteSnapshotId(): string {
+  return `report-v4-site-${"7".repeat(64)}`;
+}
 function setEvidenceValue(evidence: Record<string, unknown>, path: string, value: unknown): void {
   const segments = path.split(".");
   let target: unknown = evidence;
@@ -217,6 +347,14 @@ describe("report V4 conformance registry", () => {
 
   it("parses the exact V4 registry contract", () => {
     expect(parseReportV4Registry(registry())).toEqual(registry());
+  });
+
+  it("rejects the legacy protected-Staging V1 evidence contract", () => {
+    const input = registry("verified");
+    const legacy = protectedStagingEvidence(input);
+    legacy.schemaVersion = "report_v4_protected_staging_acceptance_v1";
+    expect(() => parseReportV4ProtectedStagingEvidence(legacy, input))
+      .toThrow(/acceptance_v2|schemaVersion/i);
   });
 
   it("rejects duplicate IDs, unsupported status and unsafe paths", () => {
@@ -300,8 +438,7 @@ describe("report V4 conformance registry", () => {
     const result = await auditReportV4Registry(input, root, "acceptance", async () => 0);
 
     expect(result.exitCode).toBe(1);
-    expect(result.output).toContain("GEO-V4-TEST-02");
-    expect(result.output).toMatch(/explicit PASS/i);
+    expect(result.output).toMatch(/requirement result IDs.*exactly match|explicit PASS/i);
   });
 
   it.each([
@@ -310,62 +447,64 @@ describe("report V4 conformance registry", () => {
     ["deployment identity", "deployment.previewDeploymentId", ""],
     ["Web/Worker revision parity", "deployment.workerSourceRevision", "f".repeat(40)],
     ["protected alias", "deployment.protectedAliasUrl", "http://staging.example.com"],
-    ["configuration snapshot", "configuration.configurationSnapshotId", "not-a-config-snapshot"],
-    ["model config snapshot", "configuration.modelProfileSha256", "not-a-hash"],
-    ["report profile snapshot", "configuration.reportProfileId", ""],
-    ["page-analysis operation", "configuration.providerOperations.pageAnalysis.operationId", ""],
-    ["website-synthesis operation", "configuration.providerOperations.websiteSynthesis.provider", ""],
-    ["question-answer operation", "configuration.providerOperations.questionAnswer.model", ""],
-    ["source-diagnosis operation", "configuration.providerOperations.sourceDiagnosis.operationId", ""],
+    ["configuration snapshot", "lineage.configuration.configSnapshotId", "not-a-config-snapshot"],
+    ["model profile hash", "lineage.configuration.modelProfileHash", "not-a-hash"],
+    ["report profile hash", "lineage.configuration.reportProfileHash", ""],
     ["identity", "identities.orderId", "order-1"],
-    ["crawl time limit", "timings.crawlCompletedAt", "2026-07-17T00:10:00.001Z"],
-    ["delivery ordering", "timings.coreActivatedAt", "2026-07-17T00:09:00.000Z"],
-    ["crawl reuse", "counters.crawl.networkReadsAfterPayment", 1],
-    ["crawl partition", "counters.crawl.excludedPages", 5],
-    ["JS dependency relation", "counters.crawl.jsDependentPages", 9],
-    ["question retry bound", "counters.retries.questions.0.count", 2],
-    ["model call accounting", "counters.modelCalls.total", 99],
-    ["source read accounting", "counters.sourceReads.total", 99],
-    ["source browser fallback bound", "counters.sourceReads.browser", 7],
-    ["revision count", "counters.revisions.coreActivated", 2],
-    ["whole-report rerun", "counters.wholeReportReruns", 1],
-    ["provider claim", "counters.providerClaimCalls", 1],
-    ["qualification", "counters.qualificationCalls", 1],
-    ["four snapshot", "counters.fourSnapshotCalls", 1],
-    ["replacement", "counters.replacementFulfillmentCalls", 1],
-    ["PDF", "counters.pdfOperations", 1],
+    ["crawl time limit", "timings.crawlCompletedAt", "2030-01-01T00:10:00.001Z"],
+    ["delivery ordering", "timings.enhancementStartedAt", "2030-01-01T00:13:59.000Z"],
+    ["crawl reuse", "crawl.networkReadsAfterPayment", 1],
+    ["crawl partition", "crawl.excludedPages", 12],
+    ["JS dependency relation", "crawl.jsDependentPages", 51],
+    ["question retry bound", "providerCalls.questions.0.retries", 2],
+    ["model call accounting", "providerCalls.total", 99],
+    ["source read accounting", "crawl.rawReads", 99],
+    ["source browser fallback bound", "crawl.browserReads", 51],
+    ["revision count", "delivery.coreHtmlAssemblies", 2],
+    ["whole-report rerun", "mainline.wholeReportReruns", 1],
+    ["provider claim", "mainline.providerClaimCalls", 1],
+    ["qualification", "mainline.qualificationCalls", 1],
+    ["four snapshot", "mainline.fourSnapshotCalls", 1],
+    ["replacement", "mainline.replacementFulfillmentCalls", 1],
+    ["PDF", "delivery.pdfOperations", 1],
+    ["token rejection side effect", "tokenBudgetRejection.providerCallDelta", 1],
+    ["customer HTML leakage", "customerHtml.promptLeakCount", 1],
+    ["source display limit", "sources.questions.0.displayedSourceCount", 6],
     ["desktop browser", "browser.authorizedDesktop.reportVisible", false],
     ["desktop screenshot", "browser.authorizedDesktop.screenshotEvidenceRef", ""],
-    ["desktop overflow", "browser.authorizedDesktop.noOverflow", false],
+    ["desktop overflow", "browser.authorizedDesktop.noHorizontalOverflow", false],
     ["narrow browser", "browser.authorizedNarrow.viewportWidth", 900],
     ["narrow console", "browser.authorizedNarrow.relevantConsoleErrorCount", 1],
     ["anonymous access", "browser.anonymous.statusCode", 200],
     ["wrong-scope access", "browser.wrongScope.reportVisible", true],
     ["commerce exactly once", "commerce.creditSettlementCount", 2],
+    ["enhancement commercial isolation", "commerce.enhancementSideEffects.emails", 1],
     ["commerce audit", "commerce.auditExitCode", 1],
     ["legacy compatibility", "legacy.v2Readable", false],
-    ["diagnosis fault injection", "faultInjection.diagnosisFailure.injected", false],
-    ["fault run identity independence", "faultInjection.diagnosisFailure.identities.reportId", "00000000-0000-4000-8000-000000000001"],
-    ["core remains active", "faultInjection.diagnosisFailure.coreArtifactRevisionIdAfter", "00000000-0000-4000-8000-000000000006"],
-    ["fault commerce side effects", "faultInjection.diagnosisFailure.commerceSideEffectsDelta.emails", 1],
+    ["diagnosis fault injection", "diagnosisFailure.injected", false],
+    ["fault run identity independence", "diagnosisFailure.identities.reportId", id(1)],
+    ["core remains active", "diagnosisFailure.coreArtifactRevisionIdAfter", id(106)],
+    ["fault commerce side effects", "diagnosisFailure.commerceSideEffectsDelta.emails", 1],
+    ["question failure isolation", "questionFailure.wholeReportReruns", 1],
     ["production unchanged", "productionUnchanged", false],
     ["requirement result", "requirementResults.0.status", "implemented"]
   ])("fails closed when protected-staging evidence violates %s", (_name, path, value) => {
-    const evidence = protectedStagingEvidence(registry("verified"));
+    const input = registry("verified");
+    const evidence = protectedStagingEvidence(input);
     setEvidenceValue(evidence, path, value);
-    expect(() => parseReportV4ProtectedStagingEvidence(evidence)).toThrow();
+    expect(() => parseReportV4ProtectedStagingEvidence(evidence, input)).toThrow();
   });
 
   it("accepts only the repository v4-config SHA identity format", () => {
-    const realIdentity = protectedStagingEvidence(registry("verified"));
-    setEvidenceValue(realIdentity, "configuration.configurationSnapshotId", `v4-config-${"c".repeat(64)}`);
-    expect(() => parseReportV4ProtectedStagingEvidence(realIdentity)).not.toThrow();
+    const input = registry("verified");
+    const realIdentity = protectedStagingEvidence(input);
+    setEvidenceValue(realIdentity, "lineage.configuration.configSnapshotId", `v4-config-${"c".repeat(64)}`);
+    expect(() => parseReportV4ProtectedStagingEvidence(realIdentity, input)).not.toThrow();
 
-    const fakeUuid = protectedStagingEvidence(registry("verified"));
-    setEvidenceValue(fakeUuid, "configuration.configurationSnapshotId", "00000000-0000-4000-8000-000000000011");
-    expect(() => parseReportV4ProtectedStagingEvidence(fakeUuid)).toThrow(/configurationSnapshotId/i);
+    const fakeUuid = protectedStagingEvidence(input);
+    setEvidenceValue(fakeUuid, "lineage.configuration.configSnapshotId", id(11));
+    expect(() => parseReportV4ProtectedStagingEvidence(fakeUuid, input)).toThrow(/configSnapshotId/i);
   });
-
   it("rejects acceptance when protected browser screenshot files do not exist", async () => {
     const input = registry("verified");
     const result = await auditReportV4Registry(
@@ -406,7 +545,7 @@ describe("report V4 conformance registry", () => {
       async () => 0
     );
     expect(result.exitCode).toBe(1);
-    expect(result.output).toMatch(/verification command evidence.*exactly match/i);
+    expect(result.output).toMatch(/verification commands?.*exactly match/i);
   });
 
   it("rejects extra PASS requirement results that are not verified registry requirements", async () => {
