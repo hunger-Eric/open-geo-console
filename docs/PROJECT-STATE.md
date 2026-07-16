@@ -4,6 +4,13 @@
 
 Deliver a self-hostable, evidence-bound GEO product whose customer artifact is one secure HTML report. New reports must keep their persisted generation locale throughout model output, deterministic copy, final readiness, and email delivery. HTML-to-PDF remains a private Worker readiness check and storage artifact; it is not a customer format.
 
+## Prospective V4 Boundary
+
+- The approved two-stage simplification is prospective `combined_geo_report_v4`; current V1-V3 runtime and historical artifacts remain unchanged until a separate implementation passes acceptance.
+- The machine-readable authority is `config/report-contracts/combined-geo-report-v4.requirements.json`, with its generated human view at `docs/REPORT-V4-COVERAGE-MATRIX.md`.
+- `npm run report:v4:traceability` currently passes for 20 registered requirements. Every requirement remains `planned`, so `npm run report:v4:acceptance` intentionally fails and V4 business functionality must not be described as implemented.
+- A requirement may become `verified` only when its implementation paths, requirement-marked tests, verification commands and requirement-bound protected-Staging evidence all pass the executable gate.
+
 ## Architecture and Production Boundaries
 
 - `apps/web` admits scans, persists PostgreSQL state, serves authorized HTML/evidence, and coordinates commerce. Workers alone crawl pages, call models, collect public-source evidence, capture screenshots, and materialize artifacts.

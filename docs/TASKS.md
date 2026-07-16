@@ -1,5 +1,10 @@
 # Open GEO Console Tasks
 
+## Two-stage report V4
+
+- [x] Approve the prospective `combined_geo_report_v4` two-stage GEO report design and install the executable requirements registry, generated coverage matrix, structural traceability audit and fail-closed final acceptance command.
+- [ ] Implement V4 only through requirement-ID-bound plans and tests; keep all registry entries `planned` until their real implementation, automated commands and protected-Staging evidence satisfy `npm run report:v4:acceptance`.
+
 ## Report workspace rebuild
 
 - [x] Preserve the selected option 1 visual reference in `docs/design/`.
