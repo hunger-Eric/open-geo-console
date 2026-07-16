@@ -6,20 +6,30 @@ import {
   COMBINED_GEO_REPORT_V2_CONTRACT,
   COMBINED_GEO_REPORT_V3_CONTRACT,
   COMBINED_GEO_REPORT_V4_CONTRACT,
+  MODEL_PROFILE_OPERATIONS,
   OpenAiCompatibleClient,
   ReportLanguageValidationError,
   ReportValidationError,
   analyzePageBatch,
+  evaluateModelTokenBudget,
   planPagesWithRecovery,
   parseAiWebsiteReportV1,
   parseCombinedGeoReportV1,
   parseCombinedGeoReportV2,
   parseCombinedGeoReportV3,
   parseCombinedGeoReportV4,
+  parseModelProfile,
+  parseReportV4CustomerProseProfile,
+  parseReportV4DiagnosisInput,
+  parseReportV4DiagnosisOutput,
+  parseReportV4QuestionAnswerInput,
+  parseReportV4SiteSynthesisInput,
   planPages,
   preparePlanningCandidates,
+  runWithModelTokenBudget,
   synthesizeWebsiteReport,
   synthesizeWebsiteReportWithRecovery,
+  validateReportV4CustomerProse,
   validateEvidenceCitation,
   verifyReportEvidence,
   type AiWebsiteReportV1,
@@ -46,6 +56,21 @@ describe("combined report public exports", () => {
     ]);
     expect([parseCombinedGeoReportV1, parseCombinedGeoReportV2, parseCombinedGeoReportV3, parseCombinedGeoReportV4])
       .toEqual([expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function)]);
+  });
+
+  it("exports the V4 model, budget, bounded-input, diagnosis, and customer-prose primitives from the package root", () => {
+    expect(MODEL_PROFILE_OPERATIONS).toEqual(["pageAnalysis", "websiteSynthesis", "questionAnswer", "sourceDiagnosis"]);
+    expect([
+      parseModelProfile,
+      evaluateModelTokenBudget,
+      runWithModelTokenBudget,
+      parseReportV4SiteSynthesisInput,
+      parseReportV4QuestionAnswerInput,
+      parseReportV4DiagnosisInput,
+      parseReportV4DiagnosisOutput,
+      parseReportV4CustomerProseProfile,
+      validateReportV4CustomerProse
+    ]).toEqual(Array.from({ length: 9 }, () => expect.any(Function)));
   });
 });
 

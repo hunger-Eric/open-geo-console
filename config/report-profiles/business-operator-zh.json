@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "profileId": "business-operator-zh-v1",
+  "locale": "zh-CN",
+  "audiences": {
+    "primary": [
+      "企业负责人",
+      "市场运营",
+      "网站运营"
+    ],
+    "secondary": [
+      "GEO 专业人员"
+    ]
+  },
+  "readingOrder": [
+    "conclusion",
+    "reason",
+    "action"
+  ],
+  "tone": [
+    "专业",
+    "直接",
+    "业务可读",
+    "不过度技术化"
+  ],
+  "terminology": {
+    "requiredGeoTerms": [
+      "GEO",
+      "生成式答案",
+      "AI",
+      "官网",
+      "来源"
+    ],
+    "prohibitedSeoFraming": [
+      "SEO",
+      "搜索引擎优化",
+      "搜索排名",
+      "关键词排名",
+      "search ranking",
+      "keyword ranking",
+      "SERP"
+    ],
+    "prohibitedInternalLanguage": [
+      "checkpoint",
+      "snapshot",
+      "claim extraction",
+      "provider adapter",
+      "Token budget",
+      "retry count",
+      "state machine",
+      "检查点",
+      "快照",
+      "声明提取",
+      "供应商适配器",
+      "令牌预算",
+      "重试次数",
+      "状态机"
+    ],
+    "prohibitedPromptLeakage": [
+      "system prompt",
+      "developer message",
+      "user instructions",
+      "raw provider JSON",
+      "tool call arguments",
+      "validator error",
+      "系统提示词",
+      "开发者消息",
+      "用户指令",
+      "原始供应商 JSON",
+      "工具调用参数",
+      "验证器错误"
+    ]
+  },
+  "presentation": {
+    "conciseByDefault": true,
+    "detailedEvidenceCollapsed": true
+  },
+  "fieldBounds": {
+    "websiteSummary": {
+      "minChars": 20,
+      "maxChars": 600
+    },
+    "websiteListItem": {
+      "minChars": 8,
+      "maxChars": 240,
+      "minItems": 1,
+      "maxItems": 6
+    },
+    "questionAnswer": {
+      "minChars": 15,
+      "maxChars": 1200
+    },
+    "selectionSummary": {
+      "minChars": 15,
+      "maxChars": 200
+    },
+    "observableFactors": {
+      "minChars": 8,
+      "maxChars": 180,
+      "exactItems": 3
+    },
+    "targetGap": {
+      "minChars": 15,
+      "maxChars": 300
+    },
+    "recommendedActions": {
+      "minChars": 8,
+      "maxChars": 220,
+      "exactItems": 3
+    }
+  }
+}
