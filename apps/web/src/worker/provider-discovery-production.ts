@@ -163,7 +163,13 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
     },
     extractClaims: async ({ passages: selected, signal }) => {
       if (claims.length) return claims;
-      verificationBundle ??= await requireSnapshotBundle(verificationResolved?.snapshotId ?? "");
+      const persisted = await input.getCheckpoint();
+      if (!candidates.length) candidates = persisted?.artifacts.discovery?.candidates ?? [];
+      const verificationSnapshotId = verificationResolved?.snapshotId
+        ?? persisted?.artifacts.verification?.snapshotId
+        ?? persisted?.verificationSnapshotId
+        ?? "";
+      verificationBundle ??= await requireSnapshotBundle(verificationSnapshotId);
       claims = await extractClaims({ client: input.extractionClient, locale: question.locale, question: question.normalizedText, policy, candidates, passages: selected, bundle: verificationBundle, signal });
       if (claims.length) {
         await appendCompletedMarketProviderClaims({ snapshotId: verificationBundle.snapshot.id, claims: claims.map((claim) => {
@@ -179,9 +185,9 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
     projectProviderDiscovery: async ({ discovery, verification, retrieval, passages: selected, claims: values, qualification }) => {
       verificationBundle ??= await requireSnapshotBundle(verification.snapshotId);
       return projectProviderDiscovery({ policy, discovery, retrieval, passages: selected, claims: values, qualification, bundle: verificationBundle,
-        extractionModel: input.extractionModel, verificationPlannedQueries: verificationFanout?.queries.length ?? 0,
-        verificationCompletedQueries: verificationResolved ? completedQueries(verificationResolved.observations) : 0,
-        verificationReturnedObservations: verificationResolved?.observations.reduce((total, observation) => total + observation.results.length, 0) ?? 0,
+        extractionModel: input.extractionModel, verificationPlannedQueries: verificationFanout?.queries.length ?? verificationBundle.queries.length,
+        verificationCompletedQueries: verificationResolved ? completedQueries(verificationResolved.observations) : completedBundleQueries(verificationBundle),
+        verificationReturnedObservations: verificationResolved?.observations.reduce((total, observation) => total + observation.results.length, 0) ?? verificationBundle.observations.length,
         standardPlannedQueries, standardCompletedQueries, standardReturnedObservations, standardSafePages });
     },
     resolveStandardQuestions: async ({ signal }) => {
@@ -429,6 +435,7 @@ async function loadPassages(snapshotId: string): Promise<ProviderEvidencePassage
 }
 async function requireSnapshotBundle(snapshotId: string) { const bundle = snapshotId ? await getMarketSnapshotBundle(snapshotId) : null; if (!bundle) throw new Error("Provider verification snapshot bundle is unavailable."); return bundle; }
 function completedQueries(observations: readonly { status: string }[]) { return observations.filter(({ status }) => status === "complete" || status === "partial").length; }
+function completedBundleQueries(bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>) { return new Set(bundle.attempts.filter(({ requestStatus }) => requestStatus === "succeeded" || requestStatus === "partial").map(({ queryId }) => queryId)).size; }
 function safeDomain(value: string): string | null { try { return new URL(value).hostname.toLocaleLowerCase().replace(/^www\./, ""); } catch { return null; } }
 function institutional(value: string): boolean { const domain = safeDomain(value) ?? ""; return /(?:\.gov|\.edu|\.org)(?:\.[a-z]{2})?$/.test(domain); }
 function digest(value?: string): string | null { if (!value) return null; const result = value.startsWith("sha256:") ? value.slice(7) : value; if (!/^[a-f0-9]{64}$/i.test(result)) throw new Error("Provider source content hash is invalid."); return result.toLocaleLowerCase(); }

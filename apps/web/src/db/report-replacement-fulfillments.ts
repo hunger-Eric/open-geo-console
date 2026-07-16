@@ -3,11 +3,11 @@ import type postgres from "postgres";
 import { ensureDatabase, getSqlClient } from "./index";
 
 export const APPROVED_REPLACEMENT_TARGET = {
-  orderId: "92eaa1f9-5033-4184-8667-bd4a64fef55a",
-  reportId: "f764a24d-2bd8-4714-99fc-c7ad754753ff",
-  originalFailedJobId: "bd55fb27-8f29-4f72-81c6-bd69d60eba89",
-  failedArtifactRevisionId: "0908fe12-e434-4242-a5ae-8608f3edb368",
-  questionSetId: "business-question-set-109376f4c5c88364b7eee20bc4b096b487a222601533a2e3b591a85765de5726"
+  orderId: "c631f80e-4f6e-44a4-b0de-42aee8559c51",
+  reportId: "4b4e71b8-c130-4c83-8d4a-e3787ded7009",
+  originalFailedJobId: "146da7a2-b28b-4925-af89-0a30c9af0c23",
+  failedArtifactRevisionId: "0c41d018-65aa-42e9-84c3-9953af4b60c8",
+  questionSetId: "business-question-set-ba934fe710d804f389bf16c240f3fa23c7127e64f7f50d368e17f02c888baa6e"
 } as const;
 
 export interface ReplacementFulfillmentSummary {

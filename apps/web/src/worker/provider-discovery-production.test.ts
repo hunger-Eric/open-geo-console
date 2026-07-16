@@ -135,6 +135,44 @@ describe("production provider discovery composition", () => {
     expect(mocks.appendClaims).toHaveBeenCalledOnce();
     expect(mocks.resolve.mock.calls.map(([request]) => request.maxSourceRetrievals).reduce((total, value) => total + (value ?? 0), 0)).toBe(60);
 
+    let claimResumeCheckpoint = structuredClone(checkpoint) as NonNullable<typeof checkpoint> & {
+      claimSetHash: string | null;
+      phase: string;
+      artifacts: Record<string, unknown>;
+    };
+    delete claimResumeCheckpoint.artifacts.claims;
+    delete claimResumeCheckpoint.artifacts.qualification;
+    delete claimResumeCheckpoint.artifacts.providerDiscovery;
+    claimResumeCheckpoint.claimSetHash = null;
+    claimResumeCheckpoint.phase = "provider_claim_extraction";
+    mocks.snapshotBundle.mockClear();
+    mocks.appendClaims.mockClear();
+    const claimResumeClient = { configuredModel: "fixture-model", completeJson: vi.fn(async () => ({ modelId: "fixture-model", value: { claims: [{ subjectName: "Alpha Logistics", genericRole: "service_provider", policyRole: "carrier", capability: "linehaul_fleet", operatingMode: "self_operated", serviceScope: ["freight"], routeScope: [], exactExcerpt: passage.exactExcerpt }] } })) };
+    const claimResumeContext = createProductionProviderDiscoveryContext({
+      runtime,
+      questionSet: questions(),
+      artifactContract: "combined_geo_report_v3",
+      websiteCategories: ["logistics"],
+      websiteFoundationHash: "f".repeat(64),
+      workerId: "worker",
+      evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
+      extractionModel: "fixture-model",
+      extractionClient: claimResumeClient,
+      getCheckpoint: async () => claimResumeCheckpoint as never,
+      saveCheckpoint: async (value) => { claimResumeCheckpoint = structuredClone(value) as typeof claimResumeCheckpoint; }
+    });
+
+    const claimResumeResult = await runProviderDiscoveryPipeline({
+      identity: claimResumeContext.identity,
+      dependencies: claimResumeContext.dependencies,
+      hardDeadlineAt: "2030-01-01T01:00:00.000Z"
+    });
+    expect(claimResumeClient.completeJson).toHaveBeenCalled();
+    expect(claimResumeResult.checkpoint.artifacts.claims).toHaveLength(1);
+    expect(claimResumeResult.providerDiscovery.execution.plannedQueries).toBeGreaterThan(0);
+    expect(mocks.snapshotBundle).toHaveBeenCalledWith("snapshot-verification");
+    expect(mocks.snapshotBundle).not.toHaveBeenCalledWith("");
+
     const resumedCheckpoint = structuredClone(checkpoint) as NonNullable<typeof checkpoint> & {
       artifacts: Record<string, unknown>;
     };
