@@ -40,6 +40,7 @@ export interface ReportV4ProductionCoreJob {
 export interface ReportV4ProductionEnhancementJob extends Omit<ReportV4ProductionCoreJob, "siteSnapshotId"> {
   siteSnapshotId: null;
 }
+export const REPORT_V4_DIAGNOSIS_INITIAL_PHASE = "source_retrieval" as const;
 
 export interface ReportV4ProductionJobTransaction {
   acquireEnhancementLock(reportId: string): Promise<void>;
@@ -100,15 +101,7 @@ export function createReportV4ProductionJobRepository(store: ReportV4ProductionJ
           return existing[0]!;
         }
 
-        const job: ReportV4ProductionEnhancementJob = {
-          // V28 deliberately reserves a non-null scan_jobs.site_snapshot_id for the standard core job.
-          // Enhancement snapshot lineage is therefore derived and verified through that exact active core.
-          id: deterministicEnhancementJobId(lineage), reportId: lineage.reportId, siteSnapshotId: null,
-          tier: "deep", productContract: "recommendation_forensics_v1", fulfillmentMethodology: "two_stage_geo_report_v4",
-          recommendationReportVersion: 4, artifactContract: "combined_geo_report_v4", questionSetId: lineage.questionSetId,
-          locale: lineage.locale, reason: "v4_diagnosis_enhancement", stage: "queued", executionState: "queued",
-          creditReservationId: null, correctionId: null, replacementFulfillmentId: null
-        };
+        const job = buildReportV4DiagnosisEnhancementJob(lineage);
         await tx.insertEnhancementJob(job);
         const stored = await tx.loadEnhancementJob(job.id, true);
         if (!stored) throw new Error("The exact V4 diagnosis enhancement job was not persisted.");
@@ -242,13 +235,12 @@ function assertLineage(core: ReportV4PaidCoreContext, input: ReportV4ProductionL
 }
 
 function assertEnhancementJob(job: ReportV4ProductionEnhancementJob, core: ReportV4PaidCoreContext): void {
-  if (job.reportId !== core.report.id || job.siteSnapshotId !== null || job.tier !== "deep" ||
-      job.productContract !== "recommendation_forensics_v1" || job.fulfillmentMethodology !== "two_stage_geo_report_v4" ||
-      Number(job.recommendationReportVersion) !== 4 || job.artifactContract !== "combined_geo_report_v4" ||
-      job.questionSetId !== core.questionSet.id || job.locale !== core.coreJob.locale || job.reason !== "v4_diagnosis_enhancement" ||
-      job.creditReservationId !== null || job.correctionId !== null || job.replacementFulfillmentId !== null) {
-    throw new Error("The exact no-credit V4 diagnosis enhancement job lineage conflicts.");
-  }
+  if (!core.activeCoreArtifact) throw new Error("The V4 enhancement requires its exact active source core artifact.");
+  assertReportV4DiagnosisEnhancementJobIdentity(job, {
+    reportId: core.report.id, orderId: core.order.id, coreJobId: core.coreJob.id,
+    coreArtifactRevisionId: core.activeCoreArtifact.id, configSnapshotId: core.config.id,
+    siteSnapshotId: core.siteSnapshot.id, questionSetId: core.questionSet.id, locale: requireLocale(core.coreJob.locale)
+  });
 }
 
 function validateLineageInput<T extends ReportV4ProductionLineage>(input: T): ReportV4ProductionLineage {
@@ -273,12 +265,36 @@ function exactlyOne<T>(values: T[], label: string): T {
   if (values.length !== 1) throw new Error(`Exactly one ${label} is required; found ${values.length}.`);
   return values[0]!;
 }
-function deterministicEnhancementJobId(lineage: ReportV4ProductionLineage): string {
+export function buildReportV4DiagnosisEnhancementJob(input: ReportV4ProductionLineage): ReportV4ProductionEnhancementJob {
+  const lineage = validateLineageInput(input);
   const digest = createHash("sha256").update([
     lineage.reportId, lineage.orderId, lineage.coreJobId, lineage.coreArtifactRevisionId,
     lineage.configSnapshotId, lineage.siteSnapshotId, lineage.questionSetId, lineage.locale
   ].join("\0")).digest("hex");
-  return `v4-diagnosis-job-${digest}`;
+  return {
+    // V28 deliberately reserves a non-null scan_jobs.site_snapshot_id for the standard core job.
+    // Enhancement snapshot lineage is therefore derived and verified through that exact active core.
+    id: `v4-diagnosis-job-${digest}`, reportId: lineage.reportId, siteSnapshotId: null,
+    tier: "deep", productContract: "recommendation_forensics_v1", fulfillmentMethodology: "two_stage_geo_report_v4",
+    recommendationReportVersion: 4, artifactContract: "combined_geo_report_v4", questionSetId: lineage.questionSetId,
+    locale: lineage.locale, reason: "v4_diagnosis_enhancement", stage: "queued", executionState: "queued",
+    creditReservationId: null, correctionId: null, replacementFulfillmentId: null
+  };
+}
+
+export function assertReportV4DiagnosisEnhancementJobIdentity(
+  job: ReportV4ProductionEnhancementJob,
+  input: ReportV4ProductionLineage
+): void {
+  const expected = buildReportV4DiagnosisEnhancementJob(input);
+  const immutableKeys: Array<keyof ReportV4ProductionEnhancementJob> = [
+    "id", "reportId", "siteSnapshotId", "tier", "productContract", "fulfillmentMethodology",
+    "recommendationReportVersion", "artifactContract", "questionSetId", "locale", "reason",
+    "creditReservationId", "correctionId", "replacementFulfillmentId"
+  ];
+  if (immutableKeys.some((key) => job[key] !== expected[key])) {
+    throw new Error("The exact no-credit V4 diagnosis enhancement job lineage conflicts.");
+  }
 }
 
 function createPostgresStore(): ReportV4ProductionJobStore {
@@ -309,7 +325,7 @@ function createPostgresTransaction(sql: postgres.TransactionSql): ReportV4Produc
     },
     async insertEnhancementJob(job) {
       await sql`INSERT INTO scan_jobs(id,report_id,site_snapshot_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,artifact_contract,business_question_set_id,locale,reason,stage,execution_state,current_phase,credit_reservation_id,correction_id,replacement_fulfillment_id)
-        VALUES(${job.id},${job.reportId},${job.siteSnapshotId},${job.tier},${job.productContract},${job.fulfillmentMethodology},${job.recommendationReportVersion},${job.artifactContract},${job.questionSetId},${job.locale},${job.reason},${job.stage},${job.executionState},'source_retrieval',NULL,NULL,NULL)`;
+        VALUES(${job.id},${job.reportId},${job.siteSnapshotId},${job.tier},${job.productContract},${job.fulfillmentMethodology},${job.recommendationReportVersion},${job.artifactContract},${job.questionSetId},${job.locale},${job.reason},${job.stage},${job.executionState},${REPORT_V4_DIAGNOSIS_INITIAL_PHASE},NULL,NULL,NULL)`;
     },
     async loadEnhancementJob(id, forUpdate = false) {
       const rows = forUpdate

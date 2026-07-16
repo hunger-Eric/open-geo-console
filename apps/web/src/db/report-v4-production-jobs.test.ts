@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  buildReportV4DiagnosisEnhancementJob,
   createReportV4ProductionJobRepository,
   type ReportV4ProductionCoreAggregate,
   type ReportV4ProductionEnhancementJob,
@@ -12,6 +13,19 @@ import {
 // @requirement GEO-V4-DELIVERY-01
 // @requirement GEO-V4-DIAG-01
 describe("V4 production core and diagnosis-enhancement job lineage", () => {
+  it("builds the one deterministic no-credit enhancement identity reused by every persistence path", () => {
+    const first = buildReportV4DiagnosisEnhancementJob(exactLineage());
+    const second = buildReportV4DiagnosisEnhancementJob({ ...exactLineage() });
+    expect(second).toEqual(first);
+    expect(first).toMatchObject({
+      id: expect.stringMatching(/^v4-diagnosis-job-[a-f0-9]{64}$/), reportId: "report-1", siteSnapshotId: null,
+      questionSetId: "questions-1", locale: "en", reason: "v4_diagnosis_enhancement",
+      stage: "queued", executionState: "queued",
+      creditReservationId: null, correctionId: null, replacementFulfillmentId: null
+    });
+    expect(buildReportV4DiagnosisEnhancementJob({ ...exactLineage(), coreArtifactRevisionId: "other-core" }).id)
+      .not.toBe(first.id);
+  });
   it("loads one exact paid V4 core context with immutable locale, snapshot, questions and configuration", async () => {
     const repo = repository(exactAggregate());
     await expect(repo.loadPaidCoreContext({ coreJobId: "core-job" })).resolves.toMatchObject({
@@ -62,6 +76,7 @@ describe("V4 production core and diagnosis-enhancement job lineage", () => {
       productContract: "recommendation_forensics_v1", fulfillmentMethodology: "two_stage_geo_report_v4",
       recommendationReportVersion: 4, artifactContract: "combined_geo_report_v4"
     });
+    expect(store.jobs[0]).toEqual(buildReportV4DiagnosisEnhancementJob(input));
     expect(sideEffects).toEqual({ payments: 1, credits: 1, access: 1, refunds: 0, emails: 1 });
   });
 

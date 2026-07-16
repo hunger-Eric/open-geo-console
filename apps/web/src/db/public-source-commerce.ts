@@ -8,6 +8,14 @@ import { prepareSourceForensicReportRow } from "./source-forensic-reports";
 import { snapshotReferenceBinding } from "./combined-correction-terminalization";
 import type { ScanJobCoverage } from "./jobs";
 import { JobTransitionService } from "@/worker/job-transition-service";
+import {
+  assertReportV4DiagnosisEnhancementJobIdentity,
+  buildReportV4DiagnosisEnhancementJob,
+  REPORT_V4_DIAGNOSIS_INITIAL_PHASE,
+  type ReportV4Locale,
+  type ReportV4ProductionEnhancementJob,
+  type ReportV4ProductionLineage
+} from "./report-v4-production-jobs";
 
 export interface PaidPublicSourceSnapshotRef {
   snapshotId: string; cacheIdentity: string; freshnessState: "fresh" | "historical" | "insufficient";
@@ -94,7 +102,7 @@ export async function terminalizePaidPublicSourceReport(input: {
 export async function terminalizePaidReportV4Core(input: {
   report: unknown;
   workerId: string;
-  faultAfter?: "job" | "credit" | "order" | "access" | "email";
+  faultAfter?: "job" | "credit" | "refund" | "order" | "access" | "email" | "enhancement";
   pdfSha256?: never;
   pdfStorageKey?: never;
   pageCount?: never;
@@ -105,6 +113,7 @@ export async function terminalizePaidReportV4Core(input: {
   refundId: string | null;
   accessTokenId: string;
   emailDeliveryId: string;
+  enhancementJobId: string;
 }> {
   if (["pdfSha256", "pdfStorageKey", "pageCount"].some((field) => Object.hasOwn(input, field))) {
     throw new Error("V4 commercial terminalization rejects every PDF readiness input.");
@@ -120,6 +129,7 @@ export async function terminalizePaidReportV4Core(input: {
 
   return getSqlClient().begin(async (tx) => {
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`report-v4-commerce:${report.reportId}`},0))`;
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`report-v4-enhancement:${report.reportId}`},0))`;
     const artifact = (await tx<Array<V4ArtifactCommerceRow>>`
       SELECT core.id,core.report_id,core.order_id,core.job_id,core.revision_kind,core.artifact_contract,
         core.status,core.html_sha256,core.pdf_sha256,core.pdf_storage_key,core.ready_at,core.config_snapshot_id,
@@ -144,7 +154,7 @@ export async function terminalizePaidReportV4Core(input: {
     assertV4CoreArtifact(artifact, report);
 
     const job = (await tx<Array<V4JobCommerceRow>>`
-      SELECT id,report_id,locale,stage,execution_state,checkpoint_revision,lease_owner,lease_expires_at,
+      SELECT id,report_id,site_snapshot_id,locale,stage,execution_state,checkpoint_revision,lease_owner,lease_expires_at,
         credit_reservation_id,product_contract,fulfillment_methodology,recommendation_report_version,
         artifact_contract,business_question_set_id,reason,correction_id,replacement_fulfillment_id
       FROM scan_jobs WHERE id=${artifact.job_id} AND report_id=${report.reportId} FOR UPDATE
@@ -154,16 +164,16 @@ export async function terminalizePaidReportV4Core(input: {
         job.artifact_contract !== "combined_geo_report_v4" || job.business_question_set_id !== artifact.question_set_id ||
         !v4LocaleMatches(report.locale, job.locale) ||
         job.reason !== "standard" || job.correction_id !== null || job.replacement_fulfillment_id !== null ||
-        !job.credit_reservation_id) {
+        !job.site_snapshot_id || !job.credit_reservation_id) {
       throw new Error("V4 commercial terminalization requires its exact standard paid core job.");
     }
     const order = (await tx<Array<V4OrderCommerceRow>>`
-      SELECT id,report_id,fulfillment_job_id,provider,amount_minor,currency,report_locale,product_code,
+      SELECT id,report_id,site_snapshot_id,fulfillment_job_id,provider,amount_minor,currency,report_locale,product_code,
         fulfillment_methodology,recommendation_report_version,business_question_set_id,payment_status,
         fulfillment_status,refund_status,delivery_status
       FROM payment_orders WHERE id=${artifact.order_id} FOR UPDATE
     `)[0];
-    if (!order || order.report_id !== report.reportId || order.fulfillment_job_id !== job.id ||
+    if (!order || order.report_id !== report.reportId || order.site_snapshot_id !== job.site_snapshot_id || order.fulfillment_job_id !== job.id ||
         order.product_code !== "recommendation_forensics_v1" || order.fulfillment_methodology !== "two_stage_geo_report_v4" ||
         Number(order.recommendation_report_version) !== 4 || order.business_question_set_id !== artifact.question_set_id ||
         !v4LocaleMatches(report.locale, order.report_locale) || order.payment_status !== "paid") {
@@ -232,6 +242,7 @@ export async function terminalizePaidReportV4Core(input: {
         await tx`INSERT INTO payment_refunds(id,order_id,provider,reason,amount_minor,currency,state,idempotency_key)
           VALUES(${randomUUID()},${order.id},${order.provider},'completed_limited',${order.amount_minor},${order.currency},'pending',${`full_refund/${order.id}`})
           ON CONFLICT(order_id) DO NOTHING`;
+        fault(input.faultAfter, "refund");
       }
       const orders = await tx<Array<{ id: string }>>`
         UPDATE payment_orders SET fulfillment_status=${outcome},fulfilled_at=COALESCE(fulfilled_at,now()),
@@ -272,7 +283,21 @@ export async function terminalizePaidReportV4Core(input: {
       throw new Error("The V4 terminal email identity conflicts with the core artifact.");
     }
     fault(input.faultAfter, "email");
-    return { report, outcome, orderId: order.id, refundId, accessTokenId: access.id, emailDeliveryId: email.id };
+    const enhancement = await ensurePaidReportV4EnhancementJob(tx, {
+      reportId: report.reportId,
+      orderId: order.id,
+      coreJobId: job.id,
+      coreArtifactRevisionId: report.artifactRevisionId,
+      configSnapshotId: artifact.config_snapshot_id!,
+      siteSnapshotId: job.site_snapshot_id,
+      questionSetId: artifact.question_set_id,
+      locale: normalizeReportLanguage(report.locale) as ReportV4Locale
+    }, firstRun);
+    if (firstRun) fault(input.faultAfter, "enhancement");
+    return {
+      report, outcome, orderId: order.id, refundId, accessTokenId: access.id,
+      emailDeliveryId: email.id, enhancementJobId: enhancement.id
+    };
   });
 }
 
@@ -348,7 +373,7 @@ export async function terminalizeUnavailablePaidReportV4Core(
       throw new Error("V4 unavailable terminalization requires its exact standard paid core job lineage.");
     }
 
-    const order = (await tx<Array<V4OrderCommerceRow & { site_snapshot_id: string | null }>>`
+    const order = (await tx<Array<V4OrderCommerceRow>>`
       SELECT id,report_id,site_snapshot_id,fulfillment_job_id,provider,amount_minor,currency,report_locale,
         product_code,fulfillment_methodology,recommendation_report_version,business_question_set_id,
         payment_status,fulfillment_status,refund_status,delivery_status
@@ -520,13 +545,13 @@ interface V4ArtifactCommerceRow {
   active_pdf_sha256: string | null; active_pdf_storage_key: string | null; active_ready_at: string | null;
 }
 interface V4JobCommerceRow {
-  id: string; report_id: string; locale: string; stage: string; execution_state: string; checkpoint_revision: number; lease_owner: string | null;
+  id: string; report_id: string; site_snapshot_id: string | null; locale: string; stage: string; execution_state: string; checkpoint_revision: number; lease_owner: string | null;
   lease_expires_at: string | null; credit_reservation_id: string | null; product_contract: string; fulfillment_methodology: string | null;
   recommendation_report_version: number | null; artifact_contract: string | null; business_question_set_id: string | null;
   reason: string; correction_id: string | null; replacement_fulfillment_id: string | null;
 }
 interface V4OrderCommerceRow {
-  id: string; report_id: string; fulfillment_job_id: string | null; provider: string; amount_minor: number; currency: string;
+  id: string; report_id: string; site_snapshot_id: string | null; fulfillment_job_id: string | null; provider: string; amount_minor: number; currency: string;
   report_locale: string; product_code: string; fulfillment_methodology: string | null; recommendation_report_version: number | null;
   business_question_set_id: string | null; payment_status: string; fulfillment_status: string; refund_status: string; delivery_status: string;
 }
@@ -549,6 +574,57 @@ interface V4UnavailableQuestionCheckpointRow {
   provider_call_count: number;
   answer_payload: unknown;
   answer_content_hash: string | null;
+}
+
+async function ensurePaidReportV4EnhancementJob(
+  tx: postgres.TransactionSql,
+  lineage: ReportV4ProductionLineage,
+  firstRun: boolean
+): Promise<ReportV4ProductionEnhancementJob> {
+  const expected = buildReportV4DiagnosisEnhancementJob(lineage);
+  let rows = await loadPaidReportV4EnhancementJobs(tx, lineage.reportId);
+  if (firstRun) {
+    if (rows.length !== 0) {
+      throw new Error("A V4 enhancement job cannot exist before its atomic core commercial terminalization.");
+    }
+    await tx`INSERT INTO scan_jobs(id,report_id,site_snapshot_id,tier,product_contract,fulfillment_methodology,
+      recommendation_report_version,artifact_contract,business_question_set_id,locale,reason,stage,execution_state,
+      current_phase,credit_reservation_id,correction_id,replacement_fulfillment_id)
+      VALUES(${expected.id},${expected.reportId},${expected.siteSnapshotId},${expected.tier},${expected.productContract},
+      ${expected.fulfillmentMethodology},${expected.recommendationReportVersion},${expected.artifactContract},
+      ${expected.questionSetId},${expected.locale},${expected.reason},${expected.stage},${expected.executionState},
+      ${REPORT_V4_DIAGNOSIS_INITIAL_PHASE},NULL,NULL,NULL)`;
+    rows = await loadPaidReportV4EnhancementJobs(tx, lineage.reportId);
+  }
+  if (rows.length !== 1) {
+    throw new Error(`Exactly one atomic V4 diagnosis enhancement job is required; found ${rows.length}.`);
+  }
+  const job = rows[0]!;
+  assertReportV4DiagnosisEnhancementJobIdentity(job, lineage);
+  return job;
+}
+
+async function loadPaidReportV4EnhancementJobs(
+  tx: postgres.TransactionSql,
+  reportId: string
+): Promise<ReportV4ProductionEnhancementJob[]> {
+  const rows = await tx<Array<{
+    id:string;report_id:string;site_snapshot_id:string|null;tier:string;product_contract:string;
+    fulfillment_methodology:string|null;recommendation_report_version:number|null;artifact_contract:string|null;
+    business_question_set_id:string|null;locale:string;reason:string;stage:string;execution_state:string;
+    credit_reservation_id:string|null;correction_id:string|null;replacement_fulfillment_id:string|null;
+  }>>`SELECT id,report_id,site_snapshot_id,tier,product_contract,fulfillment_methodology,
+    recommendation_report_version,artifact_contract,business_question_set_id,locale,reason,stage,execution_state,
+    credit_reservation_id,correction_id,replacement_fulfillment_id FROM scan_jobs
+    WHERE report_id=${reportId} AND reason='v4_diagnosis_enhancement' FOR UPDATE`;
+  return rows.map((row) => ({
+    id:row.id,reportId:row.report_id,siteSnapshotId:row.site_snapshot_id as null,tier:row.tier,
+    productContract:row.product_contract,fulfillmentMethodology:row.fulfillment_methodology,
+    recommendationReportVersion:row.recommendation_report_version,artifactContract:row.artifact_contract,
+    questionSetId:row.business_question_set_id,locale:row.locale,reason:row.reason,stage:row.stage,
+    executionState:row.execution_state,creditReservationId:row.credit_reservation_id,
+    correctionId:row.correction_id,replacementFulfillmentId:row.replacement_fulfillment_id
+  }));
 }
 
 function assertV4CoreArtifact(row: V4ArtifactCommerceRow, report: CombinedGeoReportV4): void {

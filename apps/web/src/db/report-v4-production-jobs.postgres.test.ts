@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabase, getSqlClient, initializeDatabaseEnvironment } from "./index";
-import { createReportV4ProductionJobRepository } from "./report-v4-production-jobs";
+import { buildReportV4DiagnosisEnhancementJob, createReportV4ProductionJobRepository } from "./report-v4-production-jobs";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const describeDisposablePostgres = adminUrl ? describe : describe.skip;
@@ -53,6 +53,7 @@ describeDisposablePostgres("V4 production job lineage PostgreSQL repository", ()
     enhancementJobId = results[0]!.id;
 
     expect(new Set(results.map((job) => job.id))).toHaveLength(1);
+    expect(results[0]).toEqual(buildReportV4DiagnosisEnhancementJob(lineage));
     const jobs = await getSqlClient()<Array<{ id:string;credit_reservation_id:string|null;reason:string }>>`
       SELECT id,credit_reservation_id,reason FROM scan_jobs
       WHERE report_id=${ids.report} AND reason='v4_diagnosis_enhancement'`;

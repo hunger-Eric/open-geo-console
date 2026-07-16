@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { terminalizePaidReportV4Core, terminalizeUnavailablePaidReportV4Core } from "./public-source-commerce";
+import { buildReportV4DiagnosisEnhancementJob } from "./report-v4-production-jobs";
 
 const database = vi.hoisted(() => ({
   ensureDatabase: vi.fn(),
@@ -88,7 +89,10 @@ describe("V4 core commercial terminalization admission", () => {
     const fake = fakeLimitedCommerceDatabase(report("completed_limited"));
     database.getSqlClient.mockReturnValue({ begin: fake.begin });
     const first = await terminalizePaidReportV4Core({ report: report("completed_limited"), workerId: "worker-v4" });
-    expect(first).toMatchObject({ outcome: "completed_limited", refundId: "refund-v4" });
+    expect(first).toMatchObject({
+      outcome: "completed_limited", refundId: "refund-v4",
+      enhancementJobId: expect.stringMatching(/^v4-diagnosis-job-[a-f0-9]{64}$/)
+    });
     expect(fake.state).toMatchObject({
       jobStage: "completed_limited",
       orderStatus: "completed_limited",
@@ -101,7 +105,10 @@ describe("V4 core commercial terminalization admission", () => {
       transitions: 1
     });
     const reentry = await terminalizePaidReportV4Core({ report: report("completed_limited"), workerId: "worker-v4" });
-    expect(reentry).toMatchObject({ refundId: "refund-v4", accessTokenId: "token-v4", emailDeliveryId: "email-v4" });
+    expect(reentry).toMatchObject({
+      refundId: "refund-v4", accessTokenId: "token-v4", emailDeliveryId: "email-v4",
+      enhancementJobId: first.enhancementJobId
+    });
     expect(fake.state).toMatchObject({ creditsRemaining: 1, refunds: 1, tokens: 1, emails: 1, transitions: 1 });
   });
 
@@ -198,8 +205,13 @@ function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhance
     refunds: 0,
     tokens: 0,
     emails: 0,
-    transitions: 0
+    transitions: 0,
+    enhancements: 0
   };
+  const enhancement = buildReportV4DiagnosisEnhancementJob({
+    reportId:"report-v4",orderId:"order-v4",coreJobId:"job-v4",coreArtifactRevisionId:"core-v4",
+    configSnapshotId:"config-v4",siteSnapshotId:"snapshot-v4",questionSetId:"questions-v4",locale:"zh"
+  });
   const tx = async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const sql = strings.join("?").replaceAll(/\s+/gu, " ").trim();
     if (sql.includes("pg_advisory_xact_lock")) return [];
@@ -218,8 +230,8 @@ function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhance
       active_report_id: "report-v4", active_html_sha256: "html-hash", active_pdf_sha256: null,
       active_pdf_storage_key: null, active_ready_at: "2026-07-17T00:00:00.000Z"
     }];
-    if (sql.includes("FROM scan_jobs WHERE")) return [{
-      id: "job-v4", report_id: "report-v4", locale: "zh", stage: state.jobStage, execution_state: state.jobExecution,
+    if (sql.includes("FROM scan_jobs WHERE id=")) return [{
+      id: "job-v4", report_id: "report-v4", site_snapshot_id: "snapshot-v4", locale: "zh", stage: state.jobStage, execution_state: state.jobExecution,
       checkpoint_revision: 7, lease_owner: state.jobExecution === "running" ? "worker-v4" : null,
       lease_expires_at: state.jobExecution === "running" ? "2099-01-01T00:00:00.000Z" : null,
       credit_reservation_id: "credit-v4", product_contract: "recommendation_forensics_v1",
@@ -228,7 +240,7 @@ function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhance
       correction_id: null, replacement_fulfillment_id: null
     }];
     if (sql.includes("FROM payment_orders WHERE id=") && sql.includes("fulfillment_job_id")) return [{
-      id: "order-v4", report_id: "report-v4", fulfillment_job_id: "job-v4", provider: "airwallex",
+      id: "order-v4", report_id: "report-v4", site_snapshot_id: "snapshot-v4", fulfillment_job_id: "job-v4", provider: "airwallex",
       amount_minor: 2900, currency: "USD", report_locale: "zh", product_code: "recommendation_forensics_v1",
       fulfillment_methodology: "two_stage_geo_report_v4", recommendation_report_version: 4,
       business_question_set_id: "questions-v4", payment_status: "paid", fulfillment_status: state.orderStatus,
@@ -250,6 +262,14 @@ function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhance
     if (sql.startsWith("SELECT id,report_id,artifact_scope FROM report_access_tokens")) return [{ id: "token-v4", report_id: "report-v4", artifact_scope: "combined_geo_report_v4" }];
     if (sql.startsWith("INSERT INTO email_deliveries")) { state.emails = 1; return []; }
     if (sql.startsWith("SELECT id,order_id,report_id,template_type FROM email_deliveries")) return [{ id: "email-v4", order_id: "order-v4", report_id: "report-v4", template_type: "limited_report_refund" }];
+    if (sql.includes("FROM scan_jobs") && sql.includes("reason='v4_diagnosis_enhancement'")) return state.enhancements ? [{
+      id:enhancement.id,report_id:enhancement.reportId,site_snapshot_id:null,tier:enhancement.tier,
+      product_contract:enhancement.productContract,fulfillment_methodology:enhancement.fulfillmentMethodology,
+      recommendation_report_version:enhancement.recommendationReportVersion,artifact_contract:enhancement.artifactContract,
+      business_question_set_id:enhancement.questionSetId,locale:enhancement.locale,reason:enhancement.reason,
+      stage:enhancement.stage,execution_state:enhancement.executionState,credit_reservation_id:null,correction_id:null,replacement_fulfillment_id:null
+    }] : [];
+    if (sql.startsWith("INSERT INTO scan_jobs")) { state.enhancements = 1; return []; }
     throw new Error(`Unexpected SQL in V4 commerce fixture: ${sql}; values=${values.length}`);
   };
   return { state, begin: async (work: (transaction: typeof tx) => Promise<unknown>) => work(tx) };
