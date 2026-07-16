@@ -2,12 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AI_WEBSITE_REPORT_VERSION,
   AI_REPORT_PROMPT_VERSION,
+  COMBINED_GEO_REPORT_CONTRACT,
+  COMBINED_GEO_REPORT_V2_CONTRACT,
+  COMBINED_GEO_REPORT_V3_CONTRACT,
+  COMBINED_GEO_REPORT_V4_CONTRACT,
   OpenAiCompatibleClient,
   ReportLanguageValidationError,
   ReportValidationError,
   analyzePageBatch,
   planPagesWithRecovery,
   parseAiWebsiteReportV1,
+  parseCombinedGeoReportV1,
+  parseCombinedGeoReportV2,
+  parseCombinedGeoReportV3,
+  parseCombinedGeoReportV4,
   planPages,
   preparePlanningCandidates,
   synthesizeWebsiteReport,
@@ -20,6 +28,26 @@ import {
   type JsonCompletionResult,
   type ReportSynthesisInput
 } from "./index";
+
+// @requirement GEO-V4-CONTRACT-01
+// @requirement GEO-V4-LEGACY-01
+describe("combined report public exports", () => {
+  it("adds V4 without removing or widening the historical V1-V3 exports", () => {
+    expect([
+      COMBINED_GEO_REPORT_CONTRACT,
+      COMBINED_GEO_REPORT_V2_CONTRACT,
+      COMBINED_GEO_REPORT_V3_CONTRACT,
+      COMBINED_GEO_REPORT_V4_CONTRACT
+    ]).toEqual([
+      "combined_geo_report_v1",
+      "combined_geo_report_v2",
+      "combined_geo_report_v3",
+      "combined_geo_report_v4"
+    ]);
+    expect([parseCombinedGeoReportV1, parseCombinedGeoReportV2, parseCombinedGeoReportV3, parseCombinedGeoReportV4])
+      .toEqual([expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function)]);
+  });
+});
 
 function mockClient(values: unknown[], modelId = "mock-model"): JsonCompletionClient {
   let call = 0;

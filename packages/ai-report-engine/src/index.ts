@@ -20,3 +20,4 @@ export * from "./open-geo-answer-v3";
 export * from "./source-selection-diagnosis-v1";
 export * from "./combined-geo-report-v3";
 export * from "./generative-search-answer";
+export * from "./combined-geo-report-v4";
