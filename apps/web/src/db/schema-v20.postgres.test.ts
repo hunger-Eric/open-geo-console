@@ -17,7 +17,7 @@ describeDisposablePostgres("schema v20 provider evidence persistence", () => {
     const sql = postgres(withDatabase(adminUrl!, databaseName), { max: 1, prepare: false });
     try {
       await sql.begin(async (tx) => { for (const statement of DATABASE_MIGRATIONS) await tx.unsafe(statement); });
-      expect(DATABASE_SCHEMA_VERSION).toBe(24);
+      expect(DATABASE_SCHEMA_VERSION).toBe(25);
       expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining([...V20_DATABASE_MIGRATIONS]));
       const columns = await sql<{ column_name: string }[]>`SELECT column_name FROM information_schema.columns WHERE table_name='market_snapshot_questions'`;
       expect(columns.map(({ column_name }) => column_name)).toEqual(expect.arrayContaining(["snapshot_kind", "parent_snapshot_id", "candidate_set_hash", "query_plan_version"]));
@@ -28,7 +28,7 @@ describeDisposablePostgres("schema v20 provider evidence persistence", () => {
       expect(definitions).toContain("combined_geo_report_v2");
       expect(definitions).toContain("evidence_refresh");
 
-      await sql`INSERT INTO public_search_surface_authorities(authority_version,surface_id,surface_version,environment,locale_capabilities,region_capabilities,terms_reviewed_at,evidence_references,captured_at,active) VALUES('authority','surface','v1','staging','["en"]','["US"]',now(),'["review"]',now(),true)`;
+      await sql`INSERT INTO public_search_surface_authorities(authority_version,adapter_id,provider_id,product_id,model_id,adapter_version,surface_id,surface_version,environment,locale_capabilities,region_capabilities,terms_reviewed_at,evidence_references,captured_at,active) VALUES('authority','adapter','provider','product','model','adapter-v1','surface','v1','staging','["en"]','["US"]',now(),'["review"]',now(),true)`;
       await sql`INSERT INTO market_snapshot_questions(id,cache_identity,normalized_question,question_hash,locale,region,surface_authority_version,surface_id,surface_version,fanout_version,completion_version,snapshot_kind,query_plan_version) VALUES('historical','historical-cache','question','hash','en','US','authority','surface','v1','legacy',1,'standard_question','legacy-standard-v1')`;
       expect((await sql<{ snapshot_kind: string }[]>`SELECT snapshot_kind FROM market_snapshot_questions WHERE id='historical'`)[0]?.snapshot_kind).toBe("standard_question");
 

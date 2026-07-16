@@ -17,14 +17,14 @@ describeDisposablePostgres("schema v19 staging presentation refresh",()=>{
     const sql=postgres(withDatabase(adminUrl!,databaseName),{max:1,prepare:false});
     try{
       await sql.begin(async(tx)=>{for(const statement of DATABASE_MIGRATIONS)await tx.unsafe(statement);});
-      expect(DATABASE_SCHEMA_VERSION).toBe(24);
+      expect(DATABASE_SCHEMA_VERSION).toBe(25);
       expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining([...V19_DATABASE_MIGRATIONS]));
       await sql`INSERT INTO scan_reports(id,url,payload,report_locale) VALUES('report','https://example.com','{}','en')`;
       await sql`INSERT INTO scan_jobs(id,report_id,tier,product_contract,locale,fulfillment_methodology,recommendation_report_version)
         VALUES('original','report','deep','recommendation_forensics_v1','en','public_search_source_forensics_v1',2)`;
       await sql`INSERT INTO payment_orders(id,checkout_idempotency_hmac,provider,report_id,fulfillment_job_id,site_key,customer_email_encrypted,
-        customer_email_hmac,email_key_version,product_code,catalog_version,terms_version,refund_policy_version,report_locale,currency,amount_minor)
-        VALUES('order','checkout','stripe','report','original','example.com','cipher','email','v1','recommendation_forensics_v1','v1','v1','v1','en','USD',100)`;
+        customer_email_hmac,email_key_version,product_code,catalog_version,terms_version,refund_policy_version,report_locale,currency,amount_minor,fulfillment_methodology,recommendation_report_version)
+        VALUES('order','checkout','stripe','report','original','example.com','cipher','email','v1','recommendation_forensics_v1','v1','v1','v1','en','USD',100,'public_search_source_forensics_v1',2)`;
       await sql`INSERT INTO report_business_question_sets(id,report_id,order_id,revision,locale,region,status,confidence,generation_rule_version,neutralization_version,profile_evidence_identity)
         VALUES('questions','report','order',1,'en','US','candidate','high','v1','v1','profile')`;
       await sql`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,revision,artifact_contract,status,payload_identity_hash,html_sha256,pdf_sha256,pdf_storage_key,ready_at)

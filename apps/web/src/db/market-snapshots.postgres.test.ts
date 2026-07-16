@@ -146,12 +146,12 @@ describePostgres("public-search market snapshot PostgreSQL authority", () => {
       locale: surface.locale,
       region: surface.region,
       kind: "supplier_discovery",
-      exactText: "深圳到台湾的运输公司有哪些？",
-      normalizedText: "深圳到台湾的运输公司有哪些？",
+      exactText: "深圳到台湾的冷链运输公司有哪些？",
+      normalizedText: "深圳到台湾的冷链运输公司有哪些？",
       derivation: {
         ruleId: "direct",
         evidenceSourceIds: ["public-fixture"],
-        subject: "深圳到台湾运输",
+        subject: "深圳到台湾冷链运输",
         broadened: false
       }
     };

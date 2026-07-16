@@ -18,6 +18,22 @@ describe("combined snapshot reference cutoff", () => {
       new Date("2026-08-20T00:00:00.000Z"),
     )).toEqual({ evidenceCutoff: "2026-07-22T00:00:00.000Z", freshnessState: "historical" });
   });
+
+  it("tolerates bounded application and database clock skew", () => {
+    expect(snapshotReferenceBinding(
+      "2026-07-14T05:27:15.000Z",
+      "2026-07-14T05:27:15.000Z",
+      new Date("2026-07-14T05:27:10.000Z"),
+    )).toEqual({ evidenceCutoff: "2026-07-14T05:27:15.000Z", freshnessState: "fresh" });
+  });
+
+  it("rejects timestamps beyond the bounded clock-skew allowance", () => {
+    expect(() => snapshotReferenceBinding(
+      "2026-07-14T05:29:00.001Z",
+      "2026-07-14T05:27:12.000Z",
+      new Date("2026-07-14T05:28:00.000Z"),
+    )).toThrow(/future/i);
+  });
 });
 
 describe("combined V3 commercial outcome", () => {

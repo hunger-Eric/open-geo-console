@@ -128,12 +128,14 @@ export async function terminalizePaidCombinedReport(input: {
 }
 export function snapshotReferenceBinding(reportCutoff:string,snapshotCompletedAt:string,now=new Date()):{evidenceCutoff:string;freshnessState:"fresh"|"historical"|"insufficient"}{
   const reportTime=Date.parse(reportCutoff),completedTime=Date.parse(snapshotCompletedAt),nowTime=now.getTime();
-  if(!Number.isFinite(reportTime)||!Number.isFinite(completedTime)||completedTime>nowTime)throw new Error("Snapshot reference timestamps are invalid.");
+  const latestAcceptedTime=nowTime+SNAPSHOT_CLOCK_SKEW_TOLERANCE_MS;
+  if(!Number.isFinite(reportTime)||!Number.isFinite(completedTime)||completedTime>latestAcceptedTime)throw new Error("Snapshot reference timestamps are invalid.");
   const cutoff=Math.max(reportTime,completedTime);
-  if(cutoff>nowTime)throw new Error("Snapshot reference cutoff cannot be in the future.");
+  if(cutoff>latestAcceptedTime)throw new Error("Snapshot reference cutoff cannot be in the future.");
   const age=cutoff-completedTime;
   return {evidenceCutoff:new Date(cutoff).toISOString(),freshnessState:age<=7*24*60*60_000?"fresh":age<=30*24*60*60_000?"historical":"insufficient"};
 }
+const SNAPSHOT_CLOCK_SKEW_TOLERANCE_MS=60_000;
 function sha(parts:string[]):string{return createHash("sha256").update(parts.join("\0")).digest("hex");}
 export function combinedV3CommercialOutcome(cards: readonly OpenGeoAnswerCardV3[]): "completed" | "completed_limited" | "failed" {
   if(cards.length!==3)throw new TypeError("V3 commercial outcome requires exactly three answer cards.");

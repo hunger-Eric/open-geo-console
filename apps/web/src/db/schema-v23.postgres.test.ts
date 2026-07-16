@@ -21,15 +21,15 @@ describeDisposablePostgres("schema v23 replacement fulfillment lineage", () => {
     const sql = postgres(withDatabase(adminUrl!, databaseName), { max: 1, prepare: false });
     try {
       await sql.begin(async (tx) => { for (const statement of DATABASE_MIGRATIONS) await tx.unsafe(statement); });
-      expect(DATABASE_SCHEMA_VERSION).toBe(24);
+      expect(DATABASE_SCHEMA_VERSION).toBe(25);
       expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining([...V23_DATABASE_MIGRATIONS]));
 
       await sql`INSERT INTO scan_reports(id,url,payload,report_locale,technical_status) VALUES('report-1','https://example.com','{}','zh','completed')`;
       await sql`INSERT INTO scan_jobs(id,report_id,tier,product_contract,locale,fulfillment_methodology,recommendation_report_version,artifact_contract,stage)
         VALUES('failed-job','report-1','deep','recommendation_forensics_v1','zh','public_search_source_forensics_v1',2,'combined_geo_report_v3','failed')`;
       await sql`INSERT INTO payment_orders(id,checkout_idempotency_hmac,provider,report_id,fulfillment_job_id,site_key,customer_email_encrypted,
-        customer_email_hmac,email_key_version,product_code,catalog_version,terms_version,refund_policy_version,report_locale,currency,amount_minor,payment_status,fulfillment_status,refund_status)
-        VALUES('order-1','checkout-1','airwallex','report-1','failed-job','example.com','cipher','email','v1','recommendation_forensics_v1','v1','v1','v1','zh','USD',100,'paid','failed','failed')`;
+        customer_email_hmac,email_key_version,product_code,catalog_version,terms_version,refund_policy_version,report_locale,currency,amount_minor,payment_status,fulfillment_status,refund_status,fulfillment_methodology,recommendation_report_version)
+        VALUES('order-1','checkout-1','airwallex','report-1','failed-job','example.com','cipher','email','v1','recommendation_forensics_v1','v1','v1','v1','zh','USD',100,'paid','failed','failed','public_search_source_forensics_v1',2)`;
       await sql`INSERT INTO report_business_question_sets(id,report_id,order_id,revision,locale,region,status,confidence,generation_rule_version,neutralization_version,profile_evidence_identity)
         VALUES('questions-1','report-1','order-1',1,'zh','CN','candidate','high','v1','v1','profile')`;
       await sql`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,revision,artifact_contract,status,payload_identity_hash)
