@@ -2950,6 +2950,27 @@ export const V32_DATABASE_MIGRATIONS = [
    END $$`
 ] as const;
 
+export const V33_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS report_v4_website_synthesis_checkpoints (
+    identity_hash text PRIMARY KEY, report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+    order_id text NOT NULL REFERENCES payment_orders(id) ON DELETE RESTRICT,
+    core_job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+    config_snapshot_id text NOT NULL REFERENCES report_v4_config_snapshots(id) ON DELETE RESTRICT,
+    site_snapshot_id text NOT NULL REFERENCES report_v4_site_snapshots(id) ON DELETE RESTRICT,
+    operation_id text NOT NULL, profile_id text NOT NULL, state text NOT NULL DEFAULT 'queued',
+    worker_id text, lease_expires_at timestamptz, provider_call_count integer NOT NULL DEFAULT 0,
+    correction_count integer NOT NULL DEFAULT 0, output_payload jsonb, output_hash text, error_code text,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT report_v4_website_synthesis_checkpoint_state_check CHECK(state IN ('queued','running','completed','failed')),
+    CONSTRAINT report_v4_website_synthesis_checkpoint_identity_check CHECK(identity_hash ~ '^[a-f0-9]{64}$' AND operation_id <> '' AND profile_id <> ''),
+    CONSTRAINT report_v4_website_synthesis_checkpoint_calls_check CHECK(provider_call_count BETWEEN 0 AND 1 AND correction_count = 0),
+    CONSTRAINT report_v4_website_synthesis_checkpoint_hash_check CHECK(output_hash IS NULL OR output_hash ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT report_v4_website_synthesis_checkpoint_payload_check CHECK((state='completed' AND output_payload IS NOT NULL AND output_hash IS NOT NULL) OR (state<>'completed' AND output_payload IS NULL AND output_hash IS NULL))
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_website_synthesis_checkpoint_lineage_uidx ON report_v4_website_synthesis_checkpoints(report_id,order_id,core_job_id,config_snapshot_id,site_snapshot_id,operation_id,profile_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_website_synthesis_checkpoint_core_uidx ON report_v4_website_synthesis_checkpoints(core_job_id)`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -2974,7 +2995,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 29, migrations: V29_DATABASE_MIGRATIONS },
   { version: 30, migrations: V30_DATABASE_MIGRATIONS },
   { version: 31, migrations: V31_DATABASE_MIGRATIONS },
-  { version: 32, migrations: V32_DATABASE_MIGRATIONS }
+  { version: 32, migrations: V32_DATABASE_MIGRATIONS },
+  { version: 33, migrations: V33_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {
