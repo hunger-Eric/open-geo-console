@@ -2889,6 +2889,26 @@ export const V30_DATABASE_MIGRATIONS = [
    FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_diagnosis_checkpoint_mutation()`
 ] as const;
 
+export const V31_DATABASE_MIGRATIONS = [
+  `ALTER TABLE report_v4_site_snapshot_pages
+   ADD COLUMN IF NOT EXISTS retained_cleaned_text text`,
+  `ALTER TABLE report_v4_site_snapshot_pages
+   DROP CONSTRAINT IF EXISTS report_v4_site_snapshot_pages_retained_text_check`,
+  `ALTER TABLE report_v4_site_snapshot_pages
+   ADD CONSTRAINT report_v4_site_snapshot_pages_retained_text_check CHECK (
+     (
+       analyzable=true
+       AND retained_cleaned_text IS NOT NULL
+       AND length(btrim(retained_cleaned_text)) > 0
+       AND char_length(retained_cleaned_text) <= 100000
+       AND read_mode IS NOT NULL
+       AND content_hash IS NOT NULL
+       AND exclusion_reason IS NULL
+     )
+     OR (analyzable=false AND retained_cleaned_text IS NULL)
+   ) NOT VALID`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -2911,7 +2931,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 27, migrations: V27_DATABASE_MIGRATIONS },
   { version: 28, migrations: V28_DATABASE_MIGRATIONS },
   { version: 29, migrations: V29_DATABASE_MIGRATIONS },
-  { version: 30, migrations: V30_DATABASE_MIGRATIONS }
+  { version: 30, migrations: V30_DATABASE_MIGRATIONS },
+  { version: 31, migrations: V31_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

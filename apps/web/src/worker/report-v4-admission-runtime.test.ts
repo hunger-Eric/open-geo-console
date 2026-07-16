@@ -21,8 +21,23 @@ import type {
 // @requirement GEO-V4-CRAWL-02
 // @requirement GEO-V4-CRAWL-03
 // @requirement GEO-V4-CRAWL-04
+// @requirement GEO-V4-TOKEN-02
 
 describe("recoverable V4 admission runtime", () => {
+  it("checkpoints and finalizes exact cleaned text while keeping the customer-safe preview at 1,000 characters", async () => {
+    const retainedText = `${"Exact cleaned evidence ".repeat(80)}tail`;
+    const harness = runtimeHarness([candidate(1)], {
+      extractAnalyzableText: () => retainedText
+    });
+
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 1, successfulPages: 1, failedPages: 0 });
+    expect(harness.persistedCheckpoint!.pages[0]).toMatchObject({
+      retainedText,
+      contentHash: sha(retainedText),
+      summary: retainedText.replace(/\s+/g, " ").trim().slice(0, 1_000)
+    });
+    expect(harness.finalized!.pages[0]).toMatchObject({ retainedText, contentHash: sha(retainedText) });
+  });
   it("propagates an exact caller abort that lands between the preflight check and operation listener setup", async () => {
     const callerReason = new Error("caller lease aborted in setup race");
     let abortedReads = 0;
@@ -375,6 +390,7 @@ function checkpointPage(ordinal: number, normalizedUrl = "https://example.com/pa
     analyzable: true,
     readMode: "direct_readable" as const,
     summary: `Checkpoint page ${ordinal}`,
+    retainedText: `checkpoint-page-${ordinal}`,
     contentHash: sha(`checkpoint-page-${ordinal}`),
     exclusionReason: null
   };

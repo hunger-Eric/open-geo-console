@@ -211,6 +211,7 @@ export const reportV4SiteSnapshotPages = pgTable(
     analyzable: boolean("analyzable").notNull(),
     readMode: text("read_mode").$type<ReportV4SiteSnapshotReadMode>(),
     summary: text("summary"),
+    retainedCleanedText: text("retained_cleaned_text"),
     contentHash: text("content_hash"),
     exclusionReason: text("exclusion_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
@@ -223,6 +224,12 @@ export const reportV4SiteSnapshotPages = pgTable(
     check("report_v4_site_snapshot_pages_url_check", sql`${table.normalizedUrl} ~ '^https?://'`),
     check("report_v4_site_snapshot_pages_read_mode_check", sql`${table.readMode} IS NULL OR ${table.readMode} IN ('direct_readable','js_dependent')`),
     check("report_v4_site_snapshot_pages_hash_check", sql`${table.contentHash} IS NULL OR ${table.contentHash} ~ '^[a-f0-9]{64}$'`),
+    check("report_v4_site_snapshot_pages_retained_text_check", sql`(
+      ${table.analyzable}=true AND ${table.retainedCleanedText} IS NOT NULL
+      AND length(btrim(${table.retainedCleanedText})) > 0
+      AND char_length(${table.retainedCleanedText}) <= 100000 AND ${table.readMode} IS NOT NULL
+      AND ${table.contentHash} IS NOT NULL AND ${table.exclusionReason} IS NULL
+    ) OR (${table.analyzable}=false AND ${table.retainedCleanedText} IS NULL)`),
     check("report_v4_site_snapshot_pages_shape_check", sql`(
       (${table.analyzable}=true AND ${table.readMode} IS NOT NULL AND ${table.summary} IS NOT NULL AND length(btrim(${table.summary})) > 0 AND ${table.contentHash} IS NOT NULL AND ${table.exclusionReason} IS NULL)
       OR (${table.analyzable}=false AND ${table.readMode} IS NULL AND ${table.summary} IS NULL AND ${table.contentHash} IS NULL AND ${table.exclusionReason} IS NOT NULL AND length(btrim(${table.exclusionReason})) > 0)

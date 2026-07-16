@@ -15,7 +15,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-CRAWL-04
 describe("schema v30 V4 runtime persistence substrate", () => {
   it("adds only hierarchical summaries, diagnosis checkpoints and one enhancement per core", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(30);
+    expect(DATABASE_SCHEMA_VERSION).toBe(31);
     const sql = databaseMigrationsAfter(29).join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_page_summaries");
     expect(sql).toContain("source_length integer NOT NULL");
@@ -83,11 +83,11 @@ describeDisposablePostgres("schema v30 V4 runtime persistence PostgreSQL constra
       (id,report_id,site_key,status,captured_at,collector_config_identity_hash)
       VALUES('snapshot-v30','report-v30','v30.example','collecting',now(),${hash("collector-v30")})`;
     await sql`INSERT INTO report_v4_site_snapshot_pages
-      (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,content_hash)
+      (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,retained_cleaned_text,content_hash)
       VALUES
-       ('page-v30','snapshot-v30',1,'https://v30.example/','true','direct_readable','Homepage summary',${hash("page-v30")}),
-       ('page-v30-wrong','snapshot-v30',2,'https://v30.example/wrong','true','direct_readable','Wrong-content fixture',${hash("page-v30-wrong")}),
-       ('page-v30-invalid','snapshot-v30',3,'https://v30.example/invalid','true','direct_readable','Invalid-location fixture',${hash("page-v30-invalid")})`;
+       ('page-v30','snapshot-v30',1,'https://v30.example/','true','direct_readable','Homepage summary','page-v30',${hash("page-v30")}),
+       ('page-v30-wrong','snapshot-v30',2,'https://v30.example/wrong','true','direct_readable','Wrong-content fixture','page-v30-wrong',${hash("page-v30-wrong")}),
+       ('page-v30-invalid','snapshot-v30',3,'https://v30.example/invalid','true','direct_readable','Invalid-location fixture','page-v30-invalid',${hash("page-v30-invalid")})`;
 
     const chunks = [{
       order: 1,

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   beginReportV4PreAdmissionSnapshot,
   finalizeReportV4PreAdmissionSnapshot,
@@ -9,6 +9,7 @@ import {
 } from "./report-v4-site-snapshots";
 
 // @requirement GEO-V4-CRAWL-04
+// @requirement GEO-V4-TOKEN-02
 describe("V4 pre-admission site snapshot repository", () => {
   beforeEach(() => {
     delete process.env.DATABASE_URL;
@@ -65,10 +66,54 @@ describe("V4 pre-admission site snapshot repository", () => {
     });
     expect(resolved).toEqual(terminal);
     expect(resolved.pages).toHaveLength(1);
+    expect(resolved.pages[0]).toMatchObject({
+      summary: "Page 1",
+      retainedText: "page-1",
+      contentHash: sha("page-1")
+    });
 
     await expect(resolvePaidReportV4SiteSnapshot({ ...identity, siteKey: "other.example", contentIdentityHash: sha("content") })).rejects.toThrow(/identity/i);
     await expect(resolvePaidReportV4SiteSnapshot({ ...identity, collectorConfigIdentityHash: sha("other-config"), contentIdentityHash: sha("content") })).rejects.toThrow(/identity/i);
     await expect(resolvePaidReportV4SiteSnapshot({ ...identity, contentIdentityHash: sha("other-content") })).rejects.toThrow(/identity/i);
+  });
+
+  it("retains exact bounded cleaned text, rejects hash drift, and paid resolution performs zero network", async () => {
+    const identity = fixtureIdentity("retained-text");
+    await beginReportV4PreAdmissionSnapshot(identity);
+    const terminal = await finalizeReportV4PreAdmissionSnapshot({
+      ...identity,
+      status: "completed",
+      completedAt: new Date("2030-01-01T00:05:00.000Z"),
+      contentIdentityHash: sha("retained-text-content"),
+      candidateUrlCount: 1,
+      pages: pages(1)
+    });
+    expect(terminal.pages[0]!.retainedText).toBe("page-1");
+    expect((await loadReportV4PreAdmissionSnapshot(identity))!.pages[0]!.retainedText).toBe("page-1");
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    try {
+      const paid = await resolvePaidReportV4SiteSnapshot({
+        ...identity,
+        contentIdentityHash: sha("retained-text-content")
+      });
+      expect(paid.pages[0]!.retainedText).toBe("page-1");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+
+    for (const [suffix, invalidPage] of [
+      ["blank", { ...pages(1)[0]!, retainedText: "   ", contentHash: sha("   ") }],
+      ["too-long", { ...pages(1)[0]!, retainedText: "x".repeat(100_001), contentHash: sha("x".repeat(100_001)) }],
+      ["hash-drift", { ...pages(1)[0]!, retainedText: "exact text", contentHash: sha("different text") }]
+    ] as const) {
+      await expect(finalizeFixture(`invalid-${suffix}`, "completed", [invalidPage], 1))
+        .rejects.toThrow(/retained|cleaned|100,?000|hash/i);
+    }
+    await expect(finalizeFixture("excluded-retained", "completed_limited", [
+      pages(1)[0]!, { ...excludedPage(2), retainedText: "forbidden private text" }
+    ], 2)).rejects.toThrow(/excluded.*retain|retained.*excluded/i);
   });
 
   it("makes concurrent begin/finalize idempotent but rejects a second identity or terminal overwrite", async () => {
@@ -208,6 +253,7 @@ function pages(count: number): ReportV4SiteSnapshotPageInput[] {
     analyzable: true,
     readMode: index % 2 === 0 ? "direct_readable" : "js_dependent",
     summary: `Page ${index + 1}`,
+    retainedText: `page-${index + 1}`,
     contentHash: sha(`page-${index + 1}`),
     exclusionReason: null
   }));
@@ -221,6 +267,7 @@ function excludedPage(ordinal: number): ReportV4SiteSnapshotPageInput {
     analyzable: false,
     readMode: null,
     summary: null,
+    retainedText: null,
     contentHash: null,
     exclusionReason: "ai_readability_limited"
   };

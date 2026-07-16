@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import type postgres from "postgres";
 import { ensureDatabase, getSqlClient, isMemoryPersistence } from "./index";
 import type { ReportV4SiteSnapshotReadMode, ReportV4SiteSnapshotStatus } from "./schema";
 
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
+const RETAINED_TEXT_LIMIT = 100_000;
 const TERMINAL_STATUSES = new Set<ReportV4SiteSnapshotStatus>([
   "completed",
   "completed_limited",
@@ -26,6 +28,7 @@ export interface ReportV4SiteSnapshotPageInput {
   analyzable: boolean;
   readMode: ReportV4SiteSnapshotReadMode | null;
   summary: string | null;
+  retainedText?: string | null;
   contentHash: string | null;
   exclusionReason: string | null;
 }
@@ -40,8 +43,9 @@ export interface ReportV4SiteSnapshotRecord extends ReportV4SiteSnapshotIdentity
   createdAt: Date;
 }
 
-export interface ReportV4SiteSnapshotPageRecord extends ReportV4SiteSnapshotPageInput {
+export interface ReportV4SiteSnapshotPageRecord extends Omit<ReportV4SiteSnapshotPageInput, "retainedText"> {
   snapshotId: string;
+  retainedText: string | null;
   createdAt: Date;
 }
 
@@ -97,7 +101,7 @@ export async function beginReportV4PreAdmissionSnapshot(
         id,report_id,site_key,status,captured_at,collector_config_identity_hash,
         candidate_url_count,analyzable_page_count,excluded_page_count
       ) VALUES (
-        ${identity.id},${identity.reportId},${identity.siteKey},'collecting',${identity.capturedAt},
+        ${identity.id},${identity.reportId},${identity.siteKey},'collecting',${identity.capturedAt.toISOString()},
         ${identity.collectorConfigIdentityHash},0,0,0
       ) RETURNING *
     `;
@@ -127,16 +131,16 @@ export async function finalizeReportV4PreAdmissionSnapshot(
     for (const page of terminal.pages) {
       await tx`
         INSERT INTO report_v4_site_snapshot_pages (
-          id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,content_hash,exclusion_reason
+          id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,retained_cleaned_text,content_hash,exclusion_reason
         ) VALUES (
           ${page.id},${terminal.id},${page.ordinal},${page.normalizedUrl},${page.analyzable},${page.readMode},
-          ${page.summary},${page.contentHash},${page.exclusionReason}
+          ${page.summary},${page.retainedText},${page.contentHash},${page.exclusionReason}
         )
       `;
     }
     const updated = await tx<Array<Record<string, unknown>>>`
       UPDATE report_v4_site_snapshots SET
-        status=${terminal.status},completed_at=${terminal.completedAt},content_identity_hash=${terminal.contentIdentityHash},
+        status=${terminal.status},completed_at=${terminal.completedAt.toISOString()},content_identity_hash=${terminal.contentIdentityHash},
         candidate_url_count=${terminal.candidateUrlCount},analyzable_page_count=${terminal.analyzablePageCount},
         excluded_page_count=${terminal.excludedPageCount}
       WHERE id=${terminal.id} AND status='collecting'
@@ -183,7 +187,9 @@ export async function resolvePaidReportV4SiteSnapshot(
     assertIdentity(snapshot, expected);
     if (snapshot.contentIdentityHash !== expected.contentIdentityHash) throw new Error("V4 site snapshot identity mismatch.");
     assertPaidResolvable(snapshot);
-    return clone({ snapshot, pages: state.pages.get(snapshot.id) ?? [] });
+    const bundle = clone({ snapshot, pages: state.pages.get(snapshot.id) ?? [] });
+    assertPaidRetainedText(bundle);
+    return bundle;
   }
   await ensureDatabase();
   const rows = await getSqlClient()<Array<Record<string, unknown>>>`
@@ -196,7 +202,9 @@ export async function resolvePaidReportV4SiteSnapshot(
   assertIdentity(snapshot, expected);
   if (snapshot.contentIdentityHash !== expected.contentIdentityHash) throw new Error("V4 site snapshot identity mismatch.");
   assertPaidResolvable(snapshot);
-  return loadBundle(snapshot);
+  const bundle = await loadBundle(snapshot);
+  assertPaidRetainedText(bundle);
+  return bundle;
 }
 
 function beginMemory(identity: ReportV4SiteSnapshotIdentityInput): ReportV4SiteSnapshotRecord {
@@ -264,10 +272,14 @@ function acceptExistingBegin(
   return clone(existing);
 }
 
-type ValidatedTerminalInput = FinalizeReportV4PreAdmissionSnapshotInput & {
-  pages: ReportV4SiteSnapshotPageInput[];
+type ValidatedTerminalInput = Omit<FinalizeReportV4PreAdmissionSnapshotInput, "pages"> & {
+  pages: ValidatedReportV4SiteSnapshotPageInput[];
   analyzablePageCount: number;
   excludedPageCount: number;
+};
+
+type ValidatedReportV4SiteSnapshotPageInput = Omit<ReportV4SiteSnapshotPageInput, "retainedText"> & {
+  retainedText: string | null;
 };
 
 function validateTerminalInput(input: FinalizeReportV4PreAdmissionSnapshotInput): ValidatedTerminalInput {
@@ -322,7 +334,7 @@ function validateResolveInput(input: ResolvePaidReportV4SiteSnapshotInput): Reso
   };
 }
 
-function validatePage(page: ReportV4SiteSnapshotPageInput): ReportV4SiteSnapshotPageInput {
+function validatePage(page: ReportV4SiteSnapshotPageInput): ValidatedReportV4SiteSnapshotPageInput {
   const id = requiredText(page.id, "page id");
   if (!Number.isSafeInteger(page.ordinal) || page.ordinal < 1) throw new Error("A positive page ordinal is required.");
   let normalizedUrl: string;
@@ -336,12 +348,17 @@ function validatePage(page: ReportV4SiteSnapshotPageInput): ReportV4SiteSnapshot
   if (page.analyzable) {
     if (page.readMode !== "direct_readable" && page.readMode !== "js_dependent") throw new Error("An analyzable page requires a read mode.");
     const summary = requiredText(page.summary ?? "", "page summary");
+    if (summary.length > 1_000) throw new Error("A page summary must remain within the customer-safe 1,000-character preview limit.");
+    const retainedText = retainedCleanedText(page.retainedText);
     const contentHash = validHash(page.contentHash ?? "", "page content hash");
+    if (sha(retainedText) !== contentHash) throw new Error("The retained cleaned page text does not match its exact content hash.");
     if (page.exclusionReason !== null) throw new Error("An analyzable page cannot have an exclusion reason.");
-    return { id, ordinal: page.ordinal, normalizedUrl, analyzable: true, readMode: page.readMode, summary, contentHash, exclusionReason: null };
+    return { id, ordinal: page.ordinal, normalizedUrl, analyzable: true, readMode: page.readMode, summary, retainedText, contentHash, exclusionReason: null };
   }
-  if (page.readMode !== null || page.summary !== null || page.contentHash !== null) throw new Error("An excluded page cannot retain analyzed content.");
-  return { id, ordinal: page.ordinal, normalizedUrl, analyzable: false, readMode: null, summary: null, contentHash: null, exclusionReason: requiredText(page.exclusionReason ?? "", "page exclusion reason") };
+  if (page.readMode !== null || page.summary !== null || page.retainedText != null || page.contentHash !== null) {
+    throw new Error("An excluded page cannot retain analyzed or retained cleaned text.");
+  }
+  return { id, ordinal: page.ordinal, normalizedUrl, analyzable: false, readMode: null, summary: null, retainedText: null, contentHash: null, exclusionReason: requiredText(page.exclusionReason ?? "", "page exclusion reason") };
 }
 
 function assertIdentity(
@@ -365,6 +382,19 @@ function assertPaidResolvable(snapshot: ReportV4SiteSnapshotRecord): void {
   }
 }
 
+function assertPaidRetainedText(bundle: ReportV4SiteSnapshotBundle): void {
+  for (const page of bundle.pages) {
+    if (page.analyzable) {
+      if (page.retainedText == null || !page.retainedText.trim() || page.retainedText.length > RETAINED_TEXT_LIMIT ||
+          sha(page.retainedText) !== page.contentHash) {
+        throw new Error("The paid V4 snapshot lacks exact retained cleaned text and cannot recrawl after payment.");
+      }
+    } else if (page.retainedText !== null) {
+      throw new Error("An excluded V4 snapshot page cannot expose retained cleaned text.");
+    }
+  }
+}
+
 function sameTerminalBundle(bundle: ReportV4SiteSnapshotBundle, expected: ValidatedTerminalInput): boolean {
   const snapshot = bundle.snapshot;
   return snapshot.status === expected.status && snapshot.completedAt?.getTime() === expected.completedAt.getTime() &&
@@ -374,7 +404,7 @@ function sameTerminalBundle(bundle: ReportV4SiteSnapshotBundle, expected: Valida
 }
 
 function comparablePages(pages: readonly (ReportV4SiteSnapshotPageInput | ReportV4SiteSnapshotPageRecord)[]) {
-  return [...pages].sort((a, b) => a.ordinal - b.ordinal).map(({ id, ordinal, normalizedUrl, analyzable, readMode, summary, contentHash, exclusionReason }) => ({ id, ordinal, normalizedUrl, analyzable, readMode, summary, contentHash, exclusionReason }));
+  return [...pages].sort((a, b) => a.ordinal - b.ordinal).map(({ id, ordinal, normalizedUrl, analyzable, readMode, summary, retainedText, contentHash, exclusionReason }) => ({ id, ordinal, normalizedUrl, analyzable, readMode, summary, retainedText: retainedText ?? null, contentHash, exclusionReason }));
 }
 
 async function loadBundle(snapshot: ReportV4SiteSnapshotRecord): Promise<ReportV4SiteSnapshotBundle> {
@@ -420,6 +450,7 @@ function dbPage(row: Record<string, unknown>): ReportV4SiteSnapshotPageRecord {
     analyzable: Boolean(row.analyzable),
     readMode: row.read_mode == null ? null : String(row.read_mode) as ReportV4SiteSnapshotReadMode,
     summary: row.summary == null ? null : String(row.summary),
+    retainedText: row.retained_cleaned_text == null ? null : String(row.retained_cleaned_text),
     contentHash: row.content_hash == null ? null : String(row.content_hash),
     exclusionReason: row.exclusion_reason == null ? null : String(row.exclusion_reason),
     createdAt: new Date(row.created_at as string | Date)
@@ -450,6 +481,16 @@ function validHash(value: string, field: string): string {
   const normalized = value.trim();
   if (!HASH_PATTERN.test(normalized)) throw new Error(`A lowercase SHA-256 ${field} is required.`);
   return normalized;
+}
+
+function retainedCleanedText(value: string | null | undefined): string {
+  if (typeof value !== "string" || !value.trim()) throw new Error("An analyzable page requires non-blank retained cleaned text.");
+  if (value.length > RETAINED_TEXT_LIMIT) throw new Error("Retained cleaned page text must be at most 100,000 characters.");
+  return value;
+}
+
+function sha(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function validDate(value: Date, field: string): Date {

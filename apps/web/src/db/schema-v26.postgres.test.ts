@@ -16,7 +16,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-LEGACY-01
 describe("schema v26 V4 additive substrate", () => {
   it("registers only additive V4 tables and conditional HTML-only readiness", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(30);
+    expect(DATABASE_SCHEMA_VERSION).toBe(31);
     const sql = databaseMigrationsAfter(25).join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_site_snapshots");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_site_snapshot_pages");
@@ -57,11 +57,11 @@ describeDisposablePostgres("schema v26 V4 PostgreSQL constraints", () => {
         (id,report_id,site_key,status,captured_at,collector_config_identity_hash,candidate_url_count,analyzable_page_count,excluded_page_count)
         VALUES('snapshot-v4','report-v4','example.com','collecting',now(),${hash("a")},3,0,0)`;
       await sql`INSERT INTO report_v4_site_snapshot_pages
-        (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,content_hash)
-        VALUES('page-v4','snapshot-v4',1,'https://example.com/about',true,'direct_readable','About the company',${hash("b")})`;
+        (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,retained_cleaned_text,content_hash)
+        VALUES('page-v4','snapshot-v4',1,'https://example.com/about',true,'direct_readable','About the company','b',${hash("b")})`;
       await expect(sql`INSERT INTO report_v4_site_snapshot_pages
-        (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,content_hash)
-        VALUES('invalid-analyzable-page','snapshot-v4',2,'https://example.com/missing-summary',true,'direct_readable',${hash("b2")})`).rejects.toMatchObject({ constraint_name: "report_v4_site_snapshot_pages_shape_check" });
+        (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,retained_cleaned_text,content_hash)
+        VALUES('invalid-analyzable-page','snapshot-v4',2,'https://example.com/missing-summary',true,'direct_readable','b2',${hash("b2")})`).rejects.toMatchObject({ constraint_name: "report_v4_site_snapshot_pages_shape_check" });
       await expect(sql`INSERT INTO report_v4_site_snapshot_pages
         (id,snapshot_id,ordinal,normalized_url,analyzable)
         VALUES('invalid-excluded-page','snapshot-v4',2,'https://example.com/missing-reason',false)`).rejects.toMatchObject({ constraint_name: "report_v4_site_snapshot_pages_shape_check" });
@@ -70,14 +70,14 @@ describeDisposablePostgres("schema v26 V4 PostgreSQL constraints", () => {
       await expect(sql`UPDATE report_v4_site_snapshots SET site_key='changed.example' WHERE id='snapshot-v4'`).rejects.toThrow();
       await expect(sql`UPDATE report_v4_site_snapshot_pages SET summary='changed' WHERE id='page-v4'`).rejects.toThrow();
       await expect(sql`INSERT INTO report_v4_site_snapshot_pages
-        (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,content_hash)
-        VALUES('late-page','snapshot-v4',2,'https://example.com/late',true,'direct_readable','Late',${hash("d")})`).rejects.toThrow();
+        (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,retained_cleaned_text,content_hash)
+        VALUES('late-page','snapshot-v4',2,'https://example.com/late',true,'direct_readable','Late','d',${hash("d")})`).rejects.toThrow();
       await sql`INSERT INTO report_v4_site_snapshots
         (id,report_id,site_key,status,captured_at,collector_config_identity_hash,candidate_url_count,analyzable_page_count,excluded_page_count)
         VALUES('snapshot-limited','report-v4','example.com','collecting',now(),${hash("limited-config")},2,0,0)`;
       await sql`INSERT INTO report_v4_site_snapshot_pages
-        (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,content_hash)
-        VALUES('limited-page','snapshot-limited',1,'https://example.com/limited',true,'js_dependent','Limited coverage',${hash("limited-page")})`;
+        (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,retained_cleaned_text,content_hash)
+        VALUES('limited-page','snapshot-limited',1,'https://example.com/limited',true,'js_dependent','Limited coverage','limited-page',${hash("limited-page")})`;
       await sql`UPDATE report_v4_site_snapshots SET status='completed_limited',analyzable_page_count=1,excluded_page_count=1,
         content_identity_hash=${hash("limited-content")},completed_at=now() WHERE id='snapshot-limited'`;
       await expect(sql`UPDATE report_v4_site_snapshots SET site_key='changed-limited.example' WHERE id='snapshot-limited'`).rejects.toThrow();

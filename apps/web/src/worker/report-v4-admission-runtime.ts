@@ -18,6 +18,7 @@ import {
 const DEFAULT_DEADLINE_MS = 10 * 60 * 1_000;
 const CUSTOM_SERVICE_PAGE_COUNT = 51;
 const SUMMARY_LIMIT = 1_000;
+const RETAINED_TEXT_LIMIT = 100_000;
 
 export interface ReportV4AdmissionRuntimeConfig {
   readonly identity: ReportV4SiteSnapshotIdentityInput;
@@ -197,7 +198,16 @@ function assertCheckpointInvariants(checkpoint: ReportV4AdmissionCheckpoint): vo
       throw new Error("The V4 admission checkpoint page URL lineage is invalid.");
     }
     pageUrls.push(key);
-    if (page.analyzable) analyzablePages += 1;
+    if (page.analyzable) {
+      analyzablePages += 1;
+      if (typeof page.retainedText !== "string" || !page.retainedText.trim() ||
+          page.retainedText.length > RETAINED_TEXT_LIMIT || page.contentHash !== sha(page.retainedText) ||
+          typeof page.summary !== "string" || page.summary.length > SUMMARY_LIMIT) {
+        throw new Error("The V4 admission checkpoint retained-text evidence is invalid.");
+      }
+    } else if (page.retainedText != null) {
+      throw new Error("An excluded V4 admission checkpoint page cannot retain cleaned text.");
+    }
   });
   assertUniqueCheckpointValues(pageUrls, "page URL");
   if (analyzablePages > CUSTOM_SERVICE_PAGE_COUNT) {
@@ -253,6 +263,7 @@ function appendCollectionResult(
       analyzable: true,
       readMode: page.readability,
       summary: summarize(page.analyzableText),
+      retainedText: page.analyzableText,
       contentHash: sha(page.analyzableText),
       exclusionReason: null
     });
@@ -268,6 +279,7 @@ function appendCollectionResult(
       analyzable: false,
       readMode: null,
       summary: null,
+      retainedText: null,
       contentHash: null,
       exclusionReason: exclusion.reason
     });
@@ -295,6 +307,7 @@ function appendDeadlineGaps(checkpoint: ReportV4AdmissionCheckpoint): ReportV4Ad
       analyzable: false,
       readMode: null,
       summary: null,
+      retainedText: null,
       contentHash: null,
       exclusionReason: "deadline_exceeded"
     });

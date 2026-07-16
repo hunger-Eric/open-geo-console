@@ -87,10 +87,10 @@ async function seedCollectingSnapshot(
     const analyzable = ordinal <= 2;
     const pageId = `${snapshotId}-page-${ordinal}`;
     await sql`INSERT INTO report_v4_site_snapshot_pages
-      (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,content_hash,exclusion_reason)
+      (id,snapshot_id,ordinal,normalized_url,analyzable,read_mode,summary,retained_cleaned_text,content_hash,exclusion_reason)
       VALUES(${pageId},${snapshotId},${ordinal},${`https://example.com/${pageId}`},${analyzable},
        ${analyzable ? "direct_readable" : null},${analyzable ? `Collector ${ordinal}` : null},
-       ${analyzable ? hash(pageId) : null},${analyzable ? null : "excluded"})`;
+       ${analyzable ? pageId : null},${analyzable ? hash(pageId) : null},${analyzable ? null : "excluded"})`;
   }
 }
 

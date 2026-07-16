@@ -13,7 +13,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-DELIVERY-01
 describe("schema v27 V4 immutable runtime configuration substrate", () => {
   it("adds isolated immutable snapshots and nullable historical-compatible artifact binding", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(30);
+    expect(DATABASE_SCHEMA_VERSION).toBe(31);
     const sql = databaseMigrationsAfter(26).join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_config_snapshots");
     expect(sql).toContain("model_profile_payload jsonb NOT NULL");

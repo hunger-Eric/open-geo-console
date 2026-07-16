@@ -24,16 +24,22 @@ import {
 import type { ReportV4PreAdmissionRunner } from "./report-v4-pre-admission";
 import type { ReportV4SiteCollectorDependencies } from "./report-v4-site-collector";
 
-const SNAPSHOT_ID_CONTRACT = "report-v4-site-snapshot-id-v1";
+const SNAPSHOT_ID_CONTRACT = "report-v4-site-snapshot-id-v2";
 const PRODUCT_DEADLINE_MS = 10 * 60 * 1_000;
 const COLLECTOR_CONFIG_CONTRACT = Object.freeze({
-  version: "report-v4-site-collector-config-v1",
+  version: "report-v4-site-collector-config-v2",
   networkBoundary: "safe-fetch-pinned-dns-and-redirect-v1",
   discovery: "robots-sitemap-and-same-site-html-links-v1",
   readOrder: "raw-then-single-browser-on-empty-v1",
   admissionLimit: 50,
   customServiceThreshold: 51,
-  deadlineMs: PRODUCT_DEADLINE_MS
+  deadlineMs: PRODUCT_DEADLINE_MS,
+  retainedText: Object.freeze({
+    policy: "exact-cleaned-analyzable-text-v1",
+    maxCharactersPerPage: 100_000,
+    contentHash: "sha256-utf8-exact",
+    excludedPages: "null"
+  })
 });
 const CHECKPOINT_FIELD = "reportV4Admission";
 

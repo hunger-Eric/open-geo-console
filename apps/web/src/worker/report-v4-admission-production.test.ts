@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { CheckpointScanJobInput } from "@/db/jobs";
@@ -18,6 +19,7 @@ import { selectReportV4PreAdmissionRunner } from "./processor";
 // @requirement GEO-V4-CRAWL-02
 // @requirement GEO-V4-CRAWL-03
 // @requirement GEO-V4-CRAWL-04
+// @requirement GEO-V4-TOKEN-02
 
 describe("production V4 pre-admission composition", () => {
   it("derives frozen identity from the authoritative report and immutable job creation time", async () => {
@@ -39,12 +41,25 @@ describe("production V4 pre-admission composition", () => {
       capturedAt: new Date("2030-01-01T00:00:00.000Z")
     }).id);
     expect(expected.collectorConfigIdentityHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(expected.collectorConfigIdentityHash).not.toBe(sha(JSON.stringify({
+      version: "report-v4-site-collector-config-v1",
+      networkBoundary: "safe-fetch-pinned-dns-and-redirect-v1",
+      discovery: "robots-sitemap-and-same-site-html-links-v1",
+      readOrder: "raw-then-single-browser-on-empty-v1",
+      admissionLimit: 50,
+      customServiceThreshold: 51,
+      deadlineMs: 10 * 60 * 1_000
+    })));
     expect(harness.currentJob.checkpoint).toMatchObject({
       reportV4Admission: {
         version: 1,
         runtime: expect.objectContaining({ reportId: "report-1", capturedAt: "2030-01-01T00:00:00.000Z" }),
         robotsPolicy: { userAgent: "OpenGeoConsoleBot", rules: [], sitemaps: [] }
       }
+    });
+    expect(harness.finalized?.pages[0]).toMatchObject({
+      retainedText: "Readable https://authoritative.example/page-1",
+      contentHash: sha("Readable https://authoritative.example/page-1")
     });
   });
 
@@ -335,6 +350,10 @@ function candidate(index: number, overrides: Partial<ReportV4SiteCandidate> = {}
     contentType: "text/html",
     ...overrides
   };
+}
+
+function sha(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function admissionJob(): ScanJobRow {
