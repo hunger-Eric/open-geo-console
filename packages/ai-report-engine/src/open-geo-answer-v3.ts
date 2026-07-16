@@ -6,7 +6,11 @@ import { canonicalizePublicSourceUrl, getPublicSourceDomainIdentity } from "@ope
 import { isBlockedHostname, parseHttpUrl } from "@open-geo-console/site-crawler";
 import type { JsonCompletionClient } from "./client";
 import { sha256Hex } from "./evidence";
-import type { GenerativeSearchRefusal, GenerativeSearchSource } from "./generative-search-answer";
+import {
+  assertGenerativeSearchAnswerLanguage,
+  type GenerativeSearchRefusal,
+  type GenerativeSearchSource
+} from "./generative-search-answer";
 import {
   ReportLanguageValidationError,
   assertReportLanguage,
@@ -129,8 +133,16 @@ export function parseOpenGeoAnswerCardsV3(
   if (new Set(parsed.map(({ questionId }) => questionId)).size !== 3) {
     throw new TypeError("Open GEO V3 answer-card question IDs must be unique.");
   }
+  const generativeAnswerFields = parsed.flatMap((card, cardIndex) => {
+    if (card.answerMode !== "generative_search_v1") return [];
+    const generated = card as GenerativeSearchAnswerCardV3;
+    return [
+      { path: `answerCards[${cardIndex}].answerText`, text: generated.answerText },
+      ...(generated.refusal ? [{ path: `answerCards[${cardIndex}].refusal.reason`, text: generated.refusal.reason }] : [])
+    ];
+  });
   const generatedFields = parsed.flatMap((card, cardIndex) => {
-    if (card.answerMode === "generative_search_v1") { const generated = card as GenerativeSearchAnswerCardV3; return [{ path: `answerCards[${cardIndex}].answerText`, text: generated.answerText }, ...(generated.refusal ? [{path:`answerCards[${cardIndex}].refusal.reason`,text:generated.refusal.reason}] : []), ...generated.geoDiagnosis.targetRoles.map((text, index) => ({ path: `answerCards[${cardIndex}].geoDiagnosis.targetRoles[${index}]`, text })), ...generated.geoDiagnosis.missingEvidenceFamilies.map((text,index)=>({path:`answerCards[${cardIndex}].geoDiagnosis.missingEvidenceFamilies[${index}]`,text}))]; }
+    if (card.answerMode === "generative_search_v1") { const generated = card as GenerativeSearchAnswerCardV3; return [...generated.geoDiagnosis.targetRoles.map((text, index) => ({ path: `answerCards[${cardIndex}].geoDiagnosis.targetRoles[${index}]`, text })), ...generated.geoDiagnosis.missingEvidenceFamilies.map((text,index)=>({path:`answerCards[${cardIndex}].geoDiagnosis.missingEvidenceFamilies[${index}]`,text}))]; }
     const legacy = card as LegacyEvidenceBoundAnswerCardV3;
     return [
       ...legacy.sentences.map((sentence, sentenceIndex) => ({ path: `answerCards[${cardIndex}].sentences[${sentenceIndex}].text`, text: sentence.text })),
@@ -143,6 +155,7 @@ export function parseOpenGeoAnswerCardsV3(
     ...(context.targetAliases ?? []),
     ...(context.competitors ?? []).flatMap(({ aliases }) => aliases)
   ];
+  assertGenerativeSearchAnswerLanguage(generativeAnswerFields, context.locale);
   assertReportLanguage(generatedFields, context.locale, allowedTerms);
   return parsed as [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
 }

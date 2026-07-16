@@ -29,7 +29,7 @@ export function parseGenerativeSearchAnswerResult(value: unknown, options: { exp
   }
   if (answerText && refusal) throw new TypeError("answerText and refusal may not be supplied together.");
   if (!answerText && !refusal) throw new TypeError("nonblank answerText is required unless a typed refusal is provided.");
-  assertGenerativeAnswerLanguage([
+  assertGenerativeSearchAnswerLanguage([
     ...(answerText ? [{ path: "answerText", text: answerText }] : []),
     ...(refusal ? [{ path: "refusal.reason", text: refusal.reason }] : [])
   ], options.locale);
@@ -50,7 +50,7 @@ export function parseGenerativeSearchAnswerResult(value: unknown, options: { exp
   return { questionId, answerText, sources: [...byUrl.values()].sort((a,b) => a.providerResultOrder - b.providerResultOrder || a.canonicalUrl.localeCompare(b.canonicalUrl)), refusal, searchedAt, completedAt, providerResponseId: row.providerResponseId == null ? null : text(row.providerResponseId, "providerResponseId", 500) };
 }
 
-function assertGenerativeAnswerLanguage(
+export function assertGenerativeSearchAnswerLanguage(
   fields: readonly { path: string; text: string }[],
   locale: string
 ): void {

@@ -214,6 +214,17 @@ describe("Open GEO answer V3 contract", () => {
     expect(parsed[0]!.geoDiagnosis.citedOwnership.unknown).toBe(1);
   });
 
+  it("accepts predominantly Chinese generative cards with ordinary industry acronyms", () => {
+    const context = fixtureContext();
+    const value = generativeCards(context).map((card, index) => ({
+      ...card,
+      answerText: index === 0
+        ? "多家服务商提供跨境物流、FBA 头程和 API 对接服务，采购方应继续核验交付范围与时效。"
+        : "采购跨境物流服务时，应核验 ISO 认证、运输时效、清关责任与赔付条件。"
+    }));
+    expect(() => parseOpenGeoAnswerCardsV3(value, context)).not.toThrow();
+  });
+
   it("preserves historical cards with no answerMode", () => {
     const context=fixtureContext(); const parsed=parseOpenGeoAnswerCardsV3(cards(context),context);
     expect(parsed[0]!.answerMode).toBeUndefined(); expect("sentences" in parsed[0]!).toBe(true);
