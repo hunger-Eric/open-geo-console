@@ -35,6 +35,7 @@
     "test:ai-live": "npm run test:ai-live --workspace apps/web",
     "recommendation:methodology:audit": "npm run recommendation:methodology:audit --workspace apps/web",
     "public-search:probe": "npm run public-search:probe --workspace apps/web --",
+    "generative-answer:staging:probe": "npm run generative-answer:staging:probe --workspace apps/web --",
     "public-search:certify": "npm run public-search:certify --workspace apps/web --",
     "public-search:authority:install": "npm run public-search:authority:install --workspace apps/web --",
     "db:audit": "npm run db:audit --workspace apps/web",
