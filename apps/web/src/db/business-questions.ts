@@ -98,7 +98,11 @@ export async function confirmBusinessQuestions(input: {
       WHERE id=${input.questionSetId} AND report_id=${input.reportId} FOR UPDATE`;
     const row = rows[0];
     if (!row?.payload) throw new Error("Business question set not found.");
-    if (row.status === "locked") throw new Error("Paid business questions are permanently locked.");
+    if (row.status === "locked") {
+      const locked = row.payload as ConfirmedBusinessQuestionSet;
+      if (matchesLockedBusinessQuestions(locked, input.finalTexts)) return { confirmed: locked } as const;
+      throw new Error("Paid business questions are permanently locked.");
+    }
     if (row.status !== "candidate" && row.status !== "confirmed") throw new Error("Business questions are not correctable in their current state.");
     let confirmed: ConfirmedBusinessQuestionSet;
     try {
@@ -130,6 +134,18 @@ export async function confirmBusinessQuestions(input: {
   });
   if ("neutralizationError" in outcome) throw new TypeError(outcome.neutralizationError);
   return outcome.confirmed;
+}
+
+export function matchesLockedBusinessQuestions(
+  locked: ConfirmedBusinessQuestionSet,
+  finalTexts: readonly string[]
+): boolean {
+  return Boolean(locked.confirmedAt)
+    && locked.questions.length === 3
+    && finalTexts.length === locked.questions.length
+    && locked.questions.every((question, index) =>
+      question.privateText.trim().normalize("NFC") === finalTexts[index]?.trim().normalize("NFC")
+    );
 }
 
 export async function getBusinessQuestionSet(reportId: string, id: string): Promise<BusinessQuestionCandidateSet | ConfirmedBusinessQuestionSet | null> {
