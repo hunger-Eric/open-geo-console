@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { ProviderClaim, ProviderEvidencePassage, ProviderQualificationResult } from "@open-geo-console/citation-intelligence";
 import type { ProviderDiscoveryV1 } from "@open-geo-console/ai-report-engine";
 import type { ProviderCandidateQueryIdentity } from "@open-geo-console/public-search-observer";
+import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 import type { ScanJobPhase } from "./job-state";
 
 export const PROVIDER_DISCOVERY_CHECKPOINT_VERSION = "provider-discovery-checkpoint-v1" as const;
@@ -73,6 +74,18 @@ export interface ProviderDiscoveryPipelineDependencies {
 }
 
 export async function runProviderDiscoveryPipeline(input: {
+  identity: ProviderDiscoveryIdentity;
+  dependencies: ProviderDiscoveryPipelineDependencies;
+  hardDeadlineAt: string;
+  signal?: AbortSignal;
+}): Promise<{ providerDiscovery: ProviderDiscoveryV1; checkpoint: ProviderDiscoveryCheckpointV1; coverage: { status: "complete" | "partial" | "insufficient" } }> {
+  return runReportV4GuardedOperation({
+    guardSite: "four_snapshot",
+    delegate: () => runProviderDiscoveryPipelineUnsafe(input)
+  });
+}
+
+async function runProviderDiscoveryPipelineUnsafe(input: {
   identity: ProviderDiscoveryIdentity;
   dependencies: ProviderDiscoveryPipelineDependencies;
   hardDeadlineAt: string;

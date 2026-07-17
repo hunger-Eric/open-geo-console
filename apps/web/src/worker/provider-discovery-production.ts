@@ -32,6 +32,7 @@ import {
 import { appendCompletedMarketProviderClaims, getMarketProviderEvidenceBundle, providerClaimPersistenceHash } from "@/db/provider-evidence";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
 import type { PublicSearchAdapterIdentity } from "@/public-search-adapters/types";
+import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { createPublicSourceQuestionFanouts } from "./public-source-forensics";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
@@ -109,6 +110,36 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
   let standardSafePages = 0;
   const candidateDomains = new Map<string, string>();
 
+  const extractClaimsUnsafe: ProviderDiscoveryPipelineDependencies["extractClaims"] = async ({ passages: selected, signal }) => {
+    if (claims.length) return claims;
+    const persisted = await input.getCheckpoint();
+    if (!candidates.length) candidates = persisted?.artifacts.discovery?.candidates ?? [];
+    const verificationSnapshotId = verificationResolved?.snapshotId
+      ?? persisted?.artifacts.verification?.snapshotId
+      ?? persisted?.verificationSnapshotId
+      ?? "";
+    verificationBundle ??= await requireSnapshotBundle(verificationSnapshotId);
+    claims = await extractClaims({
+      client: input.extractionClient,
+      locale: question.locale,
+      question: question.normalizedText,
+      policy,
+      candidates,
+      passages: selected,
+      bundle: verificationBundle,
+      signal
+    });
+    if (claims.length) {
+      await appendCompletedMarketProviderClaims({ snapshotId: verificationBundle.snapshot.id, claims: claims.map((claim) => {
+        const base = { passageId: claim.passageId, providerEntityId: claim.subjectEntityId, canonicalName: claim.subjectName, genericRole: claim.genericRole,
+          policyRole: claim.policyRole, capability: claim.capability, operatingMode: claim.operatingMode, serviceScope: claim.serviceScope,
+          routeScope: claim.routeScope, exactExcerpt: claim.exactExcerpt, validationStatus: "accepted" as const, rejectionReason: null };
+        return { ...base, id: claim.claimId, claimHash: providerClaimPersistenceHash(base), extractionModel: input.extractionModel, extractionContract: PROVIDER_CLAIM_EXTRACTION_CONTRACT };
+      }) });
+    }
+    return claims;
+  };
+
   const dependencies: ProviderDiscoveryPipelineDependencies = {
     getCheckpoint: async () => sanitizePreVerificationCheckpoint(await input.getCheckpoint(), excludedIdentities),
     saveCheckpoint: input.saveCheckpoint,
@@ -161,27 +192,14 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
       if (!passages.length) passages = await loadPassages(verification.snapshotId);
       return passages;
     },
-    extractClaims: async ({ passages: selected, signal }) => {
-      if (claims.length) return claims;
-      const persisted = await input.getCheckpoint();
-      if (!candidates.length) candidates = persisted?.artifacts.discovery?.candidates ?? [];
-      const verificationSnapshotId = verificationResolved?.snapshotId
-        ?? persisted?.artifacts.verification?.snapshotId
-        ?? persisted?.verificationSnapshotId
-        ?? "";
-      verificationBundle ??= await requireSnapshotBundle(verificationSnapshotId);
-      claims = await extractClaims({ client: input.extractionClient, locale: question.locale, question: question.normalizedText, policy, candidates, passages: selected, bundle: verificationBundle, signal });
-      if (claims.length) {
-        await appendCompletedMarketProviderClaims({ snapshotId: verificationBundle.snapshot.id, claims: claims.map((claim) => {
-          const base = { passageId: claim.passageId, providerEntityId: claim.subjectEntityId, canonicalName: claim.subjectName, genericRole: claim.genericRole,
-            policyRole: claim.policyRole, capability: claim.capability, operatingMode: claim.operatingMode, serviceScope: claim.serviceScope,
-            routeScope: claim.routeScope, exactExcerpt: claim.exactExcerpt, validationStatus: "accepted" as const, rejectionReason: null };
-          return { ...base, id: claim.claimId, claimHash: providerClaimPersistenceHash(base), extractionModel: input.extractionModel, extractionContract: PROVIDER_CLAIM_EXTRACTION_CONTRACT };
-        }) });
-      }
-      return claims;
-    },
-    qualify: async ({ claims: values }) => policy.qualify({ claims: values }),
+    extractClaims: (request) => runReportV4GuardedOperation({
+      guardSite: "provider_claim",
+      delegate: () => extractClaimsUnsafe(request)
+    }),
+    qualify: async ({ claims: values }) => runReportV4GuardedOperation({
+      guardSite: "qualification",
+      delegate: () => policy.qualify({ claims: values })
+    }),
     projectProviderDiscovery: async ({ discovery, verification, retrieval, passages: selected, claims: values, qualification }) => {
       verificationBundle ??= await requireSnapshotBundle(verification.snapshotId);
       return projectProviderDiscovery({ policy, discovery, retrieval, passages: selected, claims: values, qualification, bundle: verificationBundle,

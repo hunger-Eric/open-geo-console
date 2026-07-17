@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfirmedBusinessQuestionSet, PublicSearchSurfaceAuthority } from "@open-geo-console/public-search-observer";
 import {
   bindQuestionScopedDirectEvidence,
@@ -10,6 +10,24 @@ import {
 import { runProviderDiscoveryPipeline } from "./provider-discovery-pipeline";
 
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), providerBundle: vi.fn(), snapshotBundle: vi.fn(), appendClaims: vi.fn() }));
+const providerGuardHarness = vi.hoisted(() => {
+  const state = {
+    blockedSite: null as string | null,
+    guardSites: [] as string[],
+    delegatedSites: [] as string[]
+  };
+  const blocked = new Error("blocked by Report V4 provider-discovery test guard");
+  return {
+    state,
+    blocked,
+    run: vi.fn(async (input: { guardSite: string; delegate: () => unknown | Promise<unknown> }) => {
+      state.guardSites.push(input.guardSite);
+      if (state.blockedSite === input.guardSite) throw blocked;
+      state.delegatedSites.push(input.guardSite);
+      return input.delegate();
+    })
+  };
+});
 vi.mock("./public-source-snapshot-resolver", () => ({ resolvePublicSourceSnapshot: mocks.resolve }));
 vi.mock("@/db/provider-evidence", () => ({
   getMarketProviderEvidenceBundle: mocks.providerBundle,
@@ -17,8 +35,119 @@ vi.mock("@/db/provider-evidence", () => ({
   providerClaimPersistenceHash: () => "d".repeat(64)
 }));
 vi.mock("@/db/market-snapshots", () => ({ getMarketSnapshotBundle: mocks.snapshotBundle }));
+vi.mock("@/report-v4/prohibited-operation-guard-runtime", () => ({
+  runReportV4GuardedOperation: providerGuardHarness.run
+}));
+
+beforeEach(() => {
+  providerGuardHarness.state.blockedSite = null;
+  providerGuardHarness.state.guardSites.length = 0;
+  providerGuardHarness.state.delegatedSites.length = 0;
+  providerGuardHarness.run.mockClear();
+  mocks.resolve.mockClear();
+  mocks.providerBundle.mockClear();
+  mocks.snapshotBundle.mockClear();
+  mocks.appendClaims.mockClear();
+});
 
 describe("production provider discovery composition", () => {
+  it("blocks provider claim extraction before the application adapter is called", async () => {
+    const { context, extractionClient, getCheckpoint, passage } = providerGuardContext();
+    providerGuardHarness.state.blockedSite = "provider_claim";
+
+    await expect(context.dependencies.extractClaims({ passages: [passage] }))
+      .rejects.toBe(providerGuardHarness.blocked);
+
+    expect(providerGuardHarness.state.guardSites).toEqual(["provider_claim"]);
+    expect(providerGuardHarness.state.delegatedSites).toEqual([]);
+    expect(getCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.snapshotBundle).not.toHaveBeenCalled();
+    expect(extractionClient.completeJson).not.toHaveBeenCalled();
+    expect(mocks.appendClaims).not.toHaveBeenCalled();
+  });
+
+  it("trips provider claim extraction before a populated in-memory cache can return", async () => {
+    const { context, extractionClient, getCheckpoint, passage } = providerGuardContext();
+    await context.dependencies.extractClaims({ passages: [passage] });
+    providerGuardHarness.state.guardSites.length = 0;
+    providerGuardHarness.state.delegatedSites.length = 0;
+    providerGuardHarness.state.blockedSite = "provider_claim";
+    getCheckpoint.mockClear();
+    mocks.snapshotBundle.mockClear();
+    mocks.appendClaims.mockClear();
+    extractionClient.completeJson.mockClear();
+
+    await expect(context.dependencies.extractClaims({ passages: [passage] }))
+      .rejects.toBe(providerGuardHarness.blocked);
+
+    expect(providerGuardHarness.state.guardSites).toEqual(["provider_claim"]);
+    expect(providerGuardHarness.state.delegatedSites).toEqual([]);
+    expect(getCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.snapshotBundle).not.toHaveBeenCalled();
+    expect(extractionClient.completeJson).not.toHaveBeenCalled();
+    expect(mocks.appendClaims).not.toHaveBeenCalled();
+  });
+
+  it("reuses the provider claim cache without repeating inactive database or model work", async () => {
+    const { context, extractionClient, getCheckpoint, passage } = providerGuardContext();
+
+    const first = await context.dependencies.extractClaims({ passages: [passage] });
+    const replay = await context.dependencies.extractClaims({ passages: [passage] });
+
+    expect(replay).toEqual(first);
+    expect(providerGuardHarness.state.guardSites).toEqual(["provider_claim", "provider_claim"]);
+    expect(providerGuardHarness.state.delegatedSites).toEqual(["provider_claim", "provider_claim"]);
+    expect(getCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.snapshotBundle).toHaveBeenCalledTimes(1);
+    expect(extractionClient.completeJson).toHaveBeenCalledTimes(1);
+    expect(mocks.appendClaims).toHaveBeenCalledTimes(1);
+  });
+
+  it("delegates provider claim extraction exactly once without active authority", async () => {
+    const { context, extractionClient, passage } = providerGuardContext();
+
+    await expect(context.dependencies.extractClaims({ passages: [passage] })).resolves.toBeDefined();
+
+    expect(providerGuardHarness.state.guardSites).toEqual(["provider_claim"]);
+    expect(providerGuardHarness.state.delegatedSites).toEqual(["provider_claim"]);
+    expect(extractionClient.completeJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the original provider claim adapter failure without retry", async () => {
+    const { context, extractionClient, passage } = providerGuardContext();
+    const failure = new Error("claim adapter failed");
+    extractionClient.completeJson.mockRejectedValueOnce(failure);
+
+    await expect(context.dependencies.extractClaims({ passages: [passage] })).rejects.toBe(failure);
+
+    expect(providerGuardHarness.state.guardSites).toEqual(["provider_claim"]);
+    expect(providerGuardHarness.state.delegatedSites).toEqual(["provider_claim"]);
+    expect(extractionClient.completeJson).toHaveBeenCalledTimes(1);
+    expect(mocks.appendClaims).not.toHaveBeenCalled();
+  });
+
+  it("blocks qualification before its real policy delegate", async () => {
+    const { context } = providerGuardContext();
+    providerGuardHarness.state.blockedSite = "qualification";
+
+    await expect(context.dependencies.qualify({ claims: [] })).rejects.toBe(providerGuardHarness.blocked);
+
+    expect(providerGuardHarness.state.guardSites).toEqual(["qualification"]);
+    expect(providerGuardHarness.state.delegatedSites).toEqual([]);
+  });
+
+  it("delegates qualification exactly once without active authority", async () => {
+    const { context } = providerGuardContext();
+
+    await expect(context.dependencies.qualify({ claims: [] })).resolves.toMatchObject({
+      policyId: context.policy.policyId,
+      policyVersion: context.policy.version
+    });
+
+    expect(providerGuardHarness.state.guardSites).toEqual(["qualification"]);
+    expect(providerGuardHarness.state.delegatedSites).toEqual(["qualification"]);
+  });
+
   it("binds only body excerpts that match the question to a traceable domain subject", () => {
     const fact = {
       observationId: "observation-1", queryId: "query-1", resultUrl: "https://www.ycs-express.com/service", finalUrl: "https://www.ycs-express.com/service",
@@ -239,6 +368,91 @@ describe("production provider discovery composition", () => {
     expect(mocks.snapshotBundle).not.toHaveBeenCalledWith("");
   });
 });
+
+function providerGuardContext() {
+  const passage = {
+    passageId: "passage-alpha",
+    sourceEvidenceId: "source-alpha",
+    passageOrder: 0,
+    exactExcerpt: "Alpha Logistics provides self operated freight with an owned fleet.",
+    excerptHash: "a".repeat(64),
+    relevanceScore: 100,
+    matchedEntityTerms: ["Alpha Logistics"],
+    matchedServiceTerms: ["freight"],
+    matchedControlTerms: ["self operated", "owned"],
+    matchedCapabilityTerms: ["fleet"],
+    selectorVersion: "provider-passage-selector-v1"
+  };
+  mocks.snapshotBundle.mockResolvedValueOnce({
+    snapshot: { id: "snapshot-verification", status: "completed", cacheIdentity: "verification-cache" },
+    attempts: [],
+    queries: [],
+    observations: [{ id: "observation-alpha", title: "Alpha Logistics" }],
+    sources: [{
+      id: "source-alpha",
+      observationId: "observation-alpha",
+      canonicalUrl: "https://alpha.example/logistics",
+      registrableDomain: "alpha.example",
+      sourceCategory: "company_owned",
+      retrievalState: "available",
+      retrievedAt: new Date("2030-01-01T00:00:00.000Z")
+    }]
+  });
+  mocks.appendClaims.mockResolvedValueOnce([]);
+  const extractionClient = {
+    configuredModel: "fixture-model",
+    completeJson: vi.fn(async () => ({
+      modelId: "fixture-model",
+      value: {
+        claims: [{
+          subjectName: "Alpha Logistics",
+          genericRole: "service_provider",
+          policyRole: "carrier",
+          capability: "linehaul_fleet",
+          operatingMode: "self_operated",
+          serviceScope: ["freight"],
+          routeScope: [],
+          exactExcerpt: passage.exactExcerpt
+        }]
+      }
+    }))
+  };
+  const runtime = {
+    adapter: { id: "fixture", surface, authority, search: vi.fn() },
+    authority,
+    identity: {
+      adapterId: "fixture",
+      providerId: "fixture",
+      productId: "search",
+      modelId: "fixture",
+      adapterVersion: "v1",
+      surface
+    }
+  };
+  const getCheckpoint = vi.fn(async () => ({
+    verificationSnapshotId: "snapshot-verification",
+    artifacts: {
+      discovery: {
+        candidates: [{ entityId: "provider-alpha", canonicalName: "Alpha Logistics", rank: 0 }]
+      },
+      verification: { snapshotId: "snapshot-verification" }
+    }
+  }) as never);
+  const context = createProductionProviderDiscoveryContext({
+    runtime,
+    questionSet: questions(),
+    artifactContract: "combined_geo_report_v3",
+    websiteCategories: ["logistics"],
+    websiteFoundationHash: "f".repeat(64),
+    workerId: "worker",
+    evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
+    extractionModel: "fixture-model",
+    extractionClient,
+    getCheckpoint,
+    saveCheckpoint: async () => undefined
+  });
+  return { context, extractionClient, getCheckpoint, passage };
+}
 
 const surface = { surfaceId: "fixture", providerId: "fixture", productId: "search", surfaceKind: "documented_api" as const, contractVersion: "1", surfaceVersion: "v1", adapterVersion: "v1", locale: "en", region: "US" };
 const authority: PublicSearchSurfaceAuthority = { authorityId: "authority", environment: "test", surface, active: true, certifiedAt: "2030-01-01T00:00:00.000Z", evidenceReference: "review", supportedLocales: ["en"], supportedRegions: ["US"] };

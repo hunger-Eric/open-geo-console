@@ -1,8 +1,76 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runProviderDiscoveryPipeline, type ProviderDiscoveryCheckpointV1, type ProviderDiscoveryPipelineDependencies } from "./provider-discovery-pipeline";
 
+const fourSnapshotGuardHarness = vi.hoisted(() => {
+  const state = {
+    blockedSite: null as string | null,
+    guardSites: [] as string[],
+    delegatedSites: [] as string[]
+  };
+  const blocked = new Error("blocked by Report V4 four-snapshot test guard");
+  return {
+    state,
+    blocked,
+    run: vi.fn(async (input: { guardSite: string; delegate: () => Promise<unknown> }) => {
+      state.guardSites.push(input.guardSite);
+      if (state.blockedSite === input.guardSite) throw blocked;
+      state.delegatedSites.push(input.guardSite);
+      return input.delegate();
+    })
+  };
+});
+
+vi.mock("@/report-v4/prohibited-operation-guard-runtime", () => ({
+  runReportV4GuardedOperation: fourSnapshotGuardHarness.run
+}));
+
+beforeEach(() => {
+  fourSnapshotGuardHarness.state.blockedSite = null;
+  fourSnapshotGuardHarness.state.guardSites.length = 0;
+  fourSnapshotGuardHarness.state.delegatedSites.length = 0;
+  fourSnapshotGuardHarness.run.mockClear();
+});
+
 describe("provider discovery recoverable pipeline", () => {
+  it("blocks four-snapshot orchestration before checkpoint or snapshot work", async () => {
+    const deps = dependencies({});
+    fourSnapshotGuardHarness.state.blockedSite = "four_snapshot";
+
+    await expect(runProviderDiscoveryPipeline(runInput(deps))).rejects.toBe(fourSnapshotGuardHarness.blocked);
+
+    expect(fourSnapshotGuardHarness.state.guardSites).toEqual(["four_snapshot"]);
+    expect(fourSnapshotGuardHarness.state.delegatedSites).toEqual([]);
+    expect(deps.getCheckpoint).not.toHaveBeenCalled();
+    expect(deps.runDiscovery).not.toHaveBeenCalled();
+    expect(deps.runVerification).not.toHaveBeenCalled();
+    expect(deps.resolveStandardQuestions).not.toHaveBeenCalled();
+  });
+
+  it("delegates four-snapshot orchestration exactly once without active authority", async () => {
+    const deps = dependencies({});
+
+    await expect(runProviderDiscoveryPipeline(runInput(deps))).resolves.toBeDefined();
+
+    expect(fourSnapshotGuardHarness.state.guardSites).toEqual(["four_snapshot"]);
+    expect(fourSnapshotGuardHarness.state.delegatedSites).toEqual(["four_snapshot"]);
+    expect(deps.getCheckpoint).toHaveBeenCalledTimes(1);
+    expect(deps.runDiscovery).toHaveBeenCalledTimes(1);
+    expect(deps.resolveStandardQuestions).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the original four-snapshot delegate failure without retry", async () => {
+    const deps = dependencies({});
+    const failure = new Error("snapshot delegate failed");
+    vi.mocked(deps.runDiscovery).mockRejectedValueOnce(failure);
+
+    await expect(runProviderDiscoveryPipeline(runInput(deps))).rejects.toBe(failure);
+
+    expect(fourSnapshotGuardHarness.state.guardSites).toEqual(["four_snapshot"]);
+    expect(fourSnapshotGuardHarness.state.delegatedSites).toEqual(["four_snapshot"]);
+    expect(deps.runDiscovery).toHaveBeenCalledTimes(1);
+  });
+
   it("resumes after candidate verification without repeating search", async () => {
     let checkpoint: ProviderDiscoveryCheckpointV1 | null = null;
     const calls={discovery:0,verification:0,passages:0};
