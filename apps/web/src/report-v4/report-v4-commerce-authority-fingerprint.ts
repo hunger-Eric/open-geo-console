@@ -43,6 +43,7 @@ const scopeKeys = [
   "siteSnapshotIdHash",
   "configSnapshotIdHash",
   "questionSetIdHash",
+  "activeArtifactRevisionIdHash",
   "preAdmissionJobIdHash",
   "coreJobIdHash",
   "enhancementJobIdHash",
@@ -57,6 +58,7 @@ type Scope = Readonly<{
   siteSnapshotIdHash: string | null;
   configSnapshotIdHash: string | null;
   questionSetIdHash: string | null;
+  activeArtifactRevisionIdHash: string | null;
   preAdmissionJobIdHash: string | null;
   coreJobIdHash: string | null;
   enhancementJobIdHash: string | null;
@@ -182,13 +184,16 @@ function validateLineage(value: Normalized): void {
     scope.questionSetIdHash,
     "order question-set scope lineage",
   );
-  if (
-    phase === "final" &&
-    (scope.siteSnapshotIdHash === null ||
+  if (phase === "final") {
+    if (
+      scope.siteSnapshotIdHash === null ||
       scope.configSnapshotIdHash === null ||
-      scope.questionSetIdHash === null)
-  )
-    fail("final scope must declare snapshot, config, and question-set anchors");
+      scope.questionSetIdHash === null
+    )
+      fail("final scope must declare snapshot, config, and question-set anchors");
+    if (scope.activeArtifactRevisionIdHash === null)
+      fail("final scope must declare the active artifact pointer");
+  }
 
   const laneScopes = [
     ["pre-admission", scope.preAdmissionJobIdHash, "v4_pre_admission"],
@@ -200,8 +205,11 @@ function validateLineage(value: Normalized): void {
     "job scope identifiers",
   );
   const expectedJobs = laneScopes.filter(([, id]) => id !== null);
-  if (phase === "final" && expectedJobs.length !== laneScopes.length)
-    fail("final job scope must declare all three lanes");
+  if (
+    phase === "final" &&
+    (scope.preAdmissionJobIdHash === null || scope.coreJobIdHash === null)
+  )
+    fail("final job scope must declare pre-admission and core lanes");
   if (value.jobs.length !== expectedJobs.length)
     fail("job scope must contain every and only the declared lanes");
   for (const [label, idHash, reason] of laneScopes) {
@@ -403,8 +411,14 @@ function validateLineage(value: Normalized): void {
   validateArtifacts(value, phase);
   const questionCount = value.questionCheckpoints.length;
   const diagnosisCount = value.diagnosisCheckpoints.length;
-  if (phase === "final" && (questionCount !== 3 || diagnosisCount !== 3))
-    fail("final checkpoint scope must contain exactly three of each kind");
+  if (phase === "final") {
+    if (questionCount !== 3)
+      fail("final checkpoint scope must contain exactly three questions");
+    const expectedDiagnoses =
+      scope.enhancementJobIdHash === null ? 0 : 3;
+    if (diagnosisCount !== expectedDiagnoses)
+      fail("final diagnosis checkpoint scope does not match enhancement topology");
+  }
   if (
     phase === "baseline" &&
     ((questionCount !== 0 && questionCount !== 3) ||
@@ -427,8 +441,8 @@ function validateArtifacts(value: Normalized, phase: Phase): void {
     scope.coreArtifactRevisionIdHash,
     scope.enhancementArtifactRevisionIdHash,
   ].filter((id): id is string => id !== null);
-  if (phase === "final" && expected.length !== 2)
-    fail("final artifact scope must declare core and enhancement revisions");
+  if (phase === "final" && scope.coreArtifactRevisionIdHash === null)
+    fail("final artifact scope must declare the core revision");
   if (value.artifacts.length !== expected.length)
     fail("artifact scope must contain every and only declared revision");
 
@@ -456,8 +470,6 @@ function validateArtifacts(value: Normalized, phase: Phase): void {
     equal(core.jobIdHash, scope.coreJobIdHash, "core artifact job lineage");
     equal(core.revisionKind, "generation", "core artifact kind lineage");
     equal(core.sourceArtifactRevisionIdHash, null, "core artifact source lineage");
-    if (phase === "final" && core.status !== "active")
-      fail("scoped core artifact must be active");
   }
   if (enhancement) {
     equal(
@@ -476,12 +488,6 @@ function validateArtifacts(value: Normalized, phase: Phase): void {
       "enhancement artifact source lineage",
     );
     if (!core) fail("enhancement artifact requires scoped core artifact");
-    if (
-      phase === "final" &&
-      enhancement.status !== "active" &&
-      enhancement.status !== "failed"
-    )
-      fail("scoped enhancement artifact must be terminal");
     equal(
       enhancement.configSnapshotIdHash,
       core.configSnapshotIdHash,
@@ -489,6 +495,48 @@ function validateArtifacts(value: Normalized, phase: Phase): void {
     );
     if (enhancement.revision <= core.revision)
       fail("enhancement artifact revision must follow core revision");
+  }
+
+  const activeArtifacts = value.artifacts.filter(
+    (artifact) => artifact.status === "active",
+  );
+  if (scope.activeArtifactRevisionIdHash === null) {
+    if (activeArtifacts.length !== 0)
+      fail("active artifact exists without a scoped active pointer");
+  } else {
+    if (
+      activeArtifacts.length !== 1 ||
+      activeArtifacts[0].idHash !== scope.activeArtifactRevisionIdHash
+    )
+      fail("scoped active artifact pointer must identify the only active revision");
+  }
+
+  if (phase === "final") {
+    if (!core) fail("final topology is missing the core artifact");
+    if (!enhancement) {
+      equal(core.status, "active", "question-failure core artifact state");
+      equal(
+        scope.activeArtifactRevisionIdHash,
+        core.idHash,
+        "question-failure active artifact pointer",
+      );
+    } else if (enhancement.status === "active") {
+      equal(core.status, "ready", "enhancement-success core artifact state");
+      equal(
+        scope.activeArtifactRevisionIdHash,
+        enhancement.idHash,
+        "enhancement-success active artifact pointer",
+      );
+    } else if (enhancement.status === "failed") {
+      equal(core.status, "active", "enhancement-failure core artifact state");
+      equal(
+        scope.activeArtifactRevisionIdHash,
+        core.idHash,
+        "enhancement-failure active artifact pointer",
+      );
+    } else {
+      fail("scoped enhancement artifact must be active or failed");
+    }
   }
 }
 
@@ -605,6 +653,10 @@ function parseScope(value: unknown): Scope {
       scope.questionSetIdHash,
       "scope.questionSetIdHash",
     ),
+    activeArtifactRevisionIdHash: nullableHash(
+      scope.activeArtifactRevisionIdHash,
+      "scope.activeArtifactRevisionIdHash",
+    ),
     preAdmissionJobIdHash: nullableHash(
       scope.preAdmissionJobIdHash,
       "scope.preAdmissionJobIdHash",
@@ -624,10 +676,10 @@ function parseScope(value: unknown): Scope {
     ),
   };
   if (
-    result.enhancementJobIdHash === null &&
-    result.enhancementArtifactRevisionIdHash !== null
+    (result.enhancementJobIdHash === null) !==
+    (result.enhancementArtifactRevisionIdHash === null)
   )
-    fail("enhancement artifact scope requires enhancement job scope");
+    fail("enhancement job and artifact scope must be all-or-none");
   if (
     result.coreJobIdHash === null &&
     result.coreArtifactRevisionIdHash !== null

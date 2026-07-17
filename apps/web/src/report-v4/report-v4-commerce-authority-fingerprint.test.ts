@@ -60,6 +60,7 @@ function validInput() {
       siteSnapshotIdHash: snapshotIdHash,
       configSnapshotIdHash: hash("config-1"),
       questionSetIdHash,
+      activeArtifactRevisionIdHash: enhancementArtifactRevisionIdHash,
       preAdmissionJobIdHash,
       coreJobIdHash,
       enhancementJobIdHash,
@@ -275,13 +276,13 @@ function validInput() {
         revisionKind: "generation",
         revision: 1,
         artifactContract: "combined_geo_report_v4",
-        status: "active",
+        status: "ready",
         payloadIdentityHash: hash("core-payload-1"),
         htmlSha256: hash("core-html-1"),
         pdfSha256: null,
         pdfStorageKeyPresent: false,
         readyAt: at,
-        activatedAt: at,
+        activatedAt: null,
       },
     ],
     questionCheckpoints: ([1, 2, 3] as const).map((ordinal) => ({
@@ -425,13 +426,101 @@ describe("Report V4 final commerce authority fingerprint", () => {
     pendingEnhancement.artifacts[0].activatedAt = null;
     expect(() =>
       fingerprintReportV4CommerceAuthority(pendingEnhancement),
-    ).toThrow(/terminal/i);
+    ).toThrow(/active|terminal/i);
 
     const twoQuestions = validInput();
     twoQuestions.questionCheckpoints.pop();
     expect(() => fingerprintReportV4CommerceAuthority(twoQuestions)).toThrow(
       /exactly three/i,
     );
+  });
+
+  it("accepts all protected final artifact topologies", () => {
+    expect(fingerprintReportV4CommerceAuthority(validInput())).toMatch(
+      /^[a-f0-9]{64}$/u,
+    );
+
+    const activePartialEnhancement = validInput();
+    activePartialEnhancement.diagnosisCheckpoints[0].state = "failed";
+    activePartialEnhancement.diagnosisCheckpoints[0].diagnosisContentHash = null;
+    expect(
+      fingerprintReportV4CommerceAuthority(activePartialEnhancement),
+    ).toMatch(/^[a-f0-9]{64}$/u);
+
+    const failedEnhancement = validInput();
+    failedEnhancement.artifacts[0].status = "failed";
+    failedEnhancement.artifacts[0].htmlSha256 = null;
+    failedEnhancement.artifacts[0].readyAt = null;
+    failedEnhancement.artifacts[0].activatedAt = null;
+    failedEnhancement.artifacts[1].status = "active";
+    failedEnhancement.artifacts[1].activatedAt = at;
+    failedEnhancement.scope.activeArtifactRevisionIdHash =
+      failedEnhancement.scope.coreArtifactRevisionIdHash;
+    expect(fingerprintReportV4CommerceAuthority(failedEnhancement)).toMatch(
+      /^[a-f0-9]{64}$/u,
+    );
+
+    const questionFailure = validInput();
+    questionFailure.scope.enhancementJobIdHash = null;
+    questionFailure.scope.enhancementArtifactRevisionIdHash = null;
+    questionFailure.scope.activeArtifactRevisionIdHash =
+      questionFailure.scope.coreArtifactRevisionIdHash;
+    questionFailure.jobs = questionFailure.jobs.filter(
+      (row) => row.reason !== "v4_diagnosis_enhancement",
+    );
+    questionFailure.dispatches = questionFailure.dispatches.filter(
+      (row) => row.jobId !== "enhancement-job-1",
+    );
+    questionFailure.artifacts = questionFailure.artifacts.filter(
+      (row) => row.revisionKind !== "diagnosis_enhancement",
+    );
+    questionFailure.artifacts[0].status = "active";
+    questionFailure.artifacts[0].activatedAt = at;
+    questionFailure.diagnosisCheckpoints = [];
+    expect(fingerprintReportV4CommerceAuthority(questionFailure)).toMatch(
+      /^[a-f0-9]{64}$/u,
+    );
+  });
+
+  it("rejects ambiguous active artifacts, wrong pointers, and half-bound enhancement", () => {
+    const twoActive = validInput();
+    twoActive.artifacts[1].status = "active";
+    twoActive.artifacts[1].activatedAt = at;
+    expect(() => fingerprintReportV4CommerceAuthority(twoActive)).toThrow(
+      /active/i,
+    );
+
+    const wrongPointer = validInput();
+    wrongPointer.scope.activeArtifactRevisionIdHash =
+      wrongPointer.scope.coreArtifactRevisionIdHash;
+    expect(() => fingerprintReportV4CommerceAuthority(wrongPointer)).toThrow(
+      /active|pointer/i,
+    );
+
+    const halfBound = validInput();
+    halfBound.scope.enhancementArtifactRevisionIdHash = null;
+    expect(() => fingerprintReportV4CommerceAuthority(halfBound)).toThrow(
+      /all-or-none|enhancement/i,
+    );
+
+    const danglingBaselinePointer = validInput();
+    danglingBaselinePointer.phase = "baseline";
+    danglingBaselinePointer.scope.activeArtifactRevisionIdHash =
+      danglingBaselinePointer.scope.coreArtifactRevisionIdHash;
+    danglingBaselinePointer.scope.coreArtifactRevisionIdHash = null;
+    danglingBaselinePointer.scope.enhancementJobIdHash = null;
+    danglingBaselinePointer.scope.enhancementArtifactRevisionIdHash = null;
+    danglingBaselinePointer.jobs = danglingBaselinePointer.jobs.filter(
+      (row) => row.reason !== "v4_diagnosis_enhancement",
+    );
+    danglingBaselinePointer.dispatches = danglingBaselinePointer.dispatches.filter(
+      (row) => row.jobId !== "enhancement-job-1",
+    );
+    danglingBaselinePointer.artifacts = [];
+    danglingBaselinePointer.diagnosisCheckpoints = [];
+    expect(() =>
+      fingerprintReportV4CommerceAuthority(danglingBaselinePointer),
+    ).toThrow(/active.*pointer/i);
   });
 
   it("rejects duplicate natural keys even when row IDs differ", () => {
@@ -545,6 +634,7 @@ describe("Report V4 final commerce authority fingerprint", () => {
     input.scope.siteSnapshotIdHash = null;
     input.scope.configSnapshotIdHash = null;
     input.scope.questionSetIdHash = null;
+    input.scope.activeArtifactRevisionIdHash = null;
     input.orders[0].fulfillmentJobIdHash = null;
     input.orders[0].siteSnapshotIdHash = null;
     input.orders[0].businessQuestionSetIdHash = null;
