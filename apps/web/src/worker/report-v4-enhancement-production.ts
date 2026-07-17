@@ -79,6 +79,7 @@ import { createReportV4AcceptanceObserver } from "./report-v4-acceptance-observe
 import { createReportV4AcceptanceFaultController } from "./report-v4-acceptance-fault-controller";
 import {
   observeReportV4EnhancementActivation,
+  observeReportV4DiagnosisTerminalCheckpoint,
   observeReportV4EnhancementHtml,
   observeReportV4RecoveredEnhancementActivation,
   withReportV4EnhancementAcceptanceDiagnosisProvider,
@@ -343,8 +344,15 @@ function createLiveStageDependencies(input: {
                 ...(input.options.fetch ? { fetch: input.options.fetch } : {}),
                 ...(input.options.now ? { now: input.options.now } : {})
               }),
+              acceptanceRuntime: input.acceptanceRuntime ?? null,
               signal: request.signal
             });
+        // Validate the complete recovered lineage/order before recording any
+        // terminal checkpoint evidence. Invalid recovery must produce zero
+        // checkpoint_terminal observations and must never authorize I/O.
+        if (terminalSeeds && input.acceptanceRuntime) {
+          for (const checkpoint of terminalSeeds) await observeReportV4DiagnosisTerminalCheckpoint(input.acceptanceRuntime, checkpoint);
+        }
       }
       return {
         enhancementJobId: execution.input.job.id,
@@ -427,6 +435,7 @@ function createLiveStageDependencies(input: {
           diagnosisInput: unit.diagnosisInput,
           diagnosis: result.diagnosis
         });
+        if (input.acceptanceRuntime) await observeReportV4DiagnosisTerminalCheckpoint(input.acceptanceRuntime, unit.checkpoint);
         return { status: "completed", diagnosis: result.diagnosis, providerAttempts: result.providerAttempts };
       }
       unit.checkpoint = await input.diagnosisCheckpoints.markFailed({
@@ -434,6 +443,7 @@ function createLiveStageDependencies(input: {
         providerCallCount: persistedCallCount,
         diagnosisInput: unit.diagnosisInput
       });
+      if (input.acceptanceRuntime) await observeReportV4DiagnosisTerminalCheckpoint(input.acceptanceRuntime, unit.checkpoint);
       return { status: "failed", providerAttempts: result.providerAttempts };
     },
     prepareEnhancementRevision: (identity, signal) => {
@@ -651,6 +661,7 @@ async function initializeDiagnosisCoordinator(input: {
   readonly auditDependencies: ReportV4SourceAuditDependencies;
   readonly repository: ReportV4DiagnosisCheckpointRepository;
   readonly provider: ReportV4DiagnosisProvider;
+  readonly acceptanceRuntime: ReportV4EnhancementAcceptanceRuntime | null;
   readonly signal?: AbortSignal;
 }): Promise<DiagnosisCoordinator> {
   const questions = [...input.questions].sort((left, right) => left.order - right.order);
@@ -712,6 +723,7 @@ async function initializeDiagnosisCoordinator(input: {
         providerCallCount: 0,
         diagnosisInput: unit.diagnosisInput
       });
+      if (input.acceptanceRuntime) await observeReportV4DiagnosisTerminalCheckpoint(input.acceptanceRuntime, checkpoint);
     }
     audits.set(unit.question.questionId, unit.auditResult);
     units.set(unit.question.questionId, {

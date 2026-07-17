@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { ReportV4AcceptanceScenario } from "../db/report-v4-acceptance-ledger";
+import type { ReportV4DiagnosisCheckpoint } from "../db/report-v4-diagnosis-checkpoints";
 import { ReportV4AcceptanceIndeterminateOperationError, type ReportV4AcceptanceObserver } from "./report-v4-acceptance-observer";
 import type { ReportV4AcceptanceFaultController } from "./report-v4-acceptance-fault-controller";
 import { ReportV4DiagnosisProviderError, type ReportV4DiagnosisProvider } from "./report-v4-diagnosis-enhancer";
@@ -9,6 +10,7 @@ import {
   observeReportV4EnhancementActivation,
   observeReportV4EnhancementHtml,
   observeReportV4RecoveredEnhancementActivation,
+  observeReportV4DiagnosisTerminalCheckpoint,
   withReportV4EnhancementAcceptanceDiagnosisProvider,
   withReportV4EnhancementAcceptanceSourceAudit,
   type ReportV4EnhancementAcceptanceRuntime
@@ -202,6 +204,34 @@ describe("Report V4 enhancement acceptance production wrappers", () => {
     expect(JSON.stringify(vi.mocked(runtime.observer.observe).mock.calls)).not.toMatch(/https?:|secret|token/iu);
   });
 
+  it("records stable opaque terminal diagnosis checkpoints for completed and failed states", async () => {
+    const runtime = runtimeFor("success");
+    const completed = diagnosisCheckpoint("completed");
+    const failed = diagnosisCheckpoint("failed");
+    await observeReportV4DiagnosisTerminalCheckpoint(runtime, completed);
+    await observeReportV4DiagnosisTerminalCheckpoint(runtime, completed);
+    await observeReportV4DiagnosisTerminalCheckpoint(runtime, failed);
+    const events = vi.mocked(runtime.observer.observe).mock.calls.map(([event]) => event);
+    expect(events).toHaveLength(3);
+    expect(events.map((event) => ({ operation: event.operation, state: event.details.state, unitId: event.unitId }))).toEqual([
+      { operation: "source_diagnosis", state: "completed", unitId: completed.identityHash },
+      { operation: "source_diagnosis", state: "completed", unitId: completed.identityHash },
+      { operation: "source_diagnosis", state: "failed", unitId: failed.identityHash }
+    ]);
+    expect(events.every((event) => /^[a-f0-9]{64}$/u.test(event.details.checkpointHash))).toBe(true);
+    expect(events[0]!.details).toEqual(events[1]!.details);
+    expect(JSON.stringify(events)).not.toContain("route conditions");
+  });
+
+  it("rejects non-terminal diagnosis checkpoints before observer emission", async () => {
+    const runtime = runtimeFor("success");
+    const nonTerminal = { ...diagnosisCheckpoint("failed"), state: "queued" } as ReportV4DiagnosisCheckpoint;
+    await expect(observeReportV4DiagnosisTerminalCheckpoint(runtime, nonTerminal)).rejects.toThrow(
+      "A terminal Report V4 diagnosis checkpoint must be completed or failed."
+    );
+    expect(runtime.observer.observe).not.toHaveBeenCalled();
+  });
+
   it("idempotently restores the exact activation event on initial active recovery and activation-catch reloads only", async () => {
     const runtime = runtimeFor("success");
     const input = {
@@ -284,6 +314,20 @@ function answeredQuestion() {
       retrievalStatus: "not_checked" as const
     }]
   };
+}
+
+function diagnosisCheckpoint(state: "completed" | "failed"): ReportV4DiagnosisCheckpoint {
+  const lineage = { reportId: "report-1", enhancementJobId: "enhancement-1", coreArtifactRevisionId: "artifact-core-1", configSnapshotId: "config-1", questionSetId: "questions-1", snapshotId: "snapshot-1", questionId: "question-1", ordinal: 1 as const };
+  const diagnosisInput = { question: { questionId: "question-1", text: "Which service fits this route?" }, answer: "The service supports this route.", locale: "en", sources: [], targetPages: [{ questionId: "question-1", pageId: "page-1", url: "https://target.example/service", relevanceReason: "Relevant", summary: "Summary", sourceLocations: [{ locationId: "loc-1", startOffset: 1, endOffset: 5 }] }] };
+  const diagnosis = state === "completed" ? { selectionSummary: "Summary", observableFactors: [{ kind: "problem_match" as const, observation: "Match", evidenceRefs: ["loc-1"] }, { kind: "factual_specificity" as const, observation: "Specific", evidenceRefs: ["loc-1"] }, { kind: "target_clarity" as const, observation: "Clear", evidenceRefs: ["loc-1"] }], targetGap: "Gap", recommendedActions: [{ priority: 1 as const, action: "Act", evidenceRefs: ["loc-1"] }, { priority: 2 as const, action: "Act", evidenceRefs: ["loc-1"] }, { priority: 3 as const, action: "Act", evidenceRefs: ["loc-1"] }], detailedEvidenceRefs: ["loc-1"] } : null;
+  const inputIdentityHash = sha(stable(diagnosisInput));
+  return { ...lineage, identityHash: sha(stable({ ...lineage, inputIdentityHash })), state, inputIdentityHash, diagnosisInput: diagnosisInput as never, providerCallCount: state === "completed" ? 1 : 2, sourceAudits: [], diagnosis: diagnosis as never, diagnosisContentHash: diagnosis ? sha(stable(diagnosis)) : null };
+}
+
+function stable(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${stable(v)}`).join(",")}}`;
+  return JSON.stringify(value);
 }
 
 function sha(value: string): string {

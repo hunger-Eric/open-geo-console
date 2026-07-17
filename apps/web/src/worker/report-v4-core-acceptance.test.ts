@@ -267,6 +267,17 @@ describe("Report V4 Core acceptance production wrappers", () => {
       .map(([event]) => event)
       .filter((event) => event.operation === "question_answer" && event.unitId === "q2");
     expect(targetClaims).toEqual([]);
+    const checkpointEvents = vi.mocked(runtime.observer.observe).mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.kind === "checkpoint_terminal");
+    expect(checkpointEvents).toHaveLength(3);
+    expect(checkpointEvents.map((event) => [event.operation, event.unitId, event.details.state]))
+      .toEqual(expect.arrayContaining([
+        ["question_answer", expect.any(String), "answered"],
+        ["question_answer", expect.any(String), "unavailable"],
+        ["question_answer", expect.any(String), "answered"]
+      ]));
+    expect(checkpointEvents.every((event) => /^[a-f0-9]{64}$/u.test(event.details.checkpointHash))).toBe(true);
   });
 
   it("records question budget rejection without provider execution", async () => {
@@ -360,6 +371,37 @@ describe("Report V4 Core acceptance production wrappers", () => {
 
     expect(provider.answerWithSources).not.toHaveBeenCalled();
     expect(runtime.observer.claimExternalIo).not.toHaveBeenCalled();
+  });
+
+  it("observes terminal checkpoint recovery without provider calls and with stable payloads", async () => {
+    const persisted = new MemoryCheckpointRepository();
+    const repository: ReportV4QuestionCheckpointRepository = {
+      ...persisted,
+      async initialize(input) {
+        const initialized = await persisted.initialize(input);
+        return initialized.map((checkpoint) => ({
+          ...checkpoint,
+          state: "answered" as const,
+          providerCallCount: 1 as const,
+          answerPayload: { order: checkpoint.ordinal, questionId: checkpoint.questionId, questionText: `Question ${checkpoint.ordinal}?`, status: "answered" as const, answer: `Persisted ${checkpoint.questionId}` },
+          sourcePayload: [],
+          answerContentHash: sha(JSON.stringify({ answerPayload: { order: checkpoint.ordinal, questionId: checkpoint.questionId, questionText: `Question ${checkpoint.ordinal}?`, status: "answered" as const, answer: `Persisted ${checkpoint.questionId}` }, sourcePayload: [] }))
+        })) as [ReportV4QuestionCheckpoint, ReportV4QuestionCheckpoint, ReportV4QuestionCheckpoint];
+      },
+      load: persisted.load.bind(persisted), recordProviderCall: persisted.recordProviderCall.bind(persisted),
+      saveAnswered: persisted.saveAnswered.bind(persisted), markUnavailable: persisted.markUnavailable.bind(persisted)
+    };
+    const provider = questionProvider();
+    const runtime = runtimeFor("success");
+    const wrapped = withReportV4CoreAcceptanceQuestions({ repository, provider, runtime, coreJobId: "core-job", questions: questionSpecs() });
+    const request = { reportId: "report", jobId: "core-job", questionSetId: "question-set", snapshotId: "snapshot", modelConfigIdentityHash: "a".repeat(64), locale: "en", region: "US", questions: questionSpecs(), repository: wrapped.repository, provider: wrapped.provider };
+    await answerReportV4Questions(request);
+    await answerReportV4Questions(request);
+    const events = vi.mocked(runtime.observer.observe).mock.calls.map(([event]) => event).filter((event) => event.kind === "checkpoint_terminal");
+    expect(events).toHaveLength(6);
+    expect(events.slice(0, 3)).toEqual(events.slice(3));
+    expect(events.every((event) => event.operation === "question_answer" && /^[a-f0-9]{64}$/u.test(event.unitId) && /^[a-f0-9]{64}$/u.test(event.details.checkpointHash))).toBe(true);
+    expect(provider.answerWithSources).not.toHaveBeenCalled();
   });
 
   it("deterministically replays an already-consumed question fault without provider or model claim", async () => {

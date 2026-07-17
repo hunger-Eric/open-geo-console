@@ -6,6 +6,7 @@ import {
 } from "@open-geo-console/ai-report-engine";
 import type { ReportV4QuestionCheckpointRepository } from "../db/report-v4-question-checkpoints";
 import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "../report-v4/report-v4-acceptance-fingerprints";
+import { computeReportV4QuestionTerminalCheckpointFingerprint } from "../report-v4/report-v4-acceptance-checkpoint-fingerprints";
 import type {
   ReportV4MimoPageAnalysisInput,
   ReportV4MimoSiteSynthesisProvider,
@@ -156,6 +157,9 @@ export function withReportV4CoreAcceptanceQuestions(input: {
         && checkpoint.state !== "answered" && checkpoint.state !== "unavailable")) {
         throw new ReportV4AcceptanceIndeterminateOperationError();
       }
+      for (const checkpoint of initialized) {
+        if (checkpoint.state === "answered" || checkpoint.state === "unavailable") await observeQuestionTerminal(runtime, checkpoint);
+      }
       return initialized;
     },
     load: input.repository.load.bind(input.repository),
@@ -181,7 +185,11 @@ export function withReportV4CoreAcceptanceQuestions(input: {
       activeAttempts.set(questionId, { attempt, event });
       return checkpoint;
     },
-    saveAnswered: input.repository.saveAnswered.bind(input.repository),
+    async saveAnswered(value) {
+      const checkpoint = await input.repository.saveAnswered(value);
+      await observeQuestionTerminal(runtime, checkpoint);
+      return checkpoint;
+    },
     async markUnavailable(value) {
       const questionId = requiredQuestionIdentity(identities, value.identityHash);
       if (indeterminateQuestions.has(questionId)) {
@@ -199,7 +207,9 @@ export function withReportV4CoreAcceptanceQuestions(input: {
           });
         }
       }
-      return input.repository.markUnavailable(value);
+      const checkpoint = await input.repository.markUnavailable(value);
+      await observeQuestionTerminal(runtime, checkpoint);
+      return checkpoint;
     }
   };
 
@@ -259,6 +269,17 @@ export function withReportV4CoreAcceptanceQuestions(input: {
     }
   };
   return { repository, provider };
+}
+
+async function observeQuestionTerminal(runtime: ReportV4CoreAcceptanceRuntime, checkpoint: import("../db/report-v4-question-checkpoints").ReportV4QuestionCheckpoint): Promise<void> {
+  if (checkpoint.state !== "answered" && checkpoint.state !== "unavailable") {
+    throw new TypeError("A terminal Report V4 question checkpoint must be answered or unavailable.");
+  }
+  await runtime.observer.observe({
+    kind: "checkpoint_terminal", operation: "question_answer", phase: "observed",
+    unitId: checkpoint.identityHash, attempt: 0,
+    details: { checkpointHash: computeReportV4QuestionTerminalCheckpointFingerprint(checkpoint), state: checkpoint.state }
+  });
 }
 
 export function withReportV4CoreAcceptanceStageDependencies(input: {

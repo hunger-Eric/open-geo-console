@@ -10,10 +10,19 @@ import {
   type ReportV4DiagnosisProvider
 } from "./report-v4-diagnosis-enhancer";
 import type { ReportV4SourceAuditDependencies, ReportV4SourceAuditRead } from "./report-v4-source-audit";
+import type { ReportV4DiagnosisCheckpoint } from "../db/report-v4-diagnosis-checkpoints";
+import { computeReportV4DiagnosisTerminalCheckpointFingerprint } from "../report-v4/report-v4-acceptance-checkpoint-fingerprints";
 
 export interface ReportV4EnhancementAcceptanceRuntime {
   readonly observer: ReportV4AcceptanceObserver;
   readonly faultController: ReportV4AcceptanceFaultController;
+}
+
+export async function observeReportV4DiagnosisTerminalCheckpoint(runtime: ReportV4EnhancementAcceptanceRuntime, checkpoint: ReportV4DiagnosisCheckpoint): Promise<void> {
+  if (checkpoint.state !== "completed" && checkpoint.state !== "failed") {
+    throw new TypeError("A terminal Report V4 diagnosis checkpoint must be completed or failed.");
+  }
+  await runtime.observer.observe({ kind: "checkpoint_terminal", operation: "source_diagnosis", phase: "observed", unitId: checkpoint.identityHash, attempt: 0, details: { checkpointHash: computeReportV4DiagnosisTerminalCheckpointFingerprint(checkpoint), state: checkpoint.state } });
 }
 
 export function withReportV4EnhancementAcceptanceSourceAudit(input: {
