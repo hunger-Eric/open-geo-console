@@ -1,15 +1,15 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { V37_DATABASE_MIGRATIONS, V38_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { V37_DATABASE_MIGRATIONS, V38_DATABASE_MIGRATIONS, V39_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 import { REPORT_V4_PROHIBITED_OPERATION_MANIFEST_ENTRIES } from "@/report-v4/prohibited-operation-manifest";
 
 // @requirement GEO-V4-ACCEPT-01
 describe("schema V37 DB-authoritative prohibited-operation guards", () => {
   it("registers one replay-safe forward migration after V36", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(38);
-    expect(databaseMigrationsAfter(36)).toEqual([...V37_DATABASE_MIGRATIONS, ...V38_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(37)).toEqual([...V38_DATABASE_MIGRATIONS]);
+    expect(DATABASE_SCHEMA_VERSION).toBe(39);
+    expect(databaseMigrationsAfter(36)).toEqual([...V37_DATABASE_MIGRATIONS, ...V38_DATABASE_MIGRATIONS, ...V39_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(37)).toEqual([...V38_DATABASE_MIGRATIONS, ...V39_DATABASE_MIGRATIONS]);
     const source = V37_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("report_v4_prohibited_operation_guard_runs");
     expect(source).toContain("report_v4_prohibited_operation_guard_counters");

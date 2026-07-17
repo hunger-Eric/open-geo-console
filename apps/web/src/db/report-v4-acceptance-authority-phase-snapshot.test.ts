@@ -1,12 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
+import { createReportV4CommerceAuthoritySnapshotPair } from "../report-v4/report-v4-commerce-authority-comparator.test-fixture";
 import type { ReportV4CommerceAuthoritySnapshot } from "./report-v4-commerce-authority-snapshot";
 import {
   REPORT_V4_ACCEPTANCE_AUTHORITY_UNAVAILABLE_SLOTS,
   REPORT_V4_ACCEPTANCE_RUNTIME_ONLY_REQUIRED_SLOTS,
+  ReportV4AcceptanceAuthorityPhaseIncompleteError,
   ReportV4AcceptanceAuthorityPhaseUnavailableError,
   assertReportV4AcceptanceWebsiteCheckpointV38Authority,
+  assertReportV4AcceptanceCompleteAuthorityPhasePayload,
   assertReportV4AcceptanceAuthorityCaptureOrder,
   loadReportV4AcceptanceAuthorityPhaseSnapshot,
+  persistReportV4AcceptanceAuthorityPhaseSnapshot,
   type ReportV4AcceptanceAuthorityPhaseFoundation
 } from "./report-v4-acceptance-authority-phase-snapshot";
 
@@ -171,6 +176,100 @@ describe("Report V4 acceptance authority phase snapshot foundation", () => {
       foundation("final", "question_failure", finalCapturedAt, false)
     )).toThrow(/strictly precede/i);
   });
+
+  it("keeps a well-shaped generic seven-slot payload explicitly unavailable", () => {
+    expectIncomplete(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload(completePayload()));
+  });
+
+  it("rejects every empty, generic, deleted, or reduced-and-resealed slot before opening a write transaction", async () => {
+    const generic = completePayload();
+    const empty = structuredClone(generic);
+    empty.authorities.site_snapshot_pages = { records: [], recordCount: 0, canonicalHash: testHash("[]") };
+    const deleted = structuredClone(generic) as unknown as { authorities: Record<string, unknown> };
+    delete deleted.authorities.ledger_authority;
+    const reduced = structuredClone(generic);
+    reduced.authorities.page_summary_integrity.records = [];
+    reseal(reduced.authorities.page_summary_integrity);
+    const sql = { begin: vi.fn() };
+
+    for (const payload of [generic, empty, deleted, reduced]) {
+      await expect(persistReportV4AcceptanceAuthorityPhaseSnapshot(sql as never, {
+        sessionId: SESSION, scenarioId: SCENARIO, phase: "baseline", workerGitSha: "a".repeat(40), payload
+      })).rejects.toMatchObject({ code: "phase_authority_incomplete" });
+    }
+    expect(sql.begin).not.toHaveBeenCalled();
+  });
+
+  it("binds future envelope time, paid order time, session count, and collecting state before declaring slots unavailable", () => {
+    const aligned = completePayload();
+    expect(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload({
+      ...aligned, capturedAt: new Date(Date.parse(aligned.capturedAt) + 1_000).toISOString()
+    })).toThrow(/capturedAt.*commerce/i);
+    expect(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload({
+      ...aligned, paidAt: new Date(Date.parse(aligned.paidAt) + 1_000).toISOString()
+    })).toThrow(/paidAt.*order/i);
+    const count = structuredClone(completePayload());
+    count.session.eventCount = 1;
+    expect(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload(count)).toThrow(/eventCount.*headSequence/i);
+    const state = structuredClone(completePayload());
+    state.session.scenarioState = "sealed" as never;
+    expect(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload(state)).toThrow(/must be collecting/i);
+  });
+
+  it("recomputes the complete commerce fingerprint before declaring DB slots unavailable", () => {
+    const payload = structuredClone(completePayload());
+    payload.commerce.fingerprint = "f".repeat(64);
+    expect(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload(payload)).toThrow(/commerce fingerprint.*canonical full payload/i);
+  });
+
+  it.each([
+    "api_key",
+    "db-password",
+    "accessToken2Value",
+    "API2Key",
+    "APIKey",
+    "APIKEY",
+    "DBPassword",
+    "HTTPAuthorization",
+    "OAuthToken",
+    "URLCredential",
+    "CustomerEMail",
+    "customeremail",
+    "credentials",
+    "SECRETS"
+  ])(
+    "recursively rejects sensitive unknown authority key %s without a case or separator bypass",
+    (key) => {
+      const payload = structuredClone(completePayload());
+      payload.authorities.site_read_manifest.records[0] = { nested: [{ [key]: "forbidden" }] };
+      expect(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload(payload)).toThrow(/forbidden sensitive unknown field/i);
+    }
+  );
+
+  it("does not misclassify an unrelated word ending in key", () => {
+    const payload = structuredClone(completePayload());
+    payload.authorities.site_read_manifest.records[0] = { nested: [{ monkey: "not-sensitive" }] };
+    expectIncomplete(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload(payload));
+  });
+
+  it("keeps foundation fields exact before the unavailable Complete boundary", () => {
+    const incomplete = structuredClone(completePayload()) as Record<string, unknown>;
+    delete incomplete.websiteCheckpoint;
+    expect(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload(incomplete)).toThrow(/incomplete|non-canonical/i);
+    expect(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload({ ...completePayload(), extra: true })).toThrow(/non-canonical/i);
+  });
+
+  it("cannot persist the incomplete foundation and never opens a write transaction", async () => {
+    const sql = { begin: vi.fn() };
+    await expect(persistReportV4AcceptanceAuthorityPhaseSnapshot(sql as never, {
+      sessionId: SESSION,
+      scenarioId: SCENARIO,
+      phase: "baseline",
+      workerGitSha: "a".repeat(40),
+      payload: foundation("baseline", "question_failure", "2026-07-17T00:00:00.000Z", false)
+    })).rejects.toMatchObject({ code: "phase_authority_incomplete" });
+    expect(sql.begin).not.toHaveBeenCalled();
+  });
 });
 
 function foundation(
@@ -219,4 +318,65 @@ function websiteCheckpoint() {
     pageSummaryIdentitySetHash: "3".repeat(64),
     outputHash: "4".repeat(64)
   };
+}
+
+function completePayload() {
+  const commerce = createReportV4CommerceAuthoritySnapshotPair("question_failure").baseline;
+  const slot = (name: string) => {
+    const records = [{ name, identityHash: testHash(name) }];
+    return { records, recordCount: records.length, canonicalHash: testHash(stable(records)) };
+  };
+  return {
+    contractVersion: "report-v4-acceptance-authority-phase-v1" as const,
+    phase: "baseline" as const,
+    capturedAt: commerce.capturedAt,
+    scenarioKind: "question_failure" as const,
+    session: {
+      sessionIdHash: testHash(SESSION),
+      scenarioIdHash: testHash(SCENARIO),
+      sessionState: "collecting" as const,
+      scenarioState: "collecting" as const,
+      headSequence: 0,
+      headHash: "0".repeat(64),
+      eventCount: 0
+    },
+    commerce,
+    paidAt: commerce.orders[0]!.paidAt!,
+    websiteCheckpoint: websiteCheckpoint(),
+    authorities: {
+      site_snapshot_pages: slot("site_snapshot_pages"),
+      page_summary_integrity: slot("page_summary_integrity"),
+      artifact_combined_payload_integrity: slot("artifact_combined_payload_integrity"),
+      site_read_manifest: slot("site_read_manifest"),
+      ledger_authority: slot("ledger_authority"),
+      prohibited_operation_guard_authority: slot("prohibited_operation_guard_authority"),
+      zero_database_effect_counts: slot("zero_database_effect_counts")
+    },
+    transactionProfile: { isolation: "repeatable read" as const, readOnly: true as const }
+  };
+}
+
+function expectIncomplete(work: () => never): void {
+  try {
+    work();
+    throw new Error("expected phase authority to remain incomplete");
+  } catch (error) {
+    expect(error).toBeInstanceOf(ReportV4AcceptanceAuthorityPhaseIncompleteError);
+    expect(error).toMatchObject({ code: "phase_authority_incomplete" });
+  }
+}
+
+function reseal(slot: { records: Record<string, unknown>[]; recordCount: number; canonicalHash: string }): void {
+  slot.recordCount = slot.records.length;
+  slot.canonicalHash = testHash(stable(slot.records));
+}
+
+function testHash(value: string): string { return createHash("sha256").update(value).digest("hex"); }
+
+function stable(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, child]) => `${JSON.stringify(key)}:${stable(child)}`).join(",")}}`;
+  return JSON.stringify(value);
 }

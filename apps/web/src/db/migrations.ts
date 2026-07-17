@@ -3686,6 +3686,68 @@ export const V38_DATABASE_MIGRATIONS = [
      FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_website_synthesis_checkpoint_mutation()`
 ] as const;
 
+export const V39_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS report_v4_acceptance_authority_phase_snapshots (
+    session_id text NOT NULL REFERENCES report_v4_acceptance_sessions(id) ON DELETE RESTRICT,
+    scenario_id text NOT NULL,
+    phase text NOT NULL,
+    captured_at text NOT NULL,
+    payload jsonb NOT NULL,
+    payload_hash text NOT NULL,
+    commerce_fingerprint text NOT NULL,
+    worker_git_sha text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY(session_id,scenario_id,phase),
+    CONSTRAINT report_v4_acceptance_authority_phase_scenario_session_fkey
+      FOREIGN KEY(scenario_id,session_id) REFERENCES report_v4_acceptance_scenarios(id,session_id) ON DELETE RESTRICT,
+    CONSTRAINT report_v4_acceptance_authority_phase_phase_check CHECK(phase IN ('baseline','final')),
+    CONSTRAINT report_v4_acceptance_authority_phase_payload_check CHECK(jsonb_typeof(payload)='object'),
+    CONSTRAINT report_v4_acceptance_authority_phase_hash_check CHECK(
+      payload_hash ~ '^[a-f0-9]{64}$' AND commerce_fingerprint ~ '^[a-f0-9]{64}$'
+      AND worker_git_sha ~ '^[a-f0-9]{40}$')
+  )`,
+  `ALTER TABLE report_v4_acceptance_authority_phase_snapshots
+     DROP CONSTRAINT IF EXISTS report_v4_acceptance_authority_phase_captured_at_check`,
+  `ALTER TABLE report_v4_acceptance_authority_phase_snapshots
+     ADD CONSTRAINT report_v4_acceptance_authority_phase_captured_at_check CHECK(
+       captured_at ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$'
+       AND captured_at::timestamptz IS NOT NULL)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_authority_phase_snapshot() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; scenario_state text; session_environment text; session_worker_git_sha text;
+     baseline_captured_at text;
+   BEGIN
+     IF TG_OP='DELETE' OR TG_OP='UPDATE' THEN
+       RAISE EXCEPTION 'A Report V4 acceptance authority phase snapshot is append-only and immutable.';
+     END IF;
+     SELECT state,environment,worker_git_sha INTO session_state,session_environment,session_worker_git_sha
+       FROM report_v4_acceptance_sessions WHERE id=NEW.session_id;
+     SELECT state INTO scenario_state FROM report_v4_acceptance_scenarios
+       WHERE id=NEW.scenario_id AND session_id=NEW.session_id;
+     IF session_environment IS DISTINCT FROM 'protected_staging' OR session_state IS DISTINCT FROM 'collecting'
+       OR scenario_state IS DISTINCT FROM 'collecting' OR session_worker_git_sha IS DISTINCT FROM NEW.worker_git_sha THEN
+       RAISE EXCEPTION 'A phase snapshot requires its exact collecting protected-Staging session and scenario.';
+     END IF;
+     IF NEW.phase='baseline' THEN
+       IF EXISTS(SELECT 1 FROM report_v4_acceptance_authority_phase_snapshots
+         WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND phase='final') THEN
+         RAISE EXCEPTION 'A baseline phase snapshot cannot follow a final phase snapshot.';
+       END IF;
+     ELSE
+       SELECT captured_at INTO baseline_captured_at FROM report_v4_acceptance_authority_phase_snapshots
+         WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND phase='baseline';
+       IF baseline_captured_at IS NULL OR baseline_captured_at::timestamptz>=NEW.captured_at::timestamptz THEN
+         RAISE EXCEPTION 'A final phase snapshot requires an earlier persisted baseline phase snapshot.';
+       END IF;
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_acceptance_authority_phase_snapshots_guard
+    ON report_v4_acceptance_authority_phase_snapshots`,
+  `CREATE TRIGGER report_v4_acceptance_authority_phase_snapshots_guard
+    BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_authority_phase_snapshots
+    FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_authority_phase_snapshot()`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -3716,7 +3778,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 35, migrations: V35_DATABASE_MIGRATIONS },
   { version: 36, migrations: V36_DATABASE_MIGRATIONS },
   { version: 37, migrations: V37_DATABASE_MIGRATIONS },
-  { version: 38, migrations: V38_DATABASE_MIGRATIONS }
+  { version: 38, migrations: V38_DATABASE_MIGRATIONS },
+  { version: 39, migrations: V39_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

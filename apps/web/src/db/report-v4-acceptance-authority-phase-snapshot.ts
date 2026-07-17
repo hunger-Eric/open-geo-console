@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { fingerprintNormalizedReportV4CommerceAuthority } from "../report-v4/report-v4-commerce-authority-fingerprint";
 import {
   loadReportV4CommerceAuthoritySnapshotInTransaction,
   type LoadReportV4CommerceAuthoritySnapshotInput,
@@ -9,6 +10,17 @@ import {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
+const GIT_SHA = /^[a-f0-9]{40}$/u;
+const COMPLETE_PHASE_CONTRACT = "report-v4-acceptance-authority-phase-v1" as const;
+const COMPLETE_AUTHORITY_SLOT_NAMES = [
+  "site_snapshot_pages",
+  "page_summary_integrity",
+  "artifact_combined_payload_integrity",
+  "site_read_manifest",
+  "ledger_authority",
+  "prohibited_operation_guard_authority",
+  "zero_database_effect_counts"
+] as const;
 
 export const REPORT_V4_ACCEPTANCE_AUTHORITY_UNAVAILABLE_SLOTS = Object.freeze([
   "site_snapshot_pages",
@@ -62,6 +74,14 @@ export interface ReportV4AcceptanceAuthorityPhaseFoundation {
   readonly transactionProfile: Readonly<{ isolation: "repeatable read"; readOnly: true }>;
 }
 
+export interface PersistReportV4AcceptanceAuthorityPhaseSnapshotInput {
+  readonly sessionId: string;
+  readonly scenarioId: string;
+  readonly phase: "baseline" | "final";
+  readonly workerGitSha: string;
+  readonly payload: unknown;
+}
+
 export interface ReportV4AcceptanceAuthorityPhaseSnapshotDependencies {
   /** Same-transaction adapter for projecting and validating the V38 checkpoint authority. */
   readonly loadWebsiteCheckpointV38InTransaction?: (
@@ -80,6 +100,15 @@ export class ReportV4AcceptanceAuthorityPhaseUnavailableError extends Error {
   ) {
     super(`Report V4 ${phase} authority phase is unavailable: ${missingAuthorities.join(", ")}.`);
     this.name = "ReportV4AcceptanceAuthorityPhaseUnavailableError";
+  }
+}
+
+export class ReportV4AcceptanceAuthorityPhaseIncompleteError extends Error {
+  readonly code = "phase_authority_incomplete" as const;
+
+  constructor() {
+    super("phase_authority_incomplete: all seven DB authority slots remain unavailable until slot-specific complete-set loaders and validators exist.");
+    this.name = "ReportV4AcceptanceAuthorityPhaseIncompleteError";
   }
 }
 
@@ -108,6 +137,38 @@ export async function loadReportV4AcceptanceAuthorityPhaseSnapshot(
       foundation.foundationHash
     );
   });
+}
+
+/** The V39 table exists, but no production complete-set projector exists yet. */
+export async function persistReportV4AcceptanceAuthorityPhaseSnapshot(
+  sql: ReportV4CommerceAuthoritySnapshotSql,
+  input: PersistReportV4AcceptanceAuthorityPhaseSnapshotInput
+): Promise<never> {
+  void sql;
+  const raw = exactRecord(input, ["payload", "phase", "scenarioId", "sessionId", "workerGitSha"], "phase persistence input");
+  parsePhaseIdentity(raw as unknown as Pick<PersistReportV4AcceptanceAuthorityPhaseSnapshotInput, "sessionId" | "scenarioId" | "phase">);
+  if (typeof raw.workerGitSha !== "string" || !GIT_SHA.test(raw.workerGitSha)) {
+    throw new Error("workerGitSha must be a lowercase full Git SHA.");
+  }
+  try {
+    assertReportV4AcceptanceCompleteAuthorityPhasePayload(raw.payload);
+  } catch (error) {
+    if (error instanceof ReportV4AcceptanceAuthorityPhaseIncompleteError) throw error;
+    throw new ReportV4AcceptanceAuthorityPhaseIncompleteError();
+  }
+}
+
+export async function loadPersistedReportV4AcceptanceAuthorityPhaseSnapshotInTransaction(
+  tx: ReportV4CommerceAuthoritySnapshotTransactionSql,
+  input: Pick<PersistReportV4AcceptanceAuthorityPhaseSnapshotInput, "sessionId" | "scenarioId" | "phase">
+): Promise<null> {
+  const identity = parsePhaseIdentity(input);
+  const rows = await tx.unsafe(`SELECT session_id,scenario_id,phase
+    FROM report_v4_acceptance_authority_phase_snapshots
+    WHERE session_id=$1 AND scenario_id=$2 AND phase=$3`, [identity.sessionId, identity.scenarioId, identity.phase]);
+  if (rows.length > 1) throw new Error("Report V4 authority phase persistence identity is not unique.");
+  if (rows[0]) throw new ReportV4AcceptanceAuthorityPhaseIncompleteError();
+  return null;
 }
 
 export function assertReportV4AcceptanceAuthorityCaptureOrder(
@@ -238,6 +299,155 @@ export function assertReportV4AcceptanceWebsiteCheckpointV38Authority(
       throw new Error(`V38 website checkpoint ${field} is missing or invalid.`);
     }
   }
+}
+
+export function assertReportV4AcceptanceCompleteAuthorityPhasePayload(
+  value: unknown
+): never {
+  const payload = exactRecord(value, [
+    "authorities", "capturedAt", "commerce", "contractVersion", "paidAt", "phase", "scenarioKind", "session",
+    "transactionProfile", "websiteCheckpoint"
+  ], "complete authority phase payload");
+  if (payload.contractVersion !== COMPLETE_PHASE_CONTRACT) throw new Error("Complete authority phase contractVersion is invalid.");
+  if (payload.phase !== "baseline" && payload.phase !== "final") throw new Error("Complete authority phase is invalid.");
+  canonicalUtcInstant(payload.capturedAt, "complete payload capturedAt");
+  canonicalUtcInstant(payload.paidAt, "complete payload paidAt");
+  if (payload.scenarioKind !== "success" && payload.scenarioKind !== "diagnosis_failure" && payload.scenarioKind !== "question_failure") {
+    throw new Error("Complete authority phase scenarioKind is invalid.");
+  }
+  validateCompleteSession(payload.session);
+  assertReportV4AcceptanceWebsiteCheckpointV38Authority(payload.websiteCheckpoint);
+  validateTransactionProfile(payload.transactionProfile);
+  const commerce = validateCompleteCommerce(payload.commerce, payload.phase, payload.scenarioKind);
+  if (payload.capturedAt !== commerce.capturedAt) {
+    throw new Error("Complete authority phase capturedAt must exactly equal commerce capturedAt.");
+  }
+  if (!Array.isArray(commerce.orders) || commerce.orders.length !== 1
+      || !commerce.orders[0] || typeof commerce.orders[0] !== "object" || Array.isArray(commerce.orders[0])
+      || (commerce.orders[0] as Record<string, unknown>).paidAt !== payload.paidAt) {
+    throw new Error("Complete authority phase paidAt must exactly equal the unique commerce order paidAt.");
+  }
+  assertPhaseTopology({
+    phase: payload.phase as "baseline" | "final",
+    capturedAt: payload.capturedAt as string,
+    scenarioKind: payload.scenarioKind as ReportV4AcceptanceAuthorityPhaseFoundation["scenarioKind"],
+    session: payload.session as ReportV4AcceptanceAuthorityPhaseFoundation["session"],
+    commerce: payload.commerce as ReportV4CommerceAuthoritySnapshot,
+    paidAt: payload.paidAt as string,
+    websiteCheckpoint: payload.websiteCheckpoint as ReportV4AcceptanceWebsiteCheckpointV38Authority,
+    foundationHash: digest(stableJson(payload)),
+    transactionProfile: payload.transactionProfile as ReportV4AcceptanceAuthorityPhaseFoundation["transactionProfile"]
+  });
+  let authorities: Record<string, unknown>;
+  try {
+    authorities = exactRecord(payload.authorities, [...COMPLETE_AUTHORITY_SLOT_NAMES].sort(), "complete DB authorities");
+  } catch {
+    throw new ReportV4AcceptanceAuthorityPhaseIncompleteError();
+  }
+  for (const name of COMPLETE_AUTHORITY_SLOT_NAMES) {
+    assertNoSensitiveUnknownKeys(authorities[name], `complete DB authorities.${name}`);
+  }
+  throw new ReportV4AcceptanceAuthorityPhaseIncompleteError();
+}
+
+function validateCompleteCommerce(value: unknown, phase: "baseline" | "final", scenarioKind: string): Record<string, unknown> {
+  const commerce = exactRecord(value, [
+    "accessTokens", "artifacts", "capturedAt", "creditAuthority", "diagnosisCheckpoints", "dispatches", "emailAuthority",
+    "fingerprint", "jobs", "orders", "paymentEvents", "phase", "questionCheckpoints", "scenarioKind", "scope", "transactionProfile"
+  ], "complete commerce authority");
+  if (commerce.phase !== phase || commerce.scenarioKind !== scenarioKind) throw new Error("Complete commerce phase/scenario topology mismatch.");
+  canonicalUtcInstant(commerce.capturedAt, "commerce capturedAt");
+  validateTransactionProfile(commerce.transactionProfile);
+  const normalized = {
+    phase: commerce.phase,
+    capturedAt: commerce.capturedAt,
+    scope: commerce.scope,
+    orders: commerce.orders,
+    paymentEvents: commerce.paymentEvents,
+    jobs: commerce.jobs,
+    dispatches: commerce.dispatches,
+    creditAuthority: commerce.creditAuthority,
+    emailAuthority: commerce.emailAuthority,
+    accessTokens: commerce.accessTokens,
+    artifacts: commerce.artifacts,
+    questionCheckpoints: commerce.questionCheckpoints,
+    diagnosisCheckpoints: commerce.diagnosisCheckpoints
+  };
+  const recomputed = fingerprintNormalizedReportV4CommerceAuthority(normalized);
+  if (commerce.fingerprint !== recomputed) throw new Error("Complete commerce fingerprint does not match its canonical full payload.");
+  return commerce;
+}
+
+function validateCompleteSession(value: unknown): void {
+  const session = exactRecord(value, [
+    "eventCount", "headHash", "headSequence", "scenarioIdHash", "scenarioState", "sessionIdHash", "sessionState"
+  ], "complete phase session authority");
+  hash(session.sessionIdHash, "sessionIdHash");
+  hash(session.scenarioIdHash, "scenarioIdHash");
+  hash(session.headHash, "headHash");
+  const headSequence = nonnegativeInteger(session.headSequence, "headSequence");
+  const eventCount = nonnegativeInteger(session.eventCount, "eventCount");
+  if (headSequence !== eventCount) throw new Error("Complete phase session eventCount must equal headSequence.");
+  if (parseState(session.sessionState, "session state") !== "collecting"
+      || parseState(session.scenarioState, "scenario state") !== "collecting") {
+    throw new Error("Complete phase session and scenario must be collecting at capture time.");
+  }
+}
+
+function validateTransactionProfile(value: unknown): void {
+  const profile = exactRecord(value, ["isolation", "readOnly"], "authority transaction profile");
+  if (profile.isolation !== "repeatable read" || profile.readOnly !== true) {
+    throw new Error("Authority transaction profile must be repeatable-read and read-only.");
+  }
+}
+
+function parsePhaseIdentity(
+  input: Pick<PersistReportV4AcceptanceAuthorityPhaseSnapshotInput, "sessionId" | "scenarioId" | "phase">
+): Pick<PersistReportV4AcceptanceAuthorityPhaseSnapshotInput, "sessionId" | "scenarioId" | "phase"> {
+  if (!input || typeof input !== "object" || !UUID.test(input.sessionId) || !UUID.test(input.scenarioId)
+      || (input.phase !== "baseline" && input.phase !== "final")) {
+    throw new TypeError("Report V4 authority phase persistence identity is invalid.");
+  }
+  return { sessionId: input.sessionId, scenarioId: input.scenarioId, phase: input.phase };
+}
+
+function exactRecord(value: unknown, fields: readonly string[], label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an exact object.`);
+  const keys = Object.keys(value).sort();
+  const expected = [...fields].sort();
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+    throw new Error(`${label} fields are incomplete or non-canonical.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function assertNoSensitiveUnknownKeys(value: unknown, label: string): void {
+  if (Array.isArray(value)) {
+    value.forEach((child, index) => assertNoSensitiveUnknownKeys(child, `${label}[${index}]`));
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    const words = sensitiveKeyWords(key);
+    const compact = key.replace(/[^A-Za-z0-9]+/gu, "").toLowerCase();
+    const compactSensitive = /(?:email|token|password|credential|secret|authorization)/u.test(compact)
+      || /(?:api|access|private|encryption|signing|idempotency|checkout)key/u.test(compact);
+    if (compactSensitive || words.some((word) => /^(?:url|email|token|key|password|credential|credentials|secret|secrets|authorization)$/u.test(word))) {
+      throw new Error(`${label} contains forbidden sensitive unknown field ${key}.`);
+    }
+    assertNoSensitiveUnknownKeys(child, `${label}.${key}`);
+  }
+}
+
+function sensitiveKeyWords(key: string): string[] {
+  return key
+    .replace(/([A-Z]+)([A-Z][a-z])/gu, "$1 $2")
+    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+    .replace(/([A-Za-z])([0-9])/gu, "$1 $2")
+    .replace(/([0-9])([A-Za-z])/gu, "$1 $2")
+    .split(/[^A-Za-z0-9]+/u)
+    .filter(Boolean)
+    .map((word) => word.toLowerCase());
 }
 
 function parseInput(input: LoadReportV4CommerceAuthoritySnapshotInput): LoadReportV4CommerceAuthoritySnapshotInput {

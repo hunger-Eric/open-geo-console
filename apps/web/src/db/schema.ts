@@ -1644,6 +1644,30 @@ export const reportV4AcceptanceEvents = pgTable("report_v4_acceptance_events", {
 ]);
 export type ReportV4AcceptanceEventRow = typeof reportV4AcceptanceEvents.$inferSelect;
 
+export const reportV4AcceptanceAuthorityPhaseSnapshots = pgTable("report_v4_acceptance_authority_phase_snapshots", {
+  sessionId: text("session_id").notNull().references(() => reportV4AcceptanceSessions.id, { onDelete: "restrict" }),
+  scenarioId: text("scenario_id").notNull(),
+  phase: text("phase").$type<"baseline" | "final">().notNull(),
+  capturedAt: text("captured_at").notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  payloadHash: text("payload_hash").notNull(),
+  commerceFingerprint: text("commerce_fingerprint").notNull(),
+  workerGitSha: text("worker_git_sha").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  primaryKey({ columns: [table.sessionId, table.scenarioId, table.phase], name: "report_v4_acceptance_authority_phase_snapshots_pkey" }),
+  foreignKey({
+    columns: [table.scenarioId, table.sessionId],
+    foreignColumns: [reportV4AcceptanceScenarios.id, reportV4AcceptanceScenarios.sessionId],
+    name: "report_v4_acceptance_authority_phase_scenario_session_fkey"
+  }).onDelete("restrict"),
+  check("report_v4_acceptance_authority_phase_phase_check", sql`${table.phase} IN ('baseline','final')`),
+  check("report_v4_acceptance_authority_phase_captured_at_check", sql`${table.capturedAt} ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$' AND ${table.capturedAt}::timestamptz IS NOT NULL`),
+  check("report_v4_acceptance_authority_phase_payload_check", sql`jsonb_typeof(${table.payload})='object'`),
+  check("report_v4_acceptance_authority_phase_hash_check", sql`${table.payloadHash} ~ '^[a-f0-9]{64}$' AND ${table.commerceFingerprint} ~ '^[a-f0-9]{64}$' AND ${table.workerGitSha} ~ '^[a-f0-9]{40}$'`)
+]);
+export type ReportV4AcceptanceAuthorityPhaseSnapshotRow = typeof reportV4AcceptanceAuthorityPhaseSnapshots.$inferSelect;
+
 export const reportV4AcceptanceSiteReadManifest = pgTable("report_v4_acceptance_site_read_manifest", {
   identityHash: text("identity_hash").primaryKey(),
   sessionId: text("session_id").notNull().references(() => reportV4AcceptanceSessions.id, { onDelete: "restrict" }),

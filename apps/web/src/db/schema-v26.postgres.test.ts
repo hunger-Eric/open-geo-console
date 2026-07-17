@@ -16,7 +16,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-LEGACY-01
 describe("schema v26 V4 additive substrate", () => {
   it("registers only additive V4 tables and conditional HTML-only readiness", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(38);
+    expect(DATABASE_SCHEMA_VERSION).toBe(39);
     const sql = databaseMigrationsAfter(25).join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_site_snapshots");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_site_snapshot_pages");

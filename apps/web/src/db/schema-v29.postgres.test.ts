@@ -10,7 +10,7 @@ const describeDisposablePostgres = adminUrl ? describe : describe.skip;
 // @requirement GEO-V4-CRAWL-04
 describe("schema v29 V4 pre-admission jobs", () => {
   it("registers the exact job identity and one-per-report boundary additively", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(38);
+    expect(DATABASE_SCHEMA_VERSION).toBe(39);
     const sql = V29_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("v4_pre_admission");
     expect(sql).toContain("tier='deep'");
