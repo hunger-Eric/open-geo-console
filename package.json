@@ -39,6 +39,8 @@
     "report:v4:traceability": "npm run report:v4:traceability --workspace apps/web",
     "report:v4:matrix": "npm run report:v4:matrix --workspace apps/web",
     "report:v4:acceptance": "npm run report:v4:acceptance --workspace apps/web",
+    "report-v4:acceptance:operator": "npm run report-v4:acceptance:operator --workspace apps/web --",
+    "report-v4:acceptance:collect": "npm run report-v4:acceptance:collect --workspace apps/web --",
     "public-search:certify": "npm run public-search:certify --workspace apps/web --",
     "public-search:authority:install": "npm run public-search:authority:install --workspace apps/web --",
     "db:audit": "npm run db:audit --workspace apps/web",

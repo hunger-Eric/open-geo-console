@@ -7,6 +7,7 @@ import type {
   ReportV4AcceptanceScenario,
   ReportV4AcceptanceSession
 } from "../db/report-v4-acceptance-ledger";
+import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "../report-v4/report-v4-acceptance-fingerprints";
 import { createReportV4AcceptanceOperator } from "./report-v4-acceptance-operator";
 
 const ENVIRONMENT: NodeJS.ProcessEnv = {
@@ -76,10 +77,12 @@ describe("Report V4 acceptance operator", () => {
 
   it("makes terminal commands idempotent only for an exact terminal result and rejects conflicts", async () => {
     const store = mockStore();
-    const sealed = scenarioRow({ state: "sealed", baselineFingerprint: "c".repeat(64), finalFingerprint: "d".repeat(64) });
+    const collecting = boundScenario();
+    const baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(collecting);
+    const sealed = { ...collecting, state: "sealed" as const, baselineFingerprint, finalFingerprint: "d".repeat(64) };
     vi.mocked(store.loadScenarios).mockResolvedValue([sealed]);
     const operator = createReportV4AcceptanceOperator(store, ENVIRONMENT);
-    const payload = { sessionId: SESSION_ID, scenarioId: SUCCESS_ID, baselineFingerprint: "c".repeat(64), finalFingerprint: "d".repeat(64) };
+    const payload = { sessionId: SESSION_ID, scenarioId: SUCCESS_ID, baselineFingerprint, finalFingerprint: "d".repeat(64) };
     await expect(operator.execute("seal-scenario", payload)).resolves.toMatchObject({ scenario: sealed });
     expect(store.sealScenario).not.toHaveBeenCalled();
     await expect(operator.execute("seal-scenario", { ...payload, finalFingerprint: "e".repeat(64) })).rejects.toThrow(/conflict|fingerprint/iu);
@@ -88,6 +91,96 @@ describe("Report V4 acceptance operator", () => {
     await expect(operator.execute("seal-session", { sessionId: SESSION_ID })).resolves.toMatchObject({ session: { state: "sealed" } });
     expect(store.sealSession).not.toHaveBeenCalled();
     await expect(operator.execute("fail-session", { sessionId: SESSION_ID })).rejects.toThrow(/conflict|sealed/iu);
+  });
+
+  it.each(["seal-scenario", "fail-scenario"] as const)(
+    "recomputes the exact persisted fault baseline before the first %s terminal write",
+    async (action) => {
+      const store = mockStore();
+      const scenario = boundScenario({
+        scenarioId: QUESTION_ID,
+        kind: "question_failure",
+        faultKind: "question_failure",
+        faultQuestionId: "question-failure",
+        expectedFaultOccurrences: 2,
+        enhancementJobId: null,
+        enhancementArtifactRevisionId: null
+      });
+      const baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(scenario);
+      vi.mocked(store.loadScenarios).mockResolvedValue([scenario]);
+      const operator = createReportV4AcceptanceOperator(store, ENVIRONMENT);
+      const payload = {
+        sessionId: SESSION_ID,
+        scenarioId: QUESTION_ID,
+        baselineFingerprint,
+        finalFingerprint: "d".repeat(64)
+      };
+
+      await expect(operator.execute(action, { ...payload, baselineFingerprint: "c".repeat(64) }))
+        .rejects.toThrow(/baseline|fingerprint/iu);
+      expect(store.sealScenario).not.toHaveBeenCalled();
+      expect(store.failScenario).not.toHaveBeenCalled();
+
+      await expect(operator.execute(action, payload)).resolves.toMatchObject({ action });
+      expect(store[action === "seal-scenario" ? "sealScenario" : "failScenario"])
+        .toHaveBeenCalledExactlyOnceWith(payload);
+    }
+  );
+
+  it("rejects a scenario row that does not belong to the exact requested session before terminal writes", async () => {
+    const store = mockStore();
+    const scenario = boundScenario({ sessionId: "51111111-1111-4111-8111-111111111111" });
+    vi.mocked(store.loadScenarios).mockResolvedValue([scenario]);
+    const payload = {
+      sessionId: SESSION_ID,
+      scenarioId: SUCCESS_ID,
+      baselineFingerprint: computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(scenario),
+      finalFingerprint: "d".repeat(64)
+    };
+
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT).execute("seal-scenario", payload))
+      .rejects.toThrow(/exact|not found|session/iu);
+    expect(store.sealScenario).not.toHaveBeenCalled();
+    expect(store.failScenario).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["seal-scenario", "sealed", "sealScenario"],
+    ["fail-scenario", "failed", "failScenario"]
+  ] as const)("keeps an exact %s terminal retry idempotent after baseline recomputation", async (action, state, method) => {
+    const store = mockStore();
+    const collecting = boundScenario();
+    const baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(collecting);
+    const terminal = {
+      ...collecting,
+      state,
+      baselineFingerprint,
+      finalFingerprint: "d".repeat(64)
+    };
+    vi.mocked(store.loadScenarios).mockResolvedValue([terminal]);
+    const payload = {
+      sessionId: SESSION_ID,
+      scenarioId: SUCCESS_ID,
+      baselineFingerprint,
+      finalFingerprint: "d".repeat(64)
+    };
+
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT).execute(action, payload))
+      .resolves.toMatchObject({ action, scenario: terminal });
+    expect(store[method]).not.toHaveBeenCalled();
+  });
+
+  it("registers both operator and collector CLIs through the workspace script contract", () => {
+    const rootPackage = JSON.parse(readFileSync(fileURLToPath(new URL("../../../../package.json", import.meta.url)), "utf8"));
+    const webPackage = JSON.parse(readFileSync(fileURLToPath(new URL("../../package.json", import.meta.url)), "utf8"));
+    expect(rootPackage.scripts).toMatchObject({
+      "report-v4:acceptance:operator": "npm run report-v4:acceptance:operator --workspace apps/web --",
+      "report-v4:acceptance:collect": "npm run report-v4:acceptance:collect --workspace apps/web --"
+    });
+    expect(webPackage.scripts).toMatchObject({
+      "report-v4:acceptance:operator": "node --import tsx src/scripts/report-v4-acceptance-operator.ts",
+      "report-v4:acceptance:collect": "node --import tsx src/scripts/report-v4-acceptance-collector.ts"
+    });
   });
 
   it("contains no deployment, payment, email, browser, production-access, or Worker mutation path", () => {
@@ -213,4 +306,20 @@ function scenarioRow(overrides: Partial<ReportV4AcceptanceScenario> = {}): Repor
     terminalAt: null,
     ...overrides
   };
+}
+
+function boundScenario(overrides: Partial<ReportV4AcceptanceScenario> = {}): ReportV4AcceptanceScenario {
+  return scenarioRow({
+    reportId: "report-1",
+    orderId: "order-1",
+    preAdmissionJobId: "pre-job-1",
+    coreJobId: "core-job-1",
+    enhancementJobId: "enhancement-job-1",
+    siteSnapshotId: "site-1",
+    configSnapshotId: "config-1",
+    questionSetId: "questions-1",
+    coreArtifactRevisionId: "core-artifact-1",
+    enhancementArtifactRevisionId: "enhancement-artifact-1",
+    ...overrides
+  });
 }

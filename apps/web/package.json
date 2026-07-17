@@ -37,6 +37,8 @@
     "report:v4:traceability": "node --import tsx src/scripts/audit-report-v4-conformance.ts traceability",
     "report:v4:matrix": "node --import tsx src/scripts/audit-report-v4-conformance.ts traceability --write-matrix",
     "report:v4:acceptance": "node --import tsx src/scripts/audit-report-v4-conformance.ts acceptance",
+    "report-v4:acceptance:operator": "node --import tsx src/scripts/report-v4-acceptance-operator.ts",
+    "report-v4:acceptance:collect": "node --import tsx src/scripts/report-v4-acceptance-collector.ts",
     "report:v4:staging:verify": "node --import tsx src/scripts/verify-report-v4-staging.ts",
     "public-search:certify": "node --env-file=.env.staging.local --import tsx src/scripts/certify-public-search-surface.ts",
     "public-search:authority:install": "node --env-file=.env.staging.local --import tsx src/scripts/install-public-search-authority.ts",

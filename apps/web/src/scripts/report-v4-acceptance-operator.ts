@@ -10,6 +10,7 @@ import {
   type ReportV4AcceptanceSession,
   type TerminalizeReportV4AcceptanceScenarioInput
 } from "../db/report-v4-acceptance-ledger";
+import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "../report-v4/report-v4-acceptance-fingerprints";
 import { assertProtectedStagingCommercePreview } from "../security/deployment-policy";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -87,9 +88,15 @@ async function terminalizeScenarioIdempotently(
   input: TerminalizeReportV4AcceptanceScenarioInput,
   target: "sealed" | "failed"
 ): Promise<ReportV4AcceptanceScenario> {
-  const matches = (await ledger.loadScenarios(input.sessionId)).filter((scenario) => scenario.scenarioId === input.scenarioId);
+  const matches = (await ledger.loadScenarios(input.sessionId)).filter((scenario) => (
+    scenario.sessionId === input.sessionId && scenario.scenarioId === input.scenarioId
+  ));
   if (matches.length !== 1) throw new Error("The exact Report V4 acceptance scenario was not found.");
   const existing = matches[0]!;
+  const expectedBaselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(existing);
+  if (input.baselineFingerprint !== expectedBaselineFingerprint) {
+    throw new Error("The Report V4 acceptance scenario baseline fingerprint does not match its exact persisted fault provenance.");
+  }
   if (existing.state === target) {
     if (existing.baselineFingerprint === input.baselineFingerprint && existing.finalFingerprint === input.finalFingerprint) return existing;
     throw new Error("The terminal Report V4 acceptance scenario fingerprint conflicts with this command.");
