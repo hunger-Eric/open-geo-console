@@ -15,6 +15,16 @@ import {
   type ReportV4CoreProductionInput
 } from "./report-v4-core-production";
 
+// @requirement GEO-V4-CONTRACT-01
+// @requirement GEO-V4-CRAWL-04
+// @requirement GEO-V4-TOKEN-01
+// @requirement GEO-V4-TOKEN-02
+// @requirement GEO-V4-ANSWER-01
+// @requirement GEO-V4-ANSWER-02
+// @requirement GEO-V4-DELIVERY-01
+// @requirement GEO-V4-PDF-01
+// @requirement GEO-V4-COMMERCE-01
+
 describe("Report V4 core production composition", () => {
   it("runs an exact reserved core through activation and atomic commerce in strict order", async () => {
     const harness = productionHarness();

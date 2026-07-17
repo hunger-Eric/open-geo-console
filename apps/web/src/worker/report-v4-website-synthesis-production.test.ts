@@ -9,6 +9,10 @@ import {
   REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID
 } from "./report-v4-website-synthesis-production";
 
+// @requirement GEO-V4-TOKEN-01
+// @requirement GEO-V4-TOKEN-02
+// @requirement GEO-V4-CRAWL-04
+
 const output = { summary: "Website summary", strengths: ["Clear"], gaps: ["Proof"], actions: ["Publish proof"] };
 const page = {
   pageId: "page-1", url: "https://example.com/", contentHash: "a".repeat(64),

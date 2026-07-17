@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createReportV4ProductionPageAnalysis } from "./report-v4-page-analysis-production";
 
+// @requirement GEO-V4-TOKEN-01
+// @requirement GEO-V4-TOKEN-02
+// @requirement GEO-V4-CRAWL-04
+
 const base = {
   reportId: "r1", siteSnapshotId: "s1", pageId: "p1", url: "https://example.com/",
   contentHash: "a".repeat(64), readability: "direct_readable" as const, sourceLength: 8,

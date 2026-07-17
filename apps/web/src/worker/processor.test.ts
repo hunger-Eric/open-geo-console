@@ -25,6 +25,12 @@ import {
   type ReportV4ProductionRunnerInput
 } from "./processor";
 
+// @requirement GEO-V4-CONTRACT-01
+// @requirement GEO-V4-DELIVERY-01
+// @requirement GEO-V4-PDF-01
+// @requirement GEO-V4-LEGACY-01
+// @requirement GEO-V4-COMMERCE-01
+
 const processorSource = readFileSync(new URL("./processor.ts", import.meta.url), "utf8");
 
 describe("strict Report V4 processor routing", () => {

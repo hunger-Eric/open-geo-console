@@ -15,6 +15,15 @@ import {
   type ClaimedReportV4EnhancementJob
 } from "./report-v4-enhancement-production";
 
+// @requirement GEO-V4-TOKEN-01
+// @requirement GEO-V4-TOKEN-02
+// @requirement GEO-V4-SOURCE-02
+// @requirement GEO-V4-DELIVERY-01
+// @requirement GEO-V4-DIAG-01
+// @requirement GEO-V4-DIAG-02
+// @requirement GEO-V4-PDF-01
+// @requirement GEO-V4-COMMERCE-01
+
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const suite = adminUrl ? describe : describe.skip;
 const suffix = randomUUID().replaceAll("-", "");

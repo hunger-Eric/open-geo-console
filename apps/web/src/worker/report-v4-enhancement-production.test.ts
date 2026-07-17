@@ -11,6 +11,15 @@ import {
   type ReportV4EnhancementProductionDependencies
 } from "./report-v4-enhancement-production";
 
+// @requirement GEO-V4-TOKEN-01
+// @requirement GEO-V4-TOKEN-02
+// @requirement GEO-V4-SOURCE-02
+// @requirement GEO-V4-DELIVERY-01
+// @requirement GEO-V4-DIAG-01
+// @requirement GEO-V4-DIAG-02
+// @requirement GEO-V4-PDF-01
+// @requirement GEO-V4-COMMERCE-01
+
 const NOW = new Date("2026-07-17T00:00:00.000Z");
 
 describe("Report V4 enhancement production boundary", () => {

@@ -13,6 +13,14 @@ import {
   type ReportV4CoreProductionInput
 } from "./report-v4-core-production";
 
+// @requirement GEO-V4-CONTRACT-01
+// @requirement GEO-V4-CRAWL-04
+// @requirement GEO-V4-ANSWER-01
+// @requirement GEO-V4-ANSWER-02
+// @requirement GEO-V4-DELIVERY-01
+// @requirement GEO-V4-PDF-01
+// @requirement GEO-V4-COMMERCE-01
+
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const describePostgres = adminUrl ? describe : describe.skip;
 const suffix = randomUUID().replaceAll("-", "");
