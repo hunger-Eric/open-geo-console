@@ -34,7 +34,10 @@ describe("Report V4 acceptance ledger verifier", () => {
     ["missing lineage", (f: Fixture) => { f.scenarios[0]!.coreArtifactRevisionId = ""; }, /coreArtifactRevisionId/u],
     ["missing fingerprint", (f: Fixture) => { f.scenarios[1]!.baselineFingerprint = null; }, /baselineFingerprint/u],
     ["wrong lineage baseline", (f: Fixture) => { f.scenarios[1]!.baselineFingerprint = "f".repeat(64); }, /fault-provenance lineage fingerprint/u],
-    ["missing success source", (f: Fixture) => { f.scenarios[0]!.faultSourceId = null; }, /faultSourceId/u]
+    ["missing success source", (f: Fixture) => { f.scenarios[0]!.faultSourceId = null; }, /faultSourceId/u],
+    ["missing diagnosis enhancement artifact", (f: Fixture) => {
+      f.scenarios[1]!.enhancementArtifactRevisionId = null;
+    }, /enhancementArtifactRevisionId must be nonblank/u]
   ])("rejects %s", (_label, mutate, message) => {
     const fixture = validLedger();
     mutate(fixture);
@@ -186,7 +189,7 @@ function scenario(sessionId: string, scenarioId: string, kind: ReportV4Acceptanc
     configSnapshotId: `config-${kind}`,
     questionSetId: `questions-${kind}`,
     coreArtifactRevisionId: `core-artifact-${kind}`,
-    enhancementArtifactRevisionId: success ? `enhancement-artifact-${kind}` : null,
+    enhancementArtifactRevisionId: success || diagnosis ? `enhancement-artifact-${kind}` : null,
     kind,
     faultKind: success ? "independent_source_read_failure" : kind,
     faultQuestionId: `question-${kind}`,

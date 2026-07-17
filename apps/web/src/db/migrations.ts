@@ -3240,6 +3240,9 @@ export const V35_DATABASE_MIGRATIONS = [
      IF NEW.kind='success' AND NEW.enhancement_artifact_revision_id IS NULL THEN
        RAISE EXCEPTION 'The successful Report V4 acceptance scenario requires its exact enhancement artifact.';
      END IF;
+     IF NEW.kind='diagnosis_failure' AND NEW.enhancement_artifact_revision_id IS NULL THEN
+       RAISE EXCEPTION 'The diagnosis-failure Report V4 acceptance scenario requires its exact enhancement artifact.';
+     END IF;
      IF NEW.kind='success' AND NEW.fault_source_id IS NULL THEN
        RAISE EXCEPTION 'The successful Report V4 acceptance scenario requires its bound independent fault source before terminalization.';
      END IF;

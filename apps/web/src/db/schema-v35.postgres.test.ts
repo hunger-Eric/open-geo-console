@@ -25,6 +25,7 @@ describe("schema V35 protected-Staging acceptance ledger", () => {
     expect(source).toContain("occurred_at_canonical ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$'");
     expect(source).toContain("OLD.fault_source_id IS NULL AND NEW.fault_source_id IS NOT NULL");
     expect(source).toContain("requires its bound independent fault source before terminalization");
+    expect(source).toContain("The diagnosis-failure Report V4 acceptance scenario requires its exact enhancement artifact.");
     const schemaSource = readFileSync(new URL("./schema.ts", import.meta.url), "utf8");
     expect(schemaSource).toContain("~ '^\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}:\\\\d{2}\\\\.\\\\d{6}Z$'");
   });

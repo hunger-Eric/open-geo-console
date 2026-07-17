@@ -130,6 +130,9 @@ function verifyScenarioContract(scenario: ReportV4AcceptanceScenario, label: str
       issues.push(`scenario ${label} diagnosis fault contract must be diagnosis_failure exactly twice`);
     }
     if (!nonblank(scenario.enhancementJobId)) issues.push(`scenario ${label} enhancementJobId must be nonblank`);
+    if (!nonblank(scenario.enhancementArtifactRevisionId)) {
+      issues.push(`scenario ${label} enhancementArtifactRevisionId must be nonblank`);
+    }
     if (scenario.faultSourceId !== null) issues.push(`scenario ${label} faultSourceId must be null for diagnosis_failure`);
     return;
   }

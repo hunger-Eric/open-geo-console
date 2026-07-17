@@ -174,6 +174,50 @@ suite("Report V4 protected-Staging acceptance ledger PostgreSQL", () => {
       .rejects.toThrow(/only a collecting successful/i);
   }, 120_000);
 
+  it("allows a collecting diagnosis scenario to remain artifact-unbound but rejects seal or fail until the exact enhancement artifact is bound", async () => {
+    const repository = repo(sql);
+    const sessionId = "17777777-7777-4777-8777-777777777777";
+    const diagnosisScenarioId = "27777777-7777-4777-8777-777777777771";
+    const questionScenarioId = "27777777-7777-4777-8777-777777777772";
+    const diagnosisLabel = "diagnosis-artifact-terminal";
+    const questionLabel = "question-artifact-optional";
+    const terminal = (scenarioId: string, label: string) => ({
+      sessionId,
+      scenarioId,
+      baselineFingerprint: hash(`before-${label}`),
+      finalFingerprint: hash(`after-${label}`)
+    });
+
+    await repository.createSession(session(sessionId));
+    await seedV4Lineage(sql, diagnosisLabel);
+    await repository.createScenario(scenario(sessionId, diagnosisScenarioId, "diagnosis_failure"));
+    const diagnosisBinding = lineage(sessionId, diagnosisScenarioId, diagnosisLabel);
+    const collectingDiagnosis = await repository.bindScenario({
+      ...diagnosisBinding,
+      enhancementArtifactRevisionId: null
+    });
+    expect(collectingDiagnosis.state).toBe("collecting");
+    expect(collectingDiagnosis.enhancementArtifactRevisionId).toBeNull();
+    await expect(repository.sealScenario(terminal(diagnosisScenarioId, diagnosisLabel)))
+      .rejects.toThrow(/diagnosis-failure.*exact enhancement artifact/i);
+    await expect(repository.failScenario(terminal(diagnosisScenarioId, diagnosisLabel)))
+      .rejects.toThrow(/diagnosis-failure.*exact enhancement artifact/i);
+    expect((await repository.bindScenario(diagnosisBinding)).enhancementArtifactRevisionId)
+      .toBe(diagnosisBinding.enhancementArtifactRevisionId);
+    expect((await repository.failScenario(terminal(diagnosisScenarioId, diagnosisLabel))).state).toBe("failed");
+
+    await seedV4Lineage(sql, questionLabel);
+    await repository.createScenario(scenario(sessionId, questionScenarioId, "question_failure"));
+    const questionBinding = lineage(sessionId, questionScenarioId, questionLabel);
+    const questionWithoutEnhancement = {
+      ...questionBinding,
+      enhancementJobId: null,
+      enhancementArtifactRevisionId: null
+    };
+    expect((await repository.bindScenario(questionWithoutEnhancement)).enhancementArtifactRevisionId).toBeNull();
+    expect((await repository.failScenario(terminal(questionScenarioId, questionLabel))).state).toBe("failed");
+  }, 120_000);
+
   it("rejects an ambiguous collecting-scenario job lookup across job roles", async () => {
     const repository = repo(sql);
     const sessionId = "15555555-5555-4555-8555-555555555555";

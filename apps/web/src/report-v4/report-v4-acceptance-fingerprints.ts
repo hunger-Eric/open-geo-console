@@ -65,7 +65,7 @@ function exactFaultContract(scenario: ReportV4AcceptanceScenario): {
       faultKind: scenario.faultKind,
       expectedOccurrences: 2,
       enhancementJobId: required(scenario.enhancementJobId, "enhancementJobId"),
-      enhancementArtifactRevisionId: optional(scenario.enhancementArtifactRevisionId, "enhancementArtifactRevisionId")
+      enhancementArtifactRevisionId: required(scenario.enhancementArtifactRevisionId, "enhancementArtifactRevisionId")
     };
   }
   if (scenario.kind === "question_failure") {

@@ -42,7 +42,8 @@ describe("Report V4 acceptance fault-provenance baseline fingerprint", () => {
     ["common report", "question_failure", "reportId"],
     ["success enhancement job", "success", "enhancementJobId"],
     ["diagnosis enhancement job", "diagnosis_failure", "enhancementJobId"],
-    ["success enhancement artifact", "success", "enhancementArtifactRevisionId"]
+    ["success enhancement artifact", "success", "enhancementArtifactRevisionId"],
+    ["diagnosis enhancement artifact", "diagnosis_failure", "enhancementArtifactRevisionId"]
   ] as const)("fails closed for missing %s", (_label, kind, field) => {
     const scenario = { ...boundScenario(kind), [field]: null };
     expect(() => computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(scenario)).toThrow(new RegExp(field, "u"));
@@ -75,7 +76,7 @@ function boundScenario(kind: ReportV4AcceptanceScenario["kind"]): ReportV4Accept
     configSnapshotId: `config-${kind}`,
     questionSetId: `questions-${kind}`,
     coreArtifactRevisionId: `core-artifact-${kind}`,
-    enhancementArtifactRevisionId: success ? `enhancement-artifact-${kind}` : null,
+    enhancementArtifactRevisionId: success || diagnosis ? `enhancement-artifact-${kind}` : null,
     kind,
     faultKind: success ? "independent_source_read_failure" : kind,
     faultQuestionId: `question-${kind}`,
