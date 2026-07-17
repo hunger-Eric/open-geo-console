@@ -1,7 +1,50 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GenerativeSearchAnswerCardV3 } from "@open-geo-console/ai-report-engine";
+
+const replacementTerminalGuard = vi.hoisted(() => {
+  const state = { blockedSite: null as string | null, guardSites: [] as string[], delegatedSites: [] as string[] };
+  const blocked = new Error("blocked by replacement terminalization guard test");
+  return {
+    state,
+    blocked,
+    run: vi.fn(async (input: { guardSite: string; delegate: () => Promise<unknown> }) => {
+      state.guardSites.push(input.guardSite);
+      if (state.blockedSite === input.guardSite) throw blocked;
+      state.delegatedSites.push(input.guardSite);
+      return input.delegate();
+    })
+  };
+});
+const replacementTerminalDatabase = vi.hoisted(() => ({
+  ensureDatabase: vi.fn(),
+  begin: vi.fn(),
+  getSqlClient: vi.fn()
+}));
+
+vi.mock("@/report-v4/prohibited-operation-guard-runtime", () => ({
+  runReportV4GuardedOperation: replacementTerminalGuard.run
+}));
+vi.mock("./index", () => ({
+  ensureDatabase: replacementTerminalDatabase.ensureDatabase,
+  getSqlClient: replacementTerminalDatabase.getSqlClient
+}));
+vi.mock("@open-geo-console/ai-report-engine", () => ({
+  requireReadyCombinedGeoReport: (value: unknown) => value,
+  requireReadyCombinedGeoReportV2: (value: unknown) => value,
+  requireReadyCombinedGeoReportV3: (value: unknown) => value
+}));
+
 import { combinedV3CommercialOutcome } from "./combined-correction-terminalization";
-import { replacementRefundAllowsActivation } from "./combined-replacement-terminalization";
+import { replacementRefundAllowsActivation, terminalizeCombinedReplacement } from "./combined-replacement-terminalization";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  replacementTerminalGuard.state.blockedSite = null;
+  replacementTerminalGuard.state.guardSites.length = 0;
+  replacementTerminalGuard.state.delegatedSites.length = 0;
+  replacementTerminalDatabase.ensureDatabase.mockResolvedValue(undefined);
+  replacementTerminalDatabase.getSqlClient.mockReturnValue({ begin: replacementTerminalDatabase.begin });
+});
 
 describe("combined replacement terminalization outcomes", () => {
   it("uses delivered generative answers instead of audit coverage", () => {
@@ -20,6 +63,39 @@ describe("combined replacement terminalization outcomes", () => {
     expect(replacementRefundAllowsActivation("refunded")).toBe(true);
     expect(replacementRefundAllowsActivation("failed")).toBe(true);
     expect(replacementRefundAllowsActivation("not_required")).toBe(false);
+  });
+
+  it("blocks replacement terminalization before validation or SQL", async () => {
+    replacementTerminalGuard.state.blockedSite = "replacement_terminalize";
+
+    await expect(terminalizeCombinedReplacement({} as never)).rejects.toBe(replacementTerminalGuard.blocked);
+
+    expect(replacementTerminalGuard.state.guardSites).toEqual(["replacement_terminalize"]);
+    expect(replacementTerminalGuard.state.delegatedSites).toEqual([]);
+    expect(replacementTerminalDatabase.ensureDatabase).not.toHaveBeenCalled();
+    expect(replacementTerminalDatabase.getSqlClient).not.toHaveBeenCalled();
+    expect(replacementTerminalDatabase.begin).not.toHaveBeenCalled();
+  });
+
+  it("delegates replacement terminalization once and preserves its transaction failure", async () => {
+    const failure = new Error("replacement terminalization transaction failed");
+    replacementTerminalDatabase.begin.mockRejectedValueOnce(failure);
+
+    await expect(terminalizeCombinedReplacement({
+      report: { artifactContract: "combined_geo_report_v3", answerCards: [generative("answered", 0), generative("answered", 1), generative("answered", 2)] },
+      workerId: "worker-1",
+      checkpointIdentityHash: "checkpoint-1",
+      snapshotRefs: [],
+      htmlSha256: "h".repeat(64),
+      pdfSha256: "p".repeat(64),
+      pdfStorageKey: "private/report.pdf",
+      pageCount: 5
+    })).rejects.toBe(failure);
+
+    expect(replacementTerminalGuard.state.guardSites).toEqual(["replacement_terminalize"]);
+    expect(replacementTerminalGuard.state.delegatedSites).toEqual(["replacement_terminalize"]);
+    expect(replacementTerminalDatabase.ensureDatabase).toHaveBeenCalledTimes(1);
+    expect(replacementTerminalDatabase.begin).toHaveBeenCalledTimes(1);
   });
 });
 

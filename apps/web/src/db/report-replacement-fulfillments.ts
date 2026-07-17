@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type postgres from "postgres";
+import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 import { ensureDatabase, getSqlClient } from "./index";
 
 export const APPROVED_REPLACEMENT_TARGET = {
@@ -63,6 +64,13 @@ export async function inspectApprovedReportReplacement(): Promise<ReplacementIns
 }
 
 export async function prepareApprovedReportReplacement(input: { confirm: boolean; authorizationRef: string }): Promise<ReplacementFulfillmentSummary> {
+  return runReportV4GuardedOperation({
+    guardSite: "replacement_prepare",
+    delegate: () => prepareApprovedReportReplacementUnsafe(input)
+  });
+}
+
+async function prepareApprovedReportReplacementUnsafe(input: { confirm: boolean; authorizationRef: string }): Promise<ReplacementFulfillmentSummary> {
   if (!input.confirm) throw new Error("Explicit --confirm is required for replacement fulfillment preparation.");
   const authorizationRef = input.authorizationRef.trim();
   if (!/^[A-Za-z0-9@._:/ -]{3,160}$/.test(authorizationRef)) throw new Error("A safe operator authorization reference is required.");
@@ -152,6 +160,13 @@ export async function syncReplacementExecutionState(jobId: string, executionStat
 }
 
 export async function resumeApprovedReplacementModelRepair(input: { confirm: boolean; authorizationRef: string }): Promise<ReplacementFulfillmentSummary> {
+  return runReportV4GuardedOperation({
+    guardSite: "replacement_resume",
+    delegate: () => resumeApprovedReplacementModelRepairUnsafe(input)
+  });
+}
+
+async function resumeApprovedReplacementModelRepairUnsafe(input: { confirm: boolean; authorizationRef: string }): Promise<ReplacementFulfillmentSummary> {
   if (!input.confirm) throw new Error("Explicit --confirm is required for replacement model repair.");
   const authorizationRef = input.authorizationRef.trim();
   if (!/^[A-Za-z0-9@._:/ -]{3,160}$/.test(authorizationRef)) throw new Error("A safe operator authorization reference is required.");

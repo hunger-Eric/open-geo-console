@@ -1,5 +1,44 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const replacementGuardHarness = vi.hoisted(() => {
+  const state = { blockedSite: null as string | null, guardSites: [] as string[], delegatedSites: [] as string[] };
+  const blocked = new Error("blocked by replacement guard test");
+  return {
+    state,
+    blocked,
+    run: vi.fn(async (input: { guardSite: string; delegate: () => Promise<unknown> }) => {
+      state.guardSites.push(input.guardSite);
+      if (state.blockedSite === input.guardSite) throw blocked;
+      state.delegatedSites.push(input.guardSite);
+      return input.delegate();
+    })
+  };
+});
+const replacementDatabase = vi.hoisted(() => {
+  const sql = vi.fn();
+  const begin = vi.fn(async (delegate: (tx: typeof sql) => Promise<unknown>) => delegate(sql));
+  Object.assign(sql, { begin });
+  return { ensureDatabase: vi.fn(), getSqlClient: vi.fn(() => sql), sql, begin };
+});
+
+vi.mock("@/report-v4/prohibited-operation-guard-runtime", () => ({
+  runReportV4GuardedOperation: replacementGuardHarness.run
+}));
+vi.mock("./index", () => ({
+  ensureDatabase: replacementDatabase.ensureDatabase,
+  getSqlClient: replacementDatabase.getSqlClient
+}));
+
 import { APPROVED_REPLACEMENT_TARGET, prepareApprovedReportReplacement, replacementProviderClaimRepairPhase, resumeApprovedReplacementModelRepair } from "./report-replacement-fulfillments";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  replacementGuardHarness.state.blockedSite = null;
+  replacementGuardHarness.state.guardSites.length = 0;
+  replacementGuardHarness.state.delegatedSites.length = 0;
+  replacementDatabase.ensureDatabase.mockResolvedValue(undefined);
+  replacementDatabase.begin.mockImplementation(async (delegate: (tx: typeof replacementDatabase.sql) => Promise<unknown>) => delegate(replacementDatabase.sql));
+});
 
 describe("approved replacement fulfillment guard", () => {
   it("is bound to the one approved paid failure lineage", () => {
@@ -24,5 +63,37 @@ describe("approved replacement fulfillment guard", () => {
     expect(replacementProviderClaimRepairPhase({ ...eligible, execution_state: "running" })).toBeNull();
     expect(replacementProviderClaimRepairPhase({ ...eligible, provider_discovery_phase: "candidate_verification" })).toBeNull();
     expect(replacementProviderClaimRepairPhase({ ...eligible, error_code: "artifact_unavailable" })).toBeNull();
+  });
+
+  it.each([
+    ["replacement_prepare", () => prepareApprovedReportReplacement({ confirm: true, authorizationRef: "approval-2026-07-17" })],
+    ["replacement_resume", () => resumeApprovedReplacementModelRepair({ confirm: true, authorizationRef: "approval-2026-07-17" })]
+  ] as const)("blocks %s before database access", async (site, operation) => {
+    replacementGuardHarness.state.blockedSite = site;
+
+    await expect(operation()).rejects.toBe(replacementGuardHarness.blocked);
+
+    expect(replacementGuardHarness.state.guardSites).toEqual([site]);
+    expect(replacementGuardHarness.state.delegatedSites).toEqual([]);
+    expect(replacementDatabase.ensureDatabase).not.toHaveBeenCalled();
+    expect(replacementDatabase.getSqlClient).not.toHaveBeenCalled();
+    expect(replacementDatabase.begin).not.toHaveBeenCalled();
+    expect(replacementDatabase.sql).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["replacement_prepare", () => prepareApprovedReportReplacement({ confirm: true, authorizationRef: "approval-2026-07-17" })],
+    ["replacement_resume", () => resumeApprovedReplacementModelRepair({ confirm: true, authorizationRef: "approval-2026-07-17" })]
+  ] as const)("delegates %s once and preserves its transaction failure", async (site, operation) => {
+    const failure = new Error(`${site} transaction failed`);
+    replacementDatabase.sql.mockRejectedValueOnce(failure);
+
+    await expect(operation()).rejects.toBe(failure);
+
+    expect(replacementGuardHarness.state.guardSites).toEqual([site]);
+    expect(replacementGuardHarness.state.delegatedSites).toEqual([site]);
+    expect(replacementDatabase.ensureDatabase).toHaveBeenCalledTimes(1);
+    expect(replacementDatabase.begin).toHaveBeenCalledTimes(1);
+    expect(replacementDatabase.sql).toHaveBeenCalledTimes(1);
   });
 });

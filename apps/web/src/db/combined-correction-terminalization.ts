@@ -1,10 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import { requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type LegacyEvidenceBoundAnswerCardV3, type OpenGeoAnswerCardV3 } from "@open-geo-console/ai-report-engine";
+import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 import { ensureDatabase, getSqlClient } from "./index";
 import type { PaidPublicSourceSnapshotRef } from "./public-source-commerce";
 import { JobTransitionService } from "@/worker/job-transition-service";
 
-export async function terminalizeCombinedCorrection(input: {
+export function terminalizeCombinedCorrection(
+  input: Parameters<typeof terminalizeCombinedCorrectionUnsafe>[0]
+): ReturnType<typeof terminalizeCombinedCorrectionUnsafe> {
+  return runReportV4GuardedOperation({
+    guardSite: "correction_terminalize",
+    delegate: () => terminalizeCombinedCorrectionUnsafe(input)
+  });
+}
+
+async function terminalizeCombinedCorrectionUnsafe(input: {
   report: unknown;
   workerId: string;
   checkpointIdentityHash: string;

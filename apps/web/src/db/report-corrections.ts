@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { BusinessQuestionCandidateSet, ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
+import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 import { ensureDatabase, getSqlClient } from "./index";
 import { getAiReport } from "./ai-reports";
 import { confirmBusinessQuestions, getBusinessQuestionSet, prepareBusinessQuestionCandidates } from "./business-questions";
@@ -11,6 +12,13 @@ export const APPROVED_CORRECTION_TARGET = {
 } as const;
 
 export async function prepareApprovedReportCorrection(): Promise<{ correctionId: string; questions: BusinessQuestionCandidateSet | ConfirmedBusinessQuestionSet }> {
+  return runReportV4GuardedOperation({
+    guardSite: "correction_prepare",
+    delegate: () => prepareApprovedReportCorrectionUnsafe()
+  });
+}
+
+async function prepareApprovedReportCorrectionUnsafe(): Promise<{ correctionId: string; questions: BusinessQuestionCandidateSet | ConfirmedBusinessQuestionSet }> {
   await assertApprovedCorrectionEligibility();
   const existing = await getSqlClient()<Array<{id:string;question_set_id:string;report_id:string;original_paid_job_id:string}>>`
     SELECT id,question_set_id,report_id,original_paid_job_id FROM report_corrections WHERE order_id=${APPROVED_CORRECTION_TARGET.orderId} LIMIT 1`;
@@ -38,6 +46,15 @@ export async function prepareApprovedReportCorrection(): Promise<{ correctionId:
 }
 
 export async function confirmApprovedReportCorrection(input: { finalTexts: readonly string[]; acknowledgedLowConfidence: boolean }): Promise<{
+  correctionId: string; jobId: string; artifactRevisionId: string; questions: ConfirmedBusinessQuestionSet;
+}> {
+  return runReportV4GuardedOperation({
+    guardSite: "correction_confirm",
+    delegate: () => confirmApprovedReportCorrectionUnsafe(input)
+  });
+}
+
+async function confirmApprovedReportCorrectionUnsafe(input: { finalTexts: readonly string[]; acknowledgedLowConfidence: boolean }): Promise<{
   correctionId: string; jobId: string; artifactRevisionId: string; questions: ConfirmedBusinessQuestionSet;
 }> {
   await assertApprovedCorrectionEligibility();

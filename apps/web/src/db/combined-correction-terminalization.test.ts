@@ -1,6 +1,49 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GenerativeSearchAnswerCardV3, LegacyEvidenceBoundAnswerCardV3, OpenGeoAnswerDiagnosisV3 } from "@open-geo-console/ai-report-engine";
-import { combinedV3CommercialOutcome, snapshotReferenceBinding } from "./combined-correction-terminalization";
+
+const correctionTerminalGuard = vi.hoisted(() => {
+  const state = { blockedSite: null as string | null, guardSites: [] as string[], delegatedSites: [] as string[] };
+  const blocked = new Error("blocked by correction terminalization guard test");
+  return {
+    state,
+    blocked,
+    run: vi.fn(async (input: { guardSite: string; delegate: () => Promise<unknown> }) => {
+      state.guardSites.push(input.guardSite);
+      if (state.blockedSite === input.guardSite) throw blocked;
+      state.delegatedSites.push(input.guardSite);
+      return input.delegate();
+    })
+  };
+});
+const correctionTerminalDatabase = vi.hoisted(() => ({
+  ensureDatabase: vi.fn(),
+  begin: vi.fn(),
+  getSqlClient: vi.fn()
+}));
+
+vi.mock("@/report-v4/prohibited-operation-guard-runtime", () => ({
+  runReportV4GuardedOperation: correctionTerminalGuard.run
+}));
+vi.mock("./index", () => ({
+  ensureDatabase: correctionTerminalDatabase.ensureDatabase,
+  getSqlClient: correctionTerminalDatabase.getSqlClient
+}));
+vi.mock("@open-geo-console/ai-report-engine", () => ({
+  requireReadyCombinedGeoReport: (value: unknown) => value,
+  requireReadyCombinedGeoReportV2: (value: unknown) => value,
+  requireReadyCombinedGeoReportV3: (value: unknown) => value
+}));
+
+import { combinedV3CommercialOutcome, snapshotReferenceBinding, terminalizeCombinedCorrection } from "./combined-correction-terminalization";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  correctionTerminalGuard.state.blockedSite = null;
+  correctionTerminalGuard.state.guardSites.length = 0;
+  correctionTerminalGuard.state.delegatedSites.length = 0;
+  correctionTerminalDatabase.ensureDatabase.mockResolvedValue(undefined);
+  correctionTerminalDatabase.getSqlClient.mockReturnValue({ begin: correctionTerminalDatabase.begin });
+});
 
 describe("combined snapshot reference cutoff", () => {
   it("advances a search-start cutoff to the completed snapshot time", () => {
@@ -33,6 +76,41 @@ describe("combined snapshot reference cutoff", () => {
       "2026-07-14T05:27:12.000Z",
       new Date("2026-07-14T05:28:00.000Z"),
     )).toThrow(/future/i);
+  });
+});
+
+describe("combined correction terminalization prohibited-operation guard", () => {
+  it("blocks correction terminalization before validation or SQL", async () => {
+    correctionTerminalGuard.state.blockedSite = "correction_terminalize";
+
+    await expect(terminalizeCombinedCorrection({} as never)).rejects.toBe(correctionTerminalGuard.blocked);
+
+    expect(correctionTerminalGuard.state.guardSites).toEqual(["correction_terminalize"]);
+    expect(correctionTerminalGuard.state.delegatedSites).toEqual([]);
+    expect(correctionTerminalDatabase.ensureDatabase).not.toHaveBeenCalled();
+    expect(correctionTerminalDatabase.getSqlClient).not.toHaveBeenCalled();
+    expect(correctionTerminalDatabase.begin).not.toHaveBeenCalled();
+  });
+
+  it("delegates correction terminalization once and preserves its transaction failure", async () => {
+    const failure = new Error("correction terminalization transaction failed");
+    correctionTerminalDatabase.begin.mockRejectedValueOnce(failure);
+
+    await expect(terminalizeCombinedCorrection({
+      report: { artifactContract: "combined_geo_report_v3" },
+      workerId: "worker-1",
+      checkpointIdentityHash: "checkpoint-1",
+      snapshotRefs: [],
+      htmlSha256: "h".repeat(64),
+      pdfSha256: "p".repeat(64),
+      pdfStorageKey: "private/report.pdf",
+      pageCount: 5
+    })).rejects.toBe(failure);
+
+    expect(correctionTerminalGuard.state.guardSites).toEqual(["correction_terminalize"]);
+    expect(correctionTerminalGuard.state.delegatedSites).toEqual(["correction_terminalize"]);
+    expect(correctionTerminalDatabase.ensureDatabase).toHaveBeenCalledTimes(1);
+    expect(correctionTerminalDatabase.begin).toHaveBeenCalledTimes(1);
   });
 });
 

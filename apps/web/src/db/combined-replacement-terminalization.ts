@@ -1,11 +1,21 @@
 import { createHash, randomUUID } from "node:crypto";
 import { requireReadyCombinedGeoReportV3, type CombinedGeoReportV3 } from "@open-geo-console/ai-report-engine";
+import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 import { JobTransitionService } from "@/worker/job-transition-service";
 import { ensureDatabase, getSqlClient } from "./index";
 import type { PaidPublicSourceSnapshotRef } from "./public-source-commerce";
 import { combinedV3CommercialOutcome, snapshotReferenceBinding } from "./combined-correction-terminalization";
 
-export async function terminalizeCombinedReplacement(input: {
+export function terminalizeCombinedReplacement(
+  input: Parameters<typeof terminalizeCombinedReplacementUnsafe>[0]
+): ReturnType<typeof terminalizeCombinedReplacementUnsafe> {
+  return runReportV4GuardedOperation({
+    guardSite: "replacement_terminalize",
+    delegate: () => terminalizeCombinedReplacementUnsafe(input)
+  });
+}
+
+async function terminalizeCombinedReplacementUnsafe(input: {
   report: unknown;
   workerId: string;
   checkpointIdentityHash: string;
