@@ -649,7 +649,11 @@ function stageDependenciesFor(): ReportV4CoreStageDependencies {
     })),
     activateCoreRevision: vi.fn(),
     terminalizeUnavailableCore: vi.fn(),
-    terminalizeDeliverableCoreAndEnqueueEnhancement: vi.fn()
+    terminalizeCoreCommercial: vi.fn(),
+    enqueueDiagnosisEnhancement: vi.fn(async () => ({
+      status: "enqueued" as const,
+      enhancementJobId: "enhancement-job"
+    }))
   };
 }
 

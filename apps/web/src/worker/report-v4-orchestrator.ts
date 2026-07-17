@@ -138,7 +138,7 @@ export interface ReportV4CoreStageDependencies extends ReportV4ClockDependencies
     readonly reason: "all_questions_unavailable";
     readonly signal?: AbortSignal;
   }) => Promise<unknown>;
-  readonly terminalizeDeliverableCoreAndEnqueueEnhancement: (input: {
+  readonly terminalizeCoreCommercial: (input: {
     readonly report: CombinedGeoReportV4;
     readonly reportId: string;
     readonly orderId: string;
@@ -149,7 +149,25 @@ export interface ReportV4CoreStageDependencies extends ReportV4ClockDependencies
     readonly questionSetId: string;
     readonly locale: string;
     readonly signal?: AbortSignal;
-  }) => Promise<{ readonly enhancementJobId: string }>;
+  }) => Promise<unknown>;
+  readonly afterCoreCommercialTerminalized?: (input: {
+    readonly report: CombinedGeoReportV4;
+    readonly signal?: AbortSignal;
+  }) => Promise<void>;
+  readonly enqueueDiagnosisEnhancement: (input: {
+    readonly reportId: string;
+    readonly orderId: string;
+    readonly coreJobId: string;
+    readonly coreArtifactRevisionId: string;
+    readonly configSnapshotId: string;
+    readonly siteSnapshotId: string;
+    readonly questionSetId: string;
+    readonly locale: string;
+    readonly signal?: AbortSignal;
+  }) => Promise<
+    | { readonly status: "enqueued"; readonly enhancementJobId: string }
+    | { readonly status: "not_enqueued"; readonly reason: "question_failure" }
+  >;
 }
 
 export interface ReportV4ClaimedEnhancementContext {
@@ -261,6 +279,7 @@ export interface ReportV4OrchestratorTimings {
 export interface ReportV4OrchestratorResult {
   readonly status: CombinedGeoReportV4Status;
   readonly delivery: "unavailable" | "core_active" | "enhancement_active";
+  readonly enqueueOutcome?: "question_failure";
   readonly coreReport: CombinedGeoReportV4 | null;
   readonly activeReport: CombinedGeoReportV4 | null;
   readonly enhancement: {
@@ -437,7 +456,7 @@ export async function runReportV4CoreStage(
     counters.revisions.coreActivated = 1;
   }
 
-  const enqueued = await dependencies.terminalizeDeliverableCoreAndEnqueueEnhancement({
+  await dependencies.terminalizeCoreCommercial({
     report: coreReport,
     reportId: parsedInput.reportId,
     orderId: parsedInput.orderId,
@@ -450,6 +469,37 @@ export async function runReportV4CoreStage(
     signal
   });
   throwIfAborted(signal);
+  const afterCoreCommercialTerminalized = dependencies.afterCoreCommercialTerminalized
+    ?? noopAfterCoreCommercialTerminalized;
+  await afterCoreCommercialTerminalized({ report: coreReport, signal });
+  throwIfAborted(signal);
+  const enqueued = await dependencies.enqueueDiagnosisEnhancement({
+    reportId: parsedInput.reportId,
+    orderId: parsedInput.orderId,
+    coreJobId: parsedInput.coreJobId,
+    coreArtifactRevisionId: parsedInput.coreArtifactRevisionId,
+    configSnapshotId: parsedInput.configSnapshotId,
+    siteSnapshotId: parsedInput.snapshotIdentity.id,
+    questionSetId: parsedInput.questionSetId,
+    locale: parsedInput.locale,
+    signal
+  });
+  if (enqueued.status === "not_enqueued") {
+    return finishStage({
+      dependencies,
+      totalStartedAt,
+      counters,
+      timings,
+      status: coreReport.status,
+      delivery: "core_active",
+      coreReport,
+      activeReport: coreReport,
+      enhancement: notStartedEnhancement(),
+      coreRevisionId: parsedInput.coreArtifactRevisionId,
+      enhancementRevisionId: null,
+      enqueueOutcome: "question_failure"
+    });
+  }
   boundedText(enqueued.enhancementJobId, "enqueued enhancementJobId", 500);
 
   return finishStage({
@@ -1147,6 +1197,8 @@ function notStartedEnhancement(): ReportV4OrchestratorResult["enhancement"] {
   return { status: "not_started", completedQuestionIds: [], failedQuestionIds: [] };
 }
 
+async function noopAfterCoreCommercialTerminalized(): Promise<void> {}
+
 function finishStage(input: {
   dependencies: ReportV4ClockDependencies;
   totalStartedAt: number;
@@ -1157,6 +1209,7 @@ function finishStage(input: {
   coreReport: CombinedGeoReportV4 | null;
   activeReport: CombinedGeoReportV4 | null;
   enhancement: ReportV4OrchestratorResult["enhancement"];
+  enqueueOutcome?: "question_failure";
   coreRevisionId: string | null;
   enhancementRevisionId: string | null;
 }): ReportV4OrchestratorResult {
@@ -1167,6 +1220,7 @@ function finishStage(input: {
   return Object.freeze({
     status: input.status,
     delivery: input.delivery,
+    ...(input.enqueueOutcome ? { enqueueOutcome: input.enqueueOutcome } : {}),
     coreReport: input.coreReport,
     activeReport: input.activeReport,
     enhancement: Object.freeze({

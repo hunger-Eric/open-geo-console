@@ -4,7 +4,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CombinedGeoReportV4 } from "@open-geo-console/ai-report-engine";
 import { closeDatabase, getSqlClient, initializeDatabaseEnvironment } from "../db";
 import { createReportV4ProductionJobRepository } from "../db/report-v4-production-jobs";
-import { terminalizePaidReportV4Core } from "../db/public-source-commerce";
+import {
+  enqueuePaidReportV4DiagnosisEnhancement,
+  terminalizePaidReportV4Core
+} from "../db/public-source-commerce";
 import { runReportV4CoreStage, type ReportV4CoreStageDependencies } from "./report-v4-orchestrator";
 import {
   buildReportV4CoreArtifactRevisionId,
@@ -116,6 +119,7 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
     expect(context.commercePhase).toBe("reserved_active");
     let modelCalls = 0;
     let prepareCalls = 0;
+    const boundaryEvents: string[] = [];
     const run = createReportV4CoreProductionWithDependencies({
       async loadPaidCoreContext() { return context; },
       async loadConfigSnapshot() {
@@ -142,9 +146,16 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
           async persistCoreArtifact() { throw new Error("must reuse"); },
           async activateCoreRevision() {},
           async terminalizeUnavailableCore() { throw new Error("not unavailable"); },
-          async terminalizeDeliverableCoreAndEnqueueEnhancement({ report }) {
-            const terminal = await terminalizePaidReportV4Core({ report, workerId: ids.workerId });
-            return { enhancementJobId: terminal.enhancementJobId };
+          async terminalizeCoreCommercial({ report }) {
+            boundaryEvents.push("terminalize");
+            await terminalizePaidReportV4Core({ report, workerId: ids.workerId });
+          },
+          async afterCoreCommercialTerminalized() {
+            boundaryEvents.push("after-terminalize");
+          },
+          async enqueueDiagnosisEnhancement(input) {
+            boundaryEvents.push("enqueue");
+            return enqueuePaidReportV4DiagnosisEnhancement(input);
           }
         };
       }
@@ -155,6 +166,7 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
     expect(result.counters.modelCalls.total).toBe(0);
     expect(modelCalls).toBe(0);
     expect(prepareCalls).toBe(0);
+    expect(boundaryEvents).toEqual(["terminalize", "after-terminalize", "enqueue"]);
     expect(await counts()).toMatchObject({ artifacts: 1, jobCompleted: 1, settledCredits: 1, accessTokens: 1, enhancements: 1 });
   }, 180_000);
 
@@ -180,7 +192,8 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
       async persistCoreArtifact() { throw new Error("must not persist"); },
       async activateCoreRevision() { throw new Error("must not activate"); },
       async terminalizeUnavailableCore() {},
-      async terminalizeDeliverableCoreAndEnqueueEnhancement() { throw new Error("must not deliver"); }
+      async terminalizeCoreCommercial() { throw new Error("must not deliver"); },
+      async enqueueDiagnosisEnhancement() { throw new Error("must not enqueue"); }
     };
     const result = await runReportV4CoreStage({
       reportId: unavailableReportId, orderId: "unavailable-order", coreJobId: "unavailable-job",
@@ -249,6 +262,11 @@ async function seedReservedActiveCore() {
   await sql`UPDATE scan_jobs SET credit_reservation_id=${ids.creditId} WHERE id=${ids.coreJobId}`;
   await sql`INSERT INTO report_v4_config_snapshots(id,report_id,order_id,core_job_id,identity_hash,model_profile_id,model_profile_hash,model_profile_payload,report_profile_id,report_profile_hash,report_profile_payload)
     VALUES(${ids.configSnapshotId},${ids.reportId},${ids.orderId},${ids.coreJobId},${configIdentityHash},'model-v4',${sha("model")},'{}','report-v4',${sha("report")},'{}')`;
+  for (const question of report.questions) {
+    const { sources, ...answerPayload } = question;
+    await sql`INSERT INTO report_v4_question_checkpoints(identity_hash,report_id,job_id,question_set_id,question_id,snapshot_id,ordinal,state,question_identity_hash,model_config_identity_hash,input_identity_hash,provider_call_count,answer_payload,source_payload,answer_content_hash)
+      VALUES(${sha(`checkpoint-${question.order}`)},${ids.reportId},${ids.coreJobId},${ids.questionSetId},${question.questionId},${ids.siteSnapshotId},${question.order},'answered',${sha(`question-${question.order}`)},${sha("model")},${sha(`input-${question.order}`)},1,${JSON.stringify(answerPayload)}::jsonb,${JSON.stringify(sources)}::jsonb,${sha(JSON.stringify(answerPayload))})`;
+  }
   await sql`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,config_snapshot_id,revision_kind,revision,artifact_contract,status,payload_identity_hash,html_sha256,readiness,ready_at,activated_at)
     VALUES(${artifactRevisionId},${ids.reportId},${ids.orderId},${ids.coreJobId},${ids.configSnapshotId},'generation',1,'combined_geo_report_v4','active',${sha(JSON.stringify(report))},${sha("html")},'{"htmlCanonical":true}',now(),now())`;
   await sql`INSERT INTO combined_geo_reports(artifact_revision_id,report_id,order_id,job_id,question_set_id,payload) VALUES(${artifactRevisionId},${ids.reportId},${ids.orderId},${ids.coreJobId},${ids.questionSetId},${JSON.stringify(report)}::jsonb)`;

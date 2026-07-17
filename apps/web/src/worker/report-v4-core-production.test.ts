@@ -39,7 +39,8 @@ describe("Report V4 core production composition", () => {
     expect(harness.events).toEqual([
       "load-context", "load-config", "resolve-locked-config", "create-stage",
       "load-artifact", "resolve-snapshot", "synthesize-website", "answer-questions",
-      "prepare-core", "render-html", "persist-payload", "activate-core", "terminalize-deliverable"
+      "prepare-core", "render-html", "persist-payload", "activate-core", "terminalize-core",
+      "after-terminalize", "enqueue-enhancement"
     ]);
   });
 
@@ -52,7 +53,8 @@ describe("Report V4 core production composition", () => {
     expect(result.counters.modelCalls.total).toBe(0);
     expect(harness.events).toEqual([
       "load-context", "load-config", "resolve-locked-config", "create-stage",
-      "load-artifact", "resolve-snapshot", "activate-core", "terminalize-deliverable"
+      "load-artifact", "resolve-snapshot", "activate-core", "terminalize-core", "after-terminalize",
+      "enqueue-enhancement"
     ]);
   });
 
@@ -73,7 +75,8 @@ describe("Report V4 core production composition", () => {
     expect(result.delivery).toBe("unavailable");
     expect(harness.events).toContain("terminalize-unavailable");
     expect(harness.events).not.toContain("render-html");
-    expect(harness.events).not.toContain("terminalize-deliverable");
+    expect(harness.events).not.toContain("terminalize-core");
+    expect(harness.events).not.toContain("enqueue-enhancement");
   });
 
   it("fails closed on an injected impossible zero-page paid snapshot without commercial writes", async () => {
@@ -83,7 +86,8 @@ describe("Report V4 core production composition", () => {
     expect(harness.events).not.toContain("synthesize-website");
     expect(harness.events).not.toContain("answer-questions");
     expect(harness.events).not.toContain("terminalize-unavailable");
-    expect(harness.events).not.toContain("terminalize-deliverable");
+    expect(harness.events).not.toContain("terminalize-core");
+    expect(harness.events).not.toContain("enqueue-enhancement");
   });
 
   it("propagates abort without any terminal write", async () => {
@@ -288,9 +292,15 @@ function productionHarness(options: HarnessOptions = {}) {
         async terminalizeUnavailableCore() {
           events.push("terminalize-unavailable");
         },
-        async terminalizeDeliverableCoreAndEnqueueEnhancement() {
-          events.push("terminalize-deliverable");
-          return { enhancementJobId: "enhancement-job" };
+        async terminalizeCoreCommercial() {
+          events.push("terminalize-core");
+        },
+        async afterCoreCommercialTerminalized() {
+          events.push("after-terminalize");
+        },
+        async enqueueDiagnosisEnhancement() {
+          events.push("enqueue-enhancement");
+          return { status: "enqueued", enhancementJobId: "enhancement-job" };
         }
       };
       expect(execution.context).toBe(context);

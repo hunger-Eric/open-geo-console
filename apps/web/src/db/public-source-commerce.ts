@@ -102,7 +102,7 @@ export async function terminalizePaidPublicSourceReport(input: {
 export async function terminalizePaidReportV4Core(input: {
   report: unknown;
   workerId: string;
-  faultAfter?: "job" | "credit" | "refund" | "order" | "access" | "email" | "enhancement";
+  faultAfter?: "job" | "credit" | "refund" | "order" | "access" | "email";
   pdfSha256?: never;
   pdfStorageKey?: never;
   pageCount?: never;
@@ -113,7 +113,6 @@ export async function terminalizePaidReportV4Core(input: {
   refundId: string | null;
   accessTokenId: string;
   emailDeliveryId: string;
-  enhancementJobId: string;
 }> {
   if (["pdfSha256", "pdfStorageKey", "pageCount"].some((field) => Object.hasOwn(input, field))) {
     throw new Error("V4 commercial terminalization rejects every PDF readiness input.");
@@ -129,7 +128,6 @@ export async function terminalizePaidReportV4Core(input: {
 
   return getSqlClient().begin(async (tx) => {
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`report-v4-commerce:${report.reportId}`},0))`;
-    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`report-v4-enhancement:${report.reportId}`},0))`;
     const artifact = (await tx<Array<V4ArtifactCommerceRow>>`
       SELECT core.id,core.report_id,core.order_id,core.job_id,core.revision_kind,core.artifact_contract,
         core.status,core.html_sha256,core.pdf_sha256,core.pdf_storage_key,core.ready_at,core.config_snapshot_id,
@@ -154,12 +152,12 @@ export async function terminalizePaidReportV4Core(input: {
     assertV4CoreArtifact(artifact, report);
 
     const job = (await tx<Array<V4JobCommerceRow>>`
-      SELECT id,report_id,site_snapshot_id,locale,stage,execution_state,checkpoint_revision,lease_owner,lease_expires_at,
+      SELECT id,report_id,site_snapshot_id,tier,locale,stage,execution_state,checkpoint_revision,lease_owner,lease_expires_at,
         credit_reservation_id,product_contract,fulfillment_methodology,recommendation_report_version,
         artifact_contract,business_question_set_id,reason,correction_id,replacement_fulfillment_id
       FROM scan_jobs WHERE id=${artifact.job_id} AND report_id=${report.reportId} FOR UPDATE
     `)[0];
-    if (!job || job.product_contract !== "recommendation_forensics_v1" ||
+    if (!job || job.tier !== "deep" || job.product_contract !== "recommendation_forensics_v1" ||
         job.fulfillment_methodology !== "two_stage_geo_report_v4" || Number(job.recommendation_report_version) !== 4 ||
         job.artifact_contract !== "combined_geo_report_v4" || job.business_question_set_id !== artifact.question_set_id ||
         !v4LocaleMatches(report.locale, job.locale) ||
@@ -283,21 +281,121 @@ export async function terminalizePaidReportV4Core(input: {
       throw new Error("The V4 terminal email identity conflicts with the core artifact.");
     }
     fault(input.faultAfter, "email");
-    const enhancement = await ensurePaidReportV4EnhancementJob(tx, {
-      reportId: report.reportId,
-      orderId: order.id,
-      coreJobId: job.id,
-      coreArtifactRevisionId: report.artifactRevisionId,
-      configSnapshotId: artifact.config_snapshot_id!,
-      siteSnapshotId: job.site_snapshot_id,
-      questionSetId: artifact.question_set_id,
-      locale: normalizeReportLanguage(report.locale) as ReportV4Locale
-    }, firstRun);
-    if (firstRun) fault(input.faultAfter, "enhancement");
     return {
       report, outcome, orderId: order.id, refundId, accessTokenId: access.id,
-      emailDeliveryId: email.id, enhancementJobId: enhancement.id
+      emailDeliveryId: email.id
     };
+  });
+}
+
+export async function enqueuePaidReportV4DiagnosisEnhancement(input: {
+  reportId: string; coreJobId: string; orderId: string; siteSnapshotId: string;
+  questionSetId: string; configSnapshotId: string; locale: string; faultAfter?: "enhancement";
+}): Promise<{ status: "enqueued"; enhancementJobId: string } | { status: "not_enqueued"; reason: "question_failure" }> {
+  const identity = {
+    reportId: requiredV4Identity(input.reportId, "report"),
+    coreJobId: requiredV4Identity(input.coreJobId, "core job"),
+    orderId: requiredV4Identity(input.orderId, "order"),
+    siteSnapshotId: requiredV4Identity(input.siteSnapshotId, "site snapshot"),
+    questionSetId: requiredV4Identity(input.questionSetId, "question set"),
+    configSnapshotId: requiredV4Identity(input.configSnapshotId, "configuration snapshot"),
+    locale: normalizeReportLanguage(input.locale) as ReportV4Locale
+  };
+  await ensureDatabase();
+  return getSqlClient().begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`report-v4-enhancement:${identity.reportId}`},0))`;
+    const artifact = (await tx<Array<V4ArtifactCommerceRow>>`
+      SELECT core.id,core.report_id,core.order_id,core.job_id,core.revision_kind,core.artifact_contract,
+        core.status,core.html_sha256,core.pdf_sha256,core.pdf_storage_key,core.ready_at,core.config_snapshot_id,
+        combined.report_id AS combined_report_id,combined.order_id AS combined_order_id,
+        combined.job_id AS combined_job_id,combined.question_set_id,combined.payload,
+        scan.active_artifact_revision_id,scan.report_locale AS scan_report_locale,
+        config.report_id AS config_report_id,config.order_id AS config_order_id,config.core_job_id AS config_core_job_id,
+        active.revision_kind AS active_revision_kind,active.source_artifact_revision_id AS active_source_artifact_revision_id,
+        active.artifact_contract AS active_artifact_contract,active.status AS active_status,
+        active.order_id AS active_order_id,active.report_id AS active_report_id,
+        active.html_sha256 AS active_html_sha256,active.pdf_sha256 AS active_pdf_sha256,
+        active.pdf_storage_key AS active_pdf_storage_key,active.ready_at AS active_ready_at
+      FROM combined_geo_reports combined
+      JOIN report_artifact_revisions core ON core.id=combined.artifact_revision_id
+      JOIN scan_reports scan ON scan.id=core.report_id
+      LEFT JOIN report_v4_config_snapshots config ON config.id=core.config_snapshot_id
+      LEFT JOIN report_artifact_revisions active ON active.id=scan.active_artifact_revision_id
+      WHERE combined.report_id=${identity.reportId} AND combined.job_id=${identity.coreJobId}
+      FOR UPDATE OF core,combined,scan
+    `)[0];
+    if (!artifact) throw new Error("The exact terminal V4 core report is required before enhancement enqueue.");
+    const report = parseCombinedGeoReportV4(artifact.payload);
+    assertV4CoreArtifact(artifact, report);
+    assertV4CoreActivationLineage(artifact, false);
+
+    const job = (await tx<Array<V4JobCommerceRow>>`
+      SELECT id,report_id,site_snapshot_id,tier,locale,stage,execution_state,checkpoint_revision,lease_owner,lease_expires_at,
+        credit_reservation_id,product_contract,fulfillment_methodology,recommendation_report_version,
+        artifact_contract,business_question_set_id,reason,correction_id,replacement_fulfillment_id
+      FROM scan_jobs WHERE id=${identity.coreJobId} AND report_id=${identity.reportId} FOR UPDATE
+    `)[0];
+    if (!job || job.execution_state !== "completed" || !["completed", "completed_limited"].includes(job.stage) ||
+        job.tier !== "deep" || job.product_contract !== "recommendation_forensics_v1" ||
+        job.fulfillment_methodology !== "two_stage_geo_report_v4" || Number(job.recommendation_report_version) !== 4 ||
+        job.artifact_contract !== "combined_geo_report_v4" || job.reason !== "standard" ||
+        job.correction_id !== null || job.replacement_fulfillment_id !== null || !job.credit_reservation_id ||
+        job.site_snapshot_id !== identity.siteSnapshotId || job.business_question_set_id !== identity.questionSetId ||
+        !v4LocaleMatches(input.locale, job.locale) || report.status !== job.stage ||
+        artifact.job_id !== job.id || artifact.report_id !== job.report_id ||
+        artifact.order_id !== identity.orderId || artifact.question_set_id !== identity.questionSetId ||
+        artifact.config_snapshot_id !== identity.configSnapshotId) {
+      throw new Error("The V4 core job is not an exact terminal eligible commercial job.");
+    }
+
+    const order = (await tx<Array<V4OrderCommerceRow>>`
+      SELECT id,report_id,site_snapshot_id,fulfillment_job_id,provider,amount_minor,currency,report_locale,product_code,
+        fulfillment_methodology,recommendation_report_version,business_question_set_id,payment_status,
+        fulfillment_status,refund_status,delivery_status
+      FROM payment_orders WHERE id=${identity.orderId} FOR UPDATE
+    `)[0];
+    if (!order || order.report_id !== identity.reportId || order.site_snapshot_id !== identity.siteSnapshotId ||
+        order.fulfillment_job_id !== job.id || order.product_code !== job.product_contract ||
+        order.fulfillment_methodology !== job.fulfillment_methodology || Number(order.recommendation_report_version) !== 4 ||
+        order.business_question_set_id !== identity.questionSetId || order.payment_status !== "paid" ||
+        order.fulfillment_status !== job.stage || !v4LocaleMatches(input.locale, order.report_locale)) {
+      throw new Error("The V4 enhancement requires its exact paid terminal order outcome.");
+    }
+
+    const credit = (await tx<Array<V4CreditCommerceRow>>`
+      SELECT id,status,access_key_id,credits,job_id,report_id,payment_order_id
+      FROM credit_ledger WHERE id=${job.credit_reservation_id} FOR UPDATE
+    `)[0];
+    const expectedCreditStatus = job.stage === "completed" ? "settled" : "refunded";
+    if (!credit || credit.report_id !== identity.reportId || credit.job_id !== job.id ||
+        credit.payment_order_id !== order.id || credit.status !== expectedCreditStatus ||
+        !credit.access_key_id || !Number.isSafeInteger(credit.credits) || credit.credits <= 0) {
+      throw new Error("The V4 core credit is not the exact commercially terminal outcome.");
+    }
+    await requireV4RefundTruth(tx, order, job.stage as "completed" | "completed_limited");
+
+    const checkpoints = await tx<V4AnsweredQuestionCheckpointRow[]>`
+      SELECT identity_hash,report_id,job_id,question_set_id,question_id,snapshot_id,ordinal,state,
+        provider_call_count,answer_payload,source_payload,answer_content_hash
+      FROM report_v4_question_checkpoints WHERE job_id=${job.id} ORDER BY ordinal FOR UPDATE
+    `;
+    if (report.questions.some((question) => question.status !== "answered") || checkpoints.length !== 3 ||
+        checkpoints.some((checkpoint) => checkpoint.state !== "answered")) {
+      return { status: "not_enqueued", reason: "question_failure" };
+    }
+    assertV4AnsweredQuestionCheckpoints(report, checkpoints, {
+      reportId: identity.reportId, coreJobId: job.id, siteSnapshotId: identity.siteSnapshotId,
+      questionSetId: identity.questionSetId
+    });
+
+    const lineage: ReportV4ProductionLineage = {
+      reportId: artifact.report_id, orderId: artifact.order_id, coreJobId: artifact.job_id,
+      coreArtifactRevisionId: artifact.id, configSnapshotId: artifact.config_snapshot_id!,
+      siteSnapshotId: job.site_snapshot_id!, questionSetId: artifact.question_set_id, locale: identity.locale
+    };
+    const enhancement = await ensurePaidReportV4EnhancementJob(tx, lineage);
+    if (enhancement.inserted) fault(input.faultAfter, "enhancement");
+    return { status: "enqueued", enhancementJobId: enhancement.job.id };
   });
 }
 
@@ -359,13 +457,13 @@ export async function terminalizeUnavailablePaidReportV4Core(
     await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`report-v4-commerce:${identity.reportId}`},0))`;
 
     const job = (await tx<Array<V4UnavailableJobRow>>`
-      SELECT id,report_id,site_snapshot_id,locale,stage,execution_state,checkpoint_revision,
+      SELECT id,report_id,site_snapshot_id,tier,locale,stage,execution_state,checkpoint_revision,
         lease_owner,lease_expires_at,credit_reservation_id,product_contract,fulfillment_methodology,
         recommendation_report_version,artifact_contract,business_question_set_id,reason,
         correction_id,replacement_fulfillment_id
       FROM scan_jobs WHERE id=${identity.coreJobId} AND report_id=${identity.reportId} FOR UPDATE
     `)[0];
-    if (!job || job.site_snapshot_id !== identity.siteSnapshotId || job.product_contract !== "recommendation_forensics_v1" ||
+    if (!job || job.site_snapshot_id !== identity.siteSnapshotId || job.tier !== "deep" || job.product_contract !== "recommendation_forensics_v1" ||
         job.fulfillment_methodology !== "two_stage_geo_report_v4" || Number(job.recommendation_report_version) !== 4 ||
         job.artifact_contract !== "combined_geo_report_v4" || job.business_question_set_id !== identity.questionSetId ||
         !v4LocaleMatches(identity.locale, job.locale) || job.reason !== "standard" || job.correction_id !== null ||
@@ -545,7 +643,7 @@ interface V4ArtifactCommerceRow {
   active_pdf_sha256: string | null; active_pdf_storage_key: string | null; active_ready_at: string | null;
 }
 interface V4JobCommerceRow {
-  id: string; report_id: string; site_snapshot_id: string | null; locale: string; stage: string; execution_state: string; checkpoint_revision: number; lease_owner: string | null;
+  id: string; report_id: string; site_snapshot_id: string | null; tier: string; locale: string; stage: string; execution_state: string; checkpoint_revision: number; lease_owner: string | null;
   lease_expires_at: string | null; credit_reservation_id: string | null; product_contract: string; fulfillment_methodology: string | null;
   recommendation_report_version: number | null; artifact_contract: string | null; business_question_set_id: string | null;
   reason: string; correction_id: string | null; replacement_fulfillment_id: string | null;
@@ -575,18 +673,29 @@ interface V4UnavailableQuestionCheckpointRow {
   answer_payload: unknown;
   answer_content_hash: string | null;
 }
+interface V4AnsweredQuestionCheckpointRow {
+  identity_hash: string;
+  report_id: string;
+  job_id: string;
+  question_set_id: string;
+  question_id: string;
+  snapshot_id: string;
+  ordinal: number;
+  state: string;
+  provider_call_count: number;
+  answer_payload: unknown;
+  source_payload: unknown;
+  answer_content_hash: string | null;
+}
 
 async function ensurePaidReportV4EnhancementJob(
   tx: postgres.TransactionSql,
-  lineage: ReportV4ProductionLineage,
-  firstRun: boolean
-): Promise<ReportV4ProductionEnhancementJob> {
+  lineage: ReportV4ProductionLineage
+): Promise<{ job: ReportV4ProductionEnhancementJob; inserted: boolean }> {
   const expected = buildReportV4DiagnosisEnhancementJob(lineage);
   let rows = await loadPaidReportV4EnhancementJobs(tx, lineage.reportId);
-  if (firstRun) {
-    if (rows.length !== 0) {
-      throw new Error("A V4 enhancement job cannot exist before its atomic core commercial terminalization.");
-    }
+  let inserted = false;
+  if (rows.length === 0) {
     await tx`INSERT INTO scan_jobs(id,report_id,site_snapshot_id,tier,product_contract,fulfillment_methodology,
       recommendation_report_version,artifact_contract,business_question_set_id,locale,reason,stage,execution_state,
       current_phase,credit_reservation_id,correction_id,replacement_fulfillment_id)
@@ -594,6 +703,7 @@ async function ensurePaidReportV4EnhancementJob(
       ${expected.fulfillmentMethodology},${expected.recommendationReportVersion},${expected.artifactContract},
       ${expected.questionSetId},${expected.locale},${expected.reason},${expected.stage},${expected.executionState},
       ${REPORT_V4_DIAGNOSIS_INITIAL_PHASE},NULL,NULL,NULL)`;
+    inserted = true;
     rows = await loadPaidReportV4EnhancementJobs(tx, lineage.reportId);
   }
   if (rows.length !== 1) {
@@ -601,7 +711,7 @@ async function ensurePaidReportV4EnhancementJob(
   }
   const job = rows[0]!;
   assertReportV4DiagnosisEnhancementJobIdentity(job, lineage);
-  return job;
+  return { job, inserted };
 }
 
 async function loadPaidReportV4EnhancementJobs(
@@ -641,6 +751,32 @@ function assertV4CoreArtifact(row: V4ArtifactCommerceRow, report: CombinedGeoRep
   }
   const persisted = parseCombinedGeoReportV4(row.payload);
   if (!isDeepStrictEqual(persisted, report)) throw new Error("The V4 core payload identity conflicts with its persisted artifact.");
+}
+
+function assertV4AnsweredQuestionCheckpoints(
+  report: CombinedGeoReportV4,
+  checkpoints: readonly V4AnsweredQuestionCheckpointRow[],
+  identity: { reportId: string; coreJobId: string; siteSnapshotId: string; questionSetId: string }
+): void {
+  for (const ordinal of [1, 2, 3]) {
+    const question = report.questions[ordinal - 1];
+    const checkpoint = checkpoints[ordinal - 1];
+    if (!question || !checkpoint || checkpoint.ordinal !== ordinal || question.order !== ordinal ||
+        checkpoint.report_id !== identity.reportId || checkpoint.job_id !== identity.coreJobId ||
+        checkpoint.question_set_id !== identity.questionSetId || checkpoint.snapshot_id !== identity.siteSnapshotId ||
+        checkpoint.question_id !== question.questionId || checkpoint.state !== "answered" ||
+        !Number.isSafeInteger(checkpoint.provider_call_count) || checkpoint.provider_call_count < 1 ||
+        checkpoint.provider_call_count > 2 || !checkpoint.answer_content_hash ||
+        !/^[a-f0-9]{64}$/.test(checkpoint.answer_content_hash) || !checkpoint.answer_payload ||
+        typeof checkpoint.answer_payload !== "object" || Array.isArray(checkpoint.answer_payload) ||
+        !Array.isArray(checkpoint.source_payload)) {
+      throw new Error("The enhancement requires three exact answered V4 question checkpoints.");
+    }
+    const checkpointQuestion = { ...(checkpoint.answer_payload as Record<string, unknown>), sources: checkpoint.source_payload };
+    if (!isDeepStrictEqual(checkpointQuestion, question)) {
+      throw new Error("The answered V4 checkpoint payload conflicts with the activated core report.");
+    }
+  }
 }
 
 function assertV4CoreActivationLineage(row: V4ArtifactCommerceRow, firstRun: boolean): void {

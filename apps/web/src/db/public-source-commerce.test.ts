@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { terminalizePaidReportV4Core, terminalizeUnavailablePaidReportV4Core } from "./public-source-commerce";
+import { enqueuePaidReportV4DiagnosisEnhancement, terminalizePaidReportV4Core, terminalizeUnavailablePaidReportV4Core } from "./public-source-commerce";
 import { buildReportV4DiagnosisEnhancementJob } from "./report-v4-production-jobs";
 
 const database = vi.hoisted(() => ({
@@ -54,7 +54,7 @@ describe("V4 core commercial terminalization admission", () => {
   // @requirement GEO-V4-COMMERCE-01
   it("rejects a diagnosis-enhanced payload as a new commercial trigger", async () => {
     const enhanced = report();
-    enhanced.questions[0]!.diagnosis = {
+    Object.assign(enhanced.questions[0]!, { diagnosis: {
       selectionSummary: "Source selection summary",
       observableFactors: [1, 2, 3].map((index) => ({
         kind: `factor-${index}`,
@@ -68,7 +68,7 @@ describe("V4 core commercial terminalization admission", () => {
         evidenceRefs: []
       })),
       detailedEvidenceRefs: []
-    };
+    } });
     await expect(terminalizePaidReportV4Core({
       report: enhanced,
       workerId: "worker-v4"
@@ -90,8 +90,7 @@ describe("V4 core commercial terminalization admission", () => {
     database.getSqlClient.mockReturnValue({ begin: fake.begin });
     const first = await terminalizePaidReportV4Core({ report: report("completed_limited"), workerId: "worker-v4" });
     expect(first).toMatchObject({
-      outcome: "completed_limited", refundId: "refund-v4",
-      enhancementJobId: expect.stringMatching(/^v4-diagnosis-job-[a-f0-9]{64}$/)
+      outcome: "completed_limited", refundId: "refund-v4"
     });
     expect(fake.state).toMatchObject({
       jobStage: "completed_limited",
@@ -106,8 +105,7 @@ describe("V4 core commercial terminalization admission", () => {
     });
     const reentry = await terminalizePaidReportV4Core({ report: report("completed_limited"), workerId: "worker-v4" });
     expect(reentry).toMatchObject({
-      refundId: "refund-v4", accessTokenId: "token-v4", emailDeliveryId: "email-v4",
-      enhancementJobId: first.enhancementJobId
+      refundId: "refund-v4", accessTokenId: "token-v4", emailDeliveryId: "email-v4"
     });
     expect(fake.state).toMatchObject({ creditsRemaining: 1, refunds: 1, tokens: 1, emails: 1, transitions: 1 });
   });
@@ -140,6 +138,19 @@ describe("V4 core commercial terminalization admission", () => {
       workerId: "worker-v4"
     })).rejects.toThrow(/configuration snapshot/i);
     expect(fake.state).toMatchObject({ transitions: 0, refunds: 0, tokens: 0, emails: 0 });
+  });
+});
+
+describe("V4 diagnosis enhancement enqueue admission", () => {
+  it("rejects missing lineage and unsupported locale before touching PostgreSQL", async () => {
+    const input = {
+      reportId: "report-v4", coreJobId: "job-v4", orderId: "order-v4", siteSnapshotId: "snapshot-v4",
+      questionSetId: "questions-v4", configSnapshotId: "config-v4", locale: "zh-CN"
+    };
+    await expect(enqueuePaidReportV4DiagnosisEnhancement({ ...input, coreJobId: " " })).rejects.toThrow(/core job identity/i);
+    await expect(enqueuePaidReportV4DiagnosisEnhancement({ ...input, locale: "fr-FR" })).rejects.toThrow(/language|locale/i);
+    expect(database.ensureDatabase).not.toHaveBeenCalled();
+    expect(database.getSqlClient).not.toHaveBeenCalled();
   });
 });
 
@@ -231,7 +242,7 @@ function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhance
       active_pdf_storage_key: null, active_ready_at: "2026-07-17T00:00:00.000Z"
     }];
     if (sql.includes("FROM scan_jobs WHERE id=")) return [{
-      id: "job-v4", report_id: "report-v4", site_snapshot_id: "snapshot-v4", locale: "zh", stage: state.jobStage, execution_state: state.jobExecution,
+      id: "job-v4", report_id: "report-v4", site_snapshot_id: "snapshot-v4", tier: "deep", locale: "zh", stage: state.jobStage, execution_state: state.jobExecution,
       checkpoint_revision: 7, lease_owner: state.jobExecution === "running" ? "worker-v4" : null,
       lease_expires_at: state.jobExecution === "running" ? "2099-01-01T00:00:00.000Z" : null,
       credit_reservation_id: "credit-v4", product_contract: "recommendation_forensics_v1",
@@ -285,7 +296,7 @@ function fakeUnavailableCommerceDatabase(providerCallCounts: readonly number[]) 
     const sql = strings.join("?").replaceAll(/\s+/gu, " ").trim();
     if (sql.includes("pg_advisory_xact_lock")) return [];
     if (sql.includes("FROM scan_jobs WHERE id=") && sql.includes("site_snapshot_id")) return [{
-      id: "job-v4", report_id: "report-v4", site_snapshot_id: "snapshot-v4", locale: "zh", stage: state.jobStage,
+      id: "job-v4", report_id: "report-v4", site_snapshot_id: "snapshot-v4", tier: "deep", locale: "zh", stage: state.jobStage,
       execution_state: state.jobExecution, checkpoint_revision: 4, lease_owner: state.jobExecution === "running" ? "worker-v4" : null,
       lease_expires_at: state.jobExecution === "running" ? "2099-01-01T00:00:00.000Z" : null,
       credit_reservation_id: "credit-v4", product_contract: "recommendation_forensics_v1",

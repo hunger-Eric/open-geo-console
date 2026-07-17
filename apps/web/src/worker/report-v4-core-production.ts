@@ -29,7 +29,8 @@ import { resolvePaidReportV4SiteSnapshot } from "../db/report-v4-site-snapshots"
 import { ensureDatabase, getSqlClient } from "../db";
 import {
   terminalizePaidReportV4Core,
-  terminalizeUnavailablePaidReportV4Core
+  terminalizeUnavailablePaidReportV4Core,
+  enqueuePaidReportV4DiagnosisEnhancement
 } from "../db/public-source-commerce";
 import {
   buildReportV4MimoQuestionTokenBudget,
@@ -523,11 +524,13 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
             workerId: execution.input.workerId
           });
         },
-        async terminalizeDeliverableCoreAndEnqueueEnhancement({ report, signal }) {
+        async terminalizeCoreCommercial({ report, signal }) {
           signal?.throwIfAborted();
-          const result = await terminalizePaidReportV4Core({ report, workerId: execution.input.workerId });
+          return terminalizePaidReportV4Core({ report, workerId: execution.input.workerId });
+        },
+        async enqueueDiagnosisEnhancement({ reportId, orderId, coreJobId, configSnapshotId, siteSnapshotId, questionSetId, locale, signal }) {
           signal?.throwIfAborted();
-          return { enhancementJobId: result.enhancementJobId };
+          return enqueuePaidReportV4DiagnosisEnhancement({ reportId, orderId, coreJobId, configSnapshotId, siteSnapshotId, questionSetId, locale });
         }
       };
     }

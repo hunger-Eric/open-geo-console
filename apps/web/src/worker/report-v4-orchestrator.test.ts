@@ -34,7 +34,7 @@ describe("V4 independently claimed core and enhancement stages", () => {
     expect(result.enhancement.status).toBe("not_started");
     expect(core.events).toEqual([
       "load-core", "resolve-snapshot", "synthesize", "answer", "prepare:core", "render:core", "persist:core",
-      "activate:core", "terminalize+enqueue"
+      "activate:core", "terminalize", "after-terminalize", "enqueue"
     ]);
     expect(core.events.join(" ")).not.toMatch(/audit|diagnose|prepare:enhancement|activate:enhancement/i);
     expect(result.counters.modelCalls.sourceDiagnosis).toBe(0);
@@ -85,7 +85,8 @@ describe("V4 independently claimed core and enhancement stages", () => {
     expect(harness.events).toContain("terminalize:unavailable");
     expect(harness.events).not.toContain("prepare:core");
     expect(harness.events).not.toContain("render:core");
-    expect(harness.events).not.toContain("terminalize+enqueue");
+    expect(harness.events).not.toContain("terminalize");
+    expect(harness.events).not.toContain("enqueue");
   });
 
   it.each([
@@ -99,15 +100,82 @@ describe("V4 independently claimed core and enhancement stages", () => {
 
     expect(result.status).toBe(expected);
     expect(result.delivery).toBe("core_active");
-    expect(harness.events.filter((event) => event === "terminalize+enqueue")).toHaveLength(1);
+    expect(harness.events.filter((event) => event === "terminalize")).toHaveLength(1);
+    expect(harness.events.filter((event) => event === "after-terminalize")).toHaveLength(1);
+    expect(harness.events.filter((event) => event === "enqueue")).toHaveLength(1);
+    expect(harness.events.slice(-3)).toEqual(["terminalize", "after-terminalize", "enqueue"]);
   });
 
-  it("keeps the activated core accessible and retries only the fault-atomic terminalize-plus-enqueue boundary", async () => {
+  it("uses an explicit no-op after hook default between committed commerce and enqueue", async () => {
+    const harness = createCoreHarness({ includeAfterHook: false });
+
+    await expect(runReportV4CoreStage(coreInput(), harness.dependencies)).resolves.toMatchObject({
+      delivery: "core_active"
+    });
+
+    expect(harness.events.slice(-2)).toEqual(["terminalize", "enqueue"]);
+    expect(harness.terminalizeCalls).toBe(1);
+  });
+
+  it.each(["success", "diagnosis_failure"] as const)(
+    "enqueues the enhancement for three answered questions before downstream %s handling",
+    async () => {
+      const harness = createCoreHarness();
+
+      const result = await runReportV4CoreStage(coreInput(), harness.dependencies);
+
+      expect(result.enqueueOutcome).toBeUndefined();
+      expect(harness.events.filter((event) => event === "enqueue")).toHaveLength(1);
+    }
+  );
+
+  it.each(["completed", "completed_limited"] as const)(
+    "preserves the activated %s core status and does not start enhancement on question failure",
+    async (snapshotStatus) => {
+      const harness = createCoreHarness({ snapshotStatus, enqueueOutcome: "question_failure" });
+
+      const result = await runReportV4CoreStage(coreInput(), harness.dependencies);
+
+      expect(result).toMatchObject({
+        status: snapshotStatus,
+        delivery: "core_active",
+        enqueueOutcome: "question_failure",
+        enhancement: { status: "not_started", completedQuestionIds: [], failedQuestionIds: [] }
+      });
+      expect(result.activeReport?.status).toBe(snapshotStatus);
+      expect(harness.events.slice(-3)).toEqual(["terminalize", "after-terminalize", "enqueue"]);
+      expect(harness.events.join(" ")).not.toMatch(/audit|diagnose|prepare:enhancement|activate:enhancement/i);
+    }
+  );
+
+  it("does not enqueue after a post-commit hook failure and retries from exact commercial replay", async () => {
+    const harness = createCoreHarness({ hookFailuresRemaining: 1 });
+
+    await expect(runReportV4CoreStage(coreInput(), harness.dependencies)).rejects.toThrow(/post-commit hook failed/i);
+    expect(harness.activeCore?.artifactRevisionId).toBe("core-revision");
+    expect(harness.committedTerminalizations).toBe(1);
+    expect(harness.terminalizeCalls).toBe(1);
+    expect(harness.events.filter((event) => event === "enqueue")).toHaveLength(0);
+
+    const boundary = harness.events.length;
+    const recovered = await runReportV4CoreStage(coreInput(), harness.dependencies);
+
+    expect(recovered.delivery).toBe("core_active");
+    expect(harness.events.slice(boundary)).toEqual([
+      "load-core", "resolve-snapshot", "activate:core", "terminalize", "after-terminalize", "enqueue"
+    ]);
+    expect(harness.terminalizeCalls).toBe(2);
+    expect(harness.committedTerminalizations).toBe(1);
+    expect(harness.events.filter((event) => event === "answer")).toHaveLength(1);
+  });
+
+  it("keeps the activated core accessible and recovers an enqueue fault after exact commercial replay", async () => {
     const harness = createCoreHarness({ enqueueFailuresRemaining: 1 });
 
     await expect(runReportV4CoreStage(coreInput(), harness.dependencies)).rejects.toThrow(/enqueue failed/i);
     expect(harness.activeCore?.artifactRevisionId).toBe("core-revision");
-    expect(harness.committedTerminalizations).toBe(0);
+    expect(harness.committedTerminalizations).toBe(1);
+    expect(harness.terminalizeCalls).toBe(1);
     expect(harness.events.filter((event) => event === "synthesize")).toHaveLength(1);
     expect(harness.events.filter((event) => event === "answer")).toHaveLength(1);
 
@@ -116,9 +184,10 @@ describe("V4 independently claimed core and enhancement stages", () => {
 
     expect(recovered.delivery).toBe("core_active");
     expect(harness.events.slice(boundary)).toEqual([
-      "load-core", "resolve-snapshot", "activate:core", "terminalize+enqueue"
+      "load-core", "resolve-snapshot", "activate:core", "terminalize", "after-terminalize", "enqueue"
     ]);
-    expect(harness.events.filter((event) => event === "terminalize+enqueue")).toHaveLength(2);
+    expect(harness.terminalizeCalls).toBe(2);
+    expect(harness.events.filter((event) => event === "enqueue")).toHaveLength(2);
     expect(harness.committedTerminalizations).toBe(1);
     expect(harness.events.filter((event) => event === "answer")).toHaveLength(1);
     expect(recovered.counters.wholeReportReruns).toBe(0);
@@ -131,7 +200,8 @@ describe("V4 independently claimed core and enhancement stages", () => {
     await expect(runReportV4CoreStage(coreInput(), harness.dependencies)).rejects.toThrow(/artifact.*stage identity|match.*identity/i);
     expect(harness.events).toEqual(["load-core", "resolve-snapshot"]);
     expect(harness.events).not.toContain("activate:core");
-    expect(harness.events).not.toContain("terminalize+enqueue");
+    expect(harness.events).not.toContain("terminalize");
+    expect(harness.events).not.toContain("enqueue");
   });
 
   it("does no enhancement work when the no-credit job was not independently claimed", async () => {
@@ -414,6 +484,7 @@ describe("V4 independently claimed core and enhancement stages", () => {
       readFile(new URL("./report-v4-orchestrator.ts", import.meta.url), "utf8")
     ));
     expect(source).not.toMatch(/providerClaim|providerQualification|fourSnapshots|replacementFulfillment|generatePdf|pdfPageCount/i);
+    expect(source).not.toContain("terminalizeDeliverableCoreAndEnqueueEnhancement");
   });
 });
 
@@ -434,7 +505,10 @@ interface CoreHarnessOptions {
   readonly unavailableQuestions?: number;
   readonly reusedQuestionIds?: readonly string[];
   readonly questionModelCalls?: number;
+  readonly hookFailuresRemaining?: number;
   readonly enqueueFailuresRemaining?: number;
+  readonly enqueueOutcome?: "enqueued" | "question_failure";
+  readonly includeAfterHook?: boolean;
   readonly existingCore?: CombinedGeoReportV4;
 }
 
@@ -442,8 +516,10 @@ function createCoreHarness(options: CoreHarnessOptions = {}) {
   const events: string[] = [];
   const snapshot = snapshotBundle(options.snapshotStatus ?? "completed", options.analyzablePages ?? 2);
   let activeCore: CombinedGeoReportV4 | null = options.existingCore ?? null;
+  let hookFailuresRemaining = options.hookFailuresRemaining ?? 0;
   let enqueueFailuresRemaining = options.enqueueFailuresRemaining ?? 0;
   let committedTerminalizations = 0;
+  let terminalizeCalls = 0;
   let now = 1_000;
   const dependencies: ReportV4CoreStageDependencies = {
     nowMs: () => (now += 5),
@@ -491,14 +567,29 @@ function createCoreHarness(options: CoreHarnessOptions = {}) {
     async terminalizeUnavailableCore() {
       events.push("terminalize:unavailable");
     },
-    async terminalizeDeliverableCoreAndEnqueueEnhancement() {
-      events.push("terminalize+enqueue");
+    async terminalizeCoreCommercial() {
+      events.push("terminalize");
+      terminalizeCalls += 1;
+      committedTerminalizations = 1;
+    },
+    ...(options.includeAfterHook === false ? {} : {
+      async afterCoreCommercialTerminalized() {
+        events.push("after-terminalize");
+        if (hookFailuresRemaining > 0) {
+          hookFailuresRemaining -= 1;
+          throw new Error("post-commit hook failed");
+        }
+      }
+    }),
+    async enqueueDiagnosisEnhancement() {
+      events.push("enqueue");
       if (enqueueFailuresRemaining > 0) {
         enqueueFailuresRemaining -= 1;
         throw new Error("enhancement enqueue failed");
       }
-      committedTerminalizations += 1;
-      return { enhancementJobId: "enhancement-job" };
+      return options.enqueueOutcome === "question_failure"
+        ? { status: "not_enqueued", reason: "question_failure" } as const
+        : { status: "enqueued", enhancementJobId: "enhancement-job" } as const;
     }
   };
   return {
@@ -506,7 +597,8 @@ function createCoreHarness(options: CoreHarnessOptions = {}) {
     events,
     snapshot,
     get activeCore() { return activeCore; },
-    get committedTerminalizations() { return committedTerminalizations; }
+    get committedTerminalizations() { return committedTerminalizations; },
+    get terminalizeCalls() { return terminalizeCalls; }
   };
 }
 
