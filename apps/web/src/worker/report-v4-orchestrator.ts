@@ -9,6 +9,7 @@ import {
 import type {
   ActivateReportV4CoreRevisionInput,
   ActivateReportV4DiagnosisEnhancementInput,
+  ReportV4CoreGenerationIdentity,
   ReportV4DiagnosisEnhancementIdentity
 } from "../db/report-v4-artifact-revisions";
 import type {
@@ -72,7 +73,7 @@ export type ReportV4OrchestratorDiagnosisResult =
   | {
       readonly status: "completed";
       readonly diagnosis: CombinedGeoReportV4QuestionDiagnosis;
-      readonly providerAttempts: 1 | 2;
+      readonly providerAttempts: 0 | 1 | 2;
     }
   | {
       readonly status: "failed";
@@ -82,6 +83,10 @@ export type ReportV4OrchestratorDiagnosisResult =
 export interface ReportV4PersistedHtmlIdentity {
   readonly payloadIdentityHash: string;
   readonly htmlSha256: string;
+}
+
+export interface ReportV4LoadedCoreArtifact extends ReportV4PersistedHtmlIdentity {
+  readonly report: CombinedGeoReportV4;
 }
 
 interface ReportV4ClockDependencies {
@@ -94,7 +99,7 @@ export interface ReportV4CoreStageDependencies extends ReportV4ClockDependencies
     readonly reportId: string;
     readonly coreArtifactRevisionId: string;
     readonly signal?: AbortSignal;
-  }) => Promise<CombinedGeoReportV4 | null>;
+  }) => Promise<ReportV4LoadedCoreArtifact | null>;
   readonly resolveSnapshot: (input: {
     readonly identity: ResolvePaidReportV4SiteSnapshotInput;
     readonly signal?: AbortSignal;
@@ -113,6 +118,10 @@ export interface ReportV4CoreStageDependencies extends ReportV4ClockDependencies
     readonly report: CombinedGeoReportV4;
     readonly signal?: AbortSignal;
   }) => Promise<string>;
+  readonly prepareCoreRevision: (
+    input: ReportV4CoreGenerationIdentity,
+    signal?: AbortSignal
+  ) => Promise<unknown>;
   readonly persistCoreArtifact: (input: {
     readonly report: CombinedGeoReportV4;
     readonly html: string;
@@ -336,8 +345,20 @@ export async function runReportV4CoreStage(
 
   let coreReport: CombinedGeoReportV4;
   if (existing) {
-    coreReport = acceptCoreArtifact(existing, parsedInput);
+    coreReport = acceptCoreArtifact(existing.report, parsedInput);
     assertArtifactAgainstSnapshot(coreReport, parsedInput, snapshot, "active core");
+    await measured(dependencies, timings, "coreDelivery", async () => {
+      await dependencies.activateCoreRevision({
+        artifactRevisionId: parsedInput.coreArtifactRevisionId,
+        reportId: parsedInput.reportId,
+        orderId: parsedInput.orderId,
+        jobId: parsedInput.coreJobId,
+        configSnapshotId: parsedInput.configSnapshotId,
+        payloadIdentityHash: existing.payloadIdentityHash,
+        htmlSha256: existing.htmlSha256
+      }, signal);
+      throwIfAborted(signal);
+    });
   } else {
     const [websiteResult, answerResult] = await Promise.all([
       measured(dependencies, timings, "websiteSynthesis", () => dependencies.synthesizeWebsite({
@@ -390,6 +411,14 @@ export async function runReportV4CoreStage(
       questions: answerResult.questions
     });
     await measured(dependencies, timings, "coreDelivery", async () => {
+      await dependencies.prepareCoreRevision({
+        artifactRevisionId: parsedInput.coreArtifactRevisionId,
+        reportId: parsedInput.reportId,
+        orderId: parsedInput.orderId,
+        jobId: parsedInput.coreJobId,
+        configSnapshotId: parsedInput.configSnapshotId
+      }, signal);
+      throwIfAborted(signal);
       const html = await dependencies.renderCoreHtml({ report: coreReport, signal });
       throwIfAborted(signal);
       const identity = await dependencies.persistCoreArtifact({ report: coreReport, html, signal });

@@ -71,19 +71,66 @@ describeDisposablePostgres("V4 production job lineage PostgreSQL repository", ()
     })).rejects.toThrow(/config|lineage|exact/i);
   }, 180_000);
 
+  it("uses PostgreSQL time and exact lease owner for reserved-active core recovery", async () => {
+    const sql = getSqlClient();
+    try {
+      await sql`UPDATE scan_jobs SET stage='analyzing',execution_state='running',lease_owner='core-worker',
+        lease_expires_at=now()+interval '5 minutes' WHERE id=${ids.coreJob}`;
+      await sql`UPDATE payment_orders SET fulfillment_status='processing' WHERE id=${ids.order}`;
+      await sql`UPDATE credit_ledger SET status='reserved',settled_at=NULL WHERE id=${ids.credit}`;
+      await sql`DELETE FROM report_access_tokens WHERE report_id=${ids.report}`;
+      const repo = createReportV4ProductionJobRepository();
+      await expect(repo.loadClaimedPaidCoreContext({ coreJobId: ids.coreJob, workerId: "core-worker" }))
+        .resolves.toMatchObject({ commercePhase: "reserved_active", activeCoreArtifact: { id: ids.artifact } });
+      await expect(repo.loadClaimedPaidCoreContext({ coreJobId: ids.coreJob, workerId: "wrong-worker" }))
+        .rejects.toThrow(/lease.*worker|worker.*lease/i);
+      await sql`UPDATE scan_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=${ids.coreJob}`;
+      await expect(repo.loadClaimedPaidCoreContext({ coreJobId: ids.coreJob, workerId: "core-worker" }))
+        .rejects.toThrow(/live lease|lease.*worker/i);
+    } finally {
+      await sql`UPDATE scan_jobs SET stage='completed',execution_state='completed',lease_owner=NULL,lease_expires_at=NULL WHERE id=${ids.coreJob}`;
+      await sql`UPDATE payment_orders SET fulfillment_status='completed' WHERE id=${ids.order}`;
+      await sql`UPDATE credit_ledger SET status='settled',settled_at=now() WHERE id=${ids.credit}`;
+      await sql`DELETE FROM report_access_tokens WHERE report_id=${ids.report}`;
+      await sql`INSERT INTO report_access_tokens(id,report_id,token_prefix,token_hmac,artifact_scope,expires_at)
+        VALUES(${`token-restored-${suffix}`},${ids.report},'ogc_report_fixture',${sha(`token-restored-${suffix}`)},'combined_geo_report_v4',now()+interval '30 days')`;
+    }
+  });
+
+  it("derives claimed enhancement lineage with PostgreSQL lease time", async () => {
+    const sql = getSqlClient();
+    try {
+      await sql`UPDATE scan_jobs SET stage='analyzing',current_phase='source_retrieval',execution_state='running',
+        lease_owner='enhancement-worker',lease_expires_at=now()+interval '5 minutes' WHERE id=${enhancementJobId}`;
+      const repo = createReportV4ProductionJobRepository();
+      await expect(repo.loadClaimedDiagnosisEnhancementContext({ enhancementJobId, workerId: "enhancement-worker" }))
+        .resolves.toMatchObject({ enhancementJob: { id: enhancementJobId, executionState: "running", leaseOwner: "enhancement-worker" }, core: { commercePhase: "settled", activeCoreArtifact: { id: ids.artifact } }, lineage: exactLineage() });
+      await expect(repo.loadClaimedDiagnosisEnhancementContext({ enhancementJobId, workerId: "wrong-worker" }))
+        .rejects.toThrow(/enhancement.*lease|lease.*worker/i);
+      await sql`UPDATE scan_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=${enhancementJobId}`;
+      await expect(repo.loadClaimedDiagnosisEnhancementContext({ enhancementJobId, workerId: "enhancement-worker" }))
+        .rejects.toThrow(/enhancement.*lease|live.*lease/i);
+    } finally {
+      await sql`UPDATE scan_jobs SET stage='queued',current_phase='source_retrieval',execution_state='queued',lease_owner=NULL,lease_expires_at=NULL WHERE id=${enhancementJobId}`;
+    }
+  });
+
   it("fails closed when out-of-band SQL creates duplicate enhancement lineage", async () => {
     const sql = getSqlClient();
-    await sql`INSERT INTO scan_jobs(id,report_id,tier,product_contract,fulfillment_methodology,
-      recommendation_report_version,artifact_contract,business_question_set_id,locale,reason,stage,execution_state,current_phase)
-      VALUES(${`out-of-band-${suffix}`},${ids.report},'deep','recommendation_forensics_v1',
-      'two_stage_geo_report_v4',4,'combined_geo_report_v4',${ids.questions},'en','v4_diagnosis_enhancement',
-      'queued','queued','source_retrieval')`;
-    await expect(createReportV4ProductionJobRepository().enqueueDiagnosisEnhancement(exactLineage()))
-      .rejects.toThrow(/duplicate|exact lineage/i);
-    await expect(createReportV4ProductionJobRepository().loadDiagnosisEnhancementContext({
-      ...exactLineage(), enhancementJobId
-    })).rejects.toThrow(/duplicate|exactly one|lineage/i);
-    await sql`DELETE FROM scan_jobs WHERE id=${`out-of-band-${suffix}`}`;
+    try {
+      await sql`INSERT INTO scan_jobs(id,report_id,tier,product_contract,fulfillment_methodology,
+        recommendation_report_version,artifact_contract,business_question_set_id,locale,reason,stage,execution_state,current_phase)
+        VALUES(${`out-of-band-${suffix}`},${ids.report},'deep','recommendation_forensics_v1',
+        'two_stage_geo_report_v4',4,'combined_geo_report_v4',${ids.questions},'en','v4_diagnosis_enhancement',
+        'queued','queued','source_retrieval')`;
+      await expect(createReportV4ProductionJobRepository().enqueueDiagnosisEnhancement(exactLineage()))
+        .rejects.toThrow(/duplicate|exact lineage/i);
+      await expect(createReportV4ProductionJobRepository().loadDiagnosisEnhancementContext({
+        ...exactLineage(), enhancementJobId
+      })).rejects.toThrow(/duplicate|exactly one|lineage/i);
+    } finally {
+      await sql`DELETE FROM scan_jobs WHERE id=${`out-of-band-${suffix}`}`;
+    }
   });
 
   it("fails closed when the authoritative paid report URL is missing or non-HTTP", async () => {

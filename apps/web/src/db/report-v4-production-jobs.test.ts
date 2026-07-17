@@ -44,6 +44,46 @@ describe("V4 production core and diagnosis-enhancement job lineage", () => {
       .resolves.toMatchObject({ commercePhase: "settled" });
   });
 
+  it("loads a reserved core only for its exact live worker lease before production work", async () => {
+    const aggregate = reservedAggregate();
+    const repo = repository(aggregate);
+
+    await expect(repo.loadClaimedPaidCoreContext({
+      coreJobId: "core-job", workerId: "worker-1"
+    })).resolves.toMatchObject({ commercePhase: "reserved", coreJob: { leaseOwner: "worker-1" } });
+
+    await expect(repo.loadClaimedPaidCoreContext({
+      coreJobId: "core-job", workerId: "wrong-worker"
+    })).rejects.toThrow(/lease.*worker|worker.*lease/i);
+    aggregate.coreJob.leaseExpiresAt = new Date("2026-07-16T23:59:59.000Z");
+    await expect(repo.loadClaimedPaidCoreContext({
+      coreJobId: "core-job", workerId: "worker-1"
+    })).rejects.toThrow(/lease.*expired|live.*lease/i);
+  });
+
+  it("admits only an exact active core as the reserved crash-recovery phase", async () => {
+    const aggregate = reservedAggregate();
+    aggregate.activeArtifacts = [{
+      id: "core-artifact-1", reportId: "report-1", orderId: "order-1", jobId: "core-job",
+      configSnapshotId: "config-1", revisionKind: "generation", artifactContract: "combined_geo_report_v4",
+      status: "active", sourceArtifactRevisionId: null
+    }];
+    aggregate.report.activeArtifactRevisionId = "core-artifact-1";
+    const claimed = () => repository(aggregate).loadClaimedPaidCoreContext({
+      coreJobId: "core-job", workerId: "worker-1"
+    });
+
+    await expect(claimed()).resolves.toMatchObject({
+      commercePhase: "reserved_active", activeCoreArtifact: { id: "core-artifact-1", status: "active" }
+    });
+
+    aggregate.activeAccessTokenCount = 1;
+    await expect(claimed()).rejects.toThrow(/reserved.*active|access|lineage/i);
+    aggregate.activeAccessTokenCount = 0;
+    aggregate.activeArtifacts[0]!.configSnapshotId = "wrong-config";
+    await expect(claimed()).rejects.toThrow(/reserved.*active|config|lineage/i);
+  });
+
   it("fails closed on duplicate, missing, legacy, replacement, locale or commercial lineage drift", async () => {
     const variants: Array<[string, (aggregate: ReportV4ProductionCoreAggregate) => void]> = [
       ["duplicate config", (value) => value.configSnapshots.push({ ...value.configSnapshots[0]!, id: "config-2" })],
@@ -116,6 +156,37 @@ describe("V4 production core and diagnosis-enhancement job lineage", () => {
       .rejects.toThrow(/duplicate|exactly one|lineage/i);
   });
 
+  it("derives exact enhancement lineage only from its independently claimed live lease", async () => {
+    const { repo, store } = repositoryHarness(exactAggregate());
+    const queued = await repo.enqueueDiagnosisEnhancement(exactLineage());
+    store.jobs[0] = {
+      ...queued,
+      stage: "source_retrieval",
+      executionState: "running",
+      leaseOwner: "enhancement-worker",
+      leaseExpiresAt: new Date("2026-07-17T00:05:00.000Z")
+    };
+
+    await expect(repo.loadClaimedDiagnosisEnhancementContext({
+      enhancementJobId: queued.id,
+      workerId: "enhancement-worker"
+    })).resolves.toMatchObject({
+      enhancementJob: { id: queued.id, executionState: "running", leaseOwner: "enhancement-worker" },
+      core: { commercePhase: "settled", activeCoreArtifact: { id: "core-artifact-1" } },
+      lineage: exactLineage()
+    });
+
+    await expect(repo.loadClaimedDiagnosisEnhancementContext({
+      enhancementJobId: queued.id,
+      workerId: "wrong-worker"
+    })).rejects.toThrow(/enhancement.*lease|lease.*worker/i);
+    store.jobs[0]!.leaseExpiresAt = new Date("2026-07-16T23:59:59.000Z");
+    await expect(repo.loadClaimedDiagnosisEnhancementContext({
+      enhancementJobId: queued.id,
+      workerId: "enhancement-worker"
+    })).rejects.toThrow(/enhancement.*lease|expired|live.*lease/i);
+  });
+
   it("resumes an enhancement after its exact active revision legitimately supersedes the core", async () => {
     const aggregate = exactAggregate();
     const { repo } = repositoryHarness(aggregate);
@@ -156,7 +227,8 @@ function exactAggregate(): ReportV4ProductionCoreAggregate {
       productContract: "recommendation_forensics_v1", fulfillmentMethodology: "two_stage_geo_report_v4",
       recommendationReportVersion: 4, artifactContract: "combined_geo_report_v4", questionSetId: "questions-1",
       locale: "en", reason: "standard", stage: "completed", executionState: "completed",
-      creditReservationId: "credit-1", correctionId: null, replacementFulfillmentId: null
+      creditReservationId: "credit-1", correctionId: null, replacementFulfillmentId: null,
+      leaseOwner: null, leaseExpiresAt: null
     },
     orders: [{
       id: "order-1", reportId: "report-1", fulfillmentJobId: "core-job", siteSnapshotId: "snapshot-1",
@@ -189,6 +261,20 @@ function exactAggregate(): ReportV4ProductionCoreAggregate {
   };
 }
 
+function reservedAggregate(): ReportV4ProductionCoreAggregate {
+  const aggregate = exactAggregate();
+  aggregate.report.activeArtifactRevisionId = null;
+  aggregate.coreJob.stage = "analyzing";
+  aggregate.coreJob.executionState = "running";
+  aggregate.coreJob.leaseOwner = "worker-1";
+  aggregate.coreJob.leaseExpiresAt = new Date("2026-07-17T00:05:00.000Z");
+  aggregate.orders[0]!.fulfillmentStatus = "processing";
+  aggregate.credits[0]!.status = "reserved";
+  aggregate.activeArtifacts = [];
+  aggregate.activeAccessTokenCount = 0;
+  return aggregate;
+}
+
 function repository(aggregate: ReportV4ProductionCoreAggregate) {
   return repositoryHarness(aggregate).repo;
 }
@@ -197,8 +283,10 @@ function repositoryHarness(aggregate: ReportV4ProductionCoreAggregate) {
   const jobs: ReportV4ProductionEnhancementJob[] = [];
   let tail: Promise<void> = Promise.resolve();
   const tx: ReportV4ProductionJobTransaction = {
+    async now() { return new Date("2026-07-17T00:00:00.000Z"); },
     async acquireEnhancementLock() {},
     async loadCoreAggregate(coreJobId) { return coreJobId === aggregate.coreJob.id ? structuredClone(aggregate) : null; },
+    async loadCoreAggregateForReport(reportId) { return reportId === aggregate.report.id ? structuredClone(aggregate) : null; },
     async listEnhancementJobs(reportId) { return jobs.filter((job) => job.reportId === reportId).map((job) => ({ ...job })); },
     async insertEnhancementJob(job) { jobs.push({ ...job }); },
     async loadEnhancementJob(id) { return jobs.find((job) => job.id === id) ?? null; }

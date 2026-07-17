@@ -33,7 +33,7 @@ describe("V4 independently claimed core and enhancement stages", () => {
     expect(result.activeReport?.artifactRevisionId).toBe("core-revision");
     expect(result.enhancement.status).toBe("not_started");
     expect(core.events).toEqual([
-      "load-core", "resolve-snapshot", "synthesize", "answer", "render:core", "persist:core",
+      "load-core", "resolve-snapshot", "synthesize", "answer", "prepare:core", "render:core", "persist:core",
       "activate:core", "terminalize+enqueue"
     ]);
     expect(core.events.join(" ")).not.toMatch(/audit|diagnose|prepare:enhancement|activate:enhancement/i);
@@ -83,6 +83,7 @@ describe("V4 independently claimed core and enhancement stages", () => {
 
     expect(result.delivery).toBe("unavailable");
     expect(harness.events).toContain("terminalize:unavailable");
+    expect(harness.events).not.toContain("prepare:core");
     expect(harness.events).not.toContain("render:core");
     expect(harness.events).not.toContain("terminalize+enqueue");
   });
@@ -115,12 +116,22 @@ describe("V4 independently claimed core and enhancement stages", () => {
 
     expect(recovered.delivery).toBe("core_active");
     expect(harness.events.slice(boundary)).toEqual([
-      "load-core", "resolve-snapshot", "terminalize+enqueue"
+      "load-core", "resolve-snapshot", "activate:core", "terminalize+enqueue"
     ]);
     expect(harness.events.filter((event) => event === "terminalize+enqueue")).toHaveLength(2);
     expect(harness.committedTerminalizations).toBe(1);
     expect(harness.events.filter((event) => event === "answer")).toHaveLength(1);
     expect(recovered.counters.wholeReportReruns).toBe(0);
+  });
+
+  it("validates a persisted recovery payload before idempotent activation", async () => {
+    const drifted = { ...coreReportFromInput("core-revision", "completed", 0), targetUrl: "https://drift.example/" };
+    const harness = createCoreHarness({ existingCore: drifted });
+
+    await expect(runReportV4CoreStage(coreInput(), harness.dependencies)).rejects.toThrow(/artifact.*stage identity|match.*identity/i);
+    expect(harness.events).toEqual(["load-core", "resolve-snapshot"]);
+    expect(harness.events).not.toContain("activate:core");
+    expect(harness.events).not.toContain("terminalize+enqueue");
   });
 
   it("does no enhancement work when the no-credit job was not independently claimed", async () => {
@@ -158,6 +169,16 @@ describe("V4 independently claimed core and enhancement stages", () => {
       release();
     }
     await expect(running).resolves.toMatchObject({ delivery: "enhancement_active" });
+  });
+
+  it("counts completed diagnosis checkpoint recovery as zero provider calls", async () => {
+    const harness = createEnhancementHarness({ diagnosisProviderAttempts: 0 });
+
+    const result = await runReportV4EnhancementStage(enhancementInput(), harness.dependencies);
+
+    expect(result.delivery).toBe("enhancement_active");
+    expect(result.counters.modelCalls.sourceDiagnosis).toBe(0);
+    expect(result.counters.providerRetries.sourceDiagnosis).toBe(0);
   });
 
   it.each([
@@ -386,12 +407,13 @@ interface CoreHarnessOptions {
   readonly reusedQuestionIds?: readonly string[];
   readonly questionModelCalls?: number;
   readonly enqueueFailuresRemaining?: number;
+  readonly existingCore?: CombinedGeoReportV4;
 }
 
 function createCoreHarness(options: CoreHarnessOptions = {}) {
   const events: string[] = [];
   const snapshot = snapshotBundle(options.snapshotStatus ?? "completed", options.analyzablePages ?? 2);
-  let activeCore: CombinedGeoReportV4 | null = null;
+  let activeCore: CombinedGeoReportV4 | null = options.existingCore ?? null;
   let enqueueFailuresRemaining = options.enqueueFailuresRemaining ?? 0;
   let committedTerminalizations = 0;
   let now = 1_000;
@@ -400,7 +422,11 @@ function createCoreHarness(options: CoreHarnessOptions = {}) {
     nowIso: () => "2026-07-17T00:00:00.000Z",
     async loadCoreArtifact() {
       events.push("load-core");
-      return activeCore;
+      return activeCore ? {
+        report: activeCore,
+        payloadIdentityHash: "a".repeat(64),
+        htmlSha256: "b".repeat(64)
+      } : null;
     },
     async resolveSnapshot() {
       events.push("resolve-snapshot");
@@ -422,6 +448,9 @@ function createCoreHarness(options: CoreHarnessOptions = {}) {
     async renderCoreHtml(input) {
       events.push("render:core");
       return `<html data-revision="${input.report.artifactRevisionId}"></html>`;
+    },
+    async prepareCoreRevision() {
+      events.push("prepare:core");
     },
     async persistCoreArtifact() {
       events.push("persist:core");
@@ -465,6 +494,7 @@ interface EnhancementHarnessOptions {
   readonly coreAccessStatus?: "active" | "missing";
   readonly terminalizeFailure?: boolean;
   readonly deliveryAbortAt?: "prepare" | "render" | "persist" | "activate";
+  readonly diagnosisProviderAttempts?: 0 | 1 | 2;
 }
 
 function createEnhancementHarness(options: EnhancementHarnessOptions = {}) {
@@ -535,7 +565,11 @@ function createEnhancementHarness(options: EnhancementHarnessOptions = {}) {
       if (options.failure === "diagnosis" || options.failedDiagnosisQuestionIds?.has(input.question.questionId)) {
         return { status: "failed", providerAttempts: 1 };
       }
-      return { status: "completed", diagnosis: diagnosis(input.question), providerAttempts: 1 };
+      return {
+        status: "completed",
+        diagnosis: diagnosis(input.question),
+        providerAttempts: options.diagnosisProviderAttempts ?? 1
+      };
     },
     async prepareEnhancementRevision() {
       events.push("prepare:enhancement");

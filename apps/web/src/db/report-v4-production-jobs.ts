@@ -36,6 +36,7 @@ export interface ReportV4ProductionCoreJob {
   fulfillmentMethodology: string | null; recommendationReportVersion: number | null; artifactContract: string | null;
   questionSetId: string | null; locale: string; reason: string; stage: string; executionState: string;
   creditReservationId: string | null; correctionId: string | null; replacementFulfillmentId: string | null;
+  leaseOwner?: string | null; leaseExpiresAt?: Date | null;
 }
 
 export interface ReportV4ProductionEnhancementJob extends Omit<ReportV4ProductionCoreJob, "siteSnapshotId"> {
@@ -44,8 +45,10 @@ export interface ReportV4ProductionEnhancementJob extends Omit<ReportV4Productio
 export const REPORT_V4_DIAGNOSIS_INITIAL_PHASE = "source_retrieval" as const;
 
 export interface ReportV4ProductionJobTransaction {
+  now(): Promise<Date>;
   acquireEnhancementLock(reportId: string): Promise<void>;
   loadCoreAggregate(coreJobId: string, forUpdate?: boolean): Promise<ReportV4ProductionCoreAggregate | null>;
+  loadCoreAggregateForReport(reportId: string, forUpdate?: boolean): Promise<ReportV4ProductionCoreAggregate | null>;
   listEnhancementJobs(reportId: string, forUpdate?: boolean): Promise<ReportV4ProductionEnhancementJob[]>;
   insertEnhancementJob(job: ReportV4ProductionEnhancementJob): Promise<void>;
   loadEnhancementJob(id: string, forUpdate?: boolean): Promise<ReportV4ProductionEnhancementJob | null>;
@@ -71,7 +74,20 @@ export interface ReportV4PaidCoreContext {
   config: ReportV4ProductionCoreAggregate["configSnapshots"][number];
   credit: ReportV4ProductionCoreAggregate["credits"][number];
   activeCoreArtifact: ReportV4ProductionCoreAggregate["activeArtifacts"][number] | null;
-  commercePhase: "reserved" | "settled";
+  commercePhase: "reserved" | "reserved_active" | "settled";
+}
+
+export interface ReportV4ClaimedDiagnosisEnhancementContext {
+  enhancementJob: ReportV4ProductionEnhancementJob & {
+    executionState: "running";
+    leaseOwner: string;
+    leaseExpiresAt: Date;
+  };
+  core: ReportV4PaidCoreContext & {
+    commercePhase: "settled";
+    activeCoreArtifact: NonNullable<ReportV4PaidCoreContext["activeCoreArtifact"]>;
+  };
+  lineage: ReportV4ProductionLineage;
 }
 
 export function createReportV4ProductionJobRepository(store: ReportV4ProductionJobStore = createPostgresStore()) {
@@ -81,6 +97,59 @@ export function createReportV4ProductionJobRepository(store: ReportV4ProductionJ
         const aggregate = await tx.loadCoreAggregate(requireId(input.coreJobId, "core job"));
         if (!aggregate) throw new Error("The exact paid V4 core job does not exist.");
         return validateCoreAggregate(aggregate);
+      });
+    },
+
+    async loadClaimedPaidCoreContext(input: {
+      coreJobId: string;
+      workerId: string;
+    }): Promise<ReportV4PaidCoreContext> {
+      return store.transaction(async (tx) => {
+        const aggregate = await tx.loadCoreAggregate(requireId(input.coreJobId, "core job"));
+        if (!aggregate) throw new Error("The exact claimed paid V4 core job does not exist.");
+        const context = validateCoreAggregate(aggregate);
+        assertLiveCoreLease(context, input.workerId, await tx.now());
+        return context;
+      });
+    },
+
+    async loadClaimedDiagnosisEnhancementContext(input: {
+      enhancementJobId: string;
+      workerId: string;
+    }): Promise<ReportV4ClaimedDiagnosisEnhancementContext> {
+      const enhancementJobId = requireId(input.enhancementJobId, "enhancement job");
+      const workerId = requireId(input.workerId, "worker");
+      return store.transaction(async (tx) => {
+        const initial = await tx.loadEnhancementJob(enhancementJobId);
+        if (!initial) throw new Error("The exact claimed V4 diagnosis enhancement job does not exist.");
+        await tx.acquireEnhancementLock(initial.reportId);
+        const enhancementJob = await tx.loadEnhancementJob(enhancementJobId, true);
+        if (!enhancementJob || enhancementJob.reportId !== initial.reportId) {
+          throw new Error("The claimed V4 diagnosis enhancement identity changed under lock.");
+        }
+        assertLiveEnhancementLease(enhancementJob, workerId, await tx.now());
+        const aggregate = await tx.loadCoreAggregateForReport(enhancementJob.reportId, true);
+        if (!aggregate) throw new Error("The exact settled V4 source core lineage does not exist.");
+        const core = validateCoreAggregate(aggregate, enhancementJob.id);
+        if (core.commercePhase !== "settled" || !core.activeCoreArtifact) {
+          throw new Error("A claimed V4 diagnosis enhancement requires its exact settled source core.");
+        }
+        assertEnhancementJob(enhancementJob, core);
+        const lineage: ReportV4ProductionLineage = {
+          reportId: core.report.id,
+          orderId: core.order.id,
+          coreJobId: core.coreJob.id,
+          coreArtifactRevisionId: core.activeCoreArtifact.id,
+          configSnapshotId: core.config.id,
+          siteSnapshotId: core.siteSnapshot.id,
+          questionSetId: core.questionSet.id,
+          locale: requireLocale(core.coreJob.locale)
+        };
+        return {
+          enhancementJob: enhancementJob as ReportV4ClaimedDiagnosisEnhancementContext["enhancementJob"],
+          core: core as ReportV4ClaimedDiagnosisEnhancementContext["core"],
+          lineage
+        };
       });
     },
 
@@ -184,16 +253,22 @@ function validateCoreAggregate(value: ReportV4ProductionCoreAggregate, allowedAc
   if (credit.id !== job.creditReservationId || credit.reportId !== job.reportId || credit.jobId !== job.id ||
       credit.paymentOrderId !== order.id) throw new Error("The exact V4 paid credit lineage is invalid.");
 
-  const reserved = !["completed", "completed_limited", "failed"].includes(job.stage) &&
+  const reservedState = !["completed", "completed_limited", "failed"].includes(job.stage) &&
     ["queued", "running", "retry_wait", "repair_wait"].includes(job.executionState) &&
     ["queued", "processing"].includes(order.fulfillmentStatus) && order.refundStatus === "not_required" &&
-    credit.status === "reserved" && value.activeArtifacts.length === 0 && value.activeAccessTokenCount === 0;
+    credit.status === "reserved" && value.activeAccessTokenCount === 0;
+  const reserved = reservedState && value.activeArtifacts.length === 0 && value.report.activeArtifactRevisionId === null;
+  const reservedActive = reservedState && isExactReservedActiveCore(value, job, order, config);
   const settled = job.stage === "completed" && job.executionState === "completed" &&
     order.fulfillmentStatus === "completed" && order.refundStatus === "not_required" && credit.status === "settled";
-  if (!reserved && !settled) throw new Error("The V4 commercial job, order and credit state is not an exact reserved or settled phase.");
+  if (!reserved && !reservedActive && !settled) {
+    throw new Error("The V4 commercial job, order and credit state is not an exact reserved, reserved-active, or settled phase.");
+  }
 
   let activeCoreArtifact: ReportV4ProductionCoreAggregate["activeArtifacts"][number] | null = null;
-  if (settled) {
+  if (reservedActive) {
+    activeCoreArtifact = value.activeArtifacts[0]!;
+  } else if (settled) {
     const coreArtifacts = value.activeArtifacts.filter((artifact) => artifact.jobId === job.id && artifact.revisionKind === "generation");
     activeCoreArtifact = exactlyOne(coreArtifacts, "V4 source core generation artifact");
     const reportActiveArtifacts = value.activeArtifacts.filter((artifact) => artifact.id === value.report.activeArtifactRevisionId);
@@ -219,7 +294,49 @@ function validateCoreAggregate(value: ReportV4ProductionCoreAggregate, allowedAc
     if (value.activeAccessTokenCount < 1) throw new Error("The settled V4 core requires an active paid access token.");
   }
   return { report: value.report, targetUrl, order, coreJob: job, siteSnapshot: snapshot, questionSet, questions,
-    config, credit, activeCoreArtifact, commercePhase: settled ? "settled" : "reserved" };
+    config, credit, activeCoreArtifact, commercePhase: settled ? "settled" : reservedActive ? "reserved_active" : "reserved" };
+}
+
+function isExactReservedActiveCore(
+  value: ReportV4ProductionCoreAggregate,
+  job: ReportV4ProductionCoreJob,
+  order: ReportV4ProductionCoreAggregate["orders"][number],
+  config: ReportV4ProductionCoreAggregate["configSnapshots"][number]
+): boolean {
+  if (value.activeArtifacts.length !== 1 || value.activeAccessTokenCount !== 0) return false;
+  const artifact = value.activeArtifacts[0]!;
+  return value.report.activeArtifactRevisionId === artifact.id && artifact.reportId === job.reportId
+    && artifact.orderId === order.id && artifact.jobId === job.id && artifact.configSnapshotId === config.id
+    && artifact.revisionKind === "generation" && artifact.artifactContract === "combined_geo_report_v4"
+    && artifact.status === "active" && artifact.sourceArtifactRevisionId === null;
+}
+
+function assertLiveCoreLease(context: ReportV4PaidCoreContext, workerIdValue: string, nowValue: Date): void {
+  const workerId = requireId(workerIdValue, "worker");
+  if (!(nowValue instanceof Date) || !Number.isFinite(nowValue.getTime())) {
+    throw new Error("A valid claimed-core lease comparison time is required.");
+  }
+  if (context.commercePhase === "settled") {
+    throw new Error("A settled V4 core is not an independently claimed running job.");
+  }
+  const job = context.coreJob;
+  if (job.executionState !== "running" || job.leaseOwner !== workerId || !job.leaseExpiresAt
+    || job.leaseExpiresAt.getTime() <= nowValue.getTime()) {
+    throw new Error("The paid V4 core requires an exact live lease owned by the claimed worker.");
+  }
+}
+
+function assertLiveEnhancementLease(
+  job: ReportV4ProductionEnhancementJob,
+  workerId: string,
+  now: Date
+): void {
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new Error("The repository clock is invalid.");
+  if (job.reason !== "v4_diagnosis_enhancement" || job.siteSnapshotId !== null || job.creditReservationId !== null
+    || job.executionState !== "running" || job.leaseOwner !== workerId || !job.leaseExpiresAt
+    || job.leaseExpiresAt.getTime() <= now.getTime() || ["completed", "failed"].includes(job.stage)) {
+    throw new Error("The V4 diagnosis enhancement requires an exact live lease owned by the claimed worker.");
+  }
 }
 
 function canonicalizePaidTargetUrl(value: string): string {
@@ -287,7 +404,8 @@ export function buildReportV4DiagnosisEnhancementJob(input: ReportV4ProductionLi
     tier: "deep", productContract: "recommendation_forensics_v1", fulfillmentMethodology: "two_stage_geo_report_v4",
     recommendationReportVersion: 4, artifactContract: "combined_geo_report_v4", questionSetId: lineage.questionSetId,
     locale: lineage.locale, reason: "v4_diagnosis_enhancement", stage: "queued", executionState: "queued",
-    creditReservationId: null, correctionId: null, replacementFulfillmentId: null
+    creditReservationId: null, correctionId: null, replacementFulfillmentId: null,
+    leaseOwner: null, leaseExpiresAt: null
   };
 }
 
@@ -318,6 +436,13 @@ function createPostgresStore(): ReportV4ProductionJobStore {
 
 function createPostgresTransaction(sql: postgres.TransactionSql): ReportV4ProductionJobTransaction {
   return {
+    async now() {
+      const rows = await sql<Array<{ now: Date | string }>>`SELECT now() AS now`;
+      const raw = rows[0]?.now;
+      const value = raw instanceof Date ? raw : new Date(String(raw ?? ""));
+      if (!Number.isFinite(value.getTime())) throw new Error("The PostgreSQL lease clock is invalid.");
+      return value;
+    },
     async acquireEnhancementLock(reportId) {
       // Synchronize with core commerce terminalization before examining its successful terminal state.
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${`report-v4-commerce:${reportId}`},0))`;
@@ -325,6 +450,14 @@ function createPostgresTransaction(sql: postgres.TransactionSql): ReportV4Produc
     },
     async loadCoreAggregate(coreJobId, forUpdate = false) {
       return loadPostgresCoreAggregate(sql, coreJobId, forUpdate);
+    },
+    async loadCoreAggregateForReport(reportId, forUpdate = false) {
+      const rows = forUpdate
+        ? await sql<Array<{ id: string }>>`SELECT id FROM scan_jobs WHERE report_id=${reportId} AND reason='standard' AND recommendation_report_version=4 FOR UPDATE`
+        : await sql<Array<{ id: string }>>`SELECT id FROM scan_jobs WHERE report_id=${reportId} AND reason='standard' AND recommendation_report_version=4`;
+      if (rows.length === 0) return null;
+      if (rows.length !== 1) throw new Error("Exactly one standard V4 source core job is required for the report.");
+      return loadPostgresCoreAggregate(sql, rows[0]!.id, false);
     },
     async listEnhancementJobs(reportId, forUpdate = false) {
       const rows = forUpdate
@@ -349,12 +482,13 @@ function createPostgresTransaction(sql: postgres.TransactionSql): ReportV4Produc
 
 const scanJobColumns = ["id", "report_id", "site_snapshot_id", "tier", "product_contract", "fulfillment_methodology",
   "recommendation_report_version", "artifact_contract", "business_question_set_id", "locale", "reason", "stage",
-  "execution_state", "credit_reservation_id", "correction_id", "replacement_fulfillment_id"];
+  "execution_state", "credit_reservation_id", "correction_id", "replacement_fulfillment_id", "lease_owner", "lease_expires_at"];
 interface ScanJobRow {
   id: string; report_id: string; site_snapshot_id: string | null; tier: string; product_contract: string;
   fulfillment_methodology: string | null; recommendation_report_version: number | null; artifact_contract: string | null;
   business_question_set_id: string | null; locale: string; reason: string; stage: string; execution_state: string;
   credit_reservation_id: string | null; correction_id: string | null; replacement_fulfillment_id: string | null;
+  lease_owner: string | null; lease_expires_at: Date | string | null;
 }
 function mapCoreJob(row: ScanJobRow): ReportV4ProductionCoreJob {
   return { id: row.id, reportId: row.report_id, siteSnapshotId: row.site_snapshot_id, tier: row.tier,
@@ -362,7 +496,15 @@ function mapCoreJob(row: ScanJobRow): ReportV4ProductionCoreJob {
     recommendationReportVersion: row.recommendation_report_version, artifactContract: row.artifact_contract,
     questionSetId: row.business_question_set_id, locale: row.locale, reason: row.reason, stage: row.stage,
     executionState: row.execution_state, creditReservationId: row.credit_reservation_id,
-    correctionId: row.correction_id, replacementFulfillmentId: row.replacement_fulfillment_id };
+    correctionId: row.correction_id, replacementFulfillmentId: row.replacement_fulfillment_id,
+    leaseOwner: row.lease_owner, leaseExpiresAt: nullableDatabaseDate(row.lease_expires_at, "lease_expires_at") };
+}
+
+function nullableDatabaseDate(value: Date | string | null, field: string): Date | null {
+  if (value === null) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(parsed.getTime())) throw new Error(`${field} is not a valid PostgreSQL timestamp.`);
+  return parsed;
 }
 function mapEnhancementJob(row: ScanJobRow): ReportV4ProductionEnhancementJob {
   const core = mapCoreJob(row);
