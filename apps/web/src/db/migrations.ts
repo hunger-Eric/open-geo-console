@@ -3017,6 +3017,284 @@ export const V34_DATABASE_MIGRATIONS = [
    END $$`
 ] as const;
 
+export const V35_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_acceptance_require_staging() RETURNS void LANGUAGE plpgsql AS $$
+   DECLARE marker text;
+   BEGIN
+     SELECT profile INTO marker FROM deployment_environment WHERE singleton=true;
+     IF marker IS DISTINCT FROM 'staging' THEN
+       RAISE EXCEPTION 'The Report V4 acceptance ledger only accepts a protected staging database marker.';
+     END IF;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_acceptance_event_valid(event_kind text,event_operation text,event_phase text,event_details jsonb)
+   RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
+   DECLARE keys text[];
+   BEGIN
+     IF jsonb_typeof(event_details)<>'object' OR octet_length(event_details::text)>32768 THEN RETURN false; END IF;
+     IF event_kind='scenario_bound' THEN
+       keys:=ARRAY['bindingHash'];
+       RETURN event_phase='observed' AND event_operation='v4_dispatch'
+         AND event_details ? 'bindingHash' AND (event_details->>'bindingHash') ~ '^[a-f0-9]{64}$'
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key);
+     ELSIF event_kind='crawl_run' THEN
+       keys:=ARRAY['candidatePages','analyzablePages','excludedPages','jsDependentPages'];
+       RETURN event_operation='crawl' AND event_phase IN ('started','completed','failed')
+         AND event_details ?& keys
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND (event_details->>'candidatePages') ~ '^\\d+$' AND (event_details->>'analyzablePages') ~ '^\\d+$'
+         AND (event_details->>'excludedPages') ~ '^\\d+$' AND (event_details->>'jsDependentPages') ~ '^\\d+$';
+     ELSIF event_kind='site_read' THEN
+       keys:=ARRAY['urlHash','readMode','networkPerformed'];
+       RETURN event_operation IN ('site_raw_read','site_browser_read') AND event_phase IN ('started','completed','failed')
+         AND event_details ?& keys AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND (event_details->>'urlHash') ~ '^[a-f0-9]{64}$' AND event_details->>'readMode' IN ('raw','browser')
+         AND jsonb_typeof(event_details->'networkPerformed')='boolean';
+     ELSIF event_kind='model_operation' THEN
+       keys:=ARRAY['providerCall','retry','budgetOutcome','inputTokens','outputTokens'];
+       RETURN event_operation IN ('page_analysis','website_synthesis','question_answer','source_diagnosis')
+         AND event_phase IN ('started','completed','failed','rejected') AND event_details ?& keys
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND jsonb_typeof(event_details->'providerCall')='boolean' AND jsonb_typeof(event_details->'retry')='boolean'
+         AND event_details->>'budgetOutcome' IN ('allowed','rejected')
+         AND (event_details->>'inputTokens') ~ '^\\d+$' AND (event_details->>'outputTokens') ~ '^\\d+$';
+    ELSIF event_kind IN ('html_assembly','artifact_activation') THEN
+      keys:=ARRAY['artifactRevisionId','htmlSha256'];
+      RETURN ((event_kind='html_assembly' AND event_operation IN ('core_html','enhancement_html') AND event_phase IN ('started','completed','failed'))
+          OR (event_kind='artifact_activation' AND event_operation='artifact_activation' AND event_phase='observed'))
+        AND event_details ?& keys
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND length(btrim(event_details->>'artifactRevisionId')) BETWEEN 1 AND 500
+         AND (event_details->>'htmlSha256') ~ '^[a-f0-9]{64}$';
+     ELSIF event_kind='fault_injection' THEN
+       keys:=ARRAY['fault','occurrence','baselineFingerprint'];
+       RETURN event_operation IN ('question_failure','diagnosis_failure','independent_source_read_failure')
+         AND event_phase='consumed' AND event_details ?& keys
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND event_details->>'fault'=event_operation AND (event_details->>'occurrence') IN ('1','2')
+         AND (event_details->>'baselineFingerprint') ~ '^[a-f0-9]{64}$';
+     ELSIF event_kind='checkpoint_terminal' THEN
+       keys:=ARRAY['checkpointHash','state'];
+       RETURN event_operation IN ('question_answer','source_diagnosis') AND event_phase='observed'
+         AND event_details ?& keys AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND (event_details->>'checkpointHash') ~ '^[a-f0-9]{64}$'
+         AND event_details->>'state' IN ('answered','unavailable','completed','failed');
+     ELSIF event_kind IN ('v4_dispatch','prohibited_operation') THEN
+       RETURN event_details='{}'::jsonb
+         AND ((event_kind='v4_dispatch' AND event_operation='v4_dispatch' AND event_phase='observed') OR
+           (event_kind='prohibited_operation' AND event_operation IN ('pdf','provider_claim','qualification','four_snapshot','replacement_fulfillment') AND event_phase='started'));
+     ELSIF event_kind='commerce_fingerprint' THEN
+       keys:=ARRAY['fingerprint'];
+       RETURN event_operation='commerce' AND event_phase='observed' AND event_details ?& keys
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND (event_details->>'fingerprint') ~ '^[a-f0-9]{64}$';
+     END IF;
+     RETURN false;
+   END $$`,
+  `CREATE TABLE IF NOT EXISTS report_v4_acceptance_sessions (
+    id text PRIMARY KEY, environment text NOT NULL DEFAULT 'protected_staging', preview_deployment_id text NOT NULL,
+    protected_alias_url text NOT NULL, web_git_sha text NOT NULL, worker_git_sha text NOT NULL,
+    state text NOT NULL DEFAULT 'collecting', head_sequence integer NOT NULL DEFAULT 0,
+    head_hash text NOT NULL DEFAULT repeat('0',64), event_count integer NOT NULL DEFAULT 0,
+    started_at timestamptz NOT NULL DEFAULT clock_timestamp(), terminal_at timestamptz,
+    CONSTRAINT report_v4_acceptance_sessions_id_check CHECK(id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+    CONSTRAINT report_v4_acceptance_sessions_environment_check CHECK(environment='protected_staging'),
+    CONSTRAINT report_v4_acceptance_sessions_deployment_check CHECK(preview_deployment_id=btrim(preview_deployment_id) AND length(preview_deployment_id) BETWEEN 1 AND 200 AND protected_alias_url ~ '^https://[^/?#@[:space:]]+$'),
+    CONSTRAINT report_v4_acceptance_sessions_sha_check CHECK(web_git_sha ~ '^[a-f0-9]{40}$' AND worker_git_sha ~ '^[a-f0-9]{40}$' AND web_git_sha=worker_git_sha),
+    CONSTRAINT report_v4_acceptance_sessions_state_check CHECK(state IN ('collecting','sealed','failed')),
+    CONSTRAINT report_v4_acceptance_sessions_head_check CHECK(head_sequence>=0 AND event_count=head_sequence AND head_hash ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT report_v4_acceptance_sessions_terminal_check CHECK((state='collecting' AND terminal_at IS NULL) OR (state IN ('sealed','failed') AND terminal_at IS NOT NULL))
+  )`,
+  `CREATE TABLE IF NOT EXISTS report_v4_acceptance_scenarios (
+    id text PRIMARY KEY, session_id text NOT NULL REFERENCES report_v4_acceptance_sessions(id) ON DELETE RESTRICT,
+    kind text NOT NULL, fault_kind text, fault_question_id text, fault_source_id text,
+    expected_fault_occurrences integer NOT NULL DEFAULT 0,
+    report_id text REFERENCES scan_reports(id) ON DELETE RESTRICT,
+    order_id text REFERENCES payment_orders(id) ON DELETE RESTRICT,
+    pre_admission_job_id text REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+    core_job_id text REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+    enhancement_job_id text REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+    site_snapshot_id text REFERENCES report_v4_site_snapshots(id) ON DELETE RESTRICT,
+    config_snapshot_id text REFERENCES report_v4_config_snapshots(id) ON DELETE RESTRICT,
+    question_set_id text REFERENCES report_business_question_sets(id) ON DELETE RESTRICT,
+    core_artifact_revision_id text REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT,
+    enhancement_artifact_revision_id text REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT,
+    baseline_fingerprint text, final_fingerprint text, state text NOT NULL DEFAULT 'collecting',
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(), terminal_at timestamptz,
+    CONSTRAINT report_v4_acceptance_scenarios_id_check CHECK(id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+    CONSTRAINT report_v4_acceptance_scenarios_kind_check CHECK(kind IN ('success','diagnosis_failure','question_failure')),
+    CONSTRAINT report_v4_acceptance_scenarios_state_check CHECK(state IN ('collecting','sealed','failed')),
+    CONSTRAINT report_v4_acceptance_scenarios_hash_check CHECK((baseline_fingerprint IS NULL OR baseline_fingerprint ~ '^[a-f0-9]{64}$') AND (final_fingerprint IS NULL OR final_fingerprint ~ '^[a-f0-9]{64}$')),
+    CONSTRAINT report_v4_acceptance_scenarios_fault_identity_check CHECK(length(btrim(fault_question_id)) BETWEEN 1 AND 500 AND (fault_source_id IS NULL OR length(btrim(fault_source_id)) BETWEEN 1 AND 500)),
+    CONSTRAINT report_v4_acceptance_scenarios_fault_check CHECK(
+      (kind='success' AND fault_kind='independent_source_read_failure' AND fault_question_id IS NOT NULL AND fault_source_id IS NOT NULL AND expected_fault_occurrences=1)
+      OR (kind='diagnosis_failure' AND fault_kind='diagnosis_failure' AND fault_question_id IS NOT NULL AND fault_source_id IS NULL AND expected_fault_occurrences=2)
+      OR (kind='question_failure' AND fault_kind='question_failure' AND fault_question_id IS NOT NULL AND fault_source_id IS NULL AND expected_fault_occurrences=2)),
+    CONSTRAINT report_v4_acceptance_scenarios_terminal_check CHECK((state='collecting' AND terminal_at IS NULL) OR (state IN ('sealed','failed') AND terminal_at IS NOT NULL)),
+    CONSTRAINT report_v4_acceptance_scenarios_id_session_uidx UNIQUE(id,session_id),
+    CONSTRAINT report_v4_acceptance_scenarios_session_kind_uidx UNIQUE(session_id,kind)
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_report_uidx ON report_v4_acceptance_scenarios(report_id) WHERE report_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_order_uidx ON report_v4_acceptance_scenarios(order_id) WHERE order_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_pre_job_uidx ON report_v4_acceptance_scenarios(pre_admission_job_id) WHERE pre_admission_job_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_core_job_uidx ON report_v4_acceptance_scenarios(core_job_id) WHERE core_job_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_enhancement_job_uidx ON report_v4_acceptance_scenarios(enhancement_job_id) WHERE enhancement_job_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_core_artifact_uidx ON report_v4_acceptance_scenarios(core_artifact_revision_id) WHERE core_artifact_revision_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_enhancement_artifact_uidx ON report_v4_acceptance_scenarios(enhancement_artifact_revision_id) WHERE enhancement_artifact_revision_id IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS report_v4_acceptance_events (
+    idempotency_key text PRIMARY KEY, session_id text NOT NULL REFERENCES report_v4_acceptance_sessions(id) ON DELETE RESTRICT,
+    scenario_id text NOT NULL, sequence integer NOT NULL, kind text NOT NULL, operation text NOT NULL,
+    unit_id text NOT NULL, attempt integer NOT NULL, phase text NOT NULL, details jsonb NOT NULL, details_canonical text NOT NULL,
+    prev_hash text NOT NULL, event_hash text NOT NULL, occurred_at timestamptz NOT NULL DEFAULT clock_timestamp(), occurred_at_canonical text NOT NULL,
+    CONSTRAINT report_v4_acceptance_events_scenario_session_fkey FOREIGN KEY(scenario_id,session_id)
+      REFERENCES report_v4_acceptance_scenarios(id,session_id) ON DELETE RESTRICT,
+    CONSTRAINT report_v4_acceptance_events_session_sequence_uidx UNIQUE(session_id,sequence),
+    CONSTRAINT report_v4_acceptance_events_identity_check CHECK(idempotency_key ~ '^[a-f0-9]{64}$' AND sequence>0 AND length(btrim(unit_id)) BETWEEN 1 AND 500 AND attempt BETWEEN 0 AND 2),
+    CONSTRAINT report_v4_acceptance_events_hash_check CHECK(prev_hash ~ '^[a-f0-9]{64}$' AND event_hash ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT report_v4_acceptance_events_canonical_check CHECK(details_canonical=details::text AND octet_length(details_canonical)<=32768
+      AND occurred_at_canonical ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$'),
+    CONSTRAINT report_v4_acceptance_events_kind_check CHECK(kind IN ('scenario_bound','crawl_run','site_read','model_operation','html_assembly','fault_injection','checkpoint_terminal','v4_dispatch','prohibited_operation','artifact_activation','commerce_fingerprint')),
+    CONSTRAINT report_v4_acceptance_events_phase_check CHECK(phase IN ('started','completed','failed','rejected','consumed','observed')),
+    CONSTRAINT report_v4_acceptance_events_details_check CHECK(ogc_report_v4_acceptance_event_valid(kind,operation,phase,details))
+  )`,
+  `CREATE INDEX IF NOT EXISTS report_v4_acceptance_events_scenario_idx ON report_v4_acceptance_events(scenario_id,sequence)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_session() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE matching_event integer; sealed_scenarios integer;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP='DELETE' THEN RAISE EXCEPTION 'A Report V4 acceptance session is immutable and cannot be deleted.'; END IF;
+     IF TG_OP='INSERT' THEN RETURN NEW; END IF;
+     IF OLD.state IN ('sealed','failed') THEN RAISE EXCEPTION 'A terminal Report V4 acceptance session is immutable.'; END IF;
+     IF NEW.id IS DISTINCT FROM OLD.id OR NEW.environment IS DISTINCT FROM OLD.environment
+       OR NEW.preview_deployment_id IS DISTINCT FROM OLD.preview_deployment_id
+       OR NEW.protected_alias_url IS DISTINCT FROM OLD.protected_alias_url
+       OR NEW.web_git_sha IS DISTINCT FROM OLD.web_git_sha OR NEW.worker_git_sha IS DISTINCT FROM OLD.worker_git_sha
+       OR NEW.started_at IS DISTINCT FROM OLD.started_at THEN
+       RAISE EXCEPTION 'A Report V4 acceptance session identity is immutable.';
+     END IF;
+     IF NEW.state='collecting' THEN
+       IF NEW.head_sequence<>OLD.head_sequence+1 OR NEW.event_count<>OLD.event_count+1 OR NEW.terminal_at IS NOT NULL THEN
+         RAISE EXCEPTION 'A Report V4 acceptance session head must advance by one exact event.';
+       END IF;
+       SELECT count(*) INTO matching_event FROM report_v4_acceptance_events
+         WHERE session_id=NEW.id AND sequence=NEW.head_sequence AND event_hash=NEW.head_hash;
+       IF matching_event<>1 THEN RAISE EXCEPTION 'A Report V4 acceptance session head requires its exact append-only event.'; END IF;
+     ELSIF NEW.state IN ('sealed','failed') THEN
+       IF NEW.head_sequence<>OLD.head_sequence OR NEW.head_hash<>OLD.head_hash OR NEW.event_count<>OLD.event_count OR NEW.terminal_at IS NULL THEN
+         RAISE EXCEPTION 'A terminal Report V4 acceptance session cannot rewrite its event head.';
+       END IF;
+       IF NEW.state='sealed' THEN
+         SELECT count(*) INTO sealed_scenarios FROM report_v4_acceptance_scenarios WHERE session_id=NEW.id AND state='sealed';
+         IF sealed_scenarios<>3 THEN RAISE EXCEPTION 'A sealed Report V4 acceptance session requires three sealed scenarios.'; END IF;
+       END IF;
+     ELSE RAISE EXCEPTION 'The Report V4 acceptance session state transition is invalid.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `CREATE TRIGGER report_v4_acceptance_sessions_guard BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_sessions FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_session()`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_scenario() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; order_ok boolean; pre_ok boolean; core_ok boolean; enhancement_ok boolean;
+     snapshot_ok boolean; config_ok boolean; questions_ok boolean; core_artifact_ok boolean; enhancement_artifact_ok boolean;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP='DELETE' THEN RAISE EXCEPTION 'A Report V4 acceptance scenario is immutable and cannot be deleted.'; END IF;
+     SELECT state INTO session_state FROM report_v4_acceptance_sessions WHERE id=NEW.session_id;
+     IF session_state IS DISTINCT FROM 'collecting' THEN RAISE EXCEPTION 'A Report V4 acceptance scenario requires a collecting session.'; END IF;
+     IF TG_OP='INSERT' THEN RETURN NEW; END IF;
+     IF OLD.state IN ('sealed','failed') THEN RAISE EXCEPTION 'A terminal Report V4 acceptance scenario is immutable.'; END IF;
+     IF NEW.id IS DISTINCT FROM OLD.id OR NEW.session_id IS DISTINCT FROM OLD.session_id OR NEW.kind IS DISTINCT FROM OLD.kind
+       OR NEW.fault_kind IS DISTINCT FROM OLD.fault_kind OR NEW.fault_question_id IS DISTINCT FROM OLD.fault_question_id
+       OR NEW.fault_source_id IS DISTINCT FROM OLD.fault_source_id OR NEW.expected_fault_occurrences IS DISTINCT FROM OLD.expected_fault_occurrences
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN RAISE EXCEPTION 'A Report V4 acceptance scenario identity is immutable.'; END IF;
+     IF (OLD.report_id IS NOT NULL AND NEW.report_id IS DISTINCT FROM OLD.report_id)
+       OR (OLD.order_id IS NOT NULL AND NEW.order_id IS DISTINCT FROM OLD.order_id)
+       OR (OLD.pre_admission_job_id IS NOT NULL AND NEW.pre_admission_job_id IS DISTINCT FROM OLD.pre_admission_job_id)
+       OR (OLD.core_job_id IS NOT NULL AND NEW.core_job_id IS DISTINCT FROM OLD.core_job_id)
+       OR (OLD.enhancement_job_id IS NOT NULL AND NEW.enhancement_job_id IS DISTINCT FROM OLD.enhancement_job_id)
+       OR (OLD.site_snapshot_id IS NOT NULL AND NEW.site_snapshot_id IS DISTINCT FROM OLD.site_snapshot_id)
+       OR (OLD.config_snapshot_id IS NOT NULL AND NEW.config_snapshot_id IS DISTINCT FROM OLD.config_snapshot_id)
+       OR (OLD.question_set_id IS NOT NULL AND NEW.question_set_id IS DISTINCT FROM OLD.question_set_id)
+       OR (OLD.core_artifact_revision_id IS NOT NULL AND NEW.core_artifact_revision_id IS DISTINCT FROM OLD.core_artifact_revision_id)
+       OR (OLD.enhancement_artifact_revision_id IS NOT NULL AND NEW.enhancement_artifact_revision_id IS DISTINCT FROM OLD.enhancement_artifact_revision_id)
+       OR (OLD.baseline_fingerprint IS NOT NULL AND NEW.baseline_fingerprint IS DISTINCT FROM OLD.baseline_fingerprint)
+       OR (OLD.final_fingerprint IS NOT NULL AND NEW.final_fingerprint IS DISTINCT FROM OLD.final_fingerprint) THEN
+       RAISE EXCEPTION 'A Report V4 acceptance scenario cannot rebind an entity or fingerprint.';
+     END IF;
+     IF NEW.state<>OLD.state AND NOT (OLD.state='collecting' AND NEW.state IN ('sealed','failed')) THEN
+       RAISE EXCEPTION 'The Report V4 acceptance scenario state transition is invalid.';
+     END IF;
+     IF NEW.state='collecting' THEN RETURN NEW; END IF;
+     IF NEW.terminal_at IS NULL OR NEW.report_id IS NULL OR NEW.order_id IS NULL OR NEW.pre_admission_job_id IS NULL
+       OR NEW.core_job_id IS NULL OR NEW.site_snapshot_id IS NULL OR NEW.config_snapshot_id IS NULL
+       OR NEW.question_set_id IS NULL OR NEW.core_artifact_revision_id IS NULL
+       OR NEW.baseline_fingerprint IS NULL OR NEW.final_fingerprint IS NULL THEN
+       RAISE EXCEPTION 'A terminal Report V4 acceptance scenario requires exact lineage and before/after fingerprints.';
+     END IF;
+     IF NEW.kind IN ('success','diagnosis_failure') AND NEW.enhancement_job_id IS NULL THEN
+       RAISE EXCEPTION 'This Report V4 acceptance scenario requires its exact enhancement job.';
+     END IF;
+     IF NEW.kind='success' AND NEW.enhancement_artifact_revision_id IS NULL THEN
+       RAISE EXCEPTION 'The successful Report V4 acceptance scenario requires its exact enhancement artifact.';
+     END IF;
+     SELECT EXISTS(SELECT 1 FROM payment_orders WHERE id=NEW.order_id AND report_id=NEW.report_id AND fulfillment_job_id=NEW.core_job_id AND site_snapshot_id=NEW.site_snapshot_id) INTO order_ok;
+     SELECT EXISTS(SELECT 1 FROM scan_jobs WHERE id=NEW.pre_admission_job_id AND report_id=NEW.report_id AND reason='v4_pre_admission' AND artifact_contract='combined_geo_report_v4') INTO pre_ok;
+     SELECT EXISTS(SELECT 1 FROM scan_jobs WHERE id=NEW.core_job_id AND report_id=NEW.report_id AND site_snapshot_id=NEW.site_snapshot_id AND business_question_set_id=NEW.question_set_id AND artifact_contract='combined_geo_report_v4' AND reason='standard') INTO core_ok;
+     SELECT NEW.enhancement_job_id IS NULL OR EXISTS(SELECT 1 FROM scan_jobs WHERE id=NEW.enhancement_job_id AND report_id=NEW.report_id AND business_question_set_id=NEW.question_set_id AND artifact_contract='combined_geo_report_v4' AND reason='v4_diagnosis_enhancement') INTO enhancement_ok;
+     SELECT EXISTS(SELECT 1 FROM report_v4_site_snapshots WHERE id=NEW.site_snapshot_id AND report_id=NEW.report_id) INTO snapshot_ok;
+     SELECT EXISTS(SELECT 1 FROM report_v4_config_snapshots WHERE id=NEW.config_snapshot_id AND report_id=NEW.report_id AND order_id=NEW.order_id AND core_job_id=NEW.core_job_id) INTO config_ok;
+     SELECT EXISTS(SELECT 1 FROM report_business_question_sets WHERE id=NEW.question_set_id AND report_id=NEW.report_id AND order_id=NEW.order_id) INTO questions_ok;
+     SELECT EXISTS(SELECT 1 FROM report_artifact_revisions WHERE id=NEW.core_artifact_revision_id AND report_id=NEW.report_id AND order_id=NEW.order_id AND job_id=NEW.core_job_id AND config_snapshot_id=NEW.config_snapshot_id AND artifact_contract='combined_geo_report_v4' AND revision_kind='generation') INTO core_artifact_ok;
+     SELECT NEW.enhancement_artifact_revision_id IS NULL OR EXISTS(SELECT 1 FROM report_artifact_revisions WHERE id=NEW.enhancement_artifact_revision_id AND report_id=NEW.report_id AND order_id=NEW.order_id AND job_id=NEW.enhancement_job_id AND config_snapshot_id=NEW.config_snapshot_id AND source_artifact_revision_id=NEW.core_artifact_revision_id AND artifact_contract='combined_geo_report_v4' AND revision_kind='diagnosis_enhancement') INTO enhancement_artifact_ok;
+     IF NOT (order_ok AND pre_ok AND core_ok AND enhancement_ok AND snapshot_ok AND config_ok AND questions_ok AND core_artifact_ok AND enhancement_artifact_ok) THEN
+       RAISE EXCEPTION 'A terminal Report V4 acceptance scenario lineage is not exact.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `CREATE TRIGGER report_v4_acceptance_scenarios_guard BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_scenarios FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_scenario()`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_event() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; scenario_state text; expected_sequence integer; expected_prev text; expected_key text;
+     started_exists boolean; terminal_exists boolean;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'A Report V4 acceptance event is append-only and immutable.'; END IF;
+     SELECT state,head_sequence+1,head_hash INTO session_state,expected_sequence,expected_prev
+       FROM report_v4_acceptance_sessions WHERE id=NEW.session_id FOR UPDATE;
+     SELECT state INTO scenario_state FROM report_v4_acceptance_scenarios WHERE id=NEW.scenario_id AND session_id=NEW.session_id;
+     IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN
+       RAISE EXCEPTION 'A Report V4 acceptance event requires collecting session and scenario state.';
+     END IF;
+     IF NEW.sequence IS DISTINCT FROM expected_sequence OR NEW.prev_hash IS DISTINCT FROM expected_prev THEN
+       RAISE EXCEPTION 'A Report V4 acceptance event does not extend the exact hash-chain head.';
+     END IF;
+     IF NEW.phase IN ('completed','failed','rejected') THEN
+       SELECT EXISTS(SELECT 1 FROM report_v4_acceptance_events
+         WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND kind=NEW.kind AND operation=NEW.operation
+           AND unit_id=NEW.unit_id AND attempt=NEW.attempt AND phase='started') INTO started_exists;
+       SELECT EXISTS(SELECT 1 FROM report_v4_acceptance_events
+         WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND kind=NEW.kind AND operation=NEW.operation
+           AND unit_id=NEW.unit_id AND attempt=NEW.attempt AND phase IN ('completed','failed','rejected')) INTO terminal_exists;
+       IF NOT started_exists OR terminal_exists THEN
+         RAISE EXCEPTION 'A terminal Report V4 acceptance event requires exactly one started claim for the same unit and attempt.';
+       END IF;
+     END IF;
+     expected_key:=encode(sha256(convert_to(concat_ws(chr(31),NEW.session_id,NEW.scenario_id,NEW.kind,NEW.operation,NEW.unit_id,NEW.attempt::text,NEW.phase),'UTF8')),'hex');
+     IF NEW.idempotency_key IS DISTINCT FROM expected_key THEN RAISE EXCEPTION 'A Report V4 acceptance event idempotency key is not deterministic.'; END IF;
+     NEW.details_canonical:=NEW.details::text;
+     NEW.occurred_at_canonical:=to_char(NEW.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"');
+     NEW.event_hash:=encode(sha256(convert_to(concat_ws(chr(31),NEW.prev_hash,NEW.idempotency_key,NEW.sequence::text,NEW.kind,NEW.operation,NEW.unit_id,NEW.attempt::text,NEW.phase,NEW.details_canonical,NEW.occurred_at_canonical),'UTF8')),'hex');
+     RETURN NEW;
+   END $$`,
+  `CREATE TRIGGER report_v4_acceptance_events_guard BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_events FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_event()`,
+  `CREATE OR REPLACE FUNCTION ogc_advance_report_v4_acceptance_session_head() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     UPDATE report_v4_acceptance_sessions
+       SET head_sequence=NEW.sequence,head_hash=NEW.event_hash,event_count=event_count+1
+       WHERE id=NEW.session_id AND state='collecting';
+     IF NOT FOUND THEN RAISE EXCEPTION 'A Report V4 acceptance event could not advance its collecting session head.'; END IF;
+     RETURN NEW;
+   END $$`,
+  `CREATE TRIGGER report_v4_acceptance_events_advance_head AFTER INSERT ON report_v4_acceptance_events FOR EACH ROW EXECUTE FUNCTION ogc_advance_report_v4_acceptance_session_head()`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -3043,7 +3321,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 31, migrations: V31_DATABASE_MIGRATIONS },
   { version: 32, migrations: V32_DATABASE_MIGRATIONS },
   { version: 33, migrations: V33_DATABASE_MIGRATIONS },
-  { version: 34, migrations: V34_DATABASE_MIGRATIONS }
+  { version: 34, migrations: V34_DATABASE_MIGRATIONS },
+  { version: 35, migrations: V35_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

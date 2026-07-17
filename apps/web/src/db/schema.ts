@@ -91,6 +91,30 @@ export type EmailTemplateType =
   | "corrected_report_ready"
   | "replacement_report_ready";
 export type EmailDeliveryState = "queued" | "sent" | "delivered" | "bounced" | "failed";
+export type ReportV4AcceptanceSessionState = "collecting" | "sealed" | "failed";
+export type ReportV4AcceptanceScenarioKind = "success" | "diagnosis_failure" | "question_failure";
+export type ReportV4AcceptanceFaultKind = "question_failure" | "diagnosis_failure" | "independent_source_read_failure";
+export type ReportV4AcceptanceEventKind =
+  | "scenario_bound" | "crawl_run" | "site_read" | "model_operation" | "html_assembly"
+  | "fault_injection" | "checkpoint_terminal" | "v4_dispatch" | "prohibited_operation"
+  | "artifact_activation" | "commerce_fingerprint";
+export type ReportV4AcceptanceOperation =
+  | "crawl" | "site_raw_read" | "site_browser_read" | "page_analysis" | "website_synthesis"
+  | "question_answer" | "source_diagnosis" | "core_html" | "enhancement_html"
+  | "question_failure" | "diagnosis_failure" | "independent_source_read_failure"
+  | "v4_dispatch" | "pdf" | "provider_claim" | "qualification" | "four_snapshot"
+  | "replacement_fulfillment" | "artifact_activation" | "commerce";
+export type ReportV4AcceptanceEventPhase = "started" | "completed" | "failed" | "rejected" | "consumed" | "observed";
+export type ReportV4AcceptanceEventDetails =
+  | { readonly bindingHash: string }
+  | { readonly candidatePages: number; readonly analyzablePages: number; readonly excludedPages: number; readonly jsDependentPages: number }
+  | { readonly urlHash: string; readonly readMode: "raw" | "browser"; readonly networkPerformed: boolean }
+  | { readonly providerCall: boolean; readonly retry: boolean; readonly budgetOutcome: "allowed" | "rejected"; readonly inputTokens: number; readonly outputTokens: number }
+  | { readonly artifactRevisionId: string; readonly htmlSha256: string }
+  | { readonly fault: ReportV4AcceptanceFaultKind; readonly occurrence: 1 | 2; readonly baselineFingerprint: string }
+  | { readonly checkpointHash: string; readonly state: "answered" | "unavailable" | "completed" | "failed" }
+  | { readonly fingerprint: string }
+  | Record<string, never>;
 export type JobDispatchState = "pending" | "published" | "abandoned";
 export type BatchRunStatus = "running" | "succeeded" | "partial" | "failed";
 export type EvidenceAssetKind = "issue_crop" | "context" | "compact" | "viewport";
@@ -1461,6 +1485,106 @@ export const reportV4DiagnosisCheckpoints = pgTable(
   ]
 );
 export type ReportV4DiagnosisCheckpointRow = typeof reportV4DiagnosisCheckpoints.$inferSelect;
+
+export const reportV4AcceptanceSessions = pgTable("report_v4_acceptance_sessions", {
+  id: text("id").primaryKey(),
+  environment: text("environment").notNull().default("protected_staging"),
+  previewDeploymentId: text("preview_deployment_id").notNull(),
+  protectedAliasUrl: text("protected_alias_url").notNull(),
+  webGitSha: text("web_git_sha").notNull(),
+  workerGitSha: text("worker_git_sha").notNull(),
+  state: text("state").$type<ReportV4AcceptanceSessionState>().notNull().default("collecting"),
+  headSequence: integer("head_sequence").notNull().default(0),
+  headHash: text("head_hash").notNull().default("0".repeat(64)),
+  eventCount: integer("event_count").notNull().default(0),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  terminalAt: timestamp("terminal_at", { withTimezone: true })
+}, (table) => [
+  check("report_v4_acceptance_sessions_id_check", sql`${table.id} ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`),
+  check("report_v4_acceptance_sessions_environment_check", sql`${table.environment}='protected_staging'`),
+  check("report_v4_acceptance_sessions_deployment_check", sql`${table.previewDeploymentId}=btrim(${table.previewDeploymentId}) AND length(${table.previewDeploymentId}) BETWEEN 1 AND 200 AND ${table.protectedAliasUrl} ~ '^https://[^/?#@[:space:]]+$'`),
+  check("report_v4_acceptance_sessions_sha_check", sql`${table.webGitSha} ~ '^[a-f0-9]{40}$' AND ${table.workerGitSha} ~ '^[a-f0-9]{40}$' AND ${table.webGitSha}=${table.workerGitSha}`),
+  check("report_v4_acceptance_sessions_state_check", sql`${table.state} IN ('collecting','sealed','failed')`),
+  check("report_v4_acceptance_sessions_head_check", sql`${table.headSequence}>=0 AND ${table.eventCount}=${table.headSequence} AND ${table.headHash} ~ '^[a-f0-9]{64}$'`),
+  check("report_v4_acceptance_sessions_terminal_check", sql`(${table.state}='collecting' AND ${table.terminalAt} IS NULL) OR (${table.state} IN ('sealed','failed') AND ${table.terminalAt} IS NOT NULL)`)
+]);
+export type ReportV4AcceptanceSessionRow = typeof reportV4AcceptanceSessions.$inferSelect;
+
+export const reportV4AcceptanceScenarios = pgTable("report_v4_acceptance_scenarios", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull().references(() => reportV4AcceptanceSessions.id, { onDelete: "restrict" }),
+  kind: text("kind").$type<ReportV4AcceptanceScenarioKind>().notNull(),
+  faultKind: text("fault_kind").$type<ReportV4AcceptanceFaultKind>(),
+  faultQuestionId: text("fault_question_id"),
+  faultSourceId: text("fault_source_id"),
+  expectedFaultOccurrences: integer("expected_fault_occurrences").notNull().default(0),
+  reportId: text("report_id").references(() => scanReports.id, { onDelete: "restrict" }),
+  orderId: text("order_id").references(() => paymentOrders.id, { onDelete: "restrict" }),
+  preAdmissionJobId: text("pre_admission_job_id").references(() => scanJobs.id, { onDelete: "restrict" }),
+  coreJobId: text("core_job_id").references(() => scanJobs.id, { onDelete: "restrict" }),
+  enhancementJobId: text("enhancement_job_id").references(() => scanJobs.id, { onDelete: "restrict" }),
+  siteSnapshotId: text("site_snapshot_id").references(() => reportV4SiteSnapshots.id, { onDelete: "restrict" }),
+  configSnapshotId: text("config_snapshot_id").references(() => reportV4ConfigSnapshots.id, { onDelete: "restrict" }),
+  questionSetId: text("question_set_id").references(() => reportBusinessQuestionSets.id, { onDelete: "restrict" }),
+  coreArtifactRevisionId: text("core_artifact_revision_id").references(() => reportArtifactRevisions.id, { onDelete: "restrict" }),
+  enhancementArtifactRevisionId: text("enhancement_artifact_revision_id").references(() => reportArtifactRevisions.id, { onDelete: "restrict" }),
+  baselineFingerprint: text("baseline_fingerprint"),
+  finalFingerprint: text("final_fingerprint"),
+  state: text("state").$type<ReportV4AcceptanceSessionState>().notNull().default("collecting"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  terminalAt: timestamp("terminal_at", { withTimezone: true })
+}, (table) => [
+  uniqueIndex("report_v4_acceptance_scenarios_session_kind_uidx").on(table.sessionId, table.kind),
+  uniqueIndex("report_v4_acceptance_scenarios_id_session_uidx").on(table.id, table.sessionId),
+  uniqueIndex("report_v4_acceptance_scenarios_report_uidx").on(table.reportId).where(sql`${table.reportId} IS NOT NULL`),
+  uniqueIndex("report_v4_acceptance_scenarios_order_uidx").on(table.orderId).where(sql`${table.orderId} IS NOT NULL`),
+  uniqueIndex("report_v4_acceptance_scenarios_pre_job_uidx").on(table.preAdmissionJobId).where(sql`${table.preAdmissionJobId} IS NOT NULL`),
+  uniqueIndex("report_v4_acceptance_scenarios_core_job_uidx").on(table.coreJobId).where(sql`${table.coreJobId} IS NOT NULL`),
+  uniqueIndex("report_v4_acceptance_scenarios_enhancement_job_uidx").on(table.enhancementJobId).where(sql`${table.enhancementJobId} IS NOT NULL`),
+  uniqueIndex("report_v4_acceptance_scenarios_core_artifact_uidx").on(table.coreArtifactRevisionId).where(sql`${table.coreArtifactRevisionId} IS NOT NULL`),
+  uniqueIndex("report_v4_acceptance_scenarios_enhancement_artifact_uidx").on(table.enhancementArtifactRevisionId).where(sql`${table.enhancementArtifactRevisionId} IS NOT NULL`),
+  check("report_v4_acceptance_scenarios_id_check", sql`${table.id} ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'`),
+  check("report_v4_acceptance_scenarios_kind_check", sql`${table.kind} IN ('success','diagnosis_failure','question_failure')`),
+  check("report_v4_acceptance_scenarios_state_check", sql`${table.state} IN ('collecting','sealed','failed')`),
+  check("report_v4_acceptance_scenarios_hash_check", sql`(${table.baselineFingerprint} IS NULL OR ${table.baselineFingerprint} ~ '^[a-f0-9]{64}$') AND (${table.finalFingerprint} IS NULL OR ${table.finalFingerprint} ~ '^[a-f0-9]{64}$')`),
+  check("report_v4_acceptance_scenarios_fault_identity_check", sql`length(btrim(${table.faultQuestionId})) BETWEEN 1 AND 500 AND (${table.faultSourceId} IS NULL OR length(btrim(${table.faultSourceId})) BETWEEN 1 AND 500)`),
+  check("report_v4_acceptance_scenarios_fault_check", sql`(${table.kind}='success' AND ${table.faultKind}='independent_source_read_failure' AND ${table.faultQuestionId} IS NOT NULL AND ${table.faultSourceId} IS NOT NULL AND ${table.expectedFaultOccurrences}=1) OR (${table.kind}='diagnosis_failure' AND ${table.faultKind}='diagnosis_failure' AND ${table.faultQuestionId} IS NOT NULL AND ${table.faultSourceId} IS NULL AND ${table.expectedFaultOccurrences}=2) OR (${table.kind}='question_failure' AND ${table.faultKind}='question_failure' AND ${table.faultQuestionId} IS NOT NULL AND ${table.faultSourceId} IS NULL AND ${table.expectedFaultOccurrences}=2)`),
+  check("report_v4_acceptance_scenarios_terminal_check", sql`(${table.state}='collecting' AND ${table.terminalAt} IS NULL) OR (${table.state} IN ('sealed','failed') AND ${table.terminalAt} IS NOT NULL)`)
+]);
+export type ReportV4AcceptanceScenarioRow = typeof reportV4AcceptanceScenarios.$inferSelect;
+
+export const reportV4AcceptanceEvents = pgTable("report_v4_acceptance_events", {
+  idempotencyKey: text("idempotency_key").primaryKey(),
+  sessionId: text("session_id").notNull().references(() => reportV4AcceptanceSessions.id, { onDelete: "restrict" }),
+  scenarioId: text("scenario_id").notNull(),
+  sequence: integer("sequence").notNull(),
+  kind: text("kind").$type<ReportV4AcceptanceEventKind>().notNull(),
+  operation: text("operation").$type<ReportV4AcceptanceOperation>().notNull(),
+  unitId: text("unit_id").notNull(),
+  attempt: integer("attempt").notNull(),
+  phase: text("phase").$type<ReportV4AcceptanceEventPhase>().notNull(),
+  details: jsonb("details").$type<ReportV4AcceptanceEventDetails>().notNull(),
+  detailsCanonical: text("details_canonical").notNull(),
+  prevHash: text("prev_hash").notNull(),
+  eventHash: text("event_hash").notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  occurredAtCanonical: text("occurred_at_canonical").notNull()
+}, (table) => [
+  uniqueIndex("report_v4_acceptance_events_session_sequence_uidx").on(table.sessionId, table.sequence),
+  index("report_v4_acceptance_events_scenario_idx").on(table.scenarioId, table.sequence),
+  foreignKey({
+    columns: [table.scenarioId, table.sessionId],
+    foreignColumns: [reportV4AcceptanceScenarios.id, reportV4AcceptanceScenarios.sessionId],
+    name: "report_v4_acceptance_events_scenario_session_fkey"
+  }).onDelete("restrict"),
+  check("report_v4_acceptance_events_identity_check", sql`${table.idempotencyKey} ~ '^[a-f0-9]{64}$' AND ${table.sequence}>0 AND length(btrim(${table.unitId})) BETWEEN 1 AND 500 AND ${table.attempt} BETWEEN 0 AND 2`),
+  check("report_v4_acceptance_events_hash_check", sql`${table.prevHash} ~ '^[a-f0-9]{64}$' AND ${table.eventHash} ~ '^[a-f0-9]{64}$'`),
+  check("report_v4_acceptance_events_canonical_check", sql`${table.detailsCanonical}=${table.details}::text AND octet_length(${table.detailsCanonical})<=32768 AND ${table.occurredAtCanonical} ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$'`),
+  check("report_v4_acceptance_events_kind_check", sql`${table.kind} IN ('scenario_bound','crawl_run','site_read','model_operation','html_assembly','fault_injection','checkpoint_terminal','v4_dispatch','prohibited_operation','artifact_activation','commerce_fingerprint')`),
+  check("report_v4_acceptance_events_phase_check", sql`${table.phase} IN ('started','completed','failed','rejected','consumed','observed')`),
+  check("report_v4_acceptance_events_details_check", sql`ogc_report_v4_acceptance_event_valid(${table.kind},${table.operation},${table.phase},${table.details})`)
+]);
+export type ReportV4AcceptanceEventRow = typeof reportV4AcceptanceEvents.$inferSelect;
 
 export const reportReplacementFulfillments = pgTable(
   "report_replacement_fulfillments",
