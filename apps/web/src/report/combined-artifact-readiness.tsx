@@ -12,6 +12,7 @@ import { CombinedGeoReportV2Artifact } from "@/components/combined-geo-report-v2
 import { CombinedGeoReportV3Artifact } from "@/components/combined-geo-report-v3-artifact";
 import { ARTIFACT_CSS } from "./artifact-styles";
 import { exportCanonicalArtifactHtmlPdf } from "./pdf-export";
+import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 import { localizeTechnicalReportForArtifact } from "./technical-report-localization";
 import { createEvidenceStorage, evidenceStorageKey } from "@/evidence/storage";
 
@@ -173,18 +174,18 @@ async function assertReadyEvidenceAssets(evidenceAssets: ReportEvidenceAssetRow[
   }
 }
 
-async function materializeReadyArtifact<T extends CombinedGeoReportV1 | CombinedGeoReportV2 | CombinedGeoReportV3>(
+export async function materializeReadyArtifact<T extends CombinedGeoReportV1 | CombinedGeoReportV2 | CombinedGeoReportV3>(
   report: T,
   model: CombinedPrivateReportArtifactModel,
   html: string
 ): Promise<{ report: T; html: string; pdf: Buffer; htmlSha256: string; pdfSha256: string; pdfStorageKey: string; pageCount: number }> {
-  const pdf = await exportCanonicalArtifactHtmlPdf(html);
+  const pdf = await runReportV4GuardedOperation({ guardSite: "pdf_readiness_chromium", delegate: () => exportCanonicalArtifactHtmlPdf(html) });
   if (pdf.subarray(0, 5).toString("utf8") !== "%PDF-") throw new Error("Combined PDF artifact has an invalid signature.");
   const pageCount = Math.max(0, pdf.toString("latin1").match(/\/Type\s*\/Page\b/g)?.length ?? 0);
   if (pageCount < 5) throw new Error(`Combined PDF artifact is not substantive (${pageCount} pages).`);
   const pdfStorageKey = evidenceStorageKey(model.reportId, model.artifactRevisionId, "pdf");
   const storage = createEvidenceStorage();
-  await storage.put(pdfStorageKey, pdf, "application/pdf");
+  await runReportV4GuardedOperation({ guardSite: "pdf_readiness_storage", delegate: () => storage.put(pdfStorageKey, pdf, "application/pdf") });
   return { report, html, pdf, htmlSha256: sha(html), pdfSha256: sha(pdf), pdfStorageKey, pageCount };
 }
 

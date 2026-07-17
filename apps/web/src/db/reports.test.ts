@@ -1,8 +1,31 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
+
+const mutationGuardHarness = vi.hoisted(() => {
+  const state = {
+    blockedSite: null as string | null,
+    guardSites: [] as string[],
+    delegatedSites: [] as string[]
+  };
+  const blocked = new Error("blocked by Report V4 mutation test guard");
+  return {
+    state,
+    blocked,
+    run: vi.fn(async (input: { guardSite: string; delegate: () => Promise<unknown> }) => {
+      state.guardSites.push(input.guardSite);
+      if (state.blockedSite === input.guardSite) throw blocked;
+      state.delegatedSites.push(input.guardSite);
+      return input.delegate();
+    })
+  };
+});
+
+vi.mock("@/report-v4/prohibited-operation-guard-runtime", () => ({
+  runReportV4GuardedOperation: mutationGuardHarness.run
+}));
 import {
   completeGeoReportTechnical,
   createGeoReportShell,
@@ -12,6 +35,13 @@ import {
   persistLegacyReportLocale,
   saveGeoReport
 } from "./reports";
+
+beforeEach(() => {
+  mutationGuardHarness.state.blockedSite = null;
+  mutationGuardHarness.state.guardSites.length = 0;
+  mutationGuardHarness.state.delegatedSites.length = 0;
+  mutationGuardHarness.run.mockClear();
+});
 
 describe("report persistence", () => {
   it("saves and reads a GEO report by id", async () => {
@@ -139,4 +169,56 @@ describe("report persistence", () => {
     expect(await persistLegacyReportLocale(legacy.id, "zh")).toBe("en");
     expect((await getGeoReport(legacy.id))?.reportLocale).toBe("en");
   });
+
+  it("blocks the legacy mutation before the report persistence side effect", async () => {
+    process.env.OPEN_GEO_DB_PATH = join(mkdtempSync(join(tmpdir(), "open-geo-guarded-")), "test.sqlite");
+    mutationGuardHarness.state.blockedSite = "legacy_mutation";
+    const reportId = "blocked-legacy-report";
+
+    await expect(saveGeoReport(
+      "https://example.com/",
+      reportFixture(),
+      "example.com",
+      reportId,
+      "en"
+    )).rejects.toBe(mutationGuardHarness.blocked);
+
+    expect(mutationGuardHarness.state.guardSites).toEqual(["legacy_mutation"]);
+    expect(mutationGuardHarness.state.delegatedSites).toEqual([]);
+    expect(await getGeoReport(reportId)).toBeNull();
+  });
+
+  it("delegates the legacy mutation exactly once when no guard context is active", async () => {
+    process.env.OPEN_GEO_DB_PATH = join(mkdtempSync(join(tmpdir(), "open-geo-unguarded-")), "test.sqlite");
+    const reportId = "unguarded-legacy-report";
+
+    const saved = await saveGeoReport(
+      "https://example.com/",
+      reportFixture(),
+      "example.com",
+      reportId,
+      "en"
+    );
+
+    expect(saved.id).toBe(reportId);
+    expect(mutationGuardHarness.state.guardSites).toEqual(["legacy_mutation"]);
+    expect(mutationGuardHarness.state.delegatedSites).toEqual(["legacy_mutation"]);
+    expect((await getGeoReport(reportId))?.id).toBe(reportId);
+  });
 });
+
+function reportFixture(): GeoAuditReport {
+  return {
+    url: "https://example.com/",
+    scannedAt: "2026-07-17T00:00:00.000Z",
+    score: 82,
+    findings: [],
+    recommendations: [],
+    pages: [],
+    machineReadableAssets: {
+      robotsTxt: { url: "https://example.com/robots.txt", present: true, status: 200, summary: "ok" },
+      sitemapXml: { url: "https://example.com/sitemap.xml", present: true, status: 200, summary: "ok" },
+      llmsTxt: { url: "https://example.com/llms.txt", present: true, status: 200, summary: "ok" }
+    }
+  };
+}

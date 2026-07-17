@@ -1,11 +1,59 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const readinessGuardHarness = vi.hoisted(() => {
+  const state = {
+    blockedSite: null as string | null,
+    guardSites: [] as string[],
+    delegatedSites: [] as string[]
+  };
+  const blocked = new Error("blocked by Report V4 readiness test guard");
+  return {
+    state,
+    blocked,
+    run: vi.fn(async (input: { guardSite: string; delegate: () => Promise<unknown> }) => {
+      state.guardSites.push(input.guardSite);
+      if (state.blockedSite === input.guardSite) throw blocked;
+      state.delegatedSites.push(input.guardSite);
+      return input.delegate();
+    })
+  };
+});
+
+const readinessSideEffects = vi.hoisted(() => ({
+  exportPdf: vi.fn(async () => Buffer.from(`%PDF-\n${"/Type /Page\n".repeat(5)}`)),
+  storage: {
+    get: vi.fn(async () => ({ body: Buffer.from("image"), contentType: "image/png" })),
+    put: vi.fn(async () => undefined)
+  }
+}));
+
+vi.mock("@/report-v4/prohibited-operation-guard-runtime", () => ({
+  runReportV4GuardedOperation: readinessGuardHarness.run
+}));
+vi.mock("./pdf-export", () => ({
+  exportCanonicalArtifactHtmlPdf: readinessSideEffects.exportPdf
+}));
+vi.mock("@/evidence/storage", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/evidence/storage")>(),
+  createEvidenceStorage: () => readinessSideEffects.storage
+}));
 import { CombinedGeoReportArtifact } from "@/components/combined-geo-report-artifact";
 import { combinedArtifactFixture, combinedV3ArtifactFixture } from "@/components/combined-artifact-fixtures";
-import { assertCombinedV3HtmlCompleteness, combinedArtifactSystemCopy, localizedProviderDiscoveryLimitation, renderCanonicalCombinedArtifactHtml, restoreWebsiteReportDomainsForArtifact } from "./combined-artifact-readiness";
+import { assertCombinedV3HtmlCompleteness, combinedArtifactSystemCopy, localizedProviderDiscoveryLimitation, materializeReadyArtifact, renderCanonicalCombinedArtifactHtml, restoreWebsiteReportDomainsForArtifact } from "./combined-artifact-readiness";
 import { ARTIFACT_CSS } from "./artifact-styles";
 import { buildSourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
+
+beforeEach(() => {
+  readinessGuardHarness.state.blockedSite = null;
+  readinessGuardHarness.state.guardSites.length = 0;
+  readinessGuardHarness.state.delegatedSites.length = 0;
+  readinessGuardHarness.run.mockClear();
+  readinessSideEffects.exportPdf.mockClear();
+  readinessSideEffects.storage.get.mockClear();
+  readinessSideEffects.storage.put.mockClear();
+});
 
 function generativeV3Fixture(){
   const model=combinedV3ArtifactFixture();
@@ -135,5 +183,56 @@ describe("combined artifact canonical rendering",()=>{
     expect(ARTIFACT_CSS).toMatch(/\.source-url[^}]*overflow-wrap:anywhere[^}]*word-break:break-word/);
     expect(ARTIFACT_CSS).toMatch(/@media\(max-width:760px\)[\s\S]*\.source-url/);
     expect(ARTIFACT_CSS).toContain(".source-content,.source-content a,.generated-answer{max-width:100%;overflow-wrap:anywhere;word-break:break-word}");
+  });
+});
+
+describe("Report V4 PDF readiness entry guards", () => {
+  const invoke = () => materializeReadyArtifact(
+    {} as never,
+    { reportId: "report-1", artifactRevisionId: "artifact-1" } as never,
+    "<!doctype html><html><body>ready</body></html>"
+  );
+
+  it("blocks Chromium readiness before nested PDF export or storage", async () => {
+    readinessGuardHarness.state.blockedSite = "pdf_readiness_chromium";
+
+    await expect(invoke()).rejects.toBe(readinessGuardHarness.blocked);
+
+    expect(readinessGuardHarness.state.guardSites).toEqual(["pdf_readiness_chromium"]);
+    expect(readinessGuardHarness.state.delegatedSites).toEqual([]);
+    expect(readinessSideEffects.exportPdf).not.toHaveBeenCalled();
+    expect(readinessSideEffects.storage.put).not.toHaveBeenCalled();
+  });
+
+  it("tests storage independently and blocks before the put side effect", async () => {
+    readinessGuardHarness.state.blockedSite = "pdf_readiness_storage";
+
+    await expect(invoke()).rejects.toBe(readinessGuardHarness.blocked);
+
+    expect(readinessGuardHarness.state.guardSites).toEqual([
+      "pdf_readiness_chromium",
+      "pdf_readiness_storage"
+    ]);
+    expect(readinessGuardHarness.state.delegatedSites).toEqual(["pdf_readiness_chromium"]);
+    expect(readinessSideEffects.exportPdf).toHaveBeenCalledTimes(1);
+    expect(readinessSideEffects.storage.put).not.toHaveBeenCalled();
+  });
+
+  it("delegates Chromium and storage exactly once each without an active guard", async () => {
+    await expect(invoke()).resolves.toMatchObject({
+      pdfStorageKey: expect.any(String),
+      pageCount: 5
+    });
+
+    expect(readinessGuardHarness.state.guardSites).toEqual([
+      "pdf_readiness_chromium",
+      "pdf_readiness_storage"
+    ]);
+    expect(readinessGuardHarness.state.delegatedSites).toEqual([
+      "pdf_readiness_chromium",
+      "pdf_readiness_storage"
+    ]);
+    expect(readinessSideEffects.exportPdf).toHaveBeenCalledTimes(1);
+    expect(readinessSideEffects.storage.put).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,10 +1,15 @@
 import serverlessChromium from "@sparticuz/chromium";
 import { chromium as serverlessPlaywright } from "playwright-core";
+import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 
 export async function exportReportPdf(input: {
   htmlUrl: string;
   cookieHeader: string;
 }): Promise<Buffer> {
+  return runReportV4GuardedOperation({ guardSite: "pdf_export_url", delegate: () => exportReportPdfUnsafe(input) });
+}
+
+async function exportReportPdfUnsafe(input: { htmlUrl: string; cookieHeader: string }): Promise<Buffer> {
   const url = new URL(input.htmlUrl);
   if (!isControlledReportArtifactUrl(url)) {
     throw new Error("PDF export URL is not a controlled report artifact.");
@@ -31,6 +36,9 @@ export async function exportReportPdf(input: {
  * persisted and therefore cannot be loaded through its authorized route.
  */
 export async function exportCanonicalArtifactHtmlPdf(html: string): Promise<Buffer> {
+  return runReportV4GuardedOperation({ guardSite: "pdf_export_html", delegate: () => exportCanonicalArtifactHtmlPdfUnsafe(html) });
+}
+async function exportCanonicalArtifactHtmlPdfUnsafe(html: string): Promise<Buffer> {
   if (!html.trim()) throw new Error("Canonical artifact HTML is required for PDF export.");
   const browser = await launchPdfBrowser();
   try {

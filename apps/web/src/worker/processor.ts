@@ -90,6 +90,7 @@ import {
 import { createProductionReportV4AdmissionRunner } from "./report-v4-admission-production";
 import { createReportV4CoreProduction } from "./report-v4-core-production";
 import { createReportV4EnhancementProduction } from "./report-v4-enhancement-production";
+import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 import {
   createReportV4AcceptanceObserver,
   type ReportV4AcceptanceObserver
@@ -408,22 +409,25 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       options.liveDrill?.inject({ jobId: job.id, fault: "crawl" });
     }
 
-    const crawl = await fetchPlannedPagesWithRecovery<StoredPageEvidence>({
-      targetPageCount: checkpoint.targetPageCount!,
-      rankedCandidates: checkpoint.rankedCandidates!,
-      effectivePlan: checkpoint.effectivePlan!,
-      checkpoint,
-      loadCompleted: (planned) => loadCompletedEvidence(job, planned),
-      fetchPage: (planned) => loadOrFetchEvidence(job, planned, discovery.robotsPolicy, execution.controller.signal),
-      saveCheckpoint: async (next) => {
-        checkpoint = { ...checkpoint, ...next };
-        await saveCheckpoint("fetching", crawlProgress(checkpoint), checkpoint, {
-          plannedPages: checkpoint.effectivePlan?.length ?? 0,
-          successfulPages: checkpoint.completedCrawlUrls?.length ?? 0,
-          failedPages: failureCount(checkpoint)
-        });
-      },
-      signal: execution.controller.signal
+    const crawl = await runReportV4GuardedOperation({
+      guardSite: "full_report_rerun",
+      delegate: () => fetchPlannedPagesWithRecovery<StoredPageEvidence>({
+        targetPageCount: checkpoint.targetPageCount!,
+        rankedCandidates: checkpoint.rankedCandidates!,
+        effectivePlan: checkpoint.effectivePlan!,
+        checkpoint,
+        loadCompleted: (planned) => loadCompletedEvidence(job, planned),
+        fetchPage: (planned) => loadOrFetchEvidence(job, planned, discovery.robotsPolicy, execution.controller.signal),
+        saveCheckpoint: async (next) => {
+          checkpoint = { ...checkpoint, ...next };
+          await saveCheckpoint("fetching", crawlProgress(checkpoint), checkpoint, {
+            plannedPages: checkpoint.effectivePlan?.length ?? 0,
+            successfulPages: checkpoint.completedCrawlUrls?.length ?? 0,
+            failedPages: failureCount(checkpoint)
+          });
+        },
+        signal: execution.controller.signal
+      })
     });
     checkpoint = { ...checkpoint, ...crawl.checkpoint };
     for (const failure of checkpoint.permanentFailures ?? []) {
