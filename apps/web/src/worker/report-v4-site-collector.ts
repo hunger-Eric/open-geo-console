@@ -7,6 +7,7 @@ import {
   type AnalyzablePageNetworkSafety,
   type AnalyzableSitePage
 } from "@open-geo-console/site-crawler";
+import { ReportV4AcceptanceIndeterminateOperationError } from "./report-v4-acceptance-observer";
 
 export interface ReportV4SiteCandidate {
   readonly siteUrl: string;
@@ -239,6 +240,7 @@ async function discoverCandidates(
 }
 
 function rethrowAbortOrConcurrentError(error: unknown, signal?: AbortSignal): void {
+  if (error instanceof ReportV4AcceptanceIndeterminateOperationError) throw error;
   if (signal && error === signal.reason) throw signal.reason;
   if (!signal?.aborted) return;
   if (error instanceof Error && error.name === "AbortError") throw signal.reason ?? error;

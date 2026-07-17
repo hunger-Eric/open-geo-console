@@ -8,10 +8,21 @@ import type {
   ReportV4SiteSnapshotRecord
 } from "@/db/report-v4-site-snapshots";
 import type { JobCheckpoint, ScanJobRow } from "@/db/schema";
+const acceptanceMocks = vi.hoisted(() => ({
+  createReportV4AcceptanceObserver: vi.fn()
+}));
+vi.mock("./report-v4-acceptance-observer", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./report-v4-acceptance-observer")>(),
+  createReportV4AcceptanceObserver: acceptanceMocks.createReportV4AcceptanceObserver
+}));
 import {
   createProductionReportV4AdmissionRunner,
   deriveReportV4AdmissionIdentity
 } from "./report-v4-admission-production";
+import {
+  ReportV4AcceptanceIndeterminateOperationError,
+  type ReportV4AcceptanceObserver
+} from "./report-v4-acceptance-observer";
 import type { ReportV4SiteCandidate } from "./report-v4-site-collector";
 import { selectReportV4PreAdmissionRunner } from "./processor";
 
@@ -61,6 +72,117 @@ describe("production V4 pre-admission composition", () => {
       retainedText: "Readable https://authoritative.example/page-1",
       contentHash: sha("Readable https://authoritative.example/page-1")
     });
+    expect(acceptanceMocks.createReportV4AcceptanceObserver).not.toHaveBeenCalled();
+  });
+
+  it("claims one crawl before discovery and records terminal counts from the persisted snapshot", async () => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+    const harness = productionHarness([candidate(1)]);
+    const order: string[] = [];
+    const observer = acceptanceObserver({
+      claimExternalIo: vi.fn(async () => {
+        order.push("crawl-claim");
+        return { event: {}, inserted: true } as never;
+      }),
+      finishExternalIo: vi.fn(async () => ({ event: {}, inserted: true }) as never)
+    });
+    acceptanceMocks.createReportV4AcceptanceObserver.mockImplementationOnce(async ({ jobId }) => {
+      order.push(`observer:${jobId}`);
+      return observer;
+    });
+    harness.discover.mockImplementationOnce(async () => {
+      order.push("discover");
+      return discovery([candidate(1)]);
+    });
+    try {
+      await expect(harness.run()).resolves.toEqual({ plannedPages: 1, successfulPages: 1, failedPages: 0 });
+      expect(order).toEqual(["observer:admission-job", "crawl-claim", "discover"]);
+      expect(observer.claimExternalIo).toHaveBeenCalledExactlyOnceWith({
+        kind: "crawl_run",
+        operation: "crawl",
+        unitId: "pre-admission-crawl:admission-job",
+        attempt: 0,
+        phase: "started",
+        details: { candidatePages: 0, analyzablePages: 0, excludedPages: 0, jsDependentPages: 0 }
+      });
+      expect(observer.finishExternalIo).toHaveBeenCalledExactlyOnceWith({
+        kind: "crawl_run",
+        operation: "crawl",
+        unitId: "pre-admission-crawl:admission-job",
+        attempt: 0,
+        phase: "completed",
+        details: { candidatePages: 1, analyzablePages: 1, excludedPages: 0, jsDependentPages: 0 }
+      });
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
+  });
+
+  it("forbids discovery and all page reads when the crawl started claim already exists", async () => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+    const harness = productionHarness([candidate(1)]);
+    const indeterminate = new ReportV4AcceptanceIndeterminateOperationError();
+    const observer = acceptanceObserver({
+      claimExternalIo: vi.fn(async () => { throw indeterminate; })
+    });
+    acceptanceMocks.createReportV4AcceptanceObserver.mockResolvedValueOnce(observer);
+    try {
+      expect(harness.currentJob.checkpoint).toEqual({});
+      await expect(harness.run()).rejects.toBe(indeterminate);
+      expect(harness.discover).not.toHaveBeenCalled();
+      expect(harness.rawReads).toEqual([]);
+      expect(harness.browserReads).toEqual([]);
+      expect(observer.finishExternalIo).not.toHaveBeenCalled();
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
+  });
+
+  it("records a failed crawl terminal and idempotently recovers an existing completed terminal", async () => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+    const failed = productionHarness([candidate(1)]);
+    const failure = new Error("discovery transport failed");
+    failed.discover.mockRejectedValueOnce(failure);
+    const failedObserver = acceptanceObserver();
+    acceptanceMocks.createReportV4AcceptanceObserver.mockResolvedValueOnce(failedObserver);
+    try {
+      await expect(failed.run()).rejects.toBe(failure);
+      expect(failedObserver.finishExternalIo).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        kind: "crawl_run",
+        phase: "failed",
+        details: { candidatePages: 0, analyzablePages: 0, excludedPages: 0, jsDependentPages: 0 }
+      }));
+
+      vi.clearAllMocks();
+      const recovered = productionHarness([candidate(1)]);
+      const recoveredObserver = acceptanceObserver({
+        finishExternalIo: vi.fn(async () => ({ event: {}, inserted: false }) as never)
+      });
+      acceptanceMocks.createReportV4AcceptanceObserver.mockResolvedValue(recoveredObserver);
+      await recovered.run();
+      vi.mocked(recoveredObserver.claimExternalIo).mockClear();
+      vi.mocked(recoveredObserver.finishExternalIo).mockClear();
+      recovered.discover.mockClear();
+      recovered.rawReads.length = 0;
+
+      await expect(recovered.run()).resolves.toEqual({ plannedPages: 1, successfulPages: 1, failedPages: 0 });
+      expect(recoveredObserver.claimExternalIo).not.toHaveBeenCalled();
+      expect(recovered.discover).not.toHaveBeenCalled();
+      expect(recovered.rawReads).toEqual([]);
+      expect(recoveredObserver.finishExternalIo).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        kind: "crawl_run",
+        phase: "completed",
+        details: { candidatePages: 1, analyzablePages: 1, excludedPages: 0, jsDependentPages: 0 }
+      }));
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
   });
 
   it("resumes persisted queue/page checkpoints without rediscovery or refetching successful URLs", async () => {
@@ -82,6 +204,57 @@ describe("production V4 pre-admission composition", () => {
     expect(harness.discover).toHaveBeenCalledTimes(1);
     expect(harness.rawReads.filter((url) => url.endsWith("/page-1"))).toHaveLength(1);
     expect(harness.rawReads.filter((url) => url.endsWith("/page-2"))).toHaveLength(1);
+  });
+
+  it("continues a previously authorized crawl from its durable checkpoint without reclaiming the crawl wrapper", async () => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+    const harness = productionHarness([candidate(1), candidate(2)]);
+    const processTerminated = new Error("process terminated before crawl terminal append");
+    const observer = acceptanceObserver({
+      finishExternalIo: vi.fn(async (event) => {
+        if (event.phase === "failed") throw processTerminated;
+        return { event: {}, inserted: true } as never;
+      })
+    });
+    acceptanceMocks.createReportV4AcceptanceObserver.mockResolvedValue(observer);
+    let interrupt = true;
+    harness.writeCheckpoint.mockImplementation(async (input) => {
+      harness.persist(input);
+      const runtime = (input.checkpoint?.reportV4Admission as { runtime?: { pages?: unknown[] } } | undefined)?.runtime;
+      if (interrupt && runtime?.pages?.length === 1) {
+        interrupt = false;
+        throw new Error("worker crashed after durable page checkpoint");
+      }
+      return harness.currentJob;
+    });
+
+    await expect(harness.run()).rejects.toBe(processTerminated);
+    expect(observer.claimExternalIo).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      kind: "crawl_run",
+      phase: "started"
+    }));
+    expect(harness.rawReads).toEqual(["https://authoritative.example/page-1"]);
+    vi.mocked(observer.claimExternalIo).mockClear();
+    vi.mocked(observer.finishExternalIo).mockClear();
+    harness.discover.mockClear();
+
+    try {
+      await expect(harness.run()).resolves.toEqual({ plannedPages: 2, successfulPages: 2, failedPages: 0 });
+      expect(vi.mocked(observer.claimExternalIo).mock.calls.filter(([event]) => event.kind === "crawl_run"))
+        .toHaveLength(0);
+      expect(harness.discover).not.toHaveBeenCalled();
+      expect(harness.rawReads.filter((url) => url.endsWith("/page-1"))).toHaveLength(1);
+      expect(harness.rawReads.filter((url) => url.endsWith("/page-2"))).toHaveLength(1);
+      expect(observer.finishExternalIo).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        kind: "crawl_run",
+        phase: "completed",
+        details: { candidatePages: 2, analyzablePages: 2, excludedPages: 0, jsDependentPages: 0 }
+      }));
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
   });
 
   it("uses one total createdAt deadline across resume instead of resetting the window", async () => {
@@ -133,7 +306,7 @@ describe("production V4 pre-admission composition", () => {
 
   it("classifies only the exact product-deadline discovery abort and propagates caller or infrastructure failures", async () => {
     const deadline = productionHarness([candidate(1)]);
-    deadline.discover.mockImplementation(async (_target, signal) => new Promise((_, reject) => {
+    deadline.discover.mockImplementation(async (_target, signal) => new Promise<ReturnType<typeof discovery>>((_, reject) => {
       signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
       deadline.fireProductDeadline();
     }));
@@ -186,6 +359,31 @@ describe("production V4 pre-admission composition", () => {
     expect(harness.rawReads).toEqual(["https://authoritative.example/page-2"]);
   });
 
+  it("never enters the admission network path for a paid core job even when acceptance is configured", async () => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+    const harness = productionHarness([candidate(1)]);
+    const observer = acceptanceObserver();
+    acceptanceMocks.createReportV4AcceptanceObserver.mockResolvedValueOnce(observer);
+    try {
+      await expect(harness.run({
+        ...admissionJob(),
+        reason: "standard",
+        siteSnapshotId: "paid-snapshot",
+        businessQuestionSetId: "paid-question-set",
+        creditReservationId: "paid-credit"
+      })).rejects.toThrow(/exact.*admission/i);
+      expect(harness.getReport).not.toHaveBeenCalled();
+      expect(harness.discover).not.toHaveBeenCalled();
+      expect(harness.rawReads).toEqual([]);
+      expect(harness.browserReads).toEqual([]);
+      expect(observer.claimExternalIo).not.toHaveBeenCalled();
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
+  });
+
   it("keeps persistent and batch deep workers on the shared processScanJob default composition while preserving injection override", () => {
     const processor = readFileSync(new URL("./processor.ts", import.meta.url), "utf8");
     const persistent = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
@@ -227,12 +425,16 @@ function productionHarness(initialCandidates: ReportV4SiteCandidate[]) {
     url: "https://authoritative.example/path?submitted=1",
     siteKey: "authoritative.example"
   }));
-  const discover = vi.fn(async () => ({
-    targetUrl: "https://authoritative.example/",
-    siteKey: "authoritative.example",
-    candidates: initialCandidates,
-    robotsPolicy: { userAgent: "OpenGeoConsoleBot", rules: [], sitemaps: [] }
-  }));
+  const discover = vi.fn(async (
+    targetUrl: string,
+    signal?: AbortSignal,
+    acceptanceObserver?: ReportV4AcceptanceObserver | null
+  ) => {
+    void targetUrl;
+    void signal;
+    void acceptanceObserver;
+    return discovery(initialCandidates);
+  });
   const harness: {
     currentJob: ScanJobRow;
     begunIdentity: unknown;
@@ -328,6 +530,33 @@ function productionHarness(initialCandidates: ReportV4SiteCandidate[]) {
   return harness;
 }
 
+function acceptanceObserver(
+  overrides: Partial<ReportV4AcceptanceObserver> = {}
+): ReportV4AcceptanceObserver {
+  return {
+    session: {} as never,
+    scenario: {} as never,
+    observe: vi.fn(async () => ({ event: {}, inserted: true }) as never),
+    claimExternalIo: vi.fn(async () => ({ event: {}, inserted: true }) as never),
+    finishExternalIo: vi.fn(async () => ({ event: {}, inserted: true }) as never),
+    ...overrides
+  };
+}
+
+function discovery(candidates: ReportV4SiteCandidate[]) {
+  return {
+    targetUrl: "https://authoritative.example/",
+    siteKey: "authoritative.example",
+    candidates,
+    robotsPolicy: { userAgent: "OpenGeoConsoleBot", rules: [], sitemaps: [] }
+  };
+}
+
+function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
 function terminalBundle(input: FinalizeReportV4PreAdmissionSnapshotInput): ReportV4SiteSnapshotBundle {
   const analyzablePageCount = input.pages.filter((page) => page.analyzable).length;
   return {
@@ -337,7 +566,12 @@ function terminalBundle(input: FinalizeReportV4PreAdmissionSnapshotInput): Repor
       excludedPageCount: input.pages.length - analyzablePageCount,
       createdAt: input.capturedAt
     },
-    pages: input.pages.map((page) => ({ ...page, snapshotId: input.id, createdAt: input.capturedAt }))
+    pages: input.pages.map((page) => ({
+      ...page,
+      retainedText: page.retainedText ?? null,
+      snapshotId: input.id,
+      createdAt: input.capturedAt
+    }))
   };
 }
 

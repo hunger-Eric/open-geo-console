@@ -23,6 +23,11 @@ import {
 } from "./crawler-runtime";
 import type { ReportV4PreAdmissionRunner } from "./report-v4-pre-admission";
 import type { ReportV4SiteCollectorDependencies } from "./report-v4-site-collector";
+import {
+  createReportV4AcceptanceObserver,
+  type ReportV4AcceptanceObserver,
+  type ReportV4AcceptanceObserverEvent
+} from "./report-v4-acceptance-observer";
 
 const SNAPSHOT_ID_CONTRACT = "report-v4-site-snapshot-id-v2";
 const PRODUCT_DEADLINE_MS = 10 * 60 * 1_000;
@@ -51,10 +56,15 @@ interface PersistedReportV4Admission {
 
 export interface ReportV4AdmissionProductionDependencies {
   getReport(reportId: string): Promise<{ url: string } | null>;
-  discover(targetUrl: string, signal?: AbortSignal): Promise<ReportV4AdmissionDiscovery>;
+  discover(
+    targetUrl: string,
+    signal?: AbortSignal,
+    acceptanceObserver?: ReportV4AcceptanceObserver | null
+  ): Promise<ReportV4AdmissionDiscovery>;
   createCollectorDependencies(input: {
     targetUrl: string;
     robotsPolicy: RobotsPolicy;
+    acceptanceObserver?: ReportV4AcceptanceObserver | null;
   }): ReportV4SiteCollectorDependencies;
   loadSnapshot(identity: ReportV4SiteSnapshotIdentityInput): Promise<ReportV4SiteSnapshotBundle | null>;
   beginSnapshot(identity: ReportV4SiteSnapshotIdentityInput): Promise<ReportV4SiteSnapshotRecord | unknown>;
@@ -87,7 +97,8 @@ export function createProductionReportV4AdmissionRunner(input: {
 }): ReportV4PreAdmissionRunner {
   const dependencies: ReportV4AdmissionProductionDependencies = {
     getReport: getGeoReport,
-    discover: discoverReportV4AdmissionSite,
+    discover: (targetUrl, signal, acceptanceObserver) =>
+      discoverReportV4AdmissionSite(targetUrl, signal, undefined, acceptanceObserver),
     createCollectorDependencies: createReportV4AdmissionCollectorDependencies,
     loadSnapshot: loadReportV4PreAdmissionSnapshot,
     beginSnapshot: beginReportV4PreAdmissionSnapshot,
@@ -101,6 +112,13 @@ export function createProductionReportV4AdmissionRunner(input: {
   };
 
   return async (runInput): Promise<ScanJobCoverage> => {
+    const acceptanceSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    const acceptanceObserver = acceptanceSessionId === undefined || acceptanceSessionId === ""
+      ? null
+      : await createReportV4AcceptanceObserver({ jobId: runInput.job.id });
+    if (acceptanceSessionId !== undefined && acceptanceSessionId !== "" && !acceptanceObserver) {
+      throw new Error("A configured Report V4 acceptance session must produce an exact admission observer.");
+    }
     assertExactAdmissionJob(runInput.job);
     const report = await dependencies.getReport(runInput.job.reportId);
     if (!report) throw new Error("The authoritative V4 admission scan report was not found.");
@@ -111,76 +129,153 @@ export function createProductionReportV4AdmissionRunner(input: {
       capturedAt: runInput.job.createdAt
     });
     const existingSnapshot = await dependencies.loadSnapshot(identity);
+    let currentCheckpoint = runInput.job.checkpoint;
     if (existingSnapshot && existingSnapshot.snapshot.status !== "collecting") {
+      if (acceptanceObserver) {
+        await acceptanceObserver.finishExternalIo(crawlEvent(
+          runInput.job.id,
+          "completed",
+          crawlDetailsFromBundle(existingSnapshot)
+        ));
+      }
       return coverage(existingSnapshot);
     }
-
-    let currentCheckpoint = runInput.job.checkpoint;
     let persisted = readPersistedAdmission(currentCheckpoint);
-    let discovery: ReportV4AdmissionDiscovery | null = null;
-    if (!persisted) {
-      runInput.signal.throwIfAborted();
-      const deadlineRemainingMs = identity.capturedAt.getTime() + PRODUCT_DEADLINE_MS - dependencies.now().getTime();
-      if (deadlineRemainingMs <= 0) {
-        discovery = deadlineFallback(targetUrl, identity.siteKey);
-      } else {
-        const operation = productDeadlineSignal(
-          runInput.signal,
-          deadlineRemainingMs,
-          dependencies.scheduleProductDeadline
-        );
-        try {
-          discovery = await dependencies.discover(targetUrl, operation.signal);
-        } catch (error) {
-          if (!operation.isProductDeadlineAbort(error)) throw error;
-          discovery = deadlineFallback(targetUrl, identity.siteKey);
-        } finally {
-          operation.dispose();
-        }
-      }
-      if (canonicalSiteRoot(discovery.targetUrl) !== targetUrl || discovery.siteKey !== identity.siteKey) {
-        throw new Error("The V4 admission discovery identity does not match the authoritative report target.");
-      }
+    if (acceptanceObserver && !persisted) {
+      await acceptanceObserver.claimExternalIo(crawlEvent(
+        runInput.job.id,
+        "started",
+        { candidatePages: 0, analyzablePages: 0, excludedPages: 0, jsDependentPages: 0 }
+      ));
     }
-    const robotsPolicy = persisted?.robotsPolicy ?? discovery!.robotsPolicy;
-    const collector = dependencies.createCollectorDependencies({ targetUrl, robotsPolicy });
-    const runner = createReportV4AdmissionRunner({
-      identity,
-      targetUrl,
-      initialCandidates: persisted ? [] : discovery!.candidates
-    }, {
-      checkpoints: {
-        async load(jobId) {
-          if (jobId !== runInput.job.id) throw new Error("The V4 admission checkpoint job identity does not match.");
-          persisted = readPersistedAdmission(currentCheckpoint);
-          return persisted?.runtime ?? null;
-        },
-        async save(jobId, runtime) {
-          if (jobId !== runInput.job.id) throw new Error("The V4 admission checkpoint job identity does not match.");
-          const field: PersistedReportV4Admission = { version: 1, runtime, robotsPolicy };
-          const analyzable = runtime.pages.filter((page) => page.analyzable).length;
-          const updated = await input.checkpointJob({
-            stage: "discovering",
-            phase: "admission",
-            progress: admissionProgress(runtime),
-            checkpoint: { [CHECKPOINT_FIELD]: field } as JobCheckpoint,
-            plannedPages: runtime.knownUrlKeys.length,
-            successfulPages: analyzable,
-            failedPages: runtime.pages.length - analyzable
-          });
-          currentCheckpoint = updated.checkpoint;
-          persisted = readPersistedAdmission(currentCheckpoint);
+
+    let result: ScanJobCoverage;
+    try {
+      let discovery: ReportV4AdmissionDiscovery | null = null;
+      if (!persisted) {
+        runInput.signal.throwIfAborted();
+        const deadlineRemainingMs = identity.capturedAt.getTime() + PRODUCT_DEADLINE_MS - dependencies.now().getTime();
+        if (deadlineRemainingMs <= 0) {
+          discovery = deadlineFallback(targetUrl, identity.siteKey);
+        } else {
+          const operation = productDeadlineSignal(
+            runInput.signal,
+            deadlineRemainingMs,
+            dependencies.scheduleProductDeadline
+          );
+          try {
+            discovery = acceptanceObserver
+              ? await dependencies.discover(targetUrl, operation.signal, acceptanceObserver)
+              : await dependencies.discover(targetUrl, operation.signal);
+          } catch (error) {
+            if (!operation.isProductDeadlineAbort(error)) throw error;
+            discovery = deadlineFallback(targetUrl, identity.siteKey);
+          } finally {
+            operation.dispose();
+          }
         }
-      },
-      snapshots: {
-        load: dependencies.loadSnapshot,
-        begin: dependencies.beginSnapshot,
-        finalize: dependencies.finalizeSnapshot
-      },
-      collector,
-      now: dependencies.now
-    });
-    return runner(runInput);
+        if (canonicalSiteRoot(discovery.targetUrl) !== targetUrl || discovery.siteKey !== identity.siteKey) {
+          throw new Error("The V4 admission discovery identity does not match the authoritative report target.");
+        }
+      }
+      const robotsPolicy = persisted?.robotsPolicy ?? discovery!.robotsPolicy;
+      const collector = dependencies.createCollectorDependencies({
+        targetUrl,
+        robotsPolicy,
+        ...(acceptanceObserver ? { acceptanceObserver } : {})
+      });
+      const runner = createReportV4AdmissionRunner({
+        identity,
+        targetUrl,
+        initialCandidates: persisted ? [] : discovery!.candidates
+      }, {
+        checkpoints: {
+          async load(jobId) {
+            if (jobId !== runInput.job.id) throw new Error("The V4 admission checkpoint job identity does not match.");
+            persisted = readPersistedAdmission(currentCheckpoint);
+            return persisted?.runtime ?? null;
+          },
+          async save(jobId, runtime) {
+            if (jobId !== runInput.job.id) throw new Error("The V4 admission checkpoint job identity does not match.");
+            const field: PersistedReportV4Admission = { version: 1, runtime, robotsPolicy };
+            const analyzable = runtime.pages.filter((page) => page.analyzable).length;
+            const updated = await input.checkpointJob({
+              stage: "discovering",
+              phase: "admission",
+              progress: admissionProgress(runtime),
+              checkpoint: { [CHECKPOINT_FIELD]: field } as JobCheckpoint,
+              plannedPages: runtime.knownUrlKeys.length,
+              successfulPages: analyzable,
+              failedPages: runtime.pages.length - analyzable
+            });
+            currentCheckpoint = updated.checkpoint;
+            persisted = readPersistedAdmission(currentCheckpoint);
+          }
+        },
+        snapshots: {
+          load: dependencies.loadSnapshot,
+          begin: dependencies.beginSnapshot,
+          finalize: dependencies.finalizeSnapshot
+        },
+        collector,
+        now: dependencies.now
+      });
+      result = await runner(runInput);
+    } catch (error) {
+      if (acceptanceObserver) {
+        await acceptanceObserver.finishExternalIo(crawlEvent(
+          runInput.job.id,
+          "failed",
+          persisted ? crawlDetailsFromCheckpoint(persisted.runtime) : crawlDetailsFromBundle(existingSnapshot)
+        ));
+      }
+      throw error;
+    }
+    if (acceptanceObserver) {
+      const terminalSnapshot = await dependencies.loadSnapshot(identity);
+      if (!terminalSnapshot || terminalSnapshot.snapshot.status === "collecting") {
+        throw new Error("A completed V4 admission crawl requires its exact terminal snapshot counts.");
+      }
+      await acceptanceObserver.finishExternalIo(crawlEvent(
+        runInput.job.id,
+        "completed",
+        crawlDetailsFromBundle(terminalSnapshot)
+      ));
+    }
+    return result;
+  };
+}
+
+function crawlEvent(
+  jobId: string,
+  phase: "started" | "completed" | "failed",
+  details: Extract<ReportV4AcceptanceObserverEvent, { kind: "crawl_run" }>["details"]
+): Extract<ReportV4AcceptanceObserverEvent, { kind: "crawl_run" }> {
+  return {
+    kind: "crawl_run",
+    operation: "crawl",
+    unitId: `pre-admission-crawl:${jobId}`,
+    attempt: 0,
+    phase,
+    details
+  };
+}
+
+function crawlDetailsFromBundle(bundle: ReportV4SiteSnapshotBundle | null) {
+  return {
+    candidatePages: bundle?.snapshot.candidateUrlCount ?? 0,
+    analyzablePages: bundle?.snapshot.analyzablePageCount ?? 0,
+    excludedPages: bundle?.snapshot.excludedPageCount ?? 0,
+    jsDependentPages: bundle?.pages.filter(({ readMode }) => readMode === "js_dependent").length ?? 0
+  };
+}
+
+function crawlDetailsFromCheckpoint(checkpoint: ReportV4AdmissionCheckpoint) {
+  return {
+    candidatePages: checkpoint.knownUrlKeys.length,
+    analyzablePages: checkpoint.pages.filter(({ analyzable }) => analyzable).length,
+    excludedPages: checkpoint.pages.filter(({ analyzable }) => !analyzable).length,
+    jsDependentPages: checkpoint.pages.filter(({ readMode }) => readMode === "js_dependent").length
   };
 }
 

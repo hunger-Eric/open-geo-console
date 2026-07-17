@@ -21,6 +21,11 @@ import type {
   ReportV4SiteCandidate,
   ReportV4SiteCollectorDependencies
 } from "./report-v4-site-collector";
+import {
+  ReportV4AcceptanceIndeterminateOperationError,
+  type ReportV4AcceptanceObserver,
+  type ReportV4AcceptanceObserverEvent
+} from "./report-v4-acceptance-observer";
 
 const CRAWLER_USER_AGENT = "OpenGeoConsoleBot/1.0 (+https://github.com/open-geo-console)";
 const MAX_SITEMAP_DOCUMENTS = 200;
@@ -59,9 +64,13 @@ export interface ReportV4AdmissionBrowserDocument {
 export async function discoverReportV4AdmissionSite(
   targetUrl: string,
   signal?: AbortSignal,
-  fetchImpl: typeof fetch = createSafeFetch()
+  fetchImpl: typeof fetch = createSafeFetch(),
+  acceptanceObserver?: ReportV4AcceptanceObserver | null
 ): Promise<ReportV4AdmissionDiscovery> {
-  const discovered = await discoverSite(targetUrl, "deep", fetchImpl, signal);
+  const acceptanceFetch = acceptanceObserver
+    ? createAcceptanceDiscoveryFetch(fetchImpl, acceptanceObserver)
+    : fetchImpl;
+  const discovered = await discoverSite(targetUrl, "deep", acceptanceFetch, signal);
   return {
     targetUrl: discovered.targetUrl,
     siteKey: discovered.siteKey,
@@ -79,6 +88,7 @@ export function createReportV4AdmissionCollectorDependencies(input: {
   robotsPolicy: RobotsPolicy;
   fetchImpl?: typeof fetch;
   renderBrowser?: (url: string, signal?: AbortSignal) => Promise<ReportV4AdmissionBrowserDocument | null>;
+  acceptanceObserver?: ReportV4AcceptanceObserver | null;
 }): ReportV4SiteCollectorDependencies {
   const fetchImpl = input.fetchImpl ?? createSafeFetch();
   const renderBrowser = input.renderBrowser ?? renderReportV4AdmissionHtml;
@@ -87,39 +97,55 @@ export function createReportV4AdmissionCollectorDependencies(input: {
       if (!isAllowedByRobots(candidate.url, input.robotsPolicy)) {
         return excludedByRobots(candidate.url);
       }
-      const response = await fetchImpl(candidate.url, {
-        signal,
-        headers: { "user-agent": CRAWLER_USER_AGENT }
+      return performAcceptanceSiteRead({
+        observer: input.acceptanceObserver,
+        scope: "admission-page",
+        url: candidate.url,
+        mode: "raw",
+        perform: async () => {
+          const response = await fetchImpl(candidate.url, {
+            signal,
+            headers: { "user-agent": CRAWLER_USER_AGENT }
+          });
+          const finalUrl = response.headers.get("x-ogc-final-url") ?? candidate.url;
+          const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+          if (response.status !== 401 && response.status !== 403 && !response.ok) {
+            throw new CrawlPageError("unsupported-content", `Page returned HTTP ${response.status}.`, {
+              status: response.status,
+              disposition: response.status >= 500 || response.status === 429 ? "transient" : "permanent"
+            });
+          }
+          return {
+            url: finalUrl,
+            networkSafety: "public",
+            access: response.status === 401 || response.status === 403 ? "login_required" : "public",
+            contentType,
+            html: await response.text(),
+            ...(!isAllowedByRobots(finalUrl, input.robotsPolicy) ? { explicitExclusion: "robots_denied" as const } : {})
+          };
+        }
       });
-      const finalUrl = response.headers.get("x-ogc-final-url") ?? candidate.url;
-      const contentType = response.headers.get("content-type") ?? "application/octet-stream";
-      if (response.status !== 401 && response.status !== 403 && !response.ok) {
-        throw new CrawlPageError("unsupported-content", `Page returned HTTP ${response.status}.`, {
-          status: response.status,
-          disposition: response.status >= 500 || response.status === 429 ? "transient" : "permanent"
-        });
-      }
-      return {
-        url: finalUrl,
-        networkSafety: "public",
-        access: response.status === 401 || response.status === 403 ? "login_required" : "public",
-        contentType,
-        html: await response.text(),
-        ...(!isAllowedByRobots(finalUrl, input.robotsPolicy) ? { explicitExclusion: "robots_denied" as const } : {})
-      };
     },
     async renderBrowserHtml(url, signal) {
       if (!isAllowedByRobots(url, input.robotsPolicy)) return excludedByRobots(url);
-      const rendered = await renderBrowser(url, signal);
-      if (!rendered) throw new Error("Browser rendering returned no readable document.");
-      return {
-        url: rendered.url,
-        networkSafety: "public",
-        access: "public",
-        contentType: "text/html",
-        html: rendered.html,
-        ...(!isAllowedByRobots(rendered.url, input.robotsPolicy) ? { explicitExclusion: "robots_denied" as const } : {})
-      };
+      return performAcceptanceSiteRead({
+        observer: input.acceptanceObserver,
+        scope: "admission-page",
+        url,
+        mode: "browser",
+        perform: async () => {
+          const rendered = await renderBrowser(url, signal);
+          if (!rendered) throw new Error("Browser rendering returned no readable document.");
+          return {
+            url: rendered.url,
+            networkSafety: "public",
+            access: "public",
+            contentType: "text/html",
+            html: rendered.html,
+            ...(!isAllowedByRobots(rendered.url, input.robotsPolicy) ? { explicitExclusion: "robots_denied" as const } : {})
+          };
+        }
+      });
     },
     extractAnalyzableText(read) {
       return extractPageContent(read.html, read.url, { maximumReadableCharacters: 100_000 }).text;
@@ -129,6 +155,68 @@ export function createReportV4AdmissionCollectorDependencies(input: {
       discovery.addHtmlDocument(read.html, read.url);
       return discovery.getUrls().map(({ url }) => reportV4Candidate(input.targetUrl, url, input.robotsPolicy));
     }
+  };
+}
+
+function createAcceptanceDiscoveryFetch(
+  fetchImpl: typeof fetch,
+  observer: ReportV4AcceptanceObserver
+): typeof fetch {
+  return (async (request: RequestInfo | URL, init?: RequestInit) => {
+    const url = request instanceof Request ? request.url : request.toString();
+    return performAcceptanceSiteRead({
+      observer,
+      scope: "admission-discovery",
+      url,
+      mode: "raw",
+      perform: async () => {
+        const response = await fetchImpl(request, init);
+        const bytes = await response.arrayBuffer();
+        return new Response(bytes.byteLength === 0 ? null : bytes, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers
+        });
+      }
+    });
+  }) as typeof fetch;
+}
+
+async function performAcceptanceSiteRead<T>(input: {
+  observer?: ReportV4AcceptanceObserver | null;
+  scope: "admission-discovery" | "admission-page";
+  url: string;
+  mode: "raw" | "browser";
+  perform: () => Promise<T>;
+}): Promise<T> {
+  if (!input.observer) return input.perform();
+  const event = siteReadEvent(input.scope, input.url, input.mode, "started");
+  await input.observer.claimExternalIo(event);
+  let result: T;
+  try {
+    result = await input.perform();
+  } catch (error) {
+    await input.observer.finishExternalIo({ ...event, phase: "failed" });
+    throw error;
+  }
+  await input.observer.finishExternalIo({ ...event, phase: "completed" });
+  return result;
+}
+
+function siteReadEvent(
+  scope: "admission-discovery" | "admission-page",
+  url: string,
+  mode: "raw" | "browser",
+  phase: "started" | "completed" | "failed"
+): Extract<ReportV4AcceptanceObserverEvent, { kind: "site_read" }> {
+  const urlHash = createHash("sha256").update(url).digest("hex");
+  return {
+    kind: "site_read",
+    operation: mode === "raw" ? "site_raw_read" : "site_browser_read",
+    unitId: `${scope}:${mode}:${urlHash}`,
+    attempt: 0,
+    phase,
+    details: { urlHash, readMode: mode, networkPerformed: true }
   };
 }
 
@@ -145,7 +233,11 @@ export async function discoverSite(
 
   const [homepageResponse, robotsResponse] = await Promise.all([
     fetchImpl(root, { signal, headers: { "user-agent": CRAWLER_USER_AGENT } }),
-    fetchImpl(new URL("/robots.txt", root), { signal, headers: { "user-agent": CRAWLER_USER_AGENT } }).catch(() => null)
+    fetchImpl(new URL("/robots.txt", root), { signal, headers: { "user-agent": CRAWLER_USER_AGENT } })
+      .catch((error) => {
+        if (error instanceof ReportV4AcceptanceIndeterminateOperationError) throw error;
+        return null;
+      })
   ]);
   if (!homepageResponse.ok) throw new Error(`Homepage returned HTTP ${homepageResponse.status}.`);
   const homepageHtml = await homepageResponse.text();
@@ -175,6 +267,7 @@ export async function discoverSite(
         for (const url of nested) if (!visitedSitemaps.has(url)) sitemapQueue.push(url);
       }
     } catch (error) {
+      if (error instanceof ReportV4AcceptanceIndeterminateOperationError) throw error;
       if (signal?.aborted) throw signal.reason ?? error;
       // A broken optional sitemap must not discard usable homepage/link discovery.
     }

@@ -5,6 +5,7 @@ import {
   type ReportV4SiteCandidate,
   type ReportV4SiteCollectorDependencies
 } from "./report-v4-site-collector";
+import { ReportV4AcceptanceIndeterminateOperationError } from "./report-v4-acceptance-observer";
 
 // @requirement GEO-V4-CRAWL-02
 // @requirement GEO-V4-CRAWL-03
@@ -98,6 +99,22 @@ describe("V4 site collector", () => {
     expect(result.exclusions).toContainEqual(expect.objectContaining({ reason: "raw_fetch_failed" }));
     expect(deps.readRawHtml).toHaveBeenCalledTimes(1);
     expect(deps.renderBrowserHtml).not.toHaveBeenCalled();
+  });
+
+  it("propagates acceptance indeterminate claims instead of converting them into page exclusions", async () => {
+    const rawIndeterminate = new ReportV4AcceptanceIndeterminateOperationError();
+    const rawDeps = dependencies({
+      readRawHtml: vi.fn(async () => { throw rawIndeterminate; })
+    });
+    await expect(collectReportV4Site([candidate()], rawDeps)).rejects.toBe(rawIndeterminate);
+    expect(rawDeps.renderBrowserHtml).not.toHaveBeenCalled();
+
+    const browserIndeterminate = new ReportV4AcceptanceIndeterminateOperationError();
+    const browserDeps = dependencies({
+      readRawHtml: vi.fn(async () => read(1, { html: "EMPTY" })),
+      renderBrowserHtml: vi.fn(async () => { throw browserIndeterminate; })
+    });
+    await expect(collectReportV4Site([candidate()], browserDeps)).rejects.toBe(browserIndeterminate);
   });
 
   it.each([
