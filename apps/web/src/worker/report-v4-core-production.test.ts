@@ -8,6 +8,7 @@ import type { ReportV4ConfigSnapshotRow } from "../db/report-v4-config-snapshots
 import type { ReportV4PaidCoreContext } from "../db/report-v4-production-jobs";
 import type { ReportV4SiteSnapshotBundle } from "../db/report-v4-site-snapshots";
 import type { ReportV4CoreStageDependencies } from "./report-v4-orchestrator";
+import type { ReportV4CoreAcceptanceRuntime } from "./report-v4-core-acceptance";
 import { ReportV4QuestionProviderError } from "./report-v4-question-answerer";
 import { createStagingLiveDrill } from "./staging-live-drill";
 import {
@@ -120,12 +121,39 @@ describe("Report V4 core production composition", () => {
     }
   });
 
+  it("loads and passes an enabled acceptance runtime before creating live stage dependencies", async () => {
+    const revisionId = buildReportV4CoreArtifactRevisionId(input());
+    const acceptanceRuntime: ReportV4CoreAcceptanceRuntime = {
+      observer: {
+        session: {},
+        scenario: { kind: "success" },
+        observe: vi.fn(async (event) => ({ event, inserted: true })),
+        claimExternalIo: vi.fn(async (event) => ({ event, inserted: true })),
+        finishExternalIo: vi.fn(async (event) => ({ event, inserted: true }))
+      } as never,
+      faultController: null,
+      baselineFingerprint: null
+    };
+    const harness = productionHarness({
+      acceptanceRuntime,
+      existingArtifact: report(revisionId),
+      context: settledContext(revisionId)
+    });
+
+    await harness.run(input());
+
+    expect(harness.events.slice(0, 5)).toEqual([
+      "load-context", "load-config", "resolve-locked-config", "load-acceptance", "create-stage"
+    ]);
+  });
+
   it("maps only the exact protected-Staging question drill to a retryable provider failure", async () => {
     const answerWithSources = vi.fn(async () => ({ answerText: "ok", sources: [] }));
     const provider = withReportV4QuestionFailureDrill({
       provider: { providerId: "provider", model: "model", searchMode: "search", answerWithSources },
       coreJobId: "core-job-v4",
       liveDrill: createStagingLiveDrill({
+        NODE_ENV: "test",
         OGC_DEPLOYMENT_PROFILE: "staging", VERCEL_ENV: "preview", COMMERCE_MODE: "test",
         OGC_STAGING_LIVE_DRILL_JOB_ID: "core-job-v4",
         OGC_STAGING_LIVE_DRILL_FAULT: "question_failure",
@@ -157,6 +185,7 @@ interface HarnessOptions {
   questionModelCalls?: number;
   reusedQuestionIds?: string[];
   unavailableQuestions?: number;
+  acceptanceRuntime?: ReportV4CoreAcceptanceRuntime;
 }
 
 function productionHarness(options: HarnessOptions = {}) {
@@ -175,7 +204,13 @@ function productionHarness(options: HarnessOptions = {}) {
       events.push("resolve-locked-config");
       return { modelRuntime: {} as never, reportRuntime: {} as never };
     },
-    createCoreStageDependencies(execution) {
+    ...(options.acceptanceRuntime ? {
+      async loadAcceptanceRuntime() {
+        events.push("load-acceptance");
+        return options.acceptanceRuntime!;
+      }
+    } : {}),
+    createCoreStageDependencies(execution, acceptanceRuntime) {
       events.push("create-stage");
       const stage: ReportV4CoreStageDependencies = {
         nowMs: vi.fn(() => 100),
@@ -228,6 +263,7 @@ function productionHarness(options: HarnessOptions = {}) {
         }
       };
       expect(execution.context).toBe(context);
+      if (options.acceptanceRuntime) expect(acceptanceRuntime).toBe(options.acceptanceRuntime);
       return stage;
     }
   };

@@ -41,13 +41,14 @@ export interface ReportV4WebsiteSynthesisProductionDependencies {
   readonly lockedModelProfile: unknown;
   readonly repository: WebsiteSynthesisRepository;
   readonly fetch?: typeof globalThis.fetch;
+  readonly provider?: Pick<ReportV4MimoSiteSynthesisProvider, "synthesizeWebsite">;
 }
 
 export function createReportV4WebsiteSynthesisProduction(
   dependencies: ReportV4WebsiteSynthesisProductionDependencies
 ) {
   const runtime = resolveReportV4LockedModelRuntime(dependencies.lockedModelProfile);
-  const provider = createReportV4MimoSiteSynthesisProvider({
+  const provider = dependencies.provider ?? createReportV4MimoSiteSynthesisProvider({
     environment: dependencies.environment,
     lockedRuntime: runtime,
     fetch: dependencies.fetch

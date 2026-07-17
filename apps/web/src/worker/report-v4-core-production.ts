@@ -35,7 +35,11 @@ import {
   buildReportV4MimoQuestionTokenBudget,
   createReportV4MimoQuestionAnswerProvider
 } from "../report-v4/mimo-provider";
-import { createReportV4MimoSiteSynthesisProvider } from "../report-v4/mimo-site-synthesis-provider";
+import {
+  buildReportV4MimoPageAnalysisTokenBudget,
+  buildReportV4MimoWebsiteSynthesisTokenBudget,
+  createReportV4MimoSiteSynthesisProvider
+} from "../report-v4/mimo-site-synthesis-provider";
 import {
   resolveReportV4LockedModelRuntime,
   type ReportV4ModelRuntimeConfig
@@ -64,6 +68,15 @@ import {
   type ReportV4CoreStageDependencies,
   type ReportV4OrchestratorResult
 } from "./report-v4-orchestrator";
+import {
+  createReportV4CoreAcceptanceRuntime,
+  observeReportV4CoreWebsiteBudgetRejection,
+  withReportV4CoreAcceptancePageProvider,
+  withReportV4CoreAcceptanceQuestions,
+  withReportV4CoreAcceptanceStageDependencies,
+  withReportV4CoreAcceptanceWebsiteProvider,
+  type ReportV4CoreAcceptanceRuntime
+} from "./report-v4-core-acceptance";
 
 export interface ReportV4CoreProductionInput {
   readonly reportId: string;
@@ -112,8 +125,12 @@ export interface ReportV4CoreProductionDependencies {
     readonly configSnapshot: ReportV4ConfigSnapshotRow;
     readonly locale: ReportV4Locale;
   }) => ReportV4CoreProductionLockedConfiguration;
-  readonly createCoreStageDependencies: (
+  readonly loadAcceptanceRuntime?: (
     execution: ReportV4CoreProductionExecution
+  ) => Promise<ReportV4CoreAcceptanceRuntime | null>;
+  readonly createCoreStageDependencies: (
+    execution: ReportV4CoreProductionExecution,
+    acceptanceRuntime?: ReportV4CoreAcceptanceRuntime | null
   ) => ReportV4CoreStageDependencies;
 }
 
@@ -192,6 +209,10 @@ export function createReportV4CoreProductionWithDependencies(
       coreArtifactRevisionId,
       ...locked
     });
+    const acceptanceRuntime = dependencies.loadAcceptanceRuntime
+      ? await dependencies.loadAcceptanceRuntime(execution)
+      : null;
+    input.signal.throwIfAborted();
     const questions = [...context.questions]
       .sort((left, right) => left.ordinal - right.ordinal)
       .map((question, index) => ({
@@ -204,11 +225,16 @@ export function createReportV4CoreProductionWithDependencies(
         { order: 3; questionId: string; questionText: string }
       ];
 
-    const stageDependencies = dependencies.createCoreStageDependencies(execution);
+    const stageDependencies = dependencies.createCoreStageDependencies(execution, acceptanceRuntime);
+    const observedStageDependencies = withReportV4CoreAcceptanceStageDependencies({
+      dependencies: stageDependencies,
+      runtime: acceptanceRuntime,
+      coreArtifactRevisionId
+    });
     const guardedStageDependencies: ReportV4CoreStageDependencies = {
-      ...stageDependencies,
+      ...observedStageDependencies,
       async resolveSnapshot(snapshotInput) {
-        const snapshot = await stageDependencies.resolveSnapshot(snapshotInput);
+        const snapshot = await observedStageDependencies.resolveSnapshot(snapshotInput);
         if (snapshot.snapshot.analyzablePageCount < 1) {
           throw new Error("A paid Report V4 production snapshot must contain at least one analyzable page; zero-page admission is upstream-only.");
         }
@@ -264,7 +290,13 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
       }
       return { modelRuntime, reportRuntime };
     },
-    createCoreStageDependencies(execution) {
+    loadAcceptanceRuntime(execution) {
+      return createReportV4CoreAcceptanceRuntime({
+        environment: options.environment,
+        coreJobId: execution.input.coreJobId
+      });
+    },
+    createCoreStageDependencies(execution, acceptanceRuntime = null) {
       return {
         nowMs: () => now().getTime(),
         nowIso: () => now().toISOString(),
@@ -288,7 +320,15 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
         async synthesizeWebsite({ snapshot, signal }) {
           const activeSignal = signal ?? execution.input.signal;
           activeSignal.throwIfAborted();
-          const provider = createReportV4MimoSiteSynthesisProvider(providerDependencies(options, execution.modelRuntime));
+          const basePageProvider = createReportV4MimoSiteSynthesisProvider(providerDependencies(options, execution.modelRuntime));
+          const provider = withReportV4CoreAcceptancePageProvider({
+            provider: basePageProvider,
+            runtime: acceptanceRuntime,
+            tokenBudget: (providerInput) => buildReportV4MimoPageAnalysisTokenBudget(
+              execution.modelRuntime,
+              providerInput
+            )
+          });
           const analyzePage = createReportV4ProductionPageAnalysis({ repository: pageSummaries, provider });
           const pageResults = await Promise.all(snapshot.pages.filter(({ analyzable }) => analyzable).map((page) => {
             if (!page.readMode || !page.contentHash || !page.retainedText) {
@@ -314,11 +354,37 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
             contentIdentityHash: snapshot.snapshot.contentIdentityHash!
           }, pageSummaries);
           activeSignal.throwIfAborted();
+          const websiteProviderInput = {
+            targetUrl: execution.context.targetUrl,
+            locale: execution.input.locale,
+            pages
+          };
+          let acceptanceWebsiteProvider;
+          if (acceptanceRuntime) {
+            const websiteBudget = buildReportV4MimoWebsiteSynthesisTokenBudget(
+              execution.modelRuntime,
+              websiteProviderInput
+            );
+            await observeReportV4CoreWebsiteBudgetRejection({
+              runtime: acceptanceRuntime,
+              unitId: REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID,
+              tokenBudget: websiteBudget
+            });
+            acceptanceWebsiteProvider = withReportV4CoreAcceptanceWebsiteProvider({
+              provider: createReportV4MimoSiteSynthesisProvider(providerDependencies(options, execution.modelRuntime)),
+              runtime: acceptanceRuntime,
+              tokenBudget: (providerInput) => buildReportV4MimoWebsiteSynthesisTokenBudget(
+                execution.modelRuntime,
+                providerInput
+              )
+            });
+          }
           const synthesize = createReportV4WebsiteSynthesisProduction({
             environment: options.environment,
             lockedModelProfile: execution.configSnapshot.modelProfile,
             repository: websiteCheckpoints,
-            ...(options.fetch ? { fetch: options.fetch } : {})
+            ...(options.fetch ? { fetch: options.fetch } : {}),
+            ...(acceptanceWebsiteProvider ? { provider: acceptanceWebsiteProvider } : {})
           });
           const synthesis = await synthesize({
             reportId: execution.input.reportId,
@@ -349,7 +415,7 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
             liveDrill: options.liveDrill
           });
           const callCounts = new Map<string, number>();
-          const provider: ReportV4QuestionAnswerProvider = {
+          const countedProvider: ReportV4QuestionAnswerProvider = {
             providerId: baseProvider.providerId,
             model: baseProvider.model,
             searchMode: baseProvider.searchMode,
@@ -358,6 +424,28 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
               return baseProvider.answerWithSources(providerInput);
             }
           };
+          const questionSpecs = questions.map((question) => {
+            const providerInput = {
+              questionId: question.questionId,
+              question: question.questionText,
+              locale: execution.input.locale,
+              region: execution.context.questionSet.region,
+              signal: activeSignal
+            };
+            return {
+              order: question.order,
+              questionId: question.questionId,
+              question: question.questionText,
+              tokenBudget: buildReportV4MimoQuestionTokenBudget({ runtime: execution.modelRuntime, input: providerInput })
+            };
+          });
+          const acceptanceQuestions = withReportV4CoreAcceptanceQuestions({
+            repository: questionCheckpoints,
+            provider: countedProvider,
+            runtime: acceptanceRuntime,
+            coreJobId: execution.input.coreJobId,
+            questions: questionSpecs
+          });
           const result = await answerReportV4Questions({
             reportId: execution.input.reportId,
             jobId: execution.input.coreJobId,
@@ -366,23 +454,9 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
             modelConfigIdentityHash: execution.configSnapshot.modelProfileHash,
             locale: execution.input.locale,
             region: execution.context.questionSet.region,
-            questions: questions.map((question) => {
-              const providerInput = {
-                questionId: question.questionId,
-                question: question.questionText,
-                locale: execution.input.locale,
-                region: execution.context.questionSet.region,
-                signal: activeSignal
-              };
-              return {
-                order: question.order,
-                questionId: question.questionId,
-                question: question.questionText,
-                tokenBudget: buildReportV4MimoQuestionTokenBudget({ runtime: execution.modelRuntime, input: providerInput })
-              };
-            }),
-            repository: questionCheckpoints,
-            provider,
+            questions: questionSpecs,
+            repository: acceptanceQuestions.repository,
+            provider: acceptanceQuestions.provider,
             signal: activeSignal
           });
           const modelCalls = [...callCounts.values()].reduce((total, count) => total + count, 0);

@@ -24,7 +24,8 @@ const base = {
   siteSnapshotId: "snapshot-1", operationId: REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID, profileId: "report-v4-mimo-v2.5-pro-v1",
   workerId: "worker-1", leaseMs: 60_000, targetUrl: "https://example.com/", locale: "en", pages: [page]
 };
-const environment = {
+const environment: NodeJS.ProcessEnv = {
+  NODE_ENV: "test",
   OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
   OGC_REPORT_V4_MIMO_API_KEY: "secret"
 };
@@ -75,6 +76,30 @@ describe("production V4 website synthesis", () => {
     await expect(run({ ...base, signal: new AbortController().signal })).resolves.toMatchObject({ reused: false, providerCalls: 1, output });
     expect(h.events).toEqual(["initialize", "claim", "begin", "provider", "complete"]);
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses an explicitly supplied provider without changing checkpoint ordering", async () => {
+    const h = repositoryHarness();
+    const fetch = vi.fn(async () => response(output));
+    const provider = {
+      synthesizeWebsite: vi.fn(async () => {
+        h.events.push("provider");
+        return output;
+      })
+    };
+    const run = createReportV4WebsiteSynthesisProduction({
+      environment,
+      lockedModelProfile: profilePayload,
+      repository: h.repository,
+      fetch,
+      provider
+    });
+
+    await expect(run({ ...base, signal: new AbortController().signal }))
+      .resolves.toMatchObject({ reused: false, providerCalls: 1, output });
+    expect(h.events).toEqual(["initialize", "claim", "begin", "provider", "complete"]);
+    expect(provider.synthesizeWebsite).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("rejects an over-budget request before checkpoint authorization or fetch", async () => {
