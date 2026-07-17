@@ -5,6 +5,10 @@ import type {
   WebsiteSynthesisRepository
 } from "../db/report-v4-website-synthesis-checkpoints";
 import {
+  buildReportV4WebsiteSynthesisInputAuthority,
+  createMemoryReportV4WebsiteSynthesisCheckpointRepository
+} from "../db/report-v4-website-synthesis-checkpoints";
+import {
   createReportV4WebsiteSynthesisProduction,
   REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID
 } from "./report-v4-website-synthesis-production";
@@ -35,6 +39,7 @@ function checkpoint(state: WebsiteSynthesisCheckpoint["state"], providerCallCoun
     reportId: base.reportId, orderId: base.orderId, coreJobId: base.coreJobId,
     configSnapshotId: base.configSnapshotId, siteSnapshotId: base.siteSnapshotId,
     operationId: base.operationId, profileId: base.profileId, identityHash: "identity", state,
+    inputIdentityHash: "1".repeat(64), pageSummaryIdentitySetHash: "2".repeat(64), pageSummaryCount: 1,
     workerId: state === "running" ? base.workerId : null,
     leaseExpiresAt: state === "running" ? "2099-01-01T00:00:00.000Z" : null,
     providerCallCount, correctionCount: 0, output: state === "completed" ? output : null,
@@ -76,6 +81,30 @@ describe("production V4 website synthesis", () => {
     await expect(run({ ...base, signal: new AbortController().signal })).resolves.toMatchObject({ reused: false, providerCalls: 1, output });
     expect(h.events).toEqual(["initialize", "claim", "begin", "provider", "complete"]);
     expect(fetch).toHaveBeenCalledTimes(1);
+    const expectedAuthority = buildReportV4WebsiteSynthesisInputAuthority({
+      ...base,
+      modelProfile: profilePayload
+    });
+    expect(h.repository.initialize).toHaveBeenCalledWith(expect.objectContaining(expectedAuthority));
+  });
+
+  it("rejects completed input drift before claim or provider call", async () => {
+    const repository = createMemoryReportV4WebsiteSynthesisCheckpointRepository();
+    const provider = { synthesizeWebsite: vi.fn(async () => output) };
+    const run = createReportV4WebsiteSynthesisProduction({
+      environment,
+      lockedModelProfile: profilePayload,
+      repository,
+      provider
+    });
+    await expect(run({ ...base, signal: new AbortController().signal })).resolves.toMatchObject({ providerCalls: 1 });
+    expect(provider.synthesizeWebsite).toHaveBeenCalledTimes(1);
+    await expect(run({
+      ...base,
+      locale: "zh",
+      signal: new AbortController().signal
+    })).rejects.toThrow(/authority|drift/i);
+    expect(provider.synthesizeWebsite).toHaveBeenCalledTimes(1);
   });
 
   it("uses an explicitly supplied provider without changing checkpoint ordering", async () => {

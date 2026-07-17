@@ -3590,6 +3590,102 @@ export const V37_DATABASE_MIGRATIONS = [
     FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_prohibited_operation_counter()`
 ] as const;
 
+export const V38_DATABASE_MIGRATIONS = [
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ADD COLUMN IF NOT EXISTS input_identity_hash text`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ADD COLUMN IF NOT EXISTS page_summary_identity_set_hash text`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ADD COLUMN IF NOT EXISTS page_summary_count integer`,
+  `DO $$ BEGIN
+     IF EXISTS(SELECT 1 FROM report_v4_website_synthesis_checkpoints
+       WHERE input_identity_hash IS NULL OR page_summary_identity_set_hash IS NULL OR page_summary_count IS NULL) THEN
+       RAISE EXCEPTION 'Existing V4 website synthesis checkpoints cannot be upgraded without provable input identity; operator disposition is required.';
+     END IF;
+   END $$`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ALTER COLUMN input_identity_hash SET NOT NULL`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ALTER COLUMN page_summary_identity_set_hash SET NOT NULL`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ALTER COLUMN page_summary_count SET NOT NULL`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints DROP CONSTRAINT IF EXISTS report_v4_website_synthesis_checkpoint_input_authority_check`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ADD CONSTRAINT report_v4_website_synthesis_checkpoint_input_authority_check
+     CHECK(input_identity_hash ~ '^[a-f0-9]{64}$' AND page_summary_identity_set_hash ~ '^[a-f0-9]{64}$'
+       AND page_summary_count BETWEEN 1 AND 50)`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints DROP CONSTRAINT IF EXISTS report_v4_website_synthesis_checkpoint_state_authority_check`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ADD CONSTRAINT report_v4_website_synthesis_checkpoint_state_authority_check CHECK(
+     (state='queued' AND provider_call_count=0 AND worker_id IS NULL AND lease_expires_at IS NULL AND error_code IS NULL)
+     OR (state='running' AND worker_id IS NOT NULL AND length(btrim(worker_id)) BETWEEN 1 AND 500
+       AND lease_expires_at IS NOT NULL AND error_code IS NULL)
+     OR (state='completed' AND provider_call_count=1 AND worker_id IS NULL AND lease_expires_at IS NULL AND error_code IS NULL)
+     OR (state='failed' AND provider_call_count=1 AND worker_id IS NULL AND lease_expires_at IS NULL
+       AND length(btrim(error_code)) BETWEEN 1 AND 200))`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_website_synthesis_checkpoint_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP='DELETE' THEN
+       RAISE EXCEPTION 'A V4 website synthesis checkpoint is immutable and cannot be deleted.';
+     END IF;
+     IF TG_OP='INSERT' THEN
+       IF NEW.state<>'queued' OR NEW.provider_call_count<>0 OR NEW.worker_id IS NOT NULL
+         OR NEW.lease_expires_at IS NOT NULL OR NEW.output_payload IS NOT NULL OR NEW.output_hash IS NOT NULL
+         OR NEW.error_code IS NOT NULL THEN
+         RAISE EXCEPTION 'A V4 website synthesis checkpoint must be inserted as fresh queued authority.';
+       END IF;
+       RETURN NEW;
+     END IF;
+     IF NEW.identity_hash IS DISTINCT FROM OLD.identity_hash
+       OR NEW.report_id IS DISTINCT FROM OLD.report_id
+       OR NEW.order_id IS DISTINCT FROM OLD.order_id
+       OR NEW.core_job_id IS DISTINCT FROM OLD.core_job_id
+       OR NEW.config_snapshot_id IS DISTINCT FROM OLD.config_snapshot_id
+       OR NEW.site_snapshot_id IS DISTINCT FROM OLD.site_snapshot_id
+       OR NEW.operation_id IS DISTINCT FROM OLD.operation_id
+       OR NEW.profile_id IS DISTINCT FROM OLD.profile_id
+       OR NEW.input_identity_hash IS DISTINCT FROM OLD.input_identity_hash
+       OR NEW.page_summary_identity_set_hash IS DISTINCT FROM OLD.page_summary_identity_set_hash
+       OR NEW.page_summary_count IS DISTINCT FROM OLD.page_summary_count
+       OR NEW.correction_count IS DISTINCT FROM OLD.correction_count
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+       RAISE EXCEPTION 'A V4 website synthesis checkpoint input authority is immutable.';
+     END IF;
+     IF OLD.state IN ('completed','failed') THEN
+       RAISE EXCEPTION 'A terminal V4 website synthesis checkpoint is immutable.';
+     END IF;
+     IF OLD.state='queued' THEN
+       IF NEW.state<>'running' OR NEW.provider_call_count<>0 OR NEW.worker_id IS NULL
+         OR NEW.lease_expires_at IS NULL THEN
+         RAISE EXCEPTION 'A queued V4 website synthesis checkpoint may only be claimed before provider authorization.';
+       END IF;
+     ELSIF OLD.state='running' THEN
+       IF NEW.state='running' THEN
+         IF OLD.provider_call_count=0 AND NEW.provider_call_count=0 THEN
+           IF OLD.lease_expires_at>clock_timestamp() OR NEW.worker_id IS NULL
+             OR NEW.lease_expires_at IS NULL THEN
+             RAISE EXCEPTION 'A running V4 website synthesis checkpoint may only be reclaimed after its unused lease expires.';
+           END IF;
+         ELSIF OLD.provider_call_count=0 AND NEW.provider_call_count=1 THEN
+           IF NEW.worker_id IS DISTINCT FROM OLD.worker_id OR NEW.lease_expires_at IS DISTINCT FROM OLD.lease_expires_at
+             OR OLD.lease_expires_at IS NULL OR OLD.lease_expires_at<=clock_timestamp() THEN
+             RAISE EXCEPTION 'A V4 website synthesis provider call requires the exact live checkpoint lease.';
+           END IF;
+         ELSE
+           RAISE EXCEPTION 'A V4 website synthesis provider call may be authorized exactly once.';
+         END IF;
+       ELSIF NEW.state IN ('completed','failed') THEN
+         IF OLD.provider_call_count<>1 OR NEW.provider_call_count<>1 OR OLD.lease_expires_at IS NULL
+           OR OLD.lease_expires_at<=clock_timestamp() THEN
+           RAISE EXCEPTION 'A terminal V4 website synthesis checkpoint requires one authorized provider call on a live lease.';
+         END IF;
+       ELSE
+         RAISE EXCEPTION 'The V4 website synthesis checkpoint state transition is invalid.';
+       END IF;
+     ELSE
+       RAISE EXCEPTION 'The V4 website synthesis checkpoint state transition is invalid.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_website_synthesis_checkpoints_guard
+     ON report_v4_website_synthesis_checkpoints`,
+  `CREATE TRIGGER report_v4_website_synthesis_checkpoints_guard
+     BEFORE INSERT OR UPDATE OR DELETE ON report_v4_website_synthesis_checkpoints
+     FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_website_synthesis_checkpoint_mutation()`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -3619,7 +3715,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 34, migrations: V34_DATABASE_MIGRATIONS },
   { version: 35, migrations: V35_DATABASE_MIGRATIONS },
   { version: 36, migrations: V36_DATABASE_MIGRATIONS },
-  { version: 37, migrations: V37_DATABASE_MIGRATIONS }
+  { version: 37, migrations: V37_DATABASE_MIGRATIONS },
+  { version: 38, migrations: V38_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

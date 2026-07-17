@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS, V38_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 
 // @requirement GEO-V4-ACCEPT-01
 describe("schema V35 protected-Staging acceptance ledger", () => {
   it("registers one forward-only append-only ledger migration after V34", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(37);
-    expect(databaseMigrationsAfter(34)).toEqual([...V35_DATABASE_MIGRATIONS, ...V36_DATABASE_MIGRATIONS, ...V37_DATABASE_MIGRATIONS]);
+    expect(DATABASE_SCHEMA_VERSION).toBe(38);
+    expect(databaseMigrationsAfter(34)).toEqual([...V35_DATABASE_MIGRATIONS, ...V36_DATABASE_MIGRATIONS, ...V37_DATABASE_MIGRATIONS, ...V38_DATABASE_MIGRATIONS]);
     const source = V35_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("report_v4_acceptance_sessions");
     expect(source).toContain("report_v4_acceptance_scenarios");

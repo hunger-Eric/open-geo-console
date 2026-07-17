@@ -1,5 +1,5 @@
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
-import type { AiWebsiteReportV1, CombinedGeoReportV1, ModelProfile, RecommendationForensicReportV1, ReportV4CustomerProseProfile, ReportV4PageSummaryChunk, SourceClassificationAuthoritySnapshot } from "@open-geo-console/ai-report-engine";
+import type { AiWebsiteReportV1, CombinedGeoReportV1, ModelProfile, RecommendationForensicReportV1, ReportV4CustomerProseProfile, ReportV4PageSummaryChunk, ReportV4WebsiteSynthesisOutput, SourceClassificationAuthoritySnapshot } from "@open-geo-console/ai-report-engine";
 import type { BusinessQuestionCandidateSet, ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { AnswerExecutionStateLedger, CertificationAuthoritySnapshot } from "@open-geo-console/answer-engine-observer";
 import type { BotEvidenceSummary } from "@open-geo-console/log-parser";
@@ -1389,6 +1389,57 @@ export const reportV4ConfigSnapshots = pgTable(
   ]
 );
 export type ReportV4ConfigSnapshotSchemaRow = typeof reportV4ConfigSnapshots.$inferSelect;
+
+export const reportV4WebsiteSynthesisCheckpoints = pgTable(
+  "report_v4_website_synthesis_checkpoints",
+  {
+    identityHash: text("identity_hash").primaryKey(),
+    reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "restrict" }),
+    orderId: text("order_id").notNull().references(() => paymentOrders.id, { onDelete: "restrict" }),
+    coreJobId: text("core_job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
+    configSnapshotId: text("config_snapshot_id").notNull().references(() => reportV4ConfigSnapshots.id, { onDelete: "restrict" }),
+    siteSnapshotId: text("site_snapshot_id").notNull().references(() => reportV4SiteSnapshots.id, { onDelete: "restrict" }),
+    operationId: text("operation_id").notNull(),
+    profileId: text("profile_id").notNull(),
+    inputIdentityHash: text("input_identity_hash").notNull(),
+    pageSummaryIdentitySetHash: text("page_summary_identity_set_hash").notNull(),
+    pageSummaryCount: integer("page_summary_count").notNull(),
+    state: text("state").notNull().default("queued"),
+    workerId: text("worker_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    providerCallCount: integer("provider_call_count").notNull().default(0),
+    correctionCount: integer("correction_count").notNull().default(0),
+    outputPayload: jsonb("output_payload").$type<ReportV4WebsiteSynthesisOutput>(),
+    outputHash: text("output_hash"),
+    errorCode: text("error_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("report_v4_website_synthesis_checkpoint_lineage_uidx").on(
+      table.reportId,
+      table.orderId,
+      table.coreJobId,
+      table.configSnapshotId,
+      table.siteSnapshotId,
+      table.operationId,
+      table.profileId
+    ),
+    uniqueIndex("report_v4_website_synthesis_checkpoint_core_uidx").on(table.coreJobId),
+    check("report_v4_website_synthesis_checkpoint_state_check", sql`${table.state} IN ('queued','running','completed','failed')`),
+    check("report_v4_website_synthesis_checkpoint_identity_check", sql`${table.identityHash} ~ '^[a-f0-9]{64}$' AND length(btrim(${table.operationId})) > 0 AND length(btrim(${table.profileId})) > 0`),
+    check("report_v4_website_synthesis_checkpoint_input_authority_check", sql`${table.inputIdentityHash} ~ '^[a-f0-9]{64}$' AND ${table.pageSummaryIdentitySetHash} ~ '^[a-f0-9]{64}$' AND ${table.pageSummaryCount} BETWEEN 1 AND 50`),
+    check("report_v4_website_synthesis_checkpoint_calls_check", sql`${table.providerCallCount} BETWEEN 0 AND 1 AND ${table.correctionCount} = 0`),
+    check("report_v4_website_synthesis_checkpoint_hash_check", sql`${table.outputHash} IS NULL OR ${table.outputHash} ~ '^[a-f0-9]{64}$'`),
+    check("report_v4_website_synthesis_checkpoint_payload_check", sql`(${table.state}='completed' AND ${table.outputPayload} IS NOT NULL AND ${table.outputHash} IS NOT NULL) OR (${table.state}<>'completed' AND ${table.outputPayload} IS NULL AND ${table.outputHash} IS NULL)`),
+    check("report_v4_website_synthesis_checkpoint_state_authority_check", sql`
+      (${table.state}='queued' AND ${table.providerCallCount}=0 AND ${table.workerId} IS NULL AND ${table.leaseExpiresAt} IS NULL AND ${table.errorCode} IS NULL)
+      OR (${table.state}='running' AND ${table.workerId} IS NOT NULL AND length(btrim(${table.workerId})) BETWEEN 1 AND 500 AND ${table.leaseExpiresAt} IS NOT NULL AND ${table.errorCode} IS NULL)
+      OR (${table.state}='completed' AND ${table.providerCallCount}=1 AND ${table.workerId} IS NULL AND ${table.leaseExpiresAt} IS NULL AND ${table.errorCode} IS NULL)
+      OR (${table.state}='failed' AND ${table.providerCallCount}=1 AND ${table.workerId} IS NULL AND ${table.leaseExpiresAt} IS NULL AND length(btrim(${table.errorCode})) BETWEEN 1 AND 200)`)
+  ]
+);
+export type ReportV4WebsiteSynthesisCheckpointSchemaRow = typeof reportV4WebsiteSynthesisCheckpoints.$inferSelect;
 
 export const reportArtifactRevisions = pgTable(
   "report_artifact_revisions",

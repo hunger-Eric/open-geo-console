@@ -15,7 +15,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-CRAWL-04
 describe("schema v30 V4 runtime persistence substrate", () => {
   it("adds only hierarchical summaries, diagnosis checkpoints and one enhancement per core", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(37);
+    expect(DATABASE_SCHEMA_VERSION).toBe(38);
     const sql = V30_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_page_summaries");
     expect(sql).toContain("source_length integer NOT NULL");

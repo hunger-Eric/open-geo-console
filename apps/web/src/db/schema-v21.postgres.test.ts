@@ -28,7 +28,7 @@ describeDisposablePostgres("schema v21 prospective V3 artifact scope", () => {
 
       await sql.begin(async (tx) => { for (const statement of V21_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
       await sql.begin(async (tx) => { for (const statement of V22_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
-      expect(DATABASE_SCHEMA_VERSION).toBe(37);
+      expect(DATABASE_SCHEMA_VERSION).toBe(38);
       expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining([...V21_DATABASE_MIGRATIONS, ...V22_DATABASE_MIGRATIONS]));
       expect(await sql<{ artifact_scope: string }[]>`SELECT artifact_scope FROM report_access_tokens ORDER BY artifact_scope`)
         .toEqual([{ artifact_scope: "combined_geo_report_v1" }, { artifact_scope: "combined_geo_report_v2" }]);

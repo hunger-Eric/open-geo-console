@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS, V38_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 
 // @requirement GEO-V4-ACCEPT-01
 describe("schema V36 protected-acceptance site-read manifest", () => {
   it("registers one forward-only hash-only manifest migration after V35", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(37);
-    expect(databaseMigrationsAfter(35)).toEqual([...V36_DATABASE_MIGRATIONS, ...V37_DATABASE_MIGRATIONS]);
+    expect(DATABASE_SCHEMA_VERSION).toBe(38);
+    expect(databaseMigrationsAfter(35)).toEqual([...V36_DATABASE_MIGRATIONS, ...V37_DATABASE_MIGRATIONS, ...V38_DATABASE_MIGRATIONS]);
     const source = V36_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("report_v4_acceptance_site_read_manifest");
     expect(source).toContain("NULLS NOT DISTINCT");

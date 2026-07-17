@@ -1,9 +1,11 @@
 import {
+  parseReportV4SiteSynthesisInput,
   runWithModelTokenBudget,
   type ReportV4PageSummary,
   type ReportV4WebsiteSynthesisOutput
 } from "@open-geo-console/ai-report-engine";
 import {
+  buildReportV4WebsiteSynthesisInputAuthority,
   type WebsiteSynthesisCheckpoint,
   type WebsiteSynthesisLineage,
   type WebsiteSynthesisRepository
@@ -71,28 +73,38 @@ function createRunner(
     if (input.operationId !== REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID) {
       throw new Error("The V4 website-synthesis checkpoint operation has drifted from websiteSynthesis.");
     }
-    const providerInput = { targetUrl: input.targetUrl, locale: input.locale, pages: input.pages };
+    const providerInput = parseReportV4SiteSynthesisInput({
+      targetUrl: input.targetUrl,
+      locale: input.locale,
+      pages: input.pages
+    });
     const budget = buildReportV4MimoWebsiteSynthesisTokenBudget(runtime, providerInput);
     await runWithModelTokenBudget(budget, async () => undefined);
     input.signal.throwIfAborted();
 
     const lineage = exactLineage(input);
-    const initialized = await repository.initialize(lineage);
+    const inputAuthority = buildReportV4WebsiteSynthesisInputAuthority({
+      ...lineage,
+      ...providerInput,
+      modelProfile: runtime.modelProfile
+    });
+    const checkpointIdentity = Object.freeze({ ...lineage, ...inputAuthority });
+    const initialized = await repository.initialize(checkpointIdentity);
     if (initialized.state === "completed") return completedResult(initialized, 0, true);
     input.signal.throwIfAborted();
-    const claimed = await repository.claim({ ...lineage, workerId: input.workerId, leaseMs: input.leaseMs });
+    const claimed = await repository.claim({ ...checkpointIdentity, workerId: input.workerId, leaseMs: input.leaseMs });
     if (claimed.state === "completed") return completedResult(claimed, 0, true);
     input.signal.throwIfAborted();
-    await repository.beginProviderCall({ ...lineage, workerId: input.workerId });
+    await repository.beginProviderCall({ ...checkpointIdentity, workerId: input.workerId });
 
     try {
       const output = await provider.synthesizeWebsite(providerInput, input.signal);
       input.signal.throwIfAborted();
-      const completed = await repository.complete({ ...lineage, workerId: input.workerId, output });
+      const completed = await repository.complete({ ...checkpointIdentity, workerId: input.workerId, output });
       return completedResult(completed, 1, false);
     } catch (error) {
       if (input.signal.aborted) throw error;
-      await repository.fail({ ...lineage, workerId: input.workerId, errorCode: boundedErrorCode(error) });
+      await repository.fail({ ...checkpointIdentity, workerId: input.workerId, errorCode: boundedErrorCode(error) });
       throw error;
     }
   };
