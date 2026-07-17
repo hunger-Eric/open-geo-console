@@ -5,16 +5,28 @@ import type { ScanJobRow } from "@/db/schema";
 const boundaryMocks = vi.hoisted(() => ({
   getScanJob: vi.fn(),
   failScanJob: vi.fn(),
-  recordPaidJobOutcome: vi.fn()
+  terminalizeScanJob: vi.fn(),
+  recordPaidJobOutcome: vi.fn(),
+  createReportV4AcceptanceObserver: vi.fn(),
+  getGeoReport: vi.fn()
 }));
 vi.mock("@/db/jobs", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/db/jobs")>(),
   getScanJob: boundaryMocks.getScanJob,
-  failScanJob: boundaryMocks.failScanJob
+  failScanJob: boundaryMocks.failScanJob,
+  terminalizeScanJob: boundaryMocks.terminalizeScanJob
 }));
 vi.mock("@/db/commercial-refunds", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/db/commercial-refunds")>(),
   recordPaidJobOutcome: boundaryMocks.recordPaidJobOutcome
+}));
+vi.mock("@/db/reports", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/db/reports")>(),
+  getGeoReport: boundaryMocks.getGeoReport
+}));
+vi.mock("./report-v4-acceptance-observer", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./report-v4-acceptance-observer")>(),
+  createReportV4AcceptanceObserver: boundaryMocks.createReportV4AcceptanceObserver
 }));
 import {
   dispatchReportV4ProductionJob,
@@ -34,6 +46,184 @@ import {
 const processorSource = readFileSync(new URL("./processor.ts", import.meta.url), "utf8");
 
 describe("strict Report V4 processor routing", () => {
+  it("does not create an acceptance observer or change dispatch when the session env is absent", async () => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    delete process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    const core = vi.fn(async () => undefined);
+    try {
+      await processScanJob(v4Job(), "worker-1", { reportV4CoreRunner: core });
+      expect(boundaryMocks.createReportV4AcceptanceObserver).not.toHaveBeenCalled();
+      expect(core).toHaveBeenCalledTimes(1);
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
+  });
+
+  it.each([
+    {
+      name: "legacy",
+      patch: {
+        productContract: "legacy_website_audit_v1",
+        fulfillmentMethodology: null,
+        recommendationReportVersion: null,
+        artifactContract: null,
+        businessQuestionSetId: null,
+        siteSnapshotId: null,
+        creditReservationId: null
+      }
+    },
+    {
+      name: "V2",
+      patch: {
+        fulfillmentMethodology: "public_search_source_forensics_v1",
+        recommendationReportVersion: 2,
+        artifactContract: null,
+        businessQuestionSetId: null,
+        siteSnapshotId: null,
+        creditReservationId: null
+      }
+    }
+  ])("keeps a $name job on its original path with zero observer access when the session env is configured", async ({ patch }) => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+    const job = v4Job(patch as Partial<ScanJobRow>);
+    boundaryMocks.getGeoReport.mockResolvedValueOnce(null);
+    boundaryMocks.failScanJob.mockResolvedValueOnce({ stage: "failed" });
+    boundaryMocks.recordPaidJobOutcome.mockResolvedValueOnce(undefined);
+    try {
+      await processScanJob(job, "worker-1");
+      expect(boundaryMocks.createReportV4AcceptanceObserver).not.toHaveBeenCalled();
+      expect(boundaryMocks.getGeoReport).toHaveBeenCalledExactlyOnceWith(job.reportId);
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
+  });
+
+  it("creates the exact job observer before V4 business dispatch and records one idempotent dispatch", async () => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+    const order: string[] = [];
+    const observe = vi.fn(async () => {
+      order.push("dispatch-event");
+      return { event: {}, inserted: true } as never;
+    });
+    boundaryMocks.createReportV4AcceptanceObserver.mockImplementationOnce(async (input: { jobId: string }) => {
+      order.push(`observer:${input.jobId}`);
+      return { observe } as never;
+    });
+    const core = vi.fn(async () => { order.push("core-runner"); });
+    try {
+      await processScanJob(v4Job(), "worker-1", { reportV4CoreRunner: core });
+      expect(order).toEqual(["observer:job-1", "dispatch-event", "core-runner"]);
+      expect(observe).toHaveBeenCalledExactlyOnceWith({
+        kind: "v4_dispatch",
+        operation: "v4_dispatch",
+        unitId: "job-1",
+        attempt: 0,
+        phase: "observed",
+        details: {}
+      });
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
+  });
+
+  it("fails closed before V4 business execution when observer routing rejects the exact job", async () => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+    const routingError = new Error("acceptance job lineage mismatch");
+    boundaryMocks.createReportV4AcceptanceObserver.mockRejectedValueOnce(routingError);
+    const core = vi.fn();
+    try {
+      await expect(processScanJob(v4Job(), "worker-1", { reportV4CoreRunner: core })).rejects.toBe(routingError);
+      expect(boundaryMocks.createReportV4AcceptanceObserver).toHaveBeenCalledExactlyOnceWith({ jobId: "job-1" });
+      expect(core).not.toHaveBeenCalled();
+      expect(boundaryMocks.failScanJob).not.toHaveBeenCalled();
+      expect(boundaryMocks.recordPaidJobOutcome).not.toHaveBeenCalled();
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
+  });
+
+  it("fails closed when a configured acceptance session does not produce an observer", async () => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+    boundaryMocks.createReportV4AcceptanceObserver.mockResolvedValueOnce(null);
+    const core = vi.fn();
+    try {
+      await expect(processScanJob(v4Job(), "worker-1", { reportV4CoreRunner: core }))
+        .rejects.toThrow(/configured Report V4 acceptance session.*observer/i);
+      expect(core).not.toHaveBeenCalled();
+      expect(boundaryMocks.failScanJob).not.toHaveBeenCalled();
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
+  });
+
+  it("records pre-admission dispatch only after its exact identity is accepted", async () => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+    const order: string[] = [];
+    const observe = vi.fn(async () => {
+      order.push("dispatch-event");
+      return { event: {}, inserted: false } as never;
+    });
+    boundaryMocks.createReportV4AcceptanceObserver.mockResolvedValueOnce({ observe } as never);
+    boundaryMocks.terminalizeScanJob.mockImplementationOnce(async () => { order.push("terminalize"); });
+    const runner = vi.fn(async () => {
+      order.push("admission-runner");
+      return { plannedPages: 1, successfulPages: 1, failedPages: 0 };
+    });
+    try {
+      await processScanJob(v4Job({
+        id: "admission-job",
+        reason: "v4_pre_admission",
+        businessQuestionSetId: null,
+        siteSnapshotId: null,
+        creditReservationId: null
+      }), "worker-1", { reportV4PreAdmissionRunner: runner });
+      expect(order).toEqual(["dispatch-event", "admission-runner", "terminalize"]);
+      expect(observe).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        kind: "v4_dispatch",
+        unitId: "admission-job",
+        phase: "observed"
+      }));
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
+  });
+
+  it("does not record pre-admission dispatch for a malformed V4 identity", async () => {
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+    const observe = vi.fn();
+    const runner = vi.fn();
+    boundaryMocks.createReportV4AcceptanceObserver.mockResolvedValueOnce({ observe } as never);
+    boundaryMocks.failScanJob.mockResolvedValueOnce({ stage: "failed" });
+    try {
+      await processScanJob(v4Job({
+        id: "malformed-admission-job",
+        reason: "v4_pre_admission",
+        businessQuestionSetId: "forbidden-question-set",
+        siteSnapshotId: null,
+        creditReservationId: null
+      }), "worker-1", { reportV4PreAdmissionRunner: runner });
+      expect(boundaryMocks.createReportV4AcceptanceObserver)
+        .toHaveBeenCalledExactlyOnceWith({ jobId: "malformed-admission-job" });
+      expect(runner).not.toHaveBeenCalled();
+      expect(observe).not.toHaveBeenCalled();
+    } finally {
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
+  });
+
   it("keeps pre-admission before V4 production and legacy fulfillment dispatch", () => {
     const preAdmission = processorSource.indexOf("processReportV4PreAdmissionJob({");
     const v4 = processorSource.indexOf("reportV4ProductionTarget = resolveReportV4ProductionTarget(job)");
@@ -136,4 +326,9 @@ function runnerInput(job: ScanJobRow): ReportV4ProductionRunnerInput {
     job, workerId: "worker-1", signal: new AbortController().signal, remainingMs: () => 10_000,
     checkpointJob: async () => job
   };
+}
+
+function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }

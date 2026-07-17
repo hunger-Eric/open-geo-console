@@ -90,6 +90,10 @@ import {
 import { createProductionReportV4AdmissionRunner } from "./report-v4-admission-production";
 import { createReportV4CoreProduction } from "./report-v4-core-production";
 import { createReportV4EnhancementProduction } from "./report-v4-enhancement-production";
+import {
+  createReportV4AcceptanceObserver,
+  type ReportV4AcceptanceObserver
+} from "./report-v4-acceptance-observer";
 
 interface StoredPageEvidence {
   page: ExtractedPage;
@@ -147,6 +151,15 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
   reportV4CoreRunner?: ReportV4ProductionRunner;
   reportV4EnhancementRunner?: ReportV4ProductionRunner;
 } = {}): Promise<void> {
+  const acceptanceSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+  const acceptanceRequired = acceptanceSessionId !== undefined && acceptanceSessionId !== "" &&
+    (job.reason === "v4_pre_admission" || hasReportV4ProductionMarker(job));
+  const acceptanceObserver = acceptanceRequired
+    ? await createReportV4AcceptanceObserver({ jobId: job.id })
+    : null;
+  if (acceptanceRequired && !acceptanceObserver) {
+    throw new Error("A configured Report V4 acceptance session must produce an exact job observer.");
+  }
   const execution = new JobExecutionLease({
     hardDeadlineMs: configuredJobHardDeadlineMs(),
     heartbeat: () => heartbeatScanJob(job.id, workerId)
@@ -176,12 +189,15 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       options.reportV4PreAdmissionRunner,
       () => createProductionReportV4AdmissionRunner({ checkpointJob })
     );
+    const observedReportV4PreAdmissionRunner = acceptanceObserver && reportV4PreAdmissionRunner
+      ? instrumentReportV4PreAdmissionDispatch(reportV4PreAdmissionRunner, acceptanceObserver)
+      : reportV4PreAdmissionRunner;
     if (await processReportV4PreAdmissionJob({
       job,
       workerId,
       signal: execution.controller.signal,
       remainingMs: () => execution.remainingMs(),
-      runner: reportV4PreAdmissionRunner,
+      runner: observedReportV4PreAdmissionRunner,
       terminalizeJob: terminalizeScanJob
     })) return;
     reportV4ProductionRoutingAttempted = hasReportV4ProductionMarker(job);
@@ -195,6 +211,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         process.env,
         options.liveDrill
       );
+      if (acceptanceObserver) await observeReportV4Dispatch(acceptanceObserver, job.id);
       await dispatchReportV4ProductionJob(reportV4ProductionTarget, {
         job,
         workerId,
@@ -644,6 +661,30 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
   } finally {
     execution.stop();
   }
+}
+
+function instrumentReportV4PreAdmissionDispatch(
+  runner: ReportV4PreAdmissionRunner,
+  observer: ReportV4AcceptanceObserver
+): ReportV4PreAdmissionRunner {
+  return async (input) => {
+    await observeReportV4Dispatch(observer, input.job.id);
+    return runner(input);
+  };
+}
+
+function observeReportV4Dispatch(
+  observer: ReportV4AcceptanceObserver,
+  jobId: string
+) {
+  return observer.observe({
+    kind: "v4_dispatch",
+    operation: "v4_dispatch",
+    unitId: jobId,
+    attempt: 0,
+    phase: "observed",
+    details: {}
+  });
 }
 
 export function resolveReportV4ProductionTarget(job: Pick<ScanJobRow,
