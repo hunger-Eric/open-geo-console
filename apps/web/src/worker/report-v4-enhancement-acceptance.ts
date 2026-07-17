@@ -106,23 +106,39 @@ export function withReportV4EnhancementAcceptanceDiagnosisProvider(input: {
   };
 }
 
-export async function observeReportV4EnhancementHtml(input: {
+export async function observeReportV4EnhancementHtmlPersistence<Result extends { readonly htmlSha256: string }>(input: {
   readonly runtime: ReportV4EnhancementAcceptanceRuntime | null;
   readonly artifactRevisionId: string;
-  readonly render: () => Promise<string>;
-}): Promise<string> {
-  const html = await input.render();
-  if (input.runtime) {
-    await input.runtime.observer.observe({
-      kind: "html_assembly",
-      operation: "enhancement_html",
-      unitId: input.artifactRevisionId,
-      attempt: 0,
-      phase: "completed",
-      details: { artifactRevisionId: input.artifactRevisionId, htmlSha256: sha256(html) }
-    });
+  readonly html: string;
+  readonly persist: () => Promise<Result>;
+}): Promise<Result> {
+  if (!input.runtime) return input.persist();
+  const started = {
+    kind: "html_assembly" as const,
+    operation: "enhancement_html" as const,
+    unitId: input.artifactRevisionId,
+    attempt: 0 as const,
+    phase: "started" as const,
+    details: { artifactRevisionId: input.artifactRevisionId, htmlSha256: sha256(input.html) }
+  };
+  await input.runtime.observer.observe(started);
+  let persisted: Result;
+  try {
+    persisted = await input.persist();
+    if (persisted.htmlSha256 !== started.details.htmlSha256) throw new Error("Persisted Report V4 enhancement HTML hash mismatch.");
+  } catch (error) {
+    await input.runtime.observer.observe({ ...started, phase: "failed" });
+    throw error;
   }
-  return html;
+  await input.runtime.observer.observe({
+    kind: "html_assembly",
+    operation: "enhancement_html",
+    unitId: input.artifactRevisionId,
+    attempt: 0,
+    phase: "completed",
+    details: { artifactRevisionId: input.artifactRevisionId, htmlSha256: persisted.htmlSha256 }
+  });
+  return persisted;
 }
 
 export async function observeReportV4EnhancementActivation<Result>(input: {
@@ -143,6 +159,11 @@ export async function observeReportV4RecoveredEnhancementActivation(input: {
   readonly htmlSha256: string;
 }): Promise<void> {
   if (input.activeArtifactRevisionId !== input.enhancementArtifactRevisionId) return;
+  if (input.runtime) {
+    const details = { artifactRevisionId: input.enhancementArtifactRevisionId, htmlSha256: input.htmlSha256 };
+    await input.runtime.observer.observe({ kind: "html_assembly", operation: "enhancement_html", unitId: input.enhancementArtifactRevisionId, attempt: 0, phase: "started", details });
+    await input.runtime.observer.observe({ kind: "html_assembly", operation: "enhancement_html", unitId: input.enhancementArtifactRevisionId, attempt: 0, phase: "completed", details });
+  }
   await observeActivationIdentity(input.runtime, input.enhancementArtifactRevisionId, input.htmlSha256);
 }
 

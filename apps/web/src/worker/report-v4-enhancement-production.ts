@@ -80,7 +80,7 @@ import { createReportV4AcceptanceFaultController } from "./report-v4-acceptance-
 import {
   observeReportV4EnhancementActivation,
   observeReportV4DiagnosisTerminalCheckpoint,
-  observeReportV4EnhancementHtml,
+  observeReportV4EnhancementHtmlPersistence,
   observeReportV4RecoveredEnhancementActivation,
   withReportV4EnhancementAcceptanceDiagnosisProvider,
   withReportV4EnhancementAcceptanceSourceAudit,
@@ -450,29 +450,28 @@ function createLiveStageDependencies(input: {
       signal?.throwIfAborted();
       return prepareReportV4DiagnosisEnhancement(identity, input.revisions);
     },
-    renderEnhancementHtml: input.acceptanceRuntime
-      ? ({ report, signal }) => observeReportV4EnhancementHtml({
-          runtime: input.acceptanceRuntime!,
-          artifactRevisionId: execution.stageInput.enhancementArtifactRevisionId,
-          render: () => renderReportV4Html({ stage: "enhancement", report, signal })
-        })
-      : ({ report, signal }) => renderReportV4Html({ stage: "enhancement", report, signal }),
+    renderEnhancementHtml: ({ report, signal }) => renderReportV4Html({ stage: "enhancement", report, signal }),
     async persistEnhancementArtifact({ report, html, signal }) {
       signal?.throwIfAborted();
-      const persisted = await persistReportV4ArtifactPayload({
-        report,
-        canonicalHtml: html,
+      const persist = () => persistReportV4ArtifactPayload({
+        report, canonicalHtml: html,
         artifactRevisionId: execution.stageInput.enhancementArtifactRevisionId,
-        reportId: execution.context.lineage.reportId,
-        orderId: execution.context.lineage.orderId,
-        jobId: execution.input.job.id,
-        coreJobId: execution.context.lineage.coreJobId,
+        reportId: execution.context.lineage.reportId, orderId: execution.context.lineage.orderId,
+        jobId: execution.input.job.id, coreJobId: execution.context.lineage.coreJobId,
         questionSetId: execution.context.lineage.questionSetId,
         configSnapshotId: execution.context.lineage.configSnapshotId,
         siteSnapshotId: execution.context.lineage.siteSnapshotId,
         revisionKind: "diagnosis_enhancement",
         sourceArtifactRevisionId: execution.context.lineage.coreArtifactRevisionId
       }, input.artifacts);
+      const persisted = input.acceptanceRuntime
+        ? await observeReportV4EnhancementHtmlPersistence({
+            runtime: input.acceptanceRuntime,
+            artifactRevisionId: execution.stageInput.enhancementArtifactRevisionId,
+            html,
+            persist
+          })
+        : await persist();
       signal?.throwIfAborted();
       return { payloadIdentityHash: persisted.payloadIdentityHash, htmlSha256: persisted.htmlSha256 };
     },

@@ -8,7 +8,7 @@ import { ReportV4DiagnosisProviderError, type ReportV4DiagnosisProvider } from "
 import { auditReportV4Sources, type ReportV4SourceAuditDependencies } from "./report-v4-source-audit";
 import {
   observeReportV4EnhancementActivation,
-  observeReportV4EnhancementHtml,
+  observeReportV4EnhancementHtmlPersistence,
   observeReportV4RecoveredEnhancementActivation,
   observeReportV4DiagnosisTerminalCheckpoint,
   withReportV4EnhancementAcceptanceDiagnosisProvider,
@@ -32,9 +32,10 @@ describe("Report V4 enhancement acceptance production wrappers", () => {
       provider, runtime: null, enhancementJobId: "enhancement-job", questionId: "q1", attempt: 1,
       baselineFingerprint: BASELINE
     })).toBe(provider);
-    await expect(observeReportV4EnhancementHtml({
-      runtime: null, artifactRevisionId: "enhancement-artifact", render: async () => "<html>original</html>"
-    })).resolves.toBe("<html>original</html>");
+    await expect(observeReportV4EnhancementHtmlPersistence({
+      runtime: null, artifactRevisionId: "enhancement-artifact", html: "<html>original</html>",
+      persist: async () => ({ htmlSha256: sha("<html>original</html>") })
+    })).resolves.toEqual({ htmlSha256: sha("<html>original</html>") });
     const activate = vi.fn(async () => undefined);
     await observeReportV4EnhancementActivation({
       runtime: null, artifactRevisionId: "enhancement-artifact", htmlSha256: sha("<html>original</html>"), activate
@@ -180,28 +181,62 @@ describe("Report V4 enhancement acceptance production wrappers", () => {
     expect(duplicateRuntime.observer.claimExternalIo).not.toHaveBeenCalled();
   });
 
-  it("observes actual enhancement HTML and activation identities once without URLs or secrets", async () => {
+  it("observes persisted enhancement HTML pair and activation identities without URLs or secrets", async () => {
     const runtime = runtimeFor("success");
     const html = "<html><body>Rendered report</body></html>";
-    const rendered = await observeReportV4EnhancementHtml({
-      runtime, artifactRevisionId: "enhancement-artifact", render: async () => html
+    const persist = vi.fn(async () => ({ htmlSha256: sha(html) }));
+    const persisted = await observeReportV4EnhancementHtmlPersistence({
+      runtime, artifactRevisionId: "enhancement-artifact", html, persist
     });
     const activate = vi.fn(async () => undefined);
     await observeReportV4EnhancementActivation({
       runtime, artifactRevisionId: "enhancement-artifact", htmlSha256: sha(html), activate
     });
 
-    expect(rendered).toBe(html);
+    expect(persisted.htmlSha256).toBe(sha(html));
     expect(activate).toHaveBeenCalledTimes(1);
     expect(runtime.observer.observe).toHaveBeenNthCalledWith(1, {
       kind: "html_assembly", operation: "enhancement_html", unitId: "enhancement-artifact", attempt: 0,
-      phase: "completed", details: { artifactRevisionId: "enhancement-artifact", htmlSha256: sha(html) }
+      phase: "started", details: { artifactRevisionId: "enhancement-artifact", htmlSha256: sha(html) }
     });
     expect(runtime.observer.observe).toHaveBeenNthCalledWith(2, {
+      kind: "html_assembly", operation: "enhancement_html", unitId: "enhancement-artifact", attempt: 0,
+      phase: "completed", details: { artifactRevisionId: "enhancement-artifact", htmlSha256: sha(html) }
+    });
+    expect(runtime.observer.observe).toHaveBeenNthCalledWith(3, {
       kind: "artifact_activation", operation: "artifact_activation", unitId: "enhancement-artifact", attempt: 0,
       phase: "observed", details: { artifactRevisionId: "enhancement-artifact", htmlSha256: sha(html) }
     });
     expect(JSON.stringify(vi.mocked(runtime.observer.observe).mock.calls)).not.toMatch(/https?:|secret|token/iu);
+  });
+
+  it("fails the pair on persist errors or hash mismatch and emits nothing when render fails upstream", async () => {
+    const runtime = runtimeFor("success");
+    const html = "<html>failure</html>";
+    await expect(observeReportV4EnhancementHtmlPersistence({
+      runtime, artifactRevisionId: "a", html, persist: async () => { throw new Error("persist failed"); }
+    })).rejects.toThrow("persist failed");
+    await expect(observeReportV4EnhancementHtmlPersistence({
+      runtime, artifactRevisionId: "b", html, persist: async () => ({ htmlSha256: "0".repeat(64) })
+    })).rejects.toThrow("hash mismatch");
+    expect(vi.mocked(runtime.observer.observe).mock.calls.map(([event]) => [event.unitId, event.phase])).toEqual([
+      ["a", "started"], ["a", "failed"], ["b", "started"], ["b", "failed"]
+    ]);
+    const renderRuntime = runtimeFor("success");
+    await expect((async () => { throw new Error("render failed"); })()).rejects.toThrow("render failed");
+    expect(renderRuntime.observer.observe).not.toHaveBeenCalled();
+  });
+
+  it("does not append failed when completed observation itself fails", async () => {
+    const runtime = runtimeFor("success");
+    const observe = vi.mocked(runtime.observer.observe);
+    observe.mockImplementationOnce(async event => ({ event, inserted: true }) as never)
+      .mockImplementationOnce(async () => { throw new Error("observer indeterminate"); });
+    const persist = vi.fn(async () => ({ htmlSha256: sha("<html>ok</html>"), payloadIdentityHash: "p" }));
+    await expect(observeReportV4EnhancementHtmlPersistence({ runtime, artifactRevisionId: "a", html: "<html>ok</html>", persist })).rejects.toThrow("observer indeterminate");
+    expect(persist).toHaveBeenCalledTimes(1);
+    expect(observe).toHaveBeenCalledTimes(2);
+    expect(observe.mock.calls.map(([event]) => event.phase)).toEqual(["started", "completed"]);
   });
 
   it("records stable opaque terminal diagnosis checkpoints for completed and failed states", async () => {
@@ -248,13 +283,15 @@ describe("Report V4 enhancement acceptance production wrappers", () => {
       activeArtifactRevisionId: "core-artifact"
     });
 
-    expect(runtime.observer.observe).toHaveBeenCalledTimes(2);
-    expect(runtime.observer.observe).toHaveBeenNthCalledWith(1, {
-      kind: "artifact_activation", operation: "artifact_activation", unitId: "enhancement-artifact", attempt: 0,
-      phase: "observed",
-      details: { artifactRevisionId: "enhancement-artifact", htmlSha256: "d".repeat(64) }
-    });
-    expect(runtime.observer.observe).toHaveBeenNthCalledWith(2, vi.mocked(runtime.observer.observe).mock.calls[0]![0]);
+    expect(runtime.observer.observe).toHaveBeenCalledTimes(6);
+    const events = vi.mocked(runtime.observer.observe).mock.calls.map(([event]) => event);
+    expect(events.map(event => event.kind + ":" + event.phase)).toEqual([
+      "html_assembly:started", "html_assembly:completed", "artifact_activation:observed",
+      "html_assembly:started", "html_assembly:completed", "artifact_activation:observed"
+    ]);
+    expect(events[0]!.details).toEqual(events[3]!.details);
+    expect(events[1]!.details).toEqual(events[4]!.details);
+    expect(events[2]!.details).toEqual(events[5]!.details);
   });
 });
 
