@@ -14,6 +14,7 @@ const INITIALIZE_FIELDS = new Set([
 ]);
 const CHECKPOINT_FIELDS = new Set(["ordinal", "questionId", "diagnosisInput"]);
 const SOURCE_AUDIT_FIELDS = new Set(["questionId", "sourceId", "canonicalUrl", "status", "summary"]);
+const MAX_DIAGNOSIS_INPUT_PAYLOAD_BYTES = 262_144;
 
 export type ReportV4DiagnosisCheckpointOrdinal = 1 | 2 | 3;
 export type ReportV4DiagnosisCheckpointState = "queued" | "running" | "completed" | "failed";
@@ -58,6 +59,7 @@ export interface ReportV4DiagnosisCheckpointRow extends ReportV4DiagnosisQuestio
   readonly identityHash: string;
   readonly state: ReportV4DiagnosisCheckpointState;
   readonly inputIdentityHash: string;
+  readonly diagnosisInputPayload: unknown;
   readonly providerCallCount: 0 | 1 | 2;
   readonly sourceAuditPayload: unknown;
   readonly diagnosisPayload: unknown | null;
@@ -68,6 +70,7 @@ export interface ReportV4DiagnosisCheckpoint extends ReportV4DiagnosisQuestionBi
   readonly identityHash: string;
   readonly state: ReportV4DiagnosisCheckpointState;
   readonly inputIdentityHash: string;
+  readonly diagnosisInput: ReportV4DiagnosisInput;
   readonly providerCallCount: 0 | 1 | 2;
   readonly sourceAudits: readonly ReportV4DiagnosisSourceAudit[];
   readonly diagnosis: ReportV4DiagnosisOutput | null;
@@ -117,6 +120,11 @@ export interface ReportV4DiagnosisCheckpointRepository {
   startAttempt(input: StartReportV4DiagnosisAttemptInput): Promise<ReportV4DiagnosisCheckpoint>;
   complete(input: CompleteReportV4DiagnosisInput): Promise<ReportV4DiagnosisCheckpoint>;
   markFailed(input: FailReportV4DiagnosisInput): Promise<ReportV4DiagnosisCheckpoint>;
+  loadTerminalRecovery(enhancementJobId: string): Promise<readonly [
+    ReportV4DiagnosisCheckpoint,
+    ReportV4DiagnosisCheckpoint,
+    ReportV4DiagnosisCheckpoint
+  ] | null>;
   loadForEnhancementComposition(input: InitializeReportV4DiagnosisCheckpointsInput): Promise<readonly [
     ReportV4DiagnosisCompositionItem,
     ReportV4DiagnosisCompositionItem,
@@ -172,6 +180,7 @@ export function createReportV4DiagnosisCheckpointRepository(
     startAttempt: (input) => startAttemptWithStore(input, store),
     complete: (input) => completeWithStore(input, store),
     markFailed: (input) => failWithStore(input, store),
+    loadTerminalRecovery: (enhancementJobId) => loadTerminalRecoveryWithStore(enhancementJobId, store),
     loadForEnhancementComposition: (input) => loadCompositionWithStore(input, store)
   };
 }
@@ -377,6 +386,29 @@ async function failWithStore(
   });
 }
 
+async function loadTerminalRecoveryWithStore(
+  enhancementJobIdValue: string,
+  store: ReportV4DiagnosisCheckpointStore
+): Promise<readonly [ReportV4DiagnosisCheckpoint, ReportV4DiagnosisCheckpoint, ReportV4DiagnosisCheckpoint] | null> {
+  const enhancementJobId = boundedText(enhancementJobIdValue, "enhancementJobId", 500);
+  return store.transaction(async (tx) => {
+    const rows = await tx.listByEnhancementJob(enhancementJobId);
+    if (rows.length === 0) return null;
+    if (rows.length !== 3) throw new Error("Partial V4 diagnosis checkpoint recovery is forbidden; exactly three rows are required.");
+    if (rows.some(({ state }) => state !== "completed" && state !== "failed")) return null;
+    const parsed = rows.map((row, index) => {
+      const checkpoint = parseRow(row);
+      if (checkpoint.enhancementJobId !== enhancementJobId || checkpoint.ordinal !== index + 1) {
+        throw new Error("Terminal V4 diagnosis checkpoint recovery order or lineage drift was detected.");
+      }
+      return checkpoint;
+    });
+    return deepFreeze(parsed) as unknown as readonly [
+      ReportV4DiagnosisCheckpoint, ReportV4DiagnosisCheckpoint, ReportV4DiagnosisCheckpoint
+    ];
+  });
+}
+
 async function loadCompositionWithStore(
   inputValue: InitializeReportV4DiagnosisCheckpointsInput,
   store: ReportV4DiagnosisCheckpointStore
@@ -445,6 +477,9 @@ function buildCandidates(inputValue: InitializeReportV4DiagnosisCheckpointsInput
     if (questionIds.has(questionId)) throw new TypeError("V4 diagnosis checkpoint questionId values must be unique; duplicate question detected.");
     questionIds.add(questionId);
     const diagnosisInput = parseReportV4DiagnosisInput(checkpoint.diagnosisInput);
+    if (Buffer.byteLength(stableJson(diagnosisInput), "utf8") > MAX_DIAGNOSIS_INPUT_PAYLOAD_BYTES) {
+      throw new TypeError("V4 diagnosis input payload exceeds its bounded size.");
+    }
     if (diagnosisInput.question.questionId !== questionId) {
       throw new TypeError("V4 diagnosis checkpoint question input does not match its exact questionId lineage.");
     }
@@ -461,6 +496,7 @@ function buildCandidates(inputValue: InitializeReportV4DiagnosisCheckpointsInput
         identityHash,
         state: "queued" as const,
         inputIdentityHash,
+        diagnosisInputPayload: diagnosisInput,
         providerCallCount: 0 as const,
         sourceAuditPayload: [],
         diagnosisPayload: null,
@@ -471,7 +507,7 @@ function buildCandidates(inputValue: InitializeReportV4DiagnosisCheckpointsInput
   return candidates as unknown as readonly [Candidate, Candidate, Candidate];
 }
 
-function parseRow(row: ReportV4DiagnosisCheckpointRow, input: ReportV4DiagnosisInput): ReportV4DiagnosisCheckpoint {
+function parseRow(row: ReportV4DiagnosisCheckpointRow, expectedInput?: ReportV4DiagnosisInput): ReportV4DiagnosisCheckpoint {
   const binding: ReportV4DiagnosisQuestionBinding = deepFreeze({
     reportId: boundedText(row.reportId, "checkpoint.reportId", 500),
     enhancementJobId: boundedText(row.enhancementJobId, "checkpoint.enhancementJobId", 500),
@@ -482,6 +518,13 @@ function parseRow(row: ReportV4DiagnosisCheckpointRow, input: ReportV4DiagnosisI
     questionId: boundedText(row.questionId, "checkpoint.questionId", 500),
     ordinal: diagnosisOrdinal(row.ordinal)
   });
+  const input = parseReportV4DiagnosisInput(jsonValue(row.diagnosisInputPayload));
+  if (Buffer.byteLength(stableJson(input), "utf8") > MAX_DIAGNOSIS_INPUT_PAYLOAD_BYTES) {
+    throw new Error("Persisted V4 diagnosis input payload exceeds its bounded size.");
+  }
+  if (expectedInput && stableJson(input) !== stableJson(expectedInput)) {
+    throw new Error("Persisted V4 diagnosis question/source/answer input payload drift was detected.");
+  }
   if (binding.questionId !== input.question.questionId) throw new Error("Persisted V4 diagnosis checkpoint question lineage drift was detected.");
   const identityHash = sha256(row.identityHash, "checkpoint.identityHash");
   const inputIdentityHash = sha256(row.inputIdentityHash, "checkpoint.inputIdentityHash");
@@ -509,7 +552,7 @@ function parseRow(row: ReportV4DiagnosisCheckpointRow, input: ReportV4DiagnosisI
     throw new Error("Failed V4 diagnosis checkpoint cannot retain diagnosis output.");
   }
   return deepFreeze({
-    ...binding, identityHash, state, inputIdentityHash, providerCallCount,
+    ...binding, identityHash, state, inputIdentityHash, diagnosisInput: input, providerCallCount,
     sourceAudits, diagnosis, diagnosisContentHash
   });
 }
@@ -517,6 +560,9 @@ function parseRow(row: ReportV4DiagnosisCheckpointRow, input: ReportV4DiagnosisI
 function assertExactCheckpoint(checkpoint: ReportV4DiagnosisCheckpoint, candidate: Candidate): void {
   if (checkpoint.identityHash !== candidate.identityHash || checkpoint.inputIdentityHash !== candidate.inputIdentityHash) {
     throw new Error("V4 diagnosis checkpoint immutable identity or idempotency drift was detected.");
+  }
+  if (stableJson(checkpoint.diagnosisInput) !== stableJson(candidate.input)) {
+    throw new Error("V4 diagnosis checkpoint immutable input payload drift was detected.");
   }
   for (const field of [
     "reportId", "enhancementJobId", "coreArtifactRevisionId", "configSnapshotId",
@@ -633,11 +679,11 @@ function postgresTransaction(sql: ReportV4DiagnosisCheckpointSql): ReportV4Diagn
         INSERT INTO report_v4_diagnosis_checkpoints (
           identity_hash,report_id,enhancement_job_id,core_artifact_revision_id,config_snapshot_id,
           question_set_id,question_id,snapshot_id,ordinal,state,input_identity_hash,provider_call_count,
-          source_audit_payload,diagnosis_payload,diagnosis_content_hash
+          diagnosis_input_payload,source_audit_payload,diagnosis_payload,diagnosis_content_hash
         ) VALUES (
           ${row.identityHash},${row.reportId},${row.enhancementJobId},${row.coreArtifactRevisionId},${row.configSnapshotId},
           ${row.questionSetId},${row.questionId},${row.snapshotId},${row.ordinal},'queued',${row.inputIdentityHash},0,
-          '[]'::jsonb,NULL,NULL
+          ${stableJson(row.diagnosisInputPayload)}::text::jsonb,'[]'::jsonb,NULL,NULL
         ) ON CONFLICT (identity_hash) DO NOTHING
       `;
     },
@@ -686,6 +732,7 @@ function postgresRow(row: Record<string, unknown>): ReportV4DiagnosisCheckpointR
     ordinal: Number(row.ordinal) as ReportV4DiagnosisCheckpointOrdinal,
     state: String(row.state) as ReportV4DiagnosisCheckpointState,
     inputIdentityHash: String(row.input_identity_hash),
+    diagnosisInputPayload: row.diagnosis_input_payload,
     providerCallCount: Number(row.provider_call_count) as 0 | 1 | 2,
     sourceAuditPayload: row.source_audit_payload,
     diagnosisPayload: row.diagnosis_payload,

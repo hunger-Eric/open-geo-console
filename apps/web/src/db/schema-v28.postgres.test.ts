@@ -3,7 +3,7 @@ import { getTableConfig } from "drizzle-orm/pg-core";
 import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V28_DATABASE_MIGRATIONS } from "./migrations";
 import { paymentOrders, scanJobs } from "./schema";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
@@ -14,8 +14,8 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-LEGACY-01
 describe("schema v28 V4 pre-admission site snapshot binding", () => {
   it("adds nullable report-bound terminal snapshot references to orders and jobs", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(32);
-    const sql = databaseMigrationsAfter(27).join("\n");
+    expect(DATABASE_SCHEMA_VERSION).toBe(34);
+    const sql = V28_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS site_snapshot_id text");
     expect(sql).toContain("ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS site_snapshot_id text");
     expect(sql).toContain("payment_orders_site_snapshot_fkey");
@@ -32,7 +32,7 @@ describe("schema v28 V4 pre-admission site snapshot binding", () => {
     expect(sql).toContain("NEW.artifact_contract IS DISTINCT FROM 'combined_geo_report_v4'");
     expect(sql).not.toContain("FOR UPDATE");
     expect(sql).not.toMatch(/site_snapshot_id text NOT NULL/u);
-    expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining(databaseMigrationsAfter(27)));
+    expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining([...V28_DATABASE_MIGRATIONS]));
 
     const scanJobConfig = getTableConfig(scanJobs);
     expect(scanJobConfig.indexes.find(({ config }) => config.name === "scan_jobs_site_snapshot_binding_uidx"))

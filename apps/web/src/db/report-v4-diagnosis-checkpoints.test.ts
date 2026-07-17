@@ -19,9 +19,9 @@ describe("V4 diagnosis checkpoint repository", () => {
       { ...exact, configSnapshotId: "wrong-config" },
       { ...exact, snapshotId: "wrong-snapshot" },
       { ...exact, questionSetId: "wrong-question-set" },
-      { ...exact, checkpoints: exact.checkpoints.map((checkpoint, index) => index === 0 ? { ...checkpoint, questionId: "wrong-question" } : checkpoint) }
+      { ...exact, checkpoints: exact.checkpoints.map((checkpoint, index) => index === 0 ? { ...checkpoint, questionId: "wrong-question" } : checkpoint) as unknown as InitializeReportV4DiagnosisCheckpointsInput["checkpoints"] }
     ]) {
-      await expect(repository().initialize(changed)).rejects.toThrow(/exact|binding|lineage/i);
+      await expect(repository().initialize(changed as InitializeReportV4DiagnosisCheckpointsInput)).rejects.toThrow(/exact|binding|lineage/i);
     }
   });
 
@@ -32,13 +32,13 @@ describe("V4 diagnosis checkpoint repository", () => {
       ...exact,
       checkpoints: exact.checkpoints.map((checkpoint, index) => index === 0
         ? { ...checkpoint, diagnosisInput: { ...diagnosisInput(1), answer: undefined } }
-        : checkpoint)
+        : checkpoint) as unknown as InitializeReportV4DiagnosisCheckpointsInput["checkpoints"]
     })).rejects.toThrow(/answer/i);
     await expect(repo.initialize({
       ...exact,
       checkpoints: exact.checkpoints.map((checkpoint, index) => index === 0
         ? { ...checkpoint, diagnosisInput: { ...diagnosisInput(1), rawPrompt: "secret" } }
-        : checkpoint)
+        : checkpoint) as unknown as InitializeReportV4DiagnosisCheckpointsInput["checkpoints"]
     })).rejects.toThrow(/unknown field rawPrompt/i);
 
     const initialized = await repo.initialize(exact);
@@ -63,12 +63,13 @@ describe("V4 diagnosis checkpoint repository", () => {
     expect(first.map(({ ordinal, state }) => ({ ordinal, state }))).toEqual([
       { ordinal: 1, state: "queued" }, { ordinal: 2, state: "queued" }, { ordinal: 3, state: "queued" }
     ]);
+    expect(first[0].diagnosisInput).toEqual(diagnosisInput(1));
     expect(await repo.initialize(exact)).toEqual(first);
     await expect(repo.initialize({
       ...exact,
       checkpoints: exact.checkpoints.map((checkpoint, index) => index === 1
         ? { ...checkpoint, diagnosisInput: { ...diagnosisInput(2), answer: "different exact answer" } }
-        : checkpoint)
+        : checkpoint) as unknown as InitializeReportV4DiagnosisCheckpointsInput["checkpoints"]
     })).rejects.toThrow(/identity|idempotency|drift/i);
     await expect(repo.initialize({
       ...exact,
@@ -118,6 +119,10 @@ describe("V4 diagnosis checkpoint repository", () => {
     expect(loaded[1].diagnosis).toBeNull();
     expect(loaded[2].diagnosis).toEqual(diagnosis(3));
     expect(Object.isFrozen(loaded)).toBe(true);
+    const recovered = await repo.loadTerminalRecovery("enhancement-job-1");
+    expect(recovered?.map(({ state }) => state)).toEqual(["completed", "failed", "completed"]);
+    expect(recovered?.[0].diagnosisInput).toEqual(diagnosisInput(1));
+    expect(Object.isFrozen(recovered?.[0].diagnosisInput)).toBe(true);
 
     const exact = await repo.complete({
       identityHash: checkpoints[0]!.identityHash, providerCallCount: 1,
@@ -181,7 +186,7 @@ function initialization(): InitializeReportV4DiagnosisCheckpointsInput {
       ordinal: ordinal as 1 | 2 | 3,
       questionId: `question-${ordinal}`,
       diagnosisInput: diagnosisInput(ordinal as 1 | 2 | 3)
-    })) as InitializeReportV4DiagnosisCheckpointsInput["checkpoints"]
+    })) as unknown as InitializeReportV4DiagnosisCheckpointsInput["checkpoints"]
   };
 }
 

@@ -2971,6 +2971,52 @@ export const V33_DATABASE_MIGRATIONS = [
   `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_website_synthesis_checkpoint_core_uidx ON report_v4_website_synthesis_checkpoints(core_job_id)`
 ] as const;
 
+export const V34_DATABASE_MIGRATIONS = [
+  `ALTER TABLE report_v4_diagnosis_checkpoints ADD COLUMN IF NOT EXISTS diagnosis_input_payload jsonb`,
+  `DO $$ BEGIN
+     IF EXISTS(SELECT 1 FROM report_v4_diagnosis_checkpoints WHERE diagnosis_input_payload IS NULL) THEN
+       RAISE EXCEPTION 'Existing V4 diagnosis checkpoints cannot be upgraded without their immutable diagnosis input payload.';
+     END IF;
+   END $$`,
+  `ALTER TABLE report_v4_diagnosis_checkpoints ALTER COLUMN diagnosis_input_payload SET NOT NULL`,
+  `ALTER TABLE report_v4_diagnosis_checkpoints DROP CONSTRAINT IF EXISTS report_v4_diagnosis_checkpoints_input_payload_check`,
+  `ALTER TABLE report_v4_diagnosis_checkpoints ADD CONSTRAINT report_v4_diagnosis_checkpoints_input_payload_check
+     CHECK(jsonb_typeof(diagnosis_input_payload)='object' AND octet_length(diagnosis_input_payload::text)<=262144)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_diagnosis_checkpoint_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP='DELETE' THEN
+       RAISE EXCEPTION 'A V4 diagnosis checkpoint is immutable and cannot be deleted.';
+     END IF;
+     IF NEW.identity_hash IS DISTINCT FROM OLD.identity_hash
+       OR NEW.report_id IS DISTINCT FROM OLD.report_id
+       OR NEW.enhancement_job_id IS DISTINCT FROM OLD.enhancement_job_id
+       OR NEW.core_artifact_revision_id IS DISTINCT FROM OLD.core_artifact_revision_id
+       OR NEW.config_snapshot_id IS DISTINCT FROM OLD.config_snapshot_id
+       OR NEW.question_set_id IS DISTINCT FROM OLD.question_set_id
+       OR NEW.question_id IS DISTINCT FROM OLD.question_id
+       OR NEW.snapshot_id IS DISTINCT FROM OLD.snapshot_id
+       OR NEW.ordinal IS DISTINCT FROM OLD.ordinal
+       OR NEW.input_identity_hash IS DISTINCT FROM OLD.input_identity_hash
+       OR NEW.diagnosis_input_payload IS DISTINCT FROM OLD.diagnosis_input_payload THEN
+       RAISE EXCEPTION 'A V4 diagnosis checkpoint identity is immutable.';
+     END IF;
+     IF OLD.state IN ('completed','failed') THEN
+       RAISE EXCEPTION 'A terminal V4 diagnosis checkpoint is immutable.';
+     END IF;
+     IF NEW.provider_call_count < OLD.provider_call_count
+       OR NEW.provider_call_count > OLD.provider_call_count + 1 THEN
+       RAISE EXCEPTION 'A V4 diagnosis provider call count may advance by at most one.';
+     END IF;
+     IF NEW.state <> OLD.state AND NOT (
+       (OLD.state='queued' AND NEW.state IN ('running','failed'))
+       OR (OLD.state='running' AND NEW.state IN ('completed','failed'))
+     ) THEN
+       RAISE EXCEPTION 'The V4 diagnosis checkpoint state transition is invalid.';
+     END IF;
+     RETURN NEW;
+   END $$`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -2996,7 +3042,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 30, migrations: V30_DATABASE_MIGRATIONS },
   { version: 31, migrations: V31_DATABASE_MIGRATIONS },
   { version: 32, migrations: V32_DATABASE_MIGRATIONS },
-  { version: 33, migrations: V33_DATABASE_MIGRATIONS }
+  { version: 33, migrations: V33_DATABASE_MIGRATIONS },
+  { version: 34, migrations: V34_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

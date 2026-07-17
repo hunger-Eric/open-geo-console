@@ -2,7 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V31_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import {
+  DATABASE_MIGRATIONS,
+  V31_DATABASE_MIGRATIONS,
+  V32_DATABASE_MIGRATIONS,
+  V33_DATABASE_MIGRATIONS,
+  V34_DATABASE_MIGRATIONS,
+  databaseMigrationsAfter
+} from "./migrations";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const describeDisposablePostgres = adminUrl ? describe : describe.skip;
@@ -12,7 +19,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-TOKEN-02
 describe("schema v31 retained V4 snapshot text", () => {
   it("registers an additive bounded private retained-text column", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(32);
+    expect(DATABASE_SCHEMA_VERSION).toBe(34);
     expect(databaseMigrationsAfter(30)).toEqual(expect.arrayContaining([...V31_DATABASE_MIGRATIONS]));
     const sql = V31_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("retained_cleaned_text text");
@@ -31,7 +38,14 @@ describeDisposablePostgres("schema v31 retained V4 snapshot text PostgreSQL cons
   beforeAll(async () => {
     await admin.unsafe(`CREATE DATABASE ${quote(databaseName)}`);
     sql = postgres(withDatabase(adminUrl!, databaseName), { max: 1, prepare: false });
-    const v30 = DATABASE_MIGRATIONS.slice(0, DATABASE_MIGRATIONS.length - V31_DATABASE_MIGRATIONS.length);
+    const v30 = DATABASE_MIGRATIONS.slice(
+      0,
+      DATABASE_MIGRATIONS.length
+        - V31_DATABASE_MIGRATIONS.length
+        - V32_DATABASE_MIGRATIONS.length
+        - V33_DATABASE_MIGRATIONS.length
+        - V34_DATABASE_MIGRATIONS.length
+    );
     await sql.begin(async (tx) => {
       for (const statement of v30) await tx.unsafe(statement);
     });

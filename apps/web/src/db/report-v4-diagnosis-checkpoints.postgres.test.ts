@@ -39,15 +39,20 @@ describeDisposablePostgres("V4 diagnosis checkpoint repository PostgreSQL parity
     const [left, right] = await Promise.all([repository.initialize(exact), repository.initialize(exact)]);
     expect(left).toEqual(right);
     expect(left).toHaveLength(3);
+    expect(left[0].diagnosisInput).toEqual(diagnosisInput(1));
     expect(await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM report_v4_diagnosis_checkpoints`)
       .toEqual([{ count: 3 }]);
+    await expect(sql`UPDATE report_v4_diagnosis_checkpoints
+      SET diagnosis_input_payload=diagnosis_input_payload || '{"locale":"drift"}'::jsonb
+      WHERE enhancement_job_id='enhancement-job-1' AND ordinal=1`)
+      .rejects.toThrow(/identity.*immutable/i);
     await expect(repository.initialize({ ...exact, snapshotId: "missing-snapshot" }))
       .rejects.toThrow(/exact|binding|lineage/i);
     await expect(repository.initialize({
       ...exact,
       checkpoints: exact.checkpoints.map((checkpoint, index) => index === 0
         ? { ...checkpoint, diagnosisInput: { ...diagnosisInput(1), answer: "drift" } }
-        : checkpoint) as InitializeReportV4DiagnosisCheckpointsInput["checkpoints"]
+        : checkpoint) as unknown as InitializeReportV4DiagnosisCheckpointsInput["checkpoints"]
     })).rejects.toThrow(/identity|idempotency|drift/i);
   }, 120_000);
 
@@ -63,6 +68,10 @@ describeDisposablePostgres("V4 diagnosis checkpoint repository PostgreSQL parity
     const [left, right] = await Promise.all([repository.startAttempt(attempt), repository.startAttempt(attempt)]);
     expect(left).toEqual(right);
     expect(left.providerCallCount).toBe(1);
+    await expect(sql`UPDATE report_v4_diagnosis_checkpoints
+      SET diagnosis_input_payload=diagnosis_input_payload || '{"locale":"drift"}'::jsonb
+      WHERE identity_hash=${checkpoints[0]!.identityHash}`)
+      .rejects.toThrow(/identity.*immutable/i);
     await repository.complete({
       identityHash: checkpoints[0]!.identityHash, providerCallCount: 1,
       diagnosisInput: diagnosisInput(1), diagnosis: diagnosis(1)
@@ -104,6 +113,9 @@ describeDisposablePostgres("V4 diagnosis checkpoint repository PostgreSQL parity
     expect(composition[0]!.diagnosis).toEqual(diagnosis(1));
     expect(composition[1]!.diagnosis).toBeNull();
     expect(Object.isFrozen(composition[2]!.diagnosis!.observableFactors)).toBe(true);
+    const recovery = await repository.loadTerminalRecovery("enhancement-job-1");
+    expect(recovery?.map(({ state }) => state)).toEqual(["completed", "failed", "completed"]);
+    expect(recovery?.[2].diagnosisInput).toEqual(diagnosisInput(3));
     await expect(repository.complete({
       identityHash: checkpoints[0]!.identityHash, providerCallCount: 1,
       diagnosisInput: diagnosisInput(1), diagnosis: { ...diagnosis(1), targetGap: "terminal drift" }
@@ -181,7 +193,7 @@ function initialization(): InitializeReportV4DiagnosisCheckpointsInput {
     checkpoints: [1, 2, 3].map((ordinal) => ({
       ordinal: ordinal as 1 | 2 | 3, questionId: `question-${ordinal}`,
       diagnosisInput: diagnosisInput(ordinal as 1 | 2 | 3)
-    })) as InitializeReportV4DiagnosisCheckpointsInput["checkpoints"]
+    })) as unknown as InitializeReportV4DiagnosisCheckpointsInput["checkpoints"]
   };
 }
 

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V27_DATABASE_MIGRATIONS } from "./migrations";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const describeDisposablePostgres = adminUrl ? describe : describe.skip;
@@ -13,8 +13,8 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-DELIVERY-01
 describe("schema v27 V4 immutable runtime configuration substrate", () => {
   it("adds isolated immutable snapshots and nullable historical-compatible artifact binding", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(32);
-    const sql = databaseMigrationsAfter(26).join("\n");
+    expect(DATABASE_SCHEMA_VERSION).toBe(34);
+    const sql = V27_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_config_snapshots");
     expect(sql).toContain("model_profile_payload jsonb NOT NULL");
     expect(sql).toContain("id = 'v4-config-' || identity_hash");
@@ -34,7 +34,7 @@ describe("schema v27 V4 immutable runtime configuration substrate", () => {
     expect(sql).toContain("report_artifact_revisions_config_snapshot_fkey");
     expect(sql).toContain("same configuration snapshot");
     expect(sql).not.toMatch(/config_snapshot_id text NOT NULL/u);
-    expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining(databaseMigrationsAfter(26)));
+    expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining([...V27_DATABASE_MIGRATIONS]));
   });
 });
 

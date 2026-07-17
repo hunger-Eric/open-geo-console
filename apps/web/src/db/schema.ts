@@ -1420,6 +1420,7 @@ export const reportV4DiagnosisCheckpoints = pgTable(
     ordinal: integer("ordinal").notNull(),
     state: text("state").$type<ReportV4DiagnosisCheckpointState>().notNull(),
     inputIdentityHash: text("input_identity_hash").notNull(),
+    diagnosisInputPayload: jsonb("diagnosis_input_payload").$type<Record<string, unknown>>().notNull(),
     providerCallCount: integer("provider_call_count").notNull().default(0),
     sourceAuditPayload: jsonb("source_audit_payload").$type<unknown[]>().notNull().default([]),
     diagnosisPayload: jsonb("diagnosis_payload").$type<Record<string, unknown>>(),
@@ -1453,6 +1454,7 @@ export const reportV4DiagnosisCheckpoints = pgTable(
     check("report_v4_diagnosis_checkpoints_ordinal_check", sql`${table.ordinal} BETWEEN 1 AND 3`),
     check("report_v4_diagnosis_checkpoints_state_check", sql`${table.state} IN ('queued','running','completed','failed')`),
     check("report_v4_diagnosis_checkpoints_hash_check", sql`${table.identityHash} ~ '^[a-f0-9]{64}$' AND ${table.inputIdentityHash} ~ '^[a-f0-9]{64}$' AND (${table.diagnosisContentHash} IS NULL OR ${table.diagnosisContentHash} ~ '^[a-f0-9]{64}$')`),
+    check("report_v4_diagnosis_checkpoints_input_payload_check", sql`jsonb_typeof(${table.diagnosisInputPayload})='object' AND octet_length(${table.diagnosisInputPayload}::text)<=262144`),
     check("report_v4_diagnosis_checkpoints_call_count_check", sql`${table.providerCallCount} BETWEEN 0 AND 2`),
     check("report_v4_diagnosis_checkpoints_source_audit_check", sql`ogc_report_v4_source_audit_payload_valid(${table.sourceAuditPayload},${table.questionId})`),
     check("report_v4_diagnosis_checkpoints_payload_check", sql`(${table.diagnosisPayload} IS NULL OR ogc_report_v4_diagnosis_payload_valid(${table.diagnosisPayload})) AND ((${table.state}='queued' AND ${table.providerCallCount}=0 AND jsonb_array_length(${table.sourceAuditPayload})=0 AND ${table.diagnosisPayload} IS NULL AND ${table.diagnosisContentHash} IS NULL) OR (${table.state}='running' AND ${table.diagnosisPayload} IS NULL AND ${table.diagnosisContentHash} IS NULL) OR (${table.state}='completed' AND ${table.providerCallCount} BETWEEN 1 AND 2 AND ${table.diagnosisPayload} IS NOT NULL AND ${table.diagnosisContentHash} IS NOT NULL) OR (${table.state}='failed' AND ${table.diagnosisPayload} IS NULL AND ${table.diagnosisContentHash} IS NULL))`)

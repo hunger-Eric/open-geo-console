@@ -88,6 +88,8 @@ import {
   type ReportV4PreAdmissionRunner
 } from "./report-v4-pre-admission";
 import { createProductionReportV4AdmissionRunner } from "./report-v4-admission-production";
+import { createReportV4CoreProduction } from "./report-v4-core-production";
+import { createReportV4EnhancementProduction } from "./report-v4-enhancement-production";
 
 interface StoredPageEvidence {
   page: ExtractedPage;
@@ -122,9 +124,28 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
   technicalCompleted?: boolean;
 }
 
+export type ReportV4ProductionTarget = "core" | "enhancement";
+
+export interface ReportV4ProductionRunnerInput {
+  readonly job: ScanJobRow;
+  readonly workerId: string;
+  readonly signal: AbortSignal;
+  readonly remainingMs: () => number;
+  readonly checkpointJob: (input: CheckpointScanJobInput) => Promise<ScanJobRow>;
+}
+
+export type ReportV4ProductionRunner = (input: ReportV4ProductionRunnerInput) => Promise<void>;
+
+export interface ReportV4ProductionRunners {
+  readonly reportV4CoreRunner?: ReportV4ProductionRunner;
+  readonly reportV4EnhancementRunner?: ReportV4ProductionRunner;
+}
+
 export async function processScanJob(job: ScanJobRow, workerId: string, options: {
   liveDrill?: StagingLiveDrill;
   reportV4PreAdmissionRunner?: ReportV4PreAdmissionRunner;
+  reportV4CoreRunner?: ReportV4ProductionRunner;
+  reportV4EnhancementRunner?: ReportV4ProductionRunner;
 } = {}): Promise<void> {
   const execution = new JobExecutionLease({
     hardDeadlineMs: configuredJobHardDeadlineMs(),
@@ -147,6 +168,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     await checkpointJob({ stage, progress, checkpoint: nextCheckpoint as JobCheckpoint, ...coverage });
   };
   let checkpoint = normalizeCheckpoint(job.checkpoint);
+  let reportV4ProductionTarget: ReportV4ProductionTarget | null = null;
+  let reportV4ProductionRoutingAttempted = false;
   try {
     const reportV4PreAdmissionRunner = selectReportV4PreAdmissionRunner(
       job,
@@ -161,6 +184,30 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       runner: reportV4PreAdmissionRunner,
       terminalizeJob: terminalizeScanJob
     })) return;
+    reportV4ProductionRoutingAttempted = hasReportV4ProductionMarker(job);
+    reportV4ProductionTarget = resolveReportV4ProductionTarget(job);
+    if (reportV4ProductionTarget) {
+      const configuredRunner = reportV4ProductionTarget === "core"
+        ? options.reportV4CoreRunner
+        : options.reportV4EnhancementRunner;
+      const selectedRunner = configuredRunner ?? createDefaultReportV4ProductionRunner(reportV4ProductionTarget, process.env);
+      await dispatchReportV4ProductionJob(reportV4ProductionTarget, {
+        job,
+        workerId,
+        signal: execution.controller.signal,
+        remainingMs: () => execution.remainingMs(),
+        checkpointJob
+      }, {
+        ...options,
+        ...(reportV4ProductionTarget === "core"
+          ? { reportV4CoreRunner: selectedRunner }
+          : {}),
+        ...(reportV4ProductionTarget === "enhancement"
+          ? { reportV4EnhancementRunner: selectedRunner }
+          : {})
+      });
+      return;
+    }
     const fulfillmentTarget = resolveRecommendationFulfillmentTarget(job);
     if (fulfillmentTarget === "recommendation_v1") throw new HistoricalRecommendationRuntimeRetiredError();
     // Retention cleanup is housekeeping, not a prerequisite for a paid
@@ -559,6 +606,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       console.error("AI report validation issues:", error.issues);
     }
     const currentJob = await getScanJob(job.id);
+    if (reportV4ProductionRoutingAttempted && isTerminalScanJob(currentJob)) return;
+    // V4 owns its atomic artifact/commerce terminalization. A non-terminal
+    // runner error must preserve the lease/recovery state and must never fall
+    // through to the legacy generic failure or commercial-outcome paths.
+    if (reportV4ProductionRoutingAttempted) throw error;
     const phase = currentJob?.currentPhase ?? phaseForStage(currentJob?.stage ?? job.stage);
     const normalized = normalizeJobError(error, {
       jobId: job.id, phase, phaseAttempt: currentJob?.phaseAttempt ?? job.phaseAttempt ?? 0,
@@ -580,7 +632,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         });
       }
     }
-    if (job.tier === "deep" && job.reason !== "v4_pre_admission" && failedJob.stage === "failed" && !["paid_report_correction","staging_artifact_refresh","replacement_fulfillment"].includes(job.reason)) {
+    if (!reportV4ProductionRoutingAttempted && job.tier === "deep" && job.reason !== "v4_pre_admission" && failedJob.stage === "failed" && !["paid_report_correction","staging_artifact_refresh","replacement_fulfillment"].includes(job.reason)) {
       await recordCommercialOutcomeSafely(job.id, "failed");
     }
     if (job.reason === "replacement_fulfillment") await syncReplacementExecutionState(job.id, failedJob.executionState);
@@ -588,6 +640,59 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
   } finally {
     execution.stop();
   }
+}
+
+export function resolveReportV4ProductionTarget(job: Pick<ScanJobRow,
+  "tier" | "productContract" | "fulfillmentMethodology" | "recommendationReportVersion" | "artifactContract" |
+  "businessQuestionSetId" | "correctionId" | "replacementFulfillmentId" | "reason" | "siteSnapshotId" | "creditReservationId"
+>): ReportV4ProductionTarget | null {
+  if (!hasReportV4ProductionMarker(job)) return null;
+  if (job.tier !== "deep" || job.productContract !== "recommendation_forensics_v1" ||
+      job.fulfillmentMethodology !== "two_stage_geo_report_v4" || job.recommendationReportVersion !== 4 ||
+      job.artifactContract !== "combined_geo_report_v4" || !job.businessQuestionSetId?.trim() ||
+      job.correctionId !== null || job.replacementFulfillmentId !== null) {
+    throw new Error("The claimed Report V4 production routing lineage is incomplete or mixed.");
+  }
+  if (job.reason === "standard" && job.siteSnapshotId?.trim() && job.creditReservationId?.trim()) return "core";
+  if (job.reason === "v4_diagnosis_enhancement" && job.siteSnapshotId === null && job.creditReservationId === null) return "enhancement";
+  throw new Error("The claimed Report V4 production job does not match one exact core or enhancement lane.");
+}
+
+export function hasReportV4ProductionMarker(job: Pick<ScanJobRow,
+  "fulfillmentMethodology" | "recommendationReportVersion" | "artifactContract" | "reason"
+>): boolean {
+  return job.fulfillmentMethodology === "two_stage_geo_report_v4" || job.recommendationReportVersion === 4 ||
+    job.artifactContract === "combined_geo_report_v4" || job.reason === "v4_diagnosis_enhancement";
+}
+
+export async function dispatchReportV4ProductionJob(
+  target: ReportV4ProductionTarget,
+  input: ReportV4ProductionRunnerInput,
+  runners: ReportV4ProductionRunners
+): Promise<void> {
+  const runner = target === "core" ? runners.reportV4CoreRunner : runners.reportV4EnhancementRunner;
+  if (!runner) throw new Error(`The production Report V4 ${target} runner is not configured.`);
+  await runner(input);
+}
+
+export function createDefaultReportV4ProductionRunner(
+  target: ReportV4ProductionTarget,
+  environment: NodeJS.ProcessEnv
+): ReportV4ProductionRunner {
+  if (target === "core") {
+    const run = createReportV4CoreProduction({ environment });
+    return async ({ job, workerId, signal, remainingMs }) => {
+      await run({ coreJobId: job.id, workerId, leaseMs: Math.max(1, remainingMs()), signal });
+    };
+  }
+  const run = createReportV4EnhancementProduction({ environment });
+  return async ({ job, workerId, signal }) => {
+    await run({ job, workerId, signal });
+  };
+}
+
+export function isTerminalScanJob(job: ScanJobRow | null): boolean {
+  return Boolean(job && (job.stage === "completed" || job.stage === "completed_limited" || job.stage === "failed"));
 }
 
 export function selectReportV4PreAdmissionRunner(
