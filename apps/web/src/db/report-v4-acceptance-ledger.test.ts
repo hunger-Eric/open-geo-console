@@ -59,6 +59,21 @@ describe("Report V4 protected-Staging acceptance ledger validation", () => {
     } as never)).rejects.toThrow(/details|field|prompt/i);
     expect(store.appendEvent).not.toHaveBeenCalled();
   });
+
+  it("accepts every canonical prohibited operation including the V37 expansion", async () => {
+    const store = fakeStore();
+    const repository = createReportV4AcceptanceLedgerRepository(store, protectedEnvironment);
+    for (const operation of ["pdf", "provider_claim", "qualification", "four_snapshot", "replacement_fulfillment",
+      "correction", "full_report_rerun", "legacy_mutation"] as const) {
+      await repository.appendEvent({ sessionId: session().sessionId, scenarioId: "22222222-2222-4222-8222-222222222222",
+        kind: "prohibited_operation", operation, unitId: operation, attempt: 0, phase: "started", details: {} });
+    }
+    expect(store.appendEvent).toHaveBeenCalledTimes(8);
+    await expect(repository.appendEvent({ sessionId: session().sessionId,
+      scenarioId: "22222222-2222-4222-8222-222222222222", kind: "prohibited_operation",
+      operation: "unknown", unitId: "unknown", attempt: 0, phase: "started", details: {} } as never))
+      .rejects.toThrow(/kind, operation, phase/u);
+  });
 });
 
 function session() {

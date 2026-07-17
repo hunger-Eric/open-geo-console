@@ -2,15 +2,15 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V34_DATABASE_MIGRATIONS, V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V34_DATABASE_MIGRATIONS, V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const suite = adminUrl ? describe : describe.skip;
 
 describe("schema V34 immutable diagnosis input payload", () => {
   it("registers one forward-only bounded payload migration after V33", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(36);
-    expect(databaseMigrationsAfter(33)).toEqual([...V34_DATABASE_MIGRATIONS, ...V35_DATABASE_MIGRATIONS, ...V36_DATABASE_MIGRATIONS]);
+    expect(DATABASE_SCHEMA_VERSION).toBe(37);
+    expect(databaseMigrationsAfter(33)).toEqual([...V34_DATABASE_MIGRATIONS, ...V35_DATABASE_MIGRATIONS, ...V36_DATABASE_MIGRATIONS, ...V37_DATABASE_MIGRATIONS]);
     const source = V34_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("diagnosis_input_payload jsonb");
     expect(source).toContain("ALTER COLUMN diagnosis_input_payload SET NOT NULL");

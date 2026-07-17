@@ -10,6 +10,7 @@ import {
   V34_DATABASE_MIGRATIONS,
   V35_DATABASE_MIGRATIONS,
   V36_DATABASE_MIGRATIONS,
+  V37_DATABASE_MIGRATIONS,
   databaseMigrationsAfter
 } from "./migrations";
 
@@ -26,13 +27,14 @@ const chunks = [{
 // @requirement GEO-V4-TOKEN-02
 describe("schema v32 terminal V4 page-summary binding", () => {
   it("registers V32 trigger hardening in the forward steps after V31", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(36);
+    expect(DATABASE_SCHEMA_VERSION).toBe(37);
     expect(databaseMigrationsAfter(31)).toEqual([
       ...V32_DATABASE_MIGRATIONS,
       ...V33_DATABASE_MIGRATIONS,
       ...V34_DATABASE_MIGRATIONS,
       ...V35_DATABASE_MIGRATIONS,
-      ...V36_DATABASE_MIGRATIONS
+      ...V36_DATABASE_MIGRATIONS,
+      ...V37_DATABASE_MIGRATIONS
     ]);
     const sql = V32_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("ogc_js_source_location_length");
@@ -60,6 +62,7 @@ describeDisposablePostgres("schema V31 to V32 page-summary migration", () => {
         - V34_DATABASE_MIGRATIONS.length
         - V35_DATABASE_MIGRATIONS.length
         - V36_DATABASE_MIGRATIONS.length
+        - V37_DATABASE_MIGRATIONS.length
     );
     await sql.begin(async (tx) => { for (const statement of throughV30) await tx.unsafe(statement); });
     await seedLegacyV30(sql);

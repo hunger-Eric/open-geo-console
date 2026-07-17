@@ -121,7 +121,7 @@ export type AppendReportV4AcceptanceEventInput = {
   | { readonly kind: "fault_injection"; readonly operation: ReportV4AcceptanceFaultKind; readonly phase: "consumed"; readonly details: { readonly fault: ReportV4AcceptanceFaultKind; readonly occurrence: 1 | 2; readonly baselineFingerprint: string } }
   | { readonly kind: "checkpoint_terminal"; readonly operation: "question_answer" | "source_diagnosis"; readonly phase: "observed"; readonly details: { readonly checkpointHash: string; readonly state: "answered" | "unavailable" | "completed" | "failed" } }
   | { readonly kind: "v4_dispatch"; readonly operation: "v4_dispatch"; readonly phase: "observed"; readonly details: Record<string, never> }
-  | { readonly kind: "prohibited_operation"; readonly operation: "pdf" | "provider_claim" | "qualification" | "four_snapshot" | "replacement_fulfillment"; readonly phase: "started"; readonly details: Record<string, never> }
+  | { readonly kind: "prohibited_operation"; readonly operation: "pdf" | "provider_claim" | "qualification" | "four_snapshot" | "replacement_fulfillment" | "correction" | "full_report_rerun" | "legacy_mutation"; readonly phase: "started"; readonly details: Record<string, never> }
   | { readonly kind: "artifact_activation"; readonly operation: "artifact_activation"; readonly phase: "observed"; readonly details: { readonly artifactRevisionId: string; readonly htmlSha256: string } }
   | { readonly kind: "commerce_fingerprint"; readonly operation: "commerce"; readonly phase: "observed"; readonly details: { readonly fingerprint: string } }
 );
@@ -480,7 +480,7 @@ function parseEventDetails(kind: ReportV4AcceptanceEventKind, operation: ReportV
     const d = record(["checkpointHash", "state"]); if (!["answered", "unavailable", "completed", "failed"].includes(String(d.state))) throw new TypeError("checkpoint_terminal state is invalid.");
     return { checkpointHash: hash(d.checkpointHash, "checkpointHash"), state: d.state as "answered" | "unavailable" | "completed" | "failed" };
   }
-  if ((kind === "v4_dispatch" && operation === "v4_dispatch" && phase === "observed") || (kind === "prohibited_operation" && ["pdf", "provider_claim", "qualification", "four_snapshot", "replacement_fulfillment"].includes(operation) && phase === "started")) {
+  if ((kind === "v4_dispatch" && operation === "v4_dispatch" && phase === "observed") || (kind === "prohibited_operation" && ["pdf", "provider_claim", "qualification", "four_snapshot", "replacement_fulfillment", "correction", "full_report_rerun", "legacy_mutation"].includes(operation) && phase === "started")) {
     record([]); return {};
   }
   if (kind === "commerce_fingerprint" && operation === "commerce" && phase === "observed") return { fingerprint: hash(record(["fingerprint"]).fingerprint, "fingerprint") };

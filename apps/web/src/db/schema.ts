@@ -18,6 +18,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex
@@ -103,12 +104,14 @@ export type ReportV4AcceptanceOperation =
   | "question_answer" | "source_diagnosis" | "core_html" | "enhancement_html"
   | "question_failure" | "diagnosis_failure" | "independent_source_read_failure"
   | "v4_dispatch" | "pdf" | "provider_claim" | "qualification" | "four_snapshot"
-  | "replacement_fulfillment" | "artifact_activation" | "commerce";
+  | "replacement_fulfillment" | "correction" | "full_report_rerun" | "legacy_mutation"
+  | "artifact_activation" | "commerce";
 export type ReportV4AcceptanceEventPhase = "started" | "completed" | "failed" | "rejected" | "consumed" | "observed";
 export type ReportV4AcceptanceSiteReadScope = "admission_discovery" | "admission_page" | "enhancement_source";
 export type ReportV4AcceptanceSiteReadPurpose = "homepage" | "robots" | "sitemap" | "page" | "source";
 export type ReportV4AcceptanceSiteReadMode = "raw" | "browser";
 export type ReportV4AcceptanceSiteReadTerminalPhase = "completed" | "failed";
+export type ReportV4ProhibitedOperationGuardRunState = "armed" | "completed";
 export type ReportV4AcceptanceEventDetails =
   | { readonly bindingHash: string }
   | { readonly candidatePages: number; readonly analyzablePages: number; readonly excludedPages: number; readonly jsDependentPages: number }
@@ -1623,6 +1626,47 @@ export const reportV4AcceptanceSiteReadManifest = pgTable("report_v4_acceptance_
   check("report_v4_acceptance_site_read_manifest_terminal_check", sql`(${table.terminalPhase} IS NULL AND ${table.terminalAt} IS NULL) OR (${table.terminalPhase} IN ('completed','failed') AND ${table.terminalAt} IS NOT NULL AND ${table.terminalAt}>=${table.startedAt})`)
 ]);
 export type ReportV4AcceptanceSiteReadManifestRow = typeof reportV4AcceptanceSiteReadManifest.$inferSelect;
+
+export const reportV4ProhibitedOperationGuardRuns = pgTable("report_v4_prohibited_operation_guard_runs", {
+  id: text("id").primaryKey(),
+  domain: text("domain").notNull(),
+  sessionId: text("session_id").notNull().references(() => reportV4AcceptanceSessions.id, { onDelete: "restrict" }),
+  scenarioId: text("scenario_id").notNull(),
+  jobId: text("job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
+  workerGitSha: text("worker_git_sha").notNull(),
+  manifestHash: text("manifest_hash").notNull(),
+  state: text("state").$type<ReportV4ProhibitedOperationGuardRunState>().notNull().default("armed"),
+  armedAt: timestamp("armed_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true })
+}, (table) => [
+  uniqueIndex("report_v4_prohibited_operation_guard_runs_identity_uidx")
+    .on(table.sessionId, table.scenarioId, table.jobId),
+  foreignKey({
+    columns: [table.scenarioId, table.sessionId],
+    foreignColumns: [reportV4AcceptanceScenarios.id, reportV4AcceptanceScenarios.sessionId],
+    name: "report_v4_prohibited_operation_guard_runs_scenario_session_fkey"
+  }).onDelete("restrict"),
+  check("report_v4_prohibited_operation_guard_runs_id_check", sql`${table.id} ~ '^[a-f0-9]{64}$'`),
+  check("report_v4_prohibited_operation_guard_runs_domain_check", sql`${table.domain}='open-geo-console/report-v4/prohibited-operation-manifest'`),
+  check("report_v4_prohibited_operation_guard_runs_sha_check", sql`${table.workerGitSha} ~ '^[a-f0-9]{40}$' AND ${table.manifestHash}='e7f33b34d76384bbb9366f4f7cc109e6bd63dc84ea962fc9ad410ddb1b6c197b'`),
+  check("report_v4_prohibited_operation_guard_runs_state_check", sql`${table.state} IN ('armed','completed')`),
+  check("report_v4_prohibited_operation_guard_runs_terminal_check", sql`(${table.state}='armed' AND ${table.completedAt} IS NULL) OR (${table.state}='completed' AND ${table.completedAt} IS NOT NULL AND ${table.completedAt}>=${table.armedAt})`)
+]);
+export type ReportV4ProhibitedOperationGuardRunRow = typeof reportV4ProhibitedOperationGuardRuns.$inferSelect;
+
+export const reportV4ProhibitedOperationGuardCounters = pgTable("report_v4_prohibited_operation_guard_counters", {
+  runId: text("run_id").notNull().references(() => reportV4ProhibitedOperationGuardRuns.id, { onDelete: "restrict" }),
+  operation: text("operation").$type<ReportV4AcceptanceOperation>().notNull(),
+  guardSite: text("guard_site").notNull(),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  seededAt: timestamp("seeded_at", { withTimezone: true }).notNull().defaultNow(),
+  attemptedAt: timestamp("attempted_at", { withTimezone: true })
+}, (table) => [
+  primaryKey({ columns: [table.runId, table.guardSite], name: "report_v4_prohibited_operation_guard_counters_pkey" }),
+  check("report_v4_prohibited_operation_guard_counters_attempt_check", sql`${table.attemptCount} IN (0,1)`),
+  check("report_v4_prohibited_operation_guard_counters_timestamp_check", sql`(${table.attemptCount}=0 AND ${table.attemptedAt} IS NULL) OR (${table.attemptCount}=1 AND ${table.attemptedAt} IS NOT NULL AND ${table.attemptedAt}>=${table.seededAt})`)
+]);
+export type ReportV4ProhibitedOperationGuardCounterRow = typeof reportV4ProhibitedOperationGuardCounters.$inferSelect;
 
 export const reportReplacementFulfillments = pgTable(
   "report_replacement_fulfillments",

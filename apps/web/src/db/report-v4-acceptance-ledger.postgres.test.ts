@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DATABASE_MIGRATIONS, V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS } from "./migrations";
+import { DATABASE_MIGRATIONS, V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS } from "./migrations";
 import {
   createPostgresReportV4AcceptanceLedgerStore,
   createReportV4AcceptanceLedgerRepository,
@@ -97,6 +97,27 @@ suite("Report V4 protected-Staging acceptance ledger PostgreSQL", () => {
     await repository.failSession(sessionId);
     await expect(repository.appendEvent(modelEvent(sessionId, scenarioId, "question-2", 2)))
       .rejects.toThrow(/collecting/i);
+  }, 120_000);
+
+  it("persists all legacy and V37 prohibited-operation discriminants without weakening typed details", async () => {
+    const repository = repo(sql);
+    const sessionId = "18888888-8888-4888-8888-888888888888";
+    const scenarioId = "28888888-8888-4888-8888-888888888888";
+    await repository.createSession(session(sessionId));
+    await repository.createScenario(scenario(sessionId, scenarioId, "question_failure"));
+    const operations = ["pdf", "provider_claim", "qualification", "four_snapshot", "replacement_fulfillment",
+      "correction", "full_report_rerun", "legacy_mutation"] as const;
+    for (const operation of operations) {
+      expect((await repository.appendEvent({ sessionId, scenarioId, kind: "prohibited_operation", operation,
+        unitId: operation, attempt: 0, phase: "started", details: {} })).inserted).toBe(true);
+    }
+    expect((await repository.loadEvents(sessionId)).map(({ operation }) => operation)).toEqual(operations);
+    const head = (await repository.loadSession(sessionId))!;
+    const invalidKey = hash([sessionId, scenarioId, "prohibited_operation", "unknown", "unknown", 0, "started"].join("\x1f"));
+    await expect(sql`INSERT INTO report_v4_acceptance_events
+      (idempotency_key,session_id,scenario_id,sequence,kind,operation,unit_id,attempt,phase,details,details_canonical,prev_hash,event_hash,occurred_at_canonical)
+      VALUES(${invalidKey},${sessionId},${scenarioId},${head.headSequence + 1},'prohibited_operation','unknown','unknown',0,'started','{}'::jsonb,'{}',${head.headHash},${'0'.repeat(64)},'2026-07-17T00:00:00.000000Z')`)
+      .rejects.toThrow(/details_check|check constraint|event_valid/iu);
   }, 120_000);
 
   it("seals only three exact terminal scenarios and rejects later append or lineage rebinding", async () => {
@@ -240,7 +261,8 @@ suite("Report V4 protected-Staging acceptance ledger PostgreSQL", () => {
     await admin.unsafe(`CREATE DATABASE ${quote(upgradeDatabaseName)}`);
     const upgradeSql = postgres(withDatabase(adminUrl!, upgradeDatabaseName), { max: 1, prepare: false });
     try {
-      const v34Migrations = DATABASE_MIGRATIONS.slice(0, -(V35_DATABASE_MIGRATIONS.length + V36_DATABASE_MIGRATIONS.length));
+      const v34Migrations = DATABASE_MIGRATIONS.slice(0,
+        -(V35_DATABASE_MIGRATIONS.length + V36_DATABASE_MIGRATIONS.length + V37_DATABASE_MIGRATIONS.length));
       await upgradeSql.begin(async (tx) => { for (const statement of v34Migrations) await tx.unsafe(statement); });
       expect((await upgradeSql`SELECT to_regclass('report_v4_acceptance_sessions')::text AS name`)[0]?.name).toBeNull();
       await upgradeSql.begin(async (tx) => { for (const statement of V35_DATABASE_MIGRATIONS) await tx.unsafe(statement); });

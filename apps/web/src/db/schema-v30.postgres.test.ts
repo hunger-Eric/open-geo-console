@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V30_DATABASE_MIGRATIONS } from "./migrations";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const describeDisposablePostgres = adminUrl ? describe : describe.skip;
@@ -15,8 +15,8 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-CRAWL-04
 describe("schema v30 V4 runtime persistence substrate", () => {
   it("adds only hierarchical summaries, diagnosis checkpoints and one enhancement per core", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(36);
-    const sql = databaseMigrationsAfter(29).join("\n");
+    expect(DATABASE_SCHEMA_VERSION).toBe(37);
+    const sql = V30_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_page_summaries");
     expect(sql).toContain("source_length integer NOT NULL");
     expect(sql).toContain("chunks jsonb NOT NULL");
@@ -32,7 +32,7 @@ describe("schema v30 V4 runtime persistence substrate", () => {
     expect(sql).toContain("report_v4_diagnosis_checkpoints_terminal_immutability_trigger");
     expect(sql).toContain("report_artifact_revisions_v4_diagnosis_source_uidx");
     expect(sql).not.toMatch(/prompt|provider_response|raw_response|pdf_/iu);
-    expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining(databaseMigrationsAfter(29)));
+    expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining(V30_DATABASE_MIGRATIONS));
   });
 });
 
