@@ -9,6 +9,7 @@ import {
   ReportV4AcceptanceLedgerVerificationError,
   verifyReportV4AcceptanceLedger
 } from "./acceptance-ledger-verifier";
+import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "./report-v4-acceptance-fingerprints";
 
 const ZERO_HASH = "0".repeat(64);
 const US = "\x1f";
@@ -32,6 +33,7 @@ describe("Report V4 acceptance ledger verifier", () => {
     ["unsealed scenario", (f: Fixture) => { f.scenarios[0]!.state = "failed"; }, /scenario.*state/u],
     ["missing lineage", (f: Fixture) => { f.scenarios[0]!.coreArtifactRevisionId = ""; }, /coreArtifactRevisionId/u],
     ["missing fingerprint", (f: Fixture) => { f.scenarios[1]!.baselineFingerprint = null; }, /baselineFingerprint/u],
+    ["wrong lineage baseline", (f: Fixture) => { f.scenarios[1]!.baselineFingerprint = "f".repeat(64); }, /fault-provenance lineage fingerprint/u],
     ["missing success source", (f: Fixture) => { f.scenarios[0]!.faultSourceId = null; }, /faultSourceId/u]
   ])("rejects %s", (_label, mutate, message) => {
     const fixture = validLedger();
@@ -172,7 +174,7 @@ function validLedger(): Fixture {
 function scenario(sessionId: string, scenarioId: string, kind: ReportV4AcceptanceScenario["kind"]): Mutable<ReportV4AcceptanceScenario> {
   const success = kind === "success";
   const diagnosis = kind === "diagnosis_failure";
-  return {
+  const result: Mutable<ReportV4AcceptanceScenario> = {
     sessionId,
     scenarioId,
     reportId: `report-${kind}`,
@@ -190,12 +192,14 @@ function scenario(sessionId: string, scenarioId: string, kind: ReportV4Acceptanc
     faultQuestionId: `question-${kind}`,
     faultSourceId: success ? "source-success" : null,
     expectedFaultOccurrences: success ? 1 : 2,
-    baselineFingerprint: hash(`baseline-${kind}`),
+    baselineFingerprint: null,
     finalFingerprint: hash(`final-${kind}`),
     state: "sealed",
     createdAt: new Date("2026-07-17T00:00:00.000Z"),
     terminalAt: new Date("2026-07-17T00:09:00.000Z")
   };
+  result.baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(result);
+  return result;
 }
 
 function faultEvent(scenarioValue: Mutable<ReportV4AcceptanceScenario>, occurrence: 1 | 2): Mutable<ReportV4AcceptanceEvent> {

@@ -4,6 +4,7 @@ import type {
   ReportV4AcceptanceScenario,
   ReportV4AcceptanceSession
 } from "../db/report-v4-acceptance-ledger";
+import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "./report-v4-acceptance-fingerprints";
 
 const ZERO_HASH = "0".repeat(64);
 const US = "\x1f";
@@ -102,6 +103,15 @@ function verifyScenarios(
     if (!HASH_PATTERN.test(scenario.finalFingerprint ?? "")) issues.push(`scenario ${label} finalFingerprint must be a SHA-256 hash`);
     if (!nonblank(scenario.faultQuestionId)) issues.push(`scenario ${label} faultQuestionId must be nonblank`);
     verifyScenarioContract(scenario, label, issues);
+    try {
+      const expectedBaseline = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(scenario);
+      if (scenario.baselineFingerprint !== expectedBaseline) {
+        issues.push(`scenario ${label} baselineFingerprint must equal the exact fault-provenance lineage fingerprint`);
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "invalid exact lineage";
+      issues.push(`scenario ${label} fault-provenance baseline cannot be recomputed: ${reason}`);
+    }
   }
 }
 
