@@ -143,8 +143,33 @@ describe("Report V4 core production composition", () => {
     await harness.run(input());
 
     expect(harness.events.slice(0, 5)).toEqual([
-      "load-context", "load-config", "resolve-locked-config", "load-acceptance", "create-stage"
+      "load-context", "load-config", "resolve-locked-config", "load-acceptance", "oversized-token-probe"
     ]);
+    expect(harness.events[5]).toBe("create-stage");
+  });
+
+  it("blocks the real Core stage when the protected acceptance token probe fails", async () => {
+    const acceptance = acceptanceRuntime();
+    const harness = productionHarness({
+      acceptanceRuntime: acceptance,
+      oversizedTokenProbeError: new Error("probe failed closed")
+    });
+
+    await expect(harness.run(input())).rejects.toThrow("probe failed closed");
+    expect(harness.events).toEqual([
+      "load-context", "load-config", "resolve-locked-config", "load-acceptance", "oversized-token-probe"
+    ]);
+    expect(harness.events).not.toContain("create-stage");
+    expect(harness.events).not.toContain("synthesize-website");
+    expect(harness.events).not.toContain("answer-questions");
+  });
+
+  it("does not invoke the acceptance-only token probe during an ordinary Core execution", async () => {
+    const harness = productionHarness();
+
+    await harness.run(input());
+
+    expect(harness.events).not.toContain("oversized-token-probe");
   });
 
   it("maps only the exact protected-Staging question drill to a retryable provider failure", async () => {
@@ -186,6 +211,7 @@ interface HarnessOptions {
   reusedQuestionIds?: string[];
   unavailableQuestions?: number;
   acceptanceRuntime?: ReportV4CoreAcceptanceRuntime;
+  oversizedTokenProbeError?: Error;
 }
 
 function productionHarness(options: HarnessOptions = {}) {
@@ -203,6 +229,11 @@ function productionHarness(options: HarnessOptions = {}) {
     resolveLockedConfiguration() {
       events.push("resolve-locked-config");
       return { modelRuntime: {} as never, reportRuntime: {} as never };
+    },
+    async runOversizedTokenAcceptanceProbe(_execution, runtime) {
+      events.push("oversized-token-probe");
+      expect(runtime).toBe(options.acceptanceRuntime);
+      if (options.oversizedTokenProbeError) throw options.oversizedTokenProbeError;
     },
     ...(options.acceptanceRuntime ? {
       async loadAcceptanceRuntime() {
@@ -268,6 +299,20 @@ function productionHarness(options: HarnessOptions = {}) {
     }
   };
   return { events, run: createReportV4CoreProductionWithDependencies(dependencies) };
+}
+
+function acceptanceRuntime(): ReportV4CoreAcceptanceRuntime {
+  return {
+    observer: {
+      session: {},
+      scenario: { kind: "success" },
+      observe: vi.fn(async (event) => ({ event, inserted: true })),
+      claimExternalIo: vi.fn(async (event) => ({ event, inserted: true })),
+      finishExternalIo: vi.fn(async (event) => ({ event, inserted: true }))
+    } as never,
+    faultController: null,
+    baselineFingerprint: null
+  };
 }
 
 function input(overrides: Partial<ReportV4CoreProductionInput> = {}): ReportV4CoreProductionInput {

@@ -77,6 +77,7 @@ import {
   withReportV4CoreAcceptanceWebsiteProvider,
   type ReportV4CoreAcceptanceRuntime
 } from "./report-v4-core-acceptance";
+import { runReportV4OversizedTokenAcceptanceProbe } from "./report-v4-oversized-token-acceptance-probe";
 
 export interface ReportV4CoreProductionInput {
   readonly reportId: string;
@@ -128,6 +129,10 @@ export interface ReportV4CoreProductionDependencies {
   readonly loadAcceptanceRuntime?: (
     execution: ReportV4CoreProductionExecution
   ) => Promise<ReportV4CoreAcceptanceRuntime | null>;
+  readonly runOversizedTokenAcceptanceProbe?: (
+    execution: ReportV4CoreProductionExecution,
+    acceptanceRuntime: ReportV4CoreAcceptanceRuntime
+  ) => Promise<void>;
   readonly createCoreStageDependencies: (
     execution: ReportV4CoreProductionExecution,
     acceptanceRuntime?: ReportV4CoreAcceptanceRuntime | null
@@ -213,6 +218,13 @@ export function createReportV4CoreProductionWithDependencies(
       ? await dependencies.loadAcceptanceRuntime(execution)
       : null;
     input.signal.throwIfAborted();
+    if (acceptanceRuntime) {
+      if (!dependencies.runOversizedTokenAcceptanceProbe) {
+        throw new Error("The protected Report V4 Core acceptance runtime requires the oversized-token probe boundary.");
+      }
+      await dependencies.runOversizedTokenAcceptanceProbe(execution, acceptanceRuntime);
+      input.signal.throwIfAborted();
+    }
     const questions = [...context.questions]
       .sort((left, right) => left.ordinal - right.ordinal)
       .map((question, index) => ({
@@ -294,6 +306,13 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
       return createReportV4CoreAcceptanceRuntime({
         environment: options.environment,
         coreJobId: execution.input.coreJobId
+      });
+    },
+    async runOversizedTokenAcceptanceProbe(execution, acceptanceRuntime) {
+      await runReportV4OversizedTokenAcceptanceProbe({
+        modelRuntime: execution.modelRuntime,
+        acceptanceRuntime,
+        signal: execution.input.signal
       });
     },
     createCoreStageDependencies(execution, acceptanceRuntime = null) {
