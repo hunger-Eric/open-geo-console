@@ -93,6 +93,38 @@ describe("Report V4 enhancement production boundary", () => {
     expect(calls).toEqual(["authority", "snapshot", "locked-runtime", "stage-dependencies", "stage"]);
   });
 
+  it("initializes acceptance for the exact enhancement job and passes it only to the real stage dependencies", async () => {
+    const calls: string[] = [];
+    const runtime = { observer: {}, faultController: {} } as never;
+    const stageDependencies = {} as ReportV4EnhancementStageDependencies;
+    const dependencies = dependenciesFor({
+      createAcceptanceRuntime: vi.fn(async (jobId: string) => {
+        calls.push(`acceptance:${jobId}`);
+        return runtime;
+      }),
+      loadClaimedContext: vi.fn(async () => { calls.push("authority"); return claimedContext(); }),
+      createStageDependencies: vi.fn((...args: unknown[]) => {
+        calls.push("stage-dependencies");
+        expect(args[1]).toBe(runtime);
+        return stageDependencies;
+      }) as never,
+      runStage: vi.fn(async (_input, received) => {
+        calls.push("stage");
+        expect(received).toBe(stageDependencies);
+        return { delivery: "enhancement_active" } as never;
+      })
+    });
+
+    await expect(createReportV4EnhancementProductionWithDependencies(dependencies)({
+      job: claimedJob(), workerId: "worker-1", signal: new AbortController().signal
+    })).resolves.toMatchObject({ delivery: "enhancement_active" });
+
+    expect(calls).toEqual([
+      "acceptance:enhancement-job-1", "authority", "stage-dependencies", "stage"
+    ]);
+    expect(dependencies.createAcceptanceRuntime).toHaveBeenCalledExactlyOnceWith("enhancement-job-1");
+  });
+
   it("fails closed when the authoritative owner conflicts before config or stage work", async () => {
     const context = claimedContext();
     const dependencies = dependenciesFor({

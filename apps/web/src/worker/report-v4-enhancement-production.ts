@@ -7,6 +7,7 @@ import {
   type ReportV4PageSummary
 } from "@open-geo-console/ai-report-engine";
 import type { ScanJobRow } from "../db/schema";
+import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "../report-v4/report-v4-acceptance-fingerprints";
 import {
   createReportV4ConfigSnapshotRepository,
   type ReportV4ConfigSnapshotRow
@@ -74,6 +75,16 @@ import {
 } from "./report-v4-source-audit-production";
 import { auditReportV4Sources } from "./report-v4-source-audit";
 import type { ReportV4SourceAuditDependencies, ReportV4SourceAuditRead } from "./report-v4-source-audit";
+import { createReportV4AcceptanceObserver } from "./report-v4-acceptance-observer";
+import { createReportV4AcceptanceFaultController } from "./report-v4-acceptance-fault-controller";
+import {
+  observeReportV4EnhancementActivation,
+  observeReportV4EnhancementHtml,
+  observeReportV4RecoveredEnhancementActivation,
+  withReportV4EnhancementAcceptanceDiagnosisProvider,
+  withReportV4EnhancementAcceptanceSourceAudit,
+  type ReportV4EnhancementAcceptanceRuntime
+} from "./report-v4-enhancement-acceptance";
 
 export type ClaimedReportV4EnhancementJob = Pick<ScanJobRow,
   "id" | "reportId" | "siteSnapshotId" | "tier" | "productContract" | "fulfillmentMethodology" |
@@ -123,6 +134,9 @@ export interface ReportV4EnhancementProductionExecution extends ReportV4Enhancem
 
 export interface ReportV4EnhancementProductionDependencies {
   readonly now: () => Date;
+  readonly createAcceptanceRuntime?: (
+    enhancementJobId: string
+  ) => Promise<ReportV4EnhancementAcceptanceRuntime>;
   readonly loadClaimedContext: (input: {
     readonly enhancementJobId: string;
     readonly workerId: string;
@@ -133,7 +147,8 @@ export interface ReportV4EnhancementProductionDependencies {
     readonly configSnapshot: ReportV4ConfigSnapshotRow;
   }) => ReportV4EnhancementLockedConfiguration;
   readonly createStageDependencies: (
-    execution: ReportV4EnhancementProductionExecution
+    execution: ReportV4EnhancementProductionExecution,
+    acceptanceRuntime?: ReportV4EnhancementAcceptanceRuntime
   ) => ReportV4EnhancementStageDependencies;
   readonly runStage?: typeof runReportV4EnhancementStage;
 }
@@ -156,6 +171,10 @@ export function createReportV4EnhancementProductionWithDependencies(
   return async function run(inputValue: RunReportV4EnhancementProductionInput): Promise<ReportV4OrchestratorResult> {
     const input = exactClaim(inputValue);
     input.signal.throwIfAborted();
+    const acceptanceRuntime = dependencies.createAcceptanceRuntime
+      ? await dependencies.createAcceptanceRuntime(input.job.id)
+      : undefined;
+    input.signal.throwIfAborted();
     const context = await dependencies.loadClaimedContext({
       enhancementJobId: input.job.id,
       workerId: input.workerId
@@ -172,7 +191,7 @@ export function createReportV4EnhancementProductionWithDependencies(
     const execution = Object.freeze({ input, context, configSnapshot, stageInput, ...locked });
     return (dependencies.runStage ?? runReportV4EnhancementStage)(
       { ...stageInput, signal: input.signal },
-      dependencies.createStageDependencies(execution)
+      dependencies.createStageDependencies(execution, acceptanceRuntime)
     );
   };
 }
@@ -189,6 +208,21 @@ function liveDependencies(
 
   return {
     now: clock,
+    ...(options.environment.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID !== undefined
+      && options.environment.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID !== ""
+      ? {
+          async createAcceptanceRuntime(enhancementJobId: string): Promise<ReportV4EnhancementAcceptanceRuntime> {
+            const [observer, faultController] = await Promise.all([
+              createReportV4AcceptanceObserver({ jobId: enhancementJobId, environment: options.environment }),
+              createReportV4AcceptanceFaultController({ jobId: enhancementJobId, environment: options.environment })
+            ]);
+            if (!observer || faultController.mode !== "active") {
+              throw new Error("The configured Report V4 acceptance session did not create an active enhancement runtime.");
+            }
+            return { observer, faultController };
+          }
+        }
+      : {}),
     loadConfigSnapshot: (id) => configSnapshots.getById(id),
     resolveLockedConfiguration({ context, configSnapshot }) {
       const modelRuntime = resolveReportV4LockedModelRuntime(configSnapshot.modelProfile);
@@ -202,9 +236,10 @@ function liveDependencies(
       }
       return { modelRuntime, reportRuntime };
     },
-    createStageDependencies(execution) {
+    createStageDependencies(execution, acceptanceRuntime) {
       return createLiveStageDependencies({
         execution,
+        acceptanceRuntime,
         options,
         revisions,
         artifacts,
@@ -218,6 +253,7 @@ function liveDependencies(
 
 function createLiveStageDependencies(input: {
   readonly execution: ReportV4EnhancementProductionExecution;
+  readonly acceptanceRuntime?: ReportV4EnhancementAcceptanceRuntime;
   readonly options: ReportV4EnhancementProductionOptions;
   readonly revisions: ReturnType<typeof createPostgresReportV4ArtifactRevisionExecutor>;
   readonly artifacts: ReturnType<typeof createPostgresReportV4ArtifactPersistenceStore>;
@@ -226,6 +262,9 @@ function createLiveStageDependencies(input: {
   readonly clock: () => Date;
 }): ReportV4EnhancementStageDependencies {
   const { execution } = input;
+  const acceptanceBaseline = input.acceptanceRuntime
+    ? computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(input.acceptanceRuntime.observer.scenario)
+    : null;
   let diagnosis: DiagnosisCoordinator | null = null;
 
   return {
@@ -250,6 +289,13 @@ function createLiveStageDependencies(input: {
         : await getReportV4ArtifactPayload(activeRevisionId, input.artifacts);
       request.signal?.throwIfAborted();
       if (!active) throw new Error("The exact active Report V4 artifact payload is missing.");
+      await observeReportV4RecoveredEnhancementActivation({
+        runtime: input.acceptanceRuntime ?? null,
+        activeArtifactRevisionId: active.artifactRevisionId,
+        enhancementArtifactRevisionId: execution.stageInput.enhancementArtifactRevisionId,
+        htmlSha256: active.htmlSha256
+      });
+      request.signal?.throwIfAborted();
       const snapshot = await resolvePaidReportV4SiteSnapshot({
         id: execution.context.lineage.siteSnapshotId,
         reportId: execution.context.lineage.reportId,
@@ -277,13 +323,18 @@ function createLiveStageDependencies(input: {
               execution,
               questions: source.report.questions,
               pages,
-              auditDependencies: withReportV4IndependentSourceReadFailureDrill({
+              auditDependencies: acceptanceSourceAuditDependencies({
+                acceptanceRuntime: input.acceptanceRuntime,
+                baselineFingerprint: acceptanceBaseline,
+                enhancementJobId: execution.input.job.id,
+                dependencies: withReportV4IndependentSourceReadFailureDrill({
                 dependencies: createReportV4SourceAuditProductionDependencies({
                   ...(input.options.sourceAudit ?? {}),
                   ...(input.options.fetch ? { fetchImpl: input.options.fetch } : {})
                 }),
                 enhancementJobId: execution.input.job.id,
                 liveDrill: input.options.liveDrill
+                })
               }),
               repository: input.diagnosisCheckpoints,
               provider: createReportV4MimoDiagnosisProvider({
@@ -346,7 +397,15 @@ function createLiveStageDependencies(input: {
           });
           persistedCallCount = unit.checkpoint.providerCallCount;
           request.signal.throwIfAborted();
-          return drilledProvider.generate(request);
+          const provider = acceptanceDiagnosisProvider({
+            acceptanceRuntime: input.acceptanceRuntime,
+            baselineFingerprint: acceptanceBaseline,
+            enhancementJobId: execution.input.job.id,
+            questionId: question.questionId,
+            attempt: exactProviderAttempt(persistedCallCount),
+            provider: drilledProvider
+          });
+          return provider.generate(request);
         }
       };
       const result = await enhanceReportV4QuestionDiagnosis({
@@ -381,7 +440,13 @@ function createLiveStageDependencies(input: {
       signal?.throwIfAborted();
       return prepareReportV4DiagnosisEnhancement(identity, input.revisions);
     },
-    renderEnhancementHtml: ({ report, signal }) => renderReportV4Html({ stage: "enhancement", report, signal }),
+    renderEnhancementHtml: input.acceptanceRuntime
+      ? ({ report, signal }) => observeReportV4EnhancementHtml({
+          runtime: input.acceptanceRuntime!,
+          artifactRevisionId: execution.stageInput.enhancementArtifactRevisionId,
+          render: () => renderReportV4Html({ stage: "enhancement", report, signal })
+        })
+      : ({ report, signal }) => renderReportV4Html({ stage: "enhancement", report, signal }),
     async persistEnhancementArtifact({ report, html, signal }) {
       signal?.throwIfAborted();
       const persisted = await persistReportV4ArtifactPayload({
@@ -401,10 +466,20 @@ function createLiveStageDependencies(input: {
       signal?.throwIfAborted();
       return { payloadIdentityHash: persisted.payloadIdentityHash, htmlSha256: persisted.htmlSha256 };
     },
-    activateEnhancementRevision: (identity, signal) => {
-      signal?.throwIfAborted();
-      return activateReportV4DiagnosisEnhancement(identity, input.revisions);
-    },
+    activateEnhancementRevision: input.acceptanceRuntime
+      ? (identity, signal) => {
+          signal?.throwIfAborted();
+          return observeReportV4EnhancementActivation({
+            runtime: input.acceptanceRuntime!,
+            artifactRevisionId: identity.artifactRevisionId,
+            htmlSha256: identity.htmlSha256,
+            activate: () => activateReportV4DiagnosisEnhancement(identity, input.revisions)
+          });
+        }
+      : (identity, signal) => {
+          signal?.throwIfAborted();
+          return activateReportV4DiagnosisEnhancement(identity, input.revisions);
+        },
     failEnhancementRevision: (identity, signal) => {
       signal?.throwIfAborted();
       return failReportV4DiagnosisEnhancement(identity, input.revisions);
@@ -464,6 +539,53 @@ export function withReportV4IndependentSourceReadFailureDrill(input: {
     },
     renderBrowserSource: (source, signal) => input.dependencies.renderBrowserSource(source, signal)
   };
+}
+
+function acceptanceSourceAuditDependencies(input: {
+  readonly dependencies: ReportV4SourceAuditDependencies;
+  readonly acceptanceRuntime?: ReportV4EnhancementAcceptanceRuntime;
+  readonly baselineFingerprint: string | null;
+  readonly enhancementJobId: string;
+}): ReportV4SourceAuditDependencies {
+  if (!input.acceptanceRuntime) return input.dependencies;
+  if (!input.baselineFingerprint) {
+    throw new Error("The active Report V4 enhancement acceptance runtime is missing its fault-provenance baseline.");
+  }
+  return withReportV4EnhancementAcceptanceSourceAudit({
+    dependencies: input.dependencies,
+    runtime: input.acceptanceRuntime,
+    enhancementJobId: input.enhancementJobId,
+    baselineFingerprint: input.baselineFingerprint
+  });
+}
+
+function acceptanceDiagnosisProvider(input: {
+  readonly provider: ReportV4DiagnosisProvider;
+  readonly acceptanceRuntime?: ReportV4EnhancementAcceptanceRuntime;
+  readonly baselineFingerprint: string | null;
+  readonly enhancementJobId: string;
+  readonly questionId: string;
+  readonly attempt: 1 | 2;
+}): ReportV4DiagnosisProvider {
+  if (!input.acceptanceRuntime) return input.provider;
+  if (!input.baselineFingerprint) {
+    throw new Error("The active Report V4 enhancement acceptance runtime is missing its fault-provenance baseline.");
+  }
+  return withReportV4EnhancementAcceptanceDiagnosisProvider({
+    provider: input.provider,
+    runtime: input.acceptanceRuntime,
+    enhancementJobId: input.enhancementJobId,
+    questionId: input.questionId,
+    attempt: input.attempt,
+    baselineFingerprint: input.baselineFingerprint
+  });
+}
+
+function exactProviderAttempt(value: number): 1 | 2 {
+  if (value !== 1 && value !== 2) {
+    throw new Error("A real Report V4 diagnosis provider attempt must be exactly 1 or 2.");
+  }
+  return value;
 }
 
 interface DiagnosisUnit {
