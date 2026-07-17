@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { fingerprintReportV4CommerceAuthority } from "./report-v4-commerce-authority-fingerprint";
+import {
+  fingerprintNormalizedReportV4CommerceAuthority,
+  fingerprintReportV4CommerceAuthority,
+} from "./report-v4-commerce-authority-fingerprint";
+import {
+  normalizeReportV4CommerceDispatches,
+  normalizeReportV4CommerceJobs,
+} from "./report-v4-commerce-job-authority";
 
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -324,8 +331,52 @@ function validInput() {
   };
 }
 
+function normalizedInput() {
+  const raw = validInput();
+  return {
+    ...raw,
+    jobs: normalizeReportV4CommerceJobs(raw.jobs),
+    dispatches: normalizeReportV4CommerceDispatches(raw.dispatches),
+  };
+}
+
 /** @requirement GEO-V4-COMMERCE-01 */
 describe("Report V4 final commerce authority fingerprint", () => {
+  it("recomputes the same official fingerprint from the complete hash-safe normalized authority", () => {
+    expect(
+      fingerprintNormalizedReportV4CommerceAuthority(normalizedInput()),
+    ).toBe(fingerprintReportV4CommerceAuthority(validInput()));
+  });
+
+  it("rejects double-encoded, missing, extra, and foreign normalized job/dispatch authority", () => {
+    const doubleEncoded = normalizedInput();
+    doubleEncoded.jobs[0].idHash = hash(doubleEncoded.jobs[0].idHash);
+    expect(() =>
+      fingerprintNormalizedReportV4CommerceAuthority(doubleEncoded),
+    ).toThrow(/scope|lineage/i);
+
+    const missing = normalizedInput() as ReturnType<typeof normalizedInput> & {
+      jobs: Array<Record<string, unknown>>;
+    };
+    delete missing.jobs[0].progress;
+    expect(() =>
+      fingerprintNormalizedReportV4CommerceAuthority(missing),
+    ).toThrow(/missing field progress/i);
+
+    const extra = normalizedInput() as ReturnType<typeof normalizedInput> & {
+      dispatches: Array<Record<string, unknown>>;
+    };
+    extra.dispatches[0].rawJobId = "must-not-be-accepted";
+    expect(() =>
+      fingerprintNormalizedReportV4CommerceAuthority(extra),
+    ).toThrow(/unknown field rawJobId/i);
+
+    const foreignDispatch = normalizedInput();
+    foreignDispatch.dispatches[0].jobIdHash = hash("foreign-job");
+    expect(() =>
+      fingerprintNormalizedReportV4CommerceAuthority(foreignDispatch),
+    ).toThrow(/dispatch.*lineage/i);
+  });
   it("returns only an opaque deterministic SHA-256", () => {
     const input = validInput();
     const first = fingerprintReportV4CommerceAuthority(input);

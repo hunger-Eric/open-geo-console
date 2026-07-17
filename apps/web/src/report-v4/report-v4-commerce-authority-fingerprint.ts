@@ -73,6 +73,53 @@ type Scope = Readonly<{
  * acceptance proof without the typed baseline/final semantic comparator.
  */
 export function fingerprintReportV4CommerceAuthority(input: unknown): string {
+  return fingerprintNormalizedAuthority(normalizeRawAuthority(input));
+}
+
+/**
+ * Recomputes the official seal from the complete hash-safe normalized shape
+ * returned by the PostgreSQL authority snapshot loader. Unlike the raw entry
+ * point, job and dispatch hashes are validated as hashes and are never hashed
+ * a second time.
+ */
+export function fingerprintNormalizedReportV4CommerceAuthority(
+  input: unknown,
+): string {
+  const raw = exactRecord(input, topLevelKeys, "authority");
+  const phase = parsePhase(raw.phase);
+  canonicalTime(raw.capturedAt, "capturedAt");
+  const normalized: Normalized = {
+    phase,
+    scope: parseScope(raw.scope),
+    orders: normalizeReportV4CommerceOrders(array(raw.orders, "orders")),
+    paymentEvents: normalizeReportV4PaymentEvents(
+      array(raw.paymentEvents, "paymentEvents"),
+    ),
+    jobs: normalizeHashSafeJobs(array(raw.jobs, "jobs")),
+    dispatches: normalizeHashSafeDispatches(
+      array(raw.dispatches, "dispatches"),
+    ),
+    creditAuthority: normalizeReportV4CommerceCreditAuthority(
+      raw.creditAuthority,
+    ),
+    emailAuthority: normalizeReportV4CommerceEmailAuthority(raw.emailAuthority),
+    accessTokens: normalizeReportV4AccessTokens(
+      array(raw.accessTokens, "accessTokens"),
+    ),
+    artifacts: normalizeReportV4ArtifactRevisions(
+      array(raw.artifacts, "artifacts"),
+    ),
+    questionCheckpoints: normalizeReportV4QuestionCheckpointAuthorities(
+      array(raw.questionCheckpoints, "questionCheckpoints"),
+    ),
+    diagnosisCheckpoints: normalizeReportV4DiagnosisCheckpointAuthorities(
+      array(raw.diagnosisCheckpoints, "diagnosisCheckpoints"),
+    ),
+  };
+  return fingerprintNormalizedAuthority(normalized);
+}
+
+function normalizeRawAuthority(input: unknown): Normalized {
   const raw = exactRecord(input, topLevelKeys, "authority");
   const phase = parsePhase(raw.phase);
   canonicalTime(raw.capturedAt, "capturedAt");
@@ -107,7 +154,7 @@ export function fingerprintReportV4CommerceAuthority(input: unknown): string {
       array(raw.diagnosisCheckpoints, "diagnosisCheckpoints"),
     );
 
-  validateLineage({
+  return {
     phase,
     scope,
     orders,
@@ -120,31 +167,35 @@ export function fingerprintReportV4CommerceAuthority(input: unknown): string {
     artifacts,
     questionCheckpoints,
     diagnosisCheckpoints,
-  });
+  };
+}
+
+function fingerprintNormalizedAuthority(value: Normalized): string {
+  validateLineage(value);
 
   const canonical = JSON.stringify({
     schemaVersion: 1,
-    scope,
-    orders,
-    paymentEvents,
-    jobs,
-    dispatches,
+    scope: value.scope,
+    orders: value.orders,
+    paymentEvents: value.paymentEvents,
+    jobs: value.jobs,
+    dispatches: value.dispatches,
     creditAuthority: {
-      accessKeys: creditAuthority.accessKeys,
-      creditLedger: creditAuthority.creditLedger,
-      refunds: creditAuthority.refunds,
+      accessKeys: value.creditAuthority.accessKeys,
+      creditLedger: value.creditAuthority.creditLedger,
+      refunds: value.creditAuthority.refunds,
     },
     emailAuthority: {
-      deliveries: emailAuthority.deliveries,
-      events: emailAuthority.events,
+      deliveries: value.emailAuthority.deliveries,
+      events: value.emailAuthority.events,
     },
-    accessTokens,
-    artifacts,
-    questionCheckpoints,
-    diagnosisCheckpoints,
+    accessTokens: value.accessTokens,
+    artifacts: value.artifacts,
+    questionCheckpoints: value.questionCheckpoints,
+    diagnosisCheckpoints: value.diagnosisCheckpoints,
   });
   return createHash("sha256")
-    .update(`${DOMAIN}/${phase}\0${canonical}`)
+    .update(`${DOMAIN}/${value.phase}\0${canonical}`)
     .digest("hex");
 }
 
@@ -168,6 +219,167 @@ type Normalized = {
     typeof normalizeReportV4DiagnosisCheckpointAuthorities
   >;
 };
+
+const normalizedJobKeys = [
+  "idHash",
+  "reportIdHash",
+  "siteSnapshotIdHash",
+  "tier",
+  "productContract",
+  "fulfillmentMethodology",
+  "recommendationReportVersion",
+  "artifactContract",
+  "businessQuestionSetIdHash",
+  "locale",
+  "reason",
+  "stage",
+  "executionState",
+  "currentPhase",
+  "checkpointRevision",
+  "phaseAttempt",
+  "resumeGeneration",
+  "progress",
+  "plannedPages",
+  "successfulPages",
+  "failedPages",
+  "attempts",
+  "maxAttempts",
+  "errorCode",
+  "publicError",
+  "creditReservationIdHash",
+] as const;
+
+const normalizedDispatchKeys = [
+  "idHash",
+  "jobIdHash",
+  "tier",
+  "schemaVersion",
+  "state",
+  "attempts",
+  "publishedAt",
+  "lastErrorCode",
+] as const;
+
+function normalizeHashSafeJobs(
+  input: readonly unknown[],
+): Normalized["jobs"] {
+  const rows = input.map((value, index) => {
+    const row = exactRecord(value, normalizedJobKeys, `jobs[${index}]`);
+    const idHash = requiredHash(row.idHash, `jobs[${index}].idHash`);
+    const reportIdHash = requiredHash(
+      row.reportIdHash,
+      `jobs[${index}].reportIdHash`,
+    );
+    const siteSnapshotIdHash = nullableHash(
+      row.siteSnapshotIdHash,
+      `jobs[${index}].siteSnapshotIdHash`,
+    );
+    const businessQuestionSetIdHash = nullableHash(
+      row.businessQuestionSetIdHash,
+      `jobs[${index}].businessQuestionSetIdHash`,
+    );
+    const publicError = nullableHash(
+      row.publicError,
+      `jobs[${index}].publicError`,
+    );
+    const creditReservationIdHash = nullableHash(
+      row.creditReservationIdHash,
+      `jobs[${index}].creditReservationIdHash`,
+    );
+    const validated = normalizeReportV4CommerceJobs([
+      {
+        id: `normalized-job-${index}`,
+        reportId: `normalized-report-${index}`,
+        siteSnapshotId:
+          siteSnapshotIdHash === null ? null : `normalized-snapshot-${index}`,
+        tier: row.tier,
+        productContract: row.productContract,
+        fulfillmentMethodology: row.fulfillmentMethodology,
+        recommendationReportVersion: row.recommendationReportVersion,
+        artifactContract: row.artifactContract,
+        businessQuestionSetId:
+          businessQuestionSetIdHash === null
+            ? null
+            : `normalized-question-set-${index}`,
+        locale: row.locale,
+        reason: row.reason,
+        stage: row.stage,
+        executionState: row.executionState,
+        currentPhase: row.currentPhase,
+        checkpointRevision: row.checkpointRevision,
+        phaseAttempt: row.phaseAttempt,
+        resumeGeneration: row.resumeGeneration,
+        progress: row.progress,
+        plannedPages: row.plannedPages,
+        successfulPages: row.successfulPages,
+        failedPages: row.failedPages,
+        attempts: row.attempts,
+        maxAttempts: row.maxAttempts,
+        errorCode: row.errorCode,
+        publicError:
+          publicError === null ? null : `normalized-public-error-${index}`,
+        creditReservationId:
+          creditReservationIdHash === null
+            ? null
+            : `normalized-credit-${index}`,
+      },
+    ])[0];
+    return {
+      ...validated,
+      idHash,
+      reportIdHash,
+      siteSnapshotIdHash,
+      businessQuestionSetIdHash,
+      publicError,
+      creditReservationIdHash,
+    };
+  });
+  return sortUniqueHashes(rows, "job");
+}
+
+function normalizeHashSafeDispatches(
+  input: readonly unknown[],
+): Normalized["dispatches"] {
+  const rows = input.map((value, index) => {
+    const row = exactRecord(value, normalizedDispatchKeys, `dispatches[${index}]`);
+    const idHash = requiredHash(
+      row.idHash,
+      `dispatches[${index}].idHash`,
+    );
+    const jobIdHash = requiredHash(
+      row.jobIdHash,
+      `dispatches[${index}].jobIdHash`,
+    );
+    const validated = normalizeReportV4CommerceDispatches([
+      {
+        id: `normalized-dispatch-${index}`,
+        jobId: `normalized-job-${index}`,
+        tier: row.tier,
+        schemaVersion: row.schemaVersion,
+        state: row.state,
+        attempts: row.attempts,
+        publishedAt: row.publishedAt,
+        lastErrorCode: row.lastErrorCode,
+      },
+    ])[0];
+    return { ...validated, idHash, jobIdHash };
+  });
+  return sortUniqueHashes(rows, "dispatch");
+}
+
+function sortUniqueHashes<T extends { idHash: string }>(
+  input: readonly T[],
+  label: string,
+): T[] {
+  const rows = [...input].sort((left, right) =>
+    left.idHash.localeCompare(right.idHash),
+  );
+  unique(
+    rows.map((row) => row.idHash),
+    `${label} idHash`,
+  );
+  return rows;
+}
 
 function validateLineage(value: Normalized): void {
   const { phase, scope } = value;
