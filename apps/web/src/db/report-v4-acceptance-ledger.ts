@@ -45,7 +45,7 @@ export type CreateReportV4AcceptanceScenarioInput = {
   readonly scenarioId: string;
   readonly faultQuestionId: string;
 } & (
-  | { readonly kind: "success"; readonly faultKind: "independent_source_read_failure"; readonly faultSourceId: string; readonly expectedFaultOccurrences: 1 }
+  | { readonly kind: "success"; readonly faultKind: "independent_source_read_failure"; readonly faultSourceId?: string; readonly expectedFaultOccurrences: 1 }
   | { readonly kind: "diagnosis_failure"; readonly faultKind: "diagnosis_failure"; readonly expectedFaultOccurrences: 2 }
   | { readonly kind: "question_failure"; readonly faultKind: "question_failure"; readonly expectedFaultOccurrences: 2 }
 );
@@ -69,6 +69,12 @@ export interface BindReportV4AcceptancePreAdmissionJobInput {
   readonly sessionId: string;
   readonly scenarioId: string;
   readonly preAdmissionJobId: string;
+}
+
+export interface BindReportV4AcceptanceFaultSourceInput {
+  readonly sessionId: string;
+  readonly scenarioId: string;
+  readonly sourceId: string;
 }
 
 export interface LoadCollectingReportV4AcceptanceScenarioByJobInput {
@@ -154,6 +160,7 @@ export interface TerminalizeReportV4AcceptanceScenarioInput {
 export interface ReportV4AcceptanceLedgerStore {
   createSession(input: CreateReportV4AcceptanceSessionInput): Promise<ReportV4AcceptanceSession>;
   createScenario(input: CreateReportV4AcceptanceScenarioInput): Promise<ReportV4AcceptanceScenario>;
+  bindFaultSource(input: BindReportV4AcceptanceFaultSourceInput): Promise<ReportV4AcceptanceScenario>;
   bindPreAdmissionJob(input: BindReportV4AcceptancePreAdmissionJobInput): Promise<ReportV4AcceptanceScenario>;
   bindScenario(input: BindReportV4AcceptanceScenarioInput): Promise<ReportV4AcceptanceScenario>;
   appendEvent(input: AppendReportV4AcceptanceEventInput): Promise<ReportV4AcceptanceEventAppendResult>;
@@ -180,6 +187,7 @@ export function createReportV4AcceptanceLedgerRepository(
   return {
     createSession: mutate((value) => store.createSession(parseSessionInput(value))),
     createScenario: mutate((value) => store.createScenario(parseScenarioInput(value))),
+    bindFaultSource: mutate((value) => store.bindFaultSource(parseFaultSourceBindingInput(value))),
     bindPreAdmissionJob: mutate((value) => store.bindPreAdmissionJob(parsePreAdmissionBindingInput(value))),
     bindScenario: mutate((value) => store.bindScenario(parseBindingInput(value))),
     appendEvent: mutate((value) => store.appendEvent(parseEventInput(value))),
@@ -210,19 +218,34 @@ export function createPostgresReportV4AcceptanceLedgerStore(sql: postgres.Sql): 
       return mapped;
     },
     async createScenario(input) {
-      const source = input as CreateReportV4AcceptanceScenarioInput & { faultSourceId?: string };
+      const source = "faultSourceId" in input ? input.faultSourceId : undefined;
       const rows = await sql`INSERT INTO report_v4_acceptance_scenarios
         (id,session_id,kind,fault_kind,fault_question_id,fault_source_id,expected_fault_occurrences)
-        VALUES(${input.scenarioId},${input.sessionId},${input.kind},${input.faultKind},${input.faultQuestionId},${source.faultSourceId ?? null},${input.expectedFaultOccurrences})
+        VALUES(${input.scenarioId},${input.sessionId},${input.kind},${input.faultKind},${input.faultQuestionId},${source ?? null},${input.expectedFaultOccurrences})
         ON CONFLICT(id) DO NOTHING RETURNING *`;
       const row = rows[0] ?? (await sql`SELECT * FROM report_v4_acceptance_scenarios WHERE id=${input.scenarioId}`)[0];
       const mapped = mapScenario(row);
       if (!mapped || mapped.sessionId !== input.sessionId || mapped.kind !== input.kind || mapped.faultKind !== input.faultKind
-        || mapped.faultQuestionId !== input.faultQuestionId || mapped.faultSourceId !== (source.faultSourceId ?? null)
+        || mapped.faultQuestionId !== input.faultQuestionId || mapped.faultSourceId !== (source ?? null)
         || mapped.expectedFaultOccurrences !== input.expectedFaultOccurrences) {
         throw new Error("Report V4 acceptance scenario idempotency conflicts with another exact fault identity.");
       }
       return mapped;
+    },
+    async bindFaultSource(input) {
+      const rows = await sql`UPDATE report_v4_acceptance_scenarios SET fault_source_id=${input.sourceId}
+        WHERE id=${input.scenarioId} AND session_id=${input.sessionId} AND state='collecting' AND kind='success'
+          AND fault_kind='independent_source_read_failure' AND fault_source_id IS NULL RETURNING *`;
+      const bound = mapScenario(rows[0]);
+      if (bound) return bound;
+      const existing = mapScenario((await sql`SELECT * FROM report_v4_acceptance_scenarios
+        WHERE id=${input.scenarioId} AND session_id=${input.sessionId} AND state='collecting'`)[0]);
+      if (existing?.kind === "success" && existing.faultKind === "independent_source_read_failure"
+        && existing.faultSourceId === input.sourceId) return existing;
+      if (existing?.kind !== "success" || existing.faultKind !== "independent_source_read_failure") {
+        throw new Error("Only a collecting successful Report V4 acceptance scenario can bind an independent fault source.");
+      }
+      throw new Error("The collecting Report V4 acceptance scenario cannot rebind its fault source.");
     },
     async bindPreAdmissionJob(input) {
       const rows = await sql`UPDATE report_v4_acceptance_scenarios SET pre_admission_job_id=${input.preAdmissionJobId}
@@ -280,6 +303,7 @@ export function createProductionReportV4AcceptanceLedgerRepository(
   return createReportV4AcceptanceLedgerRepository({
     async createSession(input) { await ensureDatabase(); return createPostgresReportV4AcceptanceLedgerStore(getSqlClient()).createSession(input); },
     async createScenario(input) { await ensureDatabase(); return createPostgresReportV4AcceptanceLedgerStore(getSqlClient()).createScenario(input); },
+    async bindFaultSource(input) { await ensureDatabase(); return createPostgresReportV4AcceptanceLedgerStore(getSqlClient()).bindFaultSource(input); },
     async bindPreAdmissionJob(input) { await ensureDatabase(); return createPostgresReportV4AcceptanceLedgerStore(getSqlClient()).bindPreAdmissionJob(input); },
     async bindScenario(input) { await ensureDatabase(); return createPostgresReportV4AcceptanceLedgerStore(getSqlClient()).bindScenario(input); },
     async appendEvent(input) { await ensureDatabase(); return createPostgresReportV4AcceptanceLedgerStore(getSqlClient()).appendEvent(input); },
@@ -369,14 +393,16 @@ function parseScenarioInput(value: CreateReportV4AcceptanceScenarioInput): Creat
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("scenario must be an object.");
   const candidate = value as unknown as Record<string, unknown>;
   const allowed = candidate.kind === "success"
-    ? ["sessionId", "scenarioId", "kind", "faultKind", "faultQuestionId", "faultSourceId", "expectedFaultOccurrences"]
+    ? ["sessionId", "scenarioId", "kind", "faultKind", "faultQuestionId", ...("faultSourceId" in candidate ? ["faultSourceId"] : []), "expectedFaultOccurrences"]
     : ["sessionId", "scenarioId", "kind", "faultKind", "faultQuestionId", "expectedFaultOccurrences"];
   const input = strictRecord(value, allowed, "scenario");
   const kind = input.kind;
   const faultKind = input.faultKind;
   const base = { sessionId: uuid(input.sessionId, "sessionId"), scenarioId: uuid(input.scenarioId, "scenarioId"), faultQuestionId: text(input.faultQuestionId, "faultQuestionId", 500) };
   if (kind === "success" && faultKind === "independent_source_read_failure" && input.expectedFaultOccurrences === 1) {
-    return { ...base, kind, faultKind, faultSourceId: text(input.faultSourceId, "faultSourceId", 500), expectedFaultOccurrences: 1 };
+    return input.faultSourceId === undefined
+      ? { ...base, kind, faultKind, expectedFaultOccurrences: 1 }
+      : { ...base, kind, faultKind, faultSourceId: text(input.faultSourceId, "faultSourceId", 500), expectedFaultOccurrences: 1 };
   }
   if (kind === "diagnosis_failure" && faultKind === kind && input.faultSourceId === undefined && input.expectedFaultOccurrences === 2) {
     return { ...base, kind, faultKind, expectedFaultOccurrences: 2 };
@@ -385,6 +411,12 @@ function parseScenarioInput(value: CreateReportV4AcceptanceScenarioInput): Creat
     return { ...base, kind, faultKind, expectedFaultOccurrences: 2 };
   }
   throw new TypeError("Report V4 acceptance scenario fault identity and occurrence budget are invalid.");
+}
+
+function parseFaultSourceBindingInput(value: BindReportV4AcceptanceFaultSourceInput): BindReportV4AcceptanceFaultSourceInput {
+  const input = strictRecord(value, ["sessionId", "scenarioId", "sourceId"], "fault source binding");
+  return { sessionId: uuid(input.sessionId, "sessionId"), scenarioId: uuid(input.scenarioId, "scenarioId"),
+    sourceId: text(input.sourceId, "sourceId", 500) };
 }
 
 function parseBindingInput(value: BindReportV4AcceptanceScenarioInput): BindReportV4AcceptanceScenarioInput {

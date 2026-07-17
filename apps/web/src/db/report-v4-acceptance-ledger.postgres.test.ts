@@ -142,6 +142,38 @@ suite("Report V4 protected-Staging acceptance ledger PostgreSQL", () => {
     await sql`UPDATE deployment_environment SET profile='staging' WHERE singleton=true`;
   });
 
+  it("defers a successful scenario fault source to one immutable collecting-state binding", async () => {
+    const repository = repo(sql);
+    const sessionId = "16666666-6666-4666-8666-666666666666";
+    const successScenarioId = "26666666-6666-4666-8666-666666666661";
+    const diagnosisScenarioId = "26666666-6666-4666-8666-666666666662";
+    const questionScenarioId = "26666666-6666-4666-8666-666666666663";
+    const label = "deferred-source";
+    await repository.createSession(session(sessionId));
+    await seedV4Lineage(sql, label);
+    const created = await repository.createScenario({
+      sessionId, scenarioId: successScenarioId, kind: "success", faultKind: "independent_source_read_failure",
+      faultQuestionId: "question-1", expectedFaultOccurrences: 1
+    });
+    expect(created.faultSourceId).toBeNull();
+    await repository.bindScenario(lineage(sessionId, successScenarioId, label));
+    const terminal = { sessionId, scenarioId: successScenarioId,
+      baselineFingerprint: hash("deferred-before"), finalFingerprint: hash("deferred-after") };
+    await expect(repository.sealScenario(terminal)).rejects.toThrow(/bound independent fault source/i);
+    const sourceBinding = { sessionId, scenarioId: successScenarioId, sourceId: "source-deferred" };
+    expect((await repository.bindFaultSource(sourceBinding)).faultSourceId).toBe(sourceBinding.sourceId);
+    expect((await repository.bindFaultSource(sourceBinding)).faultSourceId).toBe(sourceBinding.sourceId);
+    await expect(repository.bindFaultSource({ ...sourceBinding, sourceId: "source-other" })).rejects.toThrow(/rebind/i);
+    expect((await repository.sealScenario(terminal)).state).toBe("sealed");
+
+    await repository.createScenario(scenario(sessionId, diagnosisScenarioId, "diagnosis_failure"));
+    await repository.createScenario(scenario(sessionId, questionScenarioId, "question_failure"));
+    await expect(repository.bindFaultSource({ sessionId, scenarioId: diagnosisScenarioId, sourceId: "forbidden" }))
+      .rejects.toThrow(/only a collecting successful/i);
+    await expect(repository.bindFaultSource({ sessionId, scenarioId: questionScenarioId, sourceId: "forbidden" }))
+      .rejects.toThrow(/only a collecting successful/i);
+  }, 120_000);
+
   it("rejects an ambiguous collecting-scenario job lookup across job roles", async () => {
     const repository = repo(sql);
     const sessionId = "15555555-5555-4555-8555-555555555555";

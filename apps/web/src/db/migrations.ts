@@ -3126,7 +3126,7 @@ export const V35_DATABASE_MIGRATIONS = [
     CONSTRAINT report_v4_acceptance_scenarios_hash_check CHECK((baseline_fingerprint IS NULL OR baseline_fingerprint ~ '^[a-f0-9]{64}$') AND (final_fingerprint IS NULL OR final_fingerprint ~ '^[a-f0-9]{64}$')),
     CONSTRAINT report_v4_acceptance_scenarios_fault_identity_check CHECK(length(btrim(fault_question_id)) BETWEEN 1 AND 500 AND (fault_source_id IS NULL OR length(btrim(fault_source_id)) BETWEEN 1 AND 500)),
     CONSTRAINT report_v4_acceptance_scenarios_fault_check CHECK(
-      (kind='success' AND fault_kind='independent_source_read_failure' AND fault_question_id IS NOT NULL AND fault_source_id IS NOT NULL AND expected_fault_occurrences=1)
+      (kind='success' AND fault_kind='independent_source_read_failure' AND fault_question_id IS NOT NULL AND expected_fault_occurrences=1)
       OR (kind='diagnosis_failure' AND fault_kind='diagnosis_failure' AND fault_question_id IS NOT NULL AND fault_source_id IS NULL AND expected_fault_occurrences=2)
       OR (kind='question_failure' AND fault_kind='question_failure' AND fault_question_id IS NOT NULL AND fault_source_id IS NULL AND expected_fault_occurrences=2)),
     CONSTRAINT report_v4_acceptance_scenarios_terminal_check CHECK((state='collecting' AND terminal_at IS NULL) OR (state IN ('sealed','failed') AND terminal_at IS NOT NULL)),
@@ -3203,8 +3203,13 @@ export const V35_DATABASE_MIGRATIONS = [
      IF OLD.state IN ('sealed','failed') THEN RAISE EXCEPTION 'A terminal Report V4 acceptance scenario is immutable.'; END IF;
      IF NEW.id IS DISTINCT FROM OLD.id OR NEW.session_id IS DISTINCT FROM OLD.session_id OR NEW.kind IS DISTINCT FROM OLD.kind
        OR NEW.fault_kind IS DISTINCT FROM OLD.fault_kind OR NEW.fault_question_id IS DISTINCT FROM OLD.fault_question_id
-       OR NEW.fault_source_id IS DISTINCT FROM OLD.fault_source_id OR NEW.expected_fault_occurrences IS DISTINCT FROM OLD.expected_fault_occurrences
+       OR NEW.expected_fault_occurrences IS DISTINCT FROM OLD.expected_fault_occurrences
        OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN RAISE EXCEPTION 'A Report V4 acceptance scenario identity is immutable.'; END IF;
+     IF NEW.fault_source_id IS DISTINCT FROM OLD.fault_source_id AND NOT (
+       OLD.kind='success' AND OLD.fault_kind='independent_source_read_failure' AND OLD.state='collecting' AND NEW.state='collecting'
+       AND OLD.fault_source_id IS NULL AND NEW.fault_source_id IS NOT NULL) THEN
+       RAISE EXCEPTION 'A Report V4 acceptance scenario cannot rebind its fault source.';
+     END IF;
      IF (OLD.report_id IS NOT NULL AND NEW.report_id IS DISTINCT FROM OLD.report_id)
        OR (OLD.order_id IS NOT NULL AND NEW.order_id IS DISTINCT FROM OLD.order_id)
        OR (OLD.pre_admission_job_id IS NOT NULL AND NEW.pre_admission_job_id IS DISTINCT FROM OLD.pre_admission_job_id)
@@ -3234,6 +3239,9 @@ export const V35_DATABASE_MIGRATIONS = [
      END IF;
      IF NEW.kind='success' AND NEW.enhancement_artifact_revision_id IS NULL THEN
        RAISE EXCEPTION 'The successful Report V4 acceptance scenario requires its exact enhancement artifact.';
+     END IF;
+     IF NEW.kind='success' AND NEW.fault_source_id IS NULL THEN
+       RAISE EXCEPTION 'The successful Report V4 acceptance scenario requires its bound independent fault source before terminalization.';
      END IF;
      SELECT EXISTS(SELECT 1 FROM payment_orders WHERE id=NEW.order_id AND report_id=NEW.report_id AND fulfillment_job_id=NEW.core_job_id AND site_snapshot_id=NEW.site_snapshot_id) INTO order_ok;
      SELECT EXISTS(SELECT 1 FROM scan_jobs WHERE id=NEW.pre_admission_job_id AND report_id=NEW.report_id AND reason='v4_pre_admission' AND artifact_contract='combined_geo_report_v4') INTO pre_ok;

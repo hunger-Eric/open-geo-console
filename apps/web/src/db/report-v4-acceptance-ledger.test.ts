@@ -39,6 +39,14 @@ describe("Report V4 protected-Staging acceptance ledger validation", () => {
       .rejects.toThrow(/sha/i);
     await expect(repository.createSession({ ...session(), workerGitSha: "b".repeat(40) }))
       .rejects.toThrow(/same deployment commit/i);
+    const successScenario = {
+      sessionId: session().sessionId, scenarioId: "22222222-2222-4222-8222-222222222222", kind: "success" as const,
+      faultKind: "independent_source_read_failure" as const, faultQuestionId: "question-1", expectedFaultOccurrences: 1 as const
+    };
+    await repository.createScenario(successScenario);
+    await expect(repository.createScenario({ ...successScenario, faultSourceId: "" })).rejects.toThrow(/nonblank/i);
+    await expect(repository.bindFaultSource({ sessionId: successScenario.sessionId, scenarioId: successScenario.scenarioId, sourceId: "" }))
+      .rejects.toThrow(/nonblank/i);
     await expect(repository.appendEvent({
       sessionId: session().sessionId,
       scenarioId: "22222222-2222-4222-8222-222222222222",
@@ -65,7 +73,7 @@ function session() {
 
 function fakeStore(): ReportV4AcceptanceLedgerStore & Record<string, ReturnType<typeof vi.fn>> {
   return {
-    createSession: vi.fn(), createScenario: vi.fn(), bindPreAdmissionJob: vi.fn(), bindScenario: vi.fn(), appendEvent: vi.fn(),
+    createSession: vi.fn(), createScenario: vi.fn(), bindFaultSource: vi.fn(), bindPreAdmissionJob: vi.fn(), bindScenario: vi.fn(), appendEvent: vi.fn(),
     sealScenario: vi.fn(), failScenario: vi.fn(), sealSession: vi.fn(), failSession: vi.fn(),
     loadSession: vi.fn(), loadScenarios: vi.fn(), loadCollectingScenarioByJob: vi.fn(), loadEvents: vi.fn()
   } as never;
