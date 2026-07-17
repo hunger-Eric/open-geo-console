@@ -8,6 +8,8 @@ import {
   V32_DATABASE_MIGRATIONS,
   V33_DATABASE_MIGRATIONS,
   V34_DATABASE_MIGRATIONS,
+  V35_DATABASE_MIGRATIONS,
+  V36_DATABASE_MIGRATIONS,
   databaseMigrationsAfter
 } from "./migrations";
 
@@ -19,7 +21,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-TOKEN-02
 describe("schema v31 retained V4 snapshot text", () => {
   it("registers an additive bounded private retained-text column", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(35);
+    expect(DATABASE_SCHEMA_VERSION).toBe(36);
     expect(databaseMigrationsAfter(30)).toEqual(expect.arrayContaining([...V31_DATABASE_MIGRATIONS]));
     const sql = V31_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("retained_cleaned_text text");
@@ -45,6 +47,8 @@ describeDisposablePostgres("schema v31 retained V4 snapshot text PostgreSQL cons
         - V32_DATABASE_MIGRATIONS.length
         - V33_DATABASE_MIGRATIONS.length
         - V34_DATABASE_MIGRATIONS.length
+        - V35_DATABASE_MIGRATIONS.length
+        - V36_DATABASE_MIGRATIONS.length
     );
     await sql.begin(async (tx) => {
       for (const statement of v30) await tx.unsafe(statement);

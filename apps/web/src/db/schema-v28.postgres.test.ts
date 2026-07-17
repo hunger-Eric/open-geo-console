@@ -14,7 +14,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-LEGACY-01
 describe("schema v28 V4 pre-admission site snapshot binding", () => {
   it("adds nullable report-bound terminal snapshot references to orders and jobs", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(35);
+    expect(DATABASE_SCHEMA_VERSION).toBe(36);
     const sql = V28_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS site_snapshot_id text");
     expect(sql).toContain("ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS site_snapshot_id text");

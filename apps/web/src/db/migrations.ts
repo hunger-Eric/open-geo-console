@@ -3306,6 +3306,134 @@ export const V35_DATABASE_MIGRATIONS = [
   `CREATE TRIGGER report_v4_acceptance_events_advance_head AFTER INSERT ON report_v4_acceptance_events FOR EACH ROW EXECUTE FUNCTION ogc_advance_report_v4_acceptance_session_head()`
 ] as const;
 
+export const V36_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS report_v4_acceptance_site_read_manifest (
+    identity_hash text PRIMARY KEY,
+    session_id text NOT NULL REFERENCES report_v4_acceptance_sessions(id) ON DELETE RESTRICT,
+    scenario_id text NOT NULL,
+    report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+    job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+    scope text NOT NULL,
+    purpose text NOT NULL,
+    url_hash text NOT NULL,
+    mode text NOT NULL,
+    attempt integer NOT NULL,
+    pair_binding_hash text NOT NULL,
+    owner_question_id text,
+    owner_source_id text,
+    network_performed boolean NOT NULL DEFAULT true,
+    terminal_phase text,
+    started_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    terminal_at timestamptz,
+    CONSTRAINT report_v4_acceptance_site_read_manifest_scenario_session_fkey
+      FOREIGN KEY(scenario_id,session_id) REFERENCES report_v4_acceptance_scenarios(id,session_id) ON DELETE RESTRICT,
+    CONSTRAINT report_v4_acceptance_site_read_manifest_hash_check
+      CHECK(identity_hash ~ '^[a-f0-9]{64}$' AND url_hash ~ '^[a-f0-9]{64}$' AND pair_binding_hash ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT report_v4_acceptance_site_read_manifest_mode_check CHECK(mode IN ('raw','browser')),
+    CONSTRAINT report_v4_acceptance_site_read_manifest_network_check CHECK(network_performed=true),
+    CONSTRAINT report_v4_acceptance_site_read_manifest_owner_check
+      CHECK((owner_question_id IS NULL OR (owner_question_id=btrim(owner_question_id) AND length(owner_question_id) BETWEEN 1 AND 500))
+        AND (owner_source_id IS NULL OR (owner_source_id=btrim(owner_source_id) AND length(owner_source_id) BETWEEN 1 AND 500))),
+    CONSTRAINT report_v4_acceptance_site_read_manifest_scope_check CHECK(
+      (scope='admission_discovery' AND purpose IN ('homepage','robots','sitemap') AND attempt=0
+        AND owner_question_id IS NULL AND owner_source_id IS NULL)
+      OR (scope='admission_page' AND purpose='page' AND attempt=0
+        AND owner_question_id IS NULL AND owner_source_id IS NULL)
+      OR (scope='enhancement_source' AND purpose='source' AND attempt=1
+        AND owner_question_id IS NOT NULL AND owner_source_id IS NOT NULL)),
+    CONSTRAINT report_v4_acceptance_site_read_manifest_terminal_check CHECK(
+      (terminal_phase IS NULL AND terminal_at IS NULL)
+      OR (terminal_phase IN ('completed','failed') AND terminal_at IS NOT NULL AND terminal_at>=started_at))
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_site_read_manifest_natural_uidx
+    ON report_v4_acceptance_site_read_manifest
+      (session_id,scenario_id,report_id,job_id,scope,purpose,url_hash,mode,attempt,owner_question_id,owner_source_id)
+    NULLS NOT DISTINCT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_site_read_manifest_enh_physical_uidx
+    ON report_v4_acceptance_site_read_manifest(session_id,scenario_id,job_id,url_hash,mode,attempt)
+    WHERE scope='enhancement_source'`,
+  `CREATE INDEX IF NOT EXISTS report_v4_acceptance_site_read_manifest_scenario_idx
+    ON report_v4_acceptance_site_read_manifest(session_id,scenario_id,started_at,identity_hash)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_site_read_manifest() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; scenario_state text; scenario_report text; expected_job text;
+     lineage_ok boolean; expected_identity text; expected_pair text;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP='DELETE' THEN
+       RAISE EXCEPTION 'A Report V4 acceptance site-read manifest row is immutable and cannot be deleted.';
+     END IF;
+     IF TG_OP='INSERT' THEN
+       SELECT sessions.state,scenarios.state,scenarios.report_id,
+         CASE WHEN NEW.scope IN ('admission_discovery','admission_page') THEN scenarios.pre_admission_job_id
+              ELSE scenarios.enhancement_job_id END
+         INTO session_state,scenario_state,scenario_report,expected_job
+       FROM report_v4_acceptance_sessions sessions
+       JOIN report_v4_acceptance_scenarios scenarios
+         ON scenarios.session_id=sessions.id AND scenarios.id=NEW.scenario_id
+       WHERE sessions.id=NEW.session_id;
+       IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN
+         RAISE EXCEPTION 'A Report V4 acceptance site-read begin requires a collecting session and scenario.';
+       END IF;
+       IF expected_job IS DISTINCT FROM NEW.job_id OR (scenario_report IS NOT NULL AND scenario_report IS DISTINCT FROM NEW.report_id) THEN
+         RAISE EXCEPTION 'A Report V4 acceptance site-read begin requires exact scenario lineage.';
+       END IF;
+       IF NEW.scope IN ('admission_discovery','admission_page') THEN
+         SELECT EXISTS(SELECT 1 FROM scan_jobs WHERE id=NEW.job_id AND report_id=NEW.report_id
+           AND reason='v4_pre_admission' AND artifact_contract='combined_geo_report_v4') INTO lineage_ok;
+       ELSE
+         SELECT scenario_report=NEW.report_id AND EXISTS(SELECT 1 FROM scan_jobs WHERE id=NEW.job_id AND report_id=NEW.report_id
+           AND reason='v4_diagnosis_enhancement' AND artifact_contract='combined_geo_report_v4') INTO lineage_ok;
+       END IF;
+       IF lineage_ok IS DISTINCT FROM true THEN
+         RAISE EXCEPTION 'A Report V4 acceptance site-read begin requires exact job and report lineage.';
+       END IF;
+       expected_identity:=encode(sha256(convert_to(concat_ws(chr(31),
+         'ogc:report-v4:acceptance-site-read-manifest:identity:v1',NEW.session_id,NEW.scenario_id,NEW.report_id,
+         NEW.job_id,NEW.scope,NEW.purpose,NEW.url_hash,NEW.mode,NEW.attempt::text,
+         coalesce(NEW.owner_question_id,''),coalesce(NEW.owner_source_id,'')),'UTF8')),'hex');
+       expected_pair:=encode(sha256(convert_to(concat_ws(chr(31),
+         'ogc:report-v4:acceptance-site-read-manifest:pair:v1',NEW.session_id,NEW.scenario_id,NEW.report_id,
+         NEW.job_id,NEW.scope,NEW.purpose,NEW.url_hash,NEW.attempt::text),'UTF8')),'hex');
+       IF NEW.identity_hash IS DISTINCT FROM expected_identity OR NEW.pair_binding_hash IS DISTINCT FROM expected_pair THEN
+         RAISE EXCEPTION 'A Report V4 acceptance site-read manifest hash is not deterministic.';
+       END IF;
+       RETURN NEW;
+     END IF;
+     SELECT sessions.state,scenarios.state INTO session_state,scenario_state
+       FROM report_v4_acceptance_sessions sessions
+       JOIN report_v4_acceptance_scenarios scenarios
+         ON scenarios.session_id=sessions.id AND scenarios.id=NEW.scenario_id
+       WHERE sessions.id=NEW.session_id;
+     IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN
+       RAISE EXCEPTION 'A Report V4 acceptance site-read terminal requires a collecting session and scenario.';
+     END IF;
+     IF NEW.identity_hash IS DISTINCT FROM OLD.identity_hash OR NEW.session_id IS DISTINCT FROM OLD.session_id
+       OR NEW.scenario_id IS DISTINCT FROM OLD.scenario_id OR NEW.report_id IS DISTINCT FROM OLD.report_id
+       OR NEW.job_id IS DISTINCT FROM OLD.job_id OR NEW.scope IS DISTINCT FROM OLD.scope
+       OR NEW.purpose IS DISTINCT FROM OLD.purpose OR NEW.url_hash IS DISTINCT FROM OLD.url_hash
+       OR NEW.mode IS DISTINCT FROM OLD.mode OR NEW.attempt IS DISTINCT FROM OLD.attempt
+       OR NEW.pair_binding_hash IS DISTINCT FROM OLD.pair_binding_hash
+       OR NEW.owner_question_id IS DISTINCT FROM OLD.owner_question_id
+       OR NEW.owner_source_id IS DISTINCT FROM OLD.owner_source_id
+       OR NEW.network_performed IS DISTINCT FROM OLD.network_performed
+       OR NEW.started_at IS DISTINCT FROM OLD.started_at THEN
+       RAISE EXCEPTION 'A Report V4 acceptance site-read manifest identity and owner are immutable.';
+     END IF;
+     IF OLD.terminal_phase IS NOT NULL OR OLD.terminal_at IS NOT NULL THEN
+       RAISE EXCEPTION 'A terminal Report V4 acceptance site-read manifest row is immutable.';
+     END IF;
+     IF NEW.terminal_phase NOT IN ('completed','failed') OR NEW.terminal_at IS NULL THEN
+       RAISE EXCEPTION 'A Report V4 acceptance site-read manifest row may only transition once to completed or failed.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_acceptance_site_read_manifest_guard
+    ON report_v4_acceptance_site_read_manifest`,
+  `CREATE TRIGGER report_v4_acceptance_site_read_manifest_guard
+    BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_site_read_manifest
+    FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_site_read_manifest()`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -3333,7 +3461,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 32, migrations: V32_DATABASE_MIGRATIONS },
   { version: 33, migrations: V33_DATABASE_MIGRATIONS },
   { version: 34, migrations: V34_DATABASE_MIGRATIONS },
-  { version: 35, migrations: V35_DATABASE_MIGRATIONS }
+  { version: 35, migrations: V35_DATABASE_MIGRATIONS },
+  { version: 36, migrations: V36_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

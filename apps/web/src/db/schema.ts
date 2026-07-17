@@ -105,6 +105,10 @@ export type ReportV4AcceptanceOperation =
   | "v4_dispatch" | "pdf" | "provider_claim" | "qualification" | "four_snapshot"
   | "replacement_fulfillment" | "artifact_activation" | "commerce";
 export type ReportV4AcceptanceEventPhase = "started" | "completed" | "failed" | "rejected" | "consumed" | "observed";
+export type ReportV4AcceptanceSiteReadScope = "admission_discovery" | "admission_page" | "enhancement_source";
+export type ReportV4AcceptanceSiteReadPurpose = "homepage" | "robots" | "sitemap" | "page" | "source";
+export type ReportV4AcceptanceSiteReadMode = "raw" | "browser";
+export type ReportV4AcceptanceSiteReadTerminalPhase = "completed" | "failed";
 export type ReportV4AcceptanceEventDetails =
   | { readonly bindingHash: string }
   | { readonly candidatePages: number; readonly analyzablePages: number; readonly excludedPages: number; readonly jsDependentPages: number }
@@ -1585,6 +1589,40 @@ export const reportV4AcceptanceEvents = pgTable("report_v4_acceptance_events", {
   check("report_v4_acceptance_events_details_check", sql`ogc_report_v4_acceptance_event_valid(${table.kind},${table.operation},${table.phase},${table.details})`)
 ]);
 export type ReportV4AcceptanceEventRow = typeof reportV4AcceptanceEvents.$inferSelect;
+
+export const reportV4AcceptanceSiteReadManifest = pgTable("report_v4_acceptance_site_read_manifest", {
+  identityHash: text("identity_hash").primaryKey(),
+  sessionId: text("session_id").notNull().references(() => reportV4AcceptanceSessions.id, { onDelete: "restrict" }),
+  scenarioId: text("scenario_id").notNull(),
+  reportId: text("report_id").notNull().references(() => scanReports.id, { onDelete: "restrict" }),
+  jobId: text("job_id").notNull().references(() => scanJobs.id, { onDelete: "restrict" }),
+  scope: text("scope").$type<ReportV4AcceptanceSiteReadScope>().notNull(),
+  purpose: text("purpose").$type<ReportV4AcceptanceSiteReadPurpose>().notNull(),
+  urlHash: text("url_hash").notNull(),
+  mode: text("mode").$type<ReportV4AcceptanceSiteReadMode>().notNull(),
+  attempt: integer("attempt").notNull(),
+  pairBindingHash: text("pair_binding_hash").notNull(),
+  ownerQuestionId: text("owner_question_id"),
+  ownerSourceId: text("owner_source_id"),
+  networkPerformed: boolean("network_performed").notNull().default(true),
+  terminalPhase: text("terminal_phase").$type<ReportV4AcceptanceSiteReadTerminalPhase>(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  terminalAt: timestamp("terminal_at", { withTimezone: true })
+}, (table) => [
+  index("report_v4_acceptance_site_read_manifest_scenario_idx").on(table.sessionId, table.scenarioId, table.startedAt, table.identityHash),
+  foreignKey({
+    columns: [table.scenarioId, table.sessionId],
+    foreignColumns: [reportV4AcceptanceScenarios.id, reportV4AcceptanceScenarios.sessionId],
+    name: "report_v4_acceptance_site_read_manifest_scenario_session_fkey"
+  }).onDelete("restrict"),
+  check("report_v4_acceptance_site_read_manifest_hash_check", sql`${table.identityHash} ~ '^[a-f0-9]{64}$' AND ${table.urlHash} ~ '^[a-f0-9]{64}$' AND ${table.pairBindingHash} ~ '^[a-f0-9]{64}$'`),
+  check("report_v4_acceptance_site_read_manifest_mode_check", sql`${table.mode} IN ('raw','browser')`),
+  check("report_v4_acceptance_site_read_manifest_network_check", sql`${table.networkPerformed}=true`),
+  check("report_v4_acceptance_site_read_manifest_owner_check", sql`(${table.ownerQuestionId} IS NULL OR (${table.ownerQuestionId}=btrim(${table.ownerQuestionId}) AND length(${table.ownerQuestionId}) BETWEEN 1 AND 500)) AND (${table.ownerSourceId} IS NULL OR (${table.ownerSourceId}=btrim(${table.ownerSourceId}) AND length(${table.ownerSourceId}) BETWEEN 1 AND 500))`),
+  check("report_v4_acceptance_site_read_manifest_scope_check", sql`(${table.scope}='admission_discovery' AND ${table.purpose} IN ('homepage','robots','sitemap') AND ${table.attempt}=0 AND ${table.ownerQuestionId} IS NULL AND ${table.ownerSourceId} IS NULL) OR (${table.scope}='admission_page' AND ${table.purpose}='page' AND ${table.attempt}=0 AND ${table.ownerQuestionId} IS NULL AND ${table.ownerSourceId} IS NULL) OR (${table.scope}='enhancement_source' AND ${table.purpose}='source' AND ${table.attempt}=1 AND ${table.ownerQuestionId} IS NOT NULL AND ${table.ownerSourceId} IS NOT NULL)`),
+  check("report_v4_acceptance_site_read_manifest_terminal_check", sql`(${table.terminalPhase} IS NULL AND ${table.terminalAt} IS NULL) OR (${table.terminalPhase} IN ('completed','failed') AND ${table.terminalAt} IS NOT NULL AND ${table.terminalAt}>=${table.startedAt})`)
+]);
+export type ReportV4AcceptanceSiteReadManifestRow = typeof reportV4AcceptanceSiteReadManifest.$inferSelect;
 
 export const reportReplacementFulfillments = pgTable(
   "report_replacement_fulfillments",

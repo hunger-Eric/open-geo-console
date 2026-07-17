@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DATABASE_MIGRATIONS, V35_DATABASE_MIGRATIONS } from "./migrations";
+import { DATABASE_MIGRATIONS, V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS } from "./migrations";
 import {
   createPostgresReportV4AcceptanceLedgerStore,
   createReportV4AcceptanceLedgerRepository,
@@ -240,7 +240,7 @@ suite("Report V4 protected-Staging acceptance ledger PostgreSQL", () => {
     await admin.unsafe(`CREATE DATABASE ${quote(upgradeDatabaseName)}`);
     const upgradeSql = postgres(withDatabase(adminUrl!, upgradeDatabaseName), { max: 1, prepare: false });
     try {
-      const v34Migrations = DATABASE_MIGRATIONS.slice(0, -V35_DATABASE_MIGRATIONS.length);
+      const v34Migrations = DATABASE_MIGRATIONS.slice(0, -(V35_DATABASE_MIGRATIONS.length + V36_DATABASE_MIGRATIONS.length));
       await upgradeSql.begin(async (tx) => { for (const statement of v34Migrations) await tx.unsafe(statement); });
       expect((await upgradeSql`SELECT to_regclass('report_v4_acceptance_sessions')::text AS name`)[0]?.name).toBeNull();
       await upgradeSql.begin(async (tx) => { for (const statement of V35_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
