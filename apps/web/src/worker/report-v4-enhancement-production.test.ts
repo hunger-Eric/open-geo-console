@@ -2,10 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import type { ReportV4ConfigSnapshotRow } from "../db/report-v4-config-snapshots";
 import type { ReportV4ModelRuntimeConfig } from "../report-v4/model-runtime-config";
 import type { ReportV4ReportRuntimeConfig } from "../report-v4/report-runtime-config";
+import { ReportV4DiagnosisProviderError } from "./report-v4-diagnosis-enhancer";
 import type { ReportV4EnhancementStageDependencies } from "./report-v4-orchestrator";
+import { auditReportV4Sources } from "./report-v4-source-audit";
+import { createStagingLiveDrill } from "./staging-live-drill";
 import {
   buildReportV4EnhancementArtifactRevisionId,
   createReportV4EnhancementProductionWithDependencies,
+  withReportV4DiagnosisFailureDrill,
+  withReportV4IndependentSourceReadFailureDrill,
   type ClaimedReportV4EnhancementContext,
   type ClaimedReportV4EnhancementJob,
   type ReportV4EnhancementProductionDependencies
@@ -154,7 +159,70 @@ describe("Report V4 enhancement production boundary", () => {
       ...lineage, coreArtifactRevisionId: "core-artifact-2"
     }));
   });
+
+  it("maps two exact diagnosis drill occurrences to retryable provider failures", async () => {
+    const generate = vi.fn(async () => ({ selectionSummary: "unused" }));
+    const provider = withReportV4DiagnosisFailureDrill({
+      provider: { generate },
+      enhancementJobId: "enhancement-job-1",
+      questionId: "q2",
+      liveDrill: v4Drill("diagnosis_failure", "2")
+    });
+    const request = { kind: "diagnose" as const, input: {} as never, signal: new AbortController().signal };
+
+    await expect(provider.generate(request)).rejects.toMatchObject({
+      code: "temporary_provider", retryable: true
+    } satisfies Partial<ReportV4DiagnosisProviderError>);
+    await expect(provider.generate(request)).rejects.toMatchObject({
+      code: "temporary_provider", retryable: true
+    } satisfies Partial<ReportV4DiagnosisProviderError>);
+    await expect(provider.generate(request)).resolves.toMatchObject({ selectionSummary: "unused" });
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns only the exact source read into an inaccessible audit while preserving the core answer and link", async () => {
+    const readRawSource = vi.fn(async () => ({ status: "available" as const, summary: "available" }));
+    const renderBrowserSource = vi.fn(async () => ({ status: "available" as const, summary: "browser" }));
+    const dependencies = withReportV4IndependentSourceReadFailureDrill({
+      dependencies: { readRawSource, renderBrowserSource },
+      enhancementJobId: "enhancement-job-1",
+      liveDrill: v4Drill("independent_source_read_failure", "1", "source-2")
+    });
+    const question = {
+      order: 2 as const, questionId: "q2", questionText: "Question two?", status: "answered" as const,
+      answer: "Persisted answer.",
+      sources: [{
+        questionId: "q2", sourceId: "source-2", title: "Persisted source",
+        canonicalUrl: "https://source.example/two", citedText: "Persisted citation.", retrievalStatus: "not_checked" as const
+      }]
+    };
+
+    const [result] = await auditReportV4Sources([question], dependencies);
+    expect(result!.question).toBe(question);
+    expect(result!.question.answer).toBe("Persisted answer.");
+    expect(result!.question.sources[0]!.canonicalUrl).toBe("https://source.example/two");
+    expect(result!.sourceAudits).toEqual([{
+      questionId: "q2", sourceId: "source-2", canonicalUrl: "https://source.example/two", status: "inaccessible"
+    }]);
+    expect(readRawSource).not.toHaveBeenCalled();
+    expect(renderBrowserSource).not.toHaveBeenCalled();
+  });
 });
+
+function v4Drill(
+  fault: "diagnosis_failure" | "independent_source_read_failure",
+  occurrences: "1" | "2",
+  sourceId?: string
+) {
+  return createStagingLiveDrill({
+    OGC_DEPLOYMENT_PROFILE: "staging", VERCEL_ENV: "preview", COMMERCE_MODE: "test",
+    OGC_STAGING_LIVE_DRILL_JOB_ID: "enhancement-job-1",
+    OGC_STAGING_LIVE_DRILL_FAULT: fault,
+    OGC_STAGING_LIVE_DRILL_QUESTION_ID: "q2",
+    OGC_STAGING_LIVE_DRILL_OCCURRENCES: occurrences,
+    ...(sourceId ? { OGC_STAGING_LIVE_DRILL_SOURCE_ID: sourceId } : {})
+  })!;
+}
 
 function dependenciesFor(
   overrides: Partial<ReportV4EnhancementProductionDependencies> = {}

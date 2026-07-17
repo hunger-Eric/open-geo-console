@@ -8,9 +8,12 @@ import type { ReportV4ConfigSnapshotRow } from "../db/report-v4-config-snapshots
 import type { ReportV4PaidCoreContext } from "../db/report-v4-production-jobs";
 import type { ReportV4SiteSnapshotBundle } from "../db/report-v4-site-snapshots";
 import type { ReportV4CoreStageDependencies } from "./report-v4-orchestrator";
+import { ReportV4QuestionProviderError } from "./report-v4-question-answerer";
+import { createStagingLiveDrill } from "./staging-live-drill";
 import {
   buildReportV4CoreArtifactRevisionId,
   createReportV4CoreProductionWithDependencies,
+  withReportV4QuestionFailureDrill,
   type ReportV4CoreProductionDependencies,
   type ReportV4CoreProductionInput
 } from "./report-v4-core-production";
@@ -115,6 +118,33 @@ describe("Report V4 core production composition", () => {
     ]) {
       expect(buildReportV4CoreArtifactRevisionId({ ...base, ...changed })).not.toBe(expected);
     }
+  });
+
+  it("maps only the exact protected-Staging question drill to a retryable provider failure", async () => {
+    const answerWithSources = vi.fn(async () => ({ answerText: "ok", sources: [] }));
+    const provider = withReportV4QuestionFailureDrill({
+      provider: { providerId: "provider", model: "model", searchMode: "search", answerWithSources },
+      coreJobId: "core-job-v4",
+      liveDrill: createStagingLiveDrill({
+        OGC_DEPLOYMENT_PROFILE: "staging", VERCEL_ENV: "preview", COMMERCE_MODE: "test",
+        OGC_STAGING_LIVE_DRILL_JOB_ID: "core-job-v4",
+        OGC_STAGING_LIVE_DRILL_FAULT: "question_failure",
+        OGC_STAGING_LIVE_DRILL_QUESTION_ID: "q2",
+        OGC_STAGING_LIVE_DRILL_OCCURRENCES: "2"
+      })!
+    });
+    const signal = new AbortController().signal;
+
+    await expect(provider.answerWithSources({
+      questionId: "q2", question: "Question 2?", locale: "zh", region: "CN", signal
+    })).rejects.toMatchObject({ code: "temporary_provider", retryable: true } satisfies Partial<ReportV4QuestionProviderError>);
+    await expect(provider.answerWithSources({
+      questionId: "q2", question: "Question 2?", locale: "zh", region: "CN", signal
+    })).rejects.toMatchObject({ code: "temporary_provider", retryable: true } satisfies Partial<ReportV4QuestionProviderError>);
+    await expect(provider.answerWithSources({
+      questionId: "q1", question: "Question 1?", locale: "zh", region: "CN", signal
+    })).resolves.toMatchObject({ answerText: "ok" });
+    expect(answerWithSources).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -190,7 +190,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       const configuredRunner = reportV4ProductionTarget === "core"
         ? options.reportV4CoreRunner
         : options.reportV4EnhancementRunner;
-      const selectedRunner = configuredRunner ?? createDefaultReportV4ProductionRunner(reportV4ProductionTarget, process.env);
+      const selectedRunner = configuredRunner ?? createDefaultReportV4ProductionRunner(
+        reportV4ProductionTarget,
+        process.env,
+        options.liveDrill
+      );
       await dispatchReportV4ProductionJob(reportV4ProductionTarget, {
         job,
         workerId,
@@ -677,15 +681,16 @@ export async function dispatchReportV4ProductionJob(
 
 export function createDefaultReportV4ProductionRunner(
   target: ReportV4ProductionTarget,
-  environment: NodeJS.ProcessEnv
+  environment: NodeJS.ProcessEnv,
+  liveDrill?: StagingLiveDrill
 ): ReportV4ProductionRunner {
   if (target === "core") {
-    const run = createReportV4CoreProduction({ environment });
+    const run = createReportV4CoreProduction({ environment, liveDrill });
     return async ({ job, workerId, signal, remainingMs }) => {
       await run({ coreJobId: job.id, workerId, leaseMs: Math.max(1, remainingMs()), signal });
     };
   }
-  const run = createReportV4EnhancementProduction({ environment });
+  const run = createReportV4EnhancementProduction({ environment, liveDrill });
   return async ({ job, workerId, signal }) => {
     await run({ job, workerId, signal });
   };

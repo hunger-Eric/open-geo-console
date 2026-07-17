@@ -43,6 +43,12 @@ describe("strict Report V4 processor routing", () => {
     expect(legacy).toBeGreaterThan(v4);
   });
 
+  it("threads the process-scoped protected-Staging drill only into the selected V4 production runner", () => {
+    expect(processorSource).toContain("options.liveDrill");
+    expect(processorSource).toContain("createReportV4CoreProduction({ environment, liveDrill })");
+    expect(processorSource).toContain("createReportV4EnhancementProduction({ environment, liveDrill })");
+  });
+
   it("routes only exact core and enhancement identities", () => {
     expect(resolveReportV4ProductionTarget(v4Job())).toBe("core");
     expect(resolveReportV4ProductionTarget(v4Job({ reason: "v4_diagnosis_enhancement", siteSnapshotId: null, creditReservationId: null }))).toBe("enhancement");

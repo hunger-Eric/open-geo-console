@@ -55,8 +55,11 @@ import {
 import { renderReportV4Html } from "../report/report-v4-html";
 import {
   enhanceReportV4QuestionDiagnosis,
+  ReportV4DiagnosisProviderError,
   type ReportV4DiagnosisProvider
 } from "./report-v4-diagnosis-enhancer";
+import { StagingLiveDrillFaultError } from "./job-errors";
+import type { StagingLiveDrill } from "./staging-live-drill";
 import { selectReportV4DiagnosisTargetPages } from "./report-v4-diagnosis-target-pages";
 import {
   runReportV4EnhancementStage,
@@ -90,6 +93,7 @@ export interface ReportV4EnhancementProductionOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly now?: () => Date;
   readonly sourceAudit?: Omit<ReportV4SourceAuditProductionOptions, "fetchImpl">;
+  readonly liveDrill?: StagingLiveDrill;
 }
 
 export interface ClaimedReportV4EnhancementContext {
@@ -273,9 +277,13 @@ function createLiveStageDependencies(input: {
               execution,
               questions: source.report.questions,
               pages,
-              auditDependencies: createReportV4SourceAuditProductionDependencies({
-                ...(input.options.sourceAudit ?? {}),
-                ...(input.options.fetch ? { fetchImpl: input.options.fetch } : {})
+              auditDependencies: withReportV4IndependentSourceReadFailureDrill({
+                dependencies: createReportV4SourceAuditProductionDependencies({
+                  ...(input.options.sourceAudit ?? {}),
+                  ...(input.options.fetch ? { fetchImpl: input.options.fetch } : {})
+                }),
+                enhancementJobId: execution.input.job.id,
+                liveDrill: input.options.liveDrill
               }),
               repository: input.diagnosisCheckpoints,
               provider: createReportV4MimoDiagnosisProvider({
@@ -321,6 +329,12 @@ function createLiveStageDependencies(input: {
         return { status: "failed", providerAttempts: 0 };
       }
       let persistedCallCount = unit.checkpoint.providerCallCount;
+      const drilledProvider = withReportV4DiagnosisFailureDrill({
+        provider: coordinator.provider,
+        enhancementJobId: execution.input.job.id,
+        questionId: question.questionId,
+        liveDrill: input.options.liveDrill
+      });
       const checkpointingProvider: ReportV4DiagnosisProvider = {
         async generate(request) {
           const expected = persistedCallCount === 0 ? 0 : 1;
@@ -332,7 +346,7 @@ function createLiveStageDependencies(input: {
           });
           persistedCallCount = unit.checkpoint.providerCallCount;
           request.signal.throwIfAborted();
-          return coordinator.provider.generate(request);
+          return drilledProvider.generate(request);
         }
       };
       const result = await enhanceReportV4QuestionDiagnosis({
@@ -399,6 +413,56 @@ function createLiveStageDependencies(input: {
       signal?.throwIfAborted();
       return terminalizeReportV4EnhancementJob({ ...terminal, workerId: execution.input.workerId });
     }
+  };
+}
+
+export function withReportV4DiagnosisFailureDrill(input: {
+  readonly provider: ReportV4DiagnosisProvider;
+  readonly enhancementJobId: string;
+  readonly questionId: string;
+  readonly liveDrill?: StagingLiveDrill;
+}): ReportV4DiagnosisProvider {
+  if (!input.liveDrill) return input.provider;
+  return {
+    async generate(request) {
+      try {
+        input.liveDrill!.inject({
+          jobId: input.enhancementJobId,
+          fault: "diagnosis_failure",
+          questionId: input.questionId
+        });
+      } catch (error) {
+        if (error instanceof StagingLiveDrillFaultError) {
+          throw new ReportV4DiagnosisProviderError(
+            "temporary_provider",
+            "Protected staging injected a bounded Report V4 diagnosis provider failure.",
+            { cause: error }
+          );
+        }
+        throw error;
+      }
+      return input.provider.generate(request);
+    }
+  };
+}
+
+export function withReportV4IndependentSourceReadFailureDrill(input: {
+  readonly dependencies: ReportV4SourceAuditDependencies;
+  readonly enhancementJobId: string;
+  readonly liveDrill?: StagingLiveDrill;
+}): ReportV4SourceAuditDependencies {
+  if (!input.liveDrill) return input.dependencies;
+  return {
+    async readRawSource(source, signal) {
+      input.liveDrill!.inject({
+        jobId: input.enhancementJobId,
+        fault: "independent_source_read_failure",
+        questionId: source.questionId,
+        sourceId: source.sourceId
+      });
+      return input.dependencies.readRawSource(source, signal);
+    },
+    renderBrowserSource: (source, signal) => input.dependencies.renderBrowserSource(source, signal)
   };
 }
 

@@ -50,8 +50,11 @@ import {
 } from "./report-v4-page-analysis-production";
 import {
   answerReportV4Questions,
+  ReportV4QuestionProviderError,
   type ReportV4QuestionAnswerProvider
 } from "./report-v4-question-answerer";
+import { StagingLiveDrillFaultError } from "./job-errors";
+import type { StagingLiveDrill } from "./staging-live-drill";
 import {
   createReportV4WebsiteSynthesisProduction,
   REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID
@@ -86,6 +89,7 @@ export interface ReportV4CoreProductionOptions {
   readonly environment: NodeJS.ProcessEnv;
   readonly fetch?: typeof globalThis.fetch;
   readonly now?: () => Date;
+  readonly liveDrill?: StagingLiveDrill;
 }
 
 export interface ReportV4CoreProductionLockedConfiguration {
@@ -339,7 +343,11 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
         async answerQuestions({ questions, signal }) {
           const activeSignal = signal ?? execution.input.signal;
           activeSignal.throwIfAborted();
-          const baseProvider = createReportV4MimoQuestionAnswerProvider(providerDependencies(options, execution.modelRuntime));
+          const baseProvider = withReportV4QuestionFailureDrill({
+            provider: createReportV4MimoQuestionAnswerProvider(providerDependencies(options, execution.modelRuntime)),
+            coreJobId: execution.input.coreJobId,
+            liveDrill: options.liveDrill
+          });
           const callCounts = new Map<string, number>();
           const provider: ReportV4QuestionAnswerProvider = {
             providerId: baseProvider.providerId,
@@ -429,6 +437,38 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
           return { enhancementJobId: result.enhancementJobId };
         }
       };
+    }
+  };
+}
+
+export function withReportV4QuestionFailureDrill(input: {
+  readonly provider: ReportV4QuestionAnswerProvider;
+  readonly coreJobId: string;
+  readonly liveDrill?: StagingLiveDrill;
+}): ReportV4QuestionAnswerProvider {
+  if (!input.liveDrill) return input.provider;
+  return {
+    providerId: input.provider.providerId,
+    model: input.provider.model,
+    searchMode: input.provider.searchMode,
+    async answerWithSources(providerInput) {
+      try {
+        input.liveDrill!.inject({
+          jobId: input.coreJobId,
+          fault: "question_failure",
+          questionId: providerInput.questionId
+        });
+      } catch (error) {
+        if (error instanceof StagingLiveDrillFaultError) {
+          throw new ReportV4QuestionProviderError(
+            "temporary_provider",
+            "Protected staging injected a bounded Report V4 question provider failure.",
+            { cause: error }
+          );
+        }
+        throw error;
+      }
+      return input.provider.answerWithSources(providerInput);
     }
   };
 }
