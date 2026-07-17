@@ -31,6 +31,20 @@ export function parseReportV4AuditArgs(argv: string[]): ReportV4AuditArgs {
   return { mode, writeMatrix };
 }
 
+export function reportV4AcceptanceCommandEnvironment(
+  environment: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+  const sanitized = { ...environment };
+  for (const name of Object.keys(sanitized)) {
+    const normalizedName = name.toUpperCase();
+    if (normalizedName === "OGC_REPORT_V4_STAGING_EVIDENCE"
+      || normalizedName.startsWith("OGC_REPORT_V4_STAGING_EVIDENCE_")) {
+      delete sanitized[name];
+    }
+  }
+  return sanitized;
+}
+
 export async function runReportV4Conformance(argv: string[]): Promise<number> {
   const args = parseReportV4AuditArgs(argv);
   const workspaceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -40,7 +54,12 @@ export async function runReportV4Conformance(argv: string[]): Promise<number> {
     writeFileSync(resolve(workspaceRoot, registry.matrixPath), renderReportV4CoverageMatrix(registry), "utf8");
   }
   const result = await auditReportV4Registry(registry, workspaceRoot, args.mode, (command) => {
-    const child = spawnSync(command, { cwd: workspaceRoot, shell: true, stdio: "inherit" });
+    const child = spawnSync(command, {
+      cwd: workspaceRoot,
+      shell: true,
+      stdio: "inherit",
+      env: args.mode === "acceptance" ? reportV4AcceptanceCommandEnvironment() : process.env
+    });
     return child.status ?? 1;
   });
   (result.exitCode === 0 ? process.stdout : process.stderr).write(result.output);

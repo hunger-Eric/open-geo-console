@@ -15,6 +15,112 @@ const registry = JSON.parse(readFileSync(
 )) as RegistryFixture;
 
 describe("Report V4 protected-Staging verifier", () => {
+  it("keeps the no-env command pinned to the formal committed evidence path", () => {
+    const reads: string[] = [];
+    const result = runReportV4StagingVerification([], {
+      environment: {},
+      readText(path) {
+        reads.push(path);
+        return path.endsWith("combined-geo-report-v4.requirements.json")
+          ? JSON.stringify(registry)
+          : JSON.stringify(fixture());
+      },
+      isFile: () => true
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(reads.some((path) => path.replaceAll("\\", "/")
+      .endsWith("docs/operations/evidence/report-v4-protected-staging-acceptance.json")))
+      .toBe(true);
+  });
+
+  it("allows the unchanged no-argument command to verify one protected-Staging candidate", () => {
+    const candidate = "docs/operations/evidence/.report-v4-00000000-0000-4000-8000-000000000321.candidate.json";
+    const reads: string[] = [];
+    const result = runReportV4StagingVerification([], {
+      environment: {
+        OGC_DEPLOYMENT_PROFILE: "staging",
+        VERCEL_ENV: "preview",
+        COMMERCE_MODE: "test",
+        OGC_REPORT_V4_STAGING_EVIDENCE_CANDIDATE_PATH: candidate
+      },
+      realpath: (path) => path,
+      readText(path) {
+        reads.push(path);
+        return path.endsWith("combined-geo-report-v4.requirements.json")
+          ? JSON.stringify(registry)
+          : JSON.stringify(fixture());
+      },
+      isFile: () => true
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(reads.some((path) => path.replaceAll("\\", "/").endsWith(candidate))).toBe(true);
+    expect(reads.some((path) => path.endsWith("report-v4-protected-staging-acceptance.json"))).toBe(false);
+  });
+
+  it("rejects a candidate override outside protected Staging Preview", () => {
+    const result = runReportV4StagingVerification([], {
+      environment: {
+        OGC_DEPLOYMENT_PROFILE: "production",
+        VERCEL_ENV: "production",
+        COMMERCE_MODE: "live",
+        OGC_REPORT_V4_STAGING_EVIDENCE_CANDIDATE_PATH:
+          "docs/operations/evidence/.report-v4-00000000-0000-4000-8000-000000000321.candidate.json"
+      }
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toMatch(/protected staging Preview/i);
+  });
+
+  it.each([
+    ["parent traversal", "../docs/operations/evidence/.report-v4-00000000-0000-4000-8000-000000000321.candidate.json"],
+    ["absolute", "C:/tmp/.report-v4-00000000-0000-4000-8000-000000000321.candidate.json"],
+    ["wrong directory", "artifacts/.report-v4-00000000-0000-4000-8000-000000000321.candidate.json"],
+    ["wrong filename", "docs/operations/evidence/report-v4-candidate.json"]
+  ])("rejects candidate path escape: %s", (_label, candidate) => {
+    const result = runReportV4StagingVerification([], {
+      environment: {
+        OGC_DEPLOYMENT_PROFILE: "staging", VERCEL_ENV: "preview", COMMERCE_MODE: "test",
+        OGC_REPORT_V4_STAGING_EVIDENCE_CANDIDATE_PATH: candidate
+      }
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toMatch(/candidate|workspace-relative|path/i);
+  });
+
+  it("rejects a candidate whose real path escapes through a symlink", () => {
+    const candidate = "docs/operations/evidence/.report-v4-00000000-0000-4000-8000-000000000321.candidate.json";
+    const result = runReportV4StagingVerification([], {
+      environment: {
+        OGC_DEPLOYMENT_PROFILE: "staging", VERCEL_ENV: "preview", COMMERCE_MODE: "test",
+        OGC_REPORT_V4_STAGING_EVIDENCE_CANDIDATE_PATH: candidate
+      },
+      realpath(path) {
+        return path.endsWith(".candidate.json") ? resolve(workspaceRoot, "../outside/candidate.json") : path;
+      }
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toMatch(/symlink|workspace/i);
+  });
+
+  it("keeps the explicit --evidence test path compatible when no candidate env is present", () => {
+    const reads: string[] = [];
+    const result = runReportV4StagingVerification(["--evidence", "artifacts/report-v4-test-evidence.json"], {
+      environment: {},
+      readText(path) {
+        reads.push(path);
+        return path.endsWith("combined-geo-report-v4.requirements.json")
+          ? JSON.stringify(registry)
+          : JSON.stringify(fixture());
+      },
+      isFile: () => true
+    });
+    expect(result.exitCode).toBe(0);
+    expect(reads.some((path) => path.replaceAll("\\", "/").endsWith("artifacts/report-v4-test-evidence.json")))
+      .toBe(true);
+  });
+
   it("fails closed for an absent evidence file", () => {
     const result = runReportV4StagingVerification([], {
       readText() {
