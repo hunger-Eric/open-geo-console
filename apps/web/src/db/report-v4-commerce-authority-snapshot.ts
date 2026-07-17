@@ -12,9 +12,11 @@ import type { ReportV4QuestionCheckpoint } from "./report-v4-question-checkpoint
 
 type Row = Record<string, unknown>;
 type Rows = Row[];
-type QuerySql = { unsafe<T extends Rows = Rows>(query: string, parameters?: unknown[]): Promise<T> };
+export type ReportV4CommerceAuthoritySnapshotTransactionSql = {
+  unsafe<T extends Rows = Rows>(query: string, parameters?: unknown[]): Promise<T>;
+};
 export interface ReportV4CommerceAuthoritySnapshotSql {
-  begin<T>(options: string, work: (sql: QuerySql) => Promise<T>): Promise<T>;
+  begin<T>(options: string, work: (sql: ReportV4CommerceAuthoritySnapshotTransactionSql) => Promise<T>): Promise<T>;
 }
 export interface LoadReportV4CommerceAuthoritySnapshotInput {
   readonly sessionId: string;
@@ -67,7 +69,19 @@ export async function loadReportV4CommerceAuthoritySnapshot(
   input: LoadReportV4CommerceAuthoritySnapshotInput,
 ): Promise<ReportV4CommerceAuthoritySnapshot> {
   const parsed = parseInput(input);
-  return sql.begin("isolation level repeatable read read only", async (tx) => {
+  return sql.begin("isolation level repeatable read read only", (tx) =>
+    loadReportV4CommerceAuthoritySnapshotInTransaction(tx, parsed));
+}
+
+/**
+ * Transaction-scoped authority projection. The caller owns the transaction;
+ * this helper never opens, commits, or nests one.
+ */
+export async function loadReportV4CommerceAuthoritySnapshotInTransaction(
+  tx: ReportV4CommerceAuthoritySnapshotTransactionSql,
+  input: LoadReportV4CommerceAuthoritySnapshotInput
+): Promise<ReportV4CommerceAuthoritySnapshot> {
+    const parsed = parseInput(input);
     const isolation = one(await query(tx, "isolation", `SELECT current_setting('transaction_isolation') transaction_isolation,
       current_setting('transaction_read_only') transaction_read_only, clock_timestamp() captured_at`), "transaction isolation");
     if (isolation.transaction_isolation !== "repeatable read" || isolation.transaction_read_only !== "on") fail("repeatable-read read-only transaction is required");
@@ -132,7 +146,6 @@ export async function loadReportV4CommerceAuthoritySnapshot(
       WHERE session_id=$1 AND scenario_id=$2 AND kind='checkpoint_terminal'`, [parsed.sessionId, parsed.scenarioId]);
     validateTerminalEvents(questionRows, diagnosisRows, terminalEventRows);
     return project(parsed.phase, capturedAt, binding, { orderRows, paymentEventRows, jobRows, dispatchRows, accessKeyRows, creditRows, refundRows, deliveryRows, emailEventRows, tokenRows, artifactRows, questionRows, diagnosisRows });
-  });
 }
 
 type Binding = { scenarioKind:"success"|"diagnosis_failure"|"question_failure"; reportId:string; orderId:string; preAdmissionJobId:string; coreJobId:string; enhancementJobId:string|null; siteSnapshotId:string; configSnapshotId:string; questionSetId:string; coreArtifactRevisionId:string; enhancementArtifactRevisionId:string|null; activeArtifactRevisionId:string|null };
@@ -187,7 +200,7 @@ function mapDiagnosisCheckpoint(r:Row):Row {
   return {identityHash:r.identity_hash,reportIdHash:sha(r.report_id),enhancementJobIdHash:sha(r.enhancement_job_id),coreArtifactRevisionIdHash:sha(r.core_artifact_revision_id),configSnapshotIdHash:sha(r.config_snapshot_id),questionSetIdHash:sha(r.question_set_id),questionIdHash:sha(r.question_id),snapshotIdHash:sha(r.snapshot_id),ordinal:r.ordinal,state:r.state,inputIdentityHash:r.input_identity_hash,providerCallCount:r.provider_call_count,sourceAuditPayloadHash:sha(stableJson(r.source_audit_payload)),sourceAuditCount:arrayLength(r.source_audit_payload,"source_audit_payload"),diagnosisContentHash:r.diagnosis_content_hash,terminalFingerprint:computeReportV4DiagnosisTerminalCheckpointFingerprint(checkpoint)};
 }
 
-async function query(tx:QuerySql,label:string,statement:string,parameters:unknown[]=[]):Promise<Rows>{return tx.unsafe(`/* authority:${label} */ ${statement}`,parameters);}
+async function query(tx:ReportV4CommerceAuthoritySnapshotTransactionSql,label:string,statement:string,parameters:unknown[]=[]):Promise<Rows>{return tx.unsafe(`/* authority:${label} */ ${statement}`,parameters);}
 function parseInput(input:LoadReportV4CommerceAuthoritySnapshotInput):LoadReportV4CommerceAuthoritySnapshotInput { if(!input||typeof input!=="object"||Object.keys(input).sort().join()!=="phase,scenarioId,sessionId")fail("snapshot input fields are invalid"); if(!UUID.test(input.sessionId)||!UUID.test(input.scenarioId))fail("sessionId and scenarioId must be lowercase UUIDs"); if(input.phase!=="baseline"&&input.phase!=="final")fail("phase must be baseline or final"); return input; }
 function parseBinding(row:Row,input:LoadReportV4CommerceAuthoritySnapshotInput):Binding { equal(row.session_id,input.sessionId,"scenario session");equal(row.scenario_id,input.scenarioId,"scenario identity");return{scenarioKind:scenarioKind(row.kind),reportId:required(row.report_id,"report_id"),orderId:required(row.order_id,"order_id"),preAdmissionJobId:required(row.pre_admission_job_id,"pre_admission_job_id"),coreJobId:required(row.core_job_id,"core_job_id"),enhancementJobId:nullableRequired(row.enhancement_job_id,"enhancement_job_id"),siteSnapshotId:required(row.site_snapshot_id,"site_snapshot_id"),configSnapshotId:required(row.config_snapshot_id,"config_snapshot_id"),questionSetId:required(row.question_set_id,"question_set_id"),coreArtifactRevisionId:required(row.core_artifact_revision_id,"core_artifact_revision_id"),enhancementArtifactRevisionId:nullableRequired(row.enhancement_artifact_revision_id,"enhancement_artifact_revision_id"),activeArtifactRevisionId:null}; }
 function exactIds(rows:Rows,expected:Array<string|null>,label:string,field="id"):void{const wanted=expected.filter((value):value is string=>value!==null).sort(),actual=rows.map((row)=>required(row[field],`${label} ${field}`)).sort();if(new Set(actual).size!==actual.length||stableJson(actual)!==stableJson(wanted))fail(`${label} scope must contain every and only the bound rows`);}

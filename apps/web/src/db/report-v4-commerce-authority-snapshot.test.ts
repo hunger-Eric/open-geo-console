@@ -5,6 +5,7 @@ import type { ReportV4DiagnosisCheckpoint } from "./report-v4-diagnosis-checkpoi
 import type { ReportV4QuestionCheckpoint } from "./report-v4-question-checkpoints";
 import {
   loadReportV4CommerceAuthoritySnapshot,
+  loadReportV4CommerceAuthoritySnapshotInTransaction,
   type ReportV4CommerceAuthoritySnapshotSql,
 } from "./report-v4-commerce-authority-snapshot";
 
@@ -81,6 +82,21 @@ describe("Report V4 commerce authority snapshot projector", () => {
     const statements = calls.filter((call) => call.startsWith("sql:")).join("\n");
     expect(statements).not.toMatch(/select\s+\*/iu);
     expect(statements).not.toMatch(/customer_email_(encrypted|hmac)|checkout_idempotency_hmac|token_hmac|key_hmac|\breadiness\b/iu);
+  });
+
+  it("projects through the caller-owned transaction without opening a nested transaction", async () => {
+    const rows = fixture();
+    const calls: string[] = [];
+    const sql = createFakeSql(rows, calls);
+    await sql.begin("isolation level repeatable read read only", async (tx) => {
+      const result = await loadReportV4CommerceAuthoritySnapshotInTransaction(tx, {
+        sessionId: SESSION,
+        scenarioId: SCENARIO,
+        phase: "baseline"
+      });
+      expect(result.phase).toBe("baseline");
+    });
+    expect(calls.filter((call) => call.startsWith("begin:"))).toHaveLength(1);
   });
 
   it("rejects a missing, foreign, or state-mismatched checkpoint terminal event", async () => {
