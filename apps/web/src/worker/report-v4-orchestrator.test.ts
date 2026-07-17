@@ -186,8 +186,7 @@ describe("V4 independently claimed core and enhancement stages", () => {
     "diagnosis",
     "prepare_enhancement",
     "render_enhancement",
-    "persist_enhancement",
-    "activate_enhancement"
+    "persist_enhancement"
   ] as const)(
     "keeps the settled core active without commerce effects when %s enhancement work fails",
     async (failure) => {
@@ -212,8 +211,7 @@ describe("V4 independently claimed core and enhancement stages", () => {
         completedQuestionIds: unitsFailed ? [] : ["q1", "q2", "q3"],
         failedQuestionIds: unitsFailed ? ["q1", "q2", "q3"] : []
       }]);
-      const prepared = failure === "render_enhancement" || failure === "persist_enhancement"
-        || failure === "activate_enhancement";
+      const prepared = failure === "render_enhancement" || failure === "persist_enhancement";
       expect(harness.events.includes("fail-revision:enhancement")).toBe(prepared);
       if (prepared) {
         expect(harness.events.indexOf("fail-revision:enhancement"))
@@ -352,23 +350,52 @@ describe("V4 independently claimed core and enhancement stages", () => {
     expect(harness.terminalizations).toEqual([]);
   });
 
-  it("recovers an activation commit whose client saw an error through the active-artifact path", async () => {
+  it("keeps an ambiguous pre-commit activation failure nonterminal for exact-claim recovery", async () => {
+    const harness = createEnhancementHarness({ failure: "activate_enhancement" });
+
+    const result = await runReportV4EnhancementStage(enhancementInput(), harness.dependencies);
+
+    expect(result.delivery).toBe("core_active");
+    expect(result.enhancement.status).toBe("not_started");
+    expect(harness.activeRevisionId).toBe("core-revision");
+    expect(harness.enhancementRevisionState).toBe("ready");
+    expect(harness.events.filter((event) => event === "load-claimed-enhancement")).toHaveLength(2);
+    expect(harness.events).not.toContain("fail-revision:enhancement");
+    expect(harness.events.join(" ")).not.toMatch(/terminalize-enhancement/);
+    expect(harness.terminalizations).toEqual([]);
+  });
+
+  it("recovers an activation commit whose client saw an error in the same claimed execution", async () => {
     const harness = createEnhancementHarness({ failure: "activate_enhancement_after_commit" });
 
-    await expect(runReportV4EnhancementStage(enhancementInput(), harness.dependencies))
-      .rejects.toThrow(/active enhancement revision cannot be failed/i);
-    expect(harness.activeRevisionId).toBe("enhancement-revision");
-    expect(harness.enhancementRevisionState).toBe("active");
-    expect(harness.terminalizations).toEqual([]);
-
-    const boundary = harness.events.length;
     const recovered = await runReportV4EnhancementStage(enhancementInput(), harness.dependencies);
 
     expect(recovered.delivery).toBe("enhancement_active");
-    expect(harness.events.slice(boundary)).toEqual([
-      "load-claimed-enhancement",
-      "terminalize-enhancement:completed"
-    ]);
+    expect(recovered.enhancement.status).toBe("completed");
+    expect(harness.activeRevisionId).toBe("enhancement-revision");
+    expect(harness.enhancementRevisionState).toBe("active");
+    expect(harness.events.filter((event) => event === "load-claimed-enhancement")).toHaveLength(2);
+    expect(harness.events).not.toContain("fail-revision:enhancement");
+    expect(harness.events.slice(-2)).toEqual(["load-claimed-enhancement", "terminalize-enhancement:completed"]);
+    expect(harness.terminalizations).toEqual([expect.objectContaining({
+      outcome: "completed",
+      completedQuestionIds: ["q1", "q2", "q3"],
+      failedQuestionIds: []
+    })]);
+  });
+
+  it("preserves exact-claim retry when activation recovery cannot reload the active pointer", async () => {
+    const harness = createEnhancementHarness({ failure: "activate_enhancement_recovery_unknown" });
+
+    const result = await runReportV4EnhancementStage(enhancementInput(), harness.dependencies);
+
+    expect(result.delivery).toBe("core_active");
+    expect(result.enhancement.status).toBe("not_started");
+    expect(harness.activeRevisionId).toBe("enhancement-revision");
+    expect(harness.enhancementRevisionState).toBe("active");
+    expect(harness.events.filter((event) => event === "load-claimed-enhancement")).toHaveLength(2);
+    expect(harness.events).not.toContain("fail-revision:enhancement");
+    expect(harness.terminalizations).toEqual([]);
   });
 
   it.each([
@@ -398,6 +425,7 @@ type EnhancementFailure =
   | "persist_enhancement"
   | "activate_enhancement"
   | "activate_enhancement_after_commit"
+  | "activate_enhancement_recovery_unknown"
   | "fail_enhancement_revision";
 
 interface CoreHarnessOptions {
@@ -507,6 +535,7 @@ function createEnhancementHarness(options: EnhancementHarnessOptions = {}) {
     ? "active"
     : "absent";
   let enhancementCandidate: CombinedGeoReportV4 | null = options.activeEnhancement ?? null;
+  let claimedContextLoads = 0;
   const terminalizations: Array<{
     reportId: string;
     coreJobId: string;
@@ -531,6 +560,10 @@ function createEnhancementHarness(options: EnhancementHarnessOptions = {}) {
     nowIso: () => "2026-07-17T00:00:00.000Z",
     async loadClaimedEnhancementContext() {
       events.push("load-claimed-enhancement");
+      claimedContextLoads += 1;
+      if (options.failure === "activate_enhancement_recovery_unknown" && claimedContextLoads > 1) {
+        throw new Error("active pointer reload unavailable");
+      }
       if (options.claimed === false) return null;
       return {
         enhancementJobId: "enhancement-job",
@@ -588,19 +621,23 @@ function createEnhancementHarness(options: EnhancementHarnessOptions = {}) {
       if (options.failure === "persist_enhancement") throw new Error("enhancement persist failed");
       enhancementCandidate = input.report;
       enhancementRevisionState = "ready";
+      if (options.failure === "fail_enhancement_revision") throw new Error("enhancement persist response failed");
       abortDelivery("persist");
       return { payloadIdentityHash: "c".repeat(64), htmlSha256: "d".repeat(64) };
     },
     async activateEnhancementRevision() {
       events.push("activate:enhancement");
-      if (options.failure === "activate_enhancement" || options.failure === "fail_enhancement_revision") {
+      if (options.failure === "activate_enhancement") {
         throw new Error("enhancement activation failed");
       }
       activeRevisionId = "enhancement-revision";
       activeArtifact = enhancementCandidate!;
       enhancementRevisionState = "active";
       abortDelivery("activate");
-      if (options.failure === "activate_enhancement_after_commit") throw new Error("activation client response failed");
+      if (options.failure === "activate_enhancement_after_commit"
+        || options.failure === "activate_enhancement_recovery_unknown") {
+        throw new Error("activation client response failed");
+      }
     },
     async failEnhancementRevision(input) {
       events.push("fail-revision:enhancement");

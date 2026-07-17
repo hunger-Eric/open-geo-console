@@ -582,6 +582,7 @@ export async function runReportV4EnhancementStage(
   };
   let enhancedReport: CombinedGeoReportV4;
   let enhancementRevisionPrepared = false;
+  let enhancementActivationAttempted = false;
   try {
     enhancedReport = buildReport({
       input: parsedInput,
@@ -599,6 +600,7 @@ export async function runReportV4EnhancementStage(
       throwIfAborted(signal);
       const persisted = await dependencies.persistEnhancementArtifact({ report: enhancedReport, html, signal });
       throwIfAborted(signal);
+      enhancementActivationAttempted = true;
       await dependencies.activateEnhancementRevision({
         ...enhancementIdentity,
         payloadIdentityHash: persisted.payloadIdentityHash,
@@ -609,6 +611,92 @@ export async function runReportV4EnhancementStage(
     counters.revisions.enhancementActivated = 1;
   } catch {
     propagateAbort(signal);
+    if (enhancementActivationAttempted) {
+      let recoveredActiveArtifact: CombinedGeoReportV4 | null = null;
+      try {
+        const recoveredContext = await measured(dependencies, timings, "activeArtifactLookup", () => (
+          dependencies.loadClaimedEnhancementContext({
+            reportId: parsedInput.reportId,
+            coreJobId: parsedInput.coreJobId,
+            enhancementJobId: parsedInput.enhancementJobId,
+            sourceCoreArtifactRevisionId: parsedInput.sourceCoreArtifactRevisionId,
+            enhancementArtifactRevisionId: parsedInput.enhancementArtifactRevisionId,
+            signal
+          })
+        ), true);
+        throwIfAborted(signal);
+        if (!recoveredContext || recoveredContext.enhancementJobId !== parsedInput.enhancementJobId) {
+          throw new Error("The V4 diagnosis enhancement job was not independently claimed during activation recovery.");
+        }
+        if (recoveredContext.coreCommerceStatus !== "settled" || recoveredContext.coreAccessStatus !== "active") {
+          throw new Error("The V4 diagnosis enhancement activation recovery requires a settled and accessible core.");
+        }
+        acceptSnapshot(recoveredContext.snapshot, parsedInput);
+        const recoveredCore = acceptSourceCoreArtifact(recoveredContext.sourceCore, parsedInput);
+        assertArtifactAgainstSnapshot(recoveredCore, parsedInput, recoveredContext.snapshot, "recovered source core");
+        recoveredActiveArtifact = acceptEnhancementActiveArtifact(
+          recoveredContext.activeArtifact,
+          recoveredCore,
+          parsedInput
+        );
+        assertArtifactAgainstSnapshot(
+          recoveredActiveArtifact,
+          parsedInput,
+          recoveredContext.snapshot,
+          "recovered active artifact"
+        );
+      } catch {
+        propagateAbort(signal);
+      }
+
+      if (recoveredActiveArtifact?.artifactRevisionId === parsedInput.enhancementArtifactRevisionId) {
+        const recoveredCompletedQuestionIds = recoveredActiveArtifact.questions
+          .filter(({ diagnosis }) => diagnosis)
+          .map(({ questionId }) => questionId);
+        const recoveredFailedQuestionIds = recoveredActiveArtifact.questions
+          .filter(({ status, diagnosis }) => status === "answered" && !diagnosis)
+          .map(({ questionId }) => questionId);
+        await terminalizeEnhancementJob({
+          input: parsedInput,
+          dependencies,
+          outcome: "completed",
+          completedQuestionIds: recoveredCompletedQuestionIds,
+          failedQuestionIds: recoveredFailedQuestionIds
+        });
+        counters.revisions.enhancementActivated = 1;
+        return finishStage({
+          dependencies,
+          totalStartedAt,
+          counters,
+          timings,
+          status: recoveredActiveArtifact.status,
+          delivery: "enhancement_active",
+          coreReport,
+          activeReport: recoveredActiveArtifact,
+          enhancement: {
+            status: "completed",
+            completedQuestionIds: recoveredCompletedQuestionIds,
+            failedQuestionIds: recoveredFailedQuestionIds
+          },
+          coreRevisionId: parsedInput.sourceCoreArtifactRevisionId,
+          enhancementRevisionId: parsedInput.enhancementArtifactRevisionId
+        });
+      }
+
+      return finishStage({
+        dependencies,
+        totalStartedAt,
+        counters,
+        timings,
+        status: coreReport.status,
+        delivery: "core_active",
+        coreReport,
+        activeReport: coreReport,
+        enhancement: notStartedEnhancement(),
+        coreRevisionId: parsedInput.sourceCoreArtifactRevisionId,
+        enhancementRevisionId: null
+      });
+    }
     if (enhancementRevisionPrepared) {
       await dependencies.failEnhancementRevision(enhancementIdentity, signal);
       throwIfAborted(signal);
