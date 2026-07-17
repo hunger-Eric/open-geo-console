@@ -16,6 +16,7 @@ import {
 import type { ExtractedPage, PageCandidate, PageType, PlannedPage } from "@open-geo-console/ai-report-engine";
 import { createHash } from "node:crypto";
 import { configuredPublicDnsResolver, createSafeFetch } from "@/server/safe-fetch";
+import { getScanJob } from "../db/jobs";
 import type {
   ReportV4HtmlRead,
   ReportV4SiteCandidate,
@@ -26,6 +27,10 @@ import {
   type ReportV4AcceptanceObserver,
   type ReportV4AcceptanceObserverEvent
 } from "./report-v4-acceptance-observer";
+import {
+  createProductionReportV4AcceptanceSiteReadManifestRepository,
+  type ReportV4AcceptanceSiteReadManifestRepository
+} from "../db/report-v4-site-read-manifest";
 
 const CRAWLER_USER_AGENT = "OpenGeoConsoleBot/1.0 (+https://github.com/open-geo-console)";
 const MAX_SITEMAP_DOCUMENTS = 200;
@@ -65,12 +70,21 @@ export async function discoverReportV4AdmissionSite(
   targetUrl: string,
   signal?: AbortSignal,
   fetchImpl: typeof fetch = createSafeFetch(),
-  acceptanceObserver?: ReportV4AcceptanceObserver | null
+  acceptanceObserver?: ReportV4AcceptanceObserver | null,
+  siteReadManifestRepository?: ReportV4AcceptanceSiteReadManifestRepository,
+  loadJob: typeof getScanJob = getScanJob
 ): Promise<ReportV4AdmissionDiscovery> {
-  const acceptanceFetch = acceptanceObserver
-    ? createAcceptanceDiscoveryFetch(fetchImpl, acceptanceObserver)
-    : fetchImpl;
-  const discovered = await discoverSite(targetUrl, "deep", acceptanceFetch, signal);
+  let acceptanceFetch: ReturnType<typeof createAcceptanceDiscoveryFetch> | undefined;
+  if (acceptanceObserver) {
+    const manifest = siteReadManifestRepository ?? createProductionReportV4AcceptanceSiteReadManifestRepository();
+    acceptanceFetch = createAcceptanceDiscoveryFetch(
+      fetchImpl,
+      acceptanceObserver,
+      manifest,
+      lazyAdmissionSiteReadAuthority(acceptanceObserver, loadJob)
+    );
+  }
+  const discovered = await discoverSite(targetUrl, "deep", fetchImpl, signal, acceptanceFetch);
   return {
     targetUrl: discovered.targetUrl,
     siteKey: discovered.siteKey,
@@ -89,9 +103,17 @@ export function createReportV4AdmissionCollectorDependencies(input: {
   fetchImpl?: typeof fetch;
   renderBrowser?: (url: string, signal?: AbortSignal) => Promise<ReportV4AdmissionBrowserDocument | null>;
   acceptanceObserver?: ReportV4AcceptanceObserver | null;
+  siteReadManifestRepository?: ReportV4AcceptanceSiteReadManifestRepository;
+  loadJob?: typeof getScanJob;
 }): ReportV4SiteCollectorDependencies {
   const fetchImpl = input.fetchImpl ?? createSafeFetch();
   const renderBrowser = input.renderBrowser ?? renderReportV4AdmissionHtml;
+  const manifest = input.acceptanceObserver
+    ? input.siteReadManifestRepository ?? createProductionReportV4AcceptanceSiteReadManifestRepository()
+    : null;
+  const loadAuthority = input.acceptanceObserver
+    ? lazyAdmissionSiteReadAuthority(input.acceptanceObserver, input.loadJob ?? getScanJob)
+    : null;
   return {
     async readRawHtml(candidate, signal) {
       if (!isAllowedByRobots(candidate.url, input.robotsPolicy)) {
@@ -102,6 +124,9 @@ export function createReportV4AdmissionCollectorDependencies(input: {
         scope: "admission-page",
         url: candidate.url,
         mode: "raw",
+        purpose: "page",
+        siteReadManifestRepository: manifest,
+        loadAuthority,
         perform: async () => {
           const response = await fetchImpl(candidate.url, {
             signal,
@@ -133,6 +158,9 @@ export function createReportV4AdmissionCollectorDependencies(input: {
         scope: "admission-page",
         url,
         mode: "browser",
+        purpose: "page",
+        siteReadManifestRepository: manifest,
+        loadAuthority,
         perform: async () => {
           const rendered = await renderBrowser(url, signal);
           if (!rendered) throw new Error("Browser rendering returned no readable document.");
@@ -160,15 +188,20 @@ export function createReportV4AdmissionCollectorDependencies(input: {
 
 function createAcceptanceDiscoveryFetch(
   fetchImpl: typeof fetch,
-  observer: ReportV4AcceptanceObserver
-): typeof fetch {
-  return (async (request: RequestInfo | URL, init?: RequestInit) => {
+  observer: ReportV4AcceptanceObserver,
+  siteReadManifestRepository: ReportV4AcceptanceSiteReadManifestRepository,
+  loadAuthority: () => Promise<ReportV4AdmissionSiteReadAuthority>
+): (request: RequestInfo | URL, purpose: "homepage" | "robots" | "sitemap", init?: RequestInit) => Promise<Response> {
+  return async (request, purpose, init) => {
     const url = request instanceof Request ? request.url : request.toString();
     return performAcceptanceSiteRead({
       observer,
       scope: "admission-discovery",
       url,
       mode: "raw",
+      purpose,
+      siteReadManifestRepository,
+      loadAuthority,
       perform: async () => {
         const response = await fetchImpl(request, init);
         const bytes = await response.arrayBuffer();
@@ -179,28 +212,90 @@ function createAcceptanceDiscoveryFetch(
         });
       }
     });
-  }) as typeof fetch;
+  };
 }
 
 async function performAcceptanceSiteRead<T>(input: {
   observer?: ReportV4AcceptanceObserver | null;
-  scope: "admission-discovery" | "admission-page";
   url: string;
   mode: "raw" | "browser";
+  siteReadManifestRepository?: ReportV4AcceptanceSiteReadManifestRepository | null;
+  loadAuthority?: (() => Promise<ReportV4AdmissionSiteReadAuthority>) | null;
   perform: () => Promise<T>;
-}): Promise<T> {
+} & (
+  | { scope: "admission-discovery"; purpose: "homepage" | "robots" | "sitemap" }
+  | { scope: "admission-page"; purpose: "page" }
+)): Promise<T> {
   if (!input.observer) return input.perform();
+  if (!input.siteReadManifestRepository || !input.loadAuthority) {
+    throw new Error("A protected-acceptance site read requires its manifest repository and job authority.");
+  }
+  const authority = await input.loadAuthority();
   const event = siteReadEvent(input.scope, input.url, input.mode, "started");
+  const manifest = input.siteReadManifestRepository;
+  const beginBase = {
+    sessionId: authority.sessionId,
+    scenarioId: authority.scenarioId,
+    reportId: authority.reportId,
+    jobId: authority.jobId,
+    rawUrl: input.url,
+    mode: input.mode
+  };
+  const started = input.scope === "admission-discovery"
+    ? await manifest.begin({ ...beginBase, scope: "admission_discovery", purpose: input.purpose, attempt: 0 })
+    : await manifest.begin({ ...beginBase, scope: "admission_page", purpose: input.purpose, attempt: 0 });
   await input.observer.claimExternalIo(event);
   let result: T;
   try {
     result = await input.perform();
   } catch (error) {
+    await manifest.terminalize({ sessionId: started.entry.sessionId, scenarioId: started.entry.scenarioId, identityHash: started.entry.identityHash, terminalPhase: "failed" });
     await input.observer.finishExternalIo({ ...event, phase: "failed" });
     throw error;
   }
+  await manifest.terminalize({ sessionId: started.entry.sessionId, scenarioId: started.entry.scenarioId, identityHash: started.entry.identityHash, terminalPhase: "completed" });
   await input.observer.finishExternalIo({ ...event, phase: "completed" });
   return result;
+}
+
+interface ReportV4AdmissionSiteReadAuthority {
+  readonly sessionId: string;
+  readonly scenarioId: string;
+  readonly reportId: string;
+  readonly jobId: string;
+}
+
+function lazyAdmissionSiteReadAuthority(
+  observer: ReportV4AcceptanceObserver,
+  loadJob: typeof getScanJob
+): () => Promise<ReportV4AdmissionSiteReadAuthority> {
+  let pending: Promise<ReportV4AdmissionSiteReadAuthority> | null = null;
+  return () => pending ??= resolveAdmissionSiteReadAuthority(observer, loadJob);
+}
+
+async function resolveAdmissionSiteReadAuthority(
+  observer: ReportV4AcceptanceObserver,
+  loadJob: typeof getScanJob
+): Promise<ReportV4AdmissionSiteReadAuthority> {
+  const { session, scenario } = observer;
+  if (session.environment !== "protected_staging" || session.state !== "collecting" || session.terminalAt !== null
+    || scenario.sessionId !== session.sessionId || scenario.state !== "collecting" || scenario.terminalAt !== null
+    || !scenario.preAdmissionJobId) {
+    throw new Error("An exact collecting protected-acceptance pre-admission authority is required for a physical site read.");
+  }
+  const job = await loadJob(scenario.preAdmissionJobId);
+  if (!job || job.id !== scenario.preAdmissionJobId || !job.reportId || job.reason !== "v4_pre_admission"
+    || job.tier !== "deep" || job.fulfillmentMethodology !== "two_stage_geo_report_v4"
+    || job.recommendationReportVersion !== 4 || job.artifactContract !== "combined_geo_report_v4"
+    || (scenario.reportId !== null && scenario.reportId !== job.reportId)) {
+    throw new Error("The protected-acceptance pre-admission job authority does not match its persisted Report V4 lineage.");
+  }
+  return {
+    sessionId: session.sessionId,
+    scenarioId: scenario.scenarioId,
+    reportId: job.reportId,
+    jobId: job.id
+  };
 }
 
 function siteReadEvent(
@@ -224,16 +319,18 @@ export async function discoverSite(
   targetUrl: string,
   tier: "free" | "deep" = "deep",
   fetchImpl: typeof fetch = createSafeFetch(),
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  purposefulFetch?: (request: RequestInfo | URL, purpose: "homepage" | "robots" | "sitemap", init?: RequestInit) => Promise<Response>
 ): Promise<DiscoveredSite> {
+  const read = purposefulFetch ?? ((request, _purpose, init) => fetchImpl(request, init));
   const root = new URL(targetUrl);
   root.pathname = "/";
   root.search = "";
   root.hash = "";
 
   const [homepageResponse, robotsResponse] = await Promise.all([
-    fetchImpl(root, { signal, headers: { "user-agent": CRAWLER_USER_AGENT } }),
-    fetchImpl(new URL("/robots.txt", root), { signal, headers: { "user-agent": CRAWLER_USER_AGENT } })
+    read(root, "homepage", { signal, headers: { "user-agent": CRAWLER_USER_AGENT } }),
+    read(new URL("/robots.txt", root), "robots", { signal, headers: { "user-agent": CRAWLER_USER_AGENT } })
       .catch((error) => {
         if (error instanceof ReportV4AcceptanceIndeterminateOperationError) throw error;
         return null;
@@ -260,7 +357,7 @@ export async function discoverSite(
     if (visitedSitemaps.has(sitemapUrl)) continue;
     visitedSitemaps.add(sitemapUrl);
     try {
-      const response = await fetchImpl(sitemapUrl, { signal, headers: { "user-agent": CRAWLER_USER_AGENT } });
+      const response = await read(sitemapUrl, "sitemap", { signal, headers: { "user-agent": CRAWLER_USER_AGENT } });
       if (!response.ok) continue;
       const nested = discovery.addSitemapDocument(await response.text(), sitemapUrl);
       if (tier === "deep") {

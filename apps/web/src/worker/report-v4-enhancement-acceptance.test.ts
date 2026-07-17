@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { ReportV4AcceptanceScenario } from "../db/report-v4-acceptance-ledger";
 import type { ReportV4DiagnosisCheckpoint } from "../db/report-v4-diagnosis-checkpoints";
+import type { ReportV4AcceptanceSiteReadManifestRepository } from "../db/report-v4-site-read-manifest";
 import { ReportV4AcceptanceIndeterminateOperationError, type ReportV4AcceptanceObserver } from "./report-v4-acceptance-observer";
 import type { ReportV4AcceptanceFaultController } from "./report-v4-acceptance-fault-controller";
 import { ReportV4DiagnosisProviderError, type ReportV4DiagnosisProvider } from "./report-v4-diagnosis-enhancer";
@@ -77,6 +78,16 @@ describe("Report V4 enhancement acceptance production wrappers", () => {
     });
     const runtime = runtimeFor("success", {
       consume: vi.fn(async () => ({ status: "not_targeted", reason: "source" })),
+      siteReadManifestRepository: siteReadManifestRepository({
+        begin: vi.fn(async input => {
+          order.push("manifest:begin");
+          return manifestBeginResult(input);
+        }),
+        terminalize: vi.fn(async input => {
+          order.push(`manifest:${input.terminalPhase}`);
+          return manifestEntry({ terminalPhase: input.terminalPhase });
+        })
+      }),
       claimExternalIo: vi.fn(async (event) => { order.push("claim"); return { event, inserted: true } as never; }),
       finishExternalIo: vi.fn(async (event) => { order.push(`finish:${event.phase}`); return { event, inserted: true } as never; })
     });
@@ -86,7 +97,11 @@ describe("Report V4 enhancement acceptance production wrappers", () => {
 
     await expect(wrapped.readRawSource(answeredQuestion().sources[0]!)).resolves.toMatchObject({ status: "available" });
 
-    expect(order).toEqual(["claim", "raw", "finish:completed"]);
+    expect(order).toEqual(["manifest:begin", "claim", "raw", "manifest:completed", "finish:completed"]);
+    expect(runtime.siteReadManifestRepository.begin).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      reportId: "report-1", jobId: "enhancement-job", scope: "enhancement_source", purpose: "source",
+      mode: "raw", attempt: 1, ownerQuestionId: "q1", ownerSourceId: "source-1"
+    }));
     const started = vi.mocked(runtime.observer.claimExternalIo).mock.calls[0]![0];
     expect(started).toMatchObject({
       kind: "site_read", operation: "site_raw_read", unitId: "enhancement-job:q1:source-1", attempt: 1,
@@ -108,6 +123,69 @@ describe("Report V4 enhancement acceptance production wrappers", () => {
     await expect(duplicate.readRawSource(answeredQuestion().sources[0]!)).resolves.toEqual({ status: "inaccessible" });
     expect(duplicateRead).not.toHaveBeenCalled();
     expect(duplicateRuntime.observer.claimExternalIo).not.toHaveBeenCalled();
+  });
+
+  it("fails closed around manifest begin and terminal writes without claiming, delegating, or inventing observer terminals", async () => {
+    const source = answeredQuestion().sources[0]!;
+    const beginFailure = new Error("manifest begin failed");
+    const beginRead = vi.fn(async () => ({ status: "available" as const }));
+    const beginRuntime = runtimeFor("success", {
+      siteReadManifestRepository: siteReadManifestRepository({
+        begin: vi.fn(async () => { throw beginFailure; })
+      })
+    });
+    const beginWrapped = withReportV4EnhancementAcceptanceSourceAudit({
+      dependencies: sourceDependenciesFor({ readRawSource: beginRead }), runtime: beginRuntime,
+      enhancementJobId: "enhancement-job", baselineFingerprint: BASELINE
+    });
+
+    await expect(beginWrapped.readRawSource(source)).rejects.toBe(beginFailure);
+    expect(beginRead).not.toHaveBeenCalled();
+    expect(beginRuntime.observer.claimExternalIo).not.toHaveBeenCalled();
+    expect(beginRuntime.observer.finishExternalIo).not.toHaveBeenCalled();
+
+    const terminalFailure = new Error("manifest terminal failed");
+    const terminalRead = vi.fn(async () => ({ status: "available" as const }));
+    const terminalRuntime = runtimeFor("success", {
+      siteReadManifestRepository: siteReadManifestRepository({
+        terminalize: vi.fn(async () => { throw terminalFailure; })
+      })
+    });
+    const terminalWrapped = withReportV4EnhancementAcceptanceSourceAudit({
+      dependencies: sourceDependenciesFor({ readRawSource: terminalRead }), runtime: terminalRuntime,
+      enhancementJobId: "enhancement-job", baselineFingerprint: BASELINE
+    });
+
+    await expect(terminalWrapped.readRawSource(source)).rejects.toBe(terminalFailure);
+    expect(terminalRead).toHaveBeenCalledTimes(1);
+    expect(terminalRuntime.observer.claimExternalIo).toHaveBeenCalledTimes(1);
+    expect(terminalRuntime.observer.finishExternalIo).not.toHaveBeenCalled();
+  });
+
+  it("records a failed manifest before the failed observer terminal when a physical source read fails", async () => {
+    const order: string[] = [];
+    const physicalFailure = new Error("source read failed");
+    const runtime = runtimeFor("success", {
+      siteReadManifestRepository: siteReadManifestRepository({
+        begin: vi.fn(async input => { order.push("manifest:begin"); return manifestBeginResult(input); }),
+        terminalize: vi.fn(async input => {
+          order.push(`manifest:${input.terminalPhase}`);
+          return manifestEntry({ terminalPhase: input.terminalPhase });
+        })
+      }),
+      claimExternalIo: vi.fn(async event => { order.push("claim"); return { event, inserted: true } as never; }),
+      finishExternalIo: vi.fn(async event => { order.push(`finish:${event.phase}`); return { event, inserted: true } as never; })
+    });
+    const wrapped = withReportV4EnhancementAcceptanceSourceAudit({
+      dependencies: sourceDependenciesFor({ readRawSource: vi.fn(async () => {
+        order.push("raw");
+        throw physicalFailure;
+      }) }),
+      runtime, enhancementJobId: "enhancement-job", baselineFingerprint: BASELINE
+    });
+
+    await expect(wrapped.readRawSource(answeredQuestion().sources[0]!)).rejects.toBe(physicalFailure);
+    expect(order).toEqual(["manifest:begin", "claim", "raw", "manifest:failed", "finish:failed"]);
   });
 
   it("injects two exact diagnosis attempts as retryable failures before provider I/O", async () => {
@@ -301,11 +379,18 @@ function runtimeFor(
     consume?: ReportV4AcceptanceFaultController["consume"];
     claimExternalIo?: ReportV4AcceptanceObserver["claimExternalIo"];
     finishExternalIo?: ReportV4AcceptanceObserver["finishExternalIo"];
+    siteReadManifestRepository?: ReportV4AcceptanceSiteReadManifestRepository;
   } = {}
 ): ReportV4EnhancementAcceptanceRuntime {
   const observer = {
-    session: {},
-    scenario: { kind } as ReportV4AcceptanceScenario,
+    session: {
+      sessionId: "11111111-1111-4111-8111-111111111111", environment: "protected_staging",
+      state: "collecting", terminalAt: null
+    },
+    scenario: {
+      scenarioId: "scenario-1", sessionId: "11111111-1111-4111-8111-111111111111", kind,
+      state: "collecting", terminalAt: null, reportId: "report-1", enhancementJobId: "enhancement-job"
+    } as ReportV4AcceptanceScenario,
     observe: vi.fn(async (event) => ({ event, inserted: true }) as never),
     claimExternalIo: overrides.claimExternalIo ?? vi.fn(async (event) => ({ event, inserted: true }) as never),
     finishExternalIo: overrides.finishExternalIo ?? vi.fn(async (event) => ({ event, inserted: true }) as never)
@@ -314,7 +399,38 @@ function runtimeFor(
     mode: "active" as const,
     consume: overrides.consume ?? vi.fn(async () => ({ status: "not_targeted", reason: "question" }))
   } as ReportV4AcceptanceFaultController;
-  return { observer, faultController };
+  return {
+    observer,
+    faultController,
+    siteReadManifestRepository: overrides.siteReadManifestRepository ?? siteReadManifestRepository()
+  };
+}
+
+function siteReadManifestRepository(
+  overrides: Partial<ReportV4AcceptanceSiteReadManifestRepository> = {}
+): ReportV4AcceptanceSiteReadManifestRepository {
+  return {
+    begin: vi.fn(async input => manifestBeginResult(input)),
+    terminalize: vi.fn(async input => manifestEntry({ terminalPhase: input.terminalPhase })),
+    loadScenarioManifest: vi.fn(async () => []),
+    ...overrides
+  };
+}
+
+function manifestBeginResult(input: { mode: "raw" | "browser" }) {
+  return { entry: manifestEntry({ mode: input.mode }), inserted: true } as never;
+}
+
+function manifestEntry(overrides: { mode?: "raw" | "browser"; terminalPhase?: "completed" | "failed" } = {}) {
+  return {
+    identityHash: "a".repeat(64), sessionId: "11111111-1111-4111-8111-111111111111",
+    scenarioId: "scenario-1", reportId: "report-1", jobId: "enhancement-job",
+    scope: "enhancement_source", purpose: "source", urlHash: "b".repeat(64),
+    mode: overrides.mode ?? "raw", attempt: 1, pairBindingHash: "c".repeat(64),
+    ownerQuestionId: "q1", ownerSourceId: "source-1", networkPerformed: true,
+    terminalPhase: overrides.terminalPhase ?? null, startedAt: new Date("2030-01-01T00:00:00.000Z"),
+    terminalAt: overrides.terminalPhase ? new Date("2030-01-01T00:00:01.000Z") : null
+  } as never;
 }
 
 function sourceDependenciesFor(

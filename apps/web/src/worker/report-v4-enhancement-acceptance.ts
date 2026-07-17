@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ReportV4AcceptanceSiteReadManifestRepository } from "../db/report-v4-site-read-manifest";
 import type { CombinedGeoReportV4Source } from "@open-geo-console/ai-report-engine";
 import {
   type ReportV4AcceptanceObserver,
@@ -16,6 +17,7 @@ import { computeReportV4DiagnosisTerminalCheckpointFingerprint } from "../report
 export interface ReportV4EnhancementAcceptanceRuntime {
   readonly observer: ReportV4AcceptanceObserver;
   readonly faultController: ReportV4AcceptanceFaultController;
+  readonly siteReadManifestRepository: ReportV4AcceptanceSiteReadManifestRepository;
 }
 
 export async function observeReportV4DiagnosisTerminalCheckpoint(runtime: ReportV4EnhancementAcceptanceRuntime, checkpoint: ReportV4DiagnosisCheckpoint): Promise<void> {
@@ -178,16 +180,57 @@ async function observeSourceRead(input: {
 }): Promise<ReportV4SourceAuditRead> {
   input.signal?.throwIfAborted();
   const event = sourceReadEvent(input);
+  const authority = enhancementSiteReadAuthority(input.runtime.observer, input.enhancementJobId);
+  const manifest = input.runtime.siteReadManifestRepository;
+  const started = await manifest.begin({
+    sessionId: authority.sessionId,
+    scenarioId: authority.scenarioId,
+    reportId: authority.reportId,
+    jobId: authority.jobId,
+    scope: "enhancement_source", purpose: "source", rawUrl: input.source.canonicalUrl,
+    mode: input.readMode, attempt: 1, ownerQuestionId: input.source.questionId, ownerSourceId: input.source.sourceId
+  });
   await input.runtime.observer.claimExternalIo(event);
+  let result: ReportV4SourceAuditRead;
   try {
-    const result = await input.read();
+    result = await input.read();
     input.signal?.throwIfAborted();
-    await input.runtime.observer.finishExternalIo({ ...event, phase: "completed" });
-    return result;
   } catch (error) {
+    await manifest.terminalize({
+      sessionId: started.entry.sessionId,
+      scenarioId: started.entry.scenarioId,
+      identityHash: started.entry.identityHash,
+      terminalPhase: "failed"
+    });
     await input.runtime.observer.finishExternalIo({ ...event, phase: "failed" });
     throw error;
   }
+  await manifest.terminalize({
+    sessionId: started.entry.sessionId,
+    scenarioId: started.entry.scenarioId,
+    identityHash: started.entry.identityHash,
+    terminalPhase: "completed"
+  });
+  await input.runtime.observer.finishExternalIo({ ...event, phase: "completed" });
+  return result;
+}
+
+function enhancementSiteReadAuthority(
+  observer: ReportV4AcceptanceObserver,
+  enhancementJobId: string
+): { sessionId: string; scenarioId: string; reportId: string; jobId: string } {
+  const { session, scenario } = observer;
+  if (session.environment !== "protected_staging" || session.state !== "collecting" || session.terminalAt !== null
+    || scenario.sessionId !== session.sessionId || scenario.state !== "collecting" || scenario.terminalAt !== null
+    || !scenario.reportId || scenario.enhancementJobId !== enhancementJobId) {
+    throw new Error("An exact collecting protected-acceptance enhancement authority is required for a physical source read.");
+  }
+  return {
+    sessionId: session.sessionId,
+    scenarioId: scenario.scenarioId,
+    reportId: scenario.reportId,
+    jobId: enhancementJobId
+  };
 }
 
 function sourceReadEvent(input: {

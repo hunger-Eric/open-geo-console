@@ -41,6 +41,7 @@ import type {
 } from "../db/report-v4-production-jobs";
 import { createReportV4ProductionJobRepository } from "../db/report-v4-production-jobs";
 import { resolvePaidReportV4SiteSnapshot } from "../db/report-v4-site-snapshots";
+import { createProductionReportV4AcceptanceSiteReadManifestRepository } from "../db/report-v4-site-read-manifest";
 import {
   buildReportV4MimoDiagnosisTokenBudget,
   createReportV4MimoDiagnosisProvider
@@ -220,7 +221,11 @@ function liveDependencies(
             if (!observer || faultController.mode !== "active") {
               throw new Error("The configured Report V4 acceptance session did not create an active enhancement runtime.");
             }
-            return { observer, faultController };
+            return {
+              observer,
+              faultController,
+              siteReadManifestRepository: createProductionReportV4AcceptanceSiteReadManifestRepository(options.environment)
+            };
           }
         }
       : {}),
