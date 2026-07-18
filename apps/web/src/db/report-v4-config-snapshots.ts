@@ -131,6 +131,26 @@ export async function getReportV4ConfigSnapshotById(
   return repository.getById(snapshotId(id, "snapshotId"));
 }
 
+/** Read-only transaction-aware immutable snapshot lookup for sealed acceptance evidence. */
+export async function getReportV4ConfigSnapshotByIdInTransaction(
+  sql: ReportV4ConfigSnapshotSqlTransaction,
+  id: string
+): Promise<ReportV4ConfigSnapshotRow | null> {
+  const normalized = snapshotId(id, "snapshotId");
+  const rows = await sql`
+    SELECT id,report_id,order_id,core_job_id,identity_hash,
+      model_profile_id,model_profile_hash,model_profile_payload,
+      report_profile_id,report_profile_hash,report_profile_payload,created_at
+    FROM report_v4_config_snapshots WHERE id=${normalized}
+  `;
+  if (rows.length > 1) throw new Error("A V4 configuration snapshot id returned multiple rows.");
+  const parsed = rows[0] ? parsePostgresSnapshot(rows[0]) : null;
+  if (parsed && parsed.id !== normalized) {
+    throw new Error("Persisted V4 configuration snapshot id does not match the requested generation identity.");
+  }
+  return parsed;
+}
+
 export function createReportV4ConfigSnapshotPostgresDatabase(
   sql: Pick<postgres.Sql, "begin">
 ): ReportV4ConfigSnapshotPostgresDatabase {
@@ -269,15 +289,7 @@ function postgresTransaction(sql: ReportV4ConfigSnapshotSql): ReportV4ConfigSnap
       return rows[0] ? parsePostgresSnapshot(rows[0]) : null;
     },
     async findById(id) {
-      const normalized = snapshotId(id, "snapshotId");
-      const rows = await sql`
-        SELECT id,report_id,order_id,core_job_id,identity_hash,
-          model_profile_id,model_profile_hash,model_profile_payload,
-          report_profile_id,report_profile_hash,report_profile_payload,created_at
-        FROM report_v4_config_snapshots WHERE id=${normalized}
-      `;
-      if (rows.length > 1) throw new Error("A V4 configuration snapshot id returned multiple rows.");
-      return rows[0] ? parsePostgresSnapshot(rows[0]) : null;
+      return getReportV4ConfigSnapshotByIdInTransaction(sql, id);
     },
     async insert(snapshot) {
       requireLocked(snapshot.reportId, lockedReports);
