@@ -349,8 +349,16 @@ function validateScenarioEventBindings(
   const faultEvents = owned.filter((event) => event.kind === "fault_injection");
   const expectedOccurrences = Array.from({ length: expectedFaultOccurrences }, (_, index) => index + 1);
   const actualOccurrences = faultEvents.map((event) => Number((event.details as Row).occurrence));
-  if (input.phase === "baseline" && faultEvents.length !== 0) {
-    throw new Error("Ledger baseline authority requires the exact pre-fault topology with zero fault events.");
+  const scenarioKind = text(scenario.kind, "scenario kind");
+  const baselineAllowsQuestionFaults = input.phase === "baseline" && scenarioKind === "question_failure";
+  const questionFailureOccurrences = [1, 2] as const;
+  const expectedBaselineFaultEvents = baselineAllowsQuestionFaults ? questionFailureOccurrences.length : 0;
+  if (input.phase === "baseline" && (faultEvents.length !== expectedBaselineFaultEvents
+      || (baselineAllowsQuestionFaults && (expectedFaultOccurrences !== 2
+        || actualOccurrences.some((occurrence, index) => occurrence !== questionFailureOccurrences[index]))))) {
+    throw new Error(baselineAllowsQuestionFaults
+      ? "Ledger question-failure baseline authority requires exactly 1,2 fault occurrences."
+      : "Ledger baseline authority requires the exact pre-fault topology with zero fault events.");
   }
   if (input.phase === "final" && (faultEvents.length !== expectedOccurrences.length
       || actualOccurrences.some((occurrence, index) => occurrence !== expectedOccurrences[index]))) {
@@ -358,8 +366,11 @@ function validateScenarioEventBindings(
   }
 
   let effectiveBaselineFingerprint = baselineFingerprint;
-  if (input.phase === "final") {
+  if (input.phase === "final" || baselineAllowsQuestionFaults) {
     const expectedBaselineFingerprint = computeScenarioBaselineFingerprint(scenario);
+    if (baselineAllowsQuestionFaults && baselineFingerprint === null) {
+      throw new Error("Scenario question-failure baseline requires its stored fault-provenance lineage fingerprint.");
+    }
     if (baselineFingerprint !== null && baselineFingerprint !== expectedBaselineFingerprint) {
       throw new Error("Scenario baseline fingerprint does not equal the recomputed exact fault-provenance lineage fingerprint.");
     }
@@ -367,7 +378,6 @@ function validateScenarioEventBindings(
   }
 
   if (faultEvents.length > 0) {
-    const scenarioKind = text(scenario.kind, "scenario kind");
     const owningJobId = scenarioKind === "question_failure"
       ? text(scenario.core_job_id, "fault core job id")
       : text(scenario.enhancement_job_id, "fault enhancement job id");

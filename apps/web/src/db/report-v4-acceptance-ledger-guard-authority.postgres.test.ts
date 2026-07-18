@@ -162,6 +162,33 @@ suite("Report V4 ledger/guard authority PostgreSQL 17", () => {
     expect(authority.ledgerAuthority.scenario.storedBaselineFingerprint).toBeNull();
   }, 120_000);
 
+  it("accepts the persisted question-failure after-fault baseline authority and completed final replay", async () => {
+    const prepared = await seedCompleteQuestionFailureLineage(sql, "question-baseline-lifecycle");
+    const baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(prepared.scenario);
+    await sql`UPDATE report_v4_acceptance_scenarios SET baseline_fingerprint=${baselineFingerprint}
+      WHERE id=${prepared.guard.scenarioId}`;
+    for (const occurrence of [1, 2] as const) {
+      await prepared.ledger.appendEvent({
+        sessionId: prepared.guard.sessionId, scenarioId: prepared.guard.scenarioId, kind: "fault_injection",
+        operation: "question_failure", unitId: `${prepared.coreJobId}:question-1`, attempt: occurrence, phase: "consumed",
+        details: { fault: "question_failure", occurrence, baselineFingerprint }
+      });
+    }
+    const capability = await armReportV4ProhibitedOperationGuard(prepared.guard, environment);
+    const baseline = await loadReportV4AcceptanceLedgerGuardAuthority(sql, {
+      sessionId: prepared.guard.sessionId, scenarioId: prepared.guard.scenarioId, phase: "baseline"
+    });
+    expect(baseline.ledgerAuthority.events.filter(({ kind }) => kind === "fault_injection")).toHaveLength(2);
+    expect(baseline.prohibitedOperationGuardAuthority.run.state).toBe("armed");
+
+    await withReportV4ProhibitedOperationGuard(capability, async () => "ok");
+    const final = await loadReportV4AcceptanceLedgerGuardAuthority(sql, {
+      sessionId: prepared.guard.sessionId, scenarioId: prepared.guard.scenarioId, phase: "final"
+    });
+    expect(final.ledgerAuthority.events.filter(({ kind }) => kind === "fault_injection")).toHaveLength(2);
+    expect(final.prohibitedOperationGuardAuthority.run.state).toBe("completed");
+  }, 120_000);
+
   it("rejects real hash-valid rows with a forged stored/event baseline or foreign artifact lineage", async () => {
     const prepared = await seedCompleteQuestionFailureLineage(sql, "forged-baseline");
     const forgedBaseline = "e".repeat(64);
@@ -193,7 +220,8 @@ suite("Report V4 ledger/guard authority PostgreSQL 17", () => {
   }, 120_000);
 });
 
-async function seedLineage(sql: ReturnType<typeof postgres>, label: string) {
+async function seedLineage(sql: ReturnType<typeof postgres>, label: string,
+  kind: "success" | "question_failure" = "success") {
   const sessionId = randomUUID();
   const scenarioId = randomUUID();
   const reportId = `report-ledger-guard-${label}`;
@@ -210,8 +238,10 @@ async function seedLineage(sql: ReturnType<typeof postgres>, label: string) {
     VALUES(${reportId},${`https://${label}.example/`},${`${label}.example`},'en','completed')`;
   await sql`INSERT INTO scan_jobs(id,report_id,tier,locale,reason)
     VALUES(${jobId},${reportId},'deep','en','standard')`;
-  await ledger.createScenario({ sessionId, scenarioId, kind: "question_failure", faultKind: "question_failure",
-    faultQuestionId: "question-1", expectedFaultOccurrences: 2 });
+  await ledger.createScenario(kind === "question_failure"
+    ? { sessionId, scenarioId, kind, faultKind: kind, faultQuestionId: "question-1", expectedFaultOccurrences: 2 }
+    : { sessionId, scenarioId, kind, faultKind: "independent_source_read_failure", faultQuestionId: "question-1",
+      faultSourceId: "source-1", expectedFaultOccurrences: 1 });
   await ledger.bindPreAdmissionJob({ sessionId, scenarioId, preAdmissionJobId: jobId });
   await ledger.appendEvent({ sessionId, scenarioId, kind: "scenario_bound", operation: "v4_dispatch",
     unitId: `binding-${label}`, attempt: 0, phase: "observed", details: { bindingHash: "b".repeat(64) } });
@@ -219,7 +249,7 @@ async function seedLineage(sql: ReturnType<typeof postgres>, label: string) {
 }
 
 async function seedCompleteQuestionFailureLineage(sql: ReturnType<typeof postgres>, label: string) {
-  const guard = await seedLineage(sql, label);
+  const guard = await seedLineage(sql, label, "question_failure");
   const ledger = createReportV4AcceptanceLedgerRepository(createPostgresReportV4AcceptanceLedgerStore(sql), environment);
   const reportId = `report-ledger-guard-${label}`;
   const orderId = `order-ledger-guard-${label}`;

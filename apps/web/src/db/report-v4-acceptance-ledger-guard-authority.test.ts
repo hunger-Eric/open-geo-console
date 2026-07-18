@@ -154,16 +154,41 @@ describe("Report V4 acceptance ledger and prohibited-operation guard authority",
       .toHaveLength(3);
   });
 
-  it("enforces pre-fault baseline and exact final fault phase topology", () => {
+  it("enforces the question-failure Core-after-fault baseline and exact final fault phase topology", () => {
     const finalWithoutFaults = snapshot();
     finalWithoutFaults.guardRuns[0]!.state = "completed";
     finalWithoutFaults.guardRuns[0]!.completed_at = "2026-07-17T00:00:04.000000Z";
     expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("final"), finalWithoutFaults))
       .toThrow(/final.*fault|occurrences.*exact/iu);
 
-    const baselineAfterFault = faultSnapshot("question_failure");
-    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), baselineAfterFault))
-      .toThrow(/baseline.*pre-fault|baseline.*zero.*fault/iu);
+    const baselineAfterCore = faultSnapshot("question_failure");
+    baselineAfterCore.guardRuns[0]!.state = "armed";
+    baselineAfterCore.guardRuns[0]!.completed_at = null;
+    expect(projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), baselineAfterCore)
+      .ledgerAuthority.events.filter(({ kind }) => kind === "fault_injection")).toHaveLength(2);
+
+    const wrongBaselineTopology = faultSnapshot("question_failure");
+    wrongBaselineTopology.guardRuns[0]!.state = "armed";
+    wrongBaselineTopology.guardRuns[0]!.completed_at = null;
+    wrongBaselineTopology.events.splice(2, 1);
+    wrongBaselineTopology.session.head_sequence = wrongBaselineTopology.events.length;
+    wrongBaselineTopology.session.event_count = wrongBaselineTopology.events.length;
+    wrongBaselineTopology.session.head_hash = wrongBaselineTopology.events.at(-1)!.event_hash;
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), wrongBaselineTopology))
+      .toThrow(/baseline.*exactly 1,2|occurrence/iu);
+
+    const wrongExpectedCount = faultSnapshot("question_failure");
+    wrongExpectedCount.guardRuns[0]!.state = "armed";
+    wrongExpectedCount.guardRuns[0]!.completed_at = null;
+    wrongExpectedCount.scenario.expected_fault_occurrences = 1;
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), wrongExpectedCount))
+      .toThrow(/fault identity|exactly 1,2|occurrence/iu);
+
+    const diagnosisBaseline = faultSnapshot("diagnosis_failure");
+    diagnosisBaseline.guardRuns[0]!.state = "armed";
+    diagnosisBaseline.guardRuns[0]!.completed_at = null;
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), diagnosisBaseline))
+      .toThrow(/baseline.*zero.*fault/iu);
   });
 
   it("rejects a stored and event baseline that agree with each other but not the real lineage formula", () => {
@@ -174,6 +199,17 @@ describe("Report V4 acceptance ledger and prohibited-operation guard authority",
     }
     rechain(forged);
     expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("final"), forged))
+      .toThrow(/provenance|lineage.*fingerprint|recomputed.*baseline/iu);
+
+    const forgedBaselineAuthority = faultSnapshot("question_failure");
+    forgedBaselineAuthority.guardRuns[0]!.state = "armed";
+    forgedBaselineAuthority.guardRuns[0]!.completed_at = null;
+    forgedBaselineAuthority.scenario.baseline_fingerprint = "e".repeat(64);
+    for (const event of forgedBaselineAuthority.events.filter((candidate) => candidate.kind === "fault_injection")) {
+      event.details = { ...event.details as object, baselineFingerprint: forgedBaselineAuthority.scenario.baseline_fingerprint };
+    }
+    rechain(forgedBaselineAuthority);
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), forgedBaselineAuthority))
       .toThrow(/provenance|lineage.*fingerprint|recomputed.*baseline/iu);
   });
 
@@ -321,8 +357,8 @@ function snapshot(): ReportV4AcceptanceLedgerGuardRawSnapshot {
       pre_admission_job_id: jobId, core_job_id: "job-core", enhancement_job_id: null,
       site_snapshot_id: "snapshot-1", config_snapshot_id: "config-1", question_set_id: "questions-1",
       core_artifact_revision_id: "artifact-core", enhancement_artifact_revision_id: null,
-      kind: "question_failure", fault_kind: "question_failure", fault_question_id: "question-1",
-      fault_source_id: null, expected_fault_occurrences: 2, baseline_fingerprint: null, final_fingerprint: null,
+      kind: "success", fault_kind: "independent_source_read_failure", fault_question_id: "question-1",
+      fault_source_id: "source-1", expected_fault_occurrences: 1, baseline_fingerprint: null, final_fingerprint: null,
       state: "collecting", created_at: "2026-07-17T00:00:00.000000Z", terminal_at: null
     },
     events: [event],
@@ -363,6 +399,7 @@ function faultSnapshot(kind: "question_failure" | "diagnosis_failure"): ReportV4
   const raw = snapshot();
   raw.scenario.kind = kind;
   raw.scenario.fault_kind = kind;
+  raw.scenario.expected_fault_occurrences = 2;
   if (kind === "diagnosis_failure") raw.scenario.enhancement_job_id = "job-enhancement";
   if (kind === "diagnosis_failure") raw.scenario.enhancement_artifact_revision_id = "artifact-enhancement";
   raw.scenario.baseline_fingerprint = scenarioBaselineFingerprint(raw.scenario);
