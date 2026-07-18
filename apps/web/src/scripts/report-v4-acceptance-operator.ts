@@ -275,7 +275,7 @@ async function sealProductionScenarioAtomically(input: TerminalizeReportV4Accept
       scenarioKind: lockedScenario.kind
     };
     assertPersistedSealPair(input, pair, productionSealValidationDependencies);
-    const commerceFinalEvent = await assertExactPostFinalCommerceEvent(tx, input, final);
+    await assertExactPostFinalCommerceEventRange(tx, input, final, session);
     if (pair.sessionState !== "collecting" && pair.sessionState !== "sealed") {
       throw new Error("Atomic sealing requires a collecting or sealed acceptance session.");
     }
@@ -288,11 +288,6 @@ async function sealProductionScenarioAtomically(input: TerminalizeReportV4Accept
     }
     if (pair.sessionState !== "collecting" || pair.scenarioState !== "collecting") {
       throw new Error("Atomic sealing requires an exact collecting session and scenario.");
-    }
-    if (nonnegativeAuthorityInteger(session.head_sequence, "head_sequence") !== final.payload.session.headSequence + 1
-        || parseAuthorityHash(session.head_hash, "head_hash") !== commerceFinalEvent.eventHash
-        || nonnegativeAuthorityInteger(session.event_count, "event_count") !== final.payload.session.eventCount + 1) {
-      throw new Error("The live acceptance head must contain exactly the canonical commerce-final event after the final authority phase.");
     }
     const updated = await tx.unsafe(`/* report-v4-operator:atomic-seal-cas */
       UPDATE report_v4_acceptance_scenarios
@@ -309,58 +304,121 @@ async function sealProductionScenarioAtomically(input: TerminalizeReportV4Accept
   });
 }
 
-async function assertExactPostFinalCommerceEvent(
+async function assertExactPostFinalCommerceEventRange(
   tx: ReportV4CommerceAuthoritySnapshotTransactionSql,
   input: TerminalizeReportV4AcceptanceScenarioInput,
-  final: PersistedReportV4AcceptanceAuthorityPhaseSnapshot
-): Promise<{ readonly eventHash: string }> {
-  const expectedSequence = final.payload.session.headSequence + 1;
-  const rows = await tx.unsafe(`/* report-v4-operator:post-final-commerce-event */
+  final: PersistedReportV4AcceptanceAuthorityPhaseSnapshot,
+  session: Record<string, unknown>
+): Promise<void> {
+  const liveHeadSequence = nonnegativeAuthorityInteger(session.head_sequence, "head_sequence");
+  const liveEventCount = nonnegativeAuthorityInteger(session.event_count, "event_count");
+  const rows = await tx.unsafe(`/* report-v4-operator:post-final-commerce-event-range */
     SELECT idempotency_key,session_id,scenario_id,sequence,kind,operation,unit_id,attempt,phase,
       details,details_canonical,prev_hash,event_hash,occurred_at,occurred_at_canonical,
       to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') recomputed_occurred_at_canonical
-    FROM report_v4_acceptance_events WHERE session_id=$1 AND sequence=$2`,
-  [input.sessionId, expectedSequence]);
-  if (rows.length !== 1) throw new Error("The exact post-final commerce fingerprint event is missing.");
-  const row = rows[0]!;
-  const detailsValue = typeof row.details === "string" ? JSON.parse(row.details) as unknown : row.details;
-  const details = strictRecord(detailsValue, ["fingerprint"], "post-final commerce event details");
-  const fingerprint = parseAuthorityHash(details.fingerprint, "post-final commerce fingerprint");
-  const sessionId = uuid(row.session_id, "post-final event session_id");
-  const scenarioId = uuid(row.scenario_id, "post-final event scenario_id");
-  const sequence = nonnegativeAuthorityInteger(row.sequence, "post-final event sequence");
-  if (sessionId !== input.sessionId || scenarioId !== input.scenarioId || sequence !== expectedSequence
-      || row.kind !== "commerce_fingerprint" || row.operation !== "commerce" || row.unit_id !== "commerce-final"
-      || row.attempt !== 0 || row.phase !== "observed" || fingerprint !== final.commerceFingerprint) {
-    throw new Error("The post-final commerce event does not match the exact final scenario authority.");
+    FROM report_v4_acceptance_events
+    WHERE session_id=$1 AND sequence>$2 ORDER BY sequence`,
+  [input.sessionId, final.payload.session.headSequence]);
+  assertReportV4AcceptanceAtomicSealEventRangeForTestOnly({
+    sessionId: input.sessionId, scenarioId: input.scenarioId,
+    finalHeadSequence: final.payload.session.headSequence, finalHeadHash: final.payload.session.headHash,
+    finalCommerceFingerprint: final.commerceFingerprint, liveHeadSequence,
+    liveHeadHash: parseAuthorityHash(session.head_hash, "head_hash"), liveEventCount, rows,
+  });
+}
+
+export interface ReportV4AcceptanceAtomicSealEventRangeTestInput {
+  readonly sessionId: string;
+  readonly scenarioId: string;
+  readonly finalHeadSequence: number;
+  readonly finalHeadHash: string;
+  readonly finalCommerceFingerprint: string;
+  readonly liveHeadSequence: number;
+  readonly liveHeadHash: string;
+  readonly liveEventCount: number;
+  readonly rows: readonly Record<string, unknown>[];
+}
+
+export function assertReportV4AcceptanceAtomicSealEventRangeForTestOnly(
+  input: ReportV4AcceptanceAtomicSealEventRangeTestInput
+): void {
+  if (input.liveHeadSequence !== input.liveEventCount || input.liveHeadSequence <= input.finalHeadSequence
+      || input.rows.length !== input.liveHeadSequence - input.finalHeadSequence) {
+    throw new Error("The locked live acceptance head/count does not match the exact post-final global range.");
   }
-  const expectedDetailsCanonical = `{"fingerprint": "${fingerprint}"}`;
-  if (row.details_canonical !== expectedDetailsCanonical) {
-    throw new Error("The post-final commerce event details canonical form is invalid.");
+  let previousHash = parseAuthorityHash(input.finalHeadHash, "final phase head_hash");
+  let commerceFound = false;
+  for (const [index, row] of input.rows.entries()) {
+    const sequence = input.finalHeadSequence + index + 1;
+    const sessionId = uuid(row.session_id, "post-final event session_id");
+    const scenarioId = uuid(row.scenario_id, "post-final event scenario_id");
+    const actualSequence = nonnegativeAuthorityInteger(row.sequence, "post-final event sequence");
+    const kind = boundedText(row.kind, "post-final event kind", 100);
+    const operation = boundedText(row.operation, "post-final event operation", 100);
+    const unitId = boundedText(row.unit_id, "post-final event unit_id", 500);
+    const attempt = nonnegativeAuthorityInteger(row.attempt, "post-final event attempt");
+    const phase = boundedText(row.phase, "post-final event phase", 100);
+    const detailsCanonical = boundedText(row.details_canonical, "post-final details_canonical", 100_000);
+    const detailsValue = typeof row.details === "string" ? JSON.parse(row.details) as unknown : row.details;
+    if (semanticJson(JSON.parse(detailsCanonical)) !== semanticJson(detailsValue)) {
+      throw new Error("A post-final event details canonical form does not match its payload.");
+    }
+    if (sessionId !== input.sessionId || actualSequence !== sequence || attempt > 2
+        || parseAuthorityHash(row.prev_hash, "post-final event prev_hash") !== previousHash) {
+      throw new Error("The post-final global event range is not contiguous from the final phase head.");
+    }
+    const expectedIdempotencyKey = sha256Parts([sessionId, scenarioId, kind, operation, unitId, String(attempt), phase]);
+    if (parseAuthorityHash(row.idempotency_key, "post-final event idempotency_key") !== expectedIdempotencyKey) {
+      throw new Error("A post-final global event idempotency key is invalid.");
+    }
+    const occurredAtCanonical = boundedText(row.occurred_at_canonical, "post-final occurred_at_canonical", 27);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u.test(occurredAtCanonical)
+        || row.recomputed_occurred_at_canonical !== occurredAtCanonical
+        || lockedDate(row.occurred_at, "post-final occurred_at").toISOString() !== `${occurredAtCanonical.slice(0, 23)}Z`) {
+      throw new Error("A post-final global event timestamp canonical form is invalid.");
+    }
+    const expectedEventHash = sha256Parts([previousHash, expectedIdempotencyKey, String(sequence), kind, operation,
+      unitId, String(attempt), phase, detailsCanonical, occurredAtCanonical]);
+    const eventHash = parseAuthorityHash(row.event_hash, "post-final event_hash");
+    if (eventHash !== expectedEventHash) throw new Error("The post-final global event hash chain is invalid.");
+
+    if (scenarioId === input.scenarioId) {
+      if (commerceFound) throw new Error("A current-scenario event exists after commerce-final.");
+      if (kind !== "commerce_fingerprint" || operation !== "commerce" || unitId !== "commerce-final"
+          || attempt !== 0 || phase !== "observed") {
+        throw new Error("The first current-scenario event after the final phase is not the exact commerce-final authority.");
+      }
+      const details = strictRecord(detailsValue, ["fingerprint"], "post-final commerce event details");
+      const fingerprint = parseAuthorityHash(details.fingerprint, "post-final commerce fingerprint");
+      const expectedDetailsCanonical = `{"fingerprint": "${fingerprint}"}`;
+      if (fingerprint !== input.finalCommerceFingerprint || detailsCanonical !== expectedDetailsCanonical) {
+        throw new Error("The first current-scenario event after the final phase is not the exact commerce-final authority.");
+      }
+      commerceFound = true;
+    }
+    previousHash = eventHash;
   }
-  const expectedIdempotencyKey = sha256Parts([sessionId, scenarioId, "commerce_fingerprint", "commerce", "commerce-final", "0", "observed"]);
-  if (parseAuthorityHash(row.idempotency_key, "post-final event idempotency_key") !== expectedIdempotencyKey) {
-    throw new Error("The post-final commerce event idempotency key is invalid.");
+  if (!commerceFound) throw new Error("The exact post-final commerce fingerprint event is missing.");
+  if (previousHash !== parseAuthorityHash(input.liveHeadHash, "live head_hash")) {
+    throw new Error("The locked live acceptance head hash does not match the exact global event tail.");
   }
-  const prevHash = parseAuthorityHash(row.prev_hash, "post-final event prev_hash");
-  if (prevHash !== final.payload.session.headHash) throw new Error("The post-final commerce event does not extend the exact final phase head.");
-  const occurredAtCanonical = boundedText(row.occurred_at_canonical, "post-final occurred_at_canonical", 27);
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u.test(occurredAtCanonical)
-      || row.recomputed_occurred_at_canonical !== occurredAtCanonical
-      || lockedDate(row.occurred_at, "post-final occurred_at").toISOString() !== `${occurredAtCanonical.slice(0, 23)}Z`) {
-    throw new Error("The post-final commerce event timestamp canonical form is invalid.");
-  }
-  const expectedEventHash = sha256Parts([
-    prevHash, expectedIdempotencyKey, String(sequence), "commerce_fingerprint", "commerce", "commerce-final", "0", "observed",
-    expectedDetailsCanonical, occurredAtCanonical
-  ]);
-  const eventHash = parseAuthorityHash(row.event_hash, "post-final event_hash");
-  if (eventHash !== expectedEventHash) throw new Error("The post-final commerce event hash chain is invalid.");
-  return { eventHash };
 }
 
 function sha256Parts(parts: readonly string[]): string {
   return createHash("sha256").update(parts.join("\x1f")).digest("hex");
+}
+
+function semanticJson(value: unknown): string {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("Post-final event details contain a non-finite number.");
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) return `[${value.map(semanticJson).join(",")}]`;
+  if (typeof value === "object") return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, child]) => `${JSON.stringify(key)}:${semanticJson(child)}`).join(",")}}`;
+  throw new Error("Post-final event details are not JSON-compatible.");
 }
 
 async function loadProductionSealAuthorityPair(

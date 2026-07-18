@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -9,7 +10,9 @@ import type {
 } from "../db/report-v4-acceptance-ledger";
 import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "../report-v4/report-v4-acceptance-fingerprints";
 import {
+  assertReportV4AcceptanceAtomicSealEventRangeForTestOnly,
   createReportV4AcceptanceOperator,
+  type ReportV4AcceptanceAtomicSealEventRangeTestInput,
   type ReportV4AcceptanceOperatorTestOnlyDependencies
 } from "./report-v4-acceptance-operator";
 
@@ -318,14 +321,59 @@ describe("Report V4 acceptance operator", () => {
     expect(store.loadScenarios).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts a canonical global bridge with foreign interleaving and a foreign live tail", () => {
+    expect(() => assertReportV4AcceptanceAtomicSealEventRangeForTestOnly(atomicSealRange())).not.toThrow();
+  });
+
+  it("rejects a missing or wrong first current-scenario commerce-final event", () => {
+    const missing = atomicSealRange({ noCurrent: true });
+    expect(() => assertReportV4AcceptanceAtomicSealEventRangeForTestOnly(missing)).toThrow(/commerce.*missing/i);
+
+    const wrong = atomicSealRange({ firstCurrentKind: "scenario_bound" });
+    expect(() => assertReportV4AcceptanceAtomicSealEventRangeForTestOnly(wrong)).toThrow(/first current-scenario event/i);
+  });
+
+  it("rejects broken global predecessor continuity and canonical commerce tamper", () => {
+    const broken = atomicSealRange();
+    broken.rows[1]!.prev_hash = broken.finalHeadHash;
+    expect(() => assertReportV4AcceptanceAtomicSealEventRangeForTestOnly(broken)).toThrow(/contiguous/i);
+
+    const canonical = atomicSealRange({ tamperCommerceCanonical: true });
+    expect(() => assertReportV4AcceptanceAtomicSealEventRangeForTestOnly(canonical)).toThrow(/first current-scenario event/i);
+  });
+
+  it("rejects any later current event even when the foreign tail and live head are canonically rechained", () => {
+    const input = atomicSealRange({ laterCurrent: true });
+    expect(() => assertReportV4AcceptanceAtomicSealEventRangeForTestOnly(input)).toThrow(/after commerce-final/i);
+  });
+
+  it.each(["count", "sequence", "hash"] as const)("rejects stale or misaligned live %s authority", (kind) => {
+    const input = atomicSealRange();
+    if (kind === "count") input.liveEventCount -= 1;
+    if (kind === "sequence") input.liveHeadSequence += 1;
+    if (kind === "hash") input.liveHeadHash = "f".repeat(64);
+    expect(() => assertReportV4AcceptanceAtomicSealEventRangeForTestOnly(input)).toThrow(/live.*head|head\/count/i);
+  });
+
+  it("rejects a stored head and count that advance together beyond the actual global suffix", () => {
+    const input = atomicSealRange();
+    input.liveHeadSequence += 1;
+    input.liveEventCount += 1;
+    expect(() => assertReportV4AcceptanceAtomicSealEventRangeForTestOnly(input)).toThrow(/exact post-final global range|head\/count/i);
+  });
+
   it("hard-wires lock-order, live-head comparison, and terminal CAS into one production transaction", () => {
     const source = readFileSync(fileURLToPath(new URL("./report-v4-acceptance-operator.ts", import.meta.url)), "utf8");
     expect(source).toMatch(/begin\("isolation level repeatable read read write"[\s\S]*atomic-seal-session-lock[\s\S]*FOR UPDATE[\s\S]*atomic-seal-scenario-lock[\s\S]*FOR UPDATE/iu);
-    expect(source).toMatch(/assertExactPostFinalCommerceEvent\(tx, input, final\)[\s\S]*pair\.scenarioState === "sealed"[\s\S]*session\.head_sequence[\s\S]*final\.payload\.session\.headSequence \+ 1[\s\S]*session\.head_hash[\s\S]*commerceFinalEvent\.eventHash[\s\S]*session\.event_count[\s\S]*final\.payload\.session\.eventCount \+ 1/iu);
+    expect(source).toMatch(/post-final-commerce-event-range[\s\S]*sequence>\$2[\s\S]*ORDER BY sequence/iu);
+    expect(source).not.toMatch(/post-final-commerce-event-range[\s\S]*sequence<=\$3/iu);
+    expect(source).toMatch(/liveHeadSequence[\s\S]*liveEventCount[\s\S]*liveHeadHash[\s\S]*assertReportV4AcceptanceAtomicSealEventRangeForTestOnly/iu);
+    expect(source).toMatch(/assertExactPostFinalCommerceEventRange\(tx, input, final, session\)[\s\S]*pair\.scenarioState === "sealed"/u);
     expect(source).toMatch(/atomic-seal-cas[\s\S]*UPDATE report_v4_acceptance_scenarios[\s\S]*state='collecting'[\s\S]*RETURNING state/iu);
     expect(source).toMatch(/atomic-seal-scenario-lock[\s\S]*report_id,order_id,pre_admission_job_id,core_job_id,enhancement_job_id[\s\S]*config_snapshot_id,question_set_id,core_artifact_revision_id,enhancement_artifact_revision_id[\s\S]*FOR UPDATE/iu);
     expect(source).toMatch(/parseLockedAcceptanceScenario\(scenario\)[\s\S]*computeReportV4AcceptanceFaultProvenanceBaselineFingerprint\(lockedScenario\)[\s\S]*lockedBaselineFingerprint !== input\.baselineFingerprint[\s\S]*atomic-seal-cas/iu);
-    expect(source).toMatch(/post-final-commerce-event[\s\S]*sequence=\$2[\s\S]*commerce_fingerprint[\s\S]*commerce-final[\s\S]*expectedDetailsCanonical[\s\S]*expectedIdempotencyKey[\s\S]*expectedEventHash/iu);
+    expect(source).toMatch(/first current-scenario event[\s\S]*commerce-final/iu);
+    expect(source).toMatch(/current-scenario event exists after commerce-final/iu);
   });
 
   it("registers both operator and collector CLIs through the workspace script contract", () => {
@@ -354,6 +402,8 @@ const DIAGNOSIS_ID = "31111111-1111-4111-8111-111111111111";
 const QUESTION_ID = "41111111-1111-4111-8111-111111111111";
 const BASELINE_COMMERCE = "b".repeat(64);
 const FINAL_COMMERCE = "d".repeat(64);
+const FOREIGN_SCENARIO_A = "51111111-1111-4111-8111-111111111111";
+const FOREIGN_SCENARIO_B = "61111111-1111-4111-8111-111111111111";
 
 interface BeginPayload {
   sessionId: string;
@@ -482,6 +532,59 @@ function boundScenario(overrides: Partial<ReportV4AcceptanceScenario> = {}): Rep
     enhancementArtifactRevisionId: "enhancement-artifact-1",
     ...overrides
   });
+}
+
+type MutableAtomicRange = { -readonly [K in keyof ReportV4AcceptanceAtomicSealEventRangeTestInput]:
+  K extends "rows" ? Record<string, unknown>[] : ReportV4AcceptanceAtomicSealEventRangeTestInput[K] };
+
+function atomicSealRange(options: { noCurrent?: boolean; firstCurrentKind?: "scenario_bound";
+  tamperCommerceCanonical?: boolean; laterCurrent?: boolean } = {}): MutableAtomicRange {
+  const finalHeadSequence = 10; const finalHeadHash = "a".repeat(64);
+  const specs: Array<{ scenarioId: string; kind: string; operation: string; unitId: string; attempt: number;
+    phase: string; details: Record<string, unknown>; detailsCanonical?: string }> = [
+    { scenarioId: FOREIGN_SCENARIO_A, kind: "scenario_bound", operation: "v4_dispatch",
+      unitId: "foreign-before-commerce", attempt: 0, phase: "observed", details: { bindingHash: "b".repeat(64) } },
+  ];
+  if (options.noCurrent) {
+    specs.push({ scenarioId: FOREIGN_SCENARIO_B, kind: "scenario_bound", operation: "v4_dispatch",
+      unitId: "foreign-instead-of-commerce", attempt: 0, phase: "observed", details: { bindingHash: "c".repeat(64) } });
+  } else if (options.firstCurrentKind === "scenario_bound") {
+    specs.push({ scenarioId: SUCCESS_ID, kind: "scenario_bound", operation: "v4_dispatch",
+      unitId: "wrong-current", attempt: 0, phase: "observed", details: { bindingHash: "c".repeat(64) } });
+  } else {
+    specs.push({ scenarioId: SUCCESS_ID, kind: "commerce_fingerprint", operation: "commerce",
+      unitId: "commerce-final", attempt: 0, phase: "observed", details: { fingerprint: FINAL_COMMERCE },
+      detailsCanonical: options.tamperCommerceCanonical ? JSON.stringify({ fingerprint: FINAL_COMMERCE }) : undefined });
+  }
+  specs.push({ scenarioId: FOREIGN_SCENARIO_B, kind: "scenario_bound", operation: "v4_dispatch",
+    unitId: "foreign-tail", attempt: 0, phase: "observed", details: { bindingHash: "e".repeat(64) } });
+  if (options.laterCurrent) specs.push({ scenarioId: SUCCESS_ID, kind: "scenario_bound", operation: "v4_dispatch",
+    unitId: "later-current", attempt: 0, phase: "observed", details: { bindingHash: "f".repeat(64) } });
+  let previousHash = finalHeadHash;
+  const rows = specs.map((spec, index) => {
+    const sequence = finalHeadSequence + index + 1;
+    const occurredAt = new Date(Date.parse("2026-07-18T00:00:00.000Z") + sequence * 1000);
+    const occurredAtCanonical = `${occurredAt.toISOString().slice(0, 23)}000Z`;
+    const detailsCanonical = spec.detailsCanonical ?? (spec.kind === "commerce_fingerprint"
+      ? `{"fingerprint": "${FINAL_COMMERCE}"}` : JSON.stringify(spec.details));
+    const idempotencyKey = sha256PartsForTest([SESSION_ID, spec.scenarioId, spec.kind, spec.operation,
+      spec.unitId, String(spec.attempt), spec.phase]);
+    const eventHash = sha256PartsForTest([previousHash, idempotencyKey, String(sequence), spec.kind,
+      spec.operation, spec.unitId, String(spec.attempt), spec.phase, detailsCanonical, occurredAtCanonical]);
+    const row = { idempotency_key: idempotencyKey, session_id: SESSION_ID, scenario_id: spec.scenarioId,
+      sequence, kind: spec.kind, operation: spec.operation, unit_id: spec.unitId, attempt: spec.attempt,
+      phase: spec.phase, details: spec.details, details_canonical: detailsCanonical, prev_hash: previousHash,
+      event_hash: eventHash, occurred_at: occurredAt, occurred_at_canonical: occurredAtCanonical,
+      recomputed_occurred_at_canonical: occurredAtCanonical };
+    previousHash = eventHash; return row;
+  });
+  return { sessionId: SESSION_ID, scenarioId: SUCCESS_ID, finalHeadSequence, finalHeadHash,
+    finalCommerceFingerprint: FINAL_COMMERCE, liveHeadSequence: finalHeadSequence + rows.length,
+    liveHeadHash: previousHash, liveEventCount: finalHeadSequence + rows.length, rows };
+}
+
+function sha256PartsForTest(parts: readonly string[]): string {
+  return createHash("sha256").update(parts.join("\x1f")).digest("hex");
 }
 
 function sealPayload(scenario: ReportV4AcceptanceScenario) {
