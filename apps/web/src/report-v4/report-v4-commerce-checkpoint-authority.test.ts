@@ -43,6 +43,13 @@ const d = (
   providerCallCount: calls,
   sourceAuditPayloadHash: h,
   sourceAuditCount: 1,
+  sourceAuditRecords: [{
+    questionIdHash: h,
+    sourceIdHash: "b".repeat(64),
+    canonicalUrlHash: h,
+    status: "available" as const,
+    summaryHash: h,
+  }],
   diagnosisContentHash: state === "completed" ? h : null,
   terminalFingerprint: h,
 });
@@ -128,8 +135,43 @@ describe("commerce checkpoint authority", () => {
       normalizeReportV4DiagnosisCheckpointAuthorities([a, a]),
     ).toThrow(/duplicate/);
   });
+  it("canonically sorts hash-safe source audits and binds them to the checkpoint question", () => {
+    const sourceAuditRecords = [
+      { ...d().sourceAuditRecords[0]!, sourceIdHash: "c".repeat(64), canonicalUrlHash: "c".repeat(64) },
+      { ...d().sourceAuditRecords[0]!, sourceIdHash: "b".repeat(64), canonicalUrlHash: "b".repeat(64) },
+    ];
+    const [normalized] = normalizeReportV4DiagnosisCheckpointAuthorities([
+      { ...d(), sourceAuditCount: 2, sourceAuditRecords },
+    ]);
+    expect(normalized?.sourceAuditRecords.map((record) => record.sourceIdHash)).toEqual([
+      "b".repeat(64),
+      "c".repeat(64),
+    ]);
+  });
+  it.each([
+    { sourceAuditCount: 0 },
+    { sourceAuditRecords: [{ ...d().sourceAuditRecords[0]!, status: "unknown" }] },
+    { sourceAuditRecords: [{ ...d().sourceAuditRecords[0]!, questionIdHash: "c".repeat(64) }] },
+    { sourceAuditRecords: [d().sourceAuditRecords[0], d().sourceAuditRecords[0]] },
+    { sourceAuditRecords: [{ ...d().sourceAuditRecords[0]!, canonicalUrl: "https://secret.example/" }] },
+    { sourceAuditRecords: [{ ...d().sourceAuditRecords[0]!, summary: "secret summary" }] },
+    { sourceAuditRecords: [{ ...d().sourceAuditRecords[0]!, extra: h }] },
+    { sourceAuditRecords: [{ ...d().sourceAuditRecords[0]!, status: "inaccessible", summaryHash: h }] },
+  ])("rejects malformed or tampered diagnosis source-audit authority", (change) =>
+    expect(() => normalizeReportV4DiagnosisCheckpointAuthorities([{ ...d(), ...change }])).toThrow(),
+  );
+  it("rejects duplicate canonical URL hashes across distinct source IDs", () => {
+    const first = d().sourceAuditRecords[0]!;
+    expect(() => normalizeReportV4DiagnosisCheckpointAuthorities([{ ...d(), sourceAuditCount: 2,
+      sourceAuditRecords: [first, { ...first, sourceIdHash: "c".repeat(64) }] }]))
+      .toThrow(/duplicate.*canonicalUrlHash/iu);
+  });
   it("does not expose raw fields", () =>
     expect(
       JSON.stringify(normalizeReportV4QuestionCheckpointAuthorities([q()])),
     ).not.toMatch(/answerPayload|sourcePayload\W|questionText|canonicalUrl/));
+  it("does not expose source-audit URL or summary plaintext", () => {
+    const serialized = JSON.stringify(normalizeReportV4DiagnosisCheckpointAuthorities([d()]));
+    expect(serialized).not.toMatch(/canonicalUrl\W|summary\W|https?:\/\//iu);
+  });
 });

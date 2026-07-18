@@ -325,6 +325,13 @@ function validInput() {
         providerCallCount: 1,
         sourceAuditPayloadHash: hash(`source-audit-${ordinal}`),
         sourceAuditCount: 1,
+        sourceAuditRecords: [{
+          questionIdHash: hash(`question-${ordinal}`),
+          sourceIdHash: hash(`source-${ordinal}`),
+          canonicalUrlHash: hash(`source-url-${ordinal}`),
+          status: "available" as const,
+          summaryHash: hash(`source-summary-${ordinal}`),
+        }],
         diagnosisContentHash: hash(`diagnosis-${ordinal}`),
         terminalFingerprint: hash(`diagnosis-terminal-${ordinal}`),
       })),
@@ -424,7 +431,14 @@ describe("Report V4 final commerce authority fingerprint", () => {
       (v) => void (v.accessTokens[0].lastUsedAt = null),
       (v) => void (v.artifacts[0].payloadIdentityHash = hash("changed")),
       (v) => void (v.questionCheckpoints[0].sourceCount = 2),
-      (v) => void (v.diagnosisCheckpoints[0].sourceAuditCount = 2),
+      (v) => {
+        v.diagnosisCheckpoints[0].sourceAuditCount = 2;
+        v.diagnosisCheckpoints[0].sourceAuditRecords.push({
+          ...v.diagnosisCheckpoints[0].sourceAuditRecords[0],
+          sourceIdHash: hash("second-source"),
+          canonicalUrlHash: hash("second-source-url"),
+        });
+      },
     ];
     const expected = fingerprintReportV4CommerceAuthority(validInput());
 

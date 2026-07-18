@@ -36,8 +36,17 @@ export interface ReportV4DiagnosisCheckpointAuthority {
   readonly providerCallCount: 0 | 1 | 2;
   readonly sourceAuditPayloadHash: string;
   readonly sourceAuditCount: number;
+  readonly sourceAuditRecords: readonly ReportV4DiagnosisSourceAuditAuthorityRecord[];
   readonly diagnosisContentHash: string | null;
   readonly terminalFingerprint: string;
+}
+
+export interface ReportV4DiagnosisSourceAuditAuthorityRecord {
+  readonly questionIdHash: string;
+  readonly sourceIdHash: string;
+  readonly canonicalUrlHash: string;
+  readonly status: "available" | "inaccessible";
+  readonly summaryHash: string | null;
 }
 
 export function normalizeReportV4QuestionCheckpointAuthorities(
@@ -84,6 +93,7 @@ const diagnosisFields = [
   "providerCallCount",
   "sourceAuditPayloadHash",
   "sourceAuditCount",
+  "sourceAuditRecords",
   "diagnosisContentHash",
   "terminalFingerprint",
 ] as const;
@@ -150,6 +160,11 @@ function parseDiagnosis(
     r.diagnosisContentHash,
     "diagnosisContentHash",
   );
+  const questionIdHash = hash(r.questionIdHash, "questionIdHash");
+  const sourceAuditCount = safeCount(r.sourceAuditCount, 5);
+  const sourceAuditRecords = parseSourceAuditRecords(r.sourceAuditRecords, questionIdHash);
+  if (sourceAuditRecords.length !== sourceAuditCount)
+    throw new TypeError("sourceAuditCount must equal sourceAuditRecords length");
   if (state === "completed" && (calls < 1 || diagnosis === null))
     throw new TypeError("completed cross constraint");
   if (state === "failed" && diagnosis !== null)
@@ -164,7 +179,7 @@ function parseDiagnosis(
     ),
     configSnapshotIdHash: hash(r.configSnapshotIdHash, "configSnapshotIdHash"),
     questionSetIdHash: hash(r.questionSetIdHash, "questionSetIdHash"),
-    questionIdHash: hash(r.questionIdHash, "questionIdHash"),
+    questionIdHash,
     snapshotIdHash: hash(r.snapshotIdHash, "snapshotIdHash"),
     inputIdentityHash: hash(r.inputIdentityHash, "inputIdentityHash"),
     ordinal: ordinal(r.ordinal),
@@ -174,10 +189,45 @@ function parseDiagnosis(
       r.sourceAuditPayloadHash,
       "sourceAuditPayloadHash",
     ),
-    sourceAuditCount: safeCount(r.sourceAuditCount, 5),
+    sourceAuditCount,
+    sourceAuditRecords,
     diagnosisContentHash: diagnosis,
     terminalFingerprint: hash(r.terminalFingerprint, "terminalFingerprint"),
   };
+}
+function parseSourceAuditRecords(
+  value: unknown,
+  checkpointQuestionIdHash: string,
+): readonly ReportV4DiagnosisSourceAuditAuthorityRecord[] {
+  if (!Array.isArray(value) || value.length > 5)
+    throw new TypeError("sourceAuditRecords must be an array of at most five rows");
+  const fields = ["questionIdHash", "sourceIdHash", "canonicalUrlHash", "status", "summaryHash"] as const;
+  const seen = new Set<string>();
+  const seenCanonicalUrlHashes = new Set<string>();
+  return value.map((item) => {
+    const r = record(item, fields);
+    const questionIdHash = hash(r.questionIdHash, "sourceAuditRecords.questionIdHash");
+    if (questionIdHash !== checkpointQuestionIdHash)
+      throw new TypeError("source audit question must equal checkpoint question");
+    const sourceIdHash = hash(r.sourceIdHash, "sourceAuditRecords.sourceIdHash");
+    if (seen.has(sourceIdHash)) throw new TypeError("duplicate source audit sourceIdHash");
+    seen.add(sourceIdHash);
+    const canonicalUrlHash = hash(r.canonicalUrlHash, "sourceAuditRecords.canonicalUrlHash");
+    if (seenCanonicalUrlHashes.has(canonicalUrlHash))
+      throw new TypeError("duplicate source audit canonicalUrlHash");
+    seenCanonicalUrlHashes.add(canonicalUrlHash);
+    const status = literal(r.status, ["available", "inaccessible"]);
+    const summaryHash = nullableHash(r.summaryHash, "sourceAuditRecords.summaryHash");
+    if (status === "inaccessible" && summaryHash !== null)
+      throw new TypeError("inaccessible source audit summaryHash must be null");
+    return {
+      questionIdHash,
+      sourceIdHash,
+      canonicalUrlHash,
+      status,
+      summaryHash,
+    };
+  }).sort((left, right) => left.sourceIdHash.localeCompare(right.sourceIdHash));
 }
 function record(
   value: unknown,

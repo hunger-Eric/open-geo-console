@@ -117,7 +117,10 @@ function createSnapshot(
           questionSetIdHash, questionIdHash: hash(`question-${ordinal}`), snapshotIdHash, ordinal,
           state: failed ? "failed" as const : "completed" as const, inputIdentityHash: hash(`diagnosis-input-${ordinal}`),
           providerCallCount: failed ? 2 as const : 1 as const, sourceAuditPayloadHash: hash(`audit-${ordinal}`),
-          sourceAuditCount: 1, diagnosisContentHash: failed ? null : hash(`diagnosis-${ordinal}`),
+          sourceAuditCount: 1, sourceAuditRecords: [{ questionIdHash: hash(`question-${ordinal}`),
+            sourceIdHash: hash(`source-${ordinal}`), canonicalUrlHash: hash(`source-url-${ordinal}`),
+            status: "available" as const, summaryHash: hash(`source-summary-${ordinal}`) }],
+          diagnosisContentHash: failed ? null : hash(`diagnosis-${ordinal}`),
           terminalFingerprint: hash(`diagnosis-terminal-${ordinal}`),
         };
       })

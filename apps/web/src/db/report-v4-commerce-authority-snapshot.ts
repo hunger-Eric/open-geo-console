@@ -144,8 +144,9 @@ export async function loadReportV4CommerceAuthoritySnapshotInTransaction(
     const diagnosisRows = await query(tx, "diagnosis-checkpoints", `SELECT identity_hash,report_id,enhancement_job_id,core_artifact_revision_id,config_snapshot_id,question_set_id,question_id,snapshot_id,ordinal,state,input_identity_hash,diagnosis_input_payload,provider_call_count,source_audit_payload,diagnosis_payload,diagnosis_content_hash FROM report_v4_diagnosis_checkpoints WHERE report_id=$1`, [binding.reportId]);
     const terminalEventRows = await query(tx, "terminal-events", `SELECT operation,unit_id,attempt,phase,details FROM report_v4_acceptance_events
       WHERE session_id=$1 AND scenario_id=$2 AND kind='checkpoint_terminal'`, [parsed.sessionId, parsed.scenarioId]);
+    const snapshot = project(parsed.phase, capturedAt, binding, { orderRows, paymentEventRows, jobRows, dispatchRows, accessKeyRows, creditRows, refundRows, deliveryRows, emailEventRows, tokenRows, artifactRows, questionRows, diagnosisRows });
     validateTerminalEvents(questionRows, diagnosisRows, terminalEventRows);
-    return project(parsed.phase, capturedAt, binding, { orderRows, paymentEventRows, jobRows, dispatchRows, accessKeyRows, creditRows, refundRows, deliveryRows, emailEventRows, tokenRows, artifactRows, questionRows, diagnosisRows });
+    return snapshot;
 }
 
 type Binding = { scenarioKind:"success"|"diagnosis_failure"|"question_failure"; reportId:string; orderId:string; preAdmissionJobId:string; coreJobId:string; enhancementJobId:string|null; siteSnapshotId:string; configSnapshotId:string; questionSetId:string; coreArtifactRevisionId:string; enhancementArtifactRevisionId:string|null; activeArtifactRevisionId:string|null };
@@ -197,7 +198,30 @@ function mapQuestionCheckpoint(r:Row):Row {
 }
 function mapDiagnosisCheckpoint(r:Row):Row {
   const checkpoint={identityHash:r.identity_hash,reportId:r.report_id,enhancementJobId:r.enhancement_job_id,coreArtifactRevisionId:r.core_artifact_revision_id,configSnapshotId:r.config_snapshot_id,questionSetId:r.question_set_id,questionId:r.question_id,snapshotId:r.snapshot_id,ordinal:r.ordinal,state:r.state,inputIdentityHash:r.input_identity_hash,diagnosisInput:r.diagnosis_input_payload,providerCallCount:r.provider_call_count,sourceAudits:r.source_audit_payload,diagnosis:r.diagnosis_payload,diagnosisContentHash:r.diagnosis_content_hash} as ReportV4DiagnosisCheckpoint;
-  return {identityHash:r.identity_hash,reportIdHash:sha(r.report_id),enhancementJobIdHash:sha(r.enhancement_job_id),coreArtifactRevisionIdHash:sha(r.core_artifact_revision_id),configSnapshotIdHash:sha(r.config_snapshot_id),questionSetIdHash:sha(r.question_set_id),questionIdHash:sha(r.question_id),snapshotIdHash:sha(r.snapshot_id),ordinal:r.ordinal,state:r.state,inputIdentityHash:r.input_identity_hash,providerCallCount:r.provider_call_count,sourceAuditPayloadHash:sha(stableJson(r.source_audit_payload)),sourceAuditCount:arrayLength(r.source_audit_payload,"source_audit_payload"),diagnosisContentHash:r.diagnosis_content_hash,terminalFingerprint:computeReportV4DiagnosisTerminalCheckpointFingerprint(checkpoint)};
+  const sourceAuditRecords=projectSourceAuditRecords(r.source_audit_payload,required(r.question_id,"question_id"));
+  return {identityHash:r.identity_hash,reportIdHash:sha(r.report_id),enhancementJobIdHash:sha(r.enhancement_job_id),coreArtifactRevisionIdHash:sha(r.core_artifact_revision_id),configSnapshotIdHash:sha(r.config_snapshot_id),questionSetIdHash:sha(r.question_set_id),questionIdHash:sha(r.question_id),snapshotIdHash:sha(r.snapshot_id),ordinal:r.ordinal,state:r.state,inputIdentityHash:r.input_identity_hash,providerCallCount:r.provider_call_count,sourceAuditPayloadHash:sha(stableJson(r.source_audit_payload)),sourceAuditCount:arrayLength(r.source_audit_payload,"source_audit_payload"),sourceAuditRecords,diagnosisContentHash:r.diagnosis_content_hash,terminalFingerprint:computeReportV4DiagnosisTerminalCheckpointFingerprint(checkpoint)};
+}
+
+function projectSourceAuditRecords(value:unknown,checkpointQuestionId:string):Row[]{
+  if(!Array.isArray(value)||value.length>5)fail("source_audit_payload must be an array of at most five rows");
+  const allowed=new Set(["questionId","sourceId","canonicalUrl","status","summary"]),seen=new Set<string>(),seenCanonicalUrls=new Set<string>();
+  return value.map((item,index)=>{
+    const audit=asRow(item,`source audit ${index+1}`);
+    if(Object.keys(audit).some((key)=>!allowed.has(key)))fail(`source audit ${index+1} contains unsupported fields`);
+    const questionId=boundedText(audit.questionId,`source audit ${index+1} questionId`,500);
+    if(questionId!==checkpointQuestionId)fail("source audit question does not match its checkpoint question");
+    const sourceId=boundedText(audit.sourceId,`source audit ${index+1} sourceId`,500);
+    if(seen.has(sourceId))fail("source audit sourceId values must be unique");
+    seen.add(sourceId);
+    const canonicalUrl=httpUrl(audit.canonicalUrl,`source audit ${index+1} canonicalUrl`);
+    if(seenCanonicalUrls.has(canonicalUrl))fail("source audit canonical URL values must be unique after normalization");
+    seenCanonicalUrls.add(canonicalUrl);
+    const status=audit.status;
+    if(status!=="available"&&status!=="inaccessible")fail(`source audit ${index+1} status is invalid`);
+    const summary=audit.summary===undefined?null:boundedText(audit.summary,`source audit ${index+1} summary`,5000);
+    if(status==="inaccessible"&&summary!==null)fail("inaccessible source audit cannot retain a summary");
+    return {questionIdHash:sha(questionId),sourceIdHash:sha(sourceId),canonicalUrlHash:sha(canonicalUrl),status,summaryHash:summary===null?null:sha(summary)};
+  }).sort((left,right)=>required(left.sourceIdHash,"sourceIdHash").localeCompare(required(right.sourceIdHash,"sourceIdHash")));
 }
 
 async function query(tx:ReportV4CommerceAuthoritySnapshotTransactionSql,label:string,statement:string,parameters:unknown[]=[]):Promise<Rows>{return tx.unsafe(`/* authority:${label} */ ${statement}`,parameters);}
@@ -208,6 +232,8 @@ function one(rows:Rows,label:string):Row{if(rows.length!==1)fail(`${label} must 
 function equal(actual:unknown,expected:unknown,label:string):void{if(actual!==expected)fail(`${label} mismatch`);}
 function required(value:unknown,label:string):string{if(typeof value!=="string"||!value||value.trim()!==value)fail(`${label} is invalid`);return value;}
 function nullableRequired(value:unknown,label:string):string|null{return value===null?null:required(value,label);}
+function boundedText(value:unknown,label:string,max:number):string{const text=required(value,label);if(text.length>max)fail(`${label} exceeds its maximum length`);return text;}
+function httpUrl(value:unknown,label:string):string{const text=boundedText(value,label,2000);try{const url=new URL(text);if(!/^https?:$/u.test(url.protocol)||url.username||url.password)throw new Error();url.hash="";return url.href;}catch{fail(`${label} must be an HTTP(S) URL without credentials`);}}
 function safeCode(value:unknown,label:string):string{const text=required(value,label);if(!/^[a-z0-9][a-z0-9_.:-]{0,127}$/u.test(text))fail(`${label} must be a safe identifier`);return text;}
 function nullableSafeCode(value:unknown,label:string):string|null{return value===null?null:safeCode(value,label);}
 function scenarioKind(value:unknown):Binding["scenarioKind"]{if(value!=="success"&&value!=="diagnosis_failure"&&value!=="question_failure")fail("scenario kind is invalid");return value;}

@@ -171,6 +171,40 @@ describe("Report V4 commerce authority snapshot projector", () => {
       expect(result.artifacts.find((artifact) => artifact.revisionKind === "diagnosis_enhancement")!.status).toBe("active");
     }
   });
+
+  it("projects diagnosis source audits as canonical hash-safe records without plaintext", async () => {
+    const rows = protectedFinalFixture("success");
+    const result = await load(rows, [], "final");
+    const checkpoint = result.diagnosisCheckpoints.find((item) => item.ordinal === 1)!;
+    expect(checkpoint.sourceAuditCount).toBe(1);
+    expect(checkpoint.sourceAuditRecords).toEqual([{
+      questionIdHash: sha("question-1"),
+      sourceIdHash: sha("source-1"),
+      canonicalUrlHash: sha("https://source-1.example/evidence"),
+      status: "available",
+      summaryHash: sha("Audited evidence 1."),
+    }]);
+    const sourceAuditPayload = rows.diagnosisCheckpoints.find((item) => item.ordinal === 1)!.source_audit_payload;
+    expect(checkpoint.sourceAuditPayloadHash).toBe(sha(stableTestJson(sourceAuditPayload)));
+    expect(result.diagnosisCheckpoints.find((item) => item.ordinal === 2)!.sourceAuditRecords).toEqual([
+      expect.objectContaining({ status: "inaccessible", summaryHash: null }),
+    ]);
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("https://source-1.example/evidence");
+    expect(serialized).not.toContain("Audited evidence 1.");
+  });
+
+  it("rejects distinct source IDs that collapse to one normalized canonical URL", async () => {
+    const rows = protectedFinalFixture("success");
+    const diagnosis = rows.diagnosisCheckpoints.find((item) => item.ordinal === 1)!;
+    const firstAudit = (diagnosis.source_audit_payload as Record<string, unknown>[])[0]!;
+    diagnosis.source_audit_payload = [firstAudit, {
+      ...firstAudit,
+      sourceId: "source-1-alias",
+      canonicalUrl: "https://source-1.example:443/evidence#duplicate",
+    }];
+    await expect(load(rows, [], "final")).rejects.toThrow(/canonical URL.*unique.*normalization/iu);
+  });
 });
 
 type Rows = ReturnType<typeof fixture>;
@@ -329,14 +363,20 @@ function protectedFinalFixture(kind: "success" | "diagnosis_failure" | "question
   rows.artifacts[0] = { ...rows.artifacts[0]!, status: "ready" };
   rows.artifacts.push({ ...rows.artifacts[0]!, id: "artifact-enhancement", job_id: "job-enhancement", source_artifact_revision_id: "artifact-core",
     revision_kind: "diagnosis_enhancement", revision: 2, status: "active", payload_identity_hash: sha("enhancement-payload"), html_sha256: sha("enhancement-html") });
-  const evidence = answeredQuestionAndDiagnosisEvidence(kind === "diagnosis_failure" ? 2 : null);
+  const evidence = answeredQuestionAndDiagnosisEvidence(
+    kind === "diagnosis_failure" ? 2 : null,
+    kind === "success" ? 2 : null,
+  );
   rows.questionCheckpoints.push(...evidence.questions);
   rows.diagnosisCheckpoints.push(...evidence.diagnoses);
   rows.terminalEvents.push(...evidence.events);
   return rows;
 }
 
-function answeredQuestionAndDiagnosisEvidence(failedOrdinal: 1 | 2 | 3 | null) {
+function answeredQuestionAndDiagnosisEvidence(
+  failedOrdinal: 1 | 2 | 3 | null,
+  inaccessibleOrdinal: 1 | 2 | 3 | null = null,
+) {
   const questions: Record<string, unknown>[] = [], diagnoses: Record<string, unknown>[] = [], events: Record<string, unknown>[] = [];
   for (const ordinal of [1, 2, 3] as const) {
     const questionId=`question-${ordinal}`, questionIdentityHash=sha(`question-identity-${ordinal}`), modelConfigIdentityHash=sha("model-config"), inputIdentityHash=sha(`question-input-${ordinal}`);
@@ -347,9 +387,10 @@ function answeredQuestionAndDiagnosisEvidence(failedOrdinal: 1 | 2 | 3 | null) {
     questions.push({identity_hash:identityHash,report_id:question.reportId,job_id:question.jobId,question_set_id:question.questionSetId,question_id:questionId,snapshot_id:question.snapshotId,ordinal,state:question.state,question_identity_hash:questionIdentityHash,model_config_identity_hash:modelConfigIdentityHash,input_identity_hash:inputIdentityHash,provider_call_count:1,answer_payload:answerPayload,source_payload:sourcePayload,answer_content_hash:question.answerContentHash});
     events.push({operation:"question_answer",unit_id:identityHash,attempt:0,phase:"observed",details:{checkpointHash:computeReportV4QuestionTerminalCheckpointFingerprint(question),state:"answered"}});
 
-    const diagnosisInput=diagnosisInputFixture(ordinal), diagnosisInputIdentityHash=fingerprint(diagnosisInput);
+    const sourceStatus=inaccessibleOrdinal===ordinal?"inaccessible" as const:"available" as const;
+    const diagnosisInput=diagnosisInputFixture(ordinal,sourceStatus), diagnosisInputIdentityHash=fingerprint(diagnosisInput);
     const diagnosisIdentityHash=fingerprint({reportId:"report-v4",enhancementJobId:"job-enhancement",coreArtifactRevisionId:"artifact-core",configSnapshotId:`v4-config-${sha("config")}`,questionSetId:"questions-v4",snapshotId:"snapshot-v4",questionId,ordinal,inputIdentityHash:diagnosisInputIdentityHash});
-    const failed=failedOrdinal===ordinal, sourceAudits=diagnosisSourceAudits(ordinal), diagnosis=failed?null:diagnosisOutput(ordinal), diagnosisContentHash=diagnosis===null?null:fingerprint(diagnosis);
+    const failed=failedOrdinal===ordinal, sourceAudits=diagnosisSourceAudits(ordinal,sourceStatus), diagnosis=failed?null:diagnosisOutput(ordinal), diagnosisContentHash=diagnosis===null?null:fingerprint(diagnosis);
     const checkpoint={reportId:"report-v4",enhancementJobId:"job-enhancement",coreArtifactRevisionId:"artifact-core",configSnapshotId:`v4-config-${sha("config")}`,questionSetId:"questions-v4",snapshotId:"snapshot-v4",questionId,ordinal,identityHash:diagnosisIdentityHash,state:failed?"failed" as const:"completed" as const,inputIdentityHash:diagnosisInputIdentityHash,diagnosisInput,providerCallCount:failed?2 as const:1 as const,sourceAudits,diagnosis,diagnosisContentHash} satisfies ReportV4DiagnosisCheckpoint;
     diagnoses.push({identity_hash:diagnosisIdentityHash,report_id:checkpoint.reportId,enhancement_job_id:checkpoint.enhancementJobId,core_artifact_revision_id:checkpoint.coreArtifactRevisionId,config_snapshot_id:checkpoint.configSnapshotId,question_set_id:checkpoint.questionSetId,question_id:questionId,snapshot_id:checkpoint.snapshotId,ordinal,state:checkpoint.state,input_identity_hash:diagnosisInputIdentityHash,diagnosis_input_payload:diagnosisInput,provider_call_count:checkpoint.providerCallCount,source_audit_payload:sourceAudits,diagnosis_payload:diagnosis,diagnosis_content_hash:diagnosisContentHash});
     events.push({operation:"source_diagnosis",unit_id:diagnosisIdentityHash,attempt:0,phase:"observed",details:{checkpointHash:computeReportV4DiagnosisTerminalCheckpointFingerprint(checkpoint),state:checkpoint.state}});
@@ -357,8 +398,8 @@ function answeredQuestionAndDiagnosisEvidence(failedOrdinal: 1 | 2 | 3 | null) {
   return {questions,diagnoses,events};
 }
 
-function diagnosisInputFixture(ordinal:1|2|3){return{question:{questionId:`question-${ordinal}`,text:`Question ${ordinal}?`},answer:`Answer ${ordinal}.`,locale:"en",sources:[{questionId:`question-${ordinal}`,sourceId:`source-${ordinal}`,title:`Source ${ordinal}`,canonicalUrl:`https://source-${ordinal}.example/evidence`,excerpt:`Evidence ${ordinal}.`,retrievalStatus:"available"}],targetPages:[{questionId:`question-${ordinal}`,pageId:`page-${ordinal}`,url:`https://target.example/page-${ordinal}`,relevanceReason:`Relevant ${ordinal}.`,summary:`Target summary ${ordinal}.`,sourceLocations:[{locationId:`location-${ordinal}`,startOffset:0,endOffset:20}]}]};}
-function diagnosisSourceAudits(ordinal:1|2|3){return[{questionId:`question-${ordinal}`,sourceId:`source-${ordinal}`,canonicalUrl:`https://source-${ordinal}.example/evidence`,status:"available" as const,summary:`Audited evidence ${ordinal}.`}];}
+function diagnosisInputFixture(ordinal:1|2|3,status:"available"|"inaccessible"="available"){return{question:{questionId:`question-${ordinal}`,text:`Question ${ordinal}?`},answer:`Answer ${ordinal}.`,locale:"en",sources:[{questionId:`question-${ordinal}`,sourceId:`source-${ordinal}`,title:`Source ${ordinal}`,canonicalUrl:`https://source-${ordinal}.example/evidence`,excerpt:`Evidence ${ordinal}.`,retrievalStatus:status}],targetPages:[{questionId:`question-${ordinal}`,pageId:`page-${ordinal}`,url:`https://target.example/page-${ordinal}`,relevanceReason:`Relevant ${ordinal}.`,summary:`Target summary ${ordinal}.`,sourceLocations:[{locationId:`location-${ordinal}`,startOffset:0,endOffset:20}]}]};}
+function diagnosisSourceAudits(ordinal:1|2|3,status:"available"|"inaccessible"="available"){return[{questionId:`question-${ordinal}`,sourceId:`source-${ordinal}`,canonicalUrl:`https://source-${ordinal}.example/evidence`,status,...(status==="available"?{summary:`Audited evidence ${ordinal}.`}:{})}];}
 function diagnosisOutput(ordinal:1|2|3){const refs=[`source-${ordinal}`,`location-${ordinal}`];return{selectionSummary:`Selection summary ${ordinal}.`,observableFactors:["problem_match","factual_specificity","target_clarity"].map((kind,index)=>({kind,observation:`Observation ${ordinal}-${index}.`,evidenceRefs:refs})),targetGap:`Target gap ${ordinal}.`,recommendedActions:[1,2,3].map((priority)=>({priority,action:`Action ${ordinal}-${priority}.`,evidenceRefs:refs})),detailedEvidenceRefs:refs};}
 function fingerprint(value:unknown):string{return sha(stableTestJson(value));}
 function stableTestJson(value:unknown):string{if(value===null||typeof value==="string"||typeof value==="boolean"||typeof value==="number")return JSON.stringify(value);if(Array.isArray(value))return`[${value.map(stableTestJson).join(",")}]`;return`{${Object.entries(value as Record<string,unknown>).sort(([a],[b])=>a<b?-1:a>b?1:0).map(([key,child])=>`${JSON.stringify(key)}:${stableTestJson(child)}`).join(",")}}`;}
