@@ -47,6 +47,19 @@ describe("Report V4 semantic runtime projector", () => {
     const input = runtimeInput(); appendPdfEvent(input);
     expect(() => projectReportV4SemanticRuntime(input)).toThrow(/zero guard counters|prohibited-operation/i);
   });
+
+  it("ignores foreign probe and prohibited events after verifying the complete global prefix", () => {
+    const input = runtimeInput();
+    const foreignScenario = "33333333-3333-4333-8333-333333333333";
+    const probeDetails = input.events[0]!.details;
+    appendEvent(input, foreignScenario, { kind: "model_operation", operation: "page_analysis",
+      unitId: REPORT_V4_OVERSIZED_TOKEN_ACCEPTANCE_PROBE_UNIT_ID, attempt: 0, phase: "started", details: probeDetails }, "foreign-probe-started");
+    appendEvent(input, foreignScenario, { kind: "model_operation", operation: "page_analysis",
+      unitId: REPORT_V4_OVERSIZED_TOKEN_ACCEPTANCE_PROBE_UNIT_ID, attempt: 0, phase: "rejected", details: probeDetails }, "foreign-probe-rejected");
+    appendEvent(input, foreignScenario, { kind: "prohibited_operation", operation: "pdf",
+      unitId: "pdf_readiness_chromium", attempt: 0, phase: "started", details: {} }, "foreign-pdf");
+    expect(projectReportV4SemanticRuntime(input).oversizedTokenProbe).toBeDefined();
+  });
 });
 
 type MutableEvent = { -readonly [K in keyof ReportV4AcceptanceEvent]: ReportV4AcceptanceEvent[K] };
@@ -113,12 +126,18 @@ function makeProbeEvents(details: Record<string, unknown>): MutableEvent[] {
 }
 
 function appendPdfEvent(input: MutableInput): void {
+  appendEvent(input, input.events[0]!.scenarioId, { kind: "prohibited_operation", operation: "pdf",
+    unitId: "pdf_readiness_chromium", attempt: 0, phase: "started", details: {} }, "pdf-event");
+}
+
+function appendEvent(input: MutableInput, scenarioId: string,
+  value: Pick<ReportV4AcceptanceEvent, "kind" | "operation" | "unitId" | "attempt" | "phase" | "details">,
+  identity: string): void {
   const previous = input.events.at(-1)!; const sequence = previous.sequence + 1;
-  const occurredAt = new Date("2026-07-17T00:00:03.000Z"); const details = {};
-  const eventHash = hash(`${previous.eventHash}:${sequence}:pdf`);
-  const event = { sessionId: previous.sessionId, scenarioId: previous.scenarioId, sequence,
-    kind: "prohibited_operation", operation: "pdf", unitId: "pdf_readiness_chromium", attempt: 0,
-    phase: "started", details, detailsCanonical: stable(details), idempotencyKey: hash("pdf-event"),
+  const occurredAt = new Date(Date.parse("2026-07-17T00:00:00.000Z") + sequence * 1000);
+  const eventHash = hash(`${previous.eventHash}:${sequence}:${identity}`);
+  const event = { sessionId: previous.sessionId, scenarioId, sequence, ...value,
+    detailsCanonical: stable(value.details), idempotencyKey: hash(identity),
     prevHash: previous.eventHash, eventHash, occurredAt, occurredAtCanonical: occurredAt.toISOString() } as MutableEvent;
   input.events.push(event);
   input.finalPhase.authorities.ledger_authority.events.push({ sequence, fingerprint: event.idempotencyKey,

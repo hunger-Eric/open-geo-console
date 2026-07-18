@@ -40,13 +40,14 @@ export function projectReportV4AcceptanceSemanticCheckpoints(
   if (request.finalPhase.phase !== "final") fail("checkpoint projection requires a validated final-phase payload");
   const input: ProjectionContext = {
     ...request,
+    events: request.events.filter((event) => event.scenarioId === request.scenario.scenarioId),
     commerce: request.finalPhase.commerce,
     ledgerEvents: request.finalPhase.authorities.ledger_authority.events,
     siteReadManifest: request.finalPhase.authorities.site_read_manifest,
     artifact: request.finalPhase.authorities.artifact_combined_payload_integrity,
   };
   assertCompleteFinalScope(input);
-  assertLedgerMapping(input.events, input.ledgerEvents, input.scenario);
+  assertLedgerMapping(request.events, input.ledgerEvents, request.finalPhase.session.sessionIdHash);
   const scenario = input.scenario;
   const commerceQuestions = orderedCheckpoints(input.commerce.questionCheckpoints, "question");
   if (commerceQuestions.length !== 3) fail("final commerce authority must contain exactly three question checkpoints");
@@ -431,7 +432,7 @@ function deriveQuestionIds(
 function assertLedgerMapping(
   events: readonly ReportV4AcceptanceEvent[],
   ledgerEvents: readonly ReportV4AcceptanceLedgerAuthorityEventRecord[],
-  scenario: ReportV4AcceptanceScenario,
+  sessionIdHash: string,
 ): void {
   if (events.length !== ledgerEvents.length) fail("raw and ledger authority event counts differ");
   if (events.some((event, index) => event.sequence !== index + 1)) {
@@ -453,8 +454,8 @@ function assertLedgerMapping(
         || event.prevHash !== previousHash || row.previousHash !== previousHash) {
       fail("raw and ledger event arrays do not form one strict contiguous hash chain");
     }
-    if (event.sessionId !== scenario.sessionId || event.scenarioId !== scenario.scenarioId) {
-      fail(`raw event sequence ${event.sequence} is outside the exact scenario scope`);
+    if (sha(event.sessionId) !== sessionIdHash) {
+      fail(`raw event sequence ${event.sequence} is outside the exact session scope`);
     }
     const details = event.kind === "html_assembly" || event.kind === "artifact_activation"
       ? { artifactRevisionIdHash: sha(String((event.details as Record<string, unknown>).artifactRevisionId)),

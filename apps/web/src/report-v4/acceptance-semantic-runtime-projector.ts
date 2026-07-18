@@ -42,7 +42,7 @@ export function projectReportV4SemanticRuntime(input: ProjectReportV4SemanticRun
     const event = input.events[index]!; const record = projectedEvents[index]!;
     if (event.sequence !== index + 1 || record.sequence !== index + 1 || event.prevHash !== previousHash
         || record.previousHash !== previousHash || hash(event.sessionId) !== input.finalPhase.session.sessionIdHash
-        || hash(event.scenarioId) !== input.finalPhase.session.scenarioIdHash || record.eventHash !== event.eventHash
+        || record.eventHash !== event.eventHash
         || record.fingerprint !== event.idempotencyKey || record.kind !== event.kind || record.operation !== event.operation
         || record.unitIdHash !== hash(event.unitId) || record.scenarioIdHash !== hash(event.scenarioId)
         || record.attempt !== event.attempt || record.eventPhase !== event.phase
@@ -52,7 +52,8 @@ export function projectReportV4SemanticRuntime(input: ProjectReportV4SemanticRun
     }
     previousHash = event.eventHash;
   }
-  const probeEvents = input.events.filter((event) => event.kind === "model_operation" && event.operation === "page_analysis" && event.unitId === REPORT_V4_OVERSIZED_TOKEN_ACCEPTANCE_PROBE_UNIT_ID && event.attempt === 0);
+  const scenarioEvents = input.events.filter((event) => hash(event.scenarioId) === input.finalPhase.session.scenarioIdHash);
+  const probeEvents = scenarioEvents.filter((event) => event.kind === "model_operation" && event.operation === "page_analysis" && event.unitId === REPORT_V4_OVERSIZED_TOKEN_ACCEPTANCE_PROBE_UNIT_ID && event.attempt === 0);
   if (probeEvents.length !== 2 || probeEvents[0]!.phase !== "started" || probeEvents[1]!.phase !== "rejected" || probeEvents[0]!.sequence >= probeEvents[1]!.sequence) throw new Error("Oversized-token probe must have exact started then rejected events.");
   const expected = recipe.evidence;
   for (const event of probeEvents) {
@@ -66,8 +67,7 @@ export function projectReportV4SemanticRuntime(input: ProjectReportV4SemanticRun
   const counters = input.finalPhase.authorities.prohibited_operation_guard_authority.counters.filter((counter) => counter.operation === "pdf");
   if (counters.length !== pdfSites.length || new Set(counters.map((counter) => counter.guardSite)).size !== pdfSites.length || counters.some((counter) => !pdfSites.includes(counter.guardSite) || counter.attemptCount !== 0 || counter.attemptedAt !== null || counter.matchingEventFingerprint !== null)) throw new Error("PDF guard authority is not the exact four-site zero set.");
   const prohibitedOperations = new Set<string>(REPORT_V4_PROHIBITED_OPERATION_MANIFEST_ENTRIES.map((entry) => entry.operation));
-  if (input.events.some((event) => event.kind === "prohibited_operation" && prohibitedOperations.has(event.operation))
-      || projectedEvents.some((event) => event.kind === "prohibited_operation" && prohibitedOperations.has(event.operation))) {
+  if (scenarioEvents.some((event) => event.kind === "prohibited_operation" && prohibitedOperations.has(event.operation))) {
     throw new Error("Zero guard counters conflict with a prohibited-operation ledger event.");
   }
   const zero = input.finalPhase.authorities.zero_database_effect_counts.semanticZeroProjection.databaseSupported;

@@ -51,6 +51,33 @@ describe("Report V4 semantic checkpoint projector", () => {
     },
   );
 
+  it("accepts a full global prefix with foreign scenario events and keeps checkpoint semantics scenario-local", () => {
+    const input = structuredClone(makeFixture("success").input) as unknown as MutableInput;
+    appendForeignScenarioBound(input);
+    resealInput(input);
+    expect(projectReportV4AcceptanceSemanticCheckpoints(
+      input as unknown as ProjectReportV4AcceptanceSemanticCheckpointsInput,
+    ).questions).toHaveLength(3);
+  });
+
+  it("rejects a foreign raw event mapped to the wrong projected scenario hash", () => {
+    const input = structuredClone(makeFixture("success").input) as unknown as MutableInput;
+    appendForeignScenarioBound(input);
+    input.finalPhase.authorities.ledger_authority.events.at(-1)!.scenarioIdHash = sha(SCENARIO);
+    resealInput(input);
+    expect(() => projectReportV4AcceptanceSemanticCheckpoints(
+      input as unknown as ProjectReportV4AcceptanceSemanticCheckpointsInput,
+    )).toThrow(/does not exactly map/i);
+  });
+
+  it("rejects omission from the caller-supplied full global raw prefix", () => {
+    const input = structuredClone(makeFixture("success").input) as unknown as MutableInput;
+    input.events.pop();
+    expect(() => projectReportV4AcceptanceSemanticCheckpoints(
+      input as unknown as ProjectReportV4AcceptanceSemanticCheckpointsInput,
+    )).toThrow(/counts differ|exact-length/i);
+  });
+
   it.each([
     ["tampered question hash", "success", (input: MutableInput) => {
       input.finalPhase.commerce.questionCheckpoints[0]!.questionIdHash = sha("foreign-question");
@@ -182,6 +209,15 @@ function addForeignRead(input: MutableInput): void {
   const events = input.events as unknown as ReportV4AcceptanceEvent[];
   addSitePair(events, "foreign-nonprefix-unit", sha("foreign-read-url")); resequence(events);
   input.finalPhase.authorities.ledger_authority.events = mapLedger(events);
+}
+
+function appendForeignScenarioBound(input: MutableInput): void {
+  const foreign = makeEvent({ kind: "scenario_bound", operation: "v4_dispatch", unitId: "foreign-binding",
+    attempt: 0, phase: "observed", details: { bindingHash: sha("foreign-binding") } }, input.events.length + 1);
+  Object.assign(foreign, { scenarioId: "33333333-3333-4333-8333-333333333333" });
+  input.events.push(foreign as Mutable<ReportV4AcceptanceEvent>);
+  resequence(input.events as unknown as ReportV4AcceptanceEvent[]);
+  input.finalPhase.authorities.ledger_authority.events = mapLedger(input.events);
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] extends readonly (infer U)[]
