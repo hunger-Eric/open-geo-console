@@ -56,10 +56,12 @@ vi.mock("@/report-v4/prohibited-operation-guard-runtime", () => ({
 }));
 import {
   dispatchReportV4ProductionJob,
+  composeReportV4AcceptanceProductionRunner,
   isTerminalScanJob,
   processScanJob,
   resolveRecommendationFulfillmentTarget,
   resolveReportV4ProductionTarget,
+  type ReportV4AcceptanceProductionRunnerTestOnlyDependencies,
   type ReportV4ProductionRunnerInput
 } from "./processor";
 
@@ -79,6 +81,81 @@ beforeEach(() => {
 });
 
 describe("strict Report V4 processor routing", () => {
+  it("returns the unchanged base runner outside acceptance and invokes it exactly once", async () => {
+    const base = vi.fn(async () => undefined);
+    const dependencies = acceptanceRunnerDependencies();
+    const runner = composeReportV4AcceptanceProductionRunner("core", base, { NODE_ENV: "test" }, dependencies);
+    expect(runner).toBe(base);
+    await runner(runnerInput(v4Job()));
+    expect(base).toHaveBeenCalledTimes(1);
+    expect(dependencies.createObserver).not.toHaveBeenCalled();
+    expect(dependencies.runAcceptanceStage).not.toHaveBeenCalled();
+  });
+
+  it("rejects test dependency injection when only the untrusted environment argument claims test", () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      expect(() => composeReportV4AcceptanceProductionRunner(
+        "core",
+        vi.fn(async () => undefined),
+        acceptanceEnvironment(),
+        acceptanceRunnerDependencies()
+      )).toThrow(/test-only/iu);
+    } finally {
+      restoreEnvironment("NODE_ENV", previousNodeEnv);
+    }
+  });
+
+  it("wraps Core acceptance with exact terminal inspection while leaving baseline capture to the inner runner", async () => {
+    const order: string[] = [];
+    const base = vi.fn(async () => { order.push("base-core"); });
+    const dependencies = acceptanceRunnerDependencies({ order, run: true });
+    const job = v4Job();
+    const runner = composeReportV4AcceptanceProductionRunner("core", base, acceptanceEnvironment(), dependencies);
+
+    await runner(runnerInput(job));
+
+    expect(order).toEqual(["inspect", "base-core"]);
+    expect(dependencies.inspectTerminal).toHaveBeenCalledExactlyOnceWith({
+      sql: expect.anything(), sessionId: ACCEPTANCE_SESSION_ID, scenarioId: ACCEPTANCE_SCENARIO_ID,
+      coreJobId: job.id, currentJobId: job.id, target: "core"
+    });
+    const stageInput = vi.mocked(dependencies.runAcceptanceStage).mock.calls[0]![0];
+    expect(stageInput.workerGitSha).toBe("a".repeat(40));
+    expect(stageInput.isTerminalResult(undefined)).toBe(false);
+  });
+
+  it("uses the observer Core job identity when wrapping an enhancement job", async () => {
+    const enhancement = v4Job({ id: "enhancement-job", reason: "v4_diagnosis_enhancement", siteSnapshotId: null, creditReservationId: null });
+    const base = vi.fn(async () => undefined);
+    const dependencies = acceptanceRunnerDependencies({ run: true, coreJobId: "core-job" });
+    const runner = composeReportV4AcceptanceProductionRunner("enhancement", base, acceptanceEnvironment(), dependencies);
+
+    await runner(runnerInput(enhancement));
+
+    expect(dependencies.inspectTerminal).toHaveBeenCalledWith(expect.objectContaining({
+      coreJobId: "core-job", currentJobId: "enhancement-job", target: "enhancement"
+    }));
+    expect(base).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["existing final", "completed guard"])("does not invoke the base runner for %s", async () => {
+    const base = vi.fn(async () => undefined);
+    const dependencies = acceptanceRunnerDependencies({ run: false });
+    const runner = composeReportV4AcceptanceProductionRunner("core", base, acceptanceEnvironment(), dependencies);
+    await runner(runnerInput(v4Job()));
+    expect(base).not.toHaveBeenCalled();
+  });
+
+  it("propagates the wrapped production runner error", async () => {
+    const failure = new Error("core runner failed");
+    const base = vi.fn(async () => { throw failure; });
+    const dependencies = acceptanceRunnerDependencies({ run: true });
+    const runner = composeReportV4AcceptanceProductionRunner("core", base, acceptanceEnvironment(), dependencies);
+    await expect(runner(runnerInput(v4Job()))).rejects.toBe(failure);
+  });
+
   it("does not create an acceptance observer or change dispatch when the session env is absent", async () => {
     const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
     delete process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
@@ -408,6 +485,54 @@ function runnerInput(job: ScanJobRow): ReportV4ProductionRunnerInput {
   return {
     job, workerId: "worker-1", signal: new AbortController().signal, remainingMs: () => 10_000,
     checkpointJob: async () => job
+  };
+}
+
+const ACCEPTANCE_SESSION_ID = "11111111-1111-4111-8111-111111111111";
+const ACCEPTANCE_SCENARIO_ID = "21111111-1111-4111-8111-111111111111";
+
+function acceptanceEnvironment(): NodeJS.ProcessEnv {
+  return { NODE_ENV: "test", OGC_REPORT_V4_ACCEPTANCE_SESSION_ID: ACCEPTANCE_SESSION_ID };
+}
+
+function acceptanceRunnerDependencies(options: {
+  readonly order?: string[];
+  readonly run?: boolean;
+  readonly coreJobId?: string;
+} = {}): ReportV4AcceptanceProductionRunnerTestOnlyDependencies {
+  const sql = { begin: vi.fn() } as never;
+  const observer = {
+    session: {
+      sessionId: ACCEPTANCE_SESSION_ID,
+      environment: "protected_staging",
+      state: "collecting",
+      workerGitSha: "a".repeat(40),
+      terminalAt: null
+    },
+    scenario: {
+      sessionId: ACCEPTANCE_SESSION_ID,
+      scenarioId: ACCEPTANCE_SCENARIO_ID,
+      state: "collecting",
+      coreJobId: options.coreJobId ?? "job-1",
+      terminalAt: null
+    }
+  } as never;
+  const inspectTerminal = vi.fn(async () => {
+    options.order?.push("inspect");
+    return false;
+  });
+  return {
+    createObserver: vi.fn(async () => observer),
+    ensureDatabase: vi.fn(async () => undefined),
+    getSql: vi.fn(() => sql),
+    inspectTerminal,
+    runAcceptanceStage: vi.fn(async (stageInput) => {
+      if (options.run) {
+        await stageInput.inspectDurableTerminal();
+        await stageInput.runStage();
+      }
+      return { result: null, final: null, guardState: "completed" as const };
+    }) as never
   };
 }
 

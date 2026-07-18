@@ -95,6 +95,10 @@ import {
   createReportV4AcceptanceObserver,
   type ReportV4AcceptanceObserver
 } from "./report-v4-acceptance-observer";
+import { ensureDatabase, getSqlClient } from "@/db";
+import { runReportV4AcceptanceStage } from "./report-v4-acceptance-runner";
+import { inspectReportV4AcceptanceDurableTerminal } from "./report-v4-acceptance-terminal-state";
+import type { ReportV4CommerceAuthoritySnapshotSql } from "@/db/report-v4-commerce-authority-snapshot";
 
 interface StoredPageEvidence {
   page: ExtractedPage;
@@ -729,17 +733,83 @@ export function createDefaultReportV4ProductionRunner(
   environment: NodeJS.ProcessEnv,
   liveDrill?: StagingLiveDrill
 ): ReportV4ProductionRunner {
+  let baseRunner: ReportV4ProductionRunner;
   if (target === "core") {
     const run = createReportV4CoreProduction({ environment, liveDrill });
-    return async ({ job, workerId, signal, remainingMs }) => {
+    baseRunner = async ({ job, workerId, signal, remainingMs }) => {
       await run({ coreJobId: job.id, workerId, leaseMs: Math.max(1, remainingMs()), signal });
     };
+  } else {
+    const run = createReportV4EnhancementProduction({ environment, liveDrill });
+    baseRunner = async ({ job, workerId, signal }) => {
+      await run({ job, workerId, signal });
+    };
   }
-  const run = createReportV4EnhancementProduction({ environment, liveDrill });
-  return async ({ job, workerId, signal }) => {
-    await run({ job, workerId, signal });
+  return composeReportV4AcceptanceProductionRunner(target, baseRunner, environment);
+}
+
+export interface ReportV4AcceptanceProductionRunnerTestOnlyDependencies {
+  readonly createObserver: typeof createReportV4AcceptanceObserver;
+  readonly ensureDatabase: typeof ensureDatabase;
+  readonly getSql: () => ReportV4CommerceAuthoritySnapshotSql;
+  readonly inspectTerminal: typeof inspectReportV4AcceptanceDurableTerminal;
+  readonly runAcceptanceStage: typeof runReportV4AcceptanceStage;
+}
+
+export function composeReportV4AcceptanceProductionRunner(
+  target: ReportV4ProductionTarget,
+  baseRunner: ReportV4ProductionRunner,
+  environment: NodeJS.ProcessEnv,
+  testOnlyDependencies?: ReportV4AcceptanceProductionRunnerTestOnlyDependencies
+): ReportV4ProductionRunner {
+  if (testOnlyDependencies && process.env.NODE_ENV !== "test") {
+    throw new Error("Report V4 acceptance production-runner dependencies are test-only.");
+  }
+  const sessionId = environment.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+  if (sessionId === undefined || sessionId === "") return baseRunner;
+  const dependencies = testOnlyDependencies ?? productionAcceptanceRunnerDependencies;
+  return async (input) => {
+    await dependencies.ensureDatabase();
+    const observer = await dependencies.createObserver({ jobId: input.job.id, environment });
+    if (!observer || observer.session.sessionId !== sessionId || observer.session.environment !== "protected_staging"
+        || observer.session.state !== "collecting" || observer.session.terminalAt !== null
+        || observer.scenario.sessionId !== sessionId || observer.scenario.state !== "collecting"
+        || observer.scenario.terminalAt !== null) {
+      throw new Error("An active Report V4 acceptance observer is required for the production stage runner.");
+    }
+    const coreJobId = observer.scenario.coreJobId;
+    if (!coreJobId || coreJobId.trim() !== coreJobId || (target === "core" && coreJobId !== input.job.id)) {
+      throw new Error("The acceptance production stage requires the observer's exact Core job identity.");
+    }
+    const sql = dependencies.getSql();
+    await dependencies.runAcceptanceStage({
+      sql,
+      observer,
+      sessionId: observer.session.sessionId,
+      scenarioId: observer.scenario.scenarioId,
+      coreJobId,
+      workerGitSha: observer.session.workerGitSha,
+      inspectDurableTerminal: () => dependencies.inspectTerminal({
+        sql,
+        sessionId: observer.session.sessionId,
+        scenarioId: observer.scenario.scenarioId,
+        coreJobId,
+        currentJobId: input.job.id,
+        target
+      }),
+      runStage: async () => { await baseRunner(input); },
+      isTerminalResult: () => false
+    });
   };
 }
+
+const productionAcceptanceRunnerDependencies: ReportV4AcceptanceProductionRunnerTestOnlyDependencies = {
+  createObserver: createReportV4AcceptanceObserver,
+  ensureDatabase,
+  getSql: getSqlClient,
+  inspectTerminal: inspectReportV4AcceptanceDurableTerminal,
+  runAcceptanceStage: runReportV4AcceptanceStage
+};
 
 export function isTerminalScanJob(job: ScanJobRow | null): boolean {
   return Boolean(job && (job.stage === "completed" || job.stage === "completed_limited" || job.stage === "failed"));
