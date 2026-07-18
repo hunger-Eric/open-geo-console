@@ -3,7 +3,11 @@
 ## Two-stage report V4
 
 - [x] Approve the prospective `combined_geo_report_v4` two-stage GEO report design and install the executable requirements registry, generated coverage matrix, structural traceability audit and fail-closed final acceptance command.
-- [ ] Implement V4 only through requirement-ID-bound plans and tests; keep all registry entries `planned` until their real implementation, automated commands and protected-Staging evidence satisfy `npm run report:v4:acceptance`.
+- [x] Implement the local schema-v40 V4 authority and acceptance stack: global-prefix phase snapshots, checkpoint/runtime projectors, three-scenario semantic aggregation, sealed-scenario append gating, interleaving-safe atomic sealing, and `report-v4-acceptance-semantic-evidence/v2` collection.
+- [x] Bind all 20 requirements to implementation/tests and promote their registry state from `planned` to `implemented`; keep `npm run report:v4:traceability` green.
+- [ ] Obtain explicit user authorization before any protected-staging deployment or database mutation, Airwallex Sandbox payment/refund, redirected email, Git push, or pull request. Production V4 deployment and mutation are forbidden.
+- [ ] After authorization, align protected staging to schema v40 and matching Web/free/deep/commerce code, then execute the exact success, diagnosis-failure, and question-failure scenarios without bypassing the ledger/operator gates.
+- [ ] Collect requirement-bound protected-staging evidence for all 20 requirements, review each status promotion from `implemented` to `verified`, and make `npm run report:v4:acceptance` pass. Do not edit the registry, matrix status, or evidence files before that evidence exists.
 
 ## Report workspace rebuild
 
