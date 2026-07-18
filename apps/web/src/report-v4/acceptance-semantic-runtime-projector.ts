@@ -6,6 +6,7 @@ import { REPORT_V4_PROHIBITED_OPERATION_MANIFEST_ENTRIES } from "./prohibited-op
 import { resolveReportV4LockedModelRuntime } from "./model-runtime-config";
 import { buildReportV4OversizedTokenAcceptanceProbe, REPORT_V4_OVERSIZED_TOKEN_ACCEPTANCE_PROBE_UNIT_ID } from "../worker/report-v4-oversized-token-acceptance-probe";
 import { assertReportV4AcceptanceCompleteAuthorityPhasePayload } from "../db/report-v4-acceptance-authority-phase-snapshot";
+const HASH = /^[a-f0-9]{64}$/u;
 
 export interface ReportV4SemanticRuntimeProjection {
   readonly oversizedTokenProbe: ReturnType<typeof buildReportV4OversizedTokenAcceptanceProbe>["evidence"];
@@ -45,7 +46,8 @@ export function projectReportV4SemanticRuntime(input: ProjectReportV4SemanticRun
         || record.fingerprint !== event.idempotencyKey || record.kind !== event.kind || record.operation !== event.operation
         || record.unitIdHash !== hash(event.unitId) || record.scenarioIdHash !== hash(event.scenarioId)
         || record.attempt !== event.attempt || record.eventPhase !== event.phase
-        || stable(record.details) !== stable(event.details) || record.occurredAt !== event.occurredAt.toISOString()) {
+        || stable(record.details) !== stable(canonicalLedgerDetails(event))
+        || record.occurredAt !== event.occurredAt.toISOString()) {
       throw new Error("Raw event arrays are not an exact contiguous projected ledger hash chain.");
     }
     previousHash = event.eventHash;
@@ -74,4 +76,14 @@ export function projectReportV4SemanticRuntime(input: ProjectReportV4SemanticRun
 }
 
 function hash(value: string): string { return createHash("sha256").update(value).digest("hex"); }
+function canonicalLedgerDetails(event: ReportV4AcceptanceEvent): unknown {
+  if (event.kind !== "html_assembly" && event.kind !== "artifact_activation") return event.details;
+  const details = event.details as Record<string, unknown>; const keys = Object.keys(details).sort();
+  if (keys.length !== 2 || keys[0] !== "artifactRevisionId" || keys[1] !== "htmlSha256"
+      || typeof details.artifactRevisionId !== "string" || details.artifactRevisionId.length === 0
+      || typeof details.htmlSha256 !== "string" || !HASH.test(details.htmlSha256)) {
+    throw new Error("Artifact raw ledger details are incomplete or non-canonical.");
+  }
+  return { artifactRevisionIdHash: hash(details.artifactRevisionId), htmlSha256: details.htmlSha256 };
+}
 function stable(value: unknown): string { if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${stable(v)}`).join(",")}}`; return JSON.stringify(value); }
