@@ -5,6 +5,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $composeFile = Join-Path $repoRoot "compose.yaml"
 $runtimeEnv = Join-Path $repoRoot ".data\workstation-docker\staging.env"
 $composeOverride = Join-Path ([System.IO.Path]::GetTempPath()) "ogc-report-v4-staging-$PID.compose.yaml"
+$allowedUntrackedAssetsEntry = "?? assets/"
 $allowedProtectedPlanEntry = "?? docs/superpowers/plans/2026-07-15-v3-paid-acceptance-remediation.md"
 $requiredV4Names = @(
   "OGC_REPORT_V4_MODEL_PROFILE_ID",
@@ -19,12 +20,15 @@ function Assert-LastExitCode {
 
 function Assert-ExactSourceWorktree {
   param([string]$Root)
-  $entries = @(& git -C $Root status --porcelain=v1 --untracked-files=all)
+  $entries = @(& git -C $Root status --porcelain=v1 --untracked-files=normal)
   Assert-LastExitCode "Git status failed."
-  $unexpectedEntries = @($entries | Where-Object { $_ -cne $allowedProtectedPlanEntry })
+  $unexpectedEntries = @($entries | Where-Object {
+    $_ -cne $allowedUntrackedAssetsEntry -and $_ -cne $allowedProtectedPlanEntry
+  })
+  $untrackedAssetsEntries = @($entries | Where-Object { $_ -ceq $allowedUntrackedAssetsEntry })
   $protectedPlanEntries = @($entries | Where-Object { $_ -ceq $allowedProtectedPlanEntry })
-  if ($unexpectedEntries.Count -gt 0 -or $protectedPlanEntries.Count -gt 1) {
-    throw "Exact-commit staging launch rejects every worktree change except the protected V3 plan path."
+  if ($unexpectedEntries.Count -gt 0 -or $untrackedAssetsEntries.Count -gt 1 -or $protectedPlanEntries.Count -gt 1) {
+    throw "Exact-commit staging launch rejects every worktree change except the excluded untracked assets directory and protected V3 plan path."
   }
 
   $dockerIgnorePath = Join-Path $Root ".dockerignore"
@@ -32,12 +36,13 @@ function Assert-ExactSourceWorktree {
     throw "Exact-commit staging launch requires .dockerignore."
   }
   $dockerIgnoreLines = [System.IO.File]::ReadAllLines($dockerIgnorePath)
-  $exactDocsRules = @($dockerIgnoreLines | Where-Object { $_ -ceq "docs" })
   $effectiveRules = @($dockerIgnoreLines | Where-Object {
     -not [string]::IsNullOrWhiteSpace($_) -and -not $_.TrimStart().StartsWith("#")
   })
-  if ($exactDocsRules.Count -ne 1 -or $effectiveRules.Count -eq 0 -or $effectiveRules[-1] -cne "docs") {
-    throw "Exact-commit staging launch requires a final top-level exact 'docs' Docker exclusion."
+  $exactAssetsRules = @($effectiveRules | Where-Object { $_ -ceq "assets" })
+  $exactDocsRules = @($effectiveRules | Where-Object { $_ -ceq "docs" })
+  if ($exactAssetsRules.Count -ne 1 -or $exactDocsRules.Count -ne 1 -or $effectiveRules.Count -lt 2 -or $effectiveRules[-2] -cne "assets" -or $effectiveRules[-1] -cne "docs") {
+    throw "Exact-commit staging launch requires one effective top-level exact 'assets' exclusion followed by the final exact 'docs' exclusion."
   }
 }
 

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
@@ -72,26 +73,49 @@ describe("Report V4 protected-Staging preflight", () => {
 });
 
 describe("exact-commit staging-only Worker launcher", () => {
-  const source = readFileSync(
-    fileURLToPath(new URL("../../../../scripts/start-report-v4-staging-workers.ps1", import.meta.url)),
+  const launcherPath = fileURLToPath(new URL("../../../../scripts/start-report-v4-staging-workers.ps1", import.meta.url));
+  const source = readFileSync(launcherPath, "utf8");
+  const dockerIgnore = readFileSync(
+    fileURLToPath(new URL("../../../../.dockerignore", import.meta.url)),
     "utf8"
   );
 
-  it("allows only the protected untracked V3 plan while rejecting every other worktree entry", () => {
+  it("allows only the collapsed untracked assets directory and protected V3 plan while rejecting every other entry", () => {
     const protectedPath = "docs/superpowers/plans/2026-07-15-v3-paid-acceptance-remediation.md";
-    expect(source).toMatch(/git -C \$Root status --porcelain=v1 --untracked-files=all/u);
+    expect(source).toMatch(/git -C \$Root status --porcelain=v1 --untracked-files=normal/u);
+    expect(source).toMatch(/\$allowedUntrackedAssetsEntry = "\?\? assets\/"/u);
     expect(source.match(new RegExp(protectedPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gu"))).toHaveLength(1);
-    expect(source).toMatch(/unexpectedEntries[\s\S]*-cne \$allowedProtectedPlanEntry/u);
-    expect(source).toMatch(/unexpectedEntries\.Count -gt 0/u);
+    expect(source).toMatch(/unexpectedEntries[\s\S]*-cne \$allowedUntrackedAssetsEntry[\s\S]*-cne \$allowedProtectedPlanEntry/u);
+    expect(source).toMatch(/unexpectedEntries\.Count -gt 0[\s\S]*untrackedAssetsEntries\.Count -gt 1[\s\S]*protectedPlanEntries\.Count -gt 1/u);
+    expect(source).not.toMatch(/Get-ChildItem|Get-Content[^\n]*assets|Remove-Item[^\n]*assets|Move-Item[^\n]*assets|git\s+(?:add|stage)[^\n]*assets/iu);
     expect(source).not.toMatch(new RegExp(`(?:Get-Content|Remove-Item|Move-Item|git\\s+(?:add|stage))[^\\n]*${protectedPath}`, "iu"));
   });
 
-  it("rejects a missing or ineffective top-level docs Docker exclusion", () => {
+  it("requires one effective exact assets exclusion immediately before the final exact docs exclusion", () => {
+    const effectiveRules = dockerIgnore.split(/\r?\n/u)
+      .filter((line) => line.trim().length > 0 && !line.trimStart().startsWith("#"));
+    expect(effectiveRules.filter((line) => line === "assets")).toHaveLength(1);
+    expect(effectiveRules.filter((line) => line === "docs")).toHaveLength(1);
+    expect(effectiveRules.slice(-2)).toEqual(["assets", "docs"]);
     expect(source).toMatch(/Test-Path -LiteralPath \$dockerIgnorePath -PathType Leaf/u);
     expect(source).toMatch(/ReadAllLines\(\$dockerIgnorePath\)/u);
-    expect(source).toMatch(/\$_ -ceq "docs"/u);
-    expect(source).toMatch(/\$effectiveRules\[-1\] -cne "docs"/u);
-    expect(source).toMatch(/requires \.dockerignore|requires a final top-level exact 'docs'/u);
+    expect(source).toMatch(/exactAssetsRules\.Count -ne 1[\s\S]*exactDocsRules\.Count -ne 1/u);
+    expect(source).toMatch(/\$effectiveRules\[-2\] -cne "assets"[\s\S]*\$effectiveRules\[-1\] -cne "docs"/u);
+    expect(source).toMatch(/requires \.dockerignore|requires one effective top-level exact 'assets'.*final exact 'docs'/u);
+  });
+
+  (process.platform === "win32" ? it : it.skip)("parses with the Windows PowerShell language parser", () => {
+    const command = [
+      "$tokens = $null",
+      "$parseErrors = $null",
+      "[System.Management.Automation.Language.Parser]::ParseFile($env:OGC_PARSE_TARGET, [ref]$tokens, [ref]$parseErrors) | Out-Null",
+      "if ($parseErrors.Count -gt 0) { $parseErrors | ForEach-Object { [Console]::Error.WriteLine($_.Message) }; exit 1 }"
+    ].join("; ");
+    const parsed = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], {
+      encoding: "utf8",
+      env: { ...process.env, OGC_PARSE_TARGET: launcherPath }
+    });
+    if (parsed.status !== 0) throw new Error(`PowerShell parser rejected the staging launcher:\n${parsed.stderr}`);
   });
 
   it("binds build, image label, and deployment version to full HEAD", () => {
