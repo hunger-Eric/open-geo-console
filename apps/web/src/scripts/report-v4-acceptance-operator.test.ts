@@ -289,14 +289,19 @@ describe("Report V4 acceptance operator", () => {
     expect(store.sealScenario).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the atomic authority operation detects a stale final event head", async () => {
+  it.each([
+    ["missing commerce-final event", "exact post-final commerce fingerprint event is missing"],
+    ["wrong final fingerprint", "post-final commerce event does not match the exact final scenario authority"],
+    ["an extra event after commerce-final", "live acceptance head contains an extra event"],
+    ["a misaligned live head", "live acceptance head is not the canonical commerce-final event"]
+  ])("fails closed for %s", async (_label, message) => {
     const store = mockStore();
     const collecting = boundScenario();
     vi.mocked(store.loadScenarios).mockResolvedValue([collecting]);
-    const dependencies = atomicSealDependencies(new Error("final authority phase is stale because the event head advanced"));
+    const dependencies = atomicSealDependencies(new Error(message));
 
     await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT, dependencies).execute("seal-scenario", sealPayload(collecting)))
-      .rejects.toThrow(/stale|head advanced/iu);
+      .rejects.toThrow();
     expect(store.sealScenario).not.toHaveBeenCalled();
     expect(store.loadScenarios).toHaveBeenCalledTimes(1);
   });
@@ -316,10 +321,11 @@ describe("Report V4 acceptance operator", () => {
   it("hard-wires lock-order, live-head comparison, and terminal CAS into one production transaction", () => {
     const source = readFileSync(fileURLToPath(new URL("./report-v4-acceptance-operator.ts", import.meta.url)), "utf8");
     expect(source).toMatch(/begin\("isolation level repeatable read read write"[\s\S]*atomic-seal-session-lock[\s\S]*FOR UPDATE[\s\S]*atomic-seal-scenario-lock[\s\S]*FOR UPDATE/iu);
-    expect(source).toMatch(/session\.head_sequence[\s\S]*final\.payload\.session\.headSequence[\s\S]*session\.head_hash[\s\S]*final\.payload\.session\.headHash[\s\S]*session\.event_count[\s\S]*final\.payload\.session\.eventCount/iu);
+    expect(source).toMatch(/assertExactPostFinalCommerceEvent\(tx, input, final\)[\s\S]*pair\.scenarioState === "sealed"[\s\S]*session\.head_sequence[\s\S]*final\.payload\.session\.headSequence \+ 1[\s\S]*session\.head_hash[\s\S]*commerceFinalEvent\.eventHash[\s\S]*session\.event_count[\s\S]*final\.payload\.session\.eventCount \+ 1/iu);
     expect(source).toMatch(/atomic-seal-cas[\s\S]*UPDATE report_v4_acceptance_scenarios[\s\S]*state='collecting'[\s\S]*RETURNING state/iu);
     expect(source).toMatch(/atomic-seal-scenario-lock[\s\S]*report_id,order_id,pre_admission_job_id,core_job_id,enhancement_job_id[\s\S]*config_snapshot_id,question_set_id,core_artifact_revision_id,enhancement_artifact_revision_id[\s\S]*FOR UPDATE/iu);
     expect(source).toMatch(/parseLockedAcceptanceScenario\(scenario\)[\s\S]*computeReportV4AcceptanceFaultProvenanceBaselineFingerprint\(lockedScenario\)[\s\S]*lockedBaselineFingerprint !== input\.baselineFingerprint[\s\S]*atomic-seal-cas/iu);
+    expect(source).toMatch(/post-final-commerce-event[\s\S]*sequence=\$2[\s\S]*commerce_fingerprint[\s\S]*commerce-final[\s\S]*expectedDetailsCanonical[\s\S]*expectedIdempotencyKey[\s\S]*expectedEventHash/iu);
   });
 
   it("registers both operator and collector CLIs through the workspace script contract", () => {
