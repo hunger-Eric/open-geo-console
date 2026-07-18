@@ -1,15 +1,19 @@
 import { createHash } from "node:crypto";
 import { assertReportV4AcceptanceAuthorityCaptureOrder, assertReportV4AcceptanceCompleteAuthorityPhasePayload,
   type ReportV4AcceptanceCompleteAuthorityPhasePayload } from "../db/report-v4-acceptance-authority-phase-snapshot";
-import type { ReportV4AcceptanceEvent, ReportV4AcceptanceScenario } from "../db/report-v4-acceptance-ledger";
+import type { ReportV4AcceptanceEvent, ReportV4AcceptanceScenario,
+  ReportV4AcceptanceSession } from "../db/report-v4-acceptance-ledger";
 import type { ReportV4ConfigSnapshotRow } from "../db/report-v4-config-snapshots";
 import { compareReportV4CommerceAuthoritySnapshots } from "./report-v4-commerce-authority-comparator";
 import { projectReportV4AcceptanceSemanticCheckpoints } from "./acceptance-semantic-checkpoint-projector";
 import { projectReportV4SemanticRuntime } from "./acceptance-semantic-runtime-projector";
+import { verifyReportV4AcceptanceLedger } from "./acceptance-ledger-verifier";
 import type { ReportV4AcceptanceSemanticAuthority, ReportV4AllowedSiteRead,
   ReportV4ExpectedPageSummary } from "./acceptance-semantic-verifier";
 
 export interface ProjectReportV4AcceptanceSemanticAuthorityInput {
+  readonly session: ReportV4AcceptanceSession;
+  readonly scenarios: readonly ReportV4AcceptanceScenario[];
   readonly scenario: ReportV4AcceptanceScenario;
   readonly events: readonly ReportV4AcceptanceEvent[];
   readonly baselinePhase: ReportV4AcceptanceCompleteAuthorityPhasePayload;
@@ -20,28 +24,32 @@ export interface ProjectReportV4AcceptanceSemanticAuthorityInput {
 export function projectReportV4AcceptanceSemanticAuthority(
   input: ProjectReportV4AcceptanceSemanticAuthorityInput,
 ): ReportV4AcceptanceSemanticAuthority {
+  verifyReportV4AcceptanceLedger(input.session, input.scenarios, input.events);
+  if (!input.scenarios.includes(input.scenario)) fail("current scenario must be the exact sealed scenario member");
   assertReportV4AcceptanceCompleteAuthorityPhasePayload(input.baselinePhase);
   assertReportV4AcceptanceCompleteAuthorityPhasePayload(input.finalPhase);
   if (input.baselinePhase.phase !== "baseline" || input.finalPhase.phase !== "final") fail("baseline/final phases are not exact");
   assertReportV4AcceptanceAuthorityCaptureOrder(input.baselinePhase, input.finalPhase);
   assertScope(input);
   const finalLedgerEvents = assertCaptureLedgerBoundaries(input);
+  const scenarioEvents = input.events.filter((event) => event.scenarioId === input.scenario.scenarioId);
+  const scopedInput = { ...input, events: scenarioEvents };
   const checkpoints = projectReportV4AcceptanceSemanticCheckpoints({ scenario: input.scenario,
     events: finalLedgerEvents, finalPhase: input.finalPhase });
   const runtime = projectReportV4SemanticRuntime({ config: input.config, finalPhase: input.finalPhase, events: finalLedgerEvents });
   const manifest = input.finalPhase.authorities.site_read_manifest;
-  const reads = manifest.records.map((record) => projectRead(input, record));
+  const reads = manifest.records.map((record) => projectRead(scopedInput, record));
   const byIdentity = new Map(manifest.records.map((record, index) => [record.identityHash, reads[index]!]));
   const allowedSiteReads = exactIdentityProjection(manifest.allowedIdentityHashes, byIdentity, "allowed site read");
   const requiredSiteReads = exactIdentityProjection(manifest.requiredIdentityHashes, byIdentity, "required site read")
-    .map((read) => ({ ...read, terminalPhase: terminalFor(input.events, read) }));
-  const pages = projectPages(input);
-  const crawl = projectCrawl(input, pages.pageIds.length);
-  const websiteSynthesisUnitId = uniqueUnit(input.events, "model_operation", "website_synthesis");
-  const artifact = projectArtifacts(input);
+    .map((read) => ({ ...read, terminalPhase: terminalFor(scenarioEvents, read) }));
+  const pages = projectPages(scopedInput);
+  const crawl = projectCrawl(scopedInput, pages.pageIds.length);
+  const websiteSynthesisUnitId = uniqueUnit(scenarioEvents, "model_operation", "website_synthesis");
+  const artifact = projectArtifacts(scopedInput);
   const comparison = compareReportV4CommerceAuthoritySnapshots({ baseline: input.baselinePhase.commerce,
     final: input.finalPhase.commerce, scenarioKind: input.scenario.kind });
-  const commerceUnits = projectCommerceUnits(input.events, comparison.baselineFingerprint, comparison.finalFingerprint);
+  const commerceUnits = projectCommerceUnits(scenarioEvents, comparison.baselineFingerprint, comparison.finalFingerprint);
   const checkpoint = input.finalPhase.websiteCheckpoint;
   return Object.freeze({
     scenarioId: input.scenario.scenarioId,
@@ -68,13 +76,15 @@ function assertCaptureLedgerBoundaries(
   const final = input.finalPhase.authorities.ledger_authority;
   const baselineCount = baseline.events.length;
   const finalCount = final.events.length;
-  if (baselineCount >= finalCount || input.events.length !== finalCount + 1
+  if (baselineCount >= finalCount || finalCount >= input.events.length
       || baseline.session.eventCount !== baselineCount || baseline.session.headSequence !== baselineCount
       || input.baselinePhase.session.eventCount !== baselineCount || input.baselinePhase.session.headSequence !== baselineCount
       || final.session.eventCount !== finalCount || final.session.headSequence !== finalCount
       || input.finalPhase.session.eventCount !== finalCount || input.finalPhase.session.headSequence !== finalCount) {
     fail("phase ledger capture boundary counts are not exact");
   }
+  assertProjectedLedgerPrefix(input.events.slice(0, baselineCount), baseline.events, "baseline");
+  assertProjectedLedgerPrefix(input.events.slice(0, finalCount), final.events, "final");
   for (let index = 0; index < baselineCount; index += 1) {
     if (stable(baseline.events[index]) !== stable(final.events[index])) {
       fail("baseline ledger is not the exact unchanged prefix of the final ledger");
@@ -88,11 +98,24 @@ function assertCaptureLedgerBoundaries(
   if (final.session.headHash !== finalHead || input.finalPhase.session.headHash !== finalHead) {
     fail("final ledger head does not seal its exact raw prefix");
   }
-  assertCommerceBoundary(input.events[baselineCount], "commerce-baseline", input.baselinePhase.commerce.fingerprint,
+  const baselineCommerceIndex = firstCurrentScenarioEventIndex(input.events, baselineCount, input.scenario.scenarioId);
+  const finalCommerceIndex = firstCurrentScenarioEventIndex(input.events, finalCount, input.scenario.scenarioId);
+  assertCommerceBoundary(input.events[baselineCommerceIndex], "commerce-baseline", input.baselinePhase.commerce.fingerprint,
     "baseline");
-  assertCommerceBoundary(input.events[finalCount], "commerce-final", input.finalPhase.commerce.fingerprint, "final");
-  assertPostFinalChainEvent(input.events[finalCount]!, input, finalCount, finalHead);
+  assertCommerceBoundary(input.events[finalCommerceIndex], "commerce-final", input.finalPhase.commerce.fingerprint, "final");
+  assertCanonicalCommerceEvent(input.events, baselineCommerceIndex, input.baselinePhase.commerce.fingerprint, input);
+  assertCanonicalCommerceEvent(input.events, finalCommerceIndex, input.finalPhase.commerce.fingerprint, input);
+  if (input.events.slice(finalCommerceIndex + 1).some((event) => event.scenarioId === input.scenario.scenarioId)) {
+    fail("current scenario has an event after commerce-final");
+  }
   return input.events.slice(0, finalCount);
+}
+
+function firstCurrentScenarioEventIndex(events: readonly ReportV4AcceptanceEvent[], start: number,
+  scenarioId: string): number {
+  const offset = events.slice(start).findIndex((event) => event.scenarioId === scenarioId);
+  if (offset < 0) fail("phase head has no following current-scenario commerce event");
+  return start + offset;
 }
 
 function assertCommerceBoundary(event: ReportV4AcceptanceEvent | undefined, unitId: string,
@@ -100,26 +123,50 @@ function assertCommerceBoundary(event: ReportV4AcceptanceEvent | undefined, unit
   if (!event || event.kind !== "commerce_fingerprint" || event.operation !== "commerce" || event.unitId !== unitId
       || event.attempt !== 0 || event.phase !== "observed"
       || stable(event.details) !== stable({ fingerprint })) {
-    fail(`${label} ledger is not immediately followed by its exact commerce fingerprint event`);
+    fail(`${label} first current-scenario event is not its exact commerce fingerprint event`);
   }
 }
 
-function assertPostFinalChainEvent(event: ReportV4AcceptanceEvent,
-  input: ProjectReportV4AcceptanceSemanticAuthorityInput, finalCount: number, finalHead: string): void {
-  const sequence = finalCount + 1;
-  const detailsCanonical = `{"fingerprint": "${input.finalPhase.commerce.fingerprint}"}`;
+function assertCanonicalCommerceEvent(events: readonly ReportV4AcceptanceEvent[], index: number, fingerprint: string,
+  input: ProjectReportV4AcceptanceSemanticAuthorityInput): void {
+  const event = events[index]!;
+  const sequence = index + 1;
+  const previousHash = index === 0 ? "0".repeat(64) : events[index - 1]!.eventHash;
+  const detailsCanonical = `{"fingerprint": "${fingerprint}"}`;
   const idempotencyKey = shaParts([input.scenario.sessionId, input.scenario.scenarioId, "commerce_fingerprint",
-    "commerce", "commerce-final", "0", "observed"]);
+    "commerce", event.unitId, "0", "observed"]);
   if (event.sessionId !== input.scenario.sessionId || event.scenarioId !== input.scenario.scenarioId
-      || event.sequence !== sequence || event.prevHash !== finalHead || event.idempotencyKey !== idempotencyKey
+      || event.sequence !== sequence || event.prevHash !== previousHash || event.idempotencyKey !== idempotencyKey
       || event.detailsCanonical !== detailsCanonical
       || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u.test(event.occurredAtCanonical)
       || event.occurredAt.toISOString() !== `${event.occurredAtCanonical.slice(0, 23)}Z`) {
-    fail("post-final commerce event envelope does not extend the exact final phase head");
+    fail("commerce event envelope does not extend its exact global predecessor");
   }
-  const eventHash = shaParts([finalHead, idempotencyKey, String(sequence), "commerce_fingerprint", "commerce",
-    "commerce-final", "0", "observed", detailsCanonical, event.occurredAtCanonical]);
-  if (event.eventHash !== eventHash) fail("post-final commerce event hash is not canonical");
+  const unitId = event.unitId;
+  const expectedHash = shaParts([previousHash, idempotencyKey, String(sequence), "commerce_fingerprint", "commerce",
+    unitId, "0", "observed", detailsCanonical, event.occurredAtCanonical]);
+  if (event.eventHash !== expectedHash) fail("commerce event hash is not canonical");
+}
+
+function assertProjectedLedgerPrefix(raw: readonly ReportV4AcceptanceEvent[],
+  projected: ReportV4AcceptanceCompleteAuthorityPhasePayload["authorities"]["ledger_authority"]["events"],
+  label: string): void {
+  if (raw.length !== projected.length) fail(`${label} raw and projected prefix counts differ`);
+  for (let index = 0; index < raw.length; index += 1) {
+    const event = raw[index]!; const record = projected[index]!;
+    const details = event.kind === "html_assembly" || event.kind === "artifact_activation"
+      ? { artifactRevisionIdHash: sha(String((event.details as Record<string, unknown>).artifactRevisionId)),
+        htmlSha256: (event.details as Record<string, unknown>).htmlSha256 }
+      : event.details;
+    if (event.sequence !== index + 1 || record.sequence !== event.sequence
+        || record.fingerprint !== event.idempotencyKey || record.scenarioIdHash !== sha(event.scenarioId)
+        || record.kind !== event.kind || record.operation !== event.operation || record.unitIdHash !== sha(event.unitId)
+        || record.attempt !== event.attempt || record.eventPhase !== event.phase
+        || stable(record.details) !== stable(details) || record.previousHash !== event.prevHash
+        || record.eventHash !== event.eventHash || record.occurredAt !== event.occurredAt.toISOString()) {
+      fail(`${label} phase ledger is not the exact global raw prefix`);
+    }
+  }
 }
 
 function assertScope(input: ProjectReportV4AcceptanceSemanticAuthorityInput): void {

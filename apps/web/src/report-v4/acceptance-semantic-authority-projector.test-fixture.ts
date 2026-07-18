@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import profilePayload from "../../../../config/model-profiles/report-v4-mimo-v2.5-pro.json";
-import type { ReportV4AcceptanceEvent, ReportV4AcceptanceScenario } from "../db/report-v4-acceptance-ledger";
+import type { ReportV4AcceptanceEvent, ReportV4AcceptanceScenario,
+  ReportV4AcceptanceSession } from "../db/report-v4-acceptance-ledger";
 import type { ReportV4AcceptanceLedgerAuthorityEventRecord } from "../db/report-v4-acceptance-ledger-guard-authority";
 import type { ReportV4AcceptanceSiteReadManifestAuthority, ReportV4AcceptanceSiteReadManifestAuthorityRecord } from "../db/report-v4-site-read-manifest";
 import type { ReportV4ArtifactPayloadAuthorityRecord } from "../db/report-v4-artifact-authority";
@@ -11,6 +12,7 @@ import { createReportV4CommerceAuthoritySnapshotPair, resealReportV4CommerceAuth
 import { buildReportV4OversizedTokenAcceptanceProbe, REPORT_V4_OVERSIZED_TOKEN_ACCEPTANCE_PROBE_UNIT_ID } from "../worker/report-v4-oversized-token-acceptance-probe";
 import { resolveReportV4LockedModelRuntime } from "./model-runtime-config";
 import type { ProjectReportV4AcceptanceSemanticCheckpointsInput } from "./acceptance-semantic-checkpoint-projector";
+import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "./report-v4-acceptance-fingerprints";
 
 const SESSION = "11111111-1111-4111-8111-111111111111";
 const SCENARIO = "22222222-2222-4222-8222-222222222222";
@@ -21,7 +23,7 @@ const QUESTIONS = ["question-1", "question-2", "question-3"] as const;
 const SOURCES = ["source-1", "source-2", "source-3"] as const;
 
 export type Mutable<T> = { -readonly [K in keyof T]: T[K] extends readonly (infer U)[]
-  ? Mutable<U>[] : T[K] extends object ? Mutable<T[K]> : T[K] };
+  ? Mutable<U>[] : T[K] extends Date ? Date : T[K] extends object ? Mutable<T[K]> : T[K] };
 export type MutableInput = Mutable<ProjectReportV4AcceptanceSemanticCheckpointsInput>;
 
 export function makeSemanticCheckpointFixture(kind: "success" | "diagnosis_failure" | "question_failure") {
@@ -188,6 +190,102 @@ export function makeSemanticDiagnosisFailureBaselineFixture() {
 
 export function makeSemanticQuestionFailureBaselineFixture() {
   return makeSemanticBaselineFixture("question_failure");
+}
+
+export function makeSemanticGlobalAuthorityFixture(kind: "success" | "diagnosis_failure" | "question_failure") {
+  const local = makeSemanticBaselineFixture(kind);
+  const scenario = local.input.scenario as Mutable<ReportV4AcceptanceScenario>;
+  const terminalAt = new Date("2026-07-18T00:01:00.000Z");
+  Object.assign(scenario, { state: "sealed", terminalAt });
+  scenario.baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(scenario);
+  for (const event of local.input.events.filter((candidate) => candidate.kind === "fault_injection")) {
+    (event.details as Mutable<Record<string, unknown>>).baselineFingerprint = scenario.baselineFingerprint;
+  }
+  for (const phase of [local.baselinePhase, local.input.finalPhase]) {
+    Object.assign(phase.authorities.ledger_authority.scenario, {
+      baselineFingerprint: scenario.baselineFingerprint,
+      storedBaselineFingerprint: scenario.baselineFingerprint,
+    });
+  }
+
+  const foreignKinds = (["success", "diagnosis_failure", "question_failure"] as const)
+    .filter((candidate) => candidate !== kind);
+  const foreignScenarios = foreignKinds.map((foreignKind, index) => sealedForeignScenario(foreignKind, index + 1));
+  const events = [...local.input.events] as ReportV4AcceptanceEvent[];
+  const baselineCount = local.baselinePhase.authorities.ledger_authority.events.length;
+  const originalFinalCount = local.input.finalPhase.authorities.ledger_authority.events.length;
+  const baselineInterleave = foreignSemanticPair(foreignScenarios[0]!, "model_operation", "website_synthesis");
+  events.splice(baselineCount, 0, ...baselineInterleave);
+  const finalCount = originalFinalCount + baselineInterleave.length;
+  events.splice(finalCount, 0, ...foreignSemanticPair(foreignScenarios[1]!, "site_read", "site_raw_read"));
+  for (const foreign of foreignScenarios) events.push(...foreignFaultEvents(foreign));
+  resequence(events);
+
+  setPhaseGlobalPrefix(local.baselinePhase as unknown as ReportV4AcceptanceCompleteAuthorityPhasePayload,
+    events.slice(0, baselineCount));
+  setPhaseGlobalPrefix(local.input.finalPhase, events.slice(0, finalCount));
+  const session: ReportV4AcceptanceSession = {
+    sessionId: SESSION, environment: "protected_staging", previewDeploymentId: "preview-global",
+    protectedAliasUrl: "https://preview.example", webGitSha: "a".repeat(40), workerGitSha: "a".repeat(40),
+    state: "sealed", headSequence: events.length, headHash: events.at(-1)?.eventHash ?? "0".repeat(64),
+    eventCount: events.length, startedAt: new Date("2026-07-16T23:58:00.000Z"), terminalAt,
+  };
+  const scenarios: readonly ReportV4AcceptanceScenario[] = Object.freeze([scenario, ...foreignScenarios]);
+  return {
+    session, scenarios, scenario, events: Object.freeze(events), baselinePhase: local.baselinePhase,
+    finalPhase: local.input.finalPhase, config: makeSemanticSuccessConfig(),
+  };
+}
+
+function sealedForeignScenario(kind: "success" | "diagnosis_failure" | "question_failure", ordinal: number): ReportV4AcceptanceScenario {
+  const suffix = `foreign-${ordinal}`;
+  const scenario = {
+    sessionId: SESSION, scenarioId: ordinal === 1 ? "33333333-3333-4333-8333-333333333333" : "44444444-4444-4444-8444-444444444444",
+    reportId: `report-${suffix}`, orderId: `order-${suffix}`, preAdmissionJobId: `pre-${suffix}`,
+    coreJobId: `core-${suffix}`, enhancementJobId: kind === "question_failure" ? null : `enhancement-${suffix}`,
+    siteSnapshotId: `snapshot-${suffix}`, configSnapshotId: `config-${suffix}`, questionSetId: `questions-${suffix}`,
+    coreArtifactRevisionId: `core-artifact-${suffix}`,
+    enhancementArtifactRevisionId: kind === "question_failure" ? null : `enhancement-artifact-${suffix}`,
+    kind, faultKind: kind === "success" ? "independent_source_read_failure" as const : kind,
+    faultQuestionId: `question-${suffix}`, faultSourceId: kind === "success" ? `source-${suffix}` : null,
+    expectedFaultOccurrences: kind === "success" ? 1 as const : 2 as const, baselineFingerprint: null,
+    finalFingerprint: sha(`final-${suffix}`), state: "sealed" as const,
+    createdAt: new Date("2026-07-17T00:00:00.000Z"), terminalAt: new Date("2026-07-18T00:01:00.000Z"),
+  } satisfies ReportV4AcceptanceScenario;
+  return { ...scenario, baselineFingerprint: computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(scenario) };
+}
+
+function foreignSemanticPair(scenario: ReportV4AcceptanceScenario, kind: "model_operation" | "site_read",
+  operation: "website_synthesis" | "site_raw_read"): ReportV4AcceptanceEvent[] {
+  const urlHash = sha("admission-url");
+  const unitId = kind === "model_operation" ? "website-synthesis" : `admission-page:raw:${urlHash}`;
+  const details = kind === "model_operation"
+    ? { providerCall: true, retry: false, budgetOutcome: "allowed", inputTokens: 10, outputTokens: 5 }
+    : { urlHash, readMode: "raw", networkPerformed: true };
+  return (["started", "completed"] as const).map((phase) => ({ ...makeEvent({ kind, operation, unitId,
+    attempt: kind === "model_operation" ? 1 : 0, phase, details }, 0), scenarioId: scenario.scenarioId }));
+}
+
+function foreignFaultEvents(scenario: ReportV4AcceptanceScenario): ReportV4AcceptanceEvent[] {
+  const unitId = scenario.kind === "question_failure" ? `${scenario.coreJobId}:${scenario.faultQuestionId}`
+    : scenario.kind === "diagnosis_failure" ? `${scenario.enhancementJobId}:${scenario.faultQuestionId}`
+      : `${scenario.enhancementJobId}:${scenario.faultQuestionId}:${scenario.faultSourceId}`;
+  return Array.from({ length: scenario.expectedFaultOccurrences }, (_, index) => ({ ...makeEvent({
+    kind: "fault_injection", operation: scenario.faultKind, unitId, attempt: (index + 1) as 1 | 2,
+    phase: "consumed", details: { fault: scenario.faultKind, occurrence: index + 1,
+      baselineFingerprint: scenario.baselineFingerprint! },
+  }, 0), scenarioId: scenario.scenarioId }));
+}
+
+function setPhaseGlobalPrefix(phase: ReportV4AcceptanceCompleteAuthorityPhasePayload,
+  events: readonly ReportV4AcceptanceEvent[]): void {
+  const mutable = phase as unknown as Mutable<ReportV4AcceptanceCompleteAuthorityPhasePayload>;
+  const headHash = events.at(-1)?.eventHash ?? "0".repeat(64);
+  mutable.authorities.ledger_authority.events = mapLedger(events);
+  Object.assign(mutable.authorities.ledger_authority.session,
+    { headSequence: events.length, headHash, eventCount: events.length });
+  Object.assign(mutable.session, { headSequence: events.length, headHash, eventCount: events.length });
+  reseal(phase, "ledger_authority");
 }
 
 function makeSemanticBaselineFixture(kind: "success" | "diagnosis_failure" | "question_failure") {
@@ -378,18 +476,15 @@ function resequence(events: ReportV4AcceptanceEvent[]): void {
     const sequence = index + 1;
     const late = event.kind === "v4_dispatch" && event.unitId !== "job-pre" || event.kind === "model_operation" || event.kind === "html_assembly" || event.kind === "artifact_activation" || event.kind === "commerce_fingerprint";
     const occurredAt = new Date(Date.parse(late ? "2026-07-17T00:00:01.000Z" : "2026-07-17T00:00:00.000Z") + (late ? sequence * 100 : -60_000 + sequence * 100));
-    Object.assign(event, { sequence, idempotencyKey: sha(`event-${sequence}`), prevHash: previousHash,
-      eventHash: sha(`hash-${sequence}-${event.kind}-${event.operation}-${event.unitId}`), occurredAt,
-      occurredAtCanonical: occurredAt.toISOString(), detailsCanonical: stable(event.details) });
-    if (event.kind === "commerce_fingerprint" && event.unitId === "commerce-final") {
-      const detailsCanonical = `{"fingerprint": "${String((event.details as Record<string, unknown>).fingerprint)}"}`;
-      const occurredAtCanonical = `${occurredAt.toISOString().slice(0, 23)}000Z`;
-      const idempotencyKey = shaParts([event.sessionId, event.scenarioId, event.kind, event.operation,
-        event.unitId, String(event.attempt), event.phase]);
-      Object.assign(event, { idempotencyKey, detailsCanonical, occurredAtCanonical,
-        eventHash: shaParts([previousHash, idempotencyKey, String(sequence), event.kind, event.operation,
-          event.unitId, String(event.attempt), event.phase, detailsCanonical, occurredAtCanonical]) });
-    }
+    const detailsCanonical = event.kind === "commerce_fingerprint"
+      ? `{"fingerprint": "${String((event.details as Record<string, unknown>).fingerprint)}"}` : stable(event.details);
+    const occurredAtCanonical = `${occurredAt.toISOString().slice(0, 23)}000Z`;
+    const idempotencyKey = shaParts([event.sessionId, event.scenarioId, event.kind, event.operation,
+      event.unitId, String(event.attempt), event.phase]);
+    const eventHash = shaParts([previousHash, idempotencyKey, String(sequence), event.kind, event.operation,
+      event.unitId, String(event.attempt), event.phase, detailsCanonical, occurredAtCanonical]);
+    Object.assign(event, { sequence, idempotencyKey, prevHash: previousHash, eventHash, occurredAt,
+      occurredAtCanonical, detailsCanonical });
     previousHash = event.eventHash;
   }
 }
