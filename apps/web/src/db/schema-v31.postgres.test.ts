@@ -23,7 +23,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-TOKEN-02
 describe("schema v31 retained V4 snapshot text", () => {
   it("registers an additive bounded private retained-text column", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(39);
+    expect(DATABASE_SCHEMA_VERSION).toBe(40);
     expect(databaseMigrationsAfter(30)).toEqual(expect.arrayContaining([...V31_DATABASE_MIGRATIONS]));
     const sql = V31_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("retained_cleaned_text text");

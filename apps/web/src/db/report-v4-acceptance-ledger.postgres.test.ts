@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DATABASE_MIGRATIONS, V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS } from "./migrations";
+import { DATABASE_MIGRATIONS, V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS, V38_DATABASE_MIGRATIONS, V39_DATABASE_MIGRATIONS, V40_DATABASE_MIGRATIONS } from "./migrations";
 import {
   createPostgresReportV4AcceptanceLedgerStore,
   createReportV4AcceptanceLedgerRepository,
@@ -89,6 +89,8 @@ suite("Report V4 protected-Staging acceptance ledger PostgreSQL", () => {
     const scenarioId = "22222222-2222-4222-8222-222222222222";
     await repository.createSession(session(sessionId));
     await repository.createScenario(scenario(sessionId, scenarioId, "question_failure"));
+    await seedV4Lineage(sql, `terminal-replay-${sessionId}`);
+    await repository.bindScenario(lineage(sessionId, scenarioId, `terminal-replay-${sessionId}`));
     const { event } = await repository.appendEvent(modelEvent(sessionId, scenarioId, "question-1", 1));
     await expect(sql`UPDATE report_v4_acceptance_events SET details='{}'::jsonb WHERE idempotency_key=${event.idempotencyKey}`)
       .rejects.toThrow(/append-only|immutable/i);
@@ -97,6 +99,67 @@ suite("Report V4 protected-Staging acceptance ledger PostgreSQL", () => {
     await repository.failSession(sessionId);
     await expect(repository.appendEvent(modelEvent(sessionId, scenarioId, "question-2", 2)))
       .rejects.toThrow(/collecting/i);
+  }, 120_000);
+
+  it("requires exact collecting scenario membership while allowing terminal exact replay", async () => {
+    const repository = repo(sql);
+    const sessionId = "12333333-3333-4333-8333-333333333333";
+    const scenarioId = "22333333-3333-4333-8333-333333333333";
+    await repository.createSession(session(sessionId));
+    await repository.createScenario(scenario(sessionId, scenarioId, "question_failure"));
+    await seedV4Lineage(sql, "terminal-replay");
+    await repository.bindScenario(lineage(sessionId, scenarioId, "terminal-replay"));
+    const input = modelEvent(sessionId, scenarioId, "question-1", 1);
+    const first = await repository.appendEvent(input);
+    await repository.failScenario({ sessionId, scenarioId, baselineFingerprint: hash("before"), finalFingerprint: hash("after") });
+    expect(await repository.appendEvent(input)).toEqual({ event: first.event, inserted: false });
+    await expect(repository.appendEvent({ ...input, unitId: "question-2", attempt: 2 }))
+      .rejects.toThrow(/collecting.*scenario/i);
+    await expect(repository.appendEvent({ ...input, details: { ...input.details, inputTokens: 999 } }))
+      .rejects.toThrow(/idempotency.*conflict/i);
+    const head = (await repository.loadSession(sessionId))!;
+    await expect(sql`INSERT INTO report_v4_acceptance_events
+      (idempotency_key,session_id,scenario_id,sequence,kind,operation,unit_id,attempt,phase,details,details_canonical,prev_hash,event_hash,occurred_at_canonical)
+      VALUES(${hash("direct-terminal")},${sessionId},${scenarioId},${head.headSequence + 1},'model_operation','question_answer','direct',0,'started',${sql.json(input.details)}::jsonb,${JSON.stringify(input.details)},${head.headHash},${"0".repeat(64)},'2026-07-17T00:00:00.000000Z')`)
+      .rejects.toThrow(/collecting session and scenario state/i);
+    const otherSessionId = "12555555-5555-4555-8555-555555555555";
+    const otherScenarioId = "22555555-5555-4555-8555-555555555555";
+    await repository.createSession(session(otherSessionId));
+    await repository.createScenario(scenario(otherSessionId, otherScenarioId, "question_failure"));
+    await expect(repository.appendEvent({ ...input, sessionId: otherSessionId, scenarioId }))
+      .rejects.toThrow(/collecting.*scenario/i);
+  }, 120_000);
+
+  it("rejects an append when the scenario terminalizes before its insert", async () => {
+    const repository = repo(sql);
+    const sessionId = "12444444-4444-4444-8444-444444444444";
+    const scenarioId = "22444444-4444-4444-8444-444444444444";
+    await repository.createSession(session(sessionId));
+    await repository.createScenario(scenario(sessionId, scenarioId, "question_failure"));
+    await seedV4Lineage(sql, "race-lineage");
+    await repository.bindScenario(lineage(sessionId, scenarioId, "race-lineage"));
+    const input = modelEvent(sessionId, scenarioId, "race", 1);
+
+    let unlock!: () => void;
+    const held = new Promise<void>((resolve) => { unlock = resolve; });
+    let locked!: () => void;
+    const scenarioLocked = new Promise<void>((resolve) => { locked = resolve; });
+    const terminalizer = sql.begin(async (tx) => {
+      await tx`SELECT id FROM report_v4_acceptance_scenarios WHERE id=${scenarioId} AND session_id=${sessionId} FOR UPDATE`;
+      locked();
+      await held;
+      await tx`UPDATE report_v4_acceptance_scenarios
+        SET state='failed', baseline_fingerprint=${hash("race-before")}, final_fingerprint=${hash("race-after")}, terminal_at=clock_timestamp()
+        WHERE id=${scenarioId} AND session_id=${sessionId}`;
+    });
+    await scenarioLocked;
+    const append = repository.appendEvent(input);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    unlock();
+    await expect(append).rejects.toThrow(/collecting.*scenario/i);
+    await terminalizer;
+    expect((await repository.loadSession(sessionId))?.headSequence).toBe(0);
+    expect(await repository.loadEvents(sessionId)).toHaveLength(0);
   }, 120_000);
 
   it("persists all legacy and V37 prohibited-operation discriminants without weakening typed details", async () => {
@@ -262,7 +325,8 @@ suite("Report V4 protected-Staging acceptance ledger PostgreSQL", () => {
     const upgradeSql = postgres(withDatabase(adminUrl!, upgradeDatabaseName), { max: 1, prepare: false });
     try {
       const v34Migrations = DATABASE_MIGRATIONS.slice(0,
-        -(V35_DATABASE_MIGRATIONS.length + V36_DATABASE_MIGRATIONS.length + V37_DATABASE_MIGRATIONS.length));
+        -(V35_DATABASE_MIGRATIONS.length + V36_DATABASE_MIGRATIONS.length + V37_DATABASE_MIGRATIONS.length
+          + V38_DATABASE_MIGRATIONS.length + V39_DATABASE_MIGRATIONS.length + V40_DATABASE_MIGRATIONS.length));
       await upgradeSql.begin(async (tx) => { for (const statement of v34Migrations) await tx.unsafe(statement); });
       expect((await upgradeSql`SELECT to_regclass('report_v4_acceptance_sessions')::text AS name`)[0]?.name).toBeNull();
       await upgradeSql.begin(async (tx) => { for (const statement of V35_DATABASE_MIGRATIONS) await tx.unsafe(statement); });

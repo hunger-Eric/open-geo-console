@@ -55,7 +55,7 @@ suite("schema V39 complete acceptance authority phase snapshots", () => {
   }, 120_000);
 
   it("registers one replay-safe V39 forward migration after V38", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(39);
+    expect(DATABASE_SCHEMA_VERSION).toBe(40);
     expect(databaseMigrationsAfter(38)).toEqual([...V39_DATABASE_MIGRATIONS]);
     expect(databaseMigrationsAfter(39)).toEqual([]);
     const source = V39_DATABASE_MIGRATIONS.join("\n");

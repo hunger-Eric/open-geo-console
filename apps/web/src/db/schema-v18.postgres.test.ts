@@ -22,7 +22,7 @@ describeDisposablePostgres("schema v18 combined report correction persistence", 
     const sql = postgres(withDatabase(adminUrl!, databaseName), { max: 1, prepare: false });
     try {
       await executeStatements(sql, DATABASE_MIGRATIONS);
-      expect(DATABASE_SCHEMA_VERSION).toBe(39);
+      expect(DATABASE_SCHEMA_VERSION).toBe(40);
       expect(DATABASE_MIGRATIONS).toEqual(expect.arrayContaining([...V18_DATABASE_MIGRATIONS]));
 
       await sql`INSERT INTO scan_reports(id,url,payload,report_locale) VALUES ('report','https://example.com','{}','en')`;

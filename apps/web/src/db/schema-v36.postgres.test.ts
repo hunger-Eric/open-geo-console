@@ -6,7 +6,7 @@ import { V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS, V38_DATABASE_MIGRATIO
 // @requirement GEO-V4-ACCEPT-01
 describe("schema V36 protected-acceptance site-read manifest", () => {
   it("registers one forward-only hash-only manifest migration after V35", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(39);
+    expect(DATABASE_SCHEMA_VERSION).toBe(40);
     expect(databaseMigrationsAfter(35)).toEqual([...V36_DATABASE_MIGRATIONS, ...V37_DATABASE_MIGRATIONS, ...V38_DATABASE_MIGRATIONS, ...V39_DATABASE_MIGRATIONS]);
     const source = V36_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("report_v4_acceptance_site_read_manifest");

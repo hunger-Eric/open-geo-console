@@ -36,7 +36,7 @@ suite("schema V38 website-synthesis input authority", () => {
   }, 120_000);
 
   it("registers exactly one V38 forward step", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(39);
+    expect(DATABASE_SCHEMA_VERSION).toBe(40);
     expect(databaseMigrationsAfter(37)).toEqual([...V38_DATABASE_MIGRATIONS, ...V39_DATABASE_MIGRATIONS]);
     expect(databaseMigrationsAfter(38)).toEqual([...V39_DATABASE_MIGRATIONS]);
     expect(databaseMigrationsAfter(39)).toEqual([]);

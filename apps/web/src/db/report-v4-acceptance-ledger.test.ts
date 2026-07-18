@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { databaseMigrationsAfter } from "./migrations";
 import {
   createReportV4AcceptanceLedgerRepository,
   type ReportV4AcceptanceLedgerStore
@@ -12,6 +13,12 @@ const protectedEnvironment = {
 
 // @requirement GEO-V4-ACCEPT-01
 describe("Report V4 protected-Staging acceptance ledger validation", () => {
+  it("ships the scenario lock guard as a forward migration", () => {
+    const upgrade = databaseMigrationsAfter(39).join("\n");
+    expect(upgrade).toContain("ogc_guard_report_v4_acceptance_event");
+    expect(upgrade).toMatch(/WHERE id=NEW\.scenario_id AND session_id=NEW\.session_id FOR UPDATE/u);
+    expect(databaseMigrationsAfter(40)).toEqual([]);
+  });
   it("rejects production before invoking persistence", async () => {
     const store = fakeStore();
     const repository = createReportV4AcceptanceLedgerRepository(store, {

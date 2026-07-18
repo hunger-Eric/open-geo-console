@@ -6,7 +6,7 @@ import { V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIO
 // @requirement GEO-V4-ACCEPT-01
 describe("schema V35 protected-Staging acceptance ledger", () => {
   it("registers one forward-only append-only ledger migration after V34", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(39);
+    expect(DATABASE_SCHEMA_VERSION).toBe(40);
     expect(databaseMigrationsAfter(34)).toEqual([...V35_DATABASE_MIGRATIONS, ...V36_DATABASE_MIGRATIONS, ...V37_DATABASE_MIGRATIONS, ...V38_DATABASE_MIGRATIONS, ...V39_DATABASE_MIGRATIONS]);
     const source = V35_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("report_v4_acceptance_sessions");

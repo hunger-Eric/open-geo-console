@@ -29,7 +29,7 @@ const chunks = [{
 // @requirement GEO-V4-TOKEN-02
 describe("schema v32 terminal V4 page-summary binding", () => {
   it("registers V32 trigger hardening in the forward steps after V31", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(39);
+    expect(DATABASE_SCHEMA_VERSION).toBe(40);
     expect(databaseMigrationsAfter(31)).toEqual([
       ...V32_DATABASE_MIGRATIONS,
       ...V33_DATABASE_MIGRATIONS,

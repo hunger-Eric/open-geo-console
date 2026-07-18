@@ -321,12 +321,17 @@ export function createProductionReportV4AcceptanceLedgerRepository(
 async function appendPostgresEvent(tx: postgres.TransactionSql, input: AppendReportV4AcceptanceEventInput): Promise<ReportV4AcceptanceEventAppendResult> {
   const sessions = await tx`SELECT * FROM report_v4_acceptance_sessions WHERE id=${input.sessionId} FOR UPDATE`;
   const session = mapSession(sessions[0]);
-  if (!session || session.state !== "collecting") throw new Error("A collecting Report V4 acceptance session is required for append.");
   const idempotencyKey = eventIdempotencyKey(input);
   const existing = mapEvent((await tx`SELECT * FROM report_v4_acceptance_events WHERE idempotency_key=${idempotencyKey}`)[0]);
   if (existing) {
     if (!sameEvent(existing, input)) throw new Error("Report V4 acceptance event idempotency payload conflict.");
     return { event: existing, inserted: false };
+  }
+  if (!session || session.state !== "collecting") throw new Error("A collecting Report V4 acceptance session is required for append.");
+  const scenarios = await tx`SELECT state FROM report_v4_acceptance_scenarios
+    WHERE id=${input.scenarioId} AND session_id=${input.sessionId} FOR UPDATE`;
+  if (String(scenarios[0]?.state ?? "") !== "collecting") {
+    throw new Error("A collecting Report V4 acceptance scenario is required for append.");
   }
   const rows = await tx`INSERT INTO report_v4_acceptance_events
     (idempotency_key,session_id,scenario_id,sequence,kind,operation,unit_id,attempt,phase,details,prev_hash,event_hash)

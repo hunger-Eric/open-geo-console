@@ -9,7 +9,7 @@ const suite = adminUrl ? describe : describe.skip;
 
 describe("schema V34 immutable diagnosis input payload", () => {
   it("registers one forward-only bounded payload migration after V33", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(39);
+    expect(DATABASE_SCHEMA_VERSION).toBe(40);
     expect(databaseMigrationsAfter(33)).toEqual([...V34_DATABASE_MIGRATIONS, ...V35_DATABASE_MIGRATIONS, ...V36_DATABASE_MIGRATIONS, ...V37_DATABASE_MIGRATIONS, ...V38_DATABASE_MIGRATIONS, ...V39_DATABASE_MIGRATIONS]);
     const source = V34_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("diagnosis_input_payload jsonb");

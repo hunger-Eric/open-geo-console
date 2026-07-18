@@ -7,7 +7,7 @@ import { REPORT_V4_PROHIBITED_OPERATION_MANIFEST_ENTRIES } from "@/report-v4/pro
 // @requirement GEO-V4-ACCEPT-01
 describe("schema V37 DB-authoritative prohibited-operation guards", () => {
   it("registers one replay-safe forward migration after V36", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(39);
+    expect(DATABASE_SCHEMA_VERSION).toBe(40);
     expect(databaseMigrationsAfter(36)).toEqual([...V37_DATABASE_MIGRATIONS, ...V38_DATABASE_MIGRATIONS, ...V39_DATABASE_MIGRATIONS]);
     expect(databaseMigrationsAfter(37)).toEqual([...V38_DATABASE_MIGRATIONS, ...V39_DATABASE_MIGRATIONS]);
     const source = V37_DATABASE_MIGRATIONS.join("\n");

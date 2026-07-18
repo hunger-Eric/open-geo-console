@@ -3748,6 +3748,39 @@ export const V39_DATABASE_MIGRATIONS = [
     FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_authority_phase_snapshot()`
 ] as const;
 
+export const V40_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_event() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; scenario_state text; expected_sequence integer; expected_prev text; expected_key text;
+     started_exists boolean; terminal_exists boolean;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'A Report V4 acceptance event is append-only and immutable.'; END IF;
+     SELECT state,head_sequence+1,head_hash INTO session_state,expected_sequence,expected_prev
+       FROM report_v4_acceptance_sessions WHERE id=NEW.session_id FOR UPDATE;
+     SELECT state INTO scenario_state FROM report_v4_acceptance_scenarios
+       WHERE id=NEW.scenario_id AND session_id=NEW.session_id FOR UPDATE;
+     IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN
+       RAISE EXCEPTION 'A Report V4 acceptance event requires collecting session and scenario state.';
+     END IF;
+     IF NEW.sequence IS DISTINCT FROM expected_sequence OR NEW.prev_hash IS DISTINCT FROM expected_prev THEN
+       RAISE EXCEPTION 'A Report V4 acceptance event does not extend the exact hash-chain head.';
+     END IF;
+     IF NEW.phase IN ('completed','failed','rejected') THEN
+       SELECT EXISTS(SELECT 1 FROM report_v4_acceptance_events WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND kind=NEW.kind AND operation=NEW.operation AND unit_id=NEW.unit_id AND attempt=NEW.attempt AND phase='started') INTO started_exists;
+       SELECT EXISTS(SELECT 1 FROM report_v4_acceptance_events WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND kind=NEW.kind AND operation=NEW.operation AND unit_id=NEW.unit_id AND attempt=NEW.attempt AND phase IN ('completed','failed','rejected')) INTO terminal_exists;
+       IF NOT started_exists OR terminal_exists THEN RAISE EXCEPTION 'A terminal Report V4 acceptance event requires exactly one started claim for the same unit and attempt.'; END IF;
+     END IF;
+     expected_key:=encode(sha256(convert_to(concat_ws(chr(31),NEW.session_id,NEW.scenario_id,NEW.kind,NEW.operation,NEW.unit_id,NEW.attempt::text,NEW.phase),'UTF8')),'hex');
+     IF NEW.idempotency_key IS DISTINCT FROM expected_key THEN RAISE EXCEPTION 'A Report V4 acceptance event idempotency key is not deterministic.'; END IF;
+     NEW.details_canonical:=NEW.details::text;
+     NEW.occurred_at_canonical:=to_char(NEW.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"');
+     NEW.event_hash:=encode(sha256(convert_to(concat_ws(chr(31),NEW.prev_hash,NEW.idempotency_key,NEW.sequence::text,NEW.kind,NEW.operation,NEW.unit_id,NEW.attempt::text,NEW.phase,NEW.details_canonical,NEW.occurred_at_canonical),'UTF8')),'hex');
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_acceptance_events_guard ON report_v4_acceptance_events`,
+  `CREATE TRIGGER report_v4_acceptance_events_guard BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_events FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_event()`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -3779,7 +3812,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 36, migrations: V36_DATABASE_MIGRATIONS },
   { version: 37, migrations: V37_DATABASE_MIGRATIONS },
   { version: 38, migrations: V38_DATABASE_MIGRATIONS },
-  { version: 39, migrations: V39_DATABASE_MIGRATIONS }
+  { version: 39, migrations: V39_DATABASE_MIGRATIONS },
+  { version: 40, migrations: V40_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {
