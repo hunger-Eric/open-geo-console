@@ -98,12 +98,14 @@ export async function confirmBusinessQuestions(input: {
       WHERE id=${input.questionSetId} AND report_id=${input.reportId} FOR UPDATE`;
     const row = rows[0];
     if (!row?.payload) throw new Error("Business question set not found.");
-    if (row.status === "locked") {
-      const locked = row.payload as ConfirmedBusinessQuestionSet;
-      if (matchesLockedBusinessQuestions(locked, input.finalTexts)) return { confirmed: locked } as const;
-      throw new Error("Paid business questions are permanently locked.");
+    if (row.status === "confirmed" || row.status === "locked") {
+      const immutable = row.payload as ConfirmedBusinessQuestionSet;
+      if (matchesImmutableBusinessQuestions(immutable, input.finalTexts)) return { confirmed: immutable } as const;
+      throw new Error(row.status === "locked"
+        ? "Paid business questions are permanently locked."
+        : "Confirmed business questions are immutable.");
     }
-    if (row.status !== "candidate" && row.status !== "confirmed") throw new Error("Business questions are not correctable in their current state.");
+    if (row.status !== "candidate") throw new Error("Business questions are not correctable in their current state.");
     let confirmed: ConfirmedBusinessQuestionSet;
     try {
       confirmed = confirmBusinessQuestionSet({
@@ -136,14 +138,14 @@ export async function confirmBusinessQuestions(input: {
   return outcome.confirmed;
 }
 
-export function matchesLockedBusinessQuestions(
-  locked: ConfirmedBusinessQuestionSet,
+export function matchesImmutableBusinessQuestions(
+  immutable: ConfirmedBusinessQuestionSet,
   finalTexts: readonly string[]
 ): boolean {
-  return Boolean(locked.confirmedAt)
-    && locked.questions.length === 3
-    && finalTexts.length === locked.questions.length
-    && locked.questions.every((question, index) =>
+  return Boolean(immutable.confirmedAt)
+    && immutable.questions.length === 3
+    && finalTexts.length === immutable.questions.length
+    && immutable.questions.every((question, index) =>
       question.privateText.trim().normalize("NFC") === finalTexts[index]?.trim().normalize("NFC")
     );
 }
