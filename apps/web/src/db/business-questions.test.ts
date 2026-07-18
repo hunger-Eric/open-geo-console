@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
-import { matchesImmutableBusinessQuestions } from "./business-questions";
+import { matchesImmutableBusinessQuestions, resolveBusinessQuestionLocale } from "./business-questions";
 
 describe("immutable business-question checkout recovery", () => {
   const locked = {
@@ -20,5 +20,15 @@ describe("immutable business-question checkout recovery", () => {
     const changed = locked.questions.map(({ privateText }) => privateText);
     changed[1] = "改写后的第二个问题？";
     expect(matchesImmutableBusinessQuestions(locked, changed)).toBe(false);
+  });
+});
+
+describe("business-question locale authority", () => {
+  it("uses the persisted report locale ahead of the deployment default", () => {
+    expect(resolveBusinessQuestionLocale(undefined, "en", "zh-CN")).toBe("en");
+  });
+
+  it("preserves an explicit correction locale", () => {
+    expect(resolveBusinessQuestionLocale("zh-CN", "en", "en-US")).toBe("zh-CN");
   });
 });

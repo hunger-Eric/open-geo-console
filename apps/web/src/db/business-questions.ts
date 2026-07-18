@@ -22,13 +22,16 @@ export async function prepareBusinessQuestionCandidates(input: {
   foundation?: AiWebsiteReportV1;
 }): Promise<BusinessQuestionCandidateSet> {
   await ensureDatabase();
-  const existing = await getLatestBusinessQuestionSet(input.reportId);
-  if (existing && (!input.revision || existing.revision === input.revision)) return existing as BusinessQuestionCandidateSet;
   const report = await getGeoReport(input.reportId);
   if (!report) throw new Error("Report not found.");
+  const existing = await getLatestBusinessQuestionSet(input.reportId);
+  const locale = resolveBusinessQuestionLocale(input.locale, report.reportLocale, process.env.OGC_PUBLIC_SEARCH_LOCALE);
+  const immutableExisting = Boolean(existing && "confirmedAt" in existing && existing.confirmedAt);
+  if (existing && (immutableExisting || existing.locale === locale) && (!input.revision || existing.revision === input.revision)) {
+    return existing as BusinessQuestionCandidateSet;
+  }
   const foundation = input.foundation ?? await loadQuestionFoundation(input.reportId);
   const profile = foundation.organizationProfile;
-  const locale = input.locale?.trim() || process.env.OGC_PUBLIC_SEARCH_LOCALE?.trim() || report.reportLocale || "en";
   const region = input.region?.trim() || process.env.OGC_PUBLIC_SEARCH_REGION?.trim() || "global";
   const revision = input.revision ?? ((existing?.revision ?? 0) + 1);
   const candidates = generateBusinessQuestionCandidates({
@@ -148,6 +151,14 @@ export function matchesImmutableBusinessQuestions(
     && immutable.questions.every((question, index) =>
       question.privateText.trim().normalize("NFC") === finalTexts[index]?.trim().normalize("NFC")
     );
+}
+
+export function resolveBusinessQuestionLocale(
+  requestedLocale: string | undefined,
+  reportLocale: string | null | undefined,
+  environmentLocale: string | undefined
+): string {
+  return requestedLocale?.trim() || reportLocale?.trim() || environmentLocale?.trim() || "en";
 }
 
 export async function getBusinessQuestionSet(reportId: string, id: string): Promise<BusinessQuestionCandidateSet | ConfirmedBusinessQuestionSet | null> {
