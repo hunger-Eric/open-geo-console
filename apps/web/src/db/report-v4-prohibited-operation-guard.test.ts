@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import * as repositoryModule from "./report-v4-prohibited-operation-guard";
 import {
   armReportV4ProhibitedOperationGuard,
+  completeReportV4ProhibitedOperationGuard,
   reportV4ProhibitedOperationEventUnitId,
   reportV4ProhibitedOperationGuardRunId,
-  type ArmReportV4ProhibitedOperationGuardInput
+  type ArmReportV4ProhibitedOperationGuardInput,
+  type ReportV4ProhibitedOperationGuardCapability
 } from "./report-v4-prohibited-operation-guard";
 
 const staging = { VERCEL_ENV: "preview", OGC_DEPLOYMENT_PROFILE: "staging", COMMERCE_MODE: "test" } as unknown as NodeJS.ProcessEnv;
@@ -23,6 +25,15 @@ describe("Report V4 DB-authoritative prohibited-operation guard production API",
       "authorizeReportV4ProhibitedOperationGuardCapability"
     ]));
     expect(repositoryModule.armReportV4ProhibitedOperationGuard).toBeTypeOf("function");
+    expect(repositoryModule.withReportV4ProhibitedOperationGuardSegment).toBeTypeOf("function");
+    expect(repositoryModule.completeReportV4ProhibitedOperationGuard).toBeTypeOf("function");
+  });
+
+  it("refuses a forged capability before explicit completion opens persistence", async () => {
+    const forged = Object.freeze({
+      kind: "report_v4_prohibited_operation_guard_capability"
+    }) as ReportV4ProhibitedOperationGuardCapability;
+    await expect(completeReportV4ProhibitedOperationGuard(forged)).rejects.toThrow(/DB-authorized/u);
   });
 
   it("refuses non-protected production before opening persistence", async () => {

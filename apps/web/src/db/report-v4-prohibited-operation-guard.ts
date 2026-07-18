@@ -148,8 +148,28 @@ export async function withReportV4ProhibitedOperationGuard<T>(
   capability: ReportV4ProhibitedOperationGuardCapability,
   work: () => T | Promise<T>
 ): Promise<Awaited<T>> {
-  const data = capability && typeof capability === "object" ? authorizedCapabilities.get(capability) : undefined;
-  if (!data) throw new TypeError("A DB-authorized Report V4 prohibited-operation guard capability is required.");
+  requireAuthorizedCapability(capability);
+  const active = storage.getStore();
+  if (active) {
+    if (active.capability !== capability) throw new ReportV4ProhibitedOperationGuardContextConflictError();
+    return await work();
+  }
+
+  const result = await withReportV4ProhibitedOperationGuardSegment(capability, work);
+  await completeReportV4ProhibitedOperationGuard(capability);
+  return result;
+}
+
+/**
+ * Runs one resumable guarded segment without sealing its persisted authority.
+ * Both success and failure release the process/advisory execution claim while
+ * the exact all-zero run remains armed for a later segment or process.
+ */
+export async function withReportV4ProhibitedOperationGuardSegment<T>(
+  capability: ReportV4ProhibitedOperationGuardCapability,
+  work: () => T | Promise<T>
+): Promise<Awaited<T>> {
+  const data = requireAuthorizedCapability(capability);
   const active = storage.getStore();
   if (active) {
     if (active.capability !== capability) throw new ReportV4ProhibitedOperationGuardContextConflictError();
@@ -161,24 +181,62 @@ export async function withReportV4ProhibitedOperationGuard<T>(
   let connection: postgres.ReservedSql | undefined;
   let result: Awaited<T> | undefined;
   let failure: unknown;
+  let failed = false;
   try {
     connection = await acquireExecutionClaim(data);
     result = await storage.run({ capability, data, connection }, async () => await work());
-    await completePostgresAuthority(connection, data.runId);
-    data.completed = true;
   } catch (error) {
+    failed = true;
     failure = error;
   }
   if (connection) {
     try {
       await releaseExecutionClaim(connection, data.runId);
     } catch (error) {
-      if (failure === undefined) failure = error;
+      if (!failed) {
+        failed = true;
+        failure = error;
+      }
     }
   }
   data.inUse = false;
-  if (failure !== undefined) throw failure;
+  if (failed) throw failure;
   return result as Awaited<T>;
+}
+
+/** Seals the exact active-process capability and persisted all-zero run once. */
+export async function completeReportV4ProhibitedOperationGuard(
+  capability: ReportV4ProhibitedOperationGuardCapability
+): Promise<void> {
+  const data = requireAuthorizedCapability(capability);
+  if (storage.getStore() || data.completed || data.inUse) {
+    throw new ReportV4ProhibitedOperationGuardContextConflictError();
+  }
+
+  data.inUse = true;
+  let connection: postgres.ReservedSql | undefined;
+  let failure: unknown;
+  let failed = false;
+  try {
+    connection = await acquireExecutionClaim(data);
+    await completePostgresAuthority(connection, data.runId);
+    data.completed = true;
+  } catch (error) {
+    failed = true;
+    failure = error;
+  }
+  if (connection) {
+    try {
+      await releaseExecutionClaim(connection, data.runId);
+    } catch (error) {
+      if (!failed) {
+        failed = true;
+        failure = error;
+      }
+    }
+  }
+  data.inUse = false;
+  if (failed) throw failure;
 }
 
 export async function runReportV4GuardedOperation<T>(input: {
@@ -415,6 +473,14 @@ function assertRecorderIdentity(identity: ReportV4ProhibitedOperationRecorderIde
   }
   const entry = REPORT_V4_PROHIBITED_OPERATION_MANIFEST_ENTRIES.find(({ guardSite }) => guardSite === identity.guardSite);
   if (!entry || entry.operation !== identity.operation) throw new Error("The Report V4 prohibited-operation recorder pair is not canonical.");
+}
+
+function requireAuthorizedCapability(
+  capability: ReportV4ProhibitedOperationGuardCapability
+): AuthorizedCapabilityData {
+  const data = capability && typeof capability === "object" ? authorizedCapabilities.get(capability) : undefined;
+  if (!data) throw new TypeError("A DB-authorized Report V4 prohibited-operation guard capability is required.");
+  return data;
 }
 
 function isAuthoritativeFirstAttempt(value: unknown): value is ReportV4ProhibitedOperationAttemptResult {

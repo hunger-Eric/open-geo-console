@@ -2,13 +2,15 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { closeDatabase, getDatabasePoolSize } from "./index";
-import { DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS } from "./migrations";
+import { databaseMigrationsAfter, DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS } from "./migrations";
 import { createPostgresReportV4AcceptanceLedgerStore, createReportV4AcceptanceLedgerRepository } from "./report-v4-acceptance-ledger";
 import {
   armReportV4ProhibitedOperationGuard,
+  completeReportV4ProhibitedOperationGuard,
   loadReportV4ProhibitedOperationGuardAuthority,
   reportV4ProhibitedOperationEventUnitId,
-  reportV4ProhibitedOperationGuardRunId
+  reportV4ProhibitedOperationGuardRunId,
+  withReportV4ProhibitedOperationGuardSegment
 } from "./report-v4-prohibited-operation-guard";
 import {
   ReportV4ProhibitedOperationGuardContextConflictError,
@@ -117,6 +119,109 @@ suite("Report V4 prohibited-operation guard PostgreSQL 17 authority", () => {
       withReportV4ProhibitedOperationGuard(inner, innerWork)))
       .rejects.toBeInstanceOf(ReportV4ProhibitedOperationGuardContextConflictError);
     expect(innerWork).not.toHaveBeenCalled();
+  }, 120_000);
+
+  it("keeps a successful guarded segment armed until explicit completion", async () => {
+    const ids = await seedGuardLineage(sql, "question_failure", "segment-success");
+    const capability = await armReportV4ProhibitedOperationGuard(ids, environment);
+    await expect(withReportV4ProhibitedOperationGuardSegment(capability, async () => "captured"))
+      .resolves.toBe("captured");
+    const runId = reportV4ProhibitedOperationGuardRunId(ids);
+    expect((await sql`SELECT state,completed_at FROM report_v4_prohibited_operation_guard_runs WHERE id=${runId}`)[0])
+      .toMatchObject({ state: "armed", completed_at: null });
+    await expectExecutionLockReleased(runId);
+  }, 120_000);
+
+  it("keeps a failed guarded segment armed and releases its execution claim", async () => {
+    const ids = await seedGuardLineage(sql, "diagnosis_failure", "segment-failure");
+    const capability = await armReportV4ProhibitedOperationGuard(ids, environment);
+    await expect(withReportV4ProhibitedOperationGuardSegment(capability, async () => {
+      throw new Error("capture interrupted");
+    })).rejects.toThrow(/capture interrupted/u);
+    const runId = reportV4ProhibitedOperationGuardRunId(ids);
+    expect((await sql`SELECT state,completed_at FROM report_v4_prohibited_operation_guard_runs WHERE id=${runId}`)[0])
+      .toMatchObject({ state: "armed", completed_at: null });
+    await expectExecutionLockReleased(runId);
+  }, 120_000);
+
+  it("establishes the guarded segment context across PDF and LEGACY manifest boundaries", async () => {
+    for (const [label, guardSite, operation] of [
+      ["segment-pdf", "pdf_export_url", "pdf"],
+      ["segment-legacy", "legacy_mutation", "legacy_mutation"]
+    ] as const) {
+      const ids = await seedGuardLineage(sql, "question_failure", label);
+      const capability = await armReportV4ProhibitedOperationGuard(ids, environment);
+      const delegate = vi.fn(async () => "forbidden");
+      await expect(withReportV4ProhibitedOperationGuardSegment(capability, () =>
+        runReportV4GuardedOperation({ guardSite, delegate }))).rejects.toThrow(/blocked prohibited/u);
+      expect(delegate).not.toHaveBeenCalled();
+      const runId = reportV4ProhibitedOperationGuardRunId(ids);
+      expect((await sql`SELECT operation,attempt_count FROM report_v4_prohibited_operation_guard_counters
+        WHERE run_id=${runId} AND guard_site=${guardSite}`)[0]).toMatchObject({ operation, attempt_count: 1 });
+      expect((await sql`SELECT operation FROM report_v4_acceptance_events
+        WHERE session_id=${ids.sessionId} AND scenario_id=${ids.scenarioId} AND kind='prohibited_operation'`)[0]?.operation)
+        .toBe(operation);
+      expect((await sql`SELECT state,completed_at FROM report_v4_prohibited_operation_guard_runs WHERE id=${runId}`)[0])
+        .toMatchObject({ state: "armed", completed_at: null });
+      await expectExecutionLockReleased(runId);
+    }
+  }, 120_000);
+
+  it("re-arms the same deterministic run through a later SQL client, resumes a segment, and completes explicitly", async () => {
+    const ids = await seedGuardLineage(sql, "question_failure", "later-process-resume");
+    const firstProcessCapability = await armReportV4ProhibitedOperationGuard(ids, environment);
+    await withReportV4ProhibitedOperationGuardSegment(firstProcessCapability, async () => "first segment");
+    await closeDatabase();
+
+    const laterProcessCapability = await armReportV4ProhibitedOperationGuard(ids, environment);
+    expect(laterProcessCapability).not.toBe(firstProcessCapability);
+    await expect(withReportV4ProhibitedOperationGuardSegment(laterProcessCapability, async () => "second segment"))
+      .resolves.toBe("second segment");
+    await expect(completeReportV4ProhibitedOperationGuard(laterProcessCapability)).resolves.toBeUndefined();
+
+    const runId = reportV4ProhibitedOperationGuardRunId(ids);
+    expect((await sql`SELECT state,completed_at FROM report_v4_prohibited_operation_guard_runs WHERE id=${runId}`)[0])
+      .toMatchObject({ state: "completed" });
+    await expectExecutionLockReleased(runId);
+  }, 120_000);
+
+  it("completes an all-zero authority exactly once and rejects completion replay", async () => {
+    const ids = await seedGuardLineage(sql, "diagnosis_failure", "explicit-complete-once");
+    const capability = await armReportV4ProhibitedOperationGuard(ids, environment);
+    await withReportV4ProhibitedOperationGuardSegment(capability, async () => "ready");
+    await expect(completeReportV4ProhibitedOperationGuard(capability)).resolves.toBeUndefined();
+    await expect(completeReportV4ProhibitedOperationGuard(capability))
+      .rejects.toBeInstanceOf(ReportV4ProhibitedOperationGuardContextConflictError);
+  }, 120_000);
+
+  it("rejects explicit completion when a prohibited-operation counter is nonzero", async () => {
+    const ids = await seedGuardLineage(sql, "question_failure", "explicit-complete-nonzero");
+    const capability = await armReportV4ProhibitedOperationGuard(ids, environment);
+    const runId = reportV4ProhibitedOperationGuardRunId(ids);
+    await sql`UPDATE report_v4_prohibited_operation_guard_counters
+      SET attempt_count=1,attempted_at=clock_timestamp()
+      WHERE run_id=${runId} AND guard_site='pdf_export_url'`;
+    await expect(completeReportV4ProhibitedOperationGuard(capability)).rejects.toThrow(/exact zero counter/u);
+    expect((await sql`SELECT state FROM report_v4_prohibited_operation_guard_runs WHERE id=${runId}`)[0]?.state).toBe("armed");
+    await expectExecutionLockReleased(runId);
+  }, 120_000);
+
+  it("rejects completion during an active segment and rejects a stale capability after exact external completion", async () => {
+    const conflictingIds = await seedGuardLineage(sql, "diagnosis_failure", "complete-conflict");
+    const conflicting = await armReportV4ProhibitedOperationGuard(conflictingIds, environment);
+    await withReportV4ProhibitedOperationGuardSegment(conflicting, async () => {
+      await expect(completeReportV4ProhibitedOperationGuard(conflicting))
+        .rejects.toBeInstanceOf(ReportV4ProhibitedOperationGuardContextConflictError);
+    });
+
+    const staleIds = await seedGuardLineage(sql, "question_failure", "complete-stale");
+    const stale = await armReportV4ProhibitedOperationGuard(staleIds, environment);
+    const staleRunId = reportV4ProhibitedOperationGuardRunId(staleIds);
+    await sql`UPDATE report_v4_prohibited_operation_guard_runs
+      SET state='completed',completed_at=clock_timestamp() WHERE id=${staleRunId}`;
+    await expect(completeReportV4ProhibitedOperationGuard(stale))
+      .rejects.toBeInstanceOf(ReportV4ProhibitedOperationGuardContextConflictError);
+    await expectExecutionLockReleased(staleRunId);
   }, 120_000);
 
   it("trips counter then append-only ledger event with a one-connection guard pool, never delegates, and rejects reset or delete", async () => {
@@ -250,7 +355,7 @@ suite("Report V4 prohibited-operation guard PostgreSQL 17 authority", () => {
     await admin.unsafe(`CREATE DATABASE ${quote(upgradeDatabaseName)}`);
     const upgrade = postgres(withDatabase(adminUrl!, upgradeDatabaseName), { max: 1, prepare: false });
     try {
-      const throughV36 = DATABASE_MIGRATIONS.slice(0, -V37_DATABASE_MIGRATIONS.length);
+      const throughV36 = DATABASE_MIGRATIONS.slice(0, -databaseMigrationsAfter(36).length);
       await upgrade.begin(async (tx) => { for (const statement of throughV36) await tx.unsafe(statement); });
       expect((await upgrade`SELECT to_regclass('report_v4_prohibited_operation_guard_runs')::text AS name`)[0]?.name).toBeNull();
       await upgrade.begin(async (tx) => { for (const statement of V37_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
