@@ -10,6 +10,7 @@ import {
   reportV4ProhibitedOperationEventUnitId,
   reportV4ProhibitedOperationGuardRunId
 } from "./report-v4-prohibited-operation-guard";
+import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "@/report-v4/report-v4-acceptance-fingerprints";
 
 type Row = Record<string, unknown>;
 
@@ -176,8 +177,11 @@ export function projectReportV4AcceptanceLedgerGuardAuthority(
   const parsed = parseInput(input);
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new TypeError("Ledger/guard raw snapshot is invalid.");
   const session = projectSession(parsed, raw.session);
-  const scenario = projectScenario(parsed, raw.scenario);
-  const events = projectEvents(parsed, session, raw.events);
+  let scenario = projectScenario(parsed, raw.scenario);
+  const events = projectEvents(parsed, session, raw.scenario, raw.events);
+  if (parsed.phase === "final") {
+    scenario = Object.freeze({ ...scenario, baselineFingerprint: computeScenarioBaselineFingerprint(raw.scenario) });
+  }
   const ledgerWithoutHash = {
     contractVersion: "report-v4-acceptance-ledger-authority-v1" as const,
     phase: parsed.phase,
@@ -235,6 +239,7 @@ function projectScenario(input: LoadReportV4AcceptanceLedgerGuardAuthorityInput,
     throw new Error("Ledger authority scenario fault identity is non-canonical.");
   }
   const idHash = (value: unknown, label: string) => value === null ? null : digest(text(value, label));
+  const baselineFingerprint = nullableHash(row.baseline_fingerprint, "baseline fingerprint");
   return Object.freeze({
     scenarioIdHash: digest(input.scenarioId),
     reportIdHash: idHash(row.report_id, "report id"),
@@ -252,7 +257,8 @@ function projectScenario(input: LoadReportV4AcceptanceLedgerGuardAuthorityInput,
     faultQuestionIdHash: digest(text(row.fault_question_id, "fault question id")),
     faultSourceIdHash: idHash(row.fault_source_id, "fault source id"),
     expectedFaultOccurrences,
-    baselineFingerprint: nullableHash(row.baseline_fingerprint, "baseline fingerprint"),
+    baselineFingerprint,
+    storedBaselineFingerprint: baselineFingerprint,
     finalFingerprint: nullableHash(row.final_fingerprint, "final fingerprint"),
     state: "collecting",
     createdAt: instant(row.created_at, "scenario created at")
@@ -262,6 +268,7 @@ function projectScenario(input: LoadReportV4AcceptanceLedgerGuardAuthorityInput,
 function projectEvents(
   input: LoadReportV4AcceptanceLedgerGuardAuthorityInput,
   session: ReportV4AcceptanceLedgerAuthority["session"],
+  scenario: Row,
   rawEvents: Row[]
 ): readonly ReportV4AcceptanceLedgerAuthorityEventRecord[] {
   if (!Array.isArray(rawEvents)) throw new TypeError("Ledger events must be a complete array.");
@@ -325,7 +332,113 @@ function projectEvents(
   if (session.headHash !== (events.at(-1)?.eventHash ?? ZERO_HASH)) {
     throw new Error("Ledger session head hash does not equal the final event hash.");
   }
+  validateScenarioEventBindings(input, scenario, rawEvents);
   return Object.freeze(events);
+}
+
+function validateScenarioEventBindings(
+  input: LoadReportV4AcceptanceLedgerGuardAuthorityInput,
+  scenario: Row,
+  events: readonly Row[]
+): void {
+  const owned = events.filter((event) => event.scenario_id === input.scenarioId);
+  const faultKind = text(scenario.fault_kind, "scenario fault kind");
+  const faultQuestionId = text(scenario.fault_question_id, "scenario fault question id");
+  const baselineFingerprint = nullableHash(scenario.baseline_fingerprint, "scenario baseline fingerprint");
+  const expectedFaultOccurrences = integer(scenario.expected_fault_occurrences, "expected fault occurrences", 1, 2);
+  const faultEvents = owned.filter((event) => event.kind === "fault_injection");
+  const expectedOccurrences = Array.from({ length: expectedFaultOccurrences }, (_, index) => index + 1);
+  const actualOccurrences = faultEvents.map((event) => Number((event.details as Row).occurrence));
+  if (input.phase === "baseline" && faultEvents.length !== 0) {
+    throw new Error("Ledger baseline authority requires the exact pre-fault topology with zero fault events.");
+  }
+  if (input.phase === "final" && (faultEvents.length !== expectedOccurrences.length
+      || actualOccurrences.some((occurrence, index) => occurrence !== expectedOccurrences[index]))) {
+    throw new Error(`Ledger final authority fault occurrences must be exactly ${expectedOccurrences.join(",")}, with no extras.`);
+  }
+
+  let effectiveBaselineFingerprint = baselineFingerprint;
+  if (input.phase === "final") {
+    const expectedBaselineFingerprint = computeScenarioBaselineFingerprint(scenario);
+    if (baselineFingerprint !== null && baselineFingerprint !== expectedBaselineFingerprint) {
+      throw new Error("Scenario baseline fingerprint does not equal the recomputed exact fault-provenance lineage fingerprint.");
+    }
+    effectiveBaselineFingerprint = expectedBaselineFingerprint;
+  }
+
+  if (faultEvents.length > 0) {
+    const scenarioKind = text(scenario.kind, "scenario kind");
+    const owningJobId = scenarioKind === "question_failure"
+      ? text(scenario.core_job_id, "fault core job id")
+      : text(scenario.enhancement_job_id, "fault enhancement job id");
+    const faultSourceSuffix = scenarioKind === "success"
+      ? `:${text(scenario.fault_source_id, "fault source id")}`
+      : "";
+    const expectedFaultUnitId = `${owningJobId}:${faultQuestionId}${faultSourceSuffix}`;
+    for (const event of faultEvents) {
+      const details = event.details as Row;
+      if (event.operation !== faultKind || details.fault !== faultKind) {
+        throw new Error("Fault event operation must equal the exact scenario fault kind.");
+      }
+      if (event.unit_id !== expectedFaultUnitId) {
+        throw new Error("Fault event unit must equal the exact scenario target lineage.");
+      }
+      if (event.attempt !== details.occurrence) {
+        throw new Error("Fault event attempt must equal its exact occurrence.");
+      }
+      if (details.baselineFingerprint !== effectiveBaselineFingerprint) {
+        throw new Error("Fault event baseline fingerprint must equal the recomputed exact fault-provenance lineage fingerprint.");
+      }
+    }
+  }
+
+  const coreArtifactId = scenario.core_artifact_revision_id === null
+    ? null
+    : text(scenario.core_artifact_revision_id, "core artifact revision id");
+  const enhancementArtifactId = scenario.enhancement_artifact_revision_id === null
+    ? null
+    : text(scenario.enhancement_artifact_revision_id, "enhancement artifact revision id");
+  for (const event of owned.filter((candidate) => candidate.kind === "html_assembly")) {
+    const expectedArtifactId = event.operation === "core_html" ? coreArtifactId : enhancementArtifactId;
+    const detailsArtifactId = (event.details as Row).artifactRevisionId;
+    if (expectedArtifactId === null || event.unit_id !== expectedArtifactId || detailsArtifactId !== expectedArtifactId) {
+      throw new Error("HTML assembly artifact must equal the exact scenario-bound phase artifact revision.");
+    }
+  }
+  for (const event of owned.filter((candidate) => candidate.kind === "artifact_activation")) {
+    const detailsArtifactId = (event.details as Row).artifactRevisionId;
+    const scenarioArtifactIds = [coreArtifactId, enhancementArtifactId].filter((value): value is string => value !== null);
+    if (event.unit_id !== detailsArtifactId || !scenarioArtifactIds.includes(event.unit_id as string)) {
+      throw new Error("Artifact activation must equal an exact scenario-bound artifact revision.");
+    }
+  }
+}
+
+function computeScenarioBaselineFingerprint(scenario: Row): string {
+  return computeReportV4AcceptanceFaultProvenanceBaselineFingerprint({
+    sessionId: text(scenario.session_id, "fingerprint session id"),
+    scenarioId: text(scenario.id, "fingerprint scenario id"),
+    reportId: nullableText(scenario.report_id, "fingerprint report id"),
+    orderId: nullableText(scenario.order_id, "fingerprint order id"),
+    preAdmissionJobId: nullableText(scenario.pre_admission_job_id, "fingerprint pre-admission job id"),
+    coreJobId: nullableText(scenario.core_job_id, "fingerprint core job id"),
+    enhancementJobId: nullableText(scenario.enhancement_job_id, "fingerprint enhancement job id"),
+    siteSnapshotId: nullableText(scenario.site_snapshot_id, "fingerprint site snapshot id"),
+    configSnapshotId: nullableText(scenario.config_snapshot_id, "fingerprint config snapshot id"),
+    questionSetId: nullableText(scenario.question_set_id, "fingerprint question set id"),
+    coreArtifactRevisionId: nullableText(scenario.core_artifact_revision_id, "fingerprint core artifact revision id"),
+    enhancementArtifactRevisionId: nullableText(scenario.enhancement_artifact_revision_id, "fingerprint enhancement artifact revision id"),
+    kind: scenario.kind as "success" | "diagnosis_failure" | "question_failure",
+    faultKind: scenario.fault_kind as "independent_source_read_failure" | "diagnosis_failure" | "question_failure",
+    faultQuestionId: text(scenario.fault_question_id, "fingerprint fault question id"),
+    faultSourceId: nullableText(scenario.fault_source_id, "fingerprint fault source id"),
+    expectedFaultOccurrences: integer(scenario.expected_fault_occurrences, "fingerprint expected occurrences", 1, 2) as 1 | 2,
+    baselineFingerprint: nullableHash(scenario.baseline_fingerprint, "fingerprint baseline"),
+    finalFingerprint: nullableHash(scenario.final_fingerprint, "fingerprint final"),
+    state: "collecting",
+    createdAt: new Date(instant(scenario.created_at, "fingerprint scenario created at")),
+    terminalAt: null
+  });
 }
 
 function projectGuard(
@@ -511,6 +624,7 @@ function text(value: unknown, label: string): string {
 function uuid(value: unknown, label: string): string { const candidate = text(value, label); if (!UUID.test(candidate)) throw new Error(`${label} is not a lowercase UUID.`); return candidate; }
 function hash(value: unknown, label: string): string { const candidate = text(value, label); if (!HASH.test(candidate)) throw new Error(`${label} is not a SHA-256 hash.`); return candidate; }
 function gitSha(value: unknown, label: string): string { const candidate = text(value, label); if (!GIT_SHA.test(candidate)) throw new Error(`${label} is not a full lowercase Git SHA.`); return candidate; }
+function nullableText(value: unknown, label: string): string | null { return value === null ? null : text(value, label); }
 function nullableHash(value: unknown, label: string): string | null { return value === null ? null : hash(value, label); }
 function integer(value: unknown, label: string, minimum: number, maximum: number): number { const candidate = Number(value); if (!Number.isSafeInteger(candidate) || candidate < minimum || candidate > maximum) throw new Error(`${label} is invalid.`); return candidate; }
 function nonnegative(value: unknown, label: string): number { return integer(value, label, 0, Number.MAX_SAFE_INTEGER); }

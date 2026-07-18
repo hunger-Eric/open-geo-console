@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DATABASE_SCHEMA_VERSION, closeDatabase } from "./index";
@@ -17,6 +17,7 @@ import {
   runReportV4GuardedOperation,
   withReportV4ProhibitedOperationGuard
 } from "./report-v4-prohibited-operation-guard";
+import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "@/report-v4/report-v4-acceptance-fingerprints";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const suite = adminUrl ? describe : describe.skip;
@@ -90,7 +91,7 @@ suite("Report V4 ledger/guard authority PostgreSQL 17", () => {
     expect(authority.prohibitedOperationGuardAuthority.counters.every(({ attemptCount }) => attemptCount === 0)).toBe(true);
   }, 120_000);
 
-  it("rejects a real trip with its exactly matched ledger event and accepts a separately completed all-zero final", async () => {
+  it("rejects a real trip with its exactly matched ledger event and rejects a completed zero-fault final", async () => {
     const tripped = await seedLineage(sql, "trip");
     const capability = await armReportV4ProhibitedOperationGuard(tripped, environment);
     const delegate = vi.fn();
@@ -113,12 +114,9 @@ suite("Report V4 ledger/guard authority PostgreSQL 17", () => {
     const completed = await seedLineage(sql, "complete");
     const completedCapability = await armReportV4ProhibitedOperationGuard(completed, environment);
     await expect(withReportV4ProhibitedOperationGuard(completedCapability, async () => "ok")).resolves.toBe("ok");
-    const final = await loadReportV4AcceptanceLedgerGuardAuthority(sql, {
+    await expect(loadReportV4AcceptanceLedgerGuardAuthority(sql, {
       sessionId: completed.sessionId, scenarioId: completed.scenarioId, phase: "final"
-    });
-    expect(final.prohibitedOperationGuardAuthority.run.state).toBe("completed");
-    expect(final.prohibitedOperationGuardAuthority.run.completedAt).not.toBeNull();
-    expect(final.prohibitedOperationGuardAuthority.counters.every(({ attemptCount }) => attemptCount === 0)).toBe(true);
+    })).rejects.toThrow(/final.*fault.*exact/iu);
   }, 120_000);
 
   it("keeps ledger and counters consistent inside one repeatable-read snapshot while a real trip commits concurrently", async () => {
@@ -142,6 +140,56 @@ suite("Report V4 ledger/guard authority PostgreSQL 17", () => {
     await expect(loadReportV4AcceptanceLedgerGuardAuthority(sql, {
       sessionId: ids.sessionId, scenarioId: ids.scenarioId, phase: "baseline"
     })).rejects.toThrow(/baseline.*zero/iu);
+  }, 120_000);
+
+  it("accepts a real collecting final with the exact recomputed lineage baseline and fault occurrences", async () => {
+    const prepared = await seedCompleteQuestionFailureLineage(sql, "valid-final");
+    const baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(prepared.scenario);
+    for (const occurrence of [1, 2] as const) {
+      await prepared.ledger.appendEvent({
+        sessionId: prepared.guard.sessionId, scenarioId: prepared.guard.scenarioId, kind: "fault_injection",
+        operation: "question_failure", unitId: `${prepared.coreJobId}:question-1`, attempt: occurrence, phase: "consumed",
+        details: { fault: "question_failure", occurrence, baselineFingerprint }
+      });
+    }
+    const capability = await armReportV4ProhibitedOperationGuard(prepared.guard, environment);
+    await withReportV4ProhibitedOperationGuard(capability, async () => "ok");
+    const authority = await loadReportV4AcceptanceLedgerGuardAuthority(sql, {
+      sessionId: prepared.guard.sessionId, scenarioId: prepared.guard.scenarioId, phase: "final"
+    });
+    expect(authority.ledgerAuthority.events.filter(({ kind }) => kind === "fault_injection")).toHaveLength(2);
+    expect(authority.ledgerAuthority.scenario.baselineFingerprint).toBe(baselineFingerprint);
+    expect(authority.ledgerAuthority.scenario.storedBaselineFingerprint).toBeNull();
+  }, 120_000);
+
+  it("rejects real hash-valid rows with a forged stored/event baseline or foreign artifact lineage", async () => {
+    const prepared = await seedCompleteQuestionFailureLineage(sql, "forged-baseline");
+    const forgedBaseline = "e".repeat(64);
+    await sql`UPDATE report_v4_acceptance_scenarios
+      SET baseline_fingerprint=${forgedBaseline} WHERE id=${prepared.guard.scenarioId}`;
+    for (const occurrence of [1, 2] as const) {
+      await prepared.ledger.appendEvent({
+        sessionId: prepared.guard.sessionId, scenarioId: prepared.guard.scenarioId, kind: "fault_injection",
+        operation: "question_failure", unitId: `${prepared.coreJobId}:question-1`, attempt: occurrence, phase: "consumed",
+        details: { fault: "question_failure", occurrence, baselineFingerprint: forgedBaseline }
+      });
+    }
+    const capability = await armReportV4ProhibitedOperationGuard(prepared.guard, environment);
+    await withReportV4ProhibitedOperationGuard(capability, async () => "ok");
+    await expect(loadReportV4AcceptanceLedgerGuardAuthority(sql, {
+      sessionId: prepared.guard.sessionId, scenarioId: prepared.guard.scenarioId, phase: "final"
+    })).rejects.toThrow(/provenance|lineage.*fingerprint/iu);
+
+    const artifact = await seedLineage(sql, "foreign-artifact");
+    const ledger = createReportV4AcceptanceLedgerRepository(createPostgresReportV4AcceptanceLedgerStore(sql), environment);
+    await ledger.appendEvent({
+      sessionId: artifact.sessionId, scenarioId: artifact.scenarioId, kind: "html_assembly",
+      operation: "core_html", unitId: "artifact-foreign", attempt: 0, phase: "started",
+      details: { artifactRevisionId: "artifact-foreign", htmlSha256: "c".repeat(64) }
+    });
+    await expect(loadReportV4AcceptanceLedgerGuardAuthority(sql, {
+      sessionId: artifact.sessionId, scenarioId: artifact.scenarioId, phase: "baseline"
+    })).rejects.toThrow(/html.*artifact|scenario.*artifact/iu);
   }, 120_000);
 });
 
@@ -170,6 +218,59 @@ async function seedLineage(sql: ReturnType<typeof postgres>, label: string) {
   return { sessionId, scenarioId, jobId, workerGitSha };
 }
 
+async function seedCompleteQuestionFailureLineage(sql: ReturnType<typeof postgres>, label: string) {
+  const guard = await seedLineage(sql, label);
+  const ledger = createReportV4AcceptanceLedgerRepository(createPostgresReportV4AcceptanceLedgerStore(sql), environment);
+  const reportId = `report-ledger-guard-${label}`;
+  const orderId = `order-ledger-guard-${label}`;
+  const coreJobId = `core-ledger-guard-${label}`;
+  const siteSnapshotId = `snapshot-ledger-guard-${label}`;
+  const questionSetId = `questions-ledger-guard-${label}`;
+  const configSnapshotId = `v4-config-${hashText(`config-${label}`)}`;
+  const coreArtifactRevisionId = `artifact-ledger-guard-${label}`;
+  const siteKey = `${label}.example`;
+  await sql`INSERT INTO report_v4_site_snapshots
+    (id,report_id,site_key,status,captured_at,completed_at,collector_config_identity_hash,content_identity_hash,
+      candidate_url_count,analyzable_page_count,excluded_page_count)
+    VALUES(${siteSnapshotId},${reportId},${siteKey},'completed',now(),now(),${hashText(`collector-${label}`)},
+      ${hashText(`snapshot-${label}`)},1,1,0)`;
+  await sql`INSERT INTO report_business_question_sets
+    (id,report_id,revision,locale,region,status,confidence,acknowledged_low_confidence,generation_rule_version,
+      neutralization_version,profile_evidence_identity)
+    VALUES(${questionSetId},${reportId},1,'en','US','candidate','high',false,'v1','v1','profile')`;
+  await sql`INSERT INTO scan_jobs
+    (id,report_id,site_snapshot_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,
+      artifact_contract,business_question_set_id,locale,reason)
+    VALUES(${coreJobId},${reportId},${siteSnapshotId},'deep','recommendation_forensics_v1','two_stage_geo_report_v4',4,
+      'combined_geo_report_v4',${questionSetId},'en','standard')`;
+  await sql`INSERT INTO payment_orders
+    (id,checkout_idempotency_hmac,provider,report_id,site_snapshot_id,fulfillment_job_id,site_key,
+      customer_email_encrypted,customer_email_hmac,email_key_version,product_code,business_question_set_id,
+      fulfillment_methodology,recommendation_report_version,catalog_version,terms_version,refund_policy_version,
+      report_locale,currency,amount_minor,payment_status)
+    VALUES(${orderId},${hashText(`checkout-${label}`)},'airwallex',${reportId},${siteSnapshotId},${coreJobId},${siteKey},
+      'cipher',${hashText(`email-${label}`)},'v1','recommendation_forensics_v1',${questionSetId},
+      'two_stage_geo_report_v4',4,'v1','v1','v1','en','USD',100,'paid')`;
+  await sql`UPDATE report_business_question_sets SET order_id=${orderId} WHERE id=${questionSetId}`;
+  await sql`INSERT INTO report_v4_config_snapshots
+    (id,report_id,order_id,core_job_id,identity_hash,model_profile_id,model_profile_hash,model_profile_payload,
+      report_profile_id,report_profile_hash,report_profile_payload)
+    VALUES(${configSnapshotId},${reportId},${orderId},${coreJobId},${configSnapshotId.slice(10)},'model',
+      ${hashText(`model-${label}`)},'{}'::jsonb,'report',${hashText(`report-${label}`)},'{}'::jsonb)`;
+  await sql`INSERT INTO report_artifact_revisions
+    (id,report_id,order_id,job_id,config_snapshot_id,revision,revision_kind,artifact_contract,status,
+      payload_identity_hash,html_sha256,readiness,ready_at,activated_at)
+    VALUES(${coreArtifactRevisionId},${reportId},${orderId},${coreJobId},${configSnapshotId},1,'generation',
+      'combined_geo_report_v4','active',${hashText(`payload-${label}`)},${hashText(`html-${label}`)},
+      '{"htmlCanonical":true}'::jsonb,now(),now())`;
+  const scenario = await ledger.bindScenario({
+    sessionId: guard.sessionId, scenarioId: guard.scenarioId, reportId, orderId,
+    preAdmissionJobId: guard.jobId, coreJobId, enhancementJobId: null, siteSnapshotId, configSnapshotId,
+    questionSetId, coreArtifactRevisionId, enhancementArtifactRevisionId: null
+  });
+  return { guard, ledger, scenario, coreJobId };
+}
+
 function restoreEnvironment(): void {
   for (const [name, value] of Object.entries(previousEnvironment)) {
     if (value === undefined) delete process.env[name];
@@ -179,3 +280,4 @@ function restoreEnvironment(): void {
 
 function quote(value: string): string { return `"${value.replaceAll('"', '""')}"`; }
 function withDatabase(url: string, database: string): string { const parsed = new URL(url); parsed.pathname = `/${database}`; return parsed.toString(); }
+function hashText(value: string): string { return createHash("sha256").update(value).digest("hex"); }

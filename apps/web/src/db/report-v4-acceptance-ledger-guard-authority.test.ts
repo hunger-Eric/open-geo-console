@@ -15,6 +15,7 @@ import {
   reportV4ProhibitedOperationEventUnitId,
   reportV4ProhibitedOperationGuardRunId
 } from "./report-v4-prohibited-operation-guard";
+import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "@/report-v4/report-v4-acceptance-fingerprints";
 
 const sessionId = "11111111-1111-4111-8111-111111111111";
 const scenarioId = "22222222-2222-4222-8222-222222222222";
@@ -25,9 +26,7 @@ const zeroHash = "0".repeat(64);
 describe("Report V4 acceptance ledger and prohibited-operation guard authority", () => {
   it("projects a strict hash-safe baseline authority and commits phase to both canonical hashes", () => {
     const baseline = projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), snapshot());
-    const finalRaw = snapshot();
-    finalRaw.guardRuns[0]!.state = "completed";
-    finalRaw.guardRuns[0]!.completed_at = "2026-07-17T00:00:03.000000Z";
+    const finalRaw = faultSnapshot("question_failure");
     const final = projectReportV4AcceptanceLedgerGuardAuthority(input("final"), finalRaw);
 
     expect(baseline.ledgerAuthority.events).toHaveLength(1);
@@ -86,6 +85,125 @@ describe("Report V4 acceptance ledger and prohibited-operation guard authority",
     expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), count)).toThrow(/count|rows/iu);
   });
 
+  it("rejects cryptographically valid fault events that do not exactly match scenario semantics and lineage", () => {
+    const wrongOperation = faultSnapshot("diagnosis_failure");
+    wrongOperation.events[1]!.operation = "question_failure";
+    wrongOperation.events[1]!.details = { ...wrongOperation.events[1]!.details as object, fault: "question_failure" };
+    rechain(wrongOperation);
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("final"), wrongOperation))
+      .toThrow(/fault.*scenario|operation.*fault|semantic/iu);
+
+    const wrongUnit = faultSnapshot("question_failure");
+    wrongUnit.events[1]!.unit_id = "job-core:question-foreign";
+    rechain(wrongUnit);
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("final"), wrongUnit))
+      .toThrow(/fault.*unit|target|lineage/iu);
+
+    const duplicateOccurrence = faultSnapshot("question_failure");
+    duplicateOccurrence.events[2]!.details = {
+      ...duplicateOccurrence.events[2]!.details as object,
+      occurrence: 1
+    };
+    rechain(duplicateOccurrence);
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("final"), duplicateOccurrence))
+      .toThrow(/occurrence|expected.*fault/iu);
+
+    const wrongBaseline = faultSnapshot("question_failure");
+    wrongBaseline.events[1]!.details = {
+      ...wrongBaseline.events[1]!.details as object,
+      baselineFingerprint: "e".repeat(64)
+    };
+    rechain(wrongBaseline);
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("final"), wrongBaseline))
+      .toThrow(/baseline.*fingerprint|sealed.*baseline/iu);
+  });
+
+  it("rejects cryptographically valid HTML and activation events for foreign artifact revisions", () => {
+    const foreignHtml = snapshot();
+    appendEvent(foreignHtml, {
+      kind: "html_assembly", operation: "core_html", unit_id: "artifact-foreign", attempt: 0, phase: "started",
+      details: { artifactRevisionId: "artifact-foreign", htmlSha256: "c".repeat(64) }
+    });
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), foreignHtml))
+      .toThrow(/html.*artifact|scenario.*artifact|foreign/iu);
+
+    const foreignActivation = snapshot();
+    appendEvent(foreignActivation, {
+      kind: "artifact_activation", operation: "artifact_activation", unit_id: "artifact-foreign", attempt: 0,
+      phase: "observed", details: { artifactRevisionId: "artifact-foreign", htmlSha256: "c".repeat(64) }
+    });
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), foreignActivation))
+      .toThrow(/activation.*artifact|scenario.*artifact|foreign/iu);
+  });
+
+  it("preserves exact scenario-bound fault and artifact event behavior", () => {
+    const fault = faultSnapshot("question_failure");
+    expect(projectReportV4AcceptanceLedgerGuardAuthority(input("final"), fault).ledgerAuthority.events)
+      .toHaveLength(3);
+
+    const artifact = snapshot();
+    appendEvent(artifact, {
+      kind: "html_assembly", operation: "core_html", unit_id: "artifact-core", attempt: 0, phase: "started",
+      details: { artifactRevisionId: "artifact-core", htmlSha256: "c".repeat(64) }
+    });
+    appendEvent(artifact, {
+      kind: "artifact_activation", operation: "artifact_activation", unit_id: "artifact-core", attempt: 0,
+      phase: "observed", details: { artifactRevisionId: "artifact-core", htmlSha256: "c".repeat(64) }
+    });
+    expect(projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), artifact).ledgerAuthority.events)
+      .toHaveLength(3);
+  });
+
+  it("enforces pre-fault baseline and exact final fault phase topology", () => {
+    const finalWithoutFaults = snapshot();
+    finalWithoutFaults.guardRuns[0]!.state = "completed";
+    finalWithoutFaults.guardRuns[0]!.completed_at = "2026-07-17T00:00:04.000000Z";
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("final"), finalWithoutFaults))
+      .toThrow(/final.*fault|occurrences.*exact/iu);
+
+    const baselineAfterFault = faultSnapshot("question_failure");
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), baselineAfterFault))
+      .toThrow(/baseline.*pre-fault|baseline.*zero.*fault/iu);
+  });
+
+  it("rejects a stored and event baseline that agree with each other but not the real lineage formula", () => {
+    const forged = faultSnapshot("question_failure");
+    forged.scenario.baseline_fingerprint = "e".repeat(64);
+    for (const event of forged.events.filter((candidate) => candidate.kind === "fault_injection")) {
+      event.details = { ...event.details as object, baselineFingerprint: forged.scenario.baseline_fingerprint };
+    }
+    rechain(forged);
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("final"), forged))
+      .toThrow(/provenance|lineage.*fingerprint|recomputed.*baseline/iu);
+  });
+
+  it("accepts a collecting final with a derived baseline while preserving its NULL stored baseline", () => {
+    const collecting = faultSnapshot("question_failure");
+    const expectedBaseline = collecting.scenario.baseline_fingerprint;
+    collecting.scenario.baseline_fingerprint = null;
+    const authority = projectReportV4AcceptanceLedgerGuardAuthority(input("final"), collecting);
+    expect(authority.ledgerAuthority.scenario).toMatchObject({
+      baselineFingerprint: expectedBaseline,
+      storedBaselineFingerprint: null
+    });
+
+    const forgedEvent = faultSnapshot("question_failure");
+    forgedEvent.scenario.baseline_fingerprint = null;
+    forgedEvent.events[1]!.details = {
+      ...forgedEvent.events[1]!.details as object,
+      baselineFingerprint: "e".repeat(64)
+    };
+    rechain(forgedEvent);
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("final"), forgedEvent))
+      .toThrow(/provenance|lineage.*fingerprint|recomputed.*baseline/iu);
+
+    const sealed = faultSnapshot("question_failure");
+    sealed.scenario.state = "sealed";
+    sealed.scenario.terminal_at = "2026-07-17T00:00:05.000000Z";
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("final"), sealed))
+      .toThrow(/collecting.*scenario/iu);
+  });
+
   it("rejects missing, extra, duplicated, or incorrectly mapped guard counters", () => {
     const missing = snapshot();
     missing.guardCounters.pop();
@@ -123,12 +241,12 @@ describe("Report V4 acceptance ledger and prohibited-operation guard authority",
     baselineCompleted.guardRuns[0]!.completed_at = "2026-07-17T00:00:03.000000Z";
     expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), baselineCompleted)).toThrow(/baseline.*armed/iu);
 
-    const finalArmed = snapshot();
+    const finalArmed = faultSnapshot("question_failure");
+    finalArmed.guardRuns[0]!.state = "armed";
+    finalArmed.guardRuns[0]!.completed_at = null;
     expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("final"), finalArmed)).toThrow(/final.*completed/iu);
 
-    const completedNonzero = snapshot();
-    completedNonzero.guardRuns[0]!.state = "completed";
-    completedNonzero.guardRuns[0]!.completed_at = "2026-07-17T00:00:03.000000Z";
+    const completedNonzero = faultSnapshot("question_failure");
     completedNonzero.guardCounters[0]!.attempt_count = 1;
     completedNonzero.guardCounters[0]!.attempted_at = "2026-07-17T00:00:02.000000Z";
     addProhibitedEvent(completedNonzero, 0);
@@ -239,6 +357,72 @@ function addProhibitedEvent(raw: ReportV4AcceptanceLedgerGuardRawSnapshot, count
   raw.session.head_sequence = raw.events.length;
   raw.session.event_count = raw.events.length;
   raw.session.head_hash = event.event_hash;
+}
+
+function faultSnapshot(kind: "question_failure" | "diagnosis_failure"): ReportV4AcceptanceLedgerGuardRawSnapshot {
+  const raw = snapshot();
+  raw.scenario.kind = kind;
+  raw.scenario.fault_kind = kind;
+  if (kind === "diagnosis_failure") raw.scenario.enhancement_job_id = "job-enhancement";
+  if (kind === "diagnosis_failure") raw.scenario.enhancement_artifact_revision_id = "artifact-enhancement";
+  raw.scenario.baseline_fingerprint = scenarioBaselineFingerprint(raw.scenario);
+  const unitId = kind === "question_failure" ? "job-core:question-1" : "job-enhancement:question-1";
+  for (const occurrence of [1, 2] as const) {
+    appendEvent(raw, {
+      kind: "fault_injection", operation: kind, unit_id: unitId, attempt: occurrence, phase: "consumed",
+      details: { fault: kind, occurrence, baselineFingerprint: raw.scenario.baseline_fingerprint }
+    });
+  }
+  raw.guardRuns[0]!.state = "completed";
+  raw.guardRuns[0]!.completed_at = "2026-07-17T00:00:04.000000Z";
+  return raw;
+}
+
+function scenarioBaselineFingerprint(row: Record<string, unknown>): string {
+  return computeReportV4AcceptanceFaultProvenanceBaselineFingerprint({
+    sessionId: row.session_id as string, scenarioId: row.id as string,
+    reportId: row.report_id as string | null, orderId: row.order_id as string | null,
+    preAdmissionJobId: row.pre_admission_job_id as string | null, coreJobId: row.core_job_id as string | null,
+    enhancementJobId: row.enhancement_job_id as string | null, siteSnapshotId: row.site_snapshot_id as string | null,
+    configSnapshotId: row.config_snapshot_id as string | null, questionSetId: row.question_set_id as string | null,
+    coreArtifactRevisionId: row.core_artifact_revision_id as string | null,
+    enhancementArtifactRevisionId: row.enhancement_artifact_revision_id as string | null,
+    kind: row.kind as "success" | "diagnosis_failure" | "question_failure",
+    faultKind: row.fault_kind as "independent_source_read_failure" | "diagnosis_failure" | "question_failure",
+    faultQuestionId: row.fault_question_id as string, faultSourceId: row.fault_source_id as string | null,
+    expectedFaultOccurrences: row.expected_fault_occurrences as 1 | 2,
+    baselineFingerprint: row.baseline_fingerprint as string | null, finalFingerprint: row.final_fingerprint as string | null,
+    state: row.state as "collecting", createdAt: new Date(row.created_at as string), terminalAt: null
+  });
+}
+
+function appendEvent(raw: ReportV4AcceptanceLedgerGuardRawSnapshot, values: Record<string, unknown>): void {
+  const previous = raw.events.at(-1)!;
+  raw.events.push(eventRow({
+    sequence: previous.sequence as number + 1,
+    prev_hash: previous.event_hash,
+    occurred_at_canonical: `2026-07-17T00:00:0${raw.events.length + 1}.000000Z`,
+    ...values
+  }));
+  raw.session.head_sequence = raw.events.length;
+  raw.session.event_count = raw.events.length;
+  raw.session.head_hash = raw.events.at(-1)!.event_hash;
+}
+
+function rechain(raw: ReportV4AcceptanceLedgerGuardRawSnapshot): void {
+  let previousHash = zeroHash;
+  for (const [index, event] of raw.events.entries()) {
+    event.sequence = index + 1;
+    event.prev_hash = previousHash;
+    event.details_canonical = JSON.stringify(event.details);
+    event.recomputed_details_canonical = event.details_canonical;
+    event.idempotency_key = recomputeFingerprint(event);
+    event.event_hash = recomputeEventHash(event);
+    previousHash = event.event_hash as string;
+  }
+  raw.session.head_sequence = raw.events.length;
+  raw.session.event_count = raw.events.length;
+  raw.session.head_hash = previousHash;
 }
 
 function eventRow(input: Record<string, unknown>): Record<string, unknown> {
