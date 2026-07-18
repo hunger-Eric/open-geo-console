@@ -307,6 +307,14 @@ function validInput() {
         providerCallCount: 1,
         sourcePayloadHash: hash(`source-payload-${ordinal}`),
         sourceCount: 1,
+        sourceRecords: [{
+          questionIdHash: hash(`question-${ordinal}`),
+          sourceIdHash: hash(`source-${ordinal}`),
+          titleHash: hash(`source-title-${ordinal}`),
+          canonicalUrlHash: hash(`source-url-${ordinal}`),
+          citedTextHash: hash(`source-cited-${ordinal}`),
+          retrievalStatus: "not_checked" as const,
+        }],
         answerContentHash: hash(`answer-${ordinal}`),
         terminalFingerprint: hash(`question-terminal-${ordinal}`),
       })),
@@ -430,7 +438,14 @@ describe("Report V4 final commerce authority fingerprint", () => {
       (v) => void (v.emailAuthority.events[0].eventType = "email.opened"),
       (v) => void (v.accessTokens[0].lastUsedAt = null),
       (v) => void (v.artifacts[0].payloadIdentityHash = hash("changed")),
-      (v) => void (v.questionCheckpoints[0].sourceCount = 2),
+      (v) => {
+        v.questionCheckpoints[0].sourceCount = 2;
+        v.questionCheckpoints[0].sourceRecords.push({
+          ...v.questionCheckpoints[0].sourceRecords[0],
+          sourceIdHash: hash("second-question-source"),
+          canonicalUrlHash: hash("second-question-source-url"),
+        });
+      },
       (v) => {
         v.diagnosisCheckpoints[0].sourceAuditCount = 2;
         v.diagnosisCheckpoints[0].sourceAuditRecords.push({

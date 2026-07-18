@@ -194,7 +194,31 @@ function mapArtifact(r:Row):Row { return { idHash:sha(r.id),reportIdHash:sha(r.r
 
 function mapQuestionCheckpoint(r:Row):Row {
   const checkpoint={identityHash:r.identity_hash,reportId:r.report_id,jobId:r.job_id,questionSetId:r.question_set_id,questionId:r.question_id,snapshotId:r.snapshot_id,ordinal:r.ordinal,state:r.state,questionIdentityHash:r.question_identity_hash,modelConfigIdentityHash:r.model_config_identity_hash,inputIdentityHash:r.input_identity_hash,providerCallCount:r.provider_call_count,answerPayload:r.answer_payload,sourcePayload:r.source_payload,answerContentHash:r.answer_content_hash} as ReportV4QuestionCheckpoint;
-  return {identityHash:r.identity_hash,reportIdHash:sha(r.report_id),jobIdHash:sha(r.job_id),questionSetIdHash:sha(r.question_set_id),questionIdHash:sha(r.question_id),snapshotIdHash:sha(r.snapshot_id),ordinal:r.ordinal,state:r.state,questionIdentityHash:r.question_identity_hash,modelConfigIdentityHash:r.model_config_identity_hash,inputIdentityHash:r.input_identity_hash,providerCallCount:r.provider_call_count,sourcePayloadHash:sha(stableJson(r.source_payload)),sourceCount:arrayLength(r.source_payload,"source_payload"),answerContentHash:r.answer_content_hash,terminalFingerprint:computeReportV4QuestionTerminalCheckpointFingerprint(checkpoint)};
+  const sourceRecords=projectQuestionSourceRecords(r.source_payload,required(r.question_id,"question_id"));
+  return {identityHash:r.identity_hash,reportIdHash:sha(r.report_id),jobIdHash:sha(r.job_id),questionSetIdHash:sha(r.question_set_id),questionIdHash:sha(r.question_id),snapshotIdHash:sha(r.snapshot_id),ordinal:r.ordinal,state:r.state,questionIdentityHash:r.question_identity_hash,modelConfigIdentityHash:r.model_config_identity_hash,inputIdentityHash:r.input_identity_hash,providerCallCount:r.provider_call_count,sourcePayloadHash:sha(stableJson(r.source_payload)),sourceCount:arrayLength(r.source_payload,"source_payload"),sourceRecords,answerContentHash:r.answer_content_hash,terminalFingerprint:computeReportV4QuestionTerminalCheckpointFingerprint(checkpoint)};
+}
+
+function projectQuestionSourceRecords(value:unknown,checkpointQuestionId:string):Row[]{
+  if(!Array.isArray(value)||value.length>5)fail("source_payload must be an array of at most five rows");
+  const fields=["questionId","sourceId","title","canonicalUrl","citedText","retrievalStatus"],sourceIds=new Set<string>(),canonicalUrls=new Set<string>();
+  return value.map((item,index)=>{
+    const source=asRow(item,`question source ${index+1}`);
+    if(Object.keys(source).length!==fields.length||Object.keys(source).some((key)=>!fields.includes(key)))fail(`question source ${index+1} fields are not exact`);
+    const questionId=boundedText(source.questionId,`question source ${index+1} questionId`,500);
+    if(questionId!==checkpointQuestionId)fail("question source does not match its checkpoint question");
+    const sourceId=boundedText(source.sourceId,`question source ${index+1} sourceId`,500);
+    if(sourceIds.has(sourceId))fail("question sourceId values must be unique");
+    sourceIds.add(sourceId);
+    const canonicalUrl=httpUrl(source.canonicalUrl,`question source ${index+1} canonicalUrl`);
+    if(canonicalUrls.has(canonicalUrl))fail("question source canonical URL values must be unique after normalization");
+    canonicalUrls.add(canonicalUrl);
+    const title=boundedText(source.title,`question source ${index+1} title`,2000);
+    const citedText=source.citedText===null?null:boundedText(source.citedText,`question source ${index+1} citedText`,10000);
+    const retrievalStatus=source.retrievalStatus;
+    if(retrievalStatus!=="not_checked"&&retrievalStatus!=="available"&&retrievalStatus!=="inaccessible")fail(`question source ${index+1} retrievalStatus is invalid`);
+    return {questionIdHash:sha(questionId),sourceIdHash:sha(sourceId),titleHash:sha(title),canonicalUrlHash:sha(canonicalUrl),
+      citedTextHash:citedText===null?null:sha(citedText),retrievalStatus};
+  }).sort((left,right)=>required(left.sourceIdHash,"sourceIdHash").localeCompare(required(right.sourceIdHash,"sourceIdHash")));
 }
 function mapDiagnosisCheckpoint(r:Row):Row {
   const checkpoint={identityHash:r.identity_hash,reportId:r.report_id,enhancementJobId:r.enhancement_job_id,coreArtifactRevisionId:r.core_artifact_revision_id,configSnapshotId:r.config_snapshot_id,questionSetId:r.question_set_id,questionId:r.question_id,snapshotId:r.snapshot_id,ordinal:r.ordinal,state:r.state,inputIdentityHash:r.input_identity_hash,diagnosisInput:r.diagnosis_input_payload,providerCallCount:r.provider_call_count,sourceAudits:r.source_audit_payload,diagnosis:r.diagnosis_payload,diagnosisContentHash:r.diagnosis_content_hash} as ReportV4DiagnosisCheckpoint;

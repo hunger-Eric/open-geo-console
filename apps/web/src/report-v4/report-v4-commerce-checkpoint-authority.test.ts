@@ -22,6 +22,14 @@ const q = (
   providerCallCount: calls,
   sourcePayloadHash: h,
   sourceCount: state === "unavailable" ? 0 : 1,
+  sourceRecords: state === "unavailable" ? [] : [{
+    questionIdHash: h,
+    sourceIdHash: "b".repeat(64),
+    titleHash: h,
+    canonicalUrlHash: h,
+    citedTextHash: h,
+    retrievalStatus: "not_checked" as const,
+  }],
   answerContentHash: state === "answered" ? h : null,
   terminalFingerprint: h,
 });
@@ -82,6 +90,28 @@ describe("commerce checkpoint authority", () => {
       normalizeReportV4QuestionCheckpointAuthorities([a, a]),
     ).toThrow(/duplicate/);
   });
+  it("canonically sorts hash-safe question source records", () => {
+    const first = q().sourceRecords[0]!;
+    const sourceRecords = [
+      { ...first, sourceIdHash: "c".repeat(64), canonicalUrlHash: "c".repeat(64) },
+      { ...first, sourceIdHash: "b".repeat(64), canonicalUrlHash: "b".repeat(64) },
+    ];
+    const [normalized] = normalizeReportV4QuestionCheckpointAuthorities([{ ...q(), sourceCount: 2, sourceRecords }]);
+    expect(normalized?.sourceRecords.map((record) => record.sourceIdHash)).toEqual(["b".repeat(64), "c".repeat(64)]);
+  });
+  it.each([
+    { sourceCount: 0 },
+    { sourceRecords: [{ ...q().sourceRecords[0]!, questionIdHash: "c".repeat(64) }] },
+    { sourceRecords: [q().sourceRecords[0], q().sourceRecords[0]] },
+    { sourceRecords: [q().sourceRecords[0], { ...q().sourceRecords[0]!, sourceIdHash: "c".repeat(64) }] },
+    { sourceRecords: [{ ...q().sourceRecords[0]!, retrievalStatus: "unknown" }] },
+    { sourceRecords: [{ ...q().sourceRecords[0]!, canonicalUrl: "https://secret.example/" }] },
+    { sourceRecords: [{ ...q().sourceRecords[0]!, title: "secret title" }] },
+    { sourceRecords: [{ ...q().sourceRecords[0]!, citedText: "secret snippet" }] },
+    { sourceRecords: [{ ...q().sourceRecords[0]!, extra: h }] },
+  ])("rejects malformed or tampered question source authority", (change) =>
+    expect(() => normalizeReportV4QuestionCheckpointAuthorities([{ ...q(), ...change }])).toThrow(),
+  );
   it.each([
     { state: "queued" },
     { providerCallCount: 3 },
@@ -169,7 +199,11 @@ describe("commerce checkpoint authority", () => {
   it("does not expose raw fields", () =>
     expect(
       JSON.stringify(normalizeReportV4QuestionCheckpointAuthorities([q()])),
-    ).not.toMatch(/answerPayload|sourcePayload\W|questionText|canonicalUrl/));
+    ).not.toMatch(/answerPayload|sourcePayload\W|questionText|canonicalUrl(?!Hash)/));
+  it("does not expose question source plaintext", () => {
+    const serialized = JSON.stringify(normalizeReportV4QuestionCheckpointAuthorities([q()]));
+    expect(serialized).not.toMatch(/canonicalUrl\W|title\W|citedText\W|https?:\/\//iu);
+  });
   it("does not expose source-audit URL or summary plaintext", () => {
     const serialized = JSON.stringify(normalizeReportV4DiagnosisCheckpointAuthorities([d()]));
     expect(serialized).not.toMatch(/canonicalUrl\W|summary\W|https?:\/\//iu);

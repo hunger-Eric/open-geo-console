@@ -105,6 +105,10 @@ function createSnapshot(
       questionIdentityHash: hash(`question-identity-${ordinal}`), modelConfigIdentityHash: hash("model-config"),
       inputIdentityHash: hash(`question-input-${ordinal}`), providerCallCount: unavailable ? 0 as const : 1 as const,
       sourcePayloadHash: hash(`source-${ordinal}`), sourceCount: unavailable ? 0 : 1,
+      sourceRecords: unavailable ? [] : [{ questionIdHash: hash(`question-${ordinal}`),
+        sourceIdHash: hash(`source-${ordinal}`), titleHash: hash(`source-title-${ordinal}`),
+        canonicalUrlHash: hash(`source-url-${ordinal}`), citedTextHash: hash(`source-cited-${ordinal}`),
+        retrievalStatus: "not_checked" as const }],
       answerContentHash: unavailable ? null : hash(`answer-${ordinal}`), terminalFingerprint: hash(`question-terminal-${ordinal}`),
     };
   });

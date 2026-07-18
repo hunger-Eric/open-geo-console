@@ -132,7 +132,8 @@ describe("Report V4 commerce baseline/final comparator", () => {
     ["emailDeliveries", (value: MutableSnapshot) => void (value.emailAuthority.deliveries[0].attempts = 2)],
     ["emailEvents", (value: MutableSnapshot) => void (value.emailAuthority.events[0].eventType = "email.opened")],
     ["accessTokens", (value: MutableSnapshot) => void (value.accessTokens[0].lastUsedAt = finalAt)],
-    ["questionCheckpoints", (value: MutableSnapshot) => void (value.questionCheckpoints[0].sourceCount = 2)],
+    ["questionCheckpoints", (value: MutableSnapshot) =>
+      void (value.questionCheckpoints[0].sourceRecords[0].retrievalStatus = "available")],
   ] as const)("rejects a sealed post-baseline %s mutation", (component, mutate) => {
     const final = snapshot("success", "final");
     mutate(final);

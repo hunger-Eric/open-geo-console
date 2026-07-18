@@ -17,8 +17,18 @@ export interface ReportV4QuestionCheckpointAuthority {
   readonly providerCallCount: 0 | 1 | 2;
   readonly sourcePayloadHash: string;
   readonly sourceCount: number;
+  readonly sourceRecords: readonly ReportV4QuestionSourceAuthorityRecord[];
   readonly answerContentHash: string | null;
   readonly terminalFingerprint: string;
+}
+
+export interface ReportV4QuestionSourceAuthorityRecord {
+  readonly questionIdHash: string;
+  readonly sourceIdHash: string;
+  readonly titleHash: string;
+  readonly canonicalUrlHash: string;
+  readonly citedTextHash: string | null;
+  readonly retrievalStatus: "not_checked" | "available" | "inaccessible";
 }
 
 export interface ReportV4DiagnosisCheckpointAuthority {
@@ -75,6 +85,7 @@ const questionFields = [
   "providerCallCount",
   "sourcePayloadHash",
   "sourceCount",
+  "sourceRecords",
   "answerContentHash",
   "terminalFingerprint",
 ] as const;
@@ -123,6 +134,10 @@ function parseQuestion(
   const calls = count(r.providerCallCount);
   const answer = nullableHash(r.answerContentHash, "answerContentHash");
   const sourceCount = safeCount(r.sourceCount, 5);
+  const questionIdHash = hash(r.questionIdHash, "questionIdHash");
+  const sourceRecords = parseQuestionSourceRecords(r.sourceRecords, questionIdHash);
+  if (sourceRecords.length !== sourceCount)
+    throw new TypeError("sourceCount must equal sourceRecords length");
   if (state === "answered" && (calls < 1 || answer === null))
     throw new TypeError("answered cross constraint");
   if (state === "unavailable" && (answer !== null || sourceCount !== 0))
@@ -132,7 +147,7 @@ function parseQuestion(
     reportIdHash: hash(r.reportIdHash, "reportIdHash"),
     jobIdHash: hash(r.jobIdHash, "jobIdHash"),
     questionSetIdHash: hash(r.questionSetIdHash, "questionSetIdHash"),
-    questionIdHash: hash(r.questionIdHash, "questionIdHash"),
+    questionIdHash,
     snapshotIdHash: hash(r.snapshotIdHash, "snapshotIdHash"),
     questionIdentityHash: hash(r.questionIdentityHash, "questionIdentityHash"),
     modelConfigIdentityHash: hash(
@@ -145,9 +160,40 @@ function parseQuestion(
     providerCallCount: calls,
     sourcePayloadHash: hash(r.sourcePayloadHash, "sourcePayloadHash"),
     sourceCount,
+    sourceRecords,
     answerContentHash: answer,
     terminalFingerprint: hash(r.terminalFingerprint, "terminalFingerprint"),
   };
+}
+function parseQuestionSourceRecords(
+  value: unknown,
+  checkpointQuestionIdHash: string,
+): readonly ReportV4QuestionSourceAuthorityRecord[] {
+  if (!Array.isArray(value) || value.length > 5)
+    throw new TypeError("sourceRecords must be an array of at most five rows");
+  const fields = ["questionIdHash", "sourceIdHash", "titleHash", "canonicalUrlHash", "citedTextHash", "retrievalStatus"] as const;
+  const sourceIds = new Set<string>();
+  const canonicalUrls = new Set<string>();
+  return value.map((item) => {
+    const r = record(item, fields);
+    const questionIdHash = hash(r.questionIdHash, "sourceRecords.questionIdHash");
+    if (questionIdHash !== checkpointQuestionIdHash)
+      throw new TypeError("source record question must equal checkpoint question");
+    const sourceIdHash = hash(r.sourceIdHash, "sourceRecords.sourceIdHash");
+    if (sourceIds.has(sourceIdHash)) throw new TypeError("duplicate source record sourceIdHash");
+    sourceIds.add(sourceIdHash);
+    const canonicalUrlHash = hash(r.canonicalUrlHash, "sourceRecords.canonicalUrlHash");
+    if (canonicalUrls.has(canonicalUrlHash)) throw new TypeError("duplicate source record canonicalUrlHash");
+    canonicalUrls.add(canonicalUrlHash);
+    return {
+      questionIdHash,
+      sourceIdHash,
+      titleHash: hash(r.titleHash, "sourceRecords.titleHash"),
+      canonicalUrlHash,
+      citedTextHash: nullableHash(r.citedTextHash, "sourceRecords.citedTextHash"),
+      retrievalStatus: literal(r.retrievalStatus, ["not_checked", "available", "inaccessible"]),
+    };
+  }).sort((left, right) => left.sourceIdHash.localeCompare(right.sourceIdHash));
 }
 function parseDiagnosis(
   value: unknown,

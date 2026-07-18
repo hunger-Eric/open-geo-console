@@ -194,6 +194,43 @@ describe("Report V4 commerce authority snapshot projector", () => {
     expect(serialized).not.toContain("Audited evidence 1.");
   });
 
+  it("projects question sources as canonical hash-safe records without plaintext", async () => {
+    const rows = protectedFinalFixture("success");
+    const result = await load(rows, [], "final");
+    const checkpoint = result.questionCheckpoints.find((item) => item.ordinal === 1)!;
+    expect(checkpoint.sourceCount).toBe(1);
+    expect(checkpoint.sourceRecords).toEqual([{
+      questionIdHash: sha("question-1"),
+      sourceIdHash: sha("source-1"),
+      titleHash: sha("Source 1"),
+      canonicalUrlHash: sha("https://source-1.example/evidence"),
+      citedTextHash: sha("Evidence 1."),
+      retrievalStatus: "available",
+    }]);
+    const sourcePayload = rows.questionCheckpoints.find((item) => item.ordinal === 1)!.source_payload;
+    expect(checkpoint.sourcePayloadHash).toBe(sha(stableTestJson(sourcePayload)));
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("https://source-1.example/evidence");
+    expect(serialized).not.toContain("Source 1");
+    expect(serialized).not.toContain("Evidence 1.");
+  });
+
+  it.each([
+    ["extra field", (source: Record<string, unknown>) => ({ ...source, extra: "plaintext" }), /fields.*exact/iu],
+    ["duplicate source ID", (source: Record<string, unknown>) => [source, { ...source, canonicalUrl: "https://other.example/evidence" }], /sourceId.*unique/iu],
+    ["duplicate normalized URL", (source: Record<string, unknown>) => [source, { ...source, sourceId: "source-alias",
+      canonicalUrl: "https://source-1.example:443/evidence#duplicate" }], /canonical URL.*unique.*normalization/iu],
+    ["wrong status", (source: Record<string, unknown>) => ({ ...source, retrievalStatus: "unknown" }), /retrievalStatus.*invalid/iu],
+    ["wrong question", (source: Record<string, unknown>) => ({ ...source, questionId: "foreign-question" }), /checkpoint question/iu],
+  ] as const)("rejects raw question source %s", async (_label, mutate, pattern) => {
+    const rows = protectedFinalFixture("success");
+    const checkpoint = rows.questionCheckpoints.find((item) => item.ordinal === 1)!;
+    const source = (checkpoint.source_payload as Record<string, unknown>[])[0]!;
+    const changed = mutate(source);
+    checkpoint.source_payload = Array.isArray(changed) ? changed : [changed];
+    await expect(load(rows, [], "final")).rejects.toThrow(pattern);
+  });
+
   it("rejects distinct source IDs that collapse to one normalized canonical URL", async () => {
     const rows = protectedFinalFixture("success");
     const diagnosis = rows.diagnosisCheckpoints.find((item) => item.ordinal === 1)!;
