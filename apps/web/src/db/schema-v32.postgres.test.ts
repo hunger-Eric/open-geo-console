@@ -12,6 +12,7 @@ import {
   V36_DATABASE_MIGRATIONS,
   V37_DATABASE_MIGRATIONS,
   V38_DATABASE_MIGRATIONS,
+  V39_DATABASE_MIGRATIONS,
   databaseMigrationsAfter
 } from "./migrations";
 
@@ -36,7 +37,8 @@ describe("schema v32 terminal V4 page-summary binding", () => {
       ...V35_DATABASE_MIGRATIONS,
       ...V36_DATABASE_MIGRATIONS,
       ...V37_DATABASE_MIGRATIONS,
-      ...V38_DATABASE_MIGRATIONS
+      ...V38_DATABASE_MIGRATIONS,
+      ...V39_DATABASE_MIGRATIONS
     ]);
     const sql = V32_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("ogc_js_source_location_length");
@@ -66,6 +68,7 @@ describeDisposablePostgres("schema V31 to V32 page-summary migration", () => {
         - V36_DATABASE_MIGRATIONS.length
         - V37_DATABASE_MIGRATIONS.length
         - V38_DATABASE_MIGRATIONS.length
+        - V39_DATABASE_MIGRATIONS.length
     );
     await sql.begin(async (tx) => { for (const statement of throughV30) await tx.unsafe(statement); });
     await seedLegacyV30(sql);
