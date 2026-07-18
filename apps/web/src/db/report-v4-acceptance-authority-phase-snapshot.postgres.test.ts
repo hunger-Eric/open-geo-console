@@ -25,8 +25,7 @@ import {
 } from "./report-v4-artifact-persistence";
 import {
   createPostgresReportV4AcceptanceLedgerStore,
-  createReportV4AcceptanceLedgerRepository,
-  type ReportV4AcceptanceScenario
+  createReportV4AcceptanceLedgerRepository
 } from "./report-v4-acceptance-ledger";
 import {
   createPostgresReportV4AcceptanceSiteReadManifestStore,
@@ -152,11 +151,7 @@ describe("Report V4 complete authority phase PostgreSQL 17 acceptance", () => {
       .rejects.toThrow(/worker|collecting|stale/iu);
 
     await prepareFinalCheckpoints(sql, seeded);
-    const baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(seeded.boundScenario);
-    for (const occurrence of [1, 2] as const) await seeded.ledger.appendEvent({ sessionId: seeded.session,
-      scenarioId: seeded.scenario, kind: "fault_injection", operation: "question_failure",
-      unitId: `${seeded.core}:${seeded.faultQuestionId}`, attempt: occurrence, phase: "consumed",
-      details: { fault: "question_failure", occurrence, baselineFingerprint } });
+    const { baselineFingerprint } = seeded;
     await expect(persistReportV4AcceptanceAuthorityPhaseSnapshot(sql as never,
       persistenceInput(seeded, "baseline", baseline))).rejects.toThrow(/head|stale|collecting authority/iu);
     await withReportV4ProhibitedOperationGuard(seeded.guard, async () => "ok");
@@ -191,11 +186,6 @@ describe("Report V4 complete authority phase PostgreSQL 17 acceptance", () => {
   it("rejects final before baseline and baseline after final through the public persistence boundary", async () => {
     const finalFirst = await seedScenario(sql, "final-first");
     await prepareFinalCheckpoints(sql, finalFirst);
-    const finalFirstFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(finalFirst.boundScenario);
-    for (const occurrence of [1, 2] as const) await finalFirst.ledger.appendEvent({ sessionId: finalFirst.session,
-      scenarioId: finalFirst.scenario, kind: "fault_injection", operation: "question_failure",
-      unitId: `${finalFirst.core}:${finalFirst.faultQuestionId}`, attempt: occurrence, phase: "consumed",
-      details: { fault: "question_failure", occurrence, baselineFingerprint: finalFirstFingerprint } });
     await withReportV4ProhibitedOperationGuard(finalFirst.guard, async () => "ok");
     const finalPayload = await load(finalFirst, "final");
     await expect(persistReportV4AcceptanceAuthorityPhaseSnapshot(sql as never,
@@ -205,11 +195,6 @@ describe("Report V4 complete authority phase PostgreSQL 17 acceptance", () => {
     const baseline = await load(ordered, "baseline");
     await persistReportV4AcceptanceAuthorityPhaseSnapshot(sql as never, persistenceInput(ordered, "baseline", baseline));
     await prepareFinalCheckpoints(sql, ordered);
-    const fingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(ordered.boundScenario);
-    for (const occurrence of [1, 2] as const) await ordered.ledger.appendEvent({ sessionId: ordered.session,
-      scenarioId: ordered.scenario, kind: "fault_injection", operation: "question_failure",
-      unitId: `${ordered.core}:${ordered.faultQuestionId}`, attempt: occurrence, phase: "consumed",
-      details: { fault: "question_failure", occurrence, baselineFingerprint: fingerprint } });
     await withReportV4ProhibitedOperationGuard(ordered.guard, async () => "ok");
     const final = await load(ordered, "final");
     await persistReportV4AcceptanceAuthorityPhaseSnapshot(sql as never, persistenceInput(ordered, "final", final));
@@ -225,9 +210,9 @@ describe("Report V4 complete authority phase PostgreSQL 17 acceptance", () => {
 
 interface Seeded {
   session: string; scenario: string; report: string; order: string; snapshot: string; pre: string; core: string; config: string;
-  questions: string; artifact: string; faultQuestionId: string; guard: Awaited<ReturnType<typeof armReportV4ProhibitedOperationGuard>>;
+  questions: string; artifact: string; guard: Awaited<ReturnType<typeof armReportV4ProhibitedOperationGuard>>;
   ledger: ReturnType<typeof createReportV4AcceptanceLedgerRepository>;
-  boundScenario: ReportV4AcceptanceScenario;
+  baselineFingerprint: string;
 }
 
 async function seedScenario(sql: postgres.Sql, label: string): Promise<Seeded> {
@@ -312,9 +297,18 @@ async function seedScenario(sql: postgres.Sql, label: string): Promise<Seeded> {
     protectedAliasUrl: `https://${label}.preview.example`, webGitSha: WORKER_SHA, workerGitSha: WORKER_SHA });
   await ledger.createScenario({ sessionId: session, scenarioId: scenario, kind: "question_failure",
     faultKind: "question_failure", faultQuestionId, expectedFaultOccurrences: 2 });
-  const boundScenario = await ledger.bindScenario({ sessionId: session, scenarioId: scenario, reportId: report, orderId: order,
+  const initiallyBoundScenario = await ledger.bindScenario({ sessionId: session, scenarioId: scenario, reportId: report, orderId: order,
     preAdmissionJobId: pre, coreJobId: core, enhancementJobId: null, siteSnapshotId: snapshot, configSnapshotId: config,
     questionSetId: questions, coreArtifactRevisionId: artifact, enhancementArtifactRevisionId: null });
+  const baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(initiallyBoundScenario);
+  const fingerprintRows = await sql`UPDATE report_v4_acceptance_scenarios SET baseline_fingerprint=${baselineFingerprint}
+    WHERE id=${scenario} AND session_id=${session} AND state='collecting' AND baseline_fingerprint IS NULL
+    RETURNING baseline_fingerprint`;
+  if (fingerprintRows.length !== 1) throw new Error("The question-failure fixture could not establish its baseline fingerprint.");
+  for (const occurrence of [1, 2] as const) await ledger.appendEvent({ sessionId: session, scenarioId: scenario,
+    kind: "fault_injection", operation: "question_failure", unitId: `${core}:${faultQuestionId}`,
+    attempt: occurrence, phase: "consumed",
+    details: { fault: "question_failure", occurrence, baselineFingerprint } });
   const manifest = createReportV4AcceptanceSiteReadManifestRepository(
     createPostgresReportV4AcceptanceSiteReadManifestStore(sql), environment);
   const read = await manifest.begin({ sessionId: session, scenarioId: scenario, reportId: report, jobId: pre,
@@ -333,7 +327,8 @@ async function seedScenario(sql: postgres.Sql, label: string): Promise<Seeded> {
     VALUES(${`token-${suffix}`},${report},'v4',${hash(`token-${suffix}`)},'combined_geo_report_v4',now()+interval '1 day')`;
   const guard = await armReportV4ProhibitedOperationGuard({ sessionId: session, scenarioId: scenario, jobId: core,
     workerGitSha: WORKER_SHA }, environment);
-  return { session, scenario, report, order, snapshot, pre, core, config, questions, artifact, faultQuestionId, guard, ledger, boundScenario };
+  return { session, scenario, report, order, snapshot, pre, core, config, questions, artifact, guard, ledger,
+    baselineFingerprint };
 }
 
 async function prepareFinalCheckpoints(sql: postgres.Sql, seeded: Seeded): Promise<void> {
