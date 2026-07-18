@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { databaseMigrationsAfter } from "./migrations";
 import {
+  createPostgresReportV4AcceptanceLedgerStore,
   createReportV4AcceptanceLedgerRepository,
   type ReportV4AcceptanceLedgerStore
 } from "./report-v4-acceptance-ledger";
@@ -80,6 +81,52 @@ describe("Report V4 protected-Staging acceptance ledger validation", () => {
       scenarioId: "22222222-2222-4222-8222-222222222222", kind: "prohibited_operation",
       operation: "unknown", unitId: "unknown", attempt: 0, phase: "started", details: {} } as never))
       .rejects.toThrow(/kind, operation, phase/u);
+  });
+
+  it("serializes event details before the postgres-js parameter boundary", async () => {
+    const sessionId = session().sessionId;
+    const scenarioId = "22222222-2222-4222-8222-222222222222";
+    const bindingHash = "b".repeat(64);
+    let insertParameters: readonly unknown[] = [];
+    const transaction = Object.assign((strings: TemplateStringsArray, ...parameters: unknown[]) => {
+      const source = strings.join("?");
+      if (source.includes("FROM report_v4_acceptance_sessions")) {
+        return Promise.resolve([{
+          id: sessionId, environment: "protected_staging", preview_deployment_id: "dpl_preview_1",
+          protected_alias_url: "https://preview.example", web_git_sha: "a".repeat(40), worker_git_sha: "a".repeat(40),
+          state: "collecting", head_sequence: 0, head_hash: "0".repeat(64), event_count: 0,
+          started_at: new Date("2026-07-18T00:00:00.000Z"), terminal_at: null
+        }]);
+      }
+      if (source.includes("WHERE idempotency_key")) return Promise.resolve([]);
+      if (source.includes("SELECT state FROM report_v4_acceptance_scenarios")) return Promise.resolve([{ state: "collecting" }]);
+      if (source.includes("INSERT INTO report_v4_acceptance_events")) {
+        insertParameters = parameters;
+        return Promise.resolve([{
+          idempotency_key: parameters[0], session_id: sessionId, scenario_id: scenarioId, sequence: 1,
+          kind: "scenario_bound", operation: "v4_dispatch", unit_id: "pre-admission-job", attempt: 0, phase: "observed",
+          details: JSON.parse(parameters[9] as string), details_canonical: JSON.stringify({ bindingHash }),
+          prev_hash: "0".repeat(64), event_hash: "c".repeat(64),
+          occurred_at: new Date("2026-07-18T00:00:00.000Z"), occurred_at_canonical: "2026-07-18T00:00:00.000000Z"
+        }]);
+      }
+      throw new Error(`Unexpected SQL in parameter-boundary regression: ${source}`);
+    }, {
+      json: vi.fn((value: unknown) => ({ value, type: 3802 }))
+    });
+    const sql = Object.assign(transaction, {
+      begin: vi.fn(async (operation: (tx: typeof transaction) => Promise<unknown>) => operation(transaction))
+    });
+
+    const result = await createPostgresReportV4AcceptanceLedgerStore(sql as never).appendEvent({
+      sessionId, scenarioId, kind: "scenario_bound", operation: "v4_dispatch", unitId: "pre-admission-job",
+      attempt: 0, phase: "observed", details: { bindingHash }
+    });
+
+    expect(result.inserted).toBe(true);
+    expect(transaction.json).not.toHaveBeenCalled();
+    expect(insertParameters[9]).toBe(JSON.stringify({ bindingHash }));
+    expect(insertParameters.every((parameter) => parameter === null || typeof parameter !== "object")).toBe(true);
   });
 });
 

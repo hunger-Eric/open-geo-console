@@ -336,7 +336,7 @@ async function appendPostgresEvent(tx: postgres.TransactionSql, input: AppendRep
   const rows = await tx`INSERT INTO report_v4_acceptance_events
     (idempotency_key,session_id,scenario_id,sequence,kind,operation,unit_id,attempt,phase,details,prev_hash,event_hash)
     VALUES(${idempotencyKey},${input.sessionId},${input.scenarioId},${session.headSequence + 1},${input.kind},${input.operation},
-      ${input.unitId},${input.attempt},${input.phase},${tx.json(input.details)}::jsonb,${session.headHash},${ZERO_HASH}) RETURNING *`;
+      ${input.unitId},${input.attempt},${input.phase},${stableJson(input.details)}::jsonb,${session.headHash},${ZERO_HASH}) RETURNING *`;
   return { event: mapEventRequired(rows[0]), inserted: true };
 }
 
