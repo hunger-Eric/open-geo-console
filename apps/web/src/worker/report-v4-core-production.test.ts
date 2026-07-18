@@ -174,6 +174,33 @@ describe("Report V4 core production composition", () => {
     await harness.run(input());
 
     expect(harness.events).not.toContain("oversized-token-probe");
+    expect(harness.events).not.toContain("capture-baseline");
+  });
+
+  it("captures the acceptance baseline after the existing post-terminal hook and before enhancement enqueue", async () => {
+    const revisionId = buildReportV4CoreArtifactRevisionId(input());
+    const harness = productionHarness({ acceptanceRuntime: acceptanceRuntime(),
+      existingArtifact: report(revisionId), context: settledContext(revisionId) });
+
+    await harness.run(input());
+
+    expect(harness.events.slice(-4)).toEqual([
+      "terminalize-core", "after-terminalize", "capture-baseline", "enqueue-enhancement"
+    ]);
+  });
+
+  it("does not enqueue enhancement when acceptance baseline capture fails", async () => {
+    const revisionId = buildReportV4CoreArtifactRevisionId(input());
+    const harness = productionHarness({
+      acceptanceRuntime: acceptanceRuntime(),
+      existingArtifact: report(revisionId),
+      context: settledContext(revisionId),
+      baselineCaptureError: new Error("baseline capture failed closed")
+    });
+
+    await expect(harness.run(input())).rejects.toThrow("baseline capture failed closed");
+    expect(harness.events.slice(-3)).toEqual(["terminalize-core", "after-terminalize", "capture-baseline"]);
+    expect(harness.events).not.toContain("enqueue-enhancement");
   });
 
   it("maps only the exact protected-Staging question drill to a retryable provider failure", async () => {
@@ -216,6 +243,7 @@ interface HarnessOptions {
   unavailableQuestions?: number;
   acceptanceRuntime?: ReportV4CoreAcceptanceRuntime;
   oversizedTokenProbeError?: Error;
+  baselineCaptureError?: Error;
 }
 
 function productionHarness(options: HarnessOptions = {}) {
@@ -238,6 +266,12 @@ function productionHarness(options: HarnessOptions = {}) {
       events.push("oversized-token-probe");
       expect(runtime).toBe(options.acceptanceRuntime);
       if (options.oversizedTokenProbeError) throw options.oversizedTokenProbeError;
+    },
+    async captureAcceptanceBaseline(execution, runtime) {
+      events.push("capture-baseline");
+      expect(execution.input.coreJobId).toBe(input().coreJobId);
+      expect(runtime).toBe(options.acceptanceRuntime);
+      if (options.baselineCaptureError) throw options.baselineCaptureError;
     },
     ...(options.acceptanceRuntime ? {
       async loadAcceptanceRuntime() {

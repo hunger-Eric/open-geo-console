@@ -79,6 +79,7 @@ import {
   type ReportV4CoreAcceptanceRuntime
 } from "./report-v4-core-acceptance";
 import { runReportV4OversizedTokenAcceptanceProbe } from "./report-v4-oversized-token-acceptance-probe";
+import { captureReportV4AcceptancePhase } from "./report-v4-acceptance-phase-capture";
 
 export interface ReportV4CoreProductionInput {
   readonly reportId: string;
@@ -138,6 +139,10 @@ export interface ReportV4CoreProductionDependencies {
     execution: ReportV4CoreProductionExecution,
     acceptanceRuntime?: ReportV4CoreAcceptanceRuntime | null
   ) => ReportV4CoreStageDependencies;
+  readonly captureAcceptanceBaseline?: (
+    execution: ReportV4CoreProductionExecution,
+    acceptanceRuntime: ReportV4CoreAcceptanceRuntime
+  ) => Promise<void>;
 }
 
 /**
@@ -238,7 +243,22 @@ export function createReportV4CoreProductionWithDependencies(
         { order: 3; questionId: string; questionText: string }
       ];
 
-    const stageDependencies = dependencies.createCoreStageDependencies(execution, acceptanceRuntime);
+    const baseStageDependencies = dependencies.createCoreStageDependencies(execution, acceptanceRuntime);
+    let stageDependencies = baseStageDependencies;
+    if (acceptanceRuntime) {
+      if (!dependencies.captureAcceptanceBaseline) {
+        throw new Error("The protected Report V4 Core acceptance runtime requires the baseline phase-capture boundary.");
+      }
+      const captureBaseline = dependencies.captureAcceptanceBaseline;
+      const existingAfterTerminalized = baseStageDependencies.afterCoreCommercialTerminalized;
+      stageDependencies = {
+        ...baseStageDependencies,
+        async afterCoreCommercialTerminalized(hookInput) {
+          if (existingAfterTerminalized) await existingAfterTerminalized(hookInput);
+          await captureBaseline(execution, acceptanceRuntime);
+        }
+      };
+    }
     const observedStageDependencies = withReportV4CoreAcceptanceStageDependencies({
       dependencies: stageDependencies,
       runtime: acceptanceRuntime,
@@ -314,6 +334,23 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
         modelRuntime: execution.modelRuntime,
         acceptanceRuntime,
         signal: execution.input.signal
+      });
+    },
+    async captureAcceptanceBaseline(execution, acceptanceRuntime) {
+      if (acceptanceRuntime.observer.scenario.coreJobId !== execution.input.coreJobId) {
+        throw new Error("The acceptance baseline phase requires the observer's exact Core job lineage.");
+      }
+      const runtimeWorkerGitSha = options.environment.OGC_DEPLOYMENT_VERSION;
+      if (!runtimeWorkerGitSha || runtimeWorkerGitSha !== acceptanceRuntime.observer.session.workerGitSha) {
+        throw new Error("The acceptance baseline phase requires the exact Core runtime Worker Git SHA.");
+      }
+      await captureReportV4AcceptancePhase({
+        sql: getSqlClient(),
+        sessionId: acceptanceRuntime.observer.session.sessionId,
+        scenarioId: acceptanceRuntime.observer.scenario.scenarioId,
+        phase: "baseline",
+        workerGitSha: runtimeWorkerGitSha,
+        observer: acceptanceRuntime.observer
       });
     },
     createCoreStageDependencies(execution, acceptanceRuntime = null) {
