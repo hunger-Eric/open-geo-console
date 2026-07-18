@@ -32,6 +32,13 @@ export interface ReportV4MimoSiteSynthesisProvider {
   readonly synthesizeWebsite: (input: ReportV4MimoWebsiteSynthesisInput, signal: AbortSignal) => Promise<ReportV4WebsiteSynthesisOutput>;
 }
 
+export class ReportV4MimoSiteSynthesisOutputError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "ReportV4MimoSiteSynthesisOutputError";
+  }
+}
+
 export function buildReportV4MimoPageAnalysisTokenBudget(runtime: ReportV4ModelRuntimeConfig, input: ReportV4MimoPageAnalysisInput): ReturnType<typeof buildReportV4MimoStructuredTokenBudget> {
   const canonical = canonicalPageInput(input);
   return buildReportV4MimoStructuredTokenBudget(runtime, pageInvocation(canonical, new AbortController().signal));
@@ -50,7 +57,15 @@ export function createReportV4MimoSiteSynthesisProvider(
     async analyzePage(input: ReportV4MimoPageAnalysisInput, signal: AbortSignal) {
       const canonical = canonicalPageInput(input);
       const value = await invoker.invoke(pageInvocation(canonical, signal));
-      return parseReportV4PageAnalysisOutput(value, canonical.context);
+      try {
+        return parseReportV4PageAnalysisOutput(value, canonical.context);
+      } catch (error) {
+        signal.throwIfAborted();
+        throw new ReportV4MimoSiteSynthesisOutputError(
+          "MiMo returned an invalid V4 page-analysis contract.",
+          { cause: error }
+        );
+      }
     },
     async synthesizeWebsite(input: ReportV4MimoWebsiteSynthesisInput, signal: AbortSignal) {
       const value = await invoker.invoke(websiteInvocation(canonicalWebsiteInput(input), signal));

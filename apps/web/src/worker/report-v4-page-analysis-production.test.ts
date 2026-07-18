@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ReportV4MimoSiteSynthesisOutputError } from "../report-v4/mimo-site-synthesis-provider";
 import { createReportV4ProductionPageAnalysis } from "./report-v4-page-analysis-production";
 
 // @requirement GEO-V4-TOKEN-01
@@ -34,7 +35,31 @@ describe("production V4 page-analysis adapter", () => {
     const h = harness();
     await expect(h.run(base)).resolves.toMatchObject({ providerCalls: 1, reused: false, summary });
     expect(h.analyze).toHaveBeenCalledWith({ context: expect.objectContaining({ pageId: "p1", sourceLength: 8 }), retainedText: "retained" }, base.signal);
-    expect(h.persist).toHaveBeenCalledWith(expect.objectContaining({ reportId: "r1", snapshotId: "s1", pageId: "p1", output: { chunks: summary.chunks } }));
+    expect(h.persist).toHaveBeenCalledWith(expect.objectContaining({
+      reportId: "r1",
+      snapshotId: "s1",
+      pageId: "p1",
+      output: { chunks: [expect.objectContaining({ sourceLocations: [expect.objectContaining({ locationId: expect.stringMatching(/^location-[a-f0-9]{64}-1-1$/u) })] })] }
+    }));
+  });
+
+  it("retries one classified provider-contract failure and counts both calls", async () => {
+    const h = harness();
+    h.analyze
+      .mockRejectedValueOnce(new ReportV4MimoSiteSynthesisOutputError("invalid output"))
+      .mockResolvedValueOnce(summary);
+
+    await expect(h.run(base)).resolves.toMatchObject({ providerCalls: 2, reused: false, summary });
+    expect(h.analyze).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry unclassified provider failures", async () => {
+    const h = harness();
+    h.analyze.mockRejectedValueOnce(new Error("transport failed"));
+
+    await expect(h.run(base)).rejects.toThrow(/transport failed/i);
+    expect(h.analyze).toHaveBeenCalledTimes(1);
+    expect(h.persist).not.toHaveBeenCalled();
   });
 
   it("rejects malicious identity before loading", async () => {

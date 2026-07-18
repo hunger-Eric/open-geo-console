@@ -1,4 +1,5 @@
 import type { ReportV4PageAnalysisContext, ReportV4PageSummary } from "@open-geo-console/ai-report-engine";
+import { createHash } from "node:crypto";
 import {
   loadReportV4PageSummaryByExactLineage,
   type ReportV4PageSummaryRepository,
@@ -6,6 +7,7 @@ import {
 } from "../db/report-v4-page-summaries";
 import {
   createReportV4MimoSiteSynthesisProvider,
+  ReportV4MimoSiteSynthesisOutputError,
   type ReportV4MimoSiteSynthesisProvider
 } from "../report-v4/mimo-site-synthesis-provider";
 import type { ProviderDependencies } from "../report-v4/mimo-provider";
@@ -32,9 +34,11 @@ export interface ReportV4ProductionPageAnalysisDependencies {
 
 export interface ReportV4ProductionPageAnalysisResult {
   readonly summary: ReportV4PageSummary;
-  readonly providerCalls: 0 | 1;
+  readonly providerCalls: 0 | 1 | 2;
   readonly reused: boolean;
 }
+
+const MAX_PAGE_ANALYSIS_PROVIDER_ATTEMPTS = 2;
 
 export function createReportV4ProductionPageAnalysis(
   dependencies: ReportV4ProductionPageAnalysisDependencies
@@ -55,12 +59,34 @@ export function createReportV4ProductionPageAnalysis(
       readability: input.readability,
       sourceLength: input.sourceLength
     };
-    const analyzed = await dependencies.provider.analyzePage({ context, retainedText: input.retainedText }, input.signal);
+    let analyzed: ReportV4PageSummary | null = null;
+    let providerCalls: 0 | 1 | 2 = 0;
+    for (let attempt = 1; attempt <= MAX_PAGE_ANALYSIS_PROVIDER_ATTEMPTS; attempt += 1) {
+      input.signal.throwIfAborted();
+      providerCalls = attempt as 1 | 2;
+      try {
+        analyzed = await dependencies.provider.analyzePage({ context, retainedText: input.retainedText }, input.signal);
+        break;
+      } catch (error) {
+        input.signal.throwIfAborted();
+        if (!(error instanceof ReportV4MimoSiteSynthesisOutputError) || attempt === MAX_PAGE_ANALYSIS_PROVIDER_ATTEMPTS) {
+          throw error;
+        }
+      }
+    }
+    if (!analyzed) throw new Error("The V4 page-analysis provider returned no validated output.");
     input.signal.throwIfAborted();
     if (analyzed.pageId !== input.pageId || analyzed.url !== input.url || analyzed.contentHash !== input.contentHash
       || analyzed.readability !== input.readability || analyzed.sourceLength !== input.sourceLength) {
       throw new Error("The V4 page-analysis provider returned drifted page identity.");
     }
+    const canonicalChunks = analyzed.chunks.map((chunk) => Object.freeze({
+      ...chunk,
+      sourceLocations: Object.freeze(chunk.sourceLocations.map((location, locationIndex) => Object.freeze({
+        ...location,
+        locationId: canonicalLocationId(input.pageId, chunk.order, locationIndex + 1)
+      })))
+    }));
     const persisted = await persist({
       reportId: input.reportId,
       snapshotId: input.siteSnapshotId,
@@ -69,10 +95,15 @@ export function createReportV4ProductionPageAnalysis(
       contentHash: input.contentHash,
       readability: input.readability,
       sourceLength: input.sourceLength,
-      output: { chunks: analyzed.chunks }
+      output: { chunks: canonicalChunks }
     });
-    return Object.freeze({ summary: persisted.summary, providerCalls: 1, reused: false });
+    return Object.freeze({ summary: persisted.summary, providerCalls, reused: false });
   };
+}
+
+function canonicalLocationId(pageId: string, chunkOrder: number, locationOrder: number): string {
+  const pageIdentity = createHash("sha256").update(pageId).digest("hex");
+  return `location-${pageIdentity}-${chunkOrder}-${locationOrder}`;
 }
 
 export function createReportV4ProductionPageAnalysisWithLockedProfile(input: {

@@ -277,9 +277,24 @@ async function loadWithStore(
         throw new Error("Persisted V4 page-summary terminal lineage drift was detected.");
       }
     }
-    assertWebsiteSynthesisBounds(parsed.map(({ summary }) => summary));
-    return deepFreeze(parsed.map(({ summary }) => summary));
+    const synthesisSummaries = parsed.map(({ summary }) => namespaceWebsiteSourceLocationIds(summary));
+    assertWebsiteSynthesisBounds(synthesisSummaries);
+    return deepFreeze(synthesisSummaries);
   });
+}
+
+function namespaceWebsiteSourceLocationIds(summary: ReportV4PageSummary): ReportV4PageSummary {
+  const pageIdentity = createHash("sha256").update(summary.pageId).digest("hex");
+  return {
+    ...summary,
+    chunks: summary.chunks.map((chunk) => ({
+      ...chunk,
+      sourceLocations: chunk.sourceLocations.map((location, locationIndex) => ({
+        ...location,
+        locationId: `location-${pageIdentity}-${chunk.order}-${locationIndex + 1}`
+      }))
+    }))
+  };
 }
 
 async function loadByExactLineageWithStore(

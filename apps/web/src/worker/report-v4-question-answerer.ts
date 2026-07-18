@@ -93,13 +93,17 @@ export async function answerReportV4Questions(input: ReportV4QuestionAnswererInp
   const signal = input.signal ?? new AbortController().signal;
   signal.throwIfAborted();
 
-  const resolved = await Promise.all(questions.map((question, index) => resolveQuestion({
-    question,
-    checkpoint: checkpoints[index]!,
-    repository: input.repository,
-    provider: input.provider,
-    signal
-  })));
+  const resolved: Array<{ question: CombinedGeoReportV4Question; reused: boolean }> = [];
+  for (const [index, question] of questions.entries()) {
+    signal.throwIfAborted();
+    resolved.push(await resolveQuestion({
+      question,
+      checkpoint: checkpoints[index]!,
+      repository: input.repository,
+      provider: input.provider,
+      signal
+    }));
+  }
   return Object.freeze({
     questions: Object.freeze(resolved.map(({ question }) => question)) as ReportV4QuestionAnswererResult["questions"],
     reusedQuestionIds: Object.freeze(resolved.filter(({ reused }) => reused).map(({ question }) => question.questionId))

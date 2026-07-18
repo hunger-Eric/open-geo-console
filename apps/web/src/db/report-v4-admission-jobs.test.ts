@@ -52,9 +52,27 @@ describe("V4 pre-admission job lifecycle", () => {
     }));
   });
 
+  it("dispatches a protected staging regeneration through the same pre-admission boundary", async () => {
+    const createExactlyOnce = vi.fn(async () => ({ jobId: "staging-admission-job", created: true }));
+    const repository: ReportV4AdmissionJobRepository = { createExactlyOnce };
+
+    await expect(enqueueReportV4PreAdmissionAfterPreview({
+      reportId: "report-staging",
+      locale: "zh",
+      tier: "free",
+      productContract: "legacy_website_audit_v1",
+      reason: "staging_regeneration",
+      stage: "completed"
+    }, repository)).resolves.toEqual({ jobId: "staging-admission-job", created: true });
+
+    expect(createExactlyOnce).toHaveBeenCalledWith(expect.objectContaining({
+      reportId: "report-staging",
+      reason: "v4_pre_admission"
+    }));
+  });
+
   it.each([
     ["failed preview", { stage: "failed" as const }],
-    ["staging regeneration", { reason: "staging_regeneration" as const }],
     ["deep source", { tier: "deep" as const }],
     ["non-legacy source", { productContract: "recommendation_forensics_v1" as const }]
   ])("does not enqueue for %s", async (_label, overrides) => {

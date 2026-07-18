@@ -73,7 +73,7 @@ describe("business question contracts", () => {
 
     expect(set.questions.map(({ generatedText }) => generatedText)).toEqual([
       "哪些服务商公开提供跨境物流服务（如台湾海快、海运、空运专线等）？",
-      "哪些跨境物流服务方案适合外贸企业进入台湾、菲律宾、中东市场，分别适用于什么货型、时效与交付条件？",
+      "哪些跨境物流服务方案适合外贸企业进入台湾、菲律宾、中东市场，分别适用于哪些使用场景、交付条件与约束？",
       "采购跨境物流服务时，应核验哪些服务范围、交付条件、限制与风险？"
     ]);
     expect(set.questions[1].generatedText).not.toContain("面向台湾的台湾海快");

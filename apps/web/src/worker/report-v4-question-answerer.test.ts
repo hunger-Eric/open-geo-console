@@ -47,6 +47,24 @@ describe("V4 local question answerer", () => {
     await expect(answerReportV4Questions({ ...answererInput(new MemoryCheckpointRepository(), provider), questions: [questions()[1]!, questions()[0]!, questions()[2]!] })).rejects.toThrow(/ordered|order/i);
   });
 
+  it("serializes provider calls across questions to respect the locked runtime lane", async () => {
+    const repository = new MemoryCheckpointRepository();
+    let active = 0;
+    let maximumActive = 0;
+    const provider = providerFrom(async (request) => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await Promise.resolve();
+      active -= 1;
+      return providerAnswer(request.questionId, request.question);
+    });
+
+    await answerReportV4Questions(answererInput(repository, provider));
+
+    expect(maximumActive).toBe(1);
+    expect(provider.calls.map(({ questionId }) => questionId)).toEqual(["question-1", "question-2", "question-3"]);
+  });
+
   it("restores immutable answered checkpoints and skips their provider calls", async () => {
     const repository = new MemoryCheckpointRepository();
     const provider = providerFrom(async (request) => providerAnswer(request.questionId, request.question));

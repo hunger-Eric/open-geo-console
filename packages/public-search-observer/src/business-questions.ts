@@ -95,11 +95,11 @@ export function generateBusinessQuestionCandidates(input: {
     : "";
   const texts: [string, string, string] = zh ? [
     `哪些服务商公开提供${focus.serviceCategory}${examples}？`,
-    `哪些${focus.serviceCategory}方案适合${focus.audience}进入${focus.marketRegion}市场，分别适用于什么货型、时效与交付条件？`,
+    `哪些${focus.serviceCategory}方案适合${focus.audience}进入${focus.marketRegion.replace(/市场$/u, "")}市场，分别适用于哪些使用场景、交付条件与约束？`,
     `采购${focus.serviceCategory}时，应核验哪些服务范围、交付条件、限制与风险？`
   ] : [
     `Which providers publicly offer ${focus.serviceCategory}${examples}?`,
-    `Which ${focus.serviceCategory} options fit ${focus.audience} entering ${focus.marketRegion}, and for which cargo, timing, and delivery conditions?`,
+    `Which ${focus.serviceCategory} options fit ${focus.audience} entering ${focus.marketRegion}, and for which use cases, delivery conditions, and constraints?`,
     `When buying ${focus.serviceCategory}, which service scope, delivery conditions, limitations, and material risks should be verified?`
   ];
   const purposes: [BusinessQuestionPurpose, BusinessQuestionPurpose, BusinessQuestionPurpose] = [

@@ -52,7 +52,7 @@ export async function enqueueReportV4PreAdmissionAfterPreview(
 ): Promise<ReportV4AdmissionEnqueueResult | null> {
   if (preview.tier !== "free" ||
       preview.productContract !== "legacy_website_audit_v1" ||
-      preview.reason !== "standard" ||
+      (preview.reason !== "standard" && preview.reason !== "staging_regeneration") ||
       (preview.stage !== "completed" && preview.stage !== "completed_limited")) {
     return null;
   }

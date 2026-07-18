@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import profilePayload from "../../../../config/model-profiles/report-v4-mimo-v2.5-pro.json";
 import { resolveReportV4LockedModelRuntime } from "./model-runtime-config";
-import { createReportV4MimoSiteSynthesisProvider } from "./mimo-site-synthesis-provider";
+import {
+  createReportV4MimoSiteSynthesisProvider,
+  ReportV4MimoSiteSynthesisOutputError
+} from "./mimo-site-synthesis-provider";
 
 const env = () => ({
   OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
@@ -43,5 +46,19 @@ describe("dedicated V4 site synthesis MiMo adapter", () => {
     const valid = createReportV4MimoSiteSynthesisProvider({ environment: env(), fetch, lockedModelProfile: profilePayload });
     await expect(valid.analyzePage({ context: { ...context, sourceLength: 100_001 }, retainedText: "x".repeat(100_001) }, new AbortController().signal)).rejects.toThrow(/budget|exceed|token/i);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("classifies invalid page output without weakening strict source bounds", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => response({
+      chunks: [{
+        order: 1,
+        summary: "invalid bounds",
+        sourceLocations: [{ locationId: "l1", startOffset: 0, endOffset: 9 }]
+      }]
+    }));
+    const provider = createReportV4MimoSiteSynthesisProvider({ environment: env(), fetch, lockedModelProfile: profilePayload });
+    const result = provider.analyzePage({ context, retainedText: "retained" }, new AbortController().signal);
+    await expect(result).rejects.toBeInstanceOf(ReportV4MimoSiteSynthesisOutputError);
+    await expect(result).rejects.toHaveProperty("cause", expect.objectContaining({ message: expect.stringMatching(/sourceLength|bounds/i) }));
   });
 });

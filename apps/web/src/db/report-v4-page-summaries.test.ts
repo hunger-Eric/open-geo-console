@@ -113,6 +113,30 @@ describe("V4 hierarchical page-summary persistence", () => {
     expect(Object.isFrozen(loaded[0]!.chunks[0]!.sourceLocations)).toBe(true);
   });
 
+  it("creates a deterministic page namespace when legacy summaries reuse location IDs", async () => {
+    const terminal = memoryRepository();
+    const sharedOutput = {
+      chunks: [{ order: 1, summary: "Legacy summary", sourceLocations: [{ locationId: "location-1-1", startOffset: 0, endOffset: 20 }] }]
+    };
+    const first = await terminal.persist({ ...input("page-1"), output: sharedOutput });
+    const second = await terminal.persist({ ...input("page-2"), output: sharedOutput });
+    const repository = createReportV4PageSummaryRepository(createMemoryReportV4PageSummaryStore({
+      snapshots: [snapshot("completed", 2)],
+      pages: pages(),
+      summaries: [storedRow(first), storedRow(second)]
+    }));
+
+    const loaded = await repository.loadForWebsiteSynthesis(exactLoad());
+    const locationIds = loaded.flatMap(({ chunks }) => chunks.flatMap(({ sourceLocations }) => sourceLocations.map(({ locationId }) => locationId)));
+    expect(locationIds).toHaveLength(2);
+    expect(new Set(locationIds)).toHaveLength(2);
+    expect(locationIds).toEqual([
+      `location-${hash("page-1")}-1-1`,
+      `location-${hash("page-2")}-1-1`
+    ]);
+    expect(first.summary.chunks[0]!.sourceLocations[0]!.locationId).toBe("location-1-1");
+  });
+
   it("loads only an exact persisted page by immutable URL and content lineage", async () => {
     const terminal = memoryRepository();
     const persisted = await terminal.persist(input("page-1"));
