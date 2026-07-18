@@ -118,6 +118,32 @@ describe("exact-commit staging-only Worker launcher", () => {
     if (parsed.status !== 0) throw new Error(`PowerShell parser rejected the staging launcher:\n${parsed.stderr}`);
   });
 
+  it("decodes the container environment array without piping it through Windows PowerShell", () => {
+    expect(source).toMatch(/\$parsed = ConvertFrom-Json -InputObject \(\[string\]\$json\)/u);
+    expect(source).toMatch(/foreach \(\$entry in \$parsed\)/u);
+    expect(source).not.toMatch(/@\(\$json \| ConvertFrom-Json\)/u);
+  });
+
+  (process.platform === "win32" ? it : it.skip)("returns every key from a multi-entry container environment array", () => {
+    const command = [
+      "$tokens = $null",
+      "$parseErrors = $null",
+      "$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:OGC_PARSE_TARGET, [ref]$tokens, [ref]$parseErrors)",
+      "$functionAst = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Read-ContainerEnvironment' }, $true)",
+      "if ($null -eq $functionAst) { [Console]::Error.WriteLine('Read-ContainerEnvironment was not found.'); exit 1 }",
+      "Invoke-Expression $functionAst.Extent.Text",
+      "function Assert-LastExitCode { param([string]$Message) }",
+      "function docker { $global:LASTEXITCODE = 0; return '[\"FIRST=one\",\"SECOND=two=with-equals\",\"THIRD=three\"]' }",
+      "$result = Read-ContainerEnvironment 'test-container'",
+      "if ($result.Count -ne 3 -or $result['FIRST'] -ne 'one' -or $result['SECOND'] -ne 'two=with-equals' -or $result['THIRD'] -ne 'three') { [Console]::Error.WriteLine('Container environment array was not fully decoded.'); exit 1 }"
+    ].join("; ");
+    const decoded = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], {
+      encoding: "utf8",
+      env: { ...process.env, OGC_PARSE_TARGET: launcherPath }
+    });
+    if (decoded.status !== 0) throw new Error(`Windows PowerShell did not decode every environment entry:\n${decoded.stderr}`);
+  });
+
   it("binds build, image label, and deployment version to full HEAD", () => {
     expect(source).toMatch(/git rev-parse HEAD/u);
     expect(source).toMatch(/OGC_REVISION=\$revision/u);

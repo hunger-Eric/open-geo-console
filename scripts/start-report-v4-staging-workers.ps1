@@ -100,7 +100,8 @@ function Read-ContainerEnvironment {
   $json = & docker inspect --format '{{json .Config.Env}}' $ContainerId
   Assert-LastExitCode "The staging Worker container environment could not be inspected."
   $values = @{}
-  foreach ($entry in @($json | ConvertFrom-Json)) {
+  $parsed = ConvertFrom-Json -InputObject ([string]$json)
+  foreach ($entry in $parsed) {
     $parts = ([string]$entry).Split('=', 2)
     if ($parts.Count -eq 2) { $values[$parts[0]] = $parts[1] }
   }
