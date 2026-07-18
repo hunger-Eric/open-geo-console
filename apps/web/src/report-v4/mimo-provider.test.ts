@@ -32,15 +32,22 @@ import {
 // @requirement GEO-V4-DIAG-02
 
 describe("Report V4 dedicated MiMo provider", () => {
-  it("requires the exact official endpoint and dedicated key without legacy fallback", () => {
+  it("binds approved pay-as-you-go and Token Plan endpoints to their dedicated key channels", () => {
     expect(readReportV4MimoProviderConfig(environment())).toEqual({
       baseUrl: "https://api.xiaomimimo.com/v1",
       apiKey: "v4-secret"
+    });
+    expect(readReportV4MimoProviderConfig(tokenPlanEnvironment())).toEqual({
+      baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+      apiKey: "tp-v4-secret"
     });
     for (const candidate of [
       {},
       { OGC_REPORT_V4_MIMO_BASE_URL: "https://other.example/v1", OGC_REPORT_V4_MIMO_API_KEY: "key" },
       { OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1", OGC_REPORT_V4_MIMO_API_KEY: "" },
+      { OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1", OGC_REPORT_V4_MIMO_API_KEY: "tp-wrong-channel" },
+      { OGC_REPORT_V4_MIMO_BASE_URL: "https://token-plan-sgp.xiaomimimo.com/v1", OGC_REPORT_V4_MIMO_API_KEY: "sk-wrong-channel" },
+      { OGC_REPORT_V4_MIMO_BASE_URL: "https://token-plan-us.xiaomimimo.com/v1", OGC_REPORT_V4_MIMO_API_KEY: "tp-unknown-region" },
       {
         OGC_AI_BASE_URL: "https://api.xiaomimimo.com/v1",
         OGC_AI_API_KEY: "legacy-key",
@@ -49,6 +56,23 @@ describe("Report V4 dedicated MiMo provider", () => {
     ]) {
       expect(() => readReportV4MimoProviderConfig(candidate)).toThrow(/OGC_REPORT_V4_MIMO|endpoint|key/i);
     }
+  });
+
+  it("sends Token Plan requests to the configured approved regional endpoint", async () => {
+    const fetch = vi.fn(async () => response({ ok: true }));
+    const invoker = createReportV4MimoStructuredInvoker({ environment: tokenPlanEnvironment(), fetch });
+
+    await invoker.invoke({
+      operation: "pageAnalysis",
+      systemText: "Return JSON.",
+      inputText: "bounded input",
+      signal: new AbortController().signal
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
+      expect.any(Object)
+    );
   });
 
   it.each([
@@ -432,6 +456,14 @@ function environment(): NodeJS.ProcessEnv {
     OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
     OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
     OGC_REPORT_V4_MIMO_API_KEY: "v4-secret"
+  };
+}
+
+function tokenPlanEnvironment(): NodeJS.ProcessEnv {
+  return {
+    ...environment(),
+    OGC_REPORT_V4_MIMO_BASE_URL: "https://token-plan-sgp.xiaomimimo.com/v1",
+    OGC_REPORT_V4_MIMO_API_KEY: "tp-v4-secret"
   };
 }
 

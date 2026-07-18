@@ -20,6 +20,8 @@ describe("dedicated V4 site synthesis MiMo adapter", () => {
     const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
     expect(body.model).toBe("mimo-v2.5-pro");
     expect(body.tools).toBeUndefined();
+    expect(body.messages[0].content).toContain("Return 1 to 8 chunks");
+    expect(body.messages[0].content).toContain("never reuse a locationId");
     expect(body.messages[1].content).toContain("retained");
   });
 

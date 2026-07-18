@@ -28,14 +28,19 @@ import {
   type ReportV4ModelRuntimeConfig
 } from "./model-runtime-config";
 
-const MIMO_BASE_URL = "https://api.xiaomimimo.com/v1" as const;
+const MIMO_PAYG_BASE_URL = "https://api.xiaomimimo.com/v1" as const;
+const MIMO_TOKEN_PLAN_REGIONS = Object.freeze(["cn", "sgp", "ams"] as const);
+type MimoTokenPlanRegion = (typeof MIMO_TOKEN_PLAN_REGIONS)[number];
+type ReportV4MimoBaseUrl =
+  | typeof MIMO_PAYG_BASE_URL
+  | `https://token-plan-${MimoTokenPlanRegion}.xiaomimimo.com/v1`;
 const PROVIDER_SAFETY_MARGIN_TOKENS = 4_096;
 const MAX_DIAGNOSIS_INPUT_LENGTH = 80_000;
 
 type ProviderErrorCode = ReportV4QuestionProviderErrorCode & ReportV4DiagnosisProviderErrorCode;
 
 export interface ReportV4MimoProviderConfig {
-  readonly baseUrl: typeof MIMO_BASE_URL;
+  readonly baseUrl: ReportV4MimoBaseUrl;
   readonly apiKey: string;
 }
 
@@ -98,14 +103,28 @@ export class ReportV4MimoProviderError extends Error {
 }
 
 export function readReportV4MimoProviderConfig(environment: NodeJS.ProcessEnv): ReportV4MimoProviderConfig {
-  if (environment.OGC_REPORT_V4_MIMO_BASE_URL !== MIMO_BASE_URL) {
+  const baseUrl = approvedMimoBaseUrl(environment.OGC_REPORT_V4_MIMO_BASE_URL);
+  if (!baseUrl) {
     throw new Error("OGC_REPORT_V4_MIMO_BASE_URL must use the approved MiMo endpoint.");
   }
   const apiKey = environment.OGC_REPORT_V4_MIMO_API_KEY;
   if (typeof apiKey !== "string" || !apiKey.trim() || apiKey !== apiKey.trim() || apiKey.length > 4_096) {
     throw new Error("OGC_REPORT_V4_MIMO_API_KEY must contain a bounded dedicated key.");
   }
-  return Object.freeze({ baseUrl: MIMO_BASE_URL, apiKey });
+  const tokenPlanEndpoint = baseUrl !== MIMO_PAYG_BASE_URL;
+  if (tokenPlanEndpoint !== apiKey.startsWith("tp-")) {
+    throw new Error("OGC_REPORT_V4_MIMO_BASE_URL and OGC_REPORT_V4_MIMO_API_KEY must use the same MiMo billing channel.");
+  }
+  return Object.freeze({ baseUrl, apiKey });
+}
+
+function approvedMimoBaseUrl(value: string | undefined): ReportV4MimoBaseUrl | null {
+  if (value === MIMO_PAYG_BASE_URL) return value;
+  for (const region of MIMO_TOKEN_PLAN_REGIONS) {
+    const endpoint = `https://token-plan-${region}.xiaomimimo.com/v1` as const;
+    if (value === endpoint) return endpoint;
+  }
+  return null;
 }
 
 export function createReportV4MimoStructuredInvoker(

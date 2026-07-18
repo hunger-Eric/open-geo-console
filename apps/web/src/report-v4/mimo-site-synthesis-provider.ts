@@ -84,7 +84,7 @@ function websiteInvocation(input: ReportV4MimoWebsiteSynthesisInput, signal: Abo
 }
 
 const PAGE_ANALYSIS_SYSTEM =
-  "Analyze only the supplied retained text for one page. Return exactly {\"chunks\":[{\"order\":number,\"summary\":string,\"sourceLocations\":[{\"locationId\":string,\"startOffset\":number,\"endOffset\":number}]}]}. Preserve exact source locations within the retained source; do not add fields, use whole-site text, browse, or retry.";
+  "Analyze only the supplied retained text for one page. Return exactly {\"chunks\":[{\"order\":number,\"summary\":string,\"sourceLocations\":[{\"locationId\":string,\"startOffset\":number,\"endOffset\":number}]}]}. Return 1 to 8 chunks in order starting at 1. Every chunk must contain 1 to 8 source locations. Use a distinct locationId for every source location in the entire response, such as location-{chunkOrder}-{locationOrder}; never reuse a locationId. Preserve exact zero-based source offsets within the retained source, with endOffset greater than startOffset and no offset beyond sourceLength. Do not add fields, use whole-site text, browse, correct, or retry.";
 
 const WEBSITE_SYNTHESIS_SYSTEM =
   "Synthesize the website only from the supplied validated page summaries. Return exactly {\"summary\":string,\"strengths\":string[],\"gaps\":string[],\"actions\":string[]}. Use the requested locale; do not add fields, use raw HTML, browse, correct, or retry.";
