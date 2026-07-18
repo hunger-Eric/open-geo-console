@@ -178,6 +178,31 @@ describe("exact-commit staging-only Worker launcher", () => {
   });
 });
 
+describe("Worker image runtime-config contract", () => {
+  const dockerfile = readFileSync(
+    fileURLToPath(new URL("../../../../Dockerfile.worker", import.meta.url)),
+    "utf8"
+  );
+  const runtimeConfigSource = readFileSync(
+    fileURLToPath(new URL("../report-v4/model-runtime-config.ts", import.meta.url)),
+    "utf8"
+  );
+  const profilePath = fileURLToPath(
+    new URL("../../../../config/model-profiles/report-v4-mimo-v2.5-pro.json", import.meta.url)
+  );
+
+  it("copies the tracked V4 model profile to its runtime import address", () => {
+    expect(dockerfile).toMatch(/^WORKDIR \/app$/mu);
+    expect(dockerfile.match(/^COPY config \.\/config$/gmu)).toHaveLength(1);
+    expect(runtimeConfigSource).toContain(
+      'from "../../../../config/model-profiles/report-v4-mimo-v2.5-pro.json"'
+    );
+    expect(JSON.parse(readFileSync(profilePath, "utf8"))).toMatchObject({
+      profileId: "report-v4-mimo-v2.5-pro-v1"
+    });
+  });
+});
+
 function protectedStaging(): NodeJS.ProcessEnv {
   return {
     OGC_DEPLOYMENT_PROFILE: "staging",
