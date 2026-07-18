@@ -33,7 +33,7 @@ export interface RunReportV4AcceptanceStageTestOnlyDependencies<T> {
 }
 
 interface GuardDependencies {
-  load(input: ArmReportV4ProhibitedOperationGuardInput): Promise<ReportV4ProhibitedOperationGuardAuthority | null>;
+  load(input: Pick<ArmReportV4ProhibitedOperationGuardInput, "sessionId" | "scenarioId" | "jobId">): Promise<ReportV4ProhibitedOperationGuardAuthority | null>;
   arm(input: ArmReportV4ProhibitedOperationGuardInput): Promise<ReportV4ProhibitedOperationGuardCapability>;
   segment<T>(capability: ReportV4ProhibitedOperationGuardCapability, work: () => Promise<T>): Promise<T>;
   complete(capability: ReportV4ProhibitedOperationGuardCapability): Promise<void>;
@@ -50,7 +50,11 @@ export async function runReportV4AcceptanceStage<T>(input: RunReportV4Acceptance
     if ((getSqlClient() as unknown) !== (input.sql as unknown)) throw new Error("Report V4 acceptance runner requires the phase and guard authorities to use the same database client.");
   }
   const guard = test?.guard ?? productionGuard(input.sql);
-  const authority = await guard.load(identity);
+  const authority = await guard.load({
+    sessionId: identity.sessionId,
+    scenarioId: identity.scenarioId,
+    jobId: identity.jobId,
+  });
   if (authority?.run.state === "completed") {
     if (!await input.inspectDurableTerminal()) throw new Error("A completed acceptance guard without a durable terminal stage cannot capture final authority.");
     return { result: null, final: await captureFinal(input), guardState: "completed" };

@@ -34,6 +34,17 @@ describe("runReportV4AcceptanceStage", () => {
     await expect(runReportV4AcceptanceStage(input({ runStage: async () => { throw new Error("boom"); }, testOnly: { guard: g2, loadFinal: vi.fn(async () => null), captureFinal: finalCapture } }))).rejects.toThrow("boom");
     expect(calls2).toEqual(["arm", "segment"]);
   });
+  it("uses the lookup-only guard identity before arming with the worker SHA", async () => {
+    const calls: string[] = []; const g = guard("absent", calls);
+    await runReportV4AcceptanceStage(input({ isTerminalResult: () => false, testOnly: { guard: g, loadFinal: vi.fn(async () => null), captureFinal: finalCapture } }));
+    expect(g.load).toHaveBeenCalledWith({ sessionId: ids.sessionId, scenarioId: ids.scenarioId, jobId: ids.coreJobId });
+    expect(g.arm).toHaveBeenCalledWith({
+      sessionId: ids.sessionId,
+      scenarioId: ids.scenarioId,
+      jobId: ids.coreJobId,
+      workerGitSha: ids.workerGitSha,
+    });
+  });
   it("rejects absent guard with a durable terminal", async () => {
     const calls: string[] = []; const g = guard("absent", calls);
     await expect(runReportV4AcceptanceStage(input({ inspectDurableTerminal: vi.fn(async () => true), testOnly: { guard: g, loadFinal: vi.fn(async () => null), captureFinal: finalCapture } }))).rejects.toThrow("without its exact persisted guard");
