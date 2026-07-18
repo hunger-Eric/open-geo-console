@@ -8,7 +8,10 @@ import type {
   ReportV4AcceptanceSession
 } from "../db/report-v4-acceptance-ledger";
 import { computeReportV4AcceptanceFaultProvenanceBaselineFingerprint } from "../report-v4/report-v4-acceptance-fingerprints";
-import { createReportV4AcceptanceOperator } from "./report-v4-acceptance-operator";
+import {
+  createReportV4AcceptanceOperator,
+  type ReportV4AcceptanceOperatorTestOnlyDependencies
+} from "./report-v4-acceptance-operator";
 
 const ENVIRONMENT: NodeJS.ProcessEnv = {
   NODE_ENV: "test",
@@ -81,7 +84,7 @@ describe("Report V4 acceptance operator", () => {
     const baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(collecting);
     const sealed = { ...collecting, state: "sealed" as const, baselineFingerprint, finalFingerprint: "d".repeat(64) };
     vi.mocked(store.loadScenarios).mockResolvedValue([sealed]);
-    const operator = createReportV4AcceptanceOperator(store, ENVIRONMENT);
+    const operator = createReportV4AcceptanceOperator(store, ENVIRONMENT, authorityDependencies({ scenarioState: "sealed" }));
     const payload = { sessionId: SESSION_ID, scenarioId: SUCCESS_ID, baselineFingerprint, finalFingerprint: "d".repeat(64) };
     await expect(operator.execute("seal-scenario", payload)).resolves.toMatchObject({ scenario: sealed });
     expect(store.sealScenario).not.toHaveBeenCalled();
@@ -108,7 +111,10 @@ describe("Report V4 acceptance operator", () => {
       });
       const baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(scenario);
       vi.mocked(store.loadScenarios).mockResolvedValue([scenario]);
-      const operator = createReportV4AcceptanceOperator(store, ENVIRONMENT);
+      const operator = createReportV4AcceptanceOperator(store, ENVIRONMENT, authorityDependencies({
+        scenarioId: QUESTION_ID,
+        scenarioKind: "question_failure"
+      }));
       const payload = {
         sessionId: SESSION_ID,
         scenarioId: QUESTION_ID,
@@ -138,7 +144,7 @@ describe("Report V4 acceptance operator", () => {
       finalFingerprint: "d".repeat(64)
     };
 
-    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT).execute("seal-scenario", payload))
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT, authorityDependencies()).execute("seal-scenario", payload))
       .rejects.toThrow(/exact|not found|session/iu);
     expect(store.sealScenario).not.toHaveBeenCalled();
     expect(store.failScenario).not.toHaveBeenCalled();
@@ -165,9 +171,155 @@ describe("Report V4 acceptance operator", () => {
       finalFingerprint: "d".repeat(64)
     };
 
-    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT).execute(action, payload))
+    await expect(createReportV4AcceptanceOperator(
+      store,
+      ENVIRONMENT,
+      action === "seal-scenario" ? authorityDependencies({ scenarioState: "sealed" }) : undefined
+    ).execute(action, payload))
       .resolves.toMatchObject({ action, scenario: terminal });
     expect(store[method]).not.toHaveBeenCalled();
+  });
+
+  // @requirement GEO-V4-ACCEPT-01
+  // @requirement GEO-V4-COMMERCE-01
+  it("seals only after the exact persisted phase pair is fully revalidated and commerce-verified", async () => {
+    const store = mockStore();
+    const scenario = boundScenario();
+    const baselineFingerprint = computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(scenario);
+    vi.mocked(store.loadScenarios).mockResolvedValue([scenario]);
+    const dependencies = authorityDependencies();
+    const payload = { sessionId: SESSION_ID, scenarioId: SUCCESS_ID, baselineFingerprint, finalFingerprint: FINAL_COMMERCE };
+
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT, dependencies).execute("seal-scenario", payload))
+      .resolves.toMatchObject({ action: "seal-scenario", scenario: { state: "sealed" } });
+    expect(dependencies.loadSealAuthorityPair).toHaveBeenCalledExactlyOnceWith(payload);
+    expect(dependencies.assertCompleteAuthorityPhase).toHaveBeenCalledTimes(2);
+    expect(dependencies.assertCaptureOrder).toHaveBeenCalledTimes(1);
+    expect(dependencies.compareCommerce).toHaveBeenCalledTimes(1);
+    expect(store.sealScenario).toHaveBeenCalledExactlyOnceWith(payload);
+  });
+
+  it("fails closed for a missing phase row before the terminal write", async () => {
+    const store = mockStore();
+    const scenario = boundScenario();
+    vi.mocked(store.loadScenarios).mockResolvedValue([scenario]);
+    const dependencies = authorityDependencies();
+    vi.mocked(dependencies.loadSealAuthorityPair).mockRejectedValue(new Error("persisted baseline and final required"));
+
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT, dependencies).execute("seal-scenario", sealPayload(scenario)))
+      .rejects.toThrow(/baseline|final|required/iu);
+    expect(store.sealScenario).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["tampered payload", "tampered complete payload", "complete"],
+    ["reversed capture times", "final capture precedes baseline", "order"],
+    ["equal capture times", "baseline capture must strictly precede final", "order"]
+  ] as const)("rejects %s", async (_label, failure, failureSource) => {
+    const scenario = boundScenario();
+    const store = mockStore();
+    vi.mocked(store.loadScenarios).mockResolvedValue([scenario]);
+    const dependencies = authorityDependencies();
+    const assertion = failureSource === "complete" ? dependencies.assertCompleteAuthorityPhase : dependencies.assertCaptureOrder;
+    vi.mocked(assertion).mockImplementation(() => { throw new Error(failure); });
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT, dependencies).execute("seal-scenario", sealPayload(scenario)))
+      .rejects.toThrow(new RegExp(failure.split(" ")[0]!, "iu"));
+    expect(store.sealScenario).not.toHaveBeenCalled();
+  });
+
+  it("does not permit test dependency injection in a production runtime", () => {
+    expect(() => createReportV4AcceptanceOperator(mockStore(), { ...ENVIRONMENT, NODE_ENV: "production" }, authorityDependencies()))
+      .toThrow(/test-only/iu);
+  });
+
+  it.each([
+    ["lineage", () => authorityDependencies({ scenarioKind: "question_failure" })],
+    ["Worker SHA", () => authorityDependencies({ finalWorkerGitSha: "b".repeat(40) })],
+    ["comparator", () => authorityDependencies({ comparisonValid: false })],
+    ["final fingerprint", () => authorityDependencies({ finalCommerceFingerprint: "e".repeat(64) })]
+  ] as const)("rejects %s drift before sealing", async (_label, makeDependencies) => {
+    const store = mockStore();
+    const scenario = boundScenario();
+    vi.mocked(store.loadScenarios).mockResolvedValue([scenario]);
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT, makeDependencies()).execute("seal-scenario", sealPayload(scenario)))
+      .rejects.toThrow();
+    expect(store.sealScenario).not.toHaveBeenCalled();
+  });
+
+  it("reruns durable authority checks for an exact sealed replay and fails if the pair disappeared", async () => {
+    const store = mockStore();
+    const collecting = boundScenario();
+    const payload = sealPayload(collecting);
+    const sealed = { ...collecting, state: "sealed" as const, baselineFingerprint: payload.baselineFingerprint, finalFingerprint: payload.finalFingerprint };
+    vi.mocked(store.loadScenarios).mockResolvedValue([sealed]);
+    const valid = authorityDependencies({ scenarioState: "sealed" });
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT, valid).execute("seal-scenario", payload))
+      .resolves.toMatchObject({ scenario: sealed });
+    expect(valid.assertCompleteAuthorityPhase).toHaveBeenCalledTimes(2);
+    expect(store.sealScenario).not.toHaveBeenCalled();
+
+    const missing = authorityDependencies({ scenarioState: "sealed" });
+    vi.mocked(missing.loadSealAuthorityPair).mockRejectedValue(new Error("final phase row missing"));
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT, missing).execute("seal-scenario", payload))
+      .rejects.toThrow(/missing/iu);
+  });
+
+  it("keeps fail-scenario available without any authority phase pair", async () => {
+    const store = mockStore();
+    const scenario = boundScenario();
+    vi.mocked(store.loadScenarios).mockResolvedValue([scenario]);
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT).execute("fail-scenario", sealPayload(scenario)))
+      .resolves.toMatchObject({ action: "fail-scenario", scenario: { state: "failed" } });
+    expect(store.failScenario).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes production-style sealing through the atomic authority operation and never calls the ledger seal", async () => {
+    const store = mockStore();
+    const collecting = boundScenario();
+    const payload = sealPayload(collecting);
+    const sealed = { ...collecting, state: "sealed" as const,
+      baselineFingerprint: payload.baselineFingerprint, finalFingerprint: payload.finalFingerprint };
+    vi.mocked(store.loadScenarios).mockResolvedValueOnce([collecting]).mockResolvedValueOnce([sealed]);
+    const dependencies = atomicSealDependencies();
+
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT, dependencies).execute("seal-scenario", payload))
+      .resolves.toMatchObject({ scenario: sealed });
+    expect(dependencies.sealScenarioAtomically).toHaveBeenCalledExactlyOnceWith(payload);
+    expect(dependencies.loadSealAuthorityPair).not.toHaveBeenCalled();
+    expect(store.sealScenario).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the atomic authority operation detects a stale final event head", async () => {
+    const store = mockStore();
+    const collecting = boundScenario();
+    vi.mocked(store.loadScenarios).mockResolvedValue([collecting]);
+    const dependencies = atomicSealDependencies(new Error("final authority phase is stale because the event head advanced"));
+
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT, dependencies).execute("seal-scenario", sealPayload(collecting)))
+      .rejects.toThrow(/stale|head advanced/iu);
+    expect(store.sealScenario).not.toHaveBeenCalled();
+    expect(store.loadScenarios).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when the locked persisted lineage recomputes a different fault baseline", async () => {
+    const store = mockStore();
+    const collecting = boundScenario();
+    vi.mocked(store.loadScenarios).mockResolvedValue([collecting]);
+    const dependencies = atomicSealDependencies(new Error("locked fault-provenance baseline does not match"));
+
+    await expect(createReportV4AcceptanceOperator(store, ENVIRONMENT, dependencies).execute("seal-scenario", sealPayload(collecting)))
+      .rejects.toThrow(/locked|fault-provenance|baseline/iu);
+    expect(store.sealScenario).not.toHaveBeenCalled();
+    expect(store.loadScenarios).toHaveBeenCalledTimes(1);
+  });
+
+  it("hard-wires lock-order, live-head comparison, and terminal CAS into one production transaction", () => {
+    const source = readFileSync(fileURLToPath(new URL("./report-v4-acceptance-operator.ts", import.meta.url)), "utf8");
+    expect(source).toMatch(/begin\("isolation level repeatable read read write"[\s\S]*atomic-seal-session-lock[\s\S]*FOR UPDATE[\s\S]*atomic-seal-scenario-lock[\s\S]*FOR UPDATE/iu);
+    expect(source).toMatch(/session\.head_sequence[\s\S]*final\.payload\.session\.headSequence[\s\S]*session\.head_hash[\s\S]*final\.payload\.session\.headHash[\s\S]*session\.event_count[\s\S]*final\.payload\.session\.eventCount/iu);
+    expect(source).toMatch(/atomic-seal-cas[\s\S]*UPDATE report_v4_acceptance_scenarios[\s\S]*state='collecting'[\s\S]*RETURNING state/iu);
+    expect(source).toMatch(/atomic-seal-scenario-lock[\s\S]*report_id,order_id,pre_admission_job_id,core_job_id,enhancement_job_id[\s\S]*config_snapshot_id,question_set_id,core_artifact_revision_id,enhancement_artifact_revision_id[\s\S]*FOR UPDATE/iu);
+    expect(source).toMatch(/parseLockedAcceptanceScenario\(scenario\)[\s\S]*computeReportV4AcceptanceFaultProvenanceBaselineFingerprint\(lockedScenario\)[\s\S]*lockedBaselineFingerprint !== input\.baselineFingerprint[\s\S]*atomic-seal-cas/iu);
   });
 
   it("registers both operator and collector CLIs through the workspace script contract", () => {
@@ -194,6 +346,8 @@ const SESSION_ID = "11111111-1111-4111-8111-111111111111";
 const SUCCESS_ID = "21111111-1111-4111-8111-111111111111";
 const DIAGNOSIS_ID = "31111111-1111-4111-8111-111111111111";
 const QUESTION_ID = "41111111-1111-4111-8111-111111111111";
+const BASELINE_COMMERCE = "b".repeat(64);
+const FINAL_COMMERCE = "d".repeat(64);
 
 interface BeginPayload {
   sessionId: string;
@@ -322,4 +476,96 @@ function boundScenario(overrides: Partial<ReportV4AcceptanceScenario> = {}): Rep
     enhancementArtifactRevisionId: "enhancement-artifact-1",
     ...overrides
   });
+}
+
+function sealPayload(scenario: ReportV4AcceptanceScenario) {
+  return {
+    sessionId: scenario.sessionId,
+    scenarioId: scenario.scenarioId,
+    baselineFingerprint: computeReportV4AcceptanceFaultProvenanceBaselineFingerprint(scenario),
+    finalFingerprint: FINAL_COMMERCE
+  };
+}
+
+function authorityDependencies(overrides: {
+  scenarioId?: string;
+  scenarioKind?: ReportV4AcceptanceScenario["kind"];
+  scenarioState?: "collecting" | "sealed" | "failed";
+  finalWorkerGitSha?: string;
+  finalCommerceFingerprint?: string;
+  comparisonValid?: boolean;
+} = {}): ReportV4AcceptanceOperatorTestOnlyDependencies {
+  const scenarioKind = overrides.scenarioKind ?? "success";
+  const finalCommerceFingerprint = overrides.finalCommerceFingerprint ?? FINAL_COMMERCE;
+  const commerce = (fingerprint: string) => ({ fingerprint }) as never;
+  const payload = (phase: "baseline" | "final", fingerprint: string) => ({
+    phase,
+    scenarioKind,
+    capturedAt: phase === "baseline" ? "2026-07-17T00:00:00.000Z" : "2026-07-17T00:01:00.000Z",
+    session: { sessionIdHash: "1".repeat(64), scenarioIdHash: "2".repeat(64) },
+    commerce: commerce(fingerprint)
+  }) as never;
+  const baselinePayload = payload("baseline", BASELINE_COMMERCE);
+  const finalPayload = payload("final", finalCommerceFingerprint);
+  const workerGitSha = "a".repeat(40);
+  const pair = {
+    baseline: {
+      sessionId: SESSION_ID,
+      scenarioId: overrides.scenarioId ?? SUCCESS_ID,
+      phase: "baseline" as const,
+      capturedAt: "2026-07-17T00:00:00.000Z",
+      payload: baselinePayload,
+      payloadHash: "1".repeat(64),
+      commerceFingerprint: BASELINE_COMMERCE,
+      workerGitSha
+    },
+    final: {
+      sessionId: SESSION_ID,
+      scenarioId: overrides.scenarioId ?? SUCCESS_ID,
+      phase: "final" as const,
+      capturedAt: "2026-07-17T00:01:00.000Z",
+      payload: finalPayload,
+      payloadHash: "2".repeat(64),
+      commerceFingerprint: finalCommerceFingerprint,
+      workerGitSha: overrides.finalWorkerGitSha ?? workerGitSha
+    },
+    sessionWorkerGitSha: workerGitSha,
+    sessionState: "collecting" as const,
+    scenarioState: overrides.scenarioState ?? "collecting",
+    scenarioKind
+  };
+  const verified = {
+    baselineFingerprint: true,
+    finalFingerprint: true,
+    distinctFingerprints: true,
+    captureOrder: true,
+    immutableLineage: true,
+    componentAuthority: true,
+    finalTopology: true
+  };
+  const comparisonValid = overrides.comparisonValid ?? true;
+  return {
+    loadSealAuthorityPair: vi.fn(async () => pair),
+    assertCompleteAuthorityPhase: vi.fn(() => undefined) as never,
+    assertCaptureOrder: vi.fn(() => undefined),
+    compareCommerce: vi.fn(() => ({
+      valid: comparisonValid,
+      scenarioKind,
+      baselineFingerprint: BASELINE_COMMERCE,
+      finalFingerprint: finalCommerceFingerprint,
+      components: {},
+      violations: comparisonValid ? [] : [{ code: "drift", message: "drift", component: "snapshot" }],
+      verified: comparisonValid ? verified : { ...verified, finalTopology: false }
+    })) as never
+  };
+}
+
+function atomicSealDependencies(error?: Error): ReportV4AcceptanceOperatorTestOnlyDependencies {
+  const dependencies = authorityDependencies();
+  return {
+    ...dependencies,
+    sealScenarioAtomically: vi.fn(async () => {
+      if (error) throw error;
+    })
+  };
 }
