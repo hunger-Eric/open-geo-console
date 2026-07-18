@@ -726,8 +726,14 @@ function validateLedgerAuthority(value: unknown, phase: string): Record<string, 
   const eventRecords = ledger.events as Record<string, unknown>[];
   let previousHash = "0".repeat(64); const fingerprints = new Set<string>();
   for (const event of eventRecords) {
-    if (event.previousHash !== previousHash || event.scenarioIdHash !== scenario.scenarioIdHash
-        || fingerprints.has(String(event.fingerprint))) throw new Error("Ledger event chain, scenario, or fingerprint uniqueness is invalid.");
+    // The acceptance ledger is session-global: events from other scenarios in
+    // the same session are valid and must retain their own scenario hash. The
+    // selected scenario's metadata remains scoped to that scenario and is checked by
+    // cross-slot lineage below; only chain continuity and idempotency are
+    // enforced here.
+    if (event.previousHash !== previousHash || fingerprints.has(String(event.fingerprint))) {
+      throw new Error("Ledger event chain or fingerprint uniqueness is invalid.");
+    }
     fingerprints.add(String(event.fingerprint)); previousHash = String(event.eventHash);
   }
   const last = ledger.events.at(-1) as Record<string, unknown> | undefined;

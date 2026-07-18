@@ -84,6 +84,36 @@ describe("Report V4 complete acceptance authority phase snapshot", () => {
     ]);
   });
 
+  it("accepts mixed-scenario session ledger events and rejects forged hash or chain links", () => {
+    const payload = structuredClone(completePayload());
+    const ledger = payload.authorities.ledger_authority as unknown as {
+      events: Array<Record<string, unknown>>;
+      session: { headSequence: number; eventCount: number; headHash: string };
+    };
+    const foreignScenarioHash = h("foreign-scenario");
+    const eventHash = h("foreign-event");
+    ledger.events = [{
+      sequence: 1, fingerprint: h("foreign-fingerprint"), scenarioIdHash: foreignScenarioHash,
+      kind: "scenario_bound", operation: "v4_dispatch", unitIdHash: h("foreign-unit"), attempt: 0,
+      eventPhase: "observed", details: { bindingHash: h("binding") }, previousHash: ZERO, eventHash,
+      occurredAt: "2026-07-16T23:59:01.000Z"
+    }];
+    ledger.session.headSequence = 1; ledger.session.eventCount = 1; ledger.session.headHash = eventHash;
+    payload.session.headSequence = 1; payload.session.eventCount = 1; payload.session.headHash = eventHash;
+    reseal(payload, "ledger_authority");
+    expect(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload(payload)).not.toThrow();
+
+    const forgedHash = structuredClone(payload);
+    forgedHash.authorities.ledger_authority.events[0]!.scenarioIdHash = "not-a-sha";
+    reseal(forgedHash, "ledger_authority");
+    expect(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload(forgedHash)).toThrow(/hash/i);
+
+    const forgedChain = structuredClone(payload);
+    forgedChain.authorities.ledger_authority.events[0]!.previousHash = h("forged-prev");
+    reseal(forgedChain, "ledger_authority");
+    expect(() => assertReportV4AcceptanceCompleteAuthorityPhasePayload(forgedChain)).toThrow(/chain/i);
+  });
+
   it.each([
     "site_snapshot_pages", "page_summary_integrity", "artifact_combined_payload_integrity", "site_read_manifest",
     "ledger_authority", "prohibited_operation_guard_authority", "zero_database_effect_counts"

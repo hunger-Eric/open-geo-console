@@ -154,6 +154,34 @@ describe("Report V4 acceptance ledger and prohibited-operation guard authority",
       .toHaveLength(3);
   });
 
+  it("accepts mixed-scenario session events while keeping guard authority scenario-local", () => {
+    const mixed = snapshot();
+    const foreignScenarioId = "33333333-3333-4333-8333-333333333333";
+    appendEvent(mixed, {
+      scenario_id: foreignScenarioId,
+      kind: "prohibited_operation", operation: "pdf", unit_id: reportV4ProhibitedOperationEventUnitId(jobId, "pdf" as never),
+      attempt: 0, phase: "started", details: {}
+    });
+    const authority = projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), mixed);
+    expect(authority.ledgerAuthority.events.map((event) => event.scenarioIdHash)).toEqual([
+      digest(scenarioId), digest(foreignScenarioId)
+    ]);
+    expect(authority.prohibitedOperationGuardAuthority.counters.every((counter) => counter.attemptCount === 0)).toBe(true);
+  });
+
+  it("rejects a forged foreign scenario mapping when its stored event hashes are not resealed", () => {
+    const forged = snapshot();
+    appendEvent(forged, {
+      scenario_id: "33333333-3333-4333-8333-333333333333",
+      kind: "prohibited_operation", operation: "pdf",
+      unit_id: reportV4ProhibitedOperationEventUnitId(jobId, "pdf" as never), attempt: 0,
+      phase: "started", details: {}
+    });
+    forged.events[1]!.scenario_id = "44444444-4444-4444-8444-444444444444";
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), forged))
+      .toThrow(/fingerprint|idempotency|event hash/iu);
+  });
+
   it("enforces the question-failure Core-after-fault baseline and exact final fault phase topology", () => {
     const finalWithoutFaults = snapshot();
     finalWithoutFaults.guardRuns[0]!.state = "completed";
