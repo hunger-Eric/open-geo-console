@@ -57,7 +57,8 @@ const HASH = /^[a-f0-9]{64}$/u;
 /**
  * Loads the exact combined-payload authority from one immutable PostgreSQL view.
  * Stored payload hashes are treated as assertions, never as payload evidence.
- * @requirement GEO-V4-ARTIFACT-01
+ * @requirement GEO-V4-DELIVERY-01
+ * @requirement GEO-V4-SOURCE-01
  * @requirement GEO-V4-ACCEPT-01
  */
 export async function loadReportV4ArtifactAuthority(
@@ -286,10 +287,14 @@ function parseArtifact(row: Row, binding: Binding, questions: readonly [Question
       fail("payload question-set lineage drift was detected");
     }
   });
-  const payloadIdentityHash = hashJson(report);
-  if (!HASH.test(String(row.payload_identity_hash)) || row.payload_identity_hash !== payloadIdentityHash) {
-    fail("stored payload identity differs from canonical parsed content");
+  if (stableJson(report) !== stableJson(row.payload)) {
+    fail("parser round-trip differs from exact raw persisted JSONB");
   }
+  const rawPayloadIdentityHash = hashJson(row.payload);
+  if (!HASH.test(String(row.payload_identity_hash)) || row.payload_identity_hash !== rawPayloadIdentityHash) {
+    fail("stored payload identity differs from exact raw persisted JSONB");
+  }
+  const payloadIdentityHash = rawPayloadIdentityHash;
   const revision = integer(row.revision, "artifact revision");
   const questionContentHashes = report.questions.map((question) => hashJson(questionCore(question))) as unknown as [string,string,string];
   const diagnosisContentHashes = report.questions.map((question) => question.diagnosis ? hashJson(question.diagnosis) : null) as unknown as [string|null,string|null,string|null];

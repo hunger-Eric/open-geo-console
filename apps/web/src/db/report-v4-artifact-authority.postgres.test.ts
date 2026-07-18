@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadReportV4ArtifactAuthority, loadReportV4ArtifactAuthorityInTransaction } from "./report-v4-artifact-authority";
@@ -62,6 +62,23 @@ suite("Report V4 artifact authority PostgreSQL", () => {
       await expect(loadReportV4ArtifactAuthority(sql, { sessionId: ids.session, scenarioId: ids.scenario, phase: "final" }))
         .rejects.toThrow(/stored payload identity/i);
     } finally { await writer.end({ timeout: 1 }); }
+  }, 30_000);
+
+  it("rejects a raw sixth JSONB source whose stored hash matches only the parser-normalized payload", async () => {
+    const ids = await seedCore(sql);
+    const rawPayload = structuredClone(ids.reportPayload);
+    for (let index = 2; index <= 6; index += 1) {
+      rawPayload.questions[0]!.sources.push({ ...rawPayload.questions[0]!.sources[0]!,
+        sourceId: `source-1-${index}`, canonicalUrl: `https://source-${index}.example/evidence` });
+    }
+    const normalizedPayload = structuredClone(rawPayload);
+    normalizedPayload.questions[0]!.sources = normalizedPayload.questions[0]!.sources.slice(0, 5);
+    await sql.begin(async (tx) => {
+      await tx`UPDATE combined_geo_reports SET payload=${tx.json(rawPayload)} WHERE artifact_revision_id=${ids.artifact}`;
+      await tx`UPDATE report_artifact_revisions SET payload_identity_hash=${hashJson(normalizedPayload)} WHERE id=${ids.artifact}`;
+    });
+    await expect(loadReportV4ArtifactAuthority(sql, { sessionId: ids.session, scenarioId: ids.scenario, phase: "final" }))
+      .rejects.toThrow(/exact raw persisted JSONB/i);
   }, 30_000);
 
   it("accepts real success and exact-target diagnosis-failure enhancement handoffs", async () => {
@@ -257,3 +274,9 @@ function diagnosisOutput(ordinal: 1|2|3) {
 }
 
 function withDatabase(url: string, database: string): string { const parsed = new URL(url); parsed.pathname = `/${database}`; return parsed.toString(); }
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  return `{${Object.keys(value as Record<string,unknown>).sort().map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string,unknown>)[key])}`).join(",")}}`;
+}
+function hashJson(value: unknown): string { return createHash("sha256").update(stableJson(value)).digest("hex"); }

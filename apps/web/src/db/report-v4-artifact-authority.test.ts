@@ -51,6 +51,34 @@ describe("Report V4 combined-payload artifact authority", () => {
     await expect(load(malformed, "final")).rejects.toThrow(/persisted payload is invalid/i);
   });
 
+  it("rejects parser-normalizable raw payload drift even when the stored hash matches normalized content", async () => {
+    const sixthSource = fixture("question_failure", "final");
+    const sixthRaw = sixthSource.artifacts[0]!.payload as ReturnType<typeof payload>;
+    for (let index = 2; index <= 6; index += 1) {
+      sixthRaw.questions[0]!.sources.push({ ...sixthRaw.questions[0]!.sources[0]!,
+        sourceId: `source-1-${index}`, canonicalUrl: `https://source-${index}.example/evidence` });
+    }
+    const fiveSourceNormalized = structuredClone(sixthRaw);
+    fiveSourceNormalized.questions[0]!.sources = fiveSourceNormalized.questions[0]!.sources.slice(0, 5);
+    sixthSource.artifacts[0]!.payload_identity_hash = hashJson(fiveSourceNormalized);
+    await expect(load(sixthSource, "final")).rejects.toThrow(/exact raw persisted JSONB/i);
+
+    const duplicateCanonicalUrl = fixture("question_failure", "final");
+    const duplicateRaw = duplicateCanonicalUrl.artifacts[0]!.payload as ReturnType<typeof payload>;
+    duplicateRaw.questions[0]!.sources.push({ ...duplicateRaw.questions[0]!.sources[0]!, sourceId: "source-1-alias",
+      canonicalUrl: `${duplicateRaw.questions[0]!.sources[0]!.canonicalUrl}#fragment` });
+    duplicateCanonicalUrl.artifacts[0]!.payload_identity_hash = hashJson(structuredClone(
+      { ...duplicateRaw, questions: duplicateRaw.questions.map((question, index) => index === 0
+        ? { ...question, sources: question.sources.slice(0, 1) } : question) }));
+    await expect(load(duplicateCanonicalUrl, "final")).rejects.toThrow(/exact raw persisted JSONB/i);
+
+    const duplicateEvidenceRef = fixture("success", "final");
+    const diagnosisRaw = (duplicateEvidenceRef.artifacts[1]!.payload as ReturnType<typeof payload>).questions[0]!.diagnosis!;
+    diagnosisRaw.observableFactors[0]!.evidenceRefs.push("source-1");
+    duplicateEvidenceRef.artifacts[1]!.payload_identity_hash = hashJson(duplicateEvidenceRef.artifacts[1]!.payload);
+    await expect(load(duplicateEvidenceRef, "final")).rejects.toThrow(/exact raw persisted JSONB/i);
+  });
+
   it("rejects enhancement drift in answers/sources and diagnosis/checkpoint disagreement", async () => {
     const answerDrift = fixture("success", "final");
     const enhanced = answerDrift.artifacts[1]!.payload as ReturnType<typeof payload>;
