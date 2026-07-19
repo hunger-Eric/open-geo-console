@@ -104,6 +104,15 @@ describe("recoverable V4 admission runtime", () => {
       ...checkpoint,
       pages: [checkpointPage(1)]
     })],
+    ["duplicate analyzable content", (checkpoint: ReportV4AdmissionCheckpoint) => ({
+      ...checkpoint,
+      queue: [],
+      knownUrlKeys: ["https://example.com/page-1", "https://example.com/page-2"],
+      pages: [
+        checkpointPage(1),
+        { ...checkpointPage(2, "https://example.com/page-2"), contentHash: sha("checkpoint-page-1"), retainedText: "checkpoint-page-1" }
+      ]
+    })],
     ["more than 51 analyzable pages", (checkpoint: ReportV4AdmissionCheckpoint) => ({
       ...checkpoint,
       queue: [],
@@ -156,6 +165,29 @@ describe("recoverable V4 admission runtime", () => {
       "https://example.com/page-2"
     ]);
     expect(harness.finalized?.status).toBe("completed_limited");
+  });
+
+  it("counts exact duplicate page bodies once while retaining every duplicate URL as exclusion evidence", async () => {
+    const duplicateBody = "The same exact cleaned page body.";
+    const harness = runtimeHarness([candidate(1), candidate(2), candidate(3)], {
+      extractAnalyzableText: (read) => read.url.endsWith("/page-3") ? "A distinct page body." : duplicateBody
+    });
+
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 3, successfulPages: 2, failedPages: 1 });
+    expect(harness.finalized).toMatchObject({
+      status: "completed_limited",
+      pages: [
+        expect.objectContaining({ normalizedUrl: "https://example.com/page-1", analyzable: true }),
+        expect.objectContaining({
+          normalizedUrl: "https://example.com/page-2",
+          analyzable: false,
+          retainedText: null,
+          contentHash: null,
+          exclusionReason: "duplicate_content"
+        }),
+        expect.objectContaining({ normalizedUrl: "https://example.com/page-3", analyzable: true })
+      ]
+    });
   });
 
   it("binds every queued candidate to the trusted target site instead of trusting a forged candidate siteUrl", async () => {
