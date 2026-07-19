@@ -5,9 +5,11 @@
 - [x] Approve the prospective `combined_geo_report_v4` two-stage GEO report design and install the executable requirements registry, generated coverage matrix, structural traceability audit and fail-closed final acceptance command.
 - [x] Implement the local schema-v40 V4 authority and acceptance stack: global-prefix phase snapshots, checkpoint/runtime projectors, three-scenario semantic aggregation, sealed-scenario append gating, interleaving-safe atomic sealing, and `report-v4-acceptance-semantic-evidence/v2` collection.
 - [x] Bind all 20 requirements to implementation/tests and promote their registry state from `planned` to `implemented`; keep `npm run report:v4:traceability` green.
-- [ ] Obtain explicit user authorization before any protected-staging deployment or database mutation, Airwallex Sandbox payment/refund, redirected email, Git push, or pull request. Production V4 deployment and mutation are forbidden.
-- [ ] After authorization, align protected staging to schema v40 and matching Web/free/deep/commerce code, then execute the exact success, diagnosis-failure, and question-failure scenarios without bypassing the ledger/operator gates.
+- [x] Obtain explicit user authorization for the protected-staging deployment, database mutation, Airwallex Sandbox payment/refund, redirected email, and Git push performed on 2026-07-19. Production V4 deployment and mutation remained forbidden and untouched.
+- [x] Align protected staging to schema v40 and matching Web/free/deep/commerce code, then complete one real CNY 199 paid V4 core run for `https://mimo.xiaomi.com/zh`: active authorized HTML, two answered cards, one explicit unavailable card, and a truthful `completed_limited` terminal outcome.
+- [ ] Execute the exact diagnosis-failure and question-failure V4 scenarios without bypassing the ledger/operator gates. The paid core run is customer-delivery evidence, not a substitute for the remaining scenario authorities.
 - [ ] Collect requirement-bound protected-staging evidence for all 20 requirements, review each status promotion from `implemented` to `verified`, and make `npm run report:v4:acceptance` pass. Do not edit the registry, matrix status, or evidence files before that evidence exists.
+- [ ] Reconcile the 2026-07-19 paid run's failed Airwallex Sandbox cash refund and 21 retried test emails through sanctioned provider paths. The internal credit is refunded; provider refund and email delivery must not be represented as successful.
 
 ## Report workspace rebuild
 

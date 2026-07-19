@@ -121,7 +121,7 @@ Both modes verify the deployment profile and database marker and refuse producti
 
 ## Acceptance
 
-### Report V4 acceptance (local implementation; live run not yet authorized)
+### Report V4 acceptance
 
 The local branch implements schema v40 and the three-scenario V4 acceptance authority. Local readiness is checked with:
 
@@ -133,9 +133,11 @@ npm run report:v4:traceability
 npm run report:v4:acceptance
 ```
 
-`report:v4:acceptance` must continue to fail while the 20 registry entries are `implemented` rather than `verified` and requirement-bound protected-staging evidence is absent. Do not create an evidence file or promote statuses to make the command pass.
+`report:v4:acceptance` must continue to fail while any registry entry remains `implemented` rather than `verified` or the exact three-scenario protected-staging evidence set is incomplete. Do not manufacture evidence or promote statuses to make the command pass.
 
-A live V4 run requires separate explicit user authorization for deployment, schema/database mutation, Airwallex Sandbox payment/refund, redirected email, Git push, and pull-request creation. After authorization, align schema v40 plus the protected-staging Web, free Worker, deep Worker, and commerce code before using `report-v4:acceptance:operator` or `report-v4:acceptance:collect`. Use only exact run-produced session/scenario identities and immutable authorities; this runbook intentionally does not provide reusable payloads or IDs. Production deployment, production database mutation, and production commerce are forbidden for V4 acceptance.
+A live V4 run requires explicit user authorization for deployment, schema/database mutation, Airwallex Sandbox payment/refund, redirected email, Git push, and pull-request creation. After authorization, align schema v40 plus the protected-staging Web, free Worker, deep Worker, and commerce code before using `report-v4:acceptance:operator` or `report-v4:acceptance:collect`. Use only exact run-produced session/scenario identities and immutable authorities; do not reuse IDs from a prior drill. Production deployment, production database mutation, and production commerce are forbidden for V4 acceptance.
+
+The 2026-07-19 paid core run proves one authorized `combined_geo_report_v4` customer HTML can reach `completed_limited`; it does not complete the three-scenario conformance authority. Its exact identities, content inspection, failed Sandbox cash refund, retried email state, and remaining acceptance work are recorded in `docs/operations/evidence/2026-07-19-report-v4-paid-deep-report.md`.
 
 ### Combined-report presentation refresh
 
