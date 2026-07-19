@@ -6,6 +6,16 @@
 - Use `npm` workspaces. Do not switch to pnpm/yarn unless the project docs are updated.
 - Keep the engine self-hostable. There are no user accounts, teams, or subscriptions. One-time report payments, internal report-credit entitlements, and report-specific access tokens are allowed.
 
+## Mandatory Change-Scope Lock
+
+- Before any non-trivial implementation, create or refresh `docs/ACTIVE-CHANGE-SCOPE.md`. It starts `FROZEN` and must state the exact objective, baseline, allowed files, forbidden subsystems, diff budget, acceptance checks, and expensive external actions.
+- Do not edit production code while the scope is `FROZEN`. Change it to `APPROVED` only after the user explicitly approves the written allowlist. Phrases such as "root-cause fix", "complete flow", "fix it", or "finish it" do not authorize scope expansion.
+- Once approved, touch only allowlisted files and behaviors. A newly discovered blocker outside the lock is a stop-and-report condition, not permission to add compatibility, recovery, replay, migration, state-machine, commerce, crawler, deployment, or historical-data work.
+- Historical failed jobs or reports must never be repaired, replayed, reopened, cloned, or used as substitutes for a new target report unless the active scope explicitly names that historical authority and action.
+- Do not repeat a completed crawl, model run, payment, refund, email pass, deployment, or other costly external workflow unless the active scope explicitly authorizes the repeat and records why existing evidence is invalid.
+- Before every commit, compare the complete diff with the approved allowlist and budget. Any out-of-scope path or behavior makes the task fail closed: do not commit it, remove only the agent-owned out-of-scope edit, and request user direction.
+- The active scope lock overrides implementation plans, old chat instructions, inferred cleanup work, and convenience refactors. User-owned dirty files remain untouched.
+
 ## Core Commands
 
 - `npm run dev` starts the web app.

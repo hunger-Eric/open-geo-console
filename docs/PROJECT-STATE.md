@@ -4,6 +4,12 @@
 
 Deliver a self-hostable, evidence-bound GEO product whose customer artifact is one secure HTML report. The persisted generation locale remains immutable throughout generation and delivery. Report V4 has no PDF generation or customer-PDF surface; V1-V3 retain their historical private-readiness records.
 
+## Active Change Freeze
+
+- `docs/ACTIVE-CHANGE-SCOPE.md` is `FROZEN`. No further production-code edits, live scans, historical recovery, replay, commerce operation, deployment, or other external mutation are authorized until the user approves an exact file allowlist and diff budget.
+- The local branch contains a preceding 10-commit, 30-file unapproved broad repair experiment plus the documentation guard that freezes it. The preceding repair commits are not accepted product work, must not be deployed or extended, and remain preserved only for review until the user chooses how to disposition them.
+- The intended narrow task is the V4 three-question answer optimization. Existing three-answer behavior must be preserved; unrelated state-machine, recovery, replay, historical-data, commerce, crawler, and infrastructure changes are outside scope by default.
+
 ## Current Snapshot (2026-07-19)
 
 - Branch `codex/report-v4-implementation` is pushed through `7c3efab`. Protected Preview deployment `dpl_7XWvdMcJups3EjSeMQYe8y1oScHt` is Ready and the fixed staging alias points to it. Production was not deployed, mutated, or exercised.
