@@ -257,7 +257,9 @@ function validateCoreAggregate(value: ReportV4ProductionCoreAggregate, allowedAc
     ["queued", "running", "retry_wait", "repair_wait"].includes(job.executionState) &&
     ["queued", "processing"].includes(order.fulfillmentStatus) && order.refundStatus === "not_required" &&
     credit.status === "reserved" && value.activeAccessTokenCount === 0;
-  const reserved = reservedState && value.activeArtifacts.length === 0 && value.report.activeArtifactRevisionId === null;
+  const reserved = reservedState && value.report.activeArtifactRevisionId === null && (
+    value.activeArtifacts.length === 0 || isExactPendingCore(value, job, order, config)
+  );
   const reservedActive = reservedState && isExactReservedActiveCore(value, job, order, config);
   const settled = job.stage === "completed" && job.executionState === "completed" &&
     order.fulfillmentStatus === "completed" && order.refundStatus === "not_required" && credit.status === "settled";
@@ -309,6 +311,20 @@ function isExactReservedActiveCore(
     && artifact.orderId === order.id && artifact.jobId === job.id && artifact.configSnapshotId === config.id
     && artifact.revisionKind === "generation" && artifact.artifactContract === "combined_geo_report_v4"
     && artifact.status === "active" && artifact.sourceArtifactRevisionId === null;
+}
+
+function isExactPendingCore(
+  value: ReportV4ProductionCoreAggregate,
+  job: ReportV4ProductionCoreJob,
+  order: ReportV4ProductionCoreAggregate["orders"][number],
+  config: ReportV4ProductionCoreAggregate["configSnapshots"][number]
+): boolean {
+  if (value.activeArtifacts.length !== 1 || value.activeAccessTokenCount !== 0) return false;
+  const artifact = value.activeArtifacts[0]!;
+  return artifact.reportId === job.reportId && artifact.orderId === order.id && artifact.jobId === job.id
+    && artifact.configSnapshotId === config.id && artifact.revisionKind === "generation"
+    && artifact.artifactContract === "combined_geo_report_v4" && artifact.status === "pending"
+    && artifact.sourceArtifactRevisionId === null;
 }
 
 function assertLiveCoreLease(context: ReportV4PaidCoreContext, workerIdValue: string, nowValue: Date): void {

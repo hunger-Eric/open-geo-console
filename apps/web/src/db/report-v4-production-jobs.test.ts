@@ -84,6 +84,25 @@ describe("V4 production core and diagnosis-enhancement job lineage", () => {
     await expect(claimed()).rejects.toThrow(/reserved.*active|config|lineage/i);
   });
 
+  it("admits only the exact pending core left by a crash before payload persistence", async () => {
+    const aggregate = reservedAggregate();
+    aggregate.activeArtifacts = [{
+      id: "core-artifact-1", reportId: "report-1", orderId: "order-1", jobId: "core-job",
+      configSnapshotId: "config-1", revisionKind: "generation", artifactContract: "combined_geo_report_v4",
+      status: "pending", sourceArtifactRevisionId: null
+    }];
+    const claimed = () => repository(aggregate).loadClaimedPaidCoreContext({
+      coreJobId: "core-job", workerId: "worker-1"
+    });
+
+    await expect(claimed()).resolves.toMatchObject({
+      commercePhase: "reserved", activeCoreArtifact: null
+    });
+
+    aggregate.activeArtifacts[0]!.configSnapshotId = "wrong-config";
+    await expect(claimed()).rejects.toThrow(/reserved.*active|config|lineage/i);
+  });
+
   it("fails closed on duplicate, missing, legacy, replacement, locale or commercial lineage drift", async () => {
     const variants: Array<[string, (aggregate: ReportV4ProductionCoreAggregate) => void]> = [
       ["duplicate config", (value) => value.configSnapshots.push({ ...value.configSnapshots[0]!, id: "config-2" })],
