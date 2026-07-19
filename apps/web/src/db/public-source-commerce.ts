@@ -349,7 +349,7 @@ export async function recoverFailedPaidReportV4CoreForTerminalReplay(input: {
     if (!artifact) throw new Error("The exact active V4 core artifact is required for terminal replay recovery.");
     const report = parseCombinedGeoReportV4(artifact.payload);
     assertV4CoreArtifact(artifact, report);
-    assertExactActiveV4CoreLineage(artifact);
+    const recoveryTopology = recoverableV4CoreTopology(artifact);
     if (!["completed", "completed_limited"].includes(report.status)) {
       throw new Error("Only a deliverable V4 core may recover for commercial terminal replay.");
     }
@@ -371,8 +371,12 @@ export async function recoverFailedPaidReportV4CoreForTerminalReplay(input: {
       SELECT id,status,access_key_id,credits,job_id,report_id,payment_order_id
       FROM credit_ledger WHERE id=${job.credit_reservation_id} FOR UPDATE
     `)[0] : undefined;
+    const expectedErrorCode = recoveryTopology === "legacy_active_split" ? "lease_exhausted" : "unexpected_internal_error";
+    const exactOrderFailureState = recoveryTopology === "legacy_active_split"
+      ? order?.fulfillment_status === "failed" && order.refund_status === "pending" && order.delivery_status === "queued"
+      : order?.fulfillment_status === "queued" && order.refund_status === "not_required" && order.delivery_status === "not_queued";
     if (!job || !order || !credit || job.stage !== "failed" || job.execution_state !== "failed" ||
-        job.error_code !== "lease_exhausted" || job.current_phase !== "terminalization" ||
+        job.error_code !== expectedErrorCode || job.current_phase !== "terminalization" ||
         job.lease_owner !== null || job.lease_expires_at !== null || job.reason !== "standard" ||
         job.tier !== "deep" || job.product_contract !== "recommendation_forensics_v1" ||
         job.fulfillment_methodology !== "two_stage_geo_report_v4" || Number(job.recommendation_report_version) !== 4 ||
@@ -380,7 +384,7 @@ export async function recoverFailedPaidReportV4CoreForTerminalReplay(input: {
         job.site_snapshot_id === null || credit.status !== "refunded" || credit.job_id !== job.id ||
         credit.report_id !== job.report_id || credit.payment_order_id !== order.id || credit.credits < 1 ||
         order.report_id !== job.report_id || order.fulfillment_job_id !== job.id || order.payment_status !== "paid" ||
-        order.fulfillment_status !== "failed" || order.refund_status !== "pending" || order.delivery_status !== "queued" ||
+        !exactOrderFailureState ||
         order.site_snapshot_id !== job.site_snapshot_id || order.business_question_set_id !== job.business_question_set_id) {
       throw new Error("The failed V4 core commercial state is not eligible for terminal replay recovery.");
     }
@@ -404,10 +408,14 @@ export async function recoverFailedPaidReportV4CoreForTerminalReplay(input: {
       FROM payment_refunds WHERE order_id=${order.id} FOR UPDATE
     `;
     const refund = refunds[0];
-    if (refunds.length !== 1 || !refund || refund.state !== "pending" || refund.submitted_at !== null ||
-        refund.provider !== order.provider || refund.reason !== "report_failed" ||
-        Number(refund.amount_minor) !== Number(order.amount_minor) || refund.currency !== order.currency) {
-      throw new Error("A submitted or conflicting V4 refund cannot be reopened for terminal replay.");
+    if (recoveryTopology === "legacy_active_split") {
+      if (refunds.length !== 1 || !refund || refund.state !== "pending" || refund.submitted_at !== null ||
+          refund.provider !== order.provider || refund.reason !== "report_failed" ||
+          Number(refund.amount_minor) !== Number(order.amount_minor) || refund.currency !== order.currency) {
+        throw new Error("A submitted or conflicting V4 refund cannot be reopened for terminal replay.");
+      }
+    } else if (refunds.length !== 0) {
+      throw new Error("A ready V4 terminal replay cannot carry a cash-refund side effect.");
     }
     const sideEffects = (await tx<Array<{ delivered_failures: number; access_tokens: number; enhancements: number }>>`
       SELECT
@@ -431,22 +439,24 @@ export async function recoverFailedPaidReportV4CoreForTerminalReplay(input: {
     if (restored.length !== 1) throw new Error("The original V4 credit capacity cannot be restored safely.");
     await tx`DELETE FROM email_deliveries WHERE order_id=${order.id}
       AND template_type IN ('report_failed_refund','limited_report_refund','refund_succeeded') AND state='queued'`;
-    await tx`DELETE FROM payment_refunds WHERE id=${refund.id} AND state='pending' AND submitted_at IS NULL`;
+    if (refund) await tx`DELETE FROM payment_refunds WHERE id=${refund.id} AND state='pending' AND submitted_at IS NULL`;
     await tx`UPDATE credit_ledger SET status='reserved',refunded_at=NULL,settled_at=NULL
       WHERE id=${credit.id} AND status='refunded'`;
     await tx`UPDATE payment_orders SET fulfillment_status='queued',fulfilled_at=NULL,refund_status='not_required',
       delivery_status='not_queued',updated_at=now() WHERE id=${order.id}`;
-    const demoted = await tx<Array<{ id: string }>>`
-      UPDATE report_artifact_revisions SET status='ready',activated_at=NULL
-      WHERE id=${artifact.id} AND status='active' AND revision_kind='generation'
-        AND artifact_contract='combined_geo_report_v4' RETURNING id
-    `;
-    if (demoted.length !== 1) throw new Error("The legacy active V4 core could not be demoted for terminal replay.");
-    const unpublished = await tx<Array<{ id: string }>>`
-      UPDATE scan_reports SET active_artifact_revision_id=NULL
-      WHERE id=${artifact.report_id} AND active_artifact_revision_id=${artifact.id} RETURNING id
-    `;
-    if (unpublished.length !== 1) throw new Error("The legacy active V4 core pointer could not be cleared for terminal replay.");
+    if (recoveryTopology === "legacy_active_split") {
+      const demoted = await tx<Array<{ id: string }>>`
+        UPDATE report_artifact_revisions SET status='ready',activated_at=NULL
+        WHERE id=${artifact.id} AND status='active' AND revision_kind='generation'
+          AND artifact_contract='combined_geo_report_v4' RETURNING id
+      `;
+      if (demoted.length !== 1) throw new Error("The legacy active V4 core could not be demoted for terminal replay.");
+      const unpublished = await tx<Array<{ id: string }>>`
+        UPDATE scan_reports SET active_artifact_revision_id=NULL
+        WHERE id=${artifact.report_id} AND active_artifact_revision_id=${artifact.id} RETURNING id
+      `;
+      if (unpublished.length !== 1) throw new Error("The legacy active V4 core pointer could not be cleared for terminal replay.");
+    }
     await tx`UPDATE scan_jobs SET stage='queued',execution_state='queued',current_phase='admission',phase_attempt=0,
       retry_not_before=NULL,repair_reason_code=NULL,repair_deadline_at=NULL,resume_generation=resume_generation+1,
       error_code=NULL,public_error=NULL,updated_at=now() WHERE id=${job.id} AND execution_state='failed'`;
@@ -961,9 +971,10 @@ function assertV4CoreTerminalizationLineage(row: V4ArtifactCommerceRow, firstRun
   assertActiveV4CoreLineage(row);
 }
 
-function assertExactActiveV4CoreLineage(row: V4ArtifactCommerceRow): void {
-  if (row.status === "active" && row.active_artifact_revision_id === row.id) return;
-  throw new Error("The legacy split-state V4 core is not the exact active delivery revision.");
+function recoverableV4CoreTopology(row: V4ArtifactCommerceRow): "legacy_active_split" | "ready_replay_failure" {
+  if (row.status === "active" && row.active_artifact_revision_id === row.id) return "legacy_active_split";
+  if (row.status === "ready" && row.active_artifact_revision_id === null) return "ready_replay_failure";
+  throw new Error("The failed V4 core is neither the exact legacy split state nor an unpublished ready replay.");
 }
 
 function assertActiveV4CoreLineage(row: V4ArtifactCommerceRow): void {

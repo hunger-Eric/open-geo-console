@@ -55,6 +55,8 @@ describePostgres("paid public-source atomic terminalization",()=>{
     await seedPaidV4Core(sql,v4Identity(suffix,"limited"),"completed_limited");
     await seedPaidV4Core(sql,v4Identity(suffix,"recovery-limited"),"completed_limited");
     await seedFailedV4TerminalReplay(sql,v4Identity(suffix,"recovery-limited"));
+    await seedPaidV4Core(sql,v4Identity(suffix,"recovery-ready"),"completed");
+    await seedFailedV4ReadyReplay(sql,v4Identity(suffix,"recovery-ready"));
     await seedPaidV4Core(sql,v4Identity(suffix,"missing-config"),"completed",false);
     await seedPaidV4Core(sql,v4Identity(suffix,"concurrent"),"completed");
     await seedPaidV4Core(sql,v4Identity(suffix,"bypass"),"completed");
@@ -160,6 +162,29 @@ describePostgres("paid public-source atomic terminalization",()=>{
       stage:"completed_limited",execution_state:"completed",fulfillment_status:"completed_limited",
       refund_status:"pending",credit_status:"refunded",credits_remaining:1,refunds:1,
       refund_reason:"completed_limited",emails:1,tokens:1,enhancements:0,transitions:2,
+      artifact_status:"active",active_artifact_revision_id:ids.artifactRevisionId
+    });
+  },120_000);
+
+  // @requirement GEO-V4-COMMERCE-01
+  it("requeues an unpublished ready core after a side-effect-free replay failure",async()=>{
+    const sql=getSqlClient(),ids=v4Identity(suffix,"recovery-ready"),core=v4Report(ids,"completed");
+    await expect(recoverFailedPaidReportV4CoreForTerminalReplay({
+      coreJobId:ids.jobId,coreArtifactRevisionId:ids.artifactRevisionId,readiness:async()=>undefined
+    })).resolves.toEqual({jobId:ids.jobId,orderId:ids.orderId,artifactRevisionId:ids.artifactRevisionId});
+    expect(await readV4CommerceState(sql,ids)).toMatchObject({
+      stage:"queued",execution_state:"queued",fulfillment_status:"queued",refund_status:"not_required",
+      credit_status:"reserved",credits_remaining:0,refunds:0,emails:0,tokens:0,enhancements:0,transitions:1,
+      artifact_status:"ready",active_artifact_revision_id:null
+    });
+    await sql`UPDATE scan_jobs SET stage='synthesizing',execution_state='running',current_phase='terminalization',
+      lease_owner=${ids.workerId},lease_expires_at=now()+interval '1 hour' WHERE id=${ids.jobId}`;
+    await expect(terminalizePaidReportV4Core({report:core,workerId:ids.workerId})).resolves.toMatchObject({
+      outcome:"completed",orderId:ids.orderId,refundId:null
+    });
+    expect(await readV4CommerceState(sql,ids)).toMatchObject({
+      stage:"completed",execution_state:"completed",fulfillment_status:"completed",refund_status:"not_required",
+      credit_status:"settled",credits_remaining:0,refunds:0,emails:1,tokens:1,transitions:2,
       artifact_status:"active",active_artifact_revision_id:ids.artifactRevisionId
     });
   },120_000);
@@ -419,6 +444,15 @@ async function seedFailedV4TerminalReplay(sql:ReturnType<typeof getSqlClient>,id
   await sql`UPDATE access_keys SET credits_remaining=1,status='active' WHERE id=${ids.accessKeyId}`;
   await sql`INSERT INTO payment_refunds(id,order_id,provider,reason,amount_minor,currency,state,idempotency_key)
     VALUES(${randomUUID()},${ids.orderId},'airwallex','report_failed',2900,'USD','pending',${`full_refund/${ids.orderId}`})`;
+}
+async function seedFailedV4ReadyReplay(sql:ReturnType<typeof getSqlClient>,ids:V4FixtureIdentity){
+  await seedFailedV4TerminalReplay(sql,ids);
+  await sql`UPDATE report_artifact_revisions SET status='ready',activated_at=NULL WHERE id=${ids.artifactRevisionId}`;
+  await sql`UPDATE scan_reports SET active_artifact_revision_id=NULL WHERE id=${ids.reportId}`;
+  await sql`UPDATE scan_jobs SET error_code='unexpected_internal_error' WHERE id=${ids.jobId}`;
+  await sql`UPDATE payment_orders SET fulfillment_status='queued',refund_status='not_required',delivery_status='not_queued',fulfilled_at=NULL
+    WHERE id=${ids.orderId}`;
+  await sql`DELETE FROM payment_refunds WHERE order_id=${ids.orderId}`;
 }
 async function activateV4DiagnosisFixture(sql:ReturnType<typeof getSqlClient>,ids:V4FixtureIdentity,enhancementJob:string){
   const enhancementRevision=`v4-enhancement-${ids.label}-${ids.reportId}`;
