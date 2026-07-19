@@ -61,11 +61,14 @@ export type ReportV4QuestionProviderErrorCode =
   | "transport"
   | "rate_limited"
   | "temporary_provider"
+  | "contract"
   | "authentication"
   | "configuration"
   | "safety";
 
-const RETRYABLE_PROVIDER_CODES = new Set<ReportV4QuestionProviderErrorCode>(["transport", "rate_limited", "temporary_provider"]);
+const RETRYABLE_PROVIDER_CODES = new Set<ReportV4QuestionProviderErrorCode>([
+  "transport", "rate_limited", "temporary_provider", "contract"
+]);
 const QUESTION_SPEC_FIELDS = new Set(["order", "questionId", "question", "tokenBudget"]);
 
 export class ReportV4QuestionProviderError extends Error {
@@ -194,6 +197,7 @@ async function resolveQuestion(input: {
       });
     } catch {
       input.signal.throwIfAborted();
+      if (checkpoint.providerCallCount < 2) continue;
       await input.repository.markUnavailable({ identityHash: checkpoint.identityHash, providerCallCount: checkpoint.providerCallCount });
       return { question: unavailableQuestion(input.question), reused: false };
     }

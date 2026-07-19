@@ -156,16 +156,25 @@ export function createReportV4MimoQuestionAnswerProvider(
         throw mapQuestionError(error);
       }
 
-      const value = record(envelope.value);
-      return Object.freeze({
-        questionId: boundedText(input.questionId, "questionId", 500),
-        answerText: boundedTextAllowEmpty(value.answerText, "answerText", 12_000),
-        refusal: parseRefusal(value.refusal),
-        sources: parseAnnotations(envelope.annotations),
-        searchedAt: envelope.searchedAt,
-        completedAt: envelope.completedAt,
-        providerResponseId: envelope.providerResponseId
-      });
+      try {
+        const value = record(envelope.value);
+        return Object.freeze({
+          questionId: boundedText(input.questionId, "questionId", 500),
+          answerText: boundedTextAllowEmpty(value.answerText, "answerText", 12_000),
+          refusal: parseRefusal(value.refusal),
+          sources: parseAnnotations(envelope.annotations),
+          searchedAt: envelope.searchedAt,
+          completedAt: envelope.completedAt,
+          providerResponseId: envelope.providerResponseId
+        });
+      } catch (error) {
+        propagateAbort(input.signal);
+        throw new ReportV4QuestionProviderError(
+          "contract",
+          "The MiMo provider returned an invalid question result.",
+          { cause: error }
+        );
+      }
     }
   });
 }

@@ -129,17 +129,40 @@ describe("V4 local question answerer", () => {
     expect(repository.byOrdinal(1).providerCallCount).toBe(0);
   });
 
-  it("rejects cross-question provider output locally and preserves sibling answers", async () => {
+  it("retries one cross-question provider output locally and preserves sibling answers", async () => {
     const repository = new MemoryCheckpointRepository();
-    const provider = providerFrom(async (request) => request.questionId === "question-1"
-      ? providerAnswer("question-2", request.question)
-      : providerAnswer(request.questionId, request.question));
+    let firstQuestionAttempts = 0;
+    const provider = providerFrom(async (request) => {
+      if (request.questionId === "question-1" && ++firstQuestionAttempts === 1) {
+        return providerAnswer("question-2", request.question);
+      }
+      return providerAnswer(request.questionId, request.question);
+    });
 
     const result = await answerReportV4Questions(answererInput(repository, provider));
 
-    expect(result.questions.map(({ status }) => status)).toEqual(["unavailable", "answered", "answered"]);
-    expect(provider.calls.filter(({ questionId }) => questionId === "question-1")).toHaveLength(1);
+    expect(result.questions.map(({ status }) => status)).toEqual(["answered", "answered", "answered"]);
+    expect(provider.calls.filter(({ questionId }) => questionId === "question-1")).toHaveLength(2);
     expect(result.questions[1].sources.every(({ questionId }) => questionId === "question-2")).toBe(true);
+  });
+
+  it("retries one provider result-contract failure without rerunning sibling questions", async () => {
+    const repository = new MemoryCheckpointRepository();
+    let firstQuestionAttempts = 0;
+    const provider = providerFrom(async (request) => {
+      if (request.questionId === "question-1" && ++firstQuestionAttempts === 1) {
+        throw new ReportV4QuestionProviderError("contract", "invalid provider result shape");
+      }
+      return providerAnswer(request.questionId, request.question);
+    });
+
+    const result = await answerReportV4Questions(answererInput(repository, provider));
+
+    expect(result.questions.every(({ status }) => status === "answered")).toBe(true);
+    expect(provider.calls.map(({ questionId }) => questionId)).toEqual([
+      "question-1", "question-1", "question-2", "question-3"
+    ]);
+    expect(repository.byOrdinal(1).providerCallCount).toBe(2);
   });
 
   it("propagates a pre-aborted caller signal before checkpoint transitions or provider calls", async () => {

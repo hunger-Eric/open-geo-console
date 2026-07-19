@@ -378,6 +378,19 @@ describe("Report V4 dedicated MiMo provider", () => {
     });
   });
 
+  it("maps an invalid structured question result to one retryable outer contract failure", async () => {
+    const provider = createReportV4MimoQuestionAnswerProvider({
+      environment: environment(),
+      fetch: vi.fn(async () => response({ answerText: { invalid: true }, refusal: null }))
+    });
+
+    await expect(provider.answerWithSources(questionInput())).rejects.toMatchObject({
+      name: "ReportV4QuestionProviderError",
+      code: "contract",
+      retryable: true
+    });
+  });
+
   it("declares the exact question JSON contract and exposes the question-operation model identity", async () => {
     const bodies: Record<string, unknown>[] = [];
     const provider = createReportV4MimoQuestionAnswerProvider({
