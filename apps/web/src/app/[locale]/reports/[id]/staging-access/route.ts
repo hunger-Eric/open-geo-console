@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getPaymentOrder, productContractForCode } from "@/db/commercial-orders";
 import { issueReportAccessToken } from "@/db/report-tokens";
 import { getGeoReport } from "@/db/reports";
-import { getActiveCombinedGeoReport } from "@/db/combined-reports";
+import { getAnyActiveCombinedGeoReport } from "@/db/combined-reports";
 import { hasCompletedReportReplacement } from "@/db/report-replacement-fulfillments";
 import { reportAccessCookieName } from "@/server/report-access";
 
@@ -15,7 +15,7 @@ export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const orderId = new URL(request.url).searchParams.get("order") ?? "";
   const [order, report, active, replacementCompleted] = await Promise.all([
-    getPaymentOrder(orderId), getGeoReport(id), getActiveCombinedGeoReport(id), hasCompletedReportReplacement(orderId, id)
+    getPaymentOrder(orderId), getGeoReport(id), getAnyActiveCombinedGeoReport(id), hasCompletedReportReplacement(orderId, id)
   ]);
   const isDeliverable = order?.fulfillmentStatus === "completed"
     || order?.fulfillmentStatus === "completed_limited"
@@ -33,7 +33,7 @@ export async function GET(request: Request, context: RouteContext) {
     idempotencyKey: `staging-operator-preview/${order.id}/${artifactScope}`,
     artifactScope
   });
-  const destination = artifactScope === "recommendation_forensics_v1" || artifactScope === "combined_geo_report_v1" || artifactScope === "combined_geo_report_v2" || artifactScope === "combined_geo_report_v3"
+  const destination = artifactScope === "recommendation_forensics_v1" || artifactScope === "combined_geo_report_v1" || artifactScope === "combined_geo_report_v2" || artifactScope === "combined_geo_report_v3" || artifactScope === "combined_geo_report_v4"
     ? new URL(`/reports/${id}/report.html`, request.url)
     : new URL(`/${report.reportLocale}/reports/${id}/analysis`, request.url);
   const response = NextResponse.redirect(destination, 303);

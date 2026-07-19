@@ -21,7 +21,7 @@ vi.mock("@open-geo-console/ai-report-engine", () => ({
   parseCombinedGeoReportV4: mocks.parseV4
 }));
 
-import { getActiveCombinedGeoReport } from "./combined-reports";
+import { getActiveCombinedGeoReport, getAnyActiveCombinedGeoReport } from "./combined-reports";
 
 // @requirement GEO-V4-CONTRACT-01
 // @requirement GEO-V4-PDF-01
@@ -50,7 +50,7 @@ describe("active combined report loader", () => {
   it("loads the active V4 artifact through the shared unscoped report-page lookup", async () => {
     mocks.state.rows = [row()];
 
-    await expect(getActiveCombinedGeoReport("report-1")).resolves.toMatchObject({
+    await expect(getAnyActiveCombinedGeoReport("report-1")).resolves.toMatchObject({
       artifactContract: "combined_geo_report_v4",
       artifactRevisionId: "revision-v4"
     });
