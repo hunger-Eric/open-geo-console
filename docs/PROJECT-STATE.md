@@ -6,12 +6,15 @@ Deliver a self-hostable, evidence-bound GEO product whose customer artifact is o
 
 ## Active Change Freeze
 
-- `docs/ACTIVE-CHANGE-SCOPE.md` is `FROZEN`. No further production-code edits, live scans, historical recovery, replay, commerce operation, deployment, or other external mutation are authorized until the user approves an exact file allowlist and diff budget.
-- The local branch contains a preceding 10-commit, 30-file unapproved broad repair experiment plus the documentation guard that freezes it. The preceding repair commits are not accepted product work, must not be deployed or extended, and remain preserved only for review until the user chooses how to disposition them.
-- The intended narrow task is the V4 three-question answer optimization. Existing three-answer behavior must be preserved; unrelated state-machine, recovery, replay, historical-data, commerce, crawler, and infrastructure changes are outside scope by default.
+- `docs/ACTIVE-CHANGE-SCOPE.md` is `FROZEN` again after the approved V4 answer-optimization work unit completed. No further production-code edits, live scans, historical recovery, replay, commerce operation, deployment, or other external mutation are authorized without a new exact scope and explicit approval.
+- The clean local branch `codex/v4-answer-optimization-scope-reset` was created directly from `origin/codex/report-v4-implementation` and contains only the scope guard plus the narrow answer-prompt implementation. The separate 10-commit, 30-file unapproved broad repair experiment remains preserved on the accident branch for review and is not present here.
+- The completed implementation changes only `apps/web/src/report-v4/mimo-provider.ts` and its test. Three-question independence, answer checkpoints, parser behavior, state machines, recovery/replay, historical data, commerce, crawler/admission, diagnosis enhancement, Worker/Docker, staging, and deployment remain unchanged.
 
 ## Current Snapshot (2026-07-19)
 
+- The V4 current-question prompt now requires a direct useful answer, concrete provider/service identification, solution-to-scenario/condition/limitation mapping, and a practical purchase-verification checklist. Ordinary business questions cannot be replaced by research methodology, generic market background, or no-answer wording; only an explicit typed refusal may have an empty answer.
+- Focused answer-boundary verification passes 64 tests across the MiMo provider, three-question answerer, and generative-answer parser; lint and diff checks pass. An independent checker classified the implementation and complete seven-file scope diff as `CONFORMANT`.
+- No real model call, website scan, historical recovery/replay, payment, refund, email, Worker/Docker action, staging operation, or deployment was performed for this answer-optimization work unit. A real `shun-express.com` report remains a separate approval gate.
 - Branch `codex/report-v4-implementation` is pushed through `7c3efab`. Protected Preview deployment `dpl_7XWvdMcJups3EjSeMQYe8y1oScHt` is Ready and the fixed staging alias points to it. Production was not deployed, mutated, or exercised.
 - PostgreSQL schema authority is v40. V1-V3 runtime and historical artifacts remain readable and unchanged.
 - One real CNY 199 Airwallex Sandbox V4 run for `https://mimo.xiaomi.com/zh` completed as `completed_limited`: report `43dbe8f5-49e6-48f5-a902-cc8c3965c199`, order `c2071a58-5ba3-4ff6-8576-5bfec30569e3`, core job `da19f154-acee-4c23-8c9e-5ccea9365992`, active artifact `report-v4-core-e3ffa435bdbb7996762aa87c8c0127d062c6cd0d493f5b7856b6a06f84980c9e`.

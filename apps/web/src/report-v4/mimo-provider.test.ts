@@ -411,7 +411,47 @@ describe("Report V4 dedicated MiMo provider", () => {
     expect(systemText).toContain('"code": "safety_refusal" | "policy_refusal" | "high_risk_refusal"');
     expect(systemText).toContain("same-response provider URL annotations");
     expect(systemText).toContain("must never be self-reported");
+    expect(systemText).toContain("answerText must be non-empty and refusal must be null unless an explicit typed");
+    expect(systemText).toContain("Only for such a typed refusal may answerText be empty");
+    expect(systemText).toContain("do not substitute research methodology, generic market background, or no-answer wording");
     expect(systemText.length).toBeLessThanOrEqual(5_000);
+  });
+
+  it.each([
+    {
+      intent: "provider discovery",
+      question: "Which providers publicly offer enterprise geocoding APIs in China?",
+      expectedBoundary: "name concrete providers and state the publicly offered service relevant to the question"
+    },
+    {
+      intent: "solution fit",
+      question: "Which geocoding solution fits an offline delivery scenario, and under what conditions?",
+      expectedBoundary: "map each solution to its suitable scenario, delivery conditions, and limitations"
+    },
+    {
+      intent: "purchase verification",
+      question: "What should a buyer verify before purchasing an enterprise geocoding service?",
+      expectedBoundary: "a practical checklist covering service scope, conditions, limitations, and risks"
+    }
+  ])("gives the $intent question its explicit direct-answer boundary", async ({ question, expectedBoundary }) => {
+    const bodies: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return response({ answerText: "A direct answer.", refusal: null });
+    });
+    const provider = createReportV4MimoQuestionAnswerProvider({ environment: environment(), fetch });
+
+    await provider.answerWithSources({ ...questionInput(), question });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const messages = bodies[0]!.messages as Array<{ role: string; content: string }>;
+    expect(messages[0]!.content).toContain("Lead answerText with a direct, useful answer");
+    expect(messages[0]!.content).toContain(expectedBoundary);
+    expect(JSON.parse(messages[1]!.content)).toEqual({
+      question,
+      locale: "en-US",
+      region: "CN"
+    });
   });
 
   it.each(["diagnose", "retry", "correct"] as const)("builds one bounded source-diagnosis request for %s without tools", async (kind) => {
