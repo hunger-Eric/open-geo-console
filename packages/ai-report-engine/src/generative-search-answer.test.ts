@@ -26,6 +26,19 @@ describe("parseGenerativeSearchAnswerResult", () => {
     await expect(generativeSearchSourceHash(reordered)).resolves.toBe(await generativeSearchSourceHash(parsed.sources));
   });
   it("rejects prose in the wrong locale", () => { expect(() => parseGenerativeSearchAnswerResult({ ...valid, answerText: "This is an ordinary English sentence." }, { expectedQuestionId: "question-1", locale: "zh-CN" })).toThrow(/language/i); });
+  it("rejects an English answer with only a short Chinese preface", () => {
+    expect(() => parseGenerativeSearchAnswerResult({
+      ...valid,
+      answerText: "可选方案：This answer is otherwise ordinary English prose about providers, delivery, pricing, and market access."
+    }, { expectedQuestionId: "question-1", locale: "zh-CN" })).toThrow(/language/i);
+  });
+  it("accepts Chinese provider discovery answers containing unavoidable official Latin names", () => {
+    const parsed = parseGenerativeSearchAnswerResult({
+      ...valid,
+      answerText: `${"公开资料显示该服务商提供模型接入并支持全球部署。".repeat(12)} ${"MiMo-V2.5-Pro TencentCloud ApiAirforce YahooFinance ".repeat(3)}`
+    }, { expectedQuestionId: "question-1", locale: "zh-CN" });
+    expect(parsed.answerText).toContain("MiMo-V2.5-Pro");
+  });
   it("accepts predominantly Chinese answers with ordinary industry acronyms", () => {
     const parsed = parseGenerativeSearchAnswerResult({
       ...valid,

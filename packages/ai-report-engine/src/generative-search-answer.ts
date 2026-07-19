@@ -62,8 +62,9 @@ export function assertGenerativeSearchAnswerLanguage(
   const violations = fields.flatMap(({ path, text: value }) => {
     const cjk = (value.match(/[\u3400-\u9fff]/gu) ?? []).length;
     const latin = (value.match(/[A-Za-z]/gu) ?? []).length;
-    const latinBudget = Math.max(16, Math.floor(cjk * 0.25));
-    return cjk >= 2 && latin <= latinBudget
+    const hasChineseProse = cjk >= 2 && (latin <= 16 || cjk >= 16);
+    const latinBudget = Math.max(64, Math.floor(cjk * 0.75));
+    return hasChineseProse && latin <= latinBudget
       ? []
       : [{ path, reason: "unexpected_english_sentence" as const }];
   });
