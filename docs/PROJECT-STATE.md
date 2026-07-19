@@ -9,6 +9,7 @@ Deliver a self-hostable, evidence-bound GEO product whose customer artifact is o
 - `docs/ACTIVE-CHANGE-SCOPE.md` is `FROZEN`. No further production-code edits, live scans, historical recovery, replay, commerce operation, deployment, or other external mutation are authorized until the user approves an exact file allowlist and diff budget.
 - The local branch contains a preceding 10-commit, 30-file unapproved broad repair experiment plus the documentation guard that freezes it. The preceding repair commits are not accepted product work, must not be deployed or extended, and remain preserved only for review until the user chooses how to disposition them.
 - The intended narrow task is the V4 three-question answer optimization. Existing three-answer behavior must be preserved; unrelated state-machine, recovery, replay, historical-data, commerce, crawler, and infrastructure changes are outside scope by default.
+- The authoritative deviation audit and clean-branch continuation procedure are in `docs/handoffs/2026-07-19-v4-answer-optimization-scope-recovery.md`.
 
 ## Current Snapshot (2026-07-19)
 

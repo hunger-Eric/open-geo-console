@@ -3,8 +3,8 @@
 ## Active scope lock
 
 - [x] Freeze the current broad local repair branch; do not deploy, extend, replay, or use it as acceptance evidence.
-- [ ] Reconstruct the original V4 three-question answer-optimization requirement from the remote baseline and current product contract without editing code.
-- [ ] Write an exact allowed-file list, forbidden-subsystem list, diff budget, and focused acceptance checks in `docs/ACTIVE-CHANGE-SCOPE.md`.
+- [x] Reconstruct the original V4 three-question answer-optimization requirement from the remote baseline and current product contract without editing code; record the deviation audit and clean-branch handoff.
+- [ ] In the clean continuation branch, write the proposed exact allowed-file list, forbidden-subsystem list, diff budget, and focused acceptance checks in `docs/ACTIVE-CHANGE-SCOPE.md`.
 - [ ] Obtain explicit user approval before changing the scope status from `FROZEN` to `APPROVED` or editing production code.
 - [ ] After implementation, fail the task if the complete diff exceeds the approved allowlist or budget; do not silently expand the task.
 

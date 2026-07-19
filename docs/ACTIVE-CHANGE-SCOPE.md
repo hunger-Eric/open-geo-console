@@ -4,6 +4,8 @@ Status: `FROZEN`
 
 This file is the mandatory authorization boundary for the next implementation. While it is `FROZEN`, no production-code edits or external mutations are allowed.
 
+The deviation audit, convergence steps, and paste-ready fresh-chat prompt are recorded in `docs/handoffs/2026-07-19-v4-answer-optimization-scope-recovery.md`.
+
 ## Intended objective
 
 Preserve the existing Report V4 behavior in which three business questions are answered independently, and implement only the user's original answer-optimization requirement after it has been reconstructed from the remote baseline and approved in writing.
