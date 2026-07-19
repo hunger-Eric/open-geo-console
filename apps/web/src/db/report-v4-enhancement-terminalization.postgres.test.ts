@@ -46,6 +46,22 @@ suite("report v4 enhancement terminalizer PostgreSQL contract", () => {
     expect((await sql`SELECT status FROM report_artifact_revisions WHERE id=${fixture.coreArtifactId}`)[0]?.status).toBe("ready");
   });
 
+  it("terminalizes an active enhancement on a completed-limited refunded core", async () => {
+    const fixture = await seedLineage("completed-limited-core", "active", { limitedCore: true });
+    const before = await commercialTruth(fixture);
+
+    await terminalizeReportV4EnhancementJob(input(fixture, "completed"));
+
+    expect(await enhancementState(fixture)).toMatchObject({
+      stage: "completed", execution_state: "completed", current_phase: "terminalization", progress: 100
+    });
+    expect(await commercialTruth(fixture)).toEqual(before);
+    expect(before).toMatchObject({
+      core_stage: "completed_limited", fulfillment_status: "completed_limited",
+      refund_status: "pending", credit_status: "refunded", access_key_status: "active", credits_remaining: 1
+    });
+  });
+
   it("terminalizes the exact two-question partition when one source-core question is unavailable", async () => {
     const fixture = await seedLineage("completed-partial", "active", { unavailableQuestion: 3 });
     const before = await commercialTruth(fixture);
@@ -168,7 +184,7 @@ interface Fixture {
 async function seedLineage(
   label: string,
   revisionStatus: RevisionStatus,
-  options: { leaseOwner?: string; leaseExpiry?: "future" | "expired"; unavailableQuestion?: 1 | 2 | 3 } = {}
+  options: { leaseOwner?: string; leaseExpiry?: "future" | "expired"; unavailableQuestion?: 1 | 2 | 3; limitedCore?: boolean } = {}
 ): Promise<Fixture> {
   const suffix = `${label}-${randomUUID().replaceAll("-", "").slice(0, 10)}`;
   const configIdentity = sha(`config-${suffix}`);
@@ -196,8 +212,8 @@ async function seedLineage(
   await sql`INSERT INTO report_v4_site_snapshots
     (id,report_id,site_key,status,captured_at,completed_at,collector_config_identity_hash,content_identity_hash,
      candidate_url_count,analyzable_page_count,excluded_page_count)
-    VALUES(${fixture.siteSnapshotId},${fixture.reportId},${`${suffix}.example`},'completed',now()-interval '1 minute',now(),
-      ${sha(`collector-${suffix}`)},${sha(`content-${suffix}`)},1,1,0)`;
+    VALUES(${fixture.siteSnapshotId},${fixture.reportId},${`${suffix}.example`},${options.limitedCore ? "completed_limited" : "completed"},now()-interval '1 minute',now(),
+      ${sha(`collector-${suffix}`)},${sha(`content-${suffix}`)},${options.limitedCore ? 2 : 1},1,${options.limitedCore ? 1 : 0})`;
   await sql`INSERT INTO report_business_question_sets
     (id,report_id,revision,locale,region,status,confidence,generation_rule_version,neutralization_version,profile_evidence_identity)
     VALUES(${fixture.questionSetId},${fixture.reportId},1,'en','US','candidate','high','v4','v4',${sha(`profile-${suffix}`)})`;
@@ -213,7 +229,7 @@ async function seedLineage(
      artifact_contract,business_question_set_id,locale,reason,stage,execution_state,current_phase,progress)
     VALUES(${fixture.coreJobId},${fixture.reportId},${fixture.siteSnapshotId},'deep','recommendation_forensics_v1',
       'two_stage_geo_report_v4',4,'combined_geo_report_v4',${fixture.questionSetId},'en','standard',
-      'completed','completed','terminalization',100)`;
+      ${options.limitedCore ? "completed_limited" : "completed"},'completed','terminalization',100)`;
   await sql`INSERT INTO payment_orders
     (id,checkout_idempotency_hmac,provider,report_id,fulfillment_job_id,site_snapshot_id,business_question_set_id,site_key,
      customer_email_encrypted,customer_email_hmac,email_key_version,product_code,fulfillment_methodology,
@@ -222,16 +238,17 @@ async function seedLineage(
     VALUES(${fixture.orderId},${sha(`checkout-${suffix}`)},'airwallex',${fixture.reportId},${fixture.coreJobId},
       ${fixture.siteSnapshotId},${fixture.questionSetId},${`${suffix}.example`},'encrypted',${sha(`email-${suffix}`)},'v1',
       'recommendation_forensics_v1','two_stage_geo_report_v4',4,'v4','terms-v1','refund-v1','en','USD',2900,
-      'paid','completed','not_required')`;
+      'paid',${options.limitedCore ? "completed_limited" : "completed"},${options.limitedCore ? "pending" : "not_required"})`;
   await sql`UPDATE report_business_question_sets SET order_id=${fixture.orderId},status='locked',
     content_hash=${sha(`questions-${suffix}`)},neutral_content_hash=${sha(`neutral-${suffix}`)},payload='{}'::jsonb,
     confirmed_at=now(),locked_at=now() WHERE id=${fixture.questionSetId}`;
   await sql`INSERT INTO access_keys(id,key_prefix,key_hmac,payment_order_id,status,credits_remaining)
-    VALUES(${fixture.accessKeyId},${`key-${suffix}`},${sha(`key-${suffix}`)},${fixture.orderId},'exhausted',0)`;
+    VALUES(${fixture.accessKeyId},${`key-${suffix}`},${sha(`key-${suffix}`)},${fixture.orderId},${options.limitedCore ? "active" : "exhausted"},${options.limitedCore ? 1 : 0})`;
   await sql`INSERT INTO credit_ledger
-    (id,access_key_id,report_id,job_id,idempotency_key,payment_order_id,credits,status,settled_at)
+    (id,access_key_id,report_id,job_id,idempotency_key,payment_order_id,credits,status,settled_at,refunded_at)
     VALUES(${fixture.creditId},${fixture.accessKeyId},${fixture.reportId},${fixture.coreJobId},${`settled-${suffix}`},
-      ${fixture.orderId},1,'settled',now())`;
+      ${fixture.orderId},1,${options.limitedCore ? "refunded" : "settled"},
+      ${options.limitedCore ? null : new Date().toISOString()},${options.limitedCore ? new Date().toISOString() : null})`;
   await sql`UPDATE scan_jobs SET credit_reservation_id=${fixture.creditId} WHERE id=${fixture.coreJobId}`;
   await sql`INSERT INTO report_v4_config_snapshots
     (id,report_id,order_id,core_job_id,identity_hash,model_profile_id,model_profile_hash,model_profile_payload,
@@ -246,7 +263,7 @@ async function seedLineage(
       '{"htmlCanonical":true}'::jsonb,now(),now())`;
   await sql`INSERT INTO combined_geo_reports(artifact_revision_id,report_id,order_id,job_id,question_set_id,payload)
     VALUES(${fixture.coreArtifactId},${fixture.reportId},${fixture.orderId},${fixture.coreJobId},${fixture.questionSetId},
-      ${JSON.stringify(sourceCorePayload(fixture, options.unavailableQuestion))}::jsonb)`;
+      ${JSON.stringify(sourceCorePayload(fixture, options.unavailableQuestion, options.limitedCore))}::jsonb)`;
   await sql`UPDATE scan_reports SET active_artifact_revision_id=${fixture.coreArtifactId} WHERE id=${fixture.reportId}`;
   await sql`INSERT INTO report_access_tokens(id,report_id,token_prefix,token_hmac,artifact_scope,expires_at)
     VALUES(${fixture.accessTokenId},${fixture.reportId},'ogc_report_fixture',${sha(`token-${suffix}`)},
@@ -340,7 +357,7 @@ function sha(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function sourceCorePayload(fixture: Fixture, unavailableQuestion?: 1 | 2 | 3) {
+function sourceCorePayload(fixture: Fixture, unavailableQuestion?: 1 | 2 | 3, limitedCore = false) {
   return {
     version: 4,
     artifactContract: "combined_geo_report_v4",
@@ -349,7 +366,7 @@ function sourceCorePayload(fixture: Fixture, unavailableQuestion?: 1 | 2 | 3) {
     targetUrl: `https://${fixture.suffix}.example/`,
     locale: "en",
     generatedAt: "2030-01-01T00:00:00.000Z",
-    status: unavailableQuestion ? "completed_limited" : "completed",
+    status: unavailableQuestion || limitedCore ? "completed_limited" : "completed",
     websiteSynthesis: {
       summary: "Website synthesis.", strengths: ["Strength."], gaps: ["Gap."], actions: ["Action."]
     },

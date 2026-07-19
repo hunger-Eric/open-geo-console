@@ -236,18 +236,22 @@ function assertCoreLineage(
   enhancement: EnhancementJobRow,
   input: ReportV4EnhancementTerminalizationInput
 ): void {
+  const completedSettled = core.stage === "completed" && core.execution_state === "completed" &&
+    core.fulfillment_status === "completed" && core.refund_status === "not_required" && core.credit_status === "settled";
+  const completedLimitedRefunded = core.stage === "completed_limited" && core.execution_state === "completed" &&
+    core.fulfillment_status === "completed_limited" && ["pending", "refunded"].includes(core.refund_status) &&
+    core.credit_status === "refunded";
   const common = core.id === input.coreJobId && core.report_id === input.reportId && core.site_snapshot_id !== null &&
     core.product_contract === "recommendation_forensics_v1" && core.fulfillment_methodology === "two_stage_geo_report_v4" &&
     core.recommendation_report_version === 4 && core.artifact_contract === "combined_geo_report_v4" &&
-    core.business_question_set_id !== null && core.reason === "standard" && core.stage === "completed" &&
-    core.execution_state === "completed" && core.credit_reservation_id === core.credit_id &&
+    core.business_question_set_id !== null && core.reason === "standard" &&
+    (completedSettled || completedLimitedRefunded) && core.credit_reservation_id === core.credit_id &&
     core.order_report_id === core.report_id && core.order_fulfillment_job_id === core.id &&
     core.order_site_snapshot_id === core.site_snapshot_id && core.order_question_set_id === core.business_question_set_id &&
     core.order_product_code === "recommendation_forensics_v1" && core.order_methodology === "two_stage_geo_report_v4" &&
     core.order_version === 4 && core.order_locale === core.locale && core.payment_status === "paid" &&
-    core.fulfillment_status === "completed" && core.refund_status === "not_required" &&
     core.credit_report_id === core.report_id && core.credit_job_id === core.id && core.credit_order_id === core.order_id &&
-    core.credit_status === "settled" && core.source_id === input.sourceCoreArtifactRevisionId &&
+    core.source_id === input.sourceCoreArtifactRevisionId &&
     core.source_report_id === core.report_id && core.source_order_id === core.order_id && core.source_job_id === core.id &&
     core.source_config_snapshot_id !== null && core.source_revision_kind === "generation" &&
     core.source_artifact_contract === "combined_geo_report_v4" && core.config_report_id === core.report_id &&
