@@ -7,6 +7,7 @@ import {
   failReportV4DiagnosisEnhancement,
   prepareReportV4CoreGeneration,
   prepareReportV4DiagnosisEnhancement,
+  readyReportV4CoreRevision,
   type ReportV4ArtifactRevisionExecutor,
   type ReportV4ArtifactRevisionPostgresDatabase,
   type ReportV4ArtifactRevisionRow,
@@ -47,6 +48,27 @@ const enhancementIdentity = {
 };
 
 describe("V4 artifact revision repository", () => {
+  it("readies a persisted core without activating it or publishing the report pointer", async () => {
+    const executor = new MemoryExecutor();
+
+    await prepareReportV4CoreGeneration(coreIdentity, executor);
+    const ready = await readyReportV4CoreRevision(coreInput, executor);
+
+    expect(ready).toMatchObject({
+      id: "core-revision",
+      status: "ready",
+      payloadIdentityHash: coreInput.payloadIdentityHash,
+      htmlSha256: coreInput.htmlSha256
+    });
+    expect(executor.activeByReport.has("report-1")).toBe(false);
+    expect(executor.log).toEqual([
+      "lock:report-1",
+      "insert:core-revision:pending",
+      "lock:report-1",
+      "ready:core-revision"
+    ]);
+  });
+
   it("prepares one exact pending HTML-only core before payload persistence and activates it with exact hashes", async () => {
     const executor = new MemoryExecutor();
 

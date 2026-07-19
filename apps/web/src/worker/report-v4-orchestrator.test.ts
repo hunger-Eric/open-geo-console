@@ -34,7 +34,7 @@ describe("V4 independently claimed core and enhancement stages", () => {
     expect(result.enhancement.status).toBe("not_started");
     expect(core.events).toEqual([
       "load-core", "resolve-snapshot", "synthesize", "answer", "prepare:core", "render:core", "persist:core",
-      "activate:core", "terminalize", "after-terminalize", "enqueue"
+      "ready:core", "terminalize", "after-terminalize", "enqueue"
     ]);
     expect(core.events.join(" ")).not.toMatch(/audit|diagnose|prepare:enhancement|activate:enhancement/i);
     expect(result.counters.modelCalls.sourceDiagnosis).toBe(0);
@@ -162,7 +162,7 @@ describe("V4 independently claimed core and enhancement stages", () => {
 
     expect(recovered.delivery).toBe("core_active");
     expect(harness.events.slice(boundary)).toEqual([
-      "load-core", "resolve-snapshot", "activate:core", "terminalize", "after-terminalize", "enqueue"
+      "load-core", "resolve-snapshot", "ready:core", "terminalize", "after-terminalize", "enqueue"
     ]);
     expect(harness.terminalizeCalls).toBe(2);
     expect(harness.committedTerminalizations).toBe(1);
@@ -184,7 +184,7 @@ describe("V4 independently claimed core and enhancement stages", () => {
 
     expect(recovered.delivery).toBe("core_active");
     expect(harness.events.slice(boundary)).toEqual([
-      "load-core", "resolve-snapshot", "activate:core", "terminalize", "after-terminalize", "enqueue"
+      "load-core", "resolve-snapshot", "ready:core", "terminalize", "after-terminalize", "enqueue"
     ]);
     expect(harness.terminalizeCalls).toBe(2);
     expect(harness.events.filter((event) => event === "enqueue")).toHaveLength(2);
@@ -199,7 +199,7 @@ describe("V4 independently claimed core and enhancement stages", () => {
 
     await expect(runReportV4CoreStage(coreInput(), harness.dependencies)).rejects.toThrow(/artifact.*stage identity|match.*identity/i);
     expect(harness.events).toEqual(["load-core", "resolve-snapshot"]);
-    expect(harness.events).not.toContain("activate:core");
+    expect(harness.events).not.toContain("ready:core");
     expect(harness.events).not.toContain("terminalize");
     expect(harness.events).not.toContain("enqueue");
   });
@@ -560,8 +560,8 @@ function createCoreHarness(options: CoreHarnessOptions = {}) {
       events.push("persist:core");
       return { payloadIdentityHash: "a".repeat(64), htmlSha256: "b".repeat(64) };
     },
-    async activateCoreRevision(input) {
-      events.push("activate:core");
+    async readyCoreRevision(input) {
+      events.push("ready:core");
       activeCore = coreReportFromInput(input.artifactRevisionId, options.snapshotStatus ?? "completed", options.unavailableQuestions ?? 0);
     },
     async terminalizeUnavailableCore() {

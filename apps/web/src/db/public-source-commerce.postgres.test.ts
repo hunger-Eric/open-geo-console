@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabase, ensureDatabase, getSqlClient } from "./index";
-import { enqueuePaidReportV4DiagnosisEnhancement, terminalizePaidPublicSourceReport, terminalizePaidReportV4Core, terminalizeUnavailablePaidReportV4Core } from "./public-source-commerce";
+import { enqueuePaidReportV4DiagnosisEnhancement, recoverFailedPaidReportV4CoreForTerminalReplay, terminalizePaidPublicSourceReport, terminalizePaidReportV4Core, terminalizeUnavailablePaidReportV4Core } from "./public-source-commerce";
 import { activatePublicSearchSurfaceAuthority, installPublicSearchSurfaceAuthority } from "./public-search-authority";
 import { acquireMarketSnapshotLease, appendMarketSnapshotQueries, beginMarketSearchAttempt, completeMarketSearchAttempt, completeMarketSnapshotLease, createMarketSnapshotRefresh } from "./market-snapshots";
 import { createMarketSnapshotIdentity } from "@open-geo-console/public-search-observer";
@@ -53,6 +53,8 @@ describePostgres("paid public-source atomic terminalization",()=>{
     report={...report,generatedAt:evidenceCutoffAt,evidenceCutoffAt,snapshotRefs:report.snapshotRefs.map((ref,index)=>({...ref,snapshotId:snapshotIds[index]!}))};
     await seedPaidV4Core(sql,v4Identity(suffix,"complete"),"completed");
     await seedPaidV4Core(sql,v4Identity(suffix,"limited"),"completed_limited");
+    await seedPaidV4Core(sql,v4Identity(suffix,"recovery-limited"),"completed_limited");
+    await seedFailedV4TerminalReplay(sql,v4Identity(suffix,"recovery-limited"));
     await seedPaidV4Core(sql,v4Identity(suffix,"missing-config"),"completed",false);
     await seedPaidV4Core(sql,v4Identity(suffix,"concurrent"),"completed");
     await seedPaidV4Core(sql,v4Identity(suffix,"bypass"),"completed");
@@ -71,11 +73,11 @@ describePostgres("paid public-source atomic terminalization",()=>{
   it("rolls back every injected write boundary and succeeds exactly once on retry",async()=>{
     for(const faultAfter of ["report","refs","job","credit","order","email"] as const){
       await expect(terminalizePaidPublicSourceReport({report,workerId,checkpointIdentityHash,coverage:{plannedPages:3,successfulPages:3,failedPages:0},snapshotRefs:refs,faultAfter})).rejects.toThrow(/Injected fault/);
-      const counts=(await getSqlClient()<Array<{reports:number;refs:number;emails:number;refunds:number;stage:string;fulfillment:string}>>`SELECT (SELECT count(*)::int FROM report_source_forensics) reports,(SELECT count(*)::int FROM report_market_snapshot_refs) refs,(SELECT count(*)::int FROM email_deliveries) emails,(SELECT count(*)::int FROM payment_refunds) refunds,(SELECT stage FROM scan_jobs WHERE id=${jobId}) stage,(SELECT fulfillment_status FROM payment_orders WHERE id=${orderId}) fulfillment`)[0]!;
+      const counts=(await getSqlClient()<Array<{reports:number;refs:number;emails:number;refunds:number;stage:string;fulfillment:string}>>`SELECT (SELECT count(*)::int FROM report_source_forensics WHERE report_id=${reportId}) reports,(SELECT count(*)::int FROM report_market_snapshot_refs WHERE job_id=${jobId}) refs,(SELECT count(*)::int FROM email_deliveries WHERE order_id=${orderId}) emails,(SELECT count(*)::int FROM payment_refunds WHERE order_id=${orderId}) refunds,(SELECT stage FROM scan_jobs WHERE id=${jobId}) stage,(SELECT fulfillment_status FROM payment_orders WHERE id=${orderId}) fulfillment`)[0]!;
       expect(counts).toMatchObject({reports:0,refs:0,emails:0,refunds:0,stage:"synthesizing",fulfillment:"processing"});
     }
     const result=await terminalizePaidPublicSourceReport({report,workerId,checkpointIdentityHash,coverage:{plannedPages:3,successfulPages:3,failedPages:0},snapshotRefs:refs}); expect(result).toMatchObject({orderId,refundId:null});
-    const counts=(await getSqlClient()<Array<{reports:number;refs:number;emails:number;stage:string;fulfillment:string}>>`SELECT (SELECT count(*)::int FROM report_source_forensics) reports,(SELECT count(*)::int FROM report_market_snapshot_refs) refs,(SELECT count(*)::int FROM email_deliveries) emails,(SELECT stage FROM scan_jobs WHERE id=${jobId}) stage,(SELECT fulfillment_status FROM payment_orders WHERE id=${orderId}) fulfillment`)[0]!;
+    const counts=(await getSqlClient()<Array<{reports:number;refs:number;emails:number;stage:string;fulfillment:string}>>`SELECT (SELECT count(*)::int FROM report_source_forensics WHERE report_id=${reportId}) reports,(SELECT count(*)::int FROM report_market_snapshot_refs WHERE job_id=${jobId}) refs,(SELECT count(*)::int FROM email_deliveries WHERE order_id=${orderId}) emails,(SELECT stage FROM scan_jobs WHERE id=${jobId}) stage,(SELECT fulfillment_status FROM payment_orders WHERE id=${orderId}) fulfillment`)[0]!;
     expect(counts).toMatchObject({reports:1,refs:3,emails:1,stage:"completed",fulfillment:"completed"});
   });
 
@@ -84,12 +86,12 @@ describePostgres("paid public-source atomic terminalization",()=>{
   // @requirement GEO-V4-PDF-01
   it("terminalizes one HTML-only V4 core without enhancement writes, then independently enqueues exactly once",async()=>{
     const ids=v4Identity(suffix,"complete"),core=v4Report(ids,"completed");
-    for(const faultAfter of ["job","credit","order","access","email"] as const){
+    for(const faultAfter of ["activation","job","credit","order","access","email"] as const){
       await expect(terminalizePaidReportV4Core({report:core,workerId:ids.workerId,faultAfter})).rejects.toThrow(/Injected fault/);
       expect(await readV4CommerceState(getSqlClient(),ids)).toMatchObject({
         stage:"synthesizing",execution_state:"running",fulfillment_status:"processing",credit_status:"reserved",
         credits_remaining:0,refunds:0,emails:0,tokens:0,transitions:0,enhancements:0,
-        artifact_status:"active",active_artifact_revision_id:ids.artifactRevisionId
+        artifact_status:"ready",active_artifact_revision_id:null
       });
     }
     const first=await terminalizePaidReportV4Core({report:core,workerId:ids.workerId});
@@ -97,7 +99,8 @@ describePostgres("paid public-source atomic terminalization",()=>{
     const terminal=await readV4CommerceState(getSqlClient(),ids);
     expect(terminal).toMatchObject({stage:"completed",execution_state:"completed",fulfillment_status:"completed",
       refund_status:"not_required",credit_status:"settled",credits_remaining:0,refunds:0,emails:1,tokens:1,transitions:1,
-      token_scope:"combined_geo_report_v4",pdf_sha256:null,pdf_storage_key:null,enhancements:0});
+      token_scope:"combined_geo_report_v4",artifact_status:"active",active_artifact_revision_id:ids.artifactRevisionId,
+      pdf_sha256:null,pdf_storage_key:null,enhancements:0});
     expect(await terminalizePaidReportV4Core({report:core,workerId:ids.workerId})).toMatchObject({
       accessTokenId:first.accessTokenId,emailDeliveryId:first.emailDeliveryId
     });
@@ -123,7 +126,7 @@ describePostgres("paid public-source atomic terminalization",()=>{
     const ids=v4Identity(suffix,"limited"),core=v4Report(ids,"completed_limited");
     await expect(terminalizePaidReportV4Core({report:core,workerId:ids.workerId,faultAfter:"refund"})).rejects.toThrow(/Injected fault/);
     expect(await readV4CommerceState(getSqlClient(),ids)).toMatchObject({stage:"synthesizing",credit_status:"reserved",
-      refunds:0,emails:0,tokens:0,enhancements:0,artifact_status:"active",active_artifact_revision_id:ids.artifactRevisionId});
+      refunds:0,emails:0,tokens:0,enhancements:0,artifact_status:"ready",active_artifact_revision_id:null});
     const first=await terminalizePaidReportV4Core({report:core,workerId:ids.workerId});
     expect(first).toMatchObject({outcome:"completed_limited",orderId:ids.orderId,refundId:expect.any(String)});
     const terminal=await readV4CommerceState(getSqlClient(),ids);
@@ -135,6 +138,30 @@ describePostgres("paid public-source atomic terminalization",()=>{
     });
     await expect(enqueuePaidReportV4DiagnosisEnhancement(v4EnhancementInput(ids))).resolves.toMatchObject({status:"enqueued"});
     expect(await readV4CommerceState(getSqlClient(),ids)).toMatchObject({credit_status:"refunded",enhancements:1});
+  },120_000);
+
+  // @requirement GEO-V4-COMMERCE-01
+  it("reopens an unsubmitted failed refund for an answered limited core and replays official terminalization",async()=>{
+    const sql=getSqlClient(),ids=v4Identity(suffix,"recovery-limited"),core=v4Report(ids,"completed_limited");
+    await expect(recoverFailedPaidReportV4CoreForTerminalReplay({
+      coreJobId:ids.jobId,coreArtifactRevisionId:ids.artifactRevisionId,readiness:async()=>undefined
+    })).resolves.toEqual({jobId:ids.jobId,orderId:ids.orderId,artifactRevisionId:ids.artifactRevisionId});
+    expect(await readV4CommerceState(sql,ids)).toMatchObject({
+      stage:"queued",execution_state:"queued",fulfillment_status:"queued",refund_status:"not_required",
+      credit_status:"reserved",credits_remaining:0,refunds:0,emails:0,tokens:0,enhancements:0,transitions:1,
+      artifact_status:"ready",active_artifact_revision_id:null
+    });
+    await sql`UPDATE scan_jobs SET stage='synthesizing',execution_state='running',current_phase='terminalization',
+      lease_owner=${ids.workerId},lease_expires_at=now()+interval '1 hour' WHERE id=${ids.jobId}`;
+    await expect(terminalizePaidReportV4Core({report:core,workerId:ids.workerId})).resolves.toMatchObject({
+      outcome:"completed_limited",orderId:ids.orderId,refundId:expect.any(String)
+    });
+    expect(await readV4CommerceState(sql,ids)).toMatchObject({
+      stage:"completed_limited",execution_state:"completed",fulfillment_status:"completed_limited",
+      refund_status:"pending",credit_status:"refunded",credits_remaining:1,refunds:1,
+      refund_reason:"completed_limited",emails:1,tokens:1,enhancements:0,transitions:2,
+      artifact_status:"active",active_artifact_revision_id:ids.artifactRevisionId
+    });
   },120_000);
 
   // @requirement GEO-V4-COMMERCE-01
@@ -172,7 +199,7 @@ describePostgres("paid public-source atomic terminalization",()=>{
     const sql=getSqlClient();
     const preterminal=v4Identity(suffix,"enqueue-preterminal");
     await seedPaidV4Core(sql,preterminal,"completed");
-    await expect(enqueuePaidReportV4DiagnosisEnhancement(v4EnhancementInput(preterminal))).rejects.toThrow(/terminal eligible/i);
+    await expect(enqueuePaidReportV4DiagnosisEnhancement(v4EnhancementInput(preterminal))).rejects.toThrow(/active delivery|terminal eligible/i);
 
     const questionFailure=v4Identity(suffix,"enqueue-question-failure");
     await seedPaidV4Core(sql,questionFailure,"completed",true,{checkpointStates:["answered","answering","answered"]});
@@ -378,9 +405,20 @@ async function seedPaidV4Core(sql:ReturnType<typeof getSqlClient>,ids:V4FixtureI
       VALUES(${sha(`checkpoint-paid-${ids.label}-${ordinal}`)},${ids.reportId},${ids.jobId},${ids.questionSetId},${question.questionId},${siteSnapshotId},${ordinal},${state},${sha(`question-identity-paid-${ids.label}-${ordinal}`)},${sha(`model-${ids.label}`)},${sha(`input-paid-${ids.label}-${ordinal}`)},1,${state==="answered"?JSON.stringify(answerPayload):null}::jsonb,'[]'::jsonb,${state==="answered"?sha(JSON.stringify(answerPayload)):null})`;
   }
   await sql`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,config_snapshot_id,revision_kind,revision,artifact_contract,status,payload_identity_hash,html_sha256,pdf_sha256,pdf_storage_key,readiness,ready_at,activated_at)
-    VALUES(${ids.artifactRevisionId},${ids.reportId},${ids.orderId},${ids.jobId},${bindConfigSnapshot?ids.configSnapshotId:null},'generation',1,'combined_geo_report_v4','active',${sha(JSON.stringify(payload))},${sha(`html-${ids.label}`)},NULL,NULL,'{"htmlCanonical":true}'::jsonb,now(),now())`;
+    VALUES(${ids.artifactRevisionId},${ids.reportId},${ids.orderId},${ids.jobId},${bindConfigSnapshot?ids.configSnapshotId:null},'generation',1,'combined_geo_report_v4','ready',${sha(JSON.stringify(payload))},${sha(`html-${ids.label}`)},NULL,NULL,'{"htmlCanonical":true}'::jsonb,now(),NULL)`;
   await sql`INSERT INTO combined_geo_reports(artifact_revision_id,report_id,order_id,job_id,question_set_id,payload) VALUES(${ids.artifactRevisionId},${ids.reportId},${ids.orderId},${ids.jobId},${ids.questionSetId},${JSON.stringify(payload)}::jsonb)`;
+}
+async function seedFailedV4TerminalReplay(sql:ReturnType<typeof getSqlClient>,ids:V4FixtureIdentity){
+  await sql`UPDATE report_artifact_revisions SET status='active',activated_at=now() WHERE id=${ids.artifactRevisionId} AND status='ready'`;
   await sql`UPDATE scan_reports SET active_artifact_revision_id=${ids.artifactRevisionId} WHERE id=${ids.reportId}`;
+  await sql`UPDATE scan_jobs SET stage='failed',execution_state='failed',current_phase='terminalization',phase_attempt=3,
+    attempts=3,error_code='lease_exhausted',lease_owner=NULL,lease_expires_at=NULL WHERE id=${ids.jobId}`;
+  await sql`UPDATE payment_orders SET fulfillment_status='failed',refund_status='pending',delivery_status='queued',fulfilled_at=now()
+    WHERE id=${ids.orderId}`;
+  await sql`UPDATE credit_ledger SET status='refunded',refunded_at=now(),settled_at=NULL WHERE id=${ids.creditId}`;
+  await sql`UPDATE access_keys SET credits_remaining=1,status='active' WHERE id=${ids.accessKeyId}`;
+  await sql`INSERT INTO payment_refunds(id,order_id,provider,reason,amount_minor,currency,state,idempotency_key)
+    VALUES(${randomUUID()},${ids.orderId},'airwallex','report_failed',2900,'USD','pending',${`full_refund/${ids.orderId}`})`;
 }
 async function activateV4DiagnosisFixture(sql:ReturnType<typeof getSqlClient>,ids:V4FixtureIdentity,enhancementJob:string){
   const enhancementRevision=`v4-enhancement-${ids.label}-${ids.reportId}`;

@@ -289,11 +289,13 @@ export function withReportV4CoreAcceptanceStageDependencies(input: {
 }): ReportV4CoreStageDependencies {
   if (!input.runtime) return input.dependencies;
   const runtime = input.runtime;
+  let observedCoreHtmlSha256: string | null = null;
   return {
     ...input.dependencies,
     async loadCoreArtifact(value) {
       const existing = await input.dependencies.loadCoreArtifact(value);
       if (existing) {
+        observedCoreHtmlSha256 = existing.htmlSha256;
         await observeHtml(runtime, input.coreArtifactRevisionId, existing.htmlSha256, "started");
         await observeHtml(runtime, input.coreArtifactRevisionId, existing.htmlSha256, "completed");
       }
@@ -314,10 +316,14 @@ export function withReportV4CoreAcceptanceStageDependencies(input: {
         throw new Error("The persisted Core HTML hash differs from the exact rendered HTML.");
       }
       await observeHtml(runtime, input.coreArtifactRevisionId, htmlSha256, "completed");
+      observedCoreHtmlSha256 = htmlSha256;
       return persisted;
     },
-    async activateCoreRevision(value, signal) {
-      const result = await input.dependencies.activateCoreRevision(value, signal);
+    async terminalizeCoreCommercial(value) {
+      if (!observedCoreHtmlSha256) {
+        throw new Error("The activated Core artifact is missing its observed HTML identity.");
+      }
+      const result = await input.dependencies.terminalizeCoreCommercial(value);
       await runtime.observer.observe({
         kind: "artifact_activation",
         operation: "artifact_activation",
@@ -326,7 +332,7 @@ export function withReportV4CoreAcceptanceStageDependencies(input: {
         phase: "observed",
         details: {
           artifactRevisionId: input.coreArtifactRevisionId,
-          htmlSha256: value.htmlSha256
+          htmlSha256: observedCoreHtmlSha256
         }
       });
       return result;

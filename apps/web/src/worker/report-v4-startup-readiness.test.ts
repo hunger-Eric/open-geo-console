@@ -14,7 +14,8 @@ describe("Report V4 Worker startup readiness", () => {
     for (const missing of [
       "OGC_REPORT_V4_MODEL_PROFILE_ID",
       "OGC_REPORT_V4_MIMO_BASE_URL",
-      "OGC_REPORT_V4_MIMO_API_KEY"
+      "OGC_REPORT_V4_MIMO_API_KEY",
+      "OGC_TOKEN_HASH_SECRET"
     ] as const) {
       const environment = validEnvironment();
       delete environment[missing];
@@ -23,6 +24,17 @@ describe("Report V4 Worker startup readiness", () => {
       await expect(prepareWorkerStartup({ environment, ensureDatabase }))
         .rejects.toThrow(/Report V4|OGC_REPORT_V4|MiMo|profile|key/i);
       expect(ensureDatabase, missing).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects a blank or undersized commercial token secret before database startup", async () => {
+    for (const tokenSecret of ["", "too-short"]) {
+      const ensureDatabase = vi.fn();
+      await expect(prepareWorkerStartup({
+        environment: { ...validEnvironment(), OGC_TOKEN_HASH_SECRET: tokenSecret },
+        ensureDatabase
+      })).rejects.toThrow(/OGC_TOKEN_HASH_SECRET|32 characters/i);
+      expect(ensureDatabase).not.toHaveBeenCalled();
     }
   });
 
@@ -74,7 +86,8 @@ function validEnvironment(): NodeJS.ProcessEnv {
   return {
     OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
     OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
-    OGC_REPORT_V4_MIMO_API_KEY: "v4-secret"
+    OGC_REPORT_V4_MIMO_API_KEY: "v4-secret",
+    OGC_TOKEN_HASH_SECRET: "v4-commercial-token-secret-at-least-32-characters"
   };
 }
 

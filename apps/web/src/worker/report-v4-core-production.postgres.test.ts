@@ -144,7 +144,7 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
           async prepareCoreRevision() { prepareCalls += 1; },
           async renderCoreHtml() { throw new Error("must reuse"); },
           async persistCoreArtifact() { throw new Error("must reuse"); },
-          async activateCoreRevision() {},
+          async readyCoreRevision() {},
           async terminalizeUnavailableCore() { throw new Error("not unavailable"); },
           async terminalizeCoreCommercial({ report }) {
             boundaryEvents.push("terminalize");
@@ -190,7 +190,7 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
       async prepareCoreRevision() { prepared += 1; },
       async renderCoreHtml() { throw new Error("must not render"); },
       async persistCoreArtifact() { throw new Error("must not persist"); },
-      async activateCoreRevision() { throw new Error("must not activate"); },
+      async readyCoreRevision() { throw new Error("must not ready"); },
       async terminalizeUnavailableCore() {},
       async terminalizeCoreCommercial() { throw new Error("must not deliver"); },
       async enqueueDiagnosisEnhancement() { throw new Error("must not enqueue"); }

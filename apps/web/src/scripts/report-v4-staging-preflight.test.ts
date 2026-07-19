@@ -75,6 +75,10 @@ describe("Report V4 protected-Staging preflight", () => {
 describe("exact-commit staging-only Worker launcher", () => {
   const launcherPath = fileURLToPath(new URL("../../../../scripts/start-report-v4-staging-workers.ps1", import.meta.url));
   const source = readFileSync(launcherPath, "utf8");
+  const workstationLauncherSource = readFileSync(
+    fileURLToPath(new URL("../../../../scripts/start-workstation-workers.ps1", import.meta.url)),
+    "utf8"
+  );
   const dockerIgnore = readFileSync(
     fileURLToPath(new URL("../../../../.dockerignore", import.meta.url)),
     "utf8"
@@ -165,13 +169,20 @@ describe("exact-commit staging-only Worker launcher", () => {
     expect(source).toMatch(/containers were not rolled back and remain unverified/u);
   });
 
-  it("requires the merged staging env and all three dedicated V4 variables", () => {
+  it("requires the merged staging env, the three dedicated V4 variables, and the commercial token secret", () => {
     expect(source).toContain(".data\\workstation-docker\\staging.env");
     for (const name of [
       "OGC_REPORT_V4_MODEL_PROFILE_ID",
       "OGC_REPORT_V4_MIMO_BASE_URL",
-      "OGC_REPORT_V4_MIMO_API_KEY"
+      "OGC_REPORT_V4_MIMO_API_KEY",
+      "OGC_TOKEN_HASH_SECRET"
     ]) expect(source).toContain(name);
+  });
+
+  it("copies the commercial token secret into Staging without adding it to the production fallback", () => {
+    expect(workstationLauncherSource).toMatch(/if \(\$Environment -eq "staging"\)[\s\S]*OGC_TOKEN_HASH_SECRET/u);
+    expect(workstationLauncherSource).toMatch(/Require-Values \$values[\s\S]*OGC_TOKEN_HASH_SECRET[\s\S]*Staging Worker/u);
+    expect(workstationLauncherSource).not.toMatch(/\$providerNames\s*=\s*@\([^\n]*OGC_TOKEN_HASH_SECRET/u);
   });
 
   it("recreates only the two staging lanes and never delegates to broad workstation or deployment commands", () => {

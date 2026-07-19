@@ -92,6 +92,8 @@ export interface ActivateReportV4CoreRevisionInput extends ReportV4CoreGeneratio
   readonly htmlSha256: string;
 }
 
+export type ReadyReportV4CoreRevisionInput = ActivateReportV4CoreRevisionInput;
+
 export interface ReportV4DiagnosisEnhancementIdentity {
   readonly artifactRevisionId: string;
   readonly reportId: string;
@@ -188,6 +190,42 @@ export async function activateReportV4CoreRevision(
     if (!activated) throw new Error("The ready V4 core revision could not be activated.");
     await tx.setActiveRevision(identity.reportId, activated.id);
     return activated;
+  });
+}
+
+export async function readyReportV4CoreRevision(
+  input: ReadyReportV4CoreRevisionInput,
+  executor: ReportV4ArtifactRevisionExecutor
+): Promise<ReportV4ArtifactRevisionRow> {
+  strictInput(input, CORE_FIELDS, "V4 core readiness");
+  const identity = coreIdentity(input);
+  const payloadIdentityHash = sha256(input.payloadIdentityHash, "payloadIdentityHash");
+  const htmlSha256 = sha256(input.htmlSha256, "htmlSha256");
+
+  return executor.transaction(async (tx) => {
+    await tx.lockReport(identity.reportId);
+    let revision = await tx.getRevision(identity.id);
+    if (revision) {
+      assertRevisionIdentity(revision, identity);
+      if (revision.status === "ready" || revision.status === "active") {
+        assertReadyHashes(revision, payloadIdentityHash, htmlSha256);
+        return revision;
+      }
+      if (revision.status === "failed") throw new Error("A failed V4 core revision cannot be readied.");
+    } else {
+      const existingCore = await tx.getCoreRevision(identity.reportId);
+      if (existingCore) throw new Error("A distinct V4 core generation revision already exists for this report.");
+      const active = await tx.getActiveRevision(identity.reportId);
+      if (active) throw new Error("A distinct V4 core revision is already active for this report.");
+      revision = await tx.insertRevision({
+        ...identity,
+        revision: await tx.nextRevision(identity.reportId)
+      });
+    }
+
+    const active = await tx.getActiveRevision(identity.reportId);
+    if (active && active.id !== revision.id) throw new Error("A distinct V4 core revision is already active for this report.");
+    return ensureReady(revision, payloadIdentityHash, htmlSha256, tx);
   });
 }
 

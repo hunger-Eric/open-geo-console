@@ -466,21 +466,23 @@ describe("Report V4 Core acceptance production wrappers", () => {
     });
     const html = "<html><body>Core report</body></html>";
 
-    const persisted = await wrapped.persistCoreArtifact({ report: {} as never, html });
-    await wrapped.activateCoreRevision({
-      artifactRevisionId: "core-artifact", reportId: "report", orderId: "order", jobId: "core-job",
-      configSnapshotId: "config", payloadIdentityHash: persisted.payloadIdentityHash,
-      htmlSha256: persisted.htmlSha256
+    await wrapped.persistCoreArtifact({ report: {} as never, html });
+    await wrapped.terminalizeCoreCommercial({
+      report: { artifactRevisionId: "core-artifact" } as never,
+      reportId: "report", orderId: "order", coreJobId: "core-job",
+      coreArtifactRevisionId: "core-artifact", configSnapshotId: "config",
+      siteSnapshotId: "snapshot", questionSetId: "questions", locale: "zh-CN"
     });
-    await wrapped.activateCoreRevision({
-      artifactRevisionId: "core-artifact", reportId: "report", orderId: "order", jobId: "core-job",
-      configSnapshotId: "config", payloadIdentityHash: persisted.payloadIdentityHash,
-      htmlSha256: persisted.htmlSha256
+    await wrapped.terminalizeCoreCommercial({
+      report: { artifactRevisionId: "core-artifact" } as never,
+      reportId: "report", orderId: "order", coreJobId: "core-job",
+      coreArtifactRevisionId: "core-artifact", configSnapshotId: "config",
+      siteSnapshotId: "snapshot", questionSetId: "questions", locale: "zh-CN"
     });
     await wrapped.loadCoreArtifact({ reportId: "report", coreArtifactRevisionId: "core-artifact" });
 
     expect(dependencies.persistCoreArtifact).toHaveBeenCalledTimes(1);
-    expect(dependencies.activateCoreRevision).toHaveBeenCalledTimes(2);
+    expect(dependencies.terminalizeCoreCommercial).toHaveBeenCalledTimes(2);
     expect(runtime.observer.observe).toHaveBeenCalledWith({
       kind: "html_assembly", operation: "core_html", unitId: "core-artifact", attempt: 0, phase: "started",
       details: { artifactRevisionId: "core-artifact", htmlSha256: sha(html) }
@@ -647,7 +649,7 @@ function stageDependenciesFor(): ReportV4CoreStageDependencies {
       payloadIdentityHash: "c".repeat(64),
       htmlSha256: sha(html)
     })),
-    activateCoreRevision: vi.fn(),
+    readyCoreRevision: vi.fn(),
     terminalizeUnavailableCore: vi.fn(),
     terminalizeCoreCommercial: vi.fn(),
     enqueueDiagnosisEnhancement: vi.fn(async () => ({

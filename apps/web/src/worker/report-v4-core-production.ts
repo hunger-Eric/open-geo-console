@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import {
-  activateReportV4CoreRevision,
   createPostgresReportV4ArtifactRevisionExecutor,
-  prepareReportV4CoreGeneration
+  prepareReportV4CoreGeneration,
+  readyReportV4CoreRevision
 } from "../db/report-v4-artifact-revisions";
 import {
   createPostgresReportV4ArtifactPersistenceStore,
@@ -544,9 +544,9 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
           signal?.throwIfAborted();
           return { payloadIdentityHash: persisted.payloadIdentityHash, htmlSha256: persisted.htmlSha256 };
         },
-        activateCoreRevision: (input, signal) => {
+        readyCoreRevision: (input, signal) => {
           signal?.throwIfAborted();
-          return activateReportV4CoreRevision(input, revisions);
+          return readyReportV4CoreRevision(input, revisions);
         },
         async terminalizeUnavailableCore({ signal }) {
           signal?.throwIfAborted();

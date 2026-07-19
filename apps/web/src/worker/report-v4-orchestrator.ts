@@ -7,8 +7,8 @@ import {
   type CombinedGeoReportV4WebsiteSynthesis
 } from "@open-geo-console/ai-report-engine";
 import type {
-  ActivateReportV4CoreRevisionInput,
   ActivateReportV4DiagnosisEnhancementInput,
+  ReadyReportV4CoreRevisionInput,
   ReportV4CoreGenerationIdentity,
   ReportV4DiagnosisEnhancementIdentity
 } from "../db/report-v4-artifact-revisions";
@@ -127,8 +127,8 @@ export interface ReportV4CoreStageDependencies extends ReportV4ClockDependencies
     readonly html: string;
     readonly signal?: AbortSignal;
   }) => Promise<ReportV4PersistedHtmlIdentity>;
-  readonly activateCoreRevision: (
-    input: ActivateReportV4CoreRevisionInput,
+  readonly readyCoreRevision: (
+    input: ReadyReportV4CoreRevisionInput,
     signal?: AbortSignal
   ) => Promise<unknown>;
   readonly terminalizeUnavailableCore: (input: {
@@ -367,7 +367,7 @@ export async function runReportV4CoreStage(
     coreReport = acceptCoreArtifact(existing.report, parsedInput);
     assertArtifactAgainstSnapshot(coreReport, parsedInput, snapshot, "active core");
     await measured(dependencies, timings, "coreDelivery", async () => {
-      await dependencies.activateCoreRevision({
+      await dependencies.readyCoreRevision({
         artifactRevisionId: parsedInput.coreArtifactRevisionId,
         reportId: parsedInput.reportId,
         orderId: parsedInput.orderId,
@@ -442,7 +442,7 @@ export async function runReportV4CoreStage(
       throwIfAborted(signal);
       const identity = await dependencies.persistCoreArtifact({ report: coreReport, html, signal });
       throwIfAborted(signal);
-      await dependencies.activateCoreRevision({
+      await dependencies.readyCoreRevision({
         artifactRevisionId: parsedInput.coreArtifactRevisionId,
         reportId: parsedInput.reportId,
         orderId: parsedInput.orderId,
