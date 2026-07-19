@@ -63,8 +63,25 @@ function Write-RuntimeEnv {
   $providerNames = @("OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL", "OGC_AI_TIMEOUT_MS", "OGC_AI_JSON_RESPONSE_FORMAT")
   Merge-EnvFile $values (Join-Path $webRoot ".env.local") -AllowedNames $providerNames -OnlyIfMissing
   if ($Environment -eq "staging") {
-    $stagingCommercialNames = @("OGC_TOKEN_HASH_SECRET")
-    Merge-EnvFile $values (Join-Path $webRoot ".env.local") -AllowedNames $stagingCommercialNames -OnlyIfMissing
+    $stagingV4Names = @(
+      "OGC_REPORT_V4_MODEL_PROFILE_ID",
+      "OGC_REPORT_V4_MIMO_BASE_URL",
+      "OGC_REPORT_V4_MIMO_API_KEY",
+      "OGC_TOKEN_HASH_SECRET"
+    )
+    Merge-EnvFile $values (Join-Path $webRoot ".env.local") -AllowedNames $stagingV4Names -OnlyIfMissing
+    if (-not $values.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -or [string]::IsNullOrWhiteSpace($values["OGC_REPORT_V4_MODEL_PROFILE_ID"])) {
+      $values["OGC_REPORT_V4_MODEL_PROFILE_ID"] = "report-v4-mimo-v2.5-pro-v1"
+    }
+    foreach ($binding in @{
+      "OGC_REPORT_V4_MIMO_BASE_URL" = "OGC_AI_BASE_URL"
+      "OGC_REPORT_V4_MIMO_API_KEY" = "OGC_AI_API_KEY"
+    }.GetEnumerator()) {
+      if ((-not $values.ContainsKey($binding.Key) -or [string]::IsNullOrWhiteSpace($values[$binding.Key])) -and
+          $values.ContainsKey($binding.Value) -and -not [string]::IsNullOrWhiteSpace($values[$binding.Value])) {
+        $values[$binding.Key] = $values[$binding.Value]
+      }
+    }
   }
   if ($Environment -eq "staging" -and $values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true") {
     $publicSearchMiMoFallbacks = @{
@@ -89,7 +106,7 @@ function Write-RuntimeEnv {
 
   Require-Values $values @("DATABASE_URL", "OGC_DEPLOYMENT_PROFILE", "OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL") "$Environment Worker"
   if ($Environment -eq "staging") {
-    Require-Values $values @("OGC_EVIDENCE_STORAGE", "BLOB_READ_WRITE_TOKEN", "OGC_TOKEN_HASH_SECRET") "Staging Worker"
+    Require-Values $values @("OGC_EVIDENCE_STORAGE", "BLOB_READ_WRITE_TOKEN", "OGC_REPORT_V4_MODEL_PROFILE_ID", "OGC_REPORT_V4_MIMO_BASE_URL", "OGC_REPORT_V4_MIMO_API_KEY", "OGC_TOKEN_HASH_SECRET") "Staging Worker"
     if ($values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true") {
       Require-Values $values @("OGC_PUBLIC_SEARCH_ADAPTER", "OGC_PUBLIC_SEARCH_MIMO_BASE_URL", "OGC_PUBLIC_SEARCH_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_MODEL", "OGC_PUBLIC_SEARCH_LOCALE", "OGC_PUBLIC_SEARCH_REGION") "Staging public-search runtime"
     }

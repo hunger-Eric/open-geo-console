@@ -185,6 +185,14 @@ describe("exact-commit staging-only Worker launcher", () => {
     expect(workstationLauncherSource).not.toMatch(/\$providerNames\s*=\s*@\([^\n]*OGC_TOKEN_HASH_SECRET/u);
   });
 
+  it("materializes the locked V4 profile and dedicated MiMo bindings only inside the Staging environment branch", () => {
+    expect(workstationLauncherSource).toMatch(/if \(\$Environment -eq "staging"\)[\s\S]*report-v4-mimo-v2\.5-pro-v1/u);
+    expect(workstationLauncherSource).toMatch(/OGC_REPORT_V4_MIMO_BASE_URL"\s*=\s*"OGC_AI_BASE_URL/u);
+    expect(workstationLauncherSource).toMatch(/OGC_REPORT_V4_MIMO_API_KEY"\s*=\s*"OGC_AI_API_KEY/u);
+    expect(workstationLauncherSource).toMatch(/Require-Values \$values[\s\S]*OGC_REPORT_V4_MODEL_PROFILE_ID[\s\S]*OGC_REPORT_V4_MIMO_BASE_URL[\s\S]*OGC_REPORT_V4_MIMO_API_KEY[\s\S]*Staging Worker/u);
+    expect(workstationLauncherSource).not.toMatch(/\$providerNames\s*=\s*@\([^\n]*OGC_REPORT_V4_/u);
+  });
+
   it("recreates only the two staging lanes and never delegates to broad workstation or deployment commands", () => {
     expect(source).toMatch(/staging-worker-free.*staging-worker-deep/su);
     expect(source).toMatch(/compose.*up.*--no-build/su);
