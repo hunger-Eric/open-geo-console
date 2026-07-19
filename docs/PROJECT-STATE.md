@@ -4,11 +4,11 @@
 
 Deliver a self-hostable, evidence-bound GEO product whose customer artifact is one secure HTML report. The persisted generation locale remains immutable throughout generation and delivery. Report V4 has no PDF generation or customer-PDF surface; V1-V3 retain their historical private-readiness records.
 
-## Active Change Freeze
+## Active Change Scope
 
-- `docs/ACTIVE-CHANGE-SCOPE.md` is `FROZEN` again after the approved V4 answer-optimization work unit completed. No further production-code edits, live scans, historical recovery, replay, commerce operation, deployment, or other external mutation are authorized without a new exact scope and explicit approval.
-- The clean local branch `codex/v4-answer-optimization-scope-reset` was created directly from `origin/codex/report-v4-implementation` and contains only the scope guard plus the narrow answer-prompt implementation. The separate 10-commit, 30-file unapproved broad repair experiment remains preserved on the accident branch for review and is not present here.
-- The completed implementation changes only `apps/web/src/report-v4/mimo-provider.ts` and its test. Three-question independence, answer checkpoints, parser behavior, state machines, recovery/replay, historical data, commerce, crawler/admission, diagnosis enhancement, Worker/Docker, staging, and deployment remain unchanged.
+- `docs/ACTIVE-CHANGE-SCOPE.md` is `APPROVED` for its exact two-phase protected-Staging V4 plan. Phase A's exact-job one-shot Worker is implemented within the seven-file code/test allowlist and independently verified `CONFORMANT`; ordinary FIFO Worker behavior and all prohibited subsystems remain unchanged.
+- Phase A acceptance recorded 69 focused tests, a second independent disposable PostgreSQL targeted-claim run (2/2), lint, build, diff, and CodeGraph checks. The full `npm test` result remains 2,590 passed, 175 skipped, with five known unrelated acceptance-ledger failures.
+- No deployment, report, crawl, model call, payment, refund, email, production action, or other external workflow was performed for Phase A. The user-owned `assets/` and protected V3 plan remain untouched.
 
 ## Current Snapshot (2026-07-19)
 
@@ -42,8 +42,8 @@ Deliver a self-hostable, evidence-bound GEO product whose customer artifact is o
 
 ## Remaining Work / Blockers
 
-1. Repair the staging Airwallex refund configuration/reconciliation path and redirected email delivery, then rerun commerce without claiming success from the current failed/retried states.
-2. Execute the exact V4 diagnosis-failure and question-failure scenarios and collect their immutable scenario/session authorities; the paid core run covers only the customer-delivery scenario.
+1. Commit the exact Phase A diff after its final allowlist/budget audit; do not push.
+2. On that same revision, execute Phase B only through the approved protected Preview and exact one-shot Worker path for the new `shun-express.com` V4 report.
 3. Store requirement-bound evidence for all 20 requirements, review each registry promotion from `implemented` to `verified`, and only then expect `npm run report:v4:acceptance` to pass.
 4. Resolve the five PostgreSQL acceptance phase-snapshot schema-drift failures before treating the full deterministic suite as green.
 5. Keep live V2/V3 recovery and unresolved historical Sandbox refunds separate from V4 acceptance.

@@ -319,6 +319,42 @@ export async function claimScanJob(
   return claimedId ? getScanJob(claimedId) : null;
 }
 
+export interface ExactScanJobIdentity { jobId: string; reportId: string; tier: ReportTier; }
+
+/** Exact one-shot claims deliberately perform maintenance only for their target. */
+export async function claimExactScanJob(workerId: string, identity: ExactScanJobIdentity, leaseSeconds = 90): Promise<ScanJobRow | null> {
+  if (!workerId || leaseSeconds < 10) throw new Error("A worker id and a lease of at least 10 seconds are required.");
+  await ensureDatabase();
+  const sql = getSqlClient();
+  await sql.begin(async (tx) => {
+    const recoverable = await tx<{ current_phase: ScanJobPhase; checkpoint_revision: number }[]>`
+      UPDATE scan_jobs SET execution_state='retry_wait', lease_owner=NULL, lease_expires_at=NULL, retry_not_before=NULL,
+        error_code='lease_expired', public_error='The analysis is being recovered after a Worker interruption.', updated_at=now()
+      WHERE id=${identity.jobId} AND report_id=${identity.reportId} AND tier=${identity.tier}
+        AND execution_state='running' AND lease_expires_at <= now() AND phase_attempt < max_attempts
+      RETURNING current_phase, checkpoint_revision`;
+    for (const row of recoverable) await JobTransitionService.appendTransition(tx, { jobId: identity.jobId, fromState: "running", toState: "retry_wait",
+      phase: row.current_phase, checkpointRevision: row.checkpoint_revision, reasonCode: "lease_expired" });
+    await tx`
+      WITH failed AS (
+        UPDATE scan_jobs SET stage='failed', execution_state='failed', current_phase='terminalization', lease_owner=NULL,
+          lease_expires_at=NULL, retry_not_before=NULL, error_code='lease_exhausted',
+          public_error='The analysis could not be completed after multiple attempts.', updated_at=now()
+        WHERE id=${identity.jobId} AND report_id=${identity.reportId} AND tier=${identity.tier}
+          AND execution_state IN ('running','retry_wait') AND (lease_expires_at IS NULL OR lease_expires_at <= now())
+          AND phase_attempt >= max_attempts RETURNING credit_reservation_id
+      ), refunded AS (
+        UPDATE credit_ledger ledger SET status='refunded', refunded_at=now() FROM failed
+        WHERE ledger.id=failed.credit_reservation_id AND ledger.status='reserved' RETURNING ledger.access_key_id,ledger.credits
+      ) UPDATE access_keys access SET credits_remaining=access.credits_remaining+refunded.credits,
+        status=CASE WHEN access.status='exhausted' THEN 'active' ELSE access.status END FROM refunded WHERE access.id=refunded.access_key_id`;
+    await tx`DELETE FROM staging_free_regenerations regeneration USING scan_jobs job WHERE regeneration.job_id=job.id AND job.id=${identity.jobId} AND job.report_id=${identity.reportId} AND job.tier=${identity.tier} AND job.stage='failed'`;
+    await tx`UPDATE report_artifact_revisions artifact SET status='failed' FROM scan_jobs job WHERE artifact.job_id=job.id AND job.id=${identity.jobId} AND job.report_id=${identity.reportId} AND job.tier=${identity.tier} AND job.reason='staging_artifact_refresh' AND job.stage='failed' AND artifact.revision_kind='presentation_refresh' AND artifact.status='pending'`;
+  });
+  const claimedId = await JobTransitionService.claimExact(workerId, identity, leaseSeconds);
+  return claimedId ? getScanJob(claimedId) : null;
+}
+
 export async function heartbeatScanJob(id: string, workerId: string, leaseSeconds = 90): Promise<boolean> {
   await ensureDatabase();
   const sql = getSqlClient();
