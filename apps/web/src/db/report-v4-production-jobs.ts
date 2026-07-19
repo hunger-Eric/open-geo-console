@@ -258,7 +258,7 @@ function validateCoreAggregate(value: ReportV4ProductionCoreAggregate, allowedAc
     ["queued", "processing"].includes(order.fulfillmentStatus) && order.refundStatus === "not_required" &&
     credit.status === "reserved" && value.activeAccessTokenCount === 0;
   const reserved = reservedState && value.report.activeArtifactRevisionId === null && (
-    value.activeArtifacts.length === 0 || isExactPendingCore(value, job, order, config)
+    value.activeArtifacts.length === 0 || isExactPreparedCore(value, job, order, config)
   );
   const reservedActive = reservedState && isExactReservedActiveCore(value, job, order, config);
   const settled = job.stage === "completed" && job.executionState === "completed" &&
@@ -313,7 +313,7 @@ function isExactReservedActiveCore(
     && artifact.status === "active" && artifact.sourceArtifactRevisionId === null;
 }
 
-function isExactPendingCore(
+function isExactPreparedCore(
   value: ReportV4ProductionCoreAggregate,
   job: ReportV4ProductionCoreJob,
   order: ReportV4ProductionCoreAggregate["orders"][number],
@@ -323,7 +323,7 @@ function isExactPendingCore(
   const artifact = value.activeArtifacts[0]!;
   return artifact.reportId === job.reportId && artifact.orderId === order.id && artifact.jobId === job.id
     && artifact.configSnapshotId === config.id && artifact.revisionKind === "generation"
-    && artifact.artifactContract === "combined_geo_report_v4" && artifact.status === "pending"
+    && artifact.artifactContract === "combined_geo_report_v4" && ["pending", "ready"].includes(artifact.status)
     && artifact.sourceArtifactRevisionId === null;
 }
 
