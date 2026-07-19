@@ -44,6 +44,23 @@ describe("V4 production core and diagnosis-enhancement job lineage", () => {
       .resolves.toMatchObject({ commercePhase: "settled" });
   });
 
+  it("loads a completed-limited refunded core as terminalized enhancement lineage", async () => {
+    const aggregate = exactAggregate();
+    aggregate.coreJob.stage = "completed_limited";
+    aggregate.orders[0]!.fulfillmentStatus = "completed_limited";
+    aggregate.orders[0]!.refundStatus = "pending";
+    aggregate.credits[0]!.status = "refunded";
+
+    await expect(repository(aggregate).loadPaidCoreContext({ coreJobId: "core-job" }))
+      .resolves.toMatchObject({
+        commercePhase: "settled",
+        coreJob: { stage: "completed_limited" },
+        order: { fulfillmentStatus: "completed_limited", refundStatus: "pending" },
+        credit: { status: "refunded" },
+        activeCoreArtifact: { id: "core-artifact-1", status: "active" }
+      });
+  });
+
   it("loads a reserved core only for its exact live worker lease before production work", async () => {
     const aggregate = reservedAggregate();
     const repo = repository(aggregate);

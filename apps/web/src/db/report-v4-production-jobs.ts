@@ -261,8 +261,12 @@ function validateCoreAggregate(value: ReportV4ProductionCoreAggregate, allowedAc
     value.activeArtifacts.length === 0 || isExactPreparedCore(value, job, order, config)
   );
   const reservedActive = reservedState && isExactReservedActiveCore(value, job, order, config);
-  const settled = job.stage === "completed" && job.executionState === "completed" &&
+  const completedSettled = job.stage === "completed" && job.executionState === "completed" &&
     order.fulfillmentStatus === "completed" && order.refundStatus === "not_required" && credit.status === "settled";
+  const completedLimitedRefunded = job.stage === "completed_limited" && job.executionState === "completed" &&
+    order.fulfillmentStatus === "completed_limited" && ["pending", "refunded"].includes(order.refundStatus) &&
+    credit.status === "refunded";
+  const settled = completedSettled || completedLimitedRefunded;
   if (!reserved && !reservedActive && !settled) {
     throw new Error("The V4 commercial job, order and credit state is not an exact reserved, reserved-active, or settled phase.");
   }
