@@ -425,6 +425,37 @@ describe("batch analysis and evidence", () => {
     }]);
   });
 
+  it("drops an optional rewrite example when its bounded language correction still fails", async () => {
+    const invalid = { analyses: [{
+      url: page.url,
+      summary: "\u9875\u9762\u8bf4\u660e\u6e05\u6670\u3002",
+      organizationSignals: [],
+      strengths: [],
+      findings: [{
+        title: "\u884c\u52a8\u5f15\u5bfc\u9700\u8981\u66f4\u6e05\u6670",
+        severity: "warning",
+        impact: "\u8bfb\u8005\u53ef\u80fd\u65e0\u6cd5\u786e\u8ba4\u4e0b\u4e00\u6b65\u3002",
+        evidence: [{ url: page.url, quote: "Example builds evidence-first website reports" }],
+        recommendation: "\u8865\u5145\u660e\u786e\u7684\u4e0b\u4e00\u6b65\u64cd\u4f5c\u3002",
+        rewriteExample: "Add a clear CTA for modern teams.",
+        confidence: "high"
+      }]
+    }] };
+    const stillInvalid = { corrections: [{
+      path: "analyses[0].findings[0].rewriteExample",
+      text: "Keep this CTA concise."
+    }] };
+    const client = mockClient([invalid, stillInvalid]);
+
+    const result = await analyzePageBatch(client, {
+      pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined
+    });
+
+    expect(result.analyses[0]?.findings[0]?.rewriteExample).toBeUndefined();
+    expect(result.analyses[0]?.findings[0]?.recommendation).toBe("\u8865\u5145\u660e\u786e\u7684\u4e0b\u4e00\u6b65\u64cd\u4f5c\u3002");
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
+
   it("corrects legacy SEO terminology in page analysis using the existing single correction", async () => {
     const analysis = (summary: string) => ({ analyses: [{
       url: page.url, summary, organizationSignals: [], strengths: [], findings: []
