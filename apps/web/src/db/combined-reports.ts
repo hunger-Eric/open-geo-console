@@ -42,7 +42,7 @@ export type ActiveCombinedGeoReportV4 = ActiveCombinedGeoReportBase<"combined_ge
 export type ActiveLegacyCombinedGeoReport = ActiveCombinedGeoReportV1 | ActiveCombinedGeoReportV2 | ActiveCombinedGeoReportV3;
 export type ActiveCombinedGeoReport = ActiveLegacyCombinedGeoReport | ActiveCombinedGeoReportV4;
 
-export function getActiveCombinedGeoReport(reportId: string): Promise<ActiveLegacyCombinedGeoReport | null>;
+export function getActiveCombinedGeoReport(reportId: string): Promise<ActiveCombinedGeoReport | null>;
 export function getActiveCombinedGeoReport(reportId: string, expectedContract: "combined_geo_report_v1"): Promise<ActiveCombinedGeoReportV1 | null>;
 export function getActiveCombinedGeoReport(reportId: string, expectedContract: "combined_geo_report_v2"): Promise<ActiveCombinedGeoReportV2 | null>;
 export function getActiveCombinedGeoReport(reportId: string, expectedContract: "combined_geo_report_v3"): Promise<ActiveCombinedGeoReportV3 | null>;
@@ -74,7 +74,7 @@ export async function getActiveCombinedGeoReport(
   const row = rows[0];
   if (!row || !isCombinedContract(row.artifact_contract) || !row.html_sha256?.trim()
     || !Number.isInteger(row.revision) || row.revision < 1 || !isReportLocale(row.report_locale)) return null;
-  if (expectedContract ? row.artifact_contract !== expectedContract : row.artifact_contract === "combined_geo_report_v4") return null;
+  if (expectedContract && row.artifact_contract !== expectedContract) return null;
   if (row.artifact_contract === "combined_geo_report_v4") {
     if (row.pdf_storage_key !== null || row.pdf_sha256 !== null) return null;
     try {

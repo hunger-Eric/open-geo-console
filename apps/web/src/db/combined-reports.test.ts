@@ -47,6 +47,15 @@ describe("active combined report loader", () => {
     expect(mocks.parseV4).toHaveBeenCalledOnce();
   });
 
+  it("loads the active V4 artifact through the shared unscoped report-page lookup", async () => {
+    mocks.state.rows = [row()];
+
+    await expect(getActiveCombinedGeoReport("report-1")).resolves.toMatchObject({
+      artifactContract: "combined_geo_report_v4",
+      artifactRevisionId: "revision-v4"
+    });
+  });
+
   it.each([
     { name: "missing HTML", overrides: { html_sha256: null } },
     { name: "PDF hash present", overrides: { pdf_sha256: "p".repeat(64) } },
