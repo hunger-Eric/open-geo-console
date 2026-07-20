@@ -8,7 +8,7 @@ import {
   getDatabaseEnvironmentStatus,
   getSqlClient
 } from "./index";
-import { terminalizeScanJob } from "./jobs";
+import { ScanJobCapacityError, terminalizeScanJob } from "./jobs";
 import { getReportV4PreAdmissionJob } from "./report-v4-admission-jobs";
 import { admitFreeScan } from "./scan-admission";
 import {
@@ -227,6 +227,55 @@ describePostgres("protected staging PostgreSQL integration", () => {
 
     const reused = await admitFreeScan({ ...input, idempotencyKey: `reuse-${runId}-123456` });
     expect(reused).toMatchObject({ outcome: "reused", reportId: first.reportId, jobId: first.jobId });
+  }, 60_000);
+
+  it("excludes only unrecoverable repair waits from protected-staging regeneration capacity", async () => {
+    const sql = getSqlClient();
+    const leaseConstraints = await sql<Array<{ convalidated: boolean; definition: string }>>`
+      SELECT convalidated, pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = 'scan_jobs'::regclass
+        AND conname = 'scan_jobs_repair_wait_lease_check'`;
+    expect(leaseConstraints).toHaveLength(1);
+    expect(leaseConstraints[0]).toMatchObject({ convalidated: true });
+    expect(leaseConstraints[0]?.definition).toContain("execution_state");
+    expect(leaseConstraints[0]?.definition).toContain("repair_wait");
+    expect(leaseConstraints[0]?.definition).toContain("lease_owner IS NULL");
+    expect(leaseConstraints[0]?.definition).toContain("lease_expires_at IS NULL");
+    const now = new Date("2031-01-01T12:00:00.000Z");
+    const allowedSite = `${sitePrefix}-repair-capacity-allowed.test`;
+    const blockedSite = `${sitePrefix}-repair-capacity-blocked.test`;
+    const [allowedTrial, blockedTrial, repairA, repairB] = await Promise.all([
+      insertReport(allowedSite, "repair-capacity-allowed"),
+      insertReport(blockedSite, "repair-capacity-blocked"),
+      insertReport(`${sitePrefix}-repair-capacity-a.test`, "repair-capacity-a"),
+      insertReport(`${sitePrefix}-repair-capacity-b.test`, "repair-capacity-b")
+    ]);
+    await sql`INSERT INTO free_site_trials (site_key, report_id, claimed_at, expires_at) VALUES
+      (${allowedSite},${allowedTrial},${now.toISOString()},${new Date("2031-02-01T12:00:00.000Z").toISOString()}),
+      (${blockedSite},${blockedTrial},${now.toISOString()},${new Date("2031-02-01T12:00:00.000Z").toISOString()})`;
+    const [baseline] = await sql<Array<{ count: number }>>`SELECT count(*)::integer AS count FROM scan_jobs
+      WHERE tier='free' AND stage NOT IN ('completed','completed_limited','failed') AND NOT (
+        execution_state='repair_wait' AND lease_owner IS NULL AND lease_expires_at IS NULL
+        AND retry_not_before IS NULL AND repair_deadline_at IS NULL)`;
+    await sql`INSERT INTO scan_jobs (id,report_id,tier,locale,stage,execution_state) VALUES
+      (${randomUUID()},${repairA},'free','en','analyzing','repair_wait'),
+      (${randomUUID()},${repairB},'free','en','analyzing','repair_wait')`;
+    const inputFor = (siteKey: string, suffix: string, maxActiveStagingJobs: number) => ({
+      url: `https://${siteKey}/`, siteKey, locale: "en" as const,
+      idempotencyKey: `capacity-${runId}-${suffix}`, ipAddress: `${ipPrefix}::50`,
+      forceFresh: true, stagingPreview: true, dailyDistinctSiteLimit: 2, aiDailyLimit: 10,
+      now, maxActiveStagingJobs
+    });
+    expect(await admitFreeScan(inputFor(allowedSite, "allowed", baseline.count + 1))).toMatchObject({ outcome: "created" });
+
+    await sql`INSERT INTO scan_jobs
+      (id,report_id,tier,locale,stage,execution_state,lease_owner,lease_expires_at,retry_not_before,repair_deadline_at) VALUES
+      (${randomUUID()},${repairA},'free','en','analyzing','running','capacity-worker',now()+interval '5 minutes',NULL,NULL),
+      (${randomUUID()},${repairA},'free','en','analyzing','repair_wait',NULL,NULL,now()+interval '5 minutes',NULL),
+      (${randomUUID()},${repairB},'free','en','analyzing','repair_wait',NULL,NULL,NULL,now()+interval '5 minutes')`;
+    await expect(admitFreeScan(inputFor(blockedSite, "blocked", baseline.count + 4)))
+      .rejects.toBeInstanceOf(ScanJobCapacityError);
   }, 60_000);
 
   async function insertReport(siteKey: string, suffix: string): Promise<string> {

@@ -118,6 +118,13 @@ export async function admitFreeScan(input: AdmitFreeScanInput): Promise<ScanAdmi
       const activeCounts = await tx<{ count: number }[]>`
         SELECT count(*)::integer AS count FROM scan_jobs
         WHERE tier = 'free' AND stage NOT IN ('completed', 'completed_limited', 'failed')
+          AND NOT (
+            execution_state = 'repair_wait'
+            AND lease_owner IS NULL
+            AND lease_expires_at IS NULL
+            AND retry_not_before IS NULL
+            AND repair_deadline_at IS NULL
+          )
       `;
       if ((activeCounts[0]?.count ?? 0) >= maxActiveStagingJobs) throw new ScanJobCapacityError();
     } else {
