@@ -164,7 +164,7 @@ describe("recoverable V4 admission runtime", () => {
       "https://example.com/page-1",
       "https://example.com/page-2"
     ]);
-    expect(harness.finalized?.status).toBe("completed_limited");
+    expect(harness.finalized?.status).toBe("completed");
   });
 
   it("counts exact duplicate page bodies once while retaining every duplicate URL as exclusion evidence", async () => {
@@ -175,7 +175,7 @@ describe("recoverable V4 admission runtime", () => {
 
     await expect(harness.run()).resolves.toEqual({ plannedPages: 3, successfulPages: 2, failedPages: 1 });
     expect(harness.finalized).toMatchObject({
-      status: "completed_limited",
+      status: "completed",
       pages: [
         expect.objectContaining({ normalizedUrl: "https://example.com/page-1", analyzable: true }),
         expect.objectContaining({
@@ -188,6 +188,98 @@ describe("recoverable V4 admission runtime", () => {
         expect.objectContaining({ normalizedUrl: "https://example.com/page-3", analyzable: true })
       ]
     });
+  });
+
+  it("completes an exhausted Shun-shaped frontier when duplicate bodies are the only exclusions", async () => {
+    const targetUrl = "https://shun-express.com/";
+    const candidates = [
+      candidate(1, { siteUrl: targetUrl, url: targetUrl }),
+      candidate(2, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan` }),
+      candidate(3, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan-copy` }),
+      candidate(4, { siteUrl: targetUrl, url: `${targetUrl}route/philippines` })
+    ];
+    const harness = runtimeHarness(candidates, {
+      extractAnalyzableText: (read) => read.url.endsWith("/route/taiwan-copy")
+        ? "Distinct Taiwan route service body"
+        : read.url.endsWith("/route/taiwan") ? "Distinct Taiwan route service body" : `Distinct route body for ${read.url}`
+    }, { targetUrl, siteKey: "shun-express.com" });
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 4, successfulPages: 3, failedPages: 1 });
+    expect(harness.finalized?.status).toBe("completed");
+    expect(harness.finalized?.pages).toContainEqual(expect.objectContaining({
+      normalizedUrl: `${targetUrl}route/taiwan-copy`, analyzable: false, exclusionReason: "duplicate_content"
+    }));
+    expect(new Set(harness.finalized?.pages.flatMap((page) => page.contentHash ? [page.contentHash] : [])).size).toBe(3);
+  });
+
+  it("distinguishes exhausted policy and permanent-link exclusions from unresolved transient reads", async () => {
+    const targetUrl = "https://shun-express.com/";
+    const exhausted = runtimeHarness([
+      candidate(1, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan` }),
+      candidate(2, { siteUrl: targetUrl, url: `${targetUrl}?route%2Ftaiwan=`, explicitExclusion: "robots_denied" }),
+      candidate(3, { siteUrl: targetUrl, url: `${targetUrl}about.html`, explicitExclusion: "policy_excluded" })
+    ], {}, { targetUrl, siteKey: "shun-express.com" });
+    await expect(exhausted.run()).resolves.toEqual({ plannedPages: 3, successfulPages: 1, failedPages: 2 });
+    expect(exhausted.finalized?.status).toBe("completed");
+    expect(exhausted.finalized?.pages.map(({ exclusionReason }) => exclusionReason)).toEqual([
+      null,
+      "robots_denied",
+      "policy_excluded"
+    ]);
+  });
+
+  it("keeps unresolved transient Shun-shaped reads completed_limited", async () => {
+    const targetUrl = "https://shun-express.com/";
+    const transient = runtimeHarness([
+      candidate(1, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan` }),
+      candidate(2, { siteUrl: targetUrl, url: `${targetUrl}route/philippines` })
+    ], {
+      readRawHtml: vi.fn(async (value) => {
+        if (value.url.endsWith("/route/philippines")) throw new Error("transient upstream reset");
+        return {
+          url: value.url,
+          networkSafety: value.networkSafety,
+          access: value.access,
+          contentType: value.contentType ?? "text/html",
+          html: `Readable evidence for ${value.url}`
+        };
+      })
+    }, { targetUrl, siteKey: "shun-express.com" });
+    await expect(transient.run()).resolves.toEqual({ plannedPages: 2, successfulPages: 1, failedPages: 1 });
+    expect(transient.finalized?.status).toBe("completed_limited");
+    expect(transient.finalized?.pages[1]).toEqual(expect.objectContaining({ exclusionReason: "raw_fetch_failed" }));
+  });
+
+  it.each([
+    "raw_fetch_failed",
+    "raw_extraction_failed",
+    "browser_render_failed",
+    "deadline_exceeded"
+  ] as const)("keeps an exhausted frontier with %s completed_limited", async (exclusionReason) => {
+    const harness = runtimeHarness([]);
+    const excludedUrl = "https://example.com/page-2";
+    harness.persistedCheckpoint = {
+      ...checkpointFixture(),
+      queue: [],
+      knownUrlKeys: ["https://example.com/page-1", excludedUrl],
+      visitedUrlKeys: ["https://example.com/page-1", excludedUrl],
+      pages: [
+        checkpointPage(1),
+        {
+          id: "checkpoint-page-2",
+          ordinal: 2,
+          normalizedUrl: excludedUrl,
+          analyzable: false,
+          readMode: null,
+          summary: null,
+          retainedText: null,
+          contentHash: null,
+          exclusionReason
+        }
+      ]
+    };
+
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 2, successfulPages: 1, failedPages: 1 });
+    expect(harness.finalized?.status).toBe("completed_limited");
   });
 
   it("binds every queued candidate to the trusted target site instead of trusting a forged candidate siteUrl", async () => {
@@ -299,12 +391,13 @@ describe("recoverable V4 admission runtime", () => {
 function runtimeHarness(
   initialCandidates: ReportV4SiteCandidate[],
   collectorOverrides: Partial<ReportV4SiteCollectorDependencies> = {},
-  options: { deadlineMs?: number } = {}
+  options: { deadlineMs?: number; targetUrl?: string; siteKey?: string } = {}
 ) {
+  const targetUrl = options.targetUrl ?? "https://example.com/";
   const identity: ReportV4SiteSnapshotIdentityInput = {
     id: "snapshot-1",
     reportId: "report-1",
-    siteKey: "example.com",
+    siteKey: options.siteKey ?? "example.com",
     collectorConfigIdentityHash: sha("collector-config"),
     capturedAt: new Date("2030-01-01T00:00:00.000Z")
   };
@@ -340,7 +433,7 @@ function runtimeHarness(
   const dependencies: ReportV4AdmissionRuntimeDependencies = { checkpoints, snapshots, collector, now };
   const runner = createReportV4AdmissionRunner({
     identity,
-    targetUrl: "https://example.com/",
+    targetUrl,
     initialCandidates,
     ...(options.deadlineMs ? { deadlineMs: options.deadlineMs } : {})
   }, dependencies);

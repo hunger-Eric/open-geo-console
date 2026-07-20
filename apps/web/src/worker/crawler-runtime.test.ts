@@ -306,6 +306,107 @@ describe("worker site discovery tiers", () => {
     ]);
   });
 
+  it("bounds Shun-shaped apex/www and robots-denied recursive query discovery before it reaches the fetch frontier", async () => {
+    const targetUrl = "https://shun-express.com/";
+    const fetchImpl = vi.fn(async (request: string | URL | Request) => {
+      const url = request instanceof Request ? request.url : request.toString();
+      if (url.endsWith("/about.html")) {
+        return new Response("Missing stale page", {
+          status: 404,
+          headers: { "content-type": "text/html; charset=utf-8", "x-ogc-final-url": url }
+        });
+      }
+      return new Response("<html><body><main>Readable route evidence</main></body></html>", {
+        headers: { "content-type": "text/html; charset=utf-8", "x-ogc-final-url": url }
+      });
+    });
+    const dependencies = createReportV4AdmissionCollectorDependencies({
+      targetUrl,
+      robotsPolicy: { userAgent: "OpenGeoConsoleBot", rules: [{ directive: "disallow", path: "/?*" }], sitemaps: [] },
+      fetchImpl: fetchImpl as typeof fetch
+    });
+    const recursiveNewsLinks = Array.from({ length: 8 }, (_, index) =>
+      `<a href="/?news/article-${index + 1}&page=${index + 1}">News ${index + 1}</a>`).join("");
+    const discovered = await dependencies.discoverCandidates!(
+      { url: targetUrl, networkSafety: "public", access: "public", contentType: "text/html",
+        html: `<a href="https://www.shun-express.com/route/taiwan">Taiwan alias</a>
+          <a href="/route/taiwan">Taiwan</a><a href="/route/philippines">Philippines</a>
+          <a href="/?route/taiwan">Denied route query</a>${recursiveNewsLinks}
+          <a href="/about.html">Stale optional about page</a>` },
+      { ...candidate(targetUrl), siteUrl: targetUrl }
+    );
+    expect(discovered.filter(({ explicitExclusion }) => explicitExclusion !== "robots_denied").map(({ url }) => url)).toEqual([
+      targetUrl,
+      "https://shun-express.com/route/taiwan",
+      "https://shun-express.com/route/philippines",
+      "https://shun-express.com/about.html"
+    ]);
+    expect(discovered.filter(({ explicitExclusion }) => explicitExclusion === "robots_denied")).toHaveLength(1);
+
+    const result = await collectReportV4Site(discovered, dependencies);
+    expect(fetchImpl.mock.calls.map(([request]) => request.toString())).toEqual([
+      targetUrl,
+      "https://shun-express.com/route/taiwan",
+      "https://shun-express.com/route/philippines",
+      "https://shun-express.com/about.html"
+    ]);
+    expect(result.exclusions.filter(({ reason }) => reason === "robots_denied")).toHaveLength(1);
+    expect(result.exclusions).toContainEqual(expect.objectContaining({
+      url: "https://shun-express.com/about.html",
+      reason: "policy_excluded"
+    }));
+    expect(result.exclusions.some(({ reason }) => reason === "raw_fetch_failed")).toBe(false);
+  });
+
+  it.each([
+    [410, "policy_excluded"],
+    [418, "policy_excluded"],
+    [429, "raw_fetch_failed"],
+    [503, "raw_fetch_failed"]
+  ] as const)("classifies optional-page HTTP %i as %s", async (status, reason) => {
+    const url = `https://example.com/status-${status}`;
+    const dependencies = createReportV4AdmissionCollectorDependencies({
+      targetUrl: "https://example.com/",
+      robotsPolicy: { userAgent: "OpenGeoConsoleBot", rules: [], sitemaps: [] },
+      fetchImpl: vi.fn(async () => new Response("status fixture", {
+        status,
+        headers: { "content-type": "text/html", "x-ogc-final-url": url }
+      })) as typeof fetch
+    });
+
+    const result = await collectReportV4Site([candidate(url)], dependencies);
+    expect(result.exclusions).toEqual([
+      expect.objectContaining({ url, reason })
+    ]);
+  });
+
+  it("does not canonicalize same-site www aliases across protocols or effective ports", async () => {
+    const targetUrl = "https://shun-express.com/";
+    const dependencies = createReportV4AdmissionCollectorDependencies({
+      targetUrl,
+      robotsPolicy: { userAgent: "OpenGeoConsoleBot", rules: [], sitemaps: [] },
+      fetchImpl: vi.fn() as unknown as typeof fetch
+    });
+
+    const discovered = await dependencies.discoverCandidates!(
+      {
+        url: targetUrl,
+        networkSafety: "public",
+        access: "public",
+        contentType: "text/html",
+        html: `<a href="http://www.shun-express.com/route/http">HTTP</a>
+          <a href="https://www.shun-express.com:8443/route/alternate-port">Alternate port</a>`
+      },
+      { ...candidate(targetUrl), siteUrl: targetUrl }
+    );
+
+    expect(discovered.map(({ url }) => url)).toEqual([
+      targetUrl,
+      "http://www.shun-express.com/route/http",
+      "https://www.shun-express.com:8443/route/alternate-port"
+    ]);
+  });
+
   it("uses exactly one safe browser render only when raw HTML has no analyzable body", async () => {
     const order: string[] = [];
     const events: unknown[] = [];

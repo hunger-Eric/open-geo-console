@@ -19,6 +19,12 @@ const DEFAULT_DEADLINE_MS = 10 * 60 * 1_000;
 const CUSTOM_SERVICE_PAGE_COUNT = 51;
 const SUMMARY_LIMIT = 1_000;
 const RETAINED_TEXT_LIMIT = 100_000;
+const UNRESOLVED_OPERATIONAL_EXCLUSION_REASONS = new Set([
+  "raw_fetch_failed",
+  "raw_extraction_failed",
+  "browser_render_failed",
+  "deadline_exceeded"
+]);
 
 export interface ReportV4AdmissionRuntimeConfig {
   readonly identity: ReportV4SiteSnapshotIdentityInput;
@@ -351,10 +357,9 @@ async function finalizeAndReturn(
   forcedStatus?: FinalizeReportV4PreAdmissionSnapshotInput["status"]
 ): Promise<ScanJobCoverage> {
   const analyzable = analyzableCount(checkpoint.pages);
-  const excluded = checkpoint.pages.length - analyzable;
   const status = forcedStatus ?? (analyzable === 0
     ? "unavailable"
-    : excluded > 0 ? "completed_limited" : "completed");
+    : hasUnresolvedOperationalExclusion(checkpoint.pages) ? "completed_limited" : "completed");
   const input: FinalizeReportV4PreAdmissionSnapshotInput = {
     ...identity,
     status,
@@ -381,6 +386,11 @@ function coverageFromBundle(bundle: ReportV4SiteSnapshotBundle): ScanJobCoverage
 
 function analyzableCount(pages: readonly ReportV4SiteSnapshotPageInput[]): number {
   return pages.filter(({ analyzable }) => analyzable).length;
+}
+
+function hasUnresolvedOperationalExclusion(pages: readonly ReportV4SiteSnapshotPageInput[]): boolean {
+  return pages.some(({ exclusionReason }) =>
+    exclusionReason !== null && UNRESOLVED_OPERATIONAL_EXCLUSION_REASONS.has(exclusionReason));
 }
 
 function summarize(value: string): string {
