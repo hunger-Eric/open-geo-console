@@ -102,7 +102,7 @@ export async function terminalizePaidPublicSourceReport(input: {
 export async function terminalizePaidReportV4Core(input: {
   report: unknown;
   workerId: string;
-  faultAfter?: "job" | "credit" | "refund" | "order" | "access" | "email";
+  faultAfter?: "activation" | "job" | "credit" | "refund" | "order" | "access" | "email";
   pdfSha256?: never;
   pdfStorageKey?: never;
   pageCount?: never;
@@ -194,9 +194,25 @@ export async function terminalizePaidReportV4Core(input: {
     const idempotentReentry = job.execution_state === "completed" && job.stage === outcome &&
       order.fulfillment_status === outcome && credit.status === expectedCreditStatus;
     if (!firstRun && !idempotentReentry) throw new Error("V4 commercial state conflicts with this core artifact outcome.");
-    assertV4CoreActivationLineage(artifact, firstRun);
+    assertV4CoreTerminalizationLineage(artifact, firstRun);
 
     if (firstRun) {
+      const activated = await tx<Array<{ id: string }>>`
+        UPDATE report_artifact_revisions SET status='active',activated_at=clock_timestamp(),
+          pdf_sha256=NULL,pdf_storage_key=NULL
+        WHERE id=${artifact.id} AND report_id=${report.reportId} AND status='ready'
+          AND revision_kind='generation' AND artifact_contract='combined_geo_report_v4'
+        RETURNING id
+      `;
+      if (activated.length !== 1) throw new Error("The ready V4 core artifact could not be activated exactly once.");
+      const published = await tx<Array<{ id: string }>>`
+        UPDATE scan_reports SET active_artifact_revision_id=${artifact.id}
+        WHERE id=${report.reportId} AND active_artifact_revision_id IS NULL
+        RETURNING id
+      `;
+      if (published.length !== 1) throw new Error("The V4 core artifact could not become the active report exactly once.");
+      fault(input.faultAfter, "activation");
+
       const jobs = await tx<Array<{ id: string }>>`
         UPDATE scan_jobs SET stage=${outcome},execution_state='completed',current_phase='terminalization',progress=100,
           retry_not_before=NULL,repair_reason_code=NULL,repair_deadline_at=NULL,lease_owner=NULL,lease_expires_at=NULL,
@@ -327,7 +343,7 @@ export async function enqueuePaidReportV4DiagnosisEnhancement(input: {
     if (!artifact) throw new Error("The exact terminal V4 core report is required before enhancement enqueue.");
     const report = parseCombinedGeoReportV4(artifact.payload);
     assertV4CoreArtifact(artifact, report);
-    assertV4CoreActivationLineage(artifact, false);
+    assertActiveV4CoreLineage(artifact);
 
     const job = (await tx<Array<V4JobCommerceRow>>`
       SELECT id,report_id,site_snapshot_id,tier,locale,stage,execution_state,checkpoint_revision,lease_owner,lease_expires_at,
@@ -779,11 +795,19 @@ function assertV4AnsweredQuestionCheckpoints(
   }
 }
 
-function assertV4CoreActivationLineage(row: V4ArtifactCommerceRow, firstRun: boolean): void {
+function assertV4CoreTerminalizationLineage(row: V4ArtifactCommerceRow, firstRun: boolean): void {
+  if (firstRun) {
+    if (row.status === "ready" && row.active_artifact_revision_id === null) return;
+    throw new Error("The first V4 commercial transition requires one unpublished ready core artifact.");
+  }
+  assertActiveV4CoreLineage(row);
+}
+
+
+function assertActiveV4CoreLineage(row: V4ArtifactCommerceRow): void {
   if (row.status === "active" && row.active_artifact_revision_id === row.id) return;
   // A ready core behind an active enhancement is valid only for an already-terminal idempotent reentry.
-  // The first commercial transition must observe the core itself as active before enhancement work may start.
-  if (!firstRun && row.status === "ready" && row.active_artifact_revision_id &&
+  if (row.status === "ready" && row.active_artifact_revision_id &&
       row.active_revision_kind === "diagnosis_enhancement" && row.active_source_artifact_revision_id === row.id &&
       row.active_artifact_contract === "combined_geo_report_v4" && row.active_status === "active" &&
       row.active_order_id === row.order_id && row.active_report_id === row.report_id && row.active_html_sha256 && row.active_ready_at &&

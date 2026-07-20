@@ -185,15 +185,7 @@ function applyPageLanguageCorrections(
   draft: readonly PageAnalysis[],
   corrections: readonly PageLanguageCorrection[]
 ): PageAnalysis[] | null {
-  const corrected = draft.map((analysis) => ({
-    ...analysis,
-    organizationSignals: [...analysis.organizationSignals],
-    strengths: [...analysis.strengths],
-    findings: analysis.findings.map((finding) => ({
-      ...finding,
-      evidence: finding.evidence.map((citation) => ({ ...citation }))
-    }))
-  }));
+  const corrected = clonePageAnalyses(draft);
   for (const { path, text } of corrections) {
     let match = /^analyses\[(\d+)]\.(summary)$/.exec(path);
     if (match) {
@@ -221,6 +213,34 @@ function applyPageLanguageCorrections(
       continue;
     }
     return null;
+  }
+  return corrected;
+}
+
+function clonePageAnalyses(draft: readonly PageAnalysis[]): PageAnalysis[] {
+  return draft.map((analysis) => ({
+    ...analysis,
+    organizationSignals: [...analysis.organizationSignals],
+    strengths: [...analysis.strengths],
+    findings: analysis.findings.map((finding) => ({
+      ...finding,
+      evidence: finding.evidence.map((citation) => ({ ...citation }))
+    }))
+  }));
+}
+
+function omitInvalidOptionalRewriteExamples(
+  draft: readonly PageAnalysis[],
+  error: ReportLanguageValidationError
+): PageAnalysis[] | null {
+  if (error.violations.length === 0) return null;
+  const corrected = clonePageAnalyses(draft);
+  for (const { path } of error.violations) {
+    const match = /^analyses\[(\d+)]\.findings\[(\d+)]\.rewriteExample$/.exec(path);
+    if (!match) return null;
+    const finding = corrected[Number(match[1])]?.findings[Number(match[2])];
+    if (!finding || finding.rewriteExample === undefined) return null;
+    delete finding.rewriteExample;
   }
   return corrected;
 }
@@ -339,6 +359,14 @@ export async function analyzePageBatch(
         break;
       } catch (error) {
         lastError = error;
+        if (isLanguageCorrectionCall && error instanceof ReportLanguageValidationError) {
+          const withoutInvalidOptionalExamples = omitInvalidOptionalRewriteExamples(languageCorrectionDraft ?? [], error);
+          if (withoutInvalidOptionalExamples) {
+            assertPageAnalysisLanguage(withoutInvalidOptionalExamples, input.locale, allowedTerms);
+            parsed = withoutInvalidOptionalExamples;
+            break;
+          }
+        }
         if (isLanguageCorrectionCall && (!correctionCandidateApplied || !(error instanceof ReportLanguageValidationError))) {
           throw error;
         }

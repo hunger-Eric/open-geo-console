@@ -444,16 +444,26 @@ describe("strict Report V4 processor routing", () => {
     await expect(dispatchReportV4ProductionJob("core", runnerInput(v4Job()), {})).rejects.toThrow(/core runner.*not configured/i);
   });
 
-  it("processScanJob rethrows a non-terminal V4 runner error without generic failure or commerce writes", async () => {
+  it("persists a non-terminal V4 runner error through the job state machine without legacy commerce writes", async () => {
     const job = v4Job();
-    const failure = new Error("recoverable runner interruption");
+    const failure = new Error("OGC_TOKEN_HASH_SECRET key is missing");
     boundaryMocks.getScanJob.mockResolvedValue(job);
+    boundaryMocks.failScanJob.mockResolvedValueOnce({ ...job, executionState: "repair_wait" });
     try {
       await expect(processScanJob(job, "worker-1", {
         reportV4CoreRunner: vi.fn(async () => { throw failure; })
-      })).rejects.toBe(failure);
+      })).resolves.toBeUndefined();
       expect(boundaryMocks.getScanJob).toHaveBeenCalledWith(job.id);
-      expect(boundaryMocks.failScanJob).not.toHaveBeenCalled();
+      expect(boundaryMocks.failScanJob).toHaveBeenCalledWith(job.id, "worker-1", expect.objectContaining({
+        code: "unexpected_internal_error",
+        classification: "operator_repairable",
+        retryable: false,
+        phase: job.currentPhase,
+        internalError: expect.objectContaining({
+          classification: "operator_repairable",
+          message: failure.message
+        })
+      }));
       expect(boundaryMocks.recordPaidJobOutcome).not.toHaveBeenCalled();
     } finally {
       vi.clearAllMocks();

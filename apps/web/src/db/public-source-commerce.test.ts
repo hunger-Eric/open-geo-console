@@ -101,7 +101,9 @@ describe("V4 core commercial terminalization admission", () => {
       refunds: 1,
       tokens: 1,
       emails: 1,
-      transitions: 1
+      transitions: 1,
+      artifactStatus: "active",
+      activeArtifactRevisionId: "core-v4"
     });
     const reentry = await terminalizePaidReportV4Core({ report: report("completed_limited"), workerId: "worker-v4" });
     expect(reentry).toMatchObject({
@@ -117,7 +119,7 @@ describe("V4 core commercial terminalization admission", () => {
     await expect(terminalizePaidReportV4Core({
       report: report("completed_limited"),
       workerId: "worker-v4"
-    })).rejects.toThrow(/active delivery revision/i);
+    })).rejects.toThrow(/unpublished ready core artifact/i);
     expect(fake.state).toMatchObject({
       jobStage: "synthesizing",
       creditStatus: "reserved",
@@ -217,7 +219,9 @@ function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhance
     tokens: 0,
     emails: 0,
     transitions: 0,
-    enhancements: 0
+    enhancements: 0,
+    artifactStatus: "ready",
+    activeArtifactRevisionId: enhancementAlreadyActive ? "enhancement-v4" : null as string | null
   };
   const enhancement = buildReportV4DiagnosisEnhancementJob({
     reportId:"report-v4",orderId:"order-v4",coreJobId:"job-v4",coreArtifactRevisionId:"core-v4",
@@ -228,14 +232,14 @@ function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhance
     if (sql.includes("pg_advisory_xact_lock")) return [];
     if (sql.includes("FROM report_artifact_revisions core")) return [{
       id: "core-v4", report_id: "report-v4", order_id: "order-v4", job_id: "job-v4", revision_kind: "generation",
-      artifact_contract: "combined_geo_report_v4", status: enhancementAlreadyActive ? "ready" : "active", html_sha256: "html-hash", pdf_sha256: null,
+      artifact_contract: "combined_geo_report_v4", status: state.artifactStatus, html_sha256: "html-hash", pdf_sha256: null,
       pdf_storage_key: null, ready_at: "2026-07-17T00:00:00.000Z", combined_report_id: "report-v4",
       combined_order_id: "order-v4", combined_job_id: "job-v4", question_set_id: "questions-v4", payload,
       scan_report_locale: "zh", config_snapshot_id: missingConfigSnapshot ? null : "config-v4",
       config_report_id: missingConfigSnapshot ? null : "report-v4", config_order_id: missingConfigSnapshot ? null : "order-v4",
       config_core_job_id: missingConfigSnapshot ? null : "job-v4",
-      active_artifact_revision_id: enhancementAlreadyActive ? "enhancement-v4" : "core-v4",
-      active_revision_kind: enhancementAlreadyActive ? "diagnosis_enhancement" : "generation",
+      active_artifact_revision_id: state.activeArtifactRevisionId,
+      active_revision_kind: enhancementAlreadyActive ? "diagnosis_enhancement" : state.artifactStatus === "active" ? "generation" : null,
       active_source_artifact_revision_id: enhancementAlreadyActive ? "core-v4" : null,
       active_artifact_contract: "combined_geo_report_v4", active_status: "active", active_order_id: "order-v4",
       active_report_id: "report-v4", active_html_sha256: "html-hash", active_pdf_sha256: null,
@@ -261,6 +265,16 @@ function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhance
       id: "credit-v4", status: state.creditStatus, access_key_id: "key-v4", credits: 1, job_id: "job-v4",
       report_id: "report-v4", payment_order_id: "order-v4"
     }];
+    if (sql.startsWith("UPDATE report_artifact_revisions SET status='active'")) {
+      if (state.artifactStatus !== "ready") return [];
+      state.artifactStatus = "active";
+      return [{ id: "core-v4" }];
+    }
+    if (sql.startsWith("UPDATE scan_reports SET active_artifact_revision_id=")) {
+      if (state.activeArtifactRevisionId !== null) return [];
+      state.activeArtifactRevisionId = "core-v4";
+      return [{ id: "report-v4" }];
+    }
     if (sql.startsWith("UPDATE scan_jobs SET")) { state.jobStage = "completed_limited"; state.jobExecution = "completed"; return [{ id: "job-v4" }]; }
     if (sql.startsWith("INSERT INTO scan_job_transition_events")) { state.transitions += 1; return []; }
     if (sql.startsWith("UPDATE access_keys SET")) { state.creditsRemaining += 1; return [{ id: "key-v4" }]; }

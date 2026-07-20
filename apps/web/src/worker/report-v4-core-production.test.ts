@@ -320,7 +320,7 @@ function productionHarness(options: HarnessOptions = {}) {
           events.push("persist-payload");
           return { payloadIdentityHash: "c".repeat(64), htmlSha256: "d".repeat(64) };
         },
-        async activateCoreRevision() {
+        async readyCoreRevision() {
           events.push("activate-core");
         },
         async terminalizeUnavailableCore() {

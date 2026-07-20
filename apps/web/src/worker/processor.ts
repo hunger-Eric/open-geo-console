@@ -636,16 +636,15 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     }
     const currentJob = await getScanJob(job.id);
     if (reportV4ProductionRoutingAttempted && isTerminalScanJob(currentJob)) return;
-    // V4 owns its atomic artifact/commerce terminalization. A non-terminal
-    // runner error must preserve the lease/recovery state and must never fall
-    // through to the legacy generic failure or commercial-outcome paths.
-    if (reportV4ProductionRoutingAttempted) throw error;
     const phase = currentJob?.currentPhase ?? phaseForStage(currentJob?.stage ?? job.stage);
     const normalized = normalizeJobError(error, {
       jobId: job.id, phase, phaseAttempt: currentJob?.phaseAttempt ?? job.phaseAttempt ?? 0,
       resumeGeneration: currentJob?.resumeGeneration ?? job.resumeGeneration ?? 0,
       configuredSecrets: [process.env.OGC_AI_API_KEY ?? "", process.env.OGC_PUBLIC_SEARCH_MIMO_API_KEY ?? ""]
     });
+    // V4 owns commercial terminalization, but ordinary runner failures still
+    // belong to the canonical job state machine so the original error is
+    // durable immediately instead of being replaced later by lease_exhausted.
     const failedJob = await failScanJob(job.id, workerId, {
       code: normalized.code, publicMessage: "The analysis is temporarily unavailable.",
       retryable: normalized.classification === "transient",

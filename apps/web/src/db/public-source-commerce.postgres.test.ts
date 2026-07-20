@@ -84,12 +84,12 @@ describePostgres("paid public-source atomic terminalization",()=>{
   // @requirement GEO-V4-PDF-01
   it("terminalizes one HTML-only V4 core without enhancement writes, then independently enqueues exactly once",async()=>{
     const ids=v4Identity(suffix,"complete"),core=v4Report(ids,"completed");
-    for(const faultAfter of ["job","credit","order","access","email"] as const){
+    for(const faultAfter of ["activation","job","credit","order","access","email"] as const){
       await expect(terminalizePaidReportV4Core({report:core,workerId:ids.workerId,faultAfter})).rejects.toThrow(/Injected fault/);
       expect(await readV4CommerceState(getSqlClient(),ids)).toMatchObject({
         stage:"synthesizing",execution_state:"running",fulfillment_status:"processing",credit_status:"reserved",
         credits_remaining:0,refunds:0,emails:0,tokens:0,transitions:0,enhancements:0,
-        artifact_status:"active",active_artifact_revision_id:ids.artifactRevisionId
+        artifact_status:"ready",active_artifact_revision_id:null
       });
     }
     const first=await terminalizePaidReportV4Core({report:core,workerId:ids.workerId});
@@ -123,7 +123,7 @@ describePostgres("paid public-source atomic terminalization",()=>{
     const ids=v4Identity(suffix,"limited"),core=v4Report(ids,"completed_limited");
     await expect(terminalizePaidReportV4Core({report:core,workerId:ids.workerId,faultAfter:"refund"})).rejects.toThrow(/Injected fault/);
     expect(await readV4CommerceState(getSqlClient(),ids)).toMatchObject({stage:"synthesizing",credit_status:"reserved",
-      refunds:0,emails:0,tokens:0,enhancements:0,artifact_status:"active",active_artifact_revision_id:ids.artifactRevisionId});
+      refunds:0,emails:0,tokens:0,enhancements:0,artifact_status:"ready",active_artifact_revision_id:null});
     const first=await terminalizePaidReportV4Core({report:core,workerId:ids.workerId});
     expect(first).toMatchObject({outcome:"completed_limited",orderId:ids.orderId,refundId:expect.any(String)});
     const terminal=await readV4CommerceState(getSqlClient(),ids);
@@ -172,7 +172,7 @@ describePostgres("paid public-source atomic terminalization",()=>{
     const sql=getSqlClient();
     const preterminal=v4Identity(suffix,"enqueue-preterminal");
     await seedPaidV4Core(sql,preterminal,"completed");
-    await expect(enqueuePaidReportV4DiagnosisEnhancement(v4EnhancementInput(preterminal))).rejects.toThrow(/terminal eligible/i);
+    await expect(enqueuePaidReportV4DiagnosisEnhancement(v4EnhancementInput(preterminal))).rejects.toThrow(/active delivery|terminal eligible/i);
 
     const questionFailure=v4Identity(suffix,"enqueue-question-failure");
     await seedPaidV4Core(sql,questionFailure,"completed",true,{checkpointStates:["answered","answering","answered"]});
@@ -378,9 +378,8 @@ async function seedPaidV4Core(sql:ReturnType<typeof getSqlClient>,ids:V4FixtureI
       VALUES(${sha(`checkpoint-paid-${ids.label}-${ordinal}`)},${ids.reportId},${ids.jobId},${ids.questionSetId},${question.questionId},${siteSnapshotId},${ordinal},${state},${sha(`question-identity-paid-${ids.label}-${ordinal}`)},${sha(`model-${ids.label}`)},${sha(`input-paid-${ids.label}-${ordinal}`)},1,${state==="answered"?JSON.stringify(answerPayload):null}::jsonb,'[]'::jsonb,${state==="answered"?sha(JSON.stringify(answerPayload)):null})`;
   }
   await sql`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,config_snapshot_id,revision_kind,revision,artifact_contract,status,payload_identity_hash,html_sha256,pdf_sha256,pdf_storage_key,readiness,ready_at,activated_at)
-    VALUES(${ids.artifactRevisionId},${ids.reportId},${ids.orderId},${ids.jobId},${bindConfigSnapshot?ids.configSnapshotId:null},'generation',1,'combined_geo_report_v4','active',${sha(JSON.stringify(payload))},${sha(`html-${ids.label}`)},NULL,NULL,'{"htmlCanonical":true}'::jsonb,now(),now())`;
+    VALUES(${ids.artifactRevisionId},${ids.reportId},${ids.orderId},${ids.jobId},${bindConfigSnapshot?ids.configSnapshotId:null},'generation',1,'combined_geo_report_v4','ready',${sha(JSON.stringify(payload))},${sha(`html-${ids.label}`)},NULL,NULL,'{"htmlCanonical":true}'::jsonb,now(),NULL)`;
   await sql`INSERT INTO combined_geo_reports(artifact_revision_id,report_id,order_id,job_id,question_set_id,payload) VALUES(${ids.artifactRevisionId},${ids.reportId},${ids.orderId},${ids.jobId},${ids.questionSetId},${JSON.stringify(payload)}::jsonb)`;
-  await sql`UPDATE scan_reports SET active_artifact_revision_id=${ids.artifactRevisionId} WHERE id=${ids.reportId}`;
 }
 async function activateV4DiagnosisFixture(sql:ReturnType<typeof getSqlClient>,ids:V4FixtureIdentity,enhancementJob:string){
   const enhancementRevision=`v4-enhancement-${ids.label}-${ids.reportId}`;

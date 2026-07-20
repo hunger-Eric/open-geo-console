@@ -83,7 +83,7 @@ describe("Report V4 protected-Staging acceptance ledger validation", () => {
       .rejects.toThrow(/kind, operation, phase/u);
   });
 
-  it("serializes event details before the postgres-js parameter boundary", async () => {
+  it("passes validated event details through the postgres-js JSON parameter boundary", async () => {
     const sessionId = session().sessionId;
     const scenarioId = "22222222-2222-4222-8222-222222222222";
     const bindingHash = "b".repeat(64);
@@ -105,7 +105,7 @@ describe("Report V4 protected-Staging acceptance ledger validation", () => {
         return Promise.resolve([{
           idempotency_key: parameters[0], session_id: sessionId, scenario_id: scenarioId, sequence: 1,
           kind: "scenario_bound", operation: "v4_dispatch", unit_id: "pre-admission-job", attempt: 0, phase: "observed",
-          details: JSON.parse(parameters[9] as string), details_canonical: JSON.stringify({ bindingHash }),
+          details: (parameters[9] as { value: unknown }).value, details_canonical: JSON.stringify({ bindingHash }),
           prev_hash: "0".repeat(64), event_hash: "c".repeat(64),
           occurred_at: new Date("2026-07-18T00:00:00.000Z"), occurred_at_canonical: "2026-07-18T00:00:00.000000Z"
         }]);
@@ -124,9 +124,10 @@ describe("Report V4 protected-Staging acceptance ledger validation", () => {
     });
 
     expect(result.inserted).toBe(true);
-    expect(transaction.json).not.toHaveBeenCalled();
-    expect(insertParameters[9]).toBe(JSON.stringify({ bindingHash }));
-    expect(insertParameters.every((parameter) => parameter === null || typeof parameter !== "object")).toBe(true);
+    expect(transaction.json).toHaveBeenCalledTimes(1);
+    expect(transaction.json).toHaveBeenCalledWith({ bindingHash });
+    expect(insertParameters[9]).toEqual({ value: { bindingHash }, type: 3802 });
+    expect(insertParameters.every((parameter, index) => index === 9 || parameter === null || typeof parameter !== "object")).toBe(true);
   });
 });
 

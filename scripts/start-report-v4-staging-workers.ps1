@@ -10,7 +10,8 @@ $allowedProtectedPlanEntry = "?? docs/superpowers/plans/2026-07-15-v3-paid-accep
 $requiredV4Names = @(
   "OGC_REPORT_V4_MODEL_PROFILE_ID",
   "OGC_REPORT_V4_MIMO_BASE_URL",
-  "OGC_REPORT_V4_MIMO_API_KEY"
+  "OGC_REPORT_V4_MIMO_API_KEY",
+  "OGC_TOKEN_HASH_SECRET"
 )
 
 function Assert-LastExitCode {

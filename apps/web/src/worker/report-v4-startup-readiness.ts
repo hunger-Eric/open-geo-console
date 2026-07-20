@@ -29,6 +29,7 @@ export function assertReportV4WorkerStartupReadiness(
   const runtime = dependencies.loadModelRuntime(environment);
   assertLockedCapabilities(runtime);
   dependencies.readMimoProviderConfig(environment);
+  assertCommercialTokenSecret(environment);
 }
 
 export async function prepareWorkerStartup(input: {
@@ -46,6 +47,13 @@ function assertLockedCapabilities(runtime: ReportV4ModelRuntimeConfig): void {
     throw new Error("The locked Report V4 model runtime capability is missing.");
   }
   for (const operation of MODEL_PROFILE_OPERATIONS) assertOperation(runtime, operation);
+}
+
+function assertCommercialTokenSecret(environment: NodeJS.ProcessEnv): void {
+  const tokenHashSecret = environment.OGC_TOKEN_HASH_SECRET?.trim();
+  if (!tokenHashSecret || tokenHashSecret.length < 32) {
+    throw new Error("OGC_TOKEN_HASH_SECRET key must be configured with at least 32 characters.");
+  }
 }
 
 function assertOperation(runtime: ReportV4ModelRuntimeConfig, operation: ModelProfileOperation): void {

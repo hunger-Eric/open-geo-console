@@ -188,6 +188,7 @@ function assertCheckpointInvariants(checkpoint: ReportV4AdmissionCheckpoint): vo
   }
 
   const pageUrls: string[] = [];
+  const analyzableContentHashes = new Set<string>();
   let analyzablePages = 0;
   checkpoint.pages.forEach((page, index) => {
     if (!page || page.ordinal !== index + 1 || typeof page.normalizedUrl !== "string") {
@@ -205,6 +206,10 @@ function assertCheckpointInvariants(checkpoint: ReportV4AdmissionCheckpoint): vo
           typeof page.summary !== "string" || page.summary.length > SUMMARY_LIMIT) {
         throw new Error("The V4 admission checkpoint retained-text evidence is invalid.");
       }
+      if (analyzableContentHashes.has(page.contentHash)) {
+        throw new Error("The V4 admission checkpoint contains duplicate analyzable content.");
+      }
+      analyzableContentHashes.add(page.contentHash);
     } else if (page.retainedText != null) {
       throw new Error("An excluded V4 admission checkpoint page cannot retain cleaned text.");
     }
@@ -252,10 +257,29 @@ function appendCollectionResult(
 ): ReportV4AdmissionCheckpoint {
   const pages = [...checkpoint.pages];
   const persistedUrls = new Set(pages.map((page) => page.normalizedUrl));
+  const analyzableContentHashes = new Set(
+    pages.flatMap((page) => page.analyzable && page.contentHash ? [page.contentHash] : [])
+  );
   for (const page of result.pages) {
     const normalizedUrl = normalizedHttpUrl(page.normalizedUrl);
     if (!normalizedUrl || persistedUrls.has(normalizedUrl)) continue;
     persistedUrls.add(normalizedUrl);
+    const contentHash = sha(page.analyzableText);
+    if (analyzableContentHashes.has(contentHash)) {
+      pages.push({
+        id: pageId(snapshotId, normalizedUrl),
+        ordinal: pages.length + 1,
+        normalizedUrl,
+        analyzable: false,
+        readMode: null,
+        summary: null,
+        retainedText: null,
+        contentHash: null,
+        exclusionReason: "duplicate_content"
+      });
+      continue;
+    }
+    analyzableContentHashes.add(contentHash);
     pages.push({
       id: pageId(snapshotId, normalizedUrl),
       ordinal: pages.length + 1,
@@ -264,7 +288,7 @@ function appendCollectionResult(
       readMode: page.readability,
       summary: summarize(page.analyzableText),
       retainedText: page.analyzableText,
-      contentHash: sha(page.analyzableText),
+      contentHash,
       exclusionReason: null
     });
   }
