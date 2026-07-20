@@ -84,6 +84,15 @@ describe("site URL discovery", () => {
     expect(normalizeDiscoveredUrl("/brochure.pdf", "https://example.com")).toBeNull();
   });
 
+  it("collapses repeated identical query pairs without discarding meaningful query values", () => {
+    expect(normalizeDiscoveredUrl("/news?page=1&cursor=feed&cursor=feed", "https://example.com")?.href).toBe(
+      "https://example.com/news?cursor=feed&page=1"
+    );
+    expect(normalizeDiscoveredUrl("/news?page=2&cursor=feed", "https://example.com")?.href).toBe(
+      "https://example.com/news?cursor=feed&page=2"
+    );
+  });
+
   it("parses robots groups, sitemap hints, wildcards, and allow precedence", () => {
     const policy = parseRobotsTxt(
       `User-agent: *

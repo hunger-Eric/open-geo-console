@@ -1,8 +1,560 @@
 # Active Change Scope Lock
 
-Status: `APPROVED` — explicitly approved by the user for V4 admission remediation and one final replacement report
+Status: `APPROVED` — user explicitly approved the safe-fetch boundary repair and single amend delta below; external deployment remains gated on fresh checker `CONFORMANT`
 
-## Current scope — repair false-limited V4 admission, then create one replacement report
+## Pending deviation delta — preserve safe fetch and replace the undeployed local commit once
+
+Deployment checker verdict: `DEVIATION_REVIEW_REQUIRED`. Commit
+`911181c1d42e341823418f80deb8c1bdfce8076f` is locally conformant except that
+the probe injects Node global `fetch`, bypassing the crawler's `createSafeFetch`
+DNS pinning, redirect, response-size/content-type, and final-URL boundary. No
+image, Preview, Worker, live-site read, alias, report, checkout, or payment has
+occurred from that commit.
+
+If explicitly approved, this delta authorizes only:
+
+- edits to the two existing probe paths and this scope; no crawler-runtime,
+  safe-fetch, dependency, Docker, Vercel, database, commerce, or other file;
+- construction of the raw reader with `createSafeFetch({ beforeRequest })`,
+  with the shared raw/browser budget claimed before each underlying website
+  request/render while retaining the global AbortSignal and elapsed deadline;
+- injected deterministic tests proving the safe-fetch factory is used, the
+  global-fetch bypass is absent, redirect/raw/browser operations share the
+  active cap, and the `(maxReads + 1)` underlying operation never starts;
+- the existing absolute budgets (`probe <=240`, test `<=300`, scope `<=560`,
+  total `<=1,395`) and all existing no-commerce/fail-closed checks;
+- one bounded `worker` revision, one fresh `planner` checker, then exactly one
+  `git commit --amend --no-edit` replacing undeployed `911181c1...`; the final
+  commit must keep parent `5a6ac0d...`, the same seven paths, and message
+  `fix: bound v4 admission dynamic frontier`. No second commit or further amend;
+- rerunning every committed-state gate and a fresh predeployment checker.
+
+Only after that checker returns `CONFORMANT` may the previously approved
+clean-worktree/image/Preview/two-Worker/single-probe/alias sequence resume with
+the replacement SHA. Its counts, rollback, zero-business-effect rules, and
+report/payment freeze remain unchanged. A third production/test file, budget
+overflow, unsafe fetch path, failed gate, or another commit need is a stop.
+
+Safe-fetch delta checker: `CONFORMANT` before the single authorized amend.
+
+## Current scope — commit and deploy the V4 frontier repair, then run one no-commerce protected-Staging proof
+
+### Objective, authority, and exact starting state
+
+Commit only the already accepted V4 dynamic-frontier repair plus one generic,
+database-free V4 admission probe; build and deploy that exact commit to one
+protected Preview and the two Staging Worker services; then run the probe once
+against `https://shun-express.com/` without creating a report, job, order,
+checkout, payment, artifact, token, email, refund, or credit event.
+
+Authority is the user's 2026-07-20 instruction to perform the exact commit/build/
+deployment and protected-Staging no-commerce verification, while reserving the
+only new report and payment for a later separate approval. The governing plan
+remains `docs/superpowers/plans/2026-07-20-v4-admission-dynamic-frontier-repair.md`,
+Units 6–7. This scope does not authorize the later report/payment portion of
+Unit 7.
+
+Repository starting state:
+
+- branch: `codex/v4-answer-optimization-scope-reset`;
+- Git HEAD/baseline: `5a6ac0d24574581342d7bc45ca4867e44094a366`;
+- accepted uncommitted repair paths and current numstat: `discovery.ts +18/-4`,
+  `discovery.test.ts +9/-0`, admission runtime `+41/-13`, admission runtime test
+  `+155/-8`, and this scope `+313/-2`;
+- no path is staged; every other modified/untracked path remains pre-existing,
+  user-owned, and excluded from the commit;
+- accepted deterministic evidence: lint/build, 2,635 full tests, focused
+  PostgreSQL 14 tests, traceability/matrix, read-only Staging `db:audit`, diff
+  check, CodeGraph, and independent final checker `CONFORMANT`;
+- `report:v4:acceptance` remains correctly fail-closed at 20 implemented / 0
+  protected-environment verified and must not be weakened.
+
+Protected-Staging starting state:
+
+- database marker `staging`, schema/current schema `40/40`, no claimable job,
+  no actively leased job, and one recent free plus one recent deep presence;
+- fixed alias `open-geo-console-staging-itheheda.vercel.app` resolves to Ready
+  Preview `dpl_FbWc3HYAFLJyqqDwewdViPwq3JMP` /
+  `open-geo-console-g1ab1uql7-itheheda-6857s-projects.vercel.app` and anonymous
+  access returns the protected-authentication 302;
+- free/deep containers `133245956c8e...` / `56b581bca176...` use image
+  `sha256:9943d450435fdea586fa382ecb513cfb0c2f7e2112f2f9d7a23fda8e2794f0b1`,
+  OCI/runtime revision `5a6ac0d24574581342d7bc45ca4867e44094a366`;
+- merged Staging runtime contains exactly one nonblank deployment marker and
+  each required profile/model/token variable; no value or secret may be shown.
+
+Production non-change baseline is deployment
+`dpl_3cx4ntaHcXquqJgRyj9E3tBX96BW`, free/deep containers
+`e137f4e57d0d...` / `13ccba729da8...`, and commerce container
+`be94b86e9feb...`. Production mutation count is exactly zero.
+
+### Exact tracked-file allowlist and diff budgets
+
+Only these paths may enter the one commit, relative to baseline HEAD:
+
+1. `packages/site-crawler/src/discovery.ts`: at most `+25/-10`.
+2. `packages/site-crawler/src/discovery.test.ts`: at most `+20/-5`.
+3. `apps/web/src/worker/report-v4-admission-runtime.ts`: at most `+60/-25`.
+4. `apps/web/src/worker/report-v4-admission-runtime.test.ts`: at most `+190/-20`.
+5. `apps/web/src/scripts/staging-v4-admission-no-commerce-probe.ts`: new,
+   at most `+240/-0`.
+6. `apps/web/src/scripts/staging-v4-admission-no-commerce-probe.test.ts`: new,
+   at most `+300/-0`.
+7. `docs/ACTIVE-CHANGE-SCOPE.md`: at most `+560/-20`; after approval only its
+   status, exact identities, unit/checker verdicts, and results may change.
+
+Budgets: production/scripts at most `+325/-35`; tests at most `+510/-25`;
+scope at most `+560/-20`; total at most `+1,395/-80`. No package script,
+dependency, lockfile, Dockerfile, Compose file, schema, migration, Web route,
+commerce, report persistence, state-machine, acceptance registry, security,
+historical evidence, project-state/task/decision, or plan edit is allowed.
+
+### Allowed probe behavior
+
+The new probe must be generic and testable with injected discovery, collector,
+clock, and output dependencies. Its production entrypoint must:
+
+- require `OGC_DEPLOYMENT_PROFILE=staging`, `VERCEL_ENV=preview`, and
+  `COMMERCE_MODE=test`;
+- compose the existing `discoverReportV4AdmissionSite`,
+  `createReportV4AdmissionCollectorDependencies`, and
+  `createReportV4AdmissionRunner` with only in-memory checkpoint/snapshot
+  repositories;
+- never import or call a report/job/order/commerce repository, never accept a
+  report/job/order identity, and fail if `DATABASE_URL` is present;
+- count raw HTTP and browser reads, elapsed time, candidate/analyzable/excluded
+  pages, distinct content hashes, terminal status, and generic expected-text
+  matches; output only one bounded non-secret JSON object;
+- accept generic CLI expectations, while the sole live invocation is fixed to
+  target `https://shun-express.com/`, expected site key `shun-express.com`,
+  expected text `凌顺国际物流`, exactly 23 unique analyzable bodies, terminal
+  `completed`, at most 80 counted network/browser reads, and at most 600,000 ms;
+- fail on `completed_limited`, `custom_service`, `unavailable`, identity/count/
+  bound mismatch, recursive frontier growth, or any unresolved eligible work.
+
+No Shun hostname, route, or parameter may be hard-coded in reusable crawler or
+admission production code. The target-specific values exist only in the
+operator command recorded by this scope.
+
+### Units, executor/checker gates, and deterministic checks
+
+1. One bounded `worker` executor implements only the probe/test allowlist and
+   runs its red/green tests plus the existing focused crawler/admission suites.
+2. A fresh `planner` checker must return `CONFORMANT` before any stage, commit,
+   image build, Preview deployment, marker edit, container recreation, alias
+   mutation, or live-site read.
+3. The root agent audits the complete allowlist/budget, stages exactly the seven
+   paths above, and creates exactly one local commit with message
+   `fix: bound v4 admission dynamic frontier`. No amend, merge, rebase, tag,
+   branch switch, push, PR, or second commit is authorized.
+4. From the committed SHA run lint, build, full tests, probe tests, focused
+   crawler/admission tests, traceability, matrix, diff check, CodeGraph, and
+   verify `report:v4:acceptance` still fails only for the unchanged 20 unverified
+   protected-environment entries.
+5. A fresh independent predeployment checker must return `CONFORMANT` before
+   external mutation. A final fresh checker audits deployment/probe evidence.
+
+Probe implementation gate: the bounded executor's two-file probe revision
+passed `20/20` probe tests, `7` focused files / `158` tests, Web lint, and diff
+check. The fresh independent probe checker returned `CONFORMANT` before staging.
+
+### Exact clean-source, build, Preview, Worker, and probe operations
+
+After all predeployment gates pass, the following sequence is authorized once:
+
+1. Create one detached clean worktree at
+   `E:\project\open-geo-console-deploy-<commit-short-sha>` for the exact commit.
+   It must be clean before use. Add hard links only for the existing ignored
+   `.vercel/project.json` project link; do not copy secrets or user dirty files.
+2. Build exactly one image from that clean source using `Dockerfile.worker`, tag
+   `open-geo-console:staging-<full-commit-sha>`, and set both build argument and
+   OCI revision label to the full SHA. No second successful image build or tag
+   is allowed.
+3. Create exactly one Vercel Preview from the clean worktree with deployment
+   build/runtime `OGC_DEPLOYMENT_VERSION=<full-commit-sha>` and non-secret
+   revision metadata. Do not use `--prod`, push, mutate project environment,
+   disable authentication, or move the fixed alias yet. A deployment that is
+   not Ready, exact-revision, and anonymously protected is a stop.
+4. Immediately before Worker recreation, repeat read-only Staging marker/schema,
+   zero-claimable, zero-active-lease, business-row fingerprint, env-name/nonblank,
+   current container/image, and production identity checks. Drift is a stop.
+5. Change only the single ignored `OGC_DEPLOYMENT_VERSION` line in
+   `.data/workstation-docker/staging.env`, then force-recreate exactly
+   `staging-worker-free` and `staging-worker-deep` with `--no-deps --no-build`
+   and the exact image. Verify image ID/OCI SHA, tier, staging/preview/test
+   markers, nonblank required variable names, readiness logs, presence, and
+   zero claimable/active jobs. Normal presence registration/heartbeats are the
+   only allowed Staging database writes before the probe.
+6. Run exactly one ephemeral `--rm --init` probe container from the exact image,
+   with only the three non-secret staging/profile markers and deployment SHA.
+   Do not pass an env file, `DATABASE_URL`, model/payment/email/object-storage
+   secrets, report/job/order IDs, or a Worker command. The probe may perform at
+   most the fixed 80 Shun website reads and zero model/search/provider calls.
+7. Prove before/after Staging business fingerprints unchanged for reports,
+   jobs, snapshots, questions, orders, payment events, credits, artifacts,
+   tokens, emails, refunds, and acceptance rows. Worker presence timestamps are
+   excluded from the fingerprint. Also recheck production identities unchanged.
+8. Only after the probe and fingerprints pass, point the fixed protected alias
+   exactly once to the new Ready Preview. Verify direct and alias authentication,
+   exact deployment identity/SHA, and zero business effects. Do not invoke a
+   scan/report route.
+9. Remove the exact detached worktree after resolving and validating its path.
+   Preserve both old and new staging image tags; remove no staging/production
+   image, volume, deployment, cache, user file, or evidence.
+
+Allowed expensive/external counts: one commit, one detached worktree add/remove,
+one image build, one Preview deployment, one two-service Staging recreation,
+one live no-commerce probe, one fixed-alias change, at most four read-only
+Staging audits/fingerprints, and at most four production identity comparisons.
+
+If Preview, Worker, or probe verification fails before alias movement, restore
+the original deployment marker and recreate the two Staging Workers once from
+the original `5a6ac0d...` image, then stop. This single rollback is authorized
+only to restore the recorded baseline; it does not authorize another build,
+deployment, alias change, or probe. Because alias movement is last, no alias
+rollback should be needed; any post-alias mismatch is a stop-and-report event.
+
+### Forbidden actions and deviation brakes
+
+Exactly zero new report, free scan, V4 job, checkout, order, payment, Webhook,
+Core, diagnosis, model/search call, email, token, refund, credit, artifact,
+acceptance-session write, cleanup, replay, repair, resume, historical mutation,
+schema operation, production mutation, push, or ordinary/FIFO/drain/batch
+acceptance Worker is authorized. Do not run `run-report.bat`.
+
+Do not stage, commit, copy into the clean worktree, clean, reset, stash, move, or
+delete any pre-existing user dirty/untracked path. No historical report or
+snapshot may be reopened, restored, cloned, or used as new authority.
+
+Stop with `DEVIATION_REVIEW_REQUIRED` before external mutation if implementation
+needs another file/behavior or budget, if deterministic acceptance regresses,
+if exact commit/image/Preview/runtime identities diverge, if any claimable or
+active job appears, if the clean worktree is not exact, or if a secret would be
+copied/logged. After mutation, any failed health/readiness/fingerprint/probe,
+non-`completed` result, non-23 body count, identity mismatch, recursion/read/time
+overflow, business write, or production drift triggers the rollback rule above
+and then a permanent stop. No retry is inferred.
+
+This scope remains `FROZEN` until the user explicitly approves this exact
+seven-path allowlist, budgets, one commit, clean worktree, image/Preview/Worker/
+alias mutations, single no-commerce probe, rollback, zero report/payment, and
+deviation brakes. Approval of this scope still does not authorize the later one
+new report or CNY 199 Sandbox payment.
+
+## Frozen completed scope — deterministic V4 admission code Units 1–5
+
+Deterministic closeout on 2026-07-20:
+
+- Unit checkers: Units 1, 2, 3, and 4 `CONFORMANT`; Unit 3's first `REVISE_WITHIN_PLAN` was repaired and independently rechecked `CONFORMANT`.
+- `lint`, `build`, full `npm test` (`291` passed files / `2,635` passed tests), focused crawler/Worker suites, and focused PostgreSQL (`4` files / `14` tests) passed.
+- V4 traceability and matrix passed with `20` implemented requirements; V4 acceptance remained correctly fail-closed because all `20` are not yet protected-environment `verified`.
+- Read-only Staging `db:audit`, `git diff --check`, forbidden-behavior/budget audit, and CodeGraph sync/status passed.
+- No test database residue, stage, commit, push, deployment, report, payment, Worker claim, replay, repair, or historical mutation occurred.
+
+## Frozen completed scope details — V4 admission dynamic candidate-frontier repair
+
+### Authority, objective, and baseline
+
+Repair the V4 pre-payment admission collector so semantically equivalent
+dynamic URLs cannot expand an unbounded fetch frontier. The generic repair must
+retain meaningful distinct route/query variants and truthful immutable
+exclusion provenance, apply deterministic representative compression to both
+initial and dynamically discovered candidates, preserve checkpoint/restart
+order, and keep genuinely unresolved eligible transient/deadline work
+fail-closed.
+
+This scope authorizes only deterministic code/test Units 1–5 of:
+
+- plan:
+  `docs/superpowers/plans/2026-07-20-v4-admission-dynamic-frontier-repair.md`;
+- approved product design:
+  `docs/superpowers/specs/2026-07-16-two-stage-geo-report-generation-design.md`;
+- V4 consolidation design:
+  `docs/superpowers/specs/2026-07-19-v4-baseline-consolidation-complete-report-design.md`.
+
+Exact repository baseline:
+
+- repository: `E:\project\open-geo-console`;
+- branch: `codex/v4-answer-optimization-scope-reset`;
+- Git HEAD: `5a6ac0d24574581342d7bc45ca4867e44094a366`;
+- CodeGraph: current at Unit 0, `771` files, `11,191` nodes, `33,545`
+  edges;
+- pre-Unit-0 scope working-tree SHA-256:
+  `DA3C5245588E0A89FF742F58814287065DBDA805EEA7125E0951C6F5CCAE1A85`;
+- pre-Unit-0 scope Git blob:
+  `9b2c9a3788f89070ffeee26f76deb7cb5f6adba2`.
+
+The immutable failure authority is:
+
+- report `77d7577d-fbe7-4dec-b70b-912982394ff8`;
+- completed free job `4bd9f940-6da7-44dc-8fc0-d7a8e7f83548`;
+- completed V4 admission job `a80205fb-4794-48e8-b045-606e759a7c29`;
+- snapshot
+  `report-v4-site-33de08ce1642b15b6dc82b65f30ebb923571ac1a199eb7b73d6f363e119bcc46`;
+- snapshot `completed_limited`, `116 / 23 / 93`, captured-to-terminal
+  `604.213s`;
+- page evidence: `23` analyzable rows with `23` distinct body hashes;
+  `duplicate_content=78`, `policy_excluded=8`, `deadline_exceeded=5`,
+  `raw_fetch_failed=1`, `robots_denied=1`;
+- recursive evidence: `81` `/news` rows with only identical `s=/news` values,
+  comprising `74` duplicate exclusions, `2` analyzable rows, and all `5`
+  deadline rows, spanning query depths `1..27`;
+- sole raw-fetch failure: `https://member.shun-express.com/`;
+- current commercial effects: orders/payment events/refunds/credits/artifacts/
+  tokens/emails all `0`; question checkpoints `0`; exactly the two named jobs.
+
+One pre-payment question-set row exists for the report and is read-only. It is
+not payment, Core, diagnosis, artifact, or replay authority and is outside this
+repair.
+
+Unit 0 also verified the live non-change baseline:
+
+- Staging database marker is `staging`; fresh free/deep Worker presence is
+  `5a6ac0d24574581342d7bc45ca4867e44094a366`;
+- Staging free/deep containers are respectively
+  `133245956c8e7c676fbbe4e12765b14d667a6736e1f04e39b29679bd438ab334`
+  and
+  `56b581bca176838b2d0ad7c1c7b50597de29bd435ed1ca4a16d9850672b7176f`,
+  both on image
+  `sha256:9943d450435fdea586fa382ecb513cfb0c2f7e2112f2f9d7a23fda8e2794f0b1`
+  with matching OCI revision;
+- protected Preview `dpl_FbWc3HYAFLJyqqDwewdViPwq3JMP` is Ready and
+  `open-geo-console-staging-itheheda.vercel.app` resolves to that deployment;
+- production deployment remains `dpl_3cx4ntaHcXquqJgRyj9E3tBX96BW`; production
+  database marker is `production`; production free/deep/commerce container
+  identities remain
+  `e137f4e57d0d2490f6263c2a92a816f6154ab2347cf6acaaa08aa6a11af70cee`,
+  `13ccba729da8b36a82193ae46d706ff7f0a49afaedfacba69f1aae36e9e79d67`,
+  and
+  `be94b86e9febd2621793d800f528ceb5253f8e3aa144dbb38e8abc5456e54663`.
+
+These live identities are read-only evidence. Their continued existence does
+not authorize stopping, restarting, rebuilding, deploying, claiming, draining,
+or mutating them.
+
+### Exact file allowlist and per-file diff budgets
+
+No source, test, documentation, configuration, generated, asset, or runtime
+file outside this list may be edited.
+
+Production code:
+
+1. `packages/site-crawler/src/discovery.ts`: at most `+40/-15`.
+2. `packages/site-crawler/src/selection.ts`: at most `+70/-25`.
+3. `apps/web/src/worker/crawler-runtime.ts`: at most `+100/-35`.
+4. `apps/web/src/worker/report-v4-admission-runtime.ts`: at most `+150/-50`.
+
+Tests:
+
+5. `packages/site-crawler/src/discovery.test.ts`: at most `+90/-10`.
+6. `packages/site-crawler/src/selection.test.ts`: at most `+130/-15`.
+7. `apps/web/src/worker/crawler-runtime.test.ts`: at most `+220/-25`.
+8. `apps/web/src/worker/report-v4-admission-runtime.test.ts`: at most
+   `+300/-35`.
+9. `apps/web/src/worker/report-v4-admission-production.test.ts`: at most
+   `+130/-15`.
+10. `apps/web/src/db/recovery-state.postgres.test.ts`: at most `+70/-10`,
+    test-only, and only to prove the existing JSONB checkpoint round trip and
+    restart order. It may not authorize a persistence-format, schema, or
+    production database change.
+
+Scope lock:
+
+11. This current section of `docs/ACTIVE-CHANGE-SCOPE.md`: at most
+    `+320/-10` relative to Git HEAD. After explicit approval, only its status,
+    unit verdicts, and final deterministic acceptance result may change.
+
+Budgets relative to Git HEAD:
+
+- production total: at most `+360/-125`;
+- tests total: at most `+940/-110`;
+- code plus tests total: at most `+1,300/-235`;
+- scope-lock current section: at most `+320/-10`;
+- entire agent-owned task diff: at most `+1,620/-245`.
+
+Existing user-owned modifications and untracked paths do not consume the
+agent-owned budget, but they must remain byte-for-byte untouched and must never
+be staged or claimed as this task's work. Any overlap or inability to separate
+ownership is a stop condition.
+
+### Allowed behavior changes
+
+1. Introduce one generic admission-candidate normalization contract shared by
+   initial and dynamic discovery. It may remove fragments and existing tracking
+   parameters, deterministically collapse identical repeated query key/value
+   pairs, and canonicalize already accepted same-site apex/`www` identity.
+2. Omit recursive query growth when a child differs from its source only by an
+   additional identical occurrence of a query pair already present. The rule
+   must not hard-code a hostname, `/news`, `s`, or any target-specific value.
+3. Preserve meaningful paths, effective ports, same-site validation, and
+   distinct meaningful query values, including pagination/replacement
+   candidates needed by a bounded representative crawl.
+4. Apply the existing page-type/template representative policy to the union of
+   the persisted pending queue and newly discovered candidates after each
+   discovery step. Homepage priority, visited rows, persisted page evidence,
+   replacement capacity, and deterministic restart order remain stable.
+5. Count only unique analyzable body hashes toward the 51-page custom-service
+   boundary. Candidate count, URL count, duplicate bodies, or exclusions may
+   never stand in for the 51st unique body.
+6. Preserve exactly one truthful immutable exclusion/provenance row when a
+   candidate is omitted by policy. Do not fabricate analyzable content, a body
+   hash, or successful read evidence.
+7. Use existing generic `login_required`, `captcha_required`, `paywalled`, and
+   policy-exclusion semantics for proven authenticated/utility surfaces. Do
+   not special-case `member.shun-express.com` or relabel an unexplained
+   transient fetch failure as benign.
+8. Terminal semantics remain: exhausted bounded frontier with `1..50` unique
+   analyzable bodies and no unresolved eligible residue is `completed`; zero
+   is `unavailable`; the 51st unique body is `custom_service`; unresolved
+   eligible transient/deadline work remains `completed_limited`.
+9. Browser fallback remains at most once under the existing collector contract.
+   SSRF, DNS pinning, redirect, robots, content-type, body-size, locale, and
+   report-contract boundaries may not weaken.
+
+### Unit boundaries and agent protocol
+
+- Unit 1 edits tests only and proves the current implementation fails on the
+  real recursive frontier, bounded fetch/queue assertions, meaningful query
+  preservation, checkpoint restart, duplicate provenance, generic authenticated
+  surface, genuine eligible transient failure, and the 50/51 boundary.
+- Unit 2 implements only shared candidate normalization/recursive-growth
+  rejection selected by the red tests.
+- Unit 3 implements only deterministic whole-frontier representative queue
+  compression and checkpoint/restart stability.
+- Unit 4 integrates existing generic exclusion semantics and preserves strict
+  terminal behavior.
+- Unit 5 performs deterministic repository acceptance and only repairs
+  allowlisted regressions caused by Units 2–4.
+
+For Units 1–5, the root agent orchestrates and verifies. Each unit uses one
+bounded `worker` executor (`gpt-5.6-terra`, medium effort) for allowlisted edits
+and a fresh independent `planner` checker (`gpt-5.6-sol`, high effort) after the
+executor stops. Maximum concurrency remains three threads and depth one. The
+checker rereads this scope and the plan, inspects the real complete diff and
+test evidence, and returns only `CONFORMANT`, `REVISE_WITHIN_PLAN`, or
+`DEVIATION_REVIEW_REQUIRED`. A scope-contained revision is automatic. Two
+revisions that do not reduce the same failed acceptance items and require a
+different design trigger the deviation brake.
+
+### Required tests and deterministic acceptance
+
+The focused red/green suites are:
+
+```powershell
+npm test -- packages/site-crawler/src/discovery.test.ts packages/site-crawler/src/selection.test.ts packages/site-crawler/src/analyzable-site.test.ts
+npm test -- apps/web/src/worker/crawler-runtime.test.ts apps/web/src/worker/report-v4-site-collector.test.ts apps/web/src/worker/report-v4-admission-runtime.test.ts apps/web/src/worker/report-v4-admission-production.test.ts
+npm test -- apps/web/src/db/recovery-state.postgres.test.ts apps/web/src/db/report-v4-site-snapshots.postgres.test.ts apps/web/src/db/commercial-orders-v4.postgres.test.ts apps/web/src/db/report-v4-acceptance-authority-phase-snapshot.postgres.test.ts
+```
+
+The exact recursive fixture must emit the three meaningful `/news` pagination
+variants and append the same query pair for at least 30 generations. Its news
+family must remain at no more than three physical fetches and three pending/
+persisted representative candidates regardless of recursion depth. A separate
+fixture must prove distinct query values remain discoverable. Checkpoint reload
+must reproduce the same queue, order, known/visited identity, page evidence,
+and final status.
+
+Unit 5 must run:
+
+```powershell
+npm run lint
+npm run build
+npm test
+npm run report:v4:traceability
+npm run report:v4:matrix
+npm run report:v4:acceptance
+npm run db:audit
+git diff --check
+codegraph sync
+codegraph status
+```
+
+Acceptance also requires a forbidden-literal/behavior search proving no target
+hostname/path/parameter hard-code, schema/migration/dependency, historical
+repair, commerce, or security weakening entered the diff, plus a complete
+allowlist and `git diff --numstat` budget audit.
+
+### Allowed local and external operations; exact expensive-action budget
+
+Before scope approval, the only mutation is this Unit 0 scope edit. After exact
+approval, Units 1–5 may perform only allowlisted file edits and deterministic
+local verification.
+
+Allowed read-only operations after approval:
+
+- repository, Git, CodeGraph, process, Docker, Vercel identity, Staging marker,
+  target immutable tuple, and production non-change queries;
+- at most two final read-only Staging database audits and two final read-only
+  production identity/marker comparisons.
+
+Allowed isolated test operations after approval:
+
+- inspect, then start at most once the existing loopback-only PostgreSQL 17
+  test container
+  `37faf043ab4726fec76e91c1f9680bb55cd1dc82dc7e7b2aa5e4622712865e28`
+  (`ogc-v18-test-db`, host `127.0.0.1:55439`), only when its identity and
+  loopback binding still match;
+- create/drop at most eight disposable test databases through that container,
+  covering one focused run and at most one scope-contained rerun;
+- stop that exact test container at most once, and only if this task started it;
+- run `codegraph sync` at most twice after edits, followed by read-only status/
+  affected inspection.
+
+Every other expensive/external-action count is exactly zero: Docker image
+build/pull/tag/remove, Staging or production container/process stop/start/
+recreate, Preview/deployment/alias/env mutation, live website crawl, model
+call, report creation, checkout, payment, Webhook, Worker claim/drain/replay,
+commerce/refund/email run, database business-row write, schema operation,
+artifact/token creation, commit, stage, push, merge, PR, tag, or production
+change.
+
+Units 6 and 7 remain separately frozen. Code-scope approval does not authorize
+any protected-Staging probe, deployment, image, new report, checkout, payment,
+or paid acceptance. Each would require a later exact scope and separate user
+approval.
+
+### Forbidden files, subsystems, and actions
+
+- No edit to `apps/web/src/worker/report-v4-admission-production.ts`,
+  `report-v4-site-collector.ts`, security/safe-fetch code, schema/migrations,
+  database repositories, commerce, checkout, Airwallex/provider adapters,
+  price/currency, questions/prompts, Core, diagnosis, artifact, token, email,
+  customer HTML, deployment/runtime config, dependencies, lockfiles, or V1–V3
+  compatibility.
+- No hostname, route, or query-parameter special case for the target fixture in
+  production code.
+- No replay, repair, recovery, requeue, reopen, clone, delete, update, or use as
+  substitute authority for any historical report, job, snapshot, order,
+  payment, credit, artifact, token, email, refund, reservation, or question set.
+- Do not run `run-report.bat`, an ordinary FIFO/drain/batch/realtime/persistent
+  Worker for acceptance, a broad workstation Worker starter, or any exact
+  Worker against a business tuple.
+- Do not edit, stage, clean, reset, stash, move, delete, or claim ownership of
+  any pre-Unit-0 dirty/untracked path other than this scope file. This includes
+  the modified V4 acceptance PostgreSQL test, `PROJECT-STATE.md`, `TASKS.md`,
+  `DECISIONS.md`, both Shun evidence files, the old consolidation plan, all
+  untracked `assets/`, Qoder files, `run-report.bat`, restoration evidence and
+  plans, V3 plans, report-execution plans, and the new dynamic-frontier plan.
+
+### Deviation brakes and approval lifecycle
+
+Stop with `DEVIATION_REVIEW_REQUIRED` before proceeding if work needs an
+unlisted file/behavior, exceeds any per-file or total budget, changes checkpoint
+format/version or persistence schema, changes the V4 product/customer outcome,
+weakens eligible transient/deadline failure, hard-codes the target, weakens
+robots/SSRF/cross-site security, changes the 51st-unique-body boundary, touches
+an existing dirty path, requires a dependency, or requires any nonzero external
+action not listed above.
+
+This exact current section remains `FROZEN`. The user must explicitly approve
+this objective, baseline SHA, eleven-file allowlist, behavior boundary,
+per-file and total budgets, deterministic checks, isolated-test operations,
+zero Staging/production mutation budget, and deviation brakes before any
+production-code or test edit. After approval, change only the top status to
+`APPROVED` and execute Units 1–5 continuously. At deterministic closeout return
+the status to `FROZEN`; do not infer Unit 6/7 authority.
+
+## Frozen superseded scope — repair false-limited V4 admission, then create one replacement report
 
 ### Exact objective and baseline
 

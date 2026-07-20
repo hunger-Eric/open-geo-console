@@ -26,10 +26,18 @@ export interface SiteDiscoveryOptions extends SiteKeyOptions {
   maxUrls?: number;
 }
 
+export interface NormalizeDiscoveredUrlOptions {
+  allowNonHtml?: boolean;
+}
+
 const TRACKING_PARAMETERS = /^(?:utm_[a-z]+|fbclid|gclid|dclid|msclkid|mc_[a-z]+|ref_src)$/i;
 const NON_HTML_EXTENSIONS = /\.(?:avif|bmp|css|csv|docx?|eot|gif|ico|jpe?g|js|json|map|mp3|mp4|mov|pdf|png|pptx?|rar|rss|svg|tar|tiff?|ttf|txt|webm|webp|woff2?|xlsx?|xml|zip)$/i;
 
-export function normalizeDiscoveredUrl(input: string | URL, base?: string | URL): URL | null {
+export function normalizeDiscoveredUrl(
+  input: string | URL,
+  base?: string | URL,
+  options: NormalizeDiscoveredUrlOptions = {}
+): URL | null {
   let url: URL;
   try {
     url = input instanceof URL ? new URL(input.href) : new URL(input, base);
@@ -39,11 +47,17 @@ export function normalizeDiscoveredUrl(input: string | URL, base?: string | URL)
   if (url.protocol !== "http:" && url.protocol !== "https:") return null;
   if (url.username || url.password) return null;
   url.hash = "";
-  for (const key of [...url.searchParams.keys()]) {
-    if (TRACKING_PARAMETERS.test(key)) url.searchParams.delete(key);
+  const uniqueQueryValues = new Map<string, Set<string>>();
+  for (const [key, value] of url.searchParams) {
+    if (TRACKING_PARAMETERS.test(key)) continue;
+    const values = uniqueQueryValues.get(key) ?? new Set<string>();
+    values.add(value);
+    uniqueQueryValues.set(key, values);
   }
+  url.search = "";
+  for (const [key, values] of uniqueQueryValues) for (const value of values) url.searchParams.append(key, value);
   url.searchParams.sort();
-  if (NON_HTML_EXTENSIONS.test(url.pathname)) return null;
+  if (!options.allowNonHtml && NON_HTML_EXTENSIONS.test(url.pathname)) return null;
   return url;
 }
 

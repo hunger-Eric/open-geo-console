@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { buildPageCandidate, compressCandidates, normalizeDiscoveredUrl } from "@open-geo-console/site-crawler";
 import type { ScanJobCoverage } from "@/db/jobs";
 import type {
   FinalizeReportV4PreAdmissionSnapshotInput,
@@ -115,7 +116,8 @@ export function createReportV4AdmissionRunner(
         result,
         normalizedConfig.identity.id
       );
-      checkpoint = enqueueDiscovered(checkpoint, result.discoveredCandidates);
+      const enqueued = enqueueDiscovered(checkpoint, result.discoveredCandidates);
+      checkpoint = enqueued.added ? compressPendingFrontier(enqueued.checkpoint) : enqueued.checkpoint;
       await dependencies.checkpoints.save(job.id, checkpoint);
 
       if (analyzableCount(checkpoint.pages) === CUSTOM_SERVICE_PAGE_COUNT) {
@@ -137,7 +139,7 @@ function validateConfig(config: ReportV4AdmissionRuntimeConfig): Required<Report
 }
 
 function initialCheckpoint(config: Required<ReportV4AdmissionRuntimeConfig>): ReportV4AdmissionCheckpoint {
-  let checkpoint: ReportV4AdmissionCheckpoint = {
+  const checkpoint: ReportV4AdmissionCheckpoint = {
     version: 1,
     snapshotId: config.identity.id,
     reportId: config.identity.reportId,
@@ -151,8 +153,7 @@ function initialCheckpoint(config: Required<ReportV4AdmissionRuntimeConfig>): Re
     visitedUrlKeys: [],
     pages: []
   };
-  checkpoint = enqueueDiscovered(checkpoint, config.initialCandidates);
-  return checkpoint;
+  return compressPendingFrontier(enqueueDiscovered(checkpoint, config.initialCandidates).checkpoint);
 }
 
 function validateCheckpoint(
@@ -243,17 +244,50 @@ function assertUniqueCheckpointValues(values: readonly string[], field: string):
 function enqueueDiscovered(
   checkpoint: ReportV4AdmissionCheckpoint,
   candidates: ReadonlyArray<ReportV4SiteCandidate>
-): ReportV4AdmissionCheckpoint {
+): { checkpoint: ReportV4AdmissionCheckpoint; added: boolean } {
   const known = new Set(checkpoint.knownUrlKeys);
   const visited = new Set(checkpoint.visitedUrlKeys);
   const queue = [...checkpoint.queue];
+  let added = false;
   for (const candidate of candidates) {
     const key = candidateKeyOrNull(candidate.url);
     if (!key || known.has(key) || visited.has(key)) continue;
     known.add(key);
     queue.push({ ...candidate, siteUrl: checkpoint.targetUrl, url: key });
+    added = true;
   }
-  return { ...checkpoint, queue, knownUrlKeys: [...known] };
+  return { checkpoint: { ...checkpoint, queue, knownUrlKeys: [...known] }, added };
+}
+
+function compressPendingFrontier(checkpoint: ReportV4AdmissionCheckpoint): ReportV4AdmissionCheckpoint {
+  const representatives = compressCandidates(
+    checkpoint.queue.map(({ url }) => buildPageCandidate({ url, sources: ["link"] }))
+  );
+  const homepage = representatives.find(({ pageType }) => pageType === "home");
+  const representativeUrls = new Set(representatives.map(({ url }) => url));
+  const candidatesByUrl = new Map(checkpoint.queue.map((candidate) => [candidate.url, candidate]));
+  const queue = [
+    ...(homepage ? [homepage] : []),
+    ...representatives.filter(({ url }) => url !== homepage?.url)
+  ].flatMap(({ url }) => candidatesByUrl.get(url) ?? []);
+  const pages = [...checkpoint.pages];
+  const persistedUrls = new Set(pages.map(({ normalizedUrl }) => normalizedUrl));
+  for (const candidate of checkpoint.queue) {
+    if (representativeUrls.has(candidate.url) || persistedUrls.has(candidate.url)) continue;
+    persistedUrls.add(candidate.url);
+    pages.push({
+      id: pageId(checkpoint.snapshotId, candidate.url),
+      ordinal: pages.length + 1,
+      normalizedUrl: candidate.url,
+      analyzable: false,
+      readMode: null,
+      summary: null,
+      retainedText: null,
+      contentHash: null,
+      exclusionReason: candidate.explicitExclusion ?? "policy_excluded"
+    });
+  }
+  return { ...checkpoint, queue, pages };
 }
 
 function appendCollectionResult(
@@ -420,13 +454,7 @@ function candidateKeyOrNull(value: string): string | null {
 }
 
 function normalizedHttpUrl(value: string): string | null {
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
+  return normalizeDiscoveredUrl(value, undefined, { allowNonHtml: true })?.toString() ?? null;
 }
 
 function unique(values: readonly string[]): string[] {
