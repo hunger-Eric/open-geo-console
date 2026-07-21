@@ -14,7 +14,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const combinedAccess=Boolean(active&&await requestHasReportAccess(request,id,active.report.artifactContract));
   if(!legacyAccess&&!combinedAccess)return privateError(404);
   const asset = await getEvidenceAsset(id, assetId);
-  if(combinedAccess&&(!active||!asset||![active.report.originalPaidJobId,active.report.jobId].includes(asset.jobId)))return privateError(404);
+  const activeReport = active?.report;
+  const assetJobIds = [
+    activeReport && "originalPaidJobId" in activeReport ? activeReport.originalPaidJobId : null,
+    activeReport && "jobId" in activeReport ? activeReport.jobId : null
+  ];
+  if(combinedAccess&&(!active||!asset||!assetJobIds.includes(asset.jobId)))return privateError(404);
   if (!asset || asset.status !== "ready" || !asset.storageKey) return privateError(404);
   const object = await createEvidenceStorage().get(asset.storageKey);
   if (!object) return privateError(404);
