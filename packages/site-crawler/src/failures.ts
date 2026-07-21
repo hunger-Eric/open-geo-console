@@ -13,6 +13,7 @@ export type CrawlFailureCode =
   | "timeout"
   | "connection-reset"
   | "dns"
+  | "dns-not-found"
   | "tls"
   | "browser"
   | "network"
@@ -49,7 +50,8 @@ const permanentCodes = new Set<CrawlFailureCode>([
   "robots-denied",
   "unsupported-content",
   "disallowed-redirect",
-  "outside-site"
+  "outside-site",
+  "dns-not-found"
 ]);
 
 function dispositionForCode(code: CrawlFailureCode): CrawlFailureDisposition {
@@ -67,6 +69,9 @@ export function classifyPageFailure(error: unknown): CrawlFailureClassification 
   }
 
   if (error instanceof UrlSafetyError) {
+    if (error.code === "dns-not-found") {
+      return { disposition: "permanent", code: "dns-not-found", message: error.message };
+    }
     if (error.code === "dns-resolution-failed") {
       return { disposition: "transient", code: "dns", message: error.message };
     }
@@ -99,7 +104,10 @@ export function classifyPageFailure(error: unknown): CrawlFailureClassification 
   if (normalized.includes("timeout") || normalized.includes("timed out") || normalized.includes("aborterror")) {
     return { disposition: "transient", code: "timeout", message };
   }
-  if (normalized.includes("dns") || normalized.includes("eai_again") || normalized.includes("enotfound")) {
+  if (normalized.includes("enotfound")) {
+    return { disposition: "permanent", code: "dns-not-found", message };
+  }
+  if (normalized.includes("dns") || normalized.includes("eai_again")) {
     return { disposition: "transient", code: "dns", message };
   }
   if (normalized.includes("tls") || normalized.includes("ssl") || normalized.includes("certificate")) {

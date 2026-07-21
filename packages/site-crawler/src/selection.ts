@@ -5,6 +5,7 @@ import { parseHttpUrl } from "./security";
 export const MAX_CANDIDATE_URLS = 500;
 export const FREE_PAGE_LIMIT = 1;
 export const DEEP_PAGE_LIMIT = 50;
+export const MAX_REPRESENTATIVES_PER_TEMPLATE = 3;
 
 export type CrawlTier = "free" | "deep";
 export type PageType =
@@ -223,7 +224,7 @@ function roundRobinBuckets(
   });
   const selected: PageCandidate[] = [];
   let round = 0;
-  while (selected.length < limit) {
+  while (selected.length < limit && round < MAX_REPRESENTATIVES_PER_TEMPLATE) {
     let added = false;
     for (const key of keys) {
       const candidate = buckets.get(key)?.[round];

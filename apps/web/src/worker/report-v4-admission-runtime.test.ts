@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { UrlSafetyError } from "@open-geo-console/site-crawler";
 import type { ScanJobRow } from "@/db/schema";
 import type {
   FinalizeReportV4PreAdmissionSnapshotInput,
@@ -255,12 +256,66 @@ describe("recoverable V4 admission runtime", () => {
     });
 
     await expect(harness.run()).resolves.toEqual({ plannedPages: 601, successfulPages: 2, failedPages: 599 });
-    expect(harness.readRawHtml).toHaveBeenCalledTimes(501);
-    expect(harness.checkpoints.save.mock.calls.every(([, checkpoint]) => checkpoint.queue.length <= 500)).toBe(true);
-    expect(harness.finalized?.status).toBe("completed");
-    expect(harness.finalized?.pages.filter(({ exclusionReason }) => exclusionReason === "policy_excluded")).toHaveLength(100);
+    expect(harness.readRawHtml).toHaveBeenCalledTimes(4);
+    expect(harness.checkpoints.save.mock.calls.every(([, checkpoint]) => checkpoint.queue.length <= 51)).toBe(true);
+    expect(harness.finalized?.status).toBe("completed_limited");
+    expect(harness.finalized?.pages.filter(({ exclusionReason }) => exclusionReason === "policy_excluded")).toHaveLength(597);
     expect(harness.finalized?.pages.filter(({ analyzable }) => analyzable)).toHaveLength(2);
   });
+
+  it("bounds more than ten thousand same-template articles without increasing timeouts", async () => {
+    const targetUrl = "https://portal.example/";
+    const candidates = Array.from({ length: 10_001 }, (_, index) => candidate(index + 1, {
+      siteUrl: targetUrl,
+      url: `${targetUrl}news/story-${String(index + 1).padStart(5, "0")}`
+    }));
+    const harness = runtimeHarness(candidates, {
+      extractAnalyzableText: () => "One repeated readable article body"
+    }, { targetUrl, siteKey: "portal.example" });
+
+    await expect(harness.run()).resolves.toEqual({
+      plannedPages: 10_001,
+      successfulPages: 1,
+      failedPages: 10_000
+    });
+    expect(harness.readRawHtml).toHaveBeenCalledTimes(3);
+    expect(harness.finalized?.status).toBe("completed_limited");
+    expect(harness.finalized?.pages).toHaveLength(10_001);
+    expect(harness.finalized?.pages.filter(({ exclusionReason }) =>
+      exclusionReason === "policy_excluded")).toHaveLength(9_998);
+  });
+
+  it("finalizes a recovered 23-body representative snapshot without draining repeated articles", async () => {
+    const targetUrl = "https://example.com/";
+    const evidenceUrls = [
+      targetUrl,
+      ...Array.from({ length: 20 }, (_, index) => `${targetUrl}evidence-${index + 1}`),
+      `${targetUrl}about`,
+      `${targetUrl}services/freight`
+    ];
+    const pending = Array.from({ length: 100 }, (_, index) => candidate(index + 100, {
+      url: `${targetUrl}news/story-${index + 1}`
+    }));
+    const harness = runtimeHarness([]);
+    harness.persistedCheckpoint = {
+      ...checkpointFixture(),
+      queue: pending,
+      knownUrlKeys: [...evidenceUrls, ...pending.map(({ url }) => url)],
+      visitedUrlKeys: evidenceUrls,
+      pages: evidenceUrls.map((url, index) => checkpointPage(index + 1, url))
+    };
+
+    await expect(harness.run()).resolves.toEqual({
+      plannedPages: 123,
+      successfulPages: 23,
+      failedPages: 100
+    });
+    expect(harness.readRawHtml).not.toHaveBeenCalled();
+    expect(harness.finalized?.status).toBe("completed_limited");
+    expect(harness.finalized?.pages.filter(({ exclusionReason }) =>
+      exclusionReason === "policy_excluded")).toHaveLength(100);
+  });
+
 
   it("keeps the homepage first and preserves explicit exclusion provenance for omitted initial candidates", async () => {
     const targetUrl = "https://portal.example/";
@@ -340,7 +395,7 @@ describe("recoverable V4 admission runtime", () => {
     expect(new Set(harness.finalized?.pages.flatMap((page) => page.contentHash ? [page.contentHash] : [])).size).toBe(3);
   });
 
-  it("distinguishes exhausted policy and permanent-link exclusions from unresolved transient reads", async () => {
+  it("keeps robots and policy omissions deliverable as completed_limited", async () => {
     const targetUrl = "https://shun-express.com/";
     const exhausted = runtimeHarness([
       candidate(1, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan` }),
@@ -348,7 +403,7 @@ describe("recoverable V4 admission runtime", () => {
       candidate(3, { siteUrl: targetUrl, url: `${targetUrl}about.html`, explicitExclusion: "policy_excluded" })
     ], {}, { targetUrl, siteKey: "shun-express.com" });
     await expect(exhausted.run()).resolves.toEqual({ plannedPages: 3, successfulPages: 1, failedPages: 2 });
-    expect(exhausted.finalized?.status).toBe("completed");
+    expect(exhausted.finalized?.status).toBe("completed_limited");
     expect(exhausted.finalized?.pages).toEqual(expect.arrayContaining([
       expect.objectContaining({ exclusionReason: null }),
       expect.objectContaining({ exclusionReason: "robots_denied" }),
@@ -395,6 +450,30 @@ describe("recoverable V4 admission runtime", () => {
     await expect(transient.run()).resolves.toEqual({ plannedPages: 2, successfulPages: 1, failedPages: 1 });
     expect(transient.finalized?.status).toBe("completed_limited");
     expect(transient.finalized?.pages).toContainEqual(expect.objectContaining({ exclusionReason: "raw_fetch_failed" }));
+  });
+
+  it("completes when the only unresolved-looking residue is a proven-nonexistent hostname", async () => {
+    const targetUrl = "https://shun-express.com/";
+    const harness = runtimeHarness([
+      candidate(1, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan` }),
+      candidate(2, { siteUrl: targetUrl, url: "https://member.shun-express.com/" })
+    ], {
+      readRawHtml: vi.fn(async (value) => {
+        if (value.url.startsWith("https://member.")) {
+          throw new UrlSafetyError("dns-not-found", "The target hostname does not exist.");
+        }
+        return {
+          url: value.url,
+          networkSafety: value.networkSafety,
+          access: value.access,
+          contentType: value.contentType ?? "text/html",
+          html: `Readable evidence for ${value.url}`
+        };
+      })
+    }, { targetUrl, siteKey: "shun-express.com" });
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 2, successfulPages: 1, failedPages: 1 });
+    expect(harness.finalized?.status).toBe("completed");
+    expect(harness.finalized?.pages).toContainEqual(expect.objectContaining({ exclusionReason: "dns_not_found" }));
   });
 
   it.each([
@@ -500,13 +579,14 @@ describe("recoverable V4 admission runtime", () => {
     ]);
   });
 
-  it("retains the fifty-first page as custom-service evidence and never reads the fifty-second", async () => {
+  it("retains fifty-first-body custom-service evidence and never starts a fifty-second read", async () => {
     const harness = runtimeHarness(Array.from({ length: 52 }, (_, index) => candidate(index + 1)));
 
-    await expect(harness.run()).resolves.toEqual({ plannedPages: 52, successfulPages: 51, failedPages: 0 });
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 52, successfulPages: 51, failedPages: 1 });
     expect(harness.finalized).toMatchObject({ status: "custom_service" });
-    expect(harness.finalized?.pages).toHaveLength(51);
+    expect(harness.finalized?.pages).toHaveLength(52);
     expect(harness.finalized?.pages).toContainEqual(expect.objectContaining({ normalizedUrl: "https://example.com/page-51" }));
+    expect(harness.finalized?.pages.filter(({ exclusionReason }) => exclusionReason === "policy_excluded")).toHaveLength(1);
     expect(harness.readRawHtml).toHaveBeenCalledTimes(51);
   });
 

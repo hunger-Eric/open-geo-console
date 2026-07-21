@@ -2,6 +2,7 @@
 
 ## Active scope lock
 
+- [x] Restore the protected-Staging persistent free/deep Workers from the locked `bd403f7` image after a zero-claimable-job preflight; prove one `example.com` browser submission automatically completes both the free job and its exactly-once V4 pre-admission job, with zero commerce and production changes.
 - [x] Freeze the current broad local repair branch; do not deploy, extend, replay, or use it as acceptance evidence.
 - [ ] Reconstruct the original V4 three-question answer-optimization requirement from the remote baseline and current product contract without editing code.
 - [ ] Write an exact allowed-file list, forbidden-subsystem list, diff budget, and focused acceptance checks in `docs/ACTIVE-CHANGE-SCOPE.md`.
@@ -10,6 +11,9 @@
 
 ## Two-stage report V4
 
+- [x] Consolidate and remediate the approved V4 baseline at `5a6ac0d24574581342d7bc45ca4867e44094a366`; align protected Preview/image/runtime/alias and persistent free/deep Workers, pass deterministic and U4 checker gates, and preserve production unchanged.
+- [x] Submit the one final authorized `shun-express.com` replacement report `77d7577d-fbe7-4dec-b70b-912982394ff8` through the browser and allow only automatic persistent-Worker processing.
+- [ ] BLOCKED: its immutable snapshot `report-v4-site-33de08ce1642b15b6dc82b65f30ebb923571ac1a199eb7b73d6f363e119bcc46` is `completed_limited` after `604.213` seconds (`116/23/93`; `deadline_exceeded=5`, `raw_fetch_failed=1`). Commerce counts are zero. The approved permanent-stop boundary forbids checkout, payment, Core/diagnosis, replay, repair, another report, push, merge, or production change.
 - [x] Approve the prospective `combined_geo_report_v4` two-stage GEO report design and install the executable requirements registry, generated coverage matrix, structural traceability audit and fail-closed final acceptance command.
 - [x] Implement the local schema-v40 V4 authority and acceptance stack: global-prefix phase snapshots, checkpoint/runtime projectors, three-scenario semantic aggregation, sealed-scenario append gating, interleaving-safe atomic sealing, and `report-v4-acceptance-semantic-evidence/v2` collection.
 - [x] Bind all 20 requirements to implementation/tests and promote their registry state from `planned` to `implemented`; keep `npm run report:v4:traceability` green.

@@ -1,4 +1,5 @@
 import {
+  DnsNotFoundError,
   resolveSafeUrl,
   validateRedirectTarget,
   type HostnameResolver
@@ -155,7 +156,10 @@ async function queryDoh(fetchImpl: typeof fetch, hostname: string, type: "A" | "
     Status?: number;
     Answer?: Array<{ type?: number; data?: string }>;
   };
-  if (payload.Status !== 0 && payload.Status !== 3) {
+  if (payload.Status === 3) {
+    throw new DnsNotFoundError(`Public DNS reports that ${hostname} does not exist (NXDOMAIN).`);
+  }
+  if (payload.Status !== 0) {
     throw new Error(`Public DNS lookup failed with status ${payload.Status ?? "unknown"}.`);
   }
   const expectedType = type === "A" ? 1 : 28;

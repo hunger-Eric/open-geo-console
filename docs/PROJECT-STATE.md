@@ -6,9 +6,18 @@ Deliver a self-hostable, evidence-bound GEO product whose customer artifact is o
 
 ## Active Change Scope
 
-- `docs/ACTIVE-CHANGE-SCOPE.md` is `APPROVED` for its exact two-phase protected-Staging V4 plan. Phase A's exact-job one-shot Worker is implemented within the seven-file code/test allowlist and independently verified `CONFORMANT`; ordinary FIFO Worker behavior and all prohibited subsystems remain unchanged.
-- Phase A acceptance recorded 69 focused tests, a second independent disposable PostgreSQL targeted-claim run (2/2), lint, build, diff, and CodeGraph checks. The full `npm test` result remains 2,590 passed, 175 skipped, with five known unrelated acceptance-ledger failures.
-- No deployment, report, crawl, model call, payment, refund, email, production action, or other external workflow was performed for Phase A. The user-owned `assets/` and protected V3 plan remain untouched.
+- `docs/ACTIVE-CHANGE-SCOPE.md` is `FROZEN` at the final replacement's permanent-stop boundary. The remediation commit and protected runtime are aligned to `5a6ac0d24574581342d7bc45ca4867e44094a366`; Preview `dpl_FbWc3HYAFLJyqqDwewdViPwq3JMP`, fixed alias, image `sha256:9943d450435fdea586fa382ecb513cfb0c2f7e2112f2f9d7a23fda8e2794f0b1`, runtime marker, and free/deep presence match that SHA.
+- Final authorized report `77d7577d-fbe7-4dec-b70b-912982394ff8` completed its free job, but admission snapshot `report-v4-site-33de08ce1642b15b6dc82b65f30ebb923571ac1a199eb7b73d6f363e119bcc46` terminalized `completed_limited` after `604.213` seconds with `116/23/93` candidates/analyzable/excluded. The 23 analyzable bodies were unique and identified `深圳市凌顺国际物流有限公司`; unresolved `deadline_exceeded=5` and `raw_fetch_failed=1` correctly kept the gate closed.
+- The final replacement has zero orders, payment events, credits, artifacts, tokens, Core/diagnosis jobs, and active lineage jobs. No payment or customer deep report exists. No second report, replay, repair, push, merge, or production action is authorized; production deployment and containers remain unchanged.
+
+## Current Execution Outcome (2026-07-20)
+
+- The free foundation completed at score `76` and identified `深圳市凌顺国际物流有限公司` / `凌顺国际物流`; no SF or 顺丰 identity was present.
+- The sole V4 pre-admission snapshot has one homepage candidate, zero analyzable pages, and one `deadline_exceeded` exclusion. The pre-admission job is terminal `completed` without a persisted retry, repair state, or successor job, so the exact-claim state machine cannot run it again.
+- Question rows are zero because the checkout GET would normally create them lazily, but checkout refuses the unavailable snapshot. The three locked questions were therefore never persisted.
+- Historical polluted report `8446d645-8db1-45ce-8f4a-8016f7ed1b8f` and job `58f10a1b-25af-4e7c-b7fa-7dee1b4947a4` retained their original hashes and timestamps. No ordinary/persistent Worker ran; both exact ephemeral containers were removed and the other 59 containers retained the same normalized snapshot hash.
+- The requested complete paid V4 report was not produced. Continuing would require manual replay, a second report, or product/state-machine change, all outside the approved design and scope.
+- Deterministic integration gates remain green: focused Unit 2/3/4-5 suites passed `54/56/185`, exact one-shot/claim passed `26`, ledger PostgreSQL passed `12`, phase-snapshot PostgreSQL passed `5`, Unit 7A PostgreSQL passed `7`, lint and build passed, and full tests passed `2,616` with `177` skipped and zero failures. Traceability lists all 20 requirements as implemented; final V4 acceptance remains correctly fail-closed because protected-Staging verification is incomplete. CodeGraph is current at 771 files, 11,184 nodes, and 33,524 edges.
 
 ## Current Snapshot (2026-07-19)
 
@@ -36,17 +45,17 @@ Deliver a self-hostable, evidence-bound GEO product whose customer artifact is o
 
 ## Durable Evidence
 
+- The complete 2026-07-20 integrated runtime, target identities, exact one-shot logs, unavailable snapshot, zero-commerce proof, historical immutability, production non-change, and terminal stop reason are recorded in `docs/operations/evidence/2026-07-19-shun-express-v4-deep-report.md`.
 - The full paid-run identity, customer-content inspection, commercial outcome, deployment identity, code repairs, and limitations are recorded in `docs/operations/evidence/2026-07-19-report-v4-paid-deep-report.md`.
 - Protected-staging V2/V3 acceptance and correction records remain historical evidence under `docs/operations/evidence/`.
 - Historical terminal jobs, orders, credits, refunds, question sets, and artifacts remain immutable. Remediation must use a sanctioned replacement/correction boundary rather than reopening or rewriting them.
 
 ## Remaining Work / Blockers
 
-1. Commit the exact Phase A diff after its final allowlist/budget audit; do not push.
-2. On that same revision, execute Phase B only through the approved protected Preview and exact one-shot Worker path for the new `shun-express.com` V4 report.
-3. Store requirement-bound evidence for all 20 requirements, review each registry promotion from `implemented` to `verified`, and only then expect `npm run report:v4:acceptance` to pass.
-4. Resolve the five PostgreSQL acceptance phase-snapshot schema-drift failures before treating the full deterministic suite as green.
-5. Keep live V2/V3 recovery and unresolved historical Sandbox refunds separate from V4 acceptance.
+1. Preserve the failed target report, jobs, unavailable snapshot, historical authority, runtime identities, and zero-commerce evidence unchanged.
+2. Do not replay the completed pre-admission job, create or pay for a second report, alter the crawler/state machine, or push the branch under this frozen scope.
+3. Any future attempt requires a new design and exact scope that explicitly resolves the admission deadline behavior and authorizes its report/payment count; this task provides no such authority.
+4. Keep live V2/V3 recovery, unresolved historical Sandbox refunds, and production entirely separate from this failed V4 acceptance.
 
 ## Verification
 

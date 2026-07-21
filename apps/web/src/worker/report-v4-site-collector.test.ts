@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { UrlSafetyError } from "@open-geo-console/site-crawler";
 import {
   collectReportV4Site,
   type ReportV4HtmlRead,
@@ -98,6 +99,19 @@ describe("V4 site collector", () => {
 
     expect(result.exclusions).toContainEqual(expect.objectContaining({ reason: "raw_fetch_failed" }));
     expect(deps.readRawHtml).toHaveBeenCalledTimes(1);
+    expect(deps.renderBrowserHtml).not.toHaveBeenCalled();
+  });
+
+  it("classifies a proven-nonexistent hostname as terminal dns_not_found instead of raw_fetch_failed", async () => {
+    const deps = dependencies({
+      readRawHtml: vi.fn(async () => {
+        throw new UrlSafetyError("dns-not-found", "The target hostname does not exist.");
+      })
+    });
+    const result = await collectReportV4Site([candidate()], deps);
+
+    expect(result.exclusions).toContainEqual(expect.objectContaining({ reason: "dns_not_found" }));
+    expect(result.exclusions).not.toContainEqual(expect.objectContaining({ reason: "raw_fetch_failed" }));
     expect(deps.renderBrowserHtml).not.toHaveBeenCalled();
   });
 

@@ -1,8 +1,221 @@
 # Active Change Scope Lock
 
-Status: `APPROVED` — user explicitly approved the safe-fetch boundary repair and single amend delta below; external deployment remains gated on fresh checker `CONFORMANT`
+Status: `FROZEN` - contract B implementation and deterministic repository
+verification are complete. No commit or external action was authorized or
+performed; any further change requires a new exact approval.
 
-## Pending deviation delta — preserve safe fetch and replace the undeployed local commit once
+## Active scope - bounded representative V4 admission
+
+### Objective and baseline
+
+Make V4 admission stop collecting an entire website once it has representative
+report evidence. Bound every initial and dynamically discovered URL frontier,
+prevent large families of similar pages from dominating reads, preserve useful
+partial evidence, and let the existing checkout/Core path consume a truthful
+`completed_limited` snapshot.
+
+Baseline is commit `05bb1e21bcd275de594a578bb9900b15ee66bfe4` on branch
+`codex/v4-answer-optimization-scope-reset`. At approval time the four candidate
+production/test files below have no working-tree diff. All other modified and
+untracked paths are pre-existing user-owned work and must not be reset, cleaned,
+edited, staged, or committed. This scope file had a pre-existing `+72/-2`
+user-owned delta and SHA-256
+`706A98C8BEEEA1682B0981E5D9D74CA7059D7BF9C7934613FDA0AF8DCF2A9200`; all prior
+content is retained below as archived read-only evidence.
+
+Verified unchanged contracts:
+
+- ordinary Deep selection remains at most 50 analyzable bodies;
+- contract B permits at most 51 candidate reads only to preserve truthful proof
+  of the existing 51st-unique-body `custom_service` boundary;
+- checkout and Core already accept an analyzable `completed_limited` snapshot;
+- customer output remains exactly three ordered questions, each shown as
+  question, synthesized answer, and concise source links.
+
+### Exact behavior allowlist
+
+Only these behaviors may change:
+
+1. Enforce one global V4 candidate-read budget of 51. Before selecting or
+   starting the next candidate, compute `remaining = 51 - visited URL count`.
+   No candidate beyond that remainder may reach the collector.
+2. Recompute the representative frontier over the complete pending union after
+   every discovery step and after checkpoint recovery.
+3. Apply one generic cap of three representatives per identical
+   `(pageType, templateKey)` bucket. This applies equally to news, blog posts,
+   product details, help articles, case studies, and other repeated templates.
+   It must not contain a site, host, `/news`, query-key, language, or copy
+   special case. Distinct page types and distinct templates remain eligible.
+4. Persist valid candidates omitted by the representative or global budget as
+   non-analyzable `policy_excluded` evidence and never fetch them.
+5. Stop before queue exhaustion once persisted unique readable bodies include
+   deterministic representative evidence for the homepage, company identity,
+   and primary product/service activity, and the remaining queue contains no
+   unsampled high-value representative bucket. Repeated news/article/account/
+   legacy candidates do not keep admission alive.
+6. Preserve the existing 51st-unique-body `custom_service` result when a
+   genuinely diverse representative frontier reaches it. Otherwise, zero unique
+   readable bodies yields `unavailable`; one through 50 readable bodies with a
+   page failure, robots denial, timeout/deadline residue, budget omission, or
+   evidence-ready early stop yields deliverable `completed_limited`.
+7. Preserve URL safety, normalization, immutable provenance, content-hash
+   deduplication, checkpoint validation/restart determinism, caller/lease
+   cancellation, collector behavior, and the ten-minute maximum. Do not increase
+   any timeout.
+
+### Exact tracked-file allowlist and budgets
+
+Only these files may be edited:
+
+1. `apps/web/src/worker/report-v4-admission-runtime.ts`: at most `+170/-55`.
+2. `apps/web/src/worker/report-v4-admission-runtime.test.ts`: at most
+   `+300/-70`.
+3. `packages/site-crawler/src/selection.ts`: at most `+70/-25`, limited to
+   the generic per-template representative cap/API required by focused red tests.
+4. `packages/site-crawler/src/selection.test.ts`: at most `+120/-35`.
+5. `docs/ACTIVE-CHANGE-SCOPE.md`: after approval, only status, unit results,
+   exact numstat, and deviation verdicts may change; this scope's delta is at
+   most `+170/-10` relative to the pre-scope fingerprint above.
+
+Maximum change-owned production delta is `+240/-80`; tests `+420/-105`; scope
+`+170/-10`; total `+830/-195`. No other path may have a change-owned diff.
+
+### Forbidden subsystems and actions
+
+Do not edit or mutate database schema/migrations, snapshot persistence format,
+commercial orders, checkout, payments, refunds, credits, entitlements, Worker
+job state machines, Core/orchestrator/question-answerer/source-audit logic,
+model prompts/transport, report versions, report UI/source display, email,
+tokens, dependencies/lockfiles, historical data/evidence, deployment files, or
+staging/production state. Do not add recovery, replay, correction, migration,
+compatibility, or target-specific behavior. No timeout increase is allowed.
+
+No push, deployment, live crawl, report generation, checkout, payment, or
+historical mutation is authorized by this scope.
+
+### Deterministic acceptance
+
+Tests must prove without live network access:
+
+- more than 10,000 initial or dynamically discovered URLs start at most 51
+  candidate reads across the full run and checkpoint resume;
+- each `(pageType, templateKey)` retains at most three representatives,
+  including recursive `/news?s=/news...`-shaped fixtures, without
+  target-specific logic;
+- over-budget/non-representative URLs are persisted as `policy_excluded` and
+  are never passed to the collector;
+- after 23 unique readable bodies contain home, company-identity, and primary
+  business evidence, Admission finalizes without draining remaining news,
+  account, legacy, or unbounded category candidates;
+- one member/account-shaped failure, several timeouts, or robots denial yields
+  `completed_limited` when readable evidence exists; only zero readable bodies
+  yields `unavailable`;
+- the 51st unique readable body still yields `custom_service`, while an
+  ordinary Deep report contains no more than 50 bodies;
+- checkpoint recovery reproduces the same remaining budget, representative
+  queue, exclusions, terminal status, and read count;
+- existing checkout/Core `completed_limited` and exactly-three-question/source
+  display contracts pass without editing their files;
+- no timeout increases and no forbidden path changes.
+
+Required checks are the focused admission and selection tests, existing V4
+orchestrator and question-answerer regression tests, `npm run lint`,
+`npm run build`, full `npm test`, `git diff --check`, complete path/numstat
+audit, and dirty-worktree comparison. Any need outside this allowlist or budget
+is `DEVIATION_REVIEW_REQUIRED` and stops without commit.
+
+
+### Completion evidence - 2026-07-21
+
+- Implemented contract B: 51 candidate-read ceiling, three representatives per
+  `(pageType, templateKey)`, checkpoint-safe recompression, evidence-ready early
+  terminalization, truthful policy exclusions, and deliverable
+  `completed_limited` coverage.
+- Focused admission/selection: 56 tests passed. Downstream Admission/Core/
+  three-question/checkout regression selection: 64 passed and 4 conditional
+  PostgreSQL tests skipped. Final lint and full workspace/Next.js build passed.
+- Full Vitest: 292 files passed, 43 skipped; 2,668 tests passed, 177 skipped;
+  zero failures. The 10,001-link fixture passed without a timeout increase.
+- Final `git diff --check` passed. Production diff search found no target-domain,
+  member-subdomain, `/news`, timeout, or deadline special case.
+- Change-owned production/test paths remain within the approved budgets. The
+  scope delta is within its pre-scope `+170/-10` budget; pre-existing and
+  concurrent user-owned dirty files were preserved.
+- No file was staged or committed. No push, deployment, live crawl, report,
+  checkout, payment, replay, or historical mutation occurred.
+
+## Archived prior scope - read-only evidence, no authority for this change
+
+Status: `FROZEN` — the DoH-enabled probe also returned `probe_failed`, rollback is verified again, and no retry, alias movement, report, or payment is authorized
+
+## Pending deviation delta — allow the documented non-secret DoH resolver in the probe container and rerun the probe once
+
+Deployment verdict on 2026-07-21: `DEVIATION_REVIEW_REQUIRED`. The resumed
+sequence for replacement commit
+`05bb1e21bcd275de594a578bb9900b15ee66bfe4` passed every deterministic gate, the
+independent predeployment checker returned `CONFORMANT`, one image
+(`sha256:c30b30bc32a7049e93a493d88b9e3bffd6c72a9570c98458fe2be727da44ce6c`,
+tag `open-geo-console:staging-05bb1e21bcd275de594a578bb9900b15ee66bfe4`) and
+one Ready protected Preview (`dpl_2uUMrYTVPkhPcbb9HEHkrUdMhHw5`, exact-SHA
+metadata) were created, and both Staging Workers ran on the exact image with
+fresh exact-SHA presence and zero active leases. The single authorized probe
+container returned only `probe_failed` within seconds.
+
+Read-only diagnosis found the failure environmental, not logical: the
+workstation proxy resolves public DNS into the reserved Fake-IP range
+`198.18.0.0/15`, which `packages/site-crawler/src/security.ts:155` must keep
+blocking; the persistent Workers already carry the documented non-secret
+remedy `OGC_PUBLIC_DNS_DOH_URL=https://cloudflare-dns.com/dns-query`
+(`docs/PROTECTED-STAGING-OPERATIONS.md`), while the probe container did not,
+so its first website read was rejected by the URL-safety boundary. The probe
+performed zero successful website reads and zero business writes. The
+authorized rollback ran to completion: the deployment marker and both Workers
+returned to the `5a6ac0d...` image, the 68-table business fingerprint is
+byte-identical before and after, production identities are unchanged, the
+fixed alias never moved, both staging image tags are preserved, and the
+detached worktree was removed.
+
+If explicitly approved, this delta authorizes only:
+
+- reuse of the existing image and the existing Ready Preview; no new commit,
+  image build, Preview deployment, project-environment mutation, or push;
+- one `OGC_DEPLOYMENT_VERSION` change to
+  `05bb1e21bcd275de594a578bb9900b15ee66bfe4` in
+  `.data/workstation-docker/staging.env` and one `--no-deps --no-build`
+  force-recreate of exactly `staging-worker-free` and `staging-worker-deep`
+  from the exact image, with the same image/tier/marker/readiness/presence and
+  zero-claimable/zero-lease verification as before;
+- exactly one replacement probe container invocation identical to the previous
+  one except for adding the single non-secret variable
+  `OGC_PUBLIC_DNS_DOH_URL=https://cloudflare-dns.com/dns-query` (the same value
+  the Staging Workers already use); every other probe constraint is unchanged:
+  no env file, no `DATABASE_URL`, no secrets, no report/job/order identity, at
+  most 80 target reads, at most 600,000 ms, expected site key
+  `shun-express.com`, expected text `凌顺国际物流`, exactly 23 unique
+  analyzable bodies, terminal `completed`;
+- the same before/after 68-table business fingerprint comparison and
+  production identity check, and, only after a passing probe and fingerprints,
+  the single fixed-alias move and its verification, plus one fresh final
+  checker audit.
+
+The rollback rule is unchanged: any failure before alias movement restores the
+marker and recreates both Workers from the `5a6ac0d...` image once, then stops
+permanently. Everything else remains forbidden: no code edit, no new report or
+free scan, no checkout/order/payment/model/email/token/credit/artifact event,
+no historical mutation, no second probe, and no production mutation.
+
+Outcome on 2026-07-21: `DEVIATION_REVIEW_REQUIRED` — permanent stop. Both
+Workers were recreated on the exact `05bb1e2...` image with fresh exact-SHA
+presence and zero active leases, then the single authorized DoH-enabled probe
+again returned only `probe_failed` (about 26 seconds, earlier than any
+expectation mismatch could surface). The rollback ran to completion: marker
+and both Workers restored to the `5a6ac0d...` image, the 68-table business
+fingerprint byte-identical before and after, production identities unchanged,
+fixed alias unmoved, both image tags preserved. The DoH variable alone is not
+sufficient for the probe container; the next delta must diagnose the probe's
+hidden failure without further live reads.
+
+## Completed deviation delta — preserve safe fetch and replace the undeployed local commit once (done)
 
 Deployment checker verdict: `DEVIATION_REVIEW_REQUIRED`. Commit
 `911181c1d42e341823418f80deb8c1bdfce8076f` is locally conformant except that
@@ -36,6 +249,9 @@ report/payment freeze remain unchanged. A third production/test file, budget
 overflow, unsafe fetch path, failed gate, or another commit need is a stop.
 
 Safe-fetch delta checker: `CONFORMANT` before the single authorized amend.
+
+The unique Preview remains Ready and protected but unaliased; the fixed Staging alias never moved.
+The unique probe returned only `probe_failed`; old Workers, marker, business fingerprint, zero-job state, and production identities were restored and verified.
 
 ## Current scope — commit and deploy the V4 frontier repair, then run one no-commerce protected-Staging proof
 

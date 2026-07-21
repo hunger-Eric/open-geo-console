@@ -6,7 +6,7 @@
 
 ## Goal
 
-Selectively consolidate the approved V4 business-answer and exact one-shot Worker baseline with only the five approved repair groups, align one protected-Staging Web/Worker runtime revision, then create and accept exactly one new CNY 199 deep V4 report for `https://shun-express.com/`. Historical failed authority and production remain immutable.
+Selectively consolidate the approved V4 business-answer and exact one-shot Worker baseline with only the five original approved repair groups plus the bounded approved Unit 7A protected-Staging capacity correction, align one protected-Staging Web/Worker runtime revision at each approved step, then create and accept exactly one new CNY 199 deep V4 report for `https://shun-express.com/`. Historical failed authority and production remain immutable.
 
 ## Locked definitions
 
@@ -145,20 +145,51 @@ Captured 2026-07-19 before scope approval:
 **External actions:** exact actions and IDs are listed in the scope.
 
 - [ ] From a clean WSL2 worktree at the integrated runtime SHA, copy only original project link `prj_WVpdlJfsEp0YyWM2W54w8oBy985S`; use pinned `vercel@55.0.0`.
-- [ ] Run local workspace build and Vercel Preview build checks before the one permitted Preview creation.
+- [ ] Run local workspace build and Vercel Preview build checks before each explicitly permitted Preview creation.
 - [ ] Build exactly one Docker Worker image tagged `open-geo-console:staging-<full-runtime-sha>` and label `org.opencontainers.image.revision=<full-runtime-sha>`; do not start a persistent Worker.
 - [ ] Update only `OGC_DEPLOYMENT_VERSION` in `.data/workstation-docker/staging.env` to the full runtime SHA after required non-secret values and secret presence pass.
-- [ ] Create at most one new protected Preview from the exact worktree. Verify `preview`, `Ready`, project ID, full Git source, healthy authenticated `/zh -> /` navigation, and zero middleware failure before moving the fixed Staging alias once.
+- [x] Created the one originally authorized prebuilt Preview from the exact worktree: `dpl_Gv1si4s2aXeCbyQkCJrSFeXmWxXT` is `preview`/`Ready` with the full Git source, but authenticated `/zh` and `/` returned HTTP 500 before any alias move.
+- [ ] Preserve failed prebuilt Preview `dpl_Gv1si4s2aXeCbyQkCJrSFeXmWxXT` as immutable evidence. The user approved exactly one additional source-built Preview from the same exact-SHA worktree, same project, and pinned CLI, with no `--prebuilt`, code/image/env change, or third deployment. Require authenticated `/zh -> /` and `/` health before the one alias move.
 - [ ] Verify image ID/label, runtime env marker, database marker, zero ordinary Worker presence, and fixed alias all bind to the integrated runtime SHA.
 - [ ] Remove only the two exact exited `staging-4b8a450…` containers and then the two exact superseded images named in scope, after fresh reference checks. Preserve every other image/container.
 - [ ] Re-inspect production deployment/container identities and require exact equality to Unit 1.
 
+## Unit 7A — protected-Staging forced-regeneration capacity correction
+
+**Files:** `apps/web/src/db/scan-admission.ts` and `apps/web/src/db/staging-security.postgres.test.ts` only.
+
+**Budget:** production at most `+15/-5`; focused PostgreSQL test at most `+60/-10`.
+
+- [x] For protected Staging with `forceFresh=true` only, exclude from the free capacity count a `repair_wait` job only when `lease_owner`, `lease_expires_at`, `retry_not_before`, and `repair_deadline_at` are all `NULL`.
+- [x] Prove active, leased, scheduled, non-`forceFresh`, and non-Staging admission remains unchanged; do not mutate any existing job or state-machine field.
+- [x] Run `npm test -- apps/web/src/db/staging-security.postgres.test.ts`, the complete deterministic/PostgreSQL gates, diff/budget/excluded-behavior audit, and the Unit 7A implementation checker.
+- [x] Commit only the two Unit 7A code/test paths, build the one replacement image at full SHA `bd403f77b30b01c6c5a8378d0fc05b63ee56ee71`, and complete the one logical Staging marker rebind, including the retrospectively approved CRLF tool repair recorded below.
+- [x] Create the third and final source-built Preview `dpl_FHYqhkYMejCbZs5hgbbuU51c5Du5`, verify direct and fixed-alias health plus image/runtime/database-marker equality, and move the fixed Staging alias exactly once to that Preview.
+- [x] R3 preserved both earlier Previews and, after fresh reference proof, removed only old integrated image `sha256:5645ab7a4784dc0e908abda0d73a2660569a05a33f001bf3bc0a9ba5c516362c`; every other container and image was preserved.
+- [x] Re-inspect production deployment/container identities after runtime alignment and require exact equality.
+- [x] Completed R3 and obtained independent Unit 7A runtime/documentation conformance before unlocking Unit 8. The third and final browser submission was subsequently consumed exactly once as recorded below.
+
+### Unit 7A retrospective marker-rebind record
+
+- On 2026-07-20, the user ratified the two unsuccessful CRLF patch attempts plus the strictly guarded insertion of exactly one missing `0x0D` as one in-scope logical marker rebind, and confirmed that the existing runtime, Preview, and alias evidence remains valid.
+- Final env evidence: raw SHA-256 `7e18b5f4ec4a33c37c962351cf6e52b21a1a890523bbb0a99e51bed7f473c4b6`; normalized SHA-256 `98806e5988cb1c77aaa2ba84512dec555899de3b143743c4469402d76359ce78`; reconstructed-old SHA-256 `3f6f0f1e38ba3f63899af97c9d168e6b185623253bc75cc35619e45110b583ef`; `4638` bytes, `66` keys, `66` LF bytes, `66` CRLF pairs, and exactly one 40-byte SHA difference beginning at byte offset `955`.
+- Runtime alignment: Git/marker SHA `bd403f77b30b01c6c5a8378d0fc05b63ee56ee71`; image `sha256:e46c14a2b4b743d4ac3fa422ce74fcbd126c2f7552e1fa171fbcffb2dd4a30fb`; Preview `dpl_FHYqhkYMejCbZs5hgbbuU51c5Du5`; fixed alias `open-geo-console-staging-itheheda.vercel.app`.
+- This approval added no marker write, Preview, alias move, image, report/payment, or alternative mechanical-write allowance. Remaining marker/Preview/alias action counts are `0`; R3 later completed and the Unit 8 submission was subsequently consumed exactly once as recorded below.
+
 ## Unit 8 — create the one new report and immutable admission snapshot
 
-- [ ] In the authenticated browser selected for the target URL, submit one forced protected-Staging scan for `https://shun-express.com/`.
-- [ ] Record exactly one new report ID and its legacy free-job ID; prove neither historical target ID changed.
-- [ ] Run `worker:staging:exact-preview <freeJobId> <reportId>` only for that tuple.
-- [ ] Verify legacy free completion created exactly one V4 pre-admission job, then run `worker:staging:exact <preAdmissionJobId> <reportId> free` only for that tuple.
+- [x] Preserve the first browser submission as non-mutating reuse evidence: it returned historical report `8446d645-8db1-45ce-8f4a-8016f7ed1b8f` and created zero reports/jobs.
+- [x] Preserve the second verified-`forceFresh=true` submission as non-mutating active-regeneration evidence: it returned HTTP 202 through exact stale reservation `b629b4d5-9996-45bb-897a-a9349f683f86` and created zero reports/jobs.
+- [x] Deleted only that exact reservation in one transaction after all three IDs matched; one row was returned, historical report/job hashes and timestamps stayed unchanged, and no broad cleanup ran.
+- [x] Made exactly one third and final authenticated browser submission for `https://shun-express.com/`; visibly verified the force checkbox, captured `forceFresh=true`, and received HTTP 202. No fourth attempt is allowed.
+- [x] Recorded exactly one new report `f0133f5b-2eba-4d7f-b05a-a1786b2ea907`, legacy free job `67a5913f-bdf2-4f75-92fe-888887aeffcb`, and regeneration reservation `dccd164a-03ad-4f8a-9d66-028afe1eeb55`; independent read-only PostgreSQL review proved the historical target report/job remained unchanged.
+- [x] Preserve two zero-side-effect local launch failures as immutable evidence: the executor's attempt stopped at esbuild `spawn EPERM` before entrypoint import; the single checker-authorized supervisor retry stopped in startup readiness before claim because the npm command's two local env files omit `OGC_REPORT_V4_MODEL_PROFILE_ID`. Independent snapshots proved zero attempts, transitions, errors, pre-admission jobs, Worker presence, or row/hash changes after both.
+- [x] Approved by the user: allow exactly one ephemeral `--rm` container from accepted replacement image `open-geo-console:staging-bd403f77b30b01c6c5a8378d0fc05b63ee56ee71`, inject only `.data/workstation-docker/staging.env`, set workdir `/app/apps/web`, and override the persistent command with `node --import tsx src/scripts/staging-exact-preview-worker.ts 67a5913f-bdf2-4f75-92fe-888887aeffcb f0133f5b-2eba-4d7f-b05a-a1786b2ea907`. No local fallback, other tuple, or further startup retry is allowed.
+- [x] Ran the sole approved Docker `staging-exact-preview-worker.ts` boundary successfully for the exact free tuple; exit `0`, free/report/foundation/trial/regeneration/post-job authority and 59-container snapshot were independently `CONFORMANT`.
+- [x] Verified legacy free completion created exactly one V4 pre-admission job `6139c15e-f395-4a76-8ca0-d355357636d5`; persisted/type/schema/exact-claim authority all require `tier=deep`, proving the old plan word `free` is impossible.
+- [x] Approved by the user: correct only the pre-admission tier to `deep` and run once through the accepted Docker image and merged Staging env: `node --import tsx src/scripts/staging-exact-worker.ts 6139c15e-f395-4a76-8ca0-d355357636d5 f0133f5b-2eba-4d7f-b05a-a1786b2ea907 deep`. No free probe, local fallback, other tuple, or extra startup retry.
+- [x] Ran the sole Unit 8B command once; it exited `0`, removed its ephemeral container, and left every unrelated container and historical authority unchanged.
+- [ ] TERMINAL BLOCKER: snapshot `report-v4-site-710ad2113d8b2b364bbcb68cbf650bf262de6b2a05ba9ddd2d2134db8e67d9c4` is `unavailable` with `1/0/1` candidate/analyzable/excluded and homepage exclusion `deadline_exceeded`. The completed job has no persisted retry/repair/successor; checkout is blocked and no questions, order, payment, credit, artifact, token, email, Core, or diagnosis authority was created. Do not replay, create a second report, pay, push, or continue.
 - [ ] Verify unique-body admission, at most 50 analyzable bodies, duplicate exclusions, immutable snapshot/hash identity, organization identity, and exact three locked questions.
 
 Stop without another report if the target becomes terminal failed, `completed_limited`, or unauthorized `repair_wait`.
@@ -196,7 +227,7 @@ Stop as `DEVIATION_REVIEW_REQUIRED` if any of these occurs:
 
 - any action needs a path, behavior, schema, question, price, provider adapter, customer layout, product contract, deployment target, or external-action count outside the approved scope;
 - any ordinary/persistent Worker or non-target exact Worker claims a job;
-- Preview, image, runtime env, database marker, or Worker reports a different revision;
+- Preview, image, runtime env, database marker, or Worker reports a different revision, or Unit 7A would require a second replacement image, a fourth created Preview, or another alias move;
 - the one new report enters terminal failed, `completed_limited`, or unapproved `repair_wait`;
 - a second report, second payment, manual replay/reopen/recovery, or extra provider call would be required;
 - production deployment, production container/image, or production database authority changes;
