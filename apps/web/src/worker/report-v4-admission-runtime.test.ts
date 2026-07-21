@@ -258,7 +258,7 @@ describe("recoverable V4 admission runtime", () => {
     await expect(harness.run()).resolves.toEqual({ plannedPages: 601, successfulPages: 2, failedPages: 599 });
     expect(harness.readRawHtml).toHaveBeenCalledTimes(4);
     expect(harness.checkpoints.save.mock.calls.every(([, checkpoint]) => checkpoint.queue.length <= 51)).toBe(true);
-    expect(harness.finalized?.status).toBe("completed_limited");
+    expect(harness.finalized?.status).toBe("completed");
     expect(harness.finalized?.pages.filter(({ exclusionReason }) => exclusionReason === "policy_excluded")).toHaveLength(597);
     expect(harness.finalized?.pages.filter(({ analyzable }) => analyzable)).toHaveLength(2);
   });
@@ -279,7 +279,7 @@ describe("recoverable V4 admission runtime", () => {
       failedPages: 10_000
     });
     expect(harness.readRawHtml).toHaveBeenCalledTimes(3);
-    expect(harness.finalized?.status).toBe("completed_limited");
+    expect(harness.finalized?.status).toBe("completed");
     expect(harness.finalized?.pages).toHaveLength(10_001);
     expect(harness.finalized?.pages.filter(({ exclusionReason }) =>
       exclusionReason === "policy_excluded")).toHaveLength(9_998);
@@ -311,7 +311,7 @@ describe("recoverable V4 admission runtime", () => {
       failedPages: 100
     });
     expect(harness.readRawHtml).not.toHaveBeenCalled();
-    expect(harness.finalized?.status).toBe("completed_limited");
+    expect(harness.finalized?.status).toBe("completed");
     expect(harness.finalized?.pages.filter(({ exclusionReason }) =>
       exclusionReason === "policy_excluded")).toHaveLength(100);
   });
@@ -395,7 +395,7 @@ describe("recoverable V4 admission runtime", () => {
     expect(new Set(harness.finalized?.pages.flatMap((page) => page.contentHash ? [page.contentHash] : [])).size).toBe(3);
   });
 
-  it("keeps robots and policy omissions deliverable as completed_limited", async () => {
+  it("keeps robots and policy omissions deliverable as completed", async () => {
     const targetUrl = "https://shun-express.com/";
     const exhausted = runtimeHarness([
       candidate(1, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan` }),
@@ -403,7 +403,7 @@ describe("recoverable V4 admission runtime", () => {
       candidate(3, { siteUrl: targetUrl, url: `${targetUrl}about.html`, explicitExclusion: "policy_excluded" })
     ], {}, { targetUrl, siteKey: "shun-express.com" });
     await expect(exhausted.run()).resolves.toEqual({ plannedPages: 3, successfulPages: 1, failedPages: 2 });
-    expect(exhausted.finalized?.status).toBe("completed_limited");
+    expect(exhausted.finalized?.status).toBe("completed");
     expect(exhausted.finalized?.pages).toEqual(expect.arrayContaining([
       expect.objectContaining({ exclusionReason: null }),
       expect.objectContaining({ exclusionReason: "robots_denied" }),

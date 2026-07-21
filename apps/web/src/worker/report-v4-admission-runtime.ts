@@ -25,9 +25,7 @@ const COVERAGE_LIMITING_EXCLUSION_REASONS = new Set([
   "raw_fetch_failed",
   "raw_extraction_failed",
   "browser_render_failed",
-  "deadline_exceeded",
-  "policy_excluded",
-  "robots_denied"
+  "deadline_exceeded"
 ]);
 const COMPANY_IDENTITY_PAGE_TYPES = new Set<PageType>(["about", "contact"]);
 const PRIMARY_BUSINESS_PAGE_TYPES = new Set<PageType>(["product", "service", "pricing", "case-study"]);
