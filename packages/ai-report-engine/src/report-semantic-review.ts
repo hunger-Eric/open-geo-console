@@ -437,6 +437,12 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
     .map(parseObservationResult);
   assertUnique(observationResults.map(({ observationId, resultId }) => `${observationId}:${resultId}`), "$reviewInput.observationResults identity");
   for (const item of observationResults) assertNullableOwner(item.questionId, questionIds, "$reviewInput.observationResults questionId");
+  const observationOwners = new Map<string, string | null>();
+  for (const item of observationResults) {
+    const prior = observationOwners.get(item.observationId);
+    if (prior !== undefined && prior !== item.questionId) throw new TypeError(`$reviewInput.observationResults ${item.observationId} has inconsistent question ownership.`);
+    observationOwners.set(item.observationId, item.questionId);
+  }
   const fields = requireArray(record.fields, "$reviewInput.fields", MAX_FIELDS).map(parseManifestField);
   if (fields.length === 0) throw new TypeError("$reviewInput.fields must not be empty.");
   assertUnique(fields.map(({ path }) => path), "$reviewInput.fields path");
@@ -462,6 +468,7 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
     if (!fields.some((field) => field.path === fieldPath && field.questionId === questionId)) throw new TypeError(`${path} is not an owned answer field.`);
     return { questionId, fieldPath };
   });
+  if (answerSubjects.length === 0) throw new TypeError("$reviewInput.answerSubjects must include at least one answer subject.");
   assertUnique(answerSubjects.map(({ questionId }) => questionId), "$reviewInput.answerSubjects questionId");
   return {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
@@ -659,7 +666,8 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): Rep
   const parsedAnswers = answers.map((value, index) => {
     const path = `$reviewOutput.annotations.answers[${index}]`;
     const item = strictRecord(value, path, ANSWER_ANNOTATION_KEYS);
-    const questionId = input.answerSubjects[index]!.questionId;
+    const subject = input.answerSubjects[index]!;
+    const questionId = subject.questionId;
     requireExact(item.questionId, questionId, `${path}.questionId`);
     const evidenceIds = requireUniqueTextArray(item.evidenceIds, `${path}.evidenceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
     const sourceIds = requireUniqueTextArray(item.sourceIds, `${path}.sourceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
@@ -671,6 +679,9 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): Rep
       const source = sourceById.get(id); if (!source) throw new TypeError(`${path}.sourceIds contains unknown reference ${id}.`);
       assertCompatibleOwner(questionId, source.questionId, `${path}.sourceIds ${id}`);
     }
+    const field = input.fields.find((item) => item.path === subject.fieldPath && item.questionId === questionId)!;
+    assertSubset(evidenceIds, field.allowedEvidenceIds, `${path}.evidenceIds`);
+    assertSubset(sourceIds, field.allowedSourceIds, `${path}.sourceIds`);
     return { questionId, relevance: requireOneOf(item.relevance, ["responsive", "not_responsive", "blocked"] as const, `${path}.relevance`), entityRole: requireOneOf(item.entityRole, ["target", "competitor", "mixed", "none", "ambiguous"] as const, `${path}.entityRole`), evidenceIds, sourceIds, reason: requireBoundedText(item.reason, `${path}.reason`, 5_000) };
   });
   const evidenceUse = requireArray(row.evidenceUse, "$reviewOutput.annotations.evidenceUse", MAX_FIELDS).map((value, index) => {

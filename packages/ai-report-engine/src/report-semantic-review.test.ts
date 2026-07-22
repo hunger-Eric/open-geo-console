@@ -257,6 +257,15 @@ describe("ReportSemanticReview receipt integrity", () => {
     const review = parseReportSemanticReviewOutput(validReview(input), input);
     expect(deriveFreeObservationMetrics(review)).toEqual({ targetMentionCount: 1, competitorMentionCount: 1 });
   });
+
+  it("rejects observation text hash drift and cross-question observation reuse", () => {
+    const drift = inputCore();
+    drift.observationResults[0]!.originalTextHash = "a".repeat(64);
+    expect(() => createReportSemanticReviewInput(drift)).toThrow(/originalTextHash/u);
+    const reused = inputCore();
+    reused.observationResults.push({ observationId: "observation-1", resultId: "result-2", questionId: "question-2", originalText: "other", originalTextHash: reportSemanticTextHash("other") });
+    expect(() => createReportSemanticReviewInput(reused)).toThrow(/inconsistent question ownership/u);
+  });
   it("rejects non-prose drift at application and verification", () => {
     const input = createReportSemanticReviewInput(inputCore());
     const review = validReview(input);

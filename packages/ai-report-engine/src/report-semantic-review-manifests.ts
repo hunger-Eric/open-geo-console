@@ -7,7 +7,6 @@ import {
   type ReportSemanticObservationResult,
   type ReportSemanticQuestion,
   type ReportSemanticReviewInput,
-  type ReportSemanticReviewLifecycle,
   type ReportSemanticSource,
   type ReportSemanticTargetIdentity
 } from "./report-semantic-review";
@@ -22,7 +21,6 @@ export interface ReportSemanticManifestFieldSeed {
 }
 
 export interface ReportSemanticManifestSeed {
-  readonly lifecycle: ReportSemanticReviewLifecycle;
   readonly locale: string;
   readonly target: ReportSemanticTargetIdentity;
   readonly expectedModel: ReportSemanticExpectedModel;
@@ -36,7 +34,7 @@ export interface ReportSemanticManifestSeed {
 }
 
 /** Pure caller-shaped manifest construction; it never inspects prose meaning. */
-export function buildReportSemanticReviewManifest(seed: ReportSemanticManifestSeed): ReportSemanticReviewInput {
+function buildReportSemanticReviewManifest(seed: ReportSemanticManifestSeed, lifecycle: "free_v4" | "paid_v3"): ReportSemanticReviewInput {
   const fields: ReportSemanticFieldManifestEntry[] = seed.fields.map((field) => ({
     path: field.path,
     originalText: field.text,
@@ -48,7 +46,7 @@ export function buildReportSemanticReviewManifest(seed: ReportSemanticManifestSe
   }));
   return createReportSemanticReviewInput({
     version: "report-semantic-review-v1",
-    lifecycle: seed.lifecycle,
+    lifecycle,
     locale: seed.locale,
     target: seed.target,
     expectedModel: seed.expectedModel,
@@ -62,9 +60,9 @@ export function buildReportSemanticReviewManifest(seed: ReportSemanticManifestSe
   });
 }
 
-export function buildFreeV4SemanticReviewManifest(seed: Omit<ReportSemanticManifestSeed, "lifecycle">): ReportSemanticReviewInput {
-  return buildReportSemanticReviewManifest({ ...seed, lifecycle: "free_v4" });
+export function buildFreeV4SemanticReviewManifest(seed: ReportSemanticManifestSeed): ReportSemanticReviewInput {
+  return buildReportSemanticReviewManifest(seed, "free_v4");
 }
-export function buildPaidV3SemanticReviewManifest(seed: Omit<ReportSemanticManifestSeed, "lifecycle">): ReportSemanticReviewInput {
-  return buildReportSemanticReviewManifest({ ...seed, lifecycle: "paid_v3" });
+export function buildPaidV3SemanticReviewManifest(seed: ReportSemanticManifestSeed): ReportSemanticReviewInput {
+  return buildReportSemanticReviewManifest(seed, "paid_v3");
 }
