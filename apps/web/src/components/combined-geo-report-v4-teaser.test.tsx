@@ -16,17 +16,17 @@ function teaserModel(): FreeTeaserModel {
     questionId,
     exactQuestion: question.privateText,
     status: "answered",
-    answerText: "The complete teaser answer names a verifiable route capability.",
-    sources: [{
-      sourceId,
-      title: "Returned teaser source",
-      canonicalUrl: "https://source.example/route",
+    answerText: "## Route capability\n\nThe **complete teaser answer** names a verifiable route capability.\n\n- Direct route evidence\n- Publicly checkable detail",
+    sources: Array.from({ length: 8 }, (_, index) => ({
+      sourceId: index === 0 ? sourceId : `teaser-source-${index + 1}`,
+      title: `Returned teaser source ${index + 1}`,
+      canonicalUrl: index === 0 ? "https://source.example/route" : `https://source.example/route-${index + 1}`,
       registrableDomain: "source.example",
-      citedText: "The public page states the route capability.",
-      providerResultOrder: 1,
-      retrievalStatus: "search_source_only",
-      ownershipCategory: "unknown"
-    }],
+      citedText: `The public page states route capability ${index + 1}.`,
+      providerResultOrder: index + 1,
+      retrievalStatus: "search_source_only" as const,
+      ownershipCategory: "unknown" as const
+    })),
     provenance: {
       providerId: "mimo",
       model: "mimo-v2.5-pro",
@@ -47,7 +47,7 @@ function teaserModel(): FreeTeaserModel {
       missingEvidenceFamilies: [],
       retestQuestion: question.privateText
     },
-    audit: { verifiedBodyCount: 0, searchSourceOnlyCount: 1, inaccessibleCount: 0 },
+    audit: { verifiedBodyCount: 0, searchSourceOnlyCount: 8, inaccessibleCount: 0 },
     diagnosis: {
       selectionSummary: "The source supplies a concrete fact for this buyer question.",
       observableFactors: [
@@ -100,7 +100,7 @@ describe("free V4 teaser renderer", () => {
     expect(html).toContain("Across 3 buyer questions, your brand appeared 1 time(s) while competitors appeared 3 time(s).");
     for (const question of model.questionSet.questions) expect(html).toContain(question.neutralPublicText);
 
-    const answerAt = html.indexOf(model.q1AnswerCard!.answerMode === "generative_search_v1" ? model.q1AnswerCard!.answerText : "");
+    const answerAt = html.indexOf("The <strong>complete teaser answer</strong>");
     const sourceAt = html.indexOf("https://source.example/route");
     const diagnosisAt = html.indexOf("The source supplies a concrete fact for this buyer question.");
     expect(answerAt).toBeGreaterThan(0);
@@ -114,5 +114,33 @@ describe("free V4 teaser renderer", () => {
     }
     expect(html).not.toContain("Q2 paid answer secret");
     expect(html).not.toContain("Q3 paid answer secret");
+  });
+
+  it("uses a teaser-owned source layout and keeps every source behind bounded progressive disclosure", () => {
+    const model = teaserModel();
+    const html = renderToStaticMarkup(createElement(CombinedGeoReportV4Teaser, { model }));
+
+    expect(html.match(/class="teaser-source-card"/g)).toHaveLength(8);
+    expect(html).not.toContain('class="source-card"');
+    expect(html).toContain('data-collapsed-source-count="3"');
+    expect(html).toContain("View 3 more sources");
+    expect(html).toContain(".teaser-more-sources:not([open])>.teaser-source-grid{display:none}");
+    for (let index = 1; index <= 8; index += 1) {
+      expect(html).toContain(`data-answer-source="teaser-source-${index}"`);
+      expect(html).toContain(`The public page states route capability ${index}.`);
+    }
+  });
+
+  it("renders safe answer structure, distinct diagnosis blocks, and early plus final conversion actions", () => {
+    const html = renderToStaticMarkup(createElement(CombinedGeoReportV4Teaser, { model: teaserModel() }));
+
+    expect(html).toContain("<h4>Route capability</h4>");
+    expect(html).toContain("The <strong>complete teaser answer</strong> names a verifiable route capability.");
+    expect(html).toContain("<li>Direct route evidence</li>");
+    expect(html).not.toContain("**complete teaser answer**");
+    expect(html).toContain('data-observable-factor-count="3"');
+    expect(html).toContain('data-prioritized-action-count="3"');
+    expect(html).toContain('data-teaser-cta-position="early"');
+    expect(html).toContain('data-teaser-cta-position="final"');
   });
 });

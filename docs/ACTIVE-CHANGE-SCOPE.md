@@ -1,5 +1,79 @@
 # Active Change Scope Lock
 
+## Free V4 teaser usability and responsive-layout repair
+
+Status: `APPROVED` - explicitly approved by the user on 2026-07-22 after the
+rendered desktop/mobile findings and the six-part repair were presented. This
+single approval covers the bounded component repair, its tests, local rendered
+QA, the exact-commit Vercel Preview sequence recorded below, and moving only the
+protected-Staging alias after verification. It does not authorize another
+report, order, payment, or Worker replacement.
+
+The first Preview `dpl_E9hBpwBbEFRoUgBuiZzXPpYTixTV` from pre-final commit
+`596c2fb451ce14e377f82c8752bcae01dba8ff34` is immutable failed-QA evidence:
+Browser inspection proved that the author `.teaser-source-grid` display rule
+overrode the closed `<details>` user-agent rule. The protected-Staging alias was
+not moved. On 2026-07-22 the user explicitly approved exactly one replacement
+Preview from the final amended commit, its desktop/mobile QA, and the alias move
+only after that QA passes. No third Preview is authorized.
+
+### Objective and frozen evidence
+
+- Repair the real Free V4 teaser renderer used by report
+  `d83a9744-542b-4425-b2bb-a76ffdeb4f6a`. Its current desktop document is about
+  48,514 px tall and its 390 px mobile document about 57,103 px tall; the
+  checkout anchor begins around 56,132 px on mobile.
+- The primary defect is a markup/CSS contract mismatch: shared `.source-card`
+  uses `44px minmax(0,1fr)` (34 px on mobile), but the teaser emits only
+  `.source-content`, so every source is placed in the ordinal column. The Free
+  teaser also expands all 20 sources, displays lightweight Markdown markers as
+  literal text, uses a three-column metadata grid for two fields, and presents
+  the conversion action only after the excessively long evidence section.
+- Preserve the server-side lock: Q2/Q3 answers and remediation details must
+  remain absent from the Free HTML. Preserve every Q1 source identity, URL,
+  verification status, cited text, and persisted diagnosis; this is a
+  presentation repair only.
+
+### Exact allowlist and budget
+
+- `apps/web/src/components/combined-geo-report-v4-teaser.tsx`
+- `apps/web/src/components/combined-geo-report-v4-teaser.test.tsx`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for this approval and final outcome
+- Maximum production/test diff across the two TSX files: `+420/-140` lines.
+- No shared artifact renderer/style, report route, API, database, migration,
+  Worker, search, crawler, prompt, model, report contract, checkout/commerce,
+  email, package, lockfile, environment, Docker, historical report/job/artifact,
+  or production change is allowed.
+
+### Locked implementation and verification
+
+1. Give the teaser its own source layout so source content can never inherit
+   the shared ordinal column. Show the strongest first five sources directly
+   and keep every remaining source in an accessible collapsed disclosure; all
+   source authority and cited text remain in the HTML.
+2. Render safe lightweight answer formatting (paragraphs, lists, headings,
+   emphasis) as React nodes without `dangerouslySetInnerHTML`, dependency
+   changes, arbitrary HTML, or hidden paid content.
+3. Replace the oversized linear layout with a clear value hierarchy: compact
+   hero metadata, an early CTA, a concise technical/AI overview, Q1 proof,
+   visually distinct per-question diagnosis, locked Q2/Q3, issue preview, and
+   a final CTA. Keep the exact four teaser product elements and question order.
+4. Add static regressions for source structure/progressive disclosure, all
+   source identities and cited text, formatted answer markup, early/final CTA,
+   diagnosis structure, and continued absence of Q2/Q3/remediation secrets.
+5. Run the focused component suite, related report renderer tests, `npm test`,
+   `npm run lint`, `npm run build`, and `git diff --check`. Then validate the
+   real report in the Browser at desktop and 390 px mobile: correct page
+   identity, meaningful DOM, no framework overlay, relevant console health,
+   non-narrow source content, no horizontal overflow, reachable CTA, disclosure
+   interaction, and screenshots. Do not ask the user to test before these pass.
+6. One local commit and the one user-approved replacement source-only
+   exact-commit Vercel Preview are allowed; after verifying the replacement,
+   move only the protected-Staging alias. Do not push, merge, create a PR/tag,
+   rebuild/recreate Workers, generate a new report, create an order, initiate
+   payment, write database/artifact state, or mutate production. Existing
+   report/job authority remains immutable.
+
 ## Proposed follow-on - align the Free teaser ready-checkpoint identity validator
 
 Status: `APPROVED` - explicitly approved by the user on 2026-07-22. One
