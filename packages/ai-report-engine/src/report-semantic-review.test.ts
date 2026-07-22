@@ -8,6 +8,7 @@ import {
   parseReportSemanticReviewOutput,
   reportSemanticTextHash,
   verifyReportSemanticReviewReceipt,
+  deriveFreeObservationMetrics,
   type ReportSemanticFieldManifestEntry,
   type ReportSemanticReviewInput,
   type ReportSemanticReviewInputCore
@@ -242,6 +243,20 @@ describe("ReportSemanticReview model output", () => {
 });
 
 describe("ReportSemanticReview receipt integrity", () => {
+  it("blocks a claimed pass for a nonresponsive answer and hashes annotations in the receipt", () => {
+    const input = createReportSemanticReviewInput(inputCore());
+    const review = validReview(input);
+    (review.annotations as Record<string, unknown>).answers = [{ questionId: "question-1", relevance: "not_responsive", entityRole: "none", evidenceIds: [], sourceIds: [], reason: "does not answer" }];
+    expect(() => parseReportSemanticReviewOutput(review, input)).toThrow(/must equal blocked/u);
+    const applied = applyReportSemanticReview(input, validReview(input));
+    expect(() => verifyReportSemanticReviewReceipt({ ...applied.receipt, annotationsHash: "a".repeat(64) }, input, validReview(input), applied.fields)).toThrow(/annotationsHash/u);
+  });
+
+  it("counts each observation once per independent target and competitor axis", () => {
+    const input = createReportSemanticReviewInput(inputCore());
+    const review = parseReportSemanticReviewOutput(validReview(input), input);
+    expect(deriveFreeObservationMetrics(review)).toEqual({ targetMentionCount: 1, competitorMentionCount: 1 });
+  });
   it("rejects non-prose drift at application and verification", () => {
     const input = createReportSemanticReviewInput(inputCore());
     const review = validReview(input);
@@ -353,9 +368,8 @@ function inputCore(): MutableInputCore {
       originalText: evidenceText,
       originalTextHash: reportSemanticTextHash(evidenceText)
     }],
-    observationResults: [
-      { observationId: "observation-1", resultId: "result-1", questionId: "question-1" }
-    ],
+    observationResults: [{ observationId: "observation-1", resultId: "result-1", questionId: "question-1", originalText: "Target and a competitor appear together.", originalTextHash: reportSemanticTextHash("Target and a competitor appear together.") }],
+    answerSubjects: [{ questionId: "question-1", fieldPath: "answerCards[0].answerText" }],
     fields,
     nonProseProjectionHash: hashReportSemanticReviewValue({ reportId: "report-1", questionIds: [1, 2, 3] })
   };
@@ -401,8 +415,8 @@ function validReview(input: ReportSemanticReviewInput): Record<string, unknown> 
       reason: "The three questions request different buyer decisions."
     },
     annotations: {
-      observationResults: [{ observationId: "observation-1", resultId: "result-1", classification: "target", reason: "The supplied result identifies the target." }],
-      answers: input.questions.map((question) => ({ questionId: question.questionId, relevance: "responsive", entityRole: "target", evidenceIds: question.questionId === "question-1" ? ["evidence-q1"] : [], sourceIds: question.questionId === "question-1" ? ["source-q1"] : [], reason: "The answer is bound to this question." })),
+      observationResults: [{ observationId: "observation-1", resultId: "result-1", targetPresence: "present", competitorPresence: "present", reason: "The supplied result identifies both entities." }],
+      answers: input.answerSubjects.map((subject) => ({ questionId: subject.questionId, relevance: "responsive", entityRole: "target", evidenceIds: ["evidence-q1"], sourceIds: ["source-q1"], reason: "The answer is bound to this question." })),
       evidenceUse: input.fields.map((field) => ({ path: field.path, evidenceIds: field.allowedEvidenceIds, sourceIds: field.allowedSourceIds, reason: "Uses only the bound catalog references." }))
     },
     overallDecision: "pass"

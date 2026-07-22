@@ -30,6 +30,7 @@ export interface ReportSemanticManifestSeed {
   readonly sources: readonly ReportSemanticSource[];
   readonly evidence: readonly ReportSemanticEvidence[];
   readonly observationResults: readonly ReportSemanticObservationResult[];
+  readonly answerSubjects: readonly import("./report-semantic-review").ReportSemanticAnswerSubject[];
   readonly fields: readonly ReportSemanticManifestFieldSeed[];
   readonly nonProseProjectionHash: string;
 }
@@ -55,10 +56,15 @@ export function buildReportSemanticReviewManifest(seed: ReportSemanticManifestSe
     sources: seed.sources,
     evidence: seed.evidence,
     observationResults: seed.observationResults,
+    answerSubjects: seed.answerSubjects,
     fields,
     nonProseProjectionHash: seed.nonProseProjectionHash
   });
 }
 
-export const buildFreeV4SemanticReviewManifest = buildReportSemanticReviewManifest;
-export const buildPaidV3SemanticReviewManifest = buildReportSemanticReviewManifest;
+export function buildFreeV4SemanticReviewManifest(seed: Omit<ReportSemanticManifestSeed, "lifecycle">): ReportSemanticReviewInput {
+  return buildReportSemanticReviewManifest({ ...seed, lifecycle: "free_v4" });
+}
+export function buildPaidV3SemanticReviewManifest(seed: Omit<ReportSemanticManifestSeed, "lifecycle">): ReportSemanticReviewInput {
+  return buildReportSemanticReviewManifest({ ...seed, lifecycle: "paid_v3" });
+}

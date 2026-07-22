@@ -7,7 +7,7 @@ import {
 } from "./report-semantic-review";
 
 export interface ReportSemanticReviewInvoker {
-  (request: Readonly<{ input: ReportSemanticReviewInput }>): Promise<unknown>;
+  (request: Readonly<{ task: "unified_report_semantic_review"; input: ReportSemanticReviewInput }>): Promise<unknown>;
 }
 
 export interface OfflineReportSemanticReviewResult {
@@ -21,7 +21,7 @@ export async function runOfflineReportSemanticReview(
   invoke: ReportSemanticReviewInvoker,
   currentNonProseProjectionHash?: string
 ): Promise<OfflineReportSemanticReviewResult> {
-  const rawReview = await invoke({ input });
+  const rawReview = await invoke({ task: "unified_report_semantic_review", input });
   const review = parseReportSemanticReviewOutput(rawReview, input);
   return { review, applied: applyReportSemanticReview(input, review, currentNonProseProjectionHash) };
 }

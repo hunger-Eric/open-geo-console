@@ -45,7 +45,10 @@ export interface ReportSemanticObservationResult {
   readonly observationId: string;
   readonly resultId: string;
   readonly questionId: string | null;
+  readonly originalText: string;
+  readonly originalTextHash: string;
 }
+export interface ReportSemanticAnswerSubject { readonly questionId: string; readonly fieldPath: string; }
 
 export interface ReportSemanticFieldManifestEntry {
   readonly path: string;
@@ -67,6 +70,7 @@ export interface ReportSemanticReviewInputCore {
   readonly sources: readonly ReportSemanticSource[];
   readonly evidence: readonly ReportSemanticEvidence[];
   readonly observationResults: readonly ReportSemanticObservationResult[];
+  readonly answerSubjects: readonly ReportSemanticAnswerSubject[];
   readonly fields: readonly ReportSemanticFieldManifestEntry[];
   readonly nonProseProjectionHash: string;
 }
@@ -98,11 +102,12 @@ export interface ReportQuestionDistinctnessResult {
   readonly reason: string;
 }
 
-export type ReportSemanticObservationClassification = "target" | "competitor" | "ambiguous";
+export type ReportSemanticPresence = "present" | "absent" | "ambiguous";
 export interface ReportSemanticObservationAnnotation {
   readonly observationId: string;
   readonly resultId: string;
-  readonly classification: ReportSemanticObservationClassification;
+  readonly targetPresence: ReportSemanticPresence;
+  readonly competitorPresence: ReportSemanticPresence;
   readonly reason: string;
 }
 export interface ReportSemanticAnswerAnnotation {
@@ -161,6 +166,7 @@ export interface ReportSemanticReviewReceipt {
   readonly decision: "pass" | "corrected";
   readonly fieldCoverageHash: string;
   readonly appliedProseHash: string;
+  readonly annotationsHash: string;
   readonly nonProseProjectionHash: string;
   readonly fields: readonly ReportSemanticReceiptField[];
 }
@@ -173,14 +179,15 @@ export interface AppliedReportSemanticReview {
 
 const INPUT_KEYS = new Set([
   "version", "lifecycle", "locale", "target", "expectedModel", "questions", "sources", "evidence", "fields",
-  "observationResults", "nonProseProjectionHash", "inputHash"
+  "observationResults", "answerSubjects", "nonProseProjectionHash", "inputHash"
 ]);
 const TARGET_KEYS = new Set(["siteKey", "targetUrl", "aliases"]);
 const MODEL_KEYS = new Set(["providerId", "modelId"]);
 const QUESTION_KEYS = new Set(["questionId", "originalText", "originalTextHash"]);
 const SOURCE_KEYS = new Set(["sourceId", "questionId", "canonicalUrl", "originalText", "originalTextHash"]);
 const EVIDENCE_KEYS = new Set(["evidenceId", "questionId", "sourceId", "originalText", "originalTextHash"]);
-const OBSERVATION_RESULT_KEYS = new Set(["observationId", "resultId", "questionId"]);
+const OBSERVATION_RESULT_KEYS = new Set(["observationId", "resultId", "questionId", "originalText", "originalTextHash"]);
+const ANSWER_SUBJECT_KEYS = new Set(["questionId", "fieldPath"]);
 const FIELD_KEYS = new Set([
   "path", "originalText", "originalTextHash", "mutability", "questionId", "allowedEvidenceIds", "allowedSourceIds"
 ]);
@@ -194,12 +201,12 @@ const FIELD_RESULT_KEYS = new Set([
 const RETAINED_TERM_KEYS = new Set(["term", "reason"]);
 const DISTINCTNESS_KEYS = new Set(["decision", "duplicateGroups", "reason"]);
 const ANNOTATIONS_KEYS = new Set(["observationResults", "answers", "evidenceUse"]);
-const OBSERVATION_ANNOTATION_KEYS = new Set(["observationId", "resultId", "classification", "reason"]);
+const OBSERVATION_ANNOTATION_KEYS = new Set(["observationId", "resultId", "targetPresence", "competitorPresence", "reason"]);
 const ANSWER_ANNOTATION_KEYS = new Set(["questionId", "relevance", "entityRole", "evidenceIds", "sourceIds", "reason"]);
 const EVIDENCE_USE_KEYS = new Set(["path", "evidenceIds", "sourceIds", "reason"]);
 const RECEIPT_KEYS = new Set([
   "version", "lifecycle", "inputHash", "reviewHash", "providerId", "modelId", "decision", "fieldCoverageHash",
-  "appliedProseHash", "nonProseProjectionHash", "fields"
+  "appliedProseHash", "annotationsHash", "nonProseProjectionHash", "fields"
 ]);
 const RECEIPT_FIELD_KEYS = new Set(["path", "originalTextHash", "appliedTextHash", "decision"]);
 
@@ -260,7 +267,7 @@ export function parseReportSemanticReviewOutput(
     ["pass", "corrected", "blocked"] as const,
     "$reviewOutput.overallDecision"
   );
-  const expectedDecision = deriveOverallDecision(fields, questionDistinctness);
+  const expectedDecision = deriveOverallDecision(fields, questionDistinctness, annotations);
   if (overallDecision !== expectedDecision) {
     throw new TypeError(`$reviewOutput.overallDecision must equal ${expectedDecision}.`);
   }
@@ -321,6 +328,7 @@ export function applyReportSemanticReview(
     decision: review.overallDecision,
     fieldCoverageHash: fieldCoverageHash(input.fields),
     appliedProseHash: appliedProseHash(fields),
+    annotationsHash: hashReportSemanticReviewValue(review.annotations),
     nonProseProjectionHash: input.nonProseProjectionHash,
     fields: receiptFields
   };
@@ -362,6 +370,8 @@ export function verifyReportSemanticReviewReceipt(
   requireExact(coverageHash, fieldCoverageHash(input.fields), "$reviewReceipt.fieldCoverageHash");
   const proseHash = requireHash(record.appliedProseHash, "$reviewReceipt.appliedProseHash");
   requireExact(proseHash, appliedProseHash(fields), "$reviewReceipt.appliedProseHash");
+  const annotationsHash = requireHash(record.annotationsHash, "$reviewReceipt.annotationsHash");
+  requireExact(annotationsHash, hashReportSemanticReviewValue(review.annotations), "$reviewReceipt.annotationsHash");
   const nonProseHash = requireHash(record.nonProseProjectionHash, "$reviewReceipt.nonProseProjectionHash");
   requireExact(nonProseHash, input.nonProseProjectionHash, "$reviewReceipt.nonProseProjectionHash");
   requireExact(
@@ -380,6 +390,7 @@ export function verifyReportSemanticReviewReceipt(
     decision,
     fieldCoverageHash: coverageHash,
     appliedProseHash: proseHash,
+    annotationsHash,
     nonProseProjectionHash: nonProseHash,
     fields: receiptFields
   };
@@ -442,6 +453,16 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
       assertCompatibleOwner(field.questionId, source.questionId, `$reviewInput.fields ${field.path} source ${sourceId}`);
     }
   }
+  const answerSubjects = requireArray(record.answerSubjects, "$reviewInput.answerSubjects", 3).map((value, index) => {
+    const path = `$reviewInput.answerSubjects[${index}]`;
+    const row = strictRecord(value, path, ANSWER_SUBJECT_KEYS);
+    const questionId = requireBoundedText(row.questionId, `${path}.questionId`, MAX_ID_CHARS);
+    const fieldPath = requireBoundedText(row.fieldPath, `${path}.fieldPath`, MAX_PATH_CHARS);
+    if (!questionIds.has(questionId)) throw new TypeError(`${path} references unknown question ${questionId}.`);
+    if (!fields.some((field) => field.path === fieldPath && field.questionId === questionId)) throw new TypeError(`${path} is not an owned answer field.`);
+    return { questionId, fieldPath };
+  });
+  assertUnique(answerSubjects.map(({ questionId }) => questionId), "$reviewInput.answerSubjects questionId");
   return {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
     lifecycle,
@@ -452,6 +473,7 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
     sources,
     evidence,
     observationResults,
+    answerSubjects,
     fields,
     nonProseProjectionHash: requireHash(record.nonProseProjectionHash, "$reviewInput.nonProseProjectionHash")
   };
@@ -499,10 +521,13 @@ function parseEvidence(value: unknown, index: number): ReportSemanticEvidence {
 function parseObservationResult(value: unknown, index: number): ReportSemanticObservationResult {
   const path = `$reviewInput.observationResults[${index}]`;
   const row = strictRecord(value, path, OBSERVATION_RESULT_KEYS);
+  const originalText = requireBoundedText(row.originalText, `${path}.originalText`, MAX_TEXT_CHARS);
+  const originalTextHash = requireHash(row.originalTextHash, `${path}.originalTextHash`);
+  requireExact(originalTextHash, reportSemanticTextHash(originalText), `${path}.originalTextHash`);
   return {
     observationId: requireBoundedText(row.observationId, `${path}.observationId`, MAX_ID_CHARS),
     resultId: requireBoundedText(row.resultId, `${path}.resultId`, MAX_ID_CHARS),
-    questionId: requireNullableText(row.questionId, `${path}.questionId`, MAX_ID_CHARS)
+    questionId: requireNullableText(row.questionId, `${path}.questionId`, MAX_ID_CHARS), originalText, originalTextHash
   };
 }
 
@@ -622,18 +647,19 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): Rep
     return {
       observationId: expected.observationId,
       resultId: expected.resultId,
-      classification: requireOneOf(item.classification, ["target", "competitor", "ambiguous"] as const, `${path}.classification`),
+      targetPresence: requireOneOf(item.targetPresence, ["present", "absent", "ambiguous"] as const, `${path}.targetPresence`),
+      competitorPresence: requireOneOf(item.competitorPresence, ["present", "absent", "ambiguous"] as const, `${path}.competitorPresence`),
       reason: requireBoundedText(item.reason, `${path}.reason`, 5_000)
     };
   });
   const answers = requireArray(row.answers, "$reviewOutput.annotations.answers", 3);
-  if (answers.length !== input.questions.length) throw new TypeError("$reviewOutput.annotations.answers must cover every question exactly once and in order.");
+  if (answers.length !== input.answerSubjects.length) throw new TypeError("$reviewOutput.annotations.answers must cover every answer subject exactly once and in order.");
   const evidenceById = new Map(input.evidence.map((item) => [item.evidenceId, item]));
   const sourceById = new Map(input.sources.map((item) => [item.sourceId, item]));
   const parsedAnswers = answers.map((value, index) => {
     const path = `$reviewOutput.annotations.answers[${index}]`;
     const item = strictRecord(value, path, ANSWER_ANNOTATION_KEYS);
-    const questionId = input.questions[index]!.questionId;
+    const questionId = input.answerSubjects[index]!.questionId;
     requireExact(item.questionId, questionId, `${path}.questionId`);
     const evidenceIds = requireUniqueTextArray(item.evidenceIds, `${path}.evidenceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
     const sourceIds = requireUniqueTextArray(item.sourceIds, `${path}.sourceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
@@ -664,10 +690,14 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): Rep
 }
 
 export function deriveFreeObservationMetrics(review: ReportSemanticReviewOutput): { targetMentionCount: number; competitorMentionCount: number } {
-  return review.annotations.observationResults.reduce((counts, annotation) => ({
-    targetMentionCount: counts.targetMentionCount + (annotation.classification === "target" ? 1 : 0),
-    competitorMentionCount: counts.competitorMentionCount + (annotation.classification === "competitor" ? 1 : 0)
-  }), { targetMentionCount: 0, competitorMentionCount: 0 });
+  const grouped = new Map<string, { target: boolean; competitor: boolean }>();
+  for (const item of review.annotations.observationResults) {
+    const current = grouped.get(item.observationId) ?? { target: false, competitor: false };
+    current.target ||= item.targetPresence === "present";
+    current.competitor ||= item.competitorPresence === "present";
+    grouped.set(item.observationId, current);
+  }
+  return [...grouped.values()].reduce((counts, item) => ({ targetMentionCount: counts.targetMentionCount + Number(item.target), competitorMentionCount: counts.competitorMentionCount + Number(item.competitor) }), { targetMentionCount: 0, competitorMentionCount: 0 });
 }
 
 function parseAppliedFields(
@@ -721,9 +751,10 @@ function parseReceiptFields(
 
 function deriveOverallDecision(
   fields: readonly ReportSemanticFieldResult[],
-  distinctness: ReportQuestionDistinctnessResult
+  distinctness: ReportQuestionDistinctnessResult,
+  annotations: ReportSemanticAnnotations
 ): ReportSemanticReviewDecision {
-  if (distinctness.decision !== "distinct" || fields.some(({ decision }) => decision === "blocked")) return "blocked";
+  if (distinctness.decision !== "distinct" || fields.some(({ decision }) => decision === "blocked") || annotations.answers.some(({ relevance }) => relevance !== "responsive")) return "blocked";
   return fields.some(({ decision }) => decision === "corrected") ? "corrected" : "pass";
 }
 
