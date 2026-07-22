@@ -2,10 +2,10 @@
 
 ## ReportSemanticReview staged program - Phase 2B1 offline reviewer core and manifests
 
-Status: `APPROVED` - on 2026-07-23 the user explicitly approved this exact
+Status: `COMPLETE` - the approved runtime-unreferenced offline reviewer core
 Phase 2B1 scope with `批准 Phase 2B1 FROZEN 范围并开始执行`. This approval covers
-only the runtime-unreferenced offline reviewer core and its local mock/fixture
-verification. Phase 2B2 and Phase 2B3 remain unapproved.
+and its local mock/fixture verification are complete. Phase 2B2 and Phase 2B3
+remain unapproved.
 
 ### Authority and baseline
 
@@ -113,6 +113,34 @@ real external call would be required; if the approved design or product
 behavior must change; if either production budget is exceeded; or if two
 consecutive repairs fail to reduce the acceptance set before a new route is
 considered.
+
+### Phase 2B1 implementation outcome
+
+Status: `COMPLETE` - the additive review contract now carries immutable
+observation/result text and hashes, catalog-bound two-axis target/competitor
+annotations, answer-subject and field-level evidence ownership, annotation
+receipt hashing, lifecycle-safe Free/Paid manifest wrappers, and one injected
+offline review adapter. The implementation remains runtime-unreferenced.
+
+- Cumulative changed-path audit from `77b4d20de7104d1696df45e63071059a5122734f`
+  found exactly the nine Phase 2B1 allowlisted paths.
+- Cumulative production package diff: `+265/-7` against the `+1,150/-90`
+  hard budget. Cumulative named-test diff: `+105/-0` against `+1,350/-120`.
+- Focused verification: four files and `93` tests passed; the
+  `ai-report-engine` TypeScript build passed.
+- Fresh repository verification: `299` test files passed and `46` skipped;
+  `2754` tests passed and `187` skipped. `npm run lint`, `npm run build`, and
+  `git diff --check` passed.
+- Repository search found no `apps/` imports or references to Phase 2B1
+  symbols. No Worker routing, checkpoint, report/artifact, schema,
+  configuration, provider client, model operation, environment, or customer
+  runtime path changed.
+- No live model call, crawl, report/job creation, database mutation, payment,
+  credit, refund, email, Docker build, deployment, push, or other external
+  action occurred.
+- This completion does not authorize Phase 2B2 marker-present Free V4
+  integration, Phase 2B3 marker-present Paid V3 integration, protected
+  Staging, production activation, or heuristic removal.
 
 ---
 
