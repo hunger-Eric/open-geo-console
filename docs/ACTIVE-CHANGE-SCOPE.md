@@ -1,5 +1,378 @@
 # Active Change Scope Lock
 
+## ReportSemanticReview staged program - Phase 1 additive contract foundation
+
+Status: `FROZEN` - on 2026-07-23 the user approved the version-isolated,
+phased design baseline and authorized this scope rewrite. That approval is not
+implementation authority. Phase 1 may start only after the user explicitly
+approves this exact Phase 1 allowlist.
+
+### Approved design authority
+
+- `docs/superpowers/specs/2026-07-23-report-semantic-review-staged-rollout-design.md`
+- Active product path: Free V4 teaser -> Paid V3
+  `combined_geo_report_v3` only.
+- V1 and V2 product flows are retired and must remain unchanged.
+- Baseline branch: `codex/v4-answer-optimization-scope-reset`.
+- Baseline HEAD before the design/scope documentation diff:
+  `be214b02be11d6fe4b80f565793b85eed90d3561`.
+
+### Phase 1 objective
+
+Create the additive, runtime-unreferenced `ReportSemanticReview` contract
+foundation: types, canonical input/output hashing, strict parsing, exact field
+coverage and ownership validation, non-prose integrity verification, and safe
+application of corrections to mutable manifest fields.
+
+Phase 1 must not wire the contract into a Worker, provider, checkpoint,
+configuration snapshot, report builder, artifact parser/readiness gate, UI, or
+runtime route. It makes zero model calls and changes zero customer output.
+
+### Exact Phase 1 allowlist and budget
+
+- `packages/ai-report-engine/src/report-semantic-review.ts` (new)
+- `packages/ai-report-engine/src/report-semantic-review.test.ts` (new)
+- `packages/ai-report-engine/src/index.ts`
+- `packages/ai-report-engine/src/index.test.ts`
+- `docs/superpowers/specs/2026-07-23-report-semantic-review-staged-rollout-design.md`
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+
+Maximum production diff across `report-semantic-review.ts` and `index.ts`:
+`+750/-10` lines. Maximum test diff across the two test files: `+950/-20`
+lines. Documentation is excluded from these code budgets. No other path may be
+modified.
+
+### Locked Phase 1 contract behavior
+
+1. Define one explicit review version for the future Free/Paid integration,
+   but do not add an activation marker to any current configuration or job.
+2. Canonical input contains lifecycle, locale, target identity, exact ordered
+   field manifest, original text and hash, mutable/read-only state, exact
+   question/evidence/source ownership, non-prose projection hash, and expected
+   model identity.
+3. Output contains exactly one result per field, original hash, decision,
+   optional corrected text for mutable fields, evidence/source references,
+   semantic issue codes/reason, retained original terms/reasons, report-level
+   question-distinctness result, and overall decision.
+4. Reject missing, duplicate, extra, reordered, wrong-hash, wrong-owner,
+   unknown-ID, immutable-field, invalid-decision, or structurally invalid
+   output. Applying accepted corrections must preserve the non-prose hash.
+5. The contract may express model semantic decisions, but Phase 1 code must
+   not implement lexical/regex/character-ratio/subsequence heuristics for
+   language, relevance, brand legitimacy, causality, exaggeration, or evidence
+   meaning.
+6. The package export is additive. No existing export behavior, parser,
+   report type, or artifact contract may change.
+
+### Phase 1 acceptance
+
+1. Tests cover pass, correction, blocked review, mixed-language/unseen terms,
+   full field coverage, ordering, duplicate/extra paths, original hash,
+   immutable correction, question/source/evidence ownership, retained-term
+   reasons, model identity, non-prose hash, and malformed input/output.
+2. A repository search proves no production file outside the package index
+   imports or calls `ReportSemanticReview`.
+3. Run focused package tests, `npm test`, `npm run lint`, `npm run build`, and
+   `git diff --check`.
+4. Before a local Phase 1 commit, compare the complete diff against this exact
+   allowlist and both code budgets. Do not push.
+
+### Automatic execution and hard stops
+
+After explicit Phase 1 approval, conformant units continue automatically.
+Ordinary scoped defects are repaired within the same unit. Stop as
+`DEVIATION_REVIEW_REQUIRED` when any of the following occurs:
+
+- a required path is outside this allowlist;
+- a runtime import/wiring, provider/model call, checkpoint/configuration,
+  customer-output, schema, dependency, external action, or historical-data
+  change is required;
+- two consecutive repairs do not reduce the failing acceptance set and a new
+  route is being considered;
+- the production diff budget is exceeded or the approved design must change.
+
+No live scan, model call, job recovery/replay, database mutation, payment,
+credit, refund, email, Docker build, deployment, push, publication, or report
+generation is authorized.
+
+### Later phases are not authorized
+
+- Phase 2: offline integration and immutable version-carrier proof.
+- Phase 3: one separately approved protected-Staging candidate/report.
+- Phase 4: separately approved future-job production activation.
+- Phase 5: separately scoped removal of obsolete current-product heuristics
+  after no active authority depends on them.
+
+Each later phase requires a new exact `FROZEN` allowlist, budget, acceptance
+set, and explicit user approval. Phase 1 approval cannot be reused.
+
+---
+
+## Archived monolithic ReportSemanticReview proposal
+
+Status: `SUPERSEDED` - this initial all-at-once proposal is retained only as
+audit history. Its allowlist and budgets confer no authority. The staged design
+and the active Phase 1 `FROZEN` scope above replace it.
+
+### Current baseline and preserved authority
+
+- Branch `codex/v4-answer-optimization-scope-reset` at
+  `be214b02be11d6fe4b80f565793b85eed90d3561` was clean when this scope was
+  written. Existing committed scope and commerce history below this section
+  are preserved unchanged.
+- No production/runtime file, database row, report artifact, checkpoint, Paid
+  job, model invocation, search observation, or protected-site state was
+  changed by this audit.
+- The rejected local repair is superseded: changing only
+  `executiveSummary.overview`, `synthesis.ts`, a language whitelist, a regex,
+  or a character ratio cannot satisfy this objective.
+- Any existing Paid job remains evidence only. Resuming, repairing,
+  terminalizing, replacing, or publishing it requires a later exact runtime
+  authorization after the implementation and protected-Staging evidence pass.
+
+### Read-only audit: current customer path
+
+The selected current path is Free V4 teaser generation followed by Paid V3
+`combined_geo_report_v3` fulfillment. The audit found these classes of
+program-owned semantic judgment on that reachable path:
+
+1. `report-language.ts`, `analysis.ts`, `synthesis.ts`,
+   `generative-search-answer.ts`, `open-geo-answer-v3.ts`, and
+   `combined-geo-report.ts` use word lists, character ratios, or repeated local
+   correction passes to decide whether customer prose is natural and may
+   delete prose that the program considers invalid.
+2. `answer-first-v3.ts` uses provider/logistics regexes to decide whether Q1
+   answers the question, and token overlap to select a supposedly relevant
+   excerpt.
+3. `open-geo-answer-v3.ts` and `report-v4-free-teaser.ts` infer target mentions,
+   competitors, and customer-facing presence metrics from normalized substring
+   matches.
+4. `business-questions.ts` claims semantic distinctness after only normalized
+   string equality, while other deterministic categorization and template
+   choices are presented as semantic question quality.
+5. `report-v4-diagnosis.ts`, `report-v4-customer-prose.ts`,
+   `prohibited-claims.ts`, and `recommendation-forensic-v2-claims.ts` use
+   regexes to judge SEO framing, causality, ranking, recommendation, language,
+   and whether prose is customer-safe.
+6. `source-selection-diagnosis-v1.ts` constructs customer explanations,
+   evidence roles, gaps, patterns, and actions from length, digit, service-word,
+   title, category, and substring heuristics.
+7. `provider-claim-extraction.ts` asks a model to extract claims and then
+   overrides its semantic result with an operating-mode synonym list and
+   substring containment checks.
+8. `public-source-forensics/report-builder.ts` goes beyond validation: domain
+   presence and deterministic templates manufacture the customer verdict,
+   comparison, exactly three priorities, vendor actions, acceptance criteria,
+   and limitations before the final Paid artifact is assembled.
+9. Final artifact readiness calls the same language gate again instead of
+   verifying one authoritative semantic-review receipt.
+
+The audit also found the same defect class in legacy or adjacent paths,
+including `recommendation-forensic.ts`, V1 citation validation/opportunity
+helpers, V1/V2 combined-answer language gates, the legacy production
+recommendation builder, and provider passage/entity relevance scoring. The
+user confirmed on 2026-07-23 that V1 and V2 are no longer in use. They are not
+reachable as customer-prose validators in the selected Free V4 -> Paid V3
+artifact lifecycle, are not a follow-on deliverable, and must remain unchanged.
+Provider retrieval, passage ranking, and qualification are also separate from
+the final customer-prose review and remain forbidden in this scope. This
+distinction prevents a current-product repair from reviving or redesigning
+retired product behavior and historical contracts.
+
+### Locked ownership boundary
+
+The model owns:
+
+1. Natural language and whether translation is required.
+2. Preservation of brands, product names, industry terms, mixed-language
+   names, and the reason each retained original term is appropriate.
+3. Whether an answer actually addresses its bound question.
+4. Whether the three questions are semantically distinct.
+5. Whether customer prose makes unsupported causal, ranking, probability,
+   recommendation, or exaggerated claims.
+6. Whether the prose faithfully expresses the cited evidence, including
+   target/competitor presence, evidence role, source-selection diagnosis,
+   priorities, actions, and limitations.
+7. Corrections to every mutable customer-prose field in the review manifest.
+
+Deterministic code owns only:
+
+1. JSON/schema, field types, size bounds, enums, and exact cardinalities such
+   as three questions, three factors, and three actions where the product
+   contract requires them.
+2. URL safety, source/evidence/question ID existence, exact ownership and
+   cross-reference checks, exact source-excerpt binding, hashes, checkpoint
+   identity, model identity, and non-prose projection integrity.
+3. Explicit mechanical leakage bans for raw provider JSON, system/developer
+   prompts, secrets, tool transcripts, and unknown or unsafe URLs. A regex may
+   remain only for an unambiguous byte/syntax safety condition, never to infer
+   language quality, answer relevance, brand legitimacy, causality, or evidence
+   meaning.
+4. Payment, credit, artifact, access, database transaction, terminalization,
+   and exactly-once behavior.
+
+### Locked review lifecycle and contract
+
+1. Add one versioned `ReportSemanticReview` contract with a canonical input
+   hash, provider/model identity, exact field manifest, original text hash for
+   every field, mutable/read-only classification, allowed evidence and question
+   IDs, per-field verdict and corrected text, retained-original terms and
+   reasons, evidence references, issue codes, exact field coverage, overall
+   decision, and a hash of all non-prose data.
+2. Each report lifecycle gets exactly one semantic-review model call after all
+   of that lifecycle's customer prose and evidence exist:
+   - Free V4: after the three questions, observation evidence, Q1 answer/source
+     card, and Q1 diagnosis are assembled, before the ready teaser checkpoint.
+   - Paid V3: after website synthesis, all three answer/source cards, all three
+     V4 diagnoses, the source-selection diagnosis, and the public-source report
+     draft are assembled, before artifact materialization and terminalization.
+3. The Paid review treats the already accepted Free Q1 question, answer,
+   evidence identity, and reviewed prose as read-only continuity. It may review
+   them for coverage but may not silently create a different paid Q1 result.
+4. Questions are also immutable after their searches/evidence exist. If the
+   model finds semantic duplication, the review blocks; it must not rewrite a
+   question and leave old search/evidence IDs attached. Question regeneration
+   would require a separately scoped pre-search workflow.
+5. Apply model corrections only through the exact mutable field paths in the
+   manifest. Reject missing, duplicate, extra, reordered, wrong-hash,
+   wrong-owner, unknown-ID, immutable-field, non-prose, or structurally invalid
+   output. The model cannot rewrite source originals, URLs, IDs, evidence,
+   questions, hashes, cost/commercial fields, or checkpoint authority.
+6. The review input uses the current locked `websiteSynthesis` model capability
+   and its persisted model identity/budget. Do not add a required model-profile
+   operation that would invalidate historical or in-flight configuration
+   snapshots. `ReportSemanticReview` is a distinct logical contract and hash,
+   not a new unversioned configuration fallback.
+7. There is no field-by-field semantic repair loop and no programmatic fallback
+   that deletes or rewrites prose. A transport or malformed-JSON failure follows
+   the existing bounded provider failure policy and fails closed; one completed
+   semantic review is the only semantic authority for that artifact lifecycle.
+8. Persist the Free review in its checkpoint and the Paid review in the Worker
+   checkpoint and final report. Readiness verifies review version, input hash,
+   model identity, exact field coverage, pass state, applied-output hashes, and
+   non-prose integrity. It does not rerun lexical, regex, or character-ratio
+   semantic tests.
+9. Historical artifacts remain parseable without pretending they have a review
+   receipt. Only newly generated/reviewed Free V4 and Paid V3 artifacts may pass
+   the new readiness boundary. No schema migration or historical-data rewrite
+   is allowed.
+
+### Exact production allowlist
+
+- `packages/ai-report-engine/src/report-semantic-review.ts` (new)
+- `packages/ai-report-engine/src/index.ts`
+- `packages/ai-report-engine/src/report-language.ts`
+- `packages/ai-report-engine/src/analysis.ts`
+- `packages/ai-report-engine/src/synthesis.ts`
+- `packages/ai-report-engine/src/generative-search-answer.ts`
+- `packages/ai-report-engine/src/open-geo-answer-v3.ts`
+- `packages/ai-report-engine/src/combined-geo-report.ts`
+- `packages/ai-report-engine/src/combined-geo-report-v3.ts`
+- `packages/ai-report-engine/src/recommendation-forensic-v2-claims.ts`
+- `packages/ai-report-engine/src/source-selection-diagnosis-v1.ts`
+- `packages/ai-report-engine/src/report-v4-diagnosis.ts`
+- `packages/ai-report-engine/src/report-v4-customer-prose.ts`
+- `packages/ai-report-engine/src/provider-claim-extraction.ts`
+- `packages/public-search-observer/src/business-questions.ts`
+- `packages/public-search-observer/src/prohibited-claims.ts`
+- `apps/web/src/report-v4/mimo-report-semantic-review-provider.ts` (new)
+- `apps/web/src/worker/report-semantic-review.ts` (new)
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+- `apps/web/src/worker/answer-first-v3.ts`
+- `apps/web/src/worker/source-selection-diagnosis.ts`
+- `apps/web/src/worker/public-source-forensics.ts`
+- `apps/web/src/public-source-forensics/report-builder.ts`
+- `apps/web/src/worker/processor.ts`
+- `apps/web/src/report/combined-artifact-readiness.tsx`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for this scope, approval state, measured
+  budget, and final verification outcome only.
+
+Maximum production diff across the allowlisted TypeScript files:
+`+2,600/-1,300` lines. This is a hard ceiling, not a target. No other production
+or runtime path may be touched.
+
+### Initial test and fixture allowlist
+
+- `packages/ai-report-engine/src/report-semantic-review.test.ts` (new)
+- `packages/ai-report-engine/src/index.test.ts`
+- `packages/ai-report-engine/src/report-language.test.ts`
+- `packages/ai-report-engine/src/generative-search-answer.test.ts`
+- `packages/ai-report-engine/src/open-geo-answer-v3.test.ts`
+- `packages/ai-report-engine/src/combined-geo-report.test.ts`
+- `packages/ai-report-engine/src/combined-geo-report-v3.test.ts`
+- `packages/ai-report-engine/src/source-selection-diagnosis-v1.test.ts`
+- `packages/ai-report-engine/src/report-v4-diagnosis.test.ts`
+- `packages/ai-report-engine/src/report-v4-customer-prose.test.ts`
+- `packages/ai-report-engine/src/provider-claim-extraction.test.ts`
+- `packages/public-search-observer/src/business-questions.test.ts`
+- `apps/web/src/report-v4/mimo-report-semantic-review-provider.test.ts` (new)
+- `apps/web/src/worker/report-semantic-review.test.ts` (new)
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+- `apps/web/src/worker/answer-first-v3.test.ts`
+- `apps/web/src/worker/source-selection-diagnosis.test.ts`
+- `apps/web/src/worker/public-source-forensics.test.ts`
+- `apps/web/src/public-source-forensics/report-builder.test.ts`
+- `apps/web/src/public-source-forensics/testing.ts`
+- `apps/web/src/worker/processor.test.ts`
+- `apps/web/src/worker/processor-contract.test.ts`
+- `apps/web/src/report/combined-artifact-readiness.test.tsx`
+- `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx`
+- `apps/web/src/components/combined-geo-report-v4-teaser.test.tsx`
+
+Maximum initial test/fixture diff: `+3,200/-1,600` lines. The existing
+verification-only amendment rule may add only directly affected tests,
+fixtures, mocks, or harness files and may raise this test budget only to the
+measured diff plus at most 20 percent. It may not add a production file or
+weaken a gate.
+
+### Forbidden subsystems and actions
+
+- No database schema/migration, payment, order, credit, refund, access-token,
+  commercial settlement, email, or artifact terminalization semantics.
+- No public-search adapter, query fanout, live search, crawler, provider
+  discovery retrieval, passage segmentation/ranking, entity resolution,
+  evidence grade, source eligibility, provider qualification, or historical
+  evidence mutation.
+- No legacy V1/V2 product-flow rewrite, compatibility replay, report repair,
+  replacement fulfillment, historical artifact rewrite, or job-state repair.
+- No dependency, lockfile, environment, secret, model-profile JSON, model ID,
+  prompt-provider endpoint, Docker image, deployment, Preview/Staging/
+  production mutation, or external paid action.
+- No broad cleanup, unrelated refactor, formatting sweep, or modification of
+  user-owned files. Any newly discovered required production path stops and
+  returns to `FROZEN` for user approval.
+
+### Acceptance checks before any runtime proposal
+
+1. Unit tests prove mixed-language brands and unseen industry/product terms are
+   accepted or corrected by the mocked semantic reviewer without a whitelist,
+   regex, or character ratio deciding their meaning.
+2. Contract tests prove exact field coverage, original-text hashes, immutable
+   field protection, allowed evidence/question ownership, non-prose projection
+   hash, retained-term reasons, model identity, and input-hash mismatch all
+   fail closed.
+3. Free tests prove exactly one review call, persisted ready receipt, Q1 answer
+   responsiveness and presence metrics sourced from that receipt, and no local
+   semantic retry/deletion fallback.
+4. Paid tests prove exactly one review call across all final customer prose,
+   Free Q1 continuity, all three questions/answers/diagnoses, public-source
+   sections, source-selection sections, website synthesis, checkpoint resume,
+   and final readiness receipt verification.
+5. Adversarial tests cover natural causality discussion versus unsupported
+   causal claims, denial language, unknown evidence IDs, evidence belonging to
+   another question, altered exact excerpts, duplicate questions, missing
+   fields, extra fields, model JSON leakage, prompt leakage, unsafe URLs, and
+   malformed provider output.
+6. Focused affected suites, `npm test`, `npm run lint`, `npm run build`, and
+   `git diff --check` must pass. Compare the complete diff with this allowlist
+   and both budgets before any commit.
+7. A later protected-Staging acceptance proposal must name the exact candidate
+   commit/image, rollback image, target report/job, model-call count, cost cap,
+   and non-repetition evidence. This implementation scope by itself authorizes
+   none of those actions.
+
+---
+
 ## Protected-test email recipient boundary after exact-order refund
 
 Status: `APPROVED` - the user explicitly approved this exact protected-test
