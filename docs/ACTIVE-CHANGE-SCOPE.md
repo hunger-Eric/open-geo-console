@@ -1,5 +1,134 @@
 # Active Change Scope Lock
 
+## ReportSemanticReview staged program - Phase 2A inactive checkpoint carrier
+
+Status: `FROZEN` - on 2026-07-23 the user approved checkpoint-lineage
+activation as the carrier architecture. That decision authorizes this exact
+scope to be written; it does not authorize the implementation below. Change
+this status to `APPROVED` only after the user explicitly approves this Phase 2A
+allowlist, budgets, behavior, and acceptance set.
+
+### Authority and baseline
+
+- Design authority:
+  `docs/superpowers/specs/2026-07-23-report-semantic-review-staged-rollout-design.md`.
+- Approved carrier decision: optional `report-semantic-review-v1` at the root
+  of the existing `scan_jobs.checkpoint` JSONB authority, seeded only when a
+  job is created and immutable afterward.
+- Active product lineage: Free V4 pre-admission -> Paid V3
+  `combined_geo_report_v3` only.
+- V1, V2, formal Paid V4, and all historical jobs remain unchanged.
+- Baseline branch: `codex/v4-answer-optimization-scope-reset`.
+- Baseline HEAD: `8d71aca5f2e25cf2c6ac68a63972d2c9b9cd5ddf`.
+
+### Phase 2A objective
+
+Add only the inactive, immutable checkpoint carrier needed by a later offline
+semantic-review integration. Phase 2A may make the job-creation and checkpoint
+persistence surfaces capable of carrying the marker, but the ordinary
+production Free enqueue call must continue to omit it. Consequently, this
+phase makes zero model calls and activates zero real Free or Paid jobs.
+
+### Exact Phase 2A production allowlist
+
+- `apps/web/src/db/report-semantic-review-activation.ts` (new)
+- `apps/web/src/db/schema.ts`
+- `apps/web/src/db/report-v4-admission-jobs.ts`
+- `apps/web/src/db/jobs.ts`
+- `apps/web/src/db/commercial-orders.ts`
+- `docs/superpowers/specs/2026-07-23-report-semantic-review-staged-rollout-design.md`
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+
+Maximum production-code diff across the five `apps/web/src/db` files:
+`+420/-60` lines. Documentation is excluded. No other production/runtime path
+may be modified.
+
+### Exact Phase 2A test allowlist
+
+- `apps/web/src/db/report-semantic-review-activation.test.ts` (new)
+- `apps/web/src/db/report-v4-admission-jobs.test.ts`
+- `apps/web/src/db/jobs.test.ts`
+- `apps/web/src/db/commercial-orders-semantic-review.postgres.test.ts` (new)
+
+Maximum test diff: `+850/-80` lines. A verification-only amendment may adjust
+only these named test files under the repository's existing test-only rule; it
+may not add another production file or weaken an acceptance gate.
+
+### Locked Phase 2A behavior
+
+1. Define one strict optional checkpoint field whose only accepted value is
+   `report-semantic-review-v1`. Reject empty, unknown, non-string, nested, or
+   alternate-version values when the carrier is inspected.
+2. A Free V4 pre-admission job may receive the marker only as an explicit
+   creation input. Persist it atomically in the initial `scan_jobs.checkpoint`
+   JSONB value in the same insert that establishes the job identity.
+3. The normal production call from free-preview terminalization must continue
+   to omit the marker. Phase 2A must contain no active constant, environment
+   lookup, timestamp boundary, deployment inference, site/job allowlist, or
+   database fallback that turns it on.
+4. The existing exactly-once Free insert may never upgrade an already-created
+   marker-absent row or remove/change a present marker on a retry.
+5. Every later checkpoint write must preserve the marker state from the
+   persisted job row exactly. Adding, removing, or changing it after creation
+   fails closed before the update commits. Marker-absent jobs otherwise retain
+   their current checkpoint behavior.
+6. Paid V3 job creation may copy a marker only from the unique completed or
+   completed-limited Free V4 pre-admission job for the same report. A present
+   marker additionally requires a ready Free teaser checkpoint whose
+   `questionSetId` and `questionSetIdentity` match the exact locked Paid
+   business-question-set row. Copy the marker into the Paid job's initial
+   checkpoint within the existing verified-payment transaction.
+7. If the Free marker is absent, Paid V3 creation preserves the current `{}`
+   initial checkpoint and current behavior. If a marker is present but its
+   lineage is incomplete or mismatched, creation fails closed; it must not
+   silently drop the marker.
+8. Paid fulfillment idempotency must verify that an already-created Paid job
+   has the same marker state. It may not retrofit an existing job.
+9. Do not change checkpoint recovery identity, stage transitions, payment or
+   credit semantics, artifact contracts, report payloads, customer prose,
+   model profiles, or provider routing.
+10. Do not add a database column, constraint, trigger, migration, dependency,
+    configuration variable, API input, administrator bypass, or historical
+    data update.
+
+### Phase 2A acceptance
+
+1. Pure tests prove strict marker parsing, absent/present propagation, and
+   rejection of invalid or mismatched versions.
+2. Free enqueue tests prove explicit marker insertion, default absence,
+   exactly-once retries without retrofit, and no marker passed by the normal
+   production terminalization call.
+3. Checkpoint tests prove marker-preserving writes succeed while late add,
+   removal, and change fail before persistence; legacy marker-absent writes
+   remain unchanged.
+4. PostgreSQL tests prove one transactionally created Paid V3 job copies the
+   marker only from exact ready Free/question-set lineage; absent lineage stays
+   absent; mismatched lineage fails without creating a Paid job, credit side
+   effect, or artifact revision.
+5. Repository search proves there is no marker activation call, Worker branch,
+   provider/model call, report/artifact field, environment switch, timestamp
+   switch, or V1/V2 consumer.
+6. Run focused Vitest/TypeScript checks, the relevant PostgreSQL test when its
+   existing test database is available, `npm test`, `npm run lint`,
+   `npm run build`, and `git diff --check`.
+7. Before a local commit, compare the complete diff to this exact allowlist and
+   both budgets. Do not push.
+
+### Automatic execution and hard stops
+
+After explicit Phase 2A approval, conformant implementation and ordinary
+scope-contained repair continue automatically. Stop as
+`DEVIATION_REVIEW_REQUIRED` if implementation needs any non-allowlisted path,
+database migration/schema meaning, production activation source, Worker or
+provider integration, customer-output change, external action, historical-row
+mutation, or production-code budget expansion.
+
+No live scan, model call, report generation, job replay/recovery, database
+mutation outside disposable tests, payment, credit, refund, email, Docker
+build, deployment, push, or publication is authorized.
+
+---
+
 ## ReportSemanticReview staged program - Phase 1 additive contract foundation
 
 Status: `APPROVED` - on 2026-07-23 the user explicitly approved this exact

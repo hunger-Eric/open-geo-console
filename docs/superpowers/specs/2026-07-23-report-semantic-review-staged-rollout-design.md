@@ -149,25 +149,36 @@ failure policy and fails closed without a customer artifact.
 ## 7. Version isolation
 
 Activation must be bound to an immutable authority created before a job starts.
-The preferred carrier is the existing configuration-snapshot lineage, because
-it is already hashed and bound to V4/Paid authorities. The semantic-review
-marker is optional for historical snapshots and explicit for new snapshots:
+Read-only verification proved that the active Free V4 -> Paid V3 path does not
+share the formal V4 configuration-snapshot lineage: Free pre-admission and Paid
+V3 jobs begin with an empty JSONB checkpoint, and V3 artifact revisions are
+required to keep `config_snapshot_id` null. On 2026-07-23 the user therefore
+approved **checkpoint-lineage activation** as the replacement carrier.
+
+The semantic-review marker is optional in the existing `scan_jobs.checkpoint`
+JSONB authority and explicit for newly activated jobs:
 
 - marker absent: preserve the pre-review behavior for that already-created
   authority; never partially inject the new reviewer;
 - marker present with `report-semantic-review-v1`: require the complete new
   review receipt and never fall back to programmatic semantics.
 
+The marker is seeded atomically when a Free V4 pre-admission job is created.
+It may never be added, removed, or changed by a later checkpoint write. A Paid
+V3 job may receive the marker only at its own creation, copied from the exact
+completed Free checkpoint after report and question-set lineage verification.
+Absence propagates as absence. No historical row is updated.
+
 The marker is contract metadata, not a new model operation. The reviewer uses
 the already locked website-synthesis model capability and records its exact
 provider/model identity. This avoids invalidating old model-operation
 snapshots.
 
-Before Phase 2, read-only verification must prove that both active Free V4 and
-Paid V3 jobs carry the same immutable configuration authority early enough to
-prevent mid-flight adoption. If that is false, the phase returns
-`DEVIATION_REVIEW_REQUIRED`; implementation must not invent a timestamp,
-environment fallback, job denylist, or implicit migration.
+Phase 2 implementation must not itself activate the marker in the normal
+production enqueue call. It first adds the explicit carrier capability with a
+default-absent call path and proves it offline. A later separately approved
+activation changes only the explicit new-job authority. Implementation must not
+invent a timestamp, environment fallback, job denylist, or implicit migration.
 
 ## 8. Phases and authorization
 
@@ -194,18 +205,31 @@ Deliverables:
 This phase is safe to execute unattended only after its exact scope changes
 from `FROZEN` to `APPROVED`.
 
-### Phase 2 - offline integration and version carrier
+### Phase 2A - inactive checkpoint-lineage carrier
 
 Deliverables:
 
-- prove and implement immutable activation-marker propagation;
+- implement atomic optional marker seeding on Free job creation;
+- reject later addition, removal, or change of a job-bound marker;
+- copy a present marker into the Paid V3 job only at creation after exact Free
+  checkpoint/report/question-set verification;
+- preserve the normal production enqueue path as marker-absent;
+- prove the carrier with local unit/PostgreSQL tests and zero external calls.
+
+This smaller phase deliberately changes no Worker routing, provider call,
+customer prose, report artifact, or normal production activation behavior.
+
+### Phase 2B - inactive offline semantic-review integration
+
+Deliverables:
+
 - add provider adapter and Free/Paid manifest builders;
 - integrate only behind the explicit new marker;
 - preserve marker-absent jobs byte-for-byte at routing and checkpoint seams;
 - run fixture/mock end-to-end tests with zero external calls.
 
-Phase 2 receives a new exact allowlist and diff budget after Phase 1 evidence.
-Phase 1 approval does not authorize it.
+Each Phase 2 subphase receives its own exact allowlist and diff budget. Approval
+of Phase 1, the carrier architecture, or Phase 2A does not authorize Phase 2B.
 
 ### Phase 3 - protected-Staging acceptance
 
