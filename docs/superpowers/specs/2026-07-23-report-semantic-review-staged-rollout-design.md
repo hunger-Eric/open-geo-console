@@ -114,6 +114,22 @@ The model output contains exactly one result per manifest field:
 - retained original terms and a reason for each;
 - report-level question-distinctness result and overall decision.
 
+It also contains structured semantic annotations constrained to exact IDs from
+the input catalogs:
+
+- for every Free observation/result, a target, competitor, or `ambiguous`
+  classification with its exact observation/result IDs and a short reason;
+- question-distinctness annotations for the immutable three-question set;
+- answer relevance and target/competitor entity-role annotations bound to the
+  owning question and allowed source/evidence IDs; and
+- evidence-use and source-selection annotations for every applicable customer
+  conclusion.
+
+`ambiguous` classifications are deliberately excluded from target and
+competitor totals. The program verifies only returned IDs, ownership, coverage,
+hashes, safe URLs, structure, persistence, and commercial integrity; it never
+infers any annotation from wording.
+
 The program rejects missing, duplicate, extra, reordered, wrong-hash,
 wrong-owner, unknown-ID, immutable-field, non-prose, or structurally invalid
 output. Applying corrections must leave the non-prose projection hash
@@ -126,6 +142,9 @@ unchanged.
 One review occurs after the three questions, public observations, Q1 answer and
 sources, and Q1 diagnosis exist, but before the teaser becomes ready. The
 review receipt owns Q1 responsiveness and target/competitor presence semantics.
+Free target/competitor metrics are derived mechanically only from the
+reviewer's exact observation/result classifications after catalog and ownership
+verification; `ambiguous` contributes to neither metric.
 The ready checkpoint persists the input hash, applied-output hash, model
 identity, exact field coverage, non-prose hash, and pass state.
 
@@ -219,17 +238,65 @@ Deliverables:
 This smaller phase deliberately changes no Worker routing, provider call,
 customer prose, report artifact, or normal production activation behavior.
 
-### Phase 2B - inactive offline semantic-review integration
+### Phase 2B1 - offline reviewer core and manifests
 
 Deliverables:
 
-- add provider adapter and Free/Paid manifest builders;
-- integrate only behind the explicit new marker;
-- preserve marker-absent jobs byte-for-byte at routing and checkpoint seams;
-- run fixture/mock end-to-end tests with zero external calls.
+- extend the additive contract for catalog-bound observation/result and
+  evidence-use annotations;
+- add pure Free V4 and Paid V3 customer-prose manifest builders, one unified
+  reviewer provider adapter, and a pure correction/annotation application
+  layer;
+- exercise the whole review request/response with fixtures and mocks only;
+- keep every production runtime path unreferenced: no Worker import or wiring,
+  checkpoint/report/artifact/schema/environment/configuration/model-operation
+  change, and no provider/model call.
 
-Each Phase 2 subphase receives its own exact allowlist and diff budget. Approval
-of Phase 1, the carrier architecture, or Phase 2A does not authorize Phase 2B.
+Inputs are already-materialized Free/Paid report-shaped values and immutable
+catalogs. Outputs are verified review requests, structured reviewer responses,
+and pure reviewed projections/receipts. This phase cannot persist, route, or
+make a semantic decision for a real job.
+
+Rollback is deletion/revert of unused local capability; no report authority
+has adopted it. Approval of this phase does not authorize Phase 2B2 or Phase
+2B3.
+
+### Phase 2B2 - marker-present Free V4 integration
+
+Deliverables:
+
+- call the already-built unified reviewer exactly once after Free questions,
+  observations, Q1 answer/sources, and Q1 diagnosis exist;
+- persist the verified review receipt and mechanically derived Free metrics in
+  the marker-present Free checkpoint before ready;
+- require a passing review with no heuristic fallback for marker-present jobs;
+- prove marker-absent Free jobs preserve their existing routing and checkpoint
+  behavior byte-for-byte at integration seams.
+
+The marker-present Free path is fail-closed on transport, malformed output,
+coverage, or review block. It has no field-level semantic retry/deletion loop.
+It is separately authorized and separately rollbackable: the immutable marker
+continues to select its compatible path; no existing job is rewritten.
+
+### Phase 2B3 - marker-present Paid V3 integration
+
+Deliverables:
+
+- call the unified reviewer exactly once after all Paid customer prose exists
+  and before artifact materialization/terminalization;
+- require the accepted Free Q1 question, answer, evidence identity, and
+  reviewed text to be read-only and continuous in Paid;
+- persist the verified receipt with the marker-present Paid artifact and
+  remove marker-present reliance on old semantic heuristics;
+- prove marker-absent Paid behavior remains unchanged at routing, checkpoint,
+  and artifact seams.
+
+The marker-present Paid path also fails closed without local semantic repair or
+fallback. It is not authorized until a future exact `FROZEN` scope is approved.
+
+Phase 2B1, 2B2, and 2B3 each receive their own exact allowlist and hard diff
+budget. Approval of Phase 1, the carrier architecture, Phase 2A, or one 2B
+subphase does not authorize another.
 
 ### Phase 3 - protected-Staging acceptance
 

@@ -1,5 +1,122 @@
 # Active Change Scope Lock
 
+## ReportSemanticReview staged program - Phase 2B1 offline reviewer core and manifests
+
+Status: `FROZEN` - prepared after the user's approval of the three-part Phase
+2B design on 2026-07-23. This is an approval request only. No production,
+test, provider, Worker, report, checkpoint, artifact, schema, configuration,
+or external behavior may change until the user explicitly approves this exact
+allowlist. Phase 2B2 and Phase 2B3 remain unapproved.
+
+### Authority and baseline
+
+- Design authority:
+  `docs/superpowers/specs/2026-07-23-report-semantic-review-staged-rollout-design.md`.
+- Active product lineage, when later activated: Free V4 pre-admission -> Paid
+  V3 `combined_geo_report_v3` only. V1/V2, historical jobs/reports, formal
+  Paid V4, payments, credits, database authority, deployment, and production
+  activation are excluded.
+- Baseline branch: `codex/v4-answer-optimization-scope-reset`.
+- Baseline HEAD: `77b4d20de7104d1696df45e63071059a5122734f`.
+- Existing Phase 1 and Phase 2A completion evidence remains historical and is
+  not reopened by this scope.
+
+### Phase 2B1 objective
+
+Create a runtime-unreferenced offline reviewer core: extend the additive
+`ReportSemanticReview` contract for catalog-bound structured semantic
+annotations; build pure Free V4/Paid V3 manifests; build one provider-shaped
+request/response adapter; and prove fixture/mock end-to-end review and pure
+application. It must not run or be reachable from any real report lifecycle.
+
+The structured result must cover exact catalog IDs for: Free observation/result
+target/competitor/`ambiguous` classification; question distinctness; answer
+relevance and entity roles; and evidence-use/source-selection annotations.
+`ambiguous` is explicitly not a metric count. The program may validate only
+structure, exact ID/catalog ownership, hashes, safe URLs, field coverage,
+immutable ownership, and pure application integrity; it must not add lexical,
+regex, character-ratio, substring, or other semantic inference.
+
+### Exact Phase 2B1 production allowlist
+
+- `packages/ai-report-engine/src/report-semantic-review.ts`
+- `packages/ai-report-engine/src/report-semantic-review-manifests.ts` (new)
+- `packages/ai-report-engine/src/report-semantic-review-provider-adapter.ts` (new)
+- `packages/ai-report-engine/src/index.ts`
+- `docs/superpowers/specs/2026-07-23-report-semantic-review-staged-rollout-design.md`
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+
+Maximum production-code diff across the four `packages/ai-report-engine/src`
+files: `+1,150/-90` lines. Documentation is excluded. No application, Worker,
+database, report parser/builder, artifact, schema, configuration, dependency,
+or model-profile/operation file may be modified.
+
+### Exact Phase 2B1 test allowlist
+
+- `packages/ai-report-engine/src/report-semantic-review.test.ts`
+- `packages/ai-report-engine/src/report-semantic-review-manifests.test.ts` (new)
+- `packages/ai-report-engine/src/report-semantic-review-provider-adapter.test.ts` (new)
+- `packages/ai-report-engine/src/index.test.ts`
+
+Maximum test diff across the four named test files: `+1,350/-120` lines. A
+verification-only amendment may alter only these files under the repository's
+existing test-only rule; it cannot add a production path or weaken a gate.
+
+### Locked Phase 2B1 behavior
+
+1. The adapter is a pure, injectable request/response boundary. Tests may use
+   mock invokers only; implementation must not read environment variables,
+   create a provider client, select a model operation, or issue network/model
+   calls.
+2. Free/Paid manifests enumerate customer prose and immutable catalogs without
+   using wording heuristics. Exact question, source, evidence, observation, and
+   result IDs must be supplied by caller-shaped input, not discovered from text.
+3. Reviewer output is accepted only when every annotation references exact
+   input catalog IDs with valid ownership and every field has exact ordered
+   coverage. Unknown, duplicate, missing, cross-owner, or reordered IDs fail
+   closed.
+4. Pure application may mechanically derive Free target/competitor counts only
+   from accepted exact classifications; `ambiguous` contributes to neither.
+   It may not inspect text to create or alter classifications.
+5. No runtime code may import any new/changed Phase 2B1 symbol. In particular,
+   no Worker import/wiring, checkpoint mutation, report/artifact field,
+   parser/builder integration, configuration snapshot, model operation,
+   provider runtime/client, environment variable, or API route may change.
+6. No real provider/model call, crawl, report/job creation, historical job
+   mutation, database mutation, payment, credit, refund, email, Docker build,
+   deployment, push, or publication is authorized.
+7. Phase 2B2 (marker-present Free integration) and Phase 2B3 (marker-present
+   Paid integration) are expressly unapproved. Marker-absent and
+   marker-present runtime behavior must both remain untouched in this phase.
+
+### Phase 2B1 acceptance
+
+1. Focused tests cover catalog ID validity/ownership, exact annotation
+   coverage/order, all three observation classifications, `ambiguous` exclusion,
+   question distinctness, answer relevance/entity roles, evidence-use/source
+   selection annotations, immutable ownership, manifest completeness, malformed
+   responses, and a fixture/mock Free plus Paid end-to-end review/application.
+2. Repository search proves no `apps/` production file imports the Phase 2B1
+   symbols and no Worker/provider runtime/config/model-operation/checkpoint/report
+   or artifact path is changed or newly references them.
+3. Run focused package tests, `npm test`, `npm run lint`, `npm run build`, and
+   `git diff --check`.
+4. Before a local commit, compare complete changed paths and measured diffs to
+   this allowlist and both budgets. Do not push.
+
+### Automatic execution and hard stops
+
+After explicit approval, ordinary scoped implementation/test repair continues
+automatically. Stop as `DEVIATION_REVIEW_REQUIRED` if any code outside the
+allowlist is required; if an app/Worker/provider-runtime/configuration/model
+operation/checkpoint/report/artifact/schema/dependency change is needed; if a
+real external call would be required; if the approved design or product
+behavior must change; if either production budget is exceeded; or if two
+consecutive repairs fail to reduce the acceptance set before a new route is
+considered.
+
+---
+
 ## ReportSemanticReview staged program - Phase 2A inactive checkpoint carrier
 
 Status: `APPROVED` - on 2026-07-23 the user explicitly approved this exact
