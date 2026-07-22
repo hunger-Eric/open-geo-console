@@ -75,6 +75,21 @@ earlier filter-only behavior lock.
   passed and `182` skipped.
 - `npm run lint`, `npm run build`, and `git diff --check` passed.
 
+### Staging outcome
+
+- Exact code commit used by the local operator command:
+  `baa3aaccdb1392cb525dde6f56744b179e7aa841`.
+- The single authorized retry claimed exactly the three target-order messages
+  and returned `succeeded: 3`, `retried: 0`, `failed: 0`.
+- Signed Resend events then advanced `payment_confirmed`,
+  `report_failed_refund`, and `refund_succeeded` from `sent` to `delivered`;
+  all three have provider email identities, `attempts=2`, no lease, and no
+  failure code. The order delivery status is `delivered`.
+- Refund `89c3ac6e-5b83-4c7e-8dd7-9354ee5712ef` remains `succeeded` with one
+  attempt and a provider refund identity; the order remains `refunded`.
+- The one unrelated pending refund and all five unrelated queued emails still
+  match their exact pre-operation full-row SHA-256 values.
+
 ## Target the failed-order Staging commerce continuation
 
 Status: `APPROVED` - the user explicitly approved on 2026-07-22 after the
