@@ -3,9 +3,9 @@
 ## ReportSemanticReview staged program - Phase 2B1 offline reviewer core and manifests
 
 Status: `COMPLETE` - the approved runtime-unreferenced offline reviewer core
-Phase 2B1 scope with `批准 Phase 2B1 FROZEN 范围并开始执行`. This approval covers
-and its local mock/fixture verification are complete. Phase 2B2 and Phase 2B3
-remain unapproved.
+and its local mock/fixture verification are complete. The user explicitly
+approved the Phase 2B1 scope with `批准 Phase 2B1 FROZEN 范围并开始执行`. This
+approval covers only Phase 2B1; Phase 2B2 and Phase 2B3 remain unapproved.
 
 ### Authority and baseline
 
