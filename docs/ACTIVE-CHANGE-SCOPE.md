@@ -1,5 +1,139 @@
 # Active Change Scope Lock
 
+## ReportSemanticReview staged program - Phase 2B2 marker-present Free V4 integration
+
+Status: `FROZEN` - approval request only. No code may be changed until the
+user explicitly approves this exact Phase 2B2 allowlist. It authorizes neither
+marker activation nor Phase 2B3 Paid V3 integration.
+
+### Authority, baseline, and objective
+
+- Design authority:
+  `docs/superpowers/specs/2026-07-23-report-semantic-review-staged-rollout-design.md`.
+- Baseline branch: `codex/v4-answer-optimization-scope-reset`; baseline HEAD:
+  `dd3d644759e7664b0bd9565871001af61ea2a7ba`.
+- Active target: inactive, marker-present Free V4 only. Normal production Free
+  creation remains marker-absent; no environment, timestamp, nested checkpoint,
+  implicit, or configuration activation source may be added.
+- V1/V2, Paid V3/2B3, artifacts/UI, schema/migrations, payment/credit,
+  historical jobs, Staging/deployment, and old-heuristic removal are excluded.
+
+For a present root `report-semantic-review-v1` marker, run exactly one unified
+review after the three questions, exact persisted observation snapshots/results,
+Q1 answer/sources, and Q1 V4 diagnosis exist, and before the Free teaser is
+ready. Apply only verified corrections/annotations, derive Free metrics by
+deduplicated observation group, persist a fully verifiable review projection in
+the Free checkpoint, and fail closed. Marker-absent Free jobs retain the exact
+existing route, checkpoint, prose, metrics, model calls, and legacy semantics.
+
+### Exact Phase 2B2 production allowlist
+
+- `packages/ai-report-engine/src/report-semantic-review.ts`
+- `packages/ai-report-engine/src/report-semantic-review-manifests.ts`
+- `packages/ai-report-engine/src/generative-search-answer.ts`
+- `packages/ai-report-engine/src/open-geo-answer-v3.ts`
+- `packages/ai-report-engine/src/report-v4-diagnosis.ts`
+- `packages/public-search-observer/src/business-questions.ts`
+- `apps/web/src/db/business-questions.ts`
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+- `apps/web/src/worker/processor.ts`
+- `apps/web/src/worker/report-v4-diagnosis-enhancer.ts`
+- `apps/web/src/report-v4/mimo-provider.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+
+Maximum production-code diff across the eleven named source files: `+1,750/-350`
+lines. Documentation is excluded. No other production path may change; in
+particular `schema.ts`, model runtime/config, provider configuration, artifact,
+Paid, commerce, route, UI, or migration files are forbidden.
+
+### Exact Phase 2B2 test allowlist
+
+- `packages/ai-report-engine/src/report-semantic-review.test.ts`
+- `packages/ai-report-engine/src/report-semantic-review-manifests.test.ts`
+- `packages/ai-report-engine/src/generative-search-answer.test.ts`
+- `packages/ai-report-engine/src/open-geo-answer-v3.test.ts`
+- `packages/ai-report-engine/src/report-v4-diagnosis.test.ts`
+- `packages/public-search-observer/src/business-questions.test.ts`
+- `apps/web/src/db/business-questions.test.ts`
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+- `apps/web/src/worker/processor.test.ts`
+- `apps/web/src/worker/report-v4-diagnosis-enhancer.test.ts`
+- `apps/web/src/report-v4/mimo-provider.test.ts`
+
+Maximum test diff across these files: `+2,500/-450`. A verification-only
+amendment may alter only these named test files under the repository rule; it
+cannot add a production path or weaken an acceptance gate.
+
+### Locked Phase 2B2 behavior
+
+1. Read only the immutable root marker already persisted on the current job and
+   thread it explicitly through `withFreeTeaserAfterAdmission`; no activation
+   call/source is permitted. Marker absence preserves existing behavior.
+2. Marker-present observations must load and bind the exact persisted snapshot
+   observations/results on retry. Do not call `measurePresence`; calculate
+   target/competitor totals only from accepted reviewer annotations, deduped by
+   observation ID. Missing legacy metrics must not cause observation replay.
+3. Marker-present question confirmation retains exactly-three, bounds,
+   privacy/contact/secret safety, neutralization, and identity/hash checks, but
+   defers normalized-string semantic-distinctness to the unified reviewer.
+4. Marker-present answer parsing/hashing and Q1 diagnosis use structural,
+   ownership, URL, leakage, cardinality, and deterministic identity checks
+   only. They must bypass character/language, alias, and other semantic
+   heuristics. Unmarked behavior remains legacy.
+5. The unified review owns all Free customer-prose semantics, including Q1
+   relevance, target/competitor roles/positions/entities and diagnosis prose
+   required by the later immutable Paid Q1. If the current contract lacks a
+   needed structured datum, extend it only within this allowlist and bind it to
+   exact question/source/evidence/observation IDs; never synthesize a semantic
+   placeholder.
+6. Marker-present V4 diagnosis regex checks and local correctable-field repair
+   loops are bypassed. Structural priorities/cardinality, evidence ownership,
+   URLs, and leakage safety remain enforced. Provider transport retry may
+   remain; field-by-field semantic retry/deletion/fallback may not.
+7. Invoke the existing injected MiMo structured mechanism with the exact locked
+   `websiteSynthesis` model identity; no new operation, config snapshot,
+   environment key, client, or real call. Tests use mocks only.
+8. Before ready, verify and persist the actual corrected checkpoint projection
+   plus review input/output/receipt sufficient to recompute marker/version,
+   input/model identity, field/annotation coverage, hashes, non-prose hash,
+   and every observation/question/source/evidence owner. A receipt alone is
+   insufficient. Passing persisted reviews may be verified/reused; malformed,
+   blocked, model-mismatched, or transport-failed review cannot become ready or
+   fall back to legacy semantics.
+
+### Phase 2B2 acceptance
+
+1. Mocked marker-present Free E2E proves exactly one review after all required
+   inputs, correction application, full checkpoint verification, annotation
+   metrics, and immutable retry/reuse.
+2. Tests prove marker-absent byte/checkpoint seam regression, no activation
+   import/call, no legacy `measurePresence`, string-distinctness, answer
+   language/character, alias diagnosis, diagnosis regex, or local semantic
+   repair on the marked path.
+3. Tests cover blocked/malformed/model-mismatch/transport failure, ownership
+   tampering, stale/corrupt review data, no-ready fail-closed behavior, and
+   required Free Q1 semantic data for later Paid continuity.
+4. Run focused tests, `npm test`, `npm run lint`, `npm run build`, and
+   `git diff --check`; search for runtime activation and non-allowlisted
+   imports/references. Compare paths and numstat with both budgets before
+   commit. Do not push.
+
+### Automatic execution and hard stops
+
+After explicit approval, ordinary scoped repair continues automatically. Stop
+as `DEVIATION_REVIEW_REQUIRED` if any non-allowlisted path, activation source,
+real provider/model call, model-operation/config/environment change, schema,
+Paid/artifact/UI/commerce behavior, historical mutation, external action, or
+budget expansion is required; if a full verifiable projection cannot be
+persisted; or if two repairs do not reduce the acceptance set before a new
+route is considered.
+
+No live model call, crawl, report/job creation, database mutation outside
+disposable tests, payment, credit, refund, email, Docker build, deployment,
+push, or publication is authorized.
+
+---
+
 ## ReportSemanticReview staged program - Phase 2B1 offline reviewer core and manifests
 
 Status: `COMPLETE` - the approved runtime-unreferenced offline reviewer core
