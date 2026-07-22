@@ -168,6 +168,21 @@ try {
     $preflight = $preflightOutput | ConvertFrom-Json
     $currentSchemaVersion = [int]$preflight.currentSchemaVersion
     if ($currentSchemaVersion -lt 34) { throw "The Report V4 preflight returned an invalid current schema version." }
+
+    $probeOutput = (& node "--env-file=$runtimeEnv" --import tsx src/scripts/probe-public-search.ts --adapter mimo --locale zh-CN --region CN | Out-String).Trim()
+    Assert-LastExitCode "The protected-Staging public-search quality probe failed."
+    try { $probe = $probeOutput | ConvertFrom-Json }
+    catch { throw "The protected-Staging public-search quality probe returned malformed evidence." }
+    $qualityCases = @($probe.cases)
+    $failedQualityCases = @($qualityCases | Where-Object { $_.passed -ne $true })
+    if ($qualityCases.Count -ne 3 -or $failedQualityCases.Count -gt 0) {
+      throw "The protected-Staging public-search quality probe did not pass all required cases."
+    }
+    foreach ($name in @("authentication", "rateLimited", "timedOut", "malformed")) {
+      if ($probe.failureSemantics.$name -ne $true) {
+        throw "The protected-Staging public-search failure-semantics probe did not pass."
+      }
+    }
   } finally {
     Pop-Location
   }

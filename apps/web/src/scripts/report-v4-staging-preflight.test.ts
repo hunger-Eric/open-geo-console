@@ -153,16 +153,28 @@ describe("exact-commit staging-only Worker launcher", () => {
 
   it("does not mutate staging.env until preflight and image build succeed, and restores exact bytes on failed verification", () => {
     const preflight = source.indexOf("report-v4-staging-preflight.ts");
+    const publicSearchProbe = source.indexOf("probe-public-search.ts");
     const build = source.indexOf("docker build");
     const envMutation = source.indexOf("Set-RuntimeDeploymentVersion $runtimeEnv $revision");
     const compose = source.indexOf("docker compose @composeArgs up");
     expect(preflight).toBeGreaterThan(-1);
-    expect(build).toBeGreaterThan(preflight);
+    expect(publicSearchProbe).toBeGreaterThan(preflight);
+    expect(build).toBeGreaterThan(publicSearchProbe);
     expect(envMutation).toBeGreaterThan(build);
     expect(compose).toBeGreaterThan(envMutation);
     expect(source).toMatch(/ReadAllBytes\(\$runtimeEnv\)/u);
     expect(source).toMatch(/-not \$launchVerified[\s\S]*WriteAllBytes\(\$runtimeEnv, \$originalRuntimeEnvBytes\)/u);
     expect(source).toMatch(/containers were not rolled back and remain unverified/u);
+  });
+
+  it("fails closed on live public-search quality or malformed probe evidence before runtime mutation", () => {
+    expect(source).toMatch(/probe-public-search\.ts --adapter mimo --locale zh-CN --region CN/u);
+    expect(source).toMatch(/Assert-LastExitCode "The protected-Staging public-search quality probe failed\."/u);
+    expect(source).toMatch(/ConvertFrom-Json[\s\S]*malformed evidence/u);
+    expect(source).toMatch(/qualityCases\.Count -ne 3[\s\S]*failedQualityCases\.Count -gt 0/u);
+    for (const name of ["authentication", "rateLimited", "timedOut", "malformed"]) {
+      expect(source).toContain(`"${name}"`);
+    }
   });
 
   it("requires the merged staging env and all three dedicated V4 variables", () => {

@@ -47,6 +47,15 @@ export function formatPublicSearchProbeSummary(summary: MiMoPublicSearchProbeSum
   });
 }
 
+export function assertPublicSearchProbeReadiness(summary: MiMoPublicSearchProbeSummary): void {
+  if (summary.cases.length !== 3 || summary.cases.some(({passed}) => passed !== true)) {
+    throw new Error("Public-search quality readiness did not pass every required case.");
+  }
+  if (Object.values(summary.failureSemantics).some((passed) => passed !== true)) {
+    throw new Error("Public-search deterministic failure semantics are not ready.");
+  }
+}
+
 function pairs(args: string[]): Map<string, string> {
   const values = new Map<string, string>();
   for (let index = 0; index < args.length; index += 2) {
@@ -63,6 +72,9 @@ function pairs(args: string[]): Map<string, string> {
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   runPublicSearchProbeCommand(process.argv.slice(2))
-    .then((summary) => console.log(formatPublicSearchProbeSummary(summary)))
+    .then((summary) => {
+      console.log(formatPublicSearchProbeSummary(summary));
+      assertPublicSearchProbeReadiness(summary);
+    })
     .catch((error) => { console.error(error instanceof Error ? error.message : "Public-search probe failed."); process.exitCode = 1; });
 }
