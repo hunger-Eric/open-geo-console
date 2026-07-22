@@ -1,5 +1,88 @@
 # Active Change Scope Lock
 
+## Proposed follow-on - align the Free teaser ready-checkpoint identity validator
+
+Status: `APPROVED` - explicitly approved by the user on 2026-07-22. One
+approval covers the deterministic validator repair, ordinary
+corrections inside the exact allowlist, all local verification, exact protected-
+Staging replacement, one fresh replacement report, and - only after its Free V4
+authority is complete - one Sandbox checkout/payment acceptance flow. These
+ordinary steps must not be split into repeated approval requests.
+
+### Objective and frozen runtime evidence
+
+- Keep replacement report `41c1517e-9e7b-498f-8e49-429a1c04c449`, completed
+  Free foundation job `2af574b8-4ca3-48de-9930-aabb7c29e884`, and terminal V4
+  pre-admission job `201d5fc4-5e41-4980-9a39-c6801fac644f` immutable. Do not
+  retry, replay, reopen, repair, clone, delete, attach checkout, or use them as
+  final acceptance authority.
+- That run completed all three public-search snapshots and persisted the Q1
+  answer, sources, and a schema-valid Q1 diagnosis. The final saved checkpoint
+  is `stage=ready`, contains exactly three observation snapshot IDs, and has
+  `readyAt=2026-07-22T11:44:16.976Z`; terminalization then failed with
+  `Free teaser checkpoint is incomplete.`
+- The sole failing field is `questionSetIdentity`. The formal question-set
+  generator persists `confirmed-business-question-set-` followed by a 64-digit
+  lowercase SHA-256 digest, while `parseReadyFreeTeaserCheckpoint` incorrectly
+  requires that field to be a naked 64-digit digest. The unit fixture repeats
+  the same incorrect naked-digest assumption and therefore masked the real
+  production shape.
+- This is a deterministic validator-contract mismatch, not a search, provider,
+  diagnosis, persistence, or checkpoint-schema failure. The repair must remain
+  fail-closed and accept only the exact formal namespace plus digest shape.
+
+### Exact allowlist and budget
+
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for approval/outcome freeze
+- `docs/operations/evidence/2026-07-22-free-teaser-v4-paid-v3-staging-acceptance.md`
+  for non-secret final evidence only
+- Maximum production/test source diff across the two TypeScript files:
+  `+80/-15` lines. No persisted field, checkpoint version or schema, question
+  generator, database, migration, search, prompt, model, diagnosis contract,
+  provider adapter, timeout, retry/state machine, crawler, paid report contract,
+  renderer, route, UI, commerce, email, package, lockfile, environment source,
+  Dockerfile, or Compose change is allowed.
+
+### Locked implementation and verification
+
+1. Add an exact local validator for
+   `^confirmed-business-question-set-[a-f0-9]{64}$` and use it only for
+   `questionSetIdentity` in the ready-checkpoint completeness check. Keep naked
+   SHA-256 validation for `identityHash`, `admissionContentIdentityHash`, and
+   `foundationHash` unchanged. Keep the subsequent equality checks against the
+   authoritative persisted question set unchanged.
+2. Replace the misleading naked-digest test fixture with the real formal
+   identity shape. Add fail-closed regressions that accept the formal value and
+   reject a naked digest, a wrong namespace, a short digest, uppercase/non-hex
+   characters, and an otherwise complete checkpoint with any such invalid
+   identity. No production checkpoint or historical row may be rewritten.
+3. Before deployment, prove the parser against a read-only copy of the exact
+   terminal report checkpoint shape and run focused Free teaser/Worker tests,
+   `npm test`, `npm run lint`, `npm run build`, and `git diff --check`. One local
+   commit is allowed; no push, merge, PR, tag, production mutation, or live model
+   provider call is authorized.
+4. Build one source-only thin Worker overlay from current accepted image
+   `sha256:5f366092624a4ab57472cb8cd024a9776dfbc4f2ad104ba517df7723d3371f5d`
+   and one exact-commit Vercel Preview. Recreate only the two Staging Workers and
+   move only the protected-Staging alias after exact image, revision, profile,
+   command, readiness, and database-marker verification. Retain the replaced
+   `5f366...` image as rollback and, only after the candidate is verified,
+   remove older unreferenced rollback image
+   `sha256:85f5b1fe7ae5f024eaca6682cab01372995d930fa3b83e3cf96af5698261bbce`.
+   Never run a full build, pull, broad cleanup, or production mutation.
+5. Only after all deterministic checks and the exact Staging replacement pass,
+   put the protected submission page before the user; do not submit. Exactly
+   one new report and, only after its authority-complete Free V4 teaser, exactly
+   one user-completed Airwallex Sandbox checkout are authorized. Continue
+   automatically through signed Webhook, Paid V3 Worker, commerce, artifact,
+   access, redirected email, and desktop/mobile HTML QA.
+6. No failed-job recovery, manual database/artifact write, historical
+   substitution, second replacement report/order/payment, refund, provider
+   fallback, or production action is authorized. Any new terminal failure
+   freezes that authority and stops.
+
 ## Proposed follow-on - make the Free teaser diagnosis input customer-prose-safe
 
 Status: `APPROVED` - explicitly approved by the user on 2026-07-22. That single approval

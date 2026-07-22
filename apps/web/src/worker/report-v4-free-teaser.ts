@@ -246,7 +246,7 @@ export function parseReadyFreeTeaserCheckpoint(value: unknown): FreeTeaserCheckp
     throw new TypeError("Free teaser checkpoint is not ready.");
   }
   if (!isHash(checkpoint.identityHash) || !isHash(checkpoint.admissionContentIdentityHash) ||
-      !isHash(checkpoint.foundationHash) || !isHash(checkpoint.questionSetIdentity) ||
+      !isHash(checkpoint.foundationHash) || !isConfirmedBusinessQuestionSetIdentity(checkpoint.questionSetIdentity) ||
       !checkpoint.questionSetId || !checkpoint.reportId || !checkpoint.admissionSnapshotId ||
       !checkpoint.q1AnswerCard || !checkpoint.q1AnswerResult || !checkpoint.metrics ||
       checkpoint.observationSnapshotIds?.length !== 3 || !checkpoint.readyAt) {
@@ -537,6 +537,10 @@ function sha(value: unknown): string {
 
 function isHash(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
+function isConfirmedBusinessQuestionSetIdentity(value: unknown): value is string {
+  return typeof value === "string" && /^confirmed-business-question-set-[a-f0-9]{64}$/u.test(value);
 }
 
 export async function loadConfirmedFreeTeaserQuestionSet(

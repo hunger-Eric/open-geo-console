@@ -63,7 +63,7 @@ function questionSet(): ConfirmedBusinessQuestionSet {
     identityExclusions: ["目标品牌"],
     acknowledgedLowConfidence: false,
     confirmedAt: "2030-01-01T00:00:00.000Z",
-    contentHash: "d".repeat(64),
+    contentHash: `confirmed-business-question-set-${"d".repeat(64)}`,
     questions: purposes.map((purpose, index) => ({
       purpose,
       generatedText: texts[index]!,
@@ -313,6 +313,19 @@ describe("free teaser orchestration", () => {
     expect(mocks.answerWithSources).toHaveBeenCalledTimes(1);
     expect(mocks.enhanceDiagnosis).toHaveBeenCalledTimes(1);
     expect(parseReadyFreeTeaserCheckpoint(first.checkpoint).q1AnswerCard).toEqual(first.q1AnswerCard);
+
+    for (const invalidIdentity of [
+      "d".repeat(64),
+      `other-question-set-${"d".repeat(64)}`,
+      `confirmed-business-question-set-${"d".repeat(63)}`,
+      `confirmed-business-question-set-${"D".repeat(64)}`,
+      `confirmed-business-question-set-${"g".repeat(64)}`
+    ]) {
+      expect(() => parseReadyFreeTeaserCheckpoint({
+        ...first.checkpoint,
+        questionSetIdentity: invalidIdentity
+      })).toThrow("Free teaser checkpoint is incomplete.");
+    }
 
     const secondSaved: FreeTeaserCheckpointV1[] = [];
     const second = await generateFreeTeaser({ ...input, checkpoint: first.checkpoint, saveCheckpoint: async (checkpoint) => { secondSaved.push(checkpoint); } });
