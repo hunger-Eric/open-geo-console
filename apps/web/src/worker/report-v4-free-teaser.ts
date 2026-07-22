@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  REPORT_V4_MAX_DIAGNOSIS_SOURCES,
   diagnoseGenerativeSearchAnswerCardV3,
   generativeSearchAnswerHash,
   generativeSearchSourceHash,
@@ -442,7 +443,7 @@ function toDiagnosisQuestion(card: GenerativeSearchAnswerCardV3): CombinedGeoRep
     questionText: card.exactQuestion,
     status: "answered",
     answer: card.answerText,
-    sources: card.sources.map((source) => ({
+    sources: card.sources.slice(0, REPORT_V4_MAX_DIAGNOSIS_SOURCES).map((source) => ({
       questionId: card.questionId,
       sourceId: source.sourceId,
       title: source.title,

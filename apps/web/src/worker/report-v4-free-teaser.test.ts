@@ -222,6 +222,48 @@ describe("free teaser orchestration", () => {
     );
   });
 
+  it("keeps every answer-card source while bounding diagnosis input to the stable first five", async () => {
+    mocks.answerWithSources.mockImplementation(async (request: { questionId: string }) => ({
+      questionId: request.questionId,
+      answerText: "\u8be5\u670d\u52a1\u5546\u516c\u5f00\u63d0\u4f9b\u8de8\u5883\u7269\u6d41\u670d\u52a1\u3002",
+      sources: Array.from({ length: 7 }, (_, index) => ({
+        sourceId: `q1-source-${index + 1}`,
+        title: `\u516c\u5f00\u670d\u52a1\u9875 ${index + 1}`,
+        canonicalUrl: `https://public-${index + 1}.example/service`,
+        registrableDomain: `public-${index + 1}.example`,
+        citedText: `\u516c\u5f00\u8bc1\u636e ${index + 1}`,
+        providerResultOrder: index + 1
+      })),
+      refusal: null,
+      searchedAt: "2030-01-01T00:00:02.000Z",
+      completedAt: "2030-01-01T00:00:03.000Z",
+      providerResponseId: "response-many-sources"
+    }));
+    const input = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh" as const,
+      admission: admission(),
+      saveCheckpoint: vi.fn()
+    };
+
+    const first = await generateFreeTeaser(input);
+    const diagnosisQuestion = mocks.enhanceDiagnosis.mock.calls[0]![0].question;
+    expect(first.q1AnswerCard.sources.map(({ sourceId }) => sourceId)).toEqual(
+      Array.from({ length: 7 }, (_, index) => `q1-source-${index + 1}`)
+    );
+    expect(diagnosisQuestion.sources.map(({ sourceId }: { sourceId: string }) => sourceId)).toEqual(
+      Array.from({ length: 5 }, (_, index) => `q1-source-${index + 1}`)
+    );
+
+    await generateFreeTeaser({ ...input, checkpoint: first.checkpoint });
+    expect(mocks.resolveSnapshot).toHaveBeenCalledTimes(3);
+    expect(mocks.answerWithSources).toHaveBeenCalledTimes(1);
+    expect(mocks.enhanceDiagnosis).toHaveBeenCalledTimes(1);
+  });
+
   it("checkpoints every expensive stage and resumes a ready teaser without repeating search or model calls", async () => {
     const saved: FreeTeaserCheckpointV1[] = [];
     const input = {
