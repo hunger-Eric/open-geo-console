@@ -125,6 +125,63 @@ locally without runtime wiring.
 Each later phase requires a new exact `FROZEN` allowlist, budget, acceptance
 set, and explicit user approval. Phase 1 approval cannot be reused.
 
+### Phase 2 read-only carrier proof
+
+Status: `DEVIATION_REVIEW_REQUIRED` - no Phase 2 production or test file has
+been modified.
+
+The approved design preferred the existing `report_v4_config_snapshots`
+lineage and required read-only proof that Free V4 and Paid V3 already had a
+shared immutable carrier capable of fixing the semantic-review version before
+each job starts. The current active path does not satisfy that premise:
+
+- `report-v4-admission-jobs.ts` creates the Free V4 pre-admission `scan_jobs`
+  row without a configuration snapshot or initial checkpoint value, so the
+  JSONB checkpoint begins as `{}`.
+- `FreeTeaserCheckpointV1` records Admission, foundation, question-set,
+  observation, answer, and diagnosis identities, but has no configuration or
+  semantic-review contract identity. Its first value is written only after
+  question generation has begun.
+- `commercial-orders.ts` creates the Paid V3 `scan_jobs` row with the locked
+  business-question-set ID but without a configuration snapshot or initial
+  checkpoint value.
+- Paid V3 later reloads the completed Free teaser checkpoint to seed Q1. That
+  proves report/question/evidence continuity, but it is not a version authority
+  fixed in the Paid job at creation time.
+- `report_v4_config_snapshots` is bound to the formal V4 core-job/order
+  lineage. The schema requires non-V4 (`combined_geo_report_v1` through V3)
+  artifact revisions to keep `config_snapshot_id` null, so the existing V4
+  snapshot cannot simply be attached to the active Paid V3 artifact.
+
+Continuing with the preferred carrier would therefore require a new schema
+meaning or a migration, while silently switching to a timestamp, environment
+flag, deployment boundary, denylist, or implicit adoption rule is expressly
+forbidden by the approved design.
+
+The smallest conformant design revision is **checkpoint-lineage activation**:
+
+1. Atomically seed `report-semantic-review-v1` into the existing JSONB
+   checkpoint when a new Free V4 pre-admission job is created.
+2. Treat absence as the immutable legacy behavior for already-created and
+   in-flight Free jobs; never add the marker later.
+3. When the Paid V3 job is created, load the exact completed Free checkpoint,
+   verify its report/question-set lineage, and copy the same marker into the
+   Paid job's initial JSONB checkpoint in the payment transaction.
+4. Require later Free/Paid review receipts only when that job-bound marker is
+   present. Never infer activation from wall-clock time or current environment.
+
+This option needs no new database column and preserves historical rows, but it
+changes the approved carrier architecture and therefore needs explicit user
+approval before a Phase 2 `FROZEN` allowlist can be written.
+
+The stronger alternative is a new relational activation authority shared by
+the Free and Paid jobs, with a schema migration and database constraints. It
+offers more database-level enforcement but materially expands the migration,
+rollback, and verification surface.
+
+No model call, live scan, job mutation, payment, database mutation, deployment,
+push, or external action was performed during this proof.
+
 ---
 
 ## Archived monolithic ReportSemanticReview proposal
