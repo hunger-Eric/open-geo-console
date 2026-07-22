@@ -258,6 +258,32 @@ describe("ReportSemanticReview receipt integrity", () => {
     expect(deriveFreeObservationMetrics(review)).toEqual({ targetMentionCount: 1, competitorMentionCount: 1 });
   });
 
+  it("deduplicates two result rows for one observation and excludes ambiguous-only observations", () => {
+    const core = inputCore();
+    core.observationResults.push(
+      { observationId: "observation-1", resultId: "result-2", questionId: "question-1", originalText: "competitor", originalTextHash: reportSemanticTextHash("competitor") },
+      { observationId: "observation-2", resultId: "result-3", questionId: "question-1", originalText: "uncertain", originalTextHash: reportSemanticTextHash("uncertain") }
+    );
+    const input = createReportSemanticReviewInput(core);
+    const review = validReview(input);
+    (review.annotations as Record<string, unknown>).observationResults = [
+      { observationId: "observation-1", resultId: "result-1", targetPresence: "present", competitorPresence: "absent", reason: "target" },
+      { observationId: "observation-1", resultId: "result-2", targetPresence: "absent", competitorPresence: "present", reason: "competitor" },
+      { observationId: "observation-2", resultId: "result-3", targetPresence: "ambiguous", competitorPresence: "ambiguous", reason: "uncertain" }
+    ];
+    expect(deriveFreeObservationMetrics(parseReportSemanticReviewOutput(review, input))).toEqual({ targetMentionCount: 1, competitorMentionCount: 1 });
+  });
+
+  it("rejects extra or reordered answer annotations and same-question references outside the owned field", () => {
+    const input = createReportSemanticReviewInput(inputCore());
+    const extra = validReview(input);
+    (extra.annotations as Record<string, unknown>).answers = [...(extra.annotations as { answers: unknown[] }).answers, structuredClone((extra.annotations as { answers: unknown[] }).answers[0])];
+    expect(() => parseReportSemanticReviewOutput(extra, input)).toThrow(/cover every answer subject/u);
+    const disallowed = validReview(input);
+    (disallowed.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.sourceIds = ["source-global"];
+    expect(() => parseReportSemanticReviewOutput(disallowed, input)).toThrow(/disallowed reference/u);
+  });
+
   it("rejects observation text hash drift and cross-question observation reuse", () => {
     const drift = inputCore();
     drift.observationResults[0]!.originalTextHash = "a".repeat(64);

@@ -14,7 +14,9 @@ describe("semantic review manifests", () => {
   it("builds pure Free and Paid manifests from caller-shaped values", () => {
     const free = buildFreeV4SemanticReviewManifest(seed());
     const paid = buildPaidV3SemanticReviewManifest(seed());
+    expect(free.lifecycle).toBe("free_v4");
     expect(free.fields[0]?.originalText).toBe("Target term remains untouched");
     expect(paid.lifecycle).toBe("paid_v3");
+    expect(free.answerSubjects).toEqual([{ questionId: "q1", fieldPath: "answer" }]);
   });
 });
