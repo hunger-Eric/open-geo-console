@@ -153,10 +153,13 @@ export async function claimEmailDeliveries(input: {
   owner: string;
   limit?: number;
   leaseSeconds?: number;
+  orderId?: string;
 }): Promise<EmailDeliveryRow[]> {
   const limit = input.limit ?? 10;
   const leaseSeconds = input.leaseSeconds ?? 60;
+  const orderId = input.orderId?.trim() ?? null;
   assertLeaseInput(input.owner, limit, leaseSeconds);
+  if (orderId !== null && !isUuid(orderId)) throw new Error("A valid email order ID is required.");
   await ensureDatabase();
   const rows = await getSqlClient()<{ id: string }[]>`
     UPDATE email_deliveries
@@ -167,6 +170,7 @@ export async function claimEmailDeliveries(input: {
     WHERE id IN (
       SELECT id FROM email_deliveries
       WHERE state = 'queued'
+        AND (${orderId}::text IS NULL OR order_id = ${orderId})
         AND next_retry_at <= now()
         AND (lease_expires_at IS NULL OR lease_expires_at <= now())
       ORDER BY next_retry_at, created_at, id
@@ -181,6 +185,10 @@ export async function claimEmailDeliveries(input: {
     if (delivery) claimed.push(delivery);
   }
   return claimed;
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export async function markEmailSent(input: {

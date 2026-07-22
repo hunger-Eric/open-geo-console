@@ -7,6 +7,8 @@ import {
   createReportV4PaymentOrder,
   getActiveReportV4PaymentOrderForReport
 } from "./commercial-orders";
+import { claimEmailDeliveries } from "./commercial-delivery";
+import { claimPendingRefunds } from "./commercial-refunds";
 import { closeDatabase, getSqlClient, initializeDatabaseEnvironment } from "./index";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
@@ -221,6 +223,36 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
     await expect(getSqlClient()<Array<{ payment_status: string; fulfillment_status: string; fulfillment_job_id: string | null }>>`
       SELECT payment_status,fulfillment_status,fulfillment_job_id FROM payment_orders WHERE id=${order.id}`
     ).resolves.toEqual([{ payment_status: order.payment_status, fulfillment_status: order.fulfillment_status, fulfillment_job_id: order.fulfillment_job_id }]);
+  });
+
+  it("leases only the exact order when a Staging commerce target is provided", async () => {
+    await expect(claimPendingRefunds({ owner: "invalid-refund", orderId: "not-an-order" })).rejects.toThrow(/valid/i);
+    await expect(claimEmailDeliveries({ owner: "invalid-email", orderId: "not-an-order" })).rejects.toThrow(/valid/i);
+    await seedCheckoutFixture("targeted", "completed");
+    await seedCheckoutFixture("unrelated", "completed");
+    const target = await createReportV4PaymentOrder(orderInput("targeted"));
+    const unrelated = await createReportV4PaymentOrder(orderInput("unrelated"));
+    const sql = getSqlClient();
+    const targetRefundId = randomUUID();
+    const unrelatedRefundId = randomUUID();
+    const targetEmailId = randomUUID();
+    const unrelatedEmailId = randomUUID();
+    await sql`INSERT INTO payment_refunds(id,order_id,provider,reason,amount_minor,currency,state,idempotency_key)
+      VALUES(${targetRefundId},${target.id},'airwallex','report_failed',2900,'USD','pending',${`refund/${target.id}`}),
+            (${unrelatedRefundId},${unrelated.id},'airwallex','report_failed',2900,'USD','pending',${`refund/${unrelated.id}`})`;
+    await sql`INSERT INTO email_deliveries(id,order_id,report_id,template_type,template_version,locale,recipient_ref,provider,business_idempotency_key,state,next_retry_at)
+      VALUES(${targetEmailId},${target.id},'report-targeted','payment_confirmed','v1','en',${target.id},'resend',${`email/${target.id}`},'queued',now()),
+            (${unrelatedEmailId},${unrelated.id},'report-unrelated','payment_confirmed','v1','en',${unrelated.id},'resend',${`email/${unrelated.id}`},'queued',now())`;
+
+    await expect(claimPendingRefunds({ owner: "target-refund", orderId: target.id })).resolves.toEqual([
+      expect.objectContaining({ id: targetRefundId, orderId: target.id, attempts: 1 })
+    ]);
+    await expect(claimEmailDeliveries({ owner: "target-email", orderId: target.id })).resolves.toEqual([
+      expect.objectContaining({ id: targetEmailId, orderId: target.id, attempts: 1 })
+    ]);
+    await expect(sql`SELECT attempts,lease_owner FROM payment_refunds WHERE id=${unrelatedRefundId}`).resolves.toEqual([{ attempts: 0, lease_owner: null }]);
+    await expect(sql`SELECT attempts,lease_owner FROM email_deliveries WHERE id=${unrelatedEmailId}`).resolves.toEqual([{ attempts: 0, lease_owner: null }]);
+
   });
 });
 

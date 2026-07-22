@@ -425,15 +425,18 @@ export async function claimPendingRefunds(input: {
   owner: string;
   limit?: number;
   leaseSeconds?: number;
+  orderId?: string;
 }): Promise<PaymentRefundRow[]> {
   const limit = input.limit ?? 10;
   const leaseSeconds = input.leaseSeconds ?? 60;
+  const orderId = input.orderId?.trim() ?? null;
   if (!input.owner || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
     throw new Error("A refund lease owner and a limit between 1 and 100 are required.");
   }
   if (!Number.isSafeInteger(leaseSeconds) || leaseSeconds < 10) {
     throw new Error("Refund lease seconds must be an integer of at least 10.");
   }
+  if (orderId !== null && !isUuid(orderId)) throw new Error("A valid refund order ID is required.");
   await ensureDatabase();
   const rows = await getSqlClient()<{ id: string }[]>`
     UPDATE payment_refunds
@@ -444,6 +447,7 @@ export async function claimPendingRefunds(input: {
     WHERE id IN (
       SELECT id FROM payment_refunds
       WHERE state = 'pending'
+        AND (${orderId}::text IS NULL OR order_id = ${orderId})
         AND (next_retry_at IS NULL OR next_retry_at <= now())
         AND (lease_expires_at IS NULL OR lease_expires_at <= now())
       ORDER BY COALESCE(next_retry_at, created_at), id
@@ -458,6 +462,10 @@ export async function claimPendingRefunds(input: {
     if (refund) claimed.push(refund);
   }
   return claimed;
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export async function markRefundSubmitted(input: {

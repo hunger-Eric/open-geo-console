@@ -102,6 +102,18 @@ describe("commercial provider failure persistence", () => {
     expect(mocks.queueCommercialEmail).toHaveBeenCalledWith(expect.objectContaining({ templateType: "refund_assistance" }));
   });
 
+  it("passes an exact order filter only to the lease boundaries", async () => {
+    const orderId = "4286cb73-6349-467a-8aaf-9b196624da92";
+    mocks.claimEmailDeliveries.mockResolvedValue([]);
+    mocks.claimPendingRefunds.mockResolvedValue([]);
+
+    await expect(processQueuedCommercialEmails(2, { orderId })).resolves.toEqual({ claimed: 0, succeeded: 0, retried: 0, failed: 0 });
+    await expect(processPendingCommercialRefunds(1, { orderId })).resolves.toEqual({ claimed: 0, succeeded: 0, retried: 0, failed: 0 });
+
+    expect(mocks.claimEmailDeliveries).toHaveBeenCalledWith(expect.objectContaining({ orderId, limit: 2, leaseSeconds: 120 }));
+    expect(mocks.claimPendingRefunds).toHaveBeenCalledWith(expect.objectContaining({ orderId, limit: 1, leaseSeconds: 120 }));
+  });
+
   // @requirement GEO-V4-COMMERCE-01
   // @requirement GEO-V4-PDF-01
   it("sends a V4 HTML access link from the exact active scope using the terminalizer idempotency identity", async () => {

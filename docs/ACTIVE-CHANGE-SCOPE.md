@@ -1,5 +1,72 @@
 # Active Change Scope Lock
 
+## Target the failed-order Staging commerce continuation
+
+Status: `APPROVED` - the user explicitly approved on 2026-07-22 after the
+read-only queue inventory proved that the existing Staging commerce runner
+would otherwise submit one unrelated historical refund and send five unrelated
+historical emails. This one approval covers the exact-order filter, tests, one
+targeted Sandbox refund submission, and the two queued redirected test emails
+for order `4286cb73-6349-467a-8aaf-9b196624da92` only.
+
+### Exact allowlist and budget
+
+- `apps/web/src/db/commercial-refunds.ts`
+- `apps/web/src/db/commercial-delivery.ts`
+- `apps/web/src/db/commercial-orders-v4.postgres.test.ts`
+- `apps/web/src/commerce/operations.ts`
+- `apps/web/src/commerce/operations.test.ts`
+- `apps/web/src/commerce/run-operations.ts`
+- `apps/web/src/commerce/run-operations.test.ts`
+- `apps/web/src/scripts/staging-commercial-operations.ts`
+- `apps/web/src/scripts/staging-commercial-operations.test.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for this approval and outcome only
+- Maximum production/test diff across the nine TypeScript files: `+310/-40`
+  lines.
+- No schema/migration, payment Webhook, order/job/credit state machine,
+  production commerce, provider gateway, email template, recipient, artifact,
+  report, Worker search, UI, package/lockfile, environment, Docker, historical
+  row, or unrelated queue behavior may change.
+
+### Locked behavior and acceptance
+
+1. Add an optional exact `orderId` filter at the email/refund lease boundary,
+   propagate it through commercial operations, and expose it only through the
+   guarded Staging CLI as `--order-id <uuid>`. Existing unfiltered callers keep
+   their current behavior.
+2. Reject malformed order IDs and reject combining `--order-id` with `all`,
+   `reconcile`, or `sla`, so an exact-order invocation cannot trigger global
+   work. Provider submission and state transitions continue through the
+   existing formal gateways and lease-owned functions.
+3. Add regressions for argument validation, option propagation, exact lease
+   filters, and unchanged unfiltered behavior. Run focused suites, `npm test`,
+   `npm run lint`, `npm run build`, and `git diff --check`; commit only the
+   allowlisted diff locally. No Worker or Web deployment is required because
+   this operator command runs from the verified local exact commit.
+4. Before mutation, re-read both global queues. Then invoke `refunds` and
+   `email` separately with the exact order ID. Prove the target refund and two
+   target emails reach their formal provider-backed states while every
+   unrelated refund/email row remains byte-for-byte state-equivalent in the
+   audited columns. Do not retry unchanged provider failures without a new
+   explicit terminal diagnosis.
+
+### Local verification before Staging mutation
+
+- Exact-order parser, option-propagation, and core fail-closed suites: `14/14`
+  passed.
+- Disposable PostgreSQL lease-boundary suite using the existing
+  `postgres:16` image with `--pull never`, `--rm`, tmpfs, and no volume: `5/5`
+  passed; the container was removed after the run.
+- Repository suite: `295` test files passed and `45` skipped; `2696` tests
+  passed and `182` skipped. Skips were the suite's existing environment-gated
+  tests and were not used in place of the non-skipped PostgreSQL proof above.
+- One intervening run exposed the pre-existing PostgreSQL 17 capture-clock
+  flake in `report-v4-acceptance-authority-phase-snapshot.postgres.test.ts`;
+  the failure moved between two timestamp assertions, then its isolated suite
+  passed `5/5` and the final full repository run passed. No out-of-scope V4
+  authority code was changed.
+- `npm run lint` and `npm run build` passed.
+
 ## Proposed follow-on - align Paid V3 standard-question search with the proven Free V4 timeout model
 
 Status: `APPROVED` - after reviewing the two root causes, the user explicitly
