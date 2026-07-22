@@ -2,11 +2,10 @@
 
 ## ReportSemanticReview staged program - Phase 2B1 offline reviewer core and manifests
 
-Status: `FROZEN` - prepared after the user's approval of the three-part Phase
-2B design on 2026-07-23. This is an approval request only. No production,
-test, provider, Worker, report, checkpoint, artifact, schema, configuration,
-or external behavior may change until the user explicitly approves this exact
-allowlist. Phase 2B2 and Phase 2B3 remain unapproved.
+Status: `APPROVED` - on 2026-07-23 the user explicitly approved this exact
+Phase 2B1 scope with `批准 Phase 2B1 FROZEN 范围并开始执行`. This approval covers
+only the runtime-unreferenced offline reviewer core and its local mock/fixture
+verification. Phase 2B2 and Phase 2B3 remain unapproved.
 
 ### Authority and baseline
 

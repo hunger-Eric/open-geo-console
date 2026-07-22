@@ -41,6 +41,12 @@ export interface ReportSemanticEvidence {
   readonly originalTextHash: string;
 }
 
+export interface ReportSemanticObservationResult {
+  readonly observationId: string;
+  readonly resultId: string;
+  readonly questionId: string | null;
+}
+
 export interface ReportSemanticFieldManifestEntry {
   readonly path: string;
   readonly originalText: string;
@@ -60,6 +66,7 @@ export interface ReportSemanticReviewInputCore {
   readonly questions: readonly ReportSemanticQuestion[];
   readonly sources: readonly ReportSemanticSource[];
   readonly evidence: readonly ReportSemanticEvidence[];
+  readonly observationResults: readonly ReportSemanticObservationResult[];
   readonly fields: readonly ReportSemanticFieldManifestEntry[];
   readonly nonProseProjectionHash: string;
 }
@@ -91,6 +98,33 @@ export interface ReportQuestionDistinctnessResult {
   readonly reason: string;
 }
 
+export type ReportSemanticObservationClassification = "target" | "competitor" | "ambiguous";
+export interface ReportSemanticObservationAnnotation {
+  readonly observationId: string;
+  readonly resultId: string;
+  readonly classification: ReportSemanticObservationClassification;
+  readonly reason: string;
+}
+export interface ReportSemanticAnswerAnnotation {
+  readonly questionId: string;
+  readonly relevance: "responsive" | "not_responsive" | "blocked";
+  readonly entityRole: "target" | "competitor" | "mixed" | "none" | "ambiguous";
+  readonly evidenceIds: readonly string[];
+  readonly sourceIds: readonly string[];
+  readonly reason: string;
+}
+export interface ReportSemanticEvidenceUseAnnotation {
+  readonly path: string;
+  readonly evidenceIds: readonly string[];
+  readonly sourceIds: readonly string[];
+  readonly reason: string;
+}
+export interface ReportSemanticAnnotations {
+  readonly observationResults: readonly ReportSemanticObservationAnnotation[];
+  readonly answers: readonly ReportSemanticAnswerAnnotation[];
+  readonly evidenceUse: readonly ReportSemanticEvidenceUseAnnotation[];
+}
+
 export interface ReportSemanticReviewOutput {
   readonly version: typeof REPORT_SEMANTIC_REVIEW_CONTRACT;
   readonly inputHash: string;
@@ -98,6 +132,7 @@ export interface ReportSemanticReviewOutput {
   readonly modelId: string;
   readonly fields: readonly ReportSemanticFieldResult[];
   readonly questionDistinctness: ReportQuestionDistinctnessResult;
+  readonly annotations: ReportSemanticAnnotations;
   readonly overallDecision: ReportSemanticReviewDecision;
 }
 
@@ -132,23 +167,25 @@ export interface ReportSemanticReviewReceipt {
 
 export interface AppliedReportSemanticReview {
   readonly fields: readonly AppliedReportSemanticField[];
+  readonly annotations: ReportSemanticAnnotations;
   readonly receipt: ReportSemanticReviewReceipt;
 }
 
 const INPUT_KEYS = new Set([
   "version", "lifecycle", "locale", "target", "expectedModel", "questions", "sources", "evidence", "fields",
-  "nonProseProjectionHash", "inputHash"
+  "observationResults", "nonProseProjectionHash", "inputHash"
 ]);
 const TARGET_KEYS = new Set(["siteKey", "targetUrl", "aliases"]);
 const MODEL_KEYS = new Set(["providerId", "modelId"]);
 const QUESTION_KEYS = new Set(["questionId", "originalText", "originalTextHash"]);
 const SOURCE_KEYS = new Set(["sourceId", "questionId", "canonicalUrl", "originalText", "originalTextHash"]);
 const EVIDENCE_KEYS = new Set(["evidenceId", "questionId", "sourceId", "originalText", "originalTextHash"]);
+const OBSERVATION_RESULT_KEYS = new Set(["observationId", "resultId", "questionId"]);
 const FIELD_KEYS = new Set([
   "path", "originalText", "originalTextHash", "mutability", "questionId", "allowedEvidenceIds", "allowedSourceIds"
 ]);
 const OUTPUT_KEYS = new Set([
-  "version", "inputHash", "providerId", "modelId", "fields", "questionDistinctness", "overallDecision"
+  "version", "inputHash", "providerId", "modelId", "fields", "questionDistinctness", "annotations", "overallDecision"
 ]);
 const FIELD_RESULT_KEYS = new Set([
   "path", "originalTextHash", "decision", "correctedText", "issueCodes", "reason", "evidenceIds", "sourceIds",
@@ -156,6 +193,10 @@ const FIELD_RESULT_KEYS = new Set([
 ]);
 const RETAINED_TERM_KEYS = new Set(["term", "reason"]);
 const DISTINCTNESS_KEYS = new Set(["decision", "duplicateGroups", "reason"]);
+const ANNOTATIONS_KEYS = new Set(["observationResults", "answers", "evidenceUse"]);
+const OBSERVATION_ANNOTATION_KEYS = new Set(["observationId", "resultId", "classification", "reason"]);
+const ANSWER_ANNOTATION_KEYS = new Set(["questionId", "relevance", "entityRole", "evidenceIds", "sourceIds", "reason"]);
+const EVIDENCE_USE_KEYS = new Set(["path", "evidenceIds", "sourceIds", "reason"]);
 const RECEIPT_KEYS = new Set([
   "version", "lifecycle", "inputHash", "reviewHash", "providerId", "modelId", "decision", "fieldCoverageHash",
   "appliedProseHash", "nonProseProjectionHash", "fields"
@@ -213,6 +254,7 @@ export function parseReportSemanticReviewOutput(
   const fields = fieldRows.map((row, index) => parseFieldResult(row, input.fields[index]!, input, index));
   assertUnique(fields.map(({ path }) => path), "$reviewOutput.fields paths");
   const questionDistinctness = parseQuestionDistinctness(record.questionDistinctness, input);
+  const annotations = parseAnnotations(record.annotations, input);
   const overallDecision = requireOneOf(
     record.overallDecision,
     ["pass", "corrected", "blocked"] as const,
@@ -229,6 +271,7 @@ export function parseReportSemanticReviewOutput(
     modelId,
     fields,
     questionDistinctness,
+    annotations,
     overallDecision
   };
 }
@@ -281,7 +324,7 @@ export function applyReportSemanticReview(
     nonProseProjectionHash: input.nonProseProjectionHash,
     fields: receiptFields
   };
-  return { fields, receipt };
+  return { fields, annotations: review.annotations, receipt };
 }
 
 export function verifyReportSemanticReviewReceipt(
@@ -379,6 +422,10 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
     }
   }
   const evidenceById = new Map(evidence.map((item) => [item.evidenceId, item]));
+  const observationResults = requireArray(record.observationResults, "$reviewInput.observationResults", MAX_CATALOG_ROWS)
+    .map(parseObservationResult);
+  assertUnique(observationResults.map(({ observationId, resultId }) => `${observationId}:${resultId}`), "$reviewInput.observationResults identity");
+  for (const item of observationResults) assertNullableOwner(item.questionId, questionIds, "$reviewInput.observationResults questionId");
   const fields = requireArray(record.fields, "$reviewInput.fields", MAX_FIELDS).map(parseManifestField);
   if (fields.length === 0) throw new TypeError("$reviewInput.fields must not be empty.");
   assertUnique(fields.map(({ path }) => path), "$reviewInput.fields path");
@@ -404,6 +451,7 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
     questions,
     sources,
     evidence,
+    observationResults,
     fields,
     nonProseProjectionHash: requireHash(record.nonProseProjectionHash, "$reviewInput.nonProseProjectionHash")
   };
@@ -445,6 +493,16 @@ function parseEvidence(value: unknown, index: number): ReportSemanticEvidence {
     sourceId: requireNullableText(row.sourceId, `${path}.sourceId`, MAX_ID_CHARS),
     originalText,
     originalTextHash
+  };
+}
+
+function parseObservationResult(value: unknown, index: number): ReportSemanticObservationResult {
+  const path = `$reviewInput.observationResults[${index}]`;
+  const row = strictRecord(value, path, OBSERVATION_RESULT_KEYS);
+  return {
+    observationId: requireBoundedText(row.observationId, `${path}.observationId`, MAX_ID_CHARS),
+    resultId: requireBoundedText(row.resultId, `${path}.resultId`, MAX_ID_CHARS),
+    questionId: requireNullableText(row.questionId, `${path}.questionId`, MAX_ID_CHARS)
   };
 }
 
@@ -549,6 +607,67 @@ function parseQuestionDistinctness(value: unknown, input: ReportSemanticReviewIn
   const groupedIds = duplicateGroups.flat();
   if (new Set(groupedIds).size !== groupedIds.length) throw new TypeError(`${path}.duplicateGroups must not overlap.`);
   return { decision, duplicateGroups, reason: requireBoundedText(row.reason, `${path}.reason`, 5_000) };
+}
+
+function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): ReportSemanticAnnotations {
+  const row = strictRecord(value, "$reviewOutput.annotations", ANNOTATIONS_KEYS);
+  const observations = requireArray(row.observationResults, "$reviewOutput.annotations.observationResults", MAX_CATALOG_ROWS);
+  if (observations.length !== input.observationResults.length) throw new TypeError("$reviewOutput.annotations.observationResults must cover the input catalog exactly.");
+  const observationResults = observations.map((value, index) => {
+    const path = `$reviewOutput.annotations.observationResults[${index}]`;
+    const item = strictRecord(value, path, OBSERVATION_ANNOTATION_KEYS);
+    const expected = input.observationResults[index]!;
+    requireExact(item.observationId, expected.observationId, `${path}.observationId`);
+    requireExact(item.resultId, expected.resultId, `${path}.resultId`);
+    return {
+      observationId: expected.observationId,
+      resultId: expected.resultId,
+      classification: requireOneOf(item.classification, ["target", "competitor", "ambiguous"] as const, `${path}.classification`),
+      reason: requireBoundedText(item.reason, `${path}.reason`, 5_000)
+    };
+  });
+  const answers = requireArray(row.answers, "$reviewOutput.annotations.answers", 3);
+  if (answers.length !== input.questions.length) throw new TypeError("$reviewOutput.annotations.answers must cover every question exactly once and in order.");
+  const evidenceById = new Map(input.evidence.map((item) => [item.evidenceId, item]));
+  const sourceById = new Map(input.sources.map((item) => [item.sourceId, item]));
+  const parsedAnswers = answers.map((value, index) => {
+    const path = `$reviewOutput.annotations.answers[${index}]`;
+    const item = strictRecord(value, path, ANSWER_ANNOTATION_KEYS);
+    const questionId = input.questions[index]!.questionId;
+    requireExact(item.questionId, questionId, `${path}.questionId`);
+    const evidenceIds = requireUniqueTextArray(item.evidenceIds, `${path}.evidenceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
+    const sourceIds = requireUniqueTextArray(item.sourceIds, `${path}.sourceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
+    for (const id of evidenceIds) {
+      const evidence = evidenceById.get(id); if (!evidence) throw new TypeError(`${path}.evidenceIds contains unknown reference ${id}.`);
+      assertCompatibleOwner(questionId, evidence.questionId, `${path}.evidenceIds ${id}`);
+    }
+    for (const id of sourceIds) {
+      const source = sourceById.get(id); if (!source) throw new TypeError(`${path}.sourceIds contains unknown reference ${id}.`);
+      assertCompatibleOwner(questionId, source.questionId, `${path}.sourceIds ${id}`);
+    }
+    return { questionId, relevance: requireOneOf(item.relevance, ["responsive", "not_responsive", "blocked"] as const, `${path}.relevance`), entityRole: requireOneOf(item.entityRole, ["target", "competitor", "mixed", "none", "ambiguous"] as const, `${path}.entityRole`), evidenceIds, sourceIds, reason: requireBoundedText(item.reason, `${path}.reason`, 5_000) };
+  });
+  const evidenceUse = requireArray(row.evidenceUse, "$reviewOutput.annotations.evidenceUse", MAX_FIELDS).map((value, index) => {
+    const path = `$reviewOutput.annotations.evidenceUse[${index}]`;
+    const item = strictRecord(value, path, EVIDENCE_USE_KEYS);
+    const field = input.fields[index];
+    if (!field) throw new TypeError(`${path} exceeds field coverage.`);
+    requireExact(item.path, field.path, `${path}.path`);
+    const evidenceIds = requireUniqueTextArray(item.evidenceIds, `${path}.evidenceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
+    const sourceIds = requireUniqueTextArray(item.sourceIds, `${path}.sourceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
+    assertSubset(evidenceIds, field.allowedEvidenceIds, `${path}.evidenceIds`);
+    assertSubset(sourceIds, field.allowedSourceIds, `${path}.sourceIds`);
+    return { path: field.path, evidenceIds, sourceIds, reason: requireBoundedText(item.reason, `${path}.reason`, 5_000) };
+  });
+  if (evidenceUse.length !== input.fields.length) throw new TypeError("$reviewOutput.annotations.evidenceUse must cover every field exactly once and in order.");
+  return { observationResults, answers: parsedAnswers, evidenceUse };
+}
+
+export function deriveFreeObservationMetrics(review: ReportSemanticReviewOutput): { targetMentionCount: number; competitorMentionCount: number } {
+  return review.annotations.observationResults.reduce((counts, annotation) => ({
+    targetMentionCount: counts.targetMentionCount + (annotation.classification === "target" ? 1 : 0),
+    competitorMentionCount: counts.competitorMentionCount + (annotation.classification === "competitor" ? 1 : 0)
+  }), { targetMentionCount: 0, competitorMentionCount: 0 });
 }
 
 function parseAppliedFields(

@@ -353,6 +353,9 @@ function inputCore(): MutableInputCore {
       originalText: evidenceText,
       originalTextHash: reportSemanticTextHash(evidenceText)
     }],
+    observationResults: [
+      { observationId: "observation-1", resultId: "result-1", questionId: "question-1" }
+    ],
     fields,
     nonProseProjectionHash: hashReportSemanticReviewValue({ reportId: "report-1", questionIds: [1, 2, 3] })
   };
@@ -396,6 +399,11 @@ function validReview(input: ReportSemanticReviewInput): Record<string, unknown> 
       decision: "distinct",
       duplicateGroups: [],
       reason: "The three questions request different buyer decisions."
+    },
+    annotations: {
+      observationResults: [{ observationId: "observation-1", resultId: "result-1", classification: "target", reason: "The supplied result identifies the target." }],
+      answers: input.questions.map((question) => ({ questionId: question.questionId, relevance: "responsive", entityRole: "target", evidenceIds: question.questionId === "question-1" ? ["evidence-q1"] : [], sourceIds: question.questionId === "question-1" ? ["source-q1"] : [], reason: "The answer is bound to this question." })),
+      evidenceUse: input.fields.map((field) => ({ path: field.path, evidenceIds: field.allowedEvidenceIds, sourceIds: field.allowedSourceIds, reason: "Uses only the bound catalog references." }))
     },
     overallDecision: "pass"
   };
