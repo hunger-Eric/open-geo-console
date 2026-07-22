@@ -10,6 +10,7 @@ import {
   planPagesWithRecovery,
   preparePlanningCandidates,
   parseCombinedBusinessQuestionAnswers,
+  parseReportV4DiagnosisOutputForQuestion,
   synthesizeCombinedBusinessQuestionAnswers,
   synthesizeGroundedBusinessAnswersV2,
   synthesizeWebsiteReportWithRecovery,
@@ -39,6 +40,8 @@ import {
 } from "@/db/reports";
 import { getAiReport, saveAiReport } from "@/db/ai-reports";
 import { getConfirmedBusinessQuestionSet } from "@/db/business-questions";
+import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
+import { loadReportV4PreAdmissionSnapshot } from "@/db/report-v4-site-snapshots";
 import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
 import { getCorrectionExecutionContext } from "@/db/report-corrections";
@@ -87,7 +90,7 @@ import {
   processReportV4PreAdmissionJob,
   type ReportV4PreAdmissionRunner
 } from "./report-v4-pre-admission";
-import { createProductionReportV4AdmissionRunner } from "./report-v4-admission-production";
+import { createProductionReportV4AdmissionRunner, deriveReportV4AdmissionIdentity } from "./report-v4-admission-production";
 import { createReportV4CoreProduction } from "./report-v4-core-production";
 import { createReportV4EnhancementProduction } from "./report-v4-enhancement-production";
 import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
@@ -99,6 +102,16 @@ import { ensureDatabase, getSqlClient } from "@/db";
 import { runReportV4AcceptanceStage } from "./report-v4-acceptance-runner";
 import { inspectReportV4AcceptanceDurableTerminal } from "./report-v4-acceptance-terminal-state";
 import type { ReportV4CommerceAuthoritySnapshotSql } from "@/db/report-v4-commerce-authority-snapshot";
+import { enhanceReportV4QuestionDiagnosis, type ReportV4DiagnosisProvider } from "./report-v4-diagnosis-enhancer";
+import { buildReportV4MimoDiagnosisTokenBudget, createReportV4MimoDiagnosisProvider } from "@/report-v4/mimo-provider";
+import { loadReportV4ModelRuntimeConfig } from "@/report-v4/model-runtime-config";
+import type { CombinedGeoReportV4Question, OpenGeoAnswerCardV3 } from "@open-geo-console/ai-report-engine";
+import {
+  buildFreeTeaserDiagnosisTargetPages,
+  freeTeaserCheckpointFromJobCheckpoint,
+  freeTeaserSeededQ1,
+  generateFreeTeaser
+} from "./report-v4-free-teaser";
 
 interface StoredPageEvidence {
   page: ExtractedPage;
@@ -197,12 +210,16 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     const observedReportV4PreAdmissionRunner = acceptanceObserver && reportV4PreAdmissionRunner
       ? instrumentReportV4PreAdmissionDispatch(reportV4PreAdmissionRunner, acceptanceObserver)
       : reportV4PreAdmissionRunner;
+    const freeTeaserAdmissionRunner = observedReportV4PreAdmissionRunner &&
+        job.reason === "v4_pre_admission" && !options.reportV4PreAdmissionRunner
+      ? withFreeTeaserAfterAdmission(observedReportV4PreAdmissionRunner, checkpointJob)
+      : observedReportV4PreAdmissionRunner;
     if (await processReportV4PreAdmissionJob({
       job,
       workerId,
       signal: execution.controller.signal,
       remainingMs: () => execution.remainingMs(),
-      runner: observedReportV4PreAdmissionRunner,
+      runner: freeTeaserAdmissionRunner,
       terminalizeJob: terminalizeScanJob
     })) return;
     reportV4ProductionRoutingAttempted = hasReportV4ProductionMarker(job);
@@ -670,6 +687,57 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
   }
 }
 
+function withFreeTeaserAfterAdmission(
+  runner: ReportV4PreAdmissionRunner,
+  checkpointJob: WorkerCheckpointWriter
+): ReportV4PreAdmissionRunner {
+  return async (runInput) => {
+    const coverage = await runner(runInput);
+    const report = await getGeoReport(runInput.job.reportId);
+    const foundation = await getAiReport(
+      runInput.job.reportId,
+      "free",
+      "legacy_website_audit_v1"
+    );
+    if (!report || !foundation) {
+      throw new Error("Free teaser requires the completed free technical and website reports.");
+    }
+    const admissionIdentity = deriveReportV4AdmissionIdentity({
+      reportId: runInput.job.reportId,
+      targetUrl: report.url,
+      capturedAt: runInput.job.createdAt
+    });
+    const admission = await loadReportV4PreAdmissionSnapshot(admissionIdentity);
+    if (!admission) throw new Error("Free teaser Admission snapshot is unavailable.");
+    const currentJob = await getScanJob(runInput.job.id);
+    if (!currentJob) throw new Error("Free teaser pre-admission job disappeared.");
+    let currentCheckpoint = currentJob.checkpoint;
+    await generateFreeTeaser({
+      reportId: runInput.job.reportId,
+      jobId: runInput.job.id,
+      targetUrl: report.url,
+      foundation: foundation.payload,
+      locale: runInput.job.locale,
+      admission,
+      checkpoint: freeTeaserCheckpointFromJobCheckpoint(currentCheckpoint),
+      signal: runInput.signal,
+      saveCheckpoint: async (freeTeaser, phase) => {
+        const updated = await checkpointJob({
+          stage: "synthesizing",
+          phase,
+          progress: freeTeaser.stage === "ready" ? 99 : 96,
+          checkpoint: { ...currentCheckpoint, freeTeaser } as JobCheckpoint,
+          plannedPages: coverage.plannedPages,
+          successfulPages: coverage.successfulPages,
+          failedPages: coverage.failedPages
+        });
+        currentCheckpoint = updated.checkpoint;
+      }
+    });
+    return coverage;
+  };
+}
+
 function instrumentReportV4PreAdmissionDispatch(
   runner: ReportV4PreAdmissionRunner,
   observer: ReportV4AcceptanceObserver
@@ -833,7 +901,7 @@ export function resolveRecommendationFulfillmentTarget(
     return "legacy";
   }
   if (job.fulfillmentMethodology === "answer_engine_recommendation_forensics_v1" && job.recommendationReportVersion === 1) return "recommendation_v1";
-  if (job.fulfillmentMethodology === "public_search_source_forensics_v1" && job.recommendationReportVersion === 2) return "recommendation_v2";
+  if (job.fulfillmentMethodology === "public_search_source_forensics_v1" && (job.recommendationReportVersion === 2 || job.recommendationReportVersion === 3)) return "recommendation_v2";
   throw new Error("Recommendation jobs require a recognized persisted methodology and matching report version.");
 }
 
@@ -1128,6 +1196,36 @@ async function finalizeRecommendationJob(input: {
   throw new HistoricalRecommendationRuntimeRetiredError();
 }
 
+async function resolveProspectiveV3TeaserContext(
+  reportId: string,
+  targetUrl: string,
+  questionSet: ConfirmedBusinessQuestionSet
+): Promise<{
+  seededQ1: ReturnType<typeof freeTeaserSeededQ1>;
+  admission: NonNullable<Awaited<ReturnType<typeof loadReportV4PreAdmissionSnapshot>>>;
+}> {
+  const preAdmissionJob = await getReportV4PreAdmissionJob(reportId);
+  if (!preAdmissionJob || !["completed", "completed_limited"].includes(preAdmissionJob.stage)) {
+    throw new Error("Prospective Paid V3 requires one completed free teaser job.");
+  }
+  const teaserCheckpoint = freeTeaserCheckpointFromJobCheckpoint(preAdmissionJob.checkpoint);
+  if (!teaserCheckpoint) throw new Error("Prospective Paid V3 free teaser checkpoint is unavailable.");
+  const admissionIdentity = deriveReportV4AdmissionIdentity({
+    reportId,
+    targetUrl,
+    capturedAt: preAdmissionJob.createdAt
+  });
+  const admission = await loadReportV4PreAdmissionSnapshot(admissionIdentity);
+  if (!admission || admission.snapshot.id !== teaserCheckpoint.admissionSnapshotId ||
+      admission.snapshot.contentIdentityHash !== teaserCheckpoint.admissionContentIdentityHash) {
+    throw new Error("Prospective Paid V3 Admission evidence does not match the free teaser.");
+  }
+  return {
+    seededQ1: freeTeaserSeededQ1(teaserCheckpoint, questionSet),
+    admission
+  };
+}
+
 async function finalizeProviderDiscoveryCombinedJob(input: {
   job: ScanJobRow;
   workerId: string;
@@ -1153,6 +1251,9 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
   if (!businessQuestionSet || !pending) throw new Error("The combined job requires its exact locked questions and pending artifact revision.");
   const evidenceAssets = input.evidenceAssets ?? await listEvidenceAssets(input.job.reportId, input.job.id);
   await assertReusableEvidenceAssets(evidenceAssets);
+  const prospectiveTeaser = input.job.recommendationReportVersion === 3
+    ? await resolveProspectiveV3TeaserContext(input.job.reportId, input.targetUrl, businessQuestionSet)
+    : null;
   const resumedV3 = input.job.artifactContract === "combined_geo_report_v3" ? combinedV3ArtifactVerificationResume(checkpoint) : null;
   if (resumedV3) {
     const ready = await materializePreparedCombinedArtifactV3(resumedV3.report, evidenceAssets);
@@ -1174,6 +1275,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       region: businessQuestionSet.region,
       targetUrl: input.targetUrl,
       targetAliases: businessQuestionSet.identityExclusions,
+      seededQ1: prospectiveTeaser?.seededQ1,
       checkpoint: checkpoint.answerFirstV3,
       signal: input.signal,
       saveCheckpoint: async (answerFirstV3) => {
@@ -1262,6 +1364,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         .map(({ entityId, canonicalName }) => ({ entityId, aliases: [canonicalName] })),
       auditSources: storedSources,
       targetPages: input.technicalReport.pages,
+      seededQ1: prospectiveTeaser?.seededQ1,
       checkpoint: generativeCheckpoint ?? checkpoint.answerFirstV3,
       signal: input.signal,
       saveCheckpoint: async (answerFirstV3) => {
@@ -1273,7 +1376,31 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     const verificationRef = await providerVerificationCommercialRef(verificationSnapshotId);
     const snapshotRefs = uniqueSnapshotRefs([...forensicResult.commercialSnapshotRefs, verificationRef]);
     if (snapshotRefs.length !== 4) throw new Error("V3 combined reports require exactly four immutable market snapshots.");
-    if (!answerResult.checkpoint.sourceSelectionDiagnosis) throw new Error("Prospective V3 artifact requires source selection diagnosis.");
+    const sourceSelectionDiagnosis = answerResult.checkpoint.sourceSelectionDiagnosis;
+    if (!sourceSelectionDiagnosis) throw new Error("Prospective V3 artifact requires source selection diagnosis.");
+    const diagnosisResult = prospectiveTeaser
+      ? await enhanceV3AnswerCardsWithDiagnosis({
+          answerCards: answerResult.answerCards,
+          checkpoint: answerResult.checkpoint,
+          questionSetIdentity: businessQuestionSet.contentHash,
+          admission: prospectiveTeaser.admission,
+          locale: runtime.authority.surface.locale,
+          provider: createReportV4MimoDiagnosisProvider({ environment: process.env }),
+          modelRuntime: loadReportV4ModelRuntimeConfig(process.env),
+          signal: input.signal,
+          saveCheckpoint: async (answerFirstV3) => {
+            const next = { ...checkpoint, answerFirstV3 };
+            const updated = await input.checkpointJob({
+              stage: "synthesizing",
+              phase: "grounded_answer_synthesis",
+              progress: 98,
+              checkpoint: next as JobCheckpoint,
+              ...input.coverage
+            });
+            checkpoint = normalizeCheckpoint(updated.checkpoint);
+          }
+        })
+      : { answerCards: answerResult.answerCards, checkpoint: answerResult.checkpoint };
     const ready = await buildReadyCombinedArtifactV3({
       artifactRevisionId: pending.artifactRevisionId,
       artifactRevision: pending.artifactRevision,
@@ -1286,9 +1413,9 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       aiReport: input.websiteFoundation,
       evidenceAssets,
       businessQuestionSet,
-      answerCards: answerResult.answerCards,
-      sourceSelectionDiagnosis: answerResult.checkpoint.sourceSelectionDiagnosis,
-      engineProvenance: answerResult.checkpoint.engineProvenance,
+      answerCards: diagnosisResult.answerCards,
+      sourceSelectionDiagnosis,
+      engineProvenance: diagnosisResult.checkpoint.engineProvenance,
       publicSourceForensics: forensicResult.report,
       providerDiscovery: providerResult.providerDiscovery,
       languageValidationScope: combinedV3LanguageValidationScope(input.job.reason),
@@ -1298,7 +1425,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         checkpoint = normalizeCheckpoint(updated.checkpoint);
       }
     });
-    await terminalizeReadyCombinedArtifact(input, ready, answerResult.checkpoint.identityHash, snapshotRefs);
+    await terminalizeReadyCombinedArtifact(input, ready, diagnosisResult.checkpoint.identityHash, snapshotRefs);
     return;
   }
   const groundedAnswerEvidence = groundedEvidenceFromForensic(forensicResult.report);
@@ -1953,4 +2080,147 @@ export class HistoricalRecommendationRuntimeRetiredError extends Error {
 
 function publicFailure(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 500) : "The AI report task failed.";
+}
+
+async function enhanceV3AnswerCardsWithDiagnosis(input: {
+  answerCards: readonly OpenGeoAnswerCardV3[];
+  checkpoint: AnswerFirstV3CheckpointV2;
+  questionSetIdentity: string;
+  admission: NonNullable<Awaited<ReturnType<typeof loadReportV4PreAdmissionSnapshot>>>;
+  locale: string;
+  provider: ReportV4DiagnosisProvider;
+  modelRuntime: ReturnType<typeof loadReportV4ModelRuntimeConfig>;
+  saveCheckpoint(checkpoint: AnswerFirstV3CheckpointV2): Promise<void>;
+  signal?: AbortSignal;
+}): Promise<{
+  answerCards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
+  checkpoint: AnswerFirstV3CheckpointV2;
+}> {
+  const diagnosisInputs = input.answerCards.map((card) => ({
+    questionId: card.questionId,
+    targetPages: buildFreeTeaserDiagnosisTargetPages(card.questionId, input.admission)
+  }));
+  if (diagnosisInputs.some(({ targetPages }) => targetPages.length === 0)) {
+    throw new Error("Prospective V3 diagnosis requires non-empty target-site evidence for every question.");
+  }
+  const diagnosisIdentityHash = createHash("sha256").update(JSON.stringify({
+    version: "paid-v3-question-diagnosis-v1",
+    questionSetIdentity: input.questionSetIdentity,
+    answerHash: input.checkpoint.answerHash,
+    admissionSnapshotId: input.admission.snapshot.id,
+    admissionContentIdentityHash: input.admission.snapshot.contentIdentityHash,
+    locale: input.locale,
+    evidence: diagnosisInputs
+  })).digest("hex");
+  if (input.checkpoint.diagnosisIdentityHash &&
+      input.checkpoint.diagnosisIdentityHash !== diagnosisIdentityHash) {
+    throw new Error("Paid V3 diagnosis checkpoint identity does not match current question evidence.");
+  }
+
+  let checkpoint = input.checkpoint;
+  const diagnosisByQuestion = { ...(checkpoint.diagnosisByQuestion ?? {}) };
+  for (let index = 0; index < input.answerCards.length; index += 1) {
+    input.signal?.throwIfAborted();
+    const card = input.answerCards[index]!;
+    if (card.answerMode !== "generative_search_v1") {
+      throw new Error("Prospective V3 per-question diagnosis requires generative answer cards.");
+    }
+    const targetPages = diagnosisInputs[index]!.targetPages;
+    let diagnosis = diagnosisByQuestion[card.questionId];
+    if (diagnosis) {
+      diagnosis = parseReportV4DiagnosisOutputForQuestion(diagnosis, {
+        questionId: card.questionId,
+        sourceEvidenceIds: card.sources.map(({ sourceId }) => sourceId)
+      });
+    } else {
+      const result = await enhanceReportV4QuestionDiagnosis({
+        question: v3CardToV4Question(card, index),
+        locale: input.locale,
+        targetPages,
+        provider: input.provider,
+        getTokenBudget: (request) => buildReportV4MimoDiagnosisTokenBudget({
+          runtime: input.modelRuntime,
+          request
+        }),
+        signal: input.signal
+      });
+      if (result.status !== "completed") {
+        throw new Error("Paid V3 per-question diagnosis did not complete.");
+      }
+      diagnosis = parseReportV4DiagnosisOutputForQuestion(result.diagnosis, {
+        questionId: card.questionId,
+        sourceEvidenceIds: card.sources.map(({ sourceId }) => sourceId)
+      });
+      diagnosisByQuestion[card.questionId] = diagnosis;
+      checkpoint = {
+        ...checkpoint,
+        diagnosisIdentityHash,
+        diagnosisByQuestion
+      };
+      await input.saveCheckpoint(checkpoint);
+    }
+  }
+
+  const enhanced = input.answerCards.map((card) => ({
+    ...card,
+    diagnosis: diagnosisByQuestion[card.questionId]!
+  })) as [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
+  const ready: AnswerFirstV3CheckpointV2 = {
+    ...checkpoint,
+    stage: "per_question_diagnosis_ready",
+    diagnosisIdentityHash,
+    diagnosisByQuestion,
+    answerCards: enhanced as [
+      Extract<OpenGeoAnswerCardV3, { answerMode: "generative_search_v1" }>,
+      Extract<OpenGeoAnswerCardV3, { answerMode: "generative_search_v1" }>,
+      Extract<OpenGeoAnswerCardV3, { answerMode: "generative_search_v1" }>
+    ]
+  };
+  if (checkpoint.stage !== ready.stage ||
+      JSON.stringify(checkpoint.answerCards) !== JSON.stringify(ready.answerCards)) {
+    await input.saveCheckpoint(ready);
+  }
+  return { answerCards: enhanced, checkpoint: ready };
+}
+
+function v3CardToV4Question(card: OpenGeoAnswerCardV3, index: number): CombinedGeoReportV4Question {
+  const order = (index + 1) as 1 | 2 | 3;
+  if (card.answerMode === "generative_search_v1") {
+    return {
+      order,
+      questionId: card.questionId,
+      questionText: card.exactQuestion,
+      status: card.answerText ? "answered" : "unavailable",
+      answer: card.answerText ?? null,
+      sources: card.sources.map((source) => ({
+        questionId: card.questionId,
+        sourceId: source.sourceId,
+        title: source.title,
+        canonicalUrl: source.canonicalUrl,
+        citedText: source.citedText ?? null,
+        retrievalStatus: source.retrievalStatus === "verified_body" ? "available" as const
+          : source.retrievalStatus === "inaccessible" ? "inaccessible" as const
+          : "not_checked" as const
+      }))
+    };
+  }
+  // Legacy card: synthesize V4 question from legacy evidence
+  const answerText = card.status === "answered" || card.status === "limited"
+    ? card.sentences.filter((s) => s.kind === "grounded_claim").map((s) => s.text).join(" ")
+    : null;
+  return {
+    order,
+    questionId: card.questionId,
+    questionText: card.exactQuestion,
+    status: card.status === "answered" ? "answered" : "unavailable",
+    answer: answerText || null,
+    sources: card.sourceEvidence.slice(0, 5).map((evidence) => ({
+      questionId: card.questionId,
+      sourceId: evidence.evidenceId,
+      title: evidence.title,
+      canonicalUrl: evidence.canonicalUrl,
+      citedText: evidence.exactExcerpt,
+      retrievalStatus: "available" as const
+    }))
+  };
 }

@@ -62,7 +62,22 @@ function generativeV3Fixture(){
     answerText:`Complete generated answer ${index+1}.`,
     sources:[{sourceId:`source-${index+1}`,title:`Returned source ${index+1}`,canonicalUrl:`https://returned.example/${index+1}`,registrableDomain:"returned.example",citedText:`Returned cited text ${index+1}`,providerResultOrder:index+1,retrievalStatus:"search_source_only" as const,ownershipCategory:"unknown" as const}],
     provenance:{providerId:"mimo",model:"mimo-v2.5-pro",searchMode:"native_web_search",promptVersion:"generative-search-answer-v1" as const,searchedAt:"2030-01-01T00:00:00.000Z",completedAt:"2030-01-01T00:00:01.000Z",answerHash:"a".repeat(64),sourceHash:"b".repeat(64)},refusal:null,
-    geoDiagnosis:{...legacy.geoDiagnosis,citedOwnership:{...legacy.geoDiagnosis.citedOwnership,institution:0,community:0,social:0,unknown:1}},audit:{verifiedBodyCount:0,searchSourceOnlyCount:1,inaccessibleCount:0}
+    geoDiagnosis:{...legacy.geoDiagnosis,citedOwnership:{...legacy.geoDiagnosis.citedOwnership,institution:0,community:0,social:0,unknown:1}},audit:{verifiedBodyCount:0,searchSourceOnlyCount:1,inaccessibleCount:0},
+    diagnosis:{
+      selectionSummary:`Question diagnosis ${index+1}.`,
+      observableFactors:[
+        {kind:"problem_match",observation:`Observable problem match ${index+1}.`,evidenceRefs:[`source-${index+1}`]},
+        {kind:"factual_specificity",observation:`Observable specificity ${index+1}.`,evidenceRefs:[`source-${index+1}`]},
+        {kind:"target_clarity",observation:`Observable target gap ${index+1}.`,evidenceRefs:[`${legacy.questionId}:target:${"c".repeat(64)}`]}
+      ],
+      targetGap:`Target website gap ${index+1}.`,
+      recommendedActions:[
+        {priority:1 as const,action:`Publish action ${index+1}.`,evidenceRefs:[`${legacy.questionId}:target:${"c".repeat(64)}`]},
+        {priority:2 as const,action:`Clarify action ${index+1}.`,evidenceRefs:[`source-${index+1}`]},
+        {priority:3 as const,action:`Maintain action ${index+1}.`,evidenceRefs:[`${legacy.questionId}:target:${"c".repeat(64)}`]}
+      ],
+      detailedEvidenceRefs:[`source-${index+1}`,`${legacy.questionId}:target:${"c".repeat(64)}`]
+    }
   })) as typeof model.combinedReport.answerCards;
   model.combinedReport.sourceSelectionDiagnosis=buildSourceSelectionDiagnosisV1({
     locale:"en",answerHash:"a".repeat(64),sourceHash:"b".repeat(64),targetFoundationHash:"c".repeat(64),targetDomain:"example.com",
@@ -168,6 +183,16 @@ describe("combined artifact canonical rendering",()=>{
     expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,html.replaceAll(actionTitle,"diagnosis action omitted"))).toThrow(/completeness/i);
   });
 
+  it("rejects a V3 diagnosis moved outside its own answer card",()=>{
+    const model=generativeV3Fixture();
+    const html=renderCanonicalCombinedArtifactHtml(model);
+    const diagnosis="Question diagnosis 1.";
+    const questionOne=model.combinedReport.answerCards[0]!.exactQuestion;
+    const withoutDiagnosis=html.replace(diagnosis,"");
+    const questionOneAt=withoutDiagnosis.indexOf(questionOne);
+    const moved=withoutDiagnosis.slice(0,questionOneAt)+diagnosis+withoutDiagnosis.slice(questionOneAt);
+    expect(()=>assertCombinedV3HtmlCompleteness(model.combinedReport,moved)).toThrow(/answer-source-diagnosis/i);
+  });
   it("rejects a generative artifact whose source is moved before its answer",()=>{
     const model=generativeV3Fixture();
     const html=renderCanonicalCombinedArtifactHtml(model);

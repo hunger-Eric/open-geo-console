@@ -3781,6 +3781,27 @@ export const V40_DATABASE_MIGRATIONS = [
   `CREATE TRIGGER report_v4_acceptance_events_guard BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_events FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_event()`
 ] as const;
 
+export const V41_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_methodology_contract_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_methodology_contract_check CHECK (
+     (product_contract = 'legacy_website_audit_v1' AND fulfillment_methodology IS NULL AND recommendation_report_version IS NULL)
+     OR (product_contract = 'recommendation_forensics_v1'
+       AND fulfillment_methodology IS NOT NULL AND recommendation_report_version IS NOT NULL
+       AND ((fulfillment_methodology = 'answer_engine_recommendation_forensics_v1' AND recommendation_report_version = 1)
+         OR (fulfillment_methodology = 'public_search_source_forensics_v1' AND recommendation_report_version IN (2,3))
+         OR (fulfillment_methodology = 'two_stage_geo_report_v4' AND recommendation_report_version = 4)))
+   )`,
+  `ALTER TABLE payment_orders DROP CONSTRAINT IF EXISTS payment_orders_methodology_product_check`,
+  `ALTER TABLE payment_orders ADD CONSTRAINT payment_orders_methodology_product_check CHECK (
+     (product_code = 'recommendation_forensics_v1'
+       AND fulfillment_methodology IS NOT NULL AND recommendation_report_version IS NOT NULL
+       AND ((fulfillment_methodology = 'answer_engine_recommendation_forensics_v1' AND recommendation_report_version = 1)
+         OR (fulfillment_methodology = 'public_search_source_forensics_v1' AND recommendation_report_version IN (2,3))
+         OR (fulfillment_methodology = 'two_stage_geo_report_v4' AND recommendation_report_version = 4)))
+     OR (product_code <> 'recommendation_forensics_v1' AND fulfillment_methodology IS NULL AND recommendation_report_version IS NULL)
+   )`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -3813,7 +3834,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 37, migrations: V37_DATABASE_MIGRATIONS },
   { version: 38, migrations: V38_DATABASE_MIGRATIONS },
   { version: 39, migrations: V39_DATABASE_MIGRATIONS },
-  { version: 40, migrations: V40_DATABASE_MIGRATIONS }
+  { version: 40, migrations: V40_DATABASE_MIGRATIONS },
+  { version: 41, migrations: V41_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

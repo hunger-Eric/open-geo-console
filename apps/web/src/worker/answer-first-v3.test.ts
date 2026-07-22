@@ -311,6 +311,55 @@ describe("generative answer-first V3 Worker service", () => {
     expect(result.answerCards.every(({ audit }) => audit.searchSourceOnlyCount === 1)).toBe(true);
   });
 
+  it("reuses the exact free-teaser Q1 and calls the paid provider only for Q2 and Q3", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const q1 = generatedAnswer(ids[0], 0);
+    const provider = generativeProvider([generatedAnswer(ids[1], 1), generatedAnswer(ids[2], 2)]);
+    const result = await resolveGenerativeAnswerFirstV3({
+      questionSet,
+      provider,
+      locale: "zh-CN",
+      region: "CN",
+      auditSources: [],
+      seededQ1: {
+        questionSetIdentity: questionSet.contentHash,
+        providerId: provider.providerId,
+        model: provider.model,
+        searchMode: provider.searchMode,
+        locale: "zh-CN",
+        region: "CN",
+        answerResult: q1
+      }
+    });
+
+    expect(result.checkpoint.answerResults[0]).toEqual(q1);
+    expect(result.answerCards[0]!.answerText).toBe(q1.answerText);
+    expect(provider.answerWithSources.mock.calls.map(([request]) => request.questionId)).toEqual([ids[1], ids[2]]);
+  });
+
+  it("fails closed before provider calls when a free-teaser Q1 runtime identity differs", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const provider = generativeProvider([]);
+    await expect(resolveGenerativeAnswerFirstV3({
+      questionSet,
+      provider,
+      locale: "zh-CN",
+      region: "CN",
+      auditSources: [],
+      seededQ1: {
+        questionSetIdentity: questionSet.contentHash,
+        providerId: provider.providerId,
+        model: "different-model",
+        searchMode: provider.searchMode,
+        locale: "zh-CN",
+        region: "CN",
+        answerResult: generatedAnswer(ids[0], 0)
+      }
+    })).rejects.toBeInstanceOf(AnswerFirstV3ResumeIdentityMismatchError);
+    expect(provider.answerWithSources).not.toHaveBeenCalled();
+  });
   it("runs one source correction and degrades to source_limited without erasing the answer", async () => {
     const questionSet = questions();
     const ids = questionIds(questionSet);

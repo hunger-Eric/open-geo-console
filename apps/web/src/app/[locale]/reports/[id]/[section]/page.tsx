@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ReportView, type ReportWorkspaceSection } from "@/components/report-view";
 import { PendingReportView } from "@/components/pending-report-view";
 import { StoredReportFallback } from "@/components/stored-report-fallback";
 import { getBotEvidence } from "@/db/bot-evidence";
 import { getGeoReport } from "@/db/reports";
+import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
 import { getAnyActiveCombinedGeoReport } from "@/db/combined-reports";
 import { getDictionary, getLocaleAlternates, isLocale, type Locale } from "@/i18n";
 import { getVisibleReportBundle } from "@/server/visible-ai-report";
@@ -47,6 +48,9 @@ export default async function ReportWorkspaceSectionPage({
     return <StoredReportFallback dictionary={dictionary} locale={locale} page={page} reportId={id} section={section} />;
   }
   const reportLocale: Locale = row.reportLocale ?? locale;
+  if (!row.activeArtifactRevisionId && await getReportV4PreAdmissionJob(id)) {
+    redirect(`/${locale}/reports/${id}`);
+  }
   if (row.activeArtifactRevisionId) {
     const active=await getAnyActiveCombinedGeoReport(id);
     if(!active) notFound();

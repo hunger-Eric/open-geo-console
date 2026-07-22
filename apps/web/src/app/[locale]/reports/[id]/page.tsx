@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { ReportView } from "@/components/report-view";
 import { PendingReportView } from "@/components/pending-report-view";
 import { StoredReportFallback } from "@/components/stored-report-fallback";
+import { CommercialCheckout } from "@/components/commercial-checkout";
+import { CombinedGeoReportV4Teaser } from "@/components/combined-geo-report-v4-teaser";
+import { PaymentReturnBanner } from "@/components/payment-return-banner";
 import { getBotEvidence } from "@/db/bot-evidence";
 import { getGeoReport } from "@/db/reports";
 import { getAnyActiveCombinedGeoReport } from "@/db/combined-reports";
@@ -10,6 +14,12 @@ import { getDictionary, getLocaleAlternates, isLocale, type Locale } from "@/i18
 import { getVisibleReportBundle } from "@/server/visible-ai-report";
 import { cookies } from "next/headers";
 import { reportAccessCookieName, tokenGrantsReportAccess } from "@/server/report-access";
+import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
+import {
+  freeTeaserCheckpointFromJobCheckpoint,
+  loadConfirmedFreeTeaserQuestionSet,
+  parseReadyFreeTeaserCheckpoint
+} from "@/worker/report-v4-free-teaser";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +69,54 @@ export default async function ReportPage({
   }
 
   const [evidence, visible] = await Promise.all([getBotEvidence(id), getVisibleReportBundle(id, row.payload)]);
+
+  if (!row.activeArtifactRevisionId && visible.tier === "free") {
+    const preAdmissionJob = await getReportV4PreAdmissionJob(id);
+    if (preAdmissionJob) {
+      const checkpoint = freeTeaserCheckpointFromJobCheckpoint(preAdmissionJob.checkpoint);
+      let ready = null;
+      try {
+        ready = checkpoint ? parseReadyFreeTeaserCheckpoint(checkpoint) : null;
+      } catch {
+        ready = null;
+      }
+      if (!ready || !visible.aiReport) {
+        return <PendingReportView
+          createdAt={row.createdAt}
+          dictionary={getDictionary(locale)}
+          locale={locale}
+          reportId={id}
+          reportLocale={reportLocale}
+          url={row.url}
+        />;
+      }
+      const questionSet = await loadConfirmedFreeTeaserQuestionSet(id, ready);
+      const dictionary = getDictionary(locale);
+      return <>
+        <CombinedGeoReportV4Teaser model={{
+          reportId: id,
+          targetUrl: row.url,
+          locale: reportLocale === "zh" ? "zh" : "en",
+          generatedAt: ready.readyAt!,
+          technicalReport: {
+            score: visible.technicalReport.score,
+            findings: visible.technicalReport.findings
+          },
+          aiReport: visible.aiReport,
+          questionSet,
+          q1AnswerCard: ready.q1AnswerCard!,
+          brandMentionCount: ready.metrics!.brandMentionCount,
+          competitorMentionCount: ready.metrics!.competitorMentionCount
+        }}/>
+        <div id="checkout" className="mx-auto w-full max-w-[1120px] px-5 pb-12">
+          <Suspense fallback={null}>
+            <PaymentReturnBanner dictionary={dictionary} reportId={id} />
+          </Suspense>
+          <CommercialCheckout dictionary={dictionary} locale={reportLocale} reportId={id} />
+        </div>
+      </>;
+    }
+  }
   return (
     <ReportView
       aiReport={visible.aiReport}

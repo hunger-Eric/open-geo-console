@@ -124,7 +124,7 @@ export function assertFulfillmentPair(
   }
   if (productContract === "recommendation_forensics_v1" &&
       !((methodology === "answer_engine_recommendation_forensics_v1" && reportVersion === 1) ||
-        (methodology === "public_search_source_forensics_v1" && reportVersion === 2) ||
+        (methodology === "public_search_source_forensics_v1" && (reportVersion === 2 || reportVersion === 3)) ||
         (v4PreAdmission && (reason === "standard" || reason === "v4_pre_admission")))) {
     throw new Error("Recommendation-forensics jobs require a matching explicit methodology and report version.");
   }

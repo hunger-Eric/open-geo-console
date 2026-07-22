@@ -17,6 +17,7 @@ import {
   reportLanguageCorrectionFeedback,
   reportLanguageInstruction
 } from "./report-language";
+import { parseReportV4DiagnosisOutputForQuestion, type ReportV4DiagnosisOutput } from "./report-v4-diagnosis";
 
 export const OPEN_GEO_ANSWER_V3_VERSION = "open-geo-answer-v3" as const;
 export const OPEN_GEO_ENGINE_ID = "open_geo_public_search_answer_v1" as const;
@@ -74,6 +75,7 @@ export interface LegacyEvidenceBoundAnswerCardV3 {
     reasons: string[];
   };
   geoDiagnosis: OpenGeoAnswerDiagnosisV3;
+  diagnosis?: ReportV4DiagnosisOutput;
 }
 export interface GenerativeSearchAnswerSourceV3 extends GenerativeSearchSource { retrievalStatus: "verified_body" | "search_source_only" | "inaccessible"; ownershipCategory: OpenGeoAnswerOwnershipCategoryV3; }
 export interface GenerativeSearchAnswerProvenanceV3 { providerId:string; model:string; searchMode:string; promptVersion:"generative-search-answer-v1"; searchedAt:string; completedAt:string; answerHash:string; sourceHash:string; }
@@ -82,6 +84,7 @@ export interface GenerativeSearchAnswerCardV3 {
   status:"answered"|"source_limited"|"refused"; answerText:string; sources:GenerativeSearchAnswerSourceV3[];
   provenance:GenerativeSearchAnswerProvenanceV3; refusal:GenerativeSearchRefusal|null; geoDiagnosis:OpenGeoAnswerDiagnosisV3;
   audit:{verifiedBodyCount:number;searchSourceOnlyCount:number;inaccessibleCount:number};
+  diagnosis?: ReportV4DiagnosisOutput;
 }
 export type OpenGeoAnswerCardV3 = LegacyEvidenceBoundAnswerCardV3 | GenerativeSearchAnswerCardV3;
 
@@ -223,7 +226,8 @@ function parseGenerativeCard(value: unknown, cardIndex:number, canonical:{id:str
   if (Date.parse(provenance.completedAt) < Date.parse(provenance.searchedAt)) throw new TypeError(`${path}.provenance.completedAt must follow searchedAt.`);
   const audit = record(row.audit,`${path}.audit`); const parsedAudit = {verifiedBodyCount:nonnegative(audit.verifiedBodyCount,`${path}.audit.verifiedBodyCount`),searchSourceOnlyCount:nonnegative(audit.searchSourceOnlyCount,`${path}.audit.searchSourceOnlyCount`),inaccessibleCount:nonnegative(audit.inaccessibleCount,`${path}.audit.inaccessibleCount`)};
   const geoDiagnosis = diagnoseGenerativeSearchAnswerCardV3({answerText,sources},{exactQuestion:canonical.exactQuestion,locale:context.locale,targetAliases:context.targetAliases??[],competitors:context.competitors??[],missingEvidenceFamilies:context.missingEvidenceFamiliesByQuestion?.[cardIndex]??[]});
-  return {answerMode:"generative_search_v1",questionId:canonical.id,exactQuestion:canonical.exactQuestion,status,answerText,sources,provenance,refusal,geoDiagnosis,audit:parsedAudit};
+  const diagnosis = row.diagnosis === undefined ? undefined : parseReportV4DiagnosisOutputForQuestion(row.diagnosis, { questionId: canonical.id, sourceEvidenceIds: sources.map(({ sourceId }) => sourceId) });
+  return {answerMode:"generative_search_v1",questionId:canonical.id,exactQuestion:canonical.exactQuestion,status,answerText,sources,provenance,refusal,geoDiagnosis,audit:parsedAudit,...(diagnosis ? { diagnosis } : {})};
 }
 
 function parseGenerativeSource(value:unknown,path:string):GenerativeSearchAnswerSourceV3 {
@@ -414,7 +418,8 @@ function parseCard(
     missingEvidenceFamilies: context.missingEvidenceFamiliesByQuestion?.[cardIndex] ?? []
   });
   parseDiagnosis(row.geoDiagnosis, `${path}.geoDiagnosis`);
-  return { questionId: canonical.id, exactQuestion: canonical.exactQuestion, status, sentences, sourceEvidence, coverage, geoDiagnosis: expectedDiagnosis };
+  const diagnosis = row.diagnosis === undefined ? undefined : parseReportV4DiagnosisOutputForQuestion(row.diagnosis, { questionId: canonical.id, sourceEvidenceIds: sourceEvidence.map(({ evidenceId }) => evidenceId) });
+  return { questionId: canonical.id, exactQuestion: canonical.exactQuestion, status, sentences, sourceEvidence, coverage, geoDiagnosis: expectedDiagnosis, ...(diagnosis ? { diagnosis } : {}) };
 }
 
 function parseEvidence(value: unknown, path: string, questionId: string): OpenGeoAnswerEvidenceV3 {

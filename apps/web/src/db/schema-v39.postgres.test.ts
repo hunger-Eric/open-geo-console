@@ -3,7 +3,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createReportV4CommerceAuthoritySnapshotPair } from "../report-v4/report-v4-commerce-authority-comparator.test-fixture";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V39_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V39_DATABASE_MIGRATIONS, V40_DATABASE_MIGRATIONS, V41_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 import {
   loadPersistedReportV4AcceptanceAuthorityPhaseSnapshotInTransaction,
   persistReportV4AcceptanceAuthorityPhaseSnapshot
@@ -55,9 +55,11 @@ suite("schema V39 complete acceptance authority phase snapshots", () => {
   }, 120_000);
 
   it("registers one replay-safe V39 forward migration after V38", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(40);
-    expect(databaseMigrationsAfter(38)).toEqual([...V39_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(39)).toEqual([]);
+    expect(DATABASE_SCHEMA_VERSION).toBe(41);
+    expect(databaseMigrationsAfter(38)).toEqual([...V39_DATABASE_MIGRATIONS, ...V40_DATABASE_MIGRATIONS, ...V41_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(39)).toEqual([...V40_DATABASE_MIGRATIONS, ...V41_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(40)).toEqual([...V41_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(41)).toEqual([]);
     const source = V39_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("report_v4_acceptance_authority_phase_snapshots");
     expect(source.indexOf("DROP TRIGGER IF EXISTS report_v4_acceptance_authority_phase_snapshots_guard"))

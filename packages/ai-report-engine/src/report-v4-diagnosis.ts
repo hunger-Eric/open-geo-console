@@ -220,6 +220,84 @@ export function parseReportV4DiagnosisOutput(value: unknown, input: ReportV4Diag
   });
 }
 
+/**
+ * Shape-only validator for persisted V4 diagnosis output.
+ * Does not validate evidence-ref membership (the original input is not available at contract-read time).
+ */
+export function parseReportV4DiagnosisOutputShape(value: unknown): ReportV4DiagnosisOutput {
+  const root = strictObject(value, "$diagnosisOutput", OUTPUT_FIELDS);
+
+  const factorRows = array(root.observableFactors, "$diagnosisOutput.observableFactors");
+  if (factorRows.length !== 3) throw new TypeError("$diagnosisOutput.observableFactors must contain exactly three items.");
+  const observableFactors = factorRows.map((factor, index) => {
+    const path = `$diagnosisOutput.observableFactors[${index}]`;
+    const row = strictObject(factor, path, FACTOR_FIELDS);
+    return Object.freeze({
+      kind: oneOf(row.kind, FACTOR_KINDS, `${path}.kind`),
+      observation: customerProse(row.observation, `${path}.observation`, 5_000),
+      evidenceRefs: Object.freeze(evidenceRefsUnbounded(row.evidenceRefs, `${path}.evidenceRefs`))
+    });
+  }) as unknown as ReportV4DiagnosisOutput["observableFactors"];
+
+  const actionRows = array(root.recommendedActions, "$diagnosisOutput.recommendedActions");
+  if (actionRows.length !== 3) throw new TypeError("$diagnosisOutput.recommendedActions must contain exactly three items.");
+  const recommendedActions = actionRows.map((action, index) => {
+    const path = `$diagnosisOutput.recommendedActions[${index}]`;
+    const row = strictObject(action, path, ACTION_FIELDS);
+    exact(row.priority, index + 1, `${path}.priority`, "Diagnosis action priority must preserve the order 1, 2, 3.");
+    return Object.freeze({
+      priority: (index + 1) as 1 | 2 | 3,
+      action: customerProse(row.action, `${path}.action`, 5_000),
+      evidenceRefs: Object.freeze(evidenceRefsUnbounded(row.evidenceRefs, `${path}.evidenceRefs`))
+    });
+  }) as unknown as ReportV4DiagnosisOutput["recommendedActions"];
+
+  return Object.freeze({
+    selectionSummary: customerProse(root.selectionSummary, "$diagnosisOutput.selectionSummary", 5_000),
+    observableFactors,
+    targetGap: customerProse(root.targetGap, "$diagnosisOutput.targetGap", 5_000),
+    recommendedActions,
+    detailedEvidenceRefs: Object.freeze(evidenceRefsUnbounded(root.detailedEvidenceRefs, "$diagnosisOutput.detailedEvidenceRefs"))
+  });
+}
+
+export function parseReportV4DiagnosisOutputForQuestion(
+  value: unknown,
+  input: { readonly questionId: string; readonly sourceEvidenceIds: readonly string[] }
+): ReportV4DiagnosisOutput {
+  const diagnosis = parseReportV4DiagnosisOutputShape(value);
+  const questionId = boundedText(input.questionId, "$diagnosisBinding.questionId", 500);
+  const sourceIds = new Set(input.sourceEvidenceIds.map((id, index) =>
+    boundedText(id, `$diagnosisBinding.sourceEvidenceIds[${index}]`, 500)
+  ));
+  const targetPrefix = `${questionId}:target:`;
+  const allowed = (ref: string) => sourceIds.has(ref) || ref.startsWith(targetPrefix);
+  const unknown = diagnosis.detailedEvidenceRefs.find((ref) => !allowed(ref));
+  if (unknown) {
+    throw new TypeError(`$diagnosisOutput references ${unknown}, which is not bound to question ${questionId}.`);
+  }
+  if (!diagnosis.detailedEvidenceRefs.some((ref) => ref.startsWith(targetPrefix))) {
+    throw new TypeError("$diagnosisOutput must cite at least one target-site evidence ref bound to the current question.");
+  }
+  const detailed = new Set(diagnosis.detailedEvidenceRefs);
+  const nestedRefs = [
+    ...diagnosis.observableFactors.flatMap(({ evidenceRefs }) => evidenceRefs),
+    ...diagnosis.recommendedActions.flatMap(({ evidenceRefs }) => evidenceRefs)
+  ];
+  const unboundNested = nestedRefs.find((ref) => !detailed.has(ref));
+  if (unboundNested) {
+    throw new TypeError(`$diagnosisOutput nested evidence ref ${unboundNested} is absent from detailedEvidenceRefs.`);
+  }
+  return diagnosis;
+}
+
+function evidenceRefsUnbounded(value: unknown, path: string): string[] {
+  const rows = array(value, path);
+  if (rows.length < 1 || rows.length > 100) throw new TypeError(`${path} must contain between 1 and 100 evidence refs.`);
+  const refs = rows.map((ref, index) => boundedText(ref, `${path}[${index}]`, 500));
+  return [...new Set(refs)];
+}
+
 function evidenceRefs(value: unknown, path: string, allowed: ReadonlySet<string>): string[] {
   const rows = array(value, path);
   if (rows.length < 1 || rows.length > 100) throw new TypeError(`${path} must contain between 1 and 100 current-question evidence refs.`);

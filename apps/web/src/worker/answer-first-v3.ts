@@ -61,7 +61,7 @@ export interface AnswerFirstV3CheckpointV1 {
 
 export interface AnswerFirstV3CheckpointV2 {
   version: typeof GENERATIVE_ANSWER_FIRST_V3_CHECKPOINT_VERSION;
-  stage: "answers_collected" | "cards_ready" | "diagnosis_ready";
+  stage: "answers_collected" | "cards_ready" | "diagnosis_ready" | "per_question_diagnosis_ready";
   identityHash: string;
   questionSetIdentity: string;
   providerId: string;
@@ -76,6 +76,8 @@ export interface AnswerFirstV3CheckpointV2 {
   answerResults: [GenerativeSearchAnswerResult, GenerativeSearchAnswerResult, GenerativeSearchAnswerResult];
   answerCards?: [GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3];
   sourceSelectionDiagnosis?: SourceSelectionDiagnosisV1;
+  diagnosisIdentityHash?: string;
+  diagnosisByQuestion?: Record<string, NonNullable<GenerativeSearchAnswerCardV3["diagnosis"]>>;
 }
 
 export type AnswerFirstV3Checkpoint = AnswerFirstV3CheckpointV1 | AnswerFirstV3CheckpointV2;
@@ -100,6 +102,16 @@ export interface ResolveAnswerFirstV3Input extends BuildAnswerFirstV3EvidenceInp
   signal?: AbortSignal;
 }
 
+export interface AnswerFirstV3SeededQ1 {
+  questionSetIdentity: string;
+  providerId: string;
+  model: string;
+  searchMode: string;
+  locale: string;
+  region: string;
+  answerResult: GenerativeSearchAnswerResult;
+}
+
 export interface ResolveGenerativeAnswerFirstV3Input {
   questionSet: ConfirmedBusinessQuestionSet;
   provider: GenerativeSearchAnswerProvider;
@@ -110,6 +122,7 @@ export interface ResolveGenerativeAnswerFirstV3Input {
   competitors?: readonly { entityId: string; aliases: readonly string[] }[];
   auditSources?: readonly AnswerFirstV3StoredSource[];
   targetPages?: readonly SourceSelectionTargetPageSignal[];
+  seededQ1?: AnswerFirstV3SeededQ1;
   checkpoint?: AnswerFirstV3Checkpoint | null;
   saveCheckpoint?(checkpoint: AnswerFirstV3CheckpointV2): Promise<void>;
   now?: () => Date;
@@ -304,11 +317,14 @@ export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAns
     throw new AnswerFirstV3ResumeIdentityMismatchError("A legacy V3 checkpoint cannot create a generative-search answer card.");
   }
 
+  const seededQ1 = input.seededQ1
+    ? validateSeededQ1(input.seededQ1, input, questions[0])
+    : null;
   let answerResults = resumed?.answerResults;
   let providerCalls = false;
   if (!answerResults) {
     const signal = input.signal ?? new AbortController().signal;
-    answerResults = await Promise.all(questions.map(async (question, index) => {
+    const generateAnswer = async (question: (typeof questions)[number], index: number) => {
       let parsed = await callGenerativeProvider(input.provider, {
         questionId: question.id,
         question: question.exactText,
@@ -319,7 +335,7 @@ export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAns
       if (index === 0 && parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
         parsed = await callGenerativeProvider(input.provider, {
           questionId: question.id,
-          question: `${question.exactText}\n${q1Correction(input.locale)}`,
+          question: question.exactText + "\n" + q1Correction(input.locale),
           locale: input.locale,
           region: input.region,
           signal
@@ -332,13 +348,11 @@ export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAns
         const answerWithoutSources = parsed;
         const corrected = await callGenerativeProvider(input.provider, {
           questionId: question.id,
-          question: `${question.exactText}\n${sourceCorrection(input.locale)}`,
+          question: question.exactText + "\n" + sourceCorrection(input.locale),
           locale: input.locale,
           region: input.region,
           signal
         });
-        // A citation correction may enrich a valid answer, but it must never
-        // erase that answer by replacing it with a refusal or blank output.
         if (corrected.answerText && corrected.refusal === null) parsed = corrected;
         else parsed = answerWithoutSources;
       }
@@ -346,10 +360,22 @@ export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAns
         throw new AnswerFirstV3ModelContractInvalidError({ cause: new TypeError("Question 1 answer is nonresponsive market-statistic-only output.") });
       }
       return parsed;
-    })) as [GenerativeSearchAnswerResult, GenerativeSearchAnswerResult, GenerativeSearchAnswerResult];
+    };
+    if (seededQ1) {
+      const generated = await Promise.all([
+        generateAnswer(questions[1], 1),
+        generateAnswer(questions[2], 2)
+      ]);
+      answerResults = [seededQ1, generated[0], generated[1]];
+    } else {
+      answerResults = await Promise.all(questions.map(generateAnswer)) as [
+        GenerativeSearchAnswerResult,
+        GenerativeSearchAnswerResult,
+        GenerativeSearchAnswerResult
+      ];
+    }
     providerCalls = true;
   }
-
   const perAnswerHashes = await Promise.all(answerResults.map((answer) => generativeSearchAnswerHash(answer)));
   const perSourceHashes = await Promise.all(answerResults.map((answer) => generativeSearchSourceHash(answer.sources)));
   const answerHash = hash(perAnswerHashes);
@@ -412,6 +438,29 @@ export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAns
     await input.saveCheckpoint?.(ready);
   }
   return { checkpoint: ready, answerCards, reused: !providerCalls };
+}
+
+function validateSeededQ1(
+  seed: AnswerFirstV3SeededQ1,
+  input: ResolveGenerativeAnswerFirstV3Input,
+  question: { id: string; exactText: string }
+): GenerativeSearchAnswerResult {
+  if (seed.questionSetIdentity !== input.questionSet.contentHash ||
+      seed.providerId !== input.provider.providerId ||
+      seed.model !== input.provider.model ||
+      seed.searchMode !== input.provider.searchMode ||
+      seed.locale !== input.locale ||
+      seed.region !== input.region) {
+    throw new AnswerFirstV3ResumeIdentityMismatchError("Free teaser Q1 identity does not match paid V3 runtime.");
+  }
+  const parsed = parseGenerativeSearchAnswerResult(seed.answerResult, {
+    expectedQuestionId: question.id,
+    locale: input.locale
+  });
+  if (!parsed.answerText || parsed.refusal || parsed.sources.length === 0) {
+    throw new AnswerFirstV3ResumeIdentityMismatchError("Free teaser Q1 is not a complete reusable answer.");
+  }
+  return parsed;
 }
 
 async function callGenerativeProvider(

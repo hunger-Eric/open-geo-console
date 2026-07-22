@@ -401,9 +401,27 @@ export async function materializePreparedCombinedArtifactV3(
 export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, html: string): void {
   const required = [
     report.artifactRevisionId,
-    ...report.answerCards.flatMap((card) => card.answerMode === "generative_search_v1"
-      ? [card.exactQuestion, card.answerText, card.refusal?.reason ?? "", ...card.sources.flatMap((source) => [source.title, source.registrableDomain, source.canonicalUrl, source.citedText ?? ""]), ...card.geoDiagnosis.targetRoles, ...card.geoDiagnosis.competitorEntityIds, ...card.geoDiagnosis.missingEvidenceFamilies, card.geoDiagnosis.retestQuestion]
-      : [card.exactQuestion, ...card.sentences.map(({ text }) => text), ...card.sourceEvidence.flatMap((evidence) => [evidence.title, evidence.registrableDomain, evidence.canonicalUrl, evidence.exactExcerpt, evidence.ownershipCategory, evidence.observedAt]), ...card.geoDiagnosis.targetRoles, ...card.geoDiagnosis.competitorEntityIds, ...card.geoDiagnosis.missingEvidenceFamilies, card.geoDiagnosis.retestQuestion]),
+    ...report.answerCards.flatMap((card) => {
+      const answerContent = card.answerMode === "generative_search_v1"
+        ? [card.exactQuestion, card.answerText, card.refusal?.reason ?? "", ...card.sources.flatMap((source) => [source.title, source.registrableDomain, source.canonicalUrl, source.citedText ?? ""])]
+        : [card.exactQuestion, ...card.sentences.map(({ text }) => text), ...card.sourceEvidence.flatMap((evidence) => [evidence.title, evidence.registrableDomain, evidence.canonicalUrl, evidence.exactExcerpt, evidence.ownershipCategory, evidence.observedAt])];
+      if (card.diagnosis) {
+        return [
+          ...answerContent,
+          card.diagnosis.selectionSummary,
+          ...card.diagnosis.observableFactors.map(({ observation }) => observation),
+          card.diagnosis.targetGap,
+          ...card.diagnosis.recommendedActions.map(({ action }) => action)
+        ];
+      }
+      return [
+        ...answerContent,
+        ...card.geoDiagnosis.targetRoles,
+        ...card.geoDiagnosis.competitorEntityIds,
+        ...card.geoDiagnosis.missingEvidenceFamilies,
+        card.geoDiagnosis.retestQuestion
+      ];
+    }),
     ...(report.sourceSelectionDiagnosis ? [
       ...report.sourceSelectionDiagnosis.sourceProfiles.flatMap((profile) => [
         profile.registrableDomain,
@@ -438,6 +456,28 @@ export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, ht
         const evidence = card.sourceEvidence.find((candidate) => candidate.evidenceId === evidenceId);
         const evidenceAt = evidence ? renderedHtmlIndexOf(html, evidence.exactExcerpt, sentenceAt) : -1;
         if (!evidence || evidenceAt < sentenceAt || evidenceAt >= nextSentenceAt) throw new Error("Combined V3 HTML artifact failed adjacent citation completeness readiness.");
+      }
+    }
+  }
+  for (const [cardIndex, card] of report.answerCards.entries()) {
+    if (!card.diagnosis) continue;
+    const questionAt = renderedHtmlIndexOf(html, card.exactQuestion);
+    const nextQuestion = report.answerCards[cardIndex + 1];
+    const cardEnd = nextQuestion ? renderedHtmlIndexOf(html, nextQuestion.exactQuestion, questionAt + 1) : html.length;
+    const answerAnchors = card.answerMode === "generative_search_v1"
+      ? [card.status === "refused" ? card.refusal!.reason : card.answerText, ...card.sources.map(({ canonicalUrl }) => canonicalUrl)]
+      : [...card.sentences.map(({ text }) => text), ...card.sourceEvidence.map(({ exactExcerpt }) => exactExcerpt)];
+    const contentEnd = Math.max(questionAt, ...answerAnchors.map((value) => renderedHtmlIndexOf(html, value, questionAt)));
+    const diagnosisValues = [
+      card.diagnosis.selectionSummary,
+      ...card.diagnosis.observableFactors.map(({ observation }) => observation),
+      card.diagnosis.targetGap,
+      ...card.diagnosis.recommendedActions.map(({ action }) => action)
+    ];
+    for (const value of diagnosisValues) {
+      const diagnosisAt = renderedHtmlIndexOf(html, value, contentEnd);
+      if (diagnosisAt <= contentEnd || diagnosisAt >= cardEnd) {
+        throw new Error("Combined V3 HTML artifact failed answer-source-diagnosis positional completeness readiness.");
       }
     }
   }

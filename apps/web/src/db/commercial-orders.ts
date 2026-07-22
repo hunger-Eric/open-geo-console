@@ -729,7 +729,9 @@ async function applyPaidPaymentEventInternal(
 
     const combinedReportContract = expectedContract === "report_v4"
       ? "combined_geo_report_v4"
-      : resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: process.env.OGC_COMBINED_REPORT_CONTRACT });
+      : order.recommendation_report_version === 3
+        ? "combined_geo_report_v3"
+        : resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: process.env.OGC_COMBINED_REPORT_CONTRACT });
     let jobId = order.fulfillment_job_id ?? reservation.job_id;
     if (!jobId) {
       jobId = ids.jobId;
@@ -856,7 +858,7 @@ export function fulfillmentMethodologyForProductAdmission(
 }
 
 export function recommendationReportVersionForProductAdmission(productCode: string): RecommendationReportVersion | null {
-  if (productCode === "recommendation_forensics_v1") return 2;
+  if (productCode === "recommendation_forensics_v1") return 3;
   if (productCode === "deep_report_v1") return null;
   throw new CommercialOrderConflictError("The paid order uses an unsupported recommendation report version.");
 }

@@ -1,5 +1,330 @@
 # Active Change Scope Lock
 
+Status: `APPROVED` - the user explicitly authorized continuation on 2026-07-22
+for the exact protected-Staging deployment and one-report acceptance scope
+below. The frozen source manifest was revalidated before this approval update;
+only the listed actions and stop conditions are authorized.
+
+## Active scope - one complete Free-Teaser V4 to Paid V3 Staging report
+
+### Frozen source and current runtime authority
+
+- Target: `https://shun-express.com/` through the fixed protected test site
+  `https://open-geo-console-staging-itheheda.vercel.app` only.
+- Candidate source baseline: branch `codex/v4-answer-optimization-scope-reset`,
+  HEAD `a5825d637eb839e7dc1606c5e400412fb5962e52`, tracked code/test patch hash
+  `32ae24913f95a4240669920b9899386f6ddc6673`, plus these five new-file Git blob
+  hashes: teaser component `814deeda36760ec75d5359b609a0fa44a38de475`,
+  teaser test `06000f9f12319af348178a34dc7c54c7159970b6`, V41 test
+  `71f986a7385e1eea039f4d6e7705a3615f9f3e51`, teaser Worker
+  `5351e1ca7175c98ef4361393c5569d3470debae8`, and teaser Worker test
+  `ba0c24a757495ad219a2c89cf504fa119bf301e4`. Only those 51 implementation/test
+  paths plus this scope document may enter the candidate commit; every unrelated
+  dirty or untracked path remains excluded.
+- Current Web rollback authority: Preview
+  `dpl_CMPQzDZc3pGHW1As6MrdNQe1i7M6`, URL
+  `https://open-geo-console-rh74n285h-itheheda-6857s-projects.vercel.app`.
+- Current Worker rollback authority: image
+  `open-geo-console:staging-a5825d637eb839e7dc1606c5e400412fb5962e52`, ID
+  `sha256:f3b65393e41b66bd13b3d14ceb31d6a17b83cae7d9a7e1e630bc9129ef755ad9`.
+- Read-only preflight already proves Staging marker fingerprint
+  `7223dda0037deca3`, schema V41, Preview/test-commerce identity, public-search
+  runtime enabled, and two running Staging Worker lanes. No schema migration or
+  database-marker write is needed or authorized.
+
+### Exact deployment allowance after approval
+
+1. Stage only the 52 task paths and create one local candidate commit. Do not
+   push, merge, create a PR, tag, or include user-owned files. Record its full
+   SHA here before any external mutation; the SHA must be derived only from the
+   frozen source manifest above.
+2. Export that commit into a clean temporary deployment context. Create exactly
+   one Vercel Preview using existing remote build cache, verify `Ready`, then
+   move only the fixed protected-Staging alias to it. Production aliases and
+   deployments remain untouched.
+3. Build exactly one immutable Worker image tagged
+   `open-geo-console:staging-<candidate-full-sha>` with normal Docker cache (no
+   `--no-cache`; dependency and Chromium layers should be reused). Recreate only
+   `staging-worker-free` and `staging-worker-deep`, then prove image ID, revision
+   label, tier, deployment profile, database marker, and readiness. Never copy
+   files into a running container and never touch production containers/images.
+4. Run at most one redacted public-search probe and one redacted generative-answer
+   probe. A probe failure stops the run; there is no manual retry allowance.
+
+### Exact one-report allowance after runtime alignment
+
+1. Through an authenticated real browser, submit exactly one forced-new scan for
+   `https://shun-express.com/`. Do not reuse, reopen, repair, clone, or delete a
+   historical report/job.
+2. Allow only that new free job and its persisted checkpoints to generate the
+   three-question set, three public-search observations, Q1 answer/diagnosis and
+   Free V4 teaser. No manual job replay or second submission is authorized.
+3. Verify the free page contains technical score/ratings, three-question AI
+   absence metrics, full Q1 answer/sources/diagnosis, locked Q2/Q3 titles, locked
+   remediation preview and CTA; locked prose must be absent from HTML/serialized
+   props.
+4. Create exactly one `recommendation_forensics_v1` Airwallex Sandbox checkout
+   from that teaser, complete exactly one Sandbox payment, and allow its signed
+   Webhook to create exactly one Paid V3 fulfillment. Real-money commerce is
+   forbidden. If hosted checkout requires interactive account or 3DS approval,
+   pause for the user rather than substituting a synthetic payment event.
+5. Let the existing realtime Worker/checkpoint graph complete Q2/Q3 and all
+   three bound diagnoses. Run Staging commerce reconciliation only as needed for
+   this order, at most twice, and verify `completed`, zero refund, settled credit,
+   redirected test email, and an active customer HTML report accessible through
+   the exact `staging-access` report/order pair.
+6. Verify the free and paid records retain the identical question-set ID and Q1
+   identity; inspect the paid HTML for answer -> owned sources -> per-question
+   diagnosis ordering and the later secondary source-selection section.
+
+### Test-site limits, stop, rollback and evidence
+
+- Use only the fixed protected test site and its existing Staging model/search,
+  database, Worker and Sandbox-commerce resources. Real-money payment, billing
+  and production resources are forbidden. The Sandbox success event exists only
+  because the normal Paid V3 job gate requires a verified test payment event; it
+  does not debit funds. External work is bounded to one free report, one Sandbox
+  unlock, the two named probes, and the provider calls checkpointed by those two
+  jobs. No manual external-call retry is authorized.
+- Stop on any production identity, non-Staging database marker, source-manifest
+  mismatch, second scan/order/payment attempt, missing runtime secret name,
+  failed provider probe, unexpected refund, or need to change code/config/schema.
+- Before report creation, rollback may move the fixed alias once back to
+  `dpl_CMPQzDZc3pGHW1As6MrdNQe1i7M6` and recreate only the two Staging Workers
+  from the recorded prior image. After report/order creation, preserve all new
+  rows as immutable evidence; do not repair, replay, refund, delete, or reuse
+  them. Production is never a rollback target.
+- Store screenshots/traces only under ignored `output/playwright/`. One new
+  non-secret evidence file is allowed at
+  `docs/operations/evidence/2026-07-22-free-teaser-v4-paid-v3-staging-acceptance.md`.
+  It may record SHAs, deployment/image/report/order/job/artifact IDs, hashes,
+  statuses and checks, but no credentials, access token, cookie, raw provider
+  response, unhashed IP or customer email.
+- Final acceptance requires the real accessible paid HTML report and commercial
+  `completed` outcome. Tests, deployment, a free teaser, or a paid job alone do
+  not constitute completion.
+
+## Previous local implementation scope - Free-Teaser V4 + Paid V3 completion
+
+Previous status: `LOCAL_VERIFIED` - implementation, tests, lint, build and diff
+audit completed locally on 2026-07-22; no Staging acceptance was claimed.
+
+### Objective and baseline
+
+Complete the prospective product line specified by
+`docs/superpowers/specs/2026-07-21-free-teaser-v4-paid-v3-report-redesign.md`:
+new free reports become server-enforced V4 teasers; their checkout creates Paid
+V3 source-forensics fulfillment that preserves the exact free question set and
+Q1 answer. Repair the actual persistence and job-state boundaries instead of
+treating the currently green tests as completion.
+
+Baseline: branch `codex/v4-answer-optimization-scope-reset`, commit
+`a5825d637eb839e7dc1606c5e400412fb5962e52`, pre-scope tracked-diff hash
+`5718ab1f1245efbc6cec93b3ebf8203c3c71074e`. The tracked task-related partial
+delta is 309 insertions and 31 deletions across 14 paths. The two untracked task
+candidates have these SHA-256 fingerprints:
+
+- `apps/web/src/components/combined-geo-report-v4-teaser.tsx`:
+  `03999BD107BA0D13D7986755CB99CC925D59732370F26991B4487B59A2C5C440`
+- `apps/web/src/worker/report-v4-free-teaser.ts`:
+  `0ED23C40077DDBB1077F08E98B9911769F6269901AD5C5FC237129F7485B295C`
+
+Those task partials may be corrected, replaced, or removed after approval.
+Unrelated dirty/untracked paths are user-owned and must not be reset, stashed,
+cleaned, edited, staged, or committed. The specification is read-only and has
+SHA-256 `F123A22C6ECED421AF2158AED65885E6B1421F74958A10B8EDF3C755BAAF08C9`.
+
+### Locked behavior allowlist
+
+1. The existing exactly-once `v4_pre_admission` job is the free-teaser
+   authority. Teaser generation runs after its exact Admission snapshot is
+   persisted and before terminalization. Every expensive stage is checkpointed;
+   a required teaser failure is never swallowed as non-fatal.
+2. Persist one automatically confirmed three-question set, full Q1 answer with
+   sources and locally bound diagnosis, and public-search observations for all
+   three questions. Reuse existing question-set, market-observation, and scan-job
+   checkpoint authorities. Do not add a `teaser_q1_answer` report column.
+3. Compute brand/competitor metrics from the persisted three-question
+   observations. Render score/ratings without detailed findings, full Q1,
+   locked Q2/Q3 titles, issue-title preview with remediation locked, and CTA.
+   Locked answers/findings/remediation must be absent from HTML and serialized
+   props, not merely CSS-hidden.
+4. Root report, section routes, and status polling share one persisted teaser
+   readiness identity; an old completed homepage job cannot make a pending
+   teaser appear complete.
+5. Checkout uses generic `createPaymentOrder`, product
+   `recommendation_forensics_v1`, the exact persisted question-set ID,
+   public-search methodology, and report version 3. Remove only the V4 snapshot
+   prerequisite. Questions are read-only; no edit/regenerate/confirm step.
+6. Add forward-only schema V41 constraints accepting public-search versions 2
+   and 3 while preserving V4 validity. Version 3 explicitly selects
+   `combined_geo_report_v3`; environment defaults cannot redirect it.
+7. Paid V3 reuses exact free Q1 only when question-set, provider, model/search,
+   locale, region, and input identities match; mismatch fails closed. Q2/Q3 use
+   the existing answer-first generation path.
+8. `OpenGeoAnswerCardV3` gains optional `diagnosis`, not
+   `modelDiagnosis`. Parse and bind every diagnosis reference to its containing
+   question/card evidence. Historical V3 without diagnosis remains readable;
+   new version-3 fulfillment requires all three completed diagnoses.
+9. V3 diagnosis is resumable under V3 question-set identity, uses non-empty
+   authorized target-site evidence, and cannot silently omit a failed card.
+   Render each unit as answer -> its sources -> its diagnosis (three factors,
+   target gap, three actions). Cross-question source selection remains later and
+   secondary.
+10. Historical V1/V2, existing paid V4, V4 contracts, payment/entitlement
+    exactly-once boundaries, and 24-hour settlement policy remain unchanged.
+
+### Exact production-file allowlist
+
+Only these production paths may change after approval:
+
+1. `packages/ai-report-engine/src/open-geo-answer-v3.ts`
+2. `packages/ai-report-engine/src/combined-geo-report-v3.ts`
+3. `packages/ai-report-engine/src/report-v4-diagnosis.ts`
+4. `apps/web/src/worker/answer-first-v3.ts`
+5. `apps/web/src/worker/report-v4-free-teaser.ts` (new)
+6. `apps/web/src/worker/processor.ts`
+7. `apps/web/src/db/business-questions.ts`
+8. `apps/web/src/db/commercial-orders.ts`
+9. `apps/web/src/db/jobs.ts`
+10. `apps/web/src/db/schema.ts`
+11. `apps/web/src/db/migrations.ts`
+12. `apps/web/src/db/index.ts`
+13. `apps/web/src/scripts/audit-recommendation-methodologies.ts`
+14. `apps/web/src/app/api/reports/[id]/checkout/route.ts`
+15. `apps/web/src/app/api/reports/[id]/status/route.ts`
+16. `apps/web/src/components/commercial-checkout.tsx`
+17. `apps/web/src/components/combined-geo-report-v4-teaser.tsx` (new)
+18. `apps/web/src/components/combined-geo-report-v3-artifact.tsx`
+19. `apps/web/src/report/combined-artifact-readiness.tsx`
+20. `apps/web/src/app/[locale]/reports/[id]/page.tsx`
+21. `apps/web/src/app/[locale]/reports/[id]/[section]/page.tsx`
+
+No extra production helper is pre-authorized. If one becomes necessary, stop as
+`DEVIATION_REVIEW_REQUIRED` and name the exact path and responsibility.
+
+### Exact test-file allowlist
+
+Only these tests may change or be created:
+
+- `packages/ai-report-engine/src/open-geo-answer-v3.test.ts`
+- `packages/ai-report-engine/src/combined-geo-report-v3.test.ts`
+- `packages/ai-report-engine/src/report-v4-diagnosis.test.ts`
+- `apps/web/src/worker/answer-first-v3.test.ts`
+- `apps/web/src/worker/report-v4-free-teaser.test.ts` (new)
+- `apps/web/src/worker/processor.test.ts`
+- `apps/web/src/worker/processor-contract.test.ts`
+- `apps/web/src/db/jobs.test.ts`
+- `apps/web/src/db/product-contract.test.ts`
+- `apps/web/src/db/public-source-commerce.test.ts`
+- `apps/web/src/db/public-source-commerce.postgres.test.ts`
+- `apps/web/src/db/index.test.ts`
+- `apps/web/src/db/schema-v41.postgres.test.ts` (new)
+- `apps/web/src/app/api/reports/[id]/checkout/route.test.ts`
+- `apps/web/src/app/api/reports/[id]/status/route.test.ts` (new if absent)
+- `apps/web/src/components/commercial-checkout.test.ts`
+- `apps/web/src/components/combined-geo-report-v4-teaser.test.tsx` (new)
+- `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx`
+- `apps/web/src/report/combined-artifact-readiness.test.tsx`
+
+The existing `schema-v18`, `v19`, `v20`, `v21`, `v23`, `v25`,
+`v26`, `v27`, `v28`, `v29`, `v30`, `v31`, `v32`, `v34`,
+`v35`, `v36`, `v37`, `v38`, and `v39` PostgreSQL tests may receive
+only the mechanical current-version expectation change from 40 to 41.
+
+User authorization update (2026-07-22): the migration-chain assertions in
+`schema-v32`, `schema-v34`, `schema-v35`, `schema-v36`, `schema-v37`,
+`schema-v38`, `schema-v39`, and `report-v4-acceptance-ledger.test.ts` may be
+updated only to include V41 in `databaseMigrationsAfter(...)` expectations.
+No production behavior or other assertion changes are authorized by this
+update.
+
+### Diff budget
+
+- production: at most `+1,900/-650`
+- focused/new tests: at most `+2,200/-650`
+- schema-version mechanical and authorized migration-chain tests: at most `+42/-36`
+- this scope and evidence: at most `+230/-20`
+- total change-owned delta: at most `+4,349/-1,320`
+
+The partial task delta counts inside these limits. Before commit, audit every
+changed and untracked path against the allowlist.
+
+### Forbidden actions
+
+No crawler frontier/safety changes, V4 Core/Enhancement or paid-V4 contract
+changes, historical migration/replay/replacement, price or provider-protocol
+changes, refund/SLA/email/auth/token changes, dependency/lockfile/env/secret
+changes, Docker/topology/deployment changes, or unrelated docs/assets. Do not
+add CSS-only secrecy.
+
+No commit, push, deployment, live crawl, model/search call, checkout, payment,
+refund, email, or staging/production mutation is authorized. Staging E2E needs
+a later exact delta approval identifying candidate commit/image/Preview, one new
+target report, one sandbox order, cost ceiling, stop conditions, and rollback.
+
+### Deterministic acceptance
+
+Prove with focused tests and repository evidence:
+
+- exactly-once/resumable free question set, identical Q1, three observations,
+  bound diagnosis, and ready checkpoint after Admission;
+- no repeated completed external stage and no false-ready teaser on failure;
+- four teaser hooks and zero locked prose leakage;
+- consistent root/section/status states and access control;
+- V3 order with exact question-set ID and no V4 snapshot/edit gate;
+- disposable PostgreSQL V40 -> V41 migration accepting valid V2/V3 and V4,
+  rejecting invalid identities, and rewriting no historical row;
+- exact-identity Q1 reuse, Q2/Q3 generation, three resumable bound diagnoses,
+  non-empty target evidence, and fail-closed completion;
+- per-question answer/source/diagnosis ordering and historical V3 readability;
+- historical V2/V3/V4 commerce/artifact/settlement regressions remain green.
+
+Final checks: focused tests, PostgreSQL V41 test, `npm test`, `npm run lint`,
+`npm run build`, `git diff --check`, path/numstat audit, forbidden/secret
+scan, and dirty-worktree comparison. Anything outside this lock is
+`DEVIATION_REVIEW_REQUIRED`.
+
+---
+
+The sections below are archived evidence and have no authority for this change.
+
+Status: `FROZEN` - test and lint repair complete (2026-07-21). All acceptance
+checks passed: npm test 0 failures, npm run lint 0 errors, npm run build success.
+
+## Archived scope - test and lint repair
+
+### Objective and baseline
+
+Repair 12 failing unit tests and 2 ESLint errors discovered by full code scan.
+No production behavior changes; only test expectations, test mocks, unused imports,
+and `as any` casts are touched.
+
+### Allowed files
+
+1. `apps/web/src/db/product-contract.test.ts` — update version expectation 2→3
+2. `apps/web/src/app/api/reports/[id]/checkout/route.test.ts` — rewrite mocks/assertions to match refactored route
+3. `apps/web/src/app/[locale]/reports/[id]/page.tsx` — replace `as any` with typed casts
+4. `apps/web/src/components/combined-geo-report-v4-teaser.tsx` — remove unused imports/parameter
+
+### Forbidden subsystems
+
+Worker, crawler, AI engine, payment gateway, database schema, deployment.
+
+### Diff budget
+
+< 250 lines changed across the four files above.
+
+### Acceptance checks
+
+- `npm test` passes with 0 failures
+- `npm run lint` passes with 0 errors
+- `npm run build` succeeds
+
+---
+
+## Archived scope - bounded representative V4 admission (FROZEN)
+
 Status: `FROZEN` - contract B implementation and deterministic repository
 verification are complete. No commit or external action was authorized or
 performed; any further change requires a new exact approval.

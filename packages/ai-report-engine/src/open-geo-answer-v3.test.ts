@@ -214,6 +214,23 @@ describe("Open GEO answer V3 contract", () => {
     expect(parsed[0]!.geoDiagnosis.citedOwnership.unknown).toBe(1);
   });
 
+  it("accepts optional question-local diagnosis and rejects cross-question references", () => {
+    const context = { ...fixtureContext(), locale: "en", missingEvidenceFamiliesByQuestion: [[], [], []] as [string[], string[], string[]] };
+    const value = generativeCards(context);
+    const diagnosis = questionDiagnosis(value[0]!.questionId, value[0]!.sources[0]!.sourceId);
+    value[0] = { ...value[0]!, diagnosis };
+
+    const parsed = parseOpenGeoAnswerCardsV3(value, context);
+    expect(parsed[0]!.diagnosis).toEqual(diagnosis);
+    expect(parsed[1]!.diagnosis).toBeUndefined();
+
+    const foreign = generativeCards(context);
+    foreign[0] = {
+      ...foreign[0]!,
+      diagnosis: questionDiagnosis(foreign[1]!.questionId, foreign[0]!.sources[0]!.sourceId)
+    };
+    expect(() => parseOpenGeoAnswerCardsV3(foreign, context)).toThrow(/evidence|question/i);
+  });
   it("accepts predominantly Chinese generative cards with ordinary industry acronyms", () => {
     const context = fixtureContext();
     const value = generativeCards(context).map((card, index) => ({
@@ -367,5 +384,23 @@ function questionSet(): ConfirmedBusinessQuestionSet {
       neutralizationVersion: "identity-neutral-v1",
       neutralContentHash: `neutral-${index}`
     })) as unknown as ConfirmedBusinessQuestionSet["questions"]
+  };
+}
+function questionDiagnosis(questionId: string, sourceId: string): NonNullable<OpenGeoAnswerCardV3["diagnosis"]> {
+  const targetRef = `${questionId}:target:${"c".repeat(64)}`;
+  return {
+    selectionSummary: "The cited source and target page expose concrete, comparable facts.",
+    observableFactors: [
+      { kind: "problem_match", observation: "The source addresses the buyer question directly.", evidenceRefs: [sourceId] },
+      { kind: "factual_specificity", observation: "The answer cites a concrete public statement.", evidenceRefs: [sourceId] },
+      { kind: "target_clarity", observation: "The target page lacks the same level of detail.", evidenceRefs: [targetRef] }
+    ],
+    targetGap: "The target website does not state the relevant facts with equal clarity.",
+    recommendedActions: [
+      { priority: 1, action: "Publish the missing facts on the relevant service page.", evidenceRefs: [targetRef] },
+      { priority: 2, action: "Connect those facts explicitly to the buyer question.", evidenceRefs: [sourceId, targetRef] },
+      { priority: 3, action: "Keep the public details current and easy to verify.", evidenceRefs: [targetRef] }
+    ],
+    detailedEvidenceRefs: [sourceId, targetRef]
   };
 }

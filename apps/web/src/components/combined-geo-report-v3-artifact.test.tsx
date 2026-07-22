@@ -27,7 +27,22 @@ function generativeModel() {
     provenance:{providerId:"mimo",model:"mimo-v2.5-pro",searchMode:"native_web_search",promptVersion:"generative-search-answer-v1" as const,searchedAt:"2030-01-01T00:00:00.000Z",completedAt:"2030-01-01T00:00:01.000Z",answerHash:"a".repeat(64),sourceHash:"b".repeat(64)},
     refusal:null,
     geoDiagnosis:{...legacy.geoDiagnosis,citedOwnership:{...legacy.geoDiagnosis.citedOwnership,institution:0,community:0,social:0,unknown:1}},
-    audit:{verifiedBodyCount:index===0?1:0,searchSourceOnlyCount:index===1?1:0,inaccessibleCount:index===2?1:0}
+    audit:{verifiedBodyCount:index===0?1:0,searchSourceOnlyCount:index===1?1:0,inaccessibleCount:index===2?1:0},
+    diagnosis:{
+      selectionSummary:`本题来源与目标页诊断摘要 ${index+1}`,
+      observableFactors:[
+        {kind:"problem_match",observation:`本题因素 A${index+1}`,evidenceRefs:[`generated-source-${index+1}`]},
+        {kind:"factual_specificity",observation:`本题因素 B${index+1}`,evidenceRefs:[`generated-source-${index+1}`]},
+        {kind:"target_clarity",observation:`本题因素 C${index+1}`,evidenceRefs:[`${legacy.questionId}:target:${"c".repeat(64)}`]}
+      ],
+      targetGap:`目标官网差距 ${index+1}`,
+      recommendedActions:[
+        {priority:1 as const,action:`本题行动一 ${index+1}`,evidenceRefs:[`${legacy.questionId}:target:${"c".repeat(64)}`]},
+        {priority:2 as const,action:`本题行动二 ${index+1}`,evidenceRefs:[`generated-source-${index+1}`]},
+        {priority:3 as const,action:`本题行动三 ${index+1}`,evidenceRefs:[`${legacy.questionId}:target:${"c".repeat(64)}`]}
+      ],
+      detailedEvidenceRefs:[`generated-source-${index+1}`,`${legacy.questionId}:target:${"c".repeat(64)}`]
+    }
   })) as typeof model.combinedReport.answerCards;
   model.combinedReport.sourceSelectionDiagnosis=buildSourceSelectionDiagnosisV1({
     locale:"zh",answerHash:model.combinedReport.engineProvenance.answerHash,sourceHash:model.combinedReport.engineProvenance.evidenceHash,targetFoundationHash:"d".repeat(64),targetDomain:"example.com",
@@ -120,6 +135,20 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html.indexOf("data-answer-audit")).toBeGreaterThan(html.indexOf("服务商甲提供跨境海运方案 3"));
   });
 
+  it("nests each answer, its sources, and its three-factor diagnosis in that order",()=>{
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:generativeModel()}));
+    expect(html.match(/data-question-diagnosis="true"/g)).toHaveLength(3);
+    for(let index=1;index<=3;index+=1){
+      const answerAt=html.indexOf(`服务商甲提供跨境海运方案 ${index}`);
+      const sourceAt=html.indexOf(`provider.example/services/${index}`);
+      const diagnosisAt=html.indexOf(`本题来源与目标页诊断摘要 ${index}`);
+      expect(answerAt).toBeGreaterThan(0);
+      expect(answerAt).toBeLessThan(sourceAt);
+      expect(sourceAt).toBeLessThan(diagnosisAt);
+      for(const value of [`本题因素 A${index}`,`本题因素 B${index}`,`本题因素 C${index}`,`目标官网差距 ${index}`,`本题行动一 ${index}`,`本题行动二 ${index}`,`本题行动三 ${index}`]) expect(html).toContain(value);
+    }
+    expect(html.indexOf("data-source-selection-diagnosis")).toBeGreaterThan(html.indexOf("本题来源与目标页诊断摘要 3"));
+  });
   it("replaces the legacy counters with the source-centric diagnosis for prospective V3 reports",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:generativeModel()}));
     const diagnosisAt=html.indexOf("data-source-selection-diagnosis");
