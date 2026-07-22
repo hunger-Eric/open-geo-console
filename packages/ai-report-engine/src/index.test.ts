@@ -456,6 +456,41 @@ describe("batch analysis and evidence", () => {
     expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
 
+  it("drops only invalid optional signal and strength entries after bounded language correction", async () => {
+    const invalid = { analyses: [{
+      url: page.url,
+      summary: "\u9875\u9762\u8bf4\u660e\u6e05\u6670\u3002",
+      organizationSignals: ["\u7ec4\u7ec7\u540d\u79f0\u6e05\u6670\u3002", "Keep brand naming consistent."],
+      strengths: ["\u9875\u9762\u7ed3\u6784\u6e05\u6670\u3002", "Use a clear service list.", "Add more proof points."],
+      findings: [{
+        title: "\u4fe1\u4efb\u8bc1\u636e\u9700\u8981\u66f4\u5177\u4f53",
+        severity: "warning",
+        impact: "\u8bfb\u8005\u53ef\u80fd\u65e0\u6cd5\u6838\u9a8c\u91cd\u8981\u4e3b\u5f20\u3002",
+        evidence: [{ url: page.url, quote: "Example builds evidence-first website reports" }],
+        recommendation: "\u5728\u91cd\u8981\u4e3b\u5f20\u65c1\u8865\u5145\u6765\u6e90\u3002",
+        confidence: "high"
+      }]
+    }] };
+    const stillInvalid = { corrections: [
+      { path: "analyses[0].organizationSignals[1]", text: "Keep brand naming consistent." },
+      { path: "analyses[0].strengths[1]", text: "Use a clear service list." },
+      { path: "analyses[0].strengths[2]", text: "Add more proof points." }
+    ] };
+    const client = mockClient([invalid, stillInvalid]);
+
+    const result = await analyzePageBatch(client, {
+      pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined
+    });
+
+    expect(result.analyses[0]).toMatchObject({
+      summary: invalid.analyses[0]!.summary,
+      organizationSignals: ["\u7ec4\u7ec7\u540d\u79f0\u6e05\u6670\u3002"],
+      strengths: ["\u9875\u9762\u7ed3\u6784\u6e05\u6670\u3002"],
+      findings: invalid.analyses[0]!.findings
+    });
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
+
   it("corrects legacy SEO terminology in page analysis using the existing single correction", async () => {
     const analysis = (summary: string) => ({ analyses: [{
       url: page.url, summary, organizationSignals: [], strengths: [], findings: []
@@ -480,9 +515,12 @@ describe("batch analysis and evidence", () => {
   });
 
   it("fails page analysis after one language correction", async () => {
-    const invalid = { analyses: [{ url: page.url, summary: "The page clearly explains the product for modern teams.", organizationSignals: [], strengths: [], findings: [] }] };
-    const client = mockClient([invalid]);
-    await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined }))
+    const invalid = { analyses: [{ url: page.url, summary: "The page clearly explains the product for modern teams.", organizationSignals: ["Keep brand naming consistent."], strengths: [], findings: [] }] };
+    const client = mockClient([invalid, { corrections: [
+      { path: "analyses[0].summary", text: invalid.analyses[0]!.summary },
+      { path: "analyses[0].organizationSignals[0]", text: invalid.analyses[0]!.organizationSignals[0]! }
+    ] }]);
+    await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 2, retryDelay: async () => undefined }))
       .rejects.toThrow(ReportLanguageValidationError);
     expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
