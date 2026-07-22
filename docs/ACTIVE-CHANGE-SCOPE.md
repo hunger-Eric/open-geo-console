@@ -1,5 +1,124 @@
 # Active Change Scope Lock
 
+## Proposed follow-on - align Paid V3 standard-question search with the proven Free V4 timeout model
+
+Status: `APPROVED` - after reviewing the two root causes, the user explicitly
+instructed on 2026-07-22 to solve both: port the proven Free search orchestration
+and timeout model into Paid V3, and require the exact non-persisting Paid Q2/Q3
+canary before another payment. This single approval covers the complete bounded
+scope below. Ordinary corrections and every listed verification and acceptance
+step proceed without additional approval requests.
+
+### Objective and frozen runtime evidence
+
+- Preserve report `d83a9744-542b-4425-b2bb-a76ffdeb4f6a`, Airwallex Sandbox
+  order `4286cb73-6349-467a-8aaf-9b196624da92`, failed Paid V3 job
+  `2dcb4e28-52f1-44aa-a379-38ce1a408a45`, pending artifact revision
+  `9dd5489a-5a94-46eb-8d41-c8749457e832`, and confirmed three-question set
+  `business-question-set-f26e9883d027938de3efb695756a8e4023fb0ba987a5113209608dee5d3eb1d0`
+  as immutable evidence. Do not retry, replay, reopen, repair, clone, delete, or
+  use that failed lineage as the final successful report.
+- The signed Webhook correctly produced one paid order, one credit reservation,
+  and one Paid V3 job. Terminalization correctly left the order failed with a
+  pending full Sandbox refund, returned the credit, queued failure mail, and
+  left the artifact non-authoritative with no HTML/PDF hashes.
+- Paid V3 standard-question resolution still creates six-query fanouts for Q2
+  and Q3, executes both questions concurrently, permits two concurrent queries
+  inside each snapshot, and retains the default 30-second query timeout. The
+  already-repaired Free V4 path instead uses three queries per question,
+  sequential questions, one query at a time, and a 60-second timeout.
+- The failed paid run persisted 48 search attempts across eight failed and one
+  eventually completed refresh snapshot. Forty-seven attempts timed out in
+  approximately 29.5-35.6 seconds; the only success completed in 26.1 seconds,
+  after the paid job had already terminalized. All four paid error events share
+  fingerprint `d3c157bd70da8b193707377b87c9624793fd3cae8dacbc18a60e9753ffc280b8`
+  and code `public_source_snapshot_search_execution`.
+- The existing one-off replacement-fulfillment command is bound to a different
+  historical lineage and, even if generalized, intentionally leaves the
+  original order failed/refundable. It cannot satisfy this acceptance's
+  commercial-completed, zero-refund, settled-credit contract and is forbidden.
+
+### Exact allowlist and budget
+
+- `apps/web/src/worker/provider-discovery-production.ts`
+- `apps/web/src/worker/provider-discovery-production.test.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for this approval and final outcome only
+- Maximum production/test diff across the two TypeScript files: `+120/-30`
+  lines.
+- No database, migration, checkpoint schema, job state machine, recovery,
+  replacement fulfillment, commerce, payment, email, artifact renderer,
+  report route/UI, Free V4 path, crawler, prompt/model, provider adapter,
+  package/lockfile, environment-source, Dockerfile/Compose, production, or
+  historical-lineage code change is allowed.
+
+### Locked implementation and pre-submission verification
+
+1. In Paid V3 `resolveStandardQuestions` only, apply the proven Free V4 search
+   model to Q2 and Q3: keep the first three deterministic fanout queries, set
+   each query budget to 60 seconds, pass `searchConcurrency: 1`, and resolve Q2
+   then Q3 sequentially. Preserve canonical questions, exclusions, authority,
+   evidence cutoff, forced-refresh rule, retrieval depth, source/domain caps,
+   provenance, snapshot persistence, and fail-closed behavior.
+2. Add regressions proving exact Q2/Q3 order, no cross-question concurrency,
+   three queries per question, 60-second budgets, one-query concurrency, and
+   unchanged retrieval/source/domain limits. Also prove a Q2 failure prevents
+   Q3 from starting and remains a failure rather than becoming partial output.
+3. Run focused provider-discovery, public-snapshot, grounded-answer and Paid V3
+   Worker suites, then `npm test`, `npm run lint`, `npm run build`, and
+   `git diff --check`. Commit only the allowlisted diff locally; no push, merge,
+   PR, tag, or production mutation.
+4. Before any new report, run a non-persisting live Staging canary using the
+   exact locked Q2/Q3 fanouts: at most six MiMo public-search calls, strictly
+   sequential, 60 seconds each. Every query must return `complete` or `partial`
+   with at least one usable result. A timeout, unavailable/malformed response,
+   empty result, or unexpected provider cost stops the acceptance before the
+   user is asked to submit or pay.
+5. Build one source-only thin Worker overlay from
+   `open-geo-console:staging-8bb068e2a0f2e9f49a3f328c9e8f4490c4ea0b78` and
+   recreate only the named Staging free/deep Workers after exact image,
+   revision, profile, command, health, database-marker, disk, and rollback
+   checks. No full build, pull, broad cleanup, Web/Vercel deployment, or
+   production mutation is authorized. Keep the accepted current image as the
+   one rollback image and remove no image unless its exact unreferenced ID is
+   recorded here first.
+6. After deterministic checks, the live canary, and the Worker replacement all
+   pass, submit the existing pending full refund for the failed Sandbox order
+   exactly once and finish its queued redirected test emails. Then put the
+   protected-Staging submission page before the user. Exactly one fresh report
+   and, only after its complete Free V4 authority is verified, exactly one
+   user-completed Airwallex Sandbox checkout are authorized. The user performs
+   both manual actions; the agent does not click them.
+7. Continue automatically through signed Webhook, Paid V3 Worker, commerce,
+   artifact activation, access/email, and desktop/mobile HTML QA. Final success
+   requires the new order to be commercially completed with zero refund and a
+   settled credit; exactly three questions ordered as full answer, own verified
+   sources, then persisted V4 diagnosis; and all required V3 technical,
+   page-evidence, public-source, provider/task-package, 90-day-roadmap, and
+   methodology sections.
+8. Any deterministic or canary failure stops before a new report/payment. Any
+   new terminal acceptance failure freezes this authority. No historical
+   substitution, manual artifact/DB patch, failed-job replay, repair/recovery,
+   replacement fulfillment, second new report/order/payment, provider fallback,
+   or production action is authorized.
+
+### Verified implementation checkpoint
+
+- The allowlisted implementation now resolves Paid V3 Q2 then Q3, keeps only
+  the first three deterministic queries per question, uses a 60-second budget,
+  and passes `searchConcurrency: 1`. Retrieval depth and source/domain caps are
+  unchanged. Regressions also prove Q2 failure prevents Q3 from starting.
+- Focused provider-discovery/pipeline/snapshot suites passed `46/46`; the full
+  repository passed `294` test files and `2690` tests with `45` files and `181`
+  tests intentionally skipped. `npm run lint`, `npm run build`, and
+  `git diff --check` passed.
+- The exact non-persisting Staging canary used the retained confirmed Q2/Q3
+  authority and made six strictly sequential calls. All six returned
+  `complete`, each with three usable results. Durations were `52,598`, `44,162`,
+  `45,986`, `34,193`, `21,050`, and `32,829` ms: four valid calls exceeded the
+  obsolete 30-second limit while all completed inside 60 seconds. The canary
+  created zero `market_snapshot_questions` rows and zero
+  `market_search_attempts` rows.
+
 ## Free V4 teaser usability and responsive-layout repair
 
 Status: `APPROVED` - explicitly approved by the user on 2026-07-22 after the

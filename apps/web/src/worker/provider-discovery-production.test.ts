@@ -206,6 +206,55 @@ describe("production provider discovery composition", () => {
     expect([...domains.values()]).toEqual(["winner.example"]);
   });
 
+  it("resolves paid Q2 and Q3 sequentially with the proven bounded search model", async () => {
+    mocks.resolve.mockReset();
+    let releaseQ2!: () => void;
+    const q2Gate = new Promise<void>((resolve) => { releaseQ2 = resolve; });
+    const started: string[] = [];
+    mocks.resolve.mockImplementation(async (request: { question: { kind: string } }) => {
+      started.push(request.question.kind);
+      if (request.question.kind === "capability_fit") await q2Gate;
+      return resolvedSnapshot(request.question.kind === "capability_fit" ? "snapshot-q2" : "snapshot-q3");
+    });
+    const { context } = providerGuardContext();
+
+    const pending = context.dependencies.resolveStandardQuestions({
+      evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
+      signal: new AbortController().signal
+    });
+    await vi.waitFor(() => expect(started).toEqual(["capability_fit"]));
+    expect(mocks.resolve).toHaveBeenCalledTimes(1);
+    releaseQ2();
+
+    await expect(pending).resolves.toEqual(["snapshot-q2", "snapshot-q3"]);
+    expect(started).toEqual(["capability_fit", "decision_risk"]);
+    const standardRequests = mocks.resolve.mock.calls.map(([request]) => request);
+    expect(standardRequests).toHaveLength(2);
+    for (const request of standardRequests) {
+      expect(request.fanout.queries).toHaveLength(3);
+      expect(request.fanout.budget.timeoutMs).toBe(60_000);
+      expect(request.searchConcurrency).toBe(1);
+      expect(request.maxSourceRetrievals).toBe(6);
+      expect(request.maxAvailableSources).toBe(3);
+      expect(request.maxSourcesPerDomain).toBe(2);
+    }
+  });
+
+  it("fails closed on Q2 without starting Q3", async () => {
+    mocks.resolve.mockReset();
+    const failure = new Error("q2 search failed");
+    mocks.resolve.mockRejectedValueOnce(failure);
+    const { context } = providerGuardContext();
+
+    await expect(context.dependencies.resolveStandardQuestions({
+      evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
+      signal: new AbortController().signal
+    })).rejects.toBe(failure);
+
+    expect(mocks.resolve).toHaveBeenCalledTimes(1);
+    expect(mocks.resolve.mock.calls[0]![0].question.kind).toBe("capability_fit");
+  });
+
   it("sanitizes a persisted pre-verification candidate set and invalidates only its old hash", () => {
     const checkpoint = {
       phase: "candidate_verification",
@@ -461,3 +510,13 @@ function questions(): ConfirmedBusinessQuestionSet { const base = { generatedTex
   { ...base, purpose: "customer_region_fit", service: "logistics", audience: "buyers", marketRegion: "US", neutralPublicText: "Which logistics services fit buyers in the target region?", privateText: "Which logistics services fit buyers in the target region?", neutralContentHash: "q2" },
   { ...base, purpose: "purchase_delivery_risk", service: "logistics", audience: "buyers", marketRegion: "US", neutralPublicText: "What logistics delivery conditions and risks should buyers compare?", privateText: "What logistics delivery conditions and risks should buyers compare?", neutralContentHash: "q3" }
 ] } as ConfirmedBusinessQuestionSet; }
+
+function resolvedSnapshot(snapshotId: string) {
+  return {
+    snapshotId, cacheIdentity: `${snapshotId}-cache`, questionId: "question",
+    observedAt: "2030-01-01T00:00:00.000Z", ageMs: 0, collectedForThisRun: true,
+    refreshAttempted: true, refreshFailed: false, sufficientlyEvidenced: true,
+    availableSourceCount: 1, observations: [], retrievals: [], actualCostMicros: 1,
+    allocatedCostMicros: 1, avoidedCostMicros: 0
+  };
+}
