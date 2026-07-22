@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { assertFulfillmentPair, deriveScanJobQueueStatus, retryScanJob } from "./jobs";
+import { REPORT_SEMANTIC_REVIEW_CONTRACT } from "@open-geo-console/ai-report-engine";
+import {
+  assertCheckpointSemanticReviewCarrierUpdate,
+  assertFulfillmentPair,
+  deriveScanJobQueueStatus,
+  retryScanJob
+} from "./jobs";
 
 describe("scan job queue status", () => {
   it("reports jobs ahead using the same deterministic queue position", () => {
@@ -83,5 +89,23 @@ describe("scan job fulfillment identity", () => {
       4,
       "locale_correction"
     )).toThrow(/standard|pre-admission/i);
+  });
+});
+
+describe("scan job semantic-review carrier", () => {
+  it("preserves marker-absent and marker-present checkpoint writes", () => {
+    expect(() => assertCheckpointSemanticReviewCarrierUpdate({}, { targetPageCount: 3 })).not.toThrow();
+    expect(() => assertCheckpointSemanticReviewCarrierUpdate({
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+    }, { targetPageCount: 3 })).not.toThrow();
+  });
+
+  it("rejects late carrier addition or an invalid replacement", () => {
+    expect(() => assertCheckpointSemanticReviewCarrierUpdate({}, {
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+    })).toThrow(/immutable/i);
+    expect(() => assertCheckpointSemanticReviewCarrierUpdate({
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+    }, { semanticReviewContractVersion: "report-semantic-review-v2" } as never)).toThrow();
   });
 });

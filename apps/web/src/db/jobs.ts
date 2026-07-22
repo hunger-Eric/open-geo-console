@@ -22,6 +22,10 @@ import {
   createPostgresReportV4AdmissionJobRepository,
   enqueueReportV4PreAdmissionAfterPreview
 } from "./report-v4-admission-jobs";
+import {
+  assertSemanticReviewCarrierUpdate,
+  semanticReviewCarrierUpdateVersion
+} from "./report-semantic-review-activation";
 
 export { getJobCreditStatus } from "./credits";
 
@@ -398,6 +402,7 @@ export async function checkpointScanJob(
   await ensureDatabase();
   const sql = getSqlClient();
   const checkpoint = JSON.stringify(input.checkpoint ?? {});
+  const semanticReviewContractVersion = semanticReviewCarrierUpdateVersion(input.checkpoint ?? {});
   await sql.begin(async (tx) => {
     const rows = await tx<{ id: string; execution_state: string; checkpoint_revision: number; current_phase: ScanJobPhase }[]>`
       UPDATE scan_jobs
@@ -410,14 +415,22 @@ export async function checkpointScanJob(
       WHERE id = ${id} AND lease_owner = ${workerId} AND lease_expires_at > now()
         AND execution_state = 'running'
         AND (${input.expectedCheckpointRevision ?? null}::integer IS NULL OR checkpoint_revision = ${input.expectedCheckpointRevision ?? null})
+        AND (${semanticReviewContractVersion ?? null}::text IS NULL OR checkpoint->>'semanticReviewContractVersion' = ${semanticReviewContractVersion ?? null})
       RETURNING id, execution_state, checkpoint_revision, current_phase
     `;
     const row = rows[0];
-    if (!row) throw new Error("The scan job lease is missing or expired.");
+    if (!row) throw new Error("The scan job lease is missing, expired, stale, or conflicts with its immutable semantic-review carrier.");
     await JobTransitionService.appendTransition(tx, { jobId: id, fromState: row.execution_state, toState: "running",
       phase: row.current_phase, checkpointRevision: row.checkpoint_revision, reasonCode: "checkpoint_advanced" });
   });
   return (await getScanJob(id))!;
+}
+
+export function assertCheckpointSemanticReviewCarrierUpdate(
+  persisted: JobCheckpoint,
+  update: JobCheckpoint
+): void {
+  assertSemanticReviewCarrierUpdate(persisted, update);
 }
 
 export interface ScanJobCoverage {

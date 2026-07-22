@@ -11,6 +11,11 @@ import {
   type ScanJobReason,
   type ScanJobRow
 } from "./schema";
+import {
+  assertSemanticReviewCarrierEquals,
+  createSemanticReviewInitialCheckpoint,
+  type SemanticReviewContractVersion
+} from "./report-semantic-review-activation";
 
 export interface CompletedPreviewJobIdentity {
   reportId: string;
@@ -30,6 +35,7 @@ export interface ReportV4PreAdmissionJobIdentity {
   recommendationReportVersion: 4;
   artifactContract: Extract<ReportArtifactContract, "combined_geo_report_v4">;
   reason: "v4_pre_admission";
+  semanticReviewContractVersion?: SemanticReviewContractVersion;
 }
 
 export interface ReportV4AdmissionEnqueueResult {
@@ -48,7 +54,8 @@ export interface ReportV4AdmissionJobRepository {
 
 export async function enqueueReportV4PreAdmissionAfterPreview(
   preview: CompletedPreviewJobIdentity,
-  repository: ReportV4AdmissionJobRepository
+  repository: ReportV4AdmissionJobRepository,
+  options: { semanticReviewContractVersion?: SemanticReviewContractVersion } = {}
 ): Promise<ReportV4AdmissionEnqueueResult | null> {
   if (preview.tier !== "free" ||
       preview.productContract !== "legacy_website_audit_v1" ||
@@ -64,7 +71,10 @@ export async function enqueueReportV4PreAdmissionAfterPreview(
     fulfillmentMethodology: "two_stage_geo_report_v4",
     recommendationReportVersion: 4,
     artifactContract: "combined_geo_report_v4",
-    reason: "v4_pre_admission"
+    reason: "v4_pre_admission",
+    ...(options.semanticReviewContractVersion
+      ? { semanticReviewContractVersion: options.semanticReviewContractVersion }
+      : {})
   });
 }
 
@@ -74,27 +84,30 @@ export function createPostgresReportV4AdmissionJobRepository(
   return {
     async createExactlyOnce(input) {
       const requestedJobId = randomUUID();
-      const inserted = await tx<Array<{ id: string }>>`
+      const initialCheckpoint = JSON.stringify(createSemanticReviewInitialCheckpoint(input.semanticReviewContractVersion));
+      const inserted = await tx<Array<{ id: string; checkpoint: unknown }>>`
         INSERT INTO scan_jobs (
           id,report_id,tier,product_contract,fulfillment_methodology,
-          recommendation_report_version,artifact_contract,locale,reason
+          recommendation_report_version,artifact_contract,locale,reason,checkpoint
         ) VALUES (
           ${requestedJobId},${input.reportId},${input.tier},${input.productContract},
           ${input.fulfillmentMethodology},${input.recommendationReportVersion},
-          ${input.artifactContract},${input.locale},${input.reason}
+          ${input.artifactContract},${input.locale},${input.reason},${initialCheckpoint}::jsonb
         )
         ON CONFLICT (report_id) WHERE reason='v4_pre_admission' DO NOTHING
-        RETURNING id
+        RETURNING id,checkpoint
       `;
       const created = Boolean(inserted[0]);
-      const existing = created ? inserted : await tx<Array<{ id: string }>>`
-        SELECT id FROM scan_jobs
+      const existing = created ? inserted : await tx<Array<{ id: string; checkpoint: unknown }>>`
+        SELECT id,checkpoint FROM scan_jobs
         WHERE report_id=${input.reportId} AND reason='v4_pre_admission'
         ORDER BY created_at,id
         LIMIT 1
       `;
-      const jobId = existing[0]?.id;
+      const row = existing[0];
+      const jobId = row?.id;
       if (!jobId) throw new Error("The V4 pre-admission job identity could not be created or resolved.");
+      assertSemanticReviewCarrierEquals(row.checkpoint, input.semanticReviewContractVersion ?? null);
       if (created) {
         await tx`
           INSERT INTO job_dispatch_outbox (id,job_id,tier,schema_version,state)

@@ -131,6 +131,7 @@ export type CitationEvidenceGrade = EvidenceGrade;
 export type { CitationRetrievalState, CitationSourceCategory };
 
 export interface JobCheckpoint {
+  semanticReviewContractVersion?: "report-semantic-review-v1";
   recovery?: {
     schemaVersion: 1;
     phase: ScanJobPhase;

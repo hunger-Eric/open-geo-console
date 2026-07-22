@@ -2,11 +2,10 @@
 
 ## ReportSemanticReview staged program - Phase 2A inactive checkpoint carrier
 
-Status: `FROZEN` - on 2026-07-23 the user approved checkpoint-lineage
-activation as the carrier architecture. That decision authorizes this exact
-scope to be written; it does not authorize the implementation below. Change
-this status to `APPROVED` only after the user explicitly approves this Phase 2A
-allowlist, budgets, behavior, and acceptance set.
+Status: `APPROVED` - on 2026-07-23 the user explicitly approved this exact
+Phase 2A scope with "批准 Phase 2A FROZEN 范围并开始执行" after reviewing the
+allowlist, budgets, locked behavior, and acceptance set. This approval does not
+authorize Phase 2B, production activation, or any external action.
 
 ### Authority and baseline
 
@@ -113,6 +112,31 @@ may not add another production file or weaken an acceptance gate.
    `npm run build`, and `git diff --check`.
 7. Before a local commit, compare the complete diff to this exact allowlist and
    both budgets. Do not push.
+
+### Phase 2A implementation outcome
+
+Status: `COMPLETE` - the inactive checkpoint-lineage carrier is implemented
+locally and the normal production enqueue path remains marker-absent.
+
+- Complete changed-path audit found exactly the five approved production files,
+  four approved test files, and this scope document; no out-of-scope path.
+- Measured production diff: `+223/-12` against the `+420/-60` hard budget.
+- Measured test diff: `+420/-1` against the `+850/-80` budget.
+- Focused verification: `29` tests passed. The `5` disposable PostgreSQL tests
+  were discovered and skipped because neither the process nor the repository's
+  local env files provide `OGC_TEST_DATABASE_ADMIN_URL`; no real database was
+  used as a substitute.
+- Repository verification: `297` test files passed and `46` skipped; `2747`
+  tests passed and `187` skipped. `npm run lint`, `npm run build`, and
+  `git diff --check` passed.
+- Repository search found explicit carrier activation only in approved tests.
+  The production free-preview terminalization call still supplies no activation
+  option. No Worker, provider, model, report, artifact, environment, timestamp,
+  V1, or V2 consumer was added.
+- No live scan, model call, report generation, historical job mutation,
+  payment, credit, database migration, deployment, push, or external action was
+  performed.
+- Phase 2A completion grants no authority for Phase 2B or activation.
 
 ### Automatic execution and hard stops
 
