@@ -184,6 +184,44 @@ beforeEach(() => {
 });
 
 describe("free teaser orchestration", () => {
+  it("resolves the three public-search snapshots in ordinal order with one question active at a time", async () => {
+    const original = mocks.resolveSnapshot.getMockImplementation()!;
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let maxActive = 0;
+    mocks.resolveSnapshot.mockImplementation(async (input) => {
+      const result = await original(input);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      active -= 1;
+      return result;
+    });
+    const input = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh" as const,
+      admission: admission(),
+      saveCheckpoint: vi.fn()
+    };
+    const pending = generateFreeTeaser(input);
+
+    await vi.waitFor(() => expect(mocks.resolveSnapshot).toHaveBeenCalledTimes(1));
+    releases.shift()!();
+    await vi.waitFor(() => expect(mocks.resolveSnapshot).toHaveBeenCalledTimes(2));
+    releases.shift()!();
+    await vi.waitFor(() => expect(mocks.resolveSnapshot).toHaveBeenCalledTimes(3));
+    releases.shift()!();
+    await pending;
+
+    expect(maxActive).toBe(1);
+    expect(mocks.resolveSnapshot.mock.calls.map(([request]) => request.question.id)).toEqual(
+      toCanonicalBuyerQuestionSet(questionSet()).questions.map(({ id }) => id)
+    );
+  });
+
   it("checkpoints every expensive stage and resumes a ready teaser without repeating search or model calls", async () => {
     const saved: FreeTeaserCheckpointV1[] = [];
     const input = {

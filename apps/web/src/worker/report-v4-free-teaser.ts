@@ -331,8 +331,10 @@ async function observeTeaserQuestions(input: {
     excludedIdentities: exclusions
   });
   const gate = createConcurrencyGate(3);
-  const snapshots = await Promise.all(fanouts.map((fanout, index) =>
-    resolvePublicSourceSnapshot({
+  const snapshots = [];
+  for (const [index, fanout] of fanouts.entries()) {
+    input.signal?.throwIfAborted();
+    snapshots.push(await resolvePublicSourceSnapshot({
       authority: input.runtime.authority,
       adapter: input.runtime.adapter,
       question: questions.questions[index]!,
@@ -347,8 +349,8 @@ async function observeTeaserQuestions(input: {
         snapshotKind: "standard_question",
         queryPlanVersion: fanout.fanoutVersion
       }
-    })
-  ));
+    }));
+  }
   const snapshotIds = snapshots.map(({ snapshotId }) => snapshotId) as [string, string, string];
   return {
     snapshotIds,
