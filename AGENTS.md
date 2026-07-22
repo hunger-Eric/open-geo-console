@@ -56,6 +56,42 @@
 - `npm test` runs package and app unit tests.
 - `npm run build` builds packages and the web app.
 
+## Docker Image and Disk Discipline
+
+- Before any Docker build, record `docker system df`, free space on the target
+  drive, the exact image IDs referenced by affected containers, and the
+  candidate diff against its base revision. A full Worker build must not start
+  with less than 20 GiB free on the target drive; stop and report instead.
+- Classify the candidate before choosing a build path. When `package.json`,
+  `package-lock.json`, `Dockerfile.worker`, the base-image digest, and
+  browser/system dependencies are unchanged, a full Worker image build is
+  forbidden. Use an explicitly approved thin source-overlay image based on the
+  currently accepted exact Worker image, copy only the required `apps/` and
+  `packages/` source, set the candidate revision label, and recreate only the
+  named Staging services. Do not rerun `npm ci`, Playwright/Chromium installation,
+  or operating-system package installation for a source-only change.
+- A full Worker image build is allowed only when one of those dependency or
+  base-image inputs changed and the active scope records the exact reason,
+  expected disk increase, cache strategy, target tag, and rollback image.
+- Do not use `docker cp` or edits inside a running container as an accepted
+  deployment. They are allowed only for an explicitly scoped disposable debug
+  container and can never serve as release or acceptance evidence.
+- A Staging replacement must identify exactly three roles before mutation: the
+  candidate image, the current image, and one rollback image. After the new
+  containers are verified, retain only the current image and one rollback image
+  for that Staging line. Removing older unreferenced Staging images requires the
+  active scope to list their exact image IDs; production images are never part
+  of that cleanup.
+- Never run broad cleanup commands such as `docker system prune`,
+  `docker image prune -a`, `docker builder prune`, or volume-wide pruning for
+  routine task cleanup. Do not delete shared layers, volumes, or images merely
+  because Docker reports them as reclaimable.
+- After every authorized image replacement or cleanup, record the before/after
+  drive free space, `docker system df`, image IDs and sizes, container references,
+  and net bytes added or freed. A failed build must report its disk/cache delta
+  and must not be followed by another build until the remaining-space and retry
+  authority are revalidated.
+
 ## Architecture Boundaries
 
 - `packages/crawler-rules` owns AI User-Agent classification.
