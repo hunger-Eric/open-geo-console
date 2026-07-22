@@ -282,6 +282,18 @@ describe("ReportSemanticReview receipt integrity", () => {
     const disallowed = validReview(input);
     (disallowed.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.sourceIds = ["source-global"];
     expect(() => parseReportSemanticReviewOutput(disallowed, input)).toThrow(/disallowed reference/u);
+
+    const core = inputCore();
+    const sourceText = "Q2 source";
+    core.sources.push({ sourceId: "source-q2", questionId: "question-2", canonicalUrl: "https://provider.example/q2", originalText: sourceText, originalTextHash: reportSemanticTextHash(sourceText) });
+    const evidenceText = "Q2 evidence";
+    core.evidence.push({ evidenceId: "evidence-q2", questionId: "question-2", sourceId: "source-q2", originalText: evidenceText, originalTextHash: reportSemanticTextHash(evidenceText) });
+    core.fields.push(manifestField("answerCards[1].answerText", "Q2 answer", "question-2", ["evidence-q2"], ["source-q2"]));
+    core.answerSubjects.push({ questionId: "question-2", fieldPath: "answerCards[1].answerText" });
+    const orderedInput = createReportSemanticReviewInput(core);
+    const reordered = validReview(orderedInput);
+    (reordered.annotations as { answers: unknown[] }).answers.reverse();
+    expect(() => parseReportSemanticReviewOutput(reordered, orderedInput)).toThrow(/questionId/u);
   });
 
   it("rejects observation text hash drift and cross-question observation reuse", () => {
