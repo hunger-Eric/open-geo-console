@@ -122,7 +122,19 @@ beforeEach(() => {
     adapter: { id: "adapter-1" }
   });
   const canonical = toCanonicalBuyerQuestionSet(questions).questions;
-  mocks.fanouts.mockReturnValue(canonical.map(({ id }) => ({ questionId: id, fanoutVersion: "fanout-v1" })));
+  mocks.fanouts.mockReturnValue(canonical.map(({ id }) => ({
+    questionId: id,
+    questionSetVersion: "question-set-v1",
+    fanoutVersion: "fanout-v1",
+    surface: { surfaceId: "surface-1", surfaceVersion: "surface-v1", locale: "zh-CN", region: "CN" },
+    queries: Array.from({ length: 6 }, (_, index) => ({
+      id: `${id}-query-${index + 1}`,
+      exactQuery: `query ${index + 1}`,
+      derivationRuleId: `query-rule-${index + 1}`,
+      resultDepth: 3
+    })),
+    budget: { maxRequests: 1, maxResults: 3, timeoutMs: 30_000, maxCostMicros: 100_000 }
+  })));
   mocks.resolveSnapshot.mockImplementation(async (input: { question: { id: string } }) => {
     const index = canonical.findIndex(({ id }) => id === input.question.id);
     const target = index === 0;
@@ -220,6 +232,14 @@ describe("free teaser orchestration", () => {
     expect(mocks.resolveSnapshot.mock.calls.map(([request]) => request.question.id)).toEqual(
       toCanonicalBuyerQuestionSet(questionSet()).questions.map(({ id }) => id)
     );
+    for (const [request] of mocks.resolveSnapshot.mock.calls) {
+      expect(request.searchConcurrency).toBe(1);
+      expect(request.fanout.budget.timeoutMs).toBe(60_000);
+      expect(request.fanout.queries).toHaveLength(3);
+      expect(request.fanout.queries.map(({ derivationRuleId }: { derivationRuleId: string }) => derivationRuleId)).toEqual([
+        "query-rule-1", "query-rule-2", "query-rule-3"
+      ]);
+    }
   });
 
   it("keeps every answer-card source while bounding diagnosis input to the stable first five", async () => {

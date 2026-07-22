@@ -330,7 +330,11 @@ async function observeTeaserQuestions(input: {
     questions,
     authority: input.runtime.authority,
     excludedIdentities: exclusions
-  });
+  }).map((fanout) => ({
+    ...fanout,
+    queries: fanout.queries.slice(0, 3),
+    budget: { ...fanout.budget, timeoutMs: 60_000 }
+  }));
   const gate = createConcurrencyGate(3);
   const snapshots = [];
   for (const [index, fanout] of fanouts.entries()) {
@@ -346,6 +350,7 @@ async function observeTeaserQuestions(input: {
       retrievalGate: gate,
       maxSourceRetrievals: 3,
       maxAvailableSources: 1,
+      searchConcurrency: 1,
       snapshotMetadata: {
         snapshotKind: "standard_question",
         queryPlanVersion: fanout.fanoutVersion

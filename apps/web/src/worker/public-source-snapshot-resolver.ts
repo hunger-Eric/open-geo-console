@@ -84,6 +84,7 @@ export interface ResolvePublicSourceSnapshotInput {
   maxSourceRetrievals?: number;
   maxAvailableSources?: number;
   maxSourcesPerDomain?: number;
+  searchConcurrency?: 1 | 2;
   selectProviderPassages?: (input: { fact: RetrievedPublicSourceFact; sourceEvidenceId: string }) => ProviderEvidencePassage[];
   snapshotMetadata?: {
     snapshotKind: "standard_question" | "provider_discovery" | "candidate_verification";
@@ -98,6 +99,8 @@ const DEFAULT_WAIT_DEADLINE_MS = 15_000;
 
 export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnapshotInput): Promise<ResolvedPublicSourceSnapshotValue> {
   assertExactRuntime(input);
+  const searchConcurrency = input.searchConcurrency ?? 2;
+  if (searchConcurrency !== 1 && searchConcurrency !== 2) throw new TypeError("searchConcurrency must be 1 or 2.");
   const evidenceCutoff = date(input.evidenceCutoffAt, "evidenceCutoffAt");
   const identity = createMarketSnapshotIdentity({ question: input.question, surface: input.authority.surface, fanout: input.fanout });
   const exactPrior = await findExactMarketSnapshot({ identity, evidenceCutoff });
@@ -178,7 +181,7 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     } else {
       failureStage = "search_execution";
       await appendMarketSnapshotQueries({ snapshotId: currentSnapshotId, token: claim.token, queries });
-      const queryResults = await mapWithConcurrency(input.fanout.queries, 2, async (query, queryOrder) => {
+      const queryResults = await mapWithConcurrency(input.fanout.queries, searchConcurrency, async (query, queryOrder) => {
         input.signal?.throwIfAborted();
         const storedQuery = queries[queryOrder]!;
         const attempt = await beginMarketSearchAttempt({

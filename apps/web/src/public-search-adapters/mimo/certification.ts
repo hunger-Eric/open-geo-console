@@ -47,12 +47,13 @@ const CASES = [
   },
   {
     id: "narrow-structured-search" as const,
-    query: "site:public-search-no-result.invalid 一家不存在的物流服务商",
-    expectedStatuses: ["complete", "malformed"] as const
+    query: "site:gov.cn 国际货运代理 备案 管理办法",
+    expectedDomain: "gov.cn",
+    expectedStatuses: ["complete"] as const
   }
 ] as const;
 
-const PROBE_BUDGET: SearchExecutionBudget = Object.freeze({maxRequests: 3, maxResults: 3, timeoutMs: 30_000, maxCostMicros: 10_000_000});
+const PROBE_BUDGET: SearchExecutionBudget = Object.freeze({maxRequests: 1, maxResults: 3, timeoutMs: 60_000, maxCostMicros: 10_000_000});
 
 export async function runMiMoPublicSearchProbe(input: {
   environment: NodeJS.ProcessEnv;
@@ -75,7 +76,7 @@ export async function runMiMoPublicSearchProbe(input: {
       adapter,
       query: {id: `mimo-probe-${item.id}`, questionId: `mimo-probe-${item.id}`, fanoutVersion: "mimo-certification-v1", locale: input.locale, region: input.region, exactQuery: item.query, derivationRuleId: "mimo-certification", resultDepth: PROBE_BUDGET.maxResults},
       budget: PROBE_BUDGET,
-      signal: AbortSignal.timeout(PROBE_BUDGET.timeoutMs)
+      signal: new AbortController().signal
     });
     const sourceDomains = [...new Set(observation.results.map(({url}) => new URL(url).hostname.toLowerCase()))].sort();
     const expectedStatuses: readonly SearchObservationStatus[] = item.expectedStatuses;

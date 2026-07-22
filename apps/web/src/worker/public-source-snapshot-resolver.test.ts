@@ -105,6 +105,34 @@ describe("public-source snapshot resolver", () => {
     expect(peak).toBe(2);
   });
 
+  it("supports an explicit single-search lane without changing the default plan", async () => {
+    const authority = await installAuthority("review-single-search-lane");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    let active = 0;
+    let peak = 0;
+    const search = vi.fn(async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 3));
+      active -= 1;
+      return observationPayload("complete");
+    });
+
+    const resolved = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, search),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-single-search-lane",
+      searchConcurrency: 1
+    });
+
+    expect(peak).toBe(1);
+    expect(search).toHaveBeenCalledTimes(fanout.queries.length);
+    expect(resolved.observations).toHaveLength(fanout.queries.length);
+  });
+
   it("renews the snapshot lease while slow source retrieval is still running", async () => {
     const authority = await installAuthority("review-slow-retrieval");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
