@@ -1,5 +1,570 @@
 # Active Change Scope Lock
 
+## Proposed follow-on - make the Free teaser diagnosis input customer-prose-safe
+
+Status: `APPROVED` - explicitly approved by the user on 2026-07-22. That single approval
+covers the complete bounded implementation, ordinary corrections inside the
+allowlist below, verification, exact Staging replacement, one non-persisting
+live diagnosis canary, and - only after that canary passes - one fresh
+replacement report plus one Sandbox checkout/payment acceptance flow. These
+ordinary steps must not be split into repeated approval requests.
+
+### Objective and frozen runtime evidence
+
+- Keep failed report `19169f8c-d6b4-4976-8f0c-2edff6453ed2`, completed Free
+  foundation job `3aaf69f1-1a11-42c3-a32d-c02c540266c4`, and terminal V4
+  pre-admission job `0dc72e9f-dd70-4afb-b0c6-0b91a35a7fa9` immutable. Do not
+  retry, replay, reopen, repair, clone, delete, attach checkout, or use them as
+  the final acceptance authority.
+- The three-question public-search phase completed normally. Its exact
+  snapshots are `snapshot-0628f2bd9af6b30775f10b28d2b7c52a8f8db94965a11a7e3c419d0171046b33`,
+  `snapshot-15bddeb87090343f97c2dcf4c2478d5706a4f4a096b9a46af10c49385535324c`,
+  and `snapshot-2bda4cfafe20ae89409242370cd8ad1ccc423bcf07ea1fa2251e9ddca7e26bda`.
+  Q1 answer and sources persisted at checkpoint revision 12.
+- Diagnosis never called the provider. The exact retained Q1 plus five target
+  pages fails `parseReportV4DiagnosisInput` because
+  `buildFreeTeaserDiagnosisTargetPages` supplies the internal phrase
+  `Persisted target-site evidence from the exact free admission snapshot.` as
+  `relevanceReason`; the customer-prose guard rejects `admission snapshot`.
+  All four append-only errors therefore report `Free teaser Q1 diagnosis did
+  not complete.` before any provider invocation.
+- Replacing only that phrase in memory with a customer-readable description
+  admits the same real input. The retained diagnosis input is 9,557 characters
+  and its locked MiMo token budget is accepted at 28,160 estimated total
+  tokens, so model capacity and public-search timeouts are not this failure.
+
+### Exact allowlist and budget
+
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for approval/outcome freeze
+- `docs/operations/evidence/2026-07-22-free-teaser-v4-paid-v3-staging-acceptance.md`
+  for non-secret final evidence only
+- Maximum production/test source diff across the two TypeScript files:
+  `+55/-10` lines. No diagnosis schema, customer-prose guard, model profile,
+  token budget, provider adapter, public-search query/fanout/timeout, evidence
+  eligibility, database, migration, checkpoint schema, retry/state machine,
+  crawler, paid report contract, renderer, route, UI, commerce, email,
+  package, lockfile, environment source, Dockerfile, or Compose change is
+  allowed.
+
+### Locked implementation and pre-submission verification
+
+1. Replace only the internal `relevanceReason` with the bounded neutral text
+   `The page contains directly verifiable information relevant to this question.`
+   Keep target page selection, location IDs, summaries, URLs, hashes, evidence
+   references, and all fail-closed validation unchanged.
+2. Add a regression that constructs the real Free target-page shape and proves
+   the complete `parseReportV4DiagnosisInput` boundary accepts it, while the
+   existing customer-prose guard remains unchanged. Ordinary corrections are
+   allowed only in the two allowlisted files and budget above.
+3. Run focused Free teaser/diagnosis/customer-prose tests, affected Worker
+   suites, `npm test`, `npm run lint`, `npm run build`, and
+   `git diff --check`. One local commit is allowed; no push, merge, PR, tag, or
+   production mutation is authorized.
+4. Before asking for another report, run exactly one live, non-persisting MiMo
+   diagnosis canary from the merged Staging environment against the already
+   retained failed Q1 answer/source/target-page shape with the corrected
+   relevance text. It may make at most two provider calls through the formal
+   enhancer, must produce a schema-valid diagnosis with exactly three factors
+   and actions, and must not write any report, job, checkpoint, snapshot,
+   artifact, order, credit, email, or acceptance authority. A failed canary is
+   a stop before report submission.
+
+### Exact Staging replacement and remaining acceptance
+
+1. From current accepted Worker image
+   `sha256:d3870185bd43cb9fa52d2f5a43edffc046e67ef2d197a15c4423ce0d2486947b`,
+   build one source-only thin overlay and one exact-commit Vercel Preview.
+   Recreate only the two Staging Workers and move only the protected-Staging
+   alias after exact image/revision/profile/command/readiness verification.
+   Retain image
+   `sha256:85f5b1fe7ae5f024eaca6682cab01372995d930fa3b83e3cf96af5698261bbce`
+   as rollback; never run a full build, pull, broad cleanup, or production
+   mutation.
+2. Existing consecutive public-search probe passes and the failed report's
+   completed three-question snapshot evidence remain valid for this diagnosis-
+   only source change; do not spend more search probes before the canary.
+3. Only after deterministic checks, exact Staging replacement, and the live
+   diagnosis canary pass, put the protected submission page before the user.
+   Exactly one new replacement report and, only after its authority-complete
+   Free V4 teaser, exactly one user-completed Airwallex Sandbox checkout are
+   authorized. Continue automatically through signed Webhook, Paid V3 Worker,
+   commerce, artifact, access, redirected email, and desktop/mobile HTML QA.
+4. No failed-job recovery, manual database/artifact write, historical
+   substitution, second replacement report/order/payment, refund, provider
+   fallback, or production action is authorized. Any new terminal failure or
+   failed live diagnosis canary freezes that authority and stops.
+
+## Proposed follow-on - align Free teaser search orchestration and MiMo timeout model
+
+Status: `APPROVED` - explicitly approved by the user on 2026-07-22 after the
+written allowlist was presented. The user selected the objective "search
+orchestration + timeout model". One approval covers the complete bounded implementation,
+ordinary allowlisted corrections, verification, exact Staging replacement, at
+most three new live probes, and—only after two consecutive probe passes—one
+fresh report plus one Sandbox checkout/payment acceptance flow. These ordinary
+steps must not be split into repeated approval requests.
+
+### Objective and frozen evidence
+
+- Match the Free V4 teaser search workload to its actual evidence target. The
+  current teaser requests at most one available source per question but always
+  schedules six fanout variants at concurrency two with a 30-second per-query
+  budget. Preserve all three questions and evidence verification while using a
+  smaller stable Free-only plan and single-query execution.
+- Give MiMo forced, non-streaming web search one authoritative timeout. The
+  executable probe currently races the observer's 30-second timer against a
+  second `AbortSignal.timeout(30_000)`, so the same deadline may be mislabeled
+  as caller `aborted`. Remove that duplicate deadline and use a 60-second
+  MiMo/Free-query budget bounded by the existing Worker/job lifecycle.
+- Replace the deliberately nonexistent-domain live quality case with a real,
+  narrow, logistics-relevant official-domain query. Deterministic mocked tests
+  continue to prove no-result, timeout, abort, authentication, rate-limit, and
+  malformed-response semantics; the live Go/No-Go must test representative
+  availability rather than a pathological `.invalid` target.
+- Keep reports `3b351edf-f29e-4e26-8090-dc20405d5966` and
+  `6889508e-fa90-4fd9-a011-92b92cce3604`, all of their jobs/snapshots/events,
+  and the two failed replacement histories immutable. Do not retry, replay,
+  reopen, repair, clone, delete, attach checkout, or use them as substitutes.
+
+### Exact source allowlist and budget
+
+- `apps/web/src/public-search-adapters/mimo/certification.ts`
+- `apps/web/src/public-search-adapters/mimo/certification.test.ts`
+- `apps/web/src/worker/public-source-snapshot-resolver.ts`
+- `apps/web/src/worker/public-source-snapshot-resolver.test.ts`
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for approval/outcome freeze
+- `docs/operations/evidence/2026-07-22-free-teaser-v4-paid-v3-staging-acceptance.md`
+  for non-secret final evidence only
+- Maximum production/test source diff across the six TypeScript files:
+  `+220/-70` lines. No public question text, answer/diagnosis prompt, evidence
+  eligibility, database, migration, checkpoint schema, job state machine,
+  crawler, report contract, renderer, route, UI, commerce, email, package,
+  lockfile, environment source, Dockerfile, or Compose change is allowed.
+
+### Locked implementation behavior
+
+1. Keep the generic/paid snapshot resolver default at concurrency two and keep
+   its complete planned-query ledger/resume semantics unchanged. Add one
+   validated caller option allowing concurrency one; Free teaser alone uses it.
+2. For Free teaser only, retain the stable first three existing variants in
+   order—canonical, supplier discovery, capability—set their per-query timeout
+   to 60 seconds, and execute them one at a time. All three teaser questions
+   remain resolved in ordinal order. Do not change query text, result depth,
+   source retrieval/verification, identity exclusion, evidence target, retry,
+   checkpoint, or persisted snapshot authority.
+3. Align the live MiMo quality probe to production request weight:
+   `maxRequests=1`, `maxResults=3`, `timeoutMs=60_000`; remove only its duplicate
+   outer timeout signal. Replace the `.invalid` quality query with
+   `site:gov.cn 国际货运代理 备案 管理办法`, require a complete result from `gov.cn`,
+   and retain all redaction plus deterministic failure-semantics checks.
+4. Add regressions proving Free receives exactly three stable variants at
+   60 seconds and concurrency one, generic resolver behavior remains six/all
+   planned queries at concurrency two, resume does not repeat completed work,
+   the probe has only one authoritative deadline, and probe output stays
+   secret-safe/fail-closed.
+5. Run focused adapter/probe/resolver/teaser suites, affected Worker/public-
+   search suites, `npm test`, `npm run lint`, `npm run build`, and
+   `git diff --check`. Ordinary failures may be corrected automatically only
+   inside this allowlist, behavior, and budget. One local commit is allowed;
+   no push, merge, PR, tag, or production action is authorized.
+
+### Exact Staging replacement, live Go/No-Go, and acceptance
+
+1. From current accepted Worker image
+   `sha256:85f5b1fe7ae5f024eaca6682cab01372995d930fa3b83e3cf96af5698261bbce`,
+   build one source-only thin overlay and one exact-commit Vercel Preview. No
+   full build, pull, dependency/browser/OS install, `docker cp`, broad cleanup,
+   or production mutation is allowed. Recreate only the two Staging Workers,
+   verify exact image/revision/tier/readiness/database marker, then move only
+   the protected-Staging alias once.
+2. Retain the replaced `85f5...` image as the single rollback. After candidate
+   readiness, remove only older unreferenced rollback image
+   `sha256:f3b65393e41b66bd13b3d14ceb31d6a17b83cae7d9a7e1e630bc9129ef755ad9`;
+   never prune or touch production images/volumes.
+3. Run at most three new live probes, strictly sequentially, from the merged
+   Staging Worker environment. Require two consecutive complete passes of all
+   three representative quality cases. If the sequence cannot pass within the
+   cap, stop before report submission; do not hide failure by accepting the
+   deterministic failure-semantics subtests.
+4. Only after the Go decision, put the protected submission page in front of
+   the user; do not submit. Exactly one new report and, after its authority-
+   complete Free V4 teaser, exactly one user-completed Airwallex Sandbox
+   checkout are authorized. Continue automatically through signed Webhook,
+   Paid V3 Worker, commerce, artifact, access, redirected email, and desktop/
+   mobile HTML QA.
+5. No manual DB/artifact write, failed-job recovery, historical substitution,
+   second report/order/payment, refund, provider fallback, or production action
+   is authorized. Any new terminal failure freezes that authority and stops.
+
+---
+
+## Proposed follow-on - executable public-search Go/No-Go before user acceptance
+
+Status: `APPROVED` - explicitly approved by the user on 2026-07-22. This is a single
+approval envelope for the readiness-gate implementation, its ordinary
+allowlisted corrections and verification, at most three bounded live probes,
+and—only after two consecutive probe passes—one fresh report plus one Sandbox
+checkout/payment acceptance flow. Passing tests, ordinary allowlisted fixes,
+probe polling, report/Worker processing, commerce polling, and browser QA must
+not be split into repeated approval requests.
+
+### Objective and immutable failed authority
+
+- Prevent another user-submitted formal report from being used as the first
+  executable test of public-search availability. Protected Staging must fail
+  closed before report submission unless the same merged Worker environment
+  passes a real, redacted, sequential MiMo public-search quality probe.
+- Keep report `6889508e-fa90-4fd9-a011-92b92cce3604`, completed Free job
+  `1b37e23a-77a4-4b66-b870-71eb54446d36`, and terminal V4 pre-admission job
+  `29e28b37-298a-4339-9193-de4326700c92` immutable. The latter persisted four
+  failed question-2 snapshot versions and 24/24 approximately 30-second query
+  timeouts. It has no order, payment, paid job, or active artifact.
+- This gate does not weaken evidence, substitute cached/historical content,
+  extend timeouts, reduce fanout, change query text, or treat a failed probe as
+  success. If the existing provider cannot pass, stop before asking the user to
+  submit anything.
+
+### Exact allowlist and budget
+
+- `apps/web/src/scripts/probe-public-search.ts`
+- `apps/web/src/scripts/probe-public-search.test.ts`
+- `scripts/start-report-v4-staging-workers.ps1`
+- `apps/web/src/scripts/report-v4-staging-preflight.test.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for approval/outcome freeze
+- `docs/operations/evidence/2026-07-22-free-teaser-v4-paid-v3-staging-acceptance.md`
+  for non-secret final evidence only
+- Maximum source/test/script diff across the four implementation/test files:
+  `+150/-25` lines. No Worker report logic, query/fanout/timeout, provider
+  adapter, prompt, database, migration, crawler, report contract, renderer,
+  route, UI, commerce, email, Dockerfile, Compose, package, lockfile, or
+  environment-source change is allowed.
+
+### Deterministic implementation and verification
+
+1. Make the existing public-search probe command exit nonzero when any of its
+   three quality cases has `passed !== true`, while preserving its redacted
+   summary and deterministic failure-semantics checks. Unit-test all-pass,
+   timeout/failure, and secret-safe output behavior without live calls.
+2. Make the protected-Staging Worker start script run that live probe from the
+   already merged `.data/workstation-docker/staging.env` after the read-only
+   database preflight and before any Docker build, environment mutation, or
+   container recreation. A failed/malformed probe must abort without runtime
+   mutation. Add structural tests for ordering and fail-closed handling.
+3. Run focused probe/preflight tests, affected suites, `npm test`,
+   `npm run lint`, `npm run build`, and `git diff --check`. Ordinary failures
+   may be corrected automatically only inside this allowlist and budget. One
+   local commit is allowed; no push, merge, PR, tag, production mutation, or
+   new Docker image is authorized because application/Worker runtime source is
+   unchanged.
+
+### Bounded live Go/No-Go and remaining acceptance
+
+1. From the exact merged Staging Worker environment, run at most three live
+   probes, sequentially and with no overlapping calls. Require two consecutive
+   full passes; each pass must report all three quality cases passed. Wait and
+   retry automatically within that cap. A failure is a No-Go and must never be
+   hidden by the deterministic failure-semantics subtests.
+2. Only after the two-pass Go decision, reverify protected alias
+   `dpl_F98qzNhyjcqJEkhE71KWKdiPy9y1`, Worker image
+   `sha256:85f5b1fe7ae5f024eaca6682cab01372995d930fa3b83e3cf96af5698261bbce`,
+   revision `74672c07907021ff9b8a07d57d242fa30311f57f`, and the Staging database
+   marker. Then put the submission page in front of the user; do not submit.
+3. Exactly one fresh report and, only after its complete Free V4 teaser passes
+   authority checks, exactly one user-completed Airwallex Sandbox checkout are
+   authorized. Continue automatically through signed Webhook, Paid V3 Worker,
+   commerce, artifact, access, redirected email, and desktop/mobile HTML QA.
+4. No failed-job replay/recovery, manual database/artifact write, historical
+   substitution, second report/order/payment, refund, provider fallback, or
+   production action is authorized. A terminal failure after the executable
+   Go decision freezes that new authority and stops.
+
+### Runtime outcome and No-Go freeze (2026-07-22)
+
+- The executable gate was committed locally as
+  `c6aca1b` (`fix(staging): gate reports on live public search`). Focused tests
+  passed 28/28; the full repository passed 2,683 tests with 181 skipped, plus
+  lint, build, PowerShell parsing, and diff validation. No application/Worker
+  image replacement was needed or performed.
+- Live probe 1 and live probe 2 were strictly sequential. In both runs,
+  `official-factual` and `chinese-b2b-discovery` completed and passed, while
+  `narrow-structured-search` was aborted at the 30-second execution boundary.
+  Both commands exited nonzero through the new quality gate; deterministic
+  failure-semantics checks passed and did not mask the failed quality case.
+- With only one call remaining under the three-probe cap, two consecutive full
+  passes are no longer attainable. Do not spend the third call, submit a new
+  report, create checkout, or mutate any failed authority. The acceptance flow
+  remains No-Go until a future explicitly scoped change addresses the actual
+  query/timeout/runtime behavior and establishes a new bounded probe allowance.
+
+---
+
+## Proposed follow-on - fail closed by dropping only invalid optional page-analysis prose
+
+Status: `APPROVED` - explicitly approved by the user on 2026-07-22. This
+single approval covers the deterministic two-file repair, ordinary allowlisted
+debugging and verification, one exact-commit Staging replacement, one official
+checkpoint recovery of the exact current nonterminal job, and continuation of
+the already authorized report/payment acceptance flow without repeated gates.
+
+### Objective and exact stopped authority
+
+- Preserve the full V3 + per-question V4 product contract and all evidence.
+  Do not weaken the report-language guard or accept invalid report prose.
+- Current new report `6889508e-fa90-4fd9-a011-92b92cce3604` and Free job
+  `1b37e23a-77a4-4b66-b870-71eb54446d36` are the only target authorities. The
+  job is nonterminal at `repair_wait/page_analysis`, checkpoint revision 8,
+  because the model's bounded language-correction pass still left invalid prose
+  at `analyses[0].organizationSignals[1]`.
+- The page-analysis engine already discards an invalid optional
+  `rewriteExample` after bounded correction while preserving required summary,
+  findings, and evidence. Apply the same fail-closed treatment only to invalid
+  optional `organizationSignals[]` and `strengths[]` entries. Any violation in
+  required prose or evidence continues to fail.
+- Baseline source is exact commit
+  `83988dedb5f1cd7965c27240d6008a6d21deba67`; preserve every existing dirty and
+  untracked file. No new report may be submitted for this repair.
+
+### Exact source allowlist and budget
+
+- `packages/ai-report-engine/src/analysis.ts`
+- `packages/ai-report-engine/src/index.test.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for this lock and terminal freeze only
+- `docs/operations/evidence/2026-07-22-free-teaser-v4-paid-v3-staging-acceptance.md`
+  for non-secret final evidence only
+- Maximum production/test source diff across the two TypeScript files:
+  `+90/-25` lines. No prompt, model configuration, required-field validation,
+  evidence quote, provider, Worker state machine, database, migration, crawler,
+  question, report contract, renderer, route, UI, commerce, email, Dockerfile,
+  Compose, package, lockfile, or environment-source change is allowed.
+
+### Deterministic repair and verification
+
+1. Generalize the existing optional-rewrite omission helper so it may remove
+   only language-invalid `organizationSignals[index]`, `strengths[index]`, and
+   `findings[index].rewriteExample` paths after the existing bounded correction
+   attempt. Remove multiple array entries by original index without shifting the
+   wrong item; mixed required/optional violations must still fail closed.
+2. Add regressions for single and multiple optional-array violations, preserved
+   required prose/evidence, mixed required violations, and the existing rewrite-
+   example behavior.
+3. Run focused analysis/language suites, affected package/Worker suites,
+   `npm test`, `npm run lint`, `npm run build`, and `git diff --check`.
+   Ordinary failures may be corrected automatically only inside this allowlist,
+   exact behavior, and budget. One local commit is allowed; no push/merge/PR.
+
+### Exact current-job recovery and remaining acceptance
+
+1. Deploy one exact-commit Vercel Preview and one source-only thin Worker
+   overlay from current image
+   `sha256:32f8146ceea74a1d5f5187cd3f5d000424221a1309d699aa3354b995dc77340b`;
+   no full rebuild, pull, dependency install, broad cleanup, production mutation,
+   or second new report is allowed.
+2. After exact Worker readiness and Staging preflight, invoke the existing
+   operator-only `resumeScanJobAfterRepair` boundary exactly once for job
+   `1b37e23a-77a4-4b66-b870-71eb54446d36`, using its persisted recovery input
+   hash `7da576c29d92bae6aafbda2e14c984090e508c191d1fc5012b6deb576731b5c1`.
+   This must append the formal recovery transition and resume the preserved
+   checkpoint; no direct SQL update, checkpoint edit, retry route, cloned job,
+   or historical authority mutation is allowed.
+3. If the same report's Free V4 teaser completes, continue to the already
+   authorized single manual Sandbox checkout and the Paid V3/commerce/artifact/
+   access/email/desktop/mobile acceptance chain. Any terminal failure or need
+   outside this exact allowlist remains a hard stop.
+
+### Runtime outcome and terminal freeze (2026-07-22)
+
+- The exact operator recovery succeeded once. Free job
+  `1b37e23a-77a4-4b66-b870-71eb54446d36` resumed from checkpoint revision 8
+  with resume generation 1, passed the repaired page-analysis boundary, and
+  completed normally. The formal V4 pre-admission job is
+  `29e28b37-298a-4339-9193-de4326700c92`; it persisted one confirmed set of
+  exactly three questions before entering question generation.
+- The pre-admission job terminalized at checkpoint revision 10 with
+  `public_source_snapshot_search_execution`. Its append-only authority records
+  four failed snapshot completion versions for question ordinal 2. Each
+  version executed six queries; all 24 persisted search attempts timed out at
+  approximately 30 seconds with cost uncertainty. No order, payment, paid job,
+  or active artifact was created.
+- Freeze this report and both jobs as immutable evidence. Do not retry, replay,
+  reopen, repair, clone, delete, attach checkout, or perform standalone provider
+  calls under this lock. The current implementation/deployment scope is closed;
+  any public-search timeout, fanout, adapter, or executable preflight change
+  requires a new explicit allowlist and must pass that preflight before another
+  user-submitted report is requested.
+
+---
+
+## Proposed follow-on - bound Free teaser diagnosis sources to the V4 contract
+
+Status: `APPROVED` - explicitly approved by the user on 2026-07-22. This
+single approval covers the deterministic two-file repair, all ordinary
+debugging and verification inside the allowlist, one exact-commit Staging
+replacement, and one new manual report/payment acceptance flow. Passing tests,
+allowlisted corrections, deployment verification, Worker processing, commerce
+polling, and browser QA must not be split into repeated approval requests.
+
+### Objective and exact failed baseline
+
+- Preserve the approved product contract without redesign: the Free V4 teaser
+  precedes checkout; the paid artifact remains the full V3 report with exactly
+  three ordered question cards, each rendered answer -> owned verified sources
+  -> persisted V4 diagnosis.
+- Fix the deterministic adapter mismatch now proven by immutable Staging
+  evidence. Replacement report
+  `3b351edf-f29e-4e26-8090-dc20405d5966` persisted a Q1 answer card with 17
+  owned sources, while `parseReportV4DiagnosisInput` permits at most five. The
+  diagnosis enhancer therefore failed before any diagnosis-provider call and
+  the pre-admission job `80079ef7-a8fe-4e65-bae5-c2d324a85544` terminalized
+  after its formal retries with `Free teaser Q1 diagnosis did not complete.`
+- Keep that report, its Free job
+  `4713bb30-89d3-43a1-aef8-7eb77e8d27c4`, its failed pre-admission job, all
+  checkpoints, and all append-only events immutable. Do not retry, replay,
+  reopen, repair, clone, delete, or attach a payment to them.
+- Baseline source is exact commit
+  `73df8afe16a36d95aaef5817775a9a40d275b125`; preserve every existing dirty and
+  untracked file.
+
+### Exact source allowlist and budget
+
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for this lock and terminal freeze only
+- `docs/operations/evidence/2026-07-22-free-teaser-v4-paid-v3-staging-acceptance.md`
+  for non-secret final evidence only
+- Maximum production/test source diff across the two TypeScript files:
+  `+70/-10` lines. No diagnosis contract, prompt, provider adapter, token budget,
+  timeout, query policy, environment, database, migration, crawler, question,
+  report contract, renderer, route, UI, payment, email, Dockerfile, Compose,
+  package, or lockfile change is allowed.
+
+### Deterministic repair and verification
+
+1. Keep the complete Q1 answer card and all of its owned sources unchanged for
+   the teaser/report authority. Only the diagnosis adapter input may select the
+   first `REPORT_V4_MAX_DIAGNOSIS_SOURCES` sources in the card's existing stable
+   order, matching the already frozen five-source diagnosis contract and paid
+   V4 normalization boundary.
+2. Add a focused regression with more than five Q1 sources proving the
+   diagnosis provider receives exactly the stable first five, the persisted
+   teaser card still retains every owned source, and resume makes zero repeated
+   search/model calls.
+3. Run the focused teaser/diagnosis suites, affected Worker/V4 suites,
+   `npm test`, `npm run lint`, `npm run build`, and `git diff --check`.
+   Ordinary failures may be corrected automatically only inside the two-file
+   allowlist, the exact behavior above, and the diff budget.
+4. One local commit is allowed. No push, merge, PR, tag, or production action is
+   authorized.
+
+### One replacement runtime and acceptance allowance
+
+1. Create one clean exact-commit export without a new Git worktree, one exact-
+   commit Vercel Preview, and one source-only thin Worker overlay from the
+   currently accepted Staging image
+   `sha256:866dc51884eb730bbc03be30f3ee2e544f1bd9b29d640d742ffc742c12b5fcc6`.
+   No full rebuild, dependency/browser/OS install, pull, broad cleanup, or
+   production mutation is allowed.
+2. Recreate only the two Staging Workers, verify exact revision/image/tier and
+   Staging database marker/readiness, then move only the fixed protected-
+   Staging alias once. Remove only the superseded unreferenced test image after
+   verification and retain exactly one rollback image.
+3. The user may manually submit exactly one new replacement report for
+   `https://shun-express.com/`. If its formal Free V4 teaser completes, the user
+   may manually create and complete exactly one Airwallex Sandbox checkout.
+   Continue automatically through the signed Webhook, Paid V3 Worker, commerce,
+   artifact, access, redirected-email, and desktop/mobile HTML acceptance chain.
+4. No historical report/job mutation, standalone diagnostic model replay,
+   manual database/artifact write, second new report/order/payment, refund, or
+   production identity is authorized. A terminal failure requiring behavior
+   outside this exact allowlist remains a hard stop.
+
+---
+
+## Proposed follow-on - bound Free V4 teaser public-search concurrency
+
+Status: `APPROVED` - explicitly approved by the user on 2026-07-22. This single approval covers
+the bounded implementation, all ordinary debugging and verification inside the
+allowlist, one exact-commit Staging replacement, and one replacement acceptance
+flow. It must not be split into repeated approvals for normal test failures or
+allowlisted corrections.
+
+### Objective and failed baseline
+
+- Preserve the approved product contract: the Free V4 teaser precedes checkout;
+  the paid artifact remains the full V3 report with exactly three ordered
+  question cards, each rendered as answer -> owned verified sources -> persisted
+  V4 diagnosis. No report-contract, payment, artifact, or renderer redesign is
+  authorized.
+- Fix the observed Free teaser search overload. The current implementation starts
+  all three question snapshots with `Promise.all`; each snapshot independently
+  runs two queries at a time, producing up to six concurrent MiMo public-search
+  requests under a 30-second per-request timeout.
+- Treat report `ba9b403e-8b19-4169-b21a-8e8199d6d95e`, Free job
+  `fe89998a-36ee-4b72-a283-9a197dfd5f67`, and failed pre-admission job
+  `577e11ae-78ec-433f-8d6a-4d986244d477` as immutable evidence. Do not retry,
+  replay, reopen, repair, clone, delete, or attach a payment to them.
+- Baseline source is exact commit
+  `c4b0a12bdd97f37869f13e76d58c893ee9828546`; preserve every existing dirty and
+  untracked file.
+
+### Exact source allowlist and budget
+
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for this lock and terminal freeze only
+- `docs/operations/evidence/2026-07-22-free-teaser-v4-paid-v3-staging-acceptance.md`
+  for non-secret final evidence only
+- Maximum production/test source diff across the two TypeScript files:
+  `+120/-30` lines. No query text, provider adapter, timeout, environment,
+  database, migration, crawler, question, prompt, report contract, renderer,
+  route, UI, payment, email, Dockerfile, Compose, package, or lockfile change is
+  allowed.
+
+### Deterministic repair and verification
+
+1. Resolve the three persisted teaser question snapshots in stable ordinal order
+   instead of starting the three snapshots concurrently. Preserve each
+   snapshot's existing bounded internal query concurrency, retries, checkpoint
+   identity, evidence rules, and fail-closed semantics.
+2. Add a focused regression proving only one question snapshot is active at a
+   time, all three ordinals still complete in order, and resume still makes zero
+   repeated search/model calls.
+3. Run the focused teaser and snapshot-resolver suites, all affected Worker and
+   public-search suites, `npm test`, `npm run lint`, `npm run build`, and
+   `git diff --check`. Ordinary failures may be corrected automatically only
+   inside the two-file allowlist and budget.
+4. One local commit is allowed. No push, merge, PR, tag, or production action is
+   authorized.
+
+### One replacement runtime and acceptance allowance
+
+1. Create one clean exact-commit export without a new Git worktree, one exact-
+   commit Vercel Preview, and one source-only thin Worker overlay from current
+   image
+   `sha256:8b2fd4613c050edf6fe6618b6a97c5dd62ce8c5476dec7ebdd1ed009db71b665`.
+   No full rebuild, dependency/browser/OS install, pull, broad cleanup, or
+   production mutation is allowed.
+2. Recreate only the two Staging Workers, verify exact revision/image/tier and
+   Staging database marker/readiness, then move only the fixed protected-Staging
+   alias once. Remove only the superseded unreferenced test image after the new
+   containers are verified; retain the current rollback image.
+3. After deterministic and runtime verification, the user may manually submit
+   exactly one replacement report for `https://shun-express.com/`. Do not repeat
+   either already passing provider probe.
+4. If the formal Free V4 teaser completes, the user may manually create and
+   complete exactly one Airwallex Sandbox checkout. Continue the signed Webhook,
+   Paid V3 Worker, commerce, artifact, access, redirected-email, and desktop/
+   mobile HTML acceptance chain already defined below.
+5. Any second replacement report, second order/payment, terminal failure,
+   `completed_limited`, out-of-allowlist source need, environment/timeout/query-
+   policy change, historical mutation, refund, or production identity is a hard
+   stop. This approval cannot be interpreted as replay authority.
+
+---
+
 Status: `APPROVED` - the user explicitly requested on 2026-07-22 that repeated
 approval gates be removed for bounded verification maintenance. Under the
 project's approval-amortization rule, the exact test-only correction below is

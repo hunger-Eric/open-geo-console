@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { parseReportV4DiagnosisInput } from "@open-geo-console/ai-report-engine";
 import { toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import { combinedV3ArtifactFixture } from "@/components/combined-artifact-fixtures";
 
@@ -326,5 +327,26 @@ describe("free teaser orchestration", () => {
     const pages = buildFreeTeaserDiagnosisTargetPages("question-1", admission());
     expect(pages).toHaveLength(1);
     expect(pages[0]!.sourceLocations[0]!.locationId).toMatch(/^question-1:target:[a-f0-9]{64}$/u);
+  });
+
+  it("builds target evidence that passes the complete diagnosis-input customer-prose boundary", () => {
+    const targetPages = buildFreeTeaserDiagnosisTargetPages("question-1", admission());
+    expect(targetPages[0]!.relevanceReason)
+      .toBe("The page contains directly verifiable information relevant to this question.");
+
+    expect(() => parseReportV4DiagnosisInput({
+      question: { questionId: "question-1", text: "Which service fits this route?" },
+      answer: "The available service supports this route under stated conditions.",
+      locale: "en",
+      sources: [{
+        questionId: "question-1",
+        sourceId: "source-1",
+        title: "Public service page",
+        canonicalUrl: "https://public.example/service",
+        excerpt: "The public page states the route conditions.",
+        retrievalStatus: "available"
+      }],
+      targetPages
+    })).not.toThrow();
   });
 });

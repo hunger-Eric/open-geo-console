@@ -300,7 +300,7 @@ export function buildFreeTeaserDiagnosisTargetPages(
         questionId,
         pageId: page.id,
         url: page.normalizedUrl,
-        relevanceReason: "Persisted target-site evidence from the exact free admission snapshot.",
+        relevanceReason: "The page contains directly verifiable information relevant to this question.",
         summary,
         sourceLocations: Object.freeze([{
           locationId,
