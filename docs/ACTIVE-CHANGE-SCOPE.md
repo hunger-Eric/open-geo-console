@@ -1,5 +1,80 @@
 # Active Change Scope Lock
 
+## Protected-test email recipient boundary after exact-order refund
+
+Status: `APPROVED` - the user explicitly approved this exact protected-test
+recipient-boundary repair on 2026-07-22. The approved exact-order commerce
+continuation succeeded for the target Sandbox refund, but its email pass
+exposed a configuration-boundary defect that cannot be corrected inside the
+earlier filter-only behavior lock.
+
+### Frozen runtime evidence
+
+- Order `4286cb73-6349-467a-8aaf-9b196624da92` is now formally refunded;
+  refund `89c3ac6e-5b83-4c7e-8dd7-9354ee5712ef` reached `succeeded` on its
+  first Airwallex Sandbox attempt and has a provider refund identity.
+- Refund completion correctly queued an additional `refund_succeeded` email,
+  so this exact order now has three queued messages: `payment_confirmed`,
+  `report_failed_refund`, and `refund_succeeded`. The exact-order email command
+  claimed only those three, but all scheduled a first retry with
+  `unknown_error` and released their leases.
+- Read-only stage diagnostics proved the order ciphertext is present and marked
+  `v1`, but the local Staging commerce secret cannot authenticate ciphertext
+  written by the protected Vercel Staging Web. Resend API configuration,
+  From/Reply-To configuration, commerce test mode, and the redirected test
+  recipient are all valid. Vercel Sensitive values cannot be recovered through
+  `env pull`, and the merged Worker environment intentionally carries no email
+  encryption secret.
+- The failure occurs before `ResendEmailGateway.send`: `sendDelivery` decrypts
+  the customer address before the gateway replaces the envelope recipient in
+  protected test mode. Production and non-test delivery must continue to fail
+  closed on any undecryptable customer address.
+- The one unrelated pending refund and all five unrelated queued emails remain
+  state-equivalent to their pre-operation full-row SHA-256 snapshots.
+
+### Exact allowlist and budget
+
+- `apps/web/src/commerce/operations.ts`
+- `apps/web/src/commerce/operations.test.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md` for this approval and outcome only
+- Maximum production/test diff across the two TypeScript files: `+80/-15`.
+- No database row patch, manual provider call, recipient substitution outside
+  protected test mode, gateway/template/config/environment change, Web/Worker
+  deployment, refund replay, global commerce run, production mutation, or
+  unrelated queue operation is allowed.
+
+### Locked behavior and acceptance
+
+1. Reuse the existing Resend envelope-recipient authority before decryption.
+   When and only when the deployed profile is non-production and commerce mode
+   is `test`, use its validated `OGC_TEST_EMAIL_RECIPIENT` and do not decrypt
+   the customer ciphertext. Production and non-test modes must still decrypt
+   the real customer address and fail closed if authentication fails.
+2. Add regressions proving protected test delivery succeeds with deliberately
+   undecryptable customer ciphertext, while production/non-test paths still
+   invoke decryption and reject the same ciphertext. Preserve templates,
+   idempotency keys, provider gateway, durable lease/state transitions, and
+   access-token behavior.
+3. Run focused commerce/email suites, `npm test`, `npm run lint`, `npm run
+   build`, and `git diff --check`; commit only the three allowlisted paths
+   locally. Do not push, deploy, or change environment values.
+4. After the new diagnosis and code pass every gate, invoke `email --order-id
+   4286cb73-6349-467a-8aaf-9b196624da92` exactly once. Require all three target
+   rows to reach `sent` with provider email identities and prove the unrelated
+   refund/email full-row hashes remain unchanged. Any new unchanged provider
+   failure stops without another retry.
+
+### Local verification before the single email retry
+
+- Focused commerce and Resend suites: `24/24` passed.
+- The pre-existing PostgreSQL 17 capture-clock suite initially repeated its
+  known moving timestamp failure under load; after lint/build completed and
+  host load settled, its isolated run passed `5/5` and the final full suite
+  passed without changing any V4 authority file.
+- Repository suite: `295` test files passed and `45` skipped; `2699` tests
+  passed and `182` skipped.
+- `npm run lint`, `npm run build`, and `git diff --check` passed.
+
 ## Target the failed-order Staging commerce continuation
 
 Status: `APPROVED` - the user explicitly approved on 2026-07-22 after the

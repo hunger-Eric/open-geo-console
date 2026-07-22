@@ -49,10 +49,13 @@ vi.mock("@/db/commercial-refunds", () => ({
 }));
 vi.mock("@/db/report-tokens", () => ({ issueReportAccessToken: mocks.issueReportAccessToken, revokeReportAccessTokens: mocks.revokeReportAccessTokens }));
 vi.mock("./customer-email", () => ({ revealCustomerEmail: mocks.revealCustomerEmail }));
-vi.mock("@/email/resend", () => ({
-  ResendEmailGateway: vi.fn(function ResendEmailGateway() { return { send: mocks.sendEmail }; }),
-  ResendRequestError: class ResendRequestError extends Error {}
-}));
+vi.mock("@/email/resend", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/email/resend")>();
+  return {
+    ...actual,
+    ResendEmailGateway: vi.fn(function ResendEmailGateway() { return { send: mocks.sendEmail }; })
+  };
+});
 vi.mock("@/payments/airwallex", () => ({
   AirwallexGateway: vi.fn(function AirwallexGateway() { return { requestRefund: mocks.requestRefund }; })
 }));
@@ -61,11 +64,20 @@ vi.mock("@/db/combined-reports", () => ({ getActiveCombinedGeoReport: mocks.getA
 import { processPendingCommercialRefunds, processQueuedCommercialEmails } from "./operations";
 
 const originalReportBaseUrl = process.env.OGC_REPORT_BASE_URL;
+const originalDeliveryEnvironment = {
+  OGC_DEPLOYMENT_PROFILE: process.env.OGC_DEPLOYMENT_PROFILE,
+  COMMERCE_MODE: process.env.COMMERCE_MODE,
+  OGC_TEST_EMAIL_RECIPIENT: process.env.OGC_TEST_EMAIL_RECIPIENT
+};
 
 describe("commercial provider failure persistence", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.OGC_REPORT_BASE_URL = "https://example.test";
+    process.env.OGC_DEPLOYMENT_PROFILE = "production";
+    process.env.COMMERCE_MODE = "test";
+    process.env.OGC_TEST_EMAIL_RECIPIENT = "operator@example.test";
+    mocks.revealCustomerEmail.mockImplementation(() => "buyer@example.com");
     mocks.getEncryptedEmailRecipient.mockResolvedValue({ emailKeyVersion: "v1", customerEmailEncrypted: "encrypted" });
     mocks.getPaymentOrder.mockResolvedValue({ id: "order-1", reportId: "report-1", siteKey: "example.com", reportLocale: "en", productCode: "recommendation_forensics_v1", provider: "airwallex", providerPaymentId: "int_1" });
     mocks.markEmailSent.mockResolvedValue(true);
@@ -74,6 +86,40 @@ describe("commercial provider failure persistence", () => {
   afterEach(() => {
     if (originalReportBaseUrl === undefined) delete process.env.OGC_REPORT_BASE_URL;
     else process.env.OGC_REPORT_BASE_URL = originalReportBaseUrl;
+    for (const [name, value] of Object.entries(originalDeliveryEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  it("uses the protected-test envelope recipient without decrypting customer ciphertext", async () => {
+    process.env.OGC_DEPLOYMENT_PROFILE = "staging";
+    process.env.COMMERCE_MODE = "test";
+    mocks.revealCustomerEmail.mockImplementation(() => { throw new Error("ciphertext mismatch"); });
+    mocks.claimEmailDeliveries.mockResolvedValue([{ id: "email-1", orderId: "order-1", reportId: "report-1", templateType: "payment_confirmed", locale: "en", businessIdempotencyKey: "payment/order-1/v1", attempts: 2 }]);
+    mocks.sendEmail.mockResolvedValue({ providerEmailId: "resend-test" });
+
+    await expect(processQueuedCommercialEmails()).resolves.toEqual({ claimed: 1, succeeded: 1, retried: 0, failed: 0 });
+
+    expect(mocks.revealCustomerEmail).not.toHaveBeenCalled();
+    expect(mocks.sendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "operator@example.test" }));
+    expect(mocks.markEmailSent).toHaveBeenCalledWith(expect.objectContaining({ id: "email-1", providerEmailId: "resend-test" }));
+  });
+
+  it.each([
+    ["production", "test"],
+    ["staging", "live"]
+  ])("still requires customer decryption for %s profile in %s commerce mode", async (profile, mode) => {
+    process.env.OGC_DEPLOYMENT_PROFILE = profile;
+    process.env.COMMERCE_MODE = mode;
+    mocks.revealCustomerEmail.mockImplementation(() => { throw new Error("ciphertext mismatch"); });
+    mocks.claimEmailDeliveries.mockResolvedValue([{ id: "email-1", orderId: "order-1", reportId: "report-1", templateType: "payment_confirmed", locale: "en", businessIdempotencyKey: "payment/order-1/v1", attempts: 2 }]);
+
+    await expect(processQueuedCommercialEmails()).resolves.toEqual({ claimed: 1, succeeded: 0, retried: 1, failed: 0 });
+
+    expect(mocks.revealCustomerEmail).toHaveBeenCalledWith("encrypted");
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+    expect(mocks.scheduleEmailRetry).toHaveBeenCalledWith(expect.objectContaining({ id: "email-1", errorCode: "unknown_error" }));
   });
 
   it("persists a typed transient email code while retaining the retry policy", async () => {

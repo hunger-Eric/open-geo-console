@@ -22,7 +22,7 @@ import {
 import { issueReportAccessToken, revokeReportAccessTokens } from "@/db/report-tokens";
 import type { EmailDeliveryRow, PaymentRefundRow } from "@/db/schema";
 import { revealCustomerEmail } from "./customer-email";
-import { ResendEmailGateway } from "@/email/resend";
+import { ResendEmailGateway, resolveEnvelopeRecipient } from "@/email/resend";
 import type { EmailTemplate } from "@/email/gateway";
 import { AirwallexGateway } from "@/payments/airwallex";
 import { getActiveCombinedGeoReport } from "@/db/combined-reports";
@@ -84,8 +84,9 @@ async function sendDelivery(delivery: EmailDeliveryRow, owner: string, gateway: 
       requiredBaseUrl()
     ).href;
   }
+  const protectedTestRecipient = resolveEnvelopeRecipient("", process.env);
   const sent = await gateway.send({
-    to: revealCustomerEmail(recipient.customerEmailEncrypted),
+    to: protectedTestRecipient || revealCustomerEmail(recipient.customerEmailEncrypted),
     template: delivery.templateType as EmailTemplate,
     locale: delivery.locale,
     orderReference: order.id,
