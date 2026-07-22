@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V41_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V41_DATABASE_MIGRATIONS, V42_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const suite = adminUrl ? describe : describe.skip;
@@ -17,7 +17,7 @@ suite("schema V41 Paid V3 methodology admission", () => {
   beforeAll(async () => {
     await admin.unsafe(`CREATE DATABASE ${quote(databaseName)}`);
     sql = postgres(withDb(adminUrl!, databaseName), { max: 1, prepare: false });
-    const throughV40 = DATABASE_MIGRATIONS.slice(0, -V41_DATABASE_MIGRATIONS.length);
+    const throughV40 = DATABASE_MIGRATIONS.slice(0, -(V41_DATABASE_MIGRATIONS.length + V42_DATABASE_MIGRATIONS.length));
     await sql.begin(async (tx) => { for (const statement of throughV40) await tx.unsafe(statement); });
     await sql`INSERT INTO scan_reports(id,url,site_key,payload,report_locale,technical_status) VALUES
       ('report-v2','https://v2.example/','v2.example','{}','en','completed'),
@@ -42,9 +42,10 @@ suite("schema V41 Paid V3 methodology admission", () => {
   }, 120_000);
 
   it("registers one replay-safe V41 forward constraint migration", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(41);
-    expect(databaseMigrationsAfter(40)).toEqual([...V41_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(41)).toEqual([]);
+    expect(DATABASE_SCHEMA_VERSION).toBe(42);
+    expect(databaseMigrationsAfter(40)).toEqual([...V41_DATABASE_MIGRATIONS, ...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(41)).toEqual([...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(42)).toEqual([]);
     const source = V41_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("recommendation_report_version IN (2,3)");
     expect(source).toContain("two_stage_geo_report_v4");

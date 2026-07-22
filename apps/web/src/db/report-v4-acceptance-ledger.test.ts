@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { V41_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { V41_DATABASE_MIGRATIONS, V42_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 import {
   createPostgresReportV4AcceptanceLedgerStore,
   createReportV4AcceptanceLedgerRepository,
@@ -18,8 +18,9 @@ describe("Report V4 protected-Staging acceptance ledger validation", () => {
     const upgrade = databaseMigrationsAfter(39).join("\n");
     expect(upgrade).toContain("ogc_guard_report_v4_acceptance_event");
     expect(upgrade).toMatch(/WHERE id=NEW\.scenario_id AND session_id=NEW\.session_id FOR UPDATE/u);
-    expect(databaseMigrationsAfter(40)).toEqual([...V41_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(41)).toEqual([]);
+    expect(databaseMigrationsAfter(40)).toEqual([...V41_DATABASE_MIGRATIONS, ...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(41)).toEqual([...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(42)).toEqual([]);
   });
   it("rejects production before invoking persistence", async () => {
     const store = fakeStore();
