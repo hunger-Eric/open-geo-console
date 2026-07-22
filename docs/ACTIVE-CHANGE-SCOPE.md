@@ -2,10 +2,11 @@
 
 ## ReportSemanticReview staged program - Phase 1 additive contract foundation
 
-Status: `FROZEN` - on 2026-07-23 the user approved the version-isolated,
-phased design baseline and authorized this scope rewrite. That approval is not
-implementation authority. Phase 1 may start only after the user explicitly
-approves this exact Phase 1 allowlist.
+Status: `APPROVED` - on 2026-07-23 the user explicitly approved this exact
+Phase 1 scope with "可以，开始执行" after reviewing the staged design and
+allowlist. This approval covers only the additive, runtime-unreferenced
+contract foundation and its local verification. It does not authorize any
+later phase or external action.
 
 ### Approved design authority
 
@@ -94,6 +95,24 @@ Ordinary scoped defects are repaired within the same unit. Stop as
 No live scan, model call, job recovery/replay, database mutation, payment,
 credit, refund, email, Docker build, deployment, push, publication, or report
 generation is authorized.
+
+### Phase 1 implementation outcome
+
+Status: `COMPLETE` - the approved additive contract foundation is implemented
+locally without runtime wiring.
+
+- Complete changed-path audit: exactly the four approved code/test paths plus
+  this scope file; no out-of-scope path.
+- Measured production diff: `+745/-0` against the `+750/-10` hard budget.
+- Measured test diff: `+423/-0` against the `+950/-20` budget.
+- Focused TypeScript and Vitest verification: `86/86` tests passed.
+- Repository verification: `296` test files passed and `45` skipped; `2730`
+  tests passed and `182` skipped. `npm run lint`, `npm run build`, and
+  `git diff --check` passed.
+- Repository import search found zero production consumers outside the
+  additive package-root export. No Worker, provider, model, checkpoint,
+  configuration, report, artifact, UI, database, or external action changed.
+- Phase 1 completion grants no authority for Phase 2 or any external action.
 
 ### Later phases are not authorized
 

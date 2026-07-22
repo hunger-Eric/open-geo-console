@@ -8,6 +8,7 @@ import {
   COMBINED_GEO_REPORT_V4_CONTRACT,
   MODEL_PROFILE_OPERATIONS,
   OpenAiCompatibleClient,
+  REPORT_SEMANTIC_REVIEW_CONTRACT,
   ReportLanguageValidationError,
   ReportValidationError,
   analyzePageBatch,
@@ -28,6 +29,7 @@ import {
   parseReportV4DiagnosisOutput,
   parseReportV4QuestionAnswerInput,
   parseReportV4SiteSynthesisInput,
+  parseReportSemanticReviewInput,
   planPages,
   preparePlanningCandidates,
   runWithModelTokenBudget,
@@ -79,6 +81,11 @@ describe("combined report public exports", () => {
       parseReportV4CustomerProseProfile,
       validateReportV4CustomerProse
     ]).toEqual(Array.from({ length: 13 }, () => expect.any(Function)));
+  });
+
+  it("exports the additive semantic-review contract without changing report contracts", () => {
+    expect(REPORT_SEMANTIC_REVIEW_CONTRACT).toBe("report-semantic-review-v1");
+    expect(parseReportSemanticReviewInput).toEqual(expect.any(Function));
   });
 });
 

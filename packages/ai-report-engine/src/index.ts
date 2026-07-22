@@ -28,3 +28,4 @@ export * from "./model-token-estimator";
 export * from "./report-v4-site-synthesis";
 export * from "./report-v4-diagnosis";
 export * from "./report-v4-customer-prose";
+export * from "./report-semantic-review";
