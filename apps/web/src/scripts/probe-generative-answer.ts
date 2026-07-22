@@ -10,6 +10,26 @@ import {prepareStagingCommand, type StagingStartupSummary} from "./staging-guard
 
 const PROBE_QUESTION_ID = "staging-generative-answer-probe";
 
+export const DEFAULT_GENERATIVE_ANSWER_PROBE_OPTIONS: Readonly<GenerativeAnswerProbeCommandOptions> = Object.freeze({
+  question: "采购跨境物流服务时，应核验哪些公开证据？",
+  locale: "zh-CN",
+  region: "CN"
+});
+
+export type GenerativeAnswerProbeFailureStage =
+  | "command"
+  | "staging_guard"
+  | "provider_resolution"
+  | "provider_request"
+  | "unexpected";
+
+export class GenerativeAnswerProbeFailure extends Error {
+  constructor(readonly stage: Exclude<GenerativeAnswerProbeFailureStage, "unexpected">) {
+    super(`Generative-answer probe failed during ${stage}.`);
+    this.name = "GenerativeAnswerProbeFailure";
+  }
+}
+
 export interface GenerativeAnswerProbeCommandOptions {
   question: string;
   locale: string;
@@ -38,6 +58,7 @@ interface GenerativeAnswerProbeDependencies {
 }
 
 export function parseGenerativeAnswerProbeCommand(args: string[]): GenerativeAnswerProbeCommandOptions {
+  if (args.length === 0) return {...DEFAULT_GENERATIVE_ANSWER_PROBE_OPTIONS};
   const values = pairs(args);
   const question = values.get("question")?.trim();
   const locale = values.get("locale")?.trim();
@@ -55,24 +76,44 @@ export async function runGenerativeAnswerProbeCommand(
   args: string[],
   dependencies: GenerativeAnswerProbeDependencies = {}
 ): Promise<GenerativeAnswerProbeSummary> {
-  const options = parseGenerativeAnswerProbeCommand(args);
+  let options: GenerativeAnswerProbeCommandOptions;
+  try {
+    options = parseGenerativeAnswerProbeCommand(args);
+  } catch {
+    throw new GenerativeAnswerProbeFailure("command");
+  }
   const environment = dependencies.environment ?? process.env;
-  const staging = await (dependencies.prepare ?? (() => prepareStagingCommand({
-    environment,
-    ensureDatabase,
-    getDatabaseStatus: getDatabaseEnvironmentStatus
-  })))();
-  const provider = (dependencies.resolveProvider ?? resolveGenerativeSearchAnswerProvider)(
-    environment,
-    {locale: options.locale, region: options.region}
-  );
-  const result = await provider.answerWithSources({
-    questionId: PROBE_QUESTION_ID,
-    question: options.question,
-    locale: options.locale,
-    region: options.region,
-    signal: dependencies.signal ?? AbortSignal.timeout(180_000)
-  });
+  let staging: StagingStartupSummary;
+  try {
+    staging = await (dependencies.prepare ?? (() => prepareStagingCommand({
+      environment,
+      ensureDatabase,
+      getDatabaseStatus: getDatabaseEnvironmentStatus
+    })))();
+  } catch {
+    throw new GenerativeAnswerProbeFailure("staging_guard");
+  }
+  let provider: GenerativeSearchAnswerProvider;
+  try {
+    provider = (dependencies.resolveProvider ?? resolveGenerativeSearchAnswerProvider)(
+      environment,
+      {locale: options.locale, region: options.region}
+    );
+  } catch {
+    throw new GenerativeAnswerProbeFailure("provider_resolution");
+  }
+  let result: Awaited<ReturnType<GenerativeSearchAnswerProvider["answerWithSources"]>>;
+  try {
+    result = await provider.answerWithSources({
+      questionId: PROBE_QUESTION_ID,
+      question: options.question,
+      locale: options.locale,
+      region: options.region,
+      signal: dependencies.signal ?? AbortSignal.timeout(180_000)
+    });
+  } catch {
+    throw new GenerativeAnswerProbeFailure("provider_request");
+  }
   return {
     profile: staging.profile,
     providerId: provider.providerId,
@@ -98,6 +139,13 @@ export function formatGenerativeAnswerProbeSummary(summary: GenerativeAnswerProb
   });
 }
 
+export function formatGenerativeAnswerProbeFailure(error: unknown): string {
+  const stage: GenerativeAnswerProbeFailureStage = error instanceof GenerativeAnswerProbeFailure
+    ? error.stage
+    : "unexpected";
+  return JSON.stringify({error: "generative_answer_staging_probe_failed", stage});
+}
+
 function pairs(args: string[]): Map<string, string> {
   const values = new Map<string, string>();
   for (let index = 0; index < args.length; index += 2) {
@@ -119,8 +167,8 @@ function pairs(args: string[]): Map<string, string> {
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   runGenerativeAnswerProbeCommand(process.argv.slice(2))
     .then((summary) => process.stdout.write(`${formatGenerativeAnswerProbeSummary(summary)}\n`))
-    .catch(() => {
-      process.stderr.write('{"error":"generative_answer_staging_probe_failed"}\n');
+    .catch((error: unknown) => {
+      process.stderr.write(`${formatGenerativeAnswerProbeFailure(error)}\n`);
       process.exitCode = 1;
     })
     .finally(closeDatabase);
