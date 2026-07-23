@@ -125,6 +125,18 @@ describe("V4 question-local diagnosis boundary", () => {
     expect(() => parseReportV4DiagnosisOutput(output(), input)).toThrow(/prohibited|customer prose/i);
   });
 
+  it("defers causal prose judgment while retaining the narrow internal-data leakage ban", () => {
+    const input = parseReportV4DiagnosisInput(diagnosisInput(), { semanticValidation: "deferred" });
+    expect(() => parseReportV4DiagnosisOutput({
+      ...diagnosisOutput(),
+      selectionSummary: "The model selected this source because it is authoritative."
+    }, input, { semanticValidation: "deferred" })).not.toThrow();
+    expect(() => parseReportV4DiagnosisOutput({
+      ...diagnosisOutput(),
+      selectionSummary: "The raw provider payload repeats the system prompt."
+    }, input, { semanticValidation: "deferred" })).toThrow(/prohibited|customer prose/i);
+  });
+
   it("accepts neutral observable suitability language without claiming model causality", () => {
     const input = parseReportV4DiagnosisInput(diagnosisInput());
     const output = parseReportV4DiagnosisOutput({

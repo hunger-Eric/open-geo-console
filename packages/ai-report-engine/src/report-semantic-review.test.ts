@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   REPORT_SEMANTIC_REVIEW_CONTRACT,
   applyReportSemanticReview,
+  buildReportSemanticReviewSystemPrompt,
   createReportSemanticReviewInput,
   hashReportSemanticReviewValue,
   parseReportSemanticReviewInput,
@@ -15,6 +16,19 @@ import {
 } from "./report-semantic-review";
 
 describe("ReportSemanticReview input authority", () => {
+  it("builds a version-locked complete JSON review instruction for real providers", () => {
+    const prompt = buildReportSemanticReviewSystemPrompt();
+    expect(prompt).toContain(REPORT_SEMANTIC_REVIEW_CONTRACT);
+    expect(prompt).toContain("version, inputHash, providerId, modelId, fields, questionDistinctness, annotations, overallDecision");
+    expect(prompt).toMatch(/input order/iu);
+    expect(prompt).toMatch(/pass, corrected, or blocked/iu);
+    expect(prompt).toMatch(/correctedText.*natural customer prose in input\.locale/isu);
+    expect(prompt).toMatch(/brand names.*professional terms.*another language/isu);
+    expect(prompt).toMatch(/at least one reference across evidenceIds and sourceIds/iu);
+    expect(prompt).toMatch(/targetPresence.*targetFirstSentence.*targetRoles.*competitorEntityIds/isu);
+    expect(prompt).toMatch(/overallDecision exactly/iu);
+    expect(prompt).toMatch(/no Markdown/iu);
+  });
   it("creates a canonical input hash independent of object key insertion order", () => {
     const input = createReportSemanticReviewInput(inputCore());
     expect(input.version).toBe(REPORT_SEMANTIC_REVIEW_CONTRACT);
@@ -246,7 +260,7 @@ describe("ReportSemanticReview receipt integrity", () => {
   it("blocks a claimed pass for a nonresponsive answer and hashes annotations in the receipt", () => {
     const input = createReportSemanticReviewInput(inputCore());
     const review = validReview(input);
-    (review.annotations as Record<string, unknown>).answers = [{ questionId: "question-1", relevance: "not_responsive", entityRole: "none", evidenceIds: [], sourceIds: [], reason: "does not answer" }];
+    (review.annotations as Record<string, unknown>).answers = [{ questionId: "question-1", relevance: "not_responsive", entityRole: "none", targetPresence: "absent", targetFirstSentence: null, targetRoles: [], competitorEntityIds: [], evidenceIds: [], sourceIds: [], reason: "does not answer" }];
     expect(() => parseReportSemanticReviewOutput(review, input)).toThrow(/must equal blocked/u);
     const applied = applyReportSemanticReview(input, validReview(input));
     expect(() => verifyReportSemanticReviewReceipt({ ...applied.receipt, annotationsHash: "a".repeat(64) }, input, validReview(input), applied.fields)).toThrow(/annotationsHash/u);
@@ -294,6 +308,35 @@ describe("ReportSemanticReview receipt integrity", () => {
     const reordered = validReview(orderedInput);
     (reordered.annotations as { answers: unknown[] }).answers.reverse();
     expect(() => parseReportSemanticReviewOutput(reordered, orderedInput)).toThrow(/questionId/u);
+  });
+
+  it("rejects competitor annotations that are not bound to the exact entity catalog", () => {
+    const input = createReportSemanticReviewInput(inputCore());
+    const review = validReview(input);
+    (review.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.competitorEntityIds = ["unknown-competitor"];
+    expect(() => parseReportSemanticReviewOutput(review, input)).toThrow(/competitorEntityIds|unknown-competitor/u);
+
+    const crossOwnedCore = inputCore();
+    crossOwnedCore.entities[0]!.questionId = "question-2";
+    const crossOwnedInput = createReportSemanticReviewInput(crossOwnedCore);
+    const crossOwnedReview = validReview(crossOwnedInput);
+    (crossOwnedReview.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.competitorEntityIds = ["competitor-1"];
+    expect(() => parseReportSemanticReviewOutput(crossOwnedReview, crossOwnedInput)).toThrow(/another question|competitorEntityIds/u);
+  });
+
+  it("requires internally consistent target-presence details", () => {
+    const input = createReportSemanticReviewInput(inputCore());
+    const zeroSentence = validReview(input);
+    (zeroSentence.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.targetFirstSentence = 0;
+    expect(() => parseReportSemanticReviewOutput(zeroSentence, input)).toThrow(/positive/u);
+
+    const absentWithRole = validReview(input);
+    Object.assign((absentWithRole.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!, {
+      targetPresence: "absent",
+      targetFirstSentence: null,
+      targetRoles: ["subject"]
+    });
+    expect(() => parseReportSemanticReviewOutput(absentWithRole, input)).toThrow(/targetRoles.*empty/u);
   });
 
   it("rejects observation text hash drift and cross-question observation reuse", () => {
@@ -416,6 +459,7 @@ function inputCore(): MutableInputCore {
       originalTextHash: reportSemanticTextHash(evidenceText)
     }],
     observationResults: [{ observationId: "observation-1", resultId: "result-1", questionId: "question-1", originalText: "Target and a competitor appear together.", originalTextHash: reportSemanticTextHash("Target and a competitor appear together.") }],
+    entities: [{ entityId: "competitor-1", questionId: "question-1", kind: "competitor_candidate", originalText: "Competitor", originalTextHash: reportSemanticTextHash("Competitor") }],
     answerSubjects: [{ questionId: "question-1", fieldPath: "answerCards[0].answerText" }],
     fields,
     nonProseProjectionHash: hashReportSemanticReviewValue({ reportId: "report-1", questionIds: [1, 2, 3] })
@@ -463,7 +507,7 @@ function validReview(input: ReportSemanticReviewInput): Record<string, unknown> 
     },
     annotations: {
       observationResults: [{ observationId: "observation-1", resultId: "result-1", targetPresence: "present", competitorPresence: "present", reason: "The supplied result identifies both entities." }],
-      answers: input.answerSubjects.map((subject) => ({ questionId: subject.questionId, relevance: "responsive", entityRole: "target", evidenceIds: ["evidence-q1"], sourceIds: ["source-q1"], reason: "The answer is bound to this question." })),
+      answers: input.answerSubjects.map((subject) => ({ questionId: subject.questionId, relevance: "responsive", entityRole: "target", targetPresence: "present", targetFirstSentence: 1, targetRoles: ["answer subject"], competitorEntityIds: [], evidenceIds: subject.questionId === "question-1" ? ["evidence-q1"] : ["evidence-q2"], sourceIds: subject.questionId === "question-1" ? ["source-q1"] : ["source-q2"], reason: "The answer is bound to this question." })),
       evidenceUse: input.fields.map((field) => ({ path: field.path, evidenceIds: field.allowedEvidenceIds, sourceIds: field.allowedSourceIds, reason: "Uses only the bound catalog references." }))
     },
     overallDecision: "pass"

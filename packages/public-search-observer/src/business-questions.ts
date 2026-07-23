@@ -145,6 +145,7 @@ export function confirmBusinessQuestionSet(input: {
   finalTexts: readonly string[];
   acknowledgedLowConfidence: boolean;
   confirmedAt: string;
+  deferSemanticDistinctness?: boolean;
 }): ConfirmedBusinessQuestionSet {
   if (input.finalTexts.length !== 3) throw new TypeError("Exactly three business questions are required.");
   if (input.candidates.requiresAcknowledgement && !input.acknowledgedLowConfidence) {
@@ -154,7 +155,7 @@ export function confirmBusinessQuestionSet(input: {
   if (!Number.isFinite(Date.parse(confirmedAt))) throw new TypeError("confirmedAt must be an ISO timestamp.");
   const privateTexts = input.finalTexts.map((value, index) => validatePrivateQuestion(value, index));
   const normalized = privateTexts.map(normalizeComparable);
-  if (new Set(normalized).size !== 3) throw new TypeError("The three business questions must be semantically distinct.");
+  if (!input.deferSemanticDistinctness && new Set(normalized).size !== 3) throw new TypeError("The three business questions must be semantically distinct.");
   const questions = input.candidates.questions.map((candidate, index) => {
     const privateText = privateTexts[index]!;
     const neutralPublicText = neutralize(privateText, input.candidates.identityExclusions);

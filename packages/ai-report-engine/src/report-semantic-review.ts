@@ -2,6 +2,24 @@ import { createHash } from "node:crypto";
 
 export const REPORT_SEMANTIC_REVIEW_CONTRACT = "report-semantic-review-v1" as const;
 
+export function buildReportSemanticReviewSystemPrompt(): string {
+  return [
+    `You are the sole semantic reviewer for ${REPORT_SEMANTIC_REVIEW_CONTRACT}.`,
+    "Judge and, where allowed, correct customer prose for natural language, appropriate preservation of brands and technical terms, answer responsiveness, semantic question distinctness, unsupported causal or exaggerated claims, and faithful expression of the supplied evidence.",
+    "Return exactly one JSON object and no Markdown, commentary, code fence, or unknown key.",
+    "Copy version, inputHash, providerId, modelId, every ID, every originalTextHash, and every path exactly from the input authority. Never change questions, sources, evidence, observations, entities, hashes, URLs, or non-prose data. Never invent or cite an ID outside the field-owned catalogs.",
+    "The top-level keys are exactly, in this order: version, inputHash, providerId, modelId, fields, questionDistinctness, annotations, overallDecision.",
+    "Set version to report-semantic-review-v1. Set inputHash to input.inputHash. Set providerId and modelId to input.expectedModel.providerId and input.expectedModel.modelId.",
+    "fields must cover input.fields exactly once and in input order. Each item has exactly: path, originalTextHash, decision, optional correctedText, issueCodes, reason, evidenceIds, sourceIds, retainedOriginalTerms. decision is pass, corrected, or blocked. pass has no correctedText and an empty issueCodes array. corrected is allowed only for a mutable field, must include changed correctedText and nonempty issueCodes. Every correctedText must be natural customer prose in input.locale; preserve brand names, product names, acronyms, model names, and professional terms in their appropriate original form even when they use another language. blocked has no correctedText and nonempty issueCodes. evidenceIds and sourceIds must be subsets of that input field's allowed IDs and must respect question ownership. If either allowedEvidenceIds or allowedSourceIds is nonempty, the field result must return at least one reference across evidenceIds and sourceIds. retainedOriginalTerms is an array of objects with exactly term and reason.",
+    "questionDistinctness has exactly decision, duplicateGroups, reason. decision is distinct, duplicate, or blocked. distinct requires duplicateGroups []; duplicate requires nonoverlapping groups of at least two exact input questionIds. Judge meaning, not normalized string equality.",
+    "annotations has exactly observationResults, answers, evidenceUse.",
+    "annotations.observationResults must cover input.observationResults exactly once and in input order. Each item has exactly observationId, resultId, targetPresence, competitorPresence, reason. Presence enums are present, absent, or ambiguous; classify the exact supplied persisted result text independently for target and competitor presence.",
+    "annotations.answers must cover input.answerSubjects exactly once and in input order. Each item has exactly questionId, relevance, entityRole, targetPresence, targetFirstSentence, targetRoles, competitorEntityIds, evidenceIds, sourceIds, reason. relevance is responsive, not_responsive, or blocked. entityRole is target, competitor, mixed, none, or ambiguous. For Free V4, targetPresence must not be ambiguous: present requires a positive 1-based targetFirstSentence and targetRoles describing the target's roles; absent requires targetFirstSentence null and targetRoles []. competitorEntityIds may contain only exact input.entities entityIds. entityRole must agree with targetPresence and whether competitorEntityIds is empty. Answer refs must be subsets of the owned answer field catalogs.",
+    "annotations.evidenceUse must cover input.fields exactly once and in input order. Each item has exactly path, evidenceIds, sourceIds, reason, using only that field's allowed IDs.",
+    "Derive overallDecision exactly: blocked when questionDistinctness is not distinct, any field is blocked, or any answer relevance is not responsive; otherwise corrected when any field is corrected; otherwise pass. Do not claim pass when these rules require blocked or corrected."
+  ].join("\n");
+}
+
 export type ReportSemanticReviewLifecycle = "free_v4" | "paid_v3";
 export type ReportSemanticFieldMutability = "mutable" | "read_only";
 export type ReportSemanticFieldDecision = "pass" | "corrected" | "blocked";
@@ -48,6 +66,13 @@ export interface ReportSemanticObservationResult {
   readonly originalText: string;
   readonly originalTextHash: string;
 }
+export interface ReportSemanticEntity {
+  readonly entityId: string;
+  readonly questionId: string;
+  readonly kind: "competitor_candidate";
+  readonly originalText: string;
+  readonly originalTextHash: string;
+}
 export interface ReportSemanticAnswerSubject { readonly questionId: string; readonly fieldPath: string; }
 
 export interface ReportSemanticFieldManifestEntry {
@@ -70,6 +95,7 @@ export interface ReportSemanticReviewInputCore {
   readonly sources: readonly ReportSemanticSource[];
   readonly evidence: readonly ReportSemanticEvidence[];
   readonly observationResults: readonly ReportSemanticObservationResult[];
+  readonly entities: readonly ReportSemanticEntity[];
   readonly answerSubjects: readonly ReportSemanticAnswerSubject[];
   readonly fields: readonly ReportSemanticFieldManifestEntry[];
   readonly nonProseProjectionHash: string;
@@ -114,6 +140,10 @@ export interface ReportSemanticAnswerAnnotation {
   readonly questionId: string;
   readonly relevance: "responsive" | "not_responsive" | "blocked";
   readonly entityRole: "target" | "competitor" | "mixed" | "none" | "ambiguous";
+  readonly targetPresence?: ReportSemanticPresence;
+  readonly targetFirstSentence?: number | null;
+  readonly targetRoles?: readonly string[];
+  readonly competitorEntityIds?: readonly string[];
   readonly evidenceIds: readonly string[];
   readonly sourceIds: readonly string[];
   readonly reason: string;
@@ -179,7 +209,7 @@ export interface AppliedReportSemanticReview {
 
 const INPUT_KEYS = new Set([
   "version", "lifecycle", "locale", "target", "expectedModel", "questions", "sources", "evidence", "fields",
-  "observationResults", "answerSubjects", "nonProseProjectionHash", "inputHash"
+  "observationResults", "entities", "answerSubjects", "nonProseProjectionHash", "inputHash"
 ]);
 const TARGET_KEYS = new Set(["siteKey", "targetUrl", "aliases"]);
 const MODEL_KEYS = new Set(["providerId", "modelId"]);
@@ -187,6 +217,7 @@ const QUESTION_KEYS = new Set(["questionId", "originalText", "originalTextHash"]
 const SOURCE_KEYS = new Set(["sourceId", "questionId", "canonicalUrl", "originalText", "originalTextHash"]);
 const EVIDENCE_KEYS = new Set(["evidenceId", "questionId", "sourceId", "originalText", "originalTextHash"]);
 const OBSERVATION_RESULT_KEYS = new Set(["observationId", "resultId", "questionId", "originalText", "originalTextHash"]);
+const ENTITY_KEYS = new Set(["entityId", "questionId", "kind", "originalText", "originalTextHash"]);
 const ANSWER_SUBJECT_KEYS = new Set(["questionId", "fieldPath"]);
 const FIELD_KEYS = new Set([
   "path", "originalText", "originalTextHash", "mutability", "questionId", "allowedEvidenceIds", "allowedSourceIds"
@@ -202,7 +233,7 @@ const RETAINED_TERM_KEYS = new Set(["term", "reason"]);
 const DISTINCTNESS_KEYS = new Set(["decision", "duplicateGroups", "reason"]);
 const ANNOTATIONS_KEYS = new Set(["observationResults", "answers", "evidenceUse"]);
 const OBSERVATION_ANNOTATION_KEYS = new Set(["observationId", "resultId", "targetPresence", "competitorPresence", "reason"]);
-const ANSWER_ANNOTATION_KEYS = new Set(["questionId", "relevance", "entityRole", "evidenceIds", "sourceIds", "reason"]);
+const ANSWER_ANNOTATION_KEYS = new Set(["questionId", "relevance", "entityRole", "targetPresence", "targetFirstSentence", "targetRoles", "competitorEntityIds", "evidenceIds", "sourceIds", "reason"]);
 const EVIDENCE_USE_KEYS = new Set(["path", "evidenceIds", "sourceIds", "reason"]);
 const RECEIPT_KEYS = new Set([
   "version", "lifecycle", "inputHash", "reviewHash", "providerId", "modelId", "decision", "fieldCoverageHash",
@@ -443,6 +474,18 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
     if (prior !== undefined && prior !== item.questionId) throw new TypeError(`$reviewInput.observationResults ${item.observationId} has inconsistent question ownership.`);
     observationOwners.set(item.observationId, item.questionId);
   }
+  const entities = requireArray(record.entities, "$reviewInput.entities", MAX_CATALOG_ROWS).map((value, index) => {
+    const path = `$reviewInput.entities[${index}]`;
+    const row = strictRecord(value, path, ENTITY_KEYS);
+    const originalText = requireBoundedText(row.originalText, `${path}.originalText`, MAX_TEXT_CHARS);
+    const originalTextHash = requireHash(row.originalTextHash, `${path}.originalTextHash`);
+    requireExact(originalTextHash, reportSemanticTextHash(originalText), `${path}.originalTextHash`);
+    requireExact(row.kind, "competitor_candidate", `${path}.kind`);
+    const questionId = requireBoundedText(row.questionId, `${path}.questionId`, MAX_ID_CHARS);
+    if (!questionIds.has(questionId)) throw new TypeError(`${path}.questionId references an unknown question.`);
+    return { entityId: requireBoundedText(row.entityId, `${path}.entityId`, MAX_ID_CHARS), questionId, kind: "competitor_candidate" as const, originalText, originalTextHash };
+  });
+  assertUnique(entities.map(({ entityId }) => entityId), "$reviewInput.entities entityId");
   const fields = requireArray(record.fields, "$reviewInput.fields", MAX_FIELDS).map(parseManifestField);
   if (fields.length === 0) throw new TypeError("$reviewInput.fields must not be empty.");
   assertUnique(fields.map(({ path }) => path), "$reviewInput.fields path");
@@ -480,6 +523,7 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
     sources,
     evidence,
     observationResults,
+    entities,
     answerSubjects,
     fields,
     nonProseProjectionHash: requireHash(record.nonProseProjectionHash, "$reviewInput.nonProseProjectionHash")
@@ -682,7 +726,20 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): Rep
     const field = input.fields.find((item) => item.path === subject.fieldPath && item.questionId === questionId)!;
     assertSubset(evidenceIds, field.allowedEvidenceIds, `${path}.evidenceIds`);
     assertSubset(sourceIds, field.allowedSourceIds, `${path}.sourceIds`);
-    return { questionId, relevance: requireOneOf(item.relevance, ["responsive", "not_responsive", "blocked"] as const, `${path}.relevance`), entityRole: requireOneOf(item.entityRole, ["target", "competitor", "mixed", "none", "ambiguous"] as const, `${path}.entityRole`), evidenceIds, sourceIds, reason: requireBoundedText(item.reason, `${path}.reason`, 5_000) };
+    const hasGeo = item.targetPresence !== undefined || item.targetFirstSentence !== undefined || item.targetRoles !== undefined || item.competitorEntityIds !== undefined;
+    const targetPresence = hasGeo ? requireOneOf(item.targetPresence, ["present", "absent", "ambiguous"] as const, `${path}.targetPresence`) : undefined;
+    const targetFirstSentence = !hasGeo ? undefined : item.targetFirstSentence === null ? null : requireNonnegativeInteger(item.targetFirstSentence, `${path}.targetFirstSentence`);
+    if (hasGeo && targetPresence === "present" && (typeof targetFirstSentence !== "number" || targetFirstSentence < 1)) throw new TypeError(`${path}.targetFirstSentence must be positive when target presence is present.`);
+    if (hasGeo && targetPresence !== "present" && targetFirstSentence !== null) throw new TypeError(`${path}.targetFirstSentence requires present target presence.`);
+    const targetRoles = hasGeo ? requireUniqueTextArray(item.targetRoles, `${path}.targetRoles`, 100, 500) : undefined;
+    if (hasGeo && targetPresence === "absent" && targetRoles!.length !== 0) throw new TypeError(`${path}.targetRoles must be empty when target presence is absent.`);
+    const competitorEntityIds = hasGeo ? requireUniqueTextArray(item.competitorEntityIds, `${path}.competitorEntityIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS) : undefined;
+    if (competitorEntityIds) {
+      assertSubset(competitorEntityIds, input.entities.map(({ entityId }) => entityId), `${path}.competitorEntityIds`);
+      const entityById = new Map(input.entities.map((entity) => [entity.entityId, entity]));
+      for (const id of competitorEntityIds) assertCompatibleOwner(questionId, entityById.get(id)!.questionId, `${path}.competitorEntityIds ${id}`);
+    }
+    return { questionId, relevance: requireOneOf(item.relevance, ["responsive", "not_responsive", "blocked"] as const, `${path}.relevance`), entityRole: requireOneOf(item.entityRole, ["target", "competitor", "mixed", "none", "ambiguous"] as const, `${path}.entityRole`), ...(hasGeo ? { targetPresence, targetFirstSentence, targetRoles, competitorEntityIds } : {}), evidenceIds, sourceIds, reason: requireBoundedText(item.reason, `${path}.reason`, 5_000) };
   });
   const evidenceUse = requireArray(row.evidenceUse, "$reviewOutput.annotations.evidenceUse", MAX_FIELDS).map((value, index) => {
     const path = `$reviewOutput.annotations.evidenceUse[${index}]`;
@@ -845,6 +902,11 @@ function requireHash(value: unknown, path: string): string {
   const result = requireBoundedText(value, path, 64);
   if (!/^[a-f0-9]{64}$/u.test(result)) throw new TypeError(`${path} must be a lowercase SHA-256 hash.`);
   return result;
+}
+
+function requireNonnegativeInteger(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new TypeError(`${path} must be a nonnegative integer.`);
+  return value;
 }
 
 function requireSafeUrl(value: unknown, path: string): string {

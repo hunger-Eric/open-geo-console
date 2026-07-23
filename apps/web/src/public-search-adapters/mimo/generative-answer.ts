@@ -19,6 +19,11 @@ Use exactly this JSON shape:
 For a refusal, refusal must be {"code":"safety_refusal|policy_refusal|high_risk_refusal","reason":"localized reason"} and sources must be empty.`;
 const CHINESE_SYSTEM = `你必须返回且只返回 JSON 对象。请使用联网搜索完整回答普通问题，并只列出本次回答实际使用的公开来源。answerText 和 refusal.reason 必须全部使用简体中文，不得出现英文单词、英文缩写或括号内英文；请把专业术语翻译成中文。只有来源标题与引用原文可以保持原文。不要用搜索覆盖率、检索过程或“证据不足”代替答案。只有真实的安全、政策或高风险原因才允许拒绝。\n${SYSTEM}`;
 
+const DEFERRED_SYSTEM = `Return JSON only.
+Write answerText and refusal.reason naturally in the requested locale. Preserve brand names, product names, acronyms, model names, and professional terms in their original language when that is natural and accurate; do not mechanically translate them.
+A later unified evidence-bound semantic review owns final language and terminology judgment. Return the complete answer and sources without rejecting or retrying merely because appropriate non-Chinese terms are present.
+${SYSTEM}`;
+
 export function createMiMoGenerativeSearchAnswerProvider(input: { config: MiMoPublicSearchConfig; fetch?: typeof fetch; now?: () => Date }): GenerativeSearchAnswerProvider {
   const transport = input.fetch ?? fetch;
   const now = input.now ?? (() => new Date());
@@ -39,11 +44,16 @@ async function requestOnce(config: MiMoPublicSearchConfig, transport: typeof fet
     const searchedAt = now().toISOString();
     let response: Response;
     const chinese = request.locale.toLowerCase().startsWith("zh");
+    const semanticDeferred = request.semanticValidation === "deferred";
     const localeInstruction = chinese ? "除来源标题和引用原文外，answerText 和 refusal.reason 必须全部使用简体中文；不要写任何英文单词或缩写，把专业术语翻译为中文。" : "Write answerText and refusal.reason in English; preserve only source-original fields.";
     const correctionText = correction ? (chinese
       ? "\n上一次输出未满足 JSON 或语言契约。请严格返回指定对象，用简体中文完整回答；answerText 不得包含任何英文字母、英文缩写或括号内英文，并列出本次回答实际使用的公开来源。"
       : "\nYour previous output did not satisfy the JSON or language contract. Return exactly the requested object with a complete English answer and the public sources used.") : "";
-    try { response = await transport(`${config.baseUrl}/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` }, body: JSON.stringify({ model: config.model, messages: [{ role: "system", content: chinese ? CHINESE_SYSTEM : SYSTEM }, { role: "user", content: `Question: ${request.question}\nLocale: ${request.locale}\nRegion: ${request.region}\n${localeInstruction}${correctionText}` }], tools: [{ type: "web_search", force_search: true, limit: 10 }], response_format: { type: "json_object" }, temperature: 0.1, stream: false, thinking: { type: "disabled" } }), signal: request.signal }); }
+    const deferredLocaleInstruction = chinese
+      ? "Write natural Simplified Chinese while preserving appropriate brands, products, acronyms, model names, and professional terms in their original language."
+      : "Write natural prose in the requested locale while preserving appropriate brands, products, acronyms, model names, and professional terms in their original language.";
+    const deferredCorrectionText = "\nThe previous output failed the JSON or structural contract. Return exactly the requested object with a complete natural answer in the requested locale, preserving appropriate original-language brands and professional terms, and the public sources used.";
+    try { response = await transport(`${config.baseUrl}/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` }, body: JSON.stringify({ model: config.model, messages: [{ role: "system", content: semanticDeferred ? DEFERRED_SYSTEM : chinese ? CHINESE_SYSTEM : SYSTEM }, { role: "user", content: `Question: ${request.question}\nLocale: ${request.locale}\nRegion: ${request.region}\n${semanticDeferred ? deferredLocaleInstruction : localeInstruction}${correction && semanticDeferred ? deferredCorrectionText : correctionText}` }], tools: [{ type: "web_search", force_search: true, limit: 10 }], response_format: { type: "json_object" }, temperature: 0.1, stream: false, thinking: { type: "disabled" } }), signal: request.signal }); }
     catch (error) { if (isAbort(error)) throw new MiMoGenerativeSearchAnswerError("aborted", "MiMo answer request was aborted."); throw new MiMoGenerativeSearchAnswerError("unavailable", "MiMo answer transport failed."); }
     if (response.status === 401 || response.status === 403) throw new MiMoGenerativeSearchAnswerError("authentication", "MiMo answer authentication failed.");
     if (!response.ok) throw new MiMoGenerativeSearchAnswerError("unavailable", `MiMo answer request failed with HTTP ${response.status}.`);
@@ -55,7 +65,9 @@ async function requestOnce(config: MiMoPublicSearchConfig, transport: typeof fet
     // it to the request so a model echo cannot misroute an otherwise valid answer.
     const annotationSources = extractAnnotationSources(payload);
     const raw = { ...parsedRecord, questionId: request.questionId, sources: annotationSources.length ? annotationSources : parsedRecord.sources, searchedAt, completedAt: now().toISOString(), providerResponseId: extractId(payload) };
-    try { return parseGenerativeSearchAnswerResult(raw, { expectedQuestionId: request.questionId, locale: request.locale }); }
+    try { return semanticDeferred
+      ? parseGenerativeSearchAnswerResult(raw, { expectedQuestionId: request.questionId, locale: request.locale, semanticValidation: "deferred" })
+      : parseGenerativeSearchAnswerResult(raw, { expectedQuestionId: request.questionId, locale: request.locale }); }
     catch (error) {
       const message = error instanceof Error ? error.message : "MiMo answer response failed validation.";
       throw new MiMoGenerativeSearchAnswerError("malformed", /language/i.test(message) ? `${message} ${languageShape(parsedRecord.answerText)}` : message);

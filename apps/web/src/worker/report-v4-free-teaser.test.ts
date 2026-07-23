@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { parseReportV4DiagnosisInput } from "@open-geo-console/ai-report-engine";
-import { toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
+import { REPORT_SEMANTIC_REVIEW_CONTRACT, applyReportSemanticReview, buildReportSemanticReviewSystemPrompt, createReportSemanticReviewInput, parseReportV4DiagnosisInput, type ReportSemanticReviewInput, type ReportSemanticReviewInputCore, type ReportSemanticReviewOutput } from "@open-geo-console/ai-report-engine";
+import { createMarketSnapshotIdentity, deterministicId, toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet, type SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import { combinedV3ArtifactFixture } from "@/components/combined-artifact-fixtures";
 
 const mocks = vi.hoisted(() => ({
@@ -14,7 +15,10 @@ const mocks = vi.hoisted(() => ({
   enhanceDiagnosis: vi.fn(),
   diagnosisProvider: vi.fn(() => ({ id: "diagnosis-provider" })),
   diagnosisBudget: vi.fn(() => ({ maxInputTokens: 1000, maxOutputTokens: 1000 })),
-  modelRuntime: vi.fn(() => ({}))
+  modelRuntime: vi.fn(() => ({ modelProfile: { operations: { websiteSynthesis: { model: "fixture-review-model" } } } })),
+  getMarketSnapshotBundle: vi.fn(),
+  semanticInvoke: vi.fn(),
+  structuredInvoker: vi.fn()
 }));
 
 vi.mock("@/db/business-questions", () => ({
@@ -23,6 +27,7 @@ vi.mock("@/db/business-questions", () => ({
   getConfirmedBusinessQuestionSet: mocks.getConfirmed
 }));
 vi.mock("@/db/public-search-authority", () => ({ getActivePublicSearchSurfaceAuthority: vi.fn() }));
+vi.mock("@/db/market-snapshots", () => ({ getMarketSnapshotBundle: mocks.getMarketSnapshotBundle }));
 vi.mock("@/public-source-forensics/production-runtime", () => ({
   resolveProductionPublicSearchRuntime: mocks.resolveRuntime,
   resolveGenerativeSearchAnswerProvider: () => ({
@@ -34,7 +39,8 @@ vi.mock("@/public-source-forensics/production-runtime", () => ({
 }));
 vi.mock("@/report-v4/mimo-provider", () => ({
   createReportV4MimoDiagnosisProvider: mocks.diagnosisProvider,
-  buildReportV4MimoDiagnosisTokenBudget: mocks.diagnosisBudget
+  buildReportV4MimoDiagnosisTokenBudget: mocks.diagnosisBudget,
+  createReportV4MimoStructuredInvoker: mocks.structuredInvoker
 }));
 vi.mock("@/report-v4/model-runtime-config", () => ({ loadReportV4ModelRuntimeConfig: mocks.modelRuntime }));
 vi.mock("./report-v4-diagnosis-enhancer", () => ({ enhanceReportV4QuestionDiagnosis: mocks.enhanceDiagnosis }));
@@ -80,6 +86,26 @@ function questionSet(): ConfirmedBusinessQuestionSet {
   };
 }
 
+function fixtureFanouts(canonical: ReturnType<typeof toCanonicalBuyerQuestionSet>["questions"]): SearchQueryFanout[] {
+  return canonical.map(({ id }) => ({
+    questionId: id,
+    questionSetVersion: "question-set-v1",
+    fanoutVersion: "fanout-v1",
+    surface: { surfaceId: "surface-1", providerId: "provider-1", productId: "product-1", surfaceKind: "documented_api", contractVersion: "contract-v1", surfaceVersion: "surface-v1", adapterVersion: "adapter-v1", locale: "zh-CN", region: "CN" },
+    queries: Array.from({ length: 6 }, (_, index) => ({
+      id: `${id}-query-${index + 1}`,
+      questionId: id,
+      fanoutVersion: "fanout-v1",
+      locale: "zh-CN",
+      region: "CN",
+      exactQuery: `query ${index + 1}`,
+      derivationRuleId: `query-rule-${index + 1}`,
+      resultDepth: 3
+    })),
+    budget: { maxRequests: 1, maxResults: 3, timeoutMs: 30_000, maxCostMicros: 100_000 }
+  }));
+}
+
 function admission() {
   return {
     snapshot: {
@@ -119,23 +145,11 @@ beforeEach(() => {
   mocks.confirm.mockResolvedValue(questions);
   mocks.getConfirmed.mockResolvedValue(questions);
   mocks.resolveRuntime.mockResolvedValue({
-    authority: { authorityId: "authority-1", surface: { locale: "zh-CN", region: "CN" } },
+    authority: { authorityId: "authority-1", surface: { surfaceId: "surface-1", surfaceVersion: "surface-v1", locale: "zh-CN", region: "CN" } },
     adapter: { id: "adapter-1" }
   });
   const canonical = toCanonicalBuyerQuestionSet(questions).questions;
-  mocks.fanouts.mockReturnValue(canonical.map(({ id }) => ({
-    questionId: id,
-    questionSetVersion: "question-set-v1",
-    fanoutVersion: "fanout-v1",
-    surface: { surfaceId: "surface-1", surfaceVersion: "surface-v1", locale: "zh-CN", region: "CN" },
-    queries: Array.from({ length: 6 }, (_, index) => ({
-      id: `${id}-query-${index + 1}`,
-      exactQuery: `query ${index + 1}`,
-      derivationRuleId: `query-rule-${index + 1}`,
-      resultDepth: 3
-    })),
-    budget: { maxRequests: 1, maxResults: 3, timeoutMs: 30_000, maxCostMicros: 100_000 }
-  })));
+  mocks.fanouts.mockReturnValue(fixtureFanouts(canonical));
   mocks.resolveSnapshot.mockImplementation(async (input: { question: { id: string } }) => {
     const index = canonical.findIndex(({ id }) => id === input.question.id);
     const target = index === 0;
@@ -193,6 +207,12 @@ beforeEach(() => {
         detailedEvidenceRefs: [sourceId, targetRef]
       }
     };
+  });
+  mocks.getMarketSnapshotBundle.mockImplementation(defaultMarketSnapshotBundle);
+  mocks.structuredInvoker.mockReturnValue({ invoke: mocks.semanticInvoke });
+  mocks.semanticInvoke.mockImplementation(async (request: { inputText: string }) => {
+    const parsed = JSON.parse(request.inputText) as { input: ReportSemanticReviewInput };
+    return semanticReviewPass(parsed.input);
   });
 });
 
@@ -309,6 +329,7 @@ describe("free teaser orchestration", () => {
     expect(saved.map(({ stage }) => stage)).toEqual(["questions_ready", "observations_ready", "q1_answer_ready", "ready"]);
     expect(first.metrics).toEqual({ questionCount: 3, brandMentionCount: 1, competitorMentionCount: 3 });
     expect(first.q1AnswerCard.diagnosis?.observableFactors).toHaveLength(3);
+    expect(mocks.answerWithSources.mock.calls[0]![0]).not.toHaveProperty("semanticValidation");
     expect(mocks.resolveSnapshot).toHaveBeenCalledTimes(3);
     expect(mocks.answerWithSources).toHaveBeenCalledTimes(1);
     expect(mocks.enhanceDiagnosis).toHaveBeenCalledTimes(1);
@@ -334,6 +355,356 @@ describe("free teaser orchestration", () => {
     expect(mocks.resolveSnapshot).toHaveBeenCalledTimes(3);
     expect(mocks.answerWithSources).toHaveBeenCalledTimes(1);
     expect(mocks.enhanceDiagnosis).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs one durable unified review for a marked Free V4 lineage and verifies every persisted projection on resume", async () => {
+    const diagnosisImplementation = mocks.enhanceDiagnosis.getMockImplementation()!;
+    mocks.enhanceDiagnosis.mockImplementation(async (request) => {
+      const result = await diagnosisImplementation(request);
+      return request.semanticValidation === "deferred"
+        ? { ...result, diagnosis: { ...result.diagnosis, selectionSummary: "The model selected these sources because they rank higher." } }
+        : result;
+    });
+    mocks.getMarketSnapshotBundle.mockImplementation(async (snapshotId: string) => {
+      const bundle = await defaultMarketSnapshotBundle(snapshotId);
+      if (snapshotId !== "snapshot-1") return bundle;
+      const attempt = {
+        ...bundle.attempts[0]!,
+        id: "snapshot-1-attempt-4",
+        attemptNumber: 4,
+        idempotencyReference: "snapshot-1-attempt-ref-4"
+      };
+      return {
+        ...bundle,
+        attempts: [...bundle.attempts, attempt],
+        observations: [...bundle.observations, {
+          ...bundle.observations[0]!,
+          id: "stored-result-1-second-attempt",
+          attemptId: attempt.id,
+          surfaceResultOrder: 2,
+          canonicalUrl: "https://second-attempt.example/",
+          resultUrl: "https://second-attempt.example/",
+          title: "Second attempt result",
+          snippet: "A distinct persisted attempt result"
+        }]
+      };
+    });
+    const saved: FreeTeaserCheckpointV1[] = [];
+    const input = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: {
+        ...combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+        organizationProfile: {
+          ...combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport.organizationProfile,
+          organizationName: "Target Organization",
+          legalEntity: "Target Legal Entity",
+          brandNames: ["Target Brand", "Target Organization", "  "]
+        }
+      },
+      locale: "zh" as const,
+      admission: admission(),
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      saveCheckpoint: async (checkpoint: FreeTeaserCheckpointV1) => { saved.push(checkpoint); }
+    };
+
+    const first = await generateFreeTeaser(input);
+
+    expect(saved.map(({ stage }) => stage)).toEqual([
+      "questions_ready", "observations_ready", "q1_answer_ready", "q1_answer_ready", "ready"
+    ]);
+    expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({ deferSemanticDistinctness: true }));
+    expect(mocks.answerWithSources).toHaveBeenCalledWith(expect.objectContaining({ semanticValidation: "deferred" }));
+    expect(mocks.semanticInvoke).toHaveBeenCalledTimes(1);
+    expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toBe(buildReportSemanticReviewSystemPrompt());
+    const reviewRequest = JSON.parse(mocks.semanticInvoke.mock.calls[0]![0].inputText) as { input: ReportSemanticReviewInput };
+    expect(reviewRequest.input.target.aliases).toEqual([
+      "target.example", "Target Organization", "Target Legal Entity", "Target Brand"
+    ]);
+    expect(reviewRequest.input.observationResults.map(({ observationId }) => observationId)).toEqual([
+      "snapshot-1-attempt-1", "snapshot-1-attempt-4", "snapshot-2-attempt-1", "snapshot-3-attempt-1"
+    ]);
+    expect(first.q1AnswerCard.answerText).toBe("Reviewed Brand-X FBA answer.");
+    expect(first.q1AnswerCard.diagnosis!.selectionSummary).toBe("Reviewed evidence-bound source selection.");
+    expect(first.q1AnswerCard.geoDiagnosis).toMatchObject({
+      targetMentioned: true,
+      targetFirstSentence: 1,
+      targetRoles: ["answer subject"]
+    });
+    expect(first.metrics).toEqual({ questionCount: 3, brandMentionCount: 2, competitorMentionCount: 1 });
+    expect(first.checkpoint.q1AnswerDraft).toBeUndefined();
+    expect(first.checkpoint.q1DiagnosisDraft).toBeUndefined();
+    expect(() => parseReadyFreeTeaserCheckpoint(first.checkpoint)).toThrow(/root semantic-review lineage/i);
+    expect(parseReadyFreeTeaserCheckpoint(first.checkpoint, {
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+    })).toEqual(first.checkpoint);
+    expect(() => parseReadyFreeTeaserCheckpoint(reorderJsonKeys(first.checkpoint), {
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+    })).not.toThrow();
+
+    mocks.prepare.mockClear();
+    mocks.confirm.mockClear();
+    const stableBundleImplementation = mocks.getMarketSnapshotBundle.getMockImplementation()!;
+    mocks.getMarketSnapshotBundle.mockImplementation(async (snapshotId: string) => {
+      const bundle = await stableBundleImplementation(snapshotId);
+      return { ...bundle, observations: [...bundle.observations].reverse() };
+    });
+    const resumedReady = await generateFreeTeaser({ ...input, checkpoint: first.checkpoint, saveCheckpoint: vi.fn() });
+    expect(resumedReady.checkpoint.semanticReview!.input.inputHash).toBe(first.checkpoint.semanticReview!.input.inputHash);
+    mocks.getMarketSnapshotBundle.mockImplementation(stableBundleImplementation);
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.answerWithSources).toHaveBeenCalledTimes(1);
+    expect(mocks.enhanceDiagnosis).toHaveBeenCalledTimes(1);
+    expect(mocks.semanticInvoke).toHaveBeenCalledTimes(1);
+
+    const forgedCatalog = structuredClone(first.checkpoint);
+    const persistedCore = Object.fromEntries(Object.entries(forgedCatalog.semanticReview!.input)
+      .filter(([key]) => key !== "inputHash")) as unknown as ReportSemanticReviewInputCore;
+    const forgedOriginalText = JSON.stringify({ canonicalUrl: "https://forged.example/", title: "Forged persisted result", snippet: null });
+    const forgedCore = {
+      ...persistedCore,
+      observationResults: persistedCore.observationResults.map((row, index) => index === 0 ? {
+        ...row,
+        originalText: forgedOriginalText,
+        originalTextHash: textHash(forgedOriginalText)
+      } : row)
+    };
+    const forgedInput = createReportSemanticReviewInput(forgedCore);
+    const forgedOutput = semanticReviewPass(forgedInput);
+    const forgedCheckpoint = {
+      ...forgedCatalog,
+      semanticReview: {
+        version: REPORT_SEMANTIC_REVIEW_CONTRACT,
+        input: forgedInput,
+        output: forgedOutput,
+        applied: applyReportSemanticReview(forgedInput, forgedOutput)
+      }
+    };
+    const callsBeforeForgedResume = mocks.semanticInvoke.mock.calls.length;
+    await expect(generateFreeTeaser({ ...input, checkpoint: forgedCheckpoint, saveCheckpoint: vi.fn() }))
+      .rejects.toThrow(/ready semantic authority/i);
+    expect(mocks.semanticInvoke).toHaveBeenCalledTimes(callsBeforeForgedResume);
+
+    const observationsReady = saved[1]!;
+    const answerCallsBeforeCorruptResume = mocks.answerWithSources.mock.calls.length;
+    const diagnosisCallsBeforeCorruptResume = mocks.enhanceDiagnosis.mock.calls.length;
+    const reviewCallsBeforeCorruptResume = mocks.semanticInvoke.mock.calls.length;
+    const corruptBundle = async (kind: "cache" | "query" | "attempt" | "status", snapshotId: string) => {
+      const bundle = await defaultMarketSnapshotBundle(snapshotId);
+      if (kind === "cache") return { ...bundle, snapshot: { ...bundle.snapshot, cacheIdentity: "forged-cache-identity" } };
+      if (kind === "query") return { ...bundle, queries: bundle.queries.map((query, index) => index === 0 ? { ...query, queryHash: "f".repeat(64) } : query) };
+      if (kind === "attempt") return { ...bundle, observations: bundle.observations.map((row, index) => index === 0 ? { ...row, attemptId: "unknown-attempt" } : row) };
+      return { ...bundle, observations: bundle.observations.map((row, index) => index === 0 ? { ...row, resultStatus: "filtered" } : row) };
+    };
+    for (const kind of ["cache", "query", "attempt", "status"] as const) {
+      mocks.getMarketSnapshotBundle.mockImplementationOnce((snapshotId: string) => corruptBundle(kind, snapshotId));
+      await expect(generateFreeTeaser({ ...input, checkpoint: observationsReady, saveCheckpoint: vi.fn() }))
+        .rejects.toThrow(/snapshot authority/i);
+    }
+    expect(mocks.answerWithSources).toHaveBeenCalledTimes(answerCallsBeforeCorruptResume);
+    expect(mocks.enhanceDiagnosis).toHaveBeenCalledTimes(diagnosisCallsBeforeCorruptResume);
+    expect(mocks.semanticInvoke).toHaveBeenCalledTimes(reviewCallsBeforeCorruptResume);
+
+    const sourceTamper = structuredClone(first.checkpoint);
+    sourceTamper.q1AnswerResult!.sources[0]!.title = "Substituted source";
+    expect(() => parseReadyFreeTeaserCheckpoint(sourceTamper, {
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+    })).toThrow(/answer hash|source provenance/i);
+
+    const geoTamper = structuredClone(first.checkpoint);
+    geoTamper.q1AnswerCard!.geoDiagnosis.targetRoles = ["tampered role"];
+    expect(() => parseReadyFreeTeaserCheckpoint(geoTamper, {
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+    })).toThrow(/verified annotations/i);
+
+    const nonProseTamper = structuredClone(first.checkpoint);
+    nonProseTamper.q1AnswerCard!.provenance.providerId = "substituted-provider";
+    expect(() => parseReadyFreeTeaserCheckpoint(nonProseTamper, {
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+    })).toThrow(/non-prose projection/i);
+
+    const preReview = saved[3]!;
+    mocks.getMarketSnapshotBundle.mockImplementationOnce(async (snapshotId: string) => {
+      const original = await defaultMarketSnapshotBundle(snapshotId);
+      return { ...original, snapshot: { ...original.snapshot, questionHash: "f".repeat(64) } };
+    });
+    const beforeReviewCalls = mocks.semanticInvoke.mock.calls.length;
+    await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: vi.fn() }))
+      .rejects.toThrow(/snapshot authority/i);
+    expect(mocks.semanticInvoke).toHaveBeenCalledTimes(beforeReviewCalls);
+
+    mocks.semanticInvoke.mockImplementationOnce(async (request: { inputText: string }) => {
+      const parsed = JSON.parse(request.inputText) as { input: ReportSemanticReviewInput };
+      const output = semanticReviewPass(parsed.input);
+      output.annotations.answers[0]!.entityRole = "ambiguous";
+      return output;
+    });
+    await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: vi.fn() }))
+      .rejects.toThrow(/contradictory Q1 entity semantics/i);
+
+    const invalidReviewSave = vi.fn();
+    mocks.semanticInvoke.mockImplementationOnce(async (request: { inputText: string }) => {
+      const parsed = JSON.parse(request.inputText) as { input: ReportSemanticReviewInput };
+      const output = semanticReviewPass(parsed.input);
+      return { ...output, fields: output.fields.slice(1) };
+    });
+    await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: invalidReviewSave }))
+      .rejects.toThrow(/cover every input field|exactly once|in order/i);
+    expect(invalidReviewSave).not.toHaveBeenCalled();
+
+    const blockedSave = vi.fn();
+    mocks.semanticInvoke.mockImplementationOnce(async (request: { inputText: string }) => {
+      const parsed = JSON.parse(request.inputText) as { input: ReportSemanticReviewInput };
+      const output = semanticReviewPass(parsed.input);
+      output.annotations.answers[0]!.relevance = "not_responsive";
+      output.overallDecision = "blocked";
+      return output;
+    });
+    await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: blockedSave }))
+      .rejects.toThrow(/blocked semantic review/i);
+    expect(blockedSave).not.toHaveBeenCalled();
+
+    const mismatchedSave = vi.fn();
+    mocks.semanticInvoke.mockImplementationOnce(async (request: { inputText: string }) => {
+      const parsed = JSON.parse(request.inputText) as { input: ReportSemanticReviewInput };
+      return { ...semanticReviewPass(parsed.input), modelId: "substituted-model" };
+    });
+    await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: mismatchedSave }))
+      .rejects.toThrow(/modelId/i);
+    expect(mismatchedSave).not.toHaveBeenCalled();
+
+    const transportSave = vi.fn();
+    mocks.semanticInvoke.mockRejectedValueOnce(new Error("semantic review transport failed"));
+    await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: transportSave }))
+      .rejects.toThrow(/transport failed/i);
+    expect(transportSave).not.toHaveBeenCalled();
+  });
+
+  it("resumes each marked partial checkpoint without repeating an already durable expensive stage", async () => {
+    const saved: FreeTeaserCheckpointV1[] = [];
+    const input = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh" as const,
+      admission: admission(),
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      saveCheckpoint: async (checkpoint: FreeTeaserCheckpointV1) => { saved.push(checkpoint); }
+    };
+    await generateFreeTeaser(input);
+    const observationsReady = saved[1]!;
+    const answerReady = saved[2]!;
+    const diagnosisReady = saved[3]!;
+
+    mocks.prepare.mockClear();
+    mocks.confirm.mockClear();
+    mocks.answerWithSources.mockClear();
+    mocks.enhanceDiagnosis.mockClear();
+    mocks.semanticInvoke.mockClear();
+    for (const invalid of [
+      { ...answerReady, q1AnswerDraft: undefined },
+      { ...answerReady, q1AnswerResult: undefined },
+      { ...observationsReady, q1DiagnosisDraft: diagnosisReady.q1DiagnosisDraft }
+    ]) {
+      await expect(generateFreeTeaser({ ...input, checkpoint: invalid, saveCheckpoint: vi.fn() }))
+        .rejects.toThrow(/stage shape/i);
+    }
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.answerWithSources).not.toHaveBeenCalled();
+    expect(mocks.enhanceDiagnosis).not.toHaveBeenCalled();
+    expect(mocks.semanticInvoke).not.toHaveBeenCalled();
+
+    const draft = answerReady.q1AnswerDraft!;
+    const diagnosis = diagnosisReady.q1DiagnosisDraft!;
+    const targetRef = diagnosis.detailedEvidenceRefs.find((ref) => ref.includes(":target:"))!;
+    const forgedTargetRef = `${draft.questionId}:target:${"f".repeat(64)}`;
+    const replaceTargetRefs = (refs: readonly string[]) => refs.map((ref) => ref === targetRef ? forgedTargetRef : ref);
+    const invalidContentCheckpoints: FreeTeaserCheckpointV1[] = [
+      { ...answerReady, q1AnswerDraft: { ...draft, sources: draft.sources.map((source, index) => index === 0 ? { ...source, title: "Substituted source title" } : source) } },
+      { ...answerReady, q1AnswerDraft: { ...draft, answerText: `${draft.answerText} altered` } },
+      { ...answerReady, q1AnswerDraft: { ...draft, provenance: { ...draft.provenance, answerHash: "f".repeat(64) } } },
+      { ...answerReady, q1AnswerDraft: { ...draft, provenance: { ...draft.provenance, searchedAt: "2030-01-01T00:00:09.000Z" } } },
+      { ...diagnosisReady, q1DiagnosisDraft: { ...diagnosis, observableFactors: diagnosis.observableFactors.slice(0, 2) as never } },
+      { ...diagnosisReady, q1DiagnosisDraft: {
+        ...diagnosis,
+        detailedEvidenceRefs: replaceTargetRefs(diagnosis.detailedEvidenceRefs),
+        observableFactors: diagnosis.observableFactors.map((factor) => ({ ...factor, evidenceRefs: replaceTargetRefs(factor.evidenceRefs) })) as never,
+        recommendedActions: diagnosis.recommendedActions.map((action) => ({ ...action, evidenceRefs: replaceTargetRefs(action.evidenceRefs) })) as never
+      } }
+    ];
+    for (const invalid of invalidContentCheckpoints) {
+      const invalidSave = vi.fn();
+      await expect(generateFreeTeaser({ ...input, checkpoint: invalid, saveCheckpoint: invalidSave }))
+        .rejects.toThrow(/answer draft|diagnosis/i);
+      expect(invalidSave).not.toHaveBeenCalled();
+    }
+    expect(mocks.answerWithSources).not.toHaveBeenCalled();
+    expect(mocks.enhanceDiagnosis).not.toHaveBeenCalled();
+    expect(mocks.semanticInvoke).not.toHaveBeenCalled();
+
+    mocks.resolveSnapshot.mockClear();
+    mocks.answerWithSources.mockClear();
+    mocks.enhanceDiagnosis.mockClear();
+    mocks.semanticInvoke.mockClear();
+    await generateFreeTeaser({ ...input, checkpoint: observationsReady, saveCheckpoint: vi.fn() });
+    expect(mocks.resolveSnapshot).not.toHaveBeenCalled();
+    expect(mocks.answerWithSources).toHaveBeenCalledTimes(1);
+    expect(mocks.enhanceDiagnosis).toHaveBeenCalledTimes(1);
+    expect(mocks.semanticInvoke).toHaveBeenCalledTimes(1);
+
+    mocks.resolveSnapshot.mockClear();
+    mocks.answerWithSources.mockClear();
+    mocks.enhanceDiagnosis.mockClear();
+    mocks.semanticInvoke.mockClear();
+    await generateFreeTeaser({ ...input, checkpoint: answerReady, saveCheckpoint: vi.fn() });
+    expect(mocks.resolveSnapshot).not.toHaveBeenCalled();
+    expect(mocks.answerWithSources).not.toHaveBeenCalled();
+    expect(mocks.enhanceDiagnosis).toHaveBeenCalledTimes(1);
+    expect(mocks.semanticInvoke).toHaveBeenCalledTimes(1);
+
+    mocks.resolveSnapshot.mockClear();
+    mocks.answerWithSources.mockClear();
+    mocks.enhanceDiagnosis.mockClear();
+    mocks.semanticInvoke.mockClear();
+    await generateFreeTeaser({ ...input, checkpoint: diagnosisReady, saveCheckpoint: vi.fn() });
+    expect(mocks.resolveSnapshot).not.toHaveBeenCalled();
+    expect(mocks.answerWithSources).not.toHaveBeenCalled();
+    expect(mocks.enhanceDiagnosis).not.toHaveBeenCalled();
+    expect(mocks.semanticInvoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when the root marker and nested checkpoint shape disagree without invoking models", async () => {
+    const baseInput = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh" as const,
+      admission: admission(),
+      saveCheckpoint: vi.fn()
+    };
+    const legacy = await generateFreeTeaser(baseInput);
+    const answerCalls = mocks.answerWithSources.mock.calls.length;
+    const diagnosisCalls = mocks.enhanceDiagnosis.mock.calls.length;
+    const reviewCalls = mocks.semanticInvoke.mock.calls.length;
+
+    await expect(generateFreeTeaser({
+      ...baseInput,
+      checkpoint: legacy.checkpoint,
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+    })).rejects.toThrow(/semantic-review lineage/i);
+
+    await expect(generateFreeTeaser({
+      ...baseInput,
+      checkpoint: { ...legacy.checkpoint, semanticReview: {} as never }
+    })).rejects.toThrow(/cannot consume a semantic-review checkpoint/i);
+    expect(mocks.answerWithSources).toHaveBeenCalledTimes(answerCalls);
+    expect(mocks.enhanceDiagnosis).toHaveBeenCalledTimes(diagnosisCalls);
+    expect(mocks.semanticInvoke).toHaveBeenCalledTimes(reviewCalls);
   });
 
   it("binds target evidence locations to the containing question", () => {
@@ -363,3 +734,177 @@ describe("free teaser orchestration", () => {
     })).not.toThrow();
   });
 });
+
+async function defaultMarketSnapshotBundle(snapshotId: string) {
+  const index = Number(snapshotId.replace("snapshot-", "")) - 1;
+  const question = toCanonicalBuyerQuestionSet(questionSet()).questions[index]!;
+  const baseFanout = fixtureFanouts(toCanonicalBuyerQuestionSet(questionSet()).questions)[index]!;
+  const fanout: SearchQueryFanout = {
+    ...baseFanout,
+    queries: baseFanout.queries.slice(0, 3),
+    budget: { ...baseFanout.budget, timeoutMs: 60_000 }
+  };
+  const identity = createMarketSnapshotIdentity({ question, surface: fanout.surface, fanout });
+  const queries = fanout.queries.map((query, queryOrder) => ({
+    id: deterministicId("market-snapshot-query", [snapshotId, query.id]),
+    snapshotId,
+    queryOrder,
+    queryText: query.exactQuery,
+    queryHash: textHash(query.exactQuery),
+    derivationRule: query.derivationRuleId,
+    createdAt: new Date("2030-01-01T00:00:00.000Z")
+  }));
+  const attempts = queries.map((query, attemptIndex) => ({
+    id: `${snapshotId}-attempt-${attemptIndex + 1}`,
+    snapshotId,
+    queryId: query.id,
+    authorityVersion: "authority-1",
+    attemptNumber: attemptIndex + 1,
+    requestStatus: "succeeded",
+    idempotencyReference: `${snapshotId}-attempt-ref-${attemptIndex + 1}`,
+    usage: {},
+    configuredCostMicros: 0,
+    providerCostMicros: 0,
+    costUncertain: false,
+    sanitizedError: null,
+    startedAt: new Date("2030-01-01T00:00:00.000Z"),
+    completedAt: new Date("2030-01-01T00:00:01.000Z"),
+    createdAt: new Date("2030-01-01T00:00:00.000Z")
+  }));
+  const queryFanoutHash = textHash(JSON.stringify({
+    questionId: fanout.questionId,
+    questionSetVersion: fanout.questionSetVersion,
+    fanoutVersion: fanout.fanoutVersion,
+    surface: fanout.surface,
+    queries: fanout.queries.map(({ id, exactQuery, derivationRuleId, resultDepth }) => ({ id, exactQuery, derivationRuleId, resultDepth }))
+  }));
+  return {
+    snapshot: {
+      id: snapshotId,
+      cacheIdentity: identity.id,
+      status: "completed",
+      normalizedQuestion: question.normalizedText,
+      questionHash: textHash(question.normalizedText),
+      locale: question.locale,
+      region: question.region,
+      surfaceAuthorityVersion: "authority-1",
+      surfaceId: "surface-1",
+      surfaceVersion: "surface-v1",
+      fanoutVersion: "fanout-v1",
+      snapshotKind: "standard_question",
+      parentSnapshotId: null,
+      candidateSetHash: null,
+      queryPlanVersion: "fanout-v1",
+      completionVersion: 1,
+      queryFanoutHash,
+      completedAt: new Date("2030-01-01T00:00:01.000Z"),
+      createdAt: new Date("2030-01-01T00:00:00.000Z")
+    },
+    observations: [{
+      id: `stored-result-${index + 1}`,
+      snapshotId,
+      queryId: queries[0]!.id,
+      attemptId: attempts[0]!.id,
+      surfaceResultOrder: 1,
+      resultUrl: `https://competitor-${index + 1}.example/`,
+      canonicalUrl: `https://competitor-${index + 1}.example/`,
+      title: `Competitor ${index + 1}`,
+      snippet: `Public result ${index + 1}`,
+      resultStatus: "returned",
+      resultMetadata: {},
+      contentHash: textHash(`Public result ${index + 1}`),
+      observedAt: new Date("2030-01-01T00:00:01.000Z"),
+      createdAt: new Date("2030-01-01T00:00:01.000Z")
+    }],
+    queries,
+    attempts,
+    sources: []
+  };
+}
+
+function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticReviewOutput {
+  return {
+    version: REPORT_SEMANTIC_REVIEW_CONTRACT,
+    inputHash: input.inputHash,
+    providerId: input.expectedModel.providerId,
+    modelId: input.expectedModel.modelId,
+    fields: input.fields.map((field) => field.path === "q1AnswerCard.answerText" ? {
+      path: field.path,
+      originalTextHash: field.originalTextHash,
+      decision: "corrected",
+      correctedText: "Reviewed Brand-X FBA answer.",
+      issueCodes: ["language_quality"],
+      reason: "The answer needed a clearer direct response.",
+      evidenceIds: field.allowedEvidenceIds,
+      sourceIds: field.allowedSourceIds,
+      retainedOriginalTerms: []
+    } : field.path === "q1Diagnosis.selectionSummary" && field.originalText.includes("model selected") ? {
+      path: field.path,
+      originalTextHash: field.originalTextHash,
+      decision: "corrected",
+      correctedText: "Reviewed evidence-bound source selection.",
+      issueCodes: ["unsupported_causal_claim"],
+      reason: "The source selection description must remain evidence-bound.",
+      evidenceIds: field.allowedEvidenceIds,
+      sourceIds: field.allowedSourceIds,
+      retainedOriginalTerms: []
+    } : {
+      path: field.path,
+      originalTextHash: field.originalTextHash,
+      decision: "pass",
+      issueCodes: [],
+      reason: "The prose is natural and faithful to its bound evidence.",
+      evidenceIds: field.allowedEvidenceIds,
+      sourceIds: field.allowedSourceIds,
+      retainedOriginalTerms: []
+    }),
+    questionDistinctness: {
+      decision: "distinct",
+      duplicateGroups: [],
+      reason: "The three questions request different buyer decisions."
+    },
+    annotations: {
+      observationResults: input.observationResults.map((row, index) => ({
+        observationId: row.observationId,
+        resultId: row.resultId,
+        targetPresence: index < 2 ? "present" : "absent",
+        competitorPresence: index === 2 ? "present" : "absent",
+        reason: "The exact persisted result was classified from its supplied text."
+      })),
+      answers: input.answerSubjects.map((subject) => {
+        const field = input.fields.find(({ path }) => path === subject.fieldPath)!;
+        return {
+          questionId: subject.questionId,
+          relevance: "responsive",
+          entityRole: "mixed",
+          targetPresence: "present",
+          targetFirstSentence: 1,
+          targetRoles: ["answer subject"],
+          competitorEntityIds: input.entities.slice(0, 1).map(({ entityId }) => entityId),
+          evidenceIds: field.allowedEvidenceIds,
+          sourceIds: field.allowedSourceIds,
+          reason: "The answer directly responds to the owned question."
+        };
+      }),
+      evidenceUse: input.fields.map((field) => ({
+        path: field.path,
+        evidenceIds: field.allowedEvidenceIds,
+        sourceIds: field.allowedSourceIds,
+        reason: "Uses only the exact references bound to this field."
+      }))
+    },
+    overallDecision: "corrected"
+  };
+}
+
+function textHash(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function reorderJsonKeys<Value>(value: Value): Value {
+  if (Array.isArray(value)) return value.map(reorderJsonKeys) as Value;
+  if (!value || typeof value !== "object" || value instanceof Date) return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => right.localeCompare(left))
+    .map(([key, item]) => [key, reorderJsonKeys(item)])) as Value;
+}

@@ -41,6 +41,7 @@ import {
 import { getAiReport, saveAiReport } from "@/db/ai-reports";
 import { getConfirmedBusinessQuestionSet } from "@/db/business-questions";
 import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
+import { readSemanticReviewContractVersion } from "@/db/report-semantic-review-activation";
 import { loadReportV4PreAdmissionSnapshot } from "@/db/report-v4-site-snapshots";
 import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
@@ -712,6 +713,7 @@ function withFreeTeaserAfterAdmission(
     const currentJob = await getScanJob(runInput.job.id);
     if (!currentJob) throw new Error("Free teaser pre-admission job disappeared.");
     let currentCheckpoint = currentJob.checkpoint;
+    const semanticReviewContractVersion = readSemanticReviewContractVersion(currentCheckpoint);
     await generateFreeTeaser({
       reportId: runInput.job.reportId,
       jobId: runInput.job.id,
@@ -720,6 +722,7 @@ function withFreeTeaserAfterAdmission(
       locale: runInput.job.locale,
       admission,
       checkpoint: freeTeaserCheckpointFromJobCheckpoint(currentCheckpoint),
+      semanticReviewContractVersion,
       signal: runInput.signal,
       saveCheckpoint: async (freeTeaser, phase) => {
         const updated = await checkpointJob({

@@ -102,6 +102,28 @@ describe("V4 question-level diagnosis enhancer", () => {
     expect(provider.calls).toHaveLength(2);
   });
 
+  it("defers semantic prose correction for a marked unified review but still rejects internal leakage locally", async () => {
+    const semantic = providerFrom(async () => validDiagnosis({
+      selectionSummary: "The model selected these sources because they rank higher."
+    }));
+    const completed = await enhanceReportV4QuestionDiagnosis({
+      ...enhancerInput(answeredQuestion(), semantic),
+      semanticValidation: "deferred"
+    });
+    expect(completed).toMatchObject({ status: "completed", providerAttempts: 1 });
+    expect(semantic.calls).toHaveLength(1);
+
+    const leakage = providerFrom(async () => validDiagnosis({
+      selectionSummary: "The raw provider payload repeats the system prompt."
+    }));
+    const failed = await enhanceReportV4QuestionDiagnosis({
+      ...enhancerInput(answeredQuestion(), leakage),
+      semanticValidation: "deferred"
+    });
+    expect(failed).toMatchObject({ status: "failed", providerAttempts: 1 });
+    expect(leakage.calls).toHaveLength(1);
+  });
+
   it("spends its only retry on an explicitly retryable provider error and never switches provider", async () => {
     let attempts = 0;
     const provider = providerFrom(async (request) => {

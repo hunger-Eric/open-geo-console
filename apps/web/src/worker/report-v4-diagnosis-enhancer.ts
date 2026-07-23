@@ -67,6 +67,7 @@ export interface ReportV4DiagnosisEnhancerInput {
     attempt: 1 | 2
   ) => ModelTokenBudgetInput;
   readonly signal?: AbortSignal;
+  readonly semanticValidation?: "legacy" | "deferred";
 }
 
 export type ReportV4DiagnosisEnhancerResult =
@@ -119,7 +120,7 @@ export async function enhanceReportV4QuestionDiagnosis(
         retrievalStatus: source.retrievalStatus
       })),
       targetPages: input.targetPages
-    });
+    }, { semanticValidation: input.semanticValidation });
   } catch {
     propagateCallerAbort(signal);
     return failed(input.question, 0);
@@ -168,8 +169,9 @@ export async function enhanceReportV4QuestionDiagnosis(
     if (invocation.status !== "resolved") return failed(input.question, providerAttempts);
   }
 
-  const parsed = parseDiagnosis(invocation.value, diagnosisInput);
+  const parsed = parseDiagnosis(invocation.value, diagnosisInput, input.semanticValidation);
   if (parsed.status === "valid") return completed(input.question, parsed.diagnosis, providerAttempts);
+  if (input.semanticValidation === "deferred") return failed(input.question, providerAttempts);
   if (providerAttempts !== 1) return failed(input.question, providerAttempts);
 
   const field = correctableField(parsed.error);
@@ -196,11 +198,12 @@ export async function enhanceReportV4QuestionDiagnosis(
 
 function parseDiagnosis(
   value: unknown,
-  input: ReportV4DiagnosisInput
+  input: ReportV4DiagnosisInput,
+  semanticValidation?: "legacy" | "deferred"
 ): { readonly status: "valid"; readonly diagnosis: ReportV4DiagnosisOutput }
   | { readonly status: "invalid"; readonly error: unknown } {
   try {
-    return { status: "valid", diagnosis: parseReportV4DiagnosisOutput(value, input) };
+    return { status: "valid", diagnosis: parseReportV4DiagnosisOutput(value, input, { semanticValidation }) };
   } catch (error) {
     return { status: "invalid", error };
   }

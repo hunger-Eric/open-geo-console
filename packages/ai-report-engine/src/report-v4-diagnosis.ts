@@ -89,14 +89,14 @@ const PROHIBITED_INTERNAL_LANGUAGE = /(?:system prompt|developer message|raw (?:
 const PROHIBITED_SEO_LANGUAGE = /(?:\bSEO\b|search[ -]engine optimi[sz]ation|search ranking|keyword ranking|搜索引擎优化|搜索排名|关键词排名)/iu;
 const PROHIBITED_CAUSAL_LANGUAGE = /(?:hidden (?:ranking )?weight|ranking weight|citation probability|\b(?:the\s+)?(?:model|provider)\b.{0,40}\b(?:selected|ranked|chose|recommended|cited|omitted)\b.{0,40}\bbecause\b|\bbecause\b.{0,40}\b(?:the\s+)?(?:model|provider)\b.{0,40}\b(?:selected|ranked|chose|recommended|cited|omitted)\b|\bguarantee(?:s|d|ing)?\b.{0,60}\b(?:citation|cite[ds]?|recommend(?:ation|ed)?|rank(?:ing|ed)?)\b|隐藏(?:排名)?权重|引用概率|(?:模型|供应商).{0,30}(?:选择|选中|排名|推荐|引用|遗漏|省略).{0,30}(?:因为|由于)|(?:因为|由于).{0,30}(?:模型|供应商).{0,30}(?:选择|选中|排名|推荐|引用|遗漏|省略)|(?:保证|确保|必然|一定会).{0,30}(?:引用|被引用|推荐|被推荐|排名))/iu;
 
-export function parseReportV4DiagnosisInput(value: unknown): ReportV4DiagnosisInput {
+export function parseReportV4DiagnosisInput(value: unknown, options?: { semanticValidation?: "legacy" | "deferred" }): ReportV4DiagnosisInput {
   const root = strictObject(value, "$diagnosisInput", INPUT_FIELDS);
   const questionRow = strictObject(root.question, "$diagnosisInput.question", QUESTION_FIELDS);
   const question = Object.freeze({
     questionId: boundedText(questionRow.questionId, "$diagnosisInput.question.questionId", 500),
     text: boundedText(questionRow.text, "$diagnosisInput.question.text", 10_000)
   });
-  const answer = customerProse(root.answer, "$diagnosisInput.answer", 30_000);
+  const answer = customerProse(root.answer, "$diagnosisInput.answer", 30_000, options?.semanticValidation);
 
   const sourceRows = array(root.sources, "$diagnosisInput.sources");
   if (sourceRows.length > REPORT_V4_MAX_DIAGNOSIS_SOURCES) {
@@ -155,8 +155,8 @@ export function parseReportV4DiagnosisInput(value: unknown): ReportV4DiagnosisIn
       questionId: question.questionId,
       pageId,
       url: httpUrl(row.url, `${path}.url`),
-      relevanceReason: customerProse(row.relevanceReason, `${path}.relevanceReason`, 2_000),
-      summary: customerProse(row.summary, `${path}.summary`, REPORT_V4_MAX_TARGET_SUMMARY_CHARS),
+      relevanceReason: customerProse(row.relevanceReason, `${path}.relevanceReason`, 2_000, options?.semanticValidation),
+      summary: customerProse(row.summary, `${path}.summary`, REPORT_V4_MAX_TARGET_SUMMARY_CHARS, options?.semanticValidation),
       sourceLocations: Object.freeze(sourceLocations)
     });
   });
@@ -177,7 +177,7 @@ export function parseReportV4DiagnosisInput(value: unknown): ReportV4DiagnosisIn
   });
 }
 
-export function parseReportV4DiagnosisOutput(value: unknown, input: ReportV4DiagnosisInput): ReportV4DiagnosisOutput {
+export function parseReportV4DiagnosisOutput(value: unknown, input: ReportV4DiagnosisInput, options?: { semanticValidation?: "legacy" | "deferred" }): ReportV4DiagnosisOutput {
   const root = strictObject(value, "$diagnosisOutput", OUTPUT_FIELDS);
   const allowedEvidenceRefs = new Set([
     ...input.sources.map(({ sourceId }) => sourceId),
@@ -193,7 +193,7 @@ export function parseReportV4DiagnosisOutput(value: unknown, input: ReportV4Diag
     const row = strictObject(factor, path, FACTOR_FIELDS);
     return Object.freeze({
       kind: oneOf(row.kind, FACTOR_KINDS, `${path}.kind`),
-      observation: customerProse(row.observation, `${path}.observation`, 5_000),
+      observation: customerProse(row.observation, `${path}.observation`, 5_000, options?.semanticValidation),
       evidenceRefs: Object.freeze(evidenceRefs(row.evidenceRefs, `${path}.evidenceRefs`, detailedSet))
     });
   }) as unknown as ReportV4DiagnosisOutput["observableFactors"];
@@ -206,15 +206,15 @@ export function parseReportV4DiagnosisOutput(value: unknown, input: ReportV4Diag
     exact(row.priority, index + 1, `${path}.priority`, "Diagnosis action priority must preserve the order 1, 2, 3.");
     return Object.freeze({
       priority: (index + 1) as 1 | 2 | 3,
-      action: customerProse(row.action, `${path}.action`, 5_000),
+      action: customerProse(row.action, `${path}.action`, 5_000, options?.semanticValidation),
       evidenceRefs: Object.freeze(evidenceRefs(row.evidenceRefs, `${path}.evidenceRefs`, detailedSet))
     });
   }) as unknown as ReportV4DiagnosisOutput["recommendedActions"];
 
   return Object.freeze({
-    selectionSummary: customerProse(root.selectionSummary, "$diagnosisOutput.selectionSummary", 5_000),
+    selectionSummary: customerProse(root.selectionSummary, "$diagnosisOutput.selectionSummary", 5_000, options?.semanticValidation),
     observableFactors,
-    targetGap: customerProse(root.targetGap, "$diagnosisOutput.targetGap", 5_000),
+    targetGap: customerProse(root.targetGap, "$diagnosisOutput.targetGap", 5_000, options?.semanticValidation),
     recommendedActions,
     detailedEvidenceRefs: Object.freeze(detailedEvidenceRefs)
   });
@@ -224,7 +224,7 @@ export function parseReportV4DiagnosisOutput(value: unknown, input: ReportV4Diag
  * Shape-only validator for persisted V4 diagnosis output.
  * Does not validate evidence-ref membership (the original input is not available at contract-read time).
  */
-export function parseReportV4DiagnosisOutputShape(value: unknown): ReportV4DiagnosisOutput {
+export function parseReportV4DiagnosisOutputShape(value: unknown, options?: { semanticValidation?: "legacy" | "deferred" }): ReportV4DiagnosisOutput {
   const root = strictObject(value, "$diagnosisOutput", OUTPUT_FIELDS);
 
   const factorRows = array(root.observableFactors, "$diagnosisOutput.observableFactors");
@@ -234,7 +234,7 @@ export function parseReportV4DiagnosisOutputShape(value: unknown): ReportV4Diagn
     const row = strictObject(factor, path, FACTOR_FIELDS);
     return Object.freeze({
       kind: oneOf(row.kind, FACTOR_KINDS, `${path}.kind`),
-      observation: customerProse(row.observation, `${path}.observation`, 5_000),
+      observation: customerProse(row.observation, `${path}.observation`, 5_000, options?.semanticValidation),
       evidenceRefs: Object.freeze(evidenceRefsUnbounded(row.evidenceRefs, `${path}.evidenceRefs`))
     });
   }) as unknown as ReportV4DiagnosisOutput["observableFactors"];
@@ -247,15 +247,15 @@ export function parseReportV4DiagnosisOutputShape(value: unknown): ReportV4Diagn
     exact(row.priority, index + 1, `${path}.priority`, "Diagnosis action priority must preserve the order 1, 2, 3.");
     return Object.freeze({
       priority: (index + 1) as 1 | 2 | 3,
-      action: customerProse(row.action, `${path}.action`, 5_000),
+      action: customerProse(row.action, `${path}.action`, 5_000, options?.semanticValidation),
       evidenceRefs: Object.freeze(evidenceRefsUnbounded(row.evidenceRefs, `${path}.evidenceRefs`))
     });
   }) as unknown as ReportV4DiagnosisOutput["recommendedActions"];
 
   return Object.freeze({
-    selectionSummary: customerProse(root.selectionSummary, "$diagnosisOutput.selectionSummary", 5_000),
+    selectionSummary: customerProse(root.selectionSummary, "$diagnosisOutput.selectionSummary", 5_000, options?.semanticValidation),
     observableFactors,
-    targetGap: customerProse(root.targetGap, "$diagnosisOutput.targetGap", 5_000),
+    targetGap: customerProse(root.targetGap, "$diagnosisOutput.targetGap", 5_000, options?.semanticValidation),
     recommendedActions,
     detailedEvidenceRefs: Object.freeze(evidenceRefsUnbounded(root.detailedEvidenceRefs, "$diagnosisOutput.detailedEvidenceRefs"))
   });
@@ -263,9 +263,10 @@ export function parseReportV4DiagnosisOutputShape(value: unknown): ReportV4Diagn
 
 export function parseReportV4DiagnosisOutputForQuestion(
   value: unknown,
-  input: { readonly questionId: string; readonly sourceEvidenceIds: readonly string[] }
+  input: { readonly questionId: string; readonly sourceEvidenceIds: readonly string[] },
+  options?: { semanticValidation?: "legacy" | "deferred" }
 ): ReportV4DiagnosisOutput {
-  const diagnosis = parseReportV4DiagnosisOutputShape(value);
+  const diagnosis = parseReportV4DiagnosisOutputShape(value, options);
   const questionId = boundedText(input.questionId, "$diagnosisBinding.questionId", 500);
   const sourceIds = new Set(input.sourceEvidenceIds.map((id, index) =>
     boundedText(id, `$diagnosisBinding.sourceEvidenceIds[${index}]`, 500)
@@ -307,9 +308,9 @@ function evidenceRefs(value: unknown, path: string, allowed: ReadonlySet<string>
   return [...new Set(refs)];
 }
 
-function customerProse(value: unknown, path: string, max: number): string {
+function customerProse(value: unknown, path: string, max: number, semanticValidation: "legacy" | "deferred" = "legacy"): string {
   const result = boundedText(value, path, max);
-  if (PROHIBITED_INTERNAL_LANGUAGE.test(result) || PROHIBITED_SEO_LANGUAGE.test(result) || PROHIBITED_CAUSAL_LANGUAGE.test(result)) {
+  if (PROHIBITED_INTERNAL_LANGUAGE.test(result) || (semanticValidation === "legacy" && (PROHIBITED_SEO_LANGUAGE.test(result) || PROHIBITED_CAUSAL_LANGUAGE.test(result)))) {
     throw new TypeError(`${path} contains prohibited customer prose.`);
   }
   return result;

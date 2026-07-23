@@ -93,6 +93,7 @@ export async function confirmBusinessQuestions(input: {
   questionSetId: string;
   finalTexts: readonly string[];
   acknowledgedLowConfidence: boolean;
+  deferSemanticDistinctness?: boolean;
 }): Promise<ConfirmedBusinessQuestionSet> {
   await ensureDatabase();
   const outcome = await getSqlClient().begin(async (tx) => {
@@ -115,7 +116,8 @@ export async function confirmBusinessQuestions(input: {
         candidates: row.payload as BusinessQuestionCandidateSet,
         finalTexts: input.finalTexts,
         acknowledgedLowConfidence: input.acknowledgedLowConfidence,
-        confirmedAt: new Date().toISOString()
+        confirmedAt: new Date().toISOString(),
+        deferSemanticDistinctness: input.deferSemanticDistinctness
       });
     } catch (error) {
       if (error instanceof TypeError && error.message.includes("neutralized")) {

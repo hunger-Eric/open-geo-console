@@ -8,6 +8,98 @@ const body = (value: unknown) => ({ ok: true, status: 200, json: async () => ({ 
 const valid = { questionId: "question-1", answerText: "服务商甲提供跨境运输。", sources: [{ sourceId: "source-1", title: "跨境服务", canonicalUrl: "https://provider.example/services", citedText: "跨境运输", providerResultOrder: 1 }], refusal: null };
 
 describe("MiMo generative answer adapter", () => {
+  const mixedLanguage = { ...valid, answerText: "可选方案：Brand-X FBA first-mile service is available for this route." };
+
+  it("uses explicit deferred semantics for marked mixed-language terms without a language retry", async () => {
+    let request: RequestInit | undefined;
+    const transport = vi.fn(async (_url, init) => { request = init; return body(mixedLanguage); });
+    const provider = createMiMoGenerativeSearchAnswerProvider({ config, fetch: transport });
+    await expect(provider.answerWithSources({ ...input, semanticValidation: "deferred" }))
+      .resolves.toMatchObject({ answerText: mixedLanguage.answerText });
+    expect(transport).toHaveBeenCalledTimes(1);
+    const sent = JSON.parse(String(request?.body)) as { messages: Array<{ content: string }> };
+    expect(sent.messages[0]!.content).toContain("Preserve brand names, product names, acronyms");
+    expect(sent.messages[1]!.content).toContain("preserving appropriate brands");
+  });
+
+  it("uses the terminology-preserving deferred prompt for non-Chinese requested locales", async () => {
+    let request: RequestInit | undefined;
+    const transport = vi.fn(async (_url, init) => { request = init; return body({ ...valid, answerText: "Brand-X FBA first-mile service is available." }); });
+    const provider = createMiMoGenerativeSearchAnswerProvider({ config, fetch: transport });
+    await provider.answerWithSources({ ...input, locale: "en-US", semanticValidation: "deferred" });
+    const sent = JSON.parse(String(request?.body)) as { messages: Array<{ content: string }> };
+    expect(sent.messages[0]!.content).toContain("naturally in the requested locale");
+    expect(sent.messages[1]!.content).toContain("natural prose in the requested locale");
+    expect(sent.messages[1]!.content).toContain("preserving appropriate brands");
+  });
+
+  it("retries a marked request only for malformed structure and keeps deferred terminology instructions", async () => {
+    const transport = vi.fn().mockResolvedValueOnce(body({ answerText: "", sources: [], refusal: null })).mockResolvedValueOnce(body(mixedLanguage));
+    const provider = createMiMoGenerativeSearchAnswerProvider({ config, fetch: transport });
+    await expect(provider.answerWithSources({ ...input, semanticValidation: "deferred" }))
+      .resolves.toMatchObject({ answerText: mixedLanguage.answerText });
+    expect(transport).toHaveBeenCalledTimes(2);
+    const retry = JSON.parse(String(transport.mock.calls[1]![1]!.body)) as { messages: Array<{ content: string }> };
+    expect(retry.messages[1]!.content).toContain("failed the JSON or structural contract");
+    expect(retry.messages[1]!.content).not.toContain("JSON or language contract");
+  });
+
+  it("keeps omitted and explicit legacy requests on the exact same prompt and parser behavior", async () => {
+    const sent: string[] = [];
+    const makeProvider = () => createMiMoGenerativeSearchAnswerProvider({ config, fetch: async (_url, init) => { sent.push(String(init?.body)); return body(valid); } });
+    await makeProvider().answerWithSources(input);
+    await makeProvider().answerWithSources({ ...input, semanticValidation: "legacy" });
+    expect(sent[1]).toBe(sent[0]);
+    expect(JSON.parse(sent[0]!)).toMatchInlineSnapshot(`
+      {
+        "messages": [
+          {
+            "content": "你必须返回且只返回 JSON 对象。请使用联网搜索完整回答普通问题，并只列出本次回答实际使用的公开来源。answerText 和 refusal.reason 必须全部使用简体中文，不得出现英文单词、英文缩写或括号内英文；请把专业术语翻译成中文。只有来源标题与引用原文可以保持原文。不要用搜索覆盖率、检索过程或“证据不足”代替答案。只有真实的安全、政策或高风险原因才允许拒绝。
+      Return JSON only.
+      Answer the supplied ordinary question completely using web search.
+      Return only sources actually used by this answer operation, and ensure they are public sources.
+      Do not replace the answer with a description of search coverage.
+      If sources are incomplete, still return the complete answer and the sources available.
+      Set refusal only for a genuine safety, policy, or high-risk refusal.
+      Write generated prose in the requested locale; preserve source titles and cited text verbatim.
+      Use exactly this JSON shape:
+      {"questionId":"the supplied question ID","answerText":"complete answer, or empty only for a typed refusal","sources":[{"sourceId":"stable source ID","title":"source title","canonicalUrl":"public http(s) URL","citedText":"supporting text or null","providerResultOrder":0}],"refusal":null}
+      For a refusal, refusal must be {"code":"safety_refusal|policy_refusal|high_risk_refusal","reason":"localized reason"} and sources must be empty.",
+            "role": "system",
+          },
+          {
+            "content": "Question: 跨境物流服务有哪些？
+      Locale: zh-CN
+      Region: CN
+      除来源标题和引用原文外，answerText 和 refusal.reason 必须全部使用简体中文；不要写任何英文单词或缩写，把专业术语翻译为中文。",
+            "role": "user",
+          },
+        ],
+        "model": "mimo-v2.5-pro",
+        "response_format": {
+          "type": "json_object",
+        },
+        "stream": false,
+        "temperature": 0.1,
+        "thinking": {
+          "type": "disabled",
+        },
+        "tools": [
+          {
+            "force_search": true,
+            "limit": 10,
+            "type": "web_search",
+          },
+        ],
+      }
+    `);
+
+    const transport = vi.fn(async () => body(mixedLanguage));
+    await expect(createMiMoGenerativeSearchAnswerProvider({ config, fetch: transport }).answerWithSources(input))
+      .rejects.toMatchObject({ errorClass: "malformed" });
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
   it("sends JSON answer prompt and normalizes answer sources", async () => {
     let request: RequestInit | undefined;
     const provider = createMiMoGenerativeSearchAnswerProvider({ config, fetch: vi.fn(async (_url, init) => { request = init; return body(valid); }), now: () => new Date("2030-01-01T00:00:00Z") });

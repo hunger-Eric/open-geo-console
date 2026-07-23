@@ -2,9 +2,43 @@
 
 ## ReportSemanticReview staged program - Phase 2B2 marker-present Free V4 integration
 
-Status: `FROZEN` - approval request only. No code may be changed until the
-user explicitly approves this exact Phase 2B2 allowlist. It authorizes neither
-marker activation nor Phase 2B3 Paid V3 integration.
+Status: `COMPLETE` - the approved marker-present Free V4 integration and exact
+MiMo answer-deferral amendment are implemented and locally verified. This
+completion authorizes neither marker activation nor Phase 2B3 Paid V3
+integration.
+
+### APPROVED Phase 2B2 amendment - explicit MiMo answer deferral
+
+Status: `APPROVED` - explicit user approval for this exact amendment was
+received on 2026-07-23. Only the two added paths and the already approved
+explicit request-threading seams may change; the remainder of the frozen
+amendment stays binding.
+
+The current adapter calls the legacy language parser and uses a Chinese prompt
+that rejects all English terms before the marked Free worker can perform its
+explicit deferred parse. Mocked worker tests cannot prove this real boundary.
+The minimum amendment adds exactly these paths:
+
+- Production: `apps/web/src/public-search-adapters/mimo/generative-answer.ts`
+- Paired test: `apps/web/src/public-search-adapters/mimo/generative-answer.test.ts`
+
+The production addition is limited to explicitly threading the existing
+`semanticValidation` request value through this adapter. Its default remains
+`legacy`. Only an explicitly marked request may use a prompt that asks for
+natural requested-locale prose while preserving appropriate brands and
+professional terms, and may parse the returned answer with `deferred` semantic
+validation. The marker-absent prompt, parser, correction retry, errors, source
+handling, and transport behavior must remain exactly legacy. The amendment
+must not use the structured-provider replacement route, add an operation or
+configuration source, infer activation from locale/environment/nested state,
+or perform a real external call.
+
+Additional hard budgets: production `+60/-25`; paired test `+140/-40`.
+Acceptance requires mocked proof that marked mixed-language brand and industry
+terms are not rejected by character/language heuristics and that retry remains
+limited to structural malformed output, plus exact unmarked legacy prompt,
+parser, and retry regression. All existing Phase 2B2 acceptance remains in
+force.
 
 ### Authority, baseline, and objective
 
@@ -131,6 +165,44 @@ route is considered.
 No live model call, crawl, report/job creation, database mutation outside
 disposable tests, payment, credit, refund, email, Docker build, deployment,
 push, or publication is authorized.
+
+### Phase 2B2 implementation outcome
+
+Status: `COMPLETE` - the inactive root marker now explicitly selects one
+fail-closed Free V4 semantic review after the persisted three-question search,
+Q1 answer, sources, and diagnosis exist. Marker-absent Free behavior remains on
+the legacy path.
+
+- The review projection persists and re-verifies the exact input, output,
+  applied fields, receipt, model identity, field coverage, question/source/
+  evidence/observation ownership, non-prose hash, and corrected ready data.
+- Persisted observation snapshots are rebound to their cache, query, attempt,
+  returned-result, and question authorities before any later model work.
+  Metrics are derived only from accepted reviewer annotations grouped by
+  persisted attempt ID.
+- Marked answer and diagnosis drafts are structurally parsed and cross-bound to
+  the current question set, target admission, sources, hashes, timestamps, and
+  evidence before diagnosis/review continuation. A malformed partial state
+  performs no later model call and cannot be written as ready.
+- A reviewed checkpoint is parsed as ready and rebound to current external
+  catalogs before `saveCheckpoint`. Blocked, malformed, model-mismatched,
+  transport-failed, or stale review data fails closed.
+- The explicit MiMo deferred request uses requested-locale natural-prose
+  instructions that preserve appropriate brand and professional terms. Default
+  and explicitly legacy requests retain the old prompt/parser/retry route.
+- Changed-path audit found exactly 20 approved paths. Core production diff is
+  `+771/-100` against `+1,750/-350`; core test diff is `+688/-22` against
+  `+2,500/-450`. The MiMo amendment is `+14/-2` production and `+92/-0` test,
+  within its separate budgets.
+- Focused verification passed 12 files and 202 tests. Fresh full verification
+  passed 299 files and 2,769 tests, with 46 files and 187 tests skipped by their
+  existing rules. `npm run lint`, `npm run build`, and `git diff --check`
+  passed. Independent final acceptance returned `CONFORMANT` with no blocker.
+- No live provider/model call, crawl, report/job creation, historical mutation,
+  database write outside disposable tests, payment, credit, refund, email,
+  Docker build, deployment, push, publication, or marker activation occurred.
+- This completion does not authorize Phase 2B3 Paid V3 integration, heuristic
+  removal, protected Staging, production activation, or any external action.
 
 ---
 

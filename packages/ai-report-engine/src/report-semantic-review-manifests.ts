@@ -2,6 +2,7 @@ import {
   createReportSemanticReviewInput,
   reportSemanticTextHash,
   type ReportSemanticEvidence,
+  type ReportSemanticEntity,
   type ReportSemanticExpectedModel,
   type ReportSemanticFieldManifestEntry,
   type ReportSemanticObservationResult,
@@ -28,6 +29,7 @@ export interface ReportSemanticManifestSeed {
   readonly sources: readonly ReportSemanticSource[];
   readonly evidence: readonly ReportSemanticEvidence[];
   readonly observationResults: readonly ReportSemanticObservationResult[];
+  readonly entities?: readonly ReportSemanticEntity[];
   readonly answerSubjects: readonly import("./report-semantic-review").ReportSemanticAnswerSubject[];
   readonly fields: readonly ReportSemanticManifestFieldSeed[];
   readonly nonProseProjectionHash: string;
@@ -54,6 +56,7 @@ function buildReportSemanticReviewManifest(seed: ReportSemanticManifestSeed, lif
     sources: seed.sources,
     evidence: seed.evidence,
     observationResults: seed.observationResults,
+    entities: seed.entities ?? [],
     answerSubjects: seed.answerSubjects,
     fields,
     nonProseProjectionHash: seed.nonProseProjectionHash
