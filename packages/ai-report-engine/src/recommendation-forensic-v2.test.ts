@@ -24,6 +24,15 @@ describe("recommendation forensic V2 boundaries", () => {
     ], new Set(["evidence-1"]), new Set())).toThrow(/unknown evidence/);
   });
 
+  it("skips only prose-claim semantics in deferred mode and keeps evidence ownership fail closed", () => {
+    expect(() => verifyRecommendationForensicV2Claims([
+      { text: "ChatGPT recommended this company and guarantees first place.", evidenceIds: ["evidence-1"], websiteFindingIds: [] }
+    ], new Set(["evidence-1"]), new Set(), { semanticValidation: "deferred" })).not.toThrow();
+    expect(() => verifyRecommendationForensicV2Claims([
+      { text: "ChatGPT recommended this company.", evidenceIds: ["missing"], websiteFindingIds: [] }
+    ], new Set(["evidence-1"]), new Set(), { semanticValidation: "deferred" })).toThrow(/unknown evidence/u);
+  });
+
   it("rejects cross-labeled and unknown report contracts before parsing payload details", () => {
     expect(() => parseRecommendationForensicReport({ version: 2, methodology: "answer_engine_observation_v1" })).toThrow(/Unknown or inconsistent/);
     expect(() => parseRecommendationForensicReport({ version: 3, methodology: "public_search_source_forensics_v1" })).toThrow(/Unknown or inconsistent/);

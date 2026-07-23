@@ -9,6 +9,12 @@ describe("combined GEO report V3 contract", () => {
   it("keeps V3 identity prospective and explicit", () => {
     expect(COMBINED_GEO_REPORT_V3_VERSION).toBe(3);
     expect(COMBINED_GEO_REPORT_V3_CONTRACT).toBe("combined_geo_report_v3");
-    expect(() => parseCombinedGeoReportV3({ version: 2, artifactContract: "combined_geo_report_v2" })).toThrow(/combined_geo_report_v3/i);
+    const value = { version: 2, artifactContract: "combined_geo_report_v2" };
+    const error = (options?: { semanticValidation?: "legacy" | "deferred" }) => {
+      try { parseCombinedGeoReportV3(value, options); } catch (caught) { return (caught as Error).message; }
+      throw new Error("Expected parser failure.");
+    };
+    expect(error({ semanticValidation: "legacy" })).toBe(error());
+    expect(error({ semanticValidation: "deferred" })).toMatch(/combined_geo_report_v3/iu);
   });
 });

@@ -270,6 +270,35 @@ describe("Open GEO answer V3 contract", () => {
     const changed=parseOpenGeoAnswerCardsV3([{...value[0],audit:{verifiedBodyCount:1,searchSourceOnlyCount:0,inaccessibleCount:0}},value[1],value[2]],context)[0] as GenerativeSearchAnswerCardV3;
     expect(changed.provenance.answerHash).toBe(first.provenance.answerHash); expect(changed.provenance.sourceHash).toBe(first.provenance.sourceHash);
   });
+
+  it("preserves supplied reviewed diagnosis in deferred mode while legacy still recomputes it", () => {
+    const context = {
+      ...fixtureContext(),
+      locale: "en",
+      targetAliases: ["Target"],
+      missingEvidenceFamiliesByQuestion: [[], [], []] as [string[], string[], string[]]
+    };
+    const value = generativeCards(context);
+    const omitted = parseOpenGeoAnswerCardsV3(value, context);
+    const explicit = parseOpenGeoAnswerCardsV3(value, { ...context, semanticValidation: "legacy" });
+    const deferred = parseOpenGeoAnswerCardsV3(value, { ...context, semanticValidation: "deferred" });
+    expect(explicit).toEqual(omitted);
+    expect((omitted[0] as GenerativeSearchAnswerCardV3).geoDiagnosis.targetMentioned).toBe(true);
+    expect((deferred[0] as GenerativeSearchAnswerCardV3).geoDiagnosis.targetMentioned).toBe(false);
+  });
+
+  it("keeps deferred card structure and public URL checks fail closed", () => {
+    const context = {
+      ...fixtureContext(),
+      locale: "en",
+      missingEvidenceFamiliesByQuestion: [[], [], []] as [string[], string[], string[]],
+      semanticValidation: "deferred" as const
+    };
+    const value = generativeCards(context);
+    expect(() => parseOpenGeoAnswerCardsV3(value.slice(0, 2), context)).toThrow(/exactly three/u);
+    const unsafe = { ...value[0], sources: [{ ...value[0].sources[0]!, canonicalUrl: "http://127.0.0.1/private" }] };
+    expect(() => parseOpenGeoAnswerCardsV3([unsafe, value[1], value[2]], context)).toThrow(/public HTTP/u);
+  });
 });
 
 function fixtureContext() {

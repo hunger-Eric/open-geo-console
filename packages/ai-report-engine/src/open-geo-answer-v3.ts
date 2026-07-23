@@ -111,6 +111,7 @@ export interface OpenGeoAnswerCardsV3Context {
   targetAliases?: readonly string[];
   competitors?: readonly { entityId: string; aliases: readonly string[] }[];
   missingEvidenceFamiliesByQuestion?: readonly [readonly string[], readonly string[], readonly string[]];
+  semanticValidation?: "legacy" | "deferred";
 }
 
 export interface OpenGeoAnswerSynthesisV3Input extends OpenGeoAnswerCardsV3Context {
@@ -158,8 +159,10 @@ export function parseOpenGeoAnswerCardsV3(
     ...(context.targetAliases ?? []),
     ...(context.competitors ?? []).flatMap(({ aliases }) => aliases)
   ];
-  assertGenerativeSearchAnswerLanguage(generativeAnswerFields, context.locale);
-  assertReportLanguage(generatedFields, context.locale, allowedTerms);
+  if (context.semanticValidation !== "deferred") {
+    assertGenerativeSearchAnswerLanguage(generativeAnswerFields, context.locale);
+    assertReportLanguage(generatedFields, context.locale, allowedTerms);
+  }
   return parsed as [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
 }
 
@@ -225,8 +228,15 @@ function parseGenerativeCard(value: unknown, cardIndex:number, canonical:{id:str
   const provenance: GenerativeSearchAnswerProvenanceV3 = { providerId:text(p.providerId,`${path}.provenance.providerId`), model:text(p.model,`${path}.provenance.model`), searchMode:text(p.searchMode,`${path}.provenance.searchMode`), promptVersion:oneOf(p.promptVersion,["generative-search-answer-v1"] as const,`${path}.provenance.promptVersion`), searchedAt:timestamp(p.searchedAt,`${path}.provenance.searchedAt`), completedAt:timestamp(p.completedAt,`${path}.provenance.completedAt`), answerHash:hash(p.answerHash,`${path}.provenance.answerHash`), sourceHash:hash(p.sourceHash,`${path}.provenance.sourceHash`) };
   if (Date.parse(provenance.completedAt) < Date.parse(provenance.searchedAt)) throw new TypeError(`${path}.provenance.completedAt must follow searchedAt.`);
   const audit = record(row.audit,`${path}.audit`); const parsedAudit = {verifiedBodyCount:nonnegative(audit.verifiedBodyCount,`${path}.audit.verifiedBodyCount`),searchSourceOnlyCount:nonnegative(audit.searchSourceOnlyCount,`${path}.audit.searchSourceOnlyCount`),inaccessibleCount:nonnegative(audit.inaccessibleCount,`${path}.audit.inaccessibleCount`)};
-  const geoDiagnosis = diagnoseGenerativeSearchAnswerCardV3({answerText,sources},{exactQuestion:canonical.exactQuestion,locale:context.locale,targetAliases:context.targetAliases??[],competitors:context.competitors??[],missingEvidenceFamilies:context.missingEvidenceFamiliesByQuestion?.[cardIndex]??[]});
-  const diagnosis = row.diagnosis === undefined ? undefined : parseReportV4DiagnosisOutputForQuestion(row.diagnosis, { questionId: canonical.id, sourceEvidenceIds: sources.map(({ sourceId }) => sourceId) });
+  parseDiagnosis(row.geoDiagnosis, `${path}.geoDiagnosis`);
+  const geoDiagnosis = context.semanticValidation === "deferred"
+    ? row.geoDiagnosis as OpenGeoAnswerDiagnosisV3
+    : diagnoseGenerativeSearchAnswerCardV3({answerText,sources},{exactQuestion:canonical.exactQuestion,locale:context.locale,targetAliases:context.targetAliases??[],competitors:context.competitors??[],missingEvidenceFamilies:context.missingEvidenceFamiliesByQuestion?.[cardIndex]??[]});
+  const diagnosis = row.diagnosis === undefined ? undefined : parseReportV4DiagnosisOutputForQuestion(
+    row.diagnosis,
+    { questionId: canonical.id, sourceEvidenceIds: sources.map(({ sourceId }) => sourceId) },
+    { semanticValidation: context.semanticValidation }
+  );
   return {answerMode:"generative_search_v1",questionId:canonical.id,exactQuestion:canonical.exactQuestion,status,answerText,sources,provenance,refusal,geoDiagnosis,audit:parsedAudit,...(diagnosis ? { diagnosis } : {})};
 }
 
@@ -411,15 +421,21 @@ function parseCard(
   if (status === "observed" && (claims.length || !observedClaims.length || sentences.some(({ kind }) => kind === "scope_note"))) {
     throw new TypeError(`${path} observed status requires only search-observation claims.`);
   }
-  const expectedDiagnosis = diagnoseOpenGeoAnswerCardV3({ sentences, sourceEvidence }, {
-    exactQuestion: canonical.exactQuestion,
-    targetAliases: context.targetAliases ?? [],
-    competitors: context.competitors ?? [],
-    missingEvidenceFamilies: context.missingEvidenceFamiliesByQuestion?.[cardIndex] ?? []
-  });
   parseDiagnosis(row.geoDiagnosis, `${path}.geoDiagnosis`);
-  const diagnosis = row.diagnosis === undefined ? undefined : parseReportV4DiagnosisOutputForQuestion(row.diagnosis, { questionId: canonical.id, sourceEvidenceIds: sourceEvidence.map(({ evidenceId }) => evidenceId) });
-  return { questionId: canonical.id, exactQuestion: canonical.exactQuestion, status, sentences, sourceEvidence, coverage, geoDiagnosis: expectedDiagnosis, ...(diagnosis ? { diagnosis } : {}) };
+  const geoDiagnosis = context.semanticValidation === "deferred"
+    ? row.geoDiagnosis as OpenGeoAnswerDiagnosisV3
+    : diagnoseOpenGeoAnswerCardV3({ sentences, sourceEvidence }, {
+        exactQuestion: canonical.exactQuestion,
+        targetAliases: context.targetAliases ?? [],
+        competitors: context.competitors ?? [],
+        missingEvidenceFamilies: context.missingEvidenceFamiliesByQuestion?.[cardIndex] ?? []
+      });
+  const diagnosis = row.diagnosis === undefined ? undefined : parseReportV4DiagnosisOutputForQuestion(
+    row.diagnosis,
+    { questionId: canonical.id, sourceEvidenceIds: sourceEvidence.map(({ evidenceId }) => evidenceId) },
+    { semanticValidation: context.semanticValidation }
+  );
+  return { questionId: canonical.id, exactQuestion: canonical.exactQuestion, status, sentences, sourceEvidence, coverage, geoDiagnosis, ...(diagnosis ? { diagnosis } : {}) };
 }
 
 function parseEvidence(value: unknown, path: string, questionId: string): OpenGeoAnswerEvidenceV3 {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   REPORT_SEMANTIC_REVIEW_CONTRACT,
   applyReportSemanticReview,
+  buildPaidV3ReportSemanticReviewSystemPrompt,
   buildReportSemanticReviewSystemPrompt,
   createReportSemanticReviewInput,
   hashReportSemanticReviewValue,
@@ -28,6 +29,13 @@ describe("ReportSemanticReview input authority", () => {
     expect(prompt).toMatch(/targetPresence.*targetFirstSentence.*targetRoles.*competitorEntityIds/isu);
     expect(prompt).toMatch(/overallDecision exactly/iu);
     expect(prompt).toMatch(/no Markdown/iu);
+  });
+  it("makes Paid source-selection identities and evidence binding explicit to the reviewer", () => {
+    const prompt = buildPaidV3ReportSemanticReviewSystemPrompt();
+    expect(prompt).toMatch(/annotationId, itemId, kind, questionId, sourceId, profileId, actionId/iu);
+    expect(prompt).toMatch(/stable catalog identity.*target-state gap.*factor.*action/isu);
+    expect(prompt).toMatch(/Use only exact catalog evidence IDs/iu);
+    expect(prompt).toMatch(/never derive.*regexes.*keywords/isu);
   });
   it("creates a canonical input hash independent of object key insertion order", () => {
     const input = createReportSemanticReviewInput(inputCore());

@@ -48,7 +48,10 @@ export interface RecommendationForensicReportV2 {
   commercialOutcome: "completed" | "completed_limited" | "failed";
 }
 
-export function parseRecommendationForensicReportV2(value: unknown): RecommendationForensicReportV2 {
+export function parseRecommendationForensicReportV2(
+  value: unknown,
+  options: { semanticValidation?: "legacy" | "deferred" } = {}
+): RecommendationForensicReportV2 {
   const report = object(value, "$");
   exact(report.version, 2, "$.version");
   exact(report.methodology, PUBLIC_SEARCH_SOURCE_FORENSICS_METHODOLOGY, "$.methodology");
@@ -100,7 +103,12 @@ export function parseRecommendationForensicReportV2(value: unknown): Recommendat
   if (tasks.some(({ retestQuestionIds }) => retestQuestionIds.length === 0 || retestQuestionIds.some((id) => !questionIds.has(id)))) {
     fail("$.vendorTaskPackage.tasks", "Every vendor task requires known retest question IDs.");
   }
-  verifyRecommendationForensicV2Claims([...comparison, verdict, ...priorities, ...tasks], evidenceIds, websiteFindingIds);
+  verifyRecommendationForensicV2Claims(
+    [...comparison, verdict, ...priorities, ...tasks],
+    evidenceIds,
+    websiteFindingIds,
+    options
+  );
   parseCoverage(report.coverage, queryIds.size);
   parseCustomerDisclosure(report.customerCostDisclosure);
   parseOperatorCost(report.operatorCostAccounting);

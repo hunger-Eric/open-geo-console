@@ -9,11 +9,12 @@ export interface EvidenceBoundV2Claim {
 export function verifyRecommendationForensicV2Claims(
   claims: readonly EvidenceBoundV2Claim[],
   evidenceIds: ReadonlySet<string>,
-  websiteFindingIds: ReadonlySet<string>
+  websiteFindingIds: ReadonlySet<string>,
+  options: { semanticValidation?: "legacy" | "deferred" } = {}
 ): void {
   for (const [index, claim] of claims.entries()) {
     if (!claim.text.trim()) throw new TypeError(`claims[${index}].text must be non-empty.`);
-    assertNoProhibitedClaims(claim.text);
+    if (options.semanticValidation !== "deferred") assertNoProhibitedClaims(claim.text);
     const refs = [...claim.evidenceIds, ...claim.websiteFindingIds];
     if (refs.length === 0) throw new TypeError(`claims[${index}] requires structured evidence.`);
     if (new Set(refs).size !== refs.length) throw new TypeError(`claims[${index}] contains duplicate evidence references.`);

@@ -26,6 +26,8 @@ export interface SourceSelectionDiagnosisForGenerativeV3Input {
   locale: string;
   answerHash: string;
   sourceHash: string;
+  semanticValidation?: "legacy" | "deferred";
+  deferredDraft?: unknown;
 }
 
 export function buildSourceSelectionDiagnosisForGenerativeV3(input: SourceSelectionDiagnosisForGenerativeV3Input): SourceSelectionDiagnosisV1 {
@@ -56,7 +58,10 @@ export function buildSourceSelectionDiagnosisForGenerativeV3(input: SourceSelect
           providerResultOrder: source.providerResultOrder
         };
       })
-    }))
+    })),
+    ...(input.semanticValidation === "deferred"
+      ? { semanticValidation: "deferred" as const, deferredDraft: input.deferredDraft }
+      : {})
   });
 }
 

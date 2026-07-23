@@ -22,6 +22,7 @@ import type {
 export interface AnalyzePagesInput {
   pages: readonly ExtractedPage[];
   locale: string;
+  semanticValidation?: "legacy" | "deferred";
   batchSize?: number;
   maxCharactersPerPage?: number;
   signal?: AbortSignal;
@@ -271,6 +272,7 @@ export async function analyzePageBatch(
   client: JsonCompletionClient,
   input: AnalyzePagesInput
 ): Promise<PageAnalysisBatch> {
+  const semanticDeferred = input.semanticValidation === "deferred";
   const batchSize = Math.max(1, Math.min(input.batchSize ?? 4, 10));
   const maxCharacters = Math.max(1_000, Math.min(input.maxCharactersPerPage ?? 30_000, 100_000));
   const analyses: PageAnalysis[] = [...(input.completedAnalyses ?? [])];
@@ -290,10 +292,12 @@ export async function analyzePageBatch(
     let languageCorrectionError: ReportLanguageValidationError | undefined;
     let fieldsToCorrect: Array<{ path: string; text: string }> = [];
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      const isLanguageCorrectionCall = languageFeedback.length > 0;
+      const isLanguageCorrectionCall = !semanticDeferred && languageFeedback.length > 0;
       let correctionCandidateApplied = false;
       try {
-        const languageInstruction = reportLanguageInstruction(input.locale);
+        const languageInstruction = semanticDeferred
+          ? naturalLanguageInstruction(input.locale)
+          : reportLanguageInstruction(input.locale);
         const outputShape = isLanguageCorrectionCall ? {
           corrections: [{ path: "exact supplied field path", text: "replacement prose only" }]
         } : {
@@ -376,7 +380,7 @@ export async function analyzePageBatch(
         }
         languageCorrectionDraft = candidate;
         correctionCandidateApplied = isLanguageCorrectionCall;
-        assertPageAnalysisLanguage(candidate, input.locale, allowedTerms);
+        if (!semanticDeferred) assertPageAnalysisLanguage(candidate, input.locale, allowedTerms);
         parsed = candidate;
         break;
       } catch (error) {
@@ -415,6 +419,10 @@ export async function analyzePageBatch(
   }
 
   return { analyses, modelId };
+}
+
+function naturalLanguageInstruction(locale: string): string {
+  return `Write natural customer prose for locale ${locale}. Preserve appropriate brand names, product names, acronyms, model names, and professional terms in their original form.`;
 }
 
 function pageAnalysisLanguageFields(analyses: readonly PageAnalysis[]): Array<{ path: string; text: string }> {

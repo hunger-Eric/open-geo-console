@@ -296,7 +296,7 @@ export function restoreWebsiteReportDomainsForArtifact(report: AiWebsiteReportV1
   return restore(report) as AiWebsiteReportV1;
 }
 
-export async function buildReadyCombinedArtifactV3(input: {
+export interface PrepareCombinedGeoReportV3Input {
   artifactRevisionId: string;
   artifactRevision: number;
   reportId: string;
@@ -314,9 +314,30 @@ export async function buildReadyCombinedArtifactV3(input: {
   publicSourceForensics: RecommendationForensicReportV2;
   providerDiscovery: ProviderDiscoveryV1;
   languageValidationScope?: CombinedReportLanguageScope;
+}
+
+export interface BuildReadyCombinedArtifactV3Input extends PrepareCombinedGeoReportV3Input {
   onReportPrepared?: (report: CombinedGeoReportV3) => void | Promise<void>;
-}): Promise<ReadyCombinedArtifactV3> {
+}
+
+export async function buildReadyCombinedArtifactV3(input: BuildReadyCombinedArtifactV3Input): Promise<ReadyCombinedArtifactV3> {
   await assertReadyEvidenceAssets(input.evidenceAssets);
+  const report = prepareCombinedGeoReportV3Core(input, {});
+  await input.onReportPrepared?.(report);
+  return materializePreparedCombinedArtifactV3(report, input.evidenceAssets);
+}
+
+export function prepareCombinedGeoReportV3(
+  input: PrepareCombinedGeoReportV3Input,
+  options: { semanticValidation?: "legacy" | "deferred" } = {}
+): CombinedGeoReportV3 {
+  return prepareCombinedGeoReportV3Core(input, options);
+}
+
+function prepareCombinedGeoReportV3Core(
+  input: PrepareCombinedGeoReportV3Input,
+  options: { semanticValidation?: "legacy" | "deferred" }
+): CombinedGeoReportV3 {
   const forensic = input.publicSourceForensics;
   const systemCopy = combinedArtifactSystemCopy(forensic.locale, {
     technicalPages: input.technicalReport.pages.length,
@@ -375,18 +396,25 @@ export async function buildReadyCombinedArtifactV3(input: {
       ])],
       nonCausal: true
     }
-  });
-  assertCombinedGeoReportLanguage({ ...report, version: 1, artifactContract: "combined_geo_report_v1", businessQuestionAnswers: undefined }, input.languageValidationScope);
-  await input.onReportPrepared?.(report);
-  return materializePreparedCombinedArtifactV3(report, input.evidenceAssets);
+  }, { semanticValidation: options.semanticValidation ?? "legacy" });
+  if ((options.semanticValidation ?? "legacy") === "legacy") {
+    assertCombinedGeoReportLanguage(
+      { ...report, version: 1, artifactContract: "combined_geo_report_v1", businessQuestionAnswers: undefined },
+      input.languageValidationScope
+    );
+  }
+  return report;
 }
 
 export async function materializePreparedCombinedArtifactV3(
   value: unknown,
-  evidenceAssets: ReportEvidenceAssetRow[]
+  evidenceAssets: ReportEvidenceAssetRow[],
+  options: { semanticValidation?: "legacy" | "deferred" } = {}
 ): Promise<ReadyCombinedArtifactV3> {
   await assertReadyEvidenceAssets(evidenceAssets);
-  const report = requireReadyCombinedGeoReportV3(value);
+  const report = requireReadyCombinedGeoReportV3(value, {
+    semanticValidation: options.semanticValidation ?? "legacy"
+  });
   const locale: "en" | "zh" = report.locale.toLowerCase().startsWith("zh") ? "zh" : "en";
   const model: CombinedPrivateReportArtifactModelV3 = {
     productContract: "combined_geo_report_v3", reportId: report.reportId, locale, combinedReport: report,

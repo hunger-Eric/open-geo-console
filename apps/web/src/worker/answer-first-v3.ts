@@ -127,6 +127,25 @@ export interface ResolveGenerativeAnswerFirstV3Input {
   saveCheckpoint?(checkpoint: AnswerFirstV3CheckpointV2): Promise<void>;
   now?: () => Date;
   signal?: AbortSignal;
+  semanticValidation?: "legacy" | "deferred";
+}
+
+export type GenerativeSearchAnswerCardDraftV3 = Omit<GenerativeSearchAnswerCardV3, "geoDiagnosis">;
+type GenerativeAnswerCardTuple = [GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3];
+type GenerativeAnswerCardDraftTuple = [
+  GenerativeSearchAnswerCardDraftV3,
+  GenerativeSearchAnswerCardDraftV3,
+  GenerativeSearchAnswerCardDraftV3
+];
+interface ResolvedGenerativeAnswerFirstV3 {
+  checkpoint: AnswerFirstV3CheckpointV2;
+  answerCards: GenerativeAnswerCardTuple;
+  reused: boolean;
+}
+interface DeferredGenerativeAnswerFirstV3 {
+  checkpoint: AnswerFirstV3CheckpointV2;
+  answerCardDrafts: GenerativeAnswerCardDraftTuple;
+  reused: boolean;
 }
 
 export function buildAnswerFirstV3Evidence(input: BuildAnswerFirstV3EvidenceInput): OpenGeoAnswerEvidenceV3[] {
@@ -287,11 +306,16 @@ export async function resolveAnswerFirstV3(input: ResolveAnswerFirstV3Input): Pr
   return { checkpoint, answerCards, reused: false };
 }
 
-export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAnswerFirstV3Input): Promise<{
-  checkpoint: AnswerFirstV3CheckpointV2;
-  answerCards: [GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3];
-  reused: boolean;
-}> {
+export function resolveGenerativeAnswerFirstV3(
+  input: ResolveGenerativeAnswerFirstV3Input & { semanticValidation: "deferred" }
+): Promise<DeferredGenerativeAnswerFirstV3>;
+export function resolveGenerativeAnswerFirstV3(
+  input: ResolveGenerativeAnswerFirstV3Input
+): Promise<ResolvedGenerativeAnswerFirstV3>;
+export async function resolveGenerativeAnswerFirstV3(
+  input: ResolveGenerativeAnswerFirstV3Input
+): Promise<ResolvedGenerativeAnswerFirstV3 | DeferredGenerativeAnswerFirstV3> {
+  const semanticDeferred = input.semanticValidation === "deferred";
   const publicQuestions = toCanonicalBuyerQuestionSet(input.questionSet).questions;
   const mappedQuestions = input.questionSet.questions.map((question, index) => ({
     id: publicQuestions[index]!.id,
@@ -330,9 +354,10 @@ export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAns
         question: question.exactText,
         locale: input.locale,
         region: input.region,
-        signal
+        signal,
+        ...(semanticDeferred ? { semanticValidation: "deferred" as const } : {})
       });
-      if (index === 0 && parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
+      if (!semanticDeferred && index === 0 && parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
         parsed = await callGenerativeProvider(input.provider, {
           questionId: question.id,
           question: question.exactText + "\n" + q1Correction(input.locale),
@@ -351,12 +376,13 @@ export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAns
           question: question.exactText + "\n" + sourceCorrection(input.locale),
           locale: input.locale,
           region: input.region,
-          signal
+          signal,
+          ...(semanticDeferred ? { semanticValidation: "deferred" as const } : {})
         });
         if (corrected.answerText && corrected.refusal === null) parsed = corrected;
         else parsed = answerWithoutSources;
       }
-      if (index === 0 && parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
+      if (!semanticDeferred && index === 0 && parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
         throw new AnswerFirstV3ModelContractInvalidError({ cause: new TypeError("Question 1 answer is nonresponsive market-statistic-only output.") });
       }
       return parsed;
@@ -376,7 +402,9 @@ export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAns
     }
     providerCalls = true;
   }
-  const perAnswerHashes = await Promise.all(answerResults.map((answer) => generativeSearchAnswerHash(answer)));
+  const perAnswerHashes = await Promise.all(answerResults.map((answer) => semanticDeferred
+    ? generativeSearchAnswerHash(answer, { locale: input.locale, semanticValidation: "deferred" })
+    : generativeSearchAnswerHash(answer)));
   const perSourceHashes = await Promise.all(answerResults.map((answer) => generativeSearchSourceHash(answer.sources)));
   const answerHash = hash(perAnswerHashes);
   const sourceHash = hash(perSourceHashes);
@@ -414,7 +442,11 @@ export async function resolveGenerativeAnswerFirstV3(input: ResolveGenerativeAns
   };
   if (providerCalls) await input.saveCheckpoint?.(collected);
 
-  const answerCards = await buildGenerativeCards(input, questions, answerResults, perAnswerHashes, perSourceHashes);
+  const answerCardDrafts = buildGenerativeCardDrafts(input, questions, answerResults, perAnswerHashes, perSourceHashes);
+  if (semanticDeferred) {
+    return { checkpoint: collected, answerCardDrafts, reused: !providerCalls };
+  }
+  const answerCards = materializeLegacyGenerativeCards(input, answerCardDrafts);
   if (input.auditSources === undefined) return { checkpoint: collected, answerCards, reused: !providerCalls };
 
   const cardsReady: AnswerFirstV3CheckpointV2 = { ...collected, stage: "cards_ready", answerCards };
@@ -455,7 +487,8 @@ function validateSeededQ1(
   }
   const parsed = parseGenerativeSearchAnswerResult(seed.answerResult, {
     expectedQuestionId: question.id,
-    locale: input.locale
+    locale: input.locale,
+    ...(input.semanticValidation === "deferred" ? { semanticValidation: "deferred" as const } : {})
   });
   if (!parsed.answerText || parsed.refusal || parsed.sources.length === 0) {
     throw new AnswerFirstV3ResumeIdentityMismatchError("Free teaser Q1 is not a complete reusable answer.");
@@ -469,21 +502,25 @@ async function callGenerativeProvider(
 ): Promise<GenerativeSearchAnswerResult> {
   const raw = await provider.answerWithSources(request);
   try {
-    return parseGenerativeSearchAnswerResult(raw, { expectedQuestionId: request.questionId, locale: request.locale });
+    return parseGenerativeSearchAnswerResult(raw, {
+      expectedQuestionId: request.questionId,
+      locale: request.locale,
+      ...(request.semanticValidation === "deferred" ? { semanticValidation: "deferred" as const } : {})
+    });
   } catch (error) {
     throw new AnswerFirstV3ModelContractInvalidError({ cause: error });
   }
 }
 
-async function buildGenerativeCards(
+function buildGenerativeCardDrafts(
   input: ResolveGenerativeAnswerFirstV3Input,
   questions: readonly [{ id: string; exactText: string }, { id: string; exactText: string }, { id: string; exactText: string }],
   results: [GenerativeSearchAnswerResult, GenerativeSearchAnswerResult, GenerativeSearchAnswerResult],
   answerHashes: readonly string[],
   sourceHashes: readonly string[]
-): Promise<[GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3]> {
+): GenerativeAnswerCardDraftTuple {
   const auditByUrl = new Map((input.auditSources ?? []).map((source) => [normalizeComparableUrl(source.canonicalUrl), source]));
-  const drafts = results.map((result, index): GenerativeSearchAnswerCardV3 => {
+  const drafts = results.map((result, index): GenerativeSearchAnswerCardDraftV3 => {
     const sources = result.sources.map((source) => {
       const audit = auditByUrl.get(normalizeComparableUrl(source.canonicalUrl));
       return {
@@ -496,14 +533,7 @@ async function buildGenerativeCards(
     });
     const status = result.refusal ? "refused" as const : sources.length ? "answered" as const : "source_limited" as const;
     const exactQuestion = questions[index]!.exactText;
-    const geoDiagnosis = diagnoseGenerativeSearchAnswerCardV3({ answerText: result.answerText, sources }, {
-      exactQuestion,
-      locale: input.locale,
-      targetAliases: input.targetAliases ?? [],
-      competitors: input.competitors ?? [],
-      missingEvidenceFamilies: []
-    });
-    const card: GenerativeSearchAnswerCardV3 = {
+    const card: GenerativeSearchAnswerCardDraftV3 = {
       answerMode: "generative_search_v1",
       questionId: result.questionId,
       exactQuestion,
@@ -521,7 +551,6 @@ async function buildGenerativeCards(
         sourceHash: sourceHashes[index]!
       },
       refusal: result.refusal,
-      geoDiagnosis,
       audit: {
         verifiedBodyCount: sources.filter(({ retrievalStatus }) => retrievalStatus === "verified_body").length,
         searchSourceOnlyCount: sources.filter(({ retrievalStatus }) => retrievalStatus === "search_source_only").length,
@@ -530,7 +559,27 @@ async function buildGenerativeCards(
     };
     return card;
   });
-  return parseGenerativeSearchAnswerCardsV3(drafts, {
+  return drafts as GenerativeAnswerCardDraftTuple;
+}
+
+function materializeLegacyGenerativeCards(
+  input: ResolveGenerativeAnswerFirstV3Input,
+  drafts: GenerativeAnswerCardDraftTuple
+): GenerativeAnswerCardTuple {
+  const cards = drafts.map((draft): GenerativeSearchAnswerCardV3 => ({
+    ...draft,
+    geoDiagnosis: diagnoseGenerativeSearchAnswerCardV3(
+      { answerText: draft.answerText, sources: draft.sources },
+      {
+        exactQuestion: draft.exactQuestion,
+        locale: input.locale,
+        targetAliases: input.targetAliases ?? [],
+        competitors: input.competitors ?? [],
+        missingEvidenceFamilies: []
+      }
+    )
+  })) as GenerativeAnswerCardTuple;
+  return parseGenerativeSearchAnswerCardsV3(cards, {
     questionSet: input.questionSet,
     locale: input.locale,
     targetAliases: input.targetAliases,

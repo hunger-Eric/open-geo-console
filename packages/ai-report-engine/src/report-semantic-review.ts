@@ -20,6 +20,16 @@ export function buildReportSemanticReviewSystemPrompt(): string {
   ].join("\n");
 }
 
+export function buildPaidV3ReportSemanticReviewSystemPrompt(): string {
+  return [
+    buildReportSemanticReviewSystemPrompt().replace(
+      "annotations has exactly observationResults, answers, evidenceUse.",
+      "annotations has exactly observationResults, answers, evidenceUse, sourceSelection."
+    ),
+    "annotations.sourceSelection must cover input.sourceSelectionCatalog exactly once and in input order. Each item has exactly annotationId, itemId, kind, questionId, sourceId, profileId, actionId, contributionRole, targetState, factorClassification, actionFamily, priority, evidenceIds, reason. Copy annotationId, itemId, kind, questionId, sourceId, profileId, and actionId exactly, including nulls. itemId is the stable catalog identity of the exact contribution, target-state gap, factor, or action being reviewed; never derive it from annotationId or prose. Use null for every semantic value that does not apply to the item kind. contribution items require contributionRole; target_state items require targetState; factor items require factorClassification; action items require actionFamily and priority. Use only exact catalog evidence IDs. Judge these values from the supplied evidence; never derive them from question order, ownership labels, wording length, regexes, keywords, or a local taxonomy shortcut."
+  ].join("\n");
+}
+
 export type ReportSemanticReviewLifecycle = "free_v4" | "paid_v3";
 export type ReportSemanticFieldMutability = "mutable" | "read_only";
 export type ReportSemanticFieldDecision = "pass" | "corrected" | "blocked";
@@ -75,6 +85,18 @@ export interface ReportSemanticEntity {
 }
 export interface ReportSemanticAnswerSubject { readonly questionId: string; readonly fieldPath: string; }
 
+export type ReportSemanticSourceSelectionKind = "contribution" | "target_state" | "factor" | "action";
+export interface ReportSemanticSourceSelectionCatalogEntry {
+  readonly annotationId: string;
+  readonly itemId: string;
+  readonly kind: ReportSemanticSourceSelectionKind;
+  readonly questionId: string | null;
+  readonly sourceId: string | null;
+  readonly profileId: string | null;
+  readonly actionId: string | null;
+  readonly allowedEvidenceIds: readonly string[];
+}
+
 export interface ReportSemanticFieldManifestEntry {
   readonly path: string;
   readonly originalText: string;
@@ -97,6 +119,7 @@ export interface ReportSemanticReviewInputCore {
   readonly observationResults: readonly ReportSemanticObservationResult[];
   readonly entities: readonly ReportSemanticEntity[];
   readonly answerSubjects: readonly ReportSemanticAnswerSubject[];
+  readonly sourceSelectionCatalog?: readonly ReportSemanticSourceSelectionCatalogEntry[];
   readonly fields: readonly ReportSemanticFieldManifestEntry[];
   readonly nonProseProjectionHash: string;
 }
@@ -154,10 +177,27 @@ export interface ReportSemanticEvidenceUseAnnotation {
   readonly sourceIds: readonly string[];
   readonly reason: string;
 }
+export interface ReportSemanticSourceSelectionAnnotation {
+  readonly annotationId: string;
+  readonly itemId: string;
+  readonly kind: ReportSemanticSourceSelectionKind;
+  readonly questionId: string | null;
+  readonly sourceId: string | null;
+  readonly profileId: string | null;
+  readonly actionId: string | null;
+  readonly contributionRole: "candidate_discovery" | "definition_or_framework" | "first_party_capability" | "constraint_or_risk" | "comparison" | "third_party_validation" | "other" | null;
+  readonly targetState: "present" | "weak" | "missing" | "unavailable" | null;
+  readonly factorClassification: "problem_match" | "factual_specificity" | "entity_clarity" | "source_authority" | "accessibility" | "freshness" | null;
+  readonly actionFamily: "first_party_fact_page" | "entity_relationship" | "accessible_structure" | "freshness" | "third_party_validation" | null;
+  readonly priority: "high" | "medium" | "low" | null;
+  readonly evidenceIds: readonly string[];
+  readonly reason: string;
+}
 export interface ReportSemanticAnnotations {
   readonly observationResults: readonly ReportSemanticObservationAnnotation[];
   readonly answers: readonly ReportSemanticAnswerAnnotation[];
   readonly evidenceUse: readonly ReportSemanticEvidenceUseAnnotation[];
+  readonly sourceSelection?: readonly ReportSemanticSourceSelectionAnnotation[];
 }
 
 export interface ReportSemanticReviewOutput {
@@ -209,7 +249,7 @@ export interface AppliedReportSemanticReview {
 
 const INPUT_KEYS = new Set([
   "version", "lifecycle", "locale", "target", "expectedModel", "questions", "sources", "evidence", "fields",
-  "observationResults", "entities", "answerSubjects", "nonProseProjectionHash", "inputHash"
+  "observationResults", "entities", "answerSubjects", "sourceSelectionCatalog", "nonProseProjectionHash", "inputHash"
 ]);
 const TARGET_KEYS = new Set(["siteKey", "targetUrl", "aliases"]);
 const MODEL_KEYS = new Set(["providerId", "modelId"]);
@@ -219,6 +259,9 @@ const EVIDENCE_KEYS = new Set(["evidenceId", "questionId", "sourceId", "original
 const OBSERVATION_RESULT_KEYS = new Set(["observationId", "resultId", "questionId", "originalText", "originalTextHash"]);
 const ENTITY_KEYS = new Set(["entityId", "questionId", "kind", "originalText", "originalTextHash"]);
 const ANSWER_SUBJECT_KEYS = new Set(["questionId", "fieldPath"]);
+const SOURCE_SELECTION_CATALOG_KEYS = new Set([
+  "annotationId", "itemId", "kind", "questionId", "sourceId", "profileId", "actionId", "allowedEvidenceIds"
+]);
 const FIELD_KEYS = new Set([
   "path", "originalText", "originalTextHash", "mutability", "questionId", "allowedEvidenceIds", "allowedSourceIds"
 ]);
@@ -231,10 +274,15 @@ const FIELD_RESULT_KEYS = new Set([
 ]);
 const RETAINED_TERM_KEYS = new Set(["term", "reason"]);
 const DISTINCTNESS_KEYS = new Set(["decision", "duplicateGroups", "reason"]);
-const ANNOTATIONS_KEYS = new Set(["observationResults", "answers", "evidenceUse"]);
+const ANNOTATIONS_KEYS = new Set(["observationResults", "answers", "evidenceUse", "sourceSelection"]);
 const OBSERVATION_ANNOTATION_KEYS = new Set(["observationId", "resultId", "targetPresence", "competitorPresence", "reason"]);
 const ANSWER_ANNOTATION_KEYS = new Set(["questionId", "relevance", "entityRole", "targetPresence", "targetFirstSentence", "targetRoles", "competitorEntityIds", "evidenceIds", "sourceIds", "reason"]);
 const EVIDENCE_USE_KEYS = new Set(["path", "evidenceIds", "sourceIds", "reason"]);
+const SOURCE_SELECTION_ANNOTATION_KEYS = new Set([
+  "annotationId", "itemId", "kind", "questionId", "sourceId", "profileId", "actionId",
+  "contributionRole", "targetState", "factorClassification", "actionFamily", "priority",
+  "evidenceIds", "reason"
+]);
 const RECEIPT_KEYS = new Set([
   "version", "lifecycle", "inputHash", "reviewHash", "providerId", "modelId", "decision", "fieldCoverageHash",
   "appliedProseHash", "annotationsHash", "nonProseProjectionHash", "fields"
@@ -513,6 +561,68 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
   });
   if (answerSubjects.length === 0) throw new TypeError("$reviewInput.answerSubjects must include at least one answer subject.");
   assertUnique(answerSubjects.map(({ questionId }) => questionId), "$reviewInput.answerSubjects questionId");
+  const sourceSelectionCatalog = record.sourceSelectionCatalog === undefined
+    ? undefined
+    : requireArray(record.sourceSelectionCatalog, "$reviewInput.sourceSelectionCatalog", MAX_CATALOG_ROWS)
+        .map((value, index): ReportSemanticSourceSelectionCatalogEntry => {
+          const path = `$reviewInput.sourceSelectionCatalog[${index}]`;
+          const row = strictRecord(value, path, SOURCE_SELECTION_CATALOG_KEYS);
+          const kind = requireOneOf(
+            row.kind,
+            ["contribution", "target_state", "factor", "action"] as const,
+            `${path}.kind`
+          );
+          const questionId = requireNullableText(row.questionId, `${path}.questionId`, MAX_ID_CHARS);
+          const sourceId = requireNullableText(row.sourceId, `${path}.sourceId`, MAX_ID_CHARS);
+          const profileId = requireNullableText(row.profileId, `${path}.profileId`, MAX_ID_CHARS);
+          const actionId = requireNullableText(row.actionId, `${path}.actionId`, MAX_ID_CHARS);
+          if (questionId !== null && !questionIds.has(questionId)) throw new TypeError(`${path}.questionId references an unknown question.`);
+          if (sourceId !== null) {
+            const source = sourceById.get(sourceId);
+            if (!source) throw new TypeError(`${path}.sourceId references an unknown source.`);
+            assertCompatibleOwner(questionId, source.questionId, `${path}.sourceId`);
+          }
+          if (kind === "contribution" && (!questionId || !sourceId || !profileId)) {
+            throw new TypeError(`${path} contribution entries require questionId, sourceId, and profileId.`);
+          }
+          if ((kind === "target_state" || kind === "factor") && !profileId) {
+            throw new TypeError(`${path} ${kind} entries require profileId.`);
+          }
+          if (kind === "action" && !actionId) throw new TypeError(`${path} action entries require actionId.`);
+          const allowedEvidenceIds = requireUniqueTextArray(
+            row.allowedEvidenceIds,
+            `${path}.allowedEvidenceIds`,
+            MAX_REFS_PER_FIELD,
+            MAX_ID_CHARS
+          );
+          if (allowedEvidenceIds.length === 0) {
+            throw new TypeError(`${path}.allowedEvidenceIds must contain at least one exact evidence ID.`);
+          }
+          for (const evidenceId of allowedEvidenceIds) {
+            const item = evidenceById.get(evidenceId);
+            if (!item) throw new TypeError(`${path}.allowedEvidenceIds references unknown evidence ${evidenceId}.`);
+            assertCompatibleOwner(questionId, item.questionId, `${path}.allowedEvidenceIds ${evidenceId}`);
+          }
+          return {
+            annotationId: requireBoundedText(row.annotationId, `${path}.annotationId`, MAX_ID_CHARS),
+            itemId: requireBoundedText(row.itemId, `${path}.itemId`, MAX_ID_CHARS),
+            kind,
+            questionId,
+            sourceId,
+            profileId,
+            actionId,
+            allowedEvidenceIds
+          };
+        });
+  if (sourceSelectionCatalog) {
+    if (lifecycle !== "paid_v3") throw new TypeError("$reviewInput.sourceSelectionCatalog is allowed only for Paid V3.");
+    if (sourceSelectionCatalog.length === 0) throw new TypeError("$reviewInput.sourceSelectionCatalog must not be empty when supplied.");
+    assertUnique(sourceSelectionCatalog.map(({ annotationId }) => annotationId), "$reviewInput.sourceSelectionCatalog annotationId");
+    assertUnique(
+      sourceSelectionCatalog.map(({ kind, itemId }) => `${kind}\u0000${itemId}`),
+      "$reviewInput.sourceSelectionCatalog kind/itemId"
+    );
+  }
   return {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
     lifecycle,
@@ -525,6 +635,7 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
     observationResults,
     entities,
     answerSubjects,
+    ...(sourceSelectionCatalog ? { sourceSelectionCatalog } : {}),
     fields,
     nonProseProjectionHash: requireHash(record.nonProseProjectionHash, "$reviewInput.nonProseProjectionHash")
   };
@@ -726,20 +837,37 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): Rep
     const field = input.fields.find((item) => item.path === subject.fieldPath && item.questionId === questionId)!;
     assertSubset(evidenceIds, field.allowedEvidenceIds, `${path}.evidenceIds`);
     assertSubset(sourceIds, field.allowedSourceIds, `${path}.sourceIds`);
-    const hasGeo = item.targetPresence !== undefined || item.targetFirstSentence !== undefined || item.targetRoles !== undefined || item.competitorEntityIds !== undefined;
+    const hasGeo = input.lifecycle === "paid_v3" ||
+      item.targetPresence !== undefined ||
+      item.targetFirstSentence !== undefined ||
+      item.targetRoles !== undefined ||
+      item.competitorEntityIds !== undefined;
     const targetPresence = hasGeo ? requireOneOf(item.targetPresence, ["present", "absent", "ambiguous"] as const, `${path}.targetPresence`) : undefined;
     const targetFirstSentence = !hasGeo ? undefined : item.targetFirstSentence === null ? null : requireNonnegativeInteger(item.targetFirstSentence, `${path}.targetFirstSentence`);
     if (hasGeo && targetPresence === "present" && (typeof targetFirstSentence !== "number" || targetFirstSentence < 1)) throw new TypeError(`${path}.targetFirstSentence must be positive when target presence is present.`);
     if (hasGeo && targetPresence !== "present" && targetFirstSentence !== null) throw new TypeError(`${path}.targetFirstSentence requires present target presence.`);
     const targetRoles = hasGeo ? requireUniqueTextArray(item.targetRoles, `${path}.targetRoles`, 100, 500) : undefined;
     if (hasGeo && targetPresence === "absent" && targetRoles!.length !== 0) throw new TypeError(`${path}.targetRoles must be empty when target presence is absent.`);
+    if (input.lifecycle === "paid_v3" && targetPresence === "ambiguous") {
+      throw new TypeError(`${path}.targetPresence must not be ambiguous for Paid V3.`);
+    }
+    if (input.lifecycle === "paid_v3" && targetPresence === "present" && targetRoles!.length === 0) {
+      throw new TypeError(`${path}.targetRoles must describe at least one target role when target presence is present.`);
+    }
     const competitorEntityIds = hasGeo ? requireUniqueTextArray(item.competitorEntityIds, `${path}.competitorEntityIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS) : undefined;
     if (competitorEntityIds) {
       assertSubset(competitorEntityIds, input.entities.map(({ entityId }) => entityId), `${path}.competitorEntityIds`);
       const entityById = new Map(input.entities.map((entity) => [entity.entityId, entity]));
       for (const id of competitorEntityIds) assertCompatibleOwner(questionId, entityById.get(id)!.questionId, `${path}.competitorEntityIds ${id}`);
     }
-    return { questionId, relevance: requireOneOf(item.relevance, ["responsive", "not_responsive", "blocked"] as const, `${path}.relevance`), entityRole: requireOneOf(item.entityRole, ["target", "competitor", "mixed", "none", "ambiguous"] as const, `${path}.entityRole`), ...(hasGeo ? { targetPresence, targetFirstSentence, targetRoles, competitorEntityIds } : {}), evidenceIds, sourceIds, reason: requireBoundedText(item.reason, `${path}.reason`, 5_000) };
+    const entityRole = requireOneOf(item.entityRole, ["target", "competitor", "mixed", "none", "ambiguous"] as const, `${path}.entityRole`);
+    if (input.lifecycle === "paid_v3") {
+      const expectedRole = targetPresence === "present"
+        ? competitorEntityIds!.length > 0 ? "mixed" : "target"
+        : competitorEntityIds!.length > 0 ? "competitor" : "none";
+      requireExact(entityRole, expectedRole, `${path}.entityRole`);
+    }
+    return { questionId, relevance: requireOneOf(item.relevance, ["responsive", "not_responsive", "blocked"] as const, `${path}.relevance`), entityRole, ...(hasGeo ? { targetPresence, targetFirstSentence, targetRoles, competitorEntityIds } : {}), evidenceIds, sourceIds, reason: requireBoundedText(item.reason, `${path}.reason`, 5_000) };
   });
   const evidenceUse = requireArray(row.evidenceUse, "$reviewOutput.annotations.evidenceUse", MAX_FIELDS).map((value, index) => {
     const path = `$reviewOutput.annotations.evidenceUse[${index}]`;
@@ -754,7 +882,89 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): Rep
     return { path: field.path, evidenceIds, sourceIds, reason: requireBoundedText(item.reason, `${path}.reason`, 5_000) };
   });
   if (evidenceUse.length !== input.fields.length) throw new TypeError("$reviewOutput.annotations.evidenceUse must cover every field exactly once and in order.");
-  return { observationResults, answers: parsedAnswers, evidenceUse };
+  const catalog = input.sourceSelectionCatalog;
+  if (!catalog && row.sourceSelection !== undefined) {
+    throw new TypeError("$reviewOutput.annotations.sourceSelection is not allowed without an input catalog.");
+  }
+  const sourceSelection = !catalog ? undefined : requireArray(
+    row.sourceSelection,
+    "$reviewOutput.annotations.sourceSelection",
+    MAX_CATALOG_ROWS
+  ).map((value, index): ReportSemanticSourceSelectionAnnotation => {
+    const path = `$reviewOutput.annotations.sourceSelection[${index}]`;
+    const item = strictRecord(value, path, SOURCE_SELECTION_ANNOTATION_KEYS);
+    const expected = catalog[index];
+    if (!expected) throw new TypeError(`${path} exceeds source-selection catalog coverage.`);
+    requireExact(item.annotationId, expected.annotationId, `${path}.annotationId`);
+    requireExact(item.itemId, expected.itemId, `${path}.itemId`);
+    requireExact(item.kind, expected.kind, `${path}.kind`);
+    requireExact(item.questionId, expected.questionId, `${path}.questionId`);
+    requireExact(item.sourceId, expected.sourceId, `${path}.sourceId`);
+    requireExact(item.profileId, expected.profileId, `${path}.profileId`);
+    requireExact(item.actionId, expected.actionId, `${path}.actionId`);
+    const contributionRole = item.contributionRole === null ? null : requireOneOf(
+      item.contributionRole,
+      ["candidate_discovery", "definition_or_framework", "first_party_capability", "constraint_or_risk", "comparison", "third_party_validation", "other"] as const,
+      `${path}.contributionRole`
+    );
+    const targetState = item.targetState === null ? null : requireOneOf(
+      item.targetState,
+      ["present", "weak", "missing", "unavailable"] as const,
+      `${path}.targetState`
+    );
+    const factorClassification = item.factorClassification === null ? null : requireOneOf(
+      item.factorClassification,
+      ["problem_match", "factual_specificity", "entity_clarity", "source_authority", "accessibility", "freshness"] as const,
+      `${path}.factorClassification`
+    );
+    const actionFamily = item.actionFamily === null ? null : requireOneOf(
+      item.actionFamily,
+      ["first_party_fact_page", "entity_relationship", "accessible_structure", "freshness", "third_party_validation"] as const,
+      `${path}.actionFamily`
+    );
+    const priority = item.priority === null ? null : requireOneOf(
+      item.priority,
+      ["high", "medium", "low"] as const,
+      `${path}.priority`
+    );
+    const semanticValues = [contributionRole, targetState, factorClassification, actionFamily, priority];
+    const expectedPresent = expected.kind === "contribution" ? [0]
+      : expected.kind === "target_state" ? [1]
+        : expected.kind === "factor" ? [2] : [3, 4];
+    if (semanticValues.some((value, semanticIndex) => expectedPresent.includes(semanticIndex) ? value === null : value !== null)) {
+      throw new TypeError(`${path} semantic values do not match ${expected.kind} annotation shape.`);
+    }
+    const evidenceIds = requireUniqueTextArray(item.evidenceIds, `${path}.evidenceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
+    if (evidenceIds.length === 0) {
+      throw new TypeError(`${path}.evidenceIds must cite at least one catalog-owned evidence ID.`);
+    }
+    assertSubset(evidenceIds, expected.allowedEvidenceIds, `${path}.evidenceIds`);
+    return {
+      annotationId: expected.annotationId,
+      itemId: expected.itemId,
+      kind: expected.kind,
+      questionId: expected.questionId,
+      sourceId: expected.sourceId,
+      profileId: expected.profileId,
+      actionId: expected.actionId,
+      contributionRole,
+      targetState,
+      factorClassification,
+      actionFamily,
+      priority,
+      evidenceIds,
+      reason: requireBoundedText(item.reason, `${path}.reason`, 5_000)
+    };
+  });
+  if (catalog && sourceSelection!.length !== catalog.length) {
+    throw new TypeError("$reviewOutput.annotations.sourceSelection must cover the input catalog exactly once and in order.");
+  }
+  return {
+    observationResults,
+    answers: parsedAnswers,
+    evidenceUse,
+    ...(sourceSelection ? { sourceSelection } : {})
+  };
 }
 
 export function deriveFreeObservationMetrics(review: ReportSemanticReviewOutput): { targetMentionCount: number; competitorMentionCount: number } {

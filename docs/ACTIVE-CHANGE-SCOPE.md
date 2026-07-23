@@ -1,5 +1,277 @@
 # Active Change Scope Lock
 
+## ReportSemanticReview staged program - Phase 2B3 marker-present Paid V3 integration
+
+Status: Phase 2B3a is `COMPLETE`; Phase 2B3b remains
+`NOT SCOPED / NOT APPROVED`. The completed 2B3a unit is limited to its exact
+default-legacy, runtime-unreachable production/test allowlist below. It does
+not authorize marker activation, a real provider call, an artifact/job
+mutation, Phase 2B3b implementation, push, deployment, or any external action.
+Its acceptance and independent-review thresholds permit exactly one local
+Phase 2B3a commit; no push is authorized.
+
+### Authority, baseline, and safety decomposition
+
+- Design authority:
+  `docs/superpowers/specs/2026-07-23-report-semantic-review-staged-rollout-design.md`.
+- Baseline branch: `codex/v4-answer-optimization-scope-reset`; clean baseline
+  HEAD: `1cbb844e8a073708e3ad40c997610bcb732978c9`.
+- Active product lineage: Free V4 teaser -> Paid V3
+  `combined_geo_report_v3` only. V1/V2, formal Paid V4, corrections,
+  replacements, artifact refresh, and historical authorities remain legacy
+  and are not part of this phase.
+- Phase 2A, 2B1, and 2B2 are complete local prerequisites. Their completion
+  does not approve this section or activate the root marker.
+
+The minimum correct Paid integration still crosses two different risk
+classes: additive/default-legacy deferral and preparation seams, then the
+marker-selected runtime review/checkpoint/artifact adoption. Combining them in
+one approval would make a regression difficult to localize and could leave a
+partially deferred Paid path without its sole semantic authority. Phase 2B3 is
+therefore proposed as two separately approved, separately committed units
+without changing the approved product architecture:
+
+1. **Phase 2B3a** adds explicit, default-legacy Paid deferral/preparation seams
+   and pure Paid manifest capability. No runtime caller may select them.
+2. **Phase 2B3b**, only after 2B3a is complete and a new exact scope is
+   drafted and approved, may let the immutable root marker select those seams
+   and adopt exactly one unified Paid review before artifact materialization.
+
+Only Phase 2B3a is scoped below. Phase 2B3b is an unapproved future gate;
+approval of 2B3a grants it no implementation authority.
+
+### Audited active-chain evidence and exclusions
+
+The current Paid V3 Worker produces page analyses and the website foundation,
+collects three answer/source results, constructs answer cards and source-
+selection diagnosis, enhances all three per-question diagnoses, builds the
+combined report, writes `pendingArtifactVerification`, then materializes and
+terminalizes it. The following active seams can presently make semantic
+decisions before the proposed unified review:
+
+- page-analysis and website-synthesis language correction/deletion in
+  `analysis.ts` and `synthesis.ts`;
+- answer language and Q1 responsiveness, alias-based target/competitor
+  diagnosis, and per-question diagnosis semantic repair in
+  `answer-first-v3.ts`, `open-geo-answer-v3.ts`, and the V4 diagnosis route;
+- source-selection causal/prose checks in
+  `source-selection-diagnosis-v1.ts`;
+- prohibited-claim validation reached before the combined parser because
+  `public-source-forensics/report-builder.ts` calls
+  `parseRecommendationForensicReportV2` while constructing the public-source
+  draft, plus the later whole-report language gates reached through the V2
+  base parser and `combined-artifact-readiness.tsx`;
+- artifact-verification resume, which currently has no Paid semantic-review
+  projection to verify before materialization.
+
+Provider qualification, passage selection, entity resolution, source
+eligibility, evidence grading, crawling, search fanout, and exact excerpt
+binding also use deterministic rules, but the approved design explicitly
+keeps those evidence-acquisition/integrity subsystems program-owned or out of
+scope. They are not customer-prose acceptance gates and are forbidden here.
+The retired V1/V2 `recommendation-forensic.ts` path is likewise excluded.
+
+## Phase 2B3a - default-legacy Paid deferral and preparation seams
+
+Status: `COMPLETE` - the user explicitly approved this exact Phase 2B3a scope
+on 2026-07-23 with `批准 Phase 2B3a FROZEN 范围并开始执行`, and the bounded
+implementation and independent review are complete. No production caller,
+checkpoint, report, or artifact selects Paid deferred semantics in this unit.
+Completion grants no authority for Phase 2B3b.
+
+### Phase 2B3a objective
+
+Add explicit `legacy | deferred` inputs and pure preparation/manifest helpers
+needed by the later marker-present Paid path. Every new input defaults to
+`legacy`; existing callers, prompts, retries, parser results, checkpoint JSON,
+and artifact bytes remain unchanged. Deferred mode may suppress only
+programmatic customer-prose meaning judgments. Structural, ownership, URL,
+evidence, hash, cardinality, leakage, and excerpt-binding checks remain active.
+
+### Exact Phase 2B3a production allowlist
+
+- `packages/ai-report-engine/src/analysis.ts`
+- `packages/ai-report-engine/src/synthesis.ts`
+- `packages/ai-report-engine/src/report-semantic-review.ts`
+- `packages/ai-report-engine/src/report-semantic-review-manifests.ts`
+- `packages/ai-report-engine/src/open-geo-answer-v3.ts`
+- `packages/ai-report-engine/src/source-selection-diagnosis-v1.ts`
+- `packages/ai-report-engine/src/recommendation-forensic-v2-claims.ts`
+- `packages/ai-report-engine/src/recommendation-forensic-v2.ts`
+- `packages/ai-report-engine/src/combined-geo-report.ts`
+- `packages/ai-report-engine/src/combined-geo-report-v2.ts`
+- `packages/ai-report-engine/src/combined-geo-report-v3.ts`
+- `apps/web/src/worker/public-source-forensics.ts`
+- `apps/web/src/public-source-forensics/report-builder.ts`
+- `apps/web/src/worker/answer-first-v3.ts`
+- `apps/web/src/worker/source-selection-diagnosis.ts`
+- `apps/web/src/report/combined-artifact-readiness.tsx`
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+
+Maximum production-code diff across the sixteen named source files:
+`+1,500/-320` lines. Documentation is excluded. No other production path may
+change. In particular `processor.ts`, Free runtime routing, provider adapters,
+model configuration/operation files, DB/schema/migrations, commerce,
+terminalization, UI components, and activation code are forbidden.
+
+### Exact Phase 2B3a test allowlist
+
+- `packages/ai-report-engine/src/analysis.test.ts` (new)
+- `packages/ai-report-engine/src/synthesis.test.ts` (new)
+- `packages/ai-report-engine/src/report-semantic-review.test.ts`
+- `packages/ai-report-engine/src/report-semantic-review-manifests.test.ts`
+- `packages/ai-report-engine/src/open-geo-answer-v3.test.ts`
+- `packages/ai-report-engine/src/source-selection-diagnosis-v1.test.ts`
+- `packages/ai-report-engine/src/recommendation-forensic-v2.test.ts`
+- `packages/ai-report-engine/src/combined-geo-report.test.ts`
+- `packages/ai-report-engine/src/combined-geo-report-v2.test.ts`
+- `packages/ai-report-engine/src/combined-geo-report-v3.test.ts`
+- `apps/web/src/worker/public-source-forensics.test.ts`
+- `apps/web/src/public-source-forensics/report-builder.test.ts`
+- `apps/web/src/worker/answer-first-v3.test.ts`
+- `apps/web/src/worker/source-selection-diagnosis.test.ts`
+- `apps/web/src/report/combined-artifact-readiness.test.tsx`
+
+Maximum test diff across the fifteen named test files: `+1,900/-350`. The two
+new package tests provide focused coverage at the actual page-analysis and
+website-synthesis APIs without expanding unrelated package-index fixtures. A
+verification-only amendment may change only these named tests under the
+repository rule and cannot add a runtime caller or weaken a gate.
+
+### Locked Phase 2B3a behavior
+
+1. Omitted and explicit `legacy` values must be identical at every seam,
+   including prompts, model-call counts, retry/correction behavior, parsed
+   values, hashes, checkpoints, prepared reports, and materialized HTML/PDF.
+2. Deferred page analysis and website synthesis retain JSON shape, evidence
+   quotes, URLs, finding/evidence ownership, bounds, cardinality, and leakage
+   safety, but do not run language wordlists, terminology replacement,
+   language-only correction calls, or optional-prose deletion.
+3. Deferred generative answers retain typed status, safe URL, source,
+   provider/model/search identity, timestamps, and hashes, but do not run
+   language/character-ratio or Q1 responsiveness heuristics. Deferred answer
+   card drafts do not recompute target/competitor meaning from aliases.
+4. Deferred V4/source-selection diagnosis retains exact question/source/
+   evidence ownership, enum/cardinality, excerpt binding, prohibited key
+   safety, and hashes, but does not use prose regexes or local semantic field
+   correction. This does not authorize inventing semantic placeholder data.
+5. Deferred public-source builder, forensic, and combined parsing skip only
+   prohibited-claim and final report-language/terminology judgments. The
+   builder-to-`parseRecommendationForensicReportV2` call receives an explicit
+   default-legacy seam before the combined parser is reached. All omitted and
+   legacy calls still enforce the existing gate. Deferred mode still enforces
+   the exact V3 contract, three questions/cards, all IDs and owners, safe URLs,
+   hashes, evidence references, commercial identities, and artifact revision
+   data.
+6. Add one pure Paid V3 customer-prose manifest/application capability with
+   exact ordered coverage and a complete non-prose hash. It may enumerate and
+   mechanically replace declared paths only; it may not inspect wording to
+   decide meaning or become reachable from a Worker.
+7. Paid answer annotations must be sufficient to construct final Q2/Q3 target
+   presence/position/roles and competitor IDs from verified model output. The
+   catalog-bound reviewer contract must also cover every applicable source-
+   selection conclusion, including contribution role, target state, factor
+   classification, and action family/priority, each tied to exact question,
+   source, profile, gap/factor, action, and evidence IDs. Program code may
+   validate only enums, cardinality, exact catalog coverage/order, and ID
+   ownership; it may not derive any of these semantic values from question
+   ordinal, ownership category, text length, regex, keyword, or other
+   heuristic. Missing, ambiguous, contradictory, unknown-ID, or cross-owner
+   annotations fail closed.
+8. Split V3 report preparation from materialization so a later caller can
+   obtain one fully structured draft before HTML/PDF/storage. Existing
+   `buildReadyCombinedArtifactV3` must keep its exact legacy order and result;
+   no existing caller may use the new preparation entry point in 2B3a.
+9. No root marker read, Worker route, semantic checkpoint/projection, review
+   model invocation, receipt in a real report, artifact behavior change, or
+   activation source is permitted.
+
+### Phase 2B3a acceptance
+
+1. Paired tests prove default/explicit legacy equality and deferred behavior
+   for every named seam, including mixed-language brands and professional
+   terms, Q1 nonresponsive-looking prose, causal-looking draft prose, and
+   source-selection text.
+2. Negative tests prove deferred mode still rejects malformed JSON, unsafe
+   URLs, unknown/cross-owned IDs, changed questions, missing cards, unbound
+   excerpts, hash/model mismatch, leakage, and prohibited structural keys.
+3. Pure Paid manifest tests prove exact customer-prose coverage, immutable
+   questions, catalog ownership, non-prose preservation, deterministic
+   application, complete Q2/Q3 answer annotations, and exact catalog-bound
+   source-selection contribution-role, target-state, factor-classification,
+   and action-family/priority annotations; no model/network call is made.
+4. Artifact tests prove the preparation seam performs no HTML/PDF/storage
+   work and the unchanged legacy builder produces the same report and
+   materialization sequence.
+5. A repository-wide non-test search, accounting for the already approved
+   Phase 2B2 Free deferred runtime, proves that no runtime caller passes
+   `deferred` to any new or modified Phase 2B3a Paid seam. The audit must check
+   callsites for page analysis, website synthesis, public-source builder and
+   pipeline, generative answer-first, source-selection diagnosis, combined
+   V1/V2/V3 parsing, and V3 preparation/materialization individually. No
+   Worker imports or invokes the Paid manifest/application, and no production
+   caller invokes the new V3 preparation entry point. Only omitted, defaulted,
+   or explicitly `legacy` Phase 2B3a Paid behavior is reachable in production.
+6. Run focused tests, `npm test`, `npm run lint`, `npm run build`, and
+   `git diff --check`; compare complete paths and numstat to both budgets
+   before one local commit. Do not push.
+
+### Phase 2B3a implementation outcome
+
+- Exact baseline: branch `codex/v4-answer-optimization-scope-reset`, HEAD
+  `1cbb844e8a073708e3ad40c997610bcb732978c9`.
+- The completed diff contains only the sixteen allowlisted production source
+  files, fifteen allowlisted test files, and this scope document. Production
+  numstat is `+591/-106`; test numstat is `+842/-11`, both within budget.
+- All fifteen focused test files passed: `148/148`. The final full test run
+  passed `301` files and `2,793` tests, with `46` files and `187` tests
+  skipped. The isolated PostgreSQL acceptance file passed `5/5`.
+- `npm run lint`, `npm run build`, and `git diff --check` passed.
+- Repository-wide non-test callsite review confirmed that every Phase 2B3a
+  Paid deferred seam remains production-unreachable: Paid callers omit the
+  option or retain legacy behavior, no Worker imports or invokes the Paid
+  manifest/application, and no production caller invokes the new V3
+  preparation entry point. Existing explicitly approved Phase 2B2 Free
+  deferred runtime is the sole accounted-for exception and is not a Paid
+  activation path.
+- No real model call, historical or business-database mutation, report/job
+  creation or recovery, deployment, push, marker activation, or other external
+  action occurred.
+- Independent final review verdict: `CONFORMANT`. The local commit threshold
+  is met; Phase 2B3b remains `NOT SCOPED / NOT APPROVED`.
+
+### Phase 2B3a hard stops and external actions
+
+Stop as `DEVIATION_REVIEW_REQUIRED` if a runtime caller must select deferred
+mode; any non-allowlisted production file is needed; legacy equality cannot be
+proved; a schema, dependency, model operation/configuration, customer artifact,
+checkpoint, commerce, historical-data, or external-action change is needed;
+the production budget is exceeded; or two repairs do not reduce the failing
+acceptance set before a new route is considered.
+
+No live model call, crawl, report/job creation or recovery, database mutation
+outside disposable tests, payment, credit, refund, email, Docker build,
+deployment, push, publication, or marker activation is authorized.
+
+## Future gate - Phase 2B3b marker-present Paid V3 adoption
+
+Status: `NOT SCOPED / NOT APPROVED`.
+
+Only after Phase 2B3a is complete and independently verified may a new
+read-only audit draft the exact 2B3b allowlist, budgets, and acceptance set.
+That future scope must cover root-marker-only routing, marker-absent legacy
+regression, and marker-aware `parseReadyFreeTeaserCheckpoint` verification of
+the exact reviewed Free Q1 card, diagnosis, evidence identity, and receipt with
+zero Q1 regeneration. It must require one Paid review after all customer prose,
+one atomic checkpoint write containing the corrected Paid report plus the full
+input/output/applied receipt authority, model-free resume, and immediate
+receipt re-verification before both materialization and terminalization. It
+must also prove model/input/non-prose/evidence/ID/hash fail-closed behavior and
+no activation or unauthorized external action. No Phase 2B3b production or
+test file is authorized by this document.
+
+---
+
 ## ReportSemanticReview staged program - Phase 2B2 marker-present Free V4 integration
 
 Status: `COMPLETE` - the approved marker-present Free V4 integration and exact

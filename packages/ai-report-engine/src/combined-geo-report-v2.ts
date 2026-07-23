@@ -70,14 +70,23 @@ export function parseProviderDiscoveryV1(value: unknown): ProviderDiscoveryV1 {
   };
 }
 
-export function parseCombinedGeoReportV2(value: unknown): CombinedGeoReportV2 {
+export function parseCombinedGeoReportV2(
+  value: unknown,
+  options: { semanticValidation?: "legacy" | "deferred" } = {}
+): CombinedGeoReportV2 {
   const root = object(value, "$combined");
   exact(root.artifactContract, COMBINED_GEO_REPORT_V2_CONTRACT, "$combined.artifactContract");
   exact(root.version, COMBINED_GEO_REPORT_V2_VERSION, "$combined.version");
   const providerDiscovery = parseProviderDiscoveryV1(root.providerDiscovery);
   const groundedAnswerEvidence = array(root.groundedAnswerEvidence, "$combined.groundedAnswerEvidence").map(parseGroundedEvidence);
-  const businessQuestionAnswers = parseGroundedBusinessAnswersV2(root.businessQuestionAnswers, { evidence: groundedAnswerEvidence, locale: text(root.locale, "$combined.locale") });
-  const base = parseCombinedGeoReportV1({ ...root, version: 1, artifactContract: COMBINED_GEO_REPORT_CONTRACT, businessQuestionAnswers: undefined });
+  const businessQuestionAnswers = parseGroundedBusinessAnswersV2(root.businessQuestionAnswers, {
+    evidence: groundedAnswerEvidence,
+    ...(options.semanticValidation === "deferred" ? {} : { locale: text(root.locale, "$combined.locale") })
+  });
+  const base = parseCombinedGeoReportV1(
+    { ...root, version: 1, artifactContract: COMBINED_GEO_REPORT_CONTRACT, businessQuestionAnswers: undefined },
+    options
+  );
   const expectedQuestionIds = base.publicSourceForensics.questions.questions.slice(1).map(({ id }) => id);
   if (businessQuestionAnswers.answers.some((answer, index) => answer.questionId !== expectedQuestionIds[index])) throw new TypeError("Grounded answers must bind exact public questions 2 and 3.");
   return { ...base, version: COMBINED_GEO_REPORT_V2_VERSION, artifactContract: COMBINED_GEO_REPORT_V2_CONTRACT, providerDiscovery, groundedAnswerEvidence, businessQuestionAnswers };

@@ -20,6 +20,7 @@ export interface PublicSourceForensicReportBuilderInput {
   sourceGraph: PublicSourceEvidenceGraph; websiteFoundationAppendix: AiWebsiteReportV1;
   cost: RecommendationForensicCostInput; commercialOutcome: RecommendationForensicReportV2["commercialOutcome"];
   synthesis?: { modelId: string; inputHash: string };
+  semanticValidation?: "legacy" | "deferred";
 }
 
 export function buildPublicSourceForensicReport(input: PublicSourceForensicReportBuilderInput): RecommendationForensicReportV2 {
@@ -68,7 +69,9 @@ export function buildPublicSourceForensicReport(input: PublicSourceForensicRepor
     limitations: [localized ? "公开搜索顺序不代表 AI 排名，也不保证未来结果。" : "Public-search order is not an AI ranking and does not guarantee future outcomes."],
     commercialOutcome: input.commercialOutcome
   };
-  return parseRecommendationForensicReportV2(report);
+  return parseRecommendationForensicReportV2(report, {
+    semanticValidation: input.semanticValidation ?? "legacy"
+  });
 }
 
 function hash(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
