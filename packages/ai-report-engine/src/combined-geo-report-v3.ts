@@ -16,6 +16,11 @@ import {
   type SourceSelectionDiagnosisV1,
   type SourceSelectionSourceInputV1
 } from "./source-selection-diagnosis-v1";
+import {
+  hashReportSemanticReviewValue,
+  parsePaidV3ReportSemanticReviewReceipt,
+  type PaidV3ReportSemanticReviewReceipt
+} from "./report-semantic-review";
 
 export const COMBINED_GEO_REPORT_V3_VERSION = 3 as const;
 export const COMBINED_GEO_REPORT_V3_CONTRACT = "combined_geo_report_v3" as const;
@@ -26,6 +31,7 @@ export interface CombinedGeoReportV3 extends Omit<CombinedGeoReportV2, "version"
   engineProvenance: OpenGeoEngineProvenanceV3;
   answerCards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
   sourceSelectionDiagnosis?: SourceSelectionDiagnosisV1;
+  semanticReviewReceipt?: PaidV3ReportSemanticReviewReceipt;
 }
 
 export function parseCombinedGeoReportV3(
@@ -35,6 +41,9 @@ export function parseCombinedGeoReportV3(
   const root = object(value, "$combined");
   exact(root.artifactContract, COMBINED_GEO_REPORT_V3_CONTRACT, "$combined.artifactContract");
   exact(root.version, COMBINED_GEO_REPORT_V3_VERSION, "$combined.version");
+  const semanticReviewReceipt = root.semanticReviewReceipt === undefined
+    ? undefined
+    : parsePaidV3ReportSemanticReviewReceipt(root.semanticReviewReceipt);
   const provenance = parseEngineProvenance(root.engineProvenance);
   const questionSet = object(root.businessQuestionSet, "$combined.businessQuestionSet") as unknown as CombinedGeoReportV2["businessQuestionSet"];
   const preliminaryCards = array(root.answerCards, "$combined.answerCards") as unknown as OpenGeoAnswerCardV3[];
@@ -100,8 +109,15 @@ export function parseCombinedGeoReportV3(
     artifactContract: COMBINED_GEO_REPORT_V3_CONTRACT,
     engineProvenance: provenance,
     answerCards,
-    ...(sourceSelectionDiagnosis ? { sourceSelectionDiagnosis } : {})
+    ...(sourceSelectionDiagnosis ? { sourceSelectionDiagnosis } : {}),
+    ...(semanticReviewReceipt ? { semanticReviewReceipt } : {})
   };
+}
+
+export function hashCombinedGeoReportV3ReceiptExcludedProjection(value: unknown): string {
+  const root = object(value, "$combined");
+  const { semanticReviewReceipt: _semanticReviewReceipt, ...projection } = root;
+  return hashReportSemanticReviewValue(projection);
 }
 
 function parseV3SourceSelectionDiagnosis(

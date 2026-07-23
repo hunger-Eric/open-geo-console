@@ -132,7 +132,7 @@ export interface ResolveGenerativeAnswerFirstV3Input {
 
 export type GenerativeSearchAnswerCardDraftV3 = Omit<GenerativeSearchAnswerCardV3, "geoDiagnosis">;
 type GenerativeAnswerCardTuple = [GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3];
-type GenerativeAnswerCardDraftTuple = [
+export type GenerativeAnswerCardDraftTuple = [
   GenerativeSearchAnswerCardDraftV3,
   GenerativeSearchAnswerCardDraftV3,
   GenerativeSearchAnswerCardDraftV3
@@ -142,7 +142,7 @@ interface ResolvedGenerativeAnswerFirstV3 {
   answerCards: GenerativeAnswerCardTuple;
   reused: boolean;
 }
-interface DeferredGenerativeAnswerFirstV3 {
+export interface DeferredGenerativeAnswerFirstV3 {
   checkpoint: AnswerFirstV3CheckpointV2;
   answerCardDrafts: GenerativeAnswerCardDraftTuple;
   reused: boolean;

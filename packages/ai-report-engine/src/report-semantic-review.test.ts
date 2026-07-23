@@ -431,6 +431,18 @@ function inputCore(): MutableInputCore {
   return {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
     lifecycle: "paid_v3",
+    authorityBindings: {
+      rootMarker: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      artifactIdentityHash: hashReportSemanticReviewValue({ binding: "artifactIdentity" }),
+      reviewedFreeAuthorityHash: hashReportSemanticReviewValue({ binding: "reviewedFreeAuthority" }),
+      answerCheckpointHash: hashReportSemanticReviewValue({ binding: "answerCheckpoint" }),
+      commercialSnapshotsHash: hashReportSemanticReviewValue({ binding: "commercialSnapshots" }),
+      publicSourceHash: hashReportSemanticReviewValue({ binding: "publicSource" }),
+      providerDiscoveryHash: hashReportSemanticReviewValue({ binding: "providerDiscovery" }),
+      technicalFoundationHash: hashReportSemanticReviewValue({ binding: "technicalFoundation" }),
+      aiFoundationHash: hashReportSemanticReviewValue({ binding: "aiFoundation" }),
+      evidenceAssetsHash: hashReportSemanticReviewValue({ binding: "evidenceAssets" })
+    },
     locale: "zh-CN",
     target: {
       siteKey: "shun-express.com",

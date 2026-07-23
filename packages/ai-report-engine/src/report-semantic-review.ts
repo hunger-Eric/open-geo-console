@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { SourceSelectionDiagnosisV1 } from "./source-selection-diagnosis-v1";
 
 export const REPORT_SEMANTIC_REVIEW_CONTRACT = "report-semantic-review-v1" as const;
 
@@ -22,11 +23,17 @@ export function buildReportSemanticReviewSystemPrompt(): string {
 
 export function buildPaidV3ReportSemanticReviewSystemPrompt(): string {
   return [
-    buildReportSemanticReviewSystemPrompt().replace(
-      "annotations has exactly observationResults, answers, evidenceUse.",
-      "annotations has exactly observationResults, answers, evidenceUse, sourceSelection."
-    ),
-    "annotations.sourceSelection must cover input.sourceSelectionCatalog exactly once and in input order. Each item has exactly annotationId, itemId, kind, questionId, sourceId, profileId, actionId, contributionRole, targetState, factorClassification, actionFamily, priority, evidenceIds, reason. Copy annotationId, itemId, kind, questionId, sourceId, profileId, and actionId exactly, including nulls. itemId is the stable catalog identity of the exact contribution, target-state gap, factor, or action being reviewed; never derive it from annotationId or prose. Use null for every semantic value that does not apply to the item kind. contribution items require contributionRole; target_state items require targetState; factor items require factorClassification; action items require actionFamily and priority. Use only exact catalog evidence IDs. Judge these values from the supplied evidence; never derive them from question order, ownership labels, wording length, regexes, keywords, or a local taxonomy shortcut."
+    buildReportSemanticReviewSystemPrompt()
+      .replace(
+        "The top-level keys are exactly, in this order: version, inputHash, providerId, modelId, fields, questionDistinctness, annotations, overallDecision.",
+        "The top-level keys are exactly, in this order: version, inputHash, providerId, modelId, fields, questionDistinctness, annotations, sourceSelectionDraft, sourceSelectionDraftHash, overallDecision."
+      )
+      .replace(
+        "annotations has exactly observationResults, answers, evidenceUse.",
+        "annotations has exactly observationResults, answers, evidenceUse, sourceSelection."
+      ),
+    "annotations.sourceSelection must cover input.sourceSelectionCatalog exactly once and in input order. Each item has exactly annotationId, itemId, kind, questionId, sourceId, profileId, actionId, contributionRole, targetState, factorClassification, actionFamily, priority, evidenceIds, reason. Copy annotationId, itemId, kind, questionId, sourceId, profileId, and actionId exactly, including nulls. itemId is the stable catalog identity of the exact contribution, target-state gap, factor, or action being reviewed; never derive it from annotationId or prose. Use null for every semantic value that does not apply to the item kind. contribution items require contributionRole; target_state items require targetState; factor items require factorClassification; action items require actionFamily and priority. Use only exact catalog evidence IDs. Judge these values from the supplied evidence; never derive them from question order, ownership labels, wording length, regexes, keywords, or a local taxonomy shortcut.",
+    "sourceSelectionDraft must be one complete SourceSelectionDiagnosisV1 JSON object. Its ordered source profiles, contributions, target gaps, observable factors, and actions must cover input.sourceSelectionCatalog exactly in catalog order and agree exactly with every sourceSelection annotation identity and semantic value. It must include all contribution summaries, basis and confidence, factor observations, target comparisons, profile audit states, shared-pattern prose, action titles and rationales, and limitation prose. Copy every structural ID, URL, excerpt, evidence reference, locale, and analyzer version from the supplied authority without alteration. Never calculate or reinterpret answerHash, sourceHash, or targetFoundationHash: copy the supplied draft identity values, which the program will replace with its exact final post-correction hashes before structural validation. sourceSelectionDraftHash must be the lowercase SHA-256 canonical JSON hash of the raw model-owned sourceSelectionDraft before that program-owned identity rebind."
   ].join("\n");
 }
 
@@ -45,6 +52,20 @@ export interface ReportSemanticTargetIdentity {
 export interface ReportSemanticExpectedModel {
   readonly providerId: string;
   readonly modelId: string;
+}
+
+/** Immutable authority lineage for a marker-present Paid V3 semantic review. */
+export interface ReportSemanticReviewAuthorityBindings {
+  readonly rootMarker: typeof REPORT_SEMANTIC_REVIEW_CONTRACT;
+  readonly artifactIdentityHash: string;
+  readonly reviewedFreeAuthorityHash: string;
+  readonly answerCheckpointHash: string;
+  readonly commercialSnapshotsHash: string;
+  readonly publicSourceHash: string;
+  readonly providerDiscoveryHash: string;
+  readonly technicalFoundationHash: string;
+  readonly aiFoundationHash: string;
+  readonly evidenceAssetsHash: string;
 }
 
 export interface ReportSemanticQuestion {
@@ -120,6 +141,8 @@ export interface ReportSemanticReviewInputCore {
   readonly entities: readonly ReportSemanticEntity[];
   readonly answerSubjects: readonly ReportSemanticAnswerSubject[];
   readonly sourceSelectionCatalog?: readonly ReportSemanticSourceSelectionCatalogEntry[];
+  /** Optional for Free/legacy inputs and required for every Paid V3 input. */
+  readonly authorityBindings?: ReportSemanticReviewAuthorityBindings;
   readonly fields: readonly ReportSemanticFieldManifestEntry[];
   readonly nonProseProjectionHash: string;
 }
@@ -208,6 +231,8 @@ export interface ReportSemanticReviewOutput {
   readonly fields: readonly ReportSemanticFieldResult[];
   readonly questionDistinctness: ReportQuestionDistinctnessResult;
   readonly annotations: ReportSemanticAnnotations;
+  readonly sourceSelectionDraft?: SourceSelectionDiagnosisV1;
+  readonly sourceSelectionDraftHash?: string;
   readonly overallDecision: ReportSemanticReviewDecision;
 }
 
@@ -237,8 +262,16 @@ export interface ReportSemanticReviewReceipt {
   readonly fieldCoverageHash: string;
   readonly appliedProseHash: string;
   readonly annotationsHash: string;
+  readonly sourceSelectionDraftHash?: string;
   readonly nonProseProjectionHash: string;
+  readonly finalReviewedReportProjectionHash?: string;
   readonly fields: readonly ReportSemanticReceiptField[];
+}
+
+export interface PaidV3ReportSemanticReviewReceipt extends ReportSemanticReviewReceipt {
+  readonly lifecycle: "paid_v3";
+  readonly sourceSelectionDraftHash: string;
+  readonly finalReviewedReportProjectionHash: string;
 }
 
 export interface AppliedReportSemanticReview {
@@ -249,10 +282,14 @@ export interface AppliedReportSemanticReview {
 
 const INPUT_KEYS = new Set([
   "version", "lifecycle", "locale", "target", "expectedModel", "questions", "sources", "evidence", "fields",
-  "observationResults", "entities", "answerSubjects", "sourceSelectionCatalog", "nonProseProjectionHash", "inputHash"
+  "observationResults", "entities", "answerSubjects", "sourceSelectionCatalog", "authorityBindings", "nonProseProjectionHash", "inputHash"
 ]);
 const TARGET_KEYS = new Set(["siteKey", "targetUrl", "aliases"]);
 const MODEL_KEYS = new Set(["providerId", "modelId"]);
+const AUTHORITY_BINDING_KEYS = new Set([
+  "rootMarker", "artifactIdentityHash", "reviewedFreeAuthorityHash", "answerCheckpointHash", "commercialSnapshotsHash",
+  "publicSourceHash", "providerDiscoveryHash", "technicalFoundationHash", "aiFoundationHash", "evidenceAssetsHash"
+]);
 const QUESTION_KEYS = new Set(["questionId", "originalText", "originalTextHash"]);
 const SOURCE_KEYS = new Set(["sourceId", "questionId", "canonicalUrl", "originalText", "originalTextHash"]);
 const EVIDENCE_KEYS = new Set(["evidenceId", "questionId", "sourceId", "originalText", "originalTextHash"]);
@@ -266,7 +303,8 @@ const FIELD_KEYS = new Set([
   "path", "originalText", "originalTextHash", "mutability", "questionId", "allowedEvidenceIds", "allowedSourceIds"
 ]);
 const OUTPUT_KEYS = new Set([
-  "version", "inputHash", "providerId", "modelId", "fields", "questionDistinctness", "annotations", "overallDecision"
+  "version", "inputHash", "providerId", "modelId", "fields", "questionDistinctness", "annotations",
+  "sourceSelectionDraft", "sourceSelectionDraftHash", "overallDecision"
 ]);
 const FIELD_RESULT_KEYS = new Set([
   "path", "originalTextHash", "decision", "correctedText", "issueCodes", "reason", "evidenceIds", "sourceIds",
@@ -285,7 +323,8 @@ const SOURCE_SELECTION_ANNOTATION_KEYS = new Set([
 ]);
 const RECEIPT_KEYS = new Set([
   "version", "lifecycle", "inputHash", "reviewHash", "providerId", "modelId", "decision", "fieldCoverageHash",
-  "appliedProseHash", "annotationsHash", "nonProseProjectionHash", "fields"
+  "appliedProseHash", "annotationsHash", "sourceSelectionDraftHash", "nonProseProjectionHash",
+  "finalReviewedReportProjectionHash", "fields"
 ]);
 const RECEIPT_FIELD_KEYS = new Set(["path", "originalTextHash", "appliedTextHash", "decision"]);
 
@@ -341,6 +380,18 @@ export function parseReportSemanticReviewOutput(
   assertUnique(fields.map(({ path }) => path), "$reviewOutput.fields paths");
   const questionDistinctness = parseQuestionDistinctness(record.questionDistinctness, input);
   const annotations = parseAnnotations(record.annotations, input);
+  const sourceSelectionDraft = input.sourceSelectionCatalog
+    ? parsePaidReviewedSourceSelectionDraft(record.sourceSelectionDraft, input, annotations)
+    : undefined;
+  if (!input.sourceSelectionCatalog && (record.sourceSelectionDraft !== undefined || record.sourceSelectionDraftHash !== undefined)) {
+    throw new TypeError("$reviewOutput source-selection draft fields are allowed only for a catalog-bound Paid V3 review.");
+  }
+  const sourceSelectionDraftHash = sourceSelectionDraft
+    ? requireHash(record.sourceSelectionDraftHash, "$reviewOutput.sourceSelectionDraftHash")
+    : undefined;
+  if (sourceSelectionDraft && sourceSelectionDraftHash !== hashReportSemanticReviewValue(sourceSelectionDraft)) {
+    throw new TypeError("$reviewOutput.sourceSelectionDraftHash does not match the canonical reviewed draft.");
+  }
   const overallDecision = requireOneOf(
     record.overallDecision,
     ["pass", "corrected", "blocked"] as const,
@@ -358,6 +409,9 @@ export function parseReportSemanticReviewOutput(
     fields,
     questionDistinctness,
     annotations,
+    ...(sourceSelectionDraft && sourceSelectionDraftHash
+      ? { sourceSelectionDraft, sourceSelectionDraftHash }
+      : {}),
     overallDecision
   };
 }
@@ -408,6 +462,7 @@ export function applyReportSemanticReview(
     fieldCoverageHash: fieldCoverageHash(input.fields),
     appliedProseHash: appliedProseHash(fields),
     annotationsHash: hashReportSemanticReviewValue(review.annotations),
+    ...(review.sourceSelectionDraftHash ? { sourceSelectionDraftHash: review.sourceSelectionDraftHash } : {}),
     nonProseProjectionHash: input.nonProseProjectionHash,
     fields: receiptFields
   };
@@ -419,7 +474,8 @@ export function verifyReportSemanticReviewReceipt(
   rawInput: unknown,
   rawReview: unknown,
   rawAppliedFields: readonly AppliedReportSemanticField[],
-  currentNonProseProjectionHash?: string
+  currentNonProseProjectionHash?: string,
+  expectedFinalReviewedReportProjectionHash?: string
 ): ReportSemanticReviewReceipt {
   const input = parseReportSemanticReviewInput(rawInput);
   const review = parseReportSemanticReviewOutput(rawReview, input);
@@ -451,6 +507,10 @@ export function verifyReportSemanticReviewReceipt(
   requireExact(proseHash, appliedProseHash(fields), "$reviewReceipt.appliedProseHash");
   const annotationsHash = requireHash(record.annotationsHash, "$reviewReceipt.annotationsHash");
   requireExact(annotationsHash, hashReportSemanticReviewValue(review.annotations), "$reviewReceipt.annotationsHash");
+  const sourceSelectionDraftHash = record.sourceSelectionDraftHash === undefined
+    ? undefined
+    : requireHash(record.sourceSelectionDraftHash, "$reviewReceipt.sourceSelectionDraftHash");
+  requireExact(sourceSelectionDraftHash, review.sourceSelectionDraftHash, "$reviewReceipt.sourceSelectionDraftHash");
   const nonProseHash = requireHash(record.nonProseProjectionHash, "$reviewReceipt.nonProseProjectionHash");
   requireExact(nonProseHash, input.nonProseProjectionHash, "$reviewReceipt.nonProseProjectionHash");
   requireExact(
@@ -458,6 +518,16 @@ export function verifyReportSemanticReviewReceipt(
     input.nonProseProjectionHash,
     "currentNonProseProjectionHash"
   );
+  const finalReviewedReportProjectionHash = record.finalReviewedReportProjectionHash === undefined
+    ? undefined
+    : requireHash(record.finalReviewedReportProjectionHash, "$reviewReceipt.finalReviewedReportProjectionHash");
+  if (expectedFinalReviewedReportProjectionHash !== undefined) {
+    requireExact(
+      finalReviewedReportProjectionHash,
+      requireHash(expectedFinalReviewedReportProjectionHash, "expectedFinalReviewedReportProjectionHash"),
+      "$reviewReceipt.finalReviewedReportProjectionHash"
+    );
+  }
   const receiptFields = parseReceiptFields(record.fields, input, fields);
   return {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
@@ -470,8 +540,47 @@ export function verifyReportSemanticReviewReceipt(
     fieldCoverageHash: coverageHash,
     appliedProseHash: proseHash,
     annotationsHash,
+    ...(sourceSelectionDraftHash ? { sourceSelectionDraftHash } : {}),
     nonProseProjectionHash: nonProseHash,
+    ...(finalReviewedReportProjectionHash ? { finalReviewedReportProjectionHash } : {}),
     fields: receiptFields
+  };
+}
+
+export function parsePaidV3ReportSemanticReviewReceipt(value: unknown): PaidV3ReportSemanticReviewReceipt {
+  const record = strictRecord(value, "$reviewReceipt", RECEIPT_KEYS);
+  requireExact(record.version, REPORT_SEMANTIC_REVIEW_CONTRACT, "$reviewReceipt.version");
+  requireExact(record.lifecycle, "paid_v3", "$reviewReceipt.lifecycle");
+  const fields = requireArray(record.fields, "$reviewReceipt.fields", MAX_FIELDS).map((value, index) => {
+    const path = `$reviewReceipt.fields[${index}]`;
+    const row = strictRecord(value, path, RECEIPT_FIELD_KEYS);
+    return {
+      path: requireBoundedText(row.path, `${path}.path`, MAX_PATH_CHARS),
+      originalTextHash: requireHash(row.originalTextHash, `${path}.originalTextHash`),
+      appliedTextHash: requireHash(row.appliedTextHash, `${path}.appliedTextHash`),
+      decision: requireOneOf(row.decision, ["pass", "corrected"] as const, `${path}.decision`)
+    };
+  });
+  if (fields.length === 0) throw new TypeError("$reviewReceipt.fields must not be empty.");
+  assertUnique(fields.map(({ path }) => path), "$reviewReceipt.fields path");
+  return {
+    version: REPORT_SEMANTIC_REVIEW_CONTRACT,
+    lifecycle: "paid_v3",
+    inputHash: requireHash(record.inputHash, "$reviewReceipt.inputHash"),
+    reviewHash: requireHash(record.reviewHash, "$reviewReceipt.reviewHash"),
+    providerId: requireBoundedText(record.providerId, "$reviewReceipt.providerId", MAX_ID_CHARS),
+    modelId: requireBoundedText(record.modelId, "$reviewReceipt.modelId", MAX_ID_CHARS),
+    decision: requireOneOf(record.decision, ["pass", "corrected"] as const, "$reviewReceipt.decision"),
+    fieldCoverageHash: requireHash(record.fieldCoverageHash, "$reviewReceipt.fieldCoverageHash"),
+    appliedProseHash: requireHash(record.appliedProseHash, "$reviewReceipt.appliedProseHash"),
+    annotationsHash: requireHash(record.annotationsHash, "$reviewReceipt.annotationsHash"),
+    sourceSelectionDraftHash: requireHash(record.sourceSelectionDraftHash, "$reviewReceipt.sourceSelectionDraftHash"),
+    nonProseProjectionHash: requireHash(record.nonProseProjectionHash, "$reviewReceipt.nonProseProjectionHash"),
+    finalReviewedReportProjectionHash: requireHash(
+      record.finalReviewedReportProjectionHash,
+      "$reviewReceipt.finalReviewedReportProjectionHash"
+    ),
+    fields
   };
 }
 
@@ -491,6 +600,12 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
     providerId: requireBoundedText(modelRow.providerId, "$reviewInput.expectedModel.providerId", MAX_ID_CHARS),
     modelId: requireBoundedText(modelRow.modelId, "$reviewInput.expectedModel.modelId", MAX_ID_CHARS)
   };
+  const authorityBindings = record.authorityBindings === undefined
+    ? undefined
+    : parseAuthorityBindings(record.authorityBindings);
+  if (lifecycle === "paid_v3" && !authorityBindings) {
+    throw new TypeError("$reviewInput.authorityBindings is required for Paid V3.");
+  }
   const questions = requireArray(record.questions, "$reviewInput.questions", 3).map(parseQuestion);
   if (questions.length !== 3) throw new TypeError("$reviewInput.questions must contain exactly three questions.");
   assertUnique(questions.map(({ questionId }) => questionId), "$reviewInput.questions questionId");
@@ -636,8 +751,26 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
     entities,
     answerSubjects,
     ...(sourceSelectionCatalog ? { sourceSelectionCatalog } : {}),
+    ...(authorityBindings ? { authorityBindings } : {}),
     fields,
     nonProseProjectionHash: requireHash(record.nonProseProjectionHash, "$reviewInput.nonProseProjectionHash")
+  };
+}
+
+function parseAuthorityBindings(value: unknown): ReportSemanticReviewAuthorityBindings {
+  const row = strictRecord(value, "$reviewInput.authorityBindings", AUTHORITY_BINDING_KEYS);
+  requireExact(row.rootMarker, REPORT_SEMANTIC_REVIEW_CONTRACT, "$reviewInput.authorityBindings.rootMarker");
+  return {
+    rootMarker: REPORT_SEMANTIC_REVIEW_CONTRACT,
+    artifactIdentityHash: requireHash(row.artifactIdentityHash, "$reviewInput.authorityBindings.artifactIdentityHash"),
+    reviewedFreeAuthorityHash: requireHash(row.reviewedFreeAuthorityHash, "$reviewInput.authorityBindings.reviewedFreeAuthorityHash"),
+    answerCheckpointHash: requireHash(row.answerCheckpointHash, "$reviewInput.authorityBindings.answerCheckpointHash"),
+    commercialSnapshotsHash: requireHash(row.commercialSnapshotsHash, "$reviewInput.authorityBindings.commercialSnapshotsHash"),
+    publicSourceHash: requireHash(row.publicSourceHash, "$reviewInput.authorityBindings.publicSourceHash"),
+    providerDiscoveryHash: requireHash(row.providerDiscoveryHash, "$reviewInput.authorityBindings.providerDiscoveryHash"),
+    technicalFoundationHash: requireHash(row.technicalFoundationHash, "$reviewInput.authorityBindings.technicalFoundationHash"),
+    aiFoundationHash: requireHash(row.aiFoundationHash, "$reviewInput.authorityBindings.aiFoundationHash"),
+    evidenceAssetsHash: requireHash(row.evidenceAssetsHash, "$reviewInput.authorityBindings.evidenceAssetsHash")
   };
 }
 
@@ -965,6 +1098,259 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): Rep
     evidenceUse,
     ...(sourceSelection ? { sourceSelection } : {})
   };
+}
+
+/**
+ * Fails closed unless the Paid Q1 semantic annotation preserves the accepted
+ * Free annotation's meaning-bearing fields. The reviewer may supply a new
+ * reason, but cannot silently reinterpret the already accepted Q1 authority.
+ */
+export function assertPaidV3Q1AnnotationContinuity(paid: unknown, acceptedFree: unknown): void {
+  const paidAnnotation = parseQ1ContinuityAnnotation(paid, "$paidQ1Annotation");
+  const freeAnnotation = parseQ1ContinuityAnnotation(acceptedFree, "$acceptedFreeQ1Annotation");
+  for (const key of [
+    "questionId", "relevance", "entityRole", "targetPresence", "targetFirstSentence",
+    "targetRoles", "competitorEntityIds", "evidenceIds", "sourceIds"
+  ] as const) {
+    if (!sameCanonicalValue(paidAnnotation[key], freeAnnotation[key])) {
+      throw new TypeError(`Paid Q1 annotation contradicts accepted Free annotation at ${key}.`);
+    }
+  }
+}
+
+type Q1ContinuityAnnotation = Pick<
+  ReportSemanticAnswerAnnotation,
+  "questionId" | "relevance" | "entityRole" | "targetPresence" | "targetFirstSentence" |
+  "targetRoles" | "competitorEntityIds" | "evidenceIds" | "sourceIds"
+>;
+
+function parseQ1ContinuityAnnotation(value: unknown, path: string): Q1ContinuityAnnotation {
+  const row = strictRecord(value, path, ANSWER_ANNOTATION_KEYS);
+  const targetPresence = requireOneOf(row.targetPresence, ["present", "absent", "ambiguous"] as const, `${path}.targetPresence`);
+  const targetFirstSentence = row.targetFirstSentence === null
+    ? null
+    : requireNonnegativeInteger(row.targetFirstSentence, `${path}.targetFirstSentence`);
+  if (targetPresence === "present" && (typeof targetFirstSentence !== "number" || targetFirstSentence < 1)) {
+    throw new TypeError(`${path}.targetFirstSentence must be positive when target presence is present.`);
+  }
+  return {
+    questionId: requireBoundedText(row.questionId, `${path}.questionId`, MAX_ID_CHARS),
+    relevance: requireOneOf(row.relevance, ["responsive", "not_responsive", "blocked"] as const, `${path}.relevance`),
+    entityRole: requireOneOf(row.entityRole, ["target", "competitor", "mixed", "none", "ambiguous"] as const, `${path}.entityRole`),
+    targetPresence,
+    targetFirstSentence,
+    targetRoles: requireUniqueTextArray(row.targetRoles, `${path}.targetRoles`, MAX_REFS_PER_FIELD, MAX_ID_CHARS),
+    competitorEntityIds: requireUniqueTextArray(row.competitorEntityIds, `${path}.competitorEntityIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS),
+    evidenceIds: requireUniqueTextArray(row.evidenceIds, `${path}.evidenceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS),
+    sourceIds: requireUniqueTextArray(row.sourceIds, `${path}.sourceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS)
+  };
+}
+
+function sameCanonicalValue(left: unknown, right: unknown): boolean {
+  return canonicalJson(left) === canonicalJson(right);
+}
+
+interface SourceSelectionDraftProjection {
+  readonly kind: ReportSemanticSourceSelectionKind;
+  readonly questionId: string | null;
+  readonly sourceId: string | null;
+  readonly profileId: string | null;
+  readonly actionId: string | null;
+  readonly contributionRole: ReportSemanticSourceSelectionAnnotation["contributionRole"];
+  readonly targetState: ReportSemanticSourceSelectionAnnotation["targetState"];
+  readonly factorClassification: ReportSemanticSourceSelectionAnnotation["factorClassification"];
+  readonly actionFamily: ReportSemanticSourceSelectionAnnotation["actionFamily"];
+  readonly priority: ReportSemanticSourceSelectionAnnotation["priority"];
+  readonly relatedSourceRefs: readonly { questionId: string; sourceId: string }[];
+}
+
+function parsePaidReviewedSourceSelectionDraft(
+  value: unknown,
+  input: ReportSemanticReviewInput,
+  annotations: ReportSemanticAnnotations
+): SourceSelectionDiagnosisV1 {
+  const catalog = input.sourceSelectionCatalog;
+  const reviewed = annotations.sourceSelection;
+  if (!catalog || !reviewed) {
+    throw new TypeError("$reviewOutput.sourceSelectionDraft requires complete Paid source-selection authority.");
+  }
+  const root = requireRecord(value, "$reviewOutput.sourceSelectionDraft");
+  const projections: SourceSelectionDraftProjection[] = [];
+  const profileIds = new Set<string>();
+  const profileRefs = new Map<string, Array<{ questionId: string; sourceId: string }>>();
+  const profiles = requireArray(root.sourceProfiles, "$reviewOutput.sourceSelectionDraft.sourceProfiles", MAX_CATALOG_ROWS);
+  for (const [profileIndex, profileValue] of profiles.entries()) {
+    const path = `$reviewOutput.sourceSelectionDraft.sourceProfiles[${profileIndex}]`;
+    const profile = requireRecord(profileValue, path);
+    const profileId = requireBoundedText(profile.profileId, `${path}.profileId`, MAX_ID_CHARS);
+    if (profileIds.has(profileId)) throw new TypeError(`${path}.profileId must be unique.`);
+    profileIds.add(profileId);
+    const refs = requireArray(profile.sourceRefs, `${path}.sourceRefs`, MAX_REFS_PER_FIELD).map((value, refIndex) => {
+      const refPath = `${path}.sourceRefs[${refIndex}]`;
+      const ref = requireRecord(value, refPath);
+      return {
+        questionId: requireBoundedText(ref.questionId, `${refPath}.questionId`, MAX_ID_CHARS),
+        sourceId: requireBoundedText(ref.sourceId, `${refPath}.sourceId`, MAX_ID_CHARS)
+      };
+    });
+    profileRefs.set(profileId, refs);
+    for (const [index, contributionValue] of requireArray(
+      profile.contributions,
+      `${path}.contributions`,
+      MAX_CATALOG_ROWS
+    ).entries()) {
+      const itemPath = `${path}.contributions[${index}]`;
+      const contribution = requireRecord(contributionValue, itemPath);
+      projections.push({
+        kind: "contribution",
+        questionId: requireBoundedText(contribution.questionId, `${itemPath}.questionId`, MAX_ID_CHARS),
+        sourceId: requireBoundedText(contribution.sourceId, `${itemPath}.sourceId`, MAX_ID_CHARS),
+        profileId,
+        actionId: null,
+        contributionRole: requireOneOf(
+          contribution.role,
+          ["candidate_discovery", "definition_or_framework", "first_party_capability", "constraint_or_risk", "comparison", "third_party_validation", "other"] as const,
+          `${itemPath}.role`
+        ),
+        targetState: null,
+        factorClassification: null,
+        actionFamily: null,
+        priority: null,
+        relatedSourceRefs: refs
+      });
+    }
+    for (const [index, gapValue] of requireArray(
+      profile.targetGaps,
+      `${path}.targetGaps`,
+      MAX_CATALOG_ROWS
+    ).entries()) {
+      const itemPath = `${path}.targetGaps[${index}]`;
+      const gap = requireRecord(gapValue, itemPath);
+      const sourceEvidenceRefs = requireArray(
+        gap.sourceEvidenceRefs,
+        `${itemPath}.sourceEvidenceRefs`,
+        MAX_REFS_PER_FIELD
+      ).map((value, refIndex) => {
+        const refPath = `${itemPath}.sourceEvidenceRefs[${refIndex}]`;
+        const ref = requireRecord(value, refPath);
+        return {
+          questionId: requireBoundedText(ref.questionId, `${refPath}.questionId`, MAX_ID_CHARS),
+          sourceId: requireBoundedText(ref.sourceId, `${refPath}.sourceId`, MAX_ID_CHARS)
+        };
+      });
+      projections.push({
+        kind: "target_state",
+        questionId: null,
+        sourceId: null,
+        profileId,
+        actionId: null,
+        contributionRole: null,
+        targetState: requireOneOf(
+          gap.targetState,
+          ["present", "weak", "missing", "unavailable"] as const,
+          `${itemPath}.targetState`
+        ),
+        factorClassification: null,
+        actionFamily: null,
+        priority: null,
+        relatedSourceRefs: sourceEvidenceRefs.length > 0 ? sourceEvidenceRefs : refs
+      });
+    }
+    for (const [index, factorValue] of requireArray(
+      profile.observableFactors,
+      `${path}.observableFactors`,
+      MAX_CATALOG_ROWS
+    ).entries()) {
+      const itemPath = `${path}.observableFactors[${index}]`;
+      const factor = requireRecord(factorValue, itemPath);
+      projections.push({
+        kind: "factor",
+        questionId: null,
+        sourceId: null,
+        profileId,
+        actionId: null,
+        contributionRole: null,
+        targetState: null,
+        factorClassification: requireOneOf(
+          factor.factor,
+          ["problem_match", "factual_specificity", "entity_clarity", "source_authority", "accessibility", "freshness"] as const,
+          `${itemPath}.factor`
+        ),
+        actionFamily: null,
+        priority: null,
+        relatedSourceRefs: refs
+      });
+    }
+  }
+  for (const [actionIndex, actionValue] of requireArray(
+    root.targetActions,
+    "$reviewOutput.sourceSelectionDraft.targetActions",
+    MAX_CATALOG_ROWS
+  ).entries()) {
+    const path = `$reviewOutput.sourceSelectionDraft.targetActions[${actionIndex}]`;
+    const action = requireRecord(actionValue, path);
+    const relatedProfileIds = requireUniqueTextArray(
+      action.relatedProfileIds,
+      `${path}.relatedProfileIds`,
+      MAX_REFS_PER_FIELD,
+      MAX_ID_CHARS
+    );
+    const relatedSourceRefs = relatedProfileIds.flatMap((profileId) => profileRefs.get(profileId) ?? []);
+    projections.push({
+      kind: "action",
+      questionId: null,
+      sourceId: null,
+      profileId: relatedProfileIds[0] ?? null,
+      actionId: requireBoundedText(action.actionId, `${path}.actionId`, MAX_ID_CHARS),
+      contributionRole: null,
+      targetState: null,
+      factorClassification: null,
+      actionFamily: requireOneOf(
+        action.actionFamily,
+        ["first_party_fact_page", "entity_relationship", "accessible_structure", "freshness", "third_party_validation"] as const,
+        `${path}.actionFamily`
+      ),
+      priority: requireOneOf(action.priority, ["high", "medium", "low"] as const, `${path}.priority`),
+      relatedSourceRefs
+    });
+  }
+  if (projections.length !== catalog.length) {
+    throw new TypeError("$reviewOutput.sourceSelectionDraft must cover every source-selection catalog item exactly once.");
+  }
+  for (const [index, projection] of projections.entries()) {
+    const path = `$reviewOutput.sourceSelectionDraft.catalogProjection[${index}]`;
+    const expected = catalog[index]!;
+    const annotation = reviewed[index]!;
+    requireExact(projection.kind, expected.kind, `${path}.kind`);
+    requireExact(projection.profileId, expected.profileId, `${path}.profileId`);
+    requireExact(projection.actionId, expected.actionId, `${path}.actionId`);
+    if (expected.kind === "contribution") {
+      requireExact(projection.questionId, expected.questionId, `${path}.questionId`);
+      requireExact(projection.sourceId, expected.sourceId, `${path}.sourceId`);
+    } else {
+      assertCatalogReferenceIsRepresented(expected, projection.relatedSourceRefs, path);
+    }
+    requireExact(projection.contributionRole, annotation.contributionRole, `${path}.contributionRole`);
+    requireExact(projection.targetState, annotation.targetState, `${path}.targetState`);
+    requireExact(projection.factorClassification, annotation.factorClassification, `${path}.factorClassification`);
+    requireExact(projection.actionFamily, annotation.actionFamily, `${path}.actionFamily`);
+    requireExact(projection.priority, annotation.priority, `${path}.priority`);
+  }
+  return value as SourceSelectionDiagnosisV1;
+}
+
+function assertCatalogReferenceIsRepresented(
+  expected: ReportSemanticSourceSelectionCatalogEntry,
+  refs: readonly { questionId: string; sourceId: string }[],
+  path: string
+): void {
+  if (expected.questionId === null && expected.sourceId === null) return;
+  if (!refs.some((ref) =>
+    (expected.questionId === null || ref.questionId === expected.questionId)
+    && (expected.sourceId === null || ref.sourceId === expected.sourceId)
+  )) {
+    throw new TypeError(`${path} does not preserve the catalog-owned question/source identity.`);
+  }
 }
 
 export function deriveFreeObservationMetrics(review: ReportSemanticReviewOutput): { targetMentionCount: number; competitorMentionCount: number } {

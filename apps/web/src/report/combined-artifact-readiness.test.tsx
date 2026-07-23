@@ -49,6 +49,7 @@ import {
   localizedProviderDiscoveryLimitation,
   materializeReadyArtifact,
   prepareCombinedGeoReportV3,
+  prepareCombinedGeoReportV3SemanticDraft,
   renderCanonicalCombinedArtifactHtml,
   restoreWebsiteReportDomainsForArtifact,
   type PrepareCombinedGeoReportV3Input
@@ -369,14 +370,38 @@ describe("combined artifact canonical rendering",()=>{
     expect(readinessGuardHarness.run).not.toHaveBeenCalled();
   });
 
+  it("assembles a pure V3 semantic draft without legacy diagnosis parsing or artifact side effects", () => {
+    const input = v3PreparationInput();
+    const { sourceSelectionDiagnosis: _legacyDiagnosis, ...carrier } = input;
+    void _legacyDiagnosis;
+    const answerCards = input.answerCards.map((card, index) => {
+      if (index === 0) return card;
+      const { geoDiagnosis: _diagnosis, ...draft } = card;
+      void _diagnosis;
+      return draft;
+    }) as never;
+    const draft = prepareCombinedGeoReportV3SemanticDraft({ ...carrier, answerCards });
+    expect(draft.answerCards[1]).not.toHaveProperty("geoDiagnosis");
+    expect(draft).not.toHaveProperty("sourceSelectionDiagnosis");
+    expect(draft).not.toHaveProperty("semanticReviewReceipt");
+    expect(readinessSideEffects.exportPdf).not.toHaveBeenCalled();
+    expect(readinessSideEffects.storage.put).not.toHaveBeenCalled();
+  });
+
   it("lets deferred preparation accept reviewed causal-looking prose while retaining V3 structure", () => {
     const input = v3PreparationInput();
     input.publicSourceForensics = structuredClone(input.publicSourceForensics);
     input.publicSourceForensics.executiveVerdict.text = "ChatGPT recommended this company and guarantees first place.";
     expect(() => prepareCombinedGeoReportV3(input)).toThrow(/Prohibited public-search attribution claim/u);
-    const deferred = prepareCombinedGeoReportV3(input, { semanticValidation: "deferred" });
+    const deferred = prepareCombinedGeoReportV3(input, { semanticValidation: "deferred", reviewedReceiptVerified: true });
     expect(deferred.publicSourceForensics.executiveVerdict.text).toContain("guarantees first place");
     expect(deferred.answerCards).toHaveLength(3);
+    expect(readinessSideEffects.exportPdf).not.toHaveBeenCalled();
+  });
+
+  it("refuses deferred V3 preparation without caller-supplied root-bound receipt verification", () => {
+    expect(() => prepareCombinedGeoReportV3(v3PreparationInput(), { semanticValidation: "deferred" }))
+      .toThrow(/root-bound receipt verification/u);
     expect(readinessSideEffects.exportPdf).not.toHaveBeenCalled();
   });
 

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type PaidV3SemanticAnswerCardDraft, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -320,6 +320,14 @@ export interface BuildReadyCombinedArtifactV3Input extends PrepareCombinedGeoRep
   onReportPrepared?: (report: CombinedGeoReportV3) => void | Promise<void>;
 }
 
+export interface PrepareCombinedGeoReportV3SemanticDraftInput extends Omit<PrepareCombinedGeoReportV3Input, "answerCards" | "sourceSelectionDiagnosis"> {
+  answerCards: [PaidV3SemanticAnswerCardDraft, PaidV3SemanticAnswerCardDraft, PaidV3SemanticAnswerCardDraft];
+}
+
+export type CombinedGeoReportV3SemanticDraft = Omit<CombinedGeoReportV3, "answerCards" | "sourceSelectionDiagnosis" | "semanticReviewReceipt"> & {
+  answerCards: [PaidV3SemanticAnswerCardDraft, PaidV3SemanticAnswerCardDraft, PaidV3SemanticAnswerCardDraft];
+};
+
 export async function buildReadyCombinedArtifactV3(input: BuildReadyCombinedArtifactV3Input): Promise<ReadyCombinedArtifactV3> {
   await assertReadyEvidenceAssets(input.evidenceAssets);
   const report = prepareCombinedGeoReportV3Core(input, {});
@@ -329,15 +337,43 @@ export async function buildReadyCombinedArtifactV3(input: BuildReadyCombinedArti
 
 export function prepareCombinedGeoReportV3(
   input: PrepareCombinedGeoReportV3Input,
-  options: { semanticValidation?: "legacy" | "deferred" } = {}
+  options: { semanticValidation?: "legacy" | "deferred"; reviewedReceiptVerified?: boolean } = {}
 ): CombinedGeoReportV3 {
+  assertDeferredReceiptAuthority(options);
   return prepareCombinedGeoReportV3Core(input, options);
+}
+
+/**
+ * Pure pre-review carrier assembly for marker-selected Paid V3 only. It is
+ * intentionally not parsed, rendered, materialized, or persisted: Q2/Q3
+ * diagnosis, source selection, and the receipt are supplied by the one
+ * semantic-review application before the ordinary deferred readiness seam.
+ */
+export function prepareCombinedGeoReportV3SemanticDraft(
+  input: PrepareCombinedGeoReportV3SemanticDraftInput
+): CombinedGeoReportV3SemanticDraft {
+  return assembleCombinedGeoReportV3(input as unknown as Omit<PrepareCombinedGeoReportV3Input, "sourceSelectionDiagnosis"> & { answerCards: readonly PaidV3SemanticAnswerCardDraft[] }) as CombinedGeoReportV3SemanticDraft;
 }
 
 function prepareCombinedGeoReportV3Core(
   input: PrepareCombinedGeoReportV3Input,
   options: { semanticValidation?: "legacy" | "deferred" }
 ): CombinedGeoReportV3 {
+  const assembled = assembleCombinedGeoReportV3(input);
+  const report = requireReadyCombinedGeoReportV3(assembled, { semanticValidation: options.semanticValidation ?? "legacy" });
+  if ((options.semanticValidation ?? "legacy") === "legacy") {
+    assertCombinedGeoReportLanguage(
+      { ...report, version: 1, artifactContract: "combined_geo_report_v1", businessQuestionAnswers: undefined },
+      input.languageValidationScope
+    );
+  }
+  return report;
+}
+
+function assembleCombinedGeoReportV3(input: Omit<PrepareCombinedGeoReportV3Input, "sourceSelectionDiagnosis"> & {
+  answerCards: readonly PaidV3SemanticAnswerCardDraft[];
+  sourceSelectionDiagnosis?: SourceSelectionDiagnosisV1;
+}): Record<string, unknown> {
   const forensic = input.publicSourceForensics;
   const systemCopy = combinedArtifactSystemCopy(forensic.locale, {
     technicalPages: input.technicalReport.pages.length,
@@ -352,7 +388,7 @@ function prepareCombinedGeoReportV3Core(
     coverage: { ...input.aiReport.coverage, samplingMethod: systemCopy.samplingMethod, limitations: systemCopy.limitations }
   }, input.targetUrl);
   const localizedTechnicalReport = localizeTechnicalReportForArtifact(input.technicalReport, forensic.locale);
-  const report = requireReadyCombinedGeoReportV3({
+  return {
     version: 3,
     artifactContract: "combined_geo_report_v3",
     productCode: "recommendation_forensics_v1",
@@ -379,7 +415,7 @@ function prepareCombinedGeoReportV3Core(
     },
     businessQuestionSet: input.businessQuestionSet,
     answerCards: input.answerCards,
-    sourceSelectionDiagnosis: input.sourceSelectionDiagnosis,
+    ...(input.sourceSelectionDiagnosis ? { sourceSelectionDiagnosis: input.sourceSelectionDiagnosis } : {}),
     engineProvenance: input.engineProvenance,
     providerDiscovery: input.providerDiscovery,
     publicSourceForensics: forensic,
@@ -396,21 +432,15 @@ function prepareCombinedGeoReportV3Core(
       ])],
       nonCausal: true
     }
-  }, { semanticValidation: options.semanticValidation ?? "legacy" });
-  if ((options.semanticValidation ?? "legacy") === "legacy") {
-    assertCombinedGeoReportLanguage(
-      { ...report, version: 1, artifactContract: "combined_geo_report_v1", businessQuestionAnswers: undefined },
-      input.languageValidationScope
-    );
-  }
-  return report;
+  };
 }
 
 export async function materializePreparedCombinedArtifactV3(
   value: unknown,
   evidenceAssets: ReportEvidenceAssetRow[],
-  options: { semanticValidation?: "legacy" | "deferred" } = {}
+  options: { semanticValidation?: "legacy" | "deferred"; reviewedReceiptVerified?: boolean } = {}
 ): Promise<ReadyCombinedArtifactV3> {
+  assertDeferredReceiptAuthority(options);
   await assertReadyEvidenceAssets(evidenceAssets);
   const report = requireReadyCombinedGeoReportV3(value, {
     semanticValidation: options.semanticValidation ?? "legacy"
@@ -424,6 +454,12 @@ export async function materializePreparedCombinedArtifactV3(
   const html = renderCanonicalCombinedArtifactHtml(model);
   assertCombinedV3HtmlCompleteness(report, html);
   return materializeReadyArtifact(report, model, html);
+}
+
+function assertDeferredReceiptAuthority(options: { semanticValidation?: "legacy" | "deferred"; reviewedReceiptVerified?: boolean }): void {
+  if (options.semanticValidation === "deferred" && options.reviewedReceiptVerified !== true) {
+    throw new TypeError("Deferred Paid V3 artifact handling requires caller-supplied root-bound receipt verification.");
+  }
 }
 
 export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, html: string): void {

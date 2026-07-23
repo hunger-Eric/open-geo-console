@@ -2,13 +2,14 @@
 
 ## ReportSemanticReview staged program - Phase 2B3 marker-present Paid V3 integration
 
-Status: Phase 2B3a is `COMPLETE`; Phase 2B3b remains
-`NOT SCOPED / NOT APPROVED`. The completed 2B3a unit is limited to its exact
-default-legacy, runtime-unreachable production/test allowlist below. It does
-not authorize marker activation, a real provider call, an artifact/job
-mutation, Phase 2B3b implementation, push, deployment, or any external action.
-Its acceptance and independent-review thresholds permit exactly one local
-Phase 2B3a commit; no push is authorized.
+Status: Phase 2B3a is `COMPLETE`; the exact Phase 2B3b scope is now
+`APPROVED`. The completed 2B3a unit remains
+limited to its default-legacy, runtime-unreachable production/test allowlist.
+The Phase 2B3b implementation approval authorizes only the exact local
+production/test allowlist and behavior below; it does not authorize marker
+activation, a real provider call, artifact/job mutation outside disposable
+tests, push, deployment, or external action. Phase 2B3a is committed locally at
+`49b0ea34d3f270565e7ba5907adea18dfb312056`; no push is authorized.
 
 ### Authority, baseline, and safety decomposition
 
@@ -20,8 +21,9 @@ Phase 2B3a commit; no push is authorized.
   `combined_geo_report_v3` only. V1/V2, formal Paid V4, corrections,
   replacements, artifact refresh, and historical authorities remain legacy
   and are not part of this phase.
-- Phase 2A, 2B1, and 2B2 are complete local prerequisites. Their completion
-  does not approve this section or activate the root marker.
+- Phase 2A, 2B1, 2B2, and 2B3a are complete local prerequisites. Their
+  completion does not approve the FROZEN Phase 2B3b implementation or activate
+  the root marker.
 
 The minimum correct Paid integration still crosses two different risk
 classes: additive/default-legacy deferral and preparation seams, then the
@@ -37,8 +39,9 @@ without changing the approved product architecture:
    drafted and approved, may let the immutable root marker select those seams
    and adopt exactly one unified Paid review before artifact materialization.
 
-Only Phase 2B3a is scoped below. Phase 2B3b is an unapproved future gate;
-approval of 2B3a grants it no implementation authority.
+Phase 2B3a completion is recorded below. Phase 2B3b now has a separate exact
+FROZEN scope and still has no implementation authority until that scope is
+explicitly approved.
 
 ### Audited active-chain evidence and exclusions
 
@@ -237,8 +240,9 @@ repository rule and cannot add a runtime caller or weaken a gate.
 - No real model call, historical or business-database mutation, report/job
   creation or recovery, deployment, push, marker activation, or other external
   action occurred.
-- Independent final review verdict: `CONFORMANT`. The local commit threshold
-  is met; Phase 2B3b remains `NOT SCOPED / NOT APPROVED`.
+- Independent final review verdict: `CONFORMANT`. The Phase 2B3a local commit
+  threshold was met; the later Phase 2B3b scope was separately approved for
+  local implementation on 2026-07-23.
 
 ### Phase 2B3a hard stops and external actions
 
@@ -253,22 +257,338 @@ No live model call, crawl, report/job creation or recovery, database mutation
 outside disposable tests, payment, credit, refund, email, Docker build,
 deployment, push, publication, or marker activation is authorized.
 
-## Future gate - Phase 2B3b marker-present Paid V3 adoption
+## Phase 2B3b exact FROZEN gate - marker-present Paid V3 adoption
 
-Status: `NOT SCOPED / NOT APPROVED`.
+Status: `COMPLETE`. On 2026-07-23 the user first explicitly approved the
+unified-review-output extension decision and requested this exact FROZEN scope,
+then explicitly approved it with
+`批准 Phase 2B3b FROZEN 范围并开始执行`. This authorizes local implementation,
+debugging, verification, and one local commit only within the exact allowlist,
+budgets, locked behavior, and acceptance set below. The implementation later
+received an independent `CONFORMANT` verdict and authorization for exactly one
+local commit without push, deployment, marker activation, Staging, production,
+or live-model action.
 
-Only after Phase 2B3a is complete and independently verified may a new
-read-only audit draft the exact 2B3b allowlist, budgets, and acceptance set.
-That future scope must cover root-marker-only routing, marker-absent legacy
-regression, and marker-aware `parseReadyFreeTeaserCheckpoint` verification of
-the exact reviewed Free Q1 card, diagnosis, evidence identity, and receipt with
-zero Q1 regeneration. It must require one Paid review after all customer prose,
-one atomic checkpoint write containing the corrected Paid report plus the full
-input/output/applied receipt authority, model-free resume, and immediate
-receipt re-verification before both materialization and terminalization. It
-must also prove model/input/non-prose/evidence/ID/hash fail-closed behavior and
-no activation or unauthorized external action. No Phase 2B3b production or
-test file is authorized by this document.
+Measured outcome:
+
+- Production diff: `+2,029/-68` within the `+2,800/-650` ceiling.
+- Test diff: `+1,837/-13` within the `+3,800/-850` ceiling.
+- Exact allowlisted focus with
+  `OGC_RUN_DISPOSABLE_RECOVERY_POSTGRES=1`: 12/12 files and 167/167 tests
+  passed, including the disposable PostgreSQL recovery suite at 5/5; its
+  test container was removed afterward.
+- Full `npm test`: 302 files passed, 46 skipped; 2,810 tests passed, 188
+  skipped. `npm run lint`, `npm run build`, and `git diff --check` passed.
+- Independent final verdict: `CONFORMANT`; exactly one local Phase 2B3b
+  commit authorized. Push, deployment, marker activation, protected-Staging,
+  real model/report/payment runs, and production remain unauthorized.
+
+### Phase 2B3b objective and exact baseline
+
+For an ordinary Paid V3 `combined_geo_report_v3` job whose immutable root
+checkpoint already carries `report-semantic-review-v1`, adopt exactly one
+unified semantic review after the complete Paid draft inputs exist and before
+HTML/PDF/storage or terminalization. The same call must review/correct all
+existing Paid customer prose and return the complete evidence-bound
+`SourceSelectionDiagnosisV1` draft that deferred mode cannot construct
+programmatically. Pure application then builds Q2/Q3 `geoDiagnosis`, validates
+the reviewed source-selection draft, prepares the final report, and persists
+the report plus full review authority in one checkpoint write.
+
+Marker-absent Paid V3 must retain its existing routing, prompts, model-call
+counts, semantic heuristics, checkpoint payload, report, artifact bytes, and
+terminalization sequence. This phase does not seed or activate the marker.
+
+- Baseline branch: `codex/v4-answer-optimization-scope-reset`.
+- Clean production baseline HEAD:
+  `49b0ea34d3f270565e7ba5907adea18dfb312056`.
+- The only pre-scope working-tree change is this scope document.
+- Prerequisites: committed Phase 2B3a seams, immutable Phase 2A carrier, and
+  completed marker-present Free Phase 2B2.
+- Product lineage: ordinary Free V4 -> ordinary Paid V3
+  `recommendation_forensics_v1` / `combined_geo_report_v3` only.
+- V1/V2, formal Paid V4, corrections, replacements, artifact refresh,
+  historical jobs/reports, and already-created marker-absent authorities remain
+  legacy and out of scope.
+
+### Exact Phase 2B3b production allowlist
+
+1. `packages/ai-report-engine/src/report-semantic-review.ts`
+   - Extend only the Paid output/receipt contract with a complete reviewed
+     source-selection draft and its canonical hash.
+   - Enforce exact ordered catalog coverage, ID/evidence ownership, expected
+     provider/model identity, and cross-consistency between the draft and
+     semantic annotations.
+   - Do not change Free V4 output meaning or add a provider operation.
+2. `packages/ai-report-engine/src/report-semantic-review-manifests.ts`
+   - Add pure Paid V3 application and projection-verification helpers.
+   - Apply declared field corrections, mechanically construct Q2/Q3
+     `geoDiagnosis` from exact answer annotations, validate the reviewed
+     source-selection draft through the existing deferred parser, and preserve
+     every non-prose field.
+3. `packages/ai-report-engine/src/combined-geo-report-v3.ts`
+   - Carry a structurally parsed Paid semantic-review receipt on reviewed V3
+     reports.
+   - A receipt-bearing report uses deferred customer-prose parsing and verifies
+     the Paid lifecycle/receipt shape; a receipt-absent report keeps the exact
+     legacy parser behavior.
+4. `apps/web/src/worker/answer-first-v3.ts`
+   - Export/thread only the already-defined deferred answer-card draft and
+     resume authority required by the Paid integration.
+   - Marker-absent answer generation and checkpoint behavior remain unchanged.
+5. `apps/web/src/worker/source-selection-diagnosis.ts`
+   - Admit only the complete, already reviewed source-selection draft into the
+     existing deferred structural/evidence validator.
+   - It may not invoke the legacy constructor in marker-present mode.
+6. `apps/web/src/worker/report-v4-free-teaser.ts`
+   - Add marker-aware Paid seed extraction that re-parses and externally
+     re-verifies the exact reviewed Free Q1 checkpoint/projection.
+   - Free generation, metrics, prompts, review calls, and ready-state writes
+     must not change.
+7. `apps/web/src/report/combined-artifact-readiness.tsx`
+   - Add receipt-aware reviewed-report preparation/materialization seams.
+   - Marker-present materialization uses deferred structural parsing and the
+     verified receipt; marker-absent legacy ordering and bytes remain unchanged.
+8. `apps/web/src/worker/paid-v3-semantic-review.ts` (new)
+   - Own exact Paid manifest/catalog construction, the single injected
+     `websiteSynthesis` review invocation, Free Q1 continuity checks, pure
+     application, final-report projection verification, and model-free resume
+     verification.
+9. `apps/web/src/worker/processor.ts`
+   - Read only the immutable root marker, thread deferred mode through the
+     already-prepared Paid seams, persist the reviewed projection atomically,
+     and enforce pre-materialization and pre-terminalization re-verification.
+10. `docs/ACTIVE-CHANGE-SCOPE.md`
+    - Record only scope status, measured outcome, budgets, and acceptance
+      evidence.
+
+Maximum production-code diff across the nine named source files:
+`+2,800/-650` lines. Documentation is excluded. This is a hard ceiling, not an
+implementation target. No unlisted production file may change.
+
+### Exact Phase 2B3b test allowlist
+
+1. `packages/ai-report-engine/src/report-semantic-review.test.ts`
+2. `packages/ai-report-engine/src/report-semantic-review-manifests.test.ts`
+3. `packages/ai-report-engine/src/report-semantic-review-provider-adapter.test.ts`
+4. `packages/ai-report-engine/src/combined-geo-report-v3.test.ts`
+5. `apps/web/src/worker/answer-first-v3.test.ts`
+6. `apps/web/src/worker/source-selection-diagnosis.test.ts`
+7. `apps/web/src/worker/report-v4-free-teaser.test.ts`
+8. `apps/web/src/report/combined-artifact-readiness.test.tsx`
+9. `apps/web/src/worker/paid-v3-semantic-review.test.ts` (new)
+10. `apps/web/src/worker/processor.test.ts`
+11. `apps/web/src/worker/processor-contract.test.ts`
+12. `apps/web/src/db/recovery-state.postgres.test.ts`
+
+Maximum test diff across the twelve named test files: `+3,800/-850` lines. A
+verification-only amendment may change only these named tests under the
+repository rule and cannot weaken a gate, add a runtime caller, or change
+production behavior.
+
+### Locked semantic authority and application behavior
+
+1. Root marker selection is the only route selector. Environment variables,
+   nested objects, timestamps, job age, retry state, provider availability, or
+   the presence of a partial projection may not infer or activate reviewed
+   mode. Unknown marker values fail closed. A receipt-shaped report by itself
+   is never sufficient to select the Worker generation, resume, preparation,
+   or materialization route.
+2. Marker-absent Paid V3 executes the exact pre-2B3b route. It must not contain
+   a Paid semantic projection or receipt and must not invoke any new helper.
+3. Marker-present page analysis, website synthesis, public-source draft
+   construction, answer-first collection, per-question diagnosis, combined
+   parsing, and artifact preparation use their approved deferred seams. They
+   retain JSON/schema, URL, evidence, excerpt, ID, hash, leakage, and
+   cardinality checks while suppressing only program-owned customer-meaning
+   judgments.
+4. The accepted marker-bearing Free checkpoint is re-read before any Paid
+   answer or diagnosis call. Its root marker, report, question-set ID/content
+   identity, Q1 question, answer result/card, sources, answer/source hashes,
+   `geoDiagnosis`, V4 diagnosis, admission evidence identity, semantic input,
+   output, applied projection, and receipt must reverify exactly.
+5. Paid Q1 is read-only. Q1 provider calls and Q1 diagnosis-enhancer calls are
+   exactly zero. Paid answer annotations and final Q1 content must agree with
+   the accepted Free Q1 semantic authority; they cannot correct, replace, or
+   reinterpret it.
+6. Questions remain immutable. `duplicate`, `not_responsive`, `blocked`,
+   missing, ambiguous, contradictory, unknown-ID, cross-owner, or reordered
+   review results fail closed; the program may not rewrite a question and keep
+   its previous evidence.
+7. The one Paid review call uses the already locked `websiteSynthesis`
+   operation/model identity. It both reviews/corrects the declared Paid prose
+   and returns the complete source-selection draft. No second semantic model,
+   field-level correction loop, local deletion repair, or fallback call is
+   allowed.
+8. The source-selection catalog is constructed only from exact question,
+   source, evidence, target-page, profile, factor-slot, and action-slot
+   identities. The model supplies every customer-prose and semantic value
+   needed by the final diagnosis, including contribution role and summary,
+   basis/confidence, factor classification and observation, target state and
+   comparison, profile/audit/status, aggregate pattern prose, action
+   family/priority/title/rationale, and limitation prose.
+9. The reviewed source-selection draft must have exact catalog coverage/order
+   and exact semantic agreement with its annotations. Its URLs, excerpts,
+   evidence references, question/source/profile/action ownership, enums,
+   cardinalities, and hashes are program-validated. The legacy
+   `buildSourceSelectionDiagnosisV1` semantic constructor may not run, persist,
+   materialize, terminalize, or serve as fallback for a marker-present job.
+10. Pure application constructs Q2/Q3 target presence, first-sentence
+    position, target roles, competitor IDs, cited ownership, and retest
+    identity only from verified annotations plus exact structural catalogs. It
+    may not use aliases, keywords, character counts, regexes, ordinal meaning,
+    ownership-category shortcuts, or text length.
+11. Every Paid customer-prose field that exists before the review call has
+    exactly one ordered manifest entry with original-text hash, mutability,
+    question owner, and allowed evidence/source IDs. Source-selection prose
+    returned by the same call is covered by the canonical review/draft hash and
+    catalog cross-verification. No unreviewed customer prose may be appended
+    after the call except deterministic rendering of already verified values.
+12. The final `CombinedGeoReportV3` carries the verified Paid receipt. Only a
+    caller that has already verified the matching root marker and complete
+    root-bound persisted projection may use that receipt to select deferred
+    artifact parsing. Receipt absence selects legacy parsing; a detached,
+    forged, or merely shape-valid receipt cannot bypass legacy semantic gates.
+    After root-bound verification, the final reviewed artifact never re-runs
+    language wordlists, terminology substitution, causal/ranking regexes,
+    answer responsiveness, alias classification, or other programmatic
+    semantic gates.
+
+### Exact input, receipt, checkpoint, and artifact binding
+
+The canonical Paid review input and persisted projection must bind:
+
+- lifecycle, locale, target identity, expected provider/model, immutable three
+  questions, exact ordered field manifest, sources, evidence, entities, answer
+  subjects, and complete source-selection catalog;
+- report/order/job/original-paid-job IDs, artifact contract/revision ID/revision,
+  question-set ID and content identity, and root marker value;
+- exact reviewed Free Q1 input/output/applied/receipt hashes, question, answer,
+  diagnosis, source/evidence identities, answer/source hashes, and admission
+  snapshot identity;
+- answer-first identity, answer/source hashes, per-question diagnosis identity,
+  public-source and provider-discovery checkpoint/snapshot identities;
+- technical/AI foundation hashes, evidence-asset IDs/content hashes, commercial
+  snapshot identities, and every non-manifest prepared-report field.
+
+The verified receipt must bind the exact input hash, review hash, expected
+provider/model, `pass|corrected` decision, ordered field-coverage hash,
+applied-prose hash, annotations hash, source-selection-draft hash, unchanged
+non-prose projection hash, and final reviewed-report-projection hash. The
+canonical final reviewed-report projection is the complete final
+`CombinedGeoReportV3` with its semantic-review receipt omitted. Its hash is
+computed before the receipt is attached and is always recomputed from that
+receipt-excluded projection, so the receipt never hashes itself.
+
+The first `artifact_verification` checkpoint for a marker-present Paid job must
+atomically contain:
+
+- the exact corrected `CombinedGeoReportV3`;
+- immutable commercial snapshot refs; and
+- one complete Paid semantic projection containing the canonical input,
+  parsed output, pure applied result/receipt, and final reviewed-report hash.
+
+No HTML render, Chromium/PDF operation, storage write, artifact activation, or
+terminalization may occur before that checkpoint write succeeds. The existing
+checkpoint CAS/revision writer remains the only persistence boundary; no
+schema, table, column, transaction meaning, or direct SQL update is added.
+
+A resume from `artifact_verification` or `terminalization` must:
+
+1. read the root marker and require the matching complete projection;
+2. rebuild and reverify Free Q1 continuity, catalogs, input, output, applied
+   receipt, non-prose projection, source-selection draft, and final report hash;
+3. make zero search, page-analysis, synthesis, answer, diagnosis, reviewer, or
+   source-selection semantic calls;
+4. reverify immediately before
+   `materializePreparedCombinedArtifactV3`; and
+5. reverify the persisted report equals `ready.report` immediately before the
+   unchanged terminalization function is called.
+
+Marker-present partial projection, marker-absent projection, stale report,
+missing receipt, or any identity/hash mismatch fails closed without artifact
+or commercial success.
+
+### Phase 2B3b acceptance matrix
+
+1. **Contract completeness:** focused contract tests prove every Paid prose
+   field and every required source-selection value has exactly one manifest,
+   catalog, annotation, or reviewed-draft owner. Missing, extra, reordered, or
+   cross-owned coverage fails.
+2. **Legacy equality:** paired tests prove marker absence preserves exact
+   routing, prompt/model counts, checkpoint writes, report object, parser
+   behavior, materialization order, and artifact bytes at the integration
+   seams. A repository non-test callsite audit must account for all deferred
+   selections and show they are root-marker guarded.
+3. **Free continuity:** marker-aware tests tamper individually with the Free
+   marker, question set, Q1 text, answer/source hashes, source/evidence IDs,
+   diagnosis, admission identity, model, input/output/applied projection, and
+   receipt. Every case fails before a Paid model call. Valid Q1 answer and
+   diagnosis call counts are zero.
+4. **Single review:** a fresh marked Paid fixture invokes exactly one
+   `websiteSynthesis` semantic review after all required drafts/catalogs exist.
+   Transport exhaustion, malformed JSON, wrong model, blocked output,
+   incomplete fields, or incomplete source-selection output produces no
+   artifact side effect and no local repair/fallback.
+5. **Pure application:** tests prove Q2/Q3 `geoDiagnosis` and the complete
+   `SourceSelectionDiagnosisV1` equal only verified model annotations/output
+   plus structural catalogs. Mixed-language brands and new professional terms
+   pass without a program wordlist edit.
+6. **Tamper rejection:** separate tests alter input hash, field order/text hash,
+   evidence/source ownership, annotation, source-selection draft, applied
+   prose, non-prose field, receipt, model identity, snapshot identity, artifact
+   revision, and final report hash. All fail closed.
+7. **Atomic checkpoint ordering:** mocked Worker integration proves the
+   corrected report and full projection enter one successful
+   `artifact_verification` checkpoint before any render/PDF/storage call.
+8. **Persisted resume:** the allowlisted disposable PostgreSQL recovery test
+   persists a genuine marker-present checkpoint through the existing CAS
+   boundary, injects failure after that boundary, then resumes with zero model
+   calls and the same report/projection. A fabricated in-memory checkpoint
+   alone is insufficient evidence.
+9. **Materialization and terminalization:** receipt/projection verification is
+   observed immediately before materialization and again before terminalization;
+   `ready.report` exactly equals the persisted report, while structural,
+   evidence, safe-URL, HTML-completeness, PDF-readiness, and storage checks
+   remain active.
+10. **Repository gates:** all focused tests pass, followed by `npm test`,
+    `npm run lint`, `npm run build`, and `git diff --check`. Before one local
+    commit, compare every changed path and measured numstat with this allowlist
+    and both budgets, then obtain one independent final `CONFORMANT` verdict.
+
+### Forbidden subsystems, external actions, and stop rules
+
+Forbidden production changes include schema/migrations, database transaction
+meaning, commerce/payment/credit/refund/email/access, terminalization semantics,
+crawling, search fanout, provider discovery, passage selection, eligibility,
+evidence grading, entity resolution, provider adapters, provider/model
+configuration, operation identity, environment activation, dependencies, UI
+redesign, V1/V2, Paid V4, corrections, replacements, artifact refresh, and
+historical authorities.
+
+Authorized external actions: none. Tests may use mocks and an explicitly
+disposable local PostgreSQL database only. The allowlisted PostgreSQL suite may
+create and delete isolated test-only report/job/checkpoint fixture rows and
+simulate recovery inside that disposable database; those rows are not customer,
+historical, Staging, or production authorities. No live model call, crawl,
+non-test report/job creation or recovery, business/Staging/production database
+mutation, Sandbox payment, refund, email, Docker build, deployment, push,
+publication, or marker activation is authorized.
+
+After explicit approval of this exact FROZEN scope, ordinary implementation,
+debugging, and verification inside the allowlist continue automatically. Stop
+as `DEVIATION_REVIEW_REQUIRED` if any unlisted production file is required; the
+contract cannot express the complete reviewed source-selection draft without a
+second model call; marker-absent equality or model-free resume cannot be proved;
+a forbidden subsystem/external action is needed; either hard budget is
+exceeded; or two repairs do not reduce the failing acceptance set before a new
+route is considered.
+
+Passing all acceptance gates authorizes exactly one local Phase 2B3b commit.
+It does not authorize push, deployment, marker seeding, protected-Staging, a
+real report/model run, or Phase 3. Normal marker activation, candidate image,
+protected-Staging Free -> Paid acceptance, Sandbox commerce, production
+activation, legacy removal, and rollback-image policy remain separately scoped.
 
 ---
 

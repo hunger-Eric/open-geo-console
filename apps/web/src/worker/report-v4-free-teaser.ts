@@ -451,9 +451,10 @@ function verifyFreeTeaserSemanticProjection(checkpoint: FreeTeaserCheckpointV1):
 
 export function freeTeaserSeededQ1(
   checkpointValue: FreeTeaserCheckpointV1,
-  questionSet: ConfirmedBusinessQuestionSet
+  questionSet: ConfirmedBusinessQuestionSet,
+  options: { semanticReviewContractVersion?: typeof REPORT_SEMANTIC_REVIEW_CONTRACT | null } = {}
 ): FreeTeaserSeededQ1 {
-  const checkpoint = parseReadyFreeTeaserCheckpoint(checkpointValue);
+  const checkpoint = parseReadyFreeTeaserCheckpoint(checkpointValue, options);
   if (checkpoint.questionSetIdentity !== questionSet.contentHash) {
     throw new Error("Paid V3 question set does not match the free teaser.");
   }
