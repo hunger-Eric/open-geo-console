@@ -1,4 +1,9 @@
-import { REPORT_SEMANTIC_REVIEW_CONTRACT } from "@open-geo-console/ai-report-engine";
+import {
+  REPORT_SEMANTIC_REVIEW_CONTRACT,
+  parseReportSemanticReviewInput,
+  parseReportSemanticReviewOutput,
+  verifyReportSemanticReviewReceipt
+} from "@open-geo-console/ai-report-engine";
 import type { JobCheckpoint, ScanJobStage } from "./schema";
 
 export type SemanticReviewContractVersion = typeof REPORT_SEMANTIC_REVIEW_CONTRACT;
@@ -70,7 +75,40 @@ export function resolvePaidV3SemanticReviewContract(input: {
       teaser.questionSetIdentity !== input.questionSetIdentity) {
     throw new Error("The marker-bearing Free teaser does not match the Paid V3 question lineage.");
   }
+  assertTerminalFreeSemanticReceipt(teaser);
   return version;
+}
+
+/**
+ * Checkout has no natural-language authority. It only accepts the complete
+ * receipt that the Free review persisted and the exact reviewed projection it
+ * binds. This deliberately rejects partial, missing and tampered checkpoints.
+ */
+function assertTerminalFreeSemanticReceipt(teaser: Record<string, unknown>): void {
+  const semanticReview = record(teaser.semanticReview, "$checkpoint.freeTeaser.semanticReview");
+  if (semanticReview.version !== REPORT_SEMANTIC_REVIEW_CONTRACT) {
+    throw new Error("The marker-bearing Free teaser has no current semantic receipt.");
+  }
+  const input = parseReportSemanticReviewInput(semanticReview.input);
+  const output = parseReportSemanticReviewOutput(semanticReview.output, input);
+  const applied = record(semanticReview.applied, "$checkpoint.freeTeaser.semanticReview.applied");
+  if (!Array.isArray(applied.fields) || !applied.receipt) {
+    throw new Error("The marker-bearing Free teaser semantic receipt is incomplete.");
+  }
+  verifyReportSemanticReviewReceipt(applied.receipt, input, output, applied.fields);
+  const card = record(teaser.q1AnswerCard, "$checkpoint.freeTeaser.q1AnswerCard");
+  const diagnosis = record(card.diagnosis, "$checkpoint.freeTeaser.q1AnswerCard.diagnosis");
+  const projection = new Map<string, unknown>([
+    ["q1AnswerCard.answerText", card.answerText],
+    ["q1Diagnosis.selectionSummary", diagnosis.selectionSummary],
+    ["q1Diagnosis.targetGap", diagnosis.targetGap]
+  ]);
+  for (const field of applied.fields) {
+    const row = record(field, "$checkpoint.freeTeaser.semanticReview.applied.fields[]");
+    if (typeof row.path === "string" && projection.has(row.path) && projection.get(row.path) !== row.appliedText) {
+      throw new Error("The reviewed Free projection no longer matches its semantic receipt.");
+    }
+  }
 }
 
 function requireVersion(value: unknown, path: string): SemanticReviewContractVersion {

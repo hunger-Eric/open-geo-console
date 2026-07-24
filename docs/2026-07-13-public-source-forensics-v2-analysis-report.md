@@ -2,7 +2,7 @@
 
 Date: 2026-07-13  
 Branch: `codex/refactor-simulator-log-analyzer`  
-Plan: `docs/superpowers/specs/2026-07-12-public-web-recommendation-source-forensics-implementation-plan.md`
+Historical implementation plan: removed from the working tree during task-authority cleanup; recover it from Git commit `d85e59e1c9e534da6f59aa88d7967b69d4d797b1`.
 
 ## Executive conclusion
 

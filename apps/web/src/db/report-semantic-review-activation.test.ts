@@ -47,15 +47,15 @@ describe("semantic-review checkpoint carrier", () => {
     expect(() => assertSemanticReviewCarrierEquals(active, null)).toThrow(/authority/i);
   });
 
-  it("resolves a marker only from an exact terminal ready Free-to-Paid lineage", () => {
+  it("rejects a marker-bearing terminal lineage without its complete Free receipt", () => {
     const checkpoint = readyCheckpoint();
-    expect(resolvePaidV3SemanticReviewContract({
+    expect(() => resolvePaidV3SemanticReviewContract({
       checkpoint,
       stage: "completed",
       reportId: "report-1",
       questionSetId: "questions-1",
       questionSetIdentity: "a".repeat(64)
-    })).toBe(REPORT_SEMANTIC_REVIEW_CONTRACT);
+    })).toThrow(/semanticReview|receipt/i);
     expect(resolvePaidV3SemanticReviewContract({
       checkpoint: { freeTeaser: checkpoint.freeTeaser },
       stage: "synthesizing",

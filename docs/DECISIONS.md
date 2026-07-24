@@ -277,3 +277,9 @@ queue is empty. Browser acceptance must prove a new submission is automatically
 claimed and completed without an operator command. This decision does not
 authorize historical replay, payment, production mutation, or a second
 `shun-express.com` report.
+
+## 2026-07-24: Marker-bearing natural-language semantics have one model authority
+
+This superseding decision applies to prospective marker-bearing Foundation, Free, and Paid paths. The model uniformly owns review and acceptance of all natural-language semantics. Code owns only non-semantic boundaries: schema, cardinality, IDs, hashes, URLs, evidence ownership, checkpoints, state transitions, persistence, payment, and access. Word lists, regexes, character ratios, substring checks, code language gates, and local semantic fallbacks are not semantic authority and must not authorize or repair a new marker-bearing lineage.
+
+Earlier language-gate decisions remain legacy runtime history. They neither describe the confirmed target nor authorize work on a new marker-bearing path; implementation requires a separately approved active scope.

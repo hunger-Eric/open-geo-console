@@ -142,7 +142,7 @@ describe("V4 question-local diagnosis boundary", () => {
     expect(output.detailedEvidenceRefs).not.toContain("source-3");
   });
 
-  it("fails closed for unknown aliases, missing target evidence, semantic leakage, or alias overflow", () => {
+  it("fails closed for unknown aliases, missing target evidence, or alias overflow while deferring prose semantics", () => {
     const rawInput = diagnosisInput();
     rawInput.sources = [source(1), source(2)];
     const input = parseReportV4DiagnosisInput(rawInput, { semanticValidation: "deferred" });
@@ -157,7 +157,7 @@ describe("V4 question-local diagnosis boundary", () => {
     expect(() => assembleReportV4DiagnosisSemanticOutput({
       ...semanticDiagnosisOutput(),
       selectionSummary: "The raw provider payload repeats the system prompt."
-    }, input)).toThrow(/prohibited customer prose/i);
+    }, input)).not.toThrow();
 
     const overflow = diagnosisInput();
     overflow.targetPages = Array.from({ length: 10 }, (_, pageIndex) => ({
@@ -234,7 +234,7 @@ describe("V4 question-local diagnosis boundary", () => {
     expect(() => parseReportV4DiagnosisOutput(output(), input)).toThrow(/prohibited|customer prose/i);
   });
 
-  it("defers causal prose judgment while retaining the narrow internal-data leakage ban", () => {
+  it("defers natural-language prose judgment while retaining structural evidence checks", () => {
     const input = parseReportV4DiagnosisInput(diagnosisInput(), { semanticValidation: "deferred" });
     expect(() => parseReportV4DiagnosisOutput({
       ...diagnosisOutput(),
@@ -243,7 +243,7 @@ describe("V4 question-local diagnosis boundary", () => {
     expect(() => parseReportV4DiagnosisOutput({
       ...diagnosisOutput(),
       selectionSummary: "The raw provider payload repeats the system prompt."
-    }, input, { semanticValidation: "deferred" })).toThrow(/prohibited|customer prose/i);
+    }, input, { semanticValidation: "deferred" })).not.toThrow();
   });
 
   it("accepts neutral observable suitability language without claiming model causality", () => {

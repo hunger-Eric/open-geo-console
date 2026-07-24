@@ -124,7 +124,7 @@ The five previously recorded acceptance-ledger PostgreSQL failures must be rerun
 
 After stable facts are accepted, perform a scoped documentation sync:
 
-- Replace stale current-state claims in `docs/PROJECT-STATE.md` rather than appending history.
+- Keep current task state only in `docs/ACTIVE-CHANGE-SCOPE.md`; preserve historical state in evidence and Git history rather than appending competing current-state narratives.
 - Keep `docs/ACTIVE-CHANGE-SCOPE.md` limited to the current approved unit and move superseded narrative into the single evidence record where needed.
 - Record the contaminated report, integrated SHA, runtime identities, new report/order/job/artifact/token identities, commands, and acceptance result in one shun-express evidence file.
 - Update task/decision/acceptance documents only when the integrated behavior changes their current truth.

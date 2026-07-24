@@ -124,6 +124,17 @@ export interface PaidV3DraftManifestCoverage {
   readonly nonProseProjectionHash: string;
 }
 
+/** The Free surface reuses Paid V3's canonical customer-prose inventory. */
+export function buildFreeV4FoundationManifestCoverage(foundation: unknown): readonly ReportSemanticManifestFieldSeed[] {
+  const coverage = buildCanonicalPaidV3DraftManifestCoverage({
+    technicalFoundation: { aiReport: foundation }
+  });
+  return coverage.fields.map((field) => ({
+    ...field,
+    path: field.path.replace("technicalFoundation.aiReport", "foundation")
+  }));
+}
+
 export type PaidV3SemanticAnswerCardDraft =
   | OpenGeoAnswerCardV3
   | Omit<GenerativeSearchAnswerCardV3, "geoDiagnosis">;

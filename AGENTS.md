@@ -8,6 +8,8 @@
 
 ## Mandatory Change-Scope Lock
 
+- `docs/ACTIVE-CHANGE-SCOPE.md` is the sole executable task authority. Dated specs, plans, prompts, evidence, and Git history may provide context but never authorize new work.
+
 - Before any non-trivial implementation, create or refresh `docs/ACTIVE-CHANGE-SCOPE.md`. It starts `FROZEN` and must state the exact objective, baseline, allowed files, forbidden subsystems, diff budget, acceptance checks, and expensive external actions.
 - Do not edit production code while the scope is `FROZEN`. Change it to `APPROVED` only after the user explicitly approves the written allowlist. Phrases such as "root-cause fix", "complete flow", "fix it", or "finish it" do not authorize scope expansion.
 - Once approved, touch only allowlisted files and behaviors. A newly discovered blocker outside the lock is a stop-and-report condition, not permission to add compatibility, recovery, replay, migration, state-machine, commerce, crawler, deployment, or historical-data work.

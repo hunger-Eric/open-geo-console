@@ -1916,17 +1916,9 @@ function groundedEvidenceFromForensic(report: RecommendationForensicReportV2): G
   const questionFanouts = report.questions.questions.slice(1).map((question) => ({ question, queryIds: new Set(report.fanouts.find(({ questionId }) => questionId === question.id)?.queries.map(({ id }) => id) ?? []) }));
   return questionFanouts.flatMap(({ question, queryIds }) => report.sourceGraph.evidence.flatMap((evidence) => {
     if (!evidence.queryVariantIds.some((id) => queryIds.has(id)) || !evidence.verifiedExcerpt) return [];
-    const relevant = groundedExcerptRelevant(evidence.verifiedExcerpt, `${question.normalizedText} ${question.derivation.subject}`);
     return [{ evidenceId: evidence.evidenceId, questionId: question.id, subjectKey: `question:${question.id}`, registrableDomain: evidence.registrableDomain,
-      exactExcerpt: evidence.verifiedExcerpt, eligible: evidence.retrievalReadiness.ready && relevant, direct: evidence.retrievalReadiness.ready && relevant && !evidence.metadataOnly }];
+      exactExcerpt: evidence.verifiedExcerpt, eligible: evidence.retrievalReadiness.ready, direct: evidence.retrievalReadiness.ready && !evidence.metadataOnly }];
   }));
-}
-
-function groundedExcerptRelevant(excerpt:string,question:string):boolean{
-  const normalizedQuestion=question.normalize("NFKC").toLocaleLowerCase();
-  const terms=[...(normalizedQuestion.match(/[a-z0-9][a-z0-9-]{2,}/g)??[]),...(normalizedQuestion.match(/[\p{Script=Han}]{2,}/gu)??[]).flatMap((run)=>run.length<=6?[run]:Array.from({length:run.length-1},(_,index)=>run.slice(index,index+2)))];
-  const ignored=new Set(["which","what","where","provide","哪些","什么","如何","是否"]),text=excerpt.normalize("NFKC").toLocaleLowerCase();
-  return [...new Set(terms)].filter((term)=>!ignored.has(term)).some((term)=>text.includes(term));
 }
 
 async function providerVerificationCommercialRef(snapshotId: string): Promise<PublicSourceCommercialSnapshotRef> {

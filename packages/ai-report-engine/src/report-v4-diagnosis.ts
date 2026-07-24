@@ -468,7 +468,7 @@ function evidenceRefs(value: unknown, path: string, allowed: ReadonlySet<string>
 
 function customerProse(value: unknown, path: string, max: number, semanticValidation: "legacy" | "deferred" = "legacy"): string {
   const result = boundedText(value, path, max);
-  if (PROHIBITED_INTERNAL_LANGUAGE.test(result) || (semanticValidation === "legacy" && (PROHIBITED_SEO_LANGUAGE.test(result) || PROHIBITED_CAUSAL_LANGUAGE.test(result)))) {
+  if (semanticValidation === "legacy" && (PROHIBITED_INTERNAL_LANGUAGE.test(result) || PROHIBITED_SEO_LANGUAGE.test(result) || PROHIBITED_CAUSAL_LANGUAGE.test(result))) {
     throw new TypeError(`${path} contains prohibited customer prose.`);
   }
   return result;

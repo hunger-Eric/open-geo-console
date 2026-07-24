@@ -3,6 +3,7 @@ import {
   REPORT_V4_MAX_DIAGNOSIS_SOURCES,
   REPORT_SEMANTIC_REVIEW_CONTRACT,
   applyReportSemanticReview,
+  buildFreeV4FoundationManifestCoverage,
   buildFreeV4SemanticReviewManifest,
   buildReportSemanticReviewSystemPrompt,
   deriveFreeObservationMetrics,
@@ -94,6 +95,7 @@ export interface FreeTeaserCheckpointV1 {
   readonly q1AnswerCard?: GenerativeSearchAnswerCardV3;
   readonly q1AnswerDraft?: FreeTeaserQ1Draft;
   readonly q1DiagnosisDraft?: NonNullable<GenerativeSearchAnswerCardV3["diagnosis"]>;
+  readonly reviewedFoundation?: AiWebsiteReportV1;
   readonly semanticReview?: FreeTeaserSemanticReviewProjection;
   readonly readyAt?: string;
 }
@@ -384,6 +386,9 @@ export function parseReadyFreeTeaserCheckpoint(
   if (semanticReviewEnabled !== Boolean(checkpoint.semanticReview)) {
     throw new TypeError("Free teaser ready checkpoint does not match root semantic-review lineage.");
   }
+  if (semanticReviewEnabled && !checkpoint.reviewedFoundation) {
+    throw new TypeError("Free teaser ready checkpoint is missing its reviewed Foundation projection.");
+  }
   parseReportV4DiagnosisOutputForQuestion(checkpoint.q1AnswerCard.diagnosis, {
     questionId: checkpoint.q1AnswerCard.questionId,
     sourceEvidenceIds: checkpoint.q1AnswerCard.sources.map(({ sourceId }) => sourceId)
@@ -399,12 +404,14 @@ function verifyFreeTeaserSemanticProjection(checkpoint: FreeTeaserCheckpointV1):
   const applied = applyReportSemanticReview(projection.input, output);
   verifyReportSemanticReviewReceipt(projection.applied.receipt, projection.input, output, projection.applied.fields);
   if (hashReportSemanticReviewValue(applied) !== hashReportSemanticReviewValue(projection.applied)) throw new TypeError("Free teaser semantic review applied projection is stale.");
+  if (!checkpoint.reviewedFoundation) throw new TypeError("Free teaser reviewed Foundation is unavailable.");
   const actual = new Map<string, string>([
     ["q1AnswerCard.answerText", checkpoint.q1AnswerCard!.answerText],
     ["q1Diagnosis.selectionSummary", checkpoint.q1AnswerCard!.diagnosis!.selectionSummary],
     ["q1Diagnosis.targetGap", checkpoint.q1AnswerCard!.diagnosis!.targetGap],
     ...checkpoint.q1AnswerCard!.diagnosis!.observableFactors.map((factor, index) => [`q1Diagnosis.observableFactors[${index}].observation`, factor.observation] as const),
-    ...checkpoint.q1AnswerCard!.diagnosis!.recommendedActions.map((action, index) => [`q1Diagnosis.recommendedActions[${index}].action`, action.action] as const)
+    ...checkpoint.q1AnswerCard!.diagnosis!.recommendedActions.map((action, index) => [`q1Diagnosis.recommendedActions[${index}].action`, action.action] as const),
+    ...buildFreeV4FoundationManifestCoverage(checkpoint.reviewedFoundation).map(({ path, text }) => [path, text] as const)
   ]);
   for (const field of projection.applied.fields) {
     if (actual.has(field.path) && actual.get(field.path) !== field.appliedText) throw new TypeError(`Free teaser semantic field ${field.path} does not match the checkpoint.`);
@@ -454,6 +461,27 @@ function verifyFreeTeaserSemanticProjection(checkpoint: FreeTeaserCheckpointV1):
   if (checkpoint.metrics!.brandMentionCount !== metricCounts.targetMentionCount || checkpoint.metrics!.competitorMentionCount !== metricCounts.competitorMentionCount) {
     throw new TypeError("Free teaser semantic metrics do not match verified annotations.");
   }
+}
+
+function applyReviewedFoundation(foundation: AiWebsiteReportV1, textByPath: ReadonlyMap<string, string>): AiWebsiteReportV1 {
+  const projection = JSON.parse(JSON.stringify(foundation)) as Record<string, unknown>;
+  for (const [path, text] of textByPath) {
+    if (!path.startsWith("foundation.")) continue;
+    writeFoundationProjectionText(projection, path.slice("foundation.".length), text);
+  }
+  return projection as unknown as AiWebsiteReportV1;
+}
+
+function writeFoundationProjectionText(root: Record<string, unknown>, path: string, text: string): void {
+  const segments: Array<string | number> = [];
+  for (const part of path.split(".")) {
+    for (const token of part.split("[")) {
+      if (token) segments.push(token.endsWith("]") ? Number(token.slice(0, -1)) : token);
+    }
+  }
+  let current: Record<string | number, unknown> = root;
+  for (const segment of segments.slice(0, -1)) current = current[segment] as Record<string | number, unknown>;
+  current[segments.at(-1)!] = text;
 }
 
 export function freeTeaserSeededQ1(
@@ -846,6 +874,7 @@ async function reviewFreeTeaser(input: {
     throw new Error("Marked Free teaser review returned contradictory Q1 entity semantics.");
   }
   const textByPath = new Map(reviewed.applied.fields.map((field) => [field.path, field.appliedText]));
+  const reviewedFoundation = applyReviewedFoundation(input.foundation, textByPath);
   const correctedDiagnosis = {
     ...diagnosis,
     selectionSummary: textByPath.get("q1Diagnosis.selectionSummary")!,
@@ -861,7 +890,7 @@ async function reviewFreeTeaser(input: {
   const checkpointCore = { ...checkpoint };
   delete checkpointCore.q1AnswerDraft;
   delete checkpointCore.q1DiagnosisDraft;
-  return { ...checkpointCore, stage: "ready", metrics: { questionCount: 3, brandMentionCount: metrics.targetMentionCount, competitorMentionCount: metrics.competitorMentionCount }, q1AnswerResult: correctedAnswerResult, q1AnswerCard, semanticReview: { version: REPORT_SEMANTIC_REVIEW_CONTRACT, input: reviewInput, output: reviewed.review, applied: reviewed.applied }, readyAt: new Date().toISOString() };
+  return { ...checkpointCore, stage: "ready", metrics: { questionCount: 3, brandMentionCount: metrics.targetMentionCount, competitorMentionCount: metrics.competitorMentionCount }, q1AnswerResult: correctedAnswerResult, q1AnswerCard, reviewedFoundation, semanticReview: { version: REPORT_SEMANTIC_REVIEW_CONTRACT, input: reviewInput, output: reviewed.review, applied: reviewed.applied }, readyAt: new Date().toISOString() };
 }
 
 function buildFreeTeaserSemanticReviewInput(input: {
@@ -908,6 +937,7 @@ function buildFreeTeaserSemanticReviewInput(input: {
   const diagnosisSourceIds = diagnosisEvidence.filter((id) => sources.some((source) => source.sourceId === id));
   const text = (path: string, fallback: string) => input.originalTextByPath?.get(path) ?? fallback;
   const fields = [
+    ...buildFreeV4FoundationManifestCoverage(input.foundation).map((field) => ({ ...field, text: text(field.path, field.text) })),
     ...canonicalQuestions.map((question, index) => ({ path: `questions[${index}].text`, text: input.questionSet.questions[index]!.privateText, mutability: "read_only" as const, questionId: question.id, allowedEvidenceIds: [] as string[], allowedSourceIds: [] as string[] })),
     { path: "q1AnswerCard.answerText", text: text("q1AnswerCard.answerText", input.card.answerText), mutability: "mutable" as const, questionId: input.card.questionId, allowedEvidenceIds: sources.map(({ sourceId }) => sourceId), allowedSourceIds: sources.map(({ sourceId }) => sourceId) },
     { path: "q1Diagnosis.selectionSummary", text: text("q1Diagnosis.selectionSummary", input.diagnosis.selectionSummary), mutability: "mutable" as const, questionId: input.card.questionId, allowedEvidenceIds: diagnosisEvidence, allowedSourceIds: diagnosisSourceIds },

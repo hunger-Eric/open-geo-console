@@ -80,7 +80,7 @@ export default async function ReportPage({
       } catch {
         ready = null;
       }
-      if (!ready || !visible.aiReport) {
+      if (!ready || !visible.aiReport || !ready.reviewedFoundation) {
         return <PendingReportView
           createdAt={row.createdAt}
           dictionary={getDictionary(locale)}
@@ -102,7 +102,7 @@ export default async function ReportPage({
             score: visible.technicalReport.score,
             findings: visible.technicalReport.findings
           },
-          aiReport: visible.aiReport,
+          aiReport: ready.reviewedFoundation,
           questionSet,
           q1AnswerCard: ready.q1AnswerCard!,
           brandMentionCount: ready.metrics!.brandMentionCount,

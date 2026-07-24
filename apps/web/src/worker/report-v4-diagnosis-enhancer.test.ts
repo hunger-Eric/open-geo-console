@@ -102,7 +102,7 @@ describe("V4 question-level diagnosis enhancer", () => {
     expect(provider.calls).toHaveLength(2);
   });
 
-  it("defers semantic prose correction for a marked unified review but still rejects internal leakage locally", async () => {
+  it("defers natural-language prose judgment for a marked unified review while retaining evidence binding", async () => {
     const semantic = providerFrom(async () => validSemanticDiagnosis({
       selectionSummary: "The model selected these sources because they rank higher."
     }));
@@ -123,15 +123,11 @@ describe("V4 question-level diagnosis enhancer", () => {
     const leakage = providerFrom(async () => validSemanticDiagnosis({
       selectionSummary: "The raw provider payload repeats the system prompt."
     }));
-    const failed = await enhanceReportV4QuestionDiagnosis({
+    const deferred = await enhanceReportV4QuestionDiagnosis({
       ...enhancerInput(answeredQuestion(), leakage),
       semanticValidation: "deferred"
     });
-    expect(failed).toMatchObject({
-      status: "failed",
-      providerAttempts: 1,
-      failure: { stage: "semantic_contract", code: "unsafe_semantic_output", parserPath: "$diagnosisSemanticOutput.selectionSummary" }
-    });
+    expect(deferred).toMatchObject({ status: "completed", providerAttempts: 1 });
     expect(leakage.calls).toHaveLength(1);
   });
 

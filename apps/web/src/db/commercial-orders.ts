@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type postgres from "postgres";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, type ExtractTablesWithRelations } from "drizzle-orm";
+import type { PgTransaction } from "drizzle-orm/pg-core";
+import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js";
 import { ensureDatabase, getDb, getSqlClient } from "./index";
 import { hmacSecret, requireSecret } from "./secrets";
 import { resolveCombinedReportContract } from "@/report/combined-report-contract";
@@ -18,7 +20,8 @@ import {
   type PaymentProvider,
   type RecommendationFulfillmentMethodology,
   type RecommendationReportVersion,
-  type ReportLocale
+  type ReportLocale,
+  scanJobs
 } from "./schema";
 import {
   assertSemanticReviewCarrierEquals,
@@ -76,6 +79,9 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
     )).limit(1);
     if (!questionSet || (questionSet.confidence === "low" && !questionSet.acknowledgedLowConfidence)) {
       throw new CommercialOrderConflictError("Three confirmed business questions are required before checkout.");
+    }
+    if (input.productCode === "recommendation_forensics_v1") {
+      await assertFreeSemanticCheckoutAuthority(tx, input.reportId, input.businessQuestionSetId, questionSet.contentHash);
     }
     const rows = await tx.insert(paymentOrders).values({
       id,
@@ -890,9 +896,11 @@ async function paidV3SemanticReviewContract(
     WHERE report_id=${input.reportId} AND reason='v4_pre_admission'
     ORDER BY created_at,id LIMIT 1 FOR SHARE
   `;
-  if (!freeJob) return null;
+  if (!freeJob) throw new CommercialOrderConflictError("The Free semantic-review authority is unavailable for this Paid V3 lineage.");
   try {
-    if (readSemanticReviewContractVersion(freeJob.checkpoint) === null) return null;
+    if (readSemanticReviewContractVersion(freeJob.checkpoint) === null) {
+      throw new CommercialOrderConflictError("New Paid V3 lineages require the Free semantic-review marker.");
+    }
   } catch (error) {
     throw new CommercialOrderConflictError("The Free semantic-review carrier is malformed.", { cause: error });
   }
@@ -914,6 +922,32 @@ async function paidV3SemanticReviewContract(
     });
   } catch (error) {
     throw new CommercialOrderConflictError("The Free semantic-review carrier is not valid for Paid V3.", { cause: error });
+  }
+}
+
+async function assertFreeSemanticCheckoutAuthority(
+  tx: PgTransaction<PostgresJsQueryResultHKT, typeof import("./schema"), ExtractTablesWithRelations<typeof import("./schema")>>,
+  reportId: string,
+  questionSetId: string,
+  questionSetIdentity: string | null
+): Promise<void> {
+  if (!questionSetIdentity) throw new CommercialOrderConflictError("The Free semantic question-set identity is unavailable.");
+  const [freeJob] = await tx.select({ stage: scanJobs.stage, checkpoint: scanJobs.checkpoint })
+    .from(scanJobs)
+    .where(and(eq(scanJobs.reportId, reportId), eq(scanJobs.reason, "v4_pre_admission")))
+    .orderBy(asc(scanJobs.createdAt), asc(scanJobs.id))
+    .limit(1);
+  if (!freeJob) throw new CommercialOrderConflictError("A terminal reviewed Free teaser is required before checkout.");
+  try {
+    resolvePaidV3SemanticReviewContract({
+      checkpoint: freeJob.checkpoint,
+      stage: freeJob.stage as import("./schema").ScanJobStage,
+      reportId,
+      questionSetId,
+      questionSetIdentity
+    });
+  } catch (error) {
+    throw new CommercialOrderConflictError("The terminal reviewed Free teaser is not eligible for checkout.", { cause: error });
   }
 }
 
