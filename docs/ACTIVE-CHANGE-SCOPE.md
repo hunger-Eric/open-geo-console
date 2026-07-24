@@ -1,5 +1,223 @@
 # Active Change Scope Lock
 
+## Phase 3R2 APPROVED - deploy the verified repair and run one replacement protected-Staging canary
+
+Status: `DEVIATION_REVIEW_REQUIRED`. The user explicitly approved this exact
+Phase 3R2 scope on 2026-07-24 with
+`批准 Phase 3R2 FROZEN 范围并开始执行`. Execution deployed the exact candidate,
+replaced only the two Staging Workers, and created the one authorized
+replacement report. The repaired shared-snapshot path passed
+`snapshot_resolution`, but the marker-bearing Free V4 job then failed
+terminally at `grounded_answer_synthesis` after its bounded automatic attempts
+all returned `Free teaser Q1 diagnosis did not complete.` No Free semantic
+review, checkout, payment, Paid job, refund, production mutation, retry,
+replacement, or push is authorized after this stop. Exact evidence is recorded
+in
+`docs/operations/evidence/2026-07-24-semantic-review-protected-staging-r2.md`.
+
+### Objective, candidate, and hard boundary
+
+- Branch: `codex/v4-answer-optimization-scope-reset`.
+- Exact clean repair candidate:
+  `fca651f61b5eed961379419b15a7bb4017979c46`
+  (`fix: accept exact shared teaser snapshots`).
+- Phase 3R1 local verification at that commit passed the two focused files
+  `29/29`, full `npm test` with 302 files and 2,811 tests passed plus 46 files
+  and 188 tests skipped, `npm run lint`, `npm run build`, and
+  `git diff --check`.
+- Objective: deploy exactly this immutable repair candidate to the existing
+  protected Staging Web and Free/Deep Worker line, then create exactly one new
+  `https://shun-express.com/` report and prove the normal persisted
+  marker-enabled Free V4 -> Airwallex Sandbox -> Paid V3 flow, including exact
+  shared-snapshot reuse, one Free semantic review, one Paid semantic review,
+  and one complete accessible Paid HTML artifact.
+- The previously consumed Phase 3 report
+  `d5b85b92-2731-47da-ab9d-52793de179e5` and jobs
+  `42f5ed0c-3309-4834-97a7-ed3d443736de` /
+  `fa49626f-9c3a-478b-852c-b459443e9e1a` remain read-only. The pre-admission
+  job remains in `repair_wait` at `snapshot_resolution`, and the report still
+  has zero orders, payment events, refunds, credits, and Paid artifacts. It may
+  not be retried, resumed, repaired, checked out, copied, or represented as the
+  replacement canary.
+- Production Web, aliases, database, Workers, commerce, configuration, data,
+  reports, and payments remain read-only. The pre-existing production
+  Free/Deep Worker restart loop remains explicitly out of scope.
+
+### Current protected-Staging authority
+
+Read-only inspection on 2026-07-24 established:
+
+- fixed protected alias:
+  `https://open-geo-console-staging-itheheda.vercel.app`;
+- current Vercel Preview deployment:
+  `dpl_DxnJQU23awMcPH6NbQHWiAbjJ8tD`,
+  URL
+  `https://open-geo-console-ffj9cztph-itheheda-6857s-projects.vercel.app`,
+  target `preview`, status `READY`;
+- current Staging Free/Deep image:
+  `open-geo-console:staging-11927beb4f8fafd5eaddde5d0491dbcf4a44b849`,
+  image ID
+  `sha256:7d5f873f46ebfe173c6595c519e0979b63456021b7745970b745d1ecc367827e`,
+  size 1,237,526,128 bytes and revision label
+  `11927beb4f8fafd5eaddde5d0491dbcf4a44b849`;
+- Staging Free container
+  `cc650afd286a1a4d0cd65cd295f023fa61ad5aa7366ed7f9e75e977b7be01c77`
+  and Deep container
+  `50bd0804d6682d6b570b87a5b0327bb67d601b26ccfe521b8cc9ae9c63c998b6`
+  are running with zero restarts on that exact image;
+- retained older rollback:
+  `open-geo-console:staging-df013fc63ae36c3c55214e9478dd2ee2bbaf1fd7`,
+  image ID
+  `sha256:ed721dacbbc02e4b7973b9d1fce555d8697a986a371f7d5513f0cb986af96761`,
+  size 1,235,864,668 bytes;
+- ignored Staging runtime configuration is `COMMERCE_MODE=test`,
+  `OGC_DEPLOYMENT_PROFILE=staging`, and
+  `OGC_DEPLOYMENT_VERSION=11927beb4f8fafd5eaddde5d0491dbcf4a44b849`;
+- authoritative PostgreSQL marker is `staging`, schema version is `42`;
+- E drive free space is 19,783,417,856 bytes; `docker system df` reports
+  52.74 GB images, 23.53 GB local volumes, and 1.258 GB build cache.
+
+Before any mutation, recheck every identity above, the exact candidate diff,
+all container references, E drive free bytes, `docker system df`, database
+marker/schema, current alias target, and absence of a pre-existing candidate
+image/deployment. Any drift is a stop-and-report condition.
+
+### Exact deployment and local-runtime mutations
+
+No production/test source edit is allowed. The only tracked paths that may
+change are:
+
+- `docs/ACTIVE-CHANGE-SCOPE.md`;
+- one new terminal evidence file at
+  `docs/operations/evidence/2026-07-24-semantic-review-protected-staging-r2.md`,
+  created only after external execution starts.
+
+The existing clean detached worktree
+`E:/project/open-geo-console/.data/semantic-review-phase3-candidate` may be
+retargeted from `11927beb4f8fafd5eaddde5d0491dbcf4a44b849` to exact detached
+`fca651f61b5eed961379419b15a7bb4017979c46`. Do not create another worktree,
+branch, commit, merge, tag, PR, or remote ref. Preserve all other worktrees and
+dirty/untracked material.
+
+Vercel:
+
+1. From that exact clean detached candidate worktree, create exactly one new
+   Vercel **Preview** deployment. Never use `--prod`, promote, or a production
+   alias.
+2. Wait for `READY`; require exact candidate revision metadata, Preview/
+   Staging deployment profile, protected Staging PostgreSQL marker/schema, and
+   authenticated health/catalog success.
+3. Move only
+   `open-geo-console-staging-itheheda.vercel.app` to that exact READY Preview.
+   Preserve the current deployment as the Web rollback. Do not delete either
+   deployment.
+
+Docker:
+
+1. `package.json`, `package-lock.json`, `Dockerfile.worker`, base image,
+   browser, system-package, and dependency inputs are unchanged. A full Worker
+   build is forbidden.
+2. Build exactly one thin source-overlay image from exact current image
+   `sha256:7d5f873f46ebfe173c6595c519e0979b63456021b7745970b745d1ecc367827e`,
+   copying only `apps/` and `packages/`, with tag
+   `open-geo-console:staging-fca651f61b5eed961379419b15a7bb4017979c46`
+   and OCI revision label
+   `fca651f61b5eed961379419b15a7bb4017979c46`.
+3. Do not run `npm ci`, browser/OS installation, the full Worker Dockerfile,
+   `docker cp`, or an in-container edit.
+4. Change only ignored
+   `.data/workstation-docker/staging.env` value
+   `OGC_DEPLOYMENT_VERSION` to the exact repair SHA. No credential or other
+   environment value may change.
+5. Recreate only
+   `open-geo-console-staging-worker-free-1` and
+   `open-geo-console-staging-worker-deep-1`. Require exact candidate image ID/
+   label, `staging`/`preview` runtime/database markers, running state, zero
+   restart count, and ready drain logs before submitting a URL.
+6. Retain the new candidate image and former current
+   `sha256:7d5f873f46ebfe173c6595c519e0979b63456021b7745970b745d1ecc367827e`
+   as the sole rollback pair for this Staging line. After both replacement
+   containers are verified, the older zero-reference rollback
+   `sha256:ed721dacbbc02e4b7973b9d1fce555d8697a986a371f7d5513f0cb986af96761`
+   may be removed after a fresh exact zero-reference check.
+
+No other image, container, cache, layer, volume, network, service, or file may
+be cleaned or changed. Broad Docker cleanup is forbidden. Record before/after
+free bytes, `docker system df`, image IDs/sizes/labels, container references,
+and exact bytes added/freed. A failed build, deployment, alias move, service
+replacement, or cleanup stops before retry.
+
+### Exactly one replacement canary
+
+After exact Web/Worker/database parity is proven:
+
+1. Through the protected application, submit exactly
+   `https://shun-express.com/` once and create exactly one new report authority.
+   One protected-Staging forced regeneration is allowed only if it is the
+   normal UI requirement for that single submission. No second submission,
+   alternate URL, direct API fabrication, or historical authority is allowed.
+2. Let the normal persisted Free Worker run. Require the new V4 pre-admission
+   root checkpoint marker `report-semantic-review-v1`.
+3. Prove the repaired path is exercised: at least one selected completed shared
+   snapshot must predate the new report and retain origin query IDs/
+   `query_fanout_hash` different from the current report-local fanout, while
+   its recomputed semantic cache identity, query plan, authority, attempts, and
+   observations remain exact.
+4. Require exactly one unified Free semantic-review call and a persisted,
+   internally verified ready receipt before checkout.
+5. Continue only that exact new report through at most one normal Airwallex
+   **Sandbox** checkout. Sandbox transfers no real money. If the normal
+   protected UI requires user interaction or a provider challenge, pause for
+   the user; do not substitute a manual Webhook, database write, internal
+   state patch, or alternate payment path.
+6. Require the verified Sandbox Webhook to create exactly one Paid entitlement
+   and one Paid V3 job, with exact report/question-set/site-snapshot and marker
+   continuity from the Free authority.
+7. Let the normal persisted Paid Worker run. Require exactly one unified Paid
+   semantic-review call; one complete input/output/applied authority and final
+   receipt persisted at the normal checkpoint boundary; unchanged read-only
+   seeded Paid Q1; three substantive answers with question-owned sources and
+   diagnoses; one complete accessible `combined_geo_report_v3` HTML artifact;
+   settled test credit; commercial `completed`; and no refund.
+
+Across this replacement canary, allow at most 40 total model/public-provider
+invocations including automatic retries, 800,000 aggregate estimated input
+and output tokens, and US$10 equivalent model spend. Existing stricter
+operation caps remain controlling. Counts must be measurable from persisted
+checkpoints, usage, and bounded logs. Crossing or being unable to establish a
+cap stops before any retry or replacement.
+
+### Acceptance and evidence
+
+Acceptance requires one internally consistent new report/order/Sandbox event/
+job/checkpoint/snapshot/receipt/artifact/access-token lineage, exact Web/Worker/
+database candidate parity, exactly one Free and one Paid semantic-review call,
+no semantic-program fallback, no terminal reserved credit, no refund, and an
+authenticated browser read of the final complete HTML.
+
+Evidence may contain only safe IDs, hashes, counts, statuses, timings, image/
+deployment identities, URLs, and redacted screenshots. Never record
+credentials, cookies, raw access tokens, raw provider payload secrets,
+customer email plaintext, or unhashed client IPs. After a terminal pass or
+stop, update this scope and the one R2 evidence file, then create at most one
+local evidence-only commit. Do not push it.
+
+### Stops and Phase 4 boundary
+
+Stop as `DEVIATION_REVIEW_REQUIRED` before the next external action if any
+identity, target, count, cap, marker, receipt, cache-reuse proof, deployment,
+container, payment, credit, artifact, or production boundary differs; if the
+new report enters terminal failure, `completed_limited`, or unapproved
+`repair_wait`; or if continuing requires a retry, second Preview, second image
+build, second report/scan/checkout/payment, job replay/recovery, historical
+mutation, schema/dependency/provider change, manual Webhook, commerce drain,
+refund/email action, broad cleanup, push, or production mutation.
+
+Successful Phase 3R2 acceptance does not authorize Phase 4. Production
+push/deploy, marker activation, Worker replacement, report generation, and
+repair of the production Worker restart loop require a new exact production
+scope and separate explicit approval.
+
 ## Phase 3R1 FROZEN - align Free semantic verifier with exact shared-snapshot reuse
 
 Status: `COMPLETE`. The user explicitly approved this exact local-only repair
