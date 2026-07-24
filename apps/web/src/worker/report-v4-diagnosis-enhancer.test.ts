@@ -124,6 +124,51 @@ describe("V4 question-level diagnosis enhancer", () => {
     expect(leakage.calls).toHaveLength(1);
   });
 
+  it("corrects one structurally incomplete deferred field and reparses it under deferred semantics", async () => {
+    const incomplete = validDiagnosis();
+    Reflect.deleteProperty(incomplete, "targetGap");
+    const provider = providerFrom(async (request) => request.kind === "diagnose"
+      ? incomplete
+      : {
+          field: request.field,
+          value: "Improve SEO visibility because this change will cause stronger ranking."
+        });
+
+    const result = await enhanceReportV4QuestionDiagnosis({
+      ...enhancerInput(answeredQuestion(), provider),
+      semanticValidation: "deferred"
+    });
+
+    expect(result).toMatchObject({ status: "completed", providerAttempts: 2 });
+    if (result.status !== "completed") throw new Error("expected corrected deferred diagnosis");
+    expect(result.diagnosis.targetGap).toContain("SEO visibility");
+    expect(provider.calls.map(({ kind }) => kind)).toEqual(["diagnose", "correct"]);
+    const correction = provider.calls[1]!;
+    if (correction.kind !== "correct") throw new Error("expected correction request");
+    expect(correction.field).toBe("targetGap");
+    expect(correction.invalidValue).toBeUndefined();
+    expect(correction.failureReason).toMatch(/\$diagnosisOutput\.targetGap/);
+    expect(correction.evidence.sources.map(({ sourceId }) => sourceId)).toEqual(["source-1", "source-2"]);
+    expect(correction).not.toHaveProperty("selectionSummary");
+    expect(correction).not.toHaveProperty("recommendedActions");
+  });
+
+  it("fails closed when a deferred structural correction remains incomplete", async () => {
+    const incomplete = validDiagnosis();
+    Reflect.deleteProperty(incomplete, "targetGap");
+    const provider = providerFrom(async (request) => request.kind === "diagnose"
+      ? incomplete
+      : { field: request.field, value: "" });
+
+    const result = await enhanceReportV4QuestionDiagnosis({
+      ...enhancerInput(answeredQuestion(), provider),
+      semanticValidation: "deferred"
+    });
+
+    expect(result).toMatchObject({ status: "failed", providerAttempts: 2 });
+    expect(provider.calls.map(({ kind }) => kind)).toEqual(["diagnose", "correct"]);
+  });
+
   it("spends its only retry on an explicitly retryable provider error and never switches provider", async () => {
     let attempts = 0;
     const provider = providerFrom(async (request) => {

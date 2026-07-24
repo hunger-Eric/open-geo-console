@@ -1,5 +1,137 @@
 # Active Change Scope Lock
 
+## Phase 3R3 LOCAL IMPLEMENTATION COMPLETE - repair deferred Q1 diagnosis structural correction
+
+Status: `LOCAL_IMPLEMENTATION_COMPLETE`. On 2026-07-24 the user explicitly
+approved this exact Phase 3R3 FROZEN allowlist with
+`批准 Phase 3R3 FROZEN 范围并开始执行`. The bounded repair is complete:
+
+- focused enhancer and Free-teaser tests: 22 passed;
+- full suite in serial file mode: 2813 passed, 188 skipped;
+- the affected PostgreSQL file independently passed 5/5 after two parallel
+  full-suite runs exposed unrelated shared-database fixture races;
+- `npm run lint`, `npm run build`, and `git diff --check`: passed;
+- only the three allowlisted files changed and all diff budgets passed; and
+- no deployment, model call, report mutation, payment, push, or remote action
+  occurred.
+
+### Read-only root-cause evidence
+
+- Branch: `codex/v4-answer-optimization-scope-reset`.
+- Exact clean baseline:
+  `453f7bc2aa9345117953677f1740923dd8ff9534`
+  (`docs: record Phase 3R2 staging stop`).
+- Phase 3R2 report
+  `d31a0f70-5500-4d9b-89aa-c484e93495da` and job
+  `9ae1cc50-95c4-436c-a4a3-7cafac5cc9f7` remain immutable read-only
+  evidence. They may not be retried, resumed, repaired, cloned, checked out,
+  or used as a new acceptance authority.
+- The repaired shared-snapshot path completed. The marker-bearing checkpoint
+  persisted `q1AnswerDraft=true`, `q1DiagnosisDraft=false`, and
+  `semanticReview=false`, then recorded four identical
+  `Free teaser Q1 diagnosis did not complete.` failures at
+  `grounded_answer_synthesis`.
+- `generateFreeTeaser` invokes `enhanceReportV4QuestionDiagnosis` with
+  `semanticValidation: "deferred"` for the marker path. The enhancer parses the
+  first provider result, but linearly returns `failed` for every invalid
+  deferred result before it classifies a correctable field or reaches the
+  existing one-field correction boundary.
+- This makes an incomplete or evidence-ref-invalid single field unrecoverable
+  even though the same enhancer already supports exactly one same-provider,
+  field-only correction behind a fresh token-budget gate.
+- The corrected-candidate parser currently omits the caller's
+  `semanticValidation` mode, so merely removing the early return would
+  incorrectly re-enable legacy SEO/causal prose checks after correction.
+- Raw diagnosis output and its exact invalid field were not persisted, and the
+  outer Free-teaser error intentionally erased the parse detail. This scope
+  does not invent that missing historical evidence. Its deterministic
+  regression uses the proven contract class: one structurally incomplete
+  diagnosis field under deferred semantic review.
+
+### Exact objective and allowed behavior
+
+Make the existing diagnosis enhancer apply its existing single field-only
+correction to a deferred-semantic result only when the parse error is
+structural/evidence-binding, belongs to one known correctable diagnosis field,
+and the provider result is an object.
+
+The repair must:
+
+1. keep the current maximum of two provider attempts and use the same provider;
+2. re-run the existing token-budget gate before the correction call;
+3. send only the selected field, invalid value, sanitized parser reason, and
+   the already bounded diagnosis evidence;
+4. reparse the corrected candidate with the same `"deferred"` validation mode;
+5. preserve unified semantic-review ownership of SEO/causal prose;
+6. continue to reject internal instruction/provider-payload leakage locally
+   with one provider call and no correction;
+7. continue to fail closed for unknown top-level fields, non-correctable or
+   multi-field invalidity, provider/budget failure, invalid correction shape,
+   or a still-invalid corrected candidate; and
+8. never persist or log raw provider output, prompts, credentials, or secrets.
+
+### Exact file allowlist and diff budget
+
+Production source:
+
+- `apps/web/src/worker/report-v4-diagnosis-enhancer.ts`:
+  at most 25 changed lines.
+
+Deterministic test:
+
+- `apps/web/src/worker/report-v4-diagnosis-enhancer.test.ts`:
+  at most 80 changed lines.
+
+Scope authority:
+
+- `docs/ACTIVE-CHANGE-SCOPE.md`:
+  this Phase 3R3 section plus terminal status only, at most 140 changed lines.
+
+No other tracked or untracked source, test, fixture, dependency, schema,
+configuration, runtime environment, script, evidence, or generated path may be
+edited. The production and test budgets are hard bounds. Discovery of a need
+to touch another production behavior or file is a stop-and-report condition.
+
+### Forbidden scope
+
+- No prompt/schema/model/profile/provider/endpoint/token-limit change.
+- No semantic-review contract, annotation, receipt, Free-card, Paid V3,
+  checkout, payment, credit, refund, email, access-token, artifact, database,
+  migration, queue, retry-policy, lease, recovery, replay, or historical-data
+  change.
+- No Vercel action, Docker build/replacement/cleanup, browser submission,
+  public-search request, real model call, Sandbox action, production action,
+  push, merge, PR, tag, or remote mutation.
+- No retry or mutation of either consumed Phase 3/3R2 report or job.
+
+### Acceptance checks
+
+Deterministic tests must prove:
+
+1. a deferred result missing one known structural field requests exactly one
+   correction and completes with `providerAttempts=2`;
+2. the correction request identifies only that field and retains the bounded
+   original evidence;
+3. corrected output is reparsed under deferred semantics, so causal/SEO prose
+   remains reserved for the unified semantic reviewer;
+4. internal leakage still fails with exactly one provider call and no
+   correction;
+5. over-budget, invalid, or still-incomplete correction remains fail-closed;
+6. existing legacy diagnosis behavior remains unchanged; and
+7. the existing marked Free-teaser tests still prove deferred mode and exactly
+   one later unified semantic review.
+
+Run the focused enhancer and Free-teaser tests, full `npm test`, `npm run
+lint`, `npm run build`, and `git diff --check`. Before a commit, compare the
+complete diff to baseline `453f7bc2aa9345117953677f1740923dd8ff9534`,
+require only the three allowlisted paths and budgets, and create at most one
+local implementation commit. Do not push it.
+
+Passing Phase 3R3 is local repair evidence only. A new Preview, Worker image,
+replacement report, model call, Sandbox checkout, or continuation toward Paid
+V3 requires a separate newly frozen deployment/canary scope and explicit user
+approval.
+
 ## Phase 3R2 APPROVED - deploy the verified repair and run one replacement protected-Staging canary
 
 Status: `DEVIATION_REVIEW_REQUIRED`. The user explicitly approved this exact

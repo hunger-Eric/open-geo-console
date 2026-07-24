@@ -171,10 +171,9 @@ export async function enhanceReportV4QuestionDiagnosis(
 
   const parsed = parseDiagnosis(invocation.value, diagnosisInput, input.semanticValidation);
   if (parsed.status === "valid") return completed(input.question, parsed.diagnosis, providerAttempts);
-  if (input.semanticValidation === "deferred") return failed(input.question, providerAttempts);
   if (providerAttempts !== 1) return failed(input.question, providerAttempts);
 
-  const field = correctableField(parsed.error);
+  const field = correctableField(parsed.error, input.semanticValidation);
   if (!field || !isRecord(invocation.value)) return failed(input.question, providerAttempts);
   const correctionRequest = Object.freeze({
     kind: "correct" as const,
@@ -190,7 +189,7 @@ export async function enhanceReportV4QuestionDiagnosis(
   const correctedValue = parseCorrection(correction.value, field);
   if (correctedValue.status === "invalid") return failed(input.question, providerAttempts);
   const correctedCandidate = { ...invocation.value, [field]: correctedValue.value };
-  const corrected = parseDiagnosis(correctedCandidate, diagnosisInput);
+  const corrected = parseDiagnosis(correctedCandidate, diagnosisInput, input.semanticValidation);
   return corrected.status === "valid"
     ? completed(input.question, corrected.diagnosis, providerAttempts)
     : failed(input.question, providerAttempts);
@@ -221,8 +220,9 @@ function parseCorrection(
   return { status: "valid", value: value.value };
 }
 
-function correctableField(error: unknown): ReportV4DiagnosisCorrectableField | null {
+function correctableField(error: unknown, semanticValidation?: "legacy" | "deferred"): ReportV4DiagnosisCorrectableField | null {
   if (!(error instanceof TypeError)) return null;
+  if (semanticValidation === "deferred" && error.message.endsWith(" contains prohibited customer prose.")) return null;
   return CORRECTABLE_FIELDS.find((field) => error.message.startsWith(`$diagnosisOutput.${field}`)) ?? null;
 }
 
