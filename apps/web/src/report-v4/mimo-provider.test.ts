@@ -486,6 +486,35 @@ describe("Report V4 dedicated MiMo provider", () => {
     }
   });
 
+  it("builds deferred diagnosis from semantic prose and short aliases without internal evidence IDs", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return response({ selectionSummary: "result" });
+    });
+    const request = semanticDiagnosisRequest("retry");
+
+    await createReportV4MimoDiagnosisProvider({ environment: environment(), fetch }).generate(request);
+
+    const messages = bodies[0]!.messages as Array<{ role: string; content: string }>;
+    const systemText = messages[0]!.content;
+    const input = JSON.parse(messages[1]!.content) as Record<string, unknown>;
+    expect(systemText).toContain("exactly four semantic fields");
+    expect(systemText).toContain('"evidenceKeys": string[]');
+    expect(systemText).toContain("Code owns final hierarchy");
+    expect(systemText).toContain("Do not return priorities, detailedEvidenceRefs, canonical IDs");
+    expect(input).toMatchObject({
+      kind: "retry",
+      mode: "semantic",
+      failureReason: "invalid_semantic_output at $diagnosisSemanticOutput.targetGap"
+    });
+    expect(JSON.stringify(input)).toContain('"evidenceKey":"S1"');
+    expect(JSON.stringify(input)).toContain('"evidenceKey":"T1"');
+    for (const internal of ["question-1", "source-1", "target-location-1", "target-page-1"]) {
+      expect(JSON.stringify(input)).not.toContain(internal);
+    }
+  });
+
   it("maps diagnosis failures to the diagnosis provider error contract", async () => {
     const provider = createReportV4MimoDiagnosisProvider({
       environment: environment(),
@@ -553,6 +582,37 @@ function diagnosisRequest(kind: "diagnose" | "retry" | "correct"): ReportV4Diagn
   return kind === "correct"
     ? { kind, field: "selectionSummary", invalidValue: "bad", failureReason: "too short", evidence: input, signal: new AbortController().signal }
     : { kind, input, signal: new AbortController().signal };
+}
+
+function semanticDiagnosisRequest(kind: "diagnose" | "retry"): ReportV4DiagnosisProviderRequest {
+  return {
+    kind,
+    mode: "semantic",
+    failureReason: kind === "retry"
+      ? "invalid_semantic_output at $diagnosisSemanticOutput.targetGap"
+      : undefined,
+    input: {
+      question: "Which provider?",
+      answer: "Provider one.",
+      locale: "en-US",
+      evidence: [
+        {
+          evidenceKey: "S1",
+          role: "answer_source",
+          label: "Published service page",
+          text: "Provider one publishes the requested service.",
+          retrievalStatus: "available"
+        },
+        {
+          evidenceKey: "T1",
+          role: "target_page",
+          label: "The target page is relevant.",
+          text: "The target page omits operating conditions."
+        }
+      ]
+    },
+    signal: new AbortController().signal
+  };
 }
 
 function annotation(url: string, title: string) {

@@ -1,5 +1,218 @@
 # Active Change Scope Lock
 
+## Phase 3R5 LOCAL IMPLEMENTATION COMPLETE - make code assemble diagnosis hierarchy and evidence authority
+
+Status: `LOCAL_IMPLEMENTATION_COMPLETE`. On 2026-07-24 the user explicitly approved this exact
+Phase 3R5 FROZEN file allowlist and diff budget with
+`批准 Phase 3R5 FROZEN 范围并开始本地实现`.
+
+The bounded local implementation is complete:
+
+- five focused test files passed 86/86 tests;
+- the final full suite passed 2,820 tests and skipped 188;
+- `npm run lint`, `npm run build`, and `git diff --check` passed;
+- only ten allowlisted implementation, test, and scope paths changed, with
+  every per-file and aggregate diff budget satisfied; and
+- no deployment, real model call, report creation or mutation, commerce action,
+  push, branch/worktree action, or remote mutation occurred.
+
+### Objective, baseline, and immutable evidence
+
+- Branch: `codex/v4-answer-optimization-scope-reset`.
+- Exact clean baseline:
+  `6c3e8e1858008d789dc79ab59abe90917dae0bb8`
+  (`docs: record Phase 3R4 staging stop`).
+- Objective: for marker-enabled deferred diagnosis only, replace the current
+  provider-facing full persisted diagnosis object with a minimal semantic
+  payload using bounded short evidence aliases, then deterministically assemble
+  the existing canonical `ReportV4DiagnosisOutput` in code.
+- The existing final diagnosis, Free teaser, semantic-review, Paid V3,
+  persistence, artifact, and customer HTML contracts remain unchanged. This is
+  an internal generation-boundary correction, not a product/schema migration.
+- Phase 3R2 report `d31a0f70-5500-4d9b-89aa-c484e93495da`, job
+  `9ae1cc50-95c4-436c-a4a3-7cafac5cc9f7`, and Phase 3R4 report
+  `4e9d34ca-e6cf-4721-a40f-49815392a7fd`, job
+  `e5708704-229b-4c1a-87e8-c82ea0fcfdf9`, plus all related reports, jobs,
+  checkpoints, errors, question sets, snapshots, model results, and artifacts
+  are immutable read-only evidence. They may not be retried, resumed, repaired,
+  replayed, cloned, deleted, checked out, or used as new acceptance authority.
+- The current protected-Staging Preview, alias, Worker images/containers,
+  database, and every production authority remain read-only.
+
+### Locked responsibility boundary
+
+The implementation must preserve these decisions:
+
+1. The model owns semantic judgment and prose only: selection summary,
+   observable factors, target gap, recommended actions, and selection of
+   evidence aliases relevant to each semantic item.
+2. Before a deferred diagnosis request, code creates a deterministic,
+   question-local, bijective alias table. Public answer sources use bounded
+   aliases such as `S1` to `S5`; target-site evidence uses `T1` to `T10`.
+   Provider-visible semantic input contains aliases and bounded evidence text,
+   never canonical database IDs, opaque hashes, checkpoint identities, or
+   persistence objects.
+3. The provider returns only a minimal semantic payload. It may refer only to
+   supplied short aliases and must not construct `detailedEvidenceRefs`,
+   canonical question-prefixed target IDs, provenance, hashes, persistence
+   identity, or final artifact structure.
+4. Code maps known aliases back to exact current-question authorities,
+   rejects unknown/cross-question aliases, preserves evidence ownership,
+   deterministically de-duplicates and orders references, assigns action
+   priorities, constructs `detailedEvidenceRefs` from the referenced union,
+   and assembles the existing canonical diagnosis object.
+5. Code may normalize representation-only differences without another model
+   call. It must not invent, rewrite, pad, summarize, or substitute missing
+   semantic prose and must not attach evidence the model did not select.
+6. Required substantive semantic content remains fail-closed. The existing
+   maximum of two same-provider attempts remains controlling; any second call
+   must use the same bounded semantic payload and alias vocabulary behind a
+   fresh token-budget gate. No provider switching or unbounded repair is
+   allowed.
+7. Unified semantic review continues to own natural-language quality,
+   relevance, terminology, overclaiming, causal/SEO meaning, and customer
+   prose. Deterministic code continues to own shape, counts, ordering,
+   evidence identity/ownership, safety, hashes, persistence, and transitions.
+8. Legacy non-marker diagnosis behavior remains byte-for-byte compatible at
+   its public and persisted boundaries. The new semantic DTO/assembler is
+   selected only by the existing deferred semantic-review mode.
+9. A failed enhancer result must retain a bounded typed reason including
+   provider-attempt count and failure class/stage. Job evidence may persist
+   only that safe classification and sanitized parser path; it must never
+   persist or log raw provider output, prompts, full evidence prose,
+   credentials, secrets, or provider payloads.
+
+### Exact production file allowlist and diff budget
+
+Only the following production files may change after explicit approval:
+
+- `packages/ai-report-engine/src/report-v4-diagnosis.ts`:
+  semantic DTO, deterministic alias projection/assembly, and canonical final
+  validation; at most 240 changed lines.
+- `packages/ai-report-engine/src/index.ts`:
+  exports required by the bounded diagnosis API only; at most 20 changed lines.
+- `apps/web/src/worker/report-v4-diagnosis-enhancer.ts`:
+  deferred semantic request, deterministic assembly, bounded retry, and typed
+  failure result; at most 220 changed lines.
+- `apps/web/src/report-v4/mimo-provider.ts`:
+  deferred semantic prompt/input projection and correction prompt only; at
+  most 160 changed lines.
+- `apps/web/src/worker/report-v4-free-teaser.ts`:
+  consume the typed diagnosis failure without changing Free-card or review
+  behavior; at most 40 changed lines.
+- `apps/web/src/worker/report-v4-enhancement-production.ts`:
+  consume the same typed failure for the shared/Paid diagnosis path only; at
+  most 50 changed lines.
+- `apps/web/src/worker/job-errors.ts`:
+  bounded sanitized diagnosis failure classification only; at most 50 changed
+  lines.
+
+The total production-source budget is at most 780 changed lines. This is a hard
+ceiling, not a target. If the design requires another production file,
+database/schema change, dependency, or more than this budget, stop and request
+a new scope instead of expanding locally.
+
+### Exact deterministic test allowlist and diff budget
+
+Only the following test files may change after explicit approval:
+
+- `packages/ai-report-engine/src/report-v4-diagnosis.test.ts`:
+  at most 260 changed lines.
+- `apps/web/src/worker/report-v4-diagnosis-enhancer.test.ts`:
+  at most 260 changed lines.
+- `apps/web/src/report-v4/mimo-provider.test.ts`:
+  at most 180 changed lines.
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`:
+  at most 140 changed lines.
+- `apps/web/src/worker/report-v4-enhancement-production.postgres.test.ts`:
+  at most 120 changed lines.
+- `apps/web/src/worker/job-errors.test.ts`:
+  at most 100 changed lines.
+
+The total test budget is at most 1,060 changed lines. Verification-only budget
+adjustments remain subject to the repository's existing test-only amendment
+rule; production budgets remain hard.
+
+Scope authority:
+
+- `docs/ACTIVE-CHANGE-SCOPE.md`: this Phase 3R5 section and its terminal status
+  only, at most 260 changed lines.
+
+No other tracked or untracked source, test, fixture, documentation,
+configuration, generated output, or evidence path may change.
+
+### Forbidden behavior and external actions
+
+- No change to final customer-visible diagnosis meaning, final V4/V3 artifact
+  schemas, semantic-review contracts/receipts, question generation, public
+  search, crawling, site snapshots, report rendering, checkout, payment,
+  credit, refund, email, access token, database schema, migrations, queue,
+  retry policy, lease, recovery, replay, replacement, or historical authority.
+- No prompt/model/profile/provider/endpoint/key/token-limit change except the
+  allowlisted diagnosis prompt changing from canonical internal IDs/full
+  persistence shape to the approved minimal semantic DTO and short aliases.
+- No code-generated customer prose, fallback diagnosis, silent evidence
+  attachment, fabricated citation, unknown-alias coercion, missing-content
+  padding, gate weakening, or acceptance of cross-question evidence.
+- No Vercel action, Docker build/replacement/cleanup, browser submission,
+  public-provider request, real model call, report creation/mutation, Sandbox
+  checkout/payment, commerce action, production action, push, merge, PR, tag,
+  branch/worktree creation, worktree cleanup, or remote mutation.
+- Preserve all existing worktrees and user-owned files. Do not prune the
+  currently listed stale worktree registrations as part of this task.
+
+### Acceptance checks
+
+Deterministic tests must prove:
+
+1. deferred provider input exposes only `S*`/`T*` aliases plus bounded semantic
+   evidence and contains no canonical source/location IDs or persistence
+   identity;
+2. the alias table is deterministic, question-local, bijective, bounded, and
+   rejects duplicates, unknown aliases, and cross-question evidence;
+3. model-selected aliases map back to the exact existing canonical authorities;
+4. code assigns priorities and constructs ordered/de-duplicated
+   `detailedEvidenceRefs` from selected nested references without generating
+   prose or adding unselected evidence;
+5. the assembled result passes the unchanged canonical
+   `ReportV4DiagnosisOutput` and question/evidence-binding validators;
+6. representation-only differences are normalized locally with no provider
+   retry, while missing substantive semantic content remains fail-closed;
+7. any permitted second provider call stays with the same provider, alias
+   vocabulary, bounded evidence, and fresh token-budget gate, with a maximum
+   of two calls;
+8. legacy non-marker diagnosis fixtures and behavior remain unchanged;
+9. marked Free and Paid/shared diagnosis paths use the new semantic boundary
+   and retain their existing final contracts;
+10. failure evidence records a bounded type/stage/attempt count and sanitized
+    parser path without raw provider output, prompt text, evidence prose,
+    secrets, or opaque internal IDs; and
+11. internal-instruction/provider-payload leakage, unknown aliases, invalid
+    semantics, provider/budget failure, and still-invalid assembled output all
+    remain fail-closed.
+
+Run focused tests for every allowlisted production surface, then:
+
+```powershell
+npm test
+npm run lint
+npm run build
+git diff --check
+```
+
+Use a hard watchdog for the full suite if progress is opaque. Before any
+implementation commit, compare the complete diff with baseline
+`6c3e8e1858008d789dc79ab59abe90917dae0bb8`, require only allowlisted paths and
+budgets, and review the final diff for prompt leakage, raw payload persistence,
+fabricated evidence, legacy-path drift, and unauthorized external actions.
+Create at most one local implementation commit and do not push.
+
+Passing Phase 3R5 establishes local deterministic repair evidence only. Any
+Preview, Worker image, alias movement, real model call, new report, browser
+acceptance, Sandbox action, Paid V3 continuation, production action, or
+historical mutation requires a separate newly frozen scope and explicit user
+approval.
+
 ## Phase 3R4 DEVIATION REVIEW REQUIRED - deploy Q1 diagnosis repair and run one complete protected-Staging report
 
 Status: `DEVIATION_REVIEW_REQUIRED`. The user explicitly approved this exact

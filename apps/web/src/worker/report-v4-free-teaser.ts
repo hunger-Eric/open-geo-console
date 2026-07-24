@@ -48,7 +48,10 @@ import { resolveGenerativeSearchAnswerProvider, resolveProductionPublicSearchRun
 import { buildReportV4MimoDiagnosisTokenBudget, createReportV4MimoDiagnosisProvider, createReportV4MimoStructuredInvoker } from "@/report-v4/mimo-provider";
 import { loadReportV4ModelRuntimeConfig } from "@/report-v4/model-runtime-config";
 import { createConcurrencyGate } from "./bounded-scheduler";
-import { enhanceReportV4QuestionDiagnosis } from "./report-v4-diagnosis-enhancer";
+import {
+  enhanceReportV4QuestionDiagnosis,
+  formatReportV4DiagnosisFailure
+} from "./report-v4-diagnosis-enhancer";
 import { createPublicSourceQuestionFanouts } from "./public-source-forensics";
 import { resolvePublicSourceSnapshot } from "./public-source-snapshot-resolver";
 
@@ -289,7 +292,12 @@ export async function generateFreeTeaser(input: {
       semanticValidation: semanticReviewEnabled ? "deferred" : "legacy"
     });
     if (diagnosisResult.status !== "completed") {
-      throw new Error("Free teaser Q1 diagnosis did not complete.");
+      throw new Error("Free teaser Q1 diagnosis did not complete.", {
+        cause: new Error(formatReportV4DiagnosisFailure(
+          diagnosisResult.failure,
+          diagnosisResult.providerAttempts
+        ))
+      });
     }
     const diagnosis = parseReportV4DiagnosisOutputForQuestion(diagnosisResult.diagnosis, {
       questionId: q1Card.questionId,

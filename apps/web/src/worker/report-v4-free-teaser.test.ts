@@ -43,7 +43,13 @@ vi.mock("@/report-v4/mimo-provider", () => ({
   createReportV4MimoStructuredInvoker: mocks.structuredInvoker
 }));
 vi.mock("@/report-v4/model-runtime-config", () => ({ loadReportV4ModelRuntimeConfig: mocks.modelRuntime }));
-vi.mock("./report-v4-diagnosis-enhancer", () => ({ enhanceReportV4QuestionDiagnosis: mocks.enhanceDiagnosis }));
+vi.mock("./report-v4-diagnosis-enhancer", () => ({
+  enhanceReportV4QuestionDiagnosis: mocks.enhanceDiagnosis,
+  formatReportV4DiagnosisFailure: (
+    failure: { stage: string; code: string; parserPath: string | null },
+    providerAttempts: number
+  ) => `stage=${failure.stage}; code=${failure.code}; providerAttempts=${providerAttempts}${failure.parserPath ? `; parserPath=${failure.parserPath}` : ""}`
+}));
 vi.mock("./public-source-forensics", () => ({ createPublicSourceQuestionFanouts: mocks.fanouts }));
 vi.mock("./public-source-snapshot-resolver", () => ({ resolvePublicSourceSnapshot: mocks.resolveSnapshot }));
 
@@ -217,6 +223,41 @@ beforeEach(() => {
 });
 
 describe("free teaser orchestration", () => {
+  it("retains a bounded typed diagnosis cause without exposing provider output", async () => {
+    mocks.enhanceDiagnosis.mockResolvedValueOnce({
+      status: "failed",
+      providerAttempts: 1,
+      failure: {
+        stage: "semantic_contract",
+        code: "invalid_semantic_output",
+        parserPath: "$diagnosisSemanticOutput.observableFactors"
+      }
+    });
+
+    let error: unknown;
+    try {
+      await generateFreeTeaser({
+        reportId: "report-1",
+        jobId: "job-1",
+        targetUrl: "https://target.example/",
+        foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+        locale: "zh",
+        admission: admission(),
+        semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+        saveCheckpoint: vi.fn()
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("Free teaser Q1 diagnosis did not complete.");
+    expect(String((error as Error & { cause?: unknown }).cause)).toContain(
+      "stage=semantic_contract; code=invalid_semantic_output; providerAttempts=1"
+    );
+    expect(JSON.stringify(error)).not.toContain("raw provider");
+  });
+
   it("resolves the three public-search snapshots in ordinal order with one question active at a time", async () => {
     const original = mocks.resolveSnapshot.getMockImplementation()!;
     const releases: Array<() => void> = [];

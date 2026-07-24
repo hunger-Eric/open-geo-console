@@ -75,6 +75,38 @@ export interface ReportV4DiagnosisOutput {
   readonly detailedEvidenceRefs: readonly string[];
 }
 
+export type ReportV4DiagnosisEvidenceKey = `S${number}` | `T${number}`;
+
+export interface ReportV4DiagnosisSemanticEvidence {
+  readonly evidenceKey: ReportV4DiagnosisEvidenceKey;
+  readonly role: "answer_source" | "target_page";
+  readonly label: string;
+  readonly text: string;
+  readonly retrievalStatus?: ReportV4DiagnosisRetrievalStatus;
+}
+
+export interface ReportV4DiagnosisSemanticInput {
+  readonly question: string;
+  readonly answer: string;
+  readonly locale: string;
+  readonly evidence: readonly ReportV4DiagnosisSemanticEvidence[];
+}
+
+export interface ReportV4DiagnosisSemanticOutput {
+  readonly selectionSummary: string;
+  readonly observableFactors: readonly [
+    { readonly kind: ReportV4ObservableFactorKind; readonly observation: string; readonly evidenceKeys: readonly ReportV4DiagnosisEvidenceKey[] },
+    { readonly kind: ReportV4ObservableFactorKind; readonly observation: string; readonly evidenceKeys: readonly ReportV4DiagnosisEvidenceKey[] },
+    { readonly kind: ReportV4ObservableFactorKind; readonly observation: string; readonly evidenceKeys: readonly ReportV4DiagnosisEvidenceKey[] }
+  ];
+  readonly targetGap: string;
+  readonly recommendedActions: readonly [
+    { readonly action: string; readonly evidenceKeys: readonly ReportV4DiagnosisEvidenceKey[] },
+    { readonly action: string; readonly evidenceKeys: readonly ReportV4DiagnosisEvidenceKey[] },
+    { readonly action: string; readonly evidenceKeys: readonly ReportV4DiagnosisEvidenceKey[] }
+  ];
+}
+
 const INPUT_FIELDS = new Set(["question", "answer", "locale", "sources", "targetPages"]);
 const QUESTION_FIELDS = new Set(["questionId", "text"]);
 const SOURCE_FIELDS = new Set(["questionId", "sourceId", "title", "canonicalUrl", "excerpt", "retrievalStatus"]);
@@ -83,6 +115,9 @@ const LOCATION_FIELDS = new Set(["locationId", "startOffset", "endOffset"]);
 const OUTPUT_FIELDS = new Set(["selectionSummary", "observableFactors", "targetGap", "recommendedActions", "detailedEvidenceRefs"]);
 const FACTOR_FIELDS = new Set(["kind", "observation", "evidenceRefs"]);
 const ACTION_FIELDS = new Set(["priority", "action", "evidenceRefs"]);
+const SEMANTIC_OUTPUT_FIELDS = new Set(["selectionSummary", "observableFactors", "targetGap", "recommendedActions"]);
+const SEMANTIC_FACTOR_FIELDS = new Set(["kind", "observation", "evidenceKeys"]);
+const SEMANTIC_ACTION_FIELDS = new Set(["action", "evidenceKeys"]);
 const FACTOR_KINDS = ["problem_match", "factual_specificity", "entity_clarity", "source_role", "accessibility", "freshness", "target_clarity"] as const;
 
 const PROHIBITED_INTERNAL_LANGUAGE = /(?:system prompt|developer message|raw (?:json|provider)|checkpoint|snapshot|claim extraction|provider adapter|token budget|tool call|系统提示词|开发者消息|原始\s*(?:JSON|供应商)|检查点|快照|声明提取|供应商适配器|令牌预算)/iu;
@@ -175,6 +210,59 @@ export function parseReportV4DiagnosisInput(value: unknown, options?: { semantic
     sources: Object.freeze(sources),
     targetPages: Object.freeze(targetPages)
   });
+}
+
+export function buildReportV4DiagnosisSemanticInput(input: ReportV4DiagnosisInput): ReportV4DiagnosisSemanticInput {
+  return semanticProjection(input).modelInput;
+}
+
+export function assembleReportV4DiagnosisSemanticOutput(
+  value: unknown,
+  input: ReportV4DiagnosisInput
+): ReportV4DiagnosisOutput {
+  const projection = semanticProjection(input);
+  const root = strictObject(value, "$diagnosisSemanticOutput", SEMANTIC_OUTPUT_FIELDS);
+  const factors = array(root.observableFactors, "$diagnosisSemanticOutput.observableFactors");
+  if (factors.length !== 3) throw new TypeError("$diagnosisSemanticOutput.observableFactors must contain exactly three items.");
+  const observableFactors = factors.map((factor, index) => {
+    const path = `$diagnosisSemanticOutput.observableFactors[${index}]`;
+    const row = strictObject(factor, path, SEMANTIC_FACTOR_FIELDS);
+    return Object.freeze({
+      kind: oneOf(row.kind, FACTOR_KINDS, `${path}.kind`),
+      observation: customerProse(row.observation, `${path}.observation`, 5_000, "deferred"),
+      evidenceRefs: Object.freeze(resolveSemanticEvidenceKeys(row.evidenceKeys, `${path}.evidenceKeys`, projection))
+    });
+  }) as unknown as ReportV4DiagnosisOutput["observableFactors"];
+
+  const actions = array(root.recommendedActions, "$diagnosisSemanticOutput.recommendedActions");
+  if (actions.length !== 3) throw new TypeError("$diagnosisSemanticOutput.recommendedActions must contain exactly three items.");
+  const recommendedActions = actions.map((action, index) => {
+    const path = `$diagnosisSemanticOutput.recommendedActions[${index}]`;
+    const row = strictObject(action, path, SEMANTIC_ACTION_FIELDS);
+    return Object.freeze({
+      priority: (index + 1) as 1 | 2 | 3,
+      action: customerProse(row.action, `${path}.action`, 5_000, "deferred"),
+      evidenceRefs: Object.freeze(resolveSemanticEvidenceKeys(row.evidenceKeys, `${path}.evidenceKeys`, projection))
+    });
+  }) as unknown as ReportV4DiagnosisOutput["recommendedActions"];
+
+  const selected = new Set([
+    ...observableFactors.flatMap(({ evidenceRefs }) => evidenceRefs),
+    ...recommendedActions.flatMap(({ evidenceRefs }) => evidenceRefs)
+  ]);
+  const detailedEvidenceRefs = projection.bindings
+    .map(({ evidenceRef }) => evidenceRef)
+    .filter((evidenceRef) => selected.has(evidenceRef));
+  if (!detailedEvidenceRefs.some((evidenceRef) => projection.targetEvidenceRefs.has(evidenceRef))) {
+    throw new TypeError("$diagnosisSemanticOutput must select at least one target-page evidence key.");
+  }
+  return parseReportV4DiagnosisOutput({
+    selectionSummary: customerProse(root.selectionSummary, "$diagnosisSemanticOutput.selectionSummary", 5_000, "deferred"),
+    observableFactors,
+    targetGap: customerProse(root.targetGap, "$diagnosisSemanticOutput.targetGap", 5_000, "deferred"),
+    recommendedActions,
+    detailedEvidenceRefs
+  }, input, { semanticValidation: "deferred" });
 }
 
 export function parseReportV4DiagnosisOutput(value: unknown, input: ReportV4DiagnosisInput, options?: { semanticValidation?: "legacy" | "deferred" }): ReportV4DiagnosisOutput {
@@ -290,6 +378,76 @@ export function parseReportV4DiagnosisOutputForQuestion(
     throw new TypeError(`$diagnosisOutput nested evidence ref ${unboundNested} is absent from detailedEvidenceRefs.`);
   }
   return diagnosis;
+}
+
+interface ReportV4DiagnosisSemanticProjection {
+  readonly modelInput: ReportV4DiagnosisSemanticInput;
+  readonly bindings: readonly { readonly evidenceKey: ReportV4DiagnosisEvidenceKey; readonly evidenceRef: string }[];
+  readonly byKey: ReadonlyMap<string, string>;
+  readonly bindingOrder: ReadonlyMap<string, number>;
+  readonly targetEvidenceRefs: ReadonlySet<string>;
+}
+
+function semanticProjection(input: ReportV4DiagnosisInput): ReportV4DiagnosisSemanticProjection {
+  const bindings: Array<{ evidenceKey: ReportV4DiagnosisEvidenceKey; evidenceRef: string }> = [];
+  const evidence: ReportV4DiagnosisSemanticEvidence[] = input.sources.map((source, index) => {
+    const evidenceKey = `S${index + 1}` as ReportV4DiagnosisEvidenceKey;
+    bindings.push(Object.freeze({ evidenceKey, evidenceRef: source.sourceId }));
+    return Object.freeze({
+      evidenceKey,
+      role: "answer_source" as const,
+      label: source.title,
+      text: source.excerpt ?? source.title,
+      retrievalStatus: source.retrievalStatus
+    });
+  });
+  const targetLocations = input.targetPages.flatMap((page) =>
+    page.sourceLocations.map((location) => ({ page, location }))
+  );
+  if (targetLocations.length > REPORT_V4_MAX_DIAGNOSIS_TARGET_PAGES) {
+    throw new TypeError(`$diagnosisSemanticInput target evidence must contain no more than ${REPORT_V4_MAX_DIAGNOSIS_TARGET_PAGES} locations.`);
+  }
+  targetLocations.forEach(({ page, location }, index) => {
+    const evidenceKey = `T${index + 1}` as ReportV4DiagnosisEvidenceKey;
+    bindings.push(Object.freeze({ evidenceKey, evidenceRef: location.locationId }));
+    evidence.push(Object.freeze({
+      evidenceKey,
+      role: "target_page",
+      label: page.relevanceReason,
+      text: page.summary
+    }));
+  });
+  const frozenBindings = Object.freeze(bindings);
+  return Object.freeze({
+    modelInput: Object.freeze({
+      question: input.question.text,
+      answer: input.answer,
+      locale: input.locale,
+      evidence: Object.freeze(evidence)
+    }),
+    bindings: frozenBindings,
+    byKey: new Map(frozenBindings.map(({ evidenceKey, evidenceRef }) => [evidenceKey, evidenceRef])),
+    bindingOrder: new Map(frozenBindings.map(({ evidenceRef }, index) => [evidenceRef, index])),
+    targetEvidenceRefs: new Set(targetLocations.map(({ location }) => location.locationId))
+  });
+}
+
+function resolveSemanticEvidenceKeys(
+  value: unknown,
+  path: string,
+  projection: ReportV4DiagnosisSemanticProjection
+): string[] {
+  const rows = array(value, path);
+  if (rows.length < 1 || rows.length > 15) throw new TypeError(`${path} must contain between 1 and 15 evidence keys.`);
+  const refs = rows.map((value, index) => {
+    const evidenceKey = boundedText(value, `${path}[${index}]`, 4);
+    const evidenceRef = projection.byKey.get(evidenceKey);
+    if (!evidenceRef) throw new TypeError(`${path}[${index}] references an unknown evidence key.`);
+    return evidenceRef;
+  });
+  return [...new Set(refs)].sort((left, right) =>
+    projection.bindingOrder.get(left)! - projection.bindingOrder.get(right)!
+  );
 }
 
 function evidenceRefsUnbounded(value: unknown, path: string): string[] {
