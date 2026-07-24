@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { REPORT_SEMANTIC_REVIEW_CONTRACT } from "@open-geo-console/ai-report-engine";
 import {
   assertDatabaseProfileMatches,
   closeDatabase,
@@ -154,7 +155,10 @@ describePostgres("protected staging PostgreSQL integration", () => {
       reason: "v4_pre_admission",
       siteSnapshotId: null,
       businessQuestionSetId: null,
-      creditReservationId: null
+      creditReservationId: null,
+      checkpoint: {
+        semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+      }
     });
     expect(await getReportV4PreAdmissionJob(failedReport)).toBeNull();
 

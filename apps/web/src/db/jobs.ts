@@ -530,7 +530,9 @@ export async function terminalizeScanJob(
       productContract: job.product_contract,
       reason: job.reason,
       stage: input.stage
-    }, createPostgresReportV4AdmissionJobRepository(tx));
+    }, createPostgresReportV4AdmissionJobRepository(tx), {
+      semanticReviewContractVersion: "report-semantic-review-v1"
+    });
     if (!job.credit_reservation_id) return;
 
     const reservations = await tx<{
