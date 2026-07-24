@@ -2,12 +2,24 @@
 
 ## Phase 3 FROZEN - protected-Staging semantic-review activation and one fresh test-site canary
 
-Status: `APPROVED`. On 2026-07-24 the user first authorized deployment, a real
+Status: `DEVIATION_REVIEW_REQUIRED`. On 2026-07-24 the user first authorized deployment, a real
 model-backed run, and use of the user's dedicated test site without any real
 payment, then explicitly approved this exact written Phase 3 scope with
 `批准 Phase 3 FROZEN 范围并开始执行`. Local activation, verification, the bounded
 protected-Staging replacement, and the one fresh canary are authorized only
 within the allowlist, counts, identities, caps, and stop rules below.
+
+Execution stopped fail-closed on 2026-07-24 after the single authorized report
+entered unapproved `repair_wait` during `snapshot_resolution`. The new report
+and root pre-admission marker were created, but no semantic-review receipt,
+order, checkout, payment event, credit, Paid artifact, refund, or production
+mutation occurred. Two of the three normally resolved public-search snapshots
+were reused completed cache authorities from 2026-07-22 whose query text still
+matched but whose persisted `query_fanout_hash` and deterministic query IDs no
+longer matched the current verifier; the third, newly created snapshot matched.
+No retry, replay, historical mutation, second report, checkout, payment, or
+Phase 4 action is authorized. Exact evidence is recorded in
+`docs/operations/evidence/2026-07-24-semantic-review-protected-staging.md`.
 
 This is the separately gated protected-Staging phase required by
 `docs/superpowers/specs/2026-07-23-report-semantic-review-staged-rollout-design.md`.
@@ -20,6 +32,10 @@ Staging canary or combine Staging and production into one cutover.
 - Baseline branch: `codex/v4-answer-optimization-scope-reset`.
 - Exact clean baseline commit:
   `38ab4d78a7bc46b7a77eee3921b1a099be9677ab`.
+- Exact activation candidate commit:
+  `11927beb4f8fafd5eaddde5d0491dbcf4a44b849`. This is the sole local
+  activation commit; it has not been pushed. Its changed paths and budgets are
+  production `+3/-1`, test `+5/-1`, and this scope document only.
 - Target application: the authenticated protected Preview at
   `https://open-geo-console-staging-itheheda.vercel.app`.
 - Submitted target site: exactly `https://shun-express.com/`.
@@ -73,6 +89,13 @@ PostgreSQL test, `npm test`, `npm run lint`, `npm run build`, and
 resulting clean full commit SHA becomes the candidate revision and must be
 written into this section before any external mutation. Do not push, merge,
 create a PR/tag, or alter any remote Git ref.
+
+Candidate verification completed before external mutation: the two focused
+unit files passed `15/15`; the disposable PostgreSQL suite passed `7/7` after
+its fresh database received the required `staging` environment marker; the
+disposable container was removed; full `npm test` passed 302 files and 2,810
+tests with 46 files and 188 tests skipped; `npm run lint`, `npm run build`, and
+`git diff --check` passed.
 
 ### Exact deployment identities and disk-safe Worker replacement
 
