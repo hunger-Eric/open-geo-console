@@ -68,6 +68,40 @@ describe("public-source snapshot resolver", () => {
     expect(resumedRefresh).toMatchObject({ snapshotId: refreshed.snapshotId, collectedForThisRun: false });
   });
 
+  it("reuses one semantic snapshot across report-local question identities while projecting current query IDs", async () => {
+    const authority = await installAuthority("review-cross-report-reuse");
+    const search = vi.fn(async () => observationPayload("complete"));
+    const adapter = fixtureAdapter(authority, search);
+    const originFanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const currentQuestion = {
+      ...question,
+      id: "question-public-snapshot-current-report",
+      questionSetVersion: "public-question-v2"
+    };
+    const currentFanout = createSearchQueryFanout({ question: currentQuestion, surface, excludedIdentities: [] });
+    expect(currentFanout.queries.map(({ exactQuery }) => exactQuery)).toEqual(originFanout.queries.map(({ exactQuery }) => exactQuery));
+    expect(currentFanout.queries.map(({ id }) => id)).not.toEqual(originFanout.queries.map(({ id }) => id));
+
+    const first = await resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout: originFanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-origin"
+    });
+    const originBundle = await getMarketSnapshotBundle(first.snapshotId);
+    const reused = await resolvePublicSourceSnapshot({
+      authority, adapter, question: currentQuestion, fanout: currentFanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-current"
+    });
+    const reusedBundle = await getMarketSnapshotBundle(reused.snapshotId);
+
+    expect(reused).toMatchObject({ snapshotId: first.snapshotId, collectedForThisRun: false, actualCostMicros: 0 });
+    expect(reused.observations.map(({ queryId }) => queryId).sort()).toEqual(currentFanout.queries.map(({ id }) => id).sort());
+    expect(reused.observations.map(({ queryId }) => queryId).sort()).not.toEqual(originFanout.queries.map(({ id }) => id).sort());
+    expect(reusedBundle?.queries.map(({ id }) => id)).toEqual(originBundle?.queries.map(({ id }) => id));
+    expect(reusedBundle?.attempts.map(({ id }) => id)).toEqual(originBundle?.attempts.map(({ id }) => id));
+    expect(reusedBundle?.observations.map(({ id }) => id)).toEqual(originBundle?.observations.map(({ id }) => id));
+    expect(search).toHaveBeenCalledTimes(originFanout.queries.length);
+  });
+
   it("collects a new snapshot when the effective query plan changes under the same fanout version", async () => {
     const authority = await installAuthority("review-query-plan-identity");
     const search = vi.fn(async () => observationPayload("complete"));

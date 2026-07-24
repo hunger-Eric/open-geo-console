@@ -1,5 +1,160 @@
 # Active Change Scope Lock
 
+## Phase 3R1 FROZEN - align Free semantic verifier with exact shared-snapshot reuse
+
+Status: `COMPLETE`. The user explicitly approved this exact local-only repair
+scope on 2026-07-24 with
+`批准 Phase 3R1 FROZEN 范围并开始执行`. The implementation remained inside the
+four-file allowlist with production `+6/-14` and combined tests `+62/-5`.
+Focused verification passed 29/29 tests. One initial full-suite run had a
+single unrelated concurrent PostgreSQL phase-capture timestamp failure; that
+exact file then passed 5/5 alone, and the clean final full-suite rerun passed
+302 files and 2,811 tests with 46 files and 188 tests skipped. `npm run lint`,
+`npm run build`, and `git diff --check` passed. No external action occurred.
+
+### Objective, baseline, and established root cause
+
+- Baseline branch: `codex/v4-answer-optimization-scope-reset`.
+- Exact clean baseline commit:
+  `5ad211ba8574bc772f3ec8e8301781ebe81c9d01`.
+- Phase 3 activation remains committed locally at
+  `11927beb4f8fafd5eaddde5d0491dbcf4a44b849`; no commit has been pushed.
+- Objective: make the marker-enabled Free teaser snapshot verifier accept an
+  exact, completed shared public-search snapshot when its semantic query plan
+  is identical but its immutable stored question/query lineage originated from
+  another report, while preserving fail-closed rejection of any changed
+  question, surface, authority, plan, query content, attempt linkage, or
+  observation authority.
+
+The current code establishes these separate identity domains:
+
+1. `createMarketSnapshotIdentity` intentionally keys shared cache reuse by the
+   normalized question, locale, region, surface identity, fanout version, exact
+   query text/derivation/depth, and budget. It intentionally excludes
+   report-local question IDs, question-set IDs, and query IDs.
+2. Stored query IDs are snapshot-ledger identities created from the snapshot ID
+   and the originating fanout query ID. The stored `query_fanout_hash` likewise
+   records the originating fanout, including its report-local question and
+   query identities.
+3. `resolvePublicSourceSnapshot` deliberately reuses a cache-identical
+   completed snapshot and materializes it for the current report by matching
+   stored query order and exact query text, then projecting the current fanout
+   query ID into the returned observations.
+4. `verifyFreeTeaserSnapshotBundle` currently contradicts that contract by
+   requiring the stored originating query IDs and `query_fanout_hash` to equal
+   values recomputed from the current report. The Phase 3 canary therefore
+   rejected two otherwise exact shared snapshots from 2026-07-22 and accepted
+   the newly created third snapshot.
+
+### Exact implementation allowlist and behavior
+
+Production source:
+
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+
+Tests:
+
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+- `apps/web/src/worker/public-source-snapshot-resolver.test.ts`
+
+Documentation:
+
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+
+Maximum production-source diff: `+35/-20`. Maximum combined test diff:
+`+120/-20`. Documentation is excluded from those budgets. No other tracked
+path may change.
+
+The production change may only realign
+`verifyFreeTeaserSnapshotBundle` with the existing shared-cache contract:
+
+- keep exact equality for the recomputed semantic cache identity, normalized
+  question and question hash, locale, region, surface authority, surface ID and
+  version, fanout version, snapshot kind, parent/candidate metadata, query-plan
+  version, and completed status;
+- validate the persisted query ledger by count and order, snapshot ownership,
+  exact query text, query hash, and derivation rule against the current
+  semantic fanout;
+- treat persisted query IDs and `query_fanout_hash` as immutable provenance of
+  the originating shared snapshot, not as current-report identities; require
+  the origin hash and stored IDs to remain well-formed and internally unique,
+  but do not require equality to current report-local IDs;
+- derive the allowed query-ID set from the validated persisted query rows, then
+  continue requiring every terminal attempt and every returned observation to
+  bind to those exact stored rows and to the exact snapshot/authority;
+- preserve the existing requirements for unique attempts/results, terminal
+  attempt status, at least one attempt for every query, at least one successful
+  attempt, successful ownership of every returned observation, and rejection
+  of non-returned observations.
+
+No query, attempt, observation, snapshot, report, checkpoint, or semantic-review
+payload may be rewritten. No fallback, compatibility date, cache bypass,
+force-refresh behavior, report-specific cache partition, or verifier skip may
+be introduced.
+
+### Required regression proof
+
+The resolver test must construct two report-local canonical questions whose
+question and query IDs differ but whose normalized question and complete
+semantic query plan are identical. It must prove that:
+
+- the second request reuses the first exact snapshot without another search;
+- persisted snapshot/query/attempt/observation ledger IDs remain those of the
+  first origin;
+- returned observations are projected onto the second request's current query
+  IDs; and
+- a real semantic plan difference still produces a distinct snapshot.
+
+The Free teaser test must supply an otherwise exact cached bundle whose stored
+origin question/query identities and `query_fanout_hash` differ from the
+current report while its cache identity and semantic plan match. It must prove
+the semantic-review path proceeds exactly once. Existing or strengthened
+negative cases must continue to stop before the semantic-review call when any
+cache identity, question/surface/authority metadata, query order/text/hash/
+derivation, attempt ownership/status, observation ownership/status, stored-ID
+uniqueness, or origin-hash shape is corrupted.
+
+After implementation, run:
+
+- the two allowlisted focused test files;
+- `npm test`;
+- `npm run lint`;
+- `npm run build`;
+- `git diff --check`; and
+- a complete diff/allowlist/budget review.
+
+Only after all checks pass may exactly one local Phase 3R1 repair commit be
+created. Do not push, merge, create a PR/tag, or alter any remote Git ref.
+
+### Forbidden subsystems and external actions
+
+Phase 3R1 is local-only. It does not authorize:
+
+- edits to `packages/public-search-observer`, snapshot identity/fanout
+  generation, the public-source resolver, database access, schema, migrations,
+  model prompts/contracts, marker activation, commerce, artifacts, rendering,
+  access control, deployment scripts, dependencies, or environment files;
+- modification, deletion, refresh, replay, repair, or replacement of any
+  historical/current Staging or production row, snapshot, report, job, order,
+  checkpoint, artifact, token, credit, payment, refund, or email;
+- a model/provider call, URL submission, scan, report, checkout, payment,
+  Webhook, refund, email drain, Docker build/replacement/cleanup, Vercel deploy
+  or alias change, Staging mutation, production mutation, push, or publication.
+
+Any need to change the shared cache identity, fanout/query-ID generation,
+resolver materialization, database semantics, or a path outside this allowlist
+is a stop-and-report condition requiring a revised FROZEN scope and new
+approval.
+
+### Phase 3R2 boundary
+
+Successful local Phase 3R1 verification does not authorize a replacement
+canary. A separate Phase 3R2 scope must name the exact repair commit, protected-
+Staging Web/Worker revisions, image and rollback identities, disk preflight,
+one newly authorized replacement report, model/token/cost caps, and at most one
+Sandbox checkout. It requires a separate explicit approval. Phase 4 production
+activation remains unauthorized until that replacement canary fully passes.
+
 ## Phase 3 FROZEN - protected-Staging semantic-review activation and one fresh test-site canary
 
 Status: `DEVIATION_REVIEW_REQUIRED`. On 2026-07-24 the user first authorized deployment, a real

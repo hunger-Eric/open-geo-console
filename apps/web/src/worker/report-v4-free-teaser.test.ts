@@ -365,8 +365,13 @@ describe("free teaser orchestration", () => {
         ? { ...result, diagnosis: { ...result.diagnosis, selectionSummary: "The model selected these sources because they rank higher." } }
         : result;
     });
+    const currentBundle = await defaultMarketSnapshotBundle("snapshot-1");
+    const sharedOriginBundle = await defaultMarketSnapshotBundle("snapshot-1", "origin-report");
+    expect(sharedOriginBundle.snapshot.cacheIdentity).toBe(currentBundle.snapshot.cacheIdentity);
+    expect(sharedOriginBundle.snapshot.queryFanoutHash).not.toBe(currentBundle.snapshot.queryFanoutHash);
+    expect(sharedOriginBundle.queries.map(({ id }) => id)).not.toEqual(currentBundle.queries.map(({ id }) => id));
     mocks.getMarketSnapshotBundle.mockImplementation(async (snapshotId: string) => {
-      const bundle = await defaultMarketSnapshotBundle(snapshotId);
+      const bundle = await defaultMarketSnapshotBundle(snapshotId, "origin-report");
       if (snapshotId !== "snapshot-1") return bundle;
       const attempt = {
         ...bundle.attempts[0]!,
@@ -491,14 +496,22 @@ describe("free teaser orchestration", () => {
     const answerCallsBeforeCorruptResume = mocks.answerWithSources.mock.calls.length;
     const diagnosisCallsBeforeCorruptResume = mocks.enhanceDiagnosis.mock.calls.length;
     const reviewCallsBeforeCorruptResume = mocks.semanticInvoke.mock.calls.length;
-    const corruptBundle = async (kind: "cache" | "query" | "attempt" | "status", snapshotId: string) => {
+    const corruptBundle = async (kind: "cache" | "authority" | "query" | "query-order" | "query-text" | "query-rule" | "query-id" | "duplicate-query-id" | "origin-hash" | "attempt" | "attempt-status" | "status", snapshotId: string) => {
       const bundle = await defaultMarketSnapshotBundle(snapshotId);
       if (kind === "cache") return { ...bundle, snapshot: { ...bundle.snapshot, cacheIdentity: "forged-cache-identity" } };
+      if (kind === "authority") return { ...bundle, snapshot: { ...bundle.snapshot, surfaceAuthorityVersion: "forged-authority" } };
       if (kind === "query") return { ...bundle, queries: bundle.queries.map((query, index) => index === 0 ? { ...query, queryHash: "f".repeat(64) } : query) };
+      if (kind === "query-order") return { ...bundle, queries: bundle.queries.map((query, index) => index === 0 ? { ...query, queryOrder: 2 } : query) };
+      if (kind === "query-text") return { ...bundle, queries: bundle.queries.map((query, index) => index === 0 ? { ...query, queryText: "forged query" } : query) };
+      if (kind === "query-rule") return { ...bundle, queries: bundle.queries.map((query, index) => index === 0 ? { ...query, derivationRule: "forged-rule" } : query) };
+      if (kind === "query-id") return { ...bundle, queries: bundle.queries.map((query, index) => index === 0 ? { ...query, id: "malformed-query-id" } : query) };
+      if (kind === "duplicate-query-id") return { ...bundle, queries: bundle.queries.map((query, index) => index === 1 ? { ...query, id: bundle.queries[0]!.id } : query) };
+      if (kind === "origin-hash") return { ...bundle, snapshot: { ...bundle.snapshot, queryFanoutHash: "malformed-origin-hash" } };
       if (kind === "attempt") return { ...bundle, observations: bundle.observations.map((row, index) => index === 0 ? { ...row, attemptId: "unknown-attempt" } : row) };
+      if (kind === "attempt-status") return { ...bundle, attempts: bundle.attempts.map((attempt, index) => index === 0 ? { ...attempt, requestStatus: "pending" } : attempt) };
       return { ...bundle, observations: bundle.observations.map((row, index) => index === 0 ? { ...row, resultStatus: "filtered" } : row) };
     };
-    for (const kind of ["cache", "query", "attempt", "status"] as const) {
+    for (const kind of ["cache", "authority", "query", "query-order", "query-text", "query-rule", "query-id", "duplicate-query-id", "origin-hash", "attempt", "attempt-status", "status"] as const) {
       mocks.getMarketSnapshotBundle.mockImplementationOnce((snapshotId: string) => corruptBundle(kind, snapshotId));
       await expect(generateFreeTeaser({ ...input, checkpoint: observationsReady, saveCheckpoint: vi.fn() }))
         .rejects.toThrow(/snapshot authority/i);
@@ -735,15 +748,25 @@ describe("free teaser orchestration", () => {
   });
 });
 
-async function defaultMarketSnapshotBundle(snapshotId: string) {
+async function defaultMarketSnapshotBundle(snapshotId: string, originSuffix?: string) {
   const index = Number(snapshotId.replace("snapshot-", "")) - 1;
   const question = toCanonicalBuyerQuestionSet(questionSet()).questions[index]!;
   const baseFanout = fixtureFanouts(toCanonicalBuyerQuestionSet(questionSet()).questions)[index]!;
-  const fanout: SearchQueryFanout = {
+  const currentFanout: SearchQueryFanout = {
     ...baseFanout,
     queries: baseFanout.queries.slice(0, 3),
     budget: { ...baseFanout.budget, timeoutMs: 60_000 }
   };
+  const fanout: SearchQueryFanout = originSuffix ? {
+    ...currentFanout,
+    questionId: `${currentFanout.questionId}-${originSuffix}`,
+    questionSetVersion: `${currentFanout.questionSetVersion}-${originSuffix}`,
+    queries: currentFanout.queries.map((query) => ({
+      ...query,
+      id: deterministicId("query", [query.id, originSuffix]),
+      questionId: `${query.questionId}-${originSuffix}`
+    }))
+  } : currentFanout;
   const identity = createMarketSnapshotIdentity({ question, surface: fanout.surface, fanout });
   const queries = fanout.queries.map((query, queryOrder) => ({
     id: deterministicId("market-snapshot-query", [snapshotId, query.id]),

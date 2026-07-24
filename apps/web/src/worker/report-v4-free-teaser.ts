@@ -28,7 +28,6 @@ import {
 } from "@open-geo-console/ai-report-engine";
 import {
   createMarketSnapshotIdentity,
-  deterministicId,
   toCanonicalBuyerQuestionSet,
   type ConfirmedBusinessQuestionSet,
   type CustomerIdentityExclusion,
@@ -599,19 +598,10 @@ function verifyFreeTeaserSnapshotBundle(input: {
   const snapshot = bundle.snapshot;
   const identity = createMarketSnapshotIdentity({ question, surface: authority.surface, fanout });
   const expectedQueries = fanout.queries.map((query, queryOrder) => ({
-    id: deterministicId("market-snapshot-query", [snapshotId, query.id]),
-    snapshotId,
     queryOrder,
     queryText: query.exactQuery,
     queryHash: sha(query.exactQuery),
     derivationRule: query.derivationRuleId
-  }));
-  const expectedFanoutHash = sha(JSON.stringify({
-    questionId: fanout.questionId,
-    questionSetVersion: fanout.questionSetVersion,
-    fanoutVersion: fanout.fanoutVersion,
-    surface: fanout.surface,
-    queries: fanout.queries.map(({ id, exactQuery, derivationRuleId, resultDepth }) => ({ id, exactQuery, derivationRuleId, resultDepth }))
   }));
   const snapshotMatches = snapshot.id === snapshotId && snapshot.cacheIdentity === identity.id && snapshot.status === "completed" &&
     snapshot.normalizedQuestion === identity.normalizedQuestion && snapshot.questionHash === sha(question.normalizedText) &&
@@ -619,13 +609,15 @@ function verifyFreeTeaserSnapshotBundle(input: {
     snapshot.surfaceAuthorityVersion === authority.authorityId && snapshot.surfaceId === identity.surfaceId &&
     snapshot.surfaceVersion === identity.surfaceVersion && snapshot.fanoutVersion === identity.fanoutVersion &&
     snapshot.snapshotKind === "standard_question" && snapshot.parentSnapshotId == null && snapshot.candidateSetHash == null &&
-    snapshot.queryPlanVersion === fanout.fanoutVersion && snapshot.queryFanoutHash === expectedFanoutHash;
+    snapshot.queryPlanVersion === fanout.fanoutVersion && isHash(snapshot.queryFanoutHash);
+  const queryIds = new Set<string>();
   const queriesMatch = bundle.queries.length === expectedQueries.length && expectedQueries.every((expected, index) => {
     const actual = bundle.queries[index];
-    return actual?.id === expected.id && actual.snapshotId === expected.snapshotId && actual.queryOrder === expected.queryOrder &&
+    if (!actual || !/^market-snapshot-query-[a-f0-9]{64}$/u.test(actual.id) || queryIds.has(actual.id)) return false;
+    queryIds.add(actual.id);
+    return actual.snapshotId === snapshotId && actual.queryOrder === expected.queryOrder &&
       actual.queryText === expected.queryText && actual.queryHash === expected.queryHash && actual.derivationRule === expected.derivationRule;
   });
-  const queryIds = new Set(expectedQueries.map(({ id }) => id));
   const attemptIds = new Set<string>();
   const terminalStatuses = new Set(["succeeded", "partial", "timeout", "rate_limited", "unavailable", "malformed", "aborted", "authentication", "unsupported"]);
   const successfulStatuses = new Set(["succeeded", "partial"]);
@@ -633,7 +625,7 @@ function verifyFreeTeaserSnapshotBundle(input: {
     if (attemptIds.has(attempt.id)) return false;
     attemptIds.add(attempt.id);
     return attempt.snapshotId === snapshotId && queryIds.has(attempt.queryId) && attempt.authorityVersion === authority.authorityId && terminalStatuses.has(attempt.requestStatus);
-  }) && expectedQueries.every(({ id }) => bundle.attempts.some((attempt) => attempt.queryId === id)) &&
+  }) && bundle.queries.every(({ id }) => bundle.attempts.some((attempt) => attempt.queryId === id)) &&
     bundle.attempts.some((attempt) => successfulStatuses.has(attempt.requestStatus));
   const attemptById = new Map(bundle.attempts.map((attempt) => [attempt.id, attempt]));
   const resultIds = new Set<string>();
