@@ -679,18 +679,32 @@ export async function resumeScanJobAfterRepair(input: {
   await ensureDatabase();
   await input.readiness();
   const sql = getSqlClient();
+  const regenerationLocator = await sql<Array<{ site_key: string }>>`
+    SELECT site_key FROM staging_free_regenerations WHERE job_id=${input.id} LIMIT 1
+  `;
   await sql.begin(async (tx) => {
+    if (regenerationLocator[0]) {
+      await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`staging-regeneration:${regenerationLocator[0].site_key}`}, 0))`;
+    }
     const rows = await tx<{
-      id: string; report_id: string; product_contract: ScanJobRow["productContract"]; fulfillment_methodology: ScanJobRow["fulfillmentMethodology"];
+      id: string; report_id: string; reason: ScanJobRow["reason"]; product_contract: ScanJobRow["productContract"]; fulfillment_methodology: ScanJobRow["fulfillmentMethodology"];
       locale: ScanJobRow["locale"]; checkpoint: JobCheckpoint; checkpoint_revision: number; current_phase: ScanJobPhase;
       execution_state: string; resume_generation: number;
     }[]>`
-      SELECT id, report_id, product_contract, fulfillment_methodology, locale, checkpoint, checkpoint_revision,
+      SELECT id, report_id, reason, product_contract, fulfillment_methodology, locale, checkpoint, checkpoint_revision,
              current_phase, execution_state, resume_generation
       FROM scan_jobs WHERE id=${input.id} FOR UPDATE
     `;
     const job = rows[0];
     if (!job || job.execution_state !== "repair_wait") throw new Error("Only a repair-waiting job can be resumed.");
+    if (job.reason === "staging_regeneration") {
+      const reservations = await tx<Array<{ site_key: string }>>`
+        SELECT site_key FROM staging_free_regenerations
+        WHERE report_id=${job.report_id} AND job_id=${job.id}
+        FOR UPDATE
+      `;
+      if (reservations.length !== 1) throw new Error("The staging regeneration reservation was superseded.");
+    }
     validateRecoveryCheckpoint({
       job: { id: job.id, reportId: job.report_id, productContract: job.product_contract,
         fulfillmentMethodology: job.fulfillment_methodology, locale: job.locale,
