@@ -21,6 +21,41 @@ export function buildReportSemanticReviewSystemPrompt(): string {
   ].join("\n");
 }
 
+/** Free V4's marker-present request needs a field-local response blueprint. */
+export function buildFreeV4ReportSemanticReviewSystemPrompt(input: ReportSemanticReviewInput): string {
+  if (input.lifecycle !== "free_v4") throw new TypeError("Free V4 semantic-review prompt requires a Free V4 input.");
+  const blueprint = {
+    fields: input.fields.map((field, index) => ({
+      index,
+      path: field.path,
+      originalTextHash: field.originalTextHash,
+      mutability: field.mutability, referenceRequirement: field.allowedEvidenceIds.length + field.allowedSourceIds.length ? "at_least_one_exact_local_id" : "none",
+      allowedEvidenceIds: field.allowedEvidenceIds,
+      allowedSourceIds: field.allowedSourceIds
+    })),
+    answers: input.answerSubjects.map((subject, index) => {
+      const field = input.fields.find(({ path, questionId }) => path === subject.fieldPath && questionId === subject.questionId);
+      if (!field) throw new TypeError(`Free V4 answer subject ${subject.questionId} has no owned field.`);
+      return {
+        index,
+        questionId: subject.questionId,
+        fieldPath: subject.fieldPath,
+        allowedEvidenceIds: field.allowedEvidenceIds,
+        allowedSourceIds: field.allowedSourceIds
+      };
+    })
+  };
+  return [
+    buildReportSemanticReviewSystemPrompt(),
+    "This is a marker-present Free V4 request. Follow the request blueprint below exactly.",
+    "Global catalogs establish known IDs only; they do not widen a field allowlist. Each field result, evidenceUse row, and answer must use only its own listed IDs; a blueprint referenceRequirement of at_least_one_exact_local_id requires at least one exact listed evidenceIds or sourceIds, never both empty. In particular, an answer must not use diagnosis target IDs unless its own answer field allowlist explicitly lists them.",
+    "Blueprint-only index is an ordering aid; omit index from every output field object. Return fields in blueprint order and use only path, originalTextHash, decision, optional correctedText, issueCodes, reason, evidenceIds, sourceIds, retainedOriginalTerms. A mutable corrected field requires correctedText byte-for-byte different from its original text; otherwise use pass. Read-only fields must pass or block.",
+    "Return the complete JSON skeleton and checklist: every top-level key, every field, questionDistinctness, annotations.observationResults, annotations.answers, annotations.evidenceUse, and overallDecision. Do not omit empty arrays or optional values required by the contract.",
+    "Free V4 request blueprint (identities and allowlists only; customer prose remains only in the supplied input authority):",
+    JSON.stringify(blueprint)
+  ].join("\n");
+}
+
 export function buildPaidV3ReportSemanticReviewSystemPrompt(): string {
   return [
     buildReportSemanticReviewSystemPrompt()

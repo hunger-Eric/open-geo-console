@@ -15,6 +15,7 @@ import { getVisibleReportBundle } from "@/server/visible-ai-report";
 import { cookies } from "next/headers";
 import { reportAccessCookieName, tokenGrantsReportAccess } from "@/server/report-access";
 import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
+import { readSemanticReviewContractVersion } from "@/db/report-semantic-review-activation";
 import {
   freeTeaserCheckpointFromJobCheckpoint,
   loadConfirmedFreeTeaserQuestionSet,
@@ -74,13 +75,33 @@ export default async function ReportPage({
     const preAdmissionJob = await getReportV4PreAdmissionJob(id);
     if (preAdmissionJob) {
       const checkpoint = freeTeaserCheckpointFromJobCheckpoint(preAdmissionJob.checkpoint);
+      const semanticReviewContractVersion = readSemanticReviewContractVersion(preAdmissionJob.checkpoint);
+      const markerPresent = semanticReviewContractVersion !== null;
       let ready = null;
       try {
-        ready = checkpoint ? parseReadyFreeTeaserCheckpoint(checkpoint) : null;
+        ready = checkpoint
+          ? parseReadyFreeTeaserCheckpoint(
+              checkpoint,
+              markerPresent ? { semanticReviewContractVersion } : undefined
+            )
+          : null;
       } catch {
         ready = null;
       }
-      if (!ready || !visible.aiReport || !ready.reviewedFoundation) {
+      if (markerPresent) {
+        // Marker-present: only receipt-bound reviewed projection; no unreviewed fallback.
+        if (!ready || !ready.reviewedFoundation || !ready.q1AnswerCard) {
+          return <PendingReportView
+            createdAt={row.createdAt}
+            dictionary={getDictionary(locale)}
+            locale={locale}
+            reportId={id}
+            reportLocale={reportLocale}
+            url={row.url}
+          />;
+        }
+      } else if (!ready || !visible.aiReport || !ready.reviewedFoundation) {
+        // Marker-absent: preserve the original free-teaser readiness seam.
         return <PendingReportView
           createdAt={row.createdAt}
           dictionary={getDictionary(locale)}

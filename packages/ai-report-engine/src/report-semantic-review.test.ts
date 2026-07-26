@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   REPORT_SEMANTIC_REVIEW_CONTRACT,
   applyReportSemanticReview,
+  buildFreeV4ReportSemanticReviewSystemPrompt,
   buildPaidV3ReportSemanticReviewSystemPrompt,
   buildReportSemanticReviewSystemPrompt,
   createReportSemanticReviewInput,
@@ -36,6 +37,23 @@ describe("ReportSemanticReview input authority", () => {
     expect(prompt).toMatch(/stable catalog identity.*target-state gap.*factor.*action/isu);
     expect(prompt).toMatch(/Use only exact catalog evidence IDs/iu);
     expect(prompt).toMatch(/never derive.*regexes.*keywords/isu);
+  });
+  it("builds a Free V4 request blueprint with exact field-local evidence boundaries", () => {
+    const core = inputCore();
+    core.lifecycle = "free_v4";
+    const input = createReportSemanticReviewInput(core);
+    const prompt = buildFreeV4ReportSemanticReviewSystemPrompt(input);
+
+    expect(prompt).toContain("Free V4 request blueprint");
+    expect(prompt).toContain('"index":0');
+    expect(prompt).toContain(`"path":"${input.fields[0]!.path}"`);
+    expect(prompt).toContain(`"originalTextHash":"${input.fields[0]!.originalTextHash}"`);
+    expect(prompt).toContain(`"allowedEvidenceIds":["${input.fields[1]!.allowedEvidenceIds[0]}"]`);
+    expect(prompt).toContain("Global catalogs establish known IDs only; they do not widen a field allowlist.");
+    expect(prompt).toContain("correctedText byte-for-byte different");
+    expect(prompt).toContain("Blueprint-only index is an ordering aid; omit index from every output field object.");
+    expect(prompt).toContain("path, originalTextHash, decision, optional correctedText, issueCodes, reason, evidenceIds, sourceIds, retainedOriginalTerms");
+    expect(prompt).toContain("complete JSON skeleton and checklist");
   });
   it("creates a canonical input hash independent of object key insertion order", () => {
     const input = createReportSemanticReviewInput(inputCore());
@@ -116,6 +134,16 @@ describe("ReportSemanticReview input authority", () => {
 });
 
 describe("ReportSemanticReview model output", () => {
+  it("rejects a blueprint-only index in a response field", () => {
+    const core = inputCore();
+    core.lifecycle = "free_v4";
+    const input = createReportSemanticReviewInput(core);
+    const review = validReview(input);
+    reviewFields(review)[0]!.index = 0;
+
+    expect(() => parseReportSemanticReviewOutput(review, input)).toThrow(/unknown key/u);
+  });
+
   it("parses a complete pass review and derives its overall decision", () => {
     const input = createReportSemanticReviewInput(inputCore());
     const parsed = parseReportSemanticReviewOutput(validReview(input), input);
@@ -199,8 +227,8 @@ describe("ReportSemanticReview model output", () => {
     expect(() => parseReportSemanticReviewOutput(unchanged, input)).toThrow(/must differ/u);
   });
 
-  it("rejects disallowed evidence/source references and duplicate retained terms", () => {
-    const input = createReportSemanticReviewInput(inputCore());
+  it("rejects disallowed/empty answer references and duplicate retained terms while exact answer IDs pass", () => {
+    const input = createReportSemanticReviewInput(inputCore()); expect(parseReportSemanticReviewOutput(validReview(input), input).fields[1]!.evidenceIds).toEqual(["evidence-q1"]);
     const refs = validReview(input);
     reviewFields(refs)[0]!.evidenceIds = ["evidence-q1"];
     expect(() => parseReportSemanticReviewOutput(refs, input)).toThrow(/disallowed reference/u);

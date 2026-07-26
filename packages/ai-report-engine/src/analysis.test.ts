@@ -60,6 +60,45 @@ describe("analyzePageBatch semantic-validation seam", () => {
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
+  it("R6-shaped foundation summary is not rejected by language gate when deferred for Free semantic review", async () => {
+    // Mirrors protected-staging R6: language validation failed at analyses[0].summary
+    // under legacy gates; deferred Free foundation must survive until ReportSemanticReview.
+    const r6Shaped = {
+      analyses: [{
+        url: page.url,
+        pageType: page.pageType,
+        summary: "凌顺（Shun Express）提供 FBA 头程与跨境物流服务，并保留 brand and product names in mixed form。",
+        organizationSignals: ["凌顺", "Shun Express"],
+        strengths: ["FBA 头程", "API integration"],
+        findings: [{
+          title: "Organization clarity",
+          severity: "opportunity",
+          impact: "Buyers may need clearer entity wording on the homepage.",
+          evidence: [{ url: page.url, quote: "Target Brand 提供 FBA 头程服务" }],
+          recommendation: "Keep verified brand names; let semantic review own final zh customer prose.",
+          confidence: "medium"
+        }]
+      }]
+    };
+    const legacyClient = clientReturning(r6Shaped);
+    await expect(analyzePageBatch(legacyClient, {
+      pages: [page],
+      locale: "zh-CN",
+      maxAttempts: 1,
+      semanticValidation: "legacy"
+    })).rejects.toThrow(/language validation failed|unexpected_english|Report language/i);
+
+    const deferredClient = clientReturning(r6Shaped);
+    const deferred = await analyzePageBatch(deferredClient, {
+      pages: [page],
+      locale: "zh-CN",
+      maxAttempts: 1,
+      semanticValidation: "deferred"
+    });
+    expect(deferred.analyses[0]!.summary).toBe(r6Shaped.analyses[0]!.summary);
+    expect(deferredClient.completeJson).toHaveBeenCalledOnce();
+  });
+
   it("still rejects malformed deferred output and preserves exact page ownership", async () => {
     await expect(analyzePageBatch(clientReturning({ analyses: [{ ...mixedLanguageAnalysis.analyses[0], url: "https://other.example/" }] }), {
       pages: [page],

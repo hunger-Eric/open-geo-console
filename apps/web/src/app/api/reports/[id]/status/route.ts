@@ -4,6 +4,7 @@ import { getActiveCombinedGeoReport } from "@/db/combined-reports";
 import { getJobCreditStatus, getLatestScanJob, getScanJobQueueStatus } from "@/db/jobs";
 import { getGeoReport } from "@/db/reports";
 import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
+import { readSemanticReviewContractVersion } from "@/db/report-semantic-review-activation";
 import { freeTeaserCheckpointFromJobCheckpoint, parseReadyFreeTeaserCheckpoint } from "@/worker/report-v4-free-teaser";
 import { publicStateForStage } from "@/report/job-status";
 import { resolveRequestArtifactScope } from "@/server/report-access";
@@ -95,7 +96,14 @@ function isReadyFreeTeaser(checkpoint: Parameters<typeof freeTeaserCheckpointFro
   const teaser = freeTeaserCheckpointFromJobCheckpoint(checkpoint);
   if (!teaser) return false;
   try {
-    parseReadyFreeTeaserCheckpoint(teaser);
+    const semanticReviewContractVersion = readSemanticReviewContractVersion(checkpoint);
+    if (semanticReviewContractVersion !== null) {
+      // Marker-present: reviewed-ready parse with root marker only.
+      parseReadyFreeTeaserCheckpoint(teaser, { semanticReviewContractVersion });
+    } else {
+      // Marker-absent: original ready semantics (no options).
+      parseReadyFreeTeaserCheckpoint(teaser);
+    }
     return true;
   } catch {
     return false;

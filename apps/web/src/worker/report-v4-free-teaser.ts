@@ -4,8 +4,8 @@ import {
   REPORT_SEMANTIC_REVIEW_CONTRACT,
   applyReportSemanticReview,
   buildFreeV4FoundationManifestCoverage,
+  buildFreeV4ReportSemanticReviewSystemPrompt,
   buildFreeV4SemanticReviewManifest,
-  buildReportSemanticReviewSystemPrompt,
   deriveFreeObservationMetrics,
   diagnoseGenerativeSearchAnswerCardV3,
   generativeSearchAnswerHash,
@@ -859,7 +859,7 @@ async function reviewFreeTeaser(input: {
   const structured = createReportV4MimoStructuredInvoker({ environment: process.env, lockedRuntime: runtime });
   const reviewed = await runOfflineReportSemanticReview(reviewInput, async ({ task, input: exactInput }) => structured.invoke({
     operation: "websiteSynthesis",
-    systemText: buildReportSemanticReviewSystemPrompt(),
+    systemText: buildFreeV4ReportSemanticReviewSystemPrompt(reviewInput),
     inputText: JSON.stringify({ task, input: exactInput }),
     signal: input.signal ?? new AbortController().signal
   }));

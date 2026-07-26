@@ -22,8 +22,17 @@ vi.mock("@/db/reports", () => ({ getGeoReport: mocks.getGeoReport }));
 vi.mock("@/db/report-v4-admission-jobs", () => ({ getReportV4PreAdmissionJob: mocks.getReportV4PreAdmissionJob }));
 vi.mock("@/worker/report-v4-free-teaser", () => ({
   freeTeaserCheckpointFromJobCheckpoint: (checkpoint: { freeTeaser?: unknown } | null | undefined) => checkpoint?.freeTeaser ?? null,
-  parseReadyFreeTeaserCheckpoint: (checkpoint: { stage?: string }) => {
+  parseReadyFreeTeaserCheckpoint: (
+    checkpoint: { stage?: string; semanticReview?: unknown; reviewedFoundation?: unknown },
+    options?: { semanticReviewContractVersion?: string | null }
+  ) => {
     if (checkpoint.stage !== "ready") throw new TypeError("not ready");
+    // Marker-absent path: options omitted (undefined) — legacy ready is stage-only.
+    if (options === undefined) return checkpoint;
+    const markerPresent = options.semanticReviewContractVersion === "report-semantic-review-v1";
+    if (!markerPresent) throw new TypeError("unsupported contract");
+    if (!checkpoint.semanticReview) throw new TypeError("root semantic-review lineage");
+    if (!checkpoint.reviewedFoundation) throw new TypeError("missing reviewed foundation");
     return checkpoint;
   }
 }));
@@ -158,4 +167,41 @@ describe("report status artifact scopes", () => {
       hasAiReport: true,
       job: { stage: "completed", progress: 100 }
     });
-  });});
+  });
+
+  it("treats marker-present ready only when root marker matches reviewed free teaser projection", async () => {
+    mocks.resolveRequestArtifactScope.mockResolvedValue(null);
+    mocks.getAiReport.mockResolvedValue({ locale: "zh", payload: { tier: "free" } });
+    mocks.getReportV4PreAdmissionJob.mockResolvedValue({
+      ...deepJob,
+      id: "teaser-job",
+      reason: "v4_pre_admission",
+      checkpoint: {
+        semanticReviewContractVersion: "report-semantic-review-v1",
+        freeTeaser: {
+          stage: "ready",
+          semanticReview: { version: "report-semantic-review-v1" },
+          reviewedFoundation: { organizationProfile: { organizationName: "凌顺" } }
+        }
+      }
+    });
+    const ready = await GET(new Request("https://example.test/api/reports/report-1/status"), {
+      params: Promise.resolve({ id: "report-1" })
+    });
+    expect(await ready.json()).toMatchObject({ hasAiReport: true });
+
+    mocks.getReportV4PreAdmissionJob.mockResolvedValue({
+      ...deepJob,
+      id: "teaser-job",
+      reason: "v4_pre_admission",
+      checkpoint: {
+        semanticReviewContractVersion: "report-semantic-review-v1",
+        freeTeaser: { stage: "ready" }
+      }
+    });
+    const missingReview = await GET(new Request("https://example.test/api/reports/report-1/status"), {
+      params: Promise.resolve({ id: "report-1" })
+    });
+    expect(await missingReview.json()).toMatchObject({ hasAiReport: false });
+  });
+});

@@ -3,24 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScanJobRow } from "@/db/schema";
 
 const boundaryMocks = vi.hoisted(() => ({
-  getScanJob: vi.fn(),
-  failScanJob: vi.fn(),
-  terminalizeScanJob: vi.fn(),
-  recordPaidJobOutcome: vi.fn(),
-  createReportV4AcceptanceObserver: vi.fn(),
-  getGeoReport: vi.fn(),
-  fetchPlannedPagesWithRecovery: vi.fn()
+  getScanJob: vi.fn(), failScanJob: vi.fn(), terminalizeScanJob: vi.fn(),
+  checkpointScanJob: vi.fn(), heartbeatScanJob: vi.fn(), recordPaidJobOutcome: vi.fn(),
+  createReportV4AcceptanceObserver: vi.fn(), getGeoReport: vi.fn(),
+  fetchPlannedPagesWithRecovery: vi.fn(), calculateEffectiveCoverage: vi.fn(),
+  analyzePageBatch: vi.fn(), synthesizeWebsiteReportWithRecovery: vi.fn(),
+  saveAiReport: vi.fn(), purgeExpiredCrawlContent: vi.fn()
 }));
 const rerunGuardHarness = vi.hoisted(() => {
-  const state = {
-    blockedSite: null as string | null,
-    guardSites: [] as string[],
-    delegatedSites: [] as string[]
-  };
+  const state = { blockedSite: null as string | null, guardSites: [] as string[], delegatedSites: [] as string[] };
   const blocked = new Error("blocked by Report V4 rerun test guard");
   return {
-    state,
-    blocked,
+    state, blocked,
     run: vi.fn(async (input: { guardSite: string; delegate: () => Promise<unknown> }) => {
       state.guardSites.push(input.guardSite);
       if (state.blockedSite === input.guardSite) throw blocked;
@@ -31,39 +25,66 @@ const rerunGuardHarness = vi.hoisted(() => {
 });
 vi.mock("@/db/jobs", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/db/jobs")>(),
-  getScanJob: boundaryMocks.getScanJob,
-  failScanJob: boundaryMocks.failScanJob,
-  terminalizeScanJob: boundaryMocks.terminalizeScanJob
+  getScanJob: boundaryMocks.getScanJob, failScanJob: boundaryMocks.failScanJob,
+  terminalizeScanJob: boundaryMocks.terminalizeScanJob,
+  checkpointScanJob: boundaryMocks.checkpointScanJob, heartbeatScanJob: boundaryMocks.heartbeatScanJob
 }));
 vi.mock("@/db/commercial-refunds", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/db/commercial-refunds")>(),
   recordPaidJobOutcome: boundaryMocks.recordPaidJobOutcome
 }));
 vi.mock("@/db/reports", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/db/reports")>(),
-  getGeoReport: boundaryMocks.getGeoReport
+  ...await importOriginal<typeof import("@/db/reports")>(), getGeoReport: boundaryMocks.getGeoReport
+}));
+vi.mock("@/db/ai-reports", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/db/ai-reports")>(), saveAiReport: boundaryMocks.saveAiReport
+}));
+vi.mock("@/db/crawl-evidence", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/db/crawl-evidence")>(),
+  purgeExpiredCrawlContent: boundaryMocks.purgeExpiredCrawlContent
 }));
 vi.mock("./report-v4-acceptance-observer", async (importOriginal) => ({
   ...await importOriginal<typeof import("./report-v4-acceptance-observer")>(),
   createReportV4AcceptanceObserver: boundaryMocks.createReportV4AcceptanceObserver
 }));
-vi.mock("./recovery", async (importOriginal) => ({
-  ...await importOriginal<typeof import("./recovery")>(),
-  fetchPlannedPagesWithRecovery: boundaryMocks.fetchPlannedPagesWithRecovery
+vi.mock("./recovery", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./recovery")>();
+  return {
+    ...actual,
+    fetchPlannedPagesWithRecovery: boundaryMocks.fetchPlannedPagesWithRecovery,
+    calculateEffectiveCoverage: (...args: Parameters<typeof actual.calculateEffectiveCoverage>) => {
+      boundaryMocks.calculateEffectiveCoverage(...args);
+      return actual.calculateEffectiveCoverage(...args);
+    }
+  };
+});
+vi.mock("@open-geo-console/ai-report-engine", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@open-geo-console/ai-report-engine")>(),
+  analyzePageBatch: boundaryMocks.analyzePageBatch,
+  synthesizeWebsiteReportWithRecovery: boundaryMocks.synthesizeWebsiteReportWithRecovery
 }));
 vi.mock("@/report-v4/prohibited-operation-guard-runtime", () => ({
   runReportV4GuardedOperation: rerunGuardHarness.run
 }));
 import {
+  deferredPageAnalysisAuthority,
   dispatchReportV4ProductionJob,
   composeReportV4AcceptanceProductionRunner,
+  hashSynthesisInput,
   isTerminalScanJob,
+  mergeCompletedAnalyses,
   processScanJob,
   resolveRecommendationFulfillmentTarget,
   resolveReportV4ProductionTarget,
+  resolveRequiredDeferredPageAnalysisAuthority,
+  resolveWebsiteAnalysisSemanticValidation,
   type ReportV4AcceptanceProductionRunnerTestOnlyDependencies,
   type ReportV4ProductionRunnerInput
 } from "./processor";
+import {
+  selectReusableCompletedPageAnalyses,
+  type CompletedPageAnalysis
+} from "./recovery";
 
 // @requirement GEO-V4-CONTRACT-01
 // @requirement GEO-V4-DELIVERY-01
@@ -611,3 +632,158 @@ function restoreEnvironment(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
+
+describe("marker-present page analysis authority and resume identity", () => {
+  const url = "https://example.com/";
+  const other = "https://example.com/about";
+  const marker = "report-semantic-review-v1";
+  const analysis = { url, pageType: "home" as const, summary: "same summary text", organizationSignals: [] as string[], strengths: [] as string[], findings: [] as never[] };
+  const pageEvidence = { page: { url, pageType: "home" as const, title: "Home", text: "body" }, httpStatus: 200, contentHash: "content-home" };
+  const otherEvidence = { page: { ...pageEvidence.page, url: other, pageType: "about" as const, title: "About" }, httpStatus: 200, contentHash: "content-about" };
+  const coverage = { discoveredPages: 2, plannedPages: 2, analyzedPages: 1, failedPages: 0 };
+  const free = { tier: "free", artifactContract: null, recommendationReportVersion: null, reason: "staging_regeneration" } as never;
+  const evidence = (u: string, hash: string) => new Map([[u, { contentHash: hash }]]);
+  const deferred = (version = marker) => ({ mode: "deferred" as const, semanticContractVersion: version });
+
+  it("marker-absent: does not stamp identity; missing authority reuses on URL+hash only", () => {
+    expect(resolveWebsiteAnalysisSemanticValidation(free, {})).toBe("legacy");
+    expect(resolveRequiredDeferredPageAnalysisAuthority("legacy", {})).toBeNull();
+    const merged = mergeCompletedAnalyses([], [analysis], new Map([[url, pageEvidence]]));
+    expect(merged[0]!.analysisAuthority).toBeUndefined();
+    const stored: CompletedPageAnalysis = { url, contentHash: "content-home", analysis };
+    expect(selectReusableCompletedPageAnalyses([stored], {
+      evidenceByUrl: evidence(url, "content-home"), canonicalUrl: (value) => value, requiredDeferredAuthority: null
+    })).toEqual([stored]);
+    expect(hashSynthesisInput([pageEvidence], [analysis], coverage))
+      .toBe(hashSynthesisInput([pageEvidence], [analysis], coverage, { requiredDeferredAuthority: null }));
+  });
+
+  it("fresh marker-present: stamps deferred + current root contract version", () => {
+    const checkpoint = { semanticReviewContractVersion: marker } as never;
+    expect(resolveWebsiteAnalysisSemanticValidation(free, checkpoint)).toBe("deferred");
+    expect(resolveRequiredDeferredPageAnalysisAuthority("deferred", checkpoint)).toEqual(deferred());
+    expect(mergeCompletedAnalyses([], [analysis], new Map([[url, pageEvidence]]), deferredPageAnalysisAuthority(marker))[0]!.analysisAuthority)
+      .toEqual(deferred());
+  });
+
+  it("marker-present partial legacy checkpoint: incompatible entries are not reusable", () => {
+    const required = deferred();
+    const legacy: CompletedPageAnalysis = { url, contentHash: "content-home", analysis, analysisAuthority: { mode: "legacy", semanticContractVersion: null } };
+    const missing: CompletedPageAnalysis = { url: other, contentHash: "content-about", analysis: { ...analysis, url: other, pageType: "about" } };
+    expect(selectReusableCompletedPageAnalyses([legacy, missing], {
+      evidenceByUrl: new Map([[url, { contentHash: "content-home" }], [other, { contentHash: "content-about" }]]),
+      canonicalUrl: (value) => value, requiredDeferredAuthority: required
+    })).toEqual([]);
+  });
+
+  it("mixed checkpoint: reuses only fully matching deferred identity", () => {
+    const required = deferred();
+    const match: CompletedPageAnalysis = { url, contentHash: "content-home", analysis, analysisAuthority: deferred() };
+    const mismatch: CompletedPageAnalysis = {
+      url: other, contentHash: "content-about", analysis: { ...analysis, url: other, pageType: "about" },
+      analysisAuthority: deferred("report-semantic-review-v0")
+    };
+    const reusable = selectReusableCompletedPageAnalyses([match, mismatch], {
+      evidenceByUrl: new Map([[url, { contentHash: "content-home" }], [other, { contentHash: "content-about" }]]),
+      canonicalUrl: (value) => value, requiredDeferredAuthority: required
+    });
+    expect(reusable).toEqual([match]);
+    const rewritten = mergeCompletedAnalyses(
+      reusable, [{ ...analysis, url: other, pageType: "about" }],
+      new Map([[url, pageEvidence], [other, otherEvidence]]), deferredPageAnalysisAuthority(marker)
+    );
+    expect(rewritten).toHaveLength(2);
+    expect(rewritten.every((entry) => entry.analysisAuthority?.mode === "deferred" && entry.analysisAuthority.semanticContractVersion === marker)).toBe(true);
+  });
+
+  it("contract version mismatch with same deferred mode is not reused", () => {
+    const entry: CompletedPageAnalysis = { url, contentHash: "content-home", analysis, analysisAuthority: deferred("report-semantic-review-v0") };
+    expect(selectReusableCompletedPageAnalyses([entry], {
+      evidenceByUrl: evidence(url, "content-home"), canonicalUrl: (value) => value, requiredDeferredAuthority: deferred()
+    })).toEqual([]);
+  });
+
+  it("idempotent resume: full identity match reuses without rewrite", () => {
+    const entry: CompletedPageAnalysis = { url, contentHash: "content-home", analysis, analysisAuthority: deferred() };
+    expect(selectReusableCompletedPageAnalyses([entry], {
+      evidenceByUrl: evidence(url, "content-home"), canonicalUrl: (value) => value, requiredDeferredAuthority: deferred()
+    })).toEqual([entry]);
+  });
+
+  it("synthesis hash binds analysis authority; same text different authority must diverge", () => {
+    const entries: CompletedPageAnalysis[] = [{ url, contentHash: "content-home", analysis, analysisAuthority: deferred() }];
+    const legacyHash = hashSynthesisInput([pageEvidence], [analysis], coverage);
+    const deferredHash = hashSynthesisInput([pageEvidence], [analysis], coverage, { requiredDeferredAuthority: deferred(), completedEntries: entries });
+    const otherVersionHash = hashSynthesisInput([pageEvidence], [analysis], coverage, {
+      requiredDeferredAuthority: deferred("report-semantic-review-v0"),
+      completedEntries: [{ ...entries[0]!, analysisAuthority: deferred("report-semantic-review-v0") }]
+    });
+    expect(deferredHash).not.toBe(legacyHash);
+    expect(otherVersionHash).not.toBe(deferredHash);
+    expect(hashSynthesisInput([pageEvidence], [analysis], coverage, { requiredDeferredAuthority: deferred(), completedEntries: entries })).toBe(deferredHash);
+  });
+
+  it("marker-present incompatible analysis reanalysis failure fail-closes without coverage, synthesis, or AI report", async () => {
+    const planned = { url, pageType: "home" as const, priority: 100, reason: "checkpoint" };
+    const job = v4Job({
+      tier: "free", productContract: "legacy_website_audit_v1", fulfillmentMethodology: null,
+      recommendationReportVersion: null, artifactContract: null, businessQuestionSetId: null,
+      siteSnapshotId: null, creditReservationId: null, reason: "staging_regeneration",
+      stage: "analyzing", currentPhase: "page_analysis", checkpointRevision: 0,
+      checkpoint: {
+        semanticReviewContractVersion: marker,
+        discoverySnapshot: { targetUrl: url, candidates: [planned], robotsPolicy: { allowed: true }, estimatedPages: 1 },
+        targetPageCount: 1, rankedCandidates: [planned], rankedCandidateUrls: [url],
+        effectivePlan: [planned], effectivePlannedUrls: [url], planningCompleted: true,
+        completedCrawlUrls: [url],
+        completedPageAnalyses: [
+          { url, contentHash: "content-home", analysis }, // missing identity
+          { url, contentHash: "content-home", analysis, analysisAuthority: { mode: "legacy", semanticContractVersion: null } },
+          { url, contentHash: "content-home", analysis, analysisAuthority: { mode: "deferred", semanticContractVersion: "report-semantic-review-v0" } }
+        ]
+      }
+    } as Partial<ScanJobRow>);
+    const previousAi = configureTestAi();
+    const reanalysisError = new Error("reanalysis failed for incompatible deferred identity");
+    const crawlPage = { page: { url, pageType: "home" as const, title: "Home", text: "body" }, httpStatus: 200, contentHash: "content-home" };
+    boundaryMocks.getGeoReport.mockResolvedValue({ id: job.reportId, url, technicalStatus: "completed", siteKey: "example.com" });
+    boundaryMocks.getScanJob.mockResolvedValue(job);
+    boundaryMocks.failScanJob.mockResolvedValue({ ...job, stage: "failed", executionState: "failed" });
+    boundaryMocks.heartbeatScanJob.mockResolvedValue(true);
+    boundaryMocks.purgeExpiredCrawlContent.mockResolvedValue(0);
+    boundaryMocks.checkpointScanJob.mockImplementation(async (_id, _workerId, input) => ({
+      ...job, stage: input.stage, progress: input.progress, checkpoint: input.checkpoint ?? job.checkpoint,
+      checkpointRevision: (input.expectedCheckpointRevision ?? 0) + 1,
+      currentPhase: input.phase ?? "page_analysis", phaseAttempt: 0, resumeGeneration: job.resumeGeneration,
+      plannedPages: input.plannedPages ?? job.plannedPages, successfulPages: input.successfulPages ?? job.successfulPages,
+      failedPages: input.failedPages ?? job.failedPages
+    }));
+    boundaryMocks.fetchPlannedPagesWithRecovery.mockResolvedValue({
+      pages: [crawlPage], checkpoint: { ...job.checkpoint, completedCrawlUrls: [url] }, exhaustedTransientUrls: []
+    });
+    boundaryMocks.analyzePageBatch.mockRejectedValue(reanalysisError);
+    boundaryMocks.synthesizeWebsiteReportWithRecovery.mockResolvedValue({ report: { findings: [] }, rejectedFindingIds: [] });
+    boundaryMocks.saveAiReport.mockResolvedValue(undefined);
+    try {
+      await expect(processScanJob(job, "worker-1")).resolves.toBeUndefined();
+      expect(boundaryMocks.analyzePageBatch).toHaveBeenCalledTimes(1);
+      const analyzeInput = boundaryMocks.analyzePageBatch.mock.calls[0]![1] as {
+        completedAnalyses: unknown[]; pages: Array<{ url: string }>; semanticValidation?: string;
+      };
+      expect(analyzeInput.completedAnalyses).toEqual([]);
+      expect(analyzeInput.pages.map((item) => item.url)).toEqual([url]);
+      expect(analyzeInput.semanticValidation).toBe("deferred");
+      expect(boundaryMocks.failScanJob).toHaveBeenCalledTimes(1);
+      expect(boundaryMocks.failScanJob).toHaveBeenCalledWith(job.id, "worker-1", expect.objectContaining({
+        internalError: expect.objectContaining({ message: reanalysisError.message })
+      }));
+      expect(boundaryMocks.terminalizeScanJob).not.toHaveBeenCalled();
+      expect(boundaryMocks.calculateEffectiveCoverage).not.toHaveBeenCalled();
+      expect(boundaryMocks.synthesizeWebsiteReportWithRecovery).not.toHaveBeenCalled();
+      expect(boundaryMocks.saveAiReport).not.toHaveBeenCalled();
+    } finally {
+      restoreTestAi(previousAi);
+      vi.clearAllMocks();
+    }
+  });
+});
