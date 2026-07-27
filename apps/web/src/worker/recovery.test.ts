@@ -4,6 +4,9 @@ import {
   calculateEffectiveCoverage,
   determineResumeStage,
   fetchPlannedPagesWithRecovery,
+  isCompatibleDeferredPageAnalysis,
+  selectReusableCompletedPageAnalyses,
+  type CompletedPageAnalysis,
   type RecoveryCheckpoint
 } from "./recovery";
 
@@ -109,5 +112,99 @@ describe("worker recovery", () => {
         analysis: { url: ranked[0]!.url, pageType: "home", summary: "ok", organizationSignals: [], strengths: [], findings: [] }
       }]
     })).toBe("synthesizing");
+  });
+
+  it("marker-absent: missing analysisAuthority remains legal and counts as analyzed", () => {
+    const entry: CompletedPageAnalysis = {
+      url: ranked[0]!.url,
+      contentHash: "hash-home",
+      analysis: { url: ranked[0]!.url, pageType: "home", summary: "ok", organizationSignals: [], strengths: [], findings: [] }
+    };
+    expect(determineResumeStage({
+      rankedCandidates: ranked,
+      targetPageCount: 1,
+      effectivePlan: ranked.slice(0, 1),
+      completedCrawlUrls: [ranked[0]!.url],
+      completedPageAnalyses: [entry]
+    })).toBe("synthesizing");
+    const evidenceByUrl = new Map([[ranked[0]!.url, { contentHash: "hash-home" }]]);
+    expect(selectReusableCompletedPageAnalyses([entry], {
+      evidenceByUrl,
+      canonicalUrl: (url) => url,
+      requiredDeferredAuthority: null
+    })).toEqual([entry]);
+  });
+
+  it("marker-present: legacy / missing identity / version mismatch are not analysis-complete", () => {
+    const required = { mode: "deferred" as const, semanticContractVersion: "report-semantic-review-v1" };
+    const missingIdentity: CompletedPageAnalysis = {
+      url: ranked[0]!.url,
+      contentHash: "hash-home",
+      analysis: { url: ranked[0]!.url, pageType: "home", summary: "ok", organizationSignals: [], strengths: [], findings: [] }
+    };
+    const legacy: CompletedPageAnalysis = {
+      ...missingIdentity,
+      analysisAuthority: { mode: "legacy", semanticContractVersion: null }
+    };
+    const wrongVersion: CompletedPageAnalysis = {
+      ...missingIdentity,
+      analysisAuthority: { mode: "deferred", semanticContractVersion: "report-semantic-review-v0" }
+    };
+    const matching: CompletedPageAnalysis = {
+      ...missingIdentity,
+      analysisAuthority: { mode: "deferred", semanticContractVersion: "report-semantic-review-v1" }
+    };
+
+    expect(isCompatibleDeferredPageAnalysis(missingIdentity, required)).toBe(false);
+    expect(isCompatibleDeferredPageAnalysis(legacy, required)).toBe(false);
+    expect(isCompatibleDeferredPageAnalysis(wrongVersion, required)).toBe(false);
+    expect(isCompatibleDeferredPageAnalysis(matching, required)).toBe(true);
+
+    for (const entry of [missingIdentity, legacy, wrongVersion]) {
+      expect(determineResumeStage({
+        rankedCandidates: ranked,
+        targetPageCount: 1,
+        effectivePlan: ranked.slice(0, 1),
+        completedCrawlUrls: [ranked[0]!.url],
+        completedPageAnalyses: [entry]
+      }, { requiredDeferredAuthority: required })).toBe("analyzing");
+    }
+    expect(determineResumeStage({
+      rankedCandidates: ranked,
+      targetPageCount: 1,
+      effectivePlan: ranked.slice(0, 1),
+      completedCrawlUrls: [ranked[0]!.url],
+      completedPageAnalyses: [matching]
+    }, { requiredDeferredAuthority: required })).toBe("synthesizing");
+  });
+
+  it("selectReusableCompletedPageAnalyses keeps only fully matching marker-present entries", () => {
+    const required = { mode: "deferred" as const, semanticContractVersion: "report-semantic-review-v1" };
+    const home = ranked[0]!.url;
+    const service = ranked[1]!.url;
+    const entries: CompletedPageAnalysis[] = [
+      {
+        url: home,
+        contentHash: "hash-home",
+        analysis: { url: home, pageType: "home", summary: "ok", organizationSignals: [], strengths: [], findings: [] },
+        analysisAuthority: { mode: "deferred", semanticContractVersion: "report-semantic-review-v1" }
+      },
+      {
+        url: service,
+        contentHash: "hash-service",
+        analysis: { url: service, pageType: "service", summary: "legacy", organizationSignals: [], strengths: [], findings: [] }
+      }
+    ];
+    const evidenceByUrl = new Map([
+      [home, { contentHash: "hash-home" }],
+      [service, { contentHash: "hash-service" }]
+    ]);
+    const reusable = selectReusableCompletedPageAnalyses(entries, {
+      evidenceByUrl,
+      canonicalUrl: (url) => url,
+      requiredDeferredAuthority: required
+    });
+    expect(reusable).toHaveLength(1);
+    expect(reusable[0]!.url).toBe(home);
   });
 });

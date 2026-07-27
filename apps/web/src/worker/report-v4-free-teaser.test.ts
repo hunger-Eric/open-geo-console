@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { REPORT_SEMANTIC_REVIEW_CONTRACT, applyReportSemanticReview, buildReportSemanticReviewSystemPrompt, createReportSemanticReviewInput, parseReportV4DiagnosisInput, type ReportSemanticReviewInput, type ReportSemanticReviewInputCore, type ReportSemanticReviewOutput } from "@open-geo-console/ai-report-engine";
+import { REPORT_SEMANTIC_REVIEW_CONTRACT, applyReportSemanticReview, buildFreeV4ReportSemanticReviewSystemPrompt, createReportSemanticReviewInput, parseReportSemanticReviewOutput, parseReportV4DiagnosisInput, verifyReportSemanticReviewReceipt, type ReportSemanticReviewInput, type ReportSemanticReviewInputCore, type ReportSemanticReviewOutput } from "@open-geo-console/ai-report-engine";
 import { createMarketSnapshotIdentity, deterministicId, toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet, type SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import { combinedV3ArtifactFixture } from "@/components/combined-artifact-fixtures";
 
@@ -42,7 +42,10 @@ vi.mock("@/report-v4/mimo-provider", () => ({
   buildReportV4MimoDiagnosisTokenBudget: mocks.diagnosisBudget,
   createReportV4MimoStructuredInvoker: mocks.structuredInvoker
 }));
-vi.mock("@/report-v4/model-runtime-config", () => ({ loadReportV4ModelRuntimeConfig: mocks.modelRuntime }));
+vi.mock("@/report-v4/model-runtime-config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/report-v4/model-runtime-config")>()),
+  loadReportV4ModelRuntimeConfig: mocks.modelRuntime
+}));
 vi.mock("./report-v4-diagnosis-enhancer", () => ({
   enhanceReportV4QuestionDiagnosis: mocks.enhanceDiagnosis,
   formatReportV4DiagnosisFailure: (
@@ -59,6 +62,44 @@ import {
   parseReadyFreeTeaserCheckpoint,
   type FreeTeaserCheckpointV1
 } from "./report-v4-free-teaser";
+
+const CP13_SMOKE_RUN_ID = "cp13-synthetic-mimo-smoke-adc08-r06";
+const CP13_PROMPT_SENTINEL = "CP13_SYNTHETIC_CUSTOMER_PROSE_MUST_NOT_APPEAR";
+const cp13SmokeEnabled = () => process.env.OGC_CP13_SYNTHETIC_MIMO_SMOKE === "1" && process.env.OGC_CP13_SMOKE_RUN_ID === CP13_SMOKE_RUN_ID;
+
+function syntheticCp13ReviewInput(modelId = "synthetic-mimo-model"): ReportSemanticReviewInput {
+  const sourceId = "synthetic-answer-source";
+  const targetIds = ["synthetic-diagnosis-target-a", "synthetic-diagnosis-target-b"];
+  const field = (path: string, mutability: "mutable" | "read_only", questionId: string | null, allowedEvidenceIds: string[] = [], allowedSourceIds: string[] = []) => ({
+    path, originalText: `${CP13_PROMPT_SENTINEL}:${path}`, originalTextHash: textHash(`${CP13_PROMPT_SENTINEL}:${path}`), mutability, questionId, allowedEvidenceIds, allowedSourceIds
+  });
+  const fields = [
+    ...["overview", "strengths[0]", "strengths[1]", "strengths[2]", "keyRisks[0]", "topPriorities[0]"].map((key) => field(`executiveSummary.${key}`, "read_only", null)),
+    field("organizationProfile.summary", "read_only", null),
+    ...[0, 1, 2].map((index) => field(`questions[${index}].text`, "read_only", `synthetic-q${index + 1}`)),
+    field("q1AnswerCard.answerText", "mutable", "synthetic-q1", [sourceId], [sourceId]),
+    field("q1Diagnosis.selectionSummary", "mutable", "synthetic-q1", targetIds),
+    ...[0, 1, 2].map((index) => field(`q1Diagnosis.observableFactors[${index}].observation`, "mutable", "synthetic-q1", [targetIds[index % 2]!])),
+    field("q1Diagnosis.targetGap", "mutable", "synthetic-q1", targetIds),
+    ...[0, 1, 2].map((index) => field(`q1Diagnosis.recommendedActions[${index}].action`, "mutable", "synthetic-q1", [targetIds[index % 2]!]))
+  ];
+  return createReportSemanticReviewInput({
+    version: REPORT_SEMANTIC_REVIEW_CONTRACT, lifecycle: "free_v4", locale: "en", target: { siteKey: "synthetic.example", targetUrl: "https://synthetic.example/", aliases: ["Synthetic"] }, expectedModel: { providerId: "xiaomi-mimo", modelId },
+    questions: [1, 2, 3].map((index) => ({ questionId: `synthetic-q${index}`, originalText: `Synthetic question ${index}?`, originalTextHash: textHash(`Synthetic question ${index}?`) })),
+    sources: [{ sourceId, questionId: "synthetic-q1", canonicalUrl: "https://source.synthetic.example/", originalText: "Synthetic answer source.", originalTextHash: textHash("Synthetic answer source.") }],
+    evidence: [{ evidenceId: sourceId, questionId: "synthetic-q1", sourceId, originalText: "Synthetic answer evidence.", originalTextHash: textHash("Synthetic answer evidence.") }, ...targetIds.map((evidenceId) => ({ evidenceId, questionId: "synthetic-q1", sourceId: null, originalText: `Synthetic diagnosis target ${evidenceId}.`, originalTextHash: textHash(`Synthetic diagnosis target ${evidenceId}.`) }))],
+    observationResults: [{ observationId: "synthetic-observation", resultId: "synthetic-result", questionId: "synthetic-q1", originalText: "Synthetic observation.", originalTextHash: textHash("Synthetic observation.") }], entities: [{ entityId: "synthetic-competitor", questionId: "synthetic-q1", kind: "competitor_candidate", originalText: "Synthetic competitor.", originalTextHash: textHash("Synthetic competitor.") }], answerSubjects: [{ questionId: "synthetic-q1", fieldPath: "q1AnswerCard.answerText" }], fields, nonProseProjectionHash: textHash("synthetic-non-prose")
+  });
+}
+
+async function runCp13Smoke(input: ReportSemanticReviewInput, invoke: (request: { task: "unified_report_semantic_review"; input: ReportSemanticReviewInput }) => Promise<unknown>) {
+  let calls = 0;
+  const raw = await invoke({ task: "unified_report_semantic_review", input });
+  if (++calls !== 1) throw new Error("CP13 smoke attempted more than one provider request.");
+  const review = parseReportSemanticReviewOutput(raw, input);
+  const applied = applyReportSemanticReview(input, review);
+  return { review, applied, calls };
+}
 
 function questionSet(): ConfirmedBusinessQuestionSet {
   const texts = ["哪些供应商能够提供跨境物流服务？", "哪些供应商适合中国出口企业？", "采购跨境物流服务时应如何比较交付风险？"];
@@ -223,6 +264,92 @@ beforeEach(() => {
 });
 
 describe("free teaser orchestration", () => {
+  it("keeps the CP13 synthetic MiMo harness skipped by default and bounded to one non-persistent invocation", async () => {
+    expect(cp13SmokeEnabled()).toBe(process.env.OGC_CP13_SYNTHETIC_MIMO_SMOKE === "1" && process.env.OGC_CP13_SMOKE_RUN_ID === CP13_SMOKE_RUN_ID);
+    const input = syntheticCp13ReviewInput();
+    const prompt = buildFreeV4ReportSemanticReviewSystemPrompt(input);
+    let fetches = 0;
+    const persistence = vi.fn();
+    const result = await runCp13Smoke(input, async ({ input: exactInput }) => {
+      if (++fetches > 1) throw new Error("CP13 smoke attempted more than one fetch.");
+      return semanticReviewPass(exactInput);
+    });
+
+    expect(fetches).toBe(1); expect(result.calls).toBe(1);
+    expect(persistence).not.toHaveBeenCalled();
+    expect(result.review.fields).toHaveLength(19);
+    expect(result.review.fields[10]!.path).toBe("q1AnswerCard.answerText");
+    expect(prompt).toContain("Blueprint-only index is an ordering aid; omit index from every output field object.");
+    expect(prompt).toContain(`"path":"${input.fields[10]!.path}"`);
+    expect(prompt).not.toContain(CP13_PROMPT_SENTINEL); expect(prompt).not.toContain(input.fields[10]!.originalText);
+    expect(result.review.fields.every((field) => !Object.hasOwn(field, "index"))).toBe(true);
+    expect(result.review.fields.filter(({ decision }) => decision === "corrected").every((field) => field.correctedText !== input.fields.find(({ path }) => path === field.path)!.originalText)).toBe(true);
+    expect(verifyReportSemanticReviewReceipt(result.applied.receipt, input, result.review, result.applied.fields)).toEqual(result.applied.receipt);
+  });
+
+  it("constructs the actual MiMo invoker from a fake opt-in environment with a single-fetch guard", async () => {
+    const mimo = await vi.importActual<typeof import("@/report-v4/mimo-provider")>("@/report-v4/mimo-provider");
+    const runtimeModule = await vi.importActual<typeof import("@/report-v4/model-runtime-config")>("@/report-v4/model-runtime-config");
+    const environment = { OGC_REPORT_V4_MODEL_PROFILE_ID: "report-v4-mimo-v2.5-pro-v1", OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1", OGC_REPORT_V4_MIMO_API_KEY: "synthetic-key" };
+    let fetches = 0;
+    const invoker = mimo.createReportV4MimoStructuredInvoker({ environment, lockedRuntime: runtimeModule.loadReportV4ModelRuntimeConfig(environment), fetch: async () => {
+      if (++fetches > 1) throw new Error("CP13 smoke attempted more than one fetch.");
+      return new Response("{}", { status: 500 });
+    } });
+
+    await expect(invoker.invoke({ operation: "websiteSynthesis", systemText: "synthetic", inputText: "{}", signal: AbortSignal.timeout(1_000) })).rejects.toThrow();
+    expect(fetches).toBe(1);
+  });
+
+  it("finishes a hanging fake fetch through a short abort before the outer timeout", async () => {
+    const mimo = await vi.importActual<typeof import("@/report-v4/mimo-provider")>("@/report-v4/mimo-provider");
+    const runtimeModule = await vi.importActual<typeof import("@/report-v4/model-runtime-config")>("@/report-v4/model-runtime-config");
+    const environment = { OGC_REPORT_V4_MODEL_PROFILE_ID: "report-v4-mimo-v2.5-pro-v1", OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1", OGC_REPORT_V4_MIMO_API_KEY: "synthetic-key" };
+    let fetches = 0;
+    const invoker = mimo.createReportV4MimoStructuredInvoker({ environment, lockedRuntime: runtimeModule.loadReportV4ModelRuntimeConfig(environment), fetch: async (_url, init) => new Promise<Response>((_resolve, reject) => {
+      if (++fetches > 1) throw new Error("CP13 smoke attempted more than one fetch.");
+      init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+    }) });
+    await expect(invoker.invoke({ operation: "websiteSynthesis", systemText: "synthetic", inputText: "{}", signal: AbortSignal.timeout(20) })).rejects.toThrow();
+    expect(fetches).toBe(1);
+  }, 1_000);
+
+  it.skipIf(!cp13SmokeEnabled())("runs the process-local CP13 synthetic MiMo smoke once without persistence", async () => {
+    const mimo = await vi.importActual<typeof import("@/report-v4/mimo-provider")>("@/report-v4/mimo-provider");
+    const runtimeModule = await vi.importActual<typeof import("@/report-v4/model-runtime-config")>("@/report-v4/model-runtime-config");
+    const runtime = runtimeModule.loadReportV4ModelRuntimeConfig(process.env);
+    const input = syntheticCp13ReviewInput(runtime.modelProfile.operations.websiteSynthesis.model);
+    let fetches = 0;
+    const provider = mimo.createReportV4MimoStructuredInvoker({
+      environment: process.env,
+      lockedRuntime: runtime,
+      fetch: (...args) => {
+        if (++fetches > 1) throw new Error("CP13 smoke attempted more than one fetch.");
+        return globalThis.fetch(...args);
+      }
+    });
+    let status = "provider_error";
+    let result: Awaited<ReturnType<typeof runCp13Smoke>> | undefined;
+    try { result = await runCp13Smoke(input, ({ task, input: exactInput }) => provider.invoke({
+      operation: "websiteSynthesis",
+      systemText: buildFreeV4ReportSemanticReviewSystemPrompt(exactInput),
+      inputText: JSON.stringify({ task, input: exactInput }),
+      signal: AbortSignal.timeout(180_000)
+    }));
+
+    expect(fetches).toBe(1);
+    expect(result.calls).toBe(1);
+    expect(result.review.fields).toHaveLength(19); expect(result.review.fields[10]!.path).toBe("q1AnswerCard.answerText");
+    expect(result.review.fields[10]!.evidenceIds).toEqual(["synthetic-answer-source"]);
+    expect(result.review.fields[10]!.sourceIds).toEqual(["synthetic-answer-source"]);
+    expect(result.review.fields[10]!.evidenceIds).not.toContain("synthetic-diagnosis-target-a");
+    expect(result.review.fields.filter(({ path }) => path.startsWith("q1Diagnosis.")).some(({ evidenceIds }) => evidenceIds.includes("synthetic-diagnosis-target-a"))).toBe(true);
+    expect(result.review.fields.filter(({ decision }) => decision === "corrected").every((field) => field.correctedText !== input.fields.find(({ path }) => path === field.path)!.originalText)).toBe(true);
+    expect(verifyReportSemanticReviewReceipt(result.applied.receipt, input, result.review, result.applied.fields)).toEqual(result.applied.receipt);
+    status = "success";
+    } finally { console.info(JSON.stringify({ runId: CP13_SMOKE_RUN_ID, fetches, status, inputHash: input.inputHash, ...(result ? { fields: result.review.fields.length, receiptHash: result.applied.receipt.reviewHash } : {}) })); }
+  }, 200_000);
+
   it("retains a bounded typed diagnosis cause without exposing provider output", async () => {
     mocks.enhanceDiagnosis.mockResolvedValueOnce({
       status: "failed",
@@ -403,7 +530,13 @@ describe("free teaser orchestration", () => {
     mocks.enhanceDiagnosis.mockImplementation(async (request) => {
       const result = await diagnosisImplementation(request);
       return request.semanticValidation === "deferred"
-        ? { ...result, diagnosis: { ...result.diagnosis, selectionSummary: "The model selected these sources because they rank higher." } }
+        ? {
+            ...result,
+            diagnosis: {
+              ...result.diagnosis,
+              selectionSummary: "The model selected these sources because they rank higher."
+            }
+          }
         : result;
     });
     const currentBundle = await defaultMarketSnapshotBundle("snapshot-1");
@@ -447,6 +580,14 @@ describe("free teaser orchestration", () => {
           organizationName: "Target Organization",
           legalEntity: "Target Legal Entity",
           brandNames: ["Target Brand", "Target Organization", "  "]
+        },
+        executiveSummary: {
+          ...combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport.executiveSummary,
+          strengths: [
+            "The site states its primary logistics service.",
+            "The service language is consistently customer-facing.",
+            "The organization profile preserves its customer-facing identity."
+          ]
         }
       },
       locale: "zh" as const,
@@ -463,8 +604,24 @@ describe("free teaser orchestration", () => {
     expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({ deferSemanticDistinctness: true }));
     expect(mocks.answerWithSources).toHaveBeenCalledWith(expect.objectContaining({ semanticValidation: "deferred" }));
     expect(mocks.semanticInvoke).toHaveBeenCalledTimes(1);
-    expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toBe(buildReportSemanticReviewSystemPrompt());
     const reviewRequest = JSON.parse(mocks.semanticInvoke.mock.calls[0]![0].inputText) as { input: ReportSemanticReviewInput };
+    expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toBe(buildFreeV4ReportSemanticReviewSystemPrompt(reviewRequest.input));
+    expect(reviewRequest.input.fields).toHaveLength(19);
+    const answerField = reviewRequest.input.fields[10]!;
+    expect(answerField.path).toBe("q1AnswerCard.answerText");
+    const diagnosisTargetIds = reviewRequest.input.evidence
+      .filter(({ sourceId }) => sourceId === null)
+      .map(({ evidenceId }) => evidenceId);
+    const diagnosisFields = reviewRequest.input.fields.filter(({ path }) => path.startsWith("q1Diagnosis."));
+    expect(reviewRequest.input.evidencePolicy).toBe("report_global_v1");
+    expect(answerField.allowedEvidenceIds).toEqual([]);
+    expect(answerField.allowedSourceIds).toEqual([]);
+    expect(diagnosisTargetIds).not.toEqual([]);
+    expect(diagnosisFields.every(({ allowedEvidenceIds, allowedSourceIds }) => allowedEvidenceIds.length === 0 && allowedSourceIds.length === 0)).toBe(true);
+    expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toContain(`"path":"${answerField.path}"`);
+    expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toContain(`"allowedEvidenceIds":${JSON.stringify(answerField.allowedEvidenceIds)}`); expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toContain('"referenceRequirement":"at_least_one_exact_global_id"');
+    expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toContain("Blueprint-only index is an ordering aid; omit index from every output field object.");
+    expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).not.toContain(answerField.originalText);
     expect(reviewRequest.input.target.aliases).toEqual([
       "target.example", "Target Organization", "Target Legal Entity", "Target Brand"
     ]);
@@ -887,6 +1044,12 @@ async function defaultMarketSnapshotBundle(snapshotId: string, originSuffix?: st
 }
 
 function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticReviewOutput {
+  const global = input.evidencePolicy === "report_global_v1" || input.fields.some((field) => field.path.startsWith("foundation."));
+  const globalEvidenceIds = global ? [input.evidence.find(({ eligible }) => eligible === true)?.evidenceId ?? ""] : undefined;
+  const refs = (field: ReportSemanticReviewInput["fields"][number]) => ({
+    evidenceIds: globalEvidenceIds ?? field.allowedEvidenceIds,
+    sourceIds: input.evidencePolicy ? [] : field.allowedSourceIds
+  });
   return {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
     inputHash: input.inputHash,
@@ -899,8 +1062,8 @@ function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticRev
       correctedText: "Reviewed Brand-X FBA answer.",
       issueCodes: ["language_quality"],
       reason: "The answer needed a clearer direct response.",
-      evidenceIds: field.allowedEvidenceIds,
-      sourceIds: field.allowedSourceIds,
+      ...refs(field),
+      ...(global ? { rejectedEvidence: [], rejectedSources: [] } : {}),
       retainedOriginalTerms: []
     } : field.path === "q1Diagnosis.selectionSummary" && field.originalText.includes("model selected") ? {
       path: field.path,
@@ -909,8 +1072,8 @@ function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticRev
       correctedText: "Reviewed evidence-bound source selection.",
       issueCodes: ["unsupported_causal_claim"],
       reason: "The source selection description must remain evidence-bound.",
-      evidenceIds: field.allowedEvidenceIds,
-      sourceIds: field.allowedSourceIds,
+      ...refs(field),
+      ...(global ? { rejectedEvidence: [], rejectedSources: [] } : {}),
       retainedOriginalTerms: []
     } : {
       path: field.path,
@@ -918,8 +1081,8 @@ function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticRev
       decision: "pass",
       issueCodes: [],
       reason: "The prose is natural and faithful to its bound evidence.",
-      evidenceIds: field.allowedEvidenceIds,
-      sourceIds: field.allowedSourceIds,
+      ...refs(field),
+      ...(global ? { rejectedEvidence: [], rejectedSources: [] } : {}),
       retainedOriginalTerms: []
     }),
     questionDistinctness: {
@@ -945,15 +1108,13 @@ function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticRev
           targetFirstSentence: 1,
           targetRoles: ["answer subject"],
           competitorEntityIds: input.entities.slice(0, 1).map(({ entityId }) => entityId),
-          evidenceIds: field.allowedEvidenceIds,
-          sourceIds: field.allowedSourceIds,
+          ...refs(field),
           reason: "The answer directly responds to the owned question."
         };
       }),
       evidenceUse: input.fields.map((field) => ({
         path: field.path,
-        evidenceIds: field.allowedEvidenceIds,
-        sourceIds: field.allowedSourceIds,
+        ...refs(field),
         reason: "Uses only the exact references bound to this field."
       }))
     },

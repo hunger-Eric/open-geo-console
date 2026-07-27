@@ -9,7 +9,7 @@ import {
   getDatabaseEnvironmentStatus,
   getSqlClient
 } from "./index";
-import { ScanJobCapacityError, terminalizeScanJob } from "./jobs";
+import { resumeScanJobAfterRepair, ScanJobCapacityError, terminalizeScanJob } from "./jobs";
 import { getReportV4PreAdmissionJob } from "./report-v4-admission-jobs";
 import { admitFreeScan } from "./scan-admission";
 import {
@@ -26,6 +26,8 @@ describePostgres("protected staging PostgreSQL integration", () => {
   const runId = randomUUID().replaceAll("-", "");
   const sitePrefix = `staging-it-${runId}`;
   const ipPrefix = `2001:db8:${runId.slice(0, 4)}:${runId.slice(4, 8)}`;
+  const ownedReportIds = new Set<string>();
+  const ownedBindingJobIds = new Set<string>();
   const original = {
     profile: process.env.OGC_DEPLOYMENT_PROFILE,
     vercelEnvironment: process.env.VERCEL_ENV,
@@ -44,9 +46,18 @@ describePostgres("protected staging PostgreSQL integration", () => {
 
   afterAll(async () => {
     const sql = getSqlClient();
-    await sql`DELETE FROM staging_free_regenerations WHERE site_key LIKE 'staging-it-%'`;
-    await sql`DELETE FROM anonymous_rate_buckets WHERE site_key LIKE 'staging-it-%'`;
-    await sql`DELETE FROM scan_reports WHERE site_key LIKE 'staging-it-%'`;
+    await sql`DELETE FROM staging_free_regenerations WHERE site_key LIKE ${`${sitePrefix}-%`}`;
+    await sql`DELETE FROM anonymous_rate_buckets WHERE site_key LIKE ${`${sitePrefix}-%`}`;
+    for (const jobId of ownedBindingJobIds) await sql`DELETE FROM scan_jobs WHERE id=${jobId}`;
+    for (const reportId of ownedReportIds) {
+      await sql`DELETE FROM report_replacement_fulfillments WHERE report_id=${reportId}`;
+      await sql`DELETE FROM report_artifact_revisions WHERE report_id=${reportId}`;
+      await sql`DELETE FROM report_corrections WHERE report_id=${reportId}`;
+      await sql`DELETE FROM report_business_question_sets WHERE report_id=${reportId}`;
+      await sql`DELETE FROM payment_orders WHERE report_id=${reportId}`;
+      await sql`DELETE FROM scan_jobs WHERE report_id=${reportId}`;
+      await sql`DELETE FROM scan_reports WHERE id=${reportId}`;
+    }
     await sql`DELETE FROM free_ai_budget_reservations WHERE bucket_date = '2031-01-01'`;
     await sql`DELETE FROM free_ai_daily_budgets WHERE bucket_date = '2031-01-01'`;
     await closeDatabase();
@@ -282,12 +293,162 @@ describePostgres("protected staging PostgreSQL integration", () => {
       .rejects.toBeInstanceOf(ScanJobCapacityError);
   }, 60_000);
 
+  it("supersedes only a quiescent staging repair reservation and rejects its resume", async () => {
+    const sql = getSqlClient();
+    const siteKey = `${sitePrefix}-supersede.test`;
+    const now = new Date("2031-01-01T12:00:00.000Z");
+    const oldReportId = await insertReport(siteKey, "supersede-old");
+    const oldJobId = randomUUID();
+    const oldReservationId = randomUUID();
+    await sql`INSERT INTO free_site_trials (site_key,report_id,claimed_at,expires_at)
+      VALUES (${siteKey},${oldReportId},${now.toISOString()},${new Date("2031-02-01T12:00:00.000Z").toISOString()})`;
+    await sql`INSERT INTO scan_jobs
+      (id,report_id,tier,locale,reason,stage,execution_state,repair_reason_code,error_code)
+      VALUES (${oldJobId},${oldReportId},'free','en','staging_regeneration','analyzing','repair_wait','provider_unavailable','provider_unavailable')`;
+    ownedBindingJobIds.add(oldJobId);
+    await sql`INSERT INTO staging_free_regenerations (site_key,reservation_id,report_id,job_id)
+      VALUES (${siteKey},${oldReservationId},${oldReportId},${oldJobId})`;
+    const [before] = await sql<Array<{ row: unknown }>>`SELECT to_jsonb(job) AS row FROM scan_jobs job WHERE id=${oldJobId}`;
+    const input = (idempotencyKey: string) => ({
+      url: `https://${siteKey}/`, siteKey, locale: "en" as const, idempotencyKey,
+      ipAddress: `${ipPrefix}::61`, forceFresh: true, stagingPreview: true,
+      dailyDistinctSiteLimit: 2, aiDailyLimit: 10, maxActiveStagingJobs: 1_000, now
+    });
+    const requests = [`supersede-${runId}-first`, `supersede-${runId}-second`];
+    const results = await Promise.all(requests.map((idempotencyKey) => admitFreeScan(input(idempotencyKey))));
+    const created = results.filter((result) => result.outcome === "created");
+    expect(created).toHaveLength(1);
+    expect(results.map((result) => result.outcome).sort()).toEqual(["active_regeneration", "created"]);
+    const createdIndex = results.findIndex((result) => result.outcome === "created");
+    const replacement = results[createdIndex];
+    if (!replacement || replacement.outcome !== "created") throw new Error("Expected replacement admission.");
+    expect(await admitFreeScan(input(requests[createdIndex]!))).toEqual(replacement);
+    await expect(resumeScanJobAfterRepair({ id: oldJobId, inputHash: "wrong", readiness: async () => undefined }))
+      .rejects.toThrow(/superseded/i);
+    const [after] = await sql<Array<{ row: unknown }>>`SELECT to_jsonb(job) AS row FROM scan_jobs job WHERE id=${oldJobId}`;
+    expect(after).toEqual(before);
+    const reservations = await sql<Array<{ reservation_id: string; report_id: string; job_id: string }>>`
+      SELECT reservation_id,report_id,job_id FROM staging_free_regenerations WHERE site_key=${siteKey}`;
+    expect(reservations).toEqual([{ reservation_id: expect.any(String), report_id: replacement.reportId, job_id: replacement.jobId }]);
+    expect(reservations[0]?.reservation_id).not.toBe(oldReservationId);
+  }, 60_000);
+
+  it("linearizes resume against supersession without recovering a deleted reservation", async () => {
+    const sql = getSqlClient();
+    const siteKey = `${sitePrefix}-resume-race.test`;
+    const now = new Date("2031-01-01T12:00:00.000Z");
+    const reportId = await insertReport(siteKey, "resume-race-old");
+    const jobId = randomUUID();
+    const reservationId = randomUUID();
+    const inputHash = `resume-race-${runId}`;
+    const checkpoint = { recovery: { schemaVersion: 1, phase: "admission", revision: 0, phaseAttempt: 0,
+      resumeGeneration: 0, identity: { jobId, reportId, productContract: "legacy_website_audit_v1", methodology: null,
+        locale: "en", authorityId: null }, inputHash, completedArtifacts: [], remainingWork: [], priorTransitionId: null } };
+    await sql`INSERT INTO free_site_trials (site_key,report_id,claimed_at,expires_at)
+      VALUES (${siteKey},${reportId},${now.toISOString()},${new Date("2031-02-01T12:00:00.000Z").toISOString()})`;
+    await sql`INSERT INTO scan_jobs
+      (id,report_id,tier,locale,reason,stage,execution_state,repair_reason_code,error_code,checkpoint)
+      VALUES (${jobId},${reportId},'free','en','staging_regeneration','queued','repair_wait','repairable','repairable',${JSON.stringify(checkpoint)}::jsonb)`;
+    ownedBindingJobIds.add(jobId);
+    await sql`INSERT INTO staging_free_regenerations (site_key,reservation_id,report_id,job_id)
+      VALUES (${siteKey},${reservationId},${reportId},${jobId})`;
+    const [before] = await sql<Array<{ row: unknown }>>`SELECT to_jsonb(job) AS row FROM scan_jobs job WHERE id=${jobId}`;
+    const admission = admitFreeScan({ url: `https://${siteKey}/`, siteKey, locale: "en", idempotencyKey: `resume-race-${runId}`,
+      ipAddress: `${ipPrefix}::62`, forceFresh: true, stagingPreview: true, dailyDistinctSiteLimit: 2, aiDailyLimit: 10, maxActiveStagingJobs: 1_000, now });
+    const [resume, forceFresh] = await Promise.allSettled([
+      resumeScanJobAfterRepair({ id: jobId, inputHash, readiness: async () => undefined }), admission
+    ]);
+    const resumed = resume.status === "fulfilled";
+    const superseded = forceFresh.status === "fulfilled" && forceFresh.value.outcome === "created";
+    expect(Number(resumed) + Number(superseded)).toBe(1);
+    const [currentJob] = await sql<Array<{ execution_state: string; row: unknown }>>`
+      SELECT execution_state,to_jsonb(job) AS row FROM scan_jobs job WHERE id=${jobId}`;
+    const reservations = await sql<Array<{ reservation_id: string; job_id: string }>>`
+      SELECT reservation_id,job_id FROM staging_free_regenerations WHERE site_key=${siteKey}`;
+    if (resumed) {
+      expect(forceFresh).toMatchObject({ status: "fulfilled", value: { outcome: "active_regeneration", jobId } });
+      expect(currentJob?.execution_state).toBe("queued");
+      expect(reservations).toEqual([{ reservation_id: reservationId, job_id: jobId }]);
+    } else {
+      expect(resume).toMatchObject({ status: "rejected", reason: expect.objectContaining({ message: expect.stringMatching(/superseded/i) }) });
+      expect(currentJob?.row).toEqual(before?.row);
+      expect(reservations).toHaveLength(1);
+      expect(reservations[0]?.reservation_id).not.toBe(reservationId);
+    }
+  }, 60_000);
+
+  it("does not deadlock terminalization against a force-fresh reservation lookup", async () => {
+    const siteKey = `${sitePrefix}-terminalize-race.test`;
+    const now = new Date("2031-01-01T12:00:00.000Z");
+    const oldReportId = await insertReport(siteKey, "terminalize-race-old");
+    const reportId = await insertReport(siteKey, "terminalize-race-new");
+    await getSqlClient()`INSERT INTO free_site_trials (site_key,report_id,claimed_at,expires_at)
+      VALUES (${siteKey},${oldReportId},${now.toISOString()},${new Date("2031-02-01T12:00:00.000Z").toISOString()})`;
+    const reservation = await beginStagingFreeRegeneration({ siteKey, now });
+    if (reservation.outcome !== "created") throw new Error("Expected a regeneration reservation.");
+    const jobId = await insertLeasedJob(reportId, "terminalize-race-worker");
+    expect(await attachStagingFreeRegeneration({ siteKey, reservationId: reservation.reservationId, reportId, jobId })).toBe(true);
+    const [terminalized, admitted] = await Promise.allSettled([
+      terminalizeScanJob(jobId, "terminalize-race-worker", { stage: "completed", coverage: { plannedPages: 1, successfulPages: 1, failedPages: 0 } }),
+      admitFreeScan({ url: `https://${siteKey}/`, siteKey, locale: "en", idempotencyKey: `terminalize-race-${runId}`,
+        ipAddress: `${ipPrefix}::64`, forceFresh: true, stagingPreview: true, dailyDistinctSiteLimit: 2, aiDailyLimit: 10, maxActiveStagingJobs: 1_000, now })
+    ]);
+    expect(terminalized).toMatchObject({ status: "fulfilled" });
+    expect(admitted).toMatchObject({ status: "fulfilled" });
+    if (admitted.status === "fulfilled") expect(["active_regeneration", "created"]).toContain(admitted.value.outcome);
+  }, 60_000);
+
+  it("keeps every non-supersedable reservation and its historical rows immutable", async () => {
+    const sql = getSqlClient();
+    const now = new Date("2031-01-01T12:00:00.000Z");
+    const cases = [
+      { name: "queued", tier: "free", reason: "staging_regeneration", stage: "queued", state: "queued" },
+      { name: "running", tier: "free", reason: "staging_regeneration", stage: "analyzing", state: "running", lease: true },
+      { name: "retry", tier: "free", reason: "staging_regeneration", stage: "analyzing", state: "retry_wait", retry: true },
+      { name: "deadline", tier: "free", reason: "staging_regeneration", stage: "analyzing", state: "repair_wait", deadline: true },
+      { name: "wrong-tier", tier: "deep", reason: "staging_regeneration", stage: "analyzing", state: "repair_wait" },
+      { name: "wrong-reason", tier: "free", reason: "standard", stage: "analyzing", state: "repair_wait" },
+      { name: "wrong-error", tier: "free", reason: "staging_regeneration", stage: "analyzing", state: "repair_wait", error: "different" },
+      { name: "terminal", tier: "free", reason: "staging_regeneration", stage: "completed", state: "completed" },
+      { name: "correction", tier: "free", reason: "staging_regeneration", stage: "analyzing", state: "repair_wait", correction: true },
+      { name: "credit", tier: "free", reason: "staging_regeneration", stage: "analyzing", state: "repair_wait", credit: true },
+      { name: "replacement", tier: "deep", reason: "replacement_fulfillment", stage: "queued", state: "queued", replacement: true }
+    ];
+    for (const variant of cases) {
+      const siteKey = `${sitePrefix}-conservative-${variant.name}.test`;
+      const reportId = await insertReport(siteKey, `conservative-${variant.name}`);
+      const jobId = randomUUID(), reservationId = randomUUID();
+      const authority = variant.correction || variant.replacement ? await seedConservativeAuthority(reportId) : null;
+      await sql`INSERT INTO free_site_trials (site_key,report_id,claimed_at,expires_at)
+        VALUES (${siteKey},${reportId},${now.toISOString()},${new Date("2031-02-01T12:00:00.000Z").toISOString()})`;
+      await sql`INSERT INTO scan_jobs
+        (id,report_id,tier,locale,reason,stage,execution_state,lease_owner,lease_expires_at,retry_not_before,repair_deadline_at,repair_reason_code,error_code,credit_reservation_id,correction_id,replacement_fulfillment_id,artifact_contract,business_question_set_id)
+        VALUES (${jobId},${reportId},${variant.tier},'en',${variant.reason},${variant.stage},${variant.state},
+          ${variant.lease ? "worker" : null},${variant.lease ? new Date("2031-01-01T13:00:00.000Z").toISOString() : null},${variant.retry ? new Date("2031-01-01T13:00:00.000Z").toISOString() : null},${variant.deadline ? new Date("2031-01-01T13:00:00.000Z").toISOString() : null},
+          ${variant.state === "repair_wait" ? "repairable" : null},${variant.error ?? (variant.state === "repair_wait" ? "repairable" : null)},${variant.credit ? randomUUID() : null},${variant.correction ? authority!.correctionId : null},${variant.replacement ? authority!.replacementId : null},${variant.replacement ? "combined_geo_report_v3" : null},${variant.replacement ? authority!.questionSetId : null})`;
+      ownedBindingJobIds.add(jobId);
+      await sql`INSERT INTO staging_free_regenerations (site_key,reservation_id,report_id,job_id)
+        VALUES (${siteKey},${reservationId},${reportId},${jobId})`;
+      const [before] = await sql<Array<{ row: unknown }>>`SELECT jsonb_build_object('job',to_jsonb(job),'trial',to_jsonb(trial),'reservation',to_jsonb(regeneration)) AS row
+        FROM scan_jobs job JOIN free_site_trials trial ON trial.site_key=${siteKey}
+        JOIN staging_free_regenerations regeneration ON regeneration.site_key=${siteKey} WHERE job.id=${jobId}`;
+      await expect(admitFreeScan({ url: `https://${siteKey}/`, siteKey, locale: "en", idempotencyKey: `conservative-${runId}-${variant.name}`,
+        ipAddress: `${ipPrefix}::63`, forceFresh: true, stagingPreview: true, dailyDistinctSiteLimit: 2, aiDailyLimit: 10, now }))
+        .resolves.toMatchObject({ outcome: "active_regeneration", jobId });
+      const [after] = await sql<Array<{ row: unknown }>>`SELECT jsonb_build_object('job',to_jsonb(job),'trial',to_jsonb(trial),'reservation',to_jsonb(regeneration)) AS row
+        FROM scan_jobs job JOIN free_site_trials trial ON trial.site_key=${siteKey}
+        JOIN staging_free_regenerations regeneration ON regeneration.site_key=${siteKey} WHERE job.id=${jobId}`;
+      expect(after).toEqual(before);
+    }
+  }, 60_000);
+
   async function insertReport(siteKey: string, suffix: string): Promise<string> {
     const id = `${runId}-${suffix}`;
     await getSqlClient()`
       INSERT INTO scan_reports (id, url, site_key, payload, report_locale)
       VALUES (${id}, ${`https://${siteKey}/`}, ${siteKey}, ${JSON.stringify({ score: 80 })}::jsonb, 'en')
     `;
+    ownedReportIds.add(id);
     return id;
   }
 
@@ -304,6 +465,29 @@ describePostgres("protected staging PostgreSQL integration", () => {
         (${id}, ${reportId}, 'free', 'en', ${reason}, 'analyzing', 80, 1, 3, ${owner}, now() + interval '5 minutes')
     `;
     return id;
+  }
+
+  async function seedConservativeAuthority(reportId: string): Promise<{ correctionId: string; replacementId: string; questionSetId: string }> {
+    const sql = getSqlClient();
+    const jobId = randomUUID(), orderId = randomUUID(), questionSetId = randomUUID();
+    const correctionId = randomUUID(), artifactId = randomUUID(), replacementId = randomUUID();
+    await sql`INSERT INTO scan_jobs (id,report_id,tier,locale,reason,stage,execution_state)
+      VALUES (${jobId},${reportId},'free','en','standard','failed','failed')`;
+    await sql`INSERT INTO payment_orders
+      (id,checkout_idempotency_hmac,provider,report_id,site_key,customer_email_encrypted,customer_email_hmac,email_key_version,product_code,catalog_version,terms_version,refund_policy_version,report_locale,currency,amount_minor)
+      VALUES (${orderId},${`fixture-${orderId}`},'airwallex',${reportId},'fixture.test','encrypted','hmac','v1','legacy_website_audit_v1','v1','v1','v1','en','USD',1)`;
+    await sql`INSERT INTO report_business_question_sets
+      (id,report_id,order_id,revision,locale,region,status,confidence,generation_rule_version,neutralization_version,profile_evidence_identity)
+      VALUES (${questionSetId},${reportId},${orderId},1,'en','US','candidate','low','v1','v1','fixture')`;
+    await sql`INSERT INTO report_corrections (id,order_id,report_id,original_paid_job_id,question_set_id)
+      VALUES (${correctionId},${orderId},${reportId},${jobId},${questionSetId})`;
+    await sql`INSERT INTO report_artifact_revisions
+      (id,report_id,order_id,job_id,revision,artifact_contract,status,payload_identity_hash)
+      VALUES (${artifactId},${reportId},${orderId},${jobId},1,'combined_geo_report_v1','pending','fixture')`;
+    await sql`INSERT INTO report_replacement_fulfillments
+      (id,order_id,report_id,original_failed_job_id,failed_artifact_revision_id,question_set_id,reason_code,state,operator_authorization_ref)
+      VALUES (${replacementId},${orderId},${reportId},${jobId},${artifactId},${questionSetId},'paid_report_not_delivered','prepared','fixture')`;
+    return { correctionId, replacementId, questionSetId };
   }
 });
 

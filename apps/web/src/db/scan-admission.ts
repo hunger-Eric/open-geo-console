@@ -103,18 +103,48 @@ export async function admitFreeScan(input: AdmitFreeScanInput): Promise<ScanAdmi
           AND job_id IS NULL
           AND updated_at <= ${new Date(now.getTime() - 15 * 60_000).toISOString()}
       `;
-      const activeRegenerations = await tx<Array<{ report_id: string | null; job_id: string | null }>>`
-        SELECT report_id, job_id FROM staging_free_regenerations
+      const activeRegenerations = await tx<Array<{
+        reservation_id: string; report_id: string | null; job_id: string | null;
+      }>>`
+        SELECT reservation_id, report_id, job_id FROM staging_free_regenerations
         WHERE site_key = ${input.siteKey}
         LIMIT 1
       `;
       if (activeRegenerations[0]) {
+        const reservation = activeRegenerations[0];
+        const jobs = reservation.report_id !== null && reservation.job_id !== null
+          ? await tx<Array<{ id: string; tier: string; reason: string; stage: string; execution_state: string; lease_owner: string | null; lease_expires_at: string | null; retry_not_before: string | null; repair_deadline_at: string | null; repair_reason_code: string | null; error_code: string | null; credit_reservation_id: string | null; correction_id: string | null; replacement_fulfillment_id: string | null }>>`
+              SELECT id,tier,reason,stage,execution_state,lease_owner,lease_expires_at,retry_not_before,repair_deadline_at,
+                repair_reason_code,error_code,credit_reservation_id,correction_id,replacement_fulfillment_id
+              FROM scan_jobs WHERE id=${reservation.job_id} AND report_id=${reservation.report_id} FOR UPDATE
+            `
+          : [];
+        const job = jobs[0];
+        const lockedReservations = job ? await tx<Array<{ reservation_id: string }>>`
+          SELECT reservation_id FROM staging_free_regenerations
+          WHERE site_key=${input.siteKey} AND reservation_id=${reservation.reservation_id}
+            AND report_id=${reservation.report_id} AND job_id=${reservation.job_id}
+          FOR UPDATE
+        ` : [];
+        const supersedable = lockedReservations.length === 1 && job?.tier === "free" && job.reason === "staging_regeneration"
+          && !["completed", "completed_limited", "failed"].includes(job.stage) && job.execution_state === "repair_wait"
+          && job.lease_owner === null && job.lease_expires_at === null && job.retry_not_before === null && job.repair_deadline_at === null
+          && job.repair_reason_code !== null && job.error_code === job.repair_reason_code
+          && job.credit_reservation_id === null && job.correction_id === null && job.replacement_fulfillment_id === null;
+        if (supersedable) {
+          await tx`
+            DELETE FROM staging_free_regenerations
+            WHERE site_key = ${input.siteKey} AND reservation_id = ${reservation.reservation_id}
+              AND report_id = ${reservation.report_id} AND job_id = ${reservation.job_id}
+          `;
+        } else {
         return {
           outcome: "active_regeneration" as const,
-          reportId: activeRegenerations[0].report_id ?? activeTrial!.report_id,
+          reportId: reservation.report_id ?? activeTrial!.report_id,
           activeReportId: activeTrial!.report_id,
-          jobId: activeRegenerations[0].job_id
+          jobId: reservation.job_id
         };
+        }
       }
       await tx`SELECT pg_advisory_xact_lock(hashtextextended('enqueue-tier:free', 0))`;
       const activeCounts = await tx<{ count: number }[]>`

@@ -8,17 +8,27 @@ import {
   combinedV3ArtifactVerificationResume,
   combinedV3LanguageValidationScope,
   correctionArtifactVerificationResume,
+  deferredPageAnalysisAuthority,
   executeReviewedPaidV3ArtifactBoundary,
+  hashSynthesisInput,
   isMatchingRecommendationWebsiteFoundation,
+  mergeCompletedAnalyses,
   publicSourceArtifactVerificationResume,
   publicSourceSynthesisResume,
   resolvePaidV3SemanticValidation,
+  resolveRequiredDeferredPageAnalysisAuthority,
+  resolveWebsiteAnalysisSemanticValidation,
   resolvePublicSourceRunScope,
   resolveRecommendationFulfillmentTarget,
   resolveRecommendationFoundationTarget,
   sourceEvidenceHash
 } from "./processor";
 import { resolveCombinedReportContract } from "@/report/combined-report-contract";
+import {
+  isCompatibleDeferredPageAnalysis,
+  selectReusableCompletedPageAnalyses,
+  type CompletedPageAnalysis
+} from "./recovery";
 
 describe("recommendation website-foundation resume contract", () => {
   it("does not revalidate an already accepted historical AI foundation during replacement delivery", () => {
@@ -43,6 +53,104 @@ describe("recommendation website-foundation resume contract", () => {
     }, {
       semanticReviewContractVersion: "report-semantic-review-v1"
     })).toThrow(/ordinary immutable Paid lineage/i);
+  });
+
+  it("defers Free foundation only with root marker; marker-absent Free stays legacy; Paid marker unchanged", () => {
+    const freeJob = {
+      tier: "free",
+      artifactContract: null,
+      recommendationReportVersion: null,
+      reason: "staging_regeneration"
+    } as never;
+    expect(resolveWebsiteAnalysisSemanticValidation(freeJob, {})).toBe("legacy");
+    expect(resolveWebsiteAnalysisSemanticValidation(freeJob, {
+      semanticReviewContractVersion: "report-semantic-review-v1"
+    })).toBe("deferred");
+
+    const paidV3 = {
+      tier: "deep",
+      artifactContract: "combined_geo_report_v3",
+      recommendationReportVersion: 3,
+      reason: "standard"
+    } as never;
+    expect(resolveWebsiteAnalysisSemanticValidation(paidV3, {})).toBe("legacy");
+    expect(resolveWebsiteAnalysisSemanticValidation(paidV3, {
+      semanticReviewContractVersion: "report-semantic-review-v1"
+    })).toBe("deferred");
+  });
+
+  it("page-analysis authority: marker-present write/reuse contract; marker-absent omits identity", () => {
+    const marker = "report-semantic-review-v1";
+    const freeJob = {
+      tier: "free",
+      artifactContract: null,
+      recommendationReportVersion: null,
+      reason: "staging_regeneration"
+    } as never;
+    expect(resolveRequiredDeferredPageAnalysisAuthority("legacy", {})).toBeNull();
+    expect(resolveRequiredDeferredPageAnalysisAuthority(
+      resolveWebsiteAnalysisSemanticValidation(freeJob, { semanticReviewContractVersion: marker }),
+      { semanticReviewContractVersion: marker }
+    )).toEqual({ mode: "deferred", semanticContractVersion: marker });
+
+    const url = "https://customer.example/";
+    const page = {
+      url,
+      pageType: "home" as const,
+      title: "Home",
+      text: "body",
+      headings: [] as string[],
+      links: [] as string[],
+      forms: [] as string[],
+      images: [] as string[]
+    };
+    const evidence = { page, httpStatus: 200, contentHash: "hash-1" };
+    const analysis = {
+      url,
+      pageType: "home" as const,
+      summary: "summary",
+      organizationSignals: [] as string[],
+      strengths: [] as string[],
+      findings: [] as never[]
+    };
+
+    const markerAbsentWrite = mergeCompletedAnalyses([], [analysis], new Map([[url, evidence]]));
+    expect(markerAbsentWrite[0]!.analysisAuthority).toBeUndefined();
+
+    const markerPresentWrite = mergeCompletedAnalyses(
+      [],
+      [analysis],
+      new Map([[url, evidence]]),
+      deferredPageAnalysisAuthority(marker)
+    );
+    expect(markerPresentWrite[0]!.analysisAuthority).toEqual({
+      mode: "deferred",
+      semanticContractVersion: marker
+    });
+
+    const required = { mode: "deferred" as const, semanticContractVersion: marker };
+    const missing: CompletedPageAnalysis = { url, contentHash: "hash-1", analysis };
+    const matching: CompletedPageAnalysis = {
+      url,
+      contentHash: "hash-1",
+      analysis,
+      analysisAuthority: { mode: "deferred", semanticContractVersion: marker }
+    };
+    expect(isCompatibleDeferredPageAnalysis(missing, required)).toBe(false);
+    expect(isCompatibleDeferredPageAnalysis(matching, required)).toBe(true);
+    expect(selectReusableCompletedPageAnalyses([missing, matching], {
+      evidenceByUrl: new Map([[url, { contentHash: "hash-1" }]]),
+      canonicalUrl: (value) => value,
+      requiredDeferredAuthority: required
+    })).toEqual([matching]);
+
+    const coverage = { plannedPages: 1, analyzedPages: 1 };
+    const unbound = hashSynthesisInput([evidence], [analysis], coverage);
+    const bound = hashSynthesisInput([evidence], [analysis], coverage, {
+      requiredDeferredAuthority: required,
+      completedEntries: matching ? [matching] : []
+    });
+    expect(bound).not.toBe(unbound);
   });
 
   it("selects the combined artifact contract only from reviewed deployment configuration", () => {

@@ -1,0 +1,11 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+ARG OGC_APP_REVISION
+ARG OGC_RUNTIME_REPAIR_ID
+LABEL org.opencontainers.image.revision=$OGC_APP_REVISION \
+      org.open-geo-console.runtime-repair=$OGC_RUNTIME_REPAIR_ID
+
+COPY apps/web/src/scripts/apply-postgres-next-write-guard.mjs /tmp/apply-postgres-next-write-guard.mjs
+RUN node /tmp/apply-postgres-next-write-guard.mjs /app/node_modules/postgres \
+ && rm -f /tmp/apply-postgres-next-write-guard.mjs

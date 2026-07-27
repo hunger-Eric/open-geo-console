@@ -80,6 +80,52 @@ describe("Report V4 Worker startup readiness", () => {
     })).resolves.toBeUndefined();
     expect(calls).toEqual(["v4-readiness", "database"]);
   });
+
+  it("retries a nested transient database cause once, then succeeds", async () => {
+    const calls: string[] = [];
+    let attempt = 0;
+    const ensureDatabase = vi.fn(async () => {
+      calls.push("database");
+      if (attempt++ === 0) throw { cause: { cause: { code: "ECONNRESET" } } };
+    });
+    await prepareWorkerStartup({
+      environment: validEnvironment(), ensureDatabase,
+      validateReportV4Readiness: () => { calls.push("model"); },
+      delay: async (milliseconds) => { calls.push(`delay:${milliseconds}`); }
+    });
+    expect(calls).toEqual(["model", "database", "delay:1000", "database"]);
+    expect(ensureDatabase).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses all five attempts and exponential delays before rethrowing the last transient error", async () => {
+    const failure = { code: "CONNECT_TIMEOUT" };
+    const ensureDatabase = vi.fn().mockRejectedValue(failure);
+    const delays: number[] = [];
+    await expect(prepareWorkerStartup({ environment: validEnvironment(), ensureDatabase, delay: async (milliseconds) => { delays.push(milliseconds); } })).rejects.toBe(failure);
+    expect(ensureDatabase).toHaveBeenCalledTimes(5);
+    expect(delays).toEqual([1000, 2000, 4000, 8000]);
+  });
+
+  it("fails fast for auth, profile, schema, and message-only errors", async () => {
+    for (const failure of [{ code: "28P01" }, { code: "PROFILE_MISMATCH" }, { code: "42P01" }, { message: "CONNECT_TIMEOUT" }]) {
+      const ensureDatabase = vi.fn().mockRejectedValue(failure);
+      const delay = vi.fn(async () => undefined);
+      await expect(prepareWorkerStartup({ environment: validEnvironment(), ensureDatabase, delay })).rejects.toBe(failure);
+      expect(ensureDatabase).toHaveBeenCalledTimes(1);
+      expect(delay).not.toHaveBeenCalled();
+    }
+  });
+
+  it("runs model readiness once before database attempts or delays", async () => {
+    const ensureDatabase = vi.fn();
+    const delay = vi.fn(async () => undefined);
+    await expect(prepareWorkerStartup({
+      environment: validEnvironment(), ensureDatabase, delay,
+      validateReportV4Readiness: () => { throw new Error("model readiness failed"); }
+    })).rejects.toThrow("model readiness failed");
+    expect(ensureDatabase).not.toHaveBeenCalled();
+    expect(delay).not.toHaveBeenCalled();
+  });
 });
 
 function validEnvironment(): NodeJS.ProcessEnv {

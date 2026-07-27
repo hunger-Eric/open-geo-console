@@ -4,8 +4,8 @@ import {
   REPORT_SEMANTIC_REVIEW_CONTRACT,
   applyReportSemanticReview,
   buildFreeV4FoundationManifestCoverage,
+  buildFreeV4ReportSemanticReviewSystemPrompt,
   buildFreeV4SemanticReviewManifest,
-  buildReportSemanticReviewSystemPrompt,
   deriveFreeObservationMetrics,
   diagnoseGenerativeSearchAnswerCardV3,
   generativeSearchAnswerHash,
@@ -859,7 +859,7 @@ async function reviewFreeTeaser(input: {
   const structured = createReportV4MimoStructuredInvoker({ environment: process.env, lockedRuntime: runtime });
   const reviewed = await runOfflineReportSemanticReview(reviewInput, async ({ task, input: exactInput }) => structured.invoke({
     operation: "websiteSynthesis",
-    systemText: buildReportSemanticReviewSystemPrompt(),
+    systemText: buildFreeV4ReportSemanticReviewSystemPrompt(reviewInput),
     inputText: JSON.stringify({ task, input: exactInput }),
     signal: input.signal ?? new AbortController().signal
   }));
@@ -926,12 +926,12 @@ function buildFreeTeaserSemanticReviewInput(input: {
   })).filter((entity, index, rows) => rows.findIndex(({ entityId }) => entityId === entity.entityId) === index);
   const sources = input.card.sources.map((source) => {
     const originalText = JSON.stringify({ title: source.title, citedText: source.citedText });
-    return { sourceId: source.sourceId, questionId: input.card.questionId, canonicalUrl: source.canonicalUrl, originalText, originalTextHash: reportSemanticTextHash(originalText) };
+    return { sourceId: source.sourceId, questionId: input.card.questionId, canonicalUrl: source.canonicalUrl, originalText, originalTextHash: reportSemanticTextHash(originalText), eligible: true };
   });
   const targetPages = buildFreeTeaserDiagnosisTargetPages(input.card.questionId, input.admission);
   const evidence = [
-    ...sources.map((source) => ({ evidenceId: source.sourceId, questionId: source.questionId, sourceId: source.sourceId, originalText: source.originalText, originalTextHash: source.originalTextHash })),
-    ...targetPages.flatMap((page) => page.sourceLocations.map((location) => ({ evidenceId: location.locationId, questionId: input.card.questionId, sourceId: null, originalText: page.summary.slice(location.startOffset, location.endOffset), originalTextHash: reportSemanticTextHash(page.summary.slice(location.startOffset, location.endOffset)) })))
+    ...sources.map((source) => ({ evidenceId: source.sourceId, questionId: source.questionId, sourceId: source.sourceId, originalText: source.originalText, originalTextHash: source.originalTextHash, eligible: true })),
+    ...targetPages.flatMap((page) => page.sourceLocations.map((location) => ({ evidenceId: location.locationId, questionId: input.card.questionId, sourceId: null, originalText: page.summary.slice(location.startOffset, location.endOffset), originalTextHash: reportSemanticTextHash(page.summary.slice(location.startOffset, location.endOffset)), eligible: true })))
   ];
   const diagnosisEvidence = [...input.diagnosis.detailedEvidenceRefs];
   const diagnosisSourceIds = diagnosisEvidence.filter((id) => sources.some((source) => source.sourceId === id));
@@ -962,6 +962,7 @@ function buildFreeTeaserSemanticReviewInput(input: {
     .map((value) => value.trim())
     .filter((value, index, values) => values.indexOf(value) === index);
   return buildFreeV4SemanticReviewManifest({
+    evidencePolicy: "report_global_v1",
     locale: input.runtime.authority.surface.locale,
     target: { siteKey: targetHost, targetUrl: input.targetUrl, aliases: targetAliases },
     expectedModel: { providerId: "xiaomi-mimo", modelId: input.modelId },

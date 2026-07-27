@@ -99,7 +99,10 @@ import {
   calculateEffectiveCoverage,
   determineResumeStage,
   fetchPlannedPagesWithRecovery,
+  selectReusableCompletedPageAnalyses,
   type CompletedPageAnalysis,
+  type DeferredPageAnalysisAuthority,
+  type PageAnalysisAuthority,
   type RecoveryCheckpoint
 } from "./recovery";
 import {
@@ -230,7 +233,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     await checkpointJob({ stage, progress, checkpoint: nextCheckpoint as JobCheckpoint, ...coverage });
   };
   let checkpoint = normalizeCheckpoint(job.checkpoint);
-  const paidV3SemanticValidation = resolvePaidV3SemanticValidation(job, checkpoint);
+  const websiteAnalysisSemanticValidation = resolveWebsiteAnalysisSemanticValidation(job, checkpoint);
+  const requiredDeferredPageAnalysisAuthority = resolveRequiredDeferredPageAnalysisAuthority(
+    websiteAnalysisSemanticValidation,
+    checkpoint
+  );
   let reportV4ProductionTarget: ReportV4ProductionTarget | null = null;
   let reportV4ProductionRoutingAttempted = false;
   try {
@@ -411,7 +418,9 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       return;
     }
 
-    let resumeStage = determineResumeStage(checkpoint);
+    let resumeStage = determineResumeStage(checkpoint, {
+      requiredDeferredAuthority: requiredDeferredPageAnalysisAuthority
+    });
     let discovery = checkpoint.discoverySnapshot;
     if (resumeStage === "discovering" || !discovery) {
       await checkpointJob({ stage: "discovering", progress: 10 });
@@ -501,13 +510,24 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       : undefined;
 
     const evidenceByUrl = new Map(crawl.pages.map((page) => [canonicalUrl(page.page.url), page]));
-    checkpoint.completedPageAnalyses = (checkpoint.completedPageAnalyses ?? []).filter((stored) => {
-      const evidence = evidenceByUrl.get(canonicalUrl(stored.url));
-      return Boolean(evidence?.contentHash) && evidence?.contentHash === stored.contentHash;
-    });
+    // Crawl-success is independent of analysis authority filtering.
+    const crawlSuccessCount = crawl.pages.length;
+    const writeAuthority = requiredDeferredPageAnalysisAuthority
+      ? deferredPageAnalysisAuthority(requiredDeferredPageAnalysisAuthority.semanticContractVersion)
+      : undefined;
+    // Marker-present: only deferred+current-marker entries count as analysis-complete.
+    // Marker-absent: URL+contentHash only (missing identity remains legal).
+    checkpoint.completedPageAnalyses = selectReusableCompletedPageAnalyses(
+      checkpoint.completedPageAnalyses ?? [],
+      {
+        evidenceByUrl,
+        canonicalUrl,
+        requiredDeferredAuthority: requiredDeferredPageAnalysisAuthority
+      }
+    );
     await saveCheckpoint("analyzing", 65, checkpoint, {
       plannedPages: checkpoint.effectivePlan!.length,
-      successfulPages: crawl.pages.length,
+      successfulPages: crawlSuccessCount,
       failedPages: failureCount(checkpoint)
     });
     options.liveDrill?.inject({ jobId: job.id, fault: "model" });
@@ -517,7 +537,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       analyzed = await analyzePageBatch(client, {
         pages: crawl.pages.map(({ page }) => page),
         locale: job.locale,
-        ...(paidV3SemanticValidation === "deferred"
+        ...(websiteAnalysisSemanticValidation === "deferred"
           ? { semanticValidation: "deferred" as const }
           : {}),
         batchSize: 4,
@@ -528,13 +548,15 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
           checkpoint.completedPageAnalyses = mergeCompletedAnalyses(
             checkpoint.completedPageAnalyses ?? [],
             batch,
-            evidenceByUrl
+            evidenceByUrl,
+            writeAuthority
           );
           await saveCheckpoint("analyzing", analysisProgress(
             checkpoint.completedPageAnalyses.length,
             crawl.pages.length
           ), checkpoint, {
             plannedPages: checkpoint.effectivePlan!.length,
+            // Analysis-derived success only; crawl success was recorded above.
             successfulPages: checkpoint.completedPageAnalyses.length,
             failedPages: failureCount(checkpoint)
           });
@@ -545,24 +567,28 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         checkpoint.completedPageAnalyses = mergeCompletedAnalyses(
           checkpoint.completedPageAnalyses ?? [],
           error.completedAnalyses,
-          evidenceByUrl
+          evidenceByUrl,
+          writeAuthority
         );
         await saveCheckpoint("analyzing", analysisProgress(
           checkpoint.completedPageAnalyses.length,
           crawl.pages.length
         ), checkpoint);
       }
+      // Fail closed: do not synthesize a mixed/partial foundation after reanalysis failure.
       throw error;
     }
 
     checkpoint.completedPageAnalyses = mergeCompletedAnalyses(
       checkpoint.completedPageAnalyses ?? [],
       analyzed.analyses,
-      evidenceByUrl
+      evidenceByUrl,
+      writeAuthority
     );
     const effectiveCoverage = calculateEffectiveCoverage({
       discoveredCandidateCount: discovery.estimatedPages,
       effectivePlannedUrls: checkpoint.effectivePlan!.map(({ url }) => url),
+      // Coverage analyzedPages is analysis-derived (compatible completed only).
       completedCrawlUrls: analyzed.analyses.map(({ url }) => url),
       permanentFailures: checkpoint.permanentFailures ?? [],
       exhaustedTransientUrls: crawl.exhaustedTransientUrls
@@ -579,7 +605,10 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       pageTypesCovered: [...new Set(crawl.pages.map(({ page }) => page.pageType))],
       limitations
     };
-    const synthesisInputHash = hashSynthesisInput(crawl.pages, analyzed.analyses, coverage);
+    const synthesisInputHash = hashSynthesisInput(crawl.pages, analyzed.analyses, coverage, {
+      requiredDeferredAuthority: requiredDeferredPageAnalysisAuthority,
+      completedEntries: checkpoint.completedPageAnalyses
+    });
     checkpoint.synthesisInputHash = synthesisInputHash;
     await saveCheckpoint("synthesizing", 85, checkpoint);
 
@@ -592,7 +621,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       coverage
     }, {
       signal: execution.controller.signal,
-      ...(paidV3SemanticValidation === "deferred"
+      ...(websiteAnalysisSemanticValidation === "deferred"
         ? { semanticValidation: "deferred" as const }
         : {})
     });
@@ -1252,6 +1281,40 @@ export function resolvePaidV3SemanticValidation(
     throw new Error("Semantic-reviewed Paid V3 is allowed only for the ordinary immutable Paid lineage.");
   }
   return "deferred";
+}
+
+/**
+ * Website analysis prose gates:
+ * - Paid marker-present: deferred (existing Paid V3 path).
+ * - Free: deferred only when the job root checkpoint already carries the approved
+ *   semantic-review marker; marker-absent Free keeps legacy language gates.
+ */
+export function resolveWebsiteAnalysisSemanticValidation(
+  job: Pick<ScanJobRow, "tier" | "artifactContract" | "recommendationReportVersion" | "reason">,
+  checkpoint: JobCheckpoint
+): "legacy" | "deferred" {
+  if (resolvePaidV3SemanticValidation(job, checkpoint) === "deferred") return "deferred";
+  if (job.tier === "free" && readSemanticReviewContractVersion(checkpoint) !== null) {
+    return "deferred";
+  }
+  return "legacy";
+}
+
+/** Marker-present deferred write/reuse identity; null keeps marker-absent URL+hash semantics. */
+export function resolveRequiredDeferredPageAnalysisAuthority(
+  websiteAnalysisSemanticValidation: "legacy" | "deferred",
+  checkpoint: JobCheckpoint
+): DeferredPageAnalysisAuthority | null {
+  if (websiteAnalysisSemanticValidation !== "deferred") return null;
+  const version = readSemanticReviewContractVersion(checkpoint);
+  if (version === null) return null;
+  return { mode: "deferred", semanticContractVersion: version };
+}
+
+export function deferredPageAnalysisAuthority(
+  semanticContractVersion: string
+): PageAnalysisAuthority {
+  return { mode: "deferred", semanticContractVersion };
 }
 
 async function resolveCombinedQuestionAnswers(input: {
@@ -2341,10 +2404,16 @@ function urlsToPlan(urls: readonly string[]): PlannedPage[] {
   }));
 }
 
-function mergeCompletedAnalyses(
+/**
+ * Merge newly produced page analyses into the recoverable checkpoint set.
+ * When `analysisAuthority` is provided (marker-present deferred), every new
+ * entry is stamped. When omitted (marker-absent), identity is not written.
+ */
+export function mergeCompletedAnalyses(
   current: readonly CompletedPageAnalysis[],
   analyses: readonly PageAnalysis[],
-  evidenceByUrl: Map<string, StoredPageEvidence>
+  evidenceByUrl: Map<string, StoredPageEvidence> | ReadonlyMap<string, StoredPageEvidence>,
+  analysisAuthority?: PageAnalysisAuthority
 ): CompletedPageAnalysis[] {
   const merged = new Map(current.map((stored) => [canonicalUrl(stored.url), stored]));
   for (const analysis of analyses) {
@@ -2353,7 +2422,8 @@ function mergeCompletedAnalyses(
     merged.set(canonicalUrl(analysis.url), {
       url: analysis.url,
       contentHash: evidence.contentHash,
-      analysis
+      analysis,
+      ...(analysisAuthority ? { analysisAuthority } : {})
     });
   }
   return [...merged.values()];
@@ -2382,17 +2452,38 @@ function configuredAiTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : 180_000;
 }
 
-function hashSynthesisInput(
+/**
+ * Foundation synthesis input identity.
+ * Marker-absent: pages + analyses + coverage only (byte-stable vs prior).
+ * Marker-present: also binds deferred authority and each entry's authority identity.
+ */
+export function hashSynthesisInput(
   pages: readonly StoredPageEvidence[],
   analyses: readonly PageAnalysis[],
-  coverage: object
+  coverage: object,
+  options?: {
+    requiredDeferredAuthority?: DeferredPageAnalysisAuthority | null;
+    completedEntries?: readonly CompletedPageAnalysis[];
+  }
 ): string {
-  return createHash("sha256").update(JSON.stringify({
+  const base = {
     pages: pages.map(({ page, contentHash }) => ({ url: canonicalUrl(page.url), contentHash }))
       .sort((left, right) => left.url.localeCompare(right.url)),
     analyses: analyses.map(({ url, ...analysis }) => ({ url: canonicalUrl(url), ...analysis }))
       .sort((left, right) => left.url.localeCompare(right.url)),
     coverage
+  };
+  if (!options?.requiredDeferredAuthority) {
+    return createHash("sha256").update(JSON.stringify(base)).digest("hex");
+  }
+  return createHash("sha256").update(JSON.stringify({
+    ...base,
+    analysisAuthority: options.requiredDeferredAuthority,
+    entryAuthorities: (options.completedEntries ?? []).map((entry) => ({
+      url: canonicalUrl(entry.url),
+      contentHash: entry.contentHash,
+      analysisAuthority: entry.analysisAuthority ?? null
+    })).sort((left, right) => left.url.localeCompare(right.url))
   })).digest("hex");
 }
 
@@ -2700,7 +2791,8 @@ function buildPaidV3SemanticAuthorities(input: {
       questionId: card.questionId,
       canonicalUrl: source.canonicalUrl,
       originalText,
-      originalTextHash: reportSemanticTextHash(originalText)
+      originalTextHash: reportSemanticTextHash(originalText),
+      eligible: audit?.retrievalReady === true && audit.exactExcerpt !== null && source.retrievalStatus === "verified_body"
     };
   }));
   const sourceIds = new Set(sources.map(({ sourceId }) => sourceId));
@@ -2709,7 +2801,8 @@ function buildPaidV3SemanticAuthorities(input: {
     questionId: source.questionId,
     sourceId: source.sourceId,
     originalText: source.originalText,
-    originalTextHash: source.originalTextHash
+    originalTextHash: source.originalTextHash,
+    eligible: source.eligible
   }));
   const targetEvidence = answerCards.flatMap((card) =>
     buildFreeTeaserDiagnosisTargetPages(card.questionId, input.admission).flatMap((page) =>
@@ -2720,7 +2813,8 @@ function buildPaidV3SemanticAuthorities(input: {
           questionId: card.questionId,
           sourceId: null,
           originalText,
-          originalTextHash: reportSemanticTextHash(originalText)
+          originalTextHash: reportSemanticTextHash(originalText),
+          eligible: true
         };
       })
     )
@@ -2740,7 +2834,8 @@ function buildPaidV3SemanticAuthorities(input: {
       questionId: null,
       sourceId: null,
       originalText,
-      originalTextHash: reportSemanticTextHash(originalText)
+      originalTextHash: reportSemanticTextHash(originalText),
+      eligible: true
     };
   });
   const identityEvidenceText = JSON.stringify({
@@ -2756,7 +2851,8 @@ function buildPaidV3SemanticAuthorities(input: {
     questionId: null,
     sourceId: null,
     originalText: identityEvidenceText,
-    originalTextHash: reportSemanticTextHash(identityEvidenceText)
+    originalTextHash: reportSemanticTextHash(identityEvidenceText),
+    eligible: true
   };
   const evidence = [...sourceEvidence, ...targetEvidence, ...targetPageEvidence, identityEvidence];
   const observationResults = sources.map((source, index) => ({

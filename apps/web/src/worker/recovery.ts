@@ -25,15 +25,67 @@ export interface RecoveryCheckpoint {
   [key: string]: unknown;
 }
 
+/**
+ * Optional checkpoint identity for recoverable page analyses.
+ * Missing identity is legal for marker-absent / historical entries.
+ * New marker-present writes must stamp deferred + current root contract version.
+ */
+export type PageAnalysisAuthorityMode = "legacy" | "deferred";
+
+export interface PageAnalysisAuthority {
+  mode: PageAnalysisAuthorityMode;
+  semanticContractVersion: string | null;
+}
+
+export interface DeferredPageAnalysisAuthority {
+  mode: "deferred";
+  semanticContractVersion: string;
+}
+
 export interface CompletedPageAnalysis {
   url: string;
   contentHash: string;
   analysis: PageAnalysis;
+  analysisAuthority?: PageAnalysisAuthority;
 }
 
 export type ResumeStage = "discovering" | "planning" | "fetching" | "analyzing" | "synthesizing";
 
-export function determineResumeStage(checkpoint: RecoveryCheckpoint): ResumeStage {
+export function isCompatibleDeferredPageAnalysis(
+  entry: CompletedPageAnalysis,
+  required: DeferredPageAnalysisAuthority
+): boolean {
+  const authority = entry.analysisAuthority;
+  return authority?.mode === "deferred"
+    && authority.semanticContractVersion === required.semanticContractVersion;
+}
+
+/**
+ * URL + contentHash reuse for marker-absent (identity optional).
+ * Marker-present also requires deferred authority matching the current root marker.
+ */
+export function selectReusableCompletedPageAnalyses(
+  entries: readonly CompletedPageAnalysis[],
+  options: {
+    evidenceByUrl: ReadonlyMap<string, { contentHash: string }>;
+    canonicalUrl: (url: string) => string;
+    requiredDeferredAuthority?: DeferredPageAnalysisAuthority | null;
+  }
+): CompletedPageAnalysis[] {
+  return entries.filter((stored) => {
+    const evidence = options.evidenceByUrl.get(options.canonicalUrl(stored.url));
+    if (!evidence?.contentHash || evidence.contentHash !== stored.contentHash) return false;
+    if (options.requiredDeferredAuthority) {
+      return isCompatibleDeferredPageAnalysis(stored, options.requiredDeferredAuthority);
+    }
+    return true;
+  });
+}
+
+export function determineResumeStage(
+  checkpoint: RecoveryCheckpoint,
+  options?: { requiredDeferredAuthority?: DeferredPageAnalysisAuthority | null }
+): ResumeStage {
   const ranked = checkpoint.rankedCandidates ?? [];
   if (ranked.length === 0 || !checkpoint.targetPageCount) return "discovering";
   const effective = checkpoint.effectivePlan ?? [];
@@ -44,7 +96,12 @@ export function determineResumeStage(checkpoint: RecoveryCheckpoint): ResumeStag
   if (effective.some(({ url }) => !completed.has(url) && !permanent.has(url) && !exhausted.has(url))) {
     return "fetching";
   }
-  const analyzed = new Set((checkpoint.completedPageAnalyses ?? []).map(({ url }) => url));
+  const required = options?.requiredDeferredAuthority ?? null;
+  const analyzed = new Set(
+    (checkpoint.completedPageAnalyses ?? [])
+      .filter((entry) => (required ? isCompatibleDeferredPageAnalysis(entry, required) : true))
+      .map(({ url }) => url)
+  );
   if ([...completed].some((url) => !analyzed.has(url))) return "analyzing";
   return "synthesizing";
 }

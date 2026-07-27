@@ -36,10 +36,37 @@ export async function prepareWorkerStartup(input: {
   readonly environment?: NodeJS.ProcessEnv;
   readonly ensureDatabase: () => Promise<void>;
   readonly validateReportV4Readiness?: (environment: NodeJS.ProcessEnv) => void;
+  readonly delay?: (milliseconds: number) => Promise<void>;
 }): Promise<void> {
   const environment = input.environment ?? process.env;
   (input.validateReportV4Readiness ?? assertReportV4WorkerStartupReadiness)(environment);
-  await input.ensureDatabase();
+  const delay = input.delay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await input.ensureDatabase();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientStartupDatabaseError(error)) throw error;
+      if (attempt < 4) await delay(1000 * 2 ** attempt);
+    }
+  }
+  throw lastError;
+}
+
+const TRANSIENT_STARTUP_DATABASE_CODES = new Set(["CONNECT_TIMEOUT", "ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EPIPE"]);
+
+function isTransientStartupDatabaseError(error: unknown): boolean {
+  const seen = new Set<object>();
+  let current: unknown = error;
+  for (let depth = 0; depth < 8 && current && typeof current === "object" && !seen.has(current); depth += 1) {
+    seen.add(current);
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string" && TRANSIENT_STARTUP_DATABASE_CODES.has(code)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 function assertLockedCapabilities(runtime: ReportV4ModelRuntimeConfig): void {

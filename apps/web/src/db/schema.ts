@@ -153,7 +153,16 @@ export interface JobCheckpoint {
   permanentFailures?: Array<{ url: string; error: string; code?: string }>;
   transientAttemptCounts?: Record<string, number>;
   completedCrawlUrls?: string[];
-  completedPageAnalyses?: Array<{ url: string; contentHash: string; analysis: unknown }>;
+  completedPageAnalyses?: Array<{
+    url: string;
+    contentHash: string;
+    analysis: unknown;
+    /** Optional. Required only on newly written marker-present deferred entries. */
+    analysisAuthority?: {
+      mode: "legacy" | "deferred";
+      semanticContractVersion: string | null;
+    };
+  }>;
   synthesisInputHash?: string;
   // Legacy keys remain readable while existing jobs drain and migrate to the
   // explicit recovery contract above.
