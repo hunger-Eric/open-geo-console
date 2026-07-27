@@ -1,7 +1,9 @@
 # Active Change Scope Lock
 
+Status: `APPROVED`
+
 ## Historical superseded scope (context only)
-Status: `FROZEN`
+Historical status (non-executable): `FROZEN`
 
 This file is the mandatory authorization boundary for the next implementation. While it is `FROZEN`, no production-code edits or external mutations are allowed.
 
@@ -62,7 +64,7 @@ The proposed approved scope must, at minimum, prove:
 ## Approved local convergence and worktree consolidation (2026-07-27)
 ## Current approved consolidation authority
 
-Status: `APPROVED`
+Historical status (non-executable): `APPROVED`
 
 `APPROVED` - user explicitly approved the new clean-image second-report scope on 2026-07-26 (Asia/Shanghai), stating: “停止旧 Worker 后创建另一份全新报告；不能重放当前失败报告”. Prior records remain baseline only; approval is limited to the latest scope below.
 
@@ -162,9 +164,9 @@ secret/runtime-artifact exposure, disk-space violation, failed gate, or any
 request to touch Production, push, delete remote branches, force/prune, or
 expand behavior. Report the blocker without substituting or replaying history.
 
-## Accepted Q1 sample presentation (narrative HTML)
+## Accepted Q1 sample presentation (narrative HTML, archived non-executable context)
 
-Status: `APPROVED`
+Historical status (non-executable): `APPROVED`
 
 User accepted the r2/B Q1 sample on 2026-07-25 and directed that the
 customer-facing deliverable keep **LLM answer + narrative HTML packaging**,

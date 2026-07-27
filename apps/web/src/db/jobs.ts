@@ -308,16 +308,6 @@ export async function claimScanJob(
       USING scan_jobs job
       WHERE regeneration.job_id = job.id AND job.stage = 'failed'
     `;
-    await tx`
-      UPDATE report_artifact_revisions artifact
-      SET status = 'failed'
-      FROM scan_jobs job
-      WHERE artifact.job_id = job.id
-        AND job.reason = 'staging_artifact_refresh'
-        AND job.stage = 'failed'
-        AND artifact.revision_kind = 'presentation_refresh'
-        AND artifact.status = 'pending'
-    `;
   });
   const claimedId = await JobTransitionService.claim(workerId, tier, leaseSeconds);
   return claimedId ? getScanJob(claimedId) : null;
@@ -353,7 +343,6 @@ export async function claimExactScanJob(workerId: string, identity: ExactScanJob
       ) UPDATE access_keys access SET credits_remaining=access.credits_remaining+refunded.credits,
         status=CASE WHEN access.status='exhausted' THEN 'active' ELSE access.status END FROM refunded WHERE access.id=refunded.access_key_id`;
     await tx`DELETE FROM staging_free_regenerations regeneration USING scan_jobs job WHERE regeneration.job_id=job.id AND job.id=${identity.jobId} AND job.report_id=${identity.reportId} AND job.tier=${identity.tier} AND job.stage='failed'`;
-    await tx`UPDATE report_artifact_revisions artifact SET status='failed' FROM scan_jobs job WHERE artifact.job_id=job.id AND job.id=${identity.jobId} AND job.report_id=${identity.reportId} AND job.tier=${identity.tier} AND job.reason='staging_artifact_refresh' AND job.stage='failed' AND artifact.revision_kind='presentation_refresh' AND artifact.status='pending'`;
   });
   const claimedId = await JobTransitionService.claimExact(workerId, identity, leaseSeconds);
   return claimedId ? getScanJob(claimedId) : null;

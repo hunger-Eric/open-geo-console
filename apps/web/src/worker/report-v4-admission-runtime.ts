@@ -499,8 +499,9 @@ function analyzableCount(pages: readonly ReportV4SiteSnapshotPageInput[]): numbe
 }
 
 function hasCoverageLimitingExclusion(pages: readonly ReportV4SiteSnapshotPageInput[]): boolean {
-  return pages.some(({ exclusionReason }) =>
-    exclusionReason !== null && COVERAGE_LIMITING_EXCLUSION_REASONS.has(exclusionReason));
+  const reasons = new Set(pages.flatMap(({ exclusionReason }) => exclusionReason ? [exclusionReason] : []));
+  return [...reasons].some((reason) => COVERAGE_LIMITING_EXCLUSION_REASONS.has(reason)) ||
+    (reasons.has("duplicate_content") && !reasons.has("policy_excluded"));
 }
 
 function summarize(value: string): string {

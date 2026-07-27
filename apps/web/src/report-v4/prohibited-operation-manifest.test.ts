@@ -23,15 +23,10 @@ describe("Report V4 prohibited-operation manifest", () => {
       "provider_claim/provider_claim/extractClaims",
       "qualification/qualification/createProductionProviderDiscoveryContext.dependencies.qualify",
       "four_snapshot/four_snapshot/runProviderDiscoveryPipeline",
-      "replacement_fulfillment/replacement_prepare/prepareApprovedReportReplacement",
-      "replacement_fulfillment/replacement_resume/resumeApprovedReplacementModelRepair",
       "replacement_fulfillment/replacement_terminalize/terminalizeCombinedReplacement",
-      "correction/correction_prepare/prepareApprovedReportCorrection",
-      "correction/correction_confirm/confirmApprovedReportCorrection",
-      "correction/correction_terminalize/terminalizeCombinedCorrection",
       "legacy_mutation/legacy_mutation/saveGeoReport"
     ]);
-    expect(REPORT_V4_PROHIBITED_OPERATION_MANIFEST_HASH).toBe("e7f33b34d76384bbb9366f4f7cc109e6bd63dc84ea962fc9ad410ddb1b6c197b");
+    expect(REPORT_V4_PROHIBITED_OPERATION_MANIFEST_HASH).toBe("c05eaacb4e1746187a5ca37295b3329357c90b27d464fb5e6c87aea4164c390d");
   });
 
   it("rejects duplicate operation plus guard-site entries", () => {
@@ -48,8 +43,8 @@ describe("Report V4 prohibited-operation manifest", () => {
   });
 
   it("rejects a cross-paired operation even when both discriminants are individually known", () => {
-    const replacement = REPORT_V4_PROHIBITED_OPERATION_MANIFEST_ENTRIES.find(({ guardSite }) => guardSite === "replacement_prepare")!;
-    expect(() => defineReportV4ProhibitedOperationManifest([{ ...replacement, operation: "correction" }]))
+    const replacement = REPORT_V4_PROHIBITED_OPERATION_MANIFEST_ENTRIES.find(({ guardSite }) => guardSite === "replacement_terminalize")!;
+    expect(() => defineReportV4ProhibitedOperationManifest([{ ...replacement, operation: "pdf" }]))
       .toThrow(/crosses the authoritative/u);
   });
 

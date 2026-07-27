@@ -77,12 +77,7 @@ describe("Report V4 Batch B prohibited-operation entry wiring", () => {
 describe("Report V4 Batch C prohibited-operation entry wiring", () => {
   it("maps every Batch C guard site exactly once to its declared production entry", () => {
     const expected = [
-      ["replacement_prepare", "apps/web/src/db/report-replacement-fulfillments.ts", "prepareApprovedReportReplacement"],
-      ["replacement_resume", "apps/web/src/db/report-replacement-fulfillments.ts", "resumeApprovedReplacementModelRepair"],
-      ["replacement_terminalize", "apps/web/src/db/combined-replacement-terminalization.ts", "terminalizeCombinedReplacement"],
-      ["correction_prepare", "apps/web/src/db/report-corrections.ts", "prepareApprovedReportCorrection"],
-      ["correction_confirm", "apps/web/src/db/report-corrections.ts", "confirmApprovedReportCorrection"],
-      ["correction_terminalize", "apps/web/src/db/combined-correction-terminalization.ts", "terminalizeCombinedCorrection"]
+      ["replacement_terminalize", "apps/web/src/db/combined-replacement-terminalization.ts", "terminalizeCombinedReplacement"]
     ] as const;
 
     for (const [site, file, symbol] of expected) {
@@ -93,25 +88,9 @@ describe("Report V4 Batch C prohibited-operation entry wiring", () => {
   });
 
   it("keeps each Batch C guard directly outside its private unsafe delegate", () => {
-    const replacements = source("apps/web/src/db/report-replacement-fulfillments.ts");
-    expect(replacements.indexOf('guardSite: "replacement_prepare"'))
-      .toBeLessThan(replacements.indexOf("delegate: () => prepareApprovedReportReplacementUnsafe(input)"));
-    expect(replacements.indexOf('guardSite: "replacement_resume"'))
-      .toBeLessThan(replacements.indexOf("delegate: () => resumeApprovedReplacementModelRepairUnsafe(input)"));
-
     const replacementTerminalization = source("apps/web/src/db/combined-replacement-terminalization.ts");
     expect(replacementTerminalization.indexOf('guardSite: "replacement_terminalize"'))
       .toBeLessThan(replacementTerminalization.indexOf("delegate: () => terminalizeCombinedReplacementUnsafe(input)"));
 
-    const corrections = source("apps/web/src/db/report-corrections.ts");
-    expect(corrections.indexOf('guardSite: "correction_prepare"'))
-      .toBeLessThan(corrections.indexOf("delegate: () => prepareApprovedReportCorrectionUnsafe()"));
-    expect(corrections.indexOf('guardSite: "correction_confirm"'))
-      .toBeLessThan(corrections.indexOf("delegate: () => confirmApprovedReportCorrectionUnsafe(input)"));
-
-    const correctionTerminalization = source("apps/web/src/db/combined-correction-terminalization.ts");
-    expect(correctionTerminalization.indexOf('guardSite: "correction_terminalize"'))
-      .toBeLessThan(correctionTerminalization.indexOf("delegate: () => terminalizeCombinedCorrectionUnsafe(input)"));
-    expect(correctionTerminalization.match(/guardSite:/gu)).toHaveLength(1);
   });
 });

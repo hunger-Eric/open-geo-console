@@ -22,7 +22,6 @@ import {
   type AiWebsiteReportV1,
   type CombinedBusinessQuestionAnswers,
   type CombinedGeoReportV3,
-  type CombinedReportLanguageScope,
   type GroundedAnswerEvidence,
   type AppliedReportSemanticField,
   type PaidV3ReportSemanticReviewReceipt,
@@ -60,13 +59,9 @@ import { readSemanticReviewContractVersion } from "@/db/report-semantic-review-a
 import { loadReportV4PreAdmissionSnapshot } from "@/db/report-v4-site-snapshots";
 import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
-import { getCorrectionExecutionContext } from "@/db/report-corrections";
-import { getReplacementExecutionContext, syncReplacementExecutionState } from "@/db/report-replacement-fulfillments";
 import { listEvidenceAssets } from "@/db/evidence-assets";
-import { terminalizeCombinedCorrection, terminalizePaidCombinedReport } from "@/db/combined-correction-terminalization";
-import { terminalizeCombinedReplacement } from "@/db/combined-replacement-terminalization";
+import { terminalizePaidCombinedReport } from "@/db/combined-correction-terminalization";
 import { getPendingPaidCombinedContext } from "@/db/combined-reports";
-import { failStagingCombinedArtifactRefresh, getStagingCombinedArtifactRefreshContext, terminalizeStagingCombinedArtifactRefresh } from "@/db/staging-combined-artifact-refresh";
 import { buildReadyCombinedArtifact, buildReadyCombinedArtifactV2, buildReadyCombinedArtifactV3, materializePreparedCombinedArtifactV3, prepareCombinedGeoReportV3SemanticDraft } from "@/report/combined-artifact-readiness";
 import { createEvidenceStorage } from "@/evidence/storage";
 import {
@@ -298,68 +293,6 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     if (job.tier === "free") await purgeExpiredCrawlContent();
     let storedReport = await getGeoReport(job.reportId);
     if (!storedReport) throw new Error("The source technical report no longer exists.");
-    if (job.reason === "staging_artifact_refresh") {
-      assertStagingCommandEnvironment(process.env);
-      const context=await getStagingCombinedArtifactRefreshContext(job.id);
-      if(!context) throw new Error("The staging artifact-refresh identity is unavailable.");
-      const evidenceAssets=await loadReferencedEvidenceAssets(context.sourceReport);
-      await assertReusableEvidenceAssets(evidenceAssets);
-      if(context.sourceReport.artifactContract==="combined_geo_report_v2"||context.sourceReport.artifactContract==="combined_geo_report_v3"){
-        await finalizeProviderDiscoveryCombinedJob({job,workerId,checkpoint,websiteFoundation:context.sourceReport.technicalFoundation.aiReport,
-          technicalReport:context.sourceReport.technicalFoundation.technicalReport,targetUrl:context.sourceReport.targetUrl,
-          coverage:{plannedPages:job.plannedPages,successfulPages:job.successfulPages,failedPages:job.failedPages},checkpointJob,
-          signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill,evidenceAssets,
-          artifactContext:{orderId:context.orderId,artifactRevisionId:context.artifactRevisionId,artifactRevision:context.artifactRevision},
-          originalPaidJobId:context.sourceReport.originalPaidJobId,forceSnapshotRefreshAfter:context.sourceReport.generatedAt});
-        return;
-      }
-      await finalizeStagingArtifactRefreshJob({job,workerId,checkpoint,context,evidenceAssets,checkpointJob,
-        signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill});
-      return;
-    }
-    if (job.reason === "replacement_fulfillment") {
-      await syncReplacementExecutionState(job.id, "running");
-      const foundation = await getAiReport(job.reportId, "deep", "recommendation_forensics_v1");
-      const context = await getReplacementExecutionContext(job.id);
-      if (!context) throw new Error("The replacement execution identity is unavailable.");
-      const foundationMatches = foundation?.technicalPayload && foundation.isPrivate && foundation.payload.tier === "deep" &&
-        foundation.reportId === job.reportId && foundation.locale === job.locale && sameTarget(foundation.payload.targetUrl, storedReport.url);
-      if (foundationMatches) {
-        const evidenceAssets = await listEvidenceAssets(job.reportId, context.originalFailedJobId);
-        if (await areReusableEvidenceAssets(evidenceAssets)) {
-          await finalizeProviderDiscoveryCombinedJob({ job, workerId, checkpoint, websiteFoundation: foundation.payload,
-            technicalReport: foundation.technicalPayload!, targetUrl: foundation.payload.targetUrl,
-            coverage: { plannedPages: job.plannedPages, successfulPages: job.successfulPages, failedPages: job.failedPages }, checkpointJob,
-            signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill, evidenceAssets,
-            artifactContext: { orderId: context.orderId, artifactRevisionId: context.artifactRevisionId, artifactRevision: context.artifactRevision },
-            originalPaidJobId: context.originalFailedJobId });
-          return;
-        }
-      }
-    }
-    if (job.reason === "paid_report_correction") {
-      const foundation = await getAiReport(job.reportId, "deep", "recommendation_forensics_v1");
-      const context = await getCorrectionExecutionContext(job.id);
-      if (!context) throw new Error("The correction execution identity is unavailable.");
-      const foundationMatches = foundation?.technicalPayload && foundation.isPrivate && foundation.payload.tier === "deep" &&
-        foundation.reportId === job.reportId && foundation.locale === job.locale && sameTarget(foundation.payload.targetUrl, storedReport.url);
-      if (foundationMatches) {
-        const evidenceAssets = await listEvidenceAssets(job.reportId, context.originalPaidJobId);
-        if (await areReusableEvidenceAssets(evidenceAssets)) {
-          if(job.artifactContract==="combined_geo_report_v2"){
-            await finalizeProviderDiscoveryCombinedJob({job,workerId,checkpoint,websiteFoundation:foundation.payload,
-              technicalReport:foundation.technicalPayload!,targetUrl:foundation.payload.targetUrl,coverage:{plannedPages:job.plannedPages,successfulPages:job.successfulPages,failedPages:job.failedPages},
-              checkpointJob,signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill,evidenceAssets,
-              artifactContext:{orderId:context.orderId,artifactRevisionId:context.artifactRevisionId,artifactRevision:context.artifactRevision},originalPaidJobId:context.originalPaidJobId});
-            return;
-          }
-          await finalizeCorrectionJob({ job, workerId, checkpoint, websiteFoundation: foundation.payload,
-            technicalReport: foundation.technicalPayload!, targetUrl: foundation.payload.targetUrl, evidenceAssets, context,
-            checkpointJob, signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill });
-          return;
-        }
-      }
-    }
     if (fulfillmentTarget !== "legacy" && job.productContract === "recommendation_forensics_v1" && checkpoint.contractVersion === 2 &&
         checkpoint.websiteFoundation?.completed) {
       const existingFoundation = await getAiReport(job.reportId, "deep", job.productContract);
@@ -653,36 +586,6 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         failedPages: failureCount(checkpoint)
       });
       checkpoint = normalizeCheckpoint(preflightCheckpoint.checkpoint);
-      if (job.reason === "replacement_fulfillment") {
-        const context = await getReplacementExecutionContext(job.id);
-        if (!context) throw new Error("The replacement execution identity is unavailable after technical regeneration.");
-        const evidenceAssets = await listEvidenceAssets(job.reportId, job.id);
-        await assertReusableEvidenceAssets(evidenceAssets);
-        await finalizeProviderDiscoveryCombinedJob({ job, workerId, checkpoint, websiteFoundation: reportToPersist,
-          targetUrl: discovery.targetUrl, technicalReport: technicalReport!, evidenceAssets,
-          artifactContext: { orderId: context.orderId, artifactRevisionId: context.artifactRevisionId, artifactRevision: context.artifactRevision },
-          originalPaidJobId: context.originalFailedJobId,
-          coverage: { plannedPages: effectiveCoverage.effectivePlannedPages, successfulPages: effectiveCoverage.analyzedPages, failedPages: failureCount(checkpoint) },
-          checkpointJob, signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill });
-        return;
-      }
-      if (job.reason === "paid_report_correction") {
-        const context = await getCorrectionExecutionContext(job.id);
-        if (!context) throw new Error("The correction execution identity is unavailable after technical regeneration.");
-        const evidenceAssets = await listEvidenceAssets(job.reportId, job.id);
-        await assertReusableEvidenceAssets(evidenceAssets);
-        if(job.artifactContract==="combined_geo_report_v2"){
-          await finalizeProviderDiscoveryCombinedJob({job,workerId,checkpoint,websiteFoundation:reportToPersist,
-            targetUrl:discovery.targetUrl,technicalReport:technicalReport!,evidenceAssets,artifactContext:{orderId:context.orderId,artifactRevisionId:context.artifactRevisionId,artifactRevision:context.artifactRevision},
-            originalPaidJobId:context.originalPaidJobId,coverage:{plannedPages:effectiveCoverage.effectivePlannedPages,successfulPages:effectiveCoverage.analyzedPages,failedPages:failureCount(checkpoint)},
-            checkpointJob,signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill});
-          return;
-        }
-        await finalizeCorrectionJob({ job, workerId, checkpoint, websiteFoundation: reportToPersist,
-          targetUrl: discovery.targetUrl, technicalReport: technicalReport!, evidenceAssets, context,
-          checkpointJob, signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill });
-        return;
-      }
       await finalizeRecommendationJob({
         job, workerId, checkpoint, websiteFoundation: reportToPersist, targetUrl: discovery.targetUrl,
         technicalReport: technicalReport!,
@@ -746,11 +649,9 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         });
       }
     }
-    if (!reportV4ProductionRoutingAttempted && job.tier === "deep" && job.reason !== "v4_pre_admission" && failedJob.stage === "failed" && !["paid_report_correction","staging_artifact_refresh","replacement_fulfillment"].includes(job.reason)) {
+    if (!reportV4ProductionRoutingAttempted && job.tier === "deep" && job.reason !== "v4_pre_admission" && failedJob.stage === "failed") {
       await recordCommercialOutcomeSafely(job.id, "failed");
     }
-    if (job.reason === "replacement_fulfillment") await syncReplacementExecutionState(job.id, failedJob.executionState);
-    if(job.reason==="staging_artifact_refresh"&&failedJob.stage==="failed")await failStagingCombinedArtifactRefresh(job.id);
   } finally {
     execution.stop();
   }
@@ -994,91 +895,6 @@ export function resolveRecommendationFoundationTarget(
   return checkpoint.discoverySnapshot?.targetUrl ?? foundation?.payload.targetUrl ?? submittedUrl;
 }
 
-async function loadReferencedEvidenceAssets(sourceReport: import("@open-geo-console/ai-report-engine").CombinedGeoReportV1 | import("@open-geo-console/ai-report-engine").CombinedGeoReportV2 | import("@open-geo-console/ai-report-engine").CombinedGeoReportV3):Promise<ReportEvidenceAssetRow[]>{
-  const references=sourceReport.technicalFoundation.evidenceAssets;
-  const ids=new Set(references.map(({assetId})=>assetId));
-  const jobIds=[...new Set(references.map(({jobId})=>jobId))];
-  return (await Promise.all(jobIds.map((jobId)=>listEvidenceAssets(sourceReport.reportId,jobId)))).flat().filter((asset)=>ids.has(asset.id));
-}
-
-async function finalizeStagingArtifactRefreshJob(input:{
-  job:ScanJobRow;workerId:string;checkpoint:WorkerCheckpoint;
-  context:NonNullable<Awaited<ReturnType<typeof getStagingCombinedArtifactRefreshContext>>>;
-  evidenceAssets:ReportEvidenceAssetRow[];checkpointJob:WorkerCheckpointWriter;signal?:AbortSignal;remainingMs:number;liveDrill?:StagingLiveDrill;
-}):Promise<void>{
-  let checkpoint=input.checkpoint;
-  createPublicSourceAttemptBudget(input.remainingMs);
-  const source=input.context.sourceReport;
-  const questionSet=input.job.businessQuestionSetId?await getConfirmedBusinessQuestionSet(input.job.reportId,input.job.businessQuestionSetId):null;
-  if(!questionSet)throw new Error("The refresh question set is not locked and available.");
-  const resumed=correctionArtifactVerificationResume(checkpoint);
-  const result=resumed??await(async()=>{
-    const dependencies=await createProductionPublicSourceForensicsDependencies(process.env,{createDependencies:async(runtime)=>
-      createWorkerPublicSourceForensicsDependencies({job:input.job,workerId:input.workerId,
-        coverage:{plannedPages:input.job.plannedPages,successfulPages:input.job.successfulPages,failedPages:input.job.failedPages},
-        readCheckpoint:()=>checkpoint,onCheckpointSaved:async(next)=>{checkpoint=next;},checkpointJob:input.checkpointJob,
-        retrieveSource:createWorkerPublicSourceRetriever(),artifactReadiness:{async verify(){}},forceSnapshotRefreshAfter:source.generatedAt,
-        liveDrill:input.liveDrill,signal:input.signal},runtime)});
-    return runPublicSourceForensicsPipeline({reportId:input.job.reportId,jobId:input.job.id,...resolvePublicSourceRunScope(dependencies),
-      targetUrl:source.targetUrl,websiteFoundation:source.technicalFoundation.aiReport,businessQuestionSet:questionSet,dependencies,signal:input.signal});
-  })();
-  const resolvedAnswers=await resolveCombinedQuestionAnswers({checkpoint,questionSet,forensic:result.report,checkpointJob:input.checkpointJob,
-    coverage:{plannedPages:input.job.plannedPages,successfulPages:input.job.successfulPages,failedPages:input.job.failedPages},signal:input.signal});
-  checkpoint=resolvedAnswers.checkpoint;
-  const ready=await buildReadyCombinedArtifact({artifactRevisionId:input.context.artifactRevisionId,artifactRevision:input.context.artifactRevision,
-    reportId:input.job.reportId,orderId:input.context.orderId,jobId:input.job.id,originalPaidJobId:source.originalPaidJobId,
-    targetUrl:source.targetUrl,technicalReport:source.technicalFoundation.technicalReport,aiReport:source.technicalFoundation.aiReport,
-    evidenceAssets:input.evidenceAssets,businessQuestionSet:questionSet,businessQuestionAnswers:resolvedAnswers.answers,
-    publicSourceForensics:result.report,languageValidationScope:"presentation_refresh"});
-  await terminalizeStagingCombinedArtifactRefresh({report:ready.report,workerId:input.workerId,checkpointIdentityHash:result.checkpoint.identityHash,
-    snapshotRefs:result.commercialSnapshotRefs,htmlSha256:ready.htmlSha256,pdfSha256:ready.pdfSha256,pdfStorageKey:ready.pdfStorageKey,pageCount:ready.pageCount});
-}
-
-async function finalizeCorrectionJob(input: {
-  job: ScanJobRow;
-  workerId: string;
-  checkpoint: WorkerCheckpoint;
-  websiteFoundation: AiWebsiteReportV1;
-  technicalReport: GeoAuditReport;
-  targetUrl: string;
-  evidenceAssets: ReportEvidenceAssetRow[];
-  context: NonNullable<Awaited<ReturnType<typeof getCorrectionExecutionContext>>>;
-  checkpointJob: WorkerCheckpointWriter;
-  signal?: AbortSignal;
-  remainingMs: number;
-  liveDrill?: StagingLiveDrill;
-}): Promise<void> {
-  let checkpoint=input.checkpoint;
-  createPublicSourceAttemptBudget(input.remainingMs);
-  const questionSet=input.job.businessQuestionSetId ? await getConfirmedBusinessQuestionSet(input.job.reportId,input.job.businessQuestionSetId) : null;
-  if(!questionSet) throw new Error("The correction question set is not locked and available.");
-  const resumed=correctionArtifactVerificationResume(checkpoint);
-  const result=resumed ?? await (async()=>{
-    const dependencies=await createProductionPublicSourceForensicsDependencies(process.env,{createDependencies:async(runtime)=>
-      createWorkerPublicSourceForensicsDependencies({job:input.job,workerId:input.workerId,
-        coverage:{plannedPages:input.job.plannedPages,successfulPages:input.job.successfulPages,failedPages:input.job.failedPages},
-        readCheckpoint:()=>checkpoint,onCheckpointSaved:async(next)=>{checkpoint=next;},checkpointJob:input.checkpointJob,
-        retrieveSource:createWorkerPublicSourceRetriever(),artifactReadiness:{async verify(){ /* combined readiness runs below */ }},
-        liveDrill:input.liveDrill,signal:input.signal},runtime)});
-    return runPublicSourceForensicsPipeline({reportId:input.job.reportId,jobId:input.job.id,
-      ...resolvePublicSourceRunScope(dependencies),targetUrl:input.targetUrl,websiteFoundation:input.websiteFoundation,
-      businessQuestionSet:questionSet,dependencies,signal:input.signal});
-  })();
-  input.signal?.throwIfAborted();
-  const resolvedAnswers=await resolveCombinedQuestionAnswers({checkpoint,questionSet,forensic:result.report,
-    checkpointJob:input.checkpointJob,coverage:{plannedPages:input.job.plannedPages,successfulPages:input.job.successfulPages,failedPages:input.job.failedPages},signal:input.signal});
-  checkpoint=resolvedAnswers.checkpoint;
-  const ready=await buildReadyCombinedArtifact({artifactRevisionId:input.context.artifactRevisionId,
-    artifactRevision:input.context.artifactRevision,reportId:input.job.reportId,orderId:input.context.orderId,jobId:input.job.id,
-    originalPaidJobId:input.context.originalPaidJobId,targetUrl:input.targetUrl,technicalReport:input.technicalReport,
-    aiReport:input.websiteFoundation,evidenceAssets:input.evidenceAssets,businessQuestionSet:questionSet,
-    businessQuestionAnswers:resolvedAnswers.answers,publicSourceForensics:result.report});
-  input.signal?.throwIfAborted();
-  await terminalizeCombinedCorrection({report:ready.report,workerId:input.workerId,
-    checkpointIdentityHash:result.checkpoint.identityHash,snapshotRefs:result.commercialSnapshotRefs,
-    htmlSha256:ready.htmlSha256,pdfSha256:ready.pdfSha256,pdfStorageKey:ready.pdfStorageKey,pageCount:ready.pageCount});
-}
-
 export function publicSourceArtifactVerificationResume(checkpoint: WorkerCheckpoint): {
   report: RecommendationForensicReportV2;
   checkpoint: PublicSourcePipelineCheckpoint;
@@ -1091,8 +907,6 @@ export function publicSourceArtifactVerificationResume(checkpoint: WorkerCheckpo
   return { report,checkpoint:checkpoint.publicSourceForensics,
     commercialSnapshotRefs:checkpoint.pendingArtifactVerification.commercialSnapshotRefs };
 }
-
-export const correctionArtifactVerificationResume = publicSourceArtifactVerificationResume;
 
 export function publicSourceSynthesisResume(checkpoint: WorkerCheckpoint): {
   report: RecommendationForensicReportV2;
@@ -1260,12 +1074,6 @@ export async function executeReviewedPaidV3ArtifactBoundary<TReady extends { rep
   }
   await input.terminalize(ready);
   return ready;
-}
-
-export function combinedV3LanguageValidationScope(
-  reason: ScanJobRow["reason"]
-): CombinedReportLanguageScope | undefined {
-  return reason === "replacement_fulfillment" || reason === "staging_artifact_refresh" ? "presentation_refresh" : undefined;
 }
 
 export function resolvePaidV3SemanticValidation(
@@ -1900,7 +1708,6 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       engineProvenance: diagnosisResult.checkpoint.engineProvenance,
       publicSourceForensics: forensicResult.report,
       providerDiscovery: providerResult.providerDiscovery,
-      languageValidationScope: combinedV3LanguageValidationScope(input.job.reason),
       onReportPrepared: async (report) => {
         const next = { ...checkpoint, pendingArtifactVerification: { report, commercialSnapshotRefs: snapshotRefs } };
         const updated = await input.checkpointJob({ stage: "synthesizing", phase: "artifact_verification", progress: 99, checkpoint: next as JobCheckpoint, ...input.coverage });
@@ -1951,10 +1758,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     pdfStorageKey: ready.pdfStorageKey,
     pageCount: ready.pageCount
   };
-  if(input.job.reason==="staging_artifact_refresh") await terminalizeStagingCombinedArtifactRefresh(terminalInput);
-  else if(input.job.reason==="replacement_fulfillment") await terminalizeCombinedReplacement(terminalInput);
-  else if(input.job.reason==="paid_report_correction") await terminalizeCombinedCorrection(terminalInput);
-  else await terminalizePaidCombinedReport(terminalInput);
+  await terminalizePaidCombinedReport(terminalInput);
 }
 
 async function terminalizeReadyCombinedArtifact(
@@ -1965,10 +1769,7 @@ async function terminalizeReadyCombinedArtifact(
 ): Promise<void> {
   const terminalInput = { report: ready.report, workerId: input.workerId, checkpointIdentityHash, snapshotRefs,
     htmlSha256: ready.htmlSha256, pdfSha256: ready.pdfSha256, pdfStorageKey: ready.pdfStorageKey, pageCount: ready.pageCount };
-  if(input.job.reason==="staging_artifact_refresh") await terminalizeStagingCombinedArtifactRefresh(terminalInput);
-  else if(input.job.reason==="replacement_fulfillment") await terminalizeCombinedReplacement(terminalInput);
-  else if(input.job.reason==="paid_report_correction") await terminalizeCombinedCorrection(terminalInput);
-  else await terminalizePaidCombinedReport(terminalInput);
+  await terminalizePaidCombinedReport(terminalInput);
 }
 
 function isCombinedGeoReportV3(value: RecommendationForensicReportV2 | CombinedGeoReportV3 | undefined): value is CombinedGeoReportV3 {

@@ -11,7 +11,6 @@ export const REPORT_V4_PROHIBITED_OPERATIONS = [
   "qualification",
   "four_snapshot",
   "replacement_fulfillment",
-  "correction",
   "full_report_rerun",
   "legacy_mutation"
 ] as const;
@@ -27,12 +26,7 @@ export const REPORT_V4_PROHIBITED_OPERATION_GUARD_SITES = [
   "provider_claim",
   "qualification",
   "four_snapshot",
-  "replacement_prepare",
-  "replacement_resume",
   "replacement_terminalize",
-  "correction_prepare",
-  "correction_confirm",
-  "correction_terminalize",
   "legacy_mutation"
 ] as const;
 
@@ -48,12 +42,7 @@ export const REPORT_V4_PROHIBITED_OPERATION_BY_GUARD_SITE = Object.freeze({
   provider_claim: "provider_claim",
   qualification: "qualification",
   four_snapshot: "four_snapshot",
-  replacement_prepare: "replacement_fulfillment",
-  replacement_resume: "replacement_fulfillment",
   replacement_terminalize: "replacement_fulfillment",
-  correction_prepare: "correction",
-  correction_confirm: "correction",
-  correction_terminalize: "correction",
   legacy_mutation: "legacy_mutation"
 } as const satisfies Record<ReportV4ProhibitedOperationGuardSite, ReportV4ProhibitedOperation>);
 
@@ -75,12 +64,7 @@ const manifestEntries = [
   { operation: "provider_claim", guardSite: "provider_claim", module: "apps/web/src/worker/provider-discovery-production.ts", symbol: "extractClaims" },
   { operation: "qualification", guardSite: "qualification", module: "apps/web/src/worker/provider-discovery-production.ts", symbol: "createProductionProviderDiscoveryContext.dependencies.qualify" },
   { operation: "four_snapshot", guardSite: "four_snapshot", module: "apps/web/src/worker/provider-discovery-pipeline.ts", symbol: "runProviderDiscoveryPipeline" },
-  { operation: "replacement_fulfillment", guardSite: "replacement_prepare", module: "apps/web/src/db/report-replacement-fulfillments.ts", symbol: "prepareApprovedReportReplacement" },
-  { operation: "replacement_fulfillment", guardSite: "replacement_resume", module: "apps/web/src/db/report-replacement-fulfillments.ts", symbol: "resumeApprovedReplacementModelRepair" },
   { operation: "replacement_fulfillment", guardSite: "replacement_terminalize", module: "apps/web/src/db/combined-replacement-terminalization.ts", symbol: "terminalizeCombinedReplacement" },
-  { operation: "correction", guardSite: "correction_prepare", module: "apps/web/src/db/report-corrections.ts", symbol: "prepareApprovedReportCorrection" },
-  { operation: "correction", guardSite: "correction_confirm", module: "apps/web/src/db/report-corrections.ts", symbol: "confirmApprovedReportCorrection" },
-  { operation: "correction", guardSite: "correction_terminalize", module: "apps/web/src/db/combined-correction-terminalization.ts", symbol: "terminalizeCombinedCorrection" },
   { operation: "legacy_mutation", guardSite: "legacy_mutation", module: "apps/web/src/db/reports.ts", symbol: "saveGeoReport" }
 ] as const satisfies readonly ReportV4ProhibitedOperationManifestEntry[];
 

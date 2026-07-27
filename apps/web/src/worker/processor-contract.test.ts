@@ -6,8 +6,6 @@ import {
   assertPaidV3ResumeSemanticAuthority,
   createWorkerPublicSourceForensicsDependencies,
   combinedV3ArtifactVerificationResume,
-  combinedV3LanguageValidationScope,
-  correctionArtifactVerificationResume,
   deferredPageAnalysisAuthority,
   executeReviewedPaidV3ArtifactBoundary,
   hashSynthesisInput,
@@ -31,12 +29,6 @@ import {
 } from "./recovery";
 
 describe("recommendation website-foundation resume contract", () => {
-  it("does not revalidate an already accepted historical AI foundation during replacement delivery", () => {
-    expect(combinedV3LanguageValidationScope("replacement_fulfillment")).toBe("presentation_refresh");
-    expect(combinedV3LanguageValidationScope("staging_artifact_refresh")).toBe("presentation_refresh");
-    expect(combinedV3LanguageValidationScope("standard")).toBeUndefined();
-  });
-
   it("selects deferred Paid V3 semantics only from the immutable root marker on the ordinary lineage", () => {
     const paidV3 = {
       artifactContract: "combined_geo_report_v3",
@@ -159,21 +151,6 @@ describe("recommendation website-foundation resume contract", () => {
     expect(resolveCombinedReportContract({})).toBe("combined_geo_report_v1");
     expect(() => resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: "request" })).toThrow(/reviewed/i);
   });
-  it("resumes a correction artifact gate without resolving completed snapshots again", () => {
-    const report = { reportId: "report-1", jobId: "job-1" } as RecommendationForensicReportV2;
-    const publicSourceForensics = checkpointValue();
-    const checkpoint = {
-      recovery: { schemaVersion: 1, phase: "artifact_verification", revision: 2, phaseAttempt: 1,
-        resumeGeneration: 1, identity: { jobId: "job-1", reportId: "report-1", productContract: "recommendation_forensics_v1",
-          methodology: "public_search_source_forensics_v1", locale: "zh", authorityId: "authority-v2" }, inputHash: "input",
-        completedArtifacts: ["public_source"], remainingWork: ["artifact_verification"], priorTransitionId: null },
-      publicSourceForensics,
-      pendingArtifactVerification: { report, commercialSnapshotRefs: [] }
-    };
-    expect(correctionArtifactVerificationResume(checkpoint as never)).toEqual({ report, checkpoint: publicSourceForensics, commercialSnapshotRefs: [] });
-    expect(correctionArtifactVerificationResume({ ...checkpoint, recovery: { ...checkpoint.recovery, phase: "source_retrieval" } } as never)).toBeNull();
-  });
-
   it("reuses the persisted public-source payload for paid combined terminalization", () => {
     const report = { reportId: "report-1", jobId: "job-1" } as RecommendationForensicReportV2;
     const publicSourceForensics = checkpointValue();

@@ -359,7 +359,7 @@ describe("recoverable V4 admission runtime", () => {
 
     await expect(harness.run()).resolves.toEqual({ plannedPages: 3, successfulPages: 2, failedPages: 1 });
     expect(harness.finalized).toMatchObject({
-      status: "completed",
+      status: "completed_limited",
       pages: [
         expect.objectContaining({ normalizedUrl: "https://example.com/page-1", analyzable: true }),
         expect.objectContaining({
@@ -374,7 +374,7 @@ describe("recoverable V4 admission runtime", () => {
     });
   });
 
-  it("completes an exhausted Shun-shaped frontier when duplicate bodies are the only exclusions", async () => {
+  it("keeps duplicate-only Shun-shaped coverage completed_limited", async () => {
     const targetUrl = "https://shun-express.com/";
     const candidates = [
       candidate(1, { siteUrl: targetUrl, url: targetUrl }),
@@ -388,7 +388,7 @@ describe("recoverable V4 admission runtime", () => {
         : read.url.endsWith("/route/taiwan") ? "Distinct Taiwan route service body" : `Distinct route body for ${read.url}`
     }, { targetUrl, siteKey: "shun-express.com" });
     await expect(harness.run()).resolves.toEqual({ plannedPages: 4, successfulPages: 3, failedPages: 1 });
-    expect(harness.finalized?.status).toBe("completed");
+    expect(harness.finalized?.status).toBe("completed_limited");
     expect(harness.finalized?.pages).toContainEqual(expect.objectContaining({
       normalizedUrl: `${targetUrl}route/taiwan-copy`, analyzable: false, exclusionReason: "duplicate_content"
     }));
