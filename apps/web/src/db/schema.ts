@@ -1733,7 +1733,7 @@ export const reportV4ProhibitedOperationGuardRuns = pgTable("report_v4_prohibite
   }).onDelete("restrict"),
   check("report_v4_prohibited_operation_guard_runs_id_check", sql`${table.id} ~ '^[a-f0-9]{64}$'`),
   check("report_v4_prohibited_operation_guard_runs_domain_check", sql`${table.domain}='open-geo-console/report-v4/prohibited-operation-manifest'`),
-  check("report_v4_prohibited_operation_guard_runs_sha_check", sql`${table.workerGitSha} ~ '^[a-f0-9]{40}$' AND ${table.manifestHash}='e7f33b34d76384bbb9366f4f7cc109e6bd63dc84ea962fc9ad410ddb1b6c197b'`),
+  check("report_v4_prohibited_operation_guard_runs_sha_check", sql`${table.workerGitSha} ~ '^[a-f0-9]{40}$' AND ${table.manifestHash} IN ('e7f33b34d76384bbb9366f4f7cc109e6bd63dc84ea962fc9ad410ddb1b6c197b','c05eaacb4e1746187a5ca37295b3329357c90b27d464fb5e6c87aea4164c390d')`),
   check("report_v4_prohibited_operation_guard_runs_state_check", sql`${table.state} IN ('armed','completed')`),
   check("report_v4_prohibited_operation_guard_runs_terminal_check", sql`(${table.state}='armed' AND ${table.completedAt} IS NULL) OR (${table.state}='completed' AND ${table.completedAt} IS NOT NULL AND ${table.completedAt}>=${table.armedAt})`)
 ]);

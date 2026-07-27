@@ -864,8 +864,14 @@ export function selectReportV4PreAdmissionRunner(
 }
 
 export function resolveRecommendationFulfillmentTarget(
-  job: Pick<ScanJobRow, "productContract" | "fulfillmentMethodology" | "recommendationReportVersion">
+  job: Pick<ScanJobRow, "productContract" | "fulfillmentMethodology" | "recommendationReportVersion"> & { reason?: ScanJobRow["reason"] }
 ): "legacy" | "recommendation_v1" | "recommendation_v2" {
+  if (job.productContract === "recommendation_forensics_v1" &&
+      job.fulfillmentMethodology === "public_search_source_forensics_v1" &&
+      (job.recommendationReportVersion === 2 || job.recommendationReportVersion === 3) &&
+      (job.reason === "replacement_fulfillment" || job.reason === "paid_report_correction" || job.reason === "staging_artifact_refresh")) {
+    throw new HistoricalRecommendationRuntimeRetiredError();
+  }
   if (job.productContract === "legacy_website_audit_v1") {
     if (job.fulfillmentMethodology !== null || job.recommendationReportVersion !== null) {
       throw new Error("Legacy jobs cannot carry a recommendation methodology or report version.");

@@ -68,7 +68,7 @@ suite("Report V4 prohibited-operation guard PostgreSQL 17 authority", () => {
     restoreEnvironment();
   }, 120_000);
 
-  it("arms and replays one in-process capability for the exact protected authority with fifteen zero seeds", async () => {
+  it("arms and replays one in-process capability for the exact protected authority with current zero seeds", async () => {
     const ids = await seedGuardLineage(sql, "question_failure", "replay");
     const first = await armReportV4ProhibitedOperationGuard(ids, environment);
     const replay = await armReportV4ProhibitedOperationGuard(ids, environment);
@@ -79,7 +79,7 @@ suite("Report V4 prohibited-operation guard PostgreSQL 17 authority", () => {
     expect(authority?.run).toMatchObject({
       sessionId: ids.sessionId, scenarioId: ids.scenarioId, jobId: ids.jobId, workerGitSha, state: "armed"
     });
-    expect(authority?.counters).toHaveLength(15);
+    expect(authority?.counters).toHaveLength(10);
     expect(authority?.counters.every(({ attemptCount, attemptedAt }) => attemptCount === 0 && attemptedAt === null)).toBe(true);
   }, 120_000);
 
@@ -324,7 +324,7 @@ suite("Report V4 prohibited-operation guard PostgreSQL 17 authority", () => {
     } finally {
       await sql.unsafe("ALTER TABLE report_v4_prohibited_operation_guard_counters ENABLE TRIGGER report_v4_prohibited_operation_guard_counters_guard");
     }
-    await expect(armReportV4ProhibitedOperationGuard(missing, environment)).rejects.toThrow(/fifteen canonical/u);
+    await expect(armReportV4ProhibitedOperationGuard(missing, environment)).rejects.toThrow(/current canonical/u);
 
     const extra = await seedGuardLineage(sql, "diagnosis_failure", "extra-seed");
     await armReportV4ProhibitedOperationGuard(extra, environment);
@@ -336,7 +336,7 @@ suite("Report V4 prohibited-operation guard PostgreSQL 17 authority", () => {
     } finally {
       await sql.unsafe("ALTER TABLE report_v4_prohibited_operation_guard_counters ENABLE TRIGGER report_v4_prohibited_operation_guard_counters_guard");
     }
-    await expect(armReportV4ProhibitedOperationGuard(extra, environment)).rejects.toThrow(/fifteen canonical/u);
+    await expect(armReportV4ProhibitedOperationGuard(extra, environment)).rejects.toThrow(/current canonical/u);
   }, 120_000);
 
   it("completes only a successful all-zero run and rejects completed capability reuse before work", async () => {

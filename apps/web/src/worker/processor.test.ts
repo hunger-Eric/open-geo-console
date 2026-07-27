@@ -461,6 +461,28 @@ describe("strict Report V4 processor routing", () => {
     expect(resolveRecommendationFulfillmentTarget(v2)).toBe("recommendation_v2");
   });
 
+  it("keeps retired reasons on non-V2 and legacy resolver paths", () => {
+    expect(resolveRecommendationFulfillmentTarget({ productContract: "legacy_website_audit_v1", fulfillmentMethodology: null, recommendationReportVersion: null, reason: "paid_report_correction" })).toBe("legacy");
+    expect(resolveRecommendationFulfillmentTarget({ productContract: "recommendation_forensics_v1", fulfillmentMethodology: "answer_engine_recommendation_forensics_v1", recommendationReportVersion: 1, reason: "replacement_fulfillment" })).toBe("recommendation_v1");
+  });
+
+  it.each(["replacement_fulfillment", "paid_report_correction", "staging_artifact_refresh"] as const)("fails closed before execution for retired %s V2 fulfillment", async (reason) => {
+    const job = v4Job({ fulfillmentMethodology: "public_search_source_forensics_v1", recommendationReportVersion: 2, artifactContract: null, businessQuestionSetId: null, siteSnapshotId: null, creditReservationId: null, reason });
+    const runner = vi.fn(async () => undefined);
+    boundaryMocks.getScanJob.mockResolvedValueOnce(job);
+    boundaryMocks.failScanJob.mockResolvedValueOnce({ ...job, stage: "failed", executionState: "failed" });
+    boundaryMocks.recordPaidJobOutcome.mockResolvedValueOnce(undefined);
+    try {
+      await expect(processScanJob(job, "worker-1", { reportV4CoreRunner: runner })).resolves.toBeUndefined();
+      expect(boundaryMocks.getGeoReport).not.toHaveBeenCalled();
+      expect(boundaryMocks.fetchPlannedPagesWithRecovery).not.toHaveBeenCalled();
+      expect(boundaryMocks.analyzePageBatch).not.toHaveBeenCalled();
+      expect(boundaryMocks.synthesizeWebsiteReportWithRecovery).not.toHaveBeenCalled();
+      expect(boundaryMocks.saveAiReport).not.toHaveBeenCalled();
+      expect(runner).not.toHaveBeenCalled();
+    } finally { vi.clearAllMocks(); }
+  });
+
   it("dispatches exactly one selected runner and returns", async () => {
     const core = vi.fn(async () => undefined);
     const enhancement = vi.fn(async () => undefined);

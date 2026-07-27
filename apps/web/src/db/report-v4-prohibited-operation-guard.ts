@@ -462,8 +462,8 @@ function assertExactAuthority(
     }
     return `${guardSite}\x1f${operation}`;
   }).sort();
-  if (actualPairs.length !== 15 || new Set(actualPairs).size !== 15 || actualPairs.some((pair, index) => pair !== expectedPairs[index])) {
-    throw new Error("A Report V4 prohibited-operation guard requires exactly the fifteen canonical seeded counters.");
+  if (actualPairs.length !== expectedPairs.length || new Set(actualPairs).size !== expectedPairs.length || actualPairs.some((pair, index) => pair !== expectedPairs[index])) {
+    throw new Error("A Report V4 prohibited-operation guard requires exactly the current canonical seeded counters.");
   }
 }
 

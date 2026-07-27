@@ -2,9 +2,7 @@ import { createHash } from "node:crypto";
 import {
   REPORT_V4_PROHIBITED_OPERATION_MANIFEST_DOMAIN,
   REPORT_V4_PROHIBITED_OPERATION_MANIFEST_ENTRIES,
-  REPORT_V4_PROHIBITED_OPERATION_MANIFEST_HASH,
-  type ReportV4ProhibitedOperation,
-  type ReportV4ProhibitedOperationGuardSite
+  REPORT_V4_PROHIBITED_OPERATION_MANIFEST_HASH
 } from "@/report-v4/prohibited-operation-manifest";
 import {
   reportV4ProhibitedOperationEventUnitId,
@@ -20,6 +18,13 @@ const GIT_SHA = /^[a-f0-9]{40}$/u;
 const ZERO_HASH = "0".repeat(64);
 const LEDGER_DOMAIN = "open-geo-console/report-v4/acceptance-ledger-authority/v1";
 const GUARD_DOMAIN = "open-geo-console/report-v4/prohibited-operation-guard-authority/v1";
+const HISTORICAL_MANIFEST_HASH = "e7f33b34d76384bbb9366f4f7cc109e6bd63dc84ea962fc9ad410ddb1b6c197b";
+const HISTORICAL_MANIFEST_ENTRIES = [
+  ["pdf", "pdf_export_url"], ["pdf", "pdf_export_html"], ["pdf", "pdf_readiness_chromium"], ["pdf", "pdf_readiness_storage"],
+  ["full_report_rerun", "full_report_rerun"], ["provider_claim", "provider_claim"], ["qualification", "qualification"], ["four_snapshot", "four_snapshot"],
+  ["replacement_fulfillment", "replacement_prepare"], ["replacement_fulfillment", "replacement_resume"], ["replacement_fulfillment", "replacement_terminalize"],
+  ["correction", "correction_prepare"], ["correction", "correction_confirm"], ["correction", "correction_terminalize"], ["legacy_mutation", "legacy_mutation"]
+] as const;
 
 export interface ReportV4AcceptanceLedgerGuardAuthorityTransactionSql {
   unsafe<T extends Row[] = Row[]>(query: string, parameters?: unknown[]): Promise<T>;
@@ -96,8 +101,8 @@ export interface ReportV4ProhibitedOperationGuardAuthorityRecord {
     completedAt: string | null;
   }>;
   readonly counters: readonly Readonly<{
-    operation: ReportV4ProhibitedOperation;
-    guardSite: ReportV4ProhibitedOperationGuardSite;
+    operation: string;
+    guardSite: string;
     attemptCount: 0 | 1;
     seededAt: string;
     attemptedAt: string | null;
@@ -470,12 +475,12 @@ function projectGuard(
   if (!ownedJobs.includes(jobId)) throw new Error("Guard authority job is not owned by the exact scenario.");
   const workerGitSha = gitSha(runRow.worker_git_sha, "guard worker Git SHA");
   if (workerGitSha !== expectedWorkerGitSha) throw new Error("Guard authority worker Git SHA disagrees with the session.");
-  if (runRow.manifest_hash !== REPORT_V4_PROHIBITED_OPERATION_MANIFEST_HASH) {
-    throw new Error("Guard authority manifest hash is not the fixed compiled manifest.");
-  }
+  const manifest = guardManifest(text(runRow.manifest_hash, "guard manifest hash"));
   const runId = hash(runRow.id, "guard run id");
-  const expectedRunId = reportV4ProhibitedOperationGuardRunId({ sessionId: input.sessionId,
-    scenarioId: input.scenarioId, jobId, workerGitSha });
+  const expectedRunId = manifest.hash === REPORT_V4_PROHIBITED_OPERATION_MANIFEST_HASH
+    ? reportV4ProhibitedOperationGuardRunId({ sessionId: input.sessionId, scenarioId: input.scenarioId, jobId, workerGitSha })
+    : digest(["ogc:report-v4:prohibited-operation-guard-run:v1", REPORT_V4_PROHIBITED_OPERATION_MANIFEST_DOMAIN,
+      input.sessionId, input.scenarioId, jobId, workerGitSha, manifest.hash].join("\x1f"));
   if (runId !== expectedRunId) throw new Error("Guard run identity is not deterministic.");
   const state = enumValue(runRow.state, ["armed", "completed"], "guard state") as "armed" | "completed";
   const armedAt = instant(runRow.armed_at, "guard armed at");
@@ -484,8 +489,8 @@ function projectGuard(
     throw new Error("Guard run state/timestamp topology is invalid.");
   }
 
-  if (!Array.isArray(raw.guardCounters) || raw.guardCounters.length !== 15) {
-    throw new Error("Guard authority requires exactly fifteen canonical counters.");
+  if (!Array.isArray(raw.guardCounters) || raw.guardCounters.length !== manifest.entries.length) {
+    throw new Error("Guard authority requires its manifest's exact canonical counter count.");
   }
   const targetScenarioHash = digest(input.scenarioId);
   const prohibitedEvents = events.filter((event) => event.scenarioIdHash === targetScenarioHash
@@ -495,8 +500,8 @@ function projectGuard(
   const counters = raw.guardCounters.map((row, index) => {
     exactKeys(row, ["run_id", "operation", "guard_site", "attempt_count", "seeded_at", "attempted_at"], `guard counter row ${index}`);
     if (row.run_id !== runId) throw new Error("Guard counter belongs to a different run.");
-    const guardSite = text(row.guard_site, "guard site") as ReportV4ProhibitedOperationGuardSite;
-    const entry = REPORT_V4_PROHIBITED_OPERATION_MANIFEST_ENTRIES.find((candidate) => candidate.guardSite === guardSite);
+    const guardSite = text(row.guard_site, "guard site");
+    const entry = manifest.entries.find((candidate) => candidate.guardSite === guardSite);
     if (!entry || entry.operation !== row.operation || seenSites.has(guardSite)) {
       throw new Error("Guard counter operation/site mapping is non-canonical or duplicated.");
     }
@@ -508,7 +513,7 @@ function projectGuard(
     if ((attemptCount === 0 && attemptedAt !== null) || (attemptCount === 1 && attemptedAt === null)) {
       throw new Error("Guard counter attempt/timestamp topology is invalid.");
     }
-    const expectedUnitHash = digest(reportV4ProhibitedOperationEventUnitId(jobId, guardSite));
+    const expectedUnitHash = digest(reportV4ProhibitedOperationEventUnitId(jobId, guardSite as never));
     const matches = prohibitedEvents.filter((event) => event.operation === operation && event.unitIdHash === expectedUnitHash
       && event.attempt === 0 && event.eventPhase === "started" && Object.keys(event.details).length === 0);
     if ((attemptCount === 1 && matches.length !== 1) || (attemptCount === 0 && matches.length !== 0)) {
@@ -518,7 +523,7 @@ function projectGuard(
     if (matchingEventFingerprint) unmatched.delete(matchingEventFingerprint);
     return Object.freeze({ operation, guardSite, attemptCount, seededAt, attemptedAt, matchingEventFingerprint });
   }).sort((left, right) => left.guardSite.localeCompare(right.guardSite));
-  if (seenSites.size !== REPORT_V4_PROHIBITED_OPERATION_MANIFEST_ENTRIES.length || unmatched.size !== 0) {
+  if (seenSites.size !== manifest.entries.length || unmatched.size !== 0) {
     throw new Error("Guard authority contains an unmatched prohibited ledger event or non-canonical counter set.");
   }
   const nonzero = counters.filter(({ attemptCount }) => attemptCount !== 0).length;
@@ -530,11 +535,21 @@ function projectGuard(
     throw new Error("Guard final authority requires a completed run with all zero counters.");
   }
   const run = Object.freeze({ runId, sessionIdHash: digest(input.sessionId), scenarioIdHash: digest(input.scenarioId),
-    jobIdHash: digest(jobId), workerGitSha, manifestHash: REPORT_V4_PROHIBITED_OPERATION_MANIFEST_HASH,
+    jobIdHash: digest(jobId), workerGitSha, manifestHash: manifest.hash,
     state, armedAt, completedAt });
   const withoutHash = { contractVersion: "report-v4-prohibited-operation-guard-authority-v1" as const,
     phase: input.phase, run, counters: Object.freeze(counters) };
   return Object.freeze({ ...withoutHash, canonicalHash: digest(`${GUARD_DOMAIN}\x1f${stableJson(withoutHash)}`) });
+}
+
+function guardManifest(hashValue: string): { hash: string; entries: readonly { operation: string; guardSite: string }[] } {
+  if (hashValue === REPORT_V4_PROHIBITED_OPERATION_MANIFEST_HASH) {
+    return { hash: hashValue, entries: REPORT_V4_PROHIBITED_OPERATION_MANIFEST_ENTRIES };
+  }
+  if (hashValue === HISTORICAL_MANIFEST_HASH) {
+    return { hash: hashValue, entries: HISTORICAL_MANIFEST_ENTRIES.map(([operation, guardSite]) => ({ operation, guardSite })) };
+  }
+  throw new Error("Guard authority manifest hash is unsupported.");
 }
 
 function validateDetails(kind: string, operation: string, attempt: number, phase: string, value: unknown): Record<string, unknown> {

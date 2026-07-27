@@ -3877,6 +3877,65 @@ export const V42_DATABASE_MIGRATIONS = [
    END $$`
 ] as const;
 
+export const V43_DATABASE_MIGRATIONS = [
+  `ALTER TABLE report_v4_prohibited_operation_guard_runs
+    DROP CONSTRAINT IF EXISTS report_v4_prohibited_operation_guard_runs_sha_check`,
+  `ALTER TABLE report_v4_prohibited_operation_guard_runs
+    ADD CONSTRAINT report_v4_prohibited_operation_guard_runs_sha_check CHECK(
+      worker_git_sha ~ '^[a-f0-9]{40}$' AND manifest_hash IN (
+        'e7f33b34d76384bbb9366f4f7cc109e6bd63dc84ea962fc9ad410ddb1b6c197b',
+        'c05eaacb4e1746187a5ca37295b3329357c90b27d464fb5e6c87aea4164c390d'))`,
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_prohibited_operation_pair_valid_for_manifest(candidate_manifest_hash text,candidate_operation text,candidate_site text)
+   RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT CASE candidate_manifest_hash
+     WHEN 'c05eaacb4e1746187a5ca37295b3329357c90b27d464fb5e6c87aea4164c390d' THEN CASE candidate_site
+       WHEN 'pdf_export_url' THEN candidate_operation='pdf' WHEN 'pdf_export_html' THEN candidate_operation='pdf'
+       WHEN 'pdf_readiness_chromium' THEN candidate_operation='pdf' WHEN 'pdf_readiness_storage' THEN candidate_operation='pdf'
+       WHEN 'full_report_rerun' THEN candidate_operation='full_report_rerun' WHEN 'provider_claim' THEN candidate_operation='provider_claim'
+       WHEN 'qualification' THEN candidate_operation='qualification' WHEN 'four_snapshot' THEN candidate_operation='four_snapshot'
+       WHEN 'replacement_terminalize' THEN candidate_operation='replacement_fulfillment' WHEN 'legacy_mutation' THEN candidate_operation='legacy_mutation' ELSE false END
+     WHEN 'e7f33b34d76384bbb9366f4f7cc109e6bd63dc84ea962fc9ad410ddb1b6c197b' THEN ogc_report_v4_prohibited_operation_pair_valid(candidate_operation,candidate_site)
+     ELSE false END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_prohibited_operation_run() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; scenario_state text; expected_sha text; job_owned boolean; expected_id text;
+     counter_count integer; attempted_count integer; expected_counter_count integer;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP='DELETE' THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard run is immutable and cannot be deleted.'; END IF;
+     IF TG_OP='INSERT' THEN
+       SELECT sessions.state,scenarios.state,sessions.worker_git_sha,NEW.job_id IN (scenarios.pre_admission_job_id,scenarios.core_job_id,scenarios.enhancement_job_id)
+       INTO session_state,scenario_state,expected_sha,job_owned FROM report_v4_acceptance_sessions sessions
+       JOIN report_v4_acceptance_scenarios scenarios ON scenarios.session_id=sessions.id AND scenarios.id=NEW.scenario_id WHERE sessions.id=NEW.session_id;
+       IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' OR job_owned IS DISTINCT FROM true THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard run requires a collecting protected scenario that owns the exact job.'; END IF;
+       IF NEW.worker_git_sha IS DISTINCT FROM expected_sha OR NEW.manifest_hash IS DISTINCT FROM 'c05eaacb4e1746187a5ca37295b3329357c90b27d464fb5e6c87aea4164c390d' THEN RAISE EXCEPTION 'A new Report V4 prohibited-operation guard run requires the current manifest hash.'; END IF;
+       expected_id:=encode(sha256(convert_to(concat_ws(chr(31),'ogc:report-v4:prohibited-operation-guard-run:v1',NEW.domain,NEW.session_id,NEW.scenario_id,NEW.job_id,NEW.worker_git_sha,NEW.manifest_hash),'UTF8')),'hex');
+       IF NEW.id IS DISTINCT FROM expected_id OR NEW.state<>'armed' OR NEW.completed_at IS NOT NULL THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard run identity is not deterministic and armed.'; END IF;
+       RETURN NEW;
+     END IF;
+     IF NEW.id IS DISTINCT FROM OLD.id OR NEW.domain IS DISTINCT FROM OLD.domain OR NEW.session_id IS DISTINCT FROM OLD.session_id OR NEW.scenario_id IS DISTINCT FROM OLD.scenario_id OR NEW.job_id IS DISTINCT FROM OLD.job_id OR NEW.worker_git_sha IS DISTINCT FROM OLD.worker_git_sha OR NEW.manifest_hash IS DISTINCT FROM OLD.manifest_hash OR NEW.armed_at IS DISTINCT FROM OLD.armed_at THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard run identity is immutable.'; END IF;
+     IF OLD.state<>'armed' OR NEW.state<>'completed' OR OLD.completed_at IS NOT NULL OR NEW.completed_at IS NULL THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard run may complete exactly once.'; END IF;
+     SELECT sessions.state,scenarios.state INTO session_state,scenario_state FROM report_v4_acceptance_sessions sessions JOIN report_v4_acceptance_scenarios scenarios ON scenarios.session_id=sessions.id AND scenarios.id=OLD.scenario_id WHERE sessions.id=OLD.session_id;
+     IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard run may complete only while its session and scenario are collecting.'; END IF;
+     expected_counter_count:=CASE OLD.manifest_hash WHEN 'e7f33b34d76384bbb9366f4f7cc109e6bd63dc84ea962fc9ad410ddb1b6c197b' THEN 15 WHEN 'c05eaacb4e1746187a5ca37295b3329357c90b27d464fb5e6c87aea4164c390d' THEN 10 ELSE NULL END;
+     SELECT count(*),count(*) FILTER(WHERE attempt_count<>0) INTO counter_count,attempted_count FROM report_v4_prohibited_operation_guard_counters WHERE run_id=OLD.id;
+     IF expected_counter_count IS NULL OR counter_count<>expected_counter_count OR attempted_count<>0 THEN RAISE EXCEPTION 'A completed Report V4 prohibited-operation guard run requires its manifest exact zero counters.'; END IF;
+     RETURN NEW;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_prohibited_operation_counter() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE run_state text; session_state text; scenario_state text; run_manifest_hash text;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP='DELETE' THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter is immutable and cannot be deleted.'; END IF;
+     SELECT runs.state,sessions.state,scenarios.state,runs.manifest_hash INTO run_state,session_state,scenario_state,run_manifest_hash FROM report_v4_prohibited_operation_guard_runs runs JOIN report_v4_acceptance_sessions sessions ON sessions.id=runs.session_id JOIN report_v4_acceptance_scenarios scenarios ON scenarios.id=runs.scenario_id AND scenarios.session_id=runs.session_id WHERE runs.id=NEW.run_id;
+     IF run_state IS DISTINCT FROM 'armed' OR session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter requires an armed collecting run.'; END IF;
+     IF TG_OP='INSERT' AND run_manifest_hash IS DISTINCT FROM 'c05eaacb4e1746187a5ca37295b3329357c90b27d464fb5e6c87aea4164c390d' THEN RAISE EXCEPTION 'New Report V4 prohibited-operation guard counters require the current manifest.'; END IF;
+     IF NOT ogc_report_v4_prohibited_operation_pair_valid_for_manifest(run_manifest_hash,NEW.operation,NEW.guard_site) THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter operation and site are not canonical for its manifest.'; END IF;
+     IF TG_OP='INSERT' THEN IF NEW.attempt_count<>0 OR NEW.attempted_at IS NOT NULL THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter must be seeded at zero.'; END IF; RETURN NEW; END IF;
+     IF NEW.run_id IS DISTINCT FROM OLD.run_id OR NEW.operation IS DISTINCT FROM OLD.operation OR NEW.guard_site IS DISTINCT FROM OLD.guard_site OR NEW.seeded_at IS DISTINCT FROM OLD.seeded_at THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter identity is immutable.'; END IF;
+     IF OLD.attempt_count<>0 OR OLD.attempted_at IS NOT NULL OR NEW.attempt_count<>1 OR NEW.attempted_at IS NULL THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter may increment only once from zero to one.'; END IF;
+     RETURN NEW;
+   END $$`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -3911,7 +3970,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 39, migrations: V39_DATABASE_MIGRATIONS },
   { version: 40, migrations: V40_DATABASE_MIGRATIONS },
   { version: 41, migrations: V41_DATABASE_MIGRATIONS },
-  { version: 42, migrations: V42_DATABASE_MIGRATIONS }
+  { version: 42, migrations: V42_DATABASE_MIGRATIONS },
+  { version: 43, migrations: V43_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

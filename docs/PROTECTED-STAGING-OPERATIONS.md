@@ -91,7 +91,7 @@ npm run staging:replacement:resume -- --confirm --authorization-ref <operator-re
 
 `prepare` is idempotent. `resume` accepts only the approved failed model-contract checkpoint or its answer-complete language-gate repair state. A successful terminalization activates the replacement revision and queues replacement delivery; a failed attempt leaves the artifact pending and the original commercial state unchanged.
 
-Keep the old active artifact until the new customer HTML, private same-HTML PDF readiness artifact, and private evidence all pass readiness. After completion, audit one correction, one locked question set, three questions, one active revision, one artifact-keyed correction email containing only the secure HTML link, zero new billing/refund side effects, and identity-free shared snapshot/search/evidence payloads. Confirm the internal PDF hash, storage key, and page count from authoritative state; do not request a customer PDF endpoint. The accepted concrete drill and browser checklist are recorded under `docs/operations/evidence/2026-07-14-combined-report-correction-acceptance.md`.
+Keep the old active artifact until the new customer HTML, private same-HTML PDF readiness artifact, and private evidence all pass readiness. After completion, audit one correction, one locked question set, three questions, one active revision, one artifact-keyed correction email containing only the secure HTML link, zero new billing/refund side effects, and identity-free shared snapshot/search/evidence payloads. Confirm the internal PDF hash, storage key, and page count from authoritative state; do not request a customer PDF endpoint.
 
 ## Local staging cleanup
 
@@ -301,7 +301,7 @@ run-produced session/scenario identities and immutable authorities; do not
 reuse IDs from a prior drill. Production deployment, production database
 mutation, and production commerce remain forbidden.
 
-The 2026-07-19 paid core run proves one authorized `combined_geo_report_v4` customer HTML can reach `completed_limited`; it does not complete the three-scenario conformance authority. Its exact identities, content inspection, failed Sandbox cash refund, retried email state, and remaining acceptance work are recorded in `docs/operations/evidence/2026-07-19-report-v4-paid-deep-report.md`.
+The 2026-07-19 paid core run proves one authorized `combined_geo_report_v4` customer HTML can reach `completed_limited`; it does not complete the three-scenario conformance authority. Its remaining acceptance work is unchanged.
 
 ### Specialized combined-report presentation refresh
 

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V41_DATABASE_MIGRATIONS, V42_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V41_DATABASE_MIGRATIONS, V42_DATABASE_MIGRATIONS, V43_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const suite = adminUrl ? describe : describe.skip;
@@ -42,10 +42,11 @@ suite("schema V41 Paid V3 methodology admission", () => {
   }, 120_000);
 
   it("registers one replay-safe V41 forward constraint migration", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(42);
-    expect(databaseMigrationsAfter(40)).toEqual([...V41_DATABASE_MIGRATIONS, ...V42_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(41)).toEqual([...V42_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(42)).toEqual([]);
+    expect(DATABASE_SCHEMA_VERSION).toBe(43);
+    expect(databaseMigrationsAfter(40)).toEqual([...V41_DATABASE_MIGRATIONS, ...V42_DATABASE_MIGRATIONS, ...V43_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(41)).toEqual([...V42_DATABASE_MIGRATIONS, ...V43_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(42)).toEqual([...V43_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(43)).toEqual([]);
     const source = V41_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("recommendation_report_version IN (2,3)");
     expect(source).toContain("two_stage_geo_report_v4");

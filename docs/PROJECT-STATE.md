@@ -36,7 +36,6 @@ Deliver a self-hostable, evidence-bound GEO product whose customer artifact is o
 
 ## Durable Evidence
 
-- The full paid-run identity, customer-content inspection, commercial outcome, deployment identity, code repairs, and limitations are recorded in `docs/operations/evidence/2026-07-19-report-v4-paid-deep-report.md`.
 - Protected-staging V2/V3 acceptance and correction records remain historical evidence under `docs/operations/evidence/`.
 - Historical terminal jobs, orders, credits, refunds, question sets, and artifacts remain immutable. Remediation must use a sanctioned replacement/correction boundary rather than reopening or rewriting them.
 

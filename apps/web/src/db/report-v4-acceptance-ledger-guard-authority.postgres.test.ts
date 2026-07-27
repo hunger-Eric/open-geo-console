@@ -70,7 +70,7 @@ suite("Report V4 ledger/guard authority PostgreSQL 17", () => {
     restoreEnvironment();
   }, 120_000);
 
-  it("loads real appended ledger rows and an exact armed/replayed fifteen-zero guard authority", async () => {
+  it("loads real appended ledger rows and an exact armed/replayed current zero guard authority", async () => {
     const ids = await seedLineage(sql, "replay");
     const first = await armReportV4ProhibitedOperationGuard(ids, environment);
     const replay = await armReportV4ProhibitedOperationGuard(ids, environment);
@@ -87,7 +87,7 @@ suite("Report V4 ledger/guard authority PostgreSQL 17", () => {
     expect(authority.prohibitedOperationGuardAuthority.run).toMatchObject({
       workerGitSha, state: "armed"
     });
-    expect(authority.prohibitedOperationGuardAuthority.counters).toHaveLength(15);
+    expect(authority.prohibitedOperationGuardAuthority.counters).toHaveLength(10);
     expect(authority.prohibitedOperationGuardAuthority.counters.every(({ attemptCount }) => attemptCount === 0)).toBe(true);
   }, 120_000);
 

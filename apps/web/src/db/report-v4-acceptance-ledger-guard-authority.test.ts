@@ -34,7 +34,7 @@ describe("Report V4 acceptance ledger and prohibited-operation guard authority",
     expect(JSON.stringify(baseline)).not.toContain(sessionId);
     expect(JSON.stringify(baseline)).not.toContain(scenarioId);
     expect(JSON.stringify(baseline)).not.toContain(jobId);
-    expect(baseline.prohibitedOperationGuardAuthority.counters).toHaveLength(15);
+    expect(baseline.prohibitedOperationGuardAuthority.counters).toHaveLength(10);
     expect(baseline.ledgerAuthority.canonicalHash).not.toBe(final.ledgerAuthority.canonicalHash);
     expect(baseline.prohibitedOperationGuardAuthority.canonicalHash)
       .not.toBe(final.prohibitedOperationGuardAuthority.canonicalHash);
@@ -271,11 +271,11 @@ describe("Report V4 acceptance ledger and prohibited-operation guard authority",
   it("rejects missing, extra, duplicated, or incorrectly mapped guard counters", () => {
     const missing = snapshot();
     missing.guardCounters.pop();
-    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), missing)).toThrow(/fifteen|counter/iu);
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), missing)).toThrow(/counter/iu);
 
     const extra = snapshot();
     extra.guardCounters.push({ ...extra.guardCounters[0]!, guard_site: "extra_site" });
-    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), extra)).toThrow(/fifteen|counter|canonical/iu);
+    expect(() => projectReportV4AcceptanceLedgerGuardAuthority(input("baseline"), extra)).toThrow(/counter|canonical/iu);
 
     const duplicate = snapshot();
     duplicate.guardCounters[1] = { ...duplicate.guardCounters[0]! };

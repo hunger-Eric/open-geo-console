@@ -2,6 +2,117 @@
 
 Status: `APPROVED`
 
+## Current frozen scope — prohibited-operation manifest convergence
+
+Status: `APPROVED`
+
+### Objective
+
+Converge the runtime prohibited-operation manifest and its V43/schema42 authority from the current 15-entry/legacy-hash assumptions to the established 10-entry manifest and current hash, preserve historical rows, obtain all required local verification gates, make exactly one local commit, and fast-forward local `main` only. No remote or runtime operations are authorized.
+
+### Baseline
+
+- Complete HEAD: `5182cc9573daa2201086a4cae3f56f7be307a4a4`
+- Current manifest hash: `c05eaacb4e1746187a5ca37295b3329357c90b27d464fb5e6c87aea4164c390d`
+- Root cause: commit `5182cc9` reduced the prohibited-operation manifest from 15 to 10 while the runtime guard remained hard-coded to 15 and V37/schema42 retained the old hash/count, producing 8 ledger and 5 phase-snapshot failures.
+
+### Allowlist
+
+Production (exactly 6 files):
+
+- `apps/web/src/worker/processor.ts`
+- `apps/web/src/db/report-v4-prohibited-operation-guard.ts`
+- `apps/web/src/db/report-v4-acceptance-ledger-guard-authority.ts`
+- `apps/web/src/db/migrations.ts`
+- `apps/web/src/db/schema.ts`
+- `apps/web/src/index.ts`
+
+Verification amendment: this is a clerical directory-prefix correction only; it changes no behavior, budget, file count, or external action. User re-approval is required before implementation.
+
+Tests: `processor.test.ts`; direct guard, authority, index, and ledger tests; schema-v18, schema-v19, schema-v20, schema-v21, schema-v23, schema-v25 through schema-v32, schema-v34 through schema-v39, schema-v41 through schema-v43 PostgreSQL tests. The phase-snapshot PostgreSQL test and fixture are read-only gates and must not be edited.
+
+Documentation delivery: `docs/PROJECT-STATE.md` and `docs/PROTECTED-STAGING-OPERATIONS.md` only. This scope file is a mandatory authorization record.
+
+### Required behavior
+
+Forward V43 runs use only the 10-entry manifest and current hash. Existing historical rows retain their old hash/count and are never rewritten or replayed.
+
+### Diff budget
+
+- Production: 6 files, maximum `+200/-100`.
+- Tests: 29 files, maximum `+350/-250`.
+- Scope authorization record (`docs/ACTIVE-CHANGE-SCOPE.md`): maximum `+120/-10`, excluded from delivery-document budget.
+- Delivery documentation (`docs/PROJECT-STATE.md` and `docs/PROTECTED-STAGING-OPERATIONS.md`): maximum `+20/-20` combined.
+- Dependencies/Docker: zero.
+
+### Git and external actions
+
+After every gate passes, make exactly one commit and one local `main` fast-forward-only update. Zero push, zero Staging/Docker, and zero worktree cleanup.
+
+### Acceptance checks
+
+Focused checks, V43 checks, unchanged phase-snapshot PostgreSQL gate, `npm test`, lint, build, exact allowlist/budget diff review (separating this scope authorization record from the two delivery documents), clean index, and independent review all pass.
+
+### STOP conditions
+
+Stop on any historical-row mutation, fixture edit, residual full failure, branch divergence, Staging/Docker action, push, or worktree removal.
+
+## Current frozen scope — retired scan-job recommendation guard
+
+Status: `APPROVED`
+
+### Objective
+
+When any persisted retired scan-job reason could resolve to the legacy recommendation runtime, fail closed before crawl/model execution; clean only direct broken references to deleted evidence documents in Protected Staging status documentation.
+
+### Baseline
+
+- Complete HEAD: `5182cc9573daa2201086a4cae3f56f7be307a4a4`
+- Branch: `integrate/all-worktrees-20260727`
+
+### Allowlist
+
+- `apps/web/src/worker/processor.ts`
+- `apps/web/src/worker/processor.test.ts`
+- `docs/PROTECTED-STAGING-OPERATIONS.md`
+- `docs/PROJECT-STATE.md`
+- This scope file itself, solely to lock authorization.
+
+### Forbidden
+
+- Schema, migrations, or jobs persistence.
+- Commerce, payment, refund, or email behavior.
+- Crawl/model semantics.
+- Replay, recovery, or historical mutation.
+- Docker, Staging, or deploy actions.
+- Git/worktree cleanup.
+- New dependencies.
+- `.codex/`, `visualizations/`, or `tmp/`.
+
+### Diff budget
+
+- Production: at most 1 file, `+20/-5`.
+- Tests: at most 1 file, `+25/-0`.
+- Documentation: at most 2 files, `+10/-10`.
+- External actions: zero.
+
+### Acceptance checks
+
+1. Retired reasons `replacement_fulfillment`, `paid_report_correction`, and `staging_artifact_refresh`, when paired with a V2 recommendation, throw before stored report/crawl/model execution.
+2. Standard V2 and existing valid paths remain unchanged.
+3. Remove or replace the two classes of direct broken references in the runbook/state documents.
+4. Run focused tests, `npm test`, lint, and build.
+5. Complete diff matches the exact allowlist and budgets.
+
+### Expensive external actions
+
+None.
+
+### STOP conditions
+
+Stop on any schema/DB migration, reason deletion, replay, Staging rebuild/deploy, or additional historical authority.
+
+
 ## Historical superseded scope (context only)
 Historical status (non-executable): `FROZEN`
 
