@@ -5,6 +5,8 @@ export const REPORT_SEMANTIC_REVIEW_CONTRACT = "report-semantic-review-v1" as co
 export const SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE = "semantic_review_evidence_missing" as const;
 export const SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON = "accepted_global_evidence_or_source_required" as const;
 export const SEMANTIC_REVIEW_LOCAL_EVIDENCE_MISSING_REASON = "allowed_local_evidence_or_source_required" as const;
+/** Fixed reason marker on Free V4 code-synthesized entries that replace contract-violating model output. */
+export const FREE_V4_SEMANTIC_REVIEW_DEGRADED_REASON = "degraded: contract violation" as const;
 
 export type ReportSemanticReviewEvidenceMissingManifestKind =
   | "field"
@@ -172,22 +174,17 @@ export function assembleFreeV4BatchedSemanticReviewRaw(
   const mutableFields = extractBatchFields(batchPayloads.B_fields_mutable, "B_fields_mutable");
   const fieldsByPath = new Map<string, unknown>();
   for (const row of [...readonlyFields, ...mutableFields]) {
-    if (!row || typeof row !== "object" || Array.isArray(row)) {
-      throw new TypeError("Free V4 field batch rows must be objects.");
-    }
+    // Free assembly tolerance: malformed rows drop, duplicate paths are first-wins.
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
     const path = (row as { path?: unknown }).path;
-    if (typeof path !== "string" || !path) throw new TypeError("Free V4 field batch rows require path.");
-    if (fieldsByPath.has(path)) throw new TypeError(`Free V4 field batch duplicated path ${path}.`);
-    fieldsByPath.set(path, row);
+    if (typeof path !== "string" || !path) continue;
+    if (!fieldsByPath.has(path)) fieldsByPath.set(path, row);
   }
-  const fields = input.fields.map((manifest) => {
-    const row = fieldsByPath.get(manifest.path);
-    if (!row) throw new TypeError(`Free V4 field batch missing path ${manifest.path}.`);
-    return row;
-  });
-  if (fieldsByPath.size !== input.fields.length) {
-    throw new TypeError("Free V4 field batches must cover every input field exactly once.");
-  }
+  // Missing manifest fields are filled with synthesized pass entries; unknown
+  // or surplus batch entries are dropped because only manifest paths are read.
+  const fields = input.fields.map((manifest) =>
+    fieldsByPath.get(manifest.path) ?? synthesizeFreeFieldRawResult(manifest, input)
+  );
 
   const observationResults = extractNamedArray(
     batchPayloads.B_obs,
@@ -207,51 +204,10 @@ export function assembleFreeV4BatchedSemanticReviewRaw(
     reason: "Program-owned Free V4 distinctness for purpose-ordered confirmed questions."
   });
 
-  // overallDecision is filled after a provisional parse path: build raw with a
-  // placeholder then replace using exported derive after full parse... 
-  // Simpler: put a temporary overallDecision that parse will re-check.
-  // We need deriveOverallDecision on *parsed* fields. So assemble with
-  // overallDecision: "pass" then parse in two steps is wrong.
-  // Approach: parse fields/annotations through full parse by first building
-  // with overallDecision from a dry parse of partials...
-  // Cleanest: call parseReportSemanticReviewOutput after setting overallDecision
-  // via a two-pass: build without overallDecision validation by using
-  // derive on pre-parsed pieces.
-  //
-  // Use internal assembly + parseReportSemanticReviewOutput which validates
-  // overallDecision equality — so we must set the correct value. Export
-  // deriveReportSemanticOverallDecision and compute after constructing
-  // annotations from raw arrays is hard without parsing.
-  //
-  // Practical approach: try overallDecision candidates is wrong.
-  // Parse field results by temporarily constructing full output with
-  // overallDecision "pass", catch, ... no.
-  //
-  // Best: export deriveOverallDecision and a lightweight path:
-  // parseReportSemanticReviewOutput already needs correct overallDecision.
-  // Compute by parsing fields via a helper that only validates fields...
-  //
-  // Simplest correct approach used below: build raw with overallDecision from
-  // deriveReportSemanticOverallDecision applied to values obtained by calling
-  // parseReportSemanticReviewOutput with a provisional overallDecision that we
-  // patch. We'll build provisional raw with overallDecision "blocked" and if
-  // parse throws on overallDecision mismatch, read expected from error message...
-  // Fragile.
-  //
-  // Export deriveOverallDecision and also export parse that doesn't check
-  // overall? Too invasive.
-  //
-  // Final approach: assemble raw with overallDecision: "pass", then
-  // parseReportSemanticReviewOutput — if mismatch TypeError includes expected,
-  // re-assemble. Actually the error is `must equal ${expectedDecision}`.
-  //
-  // Clean: export function deriveReportSemanticOverallDecision as public alias
-  // of deriveOverallDecision. For assembly, parse intermediate by constructing
-  // complete object twice:
-  // 1) Build raw with overallDecision: "pass"
-  // 2) Try parse; on overallDecision mismatch extract from second parse attempt
-  // with corrected value.
-
+  // overallDecision is code-recomputed from the sanitized fields inside
+  // parseReportSemanticReviewOutput for every Free (non-report_global_v1)
+  // input, so the placeholder below is never authoritative. The provisional
+  // parse remains as a fail-closed structural validation of the assembly.
   const provisional = {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
     inputHash: input.inputHash,
@@ -267,18 +223,8 @@ export function assembleFreeV4BatchedSemanticReviewRaw(
     overallDecision: "pass" as const
   };
 
-  try {
-    parseReportSemanticReviewOutput(provisional, input);
-    return provisional;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    const match = message.match(/overallDecision must equal (pass|corrected|blocked)/u);
-    if (!match) throw error;
-    return {
-      ...provisional,
-      overallDecision: match[1] as "pass" | "corrected" | "blocked"
-    };
-  }
+  parseReportSemanticReviewOutput(provisional, input);
+  return provisional;
 }
 
 function freeV4BatchBlueprint(
@@ -764,10 +710,13 @@ export function parseReportSemanticReviewOutput(
   requireExact(modelId, input.expectedModel.modelId, "$reviewOutput.modelId");
 
   const fieldRows = requireArray(record.fields, "$reviewOutput.fields", MAX_FIELDS);
-  if (fieldRows.length !== input.fields.length) {
+  const global = input.evidencePolicy === "report_global_v1";
+  if (global && fieldRows.length !== input.fields.length) {
     throw new TypeError("$reviewOutput.fields must cover every input field exactly once and in order.");
   }
-  const fields = fieldRows.map((row, index) => parseFieldResult(row, input.fields[index]!, input, index));
+  const fields = global
+    ? fieldRows.map((row, index) => parseFieldResult(row, input.fields[index]!, input, index))
+    : input.fields.map((manifest, index) => sanitizeFreeFieldResult(fieldRows[index], manifest, input, index));
   assertUnique(fields.map(({ path }) => path), "$reviewOutput.fields paths");
   const questionDistinctness = parseQuestionDistinctness(record.questionDistinctness, input);
   const annotations = parseAnnotations(record.annotations, input, fields);
@@ -783,15 +732,11 @@ export function parseReportSemanticReviewOutput(
   if (sourceSelectionDraft && sourceSelectionDraftHash !== hashReportSemanticReviewValue(sourceSelectionDraft)) {
     throw new TypeError("$reviewOutput.sourceSelectionDraftHash does not match the canonical reviewed draft.");
   }
-  const overallDecision = requireOneOf(
-    record.overallDecision,
-    ["pass", "corrected", "blocked"] as const,
-    "$reviewOutput.overallDecision"
-  );
-  const expectedDecision = deriveOverallDecision(fields, questionDistinctness, annotations);
-  if (overallDecision !== expectedDecision) {
-    throw new TypeError(`$reviewOutput.overallDecision must equal ${expectedDecision}.`);
-  }
+  // Free recomputes overallDecision from the sanitized field decisions and
+  // ignores the model echo; the Paid global path stays mechanically checked.
+  const overallDecision = global
+    ? parseGlobalOverallDecision(record.overallDecision, fields, questionDistinctness, annotations)
+    : fields.some(({ decision }) => decision === "corrected") ? "corrected" : "pass";
   return {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
     inputHash: input.inputHash,
@@ -821,7 +766,7 @@ export function applyReportSemanticReview(
   if (currentNonProseHash !== input.nonProseProjectionHash) {
     throw new TypeError("The non-prose projection changed after semantic-review input creation.");
   }
-  if (review.overallDecision === "blocked") {
+  if (input.evidencePolicy === "report_global_v1" && review.overallDecision === "blocked") {
     throw new TypeError("A blocked semantic review cannot be applied.");
   }
   const fields = review.fields.map((result, index): AppliedReportSemanticField => {
@@ -842,6 +787,10 @@ export function applyReportSemanticReview(
     appliedTextHash,
     decision
   }));
+  // Free overallDecision is code-recomputed from sanitized pass/corrected
+  // field decisions, so it can never be blocked here; this only narrows the
+  // receipt decision type after the global-only rejection above.
+  const receiptDecision: "pass" | "corrected" = review.overallDecision === "blocked" ? "pass" : review.overallDecision;
   const receipt: ReportSemanticReviewReceipt = {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
     lifecycle: input.lifecycle,
@@ -849,7 +798,7 @@ export function applyReportSemanticReview(
     reviewHash: hashReportSemanticReviewValue(review),
     providerId: review.providerId,
     modelId: review.modelId,
-    decision: review.overallDecision,
+    decision: receiptDecision,
     fieldCoverageHash: fieldCoverageHash(input.fields),
     appliedProseHash: appliedProseHash(fields),
     annotationsHash: hashReportSemanticReviewValue(review.annotations),
@@ -1330,6 +1279,77 @@ function parseFieldResult(
   };
 }
 
+function freeReferenceOwnerCompatible(fieldOwner: string | null, referencedOwner: string | null | undefined): boolean {
+  return fieldOwner === null || referencedOwner == null || fieldOwner === referencedOwner;
+}
+
+/** Free V4 references are code-mounted from the field allowlist ∩ ownership-compatible IDs; model-echoed refs are never trusted. */
+function mountFreeFieldReferences(manifest: ReportSemanticFieldManifestEntry, input: ReportSemanticReviewInput): { readonly evidenceIds: readonly string[]; readonly sourceIds: readonly string[] } {
+  const evidenceById = new Map(input.evidence.map((item) => [item.evidenceId, item]));
+  const sourceById = new Map(input.sources.map((item) => [item.sourceId, item]));
+  return {
+    evidenceIds: manifest.allowedEvidenceIds.filter((id) => freeReferenceOwnerCompatible(manifest.questionId, evidenceById.get(id)?.questionId)),
+    sourceIds: manifest.allowedSourceIds.filter((id) => freeReferenceOwnerCompatible(manifest.questionId, sourceById.get(id)?.questionId))
+  };
+}
+
+function synthesizeFreeFieldResult(manifest: ReportSemanticFieldManifestEntry, refs: { readonly evidenceIds: readonly string[]; readonly sourceIds: readonly string[] }): ReportSemanticFieldResult {
+  return {
+    path: manifest.path,
+    originalTextHash: manifest.originalTextHash,
+    decision: "pass",
+    issueCodes: [],
+    reason: FREE_V4_SEMANTIC_REVIEW_DEGRADED_REASON,
+    evidenceIds: refs.evidenceIds,
+    sourceIds: refs.sourceIds,
+    retainedOriginalTerms: []
+  };
+}
+
+function synthesizeFreeFieldRawResult(manifest: ReportSemanticFieldManifestEntry, input: ReportSemanticReviewInput): Record<string, unknown> {
+  return { ...synthesizeFreeFieldResult(manifest, mountFreeFieldReferences(manifest, input)) };
+}
+
+function isContractViolation(error: unknown): boolean {
+  return error instanceof TypeError || error instanceof ReportSemanticReviewEvidenceMissingError;
+}
+
+/** Runs a strict row parse; a contract violation yields the synthesized fallback while genuine code errors propagate. */
+function degradeFreeRow<Row>(parse: () => Row, fallback: () => Row): Row {
+  try {
+    return parse();
+  } catch (error) {
+    if (!isContractViolation(error)) throw error;
+    return fallback();
+  }
+}
+
+/**
+ * Free V4 is an enhancement lane: any field-level A/B-class contract violation
+ * degrades to a code-synthesized pass entry instead of killing the job. C-class
+ * input invariants were already validated by parseInputCore, so every
+ * parseFieldResult failure reachable here stems from model output.
+ */
+function sanitizeFreeFieldResult(row: unknown, manifest: ReportSemanticFieldManifestEntry, input: ReportSemanticReviewInput, index: number): ReportSemanticFieldResult {
+  const refs = mountFreeFieldReferences(manifest, input);
+  const parsed = degradeFreeRow<ReportSemanticFieldResult>(
+    () => parseFieldResult(row, manifest, input, index),
+    () => synthesizeFreeFieldResult(manifest, refs)
+  );
+  // A model self-reported blocked field also degrades to a synthesized pass entry.
+  return parsed.decision === "blocked" ? synthesizeFreeFieldResult(manifest, refs) : { ...parsed, evidenceIds: refs.evidenceIds, sourceIds: refs.sourceIds };
+}
+
+/** Keeps only legal subset members; non-arrays pass through so the strict shape check degrades the row. */
+function filterFreeRefs(value: unknown, legal: ReadonlySet<string>): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.filter((id): id is string => typeof id === "string" && legal.has(id));
+}
+
+function freeLegalEntityIds(input: ReportSemanticReviewInput, questionId: string): ReadonlySet<string> {
+  return new Set(input.entities.filter((entity) => freeReferenceOwnerCompatible(questionId, entity.questionId)).map(({ entityId }) => entityId));
+}
+
 function parseRejectedReferences(
   value: unknown,
   idKey: "evidenceId",
@@ -1397,6 +1417,9 @@ function parseQuestionDistinctness(value: unknown, input: ReportSemanticReviewIn
 }
 
 function parseAnnotations(value: unknown, input: ReportSemanticReviewInput, fields: readonly ReportSemanticFieldResult[]): ReportSemanticAnnotations {
+  if (input.evidencePolicy !== "report_global_v1" && !input.sourceSelectionCatalog) {
+    return parseFreeAnnotations(value, input);
+  }
   const row = strictRecord(value, "$reviewOutput.annotations", ANNOTATIONS_KEYS);
   const observations = requireArray(row.observationResults, "$reviewOutput.annotations.observationResults", MAX_CATALOG_ROWS);
   if (observations.length !== input.observationResults.length) throw new TypeError("$reviewOutput.annotations.observationResults must cover the input catalog exactly.");
@@ -1584,6 +1607,91 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput, fiel
     evidenceUse,
     ...(sourceSelection ? { sourceSelection } : {})
   };
+}
+
+/**
+ * Free V4 annotation lane: rows align to the input catalogs by index (missing
+ * rows synthesized, surplus dropped, order echoes re-anchored), malformed rows
+ * degrade to synthesized entries, and references filter to legal subsets.
+ */
+function parseFreeAnnotations(value: unknown, input: ReportSemanticReviewInput): ReportSemanticAnnotations {
+  const row = strictRecord(value, "$reviewOutput.annotations", ANNOTATIONS_KEYS);
+  if (row.sourceSelection !== undefined) throw new TypeError("$reviewOutput.annotations.sourceSelection is not allowed without an input catalog.");
+  const observations = row.observationResults === undefined ? [] : requireArray(row.observationResults, "$reviewOutput.annotations.observationResults", MAX_CATALOG_ROWS);
+  const answers = row.answers === undefined ? [] : requireArray(row.answers, "$reviewOutput.annotations.answers", 3);
+  const evidenceUse = row.evidenceUse === undefined ? [] : requireArray(row.evidenceUse, "$reviewOutput.annotations.evidenceUse", MAX_FIELDS);
+  return {
+    observationResults: input.observationResults.map((expected, index) => sanitizeFreeObservationAnnotation(observations[index], expected, index)),
+    answers: input.answerSubjects.map((subject, index) => sanitizeFreeAnswerAnnotation(answers[index], subject, input, index)),
+    evidenceUse: input.fields.map((field, index) => sanitizeFreeEvidenceUseAnnotation(evidenceUse[index], field, input, index))
+  };
+}
+
+function sanitizeFreeObservationAnnotation(row: unknown, expected: ReportSemanticObservationResult, index: number): ReportSemanticObservationAnnotation {
+  const path = `$reviewOutput.annotations.observationResults[${index}]`;
+  return degradeFreeRow<ReportSemanticObservationAnnotation>(
+    () => {
+      const item = strictRecord(row, path, OBSERVATION_ANNOTATION_KEYS);
+      return {
+        observationId: expected.observationId,
+        resultId: expected.resultId,
+        targetPresence: requireOneOf(item.targetPresence, ["present", "absent", "ambiguous"] as const, `${path}.targetPresence`),
+        competitorPresence: requireOneOf(item.competitorPresence, ["present", "absent", "ambiguous"] as const, `${path}.competitorPresence`),
+        reason: requireBoundedText(item.reason, `${path}.reason`, 5_000)
+      };
+    },
+    () => ({ observationId: expected.observationId, resultId: expected.resultId, targetPresence: "ambiguous", competitorPresence: "ambiguous", reason: FREE_V4_SEMANTIC_REVIEW_DEGRADED_REASON })
+  );
+}
+
+function sanitizeFreeAnswerAnnotation(row: unknown, subject: ReportSemanticAnswerSubject, input: ReportSemanticReviewInput, index: number): ReportSemanticAnswerAnnotation {
+  const path = `$reviewOutput.annotations.answers[${index}]`;
+  const questionId = subject.questionId;
+  const field = input.fields.find((item) => item.path === subject.fieldPath && item.questionId === questionId)!;
+  const refs = mountFreeFieldReferences(field, input);
+  return degradeFreeRow<ReportSemanticAnswerAnnotation>(
+    () => {
+      const item = strictRecord(row, path, ANSWER_ANNOTATION_KEYS);
+      const relevance = requireOneOf(item.relevance, ["responsive", "not_responsive", "blocked"] as const, `${path}.relevance`);
+      const entityRole = requireOneOf(item.entityRole, ["target", "competitor", "mixed", "none", "ambiguous"] as const, `${path}.entityRole`);
+      const hasGeo = item.targetPresence !== undefined || item.targetFirstSentence !== undefined || item.targetRoles !== undefined || item.competitorEntityIds !== undefined;
+      const targetPresence = hasGeo ? requireOneOf(item.targetPresence, ["present", "absent", "ambiguous"] as const, `${path}.targetPresence`) : undefined;
+      const targetFirstSentence = !hasGeo ? undefined : item.targetFirstSentence === null ? null : requireNonnegativeInteger(item.targetFirstSentence, `${path}.targetFirstSentence`);
+      if (hasGeo && targetPresence === "present" && (typeof targetFirstSentence !== "number" || targetFirstSentence < 1)) throw new TypeError(`${path}.targetFirstSentence must be positive when target presence is present.`);
+      if (hasGeo && targetPresence !== "present" && targetFirstSentence !== null) throw new TypeError(`${path}.targetFirstSentence requires present target presence.`);
+      const targetRoles = hasGeo ? requireUniqueTextArray(item.targetRoles, `${path}.targetRoles`, 100, 500) : undefined;
+      if (hasGeo && targetPresence === "absent" && targetRoles!.length !== 0) throw new TypeError(`${path}.targetRoles must be empty when target presence is absent.`);
+      const competitorEntityIds = hasGeo ? requireUniqueTextArray(filterFreeRefs(item.competitorEntityIds, freeLegalEntityIds(input, questionId)), `${path}.competitorEntityIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS) : undefined;
+      return {
+        questionId, relevance, entityRole, ...(hasGeo ? { targetPresence, targetFirstSentence, targetRoles, competitorEntityIds } : {}),
+        evidenceIds: requireUniqueTextArray(filterFreeRefs(item.evidenceIds, new Set(refs.evidenceIds)), `${path}.evidenceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS),
+        sourceIds: requireUniqueTextArray(filterFreeRefs(item.sourceIds, new Set(refs.sourceIds)), `${path}.sourceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS),
+        reason: requireBoundedText(item.reason, `${path}.reason`, 5_000)
+      };
+    },
+    // Synthesized fallback mirrors the pre-review draft state: the system's own Q1 answer card presents the target at its first sentence.
+    () => ({
+      questionId, relevance: "responsive", entityRole: "target", targetPresence: "present", targetFirstSentence: 1, targetRoles: ["answer subject"], competitorEntityIds: [],
+      evidenceIds: refs.evidenceIds, sourceIds: refs.sourceIds, reason: FREE_V4_SEMANTIC_REVIEW_DEGRADED_REASON
+    })
+  );
+}
+
+function sanitizeFreeEvidenceUseAnnotation(row: unknown, field: ReportSemanticFieldManifestEntry, input: ReportSemanticReviewInput, index: number): ReportSemanticEvidenceUseAnnotation {
+  const path = `$reviewOutput.annotations.evidenceUse[${index}]`;
+  const refs = mountFreeFieldReferences(field, input);
+  return degradeFreeRow<ReportSemanticEvidenceUseAnnotation>(
+    () => {
+      const item = strictRecord(row, path, EVIDENCE_USE_KEYS);
+      return {
+        path: field.path,
+        evidenceIds: requireUniqueTextArray(filterFreeRefs(item.evidenceIds, new Set(refs.evidenceIds)), `${path}.evidenceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS),
+        sourceIds: requireUniqueTextArray(filterFreeRefs(item.sourceIds, new Set(refs.sourceIds)), `${path}.sourceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS),
+        reason: requireBoundedText(item.reason, `${path}.reason`, 5_000)
+      };
+    },
+    () => ({ path: field.path, evidenceIds: refs.evidenceIds, sourceIds: refs.sourceIds, reason: FREE_V4_SEMANTIC_REVIEW_DEGRADED_REASON })
+  );
 }
 
 /**
@@ -1897,6 +2005,20 @@ function parseReceiptFields(
       decision: applied.decision
     };
   });
+}
+
+function parseGlobalOverallDecision(
+  value: unknown,
+  fields: readonly ReportSemanticFieldResult[],
+  distinctness: ReportQuestionDistinctnessResult,
+  annotations: ReportSemanticAnnotations
+): ReportSemanticReviewDecision {
+  const overallDecision = requireOneOf(value, ["pass", "corrected", "blocked"] as const, "$reviewOutput.overallDecision");
+  const expectedDecision = deriveOverallDecision(fields, distinctness, annotations);
+  if (overallDecision !== expectedDecision) {
+    throw new TypeError(`$reviewOutput.overallDecision must equal ${expectedDecision}.`);
+  }
+  return overallDecision;
 }
 
 function deriveOverallDecision(

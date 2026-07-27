@@ -226,7 +226,7 @@ describe("job error normalization", () => {
     ["authentication", "mimo_authentication", "operator_repairable", false],
     ["configuration", "mimo_configuration", "operator_repairable", false],
     ["safety", "mimo_safety", "permanent", false],
-    [MIMO_OUTPUT_TRUNCATED_CODE, "mimo_output_truncated", "permanent", false],
+    [MIMO_OUTPUT_TRUNCATED_CODE, "mimo_output_truncated", "transient", true],
     [MIMO_CONTENT_FILTERED_CODE, "mimo_content_filtered", "permanent", false]
   ] as const)(
     "maps MiMo provider code %s to job %s (%s)",

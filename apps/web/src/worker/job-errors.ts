@@ -29,7 +29,7 @@ const MIMO_PROVIDER_JOB_CLASSIFICATION: Readonly<Record<string, {
   authentication: { code: "mimo_authentication", classification: "operator_repairable" },
   configuration: { code: "mimo_configuration", classification: "operator_repairable" },
   safety: { code: "mimo_safety", classification: "permanent" },
-  mimo_output_truncated: { code: "mimo_output_truncated", classification: "permanent" },
+  mimo_output_truncated: { code: "mimo_output_truncated", classification: "transient" },
   mimo_content_filtered: { code: "mimo_content_filtered", classification: "permanent" },
   contract: { code: "mimo_contract", classification: "permanent" }
 });

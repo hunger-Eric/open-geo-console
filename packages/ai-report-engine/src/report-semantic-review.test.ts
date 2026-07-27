@@ -77,7 +77,7 @@ describe("Free V4 batched semantic review", () => {
     expect(offline.review.fields).toHaveLength(input.fields.length);
   });
 
-  it("fails closed when a required field path is missing from batches", () => {
+  it("fills a field path missing from batches with a synthesized pass entry", () => {
     const core = inputCore();
     core.lifecycle = "free_v4";
     const input = createReportSemanticReviewInput(core);
@@ -89,7 +89,7 @@ describe("Free V4 batched semantic review", () => {
         evidenceUse: unknown[];
       };
     };
-    expect(() => assembleFreeV4BatchedSemanticReviewRaw(input, {
+    const assembled = assembleFreeV4BatchedSemanticReviewRaw(input, {
       B_fields_readonly: { fields: [] },
       B_fields_mutable: { fields: full.fields.filter((field) =>
         input.fields.find((m) => m.path === field.path)?.mutability === "mutable"
@@ -97,7 +97,212 @@ describe("Free V4 batched semantic review", () => {
       B_obs: { observationResults: full.annotations.observationResults },
       B_answers: { answers: full.annotations.answers },
       B_evidence_use: { evidenceUse: full.annotations.evidenceUse }
-    })).toThrow(/missing path|exactly once/i);
+    });
+    const parsed = parseReportSemanticReviewOutput(assembled, input);
+    expect(parsed.fields).toHaveLength(input.fields.length);
+    const synthesized = parsed.fields.find(({ path }) => path === "questions[0].text");
+    expect(synthesized).toMatchObject({
+      decision: "pass",
+      issueCodes: [],
+      reason: "degraded: contract violation",
+      evidenceIds: [],
+      sourceIds: []
+    });
+  });
+});
+
+describe("Free V4 semantic review graceful degradation", () => {
+  it("degrades a field with missing local references to a synthesized pass and applies the original prose", () => {
+    const input = freeInput();
+    const review = validReview(input);
+    reviewFields(review)[1]!.evidenceIds = [];
+    reviewFields(review)[1]!.sourceIds = [];
+
+    const parsed = parseReportSemanticReviewOutput(review, input);
+    expect(parsed.fields[1]).toMatchObject({
+      path: input.fields[1]!.path,
+      originalTextHash: input.fields[1]!.originalTextHash,
+      decision: "pass",
+      issueCodes: [],
+      reason: "degraded: contract violation",
+      evidenceIds: ["evidence-q1"],
+      sourceIds: ["source-q1"]
+    });
+    expect(parsed.overallDecision).toBe("pass");
+    const applied = applyReportSemanticReview(input, parsed);
+    expect(applied.fields[1]!.appliedText).toBe(input.fields[1]!.originalText);
+    expect(applied.receipt.decision).toBe("pass");
+    expect(verifyReportSemanticReviewReceipt(applied.receipt, input, parsed, applied.fields)).toEqual(applied.receipt);
+  });
+
+  it("ignores out-of-allowlist model references and code-mounts ownership-compatible refs", () => {
+    const input = freeInput();
+    const subsetViolation = validReview(input);
+    reviewFields(subsetViolation)[1]!.evidenceIds = ["mimo-annotation-999"];
+    const degraded = parseReportSemanticReviewOutput(subsetViolation, input);
+    expect(degraded.fields[1]).toMatchObject({
+      decision: "pass",
+      reason: "degraded: contract violation",
+      evidenceIds: ["evidence-q1"],
+      sourceIds: ["source-q1"]
+    });
+
+    const kept = validReview(input);
+    reviewFields(kept)[1]!.evidenceIds = ["evidence-q1"];
+    reviewFields(kept)[1]!.sourceIds = [];
+    const parsedKept = parseReportSemanticReviewOutput(kept, input);
+    expect(parsedKept.fields[1]!.reason).not.toBe("degraded: contract violation");
+    expect(parsedKept.fields[1]!.evidenceIds).toEqual(["evidence-q1"]);
+    expect(parsedKept.fields[1]!.sourceIds).toEqual(["source-q1"]);
+  });
+
+  it("degrades blank and byte-identical correctedText to the original prose", () => {
+    const input = freeInput();
+    const blank = validReview(input);
+    Object.assign(reviewFields(blank)[1]!, {
+      decision: "corrected",
+      correctedText: "   ",
+      issueCodes: ["language_quality"]
+    });
+    const degradedBlank = parseReportSemanticReviewOutput(blank, input);
+    expect(degradedBlank.fields[1]).toMatchObject({ decision: "pass", reason: "degraded: contract violation" });
+    expect(degradedBlank.fields[1]!.correctedText).toBeUndefined();
+    expect(degradedBlank.overallDecision).toBe("pass");
+
+    const identical = validReview(input);
+    Object.assign(reviewFields(identical)[1]!, {
+      decision: "corrected",
+      correctedText: input.fields[1]!.originalText,
+      issueCodes: ["language_quality"]
+    });
+    const degradedIdentical = parseReportSemanticReviewOutput(identical, input);
+    expect(degradedIdentical.fields[1]).toMatchObject({ decision: "pass", reason: "degraded: contract violation" });
+    const applied = applyReportSemanticReview(input, degradedIdentical);
+    expect(applied.fields[1]!.appliedText).toBe(input.fields[1]!.originalText);
+  });
+
+  it("degrades a model self-reported blocked field and recomputes overallDecision", () => {
+    const input = freeInput();
+    const review = validReview(input);
+    Object.assign(reviewFields(review)[0]!, {
+      decision: "blocked",
+      issueCodes: ["unsupported_causal_claim"],
+      reason: "The claim is not supported by the bound evidence."
+    });
+    review.overallDecision = "blocked";
+
+    const parsed = parseReportSemanticReviewOutput(review, input);
+    expect(parsed.fields[0]).toMatchObject({ decision: "pass", reason: "degraded: contract violation" });
+    expect(parsed.overallDecision).toBe("pass");
+    const applied = applyReportSemanticReview(input, parsed);
+    expect(applied.receipt.decision).toBe("pass");
+    expect(applied.fields[0]!.appliedText).toBe(input.fields[0]!.originalText);
+  });
+
+  it("fills missing batch fields and keeps the first duplicate path during assembly", () => {
+    const input = freeInput();
+    const full = validReview(input) as {
+      fields: Array<{ path: string } & Record<string, unknown>>;
+      annotations: { observationResults: unknown[]; answers: unknown[]; evidenceUse: unknown[] };
+    };
+    const mutableRows = full.fields.filter((field) =>
+      input.fields.find((m) => m.path === field.path)?.mutability === "mutable"
+    );
+    const duplicated = [structuredClone(mutableRows[0]!), ...mutableRows];
+    duplicated[0]!.reason = "first duplicate wins";
+    const assembled = assembleFreeV4BatchedSemanticReviewRaw(input, {
+      B_fields_readonly: { fields: [] },
+      B_fields_mutable: { fields: duplicated },
+      B_obs: { observationResults: full.annotations.observationResults },
+      B_answers: { answers: full.annotations.answers },
+      B_evidence_use: { evidenceUse: full.annotations.evidenceUse }
+    });
+    const parsed = parseReportSemanticReviewOutput(assembled, input);
+    expect(parsed.fields).toHaveLength(input.fields.length);
+    expect(parsed.fields.find(({ path }) => path === "questions[0].text"))
+      .toMatchObject({ decision: "pass", reason: "degraded: contract violation" });
+    expect(parsed.fields[0]!.reason).toBe("first duplicate wins");
+  });
+
+  it("sanitizes malformed annotation rows and filters out-of-catalog references", () => {
+    const input = freeInput();
+    const review = validReview(input);
+    const annotations = review.annotations as {
+      observationResults: unknown[];
+      answers: Array<Record<string, unknown>>;
+      evidenceUse: unknown[];
+    };
+    annotations.observationResults = ["broken"];
+    annotations.answers[0]!.evidenceIds = ["mimo-annotation-999"];
+    annotations.answers[0]!.questionId = "echoed-wrong-question";
+    annotations.evidenceUse = [{ nonsense: true }];
+
+    const parsed = parseReportSemanticReviewOutput(review, input);
+    expect(parsed.annotations.observationResults[0]).toMatchObject({
+      observationId: input.observationResults[0]!.observationId,
+      resultId: input.observationResults[0]!.resultId,
+      targetPresence: "ambiguous",
+      competitorPresence: "ambiguous",
+      reason: "degraded: contract violation"
+    });
+    expect(parsed.annotations.answers[0]).toMatchObject({
+      questionId: "question-1",
+      relevance: "responsive",
+      evidenceIds: [],
+      sourceIds: ["source-q1"]
+    });
+    expect(parsed.annotations.evidenceUse).toHaveLength(input.fields.length);
+    expect(parsed.annotations.evidenceUse[0]).toMatchObject({
+      path: input.fields[0]!.path,
+      evidenceIds: [],
+      sourceIds: ["source-global"],
+      reason: "degraded: contract violation"
+    });
+    expect(parsed.annotations.evidenceUse.slice(1).every((row) => row.reason === "degraded: contract violation")).toBe(true);
+  });
+
+  it("keeps a fully valid Free review unchanged, including corrections", () => {
+    const input = freeInput();
+    const review = validReview(input);
+    Object.assign(reviewFields(review)[1]!, {
+      decision: "corrected",
+      correctedText: "顺心捷达提供覆盖全国的FBA头程服务。",
+      issueCodes: ["answer_not_direct"],
+      reason: "The draft needed a direct answer."
+    });
+    review.overallDecision = "blocked";
+
+    const parsed = parseReportSemanticReviewOutput(review, input);
+    expect(parsed.fields[1]).toMatchObject({
+      decision: "corrected",
+      correctedText: "顺心捷达提供覆盖全国的FBA头程服务。",
+      issueCodes: ["answer_not_direct"],
+      evidenceIds: ["evidence-q1"],
+      sourceIds: ["source-q1"]
+    });
+    expect(parsed.overallDecision).toBe("corrected");
+    const applied = applyReportSemanticReview(input, parsed);
+    expect(applied.fields[1]!.appliedText).toBe("顺心捷达提供覆盖全国的FBA头程服务。");
+    expect(verifyReportSemanticReviewReceipt(applied.receipt, input, parsed, applied.fields)).toEqual(applied.receipt);
+  });
+
+  it("keeps the Paid report_global_v1 path fail-closed for the same violation classes", () => {
+    const input = globalInput();
+    const missingRefs = globalReview(input);
+    reviewFields(missingRefs)[0]!.evidenceIds = [];
+    expect(() => parseReportSemanticReviewOutput(missingRefs, input)).toThrow(ReportSemanticReviewEvidenceMissingError);
+
+    const subsetViolation = globalReview(input);
+    reviewFields(subsetViolation)[0]!.evidenceIds = ["mimo-annotation-999"];
+    expect(() => parseReportSemanticReviewOutput(subsetViolation, input)).toThrow(/unknown|disallowed/u);
+
+    const missingFields = globalReview(input);
+    reviewFields(missingFields).pop();
+    expect(() => parseReportSemanticReviewOutput(missingFields, input)).toThrow(/cover/u);
+
+    const wrongOverall = globalReview(input);
+    wrongOverall.overallDecision = "corrected";
+    expect(() => parseReportSemanticReviewOutput(wrongOverall, input)).toThrow(/must equal pass/u);
   });
 });
 
@@ -219,7 +424,7 @@ describe("ReportSemanticReview input authority", () => {
 });
 
 describe("ReportSemanticReview model output", () => {
-  it("uses eligible report-global references across fields while legacy retains field-local rejection", () => {
+  it("uses eligible report-global references across fields while legacy degrades field-local violations", () => {
     const global = globalInput();
     const review = globalReview(global);
     expect(parseReportSemanticReviewOutput(review, global).fields[0]!.evidenceIds).toEqual(["evidence-q1"]);
@@ -228,7 +433,13 @@ describe("ReportSemanticReview model output", () => {
     const legacy = createReportSemanticReviewInput(legacyCore);
     const crossField = validReview(legacy);
     reviewFields(crossField)[0]!.evidenceIds = ["evidence-q1"];
-    expect(() => parseReportSemanticReviewOutput(crossField, legacy)).toThrow(/disallowed reference/u);
+    const degraded = parseReportSemanticReviewOutput(crossField, legacy);
+    expect(degraded.fields[0]).toMatchObject({
+      decision: "pass",
+      reason: "degraded: contract violation",
+      evidenceIds: [],
+      sourceIds: ["source-global"]
+    });
   });
 
   it("fails closed global accepted and rejected reference violations while preserving blocked safety", () => {
@@ -305,7 +516,7 @@ describe("ReportSemanticReview model output", () => {
     expect(parseReportSemanticReviewOutput(zero, input).fields[0]!.decision).toBe("blocked");
   });
 
-  it("fail-closes field-local allowlists without report_global_v1, and allows empty refs when allowlists are empty", () => {
+  it("degrades field-local allowlist violations without report_global_v1, and allows empty refs when allowlists are empty", () => {
     const freeCore = inputCore();
     freeCore.lifecycle = "free_v4";
     freeCore.fields = freeCore.fields.map((field, index) => index === 0
@@ -325,29 +536,29 @@ describe("ReportSemanticReview model output", () => {
     const missingLocal = validReview(withAllow);
     reviewFields(missingLocal)[0]!.evidenceIds = [];
     reviewFields(missingLocal)[0]!.sourceIds = [];
-    expect(() => parseReportSemanticReviewOutput(missingLocal, withAllow)).toThrow(ReportSemanticReviewEvidenceMissingError);
-    try {
-      parseReportSemanticReviewOutput(missingLocal, withAllow);
-    } catch (error) {
-      expect(error).toMatchObject({
-        code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE,
-        reason: SEMANTIC_REVIEW_LOCAL_EVIDENCE_MISSING_REASON,
-        fieldPath: "$reviewOutput.fields[0]",
-        manifestKind: "field"
-      });
-    }
+    const degraded = parseReportSemanticReviewOutput(missingLocal, withAllow);
+    expect(degraded.fields[0]).toMatchObject({
+      decision: "pass",
+      issueCodes: [],
+      reason: "degraded: contract violation",
+      evidenceIds: [],
+      sourceIds: ["source-global"]
+    });
 
     reviewFields(missingLocal)[0]!.decision = "blocked";
     reviewFields(missingLocal)[0]!.issueCodes = ["unsupported"];
     missingLocal.overallDecision = "blocked";
-    expect(parseReportSemanticReviewOutput(missingLocal, withAllow).fields[0]!.decision).toBe("blocked");
+    const degradedBlocked = parseReportSemanticReviewOutput(missingLocal, withAllow);
+    expect(degradedBlocked.fields[0]!.decision).toBe("pass");
+    expect(degradedBlocked.overallDecision).toBe("pass");
   });
 
-  it("keeps rejected reference keys outside the legacy exact contract and documents global prompts", () => {
+  it("degrades rejected reference keys outside the legacy exact contract and documents global prompts", () => {
     const legacy = createReportSemanticReviewInput(inputCore());
     const legacyReview = validReview(legacy);
     reviewFields(legacyReview)[0]!.rejectedEvidence = [];
-    expect(() => parseReportSemanticReviewOutput(legacyReview, legacy)).toThrow(/unknown key/u);
+    expect(parseReportSemanticReviewOutput(legacyReview, legacy).fields[0])
+      .toMatchObject({ decision: "pass", reason: "degraded: contract violation" });
     const global = globalInput();
     const freeGlobal = buildFreeV4ReportSemanticReviewSystemPrompt(global);
     expect(freeGlobal).toMatch(/report_global_v1.*rejectedEvidence.*rejectedSources/isu);
@@ -357,14 +568,15 @@ describe("ReportSemanticReview model output", () => {
     expect(paid).not.toMatch(/field-local allowlist/iu);
   });
 
-  it("rejects a blueprint-only index in a response field", () => {
+  it("degrades a blueprint-only index in a response field", () => {
     const core = inputCore();
     core.lifecycle = "free_v4";
     const input = createReportSemanticReviewInput(core);
     const review = validReview(input);
     reviewFields(review)[0]!.index = 0;
 
-    expect(() => parseReportSemanticReviewOutput(review, input)).toThrow(/unknown key/u);
+    expect(parseReportSemanticReviewOutput(review, input).fields[0])
+      .toMatchObject({ decision: "pass", reason: "degraded: contract violation" });
   });
 
   it("parses a complete pass review and derives its overall decision", () => {
@@ -395,9 +607,9 @@ describe("ReportSemanticReview model output", () => {
     expect(verifyReportSemanticReviewReceipt(applied.receipt, input, review, applied.fields)).toEqual(applied.receipt);
   });
 
-  it("accepts a blocked review as evidence but refuses to apply it", () => {
-    const input = createReportSemanticReviewInput(inputCore());
-    const review = validReview(input);
+  it("accepts a blocked Paid review as evidence but refuses to apply it", () => {
+    const input = globalInput();
+    const review = globalReview(input);
     const result = reviewFields(review)[0]!;
     result.decision = "blocked";
     result.issueCodes = ["unsupported_causal_claim"];
@@ -413,11 +625,24 @@ describe("ReportSemanticReview model output", () => {
     ["extra", (fields: Array<Record<string, unknown>>) => { fields.push(structuredClone(fields[0]!)); }],
     ["reordered", (fields: Array<Record<string, unknown>>) => { fields.reverse(); }],
     ["duplicate", (fields: Array<Record<string, unknown>>) => { fields[1] = structuredClone(fields[0]!); }]
-  ])("rejects %s field coverage", (_name, mutate) => {
+  ])("rejects %s field coverage under report_global_v1", (_name, mutate) => {
+    const input = globalInput();
+    const review = globalReview(input);
+    mutate(reviewFields(review));
+    expect(() => parseReportSemanticReviewOutput(review, input)).toThrow(/cover|path/u);
+  });
+
+  it.each([
+    ["missing", (fields: Array<Record<string, unknown>>) => { fields.pop(); }],
+    ["extra", (fields: Array<Record<string, unknown>>) => { fields.push(structuredClone(fields[0]!)); }],
+    ["reordered", (fields: Array<Record<string, unknown>>) => { fields.reverse(); }],
+    ["duplicate", (fields: Array<Record<string, unknown>>) => { fields[1] = structuredClone(fields[0]!); }]
+  ])("aligns %s Free field coverage to the input manifest", (_name, mutate) => {
     const input = createReportSemanticReviewInput(inputCore());
     const review = validReview(input);
     mutate(reviewFields(review));
-    expect(() => parseReportSemanticReviewOutput(review, input)).toThrow(/cover|path/u);
+    const parsed = parseReportSemanticReviewOutput(review, input);
+    expect(parsed.fields.map(({ path }) => path)).toEqual(input.fields.map(({ path }) => path));
   });
 
   it("rejects model identity and original-text hash tampering", () => {
@@ -426,12 +651,13 @@ describe("ReportSemanticReview model output", () => {
     model.modelId = "another-model";
     expect(() => parseReportSemanticReviewOutput(model, input)).toThrow(/modelId/u);
 
-    const textHash = validReview(input);
+    const textHashInput = globalInput();
+    const textHash = globalReview(textHashInput);
     reviewFields(textHash)[0]!.originalTextHash = "f".repeat(64);
-    expect(() => parseReportSemanticReviewOutput(textHash, input)).toThrow(/originalTextHash/u);
+    expect(() => parseReportSemanticReviewOutput(textHash, textHashInput)).toThrow(/originalTextHash/u);
   });
 
-  it("rejects a correction to a read-only field or unchanged corrected text", () => {
+  it("degrades a correction to a read-only field or unchanged corrected text", () => {
     const input = createReportSemanticReviewInput(inputCore());
     const immutable = validReview(input);
     const immutableField = reviewFields(immutable)[2]!;
@@ -439,7 +665,9 @@ describe("ReportSemanticReview model output", () => {
     immutableField.correctedText = "Different question";
     immutableField.issueCodes = ["question_rewrite"];
     immutable.overallDecision = "corrected";
-    expect(() => parseReportSemanticReviewOutput(immutable, input)).toThrow(/read-only/u);
+    const degradedImmutable = parseReportSemanticReviewOutput(immutable, input);
+    expect(degradedImmutable.fields[2]).toMatchObject({ decision: "pass", reason: "degraded: contract violation" });
+    expect(degradedImmutable.overallDecision).toBe("pass");
 
     const unchanged = validReview(input);
     const unchangedField = reviewFields(unchanged)[0]!;
@@ -447,39 +675,52 @@ describe("ReportSemanticReview model output", () => {
     unchangedField.correctedText = input.fields[0]!.originalText;
     unchangedField.issueCodes = ["language"];
     unchanged.overallDecision = "corrected";
-    expect(() => parseReportSemanticReviewOutput(unchanged, input)).toThrow(/must differ/u);
+    const degradedUnchanged = parseReportSemanticReviewOutput(unchanged, input);
+    expect(degradedUnchanged.fields[0]).toMatchObject({ decision: "pass", reason: "degraded: contract violation" });
+    expect(applyReportSemanticReview(input, degradedUnchanged).fields[0]!.appliedText)
+      .toBe(input.fields[0]!.originalText);
   });
 
-  it("rejects disallowed/empty answer references and duplicate retained terms while exact answer IDs pass", () => {
+  it("sanitizes disallowed/empty field references and duplicate retained terms while exact answer IDs pass", () => {
     const input = createReportSemanticReviewInput(inputCore()); expect(parseReportSemanticReviewOutput(validReview(input), input).fields[1]!.evidenceIds).toEqual(["evidence-q1"]);
     const refs = validReview(input);
     reviewFields(refs)[0]!.evidenceIds = ["evidence-q1"];
-    expect(() => parseReportSemanticReviewOutput(refs, input)).toThrow(/disallowed reference/u);
+    expect(parseReportSemanticReviewOutput(refs, input).fields[0])
+      .toMatchObject({ decision: "pass", reason: "degraded: contract violation", evidenceIds: [], sourceIds: ["source-global"] });
 
     const terms = validReview(input);
     reviewFields(terms)[0]!.retainedOriginalTerms = [
       { term: "Brand", reason: "First" },
       { term: "Brand", reason: "Second" }
     ];
-    expect(() => parseReportSemanticReviewOutput(terms, input)).toThrow(/unique/u);
+    expect(parseReportSemanticReviewOutput(terms, input).fields[0])
+      .toMatchObject({ decision: "pass", reason: "degraded: contract violation", retainedOriginalTerms: [] });
 
     const missingRefs = validReview(input);
     reviewFields(missingRefs)[1]!.evidenceIds = [];
     reviewFields(missingRefs)[1]!.sourceIds = [];
-    expect(() => parseReportSemanticReviewOutput(missingRefs, input)).toThrow(ReportSemanticReviewEvidenceMissingError);
-    expect(() => parseReportSemanticReviewOutput(missingRefs, input)).toThrow(/requires accepted evidence or source/u);
+    const degraded = parseReportSemanticReviewOutput(missingRefs, input);
+    expect(degraded.fields[1]).toMatchObject({
+      decision: "pass",
+      reason: "degraded: contract violation",
+      evidenceIds: ["evidence-q1"],
+      sourceIds: ["source-q1"]
+    });
+    expect(applyReportSemanticReview(input, degraded).fields[1]!.appliedText).toBe(input.fields[1]!.originalText);
   });
 
-  it("requires non-pass issue codes and a mechanically consistent overall decision", () => {
+  it("synthesizes non-pass fields without issue codes and recomputes the overall decision", () => {
     const input = createReportSemanticReviewInput(inputCore());
     const noCode = validReview(input);
     reviewFields(noCode)[0]!.decision = "blocked";
     noCode.overallDecision = "blocked";
-    expect(() => parseReportSemanticReviewOutput(noCode, input)).toThrow(/issueCodes/u);
+    const degraded = parseReportSemanticReviewOutput(noCode, input);
+    expect(degraded.fields[0]).toMatchObject({ decision: "pass", reason: "degraded: contract violation" });
+    expect(degraded.overallDecision).toBe("pass");
 
     const wrongOverall = validReview(input);
     wrongOverall.overallDecision = "corrected";
-    expect(() => parseReportSemanticReviewOutput(wrongOverall, input)).toThrow(/must equal pass/u);
+    expect(parseReportSemanticReviewOutput(wrongOverall, input).overallDecision).toBe("pass");
   });
 
   it("binds semantic duplicate decisions to known immutable questions", () => {
@@ -512,16 +753,19 @@ describe("ReportSemanticReview model output", () => {
 
     const passWithCorrection = validReview(input);
     reviewFields(passWithCorrection)[0]!.correctedText = "Not allowed";
-    expect(() => parseReportSemanticReviewOutput(passWithCorrection, input)).toThrow(/allowed only/u);
+    expect(parseReportSemanticReviewOutput(passWithCorrection, input).fields[0])
+      .toMatchObject({ decision: "pass", reason: "degraded: contract violation" });
   });
 });
 
 describe("ReportSemanticReview receipt integrity", () => {
-  it("blocks a claimed pass for a nonresponsive answer and hashes annotations in the receipt", () => {
+  it("keeps a nonresponsive answer annotation without blocking the Free decision and hashes annotations in the receipt", () => {
     const input = createReportSemanticReviewInput(inputCore());
     const review = validReview(input);
     (review.annotations as Record<string, unknown>).answers = [{ questionId: "question-1", relevance: "not_responsive", entityRole: "none", targetPresence: "absent", targetFirstSentence: null, targetRoles: [], competitorEntityIds: [], evidenceIds: [], sourceIds: [], reason: "does not answer" }];
-    expect(() => parseReportSemanticReviewOutput(review, input)).toThrow(/must equal blocked/u);
+    const parsed = parseReportSemanticReviewOutput(review, input);
+    expect(parsed.annotations.answers[0]!.relevance).toBe("not_responsive");
+    expect(parsed.overallDecision).toBe("pass");
     const applied = applyReportSemanticReview(input, validReview(input));
     expect(() => verifyReportSemanticReviewReceipt({ ...applied.receipt, annotationsHash: "a".repeat(64) }, input, validReview(input), applied.fields)).toThrow(/annotationsHash/u);
   });
@@ -548,14 +792,17 @@ describe("ReportSemanticReview receipt integrity", () => {
     expect(deriveFreeObservationMetrics(parseReportSemanticReviewOutput(review, input))).toEqual({ targetMentionCount: 1, competitorMentionCount: 1 });
   });
 
-  it("rejects extra or reordered answer annotations and same-question references outside the owned field", () => {
+  it("sanitizes extra or reordered answer annotations and same-question references outside the owned field", () => {
     const input = createReportSemanticReviewInput(inputCore());
     const extra = validReview(input);
     (extra.annotations as Record<string, unknown>).answers = [...(extra.annotations as { answers: unknown[] }).answers, structuredClone((extra.annotations as { answers: unknown[] }).answers[0])];
-    expect(() => parseReportSemanticReviewOutput(extra, input)).toThrow(/cover every answer subject/u);
+    const parsedExtra = parseReportSemanticReviewOutput(extra, input);
+    expect(parsedExtra.annotations.answers).toHaveLength(input.answerSubjects.length);
     const disallowed = validReview(input);
     (disallowed.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.sourceIds = ["source-global"];
-    expect(() => parseReportSemanticReviewOutput(disallowed, input)).toThrow(/disallowed reference/u);
+    const parsedDisallowed = parseReportSemanticReviewOutput(disallowed, input);
+    expect(parsedDisallowed.annotations.answers[0]!.sourceIds).toEqual([]);
+    expect(parsedDisallowed.annotations.answers[0]!.evidenceIds).toEqual(["evidence-q1"]);
 
     const core = inputCore();
     const sourceText = "Q2 source";
@@ -567,28 +814,31 @@ describe("ReportSemanticReview receipt integrity", () => {
     const orderedInput = createReportSemanticReviewInput(core);
     const reordered = validReview(orderedInput);
     (reordered.annotations as { answers: unknown[] }).answers.reverse();
-    expect(() => parseReportSemanticReviewOutput(reordered, orderedInput)).toThrow(/questionId/u);
+    const parsedReordered = parseReportSemanticReviewOutput(reordered, orderedInput);
+    expect(parsedReordered.annotations.answers.map(({ questionId }) => questionId))
+      .toEqual(orderedInput.answerSubjects.map(({ questionId }) => questionId));
   });
 
-  it("rejects competitor annotations that are not bound to the exact entity catalog", () => {
+  it("filters competitor annotations that are not bound to the exact entity catalog", () => {
     const input = createReportSemanticReviewInput(inputCore());
     const review = validReview(input);
     (review.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.competitorEntityIds = ["unknown-competitor"];
-    expect(() => parseReportSemanticReviewOutput(review, input)).toThrow(/competitorEntityIds|unknown-competitor/u);
+    expect(parseReportSemanticReviewOutput(review, input).annotations.answers[0]!.competitorEntityIds).toEqual([]);
 
     const crossOwnedCore = inputCore();
     crossOwnedCore.entities[0]!.questionId = "question-2";
     const crossOwnedInput = createReportSemanticReviewInput(crossOwnedCore);
     const crossOwnedReview = validReview(crossOwnedInput);
     (crossOwnedReview.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.competitorEntityIds = ["competitor-1"];
-    expect(() => parseReportSemanticReviewOutput(crossOwnedReview, crossOwnedInput)).toThrow(/another question|competitorEntityIds/u);
+    expect(parseReportSemanticReviewOutput(crossOwnedReview, crossOwnedInput).annotations.answers[0]!.competitorEntityIds).toEqual([]);
   });
 
-  it("requires internally consistent target-presence details", () => {
+  it("degrades internally inconsistent target-presence details", () => {
     const input = createReportSemanticReviewInput(inputCore());
     const zeroSentence = validReview(input);
     (zeroSentence.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.targetFirstSentence = 0;
-    expect(() => parseReportSemanticReviewOutput(zeroSentence, input)).toThrow(/positive/u);
+    expect(parseReportSemanticReviewOutput(zeroSentence, input).annotations.answers[0])
+      .toMatchObject({ targetPresence: "present", targetFirstSentence: 1, reason: "degraded: contract violation" });
 
     const absentWithRole = validReview(input);
     Object.assign((absentWithRole.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!, {
@@ -596,7 +846,8 @@ describe("ReportSemanticReview receipt integrity", () => {
       targetFirstSentence: null,
       targetRoles: ["subject"]
     });
-    expect(() => parseReportSemanticReviewOutput(absentWithRole, input)).toThrow(/targetRoles.*empty/u);
+    expect(parseReportSemanticReviewOutput(absentWithRole, input).annotations.answers[0])
+      .toMatchObject({ targetPresence: "present", targetFirstSentence: 1, reason: "degraded: contract violation" });
   });
 
   it("rejects observation text hash drift and cross-question observation reuse", () => {
@@ -754,6 +1005,12 @@ function manifestField(
     allowedEvidenceIds,
     allowedSourceIds
   };
+}
+
+function freeInput(): ReportSemanticReviewInput {
+  const core = inputCore();
+  core.lifecycle = "free_v4";
+  return createReportSemanticReviewInput(core);
 }
 
 function globalInput(): ReportSemanticReviewInput {

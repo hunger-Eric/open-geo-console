@@ -4,10 +4,105 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Free V4 field-local evidence re-anchor (APPROVED)`.
+`Current authority: Free V4 semantic review graceful degradation (FROZEN)`.
 All earlier sections are context only.
 
-## Current authority: Free V4 field-local evidence re-anchor (APPROVED)
+## Current authority: Free V4 semantic review graceful degradation (FROZEN)
+
+**Status: `APPROVED`** — user approved this written allowlist (2026-07-27:
+"同意"). Implement only within the closed allowlists and budgets below.
+User later authorized commit + push + Staging Gates 1–3 deployment + one
+Gate 4 real-flow run (2026-07-27: "123"), lineage: wholly new submitted URL →
+Foundation → Free V4 → Q1 answer/diagnosis → semantic receipt (the
+v4_pre_admission deep lane; no Sandbox payment in this authorization).
+
+### Baseline
+
+- HEAD `9849d23`; Staging runs `8c9e375` (Web `dpl_FqrnykugzZSgEBdyM5JG5hQL4Vwn`
+  line + Workers `staging-8c9e375-overlay-v1`).
+- Gate 4 evidence: job `729674de-33ee-4312-afb5-36e18b857898` failed
+  `semantic_review_evidence_missing` (permanent) at
+  `$reviewOutput.fields[17]` on 2026-07-27 15:32:09 UTC — the global-policy gate
+  is gone, the failure moved to a field-local non-empty-allowlist field.
+- Full gate enumeration of the review chain: 60+ throw points; six real
+  failures (truncation, disallowed subset ref, blank correctedText, global and
+  local missing refs, invalid response) all at A/B-class gates, none at C-class
+  code invariants.
+
+### Problem (first principles)
+
+The review contract treats a stochastic model as a deterministic function:
+success = product of ~300 per-gate pass probabilities. Log-driven fixes only
+move the failure to the next gate. Structural faults:
+
+1. Class A gates force the model to echo information code already holds
+   (path, originalTextHash, IDs, order, coverage).
+2. Error classification is inverted: deterministic contract violations are
+   `transient` (6 backoff retries × ~6.5 min each); truncation that could
+   benefit from retry is `permanent`; assembly "missing" messages
+   misclassify to `operator_repairable`.
+3. Fail-closed is applied to a prose-polish step: any single field's
+   bookkeeping slip, or the model self-reporting `blocked`, kills the whole
+   job (`report-semantic-review.ts:824`).
+
+### Design lock
+
+| Layer | Rule |
+|-------|------|
+| C-class code invariants (input-side `parseInputCore`, ID existence/uniqueness, hash recompute, mutability at apply, receipt/ready re-validation) | **Unchanged, fail-closed** |
+| Paid V3 `report_global_v1` (global=true) path | **Unchanged** |
+| Free V4 (global=false) field-level A/B gates | **Degrade, never throw**: invalid field entry is replaced by a code-synthesized `pass` entry (original text, manifest path/hash, empty issueCodes); evidence/source refs are code-mounted from the field allowlist ∩ ownership-compatible IDs, never model-echoed |
+| Model self-reported `blocked` (Free) | Degrades to per-field `pass`; `overallDecision` is recomputed by code from sanitized decisions; blocked never kills a Free job |
+| Free batch assembly | Missing fields are filled with synthesized `pass` entries; duplicate paths first-wins; unknown entries dropped |
+| Structurally unparseable output (no fields array / not JSON) | Stays an error → `transient` retry (genuine transport/model failure) |
+| `mimo_output_truncated` | Reclassified `permanent` → `transient` (batch-splitting already reduced size; retry may succeed) |
+| Worker Q1 semantic gates (`report-v4-free-teaser.ts:912-921`) | Unchanged this scope (accepted residual, transient-retried) |
+| Sparse/minimal output redesign (prompt rewrite) | **Explicit non-goal**, deferred |
+
+Result guarantee: Free semantic review is an enhancement lane. Worst outcome
+is per-field fallback to original prose; it can never terminalize a job.
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `packages/ai-report-engine/src/report-semantic-review.ts` | Free (global=false) parse path: per-field sanitize/degrade, code-mounted refs, assembly tolerance, recomputed overallDecision; Paid path untouched |
+| `apps/web/src/worker/job-errors.ts` | `mimo_output_truncated` → transient; keep other mappings |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+### Tests allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `packages/ai-report-engine/src/report-semantic-review.test.ts` | Degradation tests per historical failure class |
+| `apps/web/src/worker/job-errors.test.ts` | Truncation reclassification |
+| `apps/web/src/worker/report-v4-free-teaser.test.ts` | Only if Free review fakes need alignment |
+
+### Forbidden
+
+- Paid V3 / global=true behavior change
+- Prompt or output-format redesign (sparse output)
+- Historical job repair/replay; deploy / Docker / Gate 4 (separate authority)
+- DB schema, commerce, crawler, deployment, worker Q1 gates, error taxonomy
+  beyond the two named mappings
+
+### Diff budget
+
+- Production source: ≤ 300 changed lines. Hard limit.
+- Tests: ≤ 400 changed lines (tracking bound, may update to measured +20%).
+- Docs: ≤ 60 changed lines.
+
+### Acceptance checks
+
+1. New unit tests replay each historical Free failure class (local missing
+   refs; subset violation; blank correctedText; self-reported blocked;
+   missing batch fields) and assert per-field degradation, code-mounted refs,
+   recomputed overallDecision, and successful apply — no throw.
+2. Paid `report_global_v1` tests unchanged and green.
+3. `npm test`, `npm run lint`, `npm run build` green.
+4. Deploy and a fresh Gate 4 real run require separate later authorization.
+
+## Historical: Free V4 field-local evidence re-anchor (APPROVED, implemented)
 
 **Status: `APPROVED`** — user directed implementation (2026-07-27): keep code
 to deterministic work only; model owns analysis/judgment; stop Free V4 from

@@ -859,7 +859,7 @@ describe("free teaser orchestration", () => {
     await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: vi.fn() }))
       .rejects.toThrow(/contradictory Q1 entity semantics/i);
 
-    const invalidReviewSave = vi.fn();
+    const degradedFieldSave = vi.fn();
     mocks.semanticInvoke.mockImplementation(async (request: { inputText: string }) => {
       const parsed = JSON.parse(request.inputText) as {
         batchId?: "B_fields_readonly" | "B_fields_mutable" | "B_obs" | "B_answers" | "B_evidence_use";
@@ -875,11 +875,15 @@ describe("free teaser orchestration", () => {
       }
       return semanticReviewBatchSlice(parsed.input, parsed.batchId);
     });
-    await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: invalidReviewSave }))
-      .rejects.toThrow(/cover every input field|exactly once|in order|missing path|field batch/i);
-    expect(invalidReviewSave).not.toHaveBeenCalled();
+    // A batch field missing from the model output degrades to a synthesized
+    // pass entry instead of killing the Free job.
+    const degradedFieldRun = await generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: degradedFieldSave });
+    expect(degradedFieldRun.checkpoint.stage).toBe("ready");
+    expect(degradedFieldRun.checkpoint.semanticReview!.output.fields.find(({ path }) => path === "questions[0].text"))
+      .toMatchObject({ decision: "pass", reason: "degraded: contract violation" });
+    expect(degradedFieldSave).toHaveBeenCalled();
 
-    const blockedSave = vi.fn();
+    const nonResponsiveSave = vi.fn();
     mocks.semanticInvoke.mockImplementation(async (request: { inputText: string }) => {
       const parsed = JSON.parse(request.inputText) as {
         batchId?: "B_fields_readonly" | "B_fields_mutable" | "B_obs" | "B_answers" | "B_evidence_use";
@@ -892,9 +896,13 @@ describe("free teaser orchestration", () => {
       }
       return semanticReviewBatchSlice(parsed.input, parsed.batchId);
     });
-    await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: blockedSave }))
-      .rejects.toThrow(/blocked semantic review/i);
-    expect(blockedSave).not.toHaveBeenCalled();
+    // Free overallDecision is recomputed from sanitized field decisions, so a
+    // model-reported nonresponsive answer can no longer block the review.
+    const nonResponsiveRun = await generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: nonResponsiveSave });
+    expect(nonResponsiveRun.checkpoint.stage).toBe("ready");
+    expect(nonResponsiveRun.checkpoint.semanticReview!.output.annotations.answers[0]!.relevance).toBe("not_responsive");
+    expect(nonResponsiveRun.checkpoint.semanticReview!.output.overallDecision).toBe("corrected");
+    expect(nonResponsiveSave).toHaveBeenCalled();
 
     const mismatchedSave = vi.fn();
     mocks.semanticInvoke.mockImplementation(async (request: { inputText: string }) => {
