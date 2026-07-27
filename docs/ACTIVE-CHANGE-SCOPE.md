@@ -163,6 +163,27 @@ fixed web entry for the user to type the site URL and perform any later test.
   rollback evidence is missing. Record before/after free space, `docker system
   df`, image IDs, container references, and net bytes; after a failed build do
   not retry until remaining space and retry authority are revalidated.
+- The user explicitly accepts the risk of Staging credentials entering the
+  Codex tool context for this release, does not request rotation, and confirms
+  deployment may continue. This is not confirmation of third-party leakage.
+  Never query or output Docker `.Config.Env`; Docker inspection is limited to
+  `.Image`, revision label, `State.Status`, `RestartCount`, image ID/
+  `RepoDigest`, and container/Compose service identity fields.
+- Release operations may atomically write the non-Git ledger
+  `.data/protected-staging-release-ledger/<candidate-full-sha>.json` with
+  restricted access and no secrets. Each action is idempotent under
+  `protected-staging:<sha>:<action>:<target>`: read an existing successful
+  record first and do not repeat it. Record platform/project/team,
+  fixed-domain/SHA, Preview action and deployment ID, overlay image ID,
+  Staging Free/Deep container IDs, alias action, rollback ID, and status.
+- One inline Dockerfile is authorized for this release, with no repository
+  script added: `FROM` the current accepted immutable Worker RepoDigest/ID,
+  `COPY` only `apps` and `packages`, and `LABEL` the final candidate SHA.
+  `npm ci`, Playwright/browser installation, OS packages, and full builds are
+  forbidden; the overlay is Staging Free/Deep only.
+- Before mutation, bind current, rollback, and candidate identities using only
+  the whitelist above; environment inspection is prohibited. The user's
+  release authorization remains active for these actions.
 - After Gate 3 technical checks, stop at the fixed site. The user—not the
   agent—will type the target URL and initiate any subsequent browser test.
 
