@@ -1,8 +1,12 @@
 import type { JsonCompletionClient } from "./client";
 import { validateEvidenceCitation } from "./evidence";
 import {
+  GEO_TERMINOLOGY_POLICY,
   ReportLanguageValidationError,
+  assertGeoTerminology,
   assertReportLanguage,
+  normalizeReportCorrectionText,
+  reportLanguageCorrectionFeedback,
   reportLanguageInstruction
 } from "./report-language";
 import type {
@@ -148,6 +152,99 @@ function pageForPrompt(page: ExtractedPage, maxCharacters: number): Record<strin
   };
 }
 
+interface PageLanguageCorrection {
+  path: string;
+  text: string;
+}
+
+function parsePageLanguageCorrections(value: unknown, expectedPaths: readonly string[]): PageLanguageCorrection[] | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = (value as Record<string, unknown>).corrections;
+  if (!Array.isArray(raw) || raw.length !== expectedPaths.length) return null;
+  const expected = new Set(expectedPaths);
+  const seen = new Set<string>();
+  const corrections: PageLanguageCorrection[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") return null;
+    const record = item as Record<string, unknown>;
+    if (
+      typeof record.path !== "string" ||
+      !expected.has(record.path) ||
+      seen.has(record.path) ||
+      typeof record.text !== "string" ||
+      record.text.trim().length === 0 ||
+      record.text.length > 4_000
+    ) return null;
+    seen.add(record.path);
+    corrections.push({ path: record.path, text: record.text.trim() });
+  }
+  return seen.size === expected.size ? corrections : null;
+}
+
+function applyPageLanguageCorrections(
+  draft: readonly PageAnalysis[],
+  corrections: readonly PageLanguageCorrection[]
+): PageAnalysis[] | null {
+  const corrected = clonePageAnalyses(draft);
+  for (const { path, text } of corrections) {
+    let match = /^analyses\[(\d+)]\.(summary)$/.exec(path);
+    if (match) {
+      const analysis = corrected[Number(match[1])];
+      if (!analysis) return null;
+      analysis.summary = text;
+      continue;
+    }
+    match = /^analyses\[(\d+)]\.(organizationSignals|strengths)\[(\d+)]$/.exec(path);
+    if (match) {
+      const analysis = corrected[Number(match[1])];
+      const collection = match[2] === "organizationSignals" ? analysis?.organizationSignals : analysis?.strengths;
+      const index = Number(match[3]);
+      if (!collection || index >= collection.length) return null;
+      collection[index] = text;
+      continue;
+    }
+    match = /^analyses\[(\d+)]\.findings\[(\d+)]\.(title|impact|recommendation|rewriteExample)$/.exec(path);
+    if (match) {
+      const finding = corrected[Number(match[1])]?.findings[Number(match[2])];
+      if (!finding) return null;
+      const field = match[3] as "title" | "impact" | "recommendation" | "rewriteExample";
+      if (field === "rewriteExample" && finding.rewriteExample === undefined) return null;
+      finding[field] = text;
+      continue;
+    }
+    return null;
+  }
+  return corrected;
+}
+
+function clonePageAnalyses(draft: readonly PageAnalysis[]): PageAnalysis[] {
+  return draft.map((analysis) => ({
+    ...analysis,
+    organizationSignals: [...analysis.organizationSignals],
+    strengths: [...analysis.strengths],
+    findings: analysis.findings.map((finding) => ({
+      ...finding,
+      evidence: finding.evidence.map((citation) => ({ ...citation }))
+    }))
+  }));
+}
+
+function omitInvalidOptionalRewriteExamples(
+  draft: readonly PageAnalysis[],
+  error: ReportLanguageValidationError
+): PageAnalysis[] | null {
+  if (error.violations.length === 0) return null;
+  const corrected = clonePageAnalyses(draft);
+  for (const { path } of error.violations) {
+    const match = /^analyses\[(\d+)]\.findings\[(\d+)]\.rewriteExample$/.exec(path);
+    if (!match) return null;
+    const finding = corrected[Number(match[1])]?.findings[Number(match[2])];
+    if (!finding || finding.rewriteExample === undefined) return null;
+    delete finding.rewriteExample;
+  }
+  return corrected;
+}
+
 export async function analyzePageBatch(
   client: JsonCompletionClient,
   input: AnalyzePagesInput
@@ -163,14 +260,38 @@ export async function analyzePageBatch(
 
   for (let start = 0; start < pendingPages.length; start += batchSize) {
     const pages = pendingPages.slice(start, start + batchSize);
+    const allowedTerms = collectPageAllowedTerms(pages);
     let parsed: PageAnalysis[] | undefined;
     let lastError: unknown;
-    let languageCorrectionUsed = false;
     let languageFeedback: string[] = [];
+    let languageCorrectionDraft: PageAnalysis[] | undefined;
+    let languageCorrectionError: ReportLanguageValidationError | undefined;
+    let fieldsToCorrect: Array<{ path: string; text: string }> = [];
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const isLanguageCorrectionCall = languageFeedback.length > 0;
+      let correctionCandidateApplied = false;
       try {
         const languageInstruction = reportLanguageInstruction(input.locale);
+        const outputShape = isLanguageCorrectionCall ? {
+          corrections: [{ path: "exact supplied field path", text: "replacement prose only" }]
+        } : {
+          analyses: [{
+            url: "exact supplied URL",
+            pageType: "supplied page type",
+            summary: "evidence-grounded summary",
+            organizationSignals: ["signal"],
+            strengths: ["strength"],
+            findings: [{
+              title: "finding",
+              severity: "critical|warning|opportunity",
+              impact: "impact",
+              evidence: [{ url: "exact supplied URL", quote: "verbatim supplied text", pageElement: "optional" }],
+              recommendation: "specific action",
+              rewriteExample: "optional example",
+              confidence: "low|medium|high"
+            }]
+          }]
+        };
         const completion = await client.completeJson({
       signal: input.signal,
       temperature: 0.1,
@@ -178,57 +299,85 @@ export async function analyzePageBatch(
       messages: [
         {
           role: "system",
-          content:
-            `You are an evidence-first GEO website analyst. Return JSON only. Analyze only supplied page text. Every formal finding must contain at least one verbatim quote copied from the supplied page and its exact URL. Do not make external ownership, market, traffic, ranking, or performance claims. ${languageInstruction}`
+          content: isLanguageCorrectionCall
+            ? `You are a strict GEO report-language editor. Return JSON only. Rewrite only the flagged report-prose fields. The allowedOriginalTerms list is exhaustive: for Simplified Chinese output, no other Latin-script sequence may appear, even inside quotation marks, examples, markup, code, email labels, or protocol labels. Replace forbidden source-language text with a Chinese description instead of repeating it. ${languageInstruction}`
+            : `You are an evidence-first GEO website analyst. Return JSON only. Analyze only supplied page text. Every formal finding must contain at least one verbatim quote copied from the supplied page and its exact URL. Do not make external ownership, market, traffic, ranking, or performance claims. ${languageInstruction}`
         },
         {
           role: "user",
-          content: JSON.stringify({
+          content: JSON.stringify(isLanguageCorrectionCall ? {
+            task: "Correct the supplied draft without re-analyzing the source pages.",
+            rules: [
+              languageInstruction,
+              "Rewrite every flagged prose field in the required language.",
+              "Translate or omit every other Latin-script word outside evidence quote fields.",
+              "Treat allowedOriginalTerms as the complete and exclusive list of Latin-script text permitted in Chinese replacements.",
+              "Never repeat forbidden source-language headings in quotation marks or examples; describe them in Chinese instead.",
+              "Do not output markup, code, email labels, or protocol-label examples in corrected prose.",
+              "Return exactly one correction for every supplied field path, with no missing, duplicate, or extra paths.",
+              "Return only replacement prose; do not add evidence, brands, platforms, claims, or other fields."
+            ],
+            correctionRequired: languageFeedback,
+            allowedOriginalTerms: allowedTerms,
+            locale: input.locale,
+            outputShape,
+            fieldsToCorrect
+          } : {
             task: "Analyze each website page for organization clarity, information architecture, content citability, trust evidence, entity consistency and GEO understandability.",
             rules: [
               languageInstruction,
               "Keep evidence quotes verbatim in their source language."
             ],
-            ...(languageFeedback.length ? { correctionRequired: languageFeedback } : {}),
             locale: input.locale,
-            outputShape: {
-              analyses: [{
-                url: "exact supplied URL",
-                pageType: "supplied page type",
-                summary: "evidence-grounded summary",
-                organizationSignals: ["signal"],
-                strengths: ["strength"],
-                findings: [{
-                  title: "finding",
-                  severity: "critical|warning|opportunity",
-                  impact: "impact",
-                  evidence: [{ url: "exact supplied URL", quote: "verbatim supplied text", pageElement: "optional" }],
-                  recommendation: "specific action",
-                  rewriteExample: "optional example",
-                  confidence: "low|medium|high"
-                }]
-              }]
-            },
+            outputShape,
             pages: pages.map((page) => pageForPrompt(page, maxCharacters))
           })
         }
       ]
         });
         modelId = completion.modelId;
-        const candidate = parseBatch(completion.value, pages);
-        if (candidate.length !== pages.length) {
-          throw new Error(`The model returned ${candidate.length} of ${pages.length} required page analyses.`);
+        const candidate = isLanguageCorrectionCall
+          ? (() => {
+              const corrections = parsePageLanguageCorrections(completion.value, fieldsToCorrect.map(({ path }) => path));
+              const normalized = corrections?.map((correction) => ({
+                ...correction,
+                text: normalizeReportCorrectionText(correction.text, input.locale, allowedTerms)
+              }));
+              return languageCorrectionDraft && normalized
+                ? applyPageLanguageCorrections(languageCorrectionDraft, normalized)
+                : null;
+            })()
+          : parseBatch(completion.value, pages);
+        if (!candidate || candidate.length !== pages.length) {
+          if (isLanguageCorrectionCall && languageCorrectionError) throw languageCorrectionError;
+          throw new Error(`The model returned ${candidate?.length ?? 0} of ${pages.length} required page analyses.`);
         }
-        assertPageAnalysisLanguage(candidate, input.locale, collectPageAllowedTerms(pages));
+        languageCorrectionDraft = candidate;
+        correctionCandidateApplied = isLanguageCorrectionCall;
+        assertPageAnalysisLanguage(candidate, input.locale, allowedTerms);
         parsed = candidate;
         break;
       } catch (error) {
         lastError = error;
-        if (isLanguageCorrectionCall) throw error;
+        if (isLanguageCorrectionCall && error instanceof ReportLanguageValidationError) {
+          const withoutInvalidOptionalExamples = omitInvalidOptionalRewriteExamples(languageCorrectionDraft ?? [], error);
+          if (withoutInvalidOptionalExamples) {
+            assertPageAnalysisLanguage(withoutInvalidOptionalExamples, input.locale, allowedTerms);
+            parsed = withoutInvalidOptionalExamples;
+            break;
+          }
+        }
+        if (isLanguageCorrectionCall && (!correctionCandidateApplied || !(error instanceof ReportLanguageValidationError))) {
+          throw error;
+        }
         if (error instanceof ReportLanguageValidationError) {
-          if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
-          languageCorrectionUsed = true;
-          languageFeedback = languageViolationFeedback(error);
+          if (attempt >= maxAttempts) throw error;
+          languageCorrectionError = error;
+          languageFeedback = reportLanguageCorrectionFeedback(error, input.locale);
+          const violationPaths = new Set(error.violations.map(({ path }) => path));
+          fieldsToCorrect = pageAnalysisLanguageFields(languageCorrectionDraft ?? [])
+            .filter(({ path }) => violationPaths.has(path));
+          if (fieldsToCorrect.length !== violationPaths.size) throw error;
         }
         if (attempt < maxAttempts) await retryDelay(Math.min(2_000, 250 * (2 ** (attempt - 1))));
       }
@@ -246,8 +395,8 @@ export async function analyzePageBatch(
   return { analyses, modelId };
 }
 
-function assertPageAnalysisLanguage(analyses: readonly PageAnalysis[], locale: string, allowedTerms: readonly string[]): void {
-  assertReportLanguage(analyses.flatMap((analysis, analysisIndex) => [
+function pageAnalysisLanguageFields(analyses: readonly PageAnalysis[]): Array<{ path: string; text: string }> {
+  return analyses.flatMap((analysis, analysisIndex) => [
     { path: `analyses[${analysisIndex}].summary`, text: analysis.summary },
     ...analysis.organizationSignals.map((text, index) => ({ path: `analyses[${analysisIndex}].organizationSignals[${index}]`, text })),
     ...analysis.strengths.map((text, index) => ({ path: `analyses[${analysisIndex}].strengths[${index}]`, text })),
@@ -257,14 +406,22 @@ function assertPageAnalysisLanguage(analyses: readonly PageAnalysis[], locale: s
       { path: `analyses[${analysisIndex}].findings[${findingIndex}].recommendation`, text: finding.recommendation },
       ...(finding.rewriteExample ? [{ path: `analyses[${analysisIndex}].findings[${findingIndex}].rewriteExample`, text: finding.rewriteExample }] : [])
     ])
-  ]), locale, allowedTerms);
+  ]);
+}
+
+function assertPageAnalysisLanguage(analyses: readonly PageAnalysis[], locale: string, allowedTerms: readonly string[]): void {
+  const fields = pageAnalysisLanguageFields(analyses);
+  assertReportLanguage(fields, locale, allowedTerms);
+  assertGeoTerminology(fields, GEO_TERMINOLOGY_POLICY);
 }
 
 function collectPageAllowedTerms(pages: readonly ExtractedPage[]): string[] {
   const terms = new Set<string>();
   for (const page of pages) {
     try {
-      for (const label of new URL(page.url).hostname.split(".")) {
+      const hostname = new URL(page.url).hostname.toLocaleLowerCase().replace(/^www\./u, "");
+      if (hostname.includes(".")) terms.add(hostname);
+      for (const label of hostname.split(".")) {
         if (/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label) && !HOSTNAME_NOISE.has(label.toLowerCase())) terms.add(label);
       }
     } catch {
@@ -275,15 +432,14 @@ function collectPageAllowedTerms(pages: readonly ExtractedPage[]): string[] {
       const name = value.replace(/\s+/g, " ").trim();
       if (name && name.length <= 120) terms.add(name);
     }
+    for (const match of page.text.matchAll(/([A-Za-z][A-Za-z0-9+.-]{1,39})(?=[\u3400-\u9fff])/gu)) {
+      terms.add(match[1]!);
+    }
   }
   return [...terms];
 }
 
 const HOSTNAME_NOISE = new Set(["www", "com", "org", "net", "io", "co", "cn"]);
-
-function languageViolationFeedback(error: ReportLanguageValidationError): string[] {
-  return error.violations.map(({ path, reason }) => `${path}: ${reason}`);
-}
 
 export function createFallbackPageAnalysis(page: ExtractedPage): PageAnalysis {
   return {

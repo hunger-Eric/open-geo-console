@@ -1791,16 +1791,2036 @@ export const V19_DATABASE_MIGRATIONS = [
    )`
 ] as const;
 
-export const DATABASE_MIGRATIONS = [
-  ...V9_DATABASE_MIGRATIONS,
-  ...V10_DATABASE_MIGRATIONS,
-  ...V11_DATABASE_MIGRATIONS,
-  ...V12_DATABASE_MIGRATIONS,
-  ...V13_DATABASE_MIGRATIONS,
-  ...V14_DATABASE_MIGRATIONS,
-  ...V15_DATABASE_MIGRATIONS,
-  ...V16_DATABASE_MIGRATIONS,
-  ...V17_DATABASE_MIGRATIONS,
-  ...V18_DATABASE_MIGRATIONS,
-  ...V19_DATABASE_MIGRATIONS
+export const V20_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_current_phase_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_current_phase_check CHECK (current_phase IN ('admission','discovery','planning','fetching','technical_audit','page_analysis','website_synthesis','public_source_preflight','question_generation','snapshot_resolution','provider_discovery_search','candidate_resolution','candidate_verification','provider_source_retrieval','provider_passage_selection','provider_claim_extraction','provider_qualification','grounded_answer_synthesis','source_retrieval','evidence_graph','report_build','artifact_verification','terminalization'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_artifact_contract_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_artifact_contract_check CHECK (artifact_contract IS NULL OR artifact_contract IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2'))`,
+  `ALTER TABLE report_access_tokens DROP CONSTRAINT IF EXISTS report_access_tokens_artifact_scope_check`,
+  `ALTER TABLE report_access_tokens ADD CONSTRAINT report_access_tokens_artifact_scope_check CHECK (artifact_scope IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_correction_credit_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_correction_credit_check CHECK (reason <> 'paid_report_correction' OR (credit_reservation_id IS NULL AND artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2') AND correction_id IS NOT NULL AND business_question_set_id IS NOT NULL))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_refresh_credit_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_refresh_credit_check CHECK (reason <> 'staging_artifact_refresh' OR (credit_reservation_id IS NULL AND artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2') AND correction_id IS NULL AND business_question_set_id IS NOT NULL AND tier='deep'))`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_contract_check`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_artifact_contract_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_contract_check CHECK (artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2'))`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_kind_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_kind_check CHECK (revision_kind IN ('generation','correction','presentation_refresh','evidence_refresh'))`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_lineage_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_lineage_check CHECK ((revision_kind IN ('presentation_refresh','evidence_refresh') AND source_artifact_revision_id IS NOT NULL AND correction_id IS NULL) OR (revision_kind NOT IN ('presentation_refresh','evidence_refresh') AND source_artifact_revision_id IS NULL))`,
+  `ALTER TABLE market_snapshot_questions ADD COLUMN IF NOT EXISTS snapshot_kind text NOT NULL DEFAULT 'standard_question'`,
+  `ALTER TABLE market_snapshot_questions ADD COLUMN IF NOT EXISTS parent_snapshot_id text`,
+  `ALTER TABLE market_snapshot_questions ADD COLUMN IF NOT EXISTS candidate_set_hash text`,
+  `ALTER TABLE market_snapshot_questions ADD COLUMN IF NOT EXISTS query_plan_version text NOT NULL DEFAULT 'legacy-standard-v1'`,
+  `ALTER TABLE market_snapshot_questions DROP CONSTRAINT IF EXISTS market_snapshot_questions_parent_fkey`,
+  `ALTER TABLE market_snapshot_questions ADD CONSTRAINT market_snapshot_questions_parent_fkey FOREIGN KEY(parent_snapshot_id) REFERENCES market_snapshot_questions(id) ON DELETE RESTRICT`,
+  `ALTER TABLE market_snapshot_questions DROP CONSTRAINT IF EXISTS market_snapshot_questions_kind_check`,
+  `ALTER TABLE market_snapshot_questions ADD CONSTRAINT market_snapshot_questions_kind_check CHECK (snapshot_kind IN ('standard_question','provider_discovery','candidate_verification'))`,
+  `ALTER TABLE market_snapshot_questions DROP CONSTRAINT IF EXISTS market_snapshot_questions_query_plan_check`,
+  `ALTER TABLE market_snapshot_questions ADD CONSTRAINT market_snapshot_questions_query_plan_check CHECK (length(btrim(query_plan_version)) > 0)`,
+  `ALTER TABLE market_snapshot_questions DROP CONSTRAINT IF EXISTS market_snapshot_questions_ancestry_shape_check`,
+  `ALTER TABLE market_snapshot_questions ADD CONSTRAINT market_snapshot_questions_ancestry_shape_check CHECK (
+     (snapshot_kind IN ('standard_question','provider_discovery') AND parent_snapshot_id IS NULL AND candidate_set_hash IS NULL)
+     OR (snapshot_kind='candidate_verification' AND parent_snapshot_id IS NOT NULL AND candidate_set_hash ~ '^[a-f0-9]{64}$')
+   )`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_provider_snapshot_ancestry() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE parent_kind text; parent_status text;
+   BEGIN
+     IF NEW.snapshot_kind <> 'candidate_verification' THEN RETURN NEW; END IF;
+     SELECT snapshot_kind,status INTO parent_kind,parent_status FROM market_snapshot_questions WHERE id=NEW.parent_snapshot_id;
+     IF parent_kind IS DISTINCT FROM 'provider_discovery' OR parent_status IS DISTINCT FROM 'completed' THEN
+       RAISE EXCEPTION 'Candidate verification requires a completed provider-discovery parent snapshot.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_snapshot_questions_provider_ancestry_trigger ON market_snapshot_questions`,
+  `CREATE TRIGGER market_snapshot_questions_provider_ancestry_trigger BEFORE INSERT OR UPDATE OF snapshot_kind,parent_snapshot_id,candidate_set_hash ON market_snapshot_questions FOR EACH ROW EXECUTE FUNCTION ogc_validate_provider_snapshot_ancestry()`,
+  `CREATE TABLE IF NOT EXISTS market_source_passages (
+     id text PRIMARY KEY,
+     source_evidence_id text NOT NULL REFERENCES market_source_evidence(id) ON DELETE RESTRICT,
+     passage_order integer NOT NULL,
+     exact_excerpt text NOT NULL,
+     excerpt_hash text NOT NULL,
+     relevance_score integer NOT NULL,
+     matched_entity_terms jsonb NOT NULL DEFAULT '[]'::jsonb,
+     matched_service_terms jsonb NOT NULL DEFAULT '[]'::jsonb,
+     matched_control_terms jsonb NOT NULL DEFAULT '[]'::jsonb,
+     matched_capability_terms jsonb NOT NULL DEFAULT '[]'::jsonb,
+     selector_version text NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT market_source_passages_source_order_key UNIQUE(source_evidence_id,passage_order),
+     CONSTRAINT market_source_passages_source_hash_key UNIQUE(source_evidence_id,excerpt_hash),
+     CONSTRAINT market_source_passages_order_check CHECK(passage_order >= 0),
+     CONSTRAINT market_source_passages_excerpt_check CHECK(char_length(btrim(exact_excerpt)) BETWEEN 1 AND 1200),
+     CONSTRAINT market_source_passages_hash_check CHECK(excerpt_hash ~ '^[a-f0-9]{64}$'),
+     CONSTRAINT market_source_passages_score_check CHECK(relevance_score BETWEEN 0 AND 100),
+     CONSTRAINT market_source_passages_selector_check CHECK(length(btrim(selector_version)) > 0),
+     CONSTRAINT market_source_passages_entity_privacy_check CHECK(ogc_public_jsonb_metadata_valid(matched_entity_terms)),
+     CONSTRAINT market_source_passages_service_privacy_check CHECK(ogc_public_jsonb_metadata_valid(matched_service_terms)),
+     CONSTRAINT market_source_passages_control_privacy_check CHECK(ogc_public_jsonb_metadata_valid(matched_control_terms)),
+     CONSTRAINT market_source_passages_capability_privacy_check CHECK(ogc_public_jsonb_metadata_valid(matched_capability_terms))
+   )`,
+  `CREATE INDEX IF NOT EXISTS market_source_passages_source_score_idx ON market_source_passages(source_evidence_id,relevance_score DESC)`,
+  `CREATE OR REPLACE FUNCTION ogc_limit_market_source_passages() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     PERFORM pg_advisory_xact_lock(hashtextextended(NEW.source_evidence_id,0));
+     IF EXISTS (SELECT 1 FROM market_source_passages WHERE id=NEW.id) THEN RETURN NEW; END IF;
+     IF (SELECT count(*) FROM market_source_passages WHERE source_evidence_id=NEW.source_evidence_id) >= 3 THEN
+       RAISE EXCEPTION 'A market source retains at most three relevant passages.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS market_source_passages_limit_trigger ON market_source_passages`,
+  `CREATE TRIGGER market_source_passages_limit_trigger BEFORE INSERT ON market_source_passages FOR EACH ROW EXECUTE FUNCTION ogc_limit_market_source_passages()`,
+  `DROP TRIGGER IF EXISTS market_source_passages_immutability_trigger ON market_source_passages`,
+  `CREATE TRIGGER market_source_passages_immutability_trigger BEFORE UPDATE OR DELETE ON market_source_passages FOR EACH ROW EXECUTE FUNCTION ogc_prevent_market_immutable_row_mutation()`,
+  `DROP TRIGGER IF EXISTS market_source_passages_private_identity_guard ON market_source_passages`,
+  `CREATE TRIGGER market_source_passages_private_identity_guard BEFORE INSERT OR UPDATE ON market_source_passages FOR EACH ROW EXECUTE FUNCTION ogc_reject_private_identity_in_shared_market_data()`,
+  `CREATE TABLE IF NOT EXISTS market_provider_claims (
+     id text PRIMARY KEY,
+     passage_id text NOT NULL REFERENCES market_source_passages(id) ON DELETE RESTRICT,
+     provider_entity_id text NOT NULL,
+     canonical_name text NOT NULL,
+     generic_role text NOT NULL,
+     policy_role text NOT NULL,
+     capability text NOT NULL,
+     operating_mode text NOT NULL,
+     service_scope jsonb NOT NULL DEFAULT '[]'::jsonb,
+     route_scope jsonb NOT NULL DEFAULT '[]'::jsonb,
+     exact_excerpt text NOT NULL,
+     claim_hash text NOT NULL,
+     extraction_model text NOT NULL,
+     extraction_contract text NOT NULL,
+     validation_status text NOT NULL,
+     rejection_reason text,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT market_provider_claims_passage_hash_key UNIQUE(passage_id,claim_hash),
+     CONSTRAINT market_provider_claims_excerpt_check CHECK(char_length(btrim(exact_excerpt)) BETWEEN 1 AND 1200),
+     CONSTRAINT market_provider_claims_hash_check CHECK(claim_hash ~ '^[a-f0-9]{64}$'),
+     CONSTRAINT market_provider_claims_status_check CHECK(validation_status IN ('accepted','rejected')),
+     CONSTRAINT market_provider_claims_rejection_check CHECK(
+       (validation_status='accepted' AND rejection_reason IS NULL)
+       OR (validation_status='rejected' AND char_length(btrim(rejection_reason)) BETWEEN 1 AND 240)
+     ),
+     CONSTRAINT market_provider_claims_service_privacy_check CHECK(ogc_public_jsonb_metadata_valid(service_scope)),
+     CONSTRAINT market_provider_claims_route_privacy_check CHECK(ogc_public_jsonb_metadata_valid(route_scope))
+   )`,
+  `CREATE INDEX IF NOT EXISTS market_provider_claims_provider_idx ON market_provider_claims(provider_entity_id,validation_status)`,
+  `DROP TRIGGER IF EXISTS market_provider_claims_immutability_trigger ON market_provider_claims`,
+  `CREATE TRIGGER market_provider_claims_immutability_trigger BEFORE UPDATE OR DELETE ON market_provider_claims FOR EACH ROW EXECUTE FUNCTION ogc_prevent_market_immutable_row_mutation()`,
+  `DROP TRIGGER IF EXISTS market_provider_claims_private_identity_guard ON market_provider_claims`,
+  `CREATE TRIGGER market_provider_claims_private_identity_guard BEFORE INSERT OR UPDATE ON market_provider_claims FOR EACH ROW EXECUTE FUNCTION ogc_reject_private_identity_in_shared_market_data()`
 ] as const;
+
+export const V21_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_artifact_contract_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_artifact_contract_check CHECK (artifact_contract IS NULL OR artifact_contract IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3'))`,
+  `ALTER TABLE report_access_tokens DROP CONSTRAINT IF EXISTS report_access_tokens_artifact_scope_check`,
+  `ALTER TABLE report_access_tokens ADD CONSTRAINT report_access_tokens_artifact_scope_check CHECK (artifact_scope IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_correction_credit_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_correction_credit_check CHECK (reason <> 'paid_report_correction' OR (credit_reservation_id IS NULL AND artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND correction_id IS NOT NULL AND business_question_set_id IS NOT NULL))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_refresh_credit_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_refresh_credit_check CHECK (reason <> 'staging_artifact_refresh' OR (credit_reservation_id IS NULL AND artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND correction_id IS NULL AND business_question_set_id IS NOT NULL AND tier='deep'))`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_contract_check`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_artifact_contract_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_contract_check CHECK (artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3'))`
+] as const;
+
+export const V22_DATABASE_MIGRATIONS = [
+  `DROP INDEX IF EXISTS report_market_snapshot_refs_job_cache_uidx`
+] as const;
+
+export const V23_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS replacement_fulfillment_id text`,
+  `ALTER TABLE report_artifact_revisions ADD COLUMN IF NOT EXISTS replacement_fulfillment_id text`,
+  `CREATE TABLE IF NOT EXISTS report_replacement_fulfillments (
+     id text PRIMARY KEY,
+     order_id text NOT NULL UNIQUE REFERENCES payment_orders(id) ON DELETE RESTRICT,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     original_failed_job_id text NOT NULL UNIQUE REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     failed_artifact_revision_id text NOT NULL UNIQUE REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT,
+     question_set_id text NOT NULL REFERENCES report_business_question_sets(id) ON DELETE RESTRICT,
+     replacement_job_id text UNIQUE REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     active_artifact_revision_id text UNIQUE REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT,
+     reason_code text NOT NULL CHECK (reason_code='paid_report_not_delivered'),
+     state text NOT NULL CHECK (state IN ('prepared','queued','running','repair_wait','completed','failed')),
+     operator_authorization_ref text NOT NULL CHECK (length(btrim(operator_authorization_ref)) > 0),
+     created_at timestamptz NOT NULL DEFAULT now(),
+     completed_at timestamptz
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS scan_jobs_replacement_fulfillment_uidx ON scan_jobs(replacement_fulfillment_id) WHERE replacement_fulfillment_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_artifact_revisions_replacement_uidx ON report_artifact_revisions(replacement_fulfillment_id) WHERE replacement_fulfillment_id IS NOT NULL`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_replacement_fulfillment_fkey`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_replacement_fulfillment_fkey FOREIGN KEY(replacement_fulfillment_id) REFERENCES report_replacement_fulfillments(id) ON DELETE RESTRICT`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_replacement_fkey`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_replacement_fkey FOREIGN KEY(replacement_fulfillment_id) REFERENCES report_replacement_fulfillments(id) ON DELETE RESTRICT`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_reason_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration','paid_report_correction','staging_artifact_refresh','replacement_fulfillment'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_replacement_fulfillment_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_replacement_fulfillment_check CHECK (
+     (reason='replacement_fulfillment' AND replacement_fulfillment_id IS NOT NULL AND credit_reservation_id IS NULL AND artifact_contract='combined_geo_report_v3' AND correction_id IS NULL AND business_question_set_id IS NOT NULL AND tier='deep')
+     OR (reason<>'replacement_fulfillment' AND replacement_fulfillment_id IS NULL)
+   )`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_kind_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_kind_check CHECK (revision_kind IN ('generation','correction','presentation_refresh','evidence_refresh','replacement'))`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_lineage_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_lineage_check CHECK (
+     (revision_kind IN ('presentation_refresh','evidence_refresh') AND source_artifact_revision_id IS NOT NULL AND correction_id IS NULL AND replacement_fulfillment_id IS NULL)
+     OR (revision_kind='replacement' AND source_artifact_revision_id IS NULL AND correction_id IS NULL AND replacement_fulfillment_id IS NOT NULL)
+     OR (revision_kind IN ('generation','correction') AND source_artifact_revision_id IS NULL AND replacement_fulfillment_id IS NULL)
+   )`
+] as const;
+
+export const V24_DATABASE_MIGRATIONS = [
+  `ALTER TABLE email_deliveries DROP CONSTRAINT IF EXISTS email_deliveries_template_type_check`,
+  `ALTER TABLE email_deliveries ADD CONSTRAINT email_deliveries_template_type_check CHECK (template_type IN ('payment_confirmed','report_ready','limited_report_refund','report_failed_refund','refund_succeeded','refund_assistance','link_reissue','corrected_report_ready','replacement_report_ready'))`
+] as const;
+
+export const V25_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS public_source_retrieval_attempts (
+     id text PRIMARY KEY,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     question_id text NOT NULL REFERENCES report_business_questions(id) ON DELETE RESTRICT,
+     snapshot_id text NOT NULL REFERENCES market_snapshot_questions(id) ON DELETE RESTRICT,
+     observation_id text NOT NULL REFERENCES market_search_observations(id) ON DELETE RESTRICT,
+     canonical_url text NOT NULL,
+     final_url text,
+     registrable_domain text NOT NULL,
+     method text NOT NULL,
+     attempt_order integer NOT NULL,
+     stage text NOT NULL,
+     outcome text NOT NULL,
+     http_status integer,
+     robots_outcome text,
+     content_type text,
+     content_bytes integer,
+     duration_ms integer NOT NULL,
+     extractor_version text,
+     decoder_version text,
+     browser_policy_version text,
+     retry_eligible boolean NOT NULL,
+     browser_eligible boolean NOT NULL,
+     safe_detail text,
+     started_at timestamptz NOT NULL,
+     completed_at timestamptz NOT NULL,
+     CONSTRAINT public_source_retrieval_attempts_method_check CHECK(method IN ('http','browser')),
+     CONSTRAINT public_source_retrieval_attempts_stage_check CHECK(stage IN ('candidate_selected','dns_validation','robots_evaluation','http_request','http_response_validation','document_decoding','content_extraction','question_relevance','subject_resolution','evidence_classification','terminal')),
+     CONSTRAINT public_source_retrieval_attempts_outcome_check CHECK(outcome IN ('available','duplicate','domain_cap','question_budget_exhausted','unsafe_destination','dns_failed','connect_timeout','tls_failed','robots_denied','robots_unavailable','redirect_invalid','redirect_limit','http_403','http_404','http_429','http_5xx','challenge_detected','authentication_required','unsupported_content_type','response_too_large','body_empty','javascript_shell','decoding_failed','extraction_failed','irrelevant_to_question','subject_ambiguous','contradictory','evidence_rejected','caller_aborted','phase_deadline','worker_deadline','internal_failure')),
+     CONSTRAINT public_source_retrieval_attempts_url_check CHECK(canonical_url ~ '^https?://' AND (final_url IS NULL OR final_url ~ '^https?://')),
+     CONSTRAINT public_source_retrieval_attempts_order_check CHECK(attempt_order >= 0),
+     CONSTRAINT public_source_retrieval_attempts_status_check CHECK(http_status IS NULL OR http_status BETWEEN 100 AND 599),
+     CONSTRAINT public_source_retrieval_attempts_robots_check CHECK(robots_outcome IS NULL OR robots_outcome IN ('allowed','denied','missing','unavailable')),
+     CONSTRAINT public_source_retrieval_attempts_size_check CHECK(content_bytes IS NULL OR content_bytes >= 0),
+     CONSTRAINT public_source_retrieval_attempts_duration_check CHECK(duration_ms >= 0),
+     CONSTRAINT public_source_retrieval_attempts_detail_check CHECK(safe_detail IS NULL OR char_length(safe_detail) <= 240),
+     CONSTRAINT public_source_retrieval_attempts_time_check CHECK(completed_at >= started_at)
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS public_source_retrieval_attempts_scope_uidx ON public_source_retrieval_attempts(snapshot_id,question_id,canonical_url,method,attempt_order)`,
+  `CREATE INDEX IF NOT EXISTS public_source_retrieval_attempts_question_idx ON public_source_retrieval_attempts(report_id,job_id,question_id,attempt_order)`,
+  `DROP TRIGGER IF EXISTS public_source_retrieval_attempts_immutability_trigger ON public_source_retrieval_attempts`,
+  `CREATE TRIGGER public_source_retrieval_attempts_immutability_trigger BEFORE UPDATE OR DELETE ON public_source_retrieval_attempts FOR EACH ROW EXECUTE FUNCTION ogc_prevent_market_immutable_row_mutation()`,
+  `CREATE TABLE IF NOT EXISTS question_acquisition_checkpoints (
+     identity_hash text PRIMARY KEY,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     question_id text NOT NULL REFERENCES report_business_questions(id) ON DELETE RESTRICT,
+     snapshot_id text NOT NULL REFERENCES market_snapshot_questions(id) ON DELETE RESTRICT,
+     candidate_pool_hash text NOT NULL,
+     state text NOT NULL,
+     planned_candidates integer NOT NULL,
+     attempted_candidates integer NOT NULL,
+     remaining_candidates integer NOT NULL,
+     returned_observations integer NOT NULL,
+     extracted_documents integer NOT NULL,
+     eligible_evidence_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+     independent_domains jsonb NOT NULL DEFAULT '[]'::jsonb,
+     query_rewrites_used integer NOT NULL,
+     http_budget_used integer NOT NULL,
+     browser_budget_used integer NOT NULL,
+     revision integer NOT NULL,
+     updated_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT question_acquisition_checkpoints_hash_check CHECK(identity_hash ~ '^[a-f0-9]{64}$' AND candidate_pool_hash ~ '^[a-f0-9]{64}$'),
+     CONSTRAINT question_acquisition_checkpoints_state_check CHECK(state IN ('collecting','evidence_target_met','exhausted','collection_failed')),
+     CONSTRAINT question_acquisition_checkpoints_count_check CHECK(planned_candidates >= 0 AND attempted_candidates >= 0 AND remaining_candidates >= 0 AND returned_observations >= 0 AND extracted_documents >= 0 AND query_rewrites_used >= 0 AND http_budget_used >= 0 AND browser_budget_used >= 0 AND revision >= 1),
+     CONSTRAINT question_acquisition_checkpoints_candidate_check CHECK(attempted_candidates + remaining_candidates <= planned_candidates),
+     CONSTRAINT question_acquisition_checkpoints_evidence_check CHECK(jsonb_typeof(eligible_evidence_ids)='array' AND jsonb_typeof(independent_domains)='array')
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS question_acquisition_checkpoints_job_question_uidx ON question_acquisition_checkpoints(job_id,question_id)`
+] as const;
+
+export const V26_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_methodology_contract_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_methodology_contract_check CHECK (
+     (product_contract = 'legacy_website_audit_v1' AND fulfillment_methodology IS NULL AND recommendation_report_version IS NULL)
+     OR (product_contract = 'recommendation_forensics_v1'
+       AND fulfillment_methodology IS NOT NULL AND recommendation_report_version IS NOT NULL
+       AND ((fulfillment_methodology = 'answer_engine_recommendation_forensics_v1' AND recommendation_report_version = 1)
+         OR (fulfillment_methodology = 'public_search_source_forensics_v1' AND recommendation_report_version = 2)
+         OR (fulfillment_methodology = 'two_stage_geo_report_v4' AND recommendation_report_version = 4)))
+   )`,
+  `ALTER TABLE payment_orders DROP CONSTRAINT IF EXISTS payment_orders_methodology_product_check`,
+  `ALTER TABLE payment_orders ADD CONSTRAINT payment_orders_methodology_product_check CHECK (
+     (product_code = 'recommendation_forensics_v1'
+       AND fulfillment_methodology IS NOT NULL AND recommendation_report_version IS NOT NULL
+       AND ((fulfillment_methodology = 'answer_engine_recommendation_forensics_v1' AND recommendation_report_version = 1)
+         OR (fulfillment_methodology = 'public_search_source_forensics_v1' AND recommendation_report_version = 2)
+         OR (fulfillment_methodology = 'two_stage_geo_report_v4' AND recommendation_report_version = 4)))
+     OR (product_code <> 'recommendation_forensics_v1' AND fulfillment_methodology IS NULL AND recommendation_report_version IS NULL)
+   )`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_reason_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration','paid_report_correction','staging_artifact_refresh','replacement_fulfillment','v4_diagnosis_enhancement'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_artifact_contract_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_artifact_contract_check CHECK (artifact_contract IS NULL OR artifact_contract IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3','combined_geo_report_v4'))`,
+  `ALTER TABLE report_access_tokens DROP CONSTRAINT IF EXISTS report_access_tokens_artifact_scope_check`,
+  `ALTER TABLE report_access_tokens ADD CONSTRAINT report_access_tokens_artifact_scope_check CHECK (artifact_scope IN ('legacy_website_audit_v1','recommendation_forensics_v1','combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3','combined_geo_report_v4'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_v4_methodology_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_v4_methodology_check CHECK (
+     (artifact_contract='combined_geo_report_v4' AND fulfillment_methodology='two_stage_geo_report_v4' AND recommendation_report_version=4)
+     OR ((artifact_contract IS NULL OR artifact_contract<>'combined_geo_report_v4') AND (fulfillment_methodology IS NULL OR fulfillment_methodology<>'two_stage_geo_report_v4'))
+   )`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_v4_enhancement_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_v4_enhancement_check CHECK (
+     reason <> 'v4_diagnosis_enhancement'
+     OR (tier='deep' AND product_contract='recommendation_forensics_v1'
+       AND fulfillment_methodology='two_stage_geo_report_v4' AND recommendation_report_version=4
+       AND artifact_contract='combined_geo_report_v4' AND business_question_set_id IS NOT NULL
+       AND credit_reservation_id IS NULL AND correction_id IS NULL AND replacement_fulfillment_id IS NULL)
+   )`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_contract_check`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_artifact_contract_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_contract_check CHECK (artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3','combined_geo_report_v4'))`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_kind_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_kind_check CHECK (revision_kind IN ('generation','correction','presentation_refresh','evidence_refresh','replacement','diagnosis_enhancement'))`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_lineage_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_lineage_check CHECK (
+     (revision_kind IN ('presentation_refresh','evidence_refresh','diagnosis_enhancement') AND source_artifact_revision_id IS NOT NULL AND correction_id IS NULL AND replacement_fulfillment_id IS NULL)
+     OR (revision_kind='replacement' AND source_artifact_revision_id IS NULL AND correction_id IS NULL AND replacement_fulfillment_id IS NOT NULL)
+     OR (revision_kind IN ('generation','correction') AND source_artifact_revision_id IS NULL AND replacement_fulfillment_id IS NULL)
+   )`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_v4_kind_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_v4_kind_check CHECK (
+     (artifact_contract='combined_geo_report_v4' AND revision_kind IN ('generation','diagnosis_enhancement'))
+     OR (artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND revision_kind<>'diagnosis_enhancement')
+   )`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_v4_diagnosis_enhancement_source() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE source_contract text; source_kind text; source_status text; source_report_id text; source_order_id text;
+   BEGIN
+     IF NEW.revision_kind <> 'diagnosis_enhancement' THEN RETURN NEW; END IF;
+     SELECT artifact_contract, revision_kind, status, report_id, order_id
+       INTO source_contract, source_kind, source_status, source_report_id, source_order_id
+       FROM report_artifact_revisions WHERE id=NEW.source_artifact_revision_id;
+     IF source_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR source_kind IS DISTINCT FROM 'generation'
+       OR source_status NOT IN ('ready','active')
+       OR source_report_id IS DISTINCT FROM NEW.report_id
+       OR source_order_id IS DISTINCT FROM NEW.order_id THEN
+       RAISE EXCEPTION 'A V4 diagnosis enhancement must extend a ready core V4 revision for the same report and order.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_artifact_revisions_v4_diagnosis_source_trigger ON report_artifact_revisions`,
+  `CREATE TRIGGER report_artifact_revisions_v4_diagnosis_source_trigger BEFORE INSERT OR UPDATE ON report_artifact_revisions FOR EACH ROW EXECUTE FUNCTION ogc_validate_v4_diagnosis_enhancement_source()`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_ready_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_ready_check CHECK (
+     status NOT IN ('ready','active')
+     OR (ready_at IS NOT NULL AND html_sha256 IS NOT NULL AND (
+       (artifact_contract='combined_geo_report_v4' AND pdf_sha256 IS NULL AND pdf_storage_key IS NULL)
+       OR (artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3') AND pdf_sha256 IS NOT NULL AND pdf_storage_key IS NOT NULL)
+     ))
+   )`,
+  `CREATE TABLE IF NOT EXISTS report_v4_site_snapshots (
+     id text PRIMARY KEY,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     site_key text NOT NULL,
+     status text NOT NULL,
+     captured_at timestamptz NOT NULL,
+     completed_at timestamptz,
+     collector_config_identity_hash text NOT NULL,
+     content_identity_hash text,
+     candidate_url_count integer NOT NULL DEFAULT 0,
+     analyzable_page_count integer NOT NULL DEFAULT 0,
+     excluded_page_count integer NOT NULL DEFAULT 0,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT report_v4_site_snapshots_site_check CHECK(length(btrim(site_key)) > 0),
+     CONSTRAINT report_v4_site_snapshots_status_check CHECK(status IN ('collecting','completed','completed_limited','unavailable','custom_service')),
+     CONSTRAINT report_v4_site_snapshots_hash_check CHECK(
+       collector_config_identity_hash ~ '^[a-f0-9]{64}$'
+       AND (content_identity_hash IS NULL OR content_identity_hash ~ '^[a-f0-9]{64}$')
+     ),
+     CONSTRAINT report_v4_site_snapshots_count_check CHECK(
+       candidate_url_count >= 0 AND analyzable_page_count >= 0 AND excluded_page_count >= 0
+       AND candidate_url_count >= analyzable_page_count + excluded_page_count
+     ),
+     CONSTRAINT report_v4_site_snapshots_terminal_shape_check CHECK(
+       (status='collecting' AND completed_at IS NULL AND content_identity_hash IS NULL)
+       OR (status='completed' AND completed_at IS NOT NULL AND completed_at >= captured_at AND content_identity_hash IS NOT NULL AND analyzable_page_count BETWEEN 1 AND 50)
+       OR (status='completed_limited' AND completed_at IS NOT NULL AND completed_at >= captured_at AND content_identity_hash IS NOT NULL AND analyzable_page_count BETWEEN 1 AND 50 AND excluded_page_count > 0)
+       OR (status='unavailable' AND completed_at IS NOT NULL AND completed_at >= captured_at AND content_identity_hash IS NOT NULL AND analyzable_page_count=0)
+       OR (status='custom_service' AND completed_at IS NOT NULL AND completed_at >= captured_at AND content_identity_hash IS NOT NULL AND analyzable_page_count >= 51)
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_site_snapshots_report_identity_uidx ON report_v4_site_snapshots(id,report_id)`,
+  `CREATE INDEX IF NOT EXISTS report_v4_site_snapshots_report_status_idx ON report_v4_site_snapshots(report_id,status,captured_at)`,
+  `CREATE TABLE IF NOT EXISTS report_v4_site_snapshot_pages (
+     id text PRIMARY KEY,
+     snapshot_id text NOT NULL REFERENCES report_v4_site_snapshots(id) ON DELETE RESTRICT,
+     ordinal integer NOT NULL,
+     normalized_url text NOT NULL,
+     analyzable boolean NOT NULL,
+     read_mode text,
+     summary text,
+     content_hash text,
+     exclusion_reason text,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT report_v4_site_snapshot_pages_ordinal_check CHECK(ordinal > 0),
+     CONSTRAINT report_v4_site_snapshot_pages_url_check CHECK(normalized_url ~ '^https?://'),
+     CONSTRAINT report_v4_site_snapshot_pages_read_mode_check CHECK(read_mode IS NULL OR read_mode IN ('direct_readable','js_dependent')),
+     CONSTRAINT report_v4_site_snapshot_pages_hash_check CHECK(content_hash IS NULL OR content_hash ~ '^[a-f0-9]{64}$'),
+     CONSTRAINT report_v4_site_snapshot_pages_shape_check CHECK(
+       (analyzable=true AND read_mode IS NOT NULL AND summary IS NOT NULL AND length(btrim(summary)) > 0 AND content_hash IS NOT NULL AND exclusion_reason IS NULL)
+       OR (analyzable=false AND read_mode IS NULL AND summary IS NULL AND content_hash IS NULL AND exclusion_reason IS NOT NULL AND length(btrim(exclusion_reason)) > 0)
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_site_snapshot_pages_ordinal_uidx ON report_v4_site_snapshot_pages(snapshot_id,ordinal)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_site_snapshot_pages_url_uidx ON report_v4_site_snapshot_pages(snapshot_id,normalized_url)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_site_snapshot_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF OLD.status IN ('completed','completed_limited','unavailable','custom_service') THEN
+       RAISE EXCEPTION 'A completed V4 site snapshot is immutable.';
+     END IF;
+     IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_site_snapshots_immutability_trigger ON report_v4_site_snapshots`,
+  `CREATE TRIGGER report_v4_site_snapshots_immutability_trigger BEFORE UPDATE OR DELETE ON report_v4_site_snapshots FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_site_snapshot_mutation()`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_site_snapshot_page_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE old_status text; new_status text;
+   BEGIN
+     IF TG_OP <> 'INSERT' THEN
+       SELECT status INTO old_status FROM report_v4_site_snapshots WHERE id=OLD.snapshot_id;
+       IF old_status IN ('completed','completed_limited','unavailable','custom_service') THEN
+         RAISE EXCEPTION 'Pages of a completed V4 site snapshot are immutable.';
+       END IF;
+     END IF;
+     IF TG_OP <> 'DELETE' THEN
+       SELECT status INTO new_status FROM report_v4_site_snapshots WHERE id=NEW.snapshot_id;
+       IF new_status IS DISTINCT FROM 'collecting' THEN
+         RAISE EXCEPTION 'V4 site snapshot pages may be written only while collecting.';
+       END IF;
+     END IF;
+     IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_site_snapshot_pages_immutability_trigger ON report_v4_site_snapshot_pages`,
+  `CREATE TRIGGER report_v4_site_snapshot_pages_immutability_trigger BEFORE INSERT OR UPDATE OR DELETE ON report_v4_site_snapshot_pages FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_site_snapshot_page_mutation()`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_business_question_sets_v4_identity_uidx ON report_business_question_sets(id,report_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_business_questions_v4_identity_uidx ON report_business_questions(id,question_set_id,ordinal)`,
+  `CREATE TABLE IF NOT EXISTS report_v4_question_checkpoints (
+     identity_hash text PRIMARY KEY,
+     report_id text NOT NULL,
+     job_id text NOT NULL,
+     question_set_id text NOT NULL,
+     question_id text NOT NULL,
+     snapshot_id text NOT NULL,
+     ordinal integer NOT NULL,
+     state text NOT NULL,
+     question_identity_hash text NOT NULL,
+     model_config_identity_hash text NOT NULL,
+     input_identity_hash text NOT NULL,
+     provider_call_count integer NOT NULL DEFAULT 0,
+     answer_payload jsonb,
+     source_payload jsonb NOT NULL DEFAULT '[]'::jsonb,
+     answer_content_hash text,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     updated_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT report_v4_question_checkpoints_job_report_fkey FOREIGN KEY(job_id,report_id) REFERENCES scan_jobs(id,report_id) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_question_checkpoints_question_fkey FOREIGN KEY(question_id,question_set_id,ordinal) REFERENCES report_business_questions(id,question_set_id,ordinal) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_question_checkpoints_question_set_fkey FOREIGN KEY(question_set_id,report_id) REFERENCES report_business_question_sets(id,report_id) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_question_checkpoints_snapshot_fkey FOREIGN KEY(snapshot_id,report_id) REFERENCES report_v4_site_snapshots(id,report_id) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_question_checkpoints_ordinal_check CHECK(ordinal BETWEEN 1 AND 3),
+     CONSTRAINT report_v4_question_checkpoints_state_check CHECK(state IN ('queued','answering','retrying','answered','unavailable')),
+     CONSTRAINT report_v4_question_checkpoints_hash_check CHECK(
+       identity_hash ~ '^[a-f0-9]{64}$' AND question_identity_hash ~ '^[a-f0-9]{64}$'
+       AND model_config_identity_hash ~ '^[a-f0-9]{64}$' AND input_identity_hash ~ '^[a-f0-9]{64}$'
+       AND (answer_content_hash IS NULL OR answer_content_hash ~ '^[a-f0-9]{64}$')
+     ),
+     CONSTRAINT report_v4_question_checkpoints_call_count_check CHECK(provider_call_count BETWEEN 0 AND 2),
+     CONSTRAINT report_v4_question_checkpoints_source_check CHECK(jsonb_typeof(source_payload)='array' AND jsonb_array_length(source_payload) <= 5),
+     CONSTRAINT report_v4_question_checkpoints_answer_shape_check CHECK(
+       (state='answered' AND provider_call_count BETWEEN 1 AND 2 AND answer_payload IS NOT NULL AND answer_content_hash IS NOT NULL)
+       OR (state<>'answered' AND answer_payload IS NULL AND answer_content_hash IS NULL)
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_question_checkpoints_job_ordinal_uidx ON report_v4_question_checkpoints(job_id,ordinal)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_question_checkpoints_job_question_uidx ON report_v4_question_checkpoints(job_id,question_id)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_terminal_checkpoint_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF OLD.state IN ('answered','unavailable') THEN RAISE EXCEPTION 'A terminal V4 question checkpoint is immutable.'; END IF;
+     IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_question_checkpoints_answer_immutability_trigger ON report_v4_question_checkpoints`,
+  `DROP TRIGGER IF EXISTS report_v4_question_checkpoints_terminal_immutability_trigger ON report_v4_question_checkpoints`,
+  `CREATE TRIGGER report_v4_question_checkpoints_terminal_immutability_trigger BEFORE UPDATE OR DELETE ON report_v4_question_checkpoints FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_terminal_checkpoint_mutation()`
+] as const;
+
+export const V27_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS report_v4_config_snapshots (
+     id text PRIMARY KEY,
+     report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+     order_id text NOT NULL REFERENCES payment_orders(id) ON DELETE RESTRICT,
+     core_job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+     identity_hash text NOT NULL,
+     model_profile_id text NOT NULL,
+     model_profile_hash text NOT NULL,
+     model_profile_payload jsonb NOT NULL,
+     report_profile_id text NOT NULL,
+     report_profile_hash text NOT NULL,
+     report_profile_payload jsonb NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT report_v4_config_snapshots_hash_check CHECK(
+       identity_hash ~ '^[a-f0-9]{64}$'
+       AND model_profile_hash ~ '^[a-f0-9]{64}$'
+       AND report_profile_hash ~ '^[a-f0-9]{64}$'
+     ),
+     CONSTRAINT report_v4_config_snapshots_identity_id_check CHECK(id = 'v4-config-' || identity_hash),
+     CONSTRAINT report_v4_config_snapshots_profile_id_check CHECK(
+       length(btrim(model_profile_id)) > 0 AND length(btrim(report_profile_id)) > 0
+     ),
+     CONSTRAINT report_v4_config_snapshots_payload_check CHECK(
+       jsonb_typeof(model_profile_payload)='object' AND jsonb_typeof(report_profile_payload)='object'
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_config_snapshots_report_uidx ON report_v4_config_snapshots(report_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_config_snapshots_order_uidx ON report_v4_config_snapshots(order_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_config_snapshots_core_job_uidx ON report_v4_config_snapshots(core_job_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_config_snapshots_binding_uidx ON report_v4_config_snapshots(id,report_id,order_id,core_job_id)`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_report_v4_config_snapshot_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE order_report_id text; order_fulfillment_job_id text; order_payment_status text; order_question_set_id text;
+     order_product_code text; order_methodology text; order_version integer;
+     job_report_id text; job_tier text; job_product_contract text; job_methodology text;
+     job_version integer; job_artifact_contract text; job_reason text; job_question_set_id text;
+   BEGIN
+     SELECT report_id,fulfillment_job_id,payment_status,business_question_set_id,product_code,fulfillment_methodology,recommendation_report_version
+       INTO order_report_id,order_fulfillment_job_id,order_payment_status,order_question_set_id,order_product_code,order_methodology,order_version
+       FROM payment_orders WHERE id=NEW.order_id;
+     SELECT report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,artifact_contract,reason,business_question_set_id
+       INTO job_report_id,job_tier,job_product_contract,job_methodology,job_version,job_artifact_contract,job_reason,job_question_set_id
+       FROM scan_jobs WHERE id=NEW.core_job_id;
+     IF order_report_id IS DISTINCT FROM NEW.report_id
+       OR order_fulfillment_job_id IS DISTINCT FROM NEW.core_job_id
+       OR order_payment_status IS DISTINCT FROM 'paid'
+       OR order_question_set_id IS NULL
+       OR order_question_set_id IS DISTINCT FROM job_question_set_id
+       OR order_product_code IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR order_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR order_version IS DISTINCT FROM 4
+       OR job_report_id IS DISTINCT FROM NEW.report_id
+       OR job_tier IS DISTINCT FROM 'deep'
+       OR job_product_contract IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR job_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR job_version IS DISTINCT FROM 4
+       OR job_artifact_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR job_reason IS DISTINCT FROM 'standard'
+       OR job_question_set_id IS NULL THEN
+       RAISE EXCEPTION 'A V4 configuration snapshot requires one exact paid order and standard core V4 job binding.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_config_snapshots_binding_trigger ON report_v4_config_snapshots`,
+  `CREATE TRIGGER report_v4_config_snapshots_binding_trigger BEFORE INSERT ON report_v4_config_snapshots FOR EACH ROW EXECUTE FUNCTION ogc_validate_report_v4_config_snapshot_binding()`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_config_snapshot_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     RAISE EXCEPTION 'A V4 runtime configuration snapshot is immutable.';
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_config_snapshots_immutability_trigger ON report_v4_config_snapshots`,
+  `CREATE TRIGGER report_v4_config_snapshots_immutability_trigger BEFORE UPDATE OR DELETE ON report_v4_config_snapshots FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_config_snapshot_mutation()`,
+  `ALTER TABLE report_artifact_revisions ADD COLUMN IF NOT EXISTS config_snapshot_id text`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_config_snapshot_fkey`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_config_snapshot_fkey FOREIGN KEY(config_snapshot_id) REFERENCES report_v4_config_snapshots(id) ON DELETE RESTRICT`,
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_v4_config_shape_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_v4_config_shape_check CHECK (
+     artifact_contract='combined_geo_report_v4' OR config_snapshot_id IS NULL
+   )`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_v4_artifact_config_snapshot() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_report_id text; snapshot_order_id text; snapshot_core_job_id text;
+     source_contract text; source_kind text; source_status text; source_report_id text;
+     source_order_id text; source_config_snapshot_id text;
+     core_job_question_set_id text; enhancement_job_report_id text; enhancement_job_tier text;
+     enhancement_job_product_contract text; enhancement_job_methodology text; enhancement_job_version integer;
+     enhancement_job_artifact_contract text; enhancement_job_reason text; enhancement_job_question_set_id text;
+     report_active_revision_id text;
+   BEGIN
+     IF TG_OP='UPDATE' AND OLD.config_snapshot_id IS NOT NULL AND (
+       NEW.config_snapshot_id IS DISTINCT FROM OLD.config_snapshot_id
+       OR NEW.report_id IS DISTINCT FROM OLD.report_id
+       OR NEW.order_id IS DISTINCT FROM OLD.order_id
+       OR NEW.job_id IS DISTINCT FROM OLD.job_id
+       OR NEW.revision_kind IS DISTINCT FROM OLD.revision_kind
+       OR NEW.source_artifact_revision_id IS DISTINCT FROM OLD.source_artifact_revision_id
+       OR NEW.artifact_contract IS DISTINCT FROM OLD.artifact_contract
+     ) THEN
+       RAISE EXCEPTION 'A bound V4 artifact configuration and lineage identity is immutable.';
+     END IF;
+     IF NEW.artifact_contract <> 'combined_geo_report_v4' THEN
+       IF NEW.config_snapshot_id IS NOT NULL THEN
+         RAISE EXCEPTION 'Historical artifact contracts cannot bind a V4 configuration snapshot.';
+       END IF;
+       RETURN NEW;
+     END IF;
+     IF NEW.config_snapshot_id IS NULL THEN
+       IF NEW.revision_kind='diagnosis_enhancement' THEN
+         SELECT artifact_contract,revision_kind,status,report_id,order_id
+           INTO source_contract,source_kind,source_status,source_report_id,source_order_id
+           FROM report_artifact_revisions WHERE id=NEW.source_artifact_revision_id;
+         IF source_contract IS DISTINCT FROM 'combined_geo_report_v4'
+           OR source_kind IS DISTINCT FROM 'generation'
+           OR source_status NOT IN ('ready','active')
+           OR source_report_id IS DISTINCT FROM NEW.report_id
+           OR source_order_id IS DISTINCT FROM NEW.order_id THEN
+           RAISE EXCEPTION 'A historical V4 diagnosis enhancement must preserve its ready core lineage.';
+         END IF;
+       END IF;
+       RETURN NEW;
+     END IF;
+     SELECT report_id,order_id,core_job_id
+       INTO snapshot_report_id,snapshot_order_id,snapshot_core_job_id
+       FROM report_v4_config_snapshots WHERE id=NEW.config_snapshot_id;
+     IF snapshot_report_id IS DISTINCT FROM NEW.report_id OR snapshot_order_id IS DISTINCT FROM NEW.order_id THEN
+       RAISE EXCEPTION 'A V4 artifact configuration snapshot must match the same report and order.';
+     END IF;
+     IF NEW.revision_kind='generation' THEN
+       IF snapshot_core_job_id IS DISTINCT FROM NEW.job_id THEN
+         RAISE EXCEPTION 'A V4 core revision must use the configuration snapshot locked by its core job.';
+       END IF;
+       RETURN NEW;
+     END IF;
+     SELECT business_question_set_id INTO core_job_question_set_id
+       FROM scan_jobs WHERE id=snapshot_core_job_id;
+     SELECT report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,
+       artifact_contract,reason,business_question_set_id
+       INTO enhancement_job_report_id,enhancement_job_tier,enhancement_job_product_contract,
+       enhancement_job_methodology,enhancement_job_version,enhancement_job_artifact_contract,
+       enhancement_job_reason,enhancement_job_question_set_id
+       FROM scan_jobs WHERE id=NEW.job_id;
+     IF enhancement_job_report_id IS DISTINCT FROM NEW.report_id
+       OR enhancement_job_tier IS DISTINCT FROM 'deep'
+       OR enhancement_job_product_contract IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR enhancement_job_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR enhancement_job_version IS DISTINCT FROM 4
+       OR enhancement_job_artifact_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR enhancement_job_reason IS DISTINCT FROM 'v4_diagnosis_enhancement'
+       OR enhancement_job_question_set_id IS NULL
+       OR enhancement_job_question_set_id IS DISTINCT FROM core_job_question_set_id THEN
+       RAISE EXCEPTION 'A V4 diagnosis enhancement requires the exact same-report V4 enhancement job and core question set.';
+     END IF;
+     SELECT artifact_contract,revision_kind,status,report_id,order_id,config_snapshot_id
+       INTO source_contract,source_kind,source_status,source_report_id,source_order_id,source_config_snapshot_id
+       FROM report_artifact_revisions WHERE id=NEW.source_artifact_revision_id;
+     IF source_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR source_kind IS DISTINCT FROM 'generation'
+       OR source_report_id IS DISTINCT FROM NEW.report_id
+       OR source_order_id IS DISTINCT FROM NEW.order_id
+       OR source_config_snapshot_id IS DISTINCT FROM NEW.config_snapshot_id THEN
+       RAISE EXCEPTION 'A V4 diagnosis enhancement must extend the active same-report/order core using the same configuration snapshot.';
+     END IF;
+     IF source_status IS DISTINCT FROM 'active' THEN
+       SELECT active_artifact_revision_id INTO report_active_revision_id
+         FROM scan_reports WHERE id=NEW.report_id;
+       IF NOT (TG_OP='UPDATE' AND OLD.status='ready' AND NEW.status='active'
+         AND source_status='ready'
+         AND report_active_revision_id IS NOT DISTINCT FROM NEW.source_artifact_revision_id) THEN
+         RAISE EXCEPTION 'A V4 diagnosis enhancement source must remain active except during its atomic ready-to-active handoff.';
+       END IF;
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_artifact_revisions_v4_diagnosis_source_trigger ON report_artifact_revisions`,
+  `DROP TRIGGER IF EXISTS report_artifact_revisions_v4_config_snapshot_trigger ON report_artifact_revisions`,
+  `CREATE TRIGGER report_artifact_revisions_v4_config_snapshot_trigger BEFORE INSERT OR UPDATE ON report_artifact_revisions FOR EACH ROW EXECUTE FUNCTION ogc_validate_v4_artifact_config_snapshot()`
+] as const;
+
+export const V28_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS site_snapshot_id text`,
+  `ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS site_snapshot_id text`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_site_snapshot_fkey`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_site_snapshot_fkey FOREIGN KEY(site_snapshot_id) REFERENCES report_v4_site_snapshots(id) ON DELETE RESTRICT`,
+  `ALTER TABLE payment_orders DROP CONSTRAINT IF EXISTS payment_orders_site_snapshot_fkey`,
+  `ALTER TABLE payment_orders ADD CONSTRAINT payment_orders_site_snapshot_fkey FOREIGN KEY(site_snapshot_id) REFERENCES report_v4_site_snapshots(id) ON DELETE RESTRICT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS scan_jobs_site_snapshot_binding_uidx ON scan_jobs(id,report_id,site_snapshot_id)`,
+  `ALTER TABLE payment_orders DROP CONSTRAINT IF EXISTS payment_orders_fulfillment_snapshot_fkey`,
+  `ALTER TABLE payment_orders ADD CONSTRAINT payment_orders_fulfillment_snapshot_fkey FOREIGN KEY(fulfillment_job_id,report_id,site_snapshot_id) REFERENCES scan_jobs(id,report_id,site_snapshot_id) MATCH SIMPLE ON DELETE RESTRICT`,
+  `CREATE INDEX IF NOT EXISTS scan_jobs_site_snapshot_idx ON scan_jobs(site_snapshot_id)`,
+  `CREATE INDEX IF NOT EXISTS payment_orders_site_snapshot_idx ON payment_orders(site_snapshot_id)`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_scan_job_site_snapshot_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_report_id text; snapshot_status text; snapshot_content_identity_hash text;
+   BEGIN
+     IF TG_OP='UPDATE' AND OLD.site_snapshot_id IS NOT NULL
+       AND NEW.site_snapshot_id IS DISTINCT FROM OLD.site_snapshot_id THEN
+       RAISE EXCEPTION 'A non-null site snapshot binding is immutable.';
+     END IF;
+     IF NEW.site_snapshot_id IS NULL THEN
+       RETURN NEW;
+     END IF;
+     IF NEW.tier IS DISTINCT FROM 'deep'
+       OR NEW.product_contract IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR NEW.fulfillment_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR NEW.recommendation_report_version IS DISTINCT FROM 4
+       OR NEW.artifact_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR NEW.reason IS DISTINCT FROM 'standard' THEN
+       RAISE EXCEPTION 'A non-null site snapshot requires an exact V4 standard core job.';
+     END IF;
+     SELECT report_id,status,content_identity_hash
+       INTO snapshot_report_id,snapshot_status,snapshot_content_identity_hash
+       FROM report_v4_site_snapshots WHERE id=NEW.site_snapshot_id;
+     IF snapshot_report_id IS DISTINCT FROM NEW.report_id THEN
+       RAISE EXCEPTION 'A site snapshot binding must belong to the same report.';
+     END IF;
+     IF snapshot_status NOT IN ('completed','completed_limited')
+       OR snapshot_content_identity_hash IS NULL THEN
+       RAISE EXCEPTION 'A site snapshot binding requires a terminal completed snapshot with a content hash.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS scan_jobs_site_snapshot_binding_trigger ON scan_jobs`,
+  `CREATE TRIGGER scan_jobs_site_snapshot_binding_trigger BEFORE INSERT OR UPDATE ON scan_jobs FOR EACH ROW EXECUTE FUNCTION ogc_validate_scan_job_site_snapshot_binding()`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_payment_order_site_snapshot_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_report_id text; snapshot_status text; snapshot_content_identity_hash text;
+   BEGIN
+     IF TG_OP='UPDATE' AND OLD.site_snapshot_id IS NOT NULL
+       AND NEW.site_snapshot_id IS DISTINCT FROM OLD.site_snapshot_id THEN
+       RAISE EXCEPTION 'A non-null site snapshot binding is immutable.';
+     END IF;
+     IF NEW.site_snapshot_id IS NULL THEN
+       RETURN NEW;
+     END IF;
+     IF NEW.product_code IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR NEW.fulfillment_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR NEW.recommendation_report_version IS DISTINCT FROM 4 THEN
+       RAISE EXCEPTION 'A non-null site snapshot requires an exact V4 order.';
+     END IF;
+     SELECT report_id,status,content_identity_hash
+       INTO snapshot_report_id,snapshot_status,snapshot_content_identity_hash
+       FROM report_v4_site_snapshots WHERE id=NEW.site_snapshot_id;
+     IF snapshot_report_id IS DISTINCT FROM NEW.report_id THEN
+       RAISE EXCEPTION 'A site snapshot binding must belong to the same report.';
+     END IF;
+     IF snapshot_status NOT IN ('completed','completed_limited')
+       OR snapshot_content_identity_hash IS NULL THEN
+       RAISE EXCEPTION 'A site snapshot binding requires a terminal completed snapshot with a content hash.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS payment_orders_site_snapshot_binding_trigger ON payment_orders`,
+  `CREATE TRIGGER payment_orders_site_snapshot_binding_trigger BEFORE INSERT OR UPDATE ON payment_orders FOR EACH ROW EXECUTE FUNCTION ogc_validate_payment_order_site_snapshot_binding()`
+] as const;
+
+export const V29_DATABASE_MIGRATIONS = [
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_reason_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_reason_check CHECK (reason IN ('standard','system_recovery','locale_correction','staging_regeneration','paid_report_correction','staging_artifact_refresh','replacement_fulfillment','v4_diagnosis_enhancement','v4_pre_admission'))`,
+  `ALTER TABLE scan_jobs DROP CONSTRAINT IF EXISTS scan_jobs_v4_pre_admission_check`,
+  `ALTER TABLE scan_jobs ADD CONSTRAINT scan_jobs_v4_pre_admission_check CHECK (
+     reason<>'v4_pre_admission' OR (
+       tier='deep'
+       AND product_contract='recommendation_forensics_v1'
+       AND fulfillment_methodology='two_stage_geo_report_v4'
+       AND recommendation_report_version=4
+       AND artifact_contract='combined_geo_report_v4'
+       AND site_snapshot_id IS NULL
+       AND business_question_set_id IS NULL
+       AND credit_reservation_id IS NULL
+       AND correction_id IS NULL
+       AND replacement_fulfillment_id IS NULL
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS scan_jobs_v4_pre_admission_report_uidx
+   ON scan_jobs(report_id) WHERE reason='v4_pre_admission'`
+] as const;
+
+export const V30_DATABASE_MIGRATIONS = [
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_site_snapshot_pages_content_binding_uidx
+   ON report_v4_site_snapshot_pages(id,snapshot_id,content_hash)`,
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_page_summary_chunks_valid(candidate jsonb,retained_source_length integer)
+   RETURNS boolean LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+   DECLARE chunk jsonb; location jsonb; expected_order integer := 1;
+     location_id text; seen_location_ids text[] := ARRAY[]::text[];
+     start_offset integer; end_offset integer;
+   BEGIN
+     IF retained_source_length <= 0 OR jsonb_typeof(candidate) <> 'array'
+       OR jsonb_array_length(candidate) NOT BETWEEN 1 AND 8 THEN
+       RETURN false;
+     END IF;
+     FOR chunk IN SELECT value FROM jsonb_array_elements(candidate) LOOP
+       IF jsonb_typeof(chunk) <> 'object'
+         OR chunk - 'order' - 'summary' - 'sourceLocations' <> '{}'::jsonb
+         OR jsonb_typeof(chunk->'order') <> 'number'
+         OR (chunk->>'order') !~ '^[1-9][0-9]*$'
+         OR (chunk->>'order')::integer <> expected_order
+         OR jsonb_typeof(chunk->'summary') <> 'string'
+         OR length(btrim(chunk->>'summary')) NOT BETWEEN 1 AND 2000
+         OR jsonb_typeof(chunk->'sourceLocations') <> 'array'
+         OR jsonb_array_length(chunk->'sourceLocations') NOT BETWEEN 1 AND 16 THEN
+         RETURN false;
+       END IF;
+       FOR location IN SELECT value FROM jsonb_array_elements(chunk->'sourceLocations') LOOP
+         IF jsonb_typeof(location) <> 'object'
+           OR location - 'locationId' - 'startOffset' - 'endOffset' <> '{}'::jsonb
+           OR jsonb_typeof(location->'locationId') <> 'string'
+           OR length(btrim(location->>'locationId')) NOT BETWEEN 1 AND 500
+           OR jsonb_typeof(location->'startOffset') <> 'number'
+           OR jsonb_typeof(location->'endOffset') <> 'number'
+           OR (location->>'startOffset') !~ '^(0|[1-9][0-9]*)$'
+           OR (location->>'endOffset') !~ '^[1-9][0-9]*$' THEN
+           RETURN false;
+         END IF;
+         location_id := location->>'locationId';
+         start_offset := (location->>'startOffset')::integer;
+         end_offset := (location->>'endOffset')::integer;
+         IF location_id = ANY(seen_location_ids) OR end_offset <= start_offset OR end_offset > retained_source_length THEN
+           RETURN false;
+         END IF;
+         seen_location_ids := array_append(seen_location_ids,location_id);
+       END LOOP;
+       expected_order := expected_order + 1;
+     END LOOP;
+     RETURN true;
+   EXCEPTION WHEN numeric_value_out_of_range OR invalid_text_representation THEN
+     RETURN false;
+   END $$`,
+  `CREATE TABLE IF NOT EXISTS report_v4_page_summaries (
+     identity_hash text PRIMARY KEY,
+     report_id text NOT NULL,
+     snapshot_id text NOT NULL,
+     page_id text NOT NULL,
+     content_hash text NOT NULL,
+     source_length integer NOT NULL,
+     chunks jsonb NOT NULL,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT report_v4_page_summaries_snapshot_report_fkey
+       FOREIGN KEY(snapshot_id,report_id) REFERENCES report_v4_site_snapshots(id,report_id) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_page_summaries_page_content_fkey
+       FOREIGN KEY(page_id,snapshot_id,content_hash)
+       REFERENCES report_v4_site_snapshot_pages(id,snapshot_id,content_hash) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_page_summaries_hash_check CHECK(
+       identity_hash ~ '^[a-f0-9]{64}$' AND content_hash ~ '^[a-f0-9]{64}$'
+     ),
+     CONSTRAINT report_v4_page_summaries_source_length_check CHECK(source_length > 0),
+     CONSTRAINT report_v4_page_summaries_chunks_check CHECK(
+       ogc_report_v4_page_summary_chunks_valid(chunks,source_length)
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_page_summaries_page_uidx ON report_v4_page_summaries(page_id)`,
+  `CREATE INDEX IF NOT EXISTS report_v4_page_summaries_snapshot_idx ON report_v4_page_summaries(snapshot_id,page_id)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_page_summary_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_status text;
+   BEGIN
+     IF TG_OP <> 'INSERT' THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary is immutable.';
+     END IF;
+     SELECT status INTO snapshot_status FROM report_v4_site_snapshots WHERE id=NEW.snapshot_id;
+     IF snapshot_status IS DISTINCT FROM 'collecting' THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary may be persisted only while its snapshot is collecting.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_page_summaries_immutability_trigger ON report_v4_page_summaries`,
+  `CREATE TRIGGER report_v4_page_summaries_immutability_trigger
+   BEFORE INSERT OR UPDATE OR DELETE ON report_v4_page_summaries
+   FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_page_summary_mutation()`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_artifact_revisions_v4_diagnosis_source_uidx
+   ON report_artifact_revisions(source_artifact_revision_id)
+   WHERE artifact_contract='combined_geo_report_v4' AND revision_kind='diagnosis_enhancement'`,
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_source_audit_payload_valid(candidate jsonb,expected_question_id text)
+   RETURNS boolean LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+   DECLARE audit jsonb; source_id text; canonical_url text;
+     seen_source_ids text[] := ARRAY[]::text[]; seen_urls text[] := ARRAY[]::text[];
+   BEGIN
+     IF jsonb_typeof(candidate) <> 'array' OR jsonb_array_length(candidate) > 5 THEN
+       RETURN false;
+     END IF;
+     FOR audit IN SELECT value FROM jsonb_array_elements(candidate) LOOP
+       IF jsonb_typeof(audit) <> 'object'
+         OR audit - 'questionId' - 'sourceId' - 'canonicalUrl' - 'status' - 'summary' <> '{}'::jsonb
+         OR NOT (audit ?& ARRAY['questionId','sourceId','canonicalUrl','status'])
+         OR jsonb_typeof(audit->'questionId') <> 'string'
+         OR audit->>'questionId' <> expected_question_id
+         OR jsonb_typeof(audit->'sourceId') <> 'string'
+         OR length(btrim(audit->>'sourceId')) NOT BETWEEN 1 AND 500
+         OR jsonb_typeof(audit->'canonicalUrl') <> 'string'
+         OR length(audit->>'canonicalUrl') NOT BETWEEN 1 AND 5000
+         OR audit->>'canonicalUrl' !~ '^https?://[^[:space:]]+$'
+         OR jsonb_typeof(audit->'status') <> 'string'
+         OR audit->>'status' NOT IN ('available','inaccessible')
+         OR (audit ? 'summary' AND (
+           jsonb_typeof(audit->'summary') <> 'string'
+           OR length(btrim(audit->>'summary')) NOT BETWEEN 1 AND 5000
+           OR audit->>'status' <> 'available'
+         )) THEN
+         RETURN false;
+       END IF;
+       source_id := audit->>'sourceId';
+       canonical_url := audit->>'canonicalUrl';
+       IF source_id = ANY(seen_source_ids) OR canonical_url = ANY(seen_urls) THEN
+         RETURN false;
+       END IF;
+       seen_source_ids := array_append(seen_source_ids,source_id);
+       seen_urls := array_append(seen_urls,canonical_url);
+     END LOOP;
+     RETURN true;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_diagnosis_payload_valid(candidate jsonb)
+   RETURNS boolean LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+   DECLARE factor jsonb; action jsonb; ref jsonb; expected_priority integer := 1;
+     detailed_refs text[] := ARRAY[]::text[]; item_refs text[]; ref_value text;
+   BEGIN
+     IF jsonb_typeof(candidate) <> 'object'
+       OR candidate - 'selectionSummary' - 'observableFactors' - 'targetGap'
+         - 'recommendedActions' - 'detailedEvidenceRefs' <> '{}'::jsonb
+       OR NOT (candidate ?& ARRAY['selectionSummary','observableFactors','targetGap','recommendedActions','detailedEvidenceRefs'])
+       OR jsonb_typeof(candidate->'selectionSummary') <> 'string'
+       OR length(btrim(candidate->>'selectionSummary')) NOT BETWEEN 1 AND 5000
+       OR jsonb_typeof(candidate->'targetGap') <> 'string'
+       OR length(btrim(candidate->>'targetGap')) NOT BETWEEN 1 AND 5000
+       OR jsonb_typeof(candidate->'observableFactors') <> 'array'
+       OR jsonb_array_length(candidate->'observableFactors') <> 3
+       OR jsonb_typeof(candidate->'recommendedActions') <> 'array'
+       OR jsonb_array_length(candidate->'recommendedActions') <> 3
+       OR jsonb_typeof(candidate->'detailedEvidenceRefs') <> 'array'
+       OR jsonb_array_length(candidate->'detailedEvidenceRefs') NOT BETWEEN 1 AND 100 THEN
+       RETURN false;
+     END IF;
+     FOR ref IN SELECT value FROM jsonb_array_elements(candidate->'detailedEvidenceRefs') LOOP
+       IF jsonb_typeof(ref) <> 'string' OR length(btrim(ref #>> '{}')) NOT BETWEEN 1 AND 500 THEN
+         RETURN false;
+       END IF;
+       ref_value := ref #>> '{}';
+       IF ref_value = ANY(detailed_refs) THEN RETURN false; END IF;
+       detailed_refs := array_append(detailed_refs,ref_value);
+     END LOOP;
+     FOR factor IN SELECT value FROM jsonb_array_elements(candidate->'observableFactors') LOOP
+       IF jsonb_typeof(factor) <> 'object'
+         OR factor - 'kind' - 'observation' - 'evidenceRefs' <> '{}'::jsonb
+         OR NOT (factor ?& ARRAY['kind','observation','evidenceRefs'])
+         OR jsonb_typeof(factor->'kind') <> 'string'
+         OR factor->>'kind' NOT IN (
+           'problem_match','factual_specificity','entity_clarity','source_role',
+           'accessibility','freshness','target_clarity'
+         )
+         OR jsonb_typeof(factor->'observation') <> 'string'
+         OR length(btrim(factor->>'observation')) NOT BETWEEN 1 AND 5000
+         OR jsonb_typeof(factor->'evidenceRefs') <> 'array'
+         OR jsonb_array_length(factor->'evidenceRefs') NOT BETWEEN 1 AND 100 THEN
+         RETURN false;
+       END IF;
+       item_refs := ARRAY[]::text[];
+       FOR ref IN SELECT value FROM jsonb_array_elements(factor->'evidenceRefs') LOOP
+         IF jsonb_typeof(ref) <> 'string' OR length(btrim(ref #>> '{}')) NOT BETWEEN 1 AND 500 THEN RETURN false; END IF;
+         ref_value := ref #>> '{}';
+         IF NOT (ref_value = ANY(detailed_refs)) OR ref_value = ANY(item_refs) THEN RETURN false; END IF;
+         item_refs := array_append(item_refs,ref_value);
+       END LOOP;
+     END LOOP;
+     FOR action IN SELECT value FROM jsonb_array_elements(candidate->'recommendedActions') LOOP
+       IF jsonb_typeof(action) <> 'object'
+         OR action - 'priority' - 'action' - 'evidenceRefs' <> '{}'::jsonb
+         OR NOT (action ?& ARRAY['priority','action','evidenceRefs'])
+         OR jsonb_typeof(action->'priority') <> 'number'
+         OR (action->>'priority') !~ '^[1-3]$'
+         OR (action->>'priority')::integer <> expected_priority
+         OR jsonb_typeof(action->'action') <> 'string'
+         OR length(btrim(action->>'action')) NOT BETWEEN 1 AND 5000
+         OR jsonb_typeof(action->'evidenceRefs') <> 'array'
+         OR jsonb_array_length(action->'evidenceRefs') NOT BETWEEN 1 AND 100 THEN
+         RETURN false;
+       END IF;
+       item_refs := ARRAY[]::text[];
+       FOR ref IN SELECT value FROM jsonb_array_elements(action->'evidenceRefs') LOOP
+         IF jsonb_typeof(ref) <> 'string' OR length(btrim(ref #>> '{}')) NOT BETWEEN 1 AND 500 THEN RETURN false; END IF;
+         ref_value := ref #>> '{}';
+         IF NOT (ref_value = ANY(detailed_refs)) OR ref_value = ANY(item_refs) THEN RETURN false; END IF;
+         item_refs := array_append(item_refs,ref_value);
+       END LOOP;
+       expected_priority := expected_priority + 1;
+     END LOOP;
+     RETURN true;
+   EXCEPTION WHEN numeric_value_out_of_range OR invalid_text_representation THEN
+     RETURN false;
+   END $$`,
+  `CREATE TABLE IF NOT EXISTS report_v4_diagnosis_checkpoints (
+     identity_hash text PRIMARY KEY,
+     report_id text NOT NULL,
+     enhancement_job_id text NOT NULL,
+     core_artifact_revision_id text NOT NULL REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT,
+     config_snapshot_id text REFERENCES report_v4_config_snapshots(id) ON DELETE RESTRICT NOT NULL,
+     question_set_id text NOT NULL,
+     question_id text NOT NULL,
+     snapshot_id text NOT NULL,
+     ordinal integer NOT NULL,
+     state text NOT NULL,
+     input_identity_hash text NOT NULL,
+     provider_call_count integer NOT NULL DEFAULT 0,
+     source_audit_payload jsonb NOT NULL DEFAULT '[]'::jsonb,
+     diagnosis_payload jsonb,
+     diagnosis_content_hash text,
+     created_at timestamptz NOT NULL DEFAULT now(),
+     updated_at timestamptz NOT NULL DEFAULT now(),
+     CONSTRAINT report_v4_diagnosis_checkpoints_job_report_fkey
+       FOREIGN KEY(enhancement_job_id,report_id) REFERENCES scan_jobs(id,report_id) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_diagnosis_checkpoints_question_fkey
+       FOREIGN KEY(question_id,question_set_id,ordinal)
+       REFERENCES report_business_questions(id,question_set_id,ordinal) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_diagnosis_checkpoints_question_set_fkey
+       FOREIGN KEY(question_set_id,report_id) REFERENCES report_business_question_sets(id,report_id) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_diagnosis_checkpoints_snapshot_fkey
+       FOREIGN KEY(snapshot_id,report_id) REFERENCES report_v4_site_snapshots(id,report_id) ON DELETE RESTRICT,
+     CONSTRAINT report_v4_diagnosis_checkpoints_ordinal_check CHECK(ordinal BETWEEN 1 AND 3),
+     CONSTRAINT report_v4_diagnosis_checkpoints_state_check CHECK(state IN ('queued','running','completed','failed')),
+     CONSTRAINT report_v4_diagnosis_checkpoints_hash_check CHECK(
+       identity_hash ~ '^[a-f0-9]{64}$' AND input_identity_hash ~ '^[a-f0-9]{64}$'
+       AND (diagnosis_content_hash IS NULL OR diagnosis_content_hash ~ '^[a-f0-9]{64}$')
+     ),
+     CONSTRAINT report_v4_diagnosis_checkpoints_call_count_check CHECK(provider_call_count BETWEEN 0 AND 2),
+     CONSTRAINT report_v4_diagnosis_checkpoints_source_audit_check CHECK(
+       ogc_report_v4_source_audit_payload_valid(source_audit_payload,question_id)
+     ),
+     CONSTRAINT report_v4_diagnosis_checkpoints_payload_check CHECK(
+       (diagnosis_payload IS NULL OR ogc_report_v4_diagnosis_payload_valid(diagnosis_payload))
+       AND (
+         (state='queued' AND provider_call_count=0 AND jsonb_array_length(source_audit_payload)=0
+           AND diagnosis_payload IS NULL AND diagnosis_content_hash IS NULL)
+         OR (state='running' AND diagnosis_payload IS NULL AND diagnosis_content_hash IS NULL)
+         OR (state='completed' AND provider_call_count BETWEEN 1 AND 2
+           AND diagnosis_payload IS NOT NULL AND diagnosis_content_hash IS NOT NULL)
+         OR (state='failed' AND diagnosis_payload IS NULL AND diagnosis_content_hash IS NULL)
+       )
+     )
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_diagnosis_checkpoints_job_ordinal_uidx
+   ON report_v4_diagnosis_checkpoints(enhancement_job_id,ordinal)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_diagnosis_checkpoints_job_question_uidx
+   ON report_v4_diagnosis_checkpoints(enhancement_job_id,question_id)`,
+  `CREATE OR REPLACE FUNCTION ogc_validate_report_v4_diagnosis_checkpoint_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE enhancement_report_id text; enhancement_tier text; enhancement_product text;
+     enhancement_methodology text; enhancement_version integer; enhancement_contract text;
+     enhancement_reason text; enhancement_question_set_id text; enhancement_credit_id text;
+     core_report_id text; source_core_job_id text; core_config_id text; core_kind text; core_contract text;
+     core_status text; core_source_id text; config_report_id text; config_core_job_id text;
+     core_question_set_id text; core_snapshot_id text; report_active_revision_id text;
+   BEGIN
+     SELECT report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,
+       artifact_contract,reason,business_question_set_id,credit_reservation_id
+       INTO enhancement_report_id,enhancement_tier,enhancement_product,enhancement_methodology,
+       enhancement_version,enhancement_contract,enhancement_reason,enhancement_question_set_id,enhancement_credit_id
+       FROM scan_jobs WHERE id=NEW.enhancement_job_id;
+     SELECT report_id,job_id,config_snapshot_id,revision_kind,artifact_contract,status,source_artifact_revision_id
+       INTO core_report_id,source_core_job_id,core_config_id,core_kind,core_contract,core_status,core_source_id
+       FROM report_artifact_revisions WHERE id=NEW.core_artifact_revision_id;
+     SELECT report_id,core_job_id INTO config_report_id,config_core_job_id
+       FROM report_v4_config_snapshots WHERE id=NEW.config_snapshot_id;
+     SELECT business_question_set_id,site_snapshot_id INTO core_question_set_id,core_snapshot_id
+       FROM scan_jobs WHERE id=source_core_job_id;
+     SELECT active_artifact_revision_id INTO report_active_revision_id
+       FROM scan_reports WHERE id=NEW.report_id;
+     IF enhancement_report_id IS DISTINCT FROM NEW.report_id
+       OR enhancement_tier IS DISTINCT FROM 'deep'
+       OR enhancement_product IS DISTINCT FROM 'recommendation_forensics_v1'
+       OR enhancement_methodology IS DISTINCT FROM 'two_stage_geo_report_v4'
+       OR enhancement_version IS DISTINCT FROM 4
+       OR enhancement_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR enhancement_reason IS DISTINCT FROM 'v4_diagnosis_enhancement'
+       OR enhancement_credit_id IS NOT NULL
+       OR enhancement_question_set_id IS DISTINCT FROM NEW.question_set_id
+       OR core_report_id IS DISTINCT FROM NEW.report_id
+       OR core_config_id IS DISTINCT FROM NEW.config_snapshot_id
+       OR core_kind IS DISTINCT FROM 'generation'
+       OR core_contract IS DISTINCT FROM 'combined_geo_report_v4'
+       OR core_status IS DISTINCT FROM 'active'
+       OR core_source_id IS NOT NULL
+       OR config_report_id IS DISTINCT FROM NEW.report_id
+       OR config_core_job_id IS DISTINCT FROM source_core_job_id
+       OR core_question_set_id IS DISTINCT FROM NEW.question_set_id
+       OR core_snapshot_id IS DISTINCT FROM NEW.snapshot_id
+       OR report_active_revision_id IS DISTINCT FROM NEW.core_artifact_revision_id THEN
+       RAISE EXCEPTION 'A V4 diagnosis checkpoint requires its exact active core, configuration, snapshot, questions and enhancement job.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_diagnosis_checkpoints_binding_trigger ON report_v4_diagnosis_checkpoints`,
+  `CREATE TRIGGER report_v4_diagnosis_checkpoints_binding_trigger
+   BEFORE INSERT ON report_v4_diagnosis_checkpoints
+   FOR EACH ROW EXECUTE FUNCTION ogc_validate_report_v4_diagnosis_checkpoint_binding()`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_diagnosis_checkpoint_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP='DELETE' THEN
+       RAISE EXCEPTION 'A V4 diagnosis checkpoint is immutable and cannot be deleted.';
+     END IF;
+     IF NEW.identity_hash IS DISTINCT FROM OLD.identity_hash
+       OR NEW.report_id IS DISTINCT FROM OLD.report_id
+       OR NEW.enhancement_job_id IS DISTINCT FROM OLD.enhancement_job_id
+       OR NEW.core_artifact_revision_id IS DISTINCT FROM OLD.core_artifact_revision_id
+       OR NEW.config_snapshot_id IS DISTINCT FROM OLD.config_snapshot_id
+       OR NEW.question_set_id IS DISTINCT FROM OLD.question_set_id
+       OR NEW.question_id IS DISTINCT FROM OLD.question_id
+       OR NEW.snapshot_id IS DISTINCT FROM OLD.snapshot_id
+       OR NEW.ordinal IS DISTINCT FROM OLD.ordinal
+       OR NEW.input_identity_hash IS DISTINCT FROM OLD.input_identity_hash THEN
+       RAISE EXCEPTION 'A V4 diagnosis checkpoint identity is immutable.';
+     END IF;
+     IF OLD.state IN ('completed','failed') THEN
+       RAISE EXCEPTION 'A terminal V4 diagnosis checkpoint is immutable.';
+     END IF;
+     IF NEW.provider_call_count < OLD.provider_call_count
+       OR NEW.provider_call_count > OLD.provider_call_count + 1 THEN
+       RAISE EXCEPTION 'A V4 diagnosis provider call count may advance by at most one.';
+     END IF;
+     IF NEW.state <> OLD.state AND NOT (
+       (OLD.state='queued' AND NEW.state IN ('running','failed'))
+       OR (OLD.state='running' AND NEW.state IN ('completed','failed'))
+     ) THEN
+       RAISE EXCEPTION 'The V4 diagnosis checkpoint state transition is invalid.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_diagnosis_checkpoints_terminal_immutability_trigger ON report_v4_diagnosis_checkpoints`,
+  `CREATE TRIGGER report_v4_diagnosis_checkpoints_terminal_immutability_trigger
+   BEFORE UPDATE OR DELETE ON report_v4_diagnosis_checkpoints
+   FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_diagnosis_checkpoint_mutation()`
+] as const;
+
+export const V31_DATABASE_MIGRATIONS = [
+  `ALTER TABLE report_v4_site_snapshot_pages
+   ADD COLUMN IF NOT EXISTS retained_cleaned_text text`,
+  `ALTER TABLE report_v4_site_snapshot_pages
+   DROP CONSTRAINT IF EXISTS report_v4_site_snapshot_pages_retained_text_check`,
+  `ALTER TABLE report_v4_site_snapshot_pages
+   ADD CONSTRAINT report_v4_site_snapshot_pages_retained_text_check CHECK (
+     (
+       analyzable=true
+       AND retained_cleaned_text IS NOT NULL
+       AND length(btrim(retained_cleaned_text)) > 0
+       AND char_length(retained_cleaned_text) <= 100000
+       AND read_mode IS NOT NULL
+       AND content_hash IS NOT NULL
+       AND exclusion_reason IS NULL
+     )
+     OR (analyzable=false AND retained_cleaned_text IS NULL)
+   ) NOT VALID`
+] as const;
+
+export const V32_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_js_source_location_length(candidate text)
+   RETURNS integer LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
+     SELECT COALESCE(sum(CASE WHEN ascii(character) > 65535 THEN 2 ELSE 1 END),0)::integer
+     FROM regexp_split_to_table(candidate,'') AS characters(character)
+   $$`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_page_summary_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_status text;
+     page_analyzable boolean;
+     page_read_mode text;
+     retained_text text;
+     page_content_hash text;
+   BEGIN
+     IF TG_OP <> 'INSERT' THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary is immutable.';
+     END IF;
+     SELECT status INTO snapshot_status
+       FROM report_v4_site_snapshots
+       WHERE id=NEW.snapshot_id AND report_id=NEW.report_id;
+     IF snapshot_status IS NULL OR snapshot_status NOT IN ('completed','completed_limited') THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary requires an exact completed or completed_limited snapshot.';
+     END IF;
+     SELECT analyzable,read_mode,retained_cleaned_text,content_hash
+       INTO page_analyzable,page_read_mode,retained_text,page_content_hash
+       FROM report_v4_site_snapshot_pages
+       WHERE id=NEW.page_id AND snapshot_id=NEW.snapshot_id;
+     IF NOT FOUND OR page_analyzable IS DISTINCT FROM true OR page_read_mode IS NULL
+       OR retained_text IS NULL OR length(btrim(retained_text))=0 OR page_content_hash IS NULL THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary requires an exact analyzable retained snapshot page.';
+     END IF;
+     IF NEW.content_hash IS DISTINCT FROM page_content_hash
+       OR page_content_hash IS DISTINCT FROM encode(sha256(convert_to(retained_text,'UTF8')),'hex') THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary content hash must match its exact retained snapshot text.';
+     END IF;
+     IF NEW.source_length IS DISTINCT FROM ogc_js_source_location_length(retained_text) THEN
+       RAISE EXCEPTION 'A V4 hierarchical page summary source length must match its retained snapshot text.';
+     END IF;
+     RETURN NEW;
+   END $$`
+] as const;
+
+export const V33_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS report_v4_website_synthesis_checkpoints (
+    identity_hash text PRIMARY KEY, report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+    order_id text NOT NULL REFERENCES payment_orders(id) ON DELETE RESTRICT,
+    core_job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+    config_snapshot_id text NOT NULL REFERENCES report_v4_config_snapshots(id) ON DELETE RESTRICT,
+    site_snapshot_id text NOT NULL REFERENCES report_v4_site_snapshots(id) ON DELETE RESTRICT,
+    operation_id text NOT NULL, profile_id text NOT NULL, state text NOT NULL DEFAULT 'queued',
+    worker_id text, lease_expires_at timestamptz, provider_call_count integer NOT NULL DEFAULT 0,
+    correction_count integer NOT NULL DEFAULT 0, output_payload jsonb, output_hash text, error_code text,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT report_v4_website_synthesis_checkpoint_state_check CHECK(state IN ('queued','running','completed','failed')),
+    CONSTRAINT report_v4_website_synthesis_checkpoint_identity_check CHECK(identity_hash ~ '^[a-f0-9]{64}$' AND operation_id <> '' AND profile_id <> ''),
+    CONSTRAINT report_v4_website_synthesis_checkpoint_calls_check CHECK(provider_call_count BETWEEN 0 AND 1 AND correction_count = 0),
+    CONSTRAINT report_v4_website_synthesis_checkpoint_hash_check CHECK(output_hash IS NULL OR output_hash ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT report_v4_website_synthesis_checkpoint_payload_check CHECK((state='completed' AND output_payload IS NOT NULL AND output_hash IS NOT NULL) OR (state<>'completed' AND output_payload IS NULL AND output_hash IS NULL))
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_website_synthesis_checkpoint_lineage_uidx ON report_v4_website_synthesis_checkpoints(report_id,order_id,core_job_id,config_snapshot_id,site_snapshot_id,operation_id,profile_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_website_synthesis_checkpoint_core_uidx ON report_v4_website_synthesis_checkpoints(core_job_id)`
+] as const;
+
+export const V34_DATABASE_MIGRATIONS = [
+  `ALTER TABLE report_v4_diagnosis_checkpoints ADD COLUMN IF NOT EXISTS diagnosis_input_payload jsonb`,
+  `DO $$ BEGIN
+     IF EXISTS(SELECT 1 FROM report_v4_diagnosis_checkpoints WHERE diagnosis_input_payload IS NULL) THEN
+       RAISE EXCEPTION 'Existing V4 diagnosis checkpoints cannot be upgraded without their immutable diagnosis input payload.';
+     END IF;
+   END $$`,
+  `ALTER TABLE report_v4_diagnosis_checkpoints ALTER COLUMN diagnosis_input_payload SET NOT NULL`,
+  `ALTER TABLE report_v4_diagnosis_checkpoints DROP CONSTRAINT IF EXISTS report_v4_diagnosis_checkpoints_input_payload_check`,
+  `ALTER TABLE report_v4_diagnosis_checkpoints ADD CONSTRAINT report_v4_diagnosis_checkpoints_input_payload_check
+     CHECK(jsonb_typeof(diagnosis_input_payload)='object' AND octet_length(diagnosis_input_payload::text)<=262144)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_diagnosis_checkpoint_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP='DELETE' THEN
+       RAISE EXCEPTION 'A V4 diagnosis checkpoint is immutable and cannot be deleted.';
+     END IF;
+     IF NEW.identity_hash IS DISTINCT FROM OLD.identity_hash
+       OR NEW.report_id IS DISTINCT FROM OLD.report_id
+       OR NEW.enhancement_job_id IS DISTINCT FROM OLD.enhancement_job_id
+       OR NEW.core_artifact_revision_id IS DISTINCT FROM OLD.core_artifact_revision_id
+       OR NEW.config_snapshot_id IS DISTINCT FROM OLD.config_snapshot_id
+       OR NEW.question_set_id IS DISTINCT FROM OLD.question_set_id
+       OR NEW.question_id IS DISTINCT FROM OLD.question_id
+       OR NEW.snapshot_id IS DISTINCT FROM OLD.snapshot_id
+       OR NEW.ordinal IS DISTINCT FROM OLD.ordinal
+       OR NEW.input_identity_hash IS DISTINCT FROM OLD.input_identity_hash
+       OR NEW.diagnosis_input_payload IS DISTINCT FROM OLD.diagnosis_input_payload THEN
+       RAISE EXCEPTION 'A V4 diagnosis checkpoint identity is immutable.';
+     END IF;
+     IF OLD.state IN ('completed','failed') THEN
+       RAISE EXCEPTION 'A terminal V4 diagnosis checkpoint is immutable.';
+     END IF;
+     IF NEW.provider_call_count < OLD.provider_call_count
+       OR NEW.provider_call_count > OLD.provider_call_count + 1 THEN
+       RAISE EXCEPTION 'A V4 diagnosis provider call count may advance by at most one.';
+     END IF;
+     IF NEW.state <> OLD.state AND NOT (
+       (OLD.state='queued' AND NEW.state IN ('running','failed'))
+       OR (OLD.state='running' AND NEW.state IN ('completed','failed'))
+     ) THEN
+       RAISE EXCEPTION 'The V4 diagnosis checkpoint state transition is invalid.';
+     END IF;
+     RETURN NEW;
+   END $$`
+] as const;
+
+export const V35_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_acceptance_require_staging() RETURNS void LANGUAGE plpgsql AS $$
+   DECLARE marker text;
+   BEGIN
+     SELECT profile INTO marker FROM deployment_environment WHERE singleton=true;
+     IF marker IS DISTINCT FROM 'staging' THEN
+       RAISE EXCEPTION 'The Report V4 acceptance ledger only accepts a protected staging database marker.';
+     END IF;
+   END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_acceptance_event_valid(event_kind text,event_operation text,event_phase text,event_details jsonb)
+   RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
+   DECLARE keys text[];
+   BEGIN
+     IF jsonb_typeof(event_details)<>'object' OR octet_length(event_details::text)>32768 THEN RETURN false; END IF;
+     IF event_kind='scenario_bound' THEN
+       keys:=ARRAY['bindingHash'];
+       RETURN event_phase='observed' AND event_operation='v4_dispatch'
+         AND event_details ? 'bindingHash' AND (event_details->>'bindingHash') ~ '^[a-f0-9]{64}$'
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key);
+     ELSIF event_kind='crawl_run' THEN
+       keys:=ARRAY['candidatePages','analyzablePages','excludedPages','jsDependentPages'];
+       RETURN event_operation='crawl' AND event_phase IN ('started','completed','failed')
+         AND event_details ?& keys
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND (event_details->>'candidatePages') ~ '^\\d+$' AND (event_details->>'analyzablePages') ~ '^\\d+$'
+         AND (event_details->>'excludedPages') ~ '^\\d+$' AND (event_details->>'jsDependentPages') ~ '^\\d+$';
+     ELSIF event_kind='site_read' THEN
+       keys:=ARRAY['urlHash','readMode','networkPerformed'];
+       RETURN event_operation IN ('site_raw_read','site_browser_read') AND event_phase IN ('started','completed','failed')
+         AND event_details ?& keys AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND (event_details->>'urlHash') ~ '^[a-f0-9]{64}$' AND event_details->>'readMode' IN ('raw','browser')
+         AND jsonb_typeof(event_details->'networkPerformed')='boolean';
+     ELSIF event_kind='model_operation' THEN
+       keys:=ARRAY['providerCall','retry','budgetOutcome','inputTokens','outputTokens'];
+       RETURN event_operation IN ('page_analysis','website_synthesis','question_answer','source_diagnosis')
+         AND event_phase IN ('started','completed','failed','rejected') AND event_details ?& keys
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND jsonb_typeof(event_details->'providerCall')='boolean' AND jsonb_typeof(event_details->'retry')='boolean'
+         AND event_details->>'budgetOutcome' IN ('allowed','rejected')
+         AND (event_details->>'inputTokens') ~ '^\\d+$' AND (event_details->>'outputTokens') ~ '^\\d+$';
+    ELSIF event_kind IN ('html_assembly','artifact_activation') THEN
+      keys:=ARRAY['artifactRevisionId','htmlSha256'];
+      RETURN ((event_kind='html_assembly' AND event_operation IN ('core_html','enhancement_html') AND event_phase IN ('started','completed','failed'))
+          OR (event_kind='artifact_activation' AND event_operation='artifact_activation' AND event_phase='observed'))
+        AND event_details ?& keys
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND length(btrim(event_details->>'artifactRevisionId')) BETWEEN 1 AND 500
+         AND (event_details->>'htmlSha256') ~ '^[a-f0-9]{64}$';
+     ELSIF event_kind='fault_injection' THEN
+       keys:=ARRAY['fault','occurrence','baselineFingerprint'];
+       RETURN event_operation IN ('question_failure','diagnosis_failure','independent_source_read_failure')
+         AND event_phase='consumed' AND event_details ?& keys
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND event_details->>'fault'=event_operation AND (event_details->>'occurrence') IN ('1','2')
+         AND (event_details->>'baselineFingerprint') ~ '^[a-f0-9]{64}$';
+     ELSIF event_kind='checkpoint_terminal' THEN
+       keys:=ARRAY['checkpointHash','state'];
+       RETURN event_operation IN ('question_answer','source_diagnosis') AND event_phase='observed'
+         AND event_details ?& keys AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND (event_details->>'checkpointHash') ~ '^[a-f0-9]{64}$'
+         AND event_details->>'state' IN ('answered','unavailable','completed','failed');
+     ELSIF event_kind IN ('v4_dispatch','prohibited_operation') THEN
+       RETURN event_details='{}'::jsonb
+         AND ((event_kind='v4_dispatch' AND event_operation='v4_dispatch' AND event_phase='observed') OR
+           (event_kind='prohibited_operation' AND event_operation IN ('pdf','provider_claim','qualification','four_snapshot','replacement_fulfillment') AND event_phase='started'));
+     ELSIF event_kind='commerce_fingerprint' THEN
+       keys:=ARRAY['fingerprint'];
+       RETURN event_operation='commerce' AND event_phase='observed' AND event_details ?& keys
+         AND (SELECT bool_and(key=ANY(keys)) FROM jsonb_object_keys(event_details) key)
+         AND (event_details->>'fingerprint') ~ '^[a-f0-9]{64}$';
+     END IF;
+     RETURN false;
+   END $$`,
+  `CREATE TABLE IF NOT EXISTS report_v4_acceptance_sessions (
+    id text PRIMARY KEY, environment text NOT NULL DEFAULT 'protected_staging', preview_deployment_id text NOT NULL,
+    protected_alias_url text NOT NULL, web_git_sha text NOT NULL, worker_git_sha text NOT NULL,
+    state text NOT NULL DEFAULT 'collecting', head_sequence integer NOT NULL DEFAULT 0,
+    head_hash text NOT NULL DEFAULT repeat('0',64), event_count integer NOT NULL DEFAULT 0,
+    started_at timestamptz NOT NULL DEFAULT clock_timestamp(), terminal_at timestamptz,
+    CONSTRAINT report_v4_acceptance_sessions_id_check CHECK(id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+    CONSTRAINT report_v4_acceptance_sessions_environment_check CHECK(environment='protected_staging'),
+    CONSTRAINT report_v4_acceptance_sessions_deployment_check CHECK(preview_deployment_id=btrim(preview_deployment_id) AND length(preview_deployment_id) BETWEEN 1 AND 200 AND protected_alias_url ~ '^https://[^/?#@[:space:]]+$'),
+    CONSTRAINT report_v4_acceptance_sessions_sha_check CHECK(web_git_sha ~ '^[a-f0-9]{40}$' AND worker_git_sha ~ '^[a-f0-9]{40}$' AND web_git_sha=worker_git_sha),
+    CONSTRAINT report_v4_acceptance_sessions_state_check CHECK(state IN ('collecting','sealed','failed')),
+    CONSTRAINT report_v4_acceptance_sessions_head_check CHECK(head_sequence>=0 AND event_count=head_sequence AND head_hash ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT report_v4_acceptance_sessions_terminal_check CHECK((state='collecting' AND terminal_at IS NULL) OR (state IN ('sealed','failed') AND terminal_at IS NOT NULL))
+  )`,
+  `CREATE TABLE IF NOT EXISTS report_v4_acceptance_scenarios (
+    id text PRIMARY KEY, session_id text NOT NULL REFERENCES report_v4_acceptance_sessions(id) ON DELETE RESTRICT,
+    kind text NOT NULL, fault_kind text, fault_question_id text, fault_source_id text,
+    expected_fault_occurrences integer NOT NULL DEFAULT 0,
+    report_id text REFERENCES scan_reports(id) ON DELETE RESTRICT,
+    order_id text REFERENCES payment_orders(id) ON DELETE RESTRICT,
+    pre_admission_job_id text REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+    core_job_id text REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+    enhancement_job_id text REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+    site_snapshot_id text REFERENCES report_v4_site_snapshots(id) ON DELETE RESTRICT,
+    config_snapshot_id text REFERENCES report_v4_config_snapshots(id) ON DELETE RESTRICT,
+    question_set_id text REFERENCES report_business_question_sets(id) ON DELETE RESTRICT,
+    core_artifact_revision_id text REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT,
+    enhancement_artifact_revision_id text REFERENCES report_artifact_revisions(id) ON DELETE RESTRICT,
+    baseline_fingerprint text, final_fingerprint text, state text NOT NULL DEFAULT 'collecting',
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(), terminal_at timestamptz,
+    CONSTRAINT report_v4_acceptance_scenarios_id_check CHECK(id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+    CONSTRAINT report_v4_acceptance_scenarios_kind_check CHECK(kind IN ('success','diagnosis_failure','question_failure')),
+    CONSTRAINT report_v4_acceptance_scenarios_state_check CHECK(state IN ('collecting','sealed','failed')),
+    CONSTRAINT report_v4_acceptance_scenarios_hash_check CHECK((baseline_fingerprint IS NULL OR baseline_fingerprint ~ '^[a-f0-9]{64}$') AND (final_fingerprint IS NULL OR final_fingerprint ~ '^[a-f0-9]{64}$')),
+    CONSTRAINT report_v4_acceptance_scenarios_fault_identity_check CHECK(length(btrim(fault_question_id)) BETWEEN 1 AND 500 AND (fault_source_id IS NULL OR length(btrim(fault_source_id)) BETWEEN 1 AND 500)),
+    CONSTRAINT report_v4_acceptance_scenarios_fault_check CHECK(
+      (kind='success' AND fault_kind='independent_source_read_failure' AND fault_question_id IS NOT NULL AND expected_fault_occurrences=1)
+      OR (kind='diagnosis_failure' AND fault_kind='diagnosis_failure' AND fault_question_id IS NOT NULL AND fault_source_id IS NULL AND expected_fault_occurrences=2)
+      OR (kind='question_failure' AND fault_kind='question_failure' AND fault_question_id IS NOT NULL AND fault_source_id IS NULL AND expected_fault_occurrences=2)),
+    CONSTRAINT report_v4_acceptance_scenarios_terminal_check CHECK((state='collecting' AND terminal_at IS NULL) OR (state IN ('sealed','failed') AND terminal_at IS NOT NULL)),
+    CONSTRAINT report_v4_acceptance_scenarios_id_session_uidx UNIQUE(id,session_id),
+    CONSTRAINT report_v4_acceptance_scenarios_session_kind_uidx UNIQUE(session_id,kind)
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_report_uidx ON report_v4_acceptance_scenarios(report_id) WHERE report_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_order_uidx ON report_v4_acceptance_scenarios(order_id) WHERE order_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_pre_job_uidx ON report_v4_acceptance_scenarios(pre_admission_job_id) WHERE pre_admission_job_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_core_job_uidx ON report_v4_acceptance_scenarios(core_job_id) WHERE core_job_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_enhancement_job_uidx ON report_v4_acceptance_scenarios(enhancement_job_id) WHERE enhancement_job_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_core_artifact_uidx ON report_v4_acceptance_scenarios(core_artifact_revision_id) WHERE core_artifact_revision_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_scenarios_enhancement_artifact_uidx ON report_v4_acceptance_scenarios(enhancement_artifact_revision_id) WHERE enhancement_artifact_revision_id IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS report_v4_acceptance_events (
+    idempotency_key text PRIMARY KEY, session_id text NOT NULL REFERENCES report_v4_acceptance_sessions(id) ON DELETE RESTRICT,
+    scenario_id text NOT NULL, sequence integer NOT NULL, kind text NOT NULL, operation text NOT NULL,
+    unit_id text NOT NULL, attempt integer NOT NULL, phase text NOT NULL, details jsonb NOT NULL, details_canonical text NOT NULL,
+    prev_hash text NOT NULL, event_hash text NOT NULL, occurred_at timestamptz NOT NULL DEFAULT clock_timestamp(), occurred_at_canonical text NOT NULL,
+    CONSTRAINT report_v4_acceptance_events_scenario_session_fkey FOREIGN KEY(scenario_id,session_id)
+      REFERENCES report_v4_acceptance_scenarios(id,session_id) ON DELETE RESTRICT,
+    CONSTRAINT report_v4_acceptance_events_session_sequence_uidx UNIQUE(session_id,sequence),
+    CONSTRAINT report_v4_acceptance_events_identity_check CHECK(idempotency_key ~ '^[a-f0-9]{64}$' AND sequence>0 AND length(btrim(unit_id)) BETWEEN 1 AND 500 AND attempt BETWEEN 0 AND 2),
+    CONSTRAINT report_v4_acceptance_events_hash_check CHECK(prev_hash ~ '^[a-f0-9]{64}$' AND event_hash ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT report_v4_acceptance_events_canonical_check CHECK(details_canonical=details::text AND octet_length(details_canonical)<=32768
+      AND occurred_at_canonical ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z$'),
+    CONSTRAINT report_v4_acceptance_events_kind_check CHECK(kind IN ('scenario_bound','crawl_run','site_read','model_operation','html_assembly','fault_injection','checkpoint_terminal','v4_dispatch','prohibited_operation','artifact_activation','commerce_fingerprint')),
+    CONSTRAINT report_v4_acceptance_events_phase_check CHECK(phase IN ('started','completed','failed','rejected','consumed','observed')),
+    CONSTRAINT report_v4_acceptance_events_details_check CHECK(ogc_report_v4_acceptance_event_valid(kind,operation,phase,details))
+  )`,
+  `CREATE INDEX IF NOT EXISTS report_v4_acceptance_events_scenario_idx ON report_v4_acceptance_events(scenario_id,sequence)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_session() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE matching_event integer; sealed_scenarios integer;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP='DELETE' THEN RAISE EXCEPTION 'A Report V4 acceptance session is immutable and cannot be deleted.'; END IF;
+     IF TG_OP='INSERT' THEN RETURN NEW; END IF;
+     IF OLD.state IN ('sealed','failed') THEN RAISE EXCEPTION 'A terminal Report V4 acceptance session is immutable.'; END IF;
+     IF NEW.id IS DISTINCT FROM OLD.id OR NEW.environment IS DISTINCT FROM OLD.environment
+       OR NEW.preview_deployment_id IS DISTINCT FROM OLD.preview_deployment_id
+       OR NEW.protected_alias_url IS DISTINCT FROM OLD.protected_alias_url
+       OR NEW.web_git_sha IS DISTINCT FROM OLD.web_git_sha OR NEW.worker_git_sha IS DISTINCT FROM OLD.worker_git_sha
+       OR NEW.started_at IS DISTINCT FROM OLD.started_at THEN
+       RAISE EXCEPTION 'A Report V4 acceptance session identity is immutable.';
+     END IF;
+     IF NEW.state='collecting' THEN
+       IF NEW.head_sequence<>OLD.head_sequence+1 OR NEW.event_count<>OLD.event_count+1 OR NEW.terminal_at IS NOT NULL THEN
+         RAISE EXCEPTION 'A Report V4 acceptance session head must advance by one exact event.';
+       END IF;
+       SELECT count(*) INTO matching_event FROM report_v4_acceptance_events
+         WHERE session_id=NEW.id AND sequence=NEW.head_sequence AND event_hash=NEW.head_hash;
+       IF matching_event<>1 THEN RAISE EXCEPTION 'A Report V4 acceptance session head requires its exact append-only event.'; END IF;
+     ELSIF NEW.state IN ('sealed','failed') THEN
+       IF NEW.head_sequence<>OLD.head_sequence OR NEW.head_hash<>OLD.head_hash OR NEW.event_count<>OLD.event_count OR NEW.terminal_at IS NULL THEN
+         RAISE EXCEPTION 'A terminal Report V4 acceptance session cannot rewrite its event head.';
+       END IF;
+       IF NEW.state='sealed' THEN
+         SELECT count(*) INTO sealed_scenarios FROM report_v4_acceptance_scenarios WHERE session_id=NEW.id AND state='sealed';
+         IF sealed_scenarios<>3 THEN RAISE EXCEPTION 'A sealed Report V4 acceptance session requires three sealed scenarios.'; END IF;
+       END IF;
+     ELSE RAISE EXCEPTION 'The Report V4 acceptance session state transition is invalid.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `CREATE TRIGGER report_v4_acceptance_sessions_guard BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_sessions FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_session()`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_scenario() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; order_ok boolean; pre_ok boolean; core_ok boolean; enhancement_ok boolean;
+     snapshot_ok boolean; config_ok boolean; questions_ok boolean; core_artifact_ok boolean; enhancement_artifact_ok boolean;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP='DELETE' THEN RAISE EXCEPTION 'A Report V4 acceptance scenario is immutable and cannot be deleted.'; END IF;
+     SELECT state INTO session_state FROM report_v4_acceptance_sessions WHERE id=NEW.session_id;
+     IF session_state IS DISTINCT FROM 'collecting' THEN RAISE EXCEPTION 'A Report V4 acceptance scenario requires a collecting session.'; END IF;
+     IF TG_OP='INSERT' THEN RETURN NEW; END IF;
+     IF OLD.state IN ('sealed','failed') THEN RAISE EXCEPTION 'A terminal Report V4 acceptance scenario is immutable.'; END IF;
+     IF NEW.id IS DISTINCT FROM OLD.id OR NEW.session_id IS DISTINCT FROM OLD.session_id OR NEW.kind IS DISTINCT FROM OLD.kind
+       OR NEW.fault_kind IS DISTINCT FROM OLD.fault_kind OR NEW.fault_question_id IS DISTINCT FROM OLD.fault_question_id
+       OR NEW.expected_fault_occurrences IS DISTINCT FROM OLD.expected_fault_occurrences
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN RAISE EXCEPTION 'A Report V4 acceptance scenario identity is immutable.'; END IF;
+     IF NEW.fault_source_id IS DISTINCT FROM OLD.fault_source_id AND NOT (
+       OLD.kind='success' AND OLD.fault_kind='independent_source_read_failure' AND OLD.state='collecting' AND NEW.state='collecting'
+       AND OLD.fault_source_id IS NULL AND NEW.fault_source_id IS NOT NULL) THEN
+       RAISE EXCEPTION 'A Report V4 acceptance scenario cannot rebind its fault source.';
+     END IF;
+     IF (OLD.report_id IS NOT NULL AND NEW.report_id IS DISTINCT FROM OLD.report_id)
+       OR (OLD.order_id IS NOT NULL AND NEW.order_id IS DISTINCT FROM OLD.order_id)
+       OR (OLD.pre_admission_job_id IS NOT NULL AND NEW.pre_admission_job_id IS DISTINCT FROM OLD.pre_admission_job_id)
+       OR (OLD.core_job_id IS NOT NULL AND NEW.core_job_id IS DISTINCT FROM OLD.core_job_id)
+       OR (OLD.enhancement_job_id IS NOT NULL AND NEW.enhancement_job_id IS DISTINCT FROM OLD.enhancement_job_id)
+       OR (OLD.site_snapshot_id IS NOT NULL AND NEW.site_snapshot_id IS DISTINCT FROM OLD.site_snapshot_id)
+       OR (OLD.config_snapshot_id IS NOT NULL AND NEW.config_snapshot_id IS DISTINCT FROM OLD.config_snapshot_id)
+       OR (OLD.question_set_id IS NOT NULL AND NEW.question_set_id IS DISTINCT FROM OLD.question_set_id)
+       OR (OLD.core_artifact_revision_id IS NOT NULL AND NEW.core_artifact_revision_id IS DISTINCT FROM OLD.core_artifact_revision_id)
+       OR (OLD.enhancement_artifact_revision_id IS NOT NULL AND NEW.enhancement_artifact_revision_id IS DISTINCT FROM OLD.enhancement_artifact_revision_id)
+       OR (OLD.baseline_fingerprint IS NOT NULL AND NEW.baseline_fingerprint IS DISTINCT FROM OLD.baseline_fingerprint)
+       OR (OLD.final_fingerprint IS NOT NULL AND NEW.final_fingerprint IS DISTINCT FROM OLD.final_fingerprint) THEN
+       RAISE EXCEPTION 'A Report V4 acceptance scenario cannot rebind an entity or fingerprint.';
+     END IF;
+     IF NEW.state<>OLD.state AND NOT (OLD.state='collecting' AND NEW.state IN ('sealed','failed')) THEN
+       RAISE EXCEPTION 'The Report V4 acceptance scenario state transition is invalid.';
+     END IF;
+     IF NEW.state='collecting' THEN RETURN NEW; END IF;
+     IF NEW.terminal_at IS NULL OR NEW.report_id IS NULL OR NEW.order_id IS NULL OR NEW.pre_admission_job_id IS NULL
+       OR NEW.core_job_id IS NULL OR NEW.site_snapshot_id IS NULL OR NEW.config_snapshot_id IS NULL
+       OR NEW.question_set_id IS NULL OR NEW.core_artifact_revision_id IS NULL
+       OR NEW.baseline_fingerprint IS NULL OR NEW.final_fingerprint IS NULL THEN
+       RAISE EXCEPTION 'A terminal Report V4 acceptance scenario requires exact lineage and before/after fingerprints.';
+     END IF;
+     IF NEW.kind IN ('success','diagnosis_failure') AND NEW.enhancement_job_id IS NULL THEN
+       RAISE EXCEPTION 'This Report V4 acceptance scenario requires its exact enhancement job.';
+     END IF;
+     IF NEW.kind='success' AND NEW.enhancement_artifact_revision_id IS NULL THEN
+       RAISE EXCEPTION 'The successful Report V4 acceptance scenario requires its exact enhancement artifact.';
+     END IF;
+     IF NEW.kind='diagnosis_failure' AND NEW.enhancement_artifact_revision_id IS NULL THEN
+       RAISE EXCEPTION 'The diagnosis-failure Report V4 acceptance scenario requires its exact enhancement artifact.';
+     END IF;
+     IF NEW.kind='success' AND NEW.fault_source_id IS NULL THEN
+       RAISE EXCEPTION 'The successful Report V4 acceptance scenario requires its bound independent fault source before terminalization.';
+     END IF;
+     SELECT EXISTS(SELECT 1 FROM payment_orders WHERE id=NEW.order_id AND report_id=NEW.report_id AND fulfillment_job_id=NEW.core_job_id AND site_snapshot_id=NEW.site_snapshot_id) INTO order_ok;
+     SELECT EXISTS(SELECT 1 FROM scan_jobs WHERE id=NEW.pre_admission_job_id AND report_id=NEW.report_id AND reason='v4_pre_admission' AND artifact_contract='combined_geo_report_v4') INTO pre_ok;
+     SELECT EXISTS(SELECT 1 FROM scan_jobs WHERE id=NEW.core_job_id AND report_id=NEW.report_id AND site_snapshot_id=NEW.site_snapshot_id AND business_question_set_id=NEW.question_set_id AND artifact_contract='combined_geo_report_v4' AND reason='standard') INTO core_ok;
+     SELECT NEW.enhancement_job_id IS NULL OR EXISTS(SELECT 1 FROM scan_jobs WHERE id=NEW.enhancement_job_id AND report_id=NEW.report_id AND business_question_set_id=NEW.question_set_id AND artifact_contract='combined_geo_report_v4' AND reason='v4_diagnosis_enhancement') INTO enhancement_ok;
+     SELECT EXISTS(SELECT 1 FROM report_v4_site_snapshots WHERE id=NEW.site_snapshot_id AND report_id=NEW.report_id) INTO snapshot_ok;
+     SELECT EXISTS(SELECT 1 FROM report_v4_config_snapshots WHERE id=NEW.config_snapshot_id AND report_id=NEW.report_id AND order_id=NEW.order_id AND core_job_id=NEW.core_job_id) INTO config_ok;
+     SELECT EXISTS(SELECT 1 FROM report_business_question_sets WHERE id=NEW.question_set_id AND report_id=NEW.report_id AND order_id=NEW.order_id) INTO questions_ok;
+     SELECT EXISTS(SELECT 1 FROM report_artifact_revisions WHERE id=NEW.core_artifact_revision_id AND report_id=NEW.report_id AND order_id=NEW.order_id AND job_id=NEW.core_job_id AND config_snapshot_id=NEW.config_snapshot_id AND artifact_contract='combined_geo_report_v4' AND revision_kind='generation') INTO core_artifact_ok;
+     SELECT NEW.enhancement_artifact_revision_id IS NULL OR EXISTS(SELECT 1 FROM report_artifact_revisions WHERE id=NEW.enhancement_artifact_revision_id AND report_id=NEW.report_id AND order_id=NEW.order_id AND job_id=NEW.enhancement_job_id AND config_snapshot_id=NEW.config_snapshot_id AND source_artifact_revision_id=NEW.core_artifact_revision_id AND artifact_contract='combined_geo_report_v4' AND revision_kind='diagnosis_enhancement') INTO enhancement_artifact_ok;
+     IF NOT (order_ok AND pre_ok AND core_ok AND enhancement_ok AND snapshot_ok AND config_ok AND questions_ok AND core_artifact_ok AND enhancement_artifact_ok) THEN
+       RAISE EXCEPTION 'A terminal Report V4 acceptance scenario lineage is not exact.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `CREATE TRIGGER report_v4_acceptance_scenarios_guard BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_scenarios FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_scenario()`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_event() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; scenario_state text; expected_sequence integer; expected_prev text; expected_key text;
+     started_exists boolean; terminal_exists boolean;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'A Report V4 acceptance event is append-only and immutable.'; END IF;
+     SELECT state,head_sequence+1,head_hash INTO session_state,expected_sequence,expected_prev
+       FROM report_v4_acceptance_sessions WHERE id=NEW.session_id FOR UPDATE;
+     SELECT state INTO scenario_state FROM report_v4_acceptance_scenarios WHERE id=NEW.scenario_id AND session_id=NEW.session_id;
+     IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN
+       RAISE EXCEPTION 'A Report V4 acceptance event requires collecting session and scenario state.';
+     END IF;
+     IF NEW.sequence IS DISTINCT FROM expected_sequence OR NEW.prev_hash IS DISTINCT FROM expected_prev THEN
+       RAISE EXCEPTION 'A Report V4 acceptance event does not extend the exact hash-chain head.';
+     END IF;
+     IF NEW.phase IN ('completed','failed','rejected') THEN
+       SELECT EXISTS(SELECT 1 FROM report_v4_acceptance_events
+         WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND kind=NEW.kind AND operation=NEW.operation
+           AND unit_id=NEW.unit_id AND attempt=NEW.attempt AND phase='started') INTO started_exists;
+       SELECT EXISTS(SELECT 1 FROM report_v4_acceptance_events
+         WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND kind=NEW.kind AND operation=NEW.operation
+           AND unit_id=NEW.unit_id AND attempt=NEW.attempt AND phase IN ('completed','failed','rejected')) INTO terminal_exists;
+       IF NOT started_exists OR terminal_exists THEN
+         RAISE EXCEPTION 'A terminal Report V4 acceptance event requires exactly one started claim for the same unit and attempt.';
+       END IF;
+     END IF;
+     expected_key:=encode(sha256(convert_to(concat_ws(chr(31),NEW.session_id,NEW.scenario_id,NEW.kind,NEW.operation,NEW.unit_id,NEW.attempt::text,NEW.phase),'UTF8')),'hex');
+     IF NEW.idempotency_key IS DISTINCT FROM expected_key THEN RAISE EXCEPTION 'A Report V4 acceptance event idempotency key is not deterministic.'; END IF;
+     NEW.details_canonical:=NEW.details::text;
+     NEW.occurred_at_canonical:=to_char(NEW.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"');
+     NEW.event_hash:=encode(sha256(convert_to(concat_ws(chr(31),NEW.prev_hash,NEW.idempotency_key,NEW.sequence::text,NEW.kind,NEW.operation,NEW.unit_id,NEW.attempt::text,NEW.phase,NEW.details_canonical,NEW.occurred_at_canonical),'UTF8')),'hex');
+     RETURN NEW;
+   END $$`,
+  `CREATE TRIGGER report_v4_acceptance_events_guard BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_events FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_event()`,
+  `CREATE OR REPLACE FUNCTION ogc_advance_report_v4_acceptance_session_head() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     UPDATE report_v4_acceptance_sessions
+       SET head_sequence=NEW.sequence,head_hash=NEW.event_hash,event_count=event_count+1
+       WHERE id=NEW.session_id AND state='collecting';
+     IF NOT FOUND THEN RAISE EXCEPTION 'A Report V4 acceptance event could not advance its collecting session head.'; END IF;
+     RETURN NEW;
+   END $$`,
+  `CREATE TRIGGER report_v4_acceptance_events_advance_head AFTER INSERT ON report_v4_acceptance_events FOR EACH ROW EXECUTE FUNCTION ogc_advance_report_v4_acceptance_session_head()`
+] as const;
+
+export const V36_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS report_v4_acceptance_site_read_manifest (
+    identity_hash text PRIMARY KEY,
+    session_id text NOT NULL REFERENCES report_v4_acceptance_sessions(id) ON DELETE RESTRICT,
+    scenario_id text NOT NULL,
+    report_id text NOT NULL REFERENCES scan_reports(id) ON DELETE RESTRICT,
+    job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+    scope text NOT NULL,
+    purpose text NOT NULL,
+    url_hash text NOT NULL,
+    mode text NOT NULL,
+    attempt integer NOT NULL,
+    pair_binding_hash text NOT NULL,
+    owner_question_id text,
+    owner_source_id text,
+    network_performed boolean NOT NULL DEFAULT true,
+    terminal_phase text,
+    started_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    terminal_at timestamptz,
+    CONSTRAINT report_v4_acceptance_site_read_manifest_scenario_session_fkey
+      FOREIGN KEY(scenario_id,session_id) REFERENCES report_v4_acceptance_scenarios(id,session_id) ON DELETE RESTRICT,
+    CONSTRAINT report_v4_acceptance_site_read_manifest_hash_check
+      CHECK(identity_hash ~ '^[a-f0-9]{64}$' AND url_hash ~ '^[a-f0-9]{64}$' AND pair_binding_hash ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT report_v4_acceptance_site_read_manifest_mode_check CHECK(mode IN ('raw','browser')),
+    CONSTRAINT report_v4_acceptance_site_read_manifest_network_check CHECK(network_performed=true),
+    CONSTRAINT report_v4_acceptance_site_read_manifest_owner_check
+      CHECK((owner_question_id IS NULL OR (owner_question_id=btrim(owner_question_id) AND length(owner_question_id) BETWEEN 1 AND 500))
+        AND (owner_source_id IS NULL OR (owner_source_id=btrim(owner_source_id) AND length(owner_source_id) BETWEEN 1 AND 500))),
+    CONSTRAINT report_v4_acceptance_site_read_manifest_scope_check CHECK(
+      (scope='admission_discovery' AND purpose IN ('homepage','robots','sitemap') AND attempt=0
+        AND owner_question_id IS NULL AND owner_source_id IS NULL)
+      OR (scope='admission_page' AND purpose='page' AND attempt=0
+        AND owner_question_id IS NULL AND owner_source_id IS NULL)
+      OR (scope='enhancement_source' AND purpose='source' AND attempt=1
+        AND owner_question_id IS NOT NULL AND owner_source_id IS NOT NULL)),
+    CONSTRAINT report_v4_acceptance_site_read_manifest_terminal_check CHECK(
+      (terminal_phase IS NULL AND terminal_at IS NULL)
+      OR (terminal_phase IN ('completed','failed') AND terminal_at IS NOT NULL AND terminal_at>=started_at))
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_site_read_manifest_natural_uidx
+    ON report_v4_acceptance_site_read_manifest
+      (session_id,scenario_id,report_id,job_id,scope,purpose,url_hash,mode,attempt,owner_question_id,owner_source_id)
+    NULLS NOT DISTINCT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS report_v4_acceptance_site_read_manifest_enh_physical_uidx
+    ON report_v4_acceptance_site_read_manifest(session_id,scenario_id,job_id,url_hash,mode,attempt)
+    WHERE scope='enhancement_source'`,
+  `CREATE INDEX IF NOT EXISTS report_v4_acceptance_site_read_manifest_scenario_idx
+    ON report_v4_acceptance_site_read_manifest(session_id,scenario_id,started_at,identity_hash)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_site_read_manifest() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; scenario_state text; scenario_report text; expected_job text;
+     lineage_ok boolean; expected_identity text; expected_pair text;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP='DELETE' THEN
+       RAISE EXCEPTION 'A Report V4 acceptance site-read manifest row is immutable and cannot be deleted.';
+     END IF;
+     IF TG_OP='INSERT' THEN
+       SELECT sessions.state,scenarios.state,scenarios.report_id,
+         CASE WHEN NEW.scope IN ('admission_discovery','admission_page') THEN scenarios.pre_admission_job_id
+              ELSE scenarios.enhancement_job_id END
+         INTO session_state,scenario_state,scenario_report,expected_job
+       FROM report_v4_acceptance_sessions sessions
+       JOIN report_v4_acceptance_scenarios scenarios
+         ON scenarios.session_id=sessions.id AND scenarios.id=NEW.scenario_id
+       WHERE sessions.id=NEW.session_id;
+       IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN
+         RAISE EXCEPTION 'A Report V4 acceptance site-read begin requires a collecting session and scenario.';
+       END IF;
+       IF expected_job IS DISTINCT FROM NEW.job_id OR (scenario_report IS NOT NULL AND scenario_report IS DISTINCT FROM NEW.report_id) THEN
+         RAISE EXCEPTION 'A Report V4 acceptance site-read begin requires exact scenario lineage.';
+       END IF;
+       IF NEW.scope IN ('admission_discovery','admission_page') THEN
+         SELECT EXISTS(SELECT 1 FROM scan_jobs WHERE id=NEW.job_id AND report_id=NEW.report_id
+           AND reason='v4_pre_admission' AND artifact_contract='combined_geo_report_v4') INTO lineage_ok;
+       ELSE
+         SELECT scenario_report=NEW.report_id AND EXISTS(SELECT 1 FROM scan_jobs WHERE id=NEW.job_id AND report_id=NEW.report_id
+           AND reason='v4_diagnosis_enhancement' AND artifact_contract='combined_geo_report_v4') INTO lineage_ok;
+       END IF;
+       IF lineage_ok IS DISTINCT FROM true THEN
+         RAISE EXCEPTION 'A Report V4 acceptance site-read begin requires exact job and report lineage.';
+       END IF;
+       expected_identity:=encode(sha256(convert_to(concat_ws(chr(31),
+         'ogc:report-v4:acceptance-site-read-manifest:identity:v1',NEW.session_id,NEW.scenario_id,NEW.report_id,
+         NEW.job_id,NEW.scope,NEW.purpose,NEW.url_hash,NEW.mode,NEW.attempt::text,
+         coalesce(NEW.owner_question_id,''),coalesce(NEW.owner_source_id,'')),'UTF8')),'hex');
+       expected_pair:=encode(sha256(convert_to(concat_ws(chr(31),
+         'ogc:report-v4:acceptance-site-read-manifest:pair:v1',NEW.session_id,NEW.scenario_id,NEW.report_id,
+         NEW.job_id,NEW.scope,NEW.purpose,NEW.url_hash,NEW.attempt::text),'UTF8')),'hex');
+       IF NEW.identity_hash IS DISTINCT FROM expected_identity OR NEW.pair_binding_hash IS DISTINCT FROM expected_pair THEN
+         RAISE EXCEPTION 'A Report V4 acceptance site-read manifest hash is not deterministic.';
+       END IF;
+       RETURN NEW;
+     END IF;
+     SELECT sessions.state,scenarios.state INTO session_state,scenario_state
+       FROM report_v4_acceptance_sessions sessions
+       JOIN report_v4_acceptance_scenarios scenarios
+         ON scenarios.session_id=sessions.id AND scenarios.id=NEW.scenario_id
+       WHERE sessions.id=NEW.session_id;
+     IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN
+       RAISE EXCEPTION 'A Report V4 acceptance site-read terminal requires a collecting session and scenario.';
+     END IF;
+     IF NEW.identity_hash IS DISTINCT FROM OLD.identity_hash OR NEW.session_id IS DISTINCT FROM OLD.session_id
+       OR NEW.scenario_id IS DISTINCT FROM OLD.scenario_id OR NEW.report_id IS DISTINCT FROM OLD.report_id
+       OR NEW.job_id IS DISTINCT FROM OLD.job_id OR NEW.scope IS DISTINCT FROM OLD.scope
+       OR NEW.purpose IS DISTINCT FROM OLD.purpose OR NEW.url_hash IS DISTINCT FROM OLD.url_hash
+       OR NEW.mode IS DISTINCT FROM OLD.mode OR NEW.attempt IS DISTINCT FROM OLD.attempt
+       OR NEW.pair_binding_hash IS DISTINCT FROM OLD.pair_binding_hash
+       OR NEW.owner_question_id IS DISTINCT FROM OLD.owner_question_id
+       OR NEW.owner_source_id IS DISTINCT FROM OLD.owner_source_id
+       OR NEW.network_performed IS DISTINCT FROM OLD.network_performed
+       OR NEW.started_at IS DISTINCT FROM OLD.started_at THEN
+       RAISE EXCEPTION 'A Report V4 acceptance site-read manifest identity and owner are immutable.';
+     END IF;
+     IF OLD.terminal_phase IS NOT NULL OR OLD.terminal_at IS NOT NULL THEN
+       RAISE EXCEPTION 'A terminal Report V4 acceptance site-read manifest row is immutable.';
+     END IF;
+     IF NEW.terminal_phase NOT IN ('completed','failed') OR NEW.terminal_at IS NULL THEN
+       RAISE EXCEPTION 'A Report V4 acceptance site-read manifest row may only transition once to completed or failed.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_acceptance_site_read_manifest_guard
+    ON report_v4_acceptance_site_read_manifest`,
+  `CREATE TRIGGER report_v4_acceptance_site_read_manifest_guard
+    BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_site_read_manifest
+    FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_site_read_manifest()`
+] as const;
+
+const V37_ACCEPTANCE_EVENT_VALID_MIGRATION = V35_DATABASE_MIGRATIONS.find((statement) =>
+  statement.includes("CREATE OR REPLACE FUNCTION ogc_report_v4_acceptance_event_valid"))!
+  .replace(
+    "'pdf','provider_claim','qualification','four_snapshot','replacement_fulfillment'",
+    "'pdf','provider_claim','qualification','four_snapshot','replacement_fulfillment','correction','full_report_rerun','legacy_mutation'"
+  );
+
+export const V37_DATABASE_MIGRATIONS = [
+  V37_ACCEPTANCE_EVENT_VALID_MIGRATION,
+  `CREATE TABLE IF NOT EXISTS report_v4_prohibited_operation_guard_runs (
+    id text PRIMARY KEY,
+    domain text NOT NULL,
+    session_id text NOT NULL REFERENCES report_v4_acceptance_sessions(id) ON DELETE RESTRICT,
+    scenario_id text NOT NULL,
+    job_id text NOT NULL REFERENCES scan_jobs(id) ON DELETE RESTRICT,
+    worker_git_sha text NOT NULL,
+    manifest_hash text NOT NULL,
+    state text NOT NULL DEFAULT 'armed',
+    armed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    completed_at timestamptz,
+    CONSTRAINT report_v4_prohibited_operation_guard_runs_scenario_session_fkey
+      FOREIGN KEY(scenario_id,session_id) REFERENCES report_v4_acceptance_scenarios(id,session_id) ON DELETE RESTRICT,
+    CONSTRAINT report_v4_prohibited_operation_guard_runs_identity_uidx UNIQUE(session_id,scenario_id,job_id),
+    CONSTRAINT report_v4_prohibited_operation_guard_runs_id_check CHECK(id ~ '^[a-f0-9]{64}$'),
+    CONSTRAINT report_v4_prohibited_operation_guard_runs_domain_check
+      CHECK(domain='open-geo-console/report-v4/prohibited-operation-manifest'),
+    CONSTRAINT report_v4_prohibited_operation_guard_runs_sha_check
+      CHECK(worker_git_sha ~ '^[a-f0-9]{40}$' AND manifest_hash='e7f33b34d76384bbb9366f4f7cc109e6bd63dc84ea962fc9ad410ddb1b6c197b'),
+    CONSTRAINT report_v4_prohibited_operation_guard_runs_state_check CHECK(state IN ('armed','completed')),
+    CONSTRAINT report_v4_prohibited_operation_guard_runs_terminal_check CHECK(
+      (state='armed' AND completed_at IS NULL)
+      OR (state='completed' AND completed_at IS NOT NULL AND completed_at>=armed_at))
+  )`,
+  `CREATE TABLE IF NOT EXISTS report_v4_prohibited_operation_guard_counters (
+    run_id text NOT NULL REFERENCES report_v4_prohibited_operation_guard_runs(id) ON DELETE RESTRICT,
+    operation text NOT NULL,
+    guard_site text NOT NULL,
+    attempt_count integer NOT NULL DEFAULT 0,
+    seeded_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    attempted_at timestamptz,
+    CONSTRAINT report_v4_prohibited_operation_guard_counters_pkey PRIMARY KEY(run_id,guard_site),
+    CONSTRAINT report_v4_prohibited_operation_guard_counters_attempt_check CHECK(attempt_count IN (0,1)),
+    CONSTRAINT report_v4_prohibited_operation_guard_counters_timestamp_check CHECK(
+      (attempt_count=0 AND attempted_at IS NULL)
+      OR (attempt_count=1 AND attempted_at IS NOT NULL AND attempted_at>=seeded_at))
+  )`,
+  `CREATE OR REPLACE FUNCTION ogc_report_v4_prohibited_operation_pair_valid(candidate_operation text,candidate_site text)
+   RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT CASE candidate_site
+     WHEN 'pdf_export_url' THEN candidate_operation='pdf'
+     WHEN 'pdf_export_html' THEN candidate_operation='pdf'
+     WHEN 'pdf_readiness_chromium' THEN candidate_operation='pdf'
+     WHEN 'pdf_readiness_storage' THEN candidate_operation='pdf'
+     WHEN 'full_report_rerun' THEN candidate_operation='full_report_rerun'
+     WHEN 'provider_claim' THEN candidate_operation='provider_claim'
+     WHEN 'qualification' THEN candidate_operation='qualification'
+     WHEN 'four_snapshot' THEN candidate_operation='four_snapshot'
+     WHEN 'replacement_prepare' THEN candidate_operation='replacement_fulfillment'
+     WHEN 'replacement_resume' THEN candidate_operation='replacement_fulfillment'
+     WHEN 'replacement_terminalize' THEN candidate_operation='replacement_fulfillment'
+     WHEN 'correction_prepare' THEN candidate_operation='correction'
+     WHEN 'correction_confirm' THEN candidate_operation='correction'
+     WHEN 'correction_terminalize' THEN candidate_operation='correction'
+     WHEN 'legacy_mutation' THEN candidate_operation='legacy_mutation'
+     ELSE false END $$`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_prohibited_operation_run() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; scenario_state text; expected_sha text; job_owned boolean; expected_id text;
+     counter_count integer; attempted_count integer;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP='DELETE' THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard run is immutable and cannot be deleted.'; END IF;
+     IF TG_OP='INSERT' THEN
+       SELECT sessions.state,scenarios.state,sessions.worker_git_sha,
+         NEW.job_id IN (scenarios.pre_admission_job_id,scenarios.core_job_id,scenarios.enhancement_job_id)
+       INTO session_state,scenario_state,expected_sha,job_owned
+       FROM report_v4_acceptance_sessions sessions
+       JOIN report_v4_acceptance_scenarios scenarios ON scenarios.session_id=sessions.id AND scenarios.id=NEW.scenario_id
+       WHERE sessions.id=NEW.session_id;
+       IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' OR job_owned IS DISTINCT FROM true THEN
+         RAISE EXCEPTION 'A Report V4 prohibited-operation guard run requires a collecting protected scenario that owns the exact job.';
+       END IF;
+       IF NEW.worker_git_sha IS DISTINCT FROM expected_sha OR NEW.manifest_hash IS DISTINCT FROM 'e7f33b34d76384bbb9366f4f7cc109e6bd63dc84ea962fc9ad410ddb1b6c197b' THEN
+         RAISE EXCEPTION 'A Report V4 prohibited-operation guard run requires the exact worker SHA and manifest hash.';
+       END IF;
+       expected_id:=encode(sha256(convert_to(concat_ws(chr(31),'ogc:report-v4:prohibited-operation-guard-run:v1',
+         NEW.domain,NEW.session_id,NEW.scenario_id,NEW.job_id,NEW.worker_git_sha,NEW.manifest_hash),'UTF8')),'hex');
+       IF NEW.id IS DISTINCT FROM expected_id OR NEW.state<>'armed' OR NEW.completed_at IS NOT NULL THEN
+         RAISE EXCEPTION 'A Report V4 prohibited-operation guard run identity is not deterministic and armed.';
+       END IF;
+       RETURN NEW;
+     END IF;
+     IF NEW.id IS DISTINCT FROM OLD.id OR NEW.domain IS DISTINCT FROM OLD.domain
+       OR NEW.session_id IS DISTINCT FROM OLD.session_id OR NEW.scenario_id IS DISTINCT FROM OLD.scenario_id
+       OR NEW.job_id IS DISTINCT FROM OLD.job_id OR NEW.worker_git_sha IS DISTINCT FROM OLD.worker_git_sha
+       OR NEW.manifest_hash IS DISTINCT FROM OLD.manifest_hash OR NEW.armed_at IS DISTINCT FROM OLD.armed_at THEN
+       RAISE EXCEPTION 'A Report V4 prohibited-operation guard run identity is immutable.';
+     END IF;
+     IF OLD.state<>'armed' OR NEW.state<>'completed' OR OLD.completed_at IS NOT NULL OR NEW.completed_at IS NULL THEN
+       RAISE EXCEPTION 'A Report V4 prohibited-operation guard run may complete exactly once.';
+     END IF;
+     SELECT sessions.state,scenarios.state INTO session_state,scenario_state
+       FROM report_v4_acceptance_sessions sessions
+       JOIN report_v4_acceptance_scenarios scenarios ON scenarios.session_id=sessions.id AND scenarios.id=OLD.scenario_id
+       WHERE sessions.id=OLD.session_id;
+     IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN
+       RAISE EXCEPTION 'A Report V4 prohibited-operation guard run may complete only while its session and scenario are collecting.';
+     END IF;
+     SELECT count(*),count(*) FILTER(WHERE attempt_count<>0) INTO counter_count,attempted_count
+       FROM report_v4_prohibited_operation_guard_counters WHERE run_id=OLD.id;
+     IF counter_count<>15 OR attempted_count<>0 THEN
+       RAISE EXCEPTION 'A completed Report V4 prohibited-operation guard run requires exactly fifteen zero counters.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_prohibited_operation_guard_runs_guard
+    ON report_v4_prohibited_operation_guard_runs`,
+  `CREATE TRIGGER report_v4_prohibited_operation_guard_runs_guard
+    BEFORE INSERT OR UPDATE OR DELETE ON report_v4_prohibited_operation_guard_runs
+    FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_prohibited_operation_run()`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_prohibited_operation_counter() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE run_state text; session_state text; scenario_state text;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP='DELETE' THEN RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter is immutable and cannot be deleted.'; END IF;
+     SELECT runs.state,sessions.state,scenarios.state INTO run_state,session_state,scenario_state
+       FROM report_v4_prohibited_operation_guard_runs runs
+       JOIN report_v4_acceptance_sessions sessions ON sessions.id=runs.session_id
+       JOIN report_v4_acceptance_scenarios scenarios ON scenarios.id=runs.scenario_id AND scenarios.session_id=runs.session_id
+       WHERE runs.id=NEW.run_id;
+     IF run_state IS DISTINCT FROM 'armed' OR session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN
+       RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter requires an armed collecting run.';
+     END IF;
+     IF NOT ogc_report_v4_prohibited_operation_pair_valid(NEW.operation,NEW.guard_site) THEN
+       RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter operation and site are not canonical.';
+     END IF;
+     IF TG_OP='INSERT' THEN
+       IF NEW.attempt_count<>0 OR NEW.attempted_at IS NOT NULL THEN
+         RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter must be seeded at zero.';
+       END IF;
+       RETURN NEW;
+     END IF;
+     IF NEW.run_id IS DISTINCT FROM OLD.run_id OR NEW.operation IS DISTINCT FROM OLD.operation
+       OR NEW.guard_site IS DISTINCT FROM OLD.guard_site OR NEW.seeded_at IS DISTINCT FROM OLD.seeded_at THEN
+       RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter identity is immutable.';
+     END IF;
+     IF OLD.attempt_count<>0 OR OLD.attempted_at IS NOT NULL OR NEW.attempt_count<>1 OR NEW.attempted_at IS NULL THEN
+       RAISE EXCEPTION 'A Report V4 prohibited-operation guard counter may increment only once from zero to one.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_prohibited_operation_guard_counters_guard
+    ON report_v4_prohibited_operation_guard_counters`,
+  `CREATE TRIGGER report_v4_prohibited_operation_guard_counters_guard
+    BEFORE INSERT OR UPDATE OR DELETE ON report_v4_prohibited_operation_guard_counters
+    FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_prohibited_operation_counter()`
+] as const;
+
+export const V38_DATABASE_MIGRATIONS = [
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ADD COLUMN IF NOT EXISTS input_identity_hash text`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ADD COLUMN IF NOT EXISTS page_summary_identity_set_hash text`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ADD COLUMN IF NOT EXISTS page_summary_count integer`,
+  `DO $$ BEGIN
+     IF EXISTS(SELECT 1 FROM report_v4_website_synthesis_checkpoints
+       WHERE input_identity_hash IS NULL OR page_summary_identity_set_hash IS NULL OR page_summary_count IS NULL) THEN
+       RAISE EXCEPTION 'Existing V4 website synthesis checkpoints cannot be upgraded without provable input identity; operator disposition is required.';
+     END IF;
+   END $$`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ALTER COLUMN input_identity_hash SET NOT NULL`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ALTER COLUMN page_summary_identity_set_hash SET NOT NULL`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ALTER COLUMN page_summary_count SET NOT NULL`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints DROP CONSTRAINT IF EXISTS report_v4_website_synthesis_checkpoint_input_authority_check`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ADD CONSTRAINT report_v4_website_synthesis_checkpoint_input_authority_check
+     CHECK(input_identity_hash ~ '^[a-f0-9]{64}$' AND page_summary_identity_set_hash ~ '^[a-f0-9]{64}$'
+       AND page_summary_count BETWEEN 1 AND 50)`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints DROP CONSTRAINT IF EXISTS report_v4_website_synthesis_checkpoint_state_authority_check`,
+  `ALTER TABLE report_v4_website_synthesis_checkpoints ADD CONSTRAINT report_v4_website_synthesis_checkpoint_state_authority_check CHECK(
+     (state='queued' AND provider_call_count=0 AND worker_id IS NULL AND lease_expires_at IS NULL AND error_code IS NULL)
+     OR (state='running' AND worker_id IS NOT NULL AND length(btrim(worker_id)) BETWEEN 1 AND 500
+       AND lease_expires_at IS NOT NULL AND error_code IS NULL)
+     OR (state='completed' AND provider_call_count=1 AND worker_id IS NULL AND lease_expires_at IS NULL AND error_code IS NULL)
+     OR (state='failed' AND provider_call_count=1 AND worker_id IS NULL AND lease_expires_at IS NULL
+       AND length(btrim(error_code)) BETWEEN 1 AND 200))`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_website_synthesis_checkpoint_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+   BEGIN
+     IF TG_OP='DELETE' THEN
+       RAISE EXCEPTION 'A V4 website synthesis checkpoint is immutable and cannot be deleted.';
+     END IF;
+     IF TG_OP='INSERT' THEN
+       IF NEW.state<>'queued' OR NEW.provider_call_count<>0 OR NEW.worker_id IS NOT NULL
+         OR NEW.lease_expires_at IS NOT NULL OR NEW.output_payload IS NOT NULL OR NEW.output_hash IS NOT NULL
+         OR NEW.error_code IS NOT NULL THEN
+         RAISE EXCEPTION 'A V4 website synthesis checkpoint must be inserted as fresh queued authority.';
+       END IF;
+       RETURN NEW;
+     END IF;
+     IF NEW.identity_hash IS DISTINCT FROM OLD.identity_hash
+       OR NEW.report_id IS DISTINCT FROM OLD.report_id
+       OR NEW.order_id IS DISTINCT FROM OLD.order_id
+       OR NEW.core_job_id IS DISTINCT FROM OLD.core_job_id
+       OR NEW.config_snapshot_id IS DISTINCT FROM OLD.config_snapshot_id
+       OR NEW.site_snapshot_id IS DISTINCT FROM OLD.site_snapshot_id
+       OR NEW.operation_id IS DISTINCT FROM OLD.operation_id
+       OR NEW.profile_id IS DISTINCT FROM OLD.profile_id
+       OR NEW.input_identity_hash IS DISTINCT FROM OLD.input_identity_hash
+       OR NEW.page_summary_identity_set_hash IS DISTINCT FROM OLD.page_summary_identity_set_hash
+       OR NEW.page_summary_count IS DISTINCT FROM OLD.page_summary_count
+       OR NEW.correction_count IS DISTINCT FROM OLD.correction_count
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+       RAISE EXCEPTION 'A V4 website synthesis checkpoint input authority is immutable.';
+     END IF;
+     IF OLD.state IN ('completed','failed') THEN
+       RAISE EXCEPTION 'A terminal V4 website synthesis checkpoint is immutable.';
+     END IF;
+     IF OLD.state='queued' THEN
+       IF NEW.state<>'running' OR NEW.provider_call_count<>0 OR NEW.worker_id IS NULL
+         OR NEW.lease_expires_at IS NULL THEN
+         RAISE EXCEPTION 'A queued V4 website synthesis checkpoint may only be claimed before provider authorization.';
+       END IF;
+     ELSIF OLD.state='running' THEN
+       IF NEW.state='running' THEN
+         IF OLD.provider_call_count=0 AND NEW.provider_call_count=0 THEN
+           IF OLD.lease_expires_at>clock_timestamp() OR NEW.worker_id IS NULL
+             OR NEW.lease_expires_at IS NULL THEN
+             RAISE EXCEPTION 'A running V4 website synthesis checkpoint may only be reclaimed after its unused lease expires.';
+           END IF;
+         ELSIF OLD.provider_call_count=0 AND NEW.provider_call_count=1 THEN
+           IF NEW.worker_id IS DISTINCT FROM OLD.worker_id OR NEW.lease_expires_at IS DISTINCT FROM OLD.lease_expires_at
+             OR OLD.lease_expires_at IS NULL OR OLD.lease_expires_at<=clock_timestamp() THEN
+             RAISE EXCEPTION 'A V4 website synthesis provider call requires the exact live checkpoint lease.';
+           END IF;
+         ELSE
+           RAISE EXCEPTION 'A V4 website synthesis provider call may be authorized exactly once.';
+         END IF;
+       ELSIF NEW.state IN ('completed','failed') THEN
+         IF OLD.provider_call_count<>1 OR NEW.provider_call_count<>1 OR OLD.lease_expires_at IS NULL
+           OR OLD.lease_expires_at<=clock_timestamp() THEN
+           RAISE EXCEPTION 'A terminal V4 website synthesis checkpoint requires one authorized provider call on a live lease.';
+         END IF;
+       ELSE
+         RAISE EXCEPTION 'The V4 website synthesis checkpoint state transition is invalid.';
+       END IF;
+     ELSE
+       RAISE EXCEPTION 'The V4 website synthesis checkpoint state transition is invalid.';
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_website_synthesis_checkpoints_guard
+     ON report_v4_website_synthesis_checkpoints`,
+  `CREATE TRIGGER report_v4_website_synthesis_checkpoints_guard
+     BEFORE INSERT OR UPDATE OR DELETE ON report_v4_website_synthesis_checkpoints
+     FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_website_synthesis_checkpoint_mutation()`
+] as const;
+
+export const V39_DATABASE_MIGRATIONS = [
+  `CREATE TABLE IF NOT EXISTS report_v4_acceptance_authority_phase_snapshots (
+    session_id text NOT NULL REFERENCES report_v4_acceptance_sessions(id) ON DELETE RESTRICT,
+    scenario_id text NOT NULL,
+    phase text NOT NULL,
+    captured_at text NOT NULL,
+    payload jsonb NOT NULL,
+    payload_hash text NOT NULL,
+    commerce_fingerprint text NOT NULL,
+    worker_git_sha text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY(session_id,scenario_id,phase),
+    CONSTRAINT report_v4_acceptance_authority_phase_scenario_session_fkey
+      FOREIGN KEY(scenario_id,session_id) REFERENCES report_v4_acceptance_scenarios(id,session_id) ON DELETE RESTRICT,
+    CONSTRAINT report_v4_acceptance_authority_phase_phase_check CHECK(phase IN ('baseline','final')),
+    CONSTRAINT report_v4_acceptance_authority_phase_payload_check CHECK(jsonb_typeof(payload)='object'),
+    CONSTRAINT report_v4_acceptance_authority_phase_hash_check CHECK(
+      payload_hash ~ '^[a-f0-9]{64}$' AND commerce_fingerprint ~ '^[a-f0-9]{64}$'
+      AND worker_git_sha ~ '^[a-f0-9]{40}$')
+  )`,
+  `ALTER TABLE report_v4_acceptance_authority_phase_snapshots
+     DROP CONSTRAINT IF EXISTS report_v4_acceptance_authority_phase_captured_at_check`,
+  `ALTER TABLE report_v4_acceptance_authority_phase_snapshots
+     ADD CONSTRAINT report_v4_acceptance_authority_phase_captured_at_check CHECK(
+       captured_at ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$'
+       AND captured_at::timestamptz IS NOT NULL)`,
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_authority_phase_snapshot() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; scenario_state text; session_environment text; session_worker_git_sha text;
+     baseline_captured_at text;
+   BEGIN
+     IF TG_OP='DELETE' OR TG_OP='UPDATE' THEN
+       RAISE EXCEPTION 'A Report V4 acceptance authority phase snapshot is append-only and immutable.';
+     END IF;
+     SELECT state,environment,worker_git_sha INTO session_state,session_environment,session_worker_git_sha
+       FROM report_v4_acceptance_sessions WHERE id=NEW.session_id;
+     SELECT state INTO scenario_state FROM report_v4_acceptance_scenarios
+       WHERE id=NEW.scenario_id AND session_id=NEW.session_id;
+     IF session_environment IS DISTINCT FROM 'protected_staging' OR session_state IS DISTINCT FROM 'collecting'
+       OR scenario_state IS DISTINCT FROM 'collecting' OR session_worker_git_sha IS DISTINCT FROM NEW.worker_git_sha THEN
+       RAISE EXCEPTION 'A phase snapshot requires its exact collecting protected-Staging session and scenario.';
+     END IF;
+     IF NEW.phase='baseline' THEN
+       IF EXISTS(SELECT 1 FROM report_v4_acceptance_authority_phase_snapshots
+         WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND phase='final') THEN
+         RAISE EXCEPTION 'A baseline phase snapshot cannot follow a final phase snapshot.';
+       END IF;
+     ELSE
+       SELECT captured_at INTO baseline_captured_at FROM report_v4_acceptance_authority_phase_snapshots
+         WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND phase='baseline';
+       IF baseline_captured_at IS NULL OR baseline_captured_at::timestamptz>=NEW.captured_at::timestamptz THEN
+         RAISE EXCEPTION 'A final phase snapshot requires an earlier persisted baseline phase snapshot.';
+       END IF;
+     END IF;
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_acceptance_authority_phase_snapshots_guard
+    ON report_v4_acceptance_authority_phase_snapshots`,
+  `CREATE TRIGGER report_v4_acceptance_authority_phase_snapshots_guard
+    BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_authority_phase_snapshots
+    FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_authority_phase_snapshot()`
+] as const;
+
+export const V40_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_guard_report_v4_acceptance_event() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE session_state text; scenario_state text; expected_sequence integer; expected_prev text; expected_key text;
+     started_exists boolean; terminal_exists boolean;
+   BEGIN
+     PERFORM ogc_report_v4_acceptance_require_staging();
+     IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'A Report V4 acceptance event is append-only and immutable.'; END IF;
+     SELECT state,head_sequence+1,head_hash INTO session_state,expected_sequence,expected_prev
+       FROM report_v4_acceptance_sessions WHERE id=NEW.session_id FOR UPDATE;
+     SELECT state INTO scenario_state FROM report_v4_acceptance_scenarios
+       WHERE id=NEW.scenario_id AND session_id=NEW.session_id FOR UPDATE;
+     IF session_state IS DISTINCT FROM 'collecting' OR scenario_state IS DISTINCT FROM 'collecting' THEN
+       RAISE EXCEPTION 'A Report V4 acceptance event requires collecting session and scenario state.';
+     END IF;
+     IF NEW.sequence IS DISTINCT FROM expected_sequence OR NEW.prev_hash IS DISTINCT FROM expected_prev THEN
+       RAISE EXCEPTION 'A Report V4 acceptance event does not extend the exact hash-chain head.';
+     END IF;
+     IF NEW.phase IN ('completed','failed','rejected') THEN
+       SELECT EXISTS(SELECT 1 FROM report_v4_acceptance_events WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND kind=NEW.kind AND operation=NEW.operation AND unit_id=NEW.unit_id AND attempt=NEW.attempt AND phase='started') INTO started_exists;
+       SELECT EXISTS(SELECT 1 FROM report_v4_acceptance_events WHERE session_id=NEW.session_id AND scenario_id=NEW.scenario_id AND kind=NEW.kind AND operation=NEW.operation AND unit_id=NEW.unit_id AND attempt=NEW.attempt AND phase IN ('completed','failed','rejected')) INTO terminal_exists;
+       IF NOT started_exists OR terminal_exists THEN RAISE EXCEPTION 'A terminal Report V4 acceptance event requires exactly one started claim for the same unit and attempt.'; END IF;
+     END IF;
+     expected_key:=encode(sha256(convert_to(concat_ws(chr(31),NEW.session_id,NEW.scenario_id,NEW.kind,NEW.operation,NEW.unit_id,NEW.attempt::text,NEW.phase),'UTF8')),'hex');
+     IF NEW.idempotency_key IS DISTINCT FROM expected_key THEN RAISE EXCEPTION 'A Report V4 acceptance event idempotency key is not deterministic.'; END IF;
+     NEW.details_canonical:=NEW.details::text;
+     NEW.occurred_at_canonical:=to_char(NEW.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"');
+     NEW.event_hash:=encode(sha256(convert_to(concat_ws(chr(31),NEW.prev_hash,NEW.idempotency_key,NEW.sequence::text,NEW.kind,NEW.operation,NEW.unit_id,NEW.attempt::text,NEW.phase,NEW.details_canonical,NEW.occurred_at_canonical),'UTF8')),'hex');
+     RETURN NEW;
+   END $$`,
+  `DROP TRIGGER IF EXISTS report_v4_acceptance_events_guard ON report_v4_acceptance_events`,
+  `CREATE TRIGGER report_v4_acceptance_events_guard BEFORE INSERT OR UPDATE OR DELETE ON report_v4_acceptance_events FOR EACH ROW EXECUTE FUNCTION ogc_guard_report_v4_acceptance_event()`
+] as const;
+
+const DATABASE_MIGRATION_STEPS = [
+  { version: 9, migrations: V9_DATABASE_MIGRATIONS },
+  { version: 10, migrations: V10_DATABASE_MIGRATIONS },
+  { version: 11, migrations: V11_DATABASE_MIGRATIONS },
+  { version: 12, migrations: V12_DATABASE_MIGRATIONS },
+  { version: 13, migrations: V13_DATABASE_MIGRATIONS },
+  { version: 14, migrations: V14_DATABASE_MIGRATIONS },
+  { version: 15, migrations: V15_DATABASE_MIGRATIONS },
+  { version: 16, migrations: V16_DATABASE_MIGRATIONS },
+  { version: 17, migrations: V17_DATABASE_MIGRATIONS },
+  { version: 18, migrations: V18_DATABASE_MIGRATIONS },
+  { version: 19, migrations: V19_DATABASE_MIGRATIONS },
+  { version: 20, migrations: V20_DATABASE_MIGRATIONS },
+  { version: 21, migrations: V21_DATABASE_MIGRATIONS },
+  { version: 22, migrations: V22_DATABASE_MIGRATIONS },
+  { version: 23, migrations: V23_DATABASE_MIGRATIONS },
+  { version: 24, migrations: V24_DATABASE_MIGRATIONS },
+  { version: 25, migrations: V25_DATABASE_MIGRATIONS },
+  { version: 26, migrations: V26_DATABASE_MIGRATIONS },
+  { version: 27, migrations: V27_DATABASE_MIGRATIONS },
+  { version: 28, migrations: V28_DATABASE_MIGRATIONS },
+  { version: 29, migrations: V29_DATABASE_MIGRATIONS },
+  { version: 30, migrations: V30_DATABASE_MIGRATIONS },
+  { version: 31, migrations: V31_DATABASE_MIGRATIONS },
+  { version: 32, migrations: V32_DATABASE_MIGRATIONS },
+  { version: 33, migrations: V33_DATABASE_MIGRATIONS },
+  { version: 34, migrations: V34_DATABASE_MIGRATIONS },
+  { version: 35, migrations: V35_DATABASE_MIGRATIONS },
+  { version: 36, migrations: V36_DATABASE_MIGRATIONS },
+  { version: 37, migrations: V37_DATABASE_MIGRATIONS },
+  { version: 38, migrations: V38_DATABASE_MIGRATIONS },
+  { version: 39, migrations: V39_DATABASE_MIGRATIONS },
+  { version: 40, migrations: V40_DATABASE_MIGRATIONS }
+] as const;
+
+export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {
+  const version = currentVersion ?? 0;
+  return DATABASE_MIGRATION_STEPS
+    .filter((step) => step.version > version)
+    .flatMap((step) => [...step.migrations]);
+}
+
+export const DATABASE_MIGRATIONS = databaseMigrationsAfter(undefined);

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import {
   applyPaidPaymentEvent,
+  applyReportV4PaidPaymentEvent,
   applyUnsuccessfulPaymentEvent,
+  getPaymentOrder,
   getPaymentOrderByProviderCheckout,
+  isReportV4PaymentOrder,
   markPaymentEventProcessing,
   recordPaymentEvent
 } from "@/db/commercial-orders";
@@ -19,7 +22,7 @@ export async function POST(request: Request) {
     if (event.outcome === "payment_paid") {
       const orderId = event.orderId ?? await resolveLegacyPaymentOrder(event);
       if (!orderId || !event.paymentIntentId) throw new Error("A paid event is missing its order or payment identity.");
-      await applyPaidPaymentEvent({
+      const input = {
         provider: "airwallex",
         providerEventId: event.eventId,
         eventType: event.eventType,
@@ -28,7 +31,10 @@ export async function POST(request: Request) {
         providerCreatedAt: event.createdAt,
         payloadHash: event.payloadHash,
         selectedFields: { providerStatus: event.providerStatus }
-      });
+      } as const;
+      const order = await getPaymentOrder(orderId);
+      if (isReportV4PaymentOrder(order)) await applyReportV4PaidPaymentEvent(input);
+      else await applyPaidPaymentEvent(input);
     } else if (event.outcome === "payment_failed" && event.orderId) {
       await applyUnsuccessfulPaymentEvent({
         provider: "airwallex",

@@ -17,7 +17,6 @@ export const en = {
     loadSample: "Load sample",
     copyLink: "Copy link",
     copiedLink: "Copied",
-    printReport: "Print / PDF",
     switchToEnglish: "English",
     switchToChinese: "中文",
     backToScanner: "Back to scanner",
@@ -71,7 +70,7 @@ export const en = {
     auditedPages: "Audited pages",
     technicalAppendix: "Technical appendix",
     noFindings: "No findings. This site is in good shape.",
-    shareDescription: "Share this report URL or print it as a client-ready PDF.",
+    shareDescription: "Share this report using its secure HTML link.",
     logNextTitle: "Add AI crawler evidence",
     logNextDescription:
       "Upload or paste access logs to see whether known AI crawlers have visited this site.",
@@ -186,7 +185,6 @@ export const en = {
     previousPage: "Previous",
     nextPage: "Next",
     pageStatus: "Page {page} of {total}",
-    printTitle: "Complete GEO report",
     backToReport: "Back to report",
     errors: {
       emptyLogs: "Paste or import access logs before analyzing.",
@@ -205,8 +203,6 @@ export const en = {
     homepagePreviewNotice: "This free preview analyzed the homepage only.",
     detectedPagesEstimate: "Approximately {count} site URLs were detected without fetching or analyzing their content.",
     lockedDeepFeatures: "Unlock the deep report for complete site findings, page evidence, dimension explanations, rewrites, and the 90-day roadmap.",
-    printLockedTitle: "Print and PDF are included with the deep report",
-    printLockedDescription: "The free preview covers the homepage only. Unlock the private deep report to export the complete evidence and action plan.",
     technicalScore: "Technical score",
     aiDimensions: "AI dimension scores",
     organizationProfile: "Organization profile",
@@ -286,6 +282,7 @@ export const en = {
     paymentFailed: "The report could not be completed. The refund workflow is being handled automatically.",
     paymentRefundPending: "A full refund has been requested and is awaiting provider confirmation.",
     paymentRefunded: "The full refund has been confirmed.",
+    paymentRefundFailed: "The automatic refund could not be completed. Contact support so the refund can be reviewed and handled.",
     paymentStatusUnavailable: "We could not load this order status for the current report.",
     paymentRefresh: "Refresh status",
     paymentRefreshStopped: "Automatic updates have paused. Refresh to check the latest verified status."
@@ -452,6 +449,19 @@ export const en = {
       title: "Weak or missing title",
       description: "AI crawlers rely on clear titles to identify page purpose.",
       recommendation: "Add a specific title that names the company, product, or page intent."
+    },
+    "page.duplicateTitles": {
+      title: "Multiple pages reuse the same title",
+      description: "{affectedCount} pages expose the same title, reducing page-specific GEO identity.",
+      recommendation:
+        "Give each page a concise title that states its distinct purpose and keep only a short reusable brand identifier."
+    },
+    "page.dominantTitleTemplate": {
+      title: "Page titles are dominated by a shared template",
+      description:
+        "{affectedCount} pages share a {sharedLength}-character title segment that outweighs their page-specific meaning.",
+      recommendation:
+        "Lead with the page's distinct purpose and reduce the repeated portion to a concise brand identifier so generative engines can select and cite the right page."
     },
     "page.missingMetaDescription": {
       title: "Missing meta description",

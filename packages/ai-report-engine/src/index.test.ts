@@ -2,16 +2,38 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AI_WEBSITE_REPORT_VERSION,
   AI_REPORT_PROMPT_VERSION,
+  COMBINED_GEO_REPORT_CONTRACT,
+  COMBINED_GEO_REPORT_V2_CONTRACT,
+  COMBINED_GEO_REPORT_V3_CONTRACT,
+  COMBINED_GEO_REPORT_V4_CONTRACT,
+  MODEL_PROFILE_OPERATIONS,
   OpenAiCompatibleClient,
   ReportLanguageValidationError,
   ReportValidationError,
   analyzePageBatch,
+  buildModelOperationTokenBudget,
+  createModelProfileRegistry,
+  createModelProviderCapabilityRegistry,
+  createModelTokenEstimatorRegistry,
+  evaluateModelTokenBudget,
   planPagesWithRecovery,
   parseAiWebsiteReportV1,
+  parseCombinedGeoReportV1,
+  parseCombinedGeoReportV2,
+  parseCombinedGeoReportV3,
+  parseCombinedGeoReportV4,
+  parseModelProfile,
+  parseReportV4CustomerProseProfile,
+  parseReportV4DiagnosisInput,
+  parseReportV4DiagnosisOutput,
+  parseReportV4QuestionAnswerInput,
+  parseReportV4SiteSynthesisInput,
   planPages,
   preparePlanningCandidates,
+  runWithModelTokenBudget,
   synthesizeWebsiteReport,
   synthesizeWebsiteReportWithRecovery,
+  validateReportV4CustomerProse,
   validateEvidenceCitation,
   verifyReportEvidence,
   type AiWebsiteReportV1,
@@ -20,6 +42,45 @@ import {
   type JsonCompletionResult,
   type ReportSynthesisInput
 } from "./index";
+
+// @requirement GEO-V4-CONTRACT-01
+// @requirement GEO-V4-LEGACY-01
+describe("combined report public exports", () => {
+  it("adds V4 without removing or widening the historical V1-V3 exports", () => {
+    expect([
+      COMBINED_GEO_REPORT_CONTRACT,
+      COMBINED_GEO_REPORT_V2_CONTRACT,
+      COMBINED_GEO_REPORT_V3_CONTRACT,
+      COMBINED_GEO_REPORT_V4_CONTRACT
+    ]).toEqual([
+      "combined_geo_report_v1",
+      "combined_geo_report_v2",
+      "combined_geo_report_v3",
+      "combined_geo_report_v4"
+    ]);
+    expect([parseCombinedGeoReportV1, parseCombinedGeoReportV2, parseCombinedGeoReportV3, parseCombinedGeoReportV4])
+      .toEqual([expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function)]);
+  });
+
+  it("exports the V4 model, budget, bounded-input, diagnosis, and customer-prose primitives from the package root", () => {
+    expect(MODEL_PROFILE_OPERATIONS).toEqual(["pageAnalysis", "websiteSynthesis", "questionAnswer", "sourceDiagnosis"]);
+    expect([
+      parseModelProfile,
+      createModelProfileRegistry,
+      createModelProviderCapabilityRegistry,
+      createModelTokenEstimatorRegistry,
+      buildModelOperationTokenBudget,
+      evaluateModelTokenBudget,
+      runWithModelTokenBudget,
+      parseReportV4SiteSynthesisInput,
+      parseReportV4QuestionAnswerInput,
+      parseReportV4DiagnosisInput,
+      parseReportV4DiagnosisOutput,
+      parseReportV4CustomerProseProfile,
+      validateReportV4CustomerProse
+    ]).toEqual(Array.from({ length: 13 }, () => expect.any(Function)));
+  });
+});
 
 function mockClient(values: unknown[], modelId = "mock-model"): JsonCompletionClient {
   let call = 0;
@@ -296,18 +357,15 @@ describe("batch analysis and evidence", () => {
         recommendation: "Add named sources beside each important claim.", confidence: "high"
       }]
     }] };
-    const chinese = { analyses: [{
-      url: page.url,
-      summary: "该页面清楚介绍了 example 产品及其目标用户。",
-      organizationSignals: ["组织名称与产品说明保持一致。"],
-      strengths: ["开头说明容易理解。"],
-      findings: [{
-        title: "信任证据需要更具体", severity: "warning", impact: "读者目前难以核验重要主张。",
-        evidence: [{ url: page.url, quote: "Example builds evidence-first website reports" }],
-        recommendation: "在重要主张旁补充具名来源。", confidence: "high"
-      }]
-    }] };
-    const client = mockClient([english, chinese]);
+    const corrections = { corrections: [
+      { path: "analyses[0].summary", text: "该页面清楚介绍了 example 产品及其目标用户。" },
+      { path: "analyses[0].organizationSignals[0]", text: "组织名称与产品说明保持一致。" },
+      { path: "analyses[0].strengths[0]", text: "开头说明容易理解。" },
+      { path: "analyses[0].findings[0].title", text: "信任证据需要更具体" },
+      { path: "analyses[0].findings[0].impact", text: "读者目前难以核验重要主张。" },
+      { path: "analyses[0].findings[0].recommendation", text: "在重要主张旁补充具名来源。" }
+    ] };
+    const client = mockClient([english, corrections]);
 
     const result = await analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined });
 
@@ -316,11 +374,135 @@ describe("batch analysis and evidence", () => {
     for (const call of vi.mocked(client.completeJson).mock.calls) {
       expect(JSON.stringify(call[0])).toContain("Simplified Chinese");
     }
+    expect(JSON.stringify(vi.mocked(client.completeJson).mock.calls[1]?.[0]))
+      .toContain("keep verbatim source text only inside evidence quote fields");
+    const correctionPayload = JSON.parse(vi.mocked(client.completeJson).mock.calls[1]![0].messages[1]!.content);
+    expect(correctionPayload.pages).toBeUndefined();
+    expect(correctionPayload.draft).toBeUndefined();
+    expect(correctionPayload.fieldsToCorrect).toEqual([
+      { path: "analyses[0].summary", text: "The page clearly explains the product for modern teams." },
+      { path: "analyses[0].organizationSignals[0]", text: "The organization is presented consistently." },
+      { path: "analyses[0].strengths[0]", text: "The opening statement is easy to understand." },
+      { path: "analyses[0].findings[0].title", text: "The trust evidence needs more detail." },
+      { path: "analyses[0].findings[0].impact", text: "Readers cannot verify every claim." },
+      { path: "analyses[0].findings[0].recommendation", text: "Add named sources beside each important claim." }
+    ]);
+    expect(correctionPayload.allowedOriginalTerms).toEqual(["example.com", "example"]);
+    expect(correctionPayload.rules).toContain("Translate or omit every other Latin-script word outside evidence quote fields.");
+    expect(correctionPayload.rules).toContain("Treat allowedOriginalTerms as the complete and exclusive list of Latin-script text permitted in Chinese replacements.");
+    expect(result.analyses[0]?.findings[0]?.evidence).toEqual(english.analyses[0]!.findings[0]!.evidence);
+  });
+
+  it("retries a well-formed correction that still leaks English without re-analyzing the page", async () => {
+    const invalid = { analyses: [{
+      url: page.url,
+      summary: "The page clearly explains the product for modern teams.",
+      organizationSignals: [],
+      strengths: [],
+      findings: []
+    }] };
+    const stillEnglish = { corrections: [{
+      path: "analyses[0].summary",
+      text: "Rewrite the summary in Chinese for modern teams."
+    }] };
+    const corrected = { corrections: [{
+      path: "analyses[0].summary",
+      text: "该页面清楚说明了产品及其目标用户。"
+    }] };
+    const client = mockClient([invalid, stillEnglish, corrected]);
+
+    const result = await analyzePageBatch(client, {
+      pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined
+    });
+
+    expect(result.analyses[0]?.summary).toBe("该页面清楚说明了产品及其目标用户。");
+    expect(client.completeJson).toHaveBeenCalledTimes(3);
+    const retryPayload = JSON.parse(vi.mocked(client.completeJson).mock.calls[2]![0].messages[1]!.content);
+    expect(retryPayload.pages).toBeUndefined();
+    expect(retryPayload.fieldsToCorrect).toEqual([{
+      path: "analyses[0].summary",
+      text: "Rewrite the summary in Chinese for modern teams."
+    }]);
+  });
+
+  it("drops an optional rewrite example when its bounded language correction still fails", async () => {
+    const invalid = { analyses: [{
+      url: page.url,
+      summary: "\u9875\u9762\u8bf4\u660e\u6e05\u6670\u3002",
+      organizationSignals: [],
+      strengths: [],
+      findings: [{
+        title: "\u884c\u52a8\u5f15\u5bfc\u9700\u8981\u66f4\u6e05\u6670",
+        severity: "warning",
+        impact: "\u8bfb\u8005\u53ef\u80fd\u65e0\u6cd5\u786e\u8ba4\u4e0b\u4e00\u6b65\u3002",
+        evidence: [{ url: page.url, quote: "Example builds evidence-first website reports" }],
+        recommendation: "\u8865\u5145\u660e\u786e\u7684\u4e0b\u4e00\u6b65\u64cd\u4f5c\u3002",
+        rewriteExample: "Add a clear CTA for modern teams.",
+        confidence: "high"
+      }]
+    }] };
+    const stillInvalid = { corrections: [{
+      path: "analyses[0].findings[0].rewriteExample",
+      text: "Keep this CTA concise."
+    }] };
+    const client = mockClient([invalid, stillInvalid]);
+
+    const result = await analyzePageBatch(client, {
+      pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined
+    });
+
+    expect(result.analyses[0]?.findings[0]?.rewriteExample).toBeUndefined();
+    expect(result.analyses[0]?.findings[0]?.recommendation).toBe("\u8865\u5145\u660e\u786e\u7684\u4e0b\u4e00\u6b65\u64cd\u4f5c\u3002");
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
+
+  it("corrects legacy SEO terminology in page analysis using the existing single correction", async () => {
+    const analysis = (summary: string) => ({ analyses: [{
+      url: page.url, summary, organizationSignals: [], strengths: [], findings: []
+    }] });
+    const client = mockClient([analysis("Improve SEO visibility."), {
+      corrections: [{ path: "analyses[0].summary", text: "Improve GEO visibility." }]
+    }]);
+
+    const result = await analyzePageBatch(client, { pages: [page], locale: "en", maxAttempts: 3, retryDelay: async () => undefined });
+
+    expect(result.analyses[0]?.summary).toContain("GEO");
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(vi.mocked(client.completeJson).mock.calls[1]?.[0])).toContain("legacy_seo_terminology");
+  });
+
+  it("fails page analysis after one legacy terminology correction", async () => {
+    const invalid = { analyses: [{ url: page.url, summary: "Improve SEO visibility.", organizationSignals: [], strengths: [], findings: [] }] };
+    const client = mockClient([invalid]);
+    await expect(analyzePageBatch(client, { pages: [page], locale: "en", maxAttempts: 3, retryDelay: async () => undefined }))
+      .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
 
   it("fails page analysis after one language correction", async () => {
     const invalid = { analyses: [{ url: page.url, summary: "The page clearly explains the product for modern teams.", organizationSignals: [], strengths: [], findings: [] }] };
     const client = mockClient([invalid]);
+    await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined }))
+      .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { name: "missing", correction: { corrections: [] } },
+    { name: "extra", correction: { corrections: [
+      { path: "analyses[0].summary", text: "该页面说明清楚。" },
+      { path: "analyses[0].strengths[0]", text: "不得新增路径。" }
+    ] } },
+    { name: "duplicate", correction: { corrections: [
+      { path: "analyses[0].summary", text: "该页面说明清楚。" },
+      { path: "analyses[0].summary", text: "重复路径。" }
+    ] } },
+    { name: "evidence", correction: { corrections: [
+      { path: "analyses[0].findings[0].evidence[0].quote", text: "不得修改证据。" }
+    ] } }
+  ])("rejects a $name field-level language correction", async ({ correction }) => {
+    const invalid = { analyses: [{ url: page.url, summary: "The page clearly explains the product.", organizationSignals: [], strengths: [], findings: [] }] };
+    const client = mockClient([invalid, correction]);
     await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined }))
       .rejects.toThrow(ReportLanguageValidationError);
     expect(client.completeJson).toHaveBeenCalledTimes(2);
@@ -332,6 +514,31 @@ describe("batch analysis and evidence", () => {
     const client = mockClient([invalid]);
     await expect(analyzePageBatch(client, { pages: [titledPage], locale: "zh-CN", maxAttempts: 3, retryDelay: async () => undefined }))
       .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows source-grounded Latin brands and acronyms directly joined to Chinese text", async () => {
+    const mixedPage = { ...page, text: "提供FBA头程服务，并支持Shopee虾皮店铺。" };
+    const output = { analyses: [{
+      url: page.url,
+      summary: "页面提供FBA头程服务，并支持Shopee虾皮店铺。",
+      organizationSignals: [], strengths: [], findings: []
+    }] };
+    const client = mockClient([output]);
+
+    await expect(analyzePageBatch(client, { pages: [mixedPage], locale: "zh-CN", retryDelay: async () => undefined }))
+      .resolves.toMatchObject({ analyses: [{ summary: output.analyses[0]!.summary }] });
+    expect(client.completeJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes Latin brands invented by the model during Chinese correction", async () => {
+    const invalid = { analyses: [{ url: page.url, summary: "建议增加 Google Reviews 和 Trustpilot。", organizationSignals: [], strengths: [], findings: [] }] };
+    const client = mockClient([invalid, {
+      corrections: [{ path: "analyses[0].summary", text: "建议增加 Google Reviews 和 Trustpilot。" }]
+    }]);
+
+    await expect(analyzePageBatch(client, { pages: [page], locale: "zh-CN", retryDelay: async () => undefined }))
+      .resolves.toMatchObject({ analyses: [{ summary: "建议增加 英文术语 和 英文术语。" }] });
     expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
 
@@ -442,9 +649,11 @@ describe("report validation and synthesis", () => {
   });
 
   it("corrects Chinese report prose once and keeps English evidence quotes", async () => {
-    const invalid = reportModelOutput(1);
-    const valid = chineseReportModelOutput();
-    const client = mockClient([invalid, valid]);
+    const invalid = chineseReportModelOutput();
+    (invalid.executiveSummary as Record<string, unknown>).overview = "The website clearly introduces the product.";
+    const client = mockClient([invalid, {
+      corrections: [{ path: "executiveSummary.overview", text: "网站清楚介绍了产品。" }]
+    }]);
 
     const result = await synthesizeWebsiteReportWithRecovery(client, synthesisInput("zh-CN"), { maxAttempts: 3, delay: async () => undefined });
 
@@ -454,6 +663,34 @@ describe("report validation and synthesis", () => {
     for (const call of vi.mocked(client.completeJson).mock.calls) {
       expect(JSON.stringify(call[0])).toContain("Simplified Chinese");
     }
+    const correctionPayload = JSON.parse(vi.mocked(client.completeJson).mock.calls[1]![0].messages[1]!.content);
+    expect(correctionPayload.fieldsToCorrect).toEqual([
+      { path: "executiveSummary.overview", text: "The website clearly introduces the product." }
+    ]);
+    expect(correctionPayload.pageEvidence).toBeUndefined();
+  });
+
+  it("corrects legacy SEO terminology in synthesis using the existing single correction", async () => {
+    const invalid = reportModelOutput(1);
+    (invalid.executiveSummary as Record<string, unknown>).overview = "Improve SEO visibility with clearer evidence.";
+    const client = mockClient([invalid, {
+      corrections: [{ path: "executiveSummary.overview", text: "Improve GEO visibility with clearer evidence." }]
+    }]);
+
+    const result = await synthesizeWebsiteReportWithRecovery(client, synthesisInput("en"), { maxAttempts: 3, delay: async () => undefined });
+
+    expect(result.report.executiveSummary.overview).toContain("GEO");
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(vi.mocked(client.completeJson).mock.calls[1]?.[0])).toContain("legacy_seo_terminology");
+  });
+
+  it("fails synthesis after one legacy terminology correction", async () => {
+    const invalid = reportModelOutput(1);
+    (invalid.executiveSummary as Record<string, unknown>).overview = "Improve SEO visibility with clearer evidence.";
+    const client = mockClient([invalid]);
+    await expect(synthesizeWebsiteReportWithRecovery(client, synthesisInput("en"), { maxAttempts: 3, delay: async () => undefined }))
+      .rejects.toThrow(ReportLanguageValidationError);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
 
   it("does not gate server-owned English coverage during Chinese model correction", async () => {

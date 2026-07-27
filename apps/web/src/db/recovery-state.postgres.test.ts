@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabase, ensureDatabase, getSqlClient } from "./index";
 import { checkpointScanJob, failScanJob, getScanJob, resumeScanJobAfterRepair } from "./jobs";
@@ -9,11 +10,14 @@ import { createTestWebsiteFoundation } from "../public-source-forensics/testing"
 import { PublicSourceArtifactUnavailableError, runPublicSourceForensicsPipeline, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "@/worker/public-source-forensics";
 import type { PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
 
-const enabled = Boolean(process.env.DATABASE_URL && process.env.OGC_DEPLOYMENT_PROFILE === "staging");
-const describePostgres = enabled ? describe : describe.skip;
+const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
+const describePostgres = adminUrl ? describe : describe.skip;
 
 describePostgres("schema-v16 recovery checkpoint authority", () => {
   const suffix = randomUUID().replaceAll("-", "");
+  const databaseName = `ogc_recovery_${suffix}`;
+  const admin = postgres(adminUrl!, { max: 1, prepare: false });
+  const originalDatabaseUrl = process.env.DATABASE_URL;
   const rows = (["source_retrieval", "artifact_verification", "terminalization"] as const).map((phase) => ({
     phase,
     reportId: `recovery-report-${phase}-${suffix}`,
@@ -27,6 +31,17 @@ describePostgres("schema-v16 recovery checkpoint authority", () => {
   };
 
   beforeAll(async () => {
+    await admin.unsafe(`CREATE DATABASE ${quote(databaseName)}`);
+    const databaseUrl = withDatabase(adminUrl!, databaseName);
+    const bootstrap = postgres(databaseUrl, { max: 1, prepare: false });
+    try {
+      await bootstrap`CREATE TABLE deployment_environment(singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton=true),profile text NOT NULL CHECK(profile IN ('staging','production')),created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now())`;
+      await bootstrap`INSERT INTO deployment_environment(singleton,profile) VALUES(true,'staging')`;
+    } finally {
+      await bootstrap.end({ timeout: 5 });
+    }
+    await closeDatabase();
+    process.env.DATABASE_URL = databaseUrl;
     await ensureDatabase();
     const sql = getSqlClient();
     for (const row of rows) {
@@ -48,6 +63,10 @@ describePostgres("schema-v16 recovery checkpoint authority", () => {
     for (const row of rows) await sql`DELETE FROM scan_reports WHERE id=${row.reportId}`;
     await sql`DELETE FROM scan_reports WHERE id=${artifactGate.reportId}`;
     await closeDatabase();
+    if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = originalDatabaseUrl;
+    await admin.unsafe(`DROP DATABASE IF EXISTS ${quote(databaseName)} WITH (FORCE)`);
+    await admin.end({ timeout: 5 });
   }, 120_000);
 
   it.each(rows)("persists $phase through repair_wait and resumes the verified V2 checkpoint", async (row) => {
@@ -174,3 +193,6 @@ function fixtureSnapshot(fanout: SearchQueryFanout, index: number) {
       accessBarrier: "none" as const, contentBytes: 100, normalizedText: "Public logistics capability.", normalizedContentHash: `sha256:${"a".repeat(64)}`, verifiedExcerpt: "Public logistics capability." }))),
     actualCostMicros: 10, allocatedCostMicros: 0, avoidedCostMicros: 0 };
 }
+
+function quote(value: string): string { return `"${value.replaceAll('"', '""')}"`; }
+function withDatabase(url: string, database: string): string { const parsed = new URL(url); parsed.pathname = `/${database}`; return parsed.toString(); }

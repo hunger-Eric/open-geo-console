@@ -1,0 +1,278 @@
+import { createHash, randomUUID } from "node:crypto";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  beginReportV4PreAdmissionSnapshot,
+  finalizeReportV4PreAdmissionSnapshot,
+  loadReportV4PreAdmissionSnapshot,
+  resolvePaidReportV4SiteSnapshot,
+  type ReportV4SiteSnapshotPageInput
+} from "./report-v4-site-snapshots";
+
+// @requirement GEO-V4-CRAWL-04
+// @requirement GEO-V4-TOKEN-02
+describe("V4 pre-admission site snapshot repository", () => {
+  beforeEach(() => {
+    delete process.env.DATABASE_URL;
+    process.env.OPEN_GEO_DB_PATH = `memory-v4-site-${randomUUID()}`;
+  });
+
+  it("loads the exact collecting or terminal snapshot for recoverable admission", async () => {
+    const identity = fixtureIdentity("recoverable");
+    await expect(loadReportV4PreAdmissionSnapshot(identity)).resolves.toBeNull();
+
+    await beginReportV4PreAdmissionSnapshot(identity);
+    await expect(loadReportV4PreAdmissionSnapshot(identity)).resolves.toMatchObject({
+      snapshot: { ...identity, status: "collecting" },
+      pages: []
+    });
+    await expect(loadReportV4PreAdmissionSnapshot({ ...identity, siteKey: "wrong.example" }))
+      .rejects.toThrow(/identity/i);
+
+    await finalizeReportV4PreAdmissionSnapshot({
+      ...identity,
+      status: "completed",
+      completedAt: new Date("2030-01-01T00:05:00.000Z"),
+      contentIdentityHash: sha("recoverable-content"),
+      candidateUrlCount: 1,
+      pages: pages(1)
+    });
+    await expect(loadReportV4PreAdmissionSnapshot(identity)).resolves.toMatchObject({
+      snapshot: { status: "completed", contentIdentityHash: sha("recoverable-content") },
+      pages: [expect.objectContaining({ normalizedUrl: "https://example.com/page-1" })]
+    });
+  });
+
+  it("binds one immutable pre-admission identity and paid generation only resolves that exact terminal snapshot", async () => {
+    const identity = fixtureIdentity();
+    const collecting = await beginReportV4PreAdmissionSnapshot(identity);
+    expect(collecting).toMatchObject({ ...identity, status: "collecting", contentIdentityHash: null });
+
+    await expect(resolvePaidReportV4SiteSnapshot({
+      ...identity,
+      contentIdentityHash: sha("content")
+    })).rejects.toThrow(/not terminal/i);
+
+    const terminal = await finalizeReportV4PreAdmissionSnapshot({
+      ...identity,
+      status: "completed",
+      completedAt: new Date("2030-01-01T00:05:00.000Z"),
+      contentIdentityHash: sha("content"),
+      candidateUrlCount: 1,
+      pages: pages(1)
+    });
+    const resolved = await resolvePaidReportV4SiteSnapshot({
+      ...identity,
+      contentIdentityHash: sha("content")
+    });
+    expect(resolved).toEqual(terminal);
+    expect(resolved.pages).toHaveLength(1);
+    expect(resolved.pages[0]).toMatchObject({
+      summary: "Page 1",
+      retainedText: "page-1",
+      contentHash: sha("page-1")
+    });
+
+    await expect(resolvePaidReportV4SiteSnapshot({ ...identity, siteKey: "other.example", contentIdentityHash: sha("content") })).rejects.toThrow(/identity/i);
+    await expect(resolvePaidReportV4SiteSnapshot({ ...identity, collectorConfigIdentityHash: sha("other-config"), contentIdentityHash: sha("content") })).rejects.toThrow(/identity/i);
+    await expect(resolvePaidReportV4SiteSnapshot({ ...identity, contentIdentityHash: sha("other-content") })).rejects.toThrow(/identity/i);
+  });
+
+  it("retains exact bounded cleaned text, rejects hash drift, and paid resolution performs zero network", async () => {
+    const identity = fixtureIdentity("retained-text");
+    await beginReportV4PreAdmissionSnapshot(identity);
+    const terminal = await finalizeReportV4PreAdmissionSnapshot({
+      ...identity,
+      status: "completed",
+      completedAt: new Date("2030-01-01T00:05:00.000Z"),
+      contentIdentityHash: sha("retained-text-content"),
+      candidateUrlCount: 1,
+      pages: pages(1)
+    });
+    expect(terminal.pages[0]!.retainedText).toBe("page-1");
+    expect((await loadReportV4PreAdmissionSnapshot(identity))!.pages[0]!.retainedText).toBe("page-1");
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    try {
+      const paid = await resolvePaidReportV4SiteSnapshot({
+        ...identity,
+        contentIdentityHash: sha("retained-text-content")
+      });
+      expect(paid.pages[0]!.retainedText).toBe("page-1");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+
+    for (const [suffix, invalidPage] of [
+      ["blank", { ...pages(1)[0]!, retainedText: "   ", contentHash: sha("   ") }],
+      ["too-long", { ...pages(1)[0]!, retainedText: "x".repeat(100_001), contentHash: sha("x".repeat(100_001)) }],
+      ["hash-drift", { ...pages(1)[0]!, retainedText: "exact text", contentHash: sha("different text") }]
+    ] as const) {
+      await expect(finalizeFixture(`invalid-${suffix}`, "completed", [invalidPage], 1))
+        .rejects.toThrow(/retained|cleaned|100,?000|hash/i);
+    }
+    await expect(finalizeFixture("excluded-retained", "completed_limited", [
+      pages(1)[0]!, { ...excludedPage(2), retainedText: "forbidden private text" }
+    ], 2)).rejects.toThrow(/excluded.*retain|retained.*excluded/i);
+  });
+
+  it("makes concurrent begin/finalize idempotent but rejects a second identity or terminal overwrite", async () => {
+    const identity = fixtureIdentity();
+    const begun = await Promise.all(Array.from({ length: 8 }, () => beginReportV4PreAdmissionSnapshot(identity)));
+    expect(new Set(begun.map(({ id }) => id))).toEqual(new Set([identity.id]));
+
+    await expect(beginReportV4PreAdmissionSnapshot({ ...identity, id: "different-snapshot" })).rejects.toThrow(/already bound/i);
+
+    const terminalInput = {
+      ...identity,
+      status: "completed" as const,
+      completedAt: new Date("2030-01-01T00:05:00.000Z"),
+      contentIdentityHash: sha("content"),
+      candidateUrlCount: 2,
+      pages: pages(2)
+    };
+    const completed = await Promise.all(Array.from({ length: 8 }, () => finalizeReportV4PreAdmissionSnapshot(terminalInput)));
+    expect(completed.every((bundle) => bundle.snapshot.contentIdentityHash === sha("content"))).toBe(true);
+
+    await expect(finalizeReportV4PreAdmissionSnapshot({
+      ...terminalInput,
+      contentIdentityHash: sha("mutated-content")
+    })).rejects.toThrow(/immutable|conflict/i);
+    await expect(finalizeReportV4PreAdmissionSnapshot({
+      ...terminalInput,
+      pages: terminalInput.pages.map((page, index) => index === 0 ? { ...page, summary: "Mutated page" } : page)
+    })).rejects.toThrow(/immutable|conflict/i);
+    await expect(beginReportV4PreAdmissionSnapshot(identity)).rejects.toThrow(/terminal|immutable/i);
+  });
+
+  it("keeps zero, limited, 50-page, and 51-page admission outcomes explicit", async () => {
+    await expect(finalizeFixture("zero-invalid", "completed", pages(0), 0)).rejects.toThrow(/completed.*1.*50/i);
+    await expect(finalizeFixture("zero", "unavailable", pages(0), 0)).resolves.toMatchObject({
+      snapshot: { status: "unavailable", analyzablePageCount: 0 }
+    });
+
+    const limitedPages = [...pages(2), excludedPage(3)];
+    await expect(finalizeFixture("limited", "completed_limited", limitedPages, 3)).resolves.toMatchObject({
+      snapshot: { status: "completed_limited", analyzablePageCount: 2, excludedPageCount: 1 }
+    });
+    await expect(finalizeFixture("limited-without-gap", "completed_limited", pages(2), 2)).rejects.toThrow(/limited.*excluded/i);
+
+    await expect(finalizeFixture("fifty", "completed", pages(50), 50)).resolves.toMatchObject({
+      snapshot: { status: "completed", analyzablePageCount: 50 }
+    });
+    await expect(finalizeFixture("fifty-custom", "custom_service", pages(50), 50)).rejects.toThrow(/custom.*51/i);
+    await expect(finalizeFixture("fifty-one-limited", "completed_limited", pages(51), 51)).rejects.toThrow(/limited.*1.*50/i);
+    await expect(finalizeFixture("fifty-one", "custom_service", pages(51), 51)).resolves.toMatchObject({
+      snapshot: { status: "custom_service", analyzablePageCount: 51 }
+    });
+    await expect(finalizeFixture("fifty-two-custom", "custom_service", pages(52), 52)).rejects.toThrow(/custom.*exactly 51/i);
+  });
+
+  it("persists the exact 51-page custom-service threshold evidence in ordinal order", async () => {
+    const terminal = await finalizeFixture("threshold-evidence", "custom_service", pages(51).reverse(), 51);
+
+    expect(terminal.snapshot).toMatchObject({
+      status: "custom_service",
+      candidateUrlCount: 51,
+      analyzablePageCount: 51,
+      excludedPageCount: 0
+    });
+    expect(terminal.pages).toHaveLength(51);
+    expect(terminal.pages.map(({ ordinal }) => ordinal)).toEqual(Array.from({ length: 51 }, (_, index) => index + 1));
+    expect(terminal.pages[0]).toMatchObject({
+      normalizedUrl: "https://example.com/page-1",
+      contentHash: sha("page-1")
+    });
+    expect(terminal.pages[50]).toMatchObject({
+      normalizedUrl: "https://example.com/page-51",
+      contentHash: sha("page-51")
+    });
+  });
+
+  it("fails closed before paid generation for unavailable and custom-service snapshots without creating or refreshing", async () => {
+    for (const fixture of [
+      { suffix: "paid-zero", status: "unavailable" as const, snapshotPages: pages(0), candidateUrlCount: 0 },
+      { suffix: "paid-51", status: "custom_service" as const, snapshotPages: pages(51), candidateUrlCount: 51 }
+    ]) {
+      const identity = fixtureIdentity(fixture.suffix);
+      await beginReportV4PreAdmissionSnapshot(identity);
+      await finalizeReportV4PreAdmissionSnapshot({
+        ...identity,
+        status: fixture.status,
+        completedAt: new Date("2030-01-01T00:05:00.000Z"),
+        contentIdentityHash: sha(`content-${fixture.suffix}`),
+        candidateUrlCount: fixture.candidateUrlCount,
+        pages: fixture.snapshotPages.map((page) => ({ ...page, id: `${fixture.suffix}:${page.id}` }))
+      });
+      await expect(resolvePaidReportV4SiteSnapshot({
+        ...identity,
+        contentIdentityHash: sha(`content-${fixture.suffix}`)
+      })).rejects.toThrow(/not eligible.*standard paid|paid.*not eligible/i);
+      await expect(beginReportV4PreAdmissionSnapshot(identity)).rejects.toThrow(/terminal|immutable/i);
+    }
+
+    const missing = fixtureIdentity("paid-missing");
+    await expect(resolvePaidReportV4SiteSnapshot({ ...missing, contentIdentityHash: sha("missing") })).rejects.toThrow(/not found/i);
+    await expect(beginReportV4PreAdmissionSnapshot(missing)).resolves.toMatchObject({ status: "collecting" });
+  });
+});
+
+async function finalizeFixture(
+  suffix: string,
+  status: "completed" | "completed_limited" | "unavailable" | "custom_service",
+  snapshotPages: ReportV4SiteSnapshotPageInput[],
+  candidateUrlCount: number
+) {
+  const identity = fixtureIdentity(suffix);
+  await beginReportV4PreAdmissionSnapshot(identity);
+  return finalizeReportV4PreAdmissionSnapshot({
+    ...identity,
+    status,
+    completedAt: new Date("2030-01-01T00:05:00.000Z"),
+    contentIdentityHash: sha(`content-${suffix}`),
+    candidateUrlCount,
+    pages: snapshotPages.map((page) => ({ ...page, id: `${suffix}:${page.id}` }))
+  });
+}
+
+function fixtureIdentity(suffix = "main") {
+  return {
+    id: `snapshot-${suffix}`,
+    reportId: `report-${suffix}`,
+    siteKey: `${suffix}.example`,
+    collectorConfigIdentityHash: sha(`config-${suffix}`),
+    capturedAt: new Date("2030-01-01T00:00:00.000Z")
+  };
+}
+
+function pages(count: number): ReportV4SiteSnapshotPageInput[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `page-${index + 1}`,
+    ordinal: index + 1,
+    normalizedUrl: `https://example.com/page-${index + 1}`,
+    analyzable: true,
+    readMode: index % 2 === 0 ? "direct_readable" : "js_dependent",
+    summary: `Page ${index + 1}`,
+    retainedText: `page-${index + 1}`,
+    contentHash: sha(`page-${index + 1}`),
+    exclusionReason: null
+  }));
+}
+
+function excludedPage(ordinal: number): ReportV4SiteSnapshotPageInput {
+  return {
+    id: `page-${ordinal}`,
+    ordinal,
+    normalizedUrl: `https://example.com/page-${ordinal}`,
+    analyzable: false,
+    readMode: null,
+    summary: null,
+    retainedText: null,
+    contentHash: null,
+    exclusionReason: "ai_readability_limited"
+  };
+}
+
+function sha(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}

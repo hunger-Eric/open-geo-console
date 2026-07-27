@@ -2,15 +2,16 @@ import type { EmailGateway, SendEmailInput, SendEmailResult } from "./gateway";
 import { isMailbox, readResendConfiguration, required } from "./config";
 import { renderTransactionalEmail } from "./templates";
 import { getCommerceMode } from "@/commerce/config";
+import { CommerceProviderError } from "@/commerce/provider-error";
 
 interface ResendOptions {
   environment?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
 }
 
-export class ResendRequestError extends Error {
+export class ResendRequestError extends CommerceProviderError {
   constructor(public readonly status: number) {
-    super(`Resend request failed with status ${status}.`);
+    super("resend", "send", "http", status);
     this.name = "ResendRequestError";
   }
 }
@@ -27,29 +28,58 @@ export class ResendEmailGateway implements EmailGateway {
   async send(input: SendEmailInput): Promise<SendEmailResult> {
     if (!input.idempotencyKey || input.idempotencyKey.length > 256) throw new Error("A valid permanent email idempotency key is required.");
     const rendered = renderTransactionalEmail(input);
-    const recipient = resolveEnvelopeRecipient(input.to, this.environment);
-    const configuration = readResendConfiguration(this.environment);
-    const response = await this.fetchImpl("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${configuration.apiKey}`,
-        "content-type": "application/json",
-        "idempotency-key": input.idempotencyKey
-      },
-      body: JSON.stringify({
-        from: configuration.from,
-        to: [recipient],
-        reply_to: configuration.replyTo,
-        subject: rendered.subject,
-        html: rendered.html,
-        text: rendered.text
-      })
-    });
+    let recipient: string;
+    let configuration: ReturnType<typeof readResendConfiguration>;
+    try {
+      recipient = resolveEnvelopeRecipient(input.to, this.environment);
+      configuration = readResendConfiguration(this.environment);
+    } catch (error) {
+      throw resendConfigurationError(error);
+    }
+    let response: Response;
+    try {
+      response = await this.fetchImpl("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${configuration.apiKey}`,
+          "content-type": "application/json",
+          "idempotency-key": input.idempotencyKey
+        },
+        body: JSON.stringify({
+          from: configuration.from,
+          to: [recipient],
+          reply_to: configuration.replyTo,
+          subject: rendered.subject,
+          html: rendered.html,
+          text: rendered.text
+        })
+      });
+    } catch (error) {
+      throw networkError("resend", "send", error);
+    }
     if (!response.ok) throw new ResendRequestError(response.status);
-    const payload = await response.json() as { id?: unknown };
-    if (typeof payload.id !== "string") throw new Error("Resend did not return an email ID.");
+    let payload: { id?: unknown };
+    try {
+      payload = await response.json() as { id?: unknown };
+    } catch {
+      throw new CommerceProviderError("resend", "send", "invalid_response");
+    }
+    if (typeof payload.id !== "string") throw new CommerceProviderError("resend", "send", "invalid_response");
     return { provider: "resend", providerEmailId: payload.id };
   }
+}
+
+function networkError(provider: "resend", operation: "send", error: unknown): CommerceProviderError {
+  const name = error instanceof Error ? error.name : "";
+  return new CommerceProviderError(provider, operation, name === "AbortError" || name === "TimeoutError" ? "timeout" : "network");
+}
+
+function resendConfigurationError(error: unknown): CommerceProviderError {
+  const failure = new CommerceProviderError("resend", "configuration", "invalid_configuration");
+  const safeField = ["OGC_TEST_EMAIL_RECIPIENT", "RESEND_API_KEY", "RESEND_FROM_EMAIL", "OGC_REPLY_TO_EMAIL"]
+    .find((field) => error instanceof Error && error.message.includes(field));
+  if (safeField) failure.message = `resend configuration failed: ${safeField}.`;
+  return failure;
 }
 
 export function resolveEnvelopeRecipient(requestedRecipient: string, environment: NodeJS.ProcessEnv = process.env): string {

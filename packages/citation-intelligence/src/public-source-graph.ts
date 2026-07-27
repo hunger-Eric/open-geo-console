@@ -52,6 +52,7 @@ export function buildPublicSourceEvidenceGraph(input: PublicSourceGraphInput): P
       robotsAllowed: retrievals.every(({ robotsAllowed }) => robotsAllowed),
       accessBarrierAbsent: retrievals.every(({ accessBarrier }) => accessBarrier === "none"),
       boundedContent: retrievals.every(({ contentBytes }) => contentBytes !== undefined && contentBytes >= 0 && contentBytes <= 2_097_152),
+      boundedExcerptAvailable: Boolean(verifiedExcerpt?.trim()),
       usableText: !metadataOnly
     });
     const sourceEligibility = scoreSourceEligibility({

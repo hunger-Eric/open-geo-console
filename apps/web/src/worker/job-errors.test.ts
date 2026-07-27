@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { normalizeJobError, PublicSourceRuntimeError, redactDiagnostic, retryDelayMs } from "./job-errors";
 import { ReportLanguageValidationError } from "@open-geo-console/ai-report-engine";
+import { PublicSourceSnapshotUnavailableError } from "./public-source-snapshot-resolver";
+import { AnswerFirstV3ModelContractInvalidError } from "./answer-first-v3";
 
 const context = { jobId: "job-1", phase: "public_source_preflight" as const, phaseAttempt: 1, resumeGeneration: 0, configuredSecrets: ["super-secret"] };
 
@@ -28,6 +30,35 @@ describe("job error normalization", () => {
     expect(normalized).toMatchObject({
       classification: "operator_repairable",
       code: "report_language_validation_failed",
+      retryableAt: null
+    });
+  });
+
+  it("preserves the safe public-source stage while redacting the underlying cause", () => {
+    const error = new PublicSourceSnapshotUnavailableError(
+      "observation_persistence",
+      { cause: new Error("Bearer super-secret failed for https://user:pass@example.com/private") }
+    );
+    const normalized = normalizeJobError(error, context);
+    expect(normalized).toMatchObject({
+      classification: "transient",
+      code: "public_source_snapshot_observation_persistence",
+      type: "PublicSourceSnapshotUnavailableError"
+    });
+    expect(normalized.retryableAt).toBeInstanceOf(Date);
+    expect(JSON.stringify(normalized)).not.toContain("super-secret");
+    expect(JSON.stringify(normalized)).not.toContain("user:pass");
+  });
+
+  it("records a bounded code for an invalid answer-first V3 model contract", () => {
+    const normalized = normalizeJobError(new AnswerFirstV3ModelContractInvalidError({
+      cause: new TypeError("Model must return exactly three ordered answer entries.")
+    }), context);
+
+    expect(normalized).toMatchObject({
+      classification: "operator_repairable",
+      code: "answer_first_v3_model_contract_invalid",
+      type: "AnswerFirstV3ModelContractInvalidError",
       retryableAt: null
     });
   });

@@ -11,18 +11,17 @@ import { ReportActions } from "./report-actions";
 import { ReportBotEvidence } from "./report-bot-evidence";
 import { ReportIssues } from "./report-issues";
 import { ReportOverview } from "./report-overview";
-import { ReportPrintView } from "./report-print-view";
 import { ReportTechnical } from "./report-technical";
 import { AiReportContent } from "./ai-report-content";
 import { AiReportStatus } from "./ai-report-status";
 import { PaymentReturnBanner } from "./payment-return-banner";
 
-export type ReportWorkspaceSection = "overview" | "analysis" | "issues" | "bots" | "technical" | "print";
+export type ReportWorkspaceSection = "overview" | "analysis" | "issues" | "bots" | "technical";
 
 export function ReportView({
   dictionary,
   aiReport,
-  canPrint,
+  htmlEnabled,
   evidence,
   locale,
   page = 1,
@@ -34,7 +33,7 @@ export function ReportView({
 }: {
   dictionary: Dictionary;
   aiReport?: AiWebsiteReportV1 | null;
-  canPrint: boolean;
+  htmlEnabled: boolean;
   evidence?: BotEvidenceSummary | null;
   locale: Locale;
   page?: number;
@@ -46,31 +45,6 @@ export function ReportView({
 }) {
   const presentation = buildReportPresentation(report, dictionary, locale);
   const overviewHref = localizePath(locale, `/reports/${reportId}`);
-
-  if (section === "print") {
-    if (!canPrint) {
-      return (
-        <main className="print-page mx-auto max-w-3xl px-6 py-12">
-          <p className="eyebrow">{dictionary.aiReport.previewLabel}</p>
-          <h1 className="mt-3 text-3xl font-semibold">{dictionary.aiReport.printLockedTitle}</h1>
-          <p className="mt-4 text-sm leading-7 text-[var(--muted)]">{dictionary.aiReport.printLockedDescription}</p>
-          <Link href={overviewHref} className="button-primary mt-7">{dictionary.workspace.backToReport}</Link>
-        </main>
-      );
-    }
-    return (
-      <ReportPrintView
-        aiReport={aiReport}
-        dictionary={dictionary}
-        evidence={evidence ?? null}
-        locale={locale}
-        presentation={presentation}
-        report={report}
-        reportHref={overviewHref}
-        reportLocale={reportLocale}
-      />
-    );
-  }
 
   const tabs = [
     { key: "overview", href: overviewHref },
@@ -109,8 +83,7 @@ export function ReportView({
         <ReportActions
           dictionary={dictionary}
           htmlHref={`/reports/${reportId}/report.html`}
-          pdfHref={`/api/reports/${reportId}/artifacts/report.pdf`}
-          printEnabled={canPrint}
+          htmlEnabled={htmlEnabled}
           shareHref={overviewHref}
         />
       </section>

@@ -1,4 +1,4 @@
-import { FileCheck2, FileText, Globe2, Languages, Printer, Share2, Sparkles, Upload } from "lucide-react";
+import { FileCheck2, FileText, Globe2, Languages, Share2, Sparkles, Upload } from "lucide-react";
 
 export const navItems = [
   { key: "scanner", href: "/", external: false },
@@ -13,7 +13,6 @@ export const scannerCapabilities = [
 
 export const reportActions = [
   { key: "copyLink", icon: Share2, action: "copy" },
-  { key: "printReport", icon: Printer, action: "print" },
   { key: "uploadLogsNext", icon: Upload, action: "logs" }
 ] as const;
 

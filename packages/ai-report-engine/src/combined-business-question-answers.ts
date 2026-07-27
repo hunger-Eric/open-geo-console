@@ -3,8 +3,11 @@ import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-sear
 import type { JsonCompletionClient } from "./client";
 import { sha256Hex } from "./evidence";
 import {
+  GEO_TERMINOLOGY_POLICY,
   ReportLanguageValidationError,
+  assertGeoTerminology,
   assertReportLanguage,
+  reportLanguageCorrectionFeedback,
   reportLanguageInstruction
 } from "./report-language";
 import type { RecommendationForensicReportV2 } from "./recommendation-forensic-v2";
@@ -204,7 +207,7 @@ export async function synthesizeCombinedBusinessQuestionAnswers(
       if (error instanceof ReportLanguageValidationError) {
         if (languageCorrectionUsed || attempt >= maxAttempts) throw error;
         languageCorrectionUsed = true;
-        languageFeedback = languageViolationFeedback(error);
+        languageFeedback = reportLanguageCorrectionFeedback(error, input.forensic.locale);
       }
       if (attempt < maxAttempts) await delayWithAbort(delay, Math.min(2_000, 250 * 2 ** (attempt - 1)), input.signal);
     }
@@ -217,11 +220,13 @@ function assertAnswerLanguage(
   locale: string,
   allowedTerms: readonly string[]
 ): void {
+  const fields = answers.map((answer, index) => ({ path: `answers[${index}].answer`, text: answer.answer }));
   assertReportLanguage(
-    answers.map((answer, index) => ({ path: `answers[${index}].answer`, text: answer.answer })),
+    fields,
     locale,
     allowedTerms
   );
+  assertGeoTerminology(fields, GEO_TERMINOLOGY_POLICY);
 }
 
 function collectQuestionAnswerAllowedTerms(forensic: RecommendationForensicReportV2): string[] {
@@ -235,10 +240,6 @@ function collectQuestionAnswerAllowedTerms(forensic: RecommendationForensicRepor
   ];
   return [...new Set(graphTerms
     .filter((value): value is string => Boolean(value?.trim()) && value!.length <= 120))];
-}
-
-function languageViolationFeedback(error: ReportLanguageValidationError): string[] {
-  return error.violations.map(({ path, reason }) => `${path}: ${reason}`);
 }
 
 function compactSynthesisInput(questionSet: ConfirmedBusinessQuestionSet, forensic: RecommendationForensicReportV2) {

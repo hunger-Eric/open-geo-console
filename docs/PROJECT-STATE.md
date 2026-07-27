@@ -2,35 +2,55 @@
 
 ## Current Goal
 
-Operate a durable, self-hostable product whose paid journey is `free technical foundation → recommendation_forensics_v1 checkout with exactly three confirmed business questions → one combined_geo_report_v1 HTML artifact → same-HTML PDF and email`. Protected staging completed the one-time free correction acceptance for the existing paid order on 2026-07-14, including fresh public-source evidence, atomic artifact activation, provider-delivered correction email, and real Chromium verification. Production remains unchanged; the remaining release gates are listed under Next Steps.
+Deliver a self-hostable, evidence-bound GEO product whose customer artifact is one secure HTML report. The persisted generation locale remains immutable throughout generation and delivery. Report V4 has no PDF generation or customer-PDF surface; V1-V3 retain their historical private-readiness records.
 
-Release baseline `v0.2.0` freezes the accepted HTML-first visual-evidence implementation before subsequent feature work. It includes private screenshot capture/storage, access-controlled evidence delivery, same-HTML PDF export, and the verified paid staging drill; it does not claim the remaining production-readiness gates below are complete.
+## Active Change Freeze
 
-The paid contract remains `recommendation_forensics_v1`, but every new order is version 2 and uses public-search market snapshots rather than answer-engine cells. Provider-neutral question/fanout contracts, immutable snapshot/attempt/observation/evidence storage, public-source evidence graphs, V2 report validation, atomic commercial terminalization, version-dispatched HTML/PDF, and an inert signed certification framework are implemented. Staging and production audits reached zero non-terminal V1 jobs before OpenAI/Perplexity runtime imports and credentials were retired from active admission. The approved design and plan are `docs/superpowers/specs/2026-07-12-public-web-recommendation-source-forensics-{design,implementation-plan}.md`; operator status is in `docs/operations/public-search-surface-certification.md`.
+- `docs/ACTIVE-CHANGE-SCOPE.md` is `FROZEN`. No further production-code edits, live scans, historical recovery, replay, commerce operation, deployment, or other external mutation are authorized until the user approves an exact file allowlist and diff budget.
+- The local branch contains a preceding 10-commit, 30-file unapproved broad repair experiment plus the documentation guard that freezes it. The preceding repair commits are not accepted product work, must not be deployed or extended, and remain preserved only for review until the user chooses how to disposition them.
+- The intended narrow task is the V4 three-question answer optimization. Existing three-answer behavior must be preserved; unrelated state-machine, recovery, replay, historical-data, commerce, crawler, and infrastructure changes are outside scope by default.
+- The authoritative deviation audit and clean-branch continuation procedure are in `docs/handoffs/2026-07-19-v4-answer-optimization-scope-recovery.md`.
 
-## Current Architecture
+## Current Snapshot (2026-07-19)
 
-The provider-independent adapter layer resolves `OGC_PUBLIC_SEARCH_ADAPTER` only from compile-time-reviewed factories. MiMo is the first candidate and reads only `OGC_PUBLIC_SEARCH_MIMO_*`. A protected-Preview signing key holds the credential for the exact signed MiMo authority. It is active with runtime enabled only in staging; the workstation staging launcher maps missing V2 MiMo values from the operator-controlled local `OGC_AI_*` source without overriding explicit V2 values. Production does not use that mapping and all production authority/runtime inputs remain disabled.
+- Branch `codex/report-v4-implementation` is pushed through `7c3efab`. Protected Preview deployment `dpl_7XWvdMcJups3EjSeMQYe8y1oScHt` is Ready and the fixed staging alias points to it. Production was not deployed, mutated, or exercised.
+- PostgreSQL schema authority is v40. V1-V3 runtime and historical artifacts remain readable and unchanged.
+- One real CNY 199 Airwallex Sandbox V4 run for `https://mimo.xiaomi.com/zh` completed as `completed_limited`: report `43dbe8f5-49e6-48f5-a902-cc8c3965c199`, order `c2071a58-5ba3-4ff6-8576-5bfec30569e3`, core job `da19f154-acee-4c23-8c9e-5ccea9365992`, active artifact `report-v4-core-e3ffa435bdbb7996762aa87c8c0127d062c6cd0d493f5b7856b6a06f84980c9e`.
+- The customer HTML is authorized and live at the protected deployment's `/reports/43dbe8f5-49e6-48f5-a902-cc8c3965c199/report.html`. Exact-route inspection returned HTTP 200, `data-report-version="4"`, three question cards, two answered cards, one explicit unavailable card, and ten public-source links.
+- The immutable pre-admission snapshot is `completed_limited`: seven candidates, three analyzable pages, and two exclusions. The paid core reused that snapshot and did not enqueue an enhancement job after its limited terminal result.
+- Payment is `paid`; fulfillment is `completed_limited`; the internal credit is refunded. The Airwallex Sandbox cash-refund submission is truthfully `failed`, and 21 queued test emails were retried but not delivered in the final commerce pass.
+- The live repairs add bounded page-analysis contract recovery, collision-free legacy page locations, serialized question calls, generic business-question wording, exact pending-core resume identity, standalone-safe V4 rendering, and explicit active-V4 HTML access without broadening the legacy default artifact loader.
+- Final source verification: focused access/renderer/report tests pass (30 tests), lint passes, and the production build passes. A prior full `npm test` run passed 2,565 tests but still has five unrelated PostgreSQL schema-drift failures in the V4 acceptance phase-snapshot suite.
+- `config/report-contracts/combined-geo-report-v4.requirements.json` remains the machine authority. All 20 requirements remain `implemented`, not `verified`; one successful paid run is not the required three-scenario evidence set.
 
-On 2026-07-13, direct read-only staging and production PostgreSQL checks found zero non-terminal recommendation rows, zero non-terminal V1 rows, and zero terminal jobs with a reserved credit. The existing audit CLI was not used because its bootstrap behavior may migrate a schema-v13 database; it must be rerun only after a separately authorized schema-v14 rollout.
+## Architecture and Product Boundaries
 
-The independently signed staging authority `public-search-authority-101c9dbb38db639d7f5b4207f8eb14e9832008672df617858239b6770b546c6e` is active only in protected staging. The corrected paid order `5f999610-17d5-4df9-9aa0-a6cce5e5b741` now has an active `combined_geo_report_v1` revision with three snapshot refs, 22 persisted source-evidence rows, ten private screenshots, a 19-page same-HTML PDF, and one delivered correction email. The detailed acceptance record is `docs/operations/evidence/2026-07-14-combined-report-correction-acceptance.md`.
+- `apps/web` owns PostgreSQL persistence, job orchestration, routes, access control, commerce, and UI. Workers alone crawl pages, call models, capture evidence, and materialize report artifacts.
+- PostgreSQL is the report, job, dispatch, payment, credit, refund, email, and access authority. Cloudflare Queue is notification-only.
+- A verified payment Webhook is the only authority that marks an order paid and creates its entitlement/deep job. Terminal commercial outcomes use the atomic job-and-credit boundary.
+- Customers receive authorized HTML only. Report V4 has no PDF generation, readiness, storage, route, action, or email claim.
+- The production free limit remains two distinct sites per rolling 24 hours. Forced regeneration and operator acceptance controls are protected-staging-only.
+- Production is outside the V4 acceptance scope and must remain untouched.
 
-The independent certification HMAC secret/key ID is stored as a sensitive protected-Preview value; no signing secret is committed or retained locally. Caller/deadline abort now propagates through DNS, robots, redirects, headers, body streaming and bounded dispatcher unwind without becoming ordinary `inaccessible`; the scheduler stops launching sources after a hard deadline. The accepted staging runtime is reviewed revision `3bd8ed2c9d9130d42418c07fc311529877862779`, image `sha256:984742fa681102e3c10333379596aed582f88465b4d3764b729d148baa840184`; free and deep presence records use the same revision and maintain live heartbeats. Production containers, configuration, database, alias and domain were not changed.
+## Durable Evidence
 
-The protected Preview now exposes `POST /api/staging/commerce/run` and a locale-aware operator page at `/staging-commerce` (or `/en/staging-commerce`), both behind Vercel Authentication. They are additionally hidden unless the runtime is exactly `VERCEL_ENV=preview`, `OGC_DEPLOYMENT_PROFILE=staging`, and `COMMERCE_MODE=test`; the page invokes the fixed reconcile/SLA/refund/email sequence with existing Preview secrets and shows only non-sensitive counts. On 2026-07-13 it submitted the V2 failure-path Sandbox refund and delivered its three redirected test emails; the workstation Worker remains report-generation only and no longer needs payment or email credentials for this acceptance path.
+- The full paid-run identity, customer-content inspection, commercial outcome, deployment identity, code repairs, and limitations are recorded in `docs/operations/evidence/2026-07-19-report-v4-paid-deep-report.md`.
+- Protected-staging V2/V3 acceptance and correction records remain historical evidence under `docs/operations/evidence/`.
+- Historical terminal jobs, orders, credits, refunds, question sets, and artifacts remain immutable. Remediation must use a sanctioned replacement/correction boundary rather than reopening or rewriting them.
 
-Schema v15 releases a report/product checkout slot only after its paid order has reached `refund_status=refunded`; unpaid and unsettled paid orders remain unique. Checkout failures return only a fixed safe error. A fresh Sandbox PaymentIntent and verified Webhook passed this boundary on 2026-07-13; the resulting job later failed in public-source retrieval and was fully refunded.
+## Remaining Work / Blockers
 
-Schema v16 separates `current_phase`, `execution_state`, displayed progress and commercial outcome. It retains `stage` as a transactional compatibility projection, persists append-only redacted error/transition events, applies phase-local transient backoff, releases leases in `repair_wait`, and resumes only through checkpoint/readiness validation. A Worker-only revision/CAS checkpoint writer now wraps every analysis checkpoint. The V2 pipeline persists its complete pending report and snapshot refs at `artifact_verification` before real HTML/PDF readiness runs, so a gate failure resumes directly from the artifact phase without public-source re-fetching. Schema v17 preserves event immutability while allowing only nested PostgreSQL foreign-key cascade cleanup. On 2026-07-13, protected-staging PostgreSQL tests proved source/artifact checkpoint → `repair_wait` → readiness → queued recovery without refunds/emails; live Worker fault drills remain required before paid admission.
+1. Repair the staging Airwallex refund configuration/reconciliation path and redirected email delivery, then rerun commerce without claiming success from the current failed/retried states.
+2. Execute the exact V4 diagnosis-failure and question-failure scenarios and collect their immutable scenario/session authorities; the paid core run covers only the customer-delivery scenario.
+3. Store requirement-bound evidence for all 20 requirements, review each registry promotion from `implemented` to `verified`, and only then expect `npm run report:v4:acceptance` to pass.
+4. Resolve the five PostgreSQL acceptance phase-snapshot schema-drift failures before treating the full deterministic suite as green.
+5. Keep live V2/V3 recovery and unresolved historical Sandbox refunds separate from V4 acceptance.
 
-Schema v18 adds immutable three-question sets, one-per-order correction entitlements, combined report payloads and revisioned artifacts. A correction job is non-billable, reuses its locked question identity through retry/recovery, performs shared search only with neutralized variants, and activates a ready HTML/PDF revision atomically. `/report.html`, `/technical`, `/analysis`, `/issues`, PDF and private evidence resolve the same active combined revision; anonymous or wrong-scope access returns application-level `404`.
+## Verification
 
-Schema v19 and the combined renderer now define a compact customer projection for the three business questions: one direct evidence-constrained answer and its selected source links per question. Internal excerpts, ratings, IDs and retrieval diagnostics remain in the evidence graph, while technical URL/quote/screenshot evidence remains visible. New combined artifacts require three answer checkpoints grounded in at least two verified independent domains each. Protected staging activated presentation-refresh revision 10 on 2026-07-14 only after shared HTML/PDF readiness passed; real Chromium verified all three cards, technical evidence retention, matching PDF bytes and application-level anonymous `404`. The acceptance record is `docs/operations/evidence/2026-07-14-combined-question-answer-presentation-acceptance.md`.
+The current verification authority is the V4 evidence record and the locked scope above. Focused access/renderer/report tests (30 tests), lint, and production build pass; the prior full `npm test` run passed 2,565 tests but retains five unrelated PostgreSQL schema-drift failures in the V4 acceptance phase-snapshot suite. Traceability remains fail-closed: all 20 V4 requirements are `implemented`, not `verified`, and the diagnosis-failure and question-failure scenarios are still missing. The protected paid run proves only the customer-delivery scenario; it does not authorize promotion to verified or further production work.
 
-The report-bound paid-order status endpoint exposes only the associated deep job's stage, bounded percentage, and safe execution-state recovery message to that order's return page. The payment-return banner treats an advancing job as generation-in-progress and renders its progress bar instead of misleadingly stopping at payment confirmation.
-
-- `apps/web` is a localized Next.js App Router app backed by PostgreSQL. It owns routes, persistence, access controls, report UI, operator scripts and the standalone Worker entry point. Chinese is the canonical unprefixed interface (`/`, `/reports/...`); English remains explicit under `/en`, and legacy `/zh/...` URLs permanently redirect to their unprefixed equivalents.
+Historical architecture and acceptance records remain preserved in `docs/operations/evidence/` and are not current execution authority. Customer delivery remains HTML-only; any private PDF readiness records are historical/internal evidence only.
 - `packages/geo-auditor` owns deterministic technical evidence and the reproducible GEO score.
 - `packages/site-crawler` owns URL/SSRF safety, registrable site identity, robots/sitemap/link discovery, HTML extraction, template clustering and representative-page selection.
 - `packages/ai-report-engine` owns OpenAI-compatible transport, page planning, batch analysis, `AiWebsiteReportV1`, synthesis and evidence verification.
@@ -43,7 +63,6 @@ The web process persists a public homepage technical report and enqueues work. S
 
 ## Implemented
 
-- Site-wide URL discovery capped at 50,000, candidate compression capped at 500, AI page planning and deterministic fallback selection.
 - DNS-pinned safe HTTP crawling, per-redirect validation, robots enforcement, response limits and Playwright fallback for JavaScript-rendered pages.
 - Structured model output, six AI dimensions, organization profile, page-type findings, evidence citations, coverage/provenance and 90-day roadmap.
 - Citation verification that removes unsupported model findings before persistence.
@@ -135,10 +154,13 @@ The web process persists a public homepage technical report and enqueues work. S
 
 ## Acceptance Commands
 
-```bash
+```powershell
 npm run lint
 npm test
 npm run build
-npm run db:audit
-npm run test:postgres:staging-security
+npm run report:v4:traceability
+npm run report:v4:acceptance
+codegraph status
 ```
+
+Expected current truth: lint, build, focused V4 tests, traceability, and CodeGraph pass. Full V4 acceptance must remain fail-closed until the two missing scenarios exist and all 20 requirement statuses are explicitly promoted from `implemented` to `verified`.

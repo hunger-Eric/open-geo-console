@@ -1,5 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { amountMinorToMajor, assertCommerceEnabled, getCommerceMode } from "@/commerce/config";
+import { CommerceProviderError, type CommerceProviderOperation } from "@/commerce/provider-error";
 import type {
   HostedCheckoutInput,
   HostedCheckoutResult,
@@ -45,15 +46,15 @@ export class AirwallexGateway implements PaymentGateway {
         ogc_report_id: input.reportId,
         ogc_site_key: input.siteKey
       }
-    });
-    return this.parsePaymentIntent(response, input.orderId);
+    }, "checkout");
+    return this.parsePaymentIntent(response, input.orderId, "checkout");
   }
 
   async getHostedCheckout(providerCheckoutId: string, orderId: string): Promise<HostedCheckoutResult> {
     assertCommerceEnabled(this.environment);
     assertPaymentIntentId(providerCheckoutId);
-    const response = await this.apiGet(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}`);
-    return this.parsePaymentIntent(response, orderId);
+    const response = await this.apiGet(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}`, "retrieve");
+    return this.parsePaymentIntent(response, orderId, "retrieve");
   }
 
   async deactivateLegacyHostedCheckout(providerCheckoutId: string, orderId: string): Promise<"deactivated" | "paid"> {
@@ -64,17 +65,17 @@ export class AirwallexGateway implements PaymentGateway {
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(providerCheckoutId)) {
       throw new Error("Airwallex legacy Payment Link ID is invalid.");
     }
-    const current = await this.apiGet(`/api/v1/pa/payment_links/${encodeURIComponent(providerCheckoutId)}`);
+    const current = await this.apiGet(`/api/v1/pa/payment_links/${encodeURIComponent(providerCheckoutId)}`, "retrieve");
     const link = parseLegacyPaymentLink(current, providerCheckoutId, orderId);
     if (link.paid) return "paid";
     if (link.active && link.updatedAt > this.now() - 15 * 60_000) {
       throw new Error("The legacy checkout is still active. Please retry after its payment window closes.");
     }
     if (link.active) {
-      await this.api(`/api/v1/pa/payment_links/${encodeURIComponent(providerCheckoutId)}/deactivate`, {});
+      await this.api(`/api/v1/pa/payment_links/${encodeURIComponent(providerCheckoutId)}/deactivate`, {}, "checkout");
     }
     const confirmed = parseLegacyPaymentLink(
-      await this.apiGet(`/api/v1/pa/payment_links/${encodeURIComponent(providerCheckoutId)}`),
+      await this.apiGet(`/api/v1/pa/payment_links/${encodeURIComponent(providerCheckoutId)}`, "retrieve"),
       providerCheckoutId,
       orderId
     );
@@ -88,7 +89,7 @@ export class AirwallexGateway implements PaymentGateway {
       return this.deactivateLegacyHostedCheckout(providerCheckoutId, orderId);
     }
     assertCommerceEnabled(this.environment);
-    const current = await this.apiGet(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}`) as Record<string, unknown>;
+    const current = await this.apiGet(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}`, "retrieve") as Record<string, unknown>;
     assertPaymentIntentOrder(current, orderId);
     const status = String(current.status ?? "").toUpperCase();
     if (["SUCCEEDED", "SETTLED", "PAID"].includes(status)) return "paid";
@@ -96,8 +97,8 @@ export class AirwallexGateway implements PaymentGateway {
     if (!["CREATED", "PENDING", "REQUIRES_PAYMENT_METHOD", "REQUIRES_CUSTOMER_ACTION", "REQUIRES_ACTION"].includes(status)) {
       throw new Error(`Airwallex PaymentIntent status ${status || "unknown"} is not safely cancellable.`);
     }
-    await this.api(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}/cancel`, {});
-    const confirmed = await this.apiGet(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}`) as Record<string, unknown>;
+    await this.api(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}/cancel`, {}, "checkout");
+    const confirmed = await this.apiGet(`/api/v1/pa/payment_intents/${encodeURIComponent(providerCheckoutId)}`, "retrieve") as Record<string, unknown>;
     assertPaymentIntentOrder(confirmed, orderId);
     const confirmedStatus = String(confirmed.status ?? "").toUpperCase();
     if (["SUCCEEDED", "SETTLED", "PAID"].includes(confirmedStatus)) return "paid";
@@ -108,7 +109,7 @@ export class AirwallexGateway implements PaymentGateway {
   async findHostedCheckoutByReference(orderId: string): Promise<HostedCheckoutResult | null> {
     assertCommerceEnabled(this.environment);
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(orderId)) throw new Error("Airwallex order reference is invalid.");
-    const response = await this.apiGet(`/api/v1/pa/payment_intents?merchant_order_id=${encodeURIComponent(orderId)}&page_num=0&page_size=10`) as {
+    const response = await this.apiGet(`/api/v1/pa/payment_intents?merchant_order_id=${encodeURIComponent(orderId)}&page_num=0&page_size=10`, "retrieve") as {
       items?: unknown;
     };
     const matches = Array.isArray(response.items) ? response.items.filter((item) => {
@@ -118,7 +119,7 @@ export class AirwallexGateway implements PaymentGateway {
       return record.merchant_order_id === orderId && metadata.ogc_order_id === orderId;
     }) : [];
     if (matches.length > 1) throw new Error("Multiple Airwallex PaymentIntents were found for one order reference.");
-    return matches[0] ? this.parsePaymentIntent(matches[0], orderId) : null;
+    return matches[0] ? this.parsePaymentIntent(matches[0], orderId, "retrieve") : null;
   }
 
   verifyAndParseWebhook(rawBody: string, headers: Headers): VerifiedPaymentEvent {
@@ -184,45 +185,72 @@ export class AirwallexGateway implements PaymentGateway {
       amount: amountMinorToMajor(input.amountMinor),
       reason: input.reason,
       metadata: { ogc_order_id: input.orderId }
-    }) as { id?: unknown; status?: unknown };
-    if (typeof response.id !== "string") throw new Error("Airwallex did not return a refund ID.");
+    }, "refund") as { id?: unknown; status?: unknown };
+    if (typeof response.id !== "string") throw new CommerceProviderError("airwallex", "refund", "invalid_response");
     const status = normalizeRefundStatus(typeof response.status === "string" ? response.status : "");
     return { providerRefundId: response.id, status };
   }
 
-  private async api(path: string, body: Record<string, unknown>): Promise<unknown> {
+  private async api(path: string, body: Record<string, unknown>, operation: Extract<CommerceProviderOperation, "checkout" | "refund">): Promise<unknown> {
     const token = await this.getAccessToken();
-    const response = await this.fetchImpl(`${this.baseUrl()}${path}`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    if (!response.ok) throw new Error(`Airwallex request failed with status ${response.status}.`);
-    return response.json();
+    const url = `${this.baseUrl()}${path}`;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(body)
+      });
+    } catch (error) {
+      throw airwallexNetworkError(operation, error);
+    }
+    if (!response.ok) throw new CommerceProviderError("airwallex", operation, "http", response.status);
+    return parseProviderJson(response, operation);
   }
 
-  private async apiGet(path: string): Promise<unknown> {
+  private async apiGet(path: string, operation: "retrieve"): Promise<unknown> {
     const token = await this.getAccessToken();
-    const response = await this.fetchImpl(`${this.baseUrl()}${path}`, {
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }
-    });
-    if (!response.ok) throw new Error(`Airwallex request failed with status ${response.status}.`);
-    return response.json();
+    const url = `${this.baseUrl()}${path}`;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }
+      });
+    } catch (error) {
+      throw airwallexNetworkError(operation, error);
+    }
+    if (!response.ok) throw new CommerceProviderError("airwallex", operation, "http", response.status);
+    return parseProviderJson(response, operation);
   }
 
   private async getAccessToken(): Promise<string> {
     if (this.accessToken && this.accessToken.expiresAt > this.now() + 30_000) return this.accessToken.value;
-    const response = await this.fetchImpl(`${this.baseUrl()}/api/v1/authentication/login`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-client-id": required(this.environment, "AIRWALLEX_CLIENT_ID"),
-        "x-api-key": required(this.environment, "AIRWALLEX_API_KEY")
-      }
-    });
-    if (!response.ok) throw new Error(`Airwallex authentication failed with status ${response.status}.`);
-    const payload = await response.json() as { token?: unknown; expires_at?: unknown };
-    if (typeof payload.token !== "string") throw new Error("Airwallex authentication did not return a token.");
+    let url: string;
+    let clientId: string;
+    let apiKey: string;
+    try {
+      url = `${this.baseUrl()}/api/v1/authentication/login`;
+      clientId = required(this.environment, "AIRWALLEX_CLIENT_ID");
+      apiKey = required(this.environment, "AIRWALLEX_API_KEY");
+    } catch (error) {
+      throw airwallexConfigurationError(error);
+    }
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-client-id": clientId,
+          "x-api-key": apiKey
+        }
+      });
+    } catch (error) {
+      throw airwallexNetworkError("authentication", error);
+    }
+    if (!response.ok) throw new CommerceProviderError("airwallex", "authentication", "http", response.status);
+    const payload = await parseProviderJson(response, "authentication") as { token?: unknown; expires_at?: unknown };
+    if (typeof payload.token !== "string") throw new CommerceProviderError("airwallex", "authentication", "invalid_response");
     const parsedExpiry = typeof payload.expires_at === "string" ? Date.parse(payload.expires_at) : Number.NaN;
     this.accessToken = { value: payload.token, expiresAt: Number.isFinite(parsedExpiry) ? parsedExpiry : this.now() + 25 * 60_000 };
     return payload.token;
@@ -241,19 +269,19 @@ export class AirwallexGateway implements PaymentGateway {
     return mode === "live" ? "https://api.airwallex.com" : "https://api-demo.airwallex.com";
   }
 
-  private parsePaymentIntent(value: unknown, orderId: string): HostedCheckoutResult {
-    if (!value || typeof value !== "object") throw new Error("Airwallex did not return a valid PaymentIntent.");
+  private parsePaymentIntent(value: unknown, orderId: string, operation: "checkout" | "retrieve"): HostedCheckoutResult {
+    if (!value || typeof value !== "object") throw new CommerceProviderError("airwallex", operation, "invalid_response");
     const response = value as Record<string, unknown>;
     const id = stringField(response, "id");
     const clientSecret = stringField(response, "client_secret");
     const currency = stringField(response, "currency");
     const merchantOrderId = stringField(response, "merchant_order_id");
     if (!id || !clientSecret || !currency || merchantOrderId !== orderId) {
-      throw new Error("Airwallex did not return a valid PaymentIntent.");
+      throw new CommerceProviderError("airwallex", operation, "invalid_response");
     }
-    assertPaymentIntentId(id);
+    if (!isAirwallexPaymentIntentId(id)) throw new CommerceProviderError("airwallex", operation, "invalid_response");
     if (currency !== "CNY" && currency !== "USD" && currency !== "HKD") {
-      throw new Error("Airwallex returned an unsupported PaymentIntent currency.");
+      throw new CommerceProviderError("airwallex", operation, "invalid_response");
     }
     return {
       provider: "airwallex",
@@ -267,6 +295,31 @@ export class AirwallexGateway implements PaymentGateway {
 
 export function verifyAirwallexWebhookSignature(rawBody: string, timestamp: string, signature: string, secret: string): boolean {
   return verifyHmac(`${timestamp}${rawBody}`, signature, secret);
+}
+
+async function parseProviderJson(response: Response, operation: CommerceProviderOperation): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw new CommerceProviderError("airwallex", operation, "invalid_response");
+  }
+}
+
+function airwallexNetworkError(operation: CommerceProviderOperation, error: unknown): CommerceProviderError {
+  const name = error instanceof Error ? error.name : "";
+  return new CommerceProviderError(
+    "airwallex",
+    operation,
+    name === "AbortError" || name === "TimeoutError" ? "timeout" : "network"
+  );
+}
+
+function airwallexConfigurationError(error: unknown): CommerceProviderError {
+  const failure = new CommerceProviderError("airwallex", "authentication", "invalid_configuration");
+  const safeDetail = ["AIRWALLEX_CLIENT_ID", "AIRWALLEX_API_KEY", "Sandbox API"]
+    .find((value) => error instanceof Error && error.message.includes(value));
+  if (safeDetail) failure.message = `airwallex authentication failed: ${safeDetail}.`;
+  return failure;
 }
 
 function verifyHmac(value: string, receivedHex: string, secret: string): boolean {

@@ -58,6 +58,7 @@ export function buildHppReturnUrls(currentUrl: string, orderId: string) {
 export function getPaymentReturnView(status: PublicOrderStatus | null, hint: ReturnHint, dictionary: Dictionary) {
   if (!status) return { kind: hint === "cancel" ? "warning" : "pending", message: hint === "cancel" ? dictionary.commerce.paymentNotCompleted : dictionary.commerce.paymentConfirming } as const;
   if (status.refundStatus === "refunded") return { kind: "warning", message: dictionary.commerce.paymentRefunded } as const;
+  if (status.refundStatus === "failed") return { kind: "warning", message: dictionary.commerce.paymentRefundFailed } as const;
   if (status.refundStatus === "pending" || status.refundStatus === "submitted") return { kind: "warning", message: dictionary.commerce.paymentRefundPending } as const;
   if (status.paymentStatus === "cancelled") return { kind: "warning", message: dictionary.commerce.paymentCancelled } as const;
   if (status.paymentStatus === "failed") return { kind: "warning", message: dictionary.commerce.paymentNotCompleted } as const;
@@ -75,7 +76,7 @@ export function isTerminalPaymentReturn(status: PublicOrderStatus): boolean {
   return status.paymentStatus === "failed"
     || status.paymentStatus === "cancelled"
     || status.refundStatus === "refunded"
+    || status.refundStatus === "failed"
     || status.fulfillmentStatus === "completed"
-    || status.fulfillmentStatus === "completed_limited"
-    || status.fulfillmentStatus === "failed";
+    || status.fulfillmentStatus === "completed_limited";
 }

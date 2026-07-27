@@ -50,10 +50,15 @@ const PUBLIC_METADATA_KEYS = new Set([
   "registrabledomain", "language", "locale", "region", "mimetype", "publishedat", "updatedat", "retrievedat", "rank",
   "resulttype", "sourcekind", "inputtokens", "outputtokens", "totaltokens", "searchrequests", "currency", "costmicros",
   "billedunits", "requestunits", "cachehits", "billing", "unit", "count", "requestcount", "resultcount",
-  "estimatedcostmicros", "providerreportedcostmicros", "costuncertain"
+  "estimatedcostmicros", "providerreportedcostmicros", "costuncertain",
+  "snapshotkind", "parentsnapshotid", "candidatesethash", "queryplanversion", "selectorversion",
+  "policyid", "policyversion", "passageid", "claimid", "capability", "operatingmode", "servicescope", "routescope",
+  "validationstatus", "rejectionreason", "extractionmodel", "extractioncontract", "relevancescore"
 ]);
 
 export interface LeaseToken { cacheIdentity: string; leaseOwner: string; attemptNumber: number }
+export type SnapshotLeaseToken = LeaseToken;
+export type MarketSnapshotKind = "standard_question" | "provider_discovery" | "candidate_verification";
 export type LeaseClaim = { acquired: true; takeover: boolean; token: LeaseToken; expiresAt: Date } |
   { acquired: false; state: "held" | "completed"; lease: MarketSnapshotLeaseRow };
 
@@ -178,6 +183,7 @@ export async function heartbeatMarketSnapshotLease(input: { token: LeaseToken; l
 
 export async function createMarketSnapshotRefresh(input: {
   identity: MarketSnapshotIdentity; authorityVersion: string; leaseOwner?: string; token?: LeaseToken; questionHash: string;
+  snapshotKind?: MarketSnapshotKind; parentSnapshotId?: string | null; candidateSetHash?: string | null; queryPlanVersion?: string;
 }): Promise<MarketSnapshotQuestionRow> {
   const identity = exactIdentity(input.identity);
   const tokenInput = input.token ?? await legacyToken(identity.id, input.leaseOwner);
@@ -185,11 +191,13 @@ export async function createMarketSnapshotRefresh(input: {
   if (expected.cacheIdentity !== identity.id) throw new Error("Lease and snapshot cache identities do not match.");
   const authorityVersion = bounded(input.authorityVersion, "authorityVersion", 256);
   const questionHash = hashText(input.questionHash, "questionHash");
+  const snapshotMetadata = parseSnapshotMetadata(input);
   if (isMemoryPersistence()) {
     requireMemoryLease(expected);
     assertMemoryAuthority(identity, authorityVersion);
+    assertMemorySnapshotAncestry(snapshotMetadata);
     const completionVersion = Math.max(0, ...memoryListMarketSnapshotQuestions().filter((row) => row.cacheIdentity === identity.id).map((row) => row.completionVersion)) + 1;
-    const row = snapshotRow(identity, authorityVersion, questionHash, completionVersion);
+    const row = snapshotRow(identity, authorityVersion, questionHash, completionVersion, snapshotMetadata);
     memorySaveMarketSnapshotQuestion(row);
     return clone(row);
   }
@@ -200,12 +208,14 @@ export async function createMarketSnapshotRefresh(input: {
     const versions = await tx<Array<{ version: number }>>`
       SELECT COALESCE(MAX(completion_version),0)+1 AS version FROM market_snapshot_questions WHERE cache_identity=${identity.id}
     `;
-    const row = snapshotRow(identity, authorityVersion, questionHash, Number(versions[0]?.version ?? 1));
+    const row = snapshotRow(identity, authorityVersion, questionHash, Number(versions[0]?.version ?? 1), snapshotMetadata);
     await tx`INSERT INTO market_snapshot_questions (
       id, cache_identity, normalized_question, question_hash, locale, region,
-      surface_authority_version, surface_id, surface_version, fanout_version, status, completion_version
+      surface_authority_version, surface_id, surface_version, fanout_version, snapshot_kind, parent_snapshot_id,
+      candidate_set_hash, query_plan_version, status, completion_version
     ) VALUES (${row.id},${row.cacheIdentity},${row.normalizedQuestion},${row.questionHash},${row.locale},${row.region},
-      ${row.surfaceAuthorityVersion},${row.surfaceId},${row.surfaceVersion},${row.fanoutVersion},'refreshing',${row.completionVersion})`;
+      ${row.surfaceAuthorityVersion},${row.surfaceId},${row.surfaceVersion},${row.fanoutVersion},${row.snapshotKind},
+      ${row.parentSnapshotId},${row.candidateSetHash},${row.queryPlanVersion},'refreshing',${row.completionVersion})`;
     return row;
   });
 }
@@ -233,7 +243,7 @@ export async function appendMarketSnapshotQueries(input: {
   snapshotId: string; leaseOwner?: string; token?: LeaseToken; queries: readonly SnapshotQueryInput[];
 }): Promise<MarketSnapshotQueryRow[]> {
   const snapshotId = bounded(input.snapshotId, "snapshotId", 256);
-  if (!Array.isArray(input.queries) || input.queries.length < 1 || input.queries.length > 6) throw new TypeError("A snapshot requires one to six queries.");
+  if (!Array.isArray(input.queries) || input.queries.length < 1 || input.queries.length > 12) throw new TypeError("A snapshot requires one to twelve queries.");
   const parsed = input.queries.map(parseQuery);
   if (new Set(parsed.map((row) => row.id)).size !== parsed.length || new Set(parsed.map((row) => row.queryOrder)).size !== parsed.length || parsed.some((row, index) => row.queryOrder !== index)) throw new TypeError("Snapshot query identity/order must be unique and contiguous from zero.");
   if (isMemoryPersistence()) {
@@ -377,6 +387,11 @@ export async function appendMarketSearchObservations(input: { token: LeaseToken;
   });
 }
 
+export function validateMarketSearchObservationInput(input: SearchObservationInput): SearchObservationInput {
+  parseObservation(input);
+  return input;
+}
+
 export async function appendMarketSourceEvidence(input: { token: LeaseToken; sources: readonly SourceEvidenceInput[] }): Promise<MarketSourceEvidenceRow[]> {
   const tokenInput = parseToken(input.token);
   const sources = input.sources.map(parseSource);
@@ -419,7 +434,7 @@ export async function completeMarketSnapshotLease(input: {
     const expected = input.token ? parseToken(input.token) : await legacyToken(input.cacheIdentity ?? snapshot.cacheIdentity, input.leaseOwner);
     if (expected.cacheIdentity !== snapshot.cacheIdentity) throw new Error("Lease token cannot complete a foreign snapshot identity.");
     requireMemoryLease(expected);
-    assertCompletionLedger(snapshotId);
+    assertCompletionLedger(snapshotId, snapshot.snapshotKind === "candidate_verification");
     const completedAt = input.completedAt ? validDate(input.completedAt, "completedAt") : new Date();
     const next = { ...snapshot, status: "completed", queryFanoutHash, completedAt };
     memorySaveMarketSnapshotQuestion(next);
@@ -432,8 +447,9 @@ export async function completeMarketSnapshotLease(input: {
   return getSqlClient().begin(async (tx) => {
     const lease = await requireLeaseTx(tx, parseToken(expected));
     const completedAt = input.completedAt ? validDate(input.completedAt, "completedAt") : null;
-    const ledger = (await tx<Array<{ query_count: number; terminal_query_count: number; successful_count: number; pending_count: number }>>`
+    const ledger = (await tx<Array<{ query_count: number; terminal_query_count: number; successful_count: number; pending_count: number; snapshot_kind: string }>>`
       SELECT
+        (SELECT snapshot_kind FROM market_snapshot_questions snapshot WHERE snapshot.id=${snapshotId}) AS snapshot_kind,
         (SELECT count(*)::integer FROM market_snapshot_queries query WHERE query.snapshot_id=${snapshotId}) AS query_count,
         (SELECT count(DISTINCT attempt.query_id)::integer FROM market_search_attempts attempt
           WHERE attempt.snapshot_id=${snapshotId} AND attempt.request_status IN ('succeeded','partial','timeout','rate_limited','unavailable','malformed','aborted','authentication','unsupported')) AS terminal_query_count,
@@ -442,7 +458,8 @@ export async function completeMarketSnapshotLease(input: {
         (SELECT count(*)::integer FROM market_search_attempts attempt
           WHERE attempt.snapshot_id=${snapshotId} AND attempt.request_status='pending') AS pending_count
     `)[0];
-    if (!ledger || ledger.query_count < 1 || ledger.terminal_query_count !== ledger.query_count || ledger.successful_count < 1 || ledger.pending_count !== 0) {
+    const exhaustedVerification = ledger?.snapshot_kind === "candidate_verification" && ledger.successful_count === 0;
+    if (!ledger || ledger.query_count < 1 || ledger.terminal_query_count !== ledger.query_count || (!exhaustedVerification && ledger.successful_count < 1) || ledger.pending_count !== 0) {
       throw new Error("Completed snapshot requires a terminal attempt per query, no pending request, and at least one successful/partial ledger.");
     }
     const rows = await tx<Array<Record<string, unknown>>>`UPDATE market_snapshot_questions SET status='completed',query_fanout_hash=${queryFanoutHash},completed_at=COALESCE(${completedAt?.toISOString() ?? null}::timestamptz,clock_timestamp()) WHERE id=${snapshotId} AND cache_identity=${lease.cache_identity as string} AND status='refreshing' RETURNING *`;
@@ -492,6 +509,7 @@ export async function findExactMarketSnapshot(input: { identity: MarketSnapshotI
 
 export async function waitForMarketSnapshot(input: {
   identity: MarketSnapshotIdentity; deadline: Date; minBackoffMs?: number; maxBackoffMs?: number; signal?: AbortSignal;
+  acceptSnapshot?: (snapshot: MarketSnapshotQuestionRow) => boolean;
 }): Promise<{ status: "completed"; snapshot: MarketSnapshotQuestionRow } | { status: "takeover_available" | "released_retryable" | "deadline" | "aborted" }> {
   const identity = exactIdentity(input.identity);
   const deadline = validDate(input.deadline, "deadline");
@@ -501,12 +519,14 @@ export async function waitForMarketSnapshot(input: {
     if (input.signal?.aborted) return { status: "aborted" };
     const now = await databaseTime();
     const found = await findExactMarketSnapshot({ identity, evidenceCutoff: now });
-    if (found) return { status: "completed", snapshot: found.snapshot };
+    if (found && (!input.acceptSnapshot || input.acceptSnapshot(found.snapshot))) return { status: "completed", snapshot: found.snapshot };
     const lease = await readLease(identity.id);
     if (lease?.state === "completed" && lease.terminalSnapshotId) {
       const bundle = await getMarketSnapshotBundle(lease.terminalSnapshotId);
       if (bundle?.snapshot.status === "completed" && exactRow(bundle.snapshot, identity)) {
-        return { status: "completed", snapshot: bundle.snapshot };
+        return !input.acceptSnapshot || input.acceptSnapshot(bundle.snapshot)
+          ? { status: "completed", snapshot: bundle.snapshot }
+          : { status: "released_retryable" };
       }
       throw new Error("Completed market snapshot lease has no exact terminal evidence.");
     }
@@ -654,24 +674,47 @@ function markUnfinishedAttemptsUncertainMemory(cacheIdentity: string, now: Date)
   const ids = new Set(memoryListMarketSnapshotQuestions().filter((row) => row.cacheIdentity === cacheIdentity).map(({ id }) => id));
   for (const row of memoryListMarketSearchAttempts()) if (ids.has(row.snapshotId) && row.requestStatus === "pending") memorySaveMarketSearchAttempt({ ...row, requestStatus: "timeout", costUncertain: true, completedAt: now, sanitizedError: "Lease expired before request outcome was recorded." });
 }
-function assertCompletionLedger(snapshotId: string): void {
+function assertCompletionLedger(snapshotId: string, allowExhausted: boolean): void {
   const queries = memoryListMarketSnapshotQueries(snapshotId), attempts = memoryListMarketSearchAttempts(snapshotId);
-  if (!queries.length || attempts.some((attempt) => attempt.requestStatus === "pending") || !queries.every((query) => attempts.some((attempt) => attempt.queryId === query.id && TERMINAL_ATTEMPT_STATES.has(attempt.requestStatus))) || !attempts.some((attempt) => SUCCESS_ATTEMPT_STATES.has(attempt.requestStatus))) throw new Error("Completed snapshot requires a terminal attempt per query, no pending request, and at least one successful/partial ledger.");
+  if (!queries.length || attempts.some((attempt) => attempt.requestStatus === "pending") || !queries.every((query) => attempts.some((attempt) => attempt.queryId === query.id && TERMINAL_ATTEMPT_STATES.has(attempt.requestStatus))) || (!allowExhausted && !attempts.some((attempt) => SUCCESS_ATTEMPT_STATES.has(attempt.requestStatus)))) throw new Error("Completed snapshot requires a terminal attempt per query, no pending request, and at least one successful/partial ledger unless candidate verification is exhausted.");
 }
 function exactIdentity(value: MarketSnapshotIdentity): MarketSnapshotIdentity {
   const parsed = parseMarketSnapshotIdentity(value);
-  const expected = deterministicId("market", [parsed.normalizedQuestion, parsed.locale, parsed.region, parsed.surfaceId, parsed.surfaceVersion, parsed.fanoutVersion].map((part) => part.trim().normalize("NFKC")));
+  const expected = deterministicId("market", [parsed.normalizedQuestion, parsed.locale, parsed.region, parsed.surfaceId, parsed.surfaceVersion, parsed.fanoutVersion, parsed.queryPlanHash].map((part) => part.trim().normalize("NFKC")));
   if (parsed.id !== expected) throw new TypeError("Market snapshot identity hash does not match its exact dimensions.");
   assertNoPrivateIdentity(parsed.normalizedQuestion);
   return parsed;
 }
-function snapshotRow(identity: MarketSnapshotIdentity, authorityVersion: string, questionHash: string, completionVersion: number): MarketSnapshotQuestionRow {
-  return { id: deterministicId("snapshot", [identity.id, String(completionVersion)]), cacheIdentity: identity.id, normalizedQuestion: identity.normalizedQuestion, questionHash, locale: identity.locale, region: identity.region, surfaceAuthorityVersion: authorityVersion, surfaceId: identity.surfaceId, surfaceVersion: identity.surfaceVersion, fanoutVersion: identity.fanoutVersion, status: "refreshing", completionVersion, queryFanoutHash: null, completedAt: null, createdAt: new Date() };
+interface ParsedSnapshotMetadata {
+  snapshotKind: MarketSnapshotKind;
+  parentSnapshotId: string | null;
+  candidateSetHash: string | null;
+  queryPlanVersion: string;
+}
+function parseSnapshotMetadata(input: {
+  snapshotKind?: MarketSnapshotKind; parentSnapshotId?: string | null; candidateSetHash?: string | null; queryPlanVersion?: string;
+}): ParsedSnapshotMetadata {
+  const snapshotKind = input.snapshotKind ?? "standard_question";
+  if (!["standard_question", "provider_discovery", "candidate_verification"].includes(snapshotKind)) throw new TypeError("Unsupported market snapshot kind.");
+  const parentSnapshotId = input.parentSnapshotId == null ? null : bounded(input.parentSnapshotId, "parentSnapshotId", 256);
+  const candidateSetHash = input.candidateSetHash == null ? null : hashText(input.candidateSetHash, "candidateSetHash");
+  const queryPlanVersion = bounded(input.queryPlanVersion ?? "legacy-standard-v1", "queryPlanVersion", 128);
+  const verification = snapshotKind === "candidate_verification";
+  if (verification !== (parentSnapshotId !== null && candidateSetHash !== null)) throw new TypeError("Candidate verification requires exact parent snapshot and candidate-set identities.");
+  return { snapshotKind, parentSnapshotId, candidateSetHash, queryPlanVersion };
+}
+function assertMemorySnapshotAncestry(metadata: ParsedSnapshotMetadata): void {
+  if (metadata.snapshotKind !== "candidate_verification") return;
+  const parent = memoryGetMarketSnapshotQuestion(metadata.parentSnapshotId!);
+  if (!parent || parent.snapshotKind !== "provider_discovery" || parent.status !== "completed") throw new Error("Candidate verification requires a completed provider-discovery parent snapshot.");
+}
+function snapshotRow(identity: MarketSnapshotIdentity, authorityVersion: string, questionHash: string, completionVersion: number, metadata: ParsedSnapshotMetadata): MarketSnapshotQuestionRow {
+  return { id: deterministicId("snapshot", [identity.id, String(completionVersion)]), cacheIdentity: identity.id, normalizedQuestion: identity.normalizedQuestion, questionHash, locale: identity.locale, region: identity.region, surfaceAuthorityVersion: authorityVersion, surfaceId: identity.surfaceId, surfaceVersion: identity.surfaceVersion, fanoutVersion: identity.fanoutVersion, snapshotKind: metadata.snapshotKind, parentSnapshotId: metadata.parentSnapshotId, candidateSetHash: metadata.candidateSetHash, queryPlanVersion: metadata.queryPlanVersion, status: "refreshing", completionVersion, queryFanoutHash: null, completedAt: null, createdAt: new Date() };
 }
 function leaseRow(cacheIdentity: string, leaseOwner: string, attemptNumber: number, now: Date, duration: number): MarketSnapshotLeaseRow { return { cacheIdentity, leaseOwner, state: "active", acquiredAt: now, heartbeatAt: now, expiresAt: new Date(now.getTime() + duration), attemptNumber, terminalSnapshotId: null, updatedAt: now }; }
 function attemptRow(snapshot: MarketSnapshotQuestionRow, queryId: string, attemptNumber: number, idempotencyReference: string, configuredCostMicros: number): MarketSearchAttemptRow { const now = new Date(); return { id: deterministicId("search-attempt", [snapshot.id, String(attemptNumber), idempotencyReference]), snapshotId: snapshot.id, queryId, authorityVersion: snapshot.surfaceAuthorityVersion, attemptNumber, requestStatus: "pending", idempotencyReference, usage: {}, configuredCostMicros, providerCostMicros: null, costUncertain: false, sanitizedError: null, startedAt: now, completedAt: null, createdAt: now }; }
 function refRow(reportId: string, jobId: string, snapshot: MarketSnapshotQuestionRow, cutoff: Date, costs: { snapshotId: string; actualCostMicros: number; allocatedCostMicros: number; avoidedCostMicros: number }): ReportMarketSnapshotRefRow & { cacheIdentity: string } { const age = cutoff.getTime() - snapshot.completedAt!.getTime(); const freshnessState = age <= FRESH_MS ? "fresh" : age <= STALE_MS ? "historical" : "insufficient"; const bindingHash = sha(JSON.stringify([reportId, jobId, snapshot.id, snapshot.cacheIdentity, cutoff.toISOString(), freshnessState, costs.actualCostMicros, costs.allocatedCostMicros, costs.avoidedCostMicros])); return { id: deterministicId("report-snapshot-ref", [jobId, snapshot.id]), reportId, jobId, snapshotId: snapshot.id, cacheIdentity: snapshot.cacheIdentity, evidenceCutoff: cutoff, freshnessState, actualCostMicros: costs.actualCostMicros, allocatedCostMicros: costs.allocatedCostMicros, avoidedCostMicros: costs.avoidedCostMicros, bindingHash, createdAt: new Date() }; }
-function parseQuery(input: SnapshotQueryInput): Omit<MarketSnapshotQueryRow, "snapshotId" | "createdAt"> { return { id: bounded(input.id, "query.id", 256), queryOrder: nonnegativeInteger(input.queryOrder, "query.queryOrder", 5), queryText: privateSafeText(input.queryText, "query.queryText", 2_000), queryHash: hashText(input.queryHash, "query.queryHash"), derivationRule: bounded(input.derivationRule, "query.derivationRule", 200) }; }
+function parseQuery(input: SnapshotQueryInput): Omit<MarketSnapshotQueryRow, "snapshotId" | "createdAt"> { return { id: bounded(input.id, "query.id", 256), queryOrder: nonnegativeInteger(input.queryOrder, "query.queryOrder", 11), queryText: privateSafeText(input.queryText, "query.queryText", 2_000), queryHash: hashText(input.queryHash, "query.queryHash"), derivationRule: bounded(input.derivationRule, "query.derivationRule", 200) }; }
 function parseObservation(input: SearchObservationInput): Omit<MarketSearchObservationRow, "createdAt"> { const resultUrl = publicUrl(input.resultUrl), canonicalUrl = publicUrl(input.canonicalUrl); if (!["returned","duplicate","inaccessible","filtered"].includes(input.resultStatus)) throw new TypeError("Unsupported search result status."); return { id: bounded(input.id, "observation.id", 256), snapshotId: bounded(input.snapshotId, "snapshotId", 256), queryId: bounded(input.queryId, "queryId", 256), attemptId: bounded(input.attemptId, "attemptId", 256), surfaceResultOrder: positiveInteger(input.surfaceResultOrder, "surfaceResultOrder", 100), resultUrl, canonicalUrl, title: privateSafeText(input.title, "title", 1_000), snippet: input.snippet == null ? null : privateSafeText(input.snippet, "snippet", 1_200), resultStatus: input.resultStatus, resultMetadata: validatePublicMetadata(input.resultMetadata ?? {}, "resultMetadata"), contentHash: hashText(input.contentHash, "contentHash"), observedAt: validDate(input.observedAt, "observedAt") }; }
 function parseSource(input: SourceEvidenceInput): Omit<MarketSourceEvidenceRow, "createdAt"> { if (!["available","inaccessible","not_retrieved"].includes(input.retrievalState)) throw new TypeError("Unsupported source retrieval state."); if (!["company_owned","earned_editorial","directory_or_reference","community_or_ugc","institution","social","unknown"].includes(input.sourceCategory)) throw new TypeError("Unsupported source category."); const excerpt = input.excerpt == null ? null : publicEvidenceText(input.excerpt, "excerpt", 1_200); const excerptHash = input.excerptHash == null ? null : hashText(input.excerptHash, "excerptHash"), contentHash = input.contentHash == null ? null : hashText(input.contentHash, "contentHash"); if (input.retrievalState === "available" ? (!excerpt || !excerptHash || !contentHash) : (excerpt || excerptHash || contentHash)) throw new TypeError("Source retrieval state and retained content are inconsistent."); return { id: bounded(input.id, "source.id", 256), snapshotId: bounded(input.snapshotId, "snapshotId", 256), observationId: bounded(input.observationId, "observationId", 256), canonicalUrl: publicUrl(input.canonicalUrl), registrableDomain: bounded(input.registrableDomain, "registrableDomain", 255), retrievalState: input.retrievalState, excerpt, excerptHash, contentHash, sourceCategory: input.sourceCategory, entities: validatePublicMetadata(input.entities ?? [], "entities", 0, true), claims: validatePublicMetadata(input.claims ?? [], "claims", 0, true), contradictions: validatePublicMetadata(input.contradictions ?? [], "contradictions", 0, true), evidenceFamilyIdentity: bounded(input.evidenceFamilyIdentity, "evidenceFamilyIdentity", 256), retrievedAt: validDate(input.retrievedAt, "retrievedAt"), expiresAt: validDate(input.expiresAt, "expiresAt") }; }
 function validatePublicMetadata(value: unknown, label: string, depth = 0, publicEvidence = false): unknown { if (depth > 4 || Buffer.byteLength(JSON.stringify(value), "utf8") > 8_192) throw new TypeError(`${label} exceeds public metadata bounds.`); if (value === null || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return value; if (typeof value === "string") { if (value.length > 2_048) throw new TypeError(`${label} string is too long.`); if (publicEvidence) assertNoSecretOrInternalIdentity(value); else assertNoPrivateIdentity(value); return value; } if (Array.isArray(value)) return value.map((item, index) => validatePublicMetadata(item, `${label}[${index}]`, depth + 1, publicEvidence)); if (value && typeof value === "object") { const output: Record<string, unknown> = {}; for (const [key, item] of Object.entries(value)) { const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, ""); if (key.length > 64 || !PUBLIC_METADATA_KEYS.has(normalized)) throw new TypeError(`${label} contains unsupported key: ${key}`); output[key] = validatePublicMetadata(item, `${label}.${key}`, depth + 1, publicEvidence); } return output; } throw new TypeError(`${label} contains unsupported metadata.`); }
@@ -704,7 +747,7 @@ function sha(value: string): string { return createHash("sha256").update(value).
 function delay(ms: number, signal?: AbortSignal): Promise<void> { return new Promise((resolve) => { const finish = () => { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); resolve(); }; const onAbort = () => finish(); const timer = setTimeout(finish, Math.max(0, ms)); signal?.addEventListener("abort", onAbort, { once: true }); }); }
 function clone<T>(value: T): T { return structuredClone(value); }
 
-function dbSnapshot(row: Record<string, unknown>): MarketSnapshotQuestionRow { return { id: String(row.id), cacheIdentity: String(row.cache_identity), normalizedQuestion: String(row.normalized_question), questionHash: String(row.question_hash), locale: String(row.locale), region: String(row.region), surfaceAuthorityVersion: String(row.surface_authority_version), surfaceId: String(row.surface_id), surfaceVersion: String(row.surface_version), fanoutVersion: String(row.fanout_version), status: String(row.status), completionVersion: Number(row.completion_version), queryFanoutHash: row.query_fanout_hash == null ? null : String(row.query_fanout_hash), completedAt: row.completed_at == null ? null : new Date(row.completed_at as string | Date), createdAt: new Date(row.created_at as string | Date) }; }
+function dbSnapshot(row: Record<string, unknown>): MarketSnapshotQuestionRow { return { id: String(row.id), cacheIdentity: String(row.cache_identity), normalizedQuestion: String(row.normalized_question), questionHash: String(row.question_hash), locale: String(row.locale), region: String(row.region), surfaceAuthorityVersion: String(row.surface_authority_version), surfaceId: String(row.surface_id), surfaceVersion: String(row.surface_version), fanoutVersion: String(row.fanout_version), snapshotKind: String(row.snapshot_kind ?? "standard_question"), parentSnapshotId: row.parent_snapshot_id == null ? null : String(row.parent_snapshot_id), candidateSetHash: row.candidate_set_hash == null ? null : String(row.candidate_set_hash), queryPlanVersion: String(row.query_plan_version ?? "legacy-standard-v1"), status: String(row.status), completionVersion: Number(row.completion_version), queryFanoutHash: row.query_fanout_hash == null ? null : String(row.query_fanout_hash), completedAt: row.completed_at == null ? null : new Date(row.completed_at as string | Date), createdAt: new Date(row.created_at as string | Date) }; }
 function dbQuery(row: Record<string, unknown>): MarketSnapshotQueryRow { return { id: String(row.id), snapshotId: String(row.snapshot_id), queryOrder: Number(row.query_order), queryText: String(row.query_text), queryHash: String(row.query_hash), derivationRule: String(row.derivation_rule), createdAt: new Date(row.created_at as string | Date) }; }
 function dbAttempt(row: Record<string, unknown>): MarketSearchAttemptRow { return { id: String(row.id), snapshotId: String(row.snapshot_id), queryId: String(row.query_id), authorityVersion: String(row.authority_version), attemptNumber: Number(row.attempt_number), requestStatus: String(row.request_status), idempotencyReference: String(row.idempotency_reference), usage: row.usage, configuredCostMicros: Number(row.configured_cost_micros), providerCostMicros: row.provider_cost_micros == null ? null : Number(row.provider_cost_micros), costUncertain: Boolean(row.cost_uncertain), sanitizedError: row.sanitized_error == null ? null : String(row.sanitized_error), startedAt: new Date(row.started_at as string | Date), completedAt: row.completed_at == null ? null : new Date(row.completed_at as string | Date), createdAt: new Date(row.created_at as string | Date) }; }
 function dbObservation(row: Record<string, unknown>): MarketSearchObservationRow { return { id: String(row.id), snapshotId: String(row.snapshot_id), queryId: String(row.query_id), attemptId: String(row.attempt_id), surfaceResultOrder: Number(row.surface_result_order), resultUrl: String(row.result_url), canonicalUrl: String(row.canonical_url), title: String(row.title), snippet: row.snippet == null ? null : String(row.snippet), resultStatus: String(row.result_status), resultMetadata: row.result_metadata, contentHash: String(row.content_hash), observedAt: new Date(row.observed_at as string | Date), createdAt: new Date(row.created_at as string | Date) }; }

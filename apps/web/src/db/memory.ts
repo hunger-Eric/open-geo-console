@@ -8,10 +8,12 @@ import type {
   CitationSourceEvidenceRow,
   MarketSearchAttemptRow,
   MarketSearchObservationRow,
+  MarketProviderClaimRow,
   MarketSnapshotLeaseRow,
   MarketSnapshotQueryRow,
   MarketSnapshotQuestionRow,
   MarketSourceEvidenceRow,
+  MarketSourcePassageRow,
   PublicSearchSurfaceAuthorityRow,
   RecommendationCertificationAuthorityRow,
   RecommendationForensicReportRow,
@@ -41,6 +43,8 @@ interface MemoryStore {
   marketSearchAttempts: Map<string, MarketSearchAttemptRow>;
   marketSearchObservations: Map<string, MarketSearchObservationRow>;
   marketSourceEvidence: Map<string, MarketSourceEvidenceRow>;
+  marketSourcePassages: Map<string, MarketSourcePassageRow>;
+  marketProviderClaims: Map<string, MarketProviderClaimRow>;
   marketSnapshotLeases: Map<string, MarketSnapshotLeaseRow>;
   reportMarketSnapshotRefs: Map<string, ReportMarketSnapshotRefRow>;
   scanJobs: Map<string, ScanJobRow>;
@@ -70,6 +74,8 @@ function currentStore(): MemoryStore {
       marketSearchAttempts: new Map(),
       marketSearchObservations: new Map(),
       marketSourceEvidence: new Map(),
+      marketSourcePassages: new Map(),
+      marketProviderClaims: new Map(),
       marketSnapshotLeases: new Map(),
       reportMarketSnapshotRefs: new Map(),
       scanJobs: new Map()
@@ -279,6 +285,26 @@ export function memorySaveMarketSearchObservation(row: MarketSearchObservationRo
 
 export function memoryListMarketSourceEvidence(snapshotId?: string): MarketSourceEvidenceRow[] {
   return [...currentStore().marketSourceEvidence.values()].filter((row) => !snapshotId || row.snapshotId === snapshotId);
+}
+
+export function memoryListMarketSourcePassages(sourceEvidenceIds?: readonly string[]): MarketSourcePassageRow[] {
+  const ids = sourceEvidenceIds ? new Set(sourceEvidenceIds) : null;
+  return [...currentStore().marketSourcePassages.values()].filter((row) => !ids || ids.has(row.sourceEvidenceId));
+}
+
+export function memorySaveMarketSourcePassage(row: MarketSourcePassageRow): MarketSourcePassageRow {
+  currentStore().marketSourcePassages.set(row.id, row);
+  return row;
+}
+
+export function memoryListMarketProviderClaims(passageIds?: readonly string[]): MarketProviderClaimRow[] {
+  const ids = passageIds ? new Set(passageIds) : null;
+  return [...currentStore().marketProviderClaims.values()].filter((row) => !ids || ids.has(row.passageId));
+}
+
+export function memorySaveMarketProviderClaim(row: MarketProviderClaimRow): MarketProviderClaimRow {
+  currentStore().marketProviderClaims.set(row.id, row);
+  return row;
 }
 
 export function memorySaveMarketSourceEvidence(row: MarketSourceEvidenceRow): MarketSourceEvidenceRow {

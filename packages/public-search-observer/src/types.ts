@@ -175,6 +175,7 @@ export interface MarketSnapshotIdentity {
   surfaceId: string;
   surfaceVersion: string;
   fanoutVersion: string;
+  queryPlanHash: string;
 }
 
 export type SnapshotFreshness = "fresh" | "stale" | "expired";

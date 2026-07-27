@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, notInArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { ensureDatabase, getDb, getSqlClient } from "./index";
 import {
@@ -18,6 +18,10 @@ import { JobTransitionService } from "@/worker/job-transition-service";
 import { phaseForStage, stageForPhase, type ScanJobPhase } from "@/worker/job-state";
 import type { NormalizedJobError } from "@/worker/job-errors";
 import { validateRecoveryCheckpoint } from "@/worker/job-recovery";
+import {
+  createPostgresReportV4AdmissionJobRepository,
+  enqueueReportV4PreAdmissionAfterPreview
+} from "./report-v4-admission-jobs";
 
 export { getJobCreditStatus } from "./credits";
 
@@ -54,7 +58,11 @@ export class ScanJobCapacityError extends Error {
 }
 
 export async function enqueueScanJob(input: EnqueueScanJobInput): Promise<ScanJobRow> {
-  assertFulfillmentPair(input.productContract ?? "legacy_website_audit_v1", input.fulfillmentMethodology ?? null, input.recommendationReportVersion ?? null);
+  const reason = input.reason ?? "standard";
+  assertFulfillmentPair(input.productContract ?? "legacy_website_audit_v1", input.fulfillmentMethodology ?? null, input.recommendationReportVersion ?? null, reason);
+  if (reason === "v4_pre_admission") {
+    throw new Error("V4 pre-admission jobs must be created by the free-preview terminalization boundary.");
+  }
   if (input.productContract === "recommendation_forensics_v1" && input.tier !== "deep") {
     throw new Error("Recommendation-forensics jobs require the deep Worker lane.");
   }
@@ -101,17 +109,26 @@ export async function enqueueScanJob(input: EnqueueScanJobInput): Promise<ScanJo
   return row;
 }
 
-function assertFulfillmentPair(
+export function assertFulfillmentPair(
   productContract: ReportProductContract,
   methodology: RecommendationFulfillmentMethodology | null,
-  reportVersion: RecommendationReportVersion | null
+  reportVersion: RecommendationReportVersion | null,
+  reason: ScanJobReason = "standard"
 ): void {
+  const v4PreAdmission = methodology === "two_stage_geo_report_v4" && reportVersion === 4;
+  if (reason === "v4_pre_admission" && !v4PreAdmission) {
+    throw new Error("The pre-admission reason requires the exact V4 fulfillment pair.");
+  }
+  if (v4PreAdmission && reason !== "standard" && reason !== "v4_pre_admission") {
+    throw new Error("The V4 fulfillment pair is reserved for the standard paid core or pre-admission jobs.");
+  }
   if (productContract === "recommendation_forensics_v1" &&
       !((methodology === "answer_engine_recommendation_forensics_v1" && reportVersion === 1) ||
-        (methodology === "public_search_source_forensics_v1" && reportVersion === 2))) {
+        (methodology === "public_search_source_forensics_v1" && reportVersion === 2) ||
+        (v4PreAdmission && (reason === "standard" || reason === "v4_pre_admission")))) {
     throw new Error("Recommendation-forensics jobs require a matching explicit methodology and report version.");
   }
-  if (productContract === "legacy_website_audit_v1" && (methodology !== null || reportVersion !== null)) {
+  if (productContract === "legacy_website_audit_v1" && (methodology !== null || reportVersion !== null || reason === "v4_pre_admission")) {
     throw new Error("Legacy website-audit jobs cannot use a recommendation fulfillment methodology or report version.");
   }
 }
@@ -122,9 +139,16 @@ export async function getScanJob(id: string): Promise<ScanJobRow | null> {
   return row ?? null;
 }
 
-export async function getLatestScanJob(reportId: string, tier?: ReportTier): Promise<ScanJobRow | null> {
+export async function getLatestScanJob(
+  reportId: string,
+  tier?: ReportTier,
+  options: { excludeReasons?: readonly ScanJobReason[] } = {}
+): Promise<ScanJobRow | null> {
   await ensureDatabase();
-  const where = tier ? and(eq(scanJobs.reportId, reportId), eq(scanJobs.tier, tier)) : eq(scanJobs.reportId, reportId);
+  const base = tier ? and(eq(scanJobs.reportId, reportId), eq(scanJobs.tier, tier)) : eq(scanJobs.reportId, reportId);
+  const where = options.excludeReasons?.length
+    ? and(base, notInArray(scanJobs.reason, [...options.excludeReasons]))
+    : base;
   const [row] = await getDb().select().from(scanJobs).where(where).orderBy(desc(scanJobs.createdAt)).limit(1);
   return row ?? null;
 }
@@ -393,7 +417,7 @@ export async function terminalizeScanJob(
   await ensureDatabase();
   const sql = getSqlClient();
   await sql.begin(async (tx) => {
-    const jobs = await tx<{ id: string; report_id: string; tier: ReportTier; credit_reservation_id: string | null; execution_state: string; checkpoint_revision: number }[]>`
+    const jobs = await tx<{ id: string; report_id: string; tier: ReportTier; product_contract: ReportProductContract; locale: ReportLocale; reason: ScanJobReason; credit_reservation_id: string | null; execution_state: string; checkpoint_revision: number }[]>`
       UPDATE scan_jobs
       SET stage = ${input.stage},
           execution_state = ${input.stage === "failed" ? "failed" : "completed"},
@@ -414,7 +438,7 @@ export async function terminalizeScanJob(
         AND lease_owner = ${workerId}
         AND lease_expires_at > now()
         AND stage NOT IN ('completed', 'completed_limited', 'failed')
-      RETURNING id, report_id, tier, credit_reservation_id, execution_state, checkpoint_revision
+      RETURNING id, report_id, tier, product_contract, locale, reason, credit_reservation_id, execution_state, checkpoint_revision
     `;
     const job = jobs[0];
     if (!job) {
@@ -450,6 +474,14 @@ export async function terminalizeScanJob(
         await tx`DELETE FROM staging_free_regenerations WHERE site_key = ${regeneration.site_key} AND job_id = ${id}`;
       }
     }
+    await enqueueReportV4PreAdmissionAfterPreview({
+      reportId: job.report_id,
+      locale: job.locale,
+      tier: job.tier,
+      productContract: job.product_contract,
+      reason: job.reason,
+      stage: input.stage
+    }, createPostgresReportV4AdmissionJobRepository(tx));
     if (!job.credit_reservation_id) return;
 
     const reservations = await tx<{

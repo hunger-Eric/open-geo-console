@@ -100,6 +100,22 @@ describe("public-source evidence forensics", () => {
     expect(eligibility.signals.map(({ id }) => id)).not.toContain("surface_result_order");
   });
 
+  it("keeps a traceable bounded excerpt eligible when the full document exceeds the extraction bound", () => {
+    const fixture = createLogisticsPublicSourceFixture();
+    const direct = fixture.retrievals.find(({ verifiedExcerpt, claims }) =>
+      Boolean(verifiedExcerpt) && Boolean(claims?.some(({ directFactSupport }) => directFactSupport)))!;
+    const graph = buildPublicSourceEvidenceGraph({
+      ...fixture,
+      retrievals: [{ ...direct, contentBytes: 2_097_153 }]
+    });
+    const evidence = graph.evidence[0]!;
+
+    expect(evidence.retrievalReadiness.signals.find(({ id }) => id === "bounded_content")?.passed).toBe(false);
+    expect(evidence.retrievalReadiness.ready).toBe(true);
+    expect(evidence.sourceEligibility.eligible).toBe(true);
+    expect(evidence.verifiedExcerpt).toBe(direct.verifiedExcerpt);
+  });
+
   it("records truthful absence only after complete observations and retrieval attempts", () => {
     const fixture = createLogisticsPublicSourceFixture();
     const graph = buildPublicSourceEvidenceGraph(fixture);

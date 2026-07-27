@@ -17,7 +17,6 @@ export const zh = {
     loadSample: "载入示例",
     copyLink: "复制链接",
     copiedLink: "已复制",
-    printReport: "打印 / PDF",
     switchToEnglish: "English",
     switchToChinese: "中文",
     backToScanner: "返回体检入口",
@@ -70,7 +69,7 @@ export const zh = {
     auditedPages: "已体检页面",
     technicalAppendix: "技术附录",
     noFindings: "未发现问题。这个站点状态良好。",
-    shareDescription: "你可以分享此报告链接，或打印为客户可读的 PDF。",
+    shareDescription: "你可以通过安全 HTML 链接分享此报告。",
     logNextTitle: "补充 AI 爬虫访问证据",
     logNextDescription: "上传或粘贴访问日志，查看已知 AI 爬虫是否访问过该站点。",
     legacyFindingLabel: "旧版问题",
@@ -182,7 +181,6 @@ export const zh = {
     previousPage: "上一页",
     nextPage: "下一页",
     pageStatus: "第 {page} / {total} 页",
-    printTitle: "完整 GEO 报告",
     backToReport: "返回报告",
     errors: {
       emptyLogs: "请先粘贴或导入访问日志。",
@@ -201,8 +199,6 @@ export const zh = {
     homepagePreviewNotice: "免费预览只分析了首页。",
     detectedPagesEstimate: "检测到约 {count} 个站内 URL，但尚未抓取或分析这些页面的内容。",
     lockedDeepFeatures: "解锁深度报告后可查看完整网站问题、页面证据、维度解释、改写示例和 90 天行动路线图。",
-    printLockedTitle: "打印和 PDF 属于深度报告",
-    printLockedDescription: "免费预览只覆盖首页。解锁私密深度报告后才能导出完整证据和行动方案。",
     technicalScore: "技术评分",
     aiDimensions: "AI 维度评分",
     organizationProfile: "企业身份画像",
@@ -282,6 +278,7 @@ export const zh = {
     paymentFailed: "报告未能完成，系统正在自动处理退款。",
     paymentRefundPending: "全额退款已提交，正在等待支付机构确认。",
     paymentRefunded: "全额退款已确认。",
+    paymentRefundFailed: "自动退款未能完成，请联系支持团队协助核验并处理退款。",
     paymentStatusUnavailable: "无法读取当前报告对应的订单状态。",
     paymentRefresh: "刷新状态",
     paymentRefreshStopped: "自动更新已暂停，请刷新以读取最新验签状态。"
@@ -446,6 +443,17 @@ export const zh = {
       description: "AI 爬虫依赖清晰标题来判断页面用途。",
       recommendation: "补充明确的页面标题，写清公司、产品或页面意图。"
     },
+    "page.duplicateTitles": {
+      title: "多个页面重复使用同一标题",
+      description: "{affectedCount} 个页面使用相同标题，削弱了生成式引擎对页面独立用途的识别。",
+      recommendation: "为每个页面使用简洁、用途明确的独立标题，仅保留短小的通用品牌标识。"
+    },
+    "page.dominantTitleTemplate": {
+      title: "页面标题被共享模板主导",
+      description: "{affectedCount} 个页面共享长度为 {sharedLength} 个字符的标题片段，页面独有语义占比过低。",
+      recommendation:
+        "优先表达当前页面的独特用途，并将重复部分缩减为简洁的品牌标识，以便生成式引擎准确选择和引用页面。"
+    },
     "page.missingMetaDescription": {
       title: "缺少 meta description",
       description: "页面缺少可用于搜索和 AI 预览场景的简明摘要。",
@@ -475,7 +483,7 @@ export const zh = {
     "homepage.missingOpenGraph": {
       title: "首页缺少 OpenGraph 元数据",
       description: "在问答或社交预览场景中，展示效果可能不够稳定。",
-      recommendation: "为首页添加 OpenGraph title、description、URL 和 image 元数据。"
+      recommendation: "为首页添加 OpenGraph 标题、描述、URL 和图片元数据。"
     }
   },
   errors: {

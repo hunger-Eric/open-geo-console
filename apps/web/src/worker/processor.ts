@@ -11,9 +11,13 @@ import {
   preparePlanningCandidates,
   parseCombinedBusinessQuestionAnswers,
   synthesizeCombinedBusinessQuestionAnswers,
+  synthesizeGroundedBusinessAnswersV2,
   synthesizeWebsiteReportWithRecovery,
   type AiWebsiteReportV1,
   type CombinedBusinessQuestionAnswers,
+  type CombinedGeoReportV3,
+  type CombinedReportLanguageScope,
+  type GroundedAnswerEvidence,
   type RecommendationForensicReportV2,
   type ExtractedPage,
   type PageAnalysis,
@@ -35,12 +39,16 @@ import {
 } from "@/db/reports";
 import { getAiReport, saveAiReport } from "@/db/ai-reports";
 import { getConfirmedBusinessQuestionSet } from "@/db/business-questions";
+import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
+import { getMarketSnapshotBundle } from "@/db/market-snapshots";
 import { getCorrectionExecutionContext } from "@/db/report-corrections";
+import { getReplacementExecutionContext, syncReplacementExecutionState } from "@/db/report-replacement-fulfillments";
 import { listEvidenceAssets } from "@/db/evidence-assets";
 import { terminalizeCombinedCorrection, terminalizePaidCombinedReport } from "@/db/combined-correction-terminalization";
+import { terminalizeCombinedReplacement } from "@/db/combined-replacement-terminalization";
 import { getPendingPaidCombinedContext } from "@/db/combined-reports";
 import { failStagingCombinedArtifactRefresh, getStagingCombinedArtifactRefreshContext, terminalizeStagingCombinedArtifactRefresh } from "@/db/staging-combined-artifact-refresh";
-import { buildReadyCombinedArtifact } from "@/report/combined-artifact-readiness";
+import { buildReadyCombinedArtifact, buildReadyCombinedArtifactV2, buildReadyCombinedArtifactV3, materializePreparedCombinedArtifactV3 } from "@/report/combined-artifact-readiness";
 import { createEvidenceStorage } from "@/evidence/storage";
 import {
   getCrawlEvidence,
@@ -52,7 +60,7 @@ import type { JobCheckpoint, ReportEvidenceAssetRow, ScanJobRow } from "@/db/sch
 import { projectFreeAiReport } from "@/report/visibility";
 import { createSafeFetch } from "@/server/safe-fetch";
 import { captureReportVisualEvidence } from "./visual-evidence";
-import { createProductionPublicSourceForensicsDependencies } from "@/public-source-forensics/production-runtime";
+import { createProductionPublicSourceForensicsDependencies, resolveGenerativeSearchAnswerProvider, resolveProductionPublicSearchRuntime } from "@/public-source-forensics/production-runtime";
 import { createPublicSourceArtifactReadinessGate } from "@/public-source-forensics/artifact-readiness";
 import { exportCanonicalArtifactHtmlPdf } from "@/report/pdf-export";
 import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline, type ArtifactReadinessGate, type PublicSourceCommercialSnapshotRef, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
@@ -65,6 +73,9 @@ import { createPublicSourceAttemptBudget } from "./public-source-execution-budge
 import { phaseForStage, recoveryEnvelope } from "./job-state";
 import type { StagingLiveDrill } from "./staging-live-drill";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
+import { createProductionProviderDiscoveryContext } from "./provider-discovery-production";
+import { runProviderDiscoveryPipeline, type ProviderDiscoveryCheckpointV1 } from "./provider-discovery-pipeline";
+import { resolveGenerativeAnswerFirstV3, type AnswerFirstV3Checkpoint, type AnswerFirstV3CheckpointV2, type AnswerFirstV3StoredSource } from "./answer-first-v3";
 import {
   calculateEffectiveCoverage,
   determineResumeStage,
@@ -72,6 +83,22 @@ import {
   type CompletedPageAnalysis,
   type RecoveryCheckpoint
 } from "./recovery";
+import {
+  processReportV4PreAdmissionJob,
+  type ReportV4PreAdmissionRunner
+} from "./report-v4-pre-admission";
+import { createProductionReportV4AdmissionRunner } from "./report-v4-admission-production";
+import { createReportV4CoreProduction } from "./report-v4-core-production";
+import { createReportV4EnhancementProduction } from "./report-v4-enhancement-production";
+import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
+import {
+  createReportV4AcceptanceObserver,
+  type ReportV4AcceptanceObserver
+} from "./report-v4-acceptance-observer";
+import { ensureDatabase, getSqlClient } from "@/db";
+import { runReportV4AcceptanceStage } from "./report-v4-acceptance-runner";
+import { inspectReportV4AcceptanceDurableTerminal } from "./report-v4-acceptance-terminal-state";
+import type { ReportV4CommerceAuthoritySnapshotSql } from "@/db/report-v4-commerce-authority-snapshot";
 
 interface StoredPageEvidence {
   page: ExtractedPage;
@@ -93,9 +120,11 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
   recommendationForensics?: { runId?: string; questionsGenerated?: boolean; reportSaved?: boolean };
   publicSourceForensics?: PublicSourcePipelineCheckpoint;
   pendingArtifactVerification?: {
-    report: RecommendationForensicReportV2;
+    report: RecommendationForensicReportV2 | CombinedGeoReportV3;
     commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
   };
+  providerDiscovery?: ProviderDiscoveryCheckpointV1;
+  answerFirstV3?: AnswerFirstV3Checkpoint;
   combinedQuestionAnswers?: CombinedBusinessQuestionAnswers;
   discoverySnapshot?: DiscoverySnapshot;
   pageAnalysisContentHashes?: Record<string, string>;
@@ -104,7 +133,38 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
   technicalCompleted?: boolean;
 }
 
-export async function processScanJob(job: ScanJobRow, workerId: string, options: { liveDrill?: StagingLiveDrill } = {}): Promise<void> {
+export type ReportV4ProductionTarget = "core" | "enhancement";
+
+export interface ReportV4ProductionRunnerInput {
+  readonly job: ScanJobRow;
+  readonly workerId: string;
+  readonly signal: AbortSignal;
+  readonly remainingMs: () => number;
+  readonly checkpointJob: (input: CheckpointScanJobInput) => Promise<ScanJobRow>;
+}
+
+export type ReportV4ProductionRunner = (input: ReportV4ProductionRunnerInput) => Promise<void>;
+
+export interface ReportV4ProductionRunners {
+  readonly reportV4CoreRunner?: ReportV4ProductionRunner;
+  readonly reportV4EnhancementRunner?: ReportV4ProductionRunner;
+}
+
+export async function processScanJob(job: ScanJobRow, workerId: string, options: {
+  liveDrill?: StagingLiveDrill;
+  reportV4PreAdmissionRunner?: ReportV4PreAdmissionRunner;
+  reportV4CoreRunner?: ReportV4ProductionRunner;
+  reportV4EnhancementRunner?: ReportV4ProductionRunner;
+} = {}): Promise<void> {
+  const acceptanceSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+  const acceptanceRequired = acceptanceSessionId !== undefined && acceptanceSessionId !== "" &&
+    (job.reason === "v4_pre_admission" || hasReportV4ProductionMarker(job));
+  const acceptanceObserver = acceptanceRequired
+    ? await createReportV4AcceptanceObserver({ jobId: job.id })
+    : null;
+  if (acceptanceRequired && !acceptanceObserver) {
+    throw new Error("A configured Report V4 acceptance session must produce an exact job observer.");
+  }
   const execution = new JobExecutionLease({
     hardDeadlineMs: configuredJobHardDeadlineMs(),
     heartbeat: () => heartbeatScanJob(job.id, workerId)
@@ -126,7 +186,54 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     await checkpointJob({ stage, progress, checkpoint: nextCheckpoint as JobCheckpoint, ...coverage });
   };
   let checkpoint = normalizeCheckpoint(job.checkpoint);
+  let reportV4ProductionTarget: ReportV4ProductionTarget | null = null;
+  let reportV4ProductionRoutingAttempted = false;
   try {
+    const reportV4PreAdmissionRunner = selectReportV4PreAdmissionRunner(
+      job,
+      options.reportV4PreAdmissionRunner,
+      () => createProductionReportV4AdmissionRunner({ checkpointJob })
+    );
+    const observedReportV4PreAdmissionRunner = acceptanceObserver && reportV4PreAdmissionRunner
+      ? instrumentReportV4PreAdmissionDispatch(reportV4PreAdmissionRunner, acceptanceObserver)
+      : reportV4PreAdmissionRunner;
+    if (await processReportV4PreAdmissionJob({
+      job,
+      workerId,
+      signal: execution.controller.signal,
+      remainingMs: () => execution.remainingMs(),
+      runner: observedReportV4PreAdmissionRunner,
+      terminalizeJob: terminalizeScanJob
+    })) return;
+    reportV4ProductionRoutingAttempted = hasReportV4ProductionMarker(job);
+    reportV4ProductionTarget = resolveReportV4ProductionTarget(job);
+    if (reportV4ProductionTarget) {
+      const configuredRunner = reportV4ProductionTarget === "core"
+        ? options.reportV4CoreRunner
+        : options.reportV4EnhancementRunner;
+      const selectedRunner = configuredRunner ?? createDefaultReportV4ProductionRunner(
+        reportV4ProductionTarget,
+        process.env,
+        options.liveDrill
+      );
+      if (acceptanceObserver) await observeReportV4Dispatch(acceptanceObserver, job.id);
+      await dispatchReportV4ProductionJob(reportV4ProductionTarget, {
+        job,
+        workerId,
+        signal: execution.controller.signal,
+        remainingMs: () => execution.remainingMs(),
+        checkpointJob
+      }, {
+        ...options,
+        ...(reportV4ProductionTarget === "core"
+          ? { reportV4CoreRunner: selectedRunner }
+          : {}),
+        ...(reportV4ProductionTarget === "enhancement"
+          ? { reportV4EnhancementRunner: selectedRunner }
+          : {})
+      });
+      return;
+    }
     const fulfillmentTarget = resolveRecommendationFulfillmentTarget(job);
     if (fulfillmentTarget === "recommendation_v1") throw new HistoricalRecommendationRuntimeRetiredError();
     // Retention cleanup is housekeeping, not a prerequisite for a paid
@@ -141,9 +248,38 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       if(!context) throw new Error("The staging artifact-refresh identity is unavailable.");
       const evidenceAssets=await loadReferencedEvidenceAssets(context.sourceReport);
       await assertReusableEvidenceAssets(evidenceAssets);
+      if(context.sourceReport.artifactContract==="combined_geo_report_v2"||context.sourceReport.artifactContract==="combined_geo_report_v3"){
+        await finalizeProviderDiscoveryCombinedJob({job,workerId,checkpoint,websiteFoundation:context.sourceReport.technicalFoundation.aiReport,
+          technicalReport:context.sourceReport.technicalFoundation.technicalReport,targetUrl:context.sourceReport.targetUrl,
+          coverage:{plannedPages:job.plannedPages,successfulPages:job.successfulPages,failedPages:job.failedPages},checkpointJob,
+          signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill,evidenceAssets,
+          artifactContext:{orderId:context.orderId,artifactRevisionId:context.artifactRevisionId,artifactRevision:context.artifactRevision},
+          originalPaidJobId:context.sourceReport.originalPaidJobId,forceSnapshotRefreshAfter:context.sourceReport.generatedAt});
+        return;
+      }
       await finalizeStagingArtifactRefreshJob({job,workerId,checkpoint,context,evidenceAssets,checkpointJob,
         signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill});
       return;
+    }
+    if (job.reason === "replacement_fulfillment") {
+      await syncReplacementExecutionState(job.id, "running");
+      const foundation = await getAiReport(job.reportId, "deep", "recommendation_forensics_v1");
+      const context = await getReplacementExecutionContext(job.id);
+      if (!context) throw new Error("The replacement execution identity is unavailable.");
+      const foundationMatches = foundation?.technicalPayload && foundation.isPrivate && foundation.payload.tier === "deep" &&
+        foundation.reportId === job.reportId && foundation.locale === job.locale && sameTarget(foundation.payload.targetUrl, storedReport.url);
+      if (foundationMatches) {
+        const evidenceAssets = await listEvidenceAssets(job.reportId, context.originalFailedJobId);
+        if (await areReusableEvidenceAssets(evidenceAssets)) {
+          await finalizeProviderDiscoveryCombinedJob({ job, workerId, checkpoint, websiteFoundation: foundation.payload,
+            technicalReport: foundation.technicalPayload!, targetUrl: foundation.payload.targetUrl,
+            coverage: { plannedPages: job.plannedPages, successfulPages: job.successfulPages, failedPages: job.failedPages }, checkpointJob,
+            signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill, evidenceAssets,
+            artifactContext: { orderId: context.orderId, artifactRevisionId: context.artifactRevisionId, artifactRevision: context.artifactRevision },
+            originalPaidJobId: context.originalFailedJobId });
+          return;
+        }
+      }
     }
     if (job.reason === "paid_report_correction") {
       const foundation = await getAiReport(job.reportId, "deep", "recommendation_forensics_v1");
@@ -154,6 +290,13 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       if (foundationMatches) {
         const evidenceAssets = await listEvidenceAssets(job.reportId, context.originalPaidJobId);
         if (await areReusableEvidenceAssets(evidenceAssets)) {
+          if(job.artifactContract==="combined_geo_report_v2"){
+            await finalizeProviderDiscoveryCombinedJob({job,workerId,checkpoint,websiteFoundation:foundation.payload,
+              technicalReport:foundation.technicalPayload!,targetUrl:foundation.payload.targetUrl,coverage:{plannedPages:job.plannedPages,successfulPages:job.successfulPages,failedPages:job.failedPages},
+              checkpointJob,signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill,evidenceAssets,
+              artifactContext:{orderId:context.orderId,artifactRevisionId:context.artifactRevisionId,artifactRevision:context.artifactRevision},originalPaidJobId:context.originalPaidJobId});
+            return;
+          }
           await finalizeCorrectionJob({ job, workerId, checkpoint, websiteFoundation: foundation.payload,
             technicalReport: foundation.technicalPayload!, targetUrl: foundation.payload.targetUrl, evidenceAssets, context,
             checkpointJob, signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill });
@@ -270,22 +413,25 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       options.liveDrill?.inject({ jobId: job.id, fault: "crawl" });
     }
 
-    const crawl = await fetchPlannedPagesWithRecovery<StoredPageEvidence>({
-      targetPageCount: checkpoint.targetPageCount!,
-      rankedCandidates: checkpoint.rankedCandidates!,
-      effectivePlan: checkpoint.effectivePlan!,
-      checkpoint,
-      loadCompleted: (planned) => loadCompletedEvidence(job, planned),
-      fetchPage: (planned) => loadOrFetchEvidence(job, planned, discovery.robotsPolicy, execution.controller.signal),
-      saveCheckpoint: async (next) => {
-        checkpoint = { ...checkpoint, ...next };
-        await saveCheckpoint("fetching", crawlProgress(checkpoint), checkpoint, {
-          plannedPages: checkpoint.effectivePlan?.length ?? 0,
-          successfulPages: checkpoint.completedCrawlUrls?.length ?? 0,
-          failedPages: failureCount(checkpoint)
-        });
-      },
-      signal: execution.controller.signal
+    const crawl = await runReportV4GuardedOperation({
+      guardSite: "full_report_rerun",
+      delegate: () => fetchPlannedPagesWithRecovery<StoredPageEvidence>({
+        targetPageCount: checkpoint.targetPageCount!,
+        rankedCandidates: checkpoint.rankedCandidates!,
+        effectivePlan: checkpoint.effectivePlan!,
+        checkpoint,
+        loadCompleted: (planned) => loadCompletedEvidence(job, planned),
+        fetchPage: (planned) => loadOrFetchEvidence(job, planned, discovery.robotsPolicy, execution.controller.signal),
+        saveCheckpoint: async (next) => {
+          checkpoint = { ...checkpoint, ...next };
+          await saveCheckpoint("fetching", crawlProgress(checkpoint), checkpoint, {
+            plannedPages: checkpoint.effectivePlan?.length ?? 0,
+            successfulPages: checkpoint.completedCrawlUrls?.length ?? 0,
+            failedPages: failureCount(checkpoint)
+          });
+        },
+        signal: execution.controller.signal
+      })
     });
     checkpoint = { ...checkpoint, ...crawl.checkpoint };
     for (const failure of checkpoint.permanentFailures ?? []) {
@@ -421,11 +567,31 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         failedPages: failureCount(checkpoint)
       });
       checkpoint = normalizeCheckpoint(preflightCheckpoint.checkpoint);
+      if (job.reason === "replacement_fulfillment") {
+        const context = await getReplacementExecutionContext(job.id);
+        if (!context) throw new Error("The replacement execution identity is unavailable after technical regeneration.");
+        const evidenceAssets = await listEvidenceAssets(job.reportId, job.id);
+        await assertReusableEvidenceAssets(evidenceAssets);
+        await finalizeProviderDiscoveryCombinedJob({ job, workerId, checkpoint, websiteFoundation: reportToPersist,
+          targetUrl: discovery.targetUrl, technicalReport: technicalReport!, evidenceAssets,
+          artifactContext: { orderId: context.orderId, artifactRevisionId: context.artifactRevisionId, artifactRevision: context.artifactRevision },
+          originalPaidJobId: context.originalFailedJobId,
+          coverage: { plannedPages: effectiveCoverage.effectivePlannedPages, successfulPages: effectiveCoverage.analyzedPages, failedPages: failureCount(checkpoint) },
+          checkpointJob, signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill });
+        return;
+      }
       if (job.reason === "paid_report_correction") {
         const context = await getCorrectionExecutionContext(job.id);
         if (!context) throw new Error("The correction execution identity is unavailable after technical regeneration.");
         const evidenceAssets = await listEvidenceAssets(job.reportId, job.id);
         await assertReusableEvidenceAssets(evidenceAssets);
+        if(job.artifactContract==="combined_geo_report_v2"){
+          await finalizeProviderDiscoveryCombinedJob({job,workerId,checkpoint,websiteFoundation:reportToPersist,
+            targetUrl:discovery.targetUrl,technicalReport:technicalReport!,evidenceAssets,artifactContext:{orderId:context.orderId,artifactRevisionId:context.artifactRevisionId,artifactRevision:context.artifactRevision},
+            originalPaidJobId:context.originalPaidJobId,coverage:{plannedPages:effectiveCoverage.effectivePlannedPages,successfulPages:effectiveCoverage.analyzedPages,failedPages:failureCount(checkpoint)},
+            checkpointJob,signal:execution.controller.signal,remainingMs:execution.remainingMs(),liveDrill:options.liveDrill});
+          return;
+        }
         await finalizeCorrectionJob({ job, workerId, checkpoint, websiteFoundation: reportToPersist,
           targetUrl: discovery.targetUrl, technicalReport: technicalReport!, evidenceAssets, context,
           checkpointJob, signal: execution.controller.signal, remainingMs: execution.remainingMs(), liveDrill: options.liveDrill });
@@ -469,12 +635,16 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       console.error("AI report validation issues:", error.issues);
     }
     const currentJob = await getScanJob(job.id);
+    if (reportV4ProductionRoutingAttempted && isTerminalScanJob(currentJob)) return;
     const phase = currentJob?.currentPhase ?? phaseForStage(currentJob?.stage ?? job.stage);
     const normalized = normalizeJobError(error, {
       jobId: job.id, phase, phaseAttempt: currentJob?.phaseAttempt ?? job.phaseAttempt ?? 0,
       resumeGeneration: currentJob?.resumeGeneration ?? job.resumeGeneration ?? 0,
       configuredSecrets: [process.env.OGC_AI_API_KEY ?? "", process.env.OGC_PUBLIC_SEARCH_MIMO_API_KEY ?? ""]
     });
+    // V4 owns commercial terminalization, but ordinary runner failures still
+    // belong to the canonical job state machine so the original error is
+    // durable immediately instead of being replaced later by lease_exhausted.
     const failedJob = await failScanJob(job.id, workerId, {
       code: normalized.code, publicMessage: "The analysis is temporarily unavailable.",
       retryable: normalized.classification === "transient",
@@ -490,13 +660,167 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         });
       }
     }
-    if (job.tier === "deep" && failedJob.stage === "failed" && !["paid_report_correction","staging_artifact_refresh"].includes(job.reason)) {
+    if (!reportV4ProductionRoutingAttempted && job.tier === "deep" && job.reason !== "v4_pre_admission" && failedJob.stage === "failed" && !["paid_report_correction","staging_artifact_refresh","replacement_fulfillment"].includes(job.reason)) {
       await recordCommercialOutcomeSafely(job.id, "failed");
     }
+    if (job.reason === "replacement_fulfillment") await syncReplacementExecutionState(job.id, failedJob.executionState);
     if(job.reason==="staging_artifact_refresh"&&failedJob.stage==="failed")await failStagingCombinedArtifactRefresh(job.id);
   } finally {
     execution.stop();
   }
+}
+
+function instrumentReportV4PreAdmissionDispatch(
+  runner: ReportV4PreAdmissionRunner,
+  observer: ReportV4AcceptanceObserver
+): ReportV4PreAdmissionRunner {
+  return async (input) => {
+    await observeReportV4Dispatch(observer, input.job.id);
+    return runner(input);
+  };
+}
+
+function observeReportV4Dispatch(
+  observer: ReportV4AcceptanceObserver,
+  jobId: string
+) {
+  return observer.observe({
+    kind: "v4_dispatch",
+    operation: "v4_dispatch",
+    unitId: jobId,
+    attempt: 0,
+    phase: "observed",
+    details: {}
+  });
+}
+
+export function resolveReportV4ProductionTarget(job: Pick<ScanJobRow,
+  "tier" | "productContract" | "fulfillmentMethodology" | "recommendationReportVersion" | "artifactContract" |
+  "businessQuestionSetId" | "correctionId" | "replacementFulfillmentId" | "reason" | "siteSnapshotId" | "creditReservationId"
+>): ReportV4ProductionTarget | null {
+  if (!hasReportV4ProductionMarker(job)) return null;
+  if (job.tier !== "deep" || job.productContract !== "recommendation_forensics_v1" ||
+      job.fulfillmentMethodology !== "two_stage_geo_report_v4" || job.recommendationReportVersion !== 4 ||
+      job.artifactContract !== "combined_geo_report_v4" || !job.businessQuestionSetId?.trim() ||
+      job.correctionId !== null || job.replacementFulfillmentId !== null) {
+    throw new Error("The claimed Report V4 production routing lineage is incomplete or mixed.");
+  }
+  if (job.reason === "standard" && job.siteSnapshotId?.trim() && job.creditReservationId?.trim()) return "core";
+  if (job.reason === "v4_diagnosis_enhancement" && job.siteSnapshotId === null && job.creditReservationId === null) return "enhancement";
+  throw new Error("The claimed Report V4 production job does not match one exact core or enhancement lane.");
+}
+
+export function hasReportV4ProductionMarker(job: Pick<ScanJobRow,
+  "fulfillmentMethodology" | "recommendationReportVersion" | "artifactContract" | "reason"
+>): boolean {
+  return job.fulfillmentMethodology === "two_stage_geo_report_v4" || job.recommendationReportVersion === 4 ||
+    job.artifactContract === "combined_geo_report_v4" || job.reason === "v4_diagnosis_enhancement";
+}
+
+export async function dispatchReportV4ProductionJob(
+  target: ReportV4ProductionTarget,
+  input: ReportV4ProductionRunnerInput,
+  runners: ReportV4ProductionRunners
+): Promise<void> {
+  const runner = target === "core" ? runners.reportV4CoreRunner : runners.reportV4EnhancementRunner;
+  if (!runner) throw new Error(`The production Report V4 ${target} runner is not configured.`);
+  await runner(input);
+}
+
+export function createDefaultReportV4ProductionRunner(
+  target: ReportV4ProductionTarget,
+  environment: NodeJS.ProcessEnv,
+  liveDrill?: StagingLiveDrill
+): ReportV4ProductionRunner {
+  let baseRunner: ReportV4ProductionRunner;
+  if (target === "core") {
+    const run = createReportV4CoreProduction({ environment, liveDrill });
+    baseRunner = async ({ job, workerId, signal, remainingMs }) => {
+      await run({ coreJobId: job.id, workerId, leaseMs: Math.max(1, remainingMs()), signal });
+    };
+  } else {
+    const run = createReportV4EnhancementProduction({ environment, liveDrill });
+    baseRunner = async ({ job, workerId, signal }) => {
+      await run({ job, workerId, signal });
+    };
+  }
+  return composeReportV4AcceptanceProductionRunner(target, baseRunner, environment);
+}
+
+export interface ReportV4AcceptanceProductionRunnerTestOnlyDependencies {
+  readonly createObserver: typeof createReportV4AcceptanceObserver;
+  readonly ensureDatabase: typeof ensureDatabase;
+  readonly getSql: () => ReportV4CommerceAuthoritySnapshotSql;
+  readonly inspectTerminal: typeof inspectReportV4AcceptanceDurableTerminal;
+  readonly runAcceptanceStage: typeof runReportV4AcceptanceStage;
+}
+
+export function composeReportV4AcceptanceProductionRunner(
+  target: ReportV4ProductionTarget,
+  baseRunner: ReportV4ProductionRunner,
+  environment: NodeJS.ProcessEnv,
+  testOnlyDependencies?: ReportV4AcceptanceProductionRunnerTestOnlyDependencies
+): ReportV4ProductionRunner {
+  if (testOnlyDependencies && process.env.NODE_ENV !== "test") {
+    throw new Error("Report V4 acceptance production-runner dependencies are test-only.");
+  }
+  const sessionId = environment.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+  if (sessionId === undefined || sessionId === "") return baseRunner;
+  const dependencies = testOnlyDependencies ?? productionAcceptanceRunnerDependencies;
+  return async (input) => {
+    await dependencies.ensureDatabase();
+    const observer = await dependencies.createObserver({ jobId: input.job.id, environment });
+    if (!observer || observer.session.sessionId !== sessionId || observer.session.environment !== "protected_staging"
+        || observer.session.state !== "collecting" || observer.session.terminalAt !== null
+        || observer.scenario.sessionId !== sessionId || observer.scenario.state !== "collecting"
+        || observer.scenario.terminalAt !== null) {
+      throw new Error("An active Report V4 acceptance observer is required for the production stage runner.");
+    }
+    const coreJobId = observer.scenario.coreJobId;
+    if (!coreJobId || coreJobId.trim() !== coreJobId || (target === "core" && coreJobId !== input.job.id)) {
+      throw new Error("The acceptance production stage requires the observer's exact Core job identity.");
+    }
+    const sql = dependencies.getSql();
+    await dependencies.runAcceptanceStage({
+      sql,
+      observer,
+      sessionId: observer.session.sessionId,
+      scenarioId: observer.scenario.scenarioId,
+      coreJobId,
+      workerGitSha: observer.session.workerGitSha,
+      inspectDurableTerminal: () => dependencies.inspectTerminal({
+        sql,
+        sessionId: observer.session.sessionId,
+        scenarioId: observer.scenario.scenarioId,
+        coreJobId,
+        currentJobId: input.job.id,
+        target
+      }),
+      runStage: async () => { await baseRunner(input); },
+      isTerminalResult: () => false
+    });
+  };
+}
+
+const productionAcceptanceRunnerDependencies: ReportV4AcceptanceProductionRunnerTestOnlyDependencies = {
+  createObserver: createReportV4AcceptanceObserver,
+  ensureDatabase,
+  getSql: getSqlClient,
+  inspectTerminal: inspectReportV4AcceptanceDurableTerminal,
+  runAcceptanceStage: runReportV4AcceptanceStage
+};
+
+export function isTerminalScanJob(job: ScanJobRow | null): boolean {
+  return Boolean(job && (job.stage === "completed" || job.stage === "completed_limited" || job.stage === "failed"));
+}
+
+export function selectReportV4PreAdmissionRunner(
+  job: Pick<ScanJobRow, "reason">,
+  injected: ReportV4PreAdmissionRunner | undefined,
+  createDefault: () => ReportV4PreAdmissionRunner
+): ReportV4PreAdmissionRunner | undefined {
+  if (injected) return injected;
+  return job.reason === "v4_pre_admission" ? createDefault() : undefined;
 }
 
 export function resolveRecommendationFulfillmentTarget(
@@ -531,7 +855,7 @@ export function resolveRecommendationFoundationTarget(
   return checkpoint.discoverySnapshot?.targetUrl ?? foundation?.payload.targetUrl ?? submittedUrl;
 }
 
-async function loadReferencedEvidenceAssets(sourceReport: import("@open-geo-console/ai-report-engine").CombinedGeoReportV1):Promise<ReportEvidenceAssetRow[]>{
+async function loadReferencedEvidenceAssets(sourceReport: import("@open-geo-console/ai-report-engine").CombinedGeoReportV1 | import("@open-geo-console/ai-report-engine").CombinedGeoReportV2 | import("@open-geo-console/ai-report-engine").CombinedGeoReportV3):Promise<ReportEvidenceAssetRow[]>{
   const references=sourceReport.technicalFoundation.evidenceAssets;
   const ids=new Set(references.map(({assetId})=>assetId));
   const jobIds=[...new Set(references.map(({jobId})=>jobId))];
@@ -616,15 +940,57 @@ async function finalizeCorrectionJob(input: {
     htmlSha256:ready.htmlSha256,pdfSha256:ready.pdfSha256,pdfStorageKey:ready.pdfStorageKey,pageCount:ready.pageCount});
 }
 
-export function correctionArtifactVerificationResume(checkpoint: WorkerCheckpoint): {
+export function publicSourceArtifactVerificationResume(checkpoint: WorkerCheckpoint): {
   report: RecommendationForensicReportV2;
   checkpoint: PublicSourcePipelineCheckpoint;
   commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
 } | null {
   const phase=recoveryEnvelope(checkpoint)?.phase;
   if(!["artifact_verification","terminalization"].includes(phase ?? "") || !checkpoint.pendingArtifactVerification || !checkpoint.publicSourceForensics) return null;
-  return { report:checkpoint.pendingArtifactVerification.report,checkpoint:checkpoint.publicSourceForensics,
+  const report=checkpoint.pendingArtifactVerification.report;
+  if(isCombinedGeoReportV3(report)) return null;
+  return { report,checkpoint:checkpoint.publicSourceForensics,
     commercialSnapshotRefs:checkpoint.pendingArtifactVerification.commercialSnapshotRefs };
+}
+
+export const correctionArtifactVerificationResume = publicSourceArtifactVerificationResume;
+
+export function publicSourceSynthesisResume(checkpoint: WorkerCheckpoint): {
+  report: RecommendationForensicReportV2;
+  checkpoint: PublicSourcePipelineCheckpoint;
+  commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
+} | null {
+  const recovery = recoveryEnvelope(checkpoint);
+  const prepared = checkpoint.pendingArtifactVerification;
+  if (!recovery || !["grounded_answer_synthesis", "artifact_verification", "terminalization"].includes(recovery.phase)
+    || !prepared || !checkpoint.publicSourceForensics || isCombinedGeoReportV3(prepared.report)) return null;
+  if (prepared.report.jobId !== recovery.identity.jobId || prepared.report.reportId !== recovery.identity.reportId) return null;
+  const reportSnapshotIds = new Set(prepared.report.snapshotRefs.map(({ snapshotId }) => snapshotId));
+  const commercialSnapshotIds = new Set(prepared.commercialSnapshotRefs.map(({ snapshotId }) => snapshotId));
+  if (!reportSnapshotIds.size || reportSnapshotIds.size !== commercialSnapshotIds.size
+    || [...reportSnapshotIds].some((snapshotId) => !commercialSnapshotIds.has(snapshotId))) return null;
+  return {
+    report: prepared.report,
+    checkpoint: checkpoint.publicSourceForensics,
+    commercialSnapshotRefs: prepared.commercialSnapshotRefs
+  };
+}
+
+export function combinedV3ArtifactVerificationResume(checkpoint: WorkerCheckpoint): {
+  report: CombinedGeoReportV3;
+  checkpoint: AnswerFirstV3Checkpoint;
+  commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
+} | null {
+  const phase=recoveryEnvelope(checkpoint)?.phase;
+  const report=checkpoint.pendingArtifactVerification?.report;
+  if(!["artifact_verification","terminalization"].includes(phase ?? "") || !isCombinedGeoReportV3(report) || !checkpoint.answerFirstV3) return null;
+  return {report,checkpoint:checkpoint.answerFirstV3,commercialSnapshotRefs:checkpoint.pendingArtifactVerification!.commercialSnapshotRefs};
+}
+
+export function combinedV3LanguageValidationScope(
+  reason: ScanJobRow["reason"]
+): CombinedReportLanguageScope | undefined {
+  return reason === "replacement_fulfillment" || reason === "staging_artifact_refresh" ? "presentation_refresh" : undefined;
 }
 
 async function resolveCombinedQuestionAnswers(input: {
@@ -683,6 +1049,10 @@ async function finalizeRecommendationJob(input: {
   liveDrill?: StagingLiveDrill;
 }): Promise<void> {
   if (input.fulfillmentTarget === "recommendation_v2") {
+    if (input.job.artifactContract === "combined_geo_report_v2" || input.job.artifactContract === "combined_geo_report_v3") {
+      await finalizeProviderDiscoveryCombinedJob(input);
+      return;
+    }
     let checkpoint = input.checkpoint;
     const artifactReadiness = input.job.artifactContract === "combined_geo_report_v1"
       ? { async verify() { /* canonical combined readiness runs after public-source synthesis */ } }
@@ -698,39 +1068,44 @@ async function finalizeRecommendationJob(input: {
       await terminalizePaidPublicSourceReport({ report, workerId: input.workerId,
         checkpointIdentityHash: checkpoint.publicSourceForensics?.identityHash ?? "", coverage: input.coverage, snapshotRefs });
     };
-    if (input.job.artifactContract !== "combined_geo_report_v1" && ["artifact_verification", "terminalization"].includes(checkpointPhase() ?? "") && checkpoint.pendingArtifactVerification) {
+    if (input.job.artifactContract !== "combined_geo_report_v1" && ["artifact_verification", "terminalization"].includes(checkpointPhase() ?? "") && checkpoint.pendingArtifactVerification && !isCombinedGeoReportV3(checkpoint.pendingArtifactVerification.report)) {
       input.signal?.throwIfAborted();
       await artifactReadiness.verify(checkpoint.pendingArtifactVerification.report);
       input.signal?.throwIfAborted();
       await terminalize(checkpoint.pendingArtifactVerification.report, checkpoint.pendingArtifactVerification.commercialSnapshotRefs);
       return;
     }
-    if (checkpointPhase() === "public_source_preflight") input.liveDrill?.inject({ jobId: input.job.id, fault: "v2_runtime" });
-    createPublicSourceAttemptBudget(input.remainingMs);
-    const dependencies = await createProductionPublicSourceForensicsDependencies(process.env, {
-      createDependencies: async (runtime) => createWorkerPublicSourceForensicsDependencies({
-        job: input.job,
-        workerId: input.workerId,
-        coverage: input.coverage,
-        readCheckpoint: () => checkpoint,
-        onCheckpointSaved: async (next) => { checkpoint = next; },
-        checkpointJob: input.checkpointJob,
-        retrieveSource: createWorkerPublicSourceRetriever(),
-        // This verifies the canonical V2 HTML and a real Chromium PDF before the
-        // atomic terminalization boundary; it never persists a report itself.
-        artifactReadiness,
-        liveDrill: input.liveDrill,
-        signal: input.signal
-      }, runtime)
-    });
     const businessQuestionSet = input.job.businessQuestionSetId
       ? await getConfirmedBusinessQuestionSet(input.job.reportId, input.job.businessQuestionSetId)
       : null;
     if (input.job.businessQuestionSetId && !businessQuestionSet) throw new Error("The job-bound business question set is unavailable or unlocked.");
-    const result = await runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
-      ...resolvePublicSourceRunScope(dependencies),
-      targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, businessQuestionSet: businessQuestionSet ?? undefined,
-      dependencies, signal: input.signal });
+    const resumedPublicSource = input.job.artifactContract === "combined_geo_report_v1"
+      ? publicSourceArtifactVerificationResume(checkpoint)
+      : null;
+    const result = resumedPublicSource ?? await (async () => {
+      if (checkpointPhase() === "public_source_preflight") input.liveDrill?.inject({ jobId: input.job.id, fault: "v2_runtime" });
+      createPublicSourceAttemptBudget(input.remainingMs);
+      const dependencies = await createProductionPublicSourceForensicsDependencies(process.env, {
+        createDependencies: async (runtime) => createWorkerPublicSourceForensicsDependencies({
+          job: input.job,
+          workerId: input.workerId,
+          coverage: input.coverage,
+          readCheckpoint: () => checkpoint,
+          onCheckpointSaved: async (next) => { checkpoint = next; },
+          checkpointJob: input.checkpointJob,
+          retrieveSource: createWorkerPublicSourceRetriever(),
+          // This verifies the canonical V2 HTML and a real Chromium PDF before the
+          // atomic terminalization boundary; it never persists a report itself.
+          artifactReadiness,
+          liveDrill: input.liveDrill,
+          signal: input.signal
+        }, runtime)
+      });
+      return runPublicSourceForensicsPipeline({ reportId: input.job.reportId, jobId: input.job.id,
+        ...resolvePublicSourceRunScope(dependencies),
+        targetUrl: input.targetUrl, websiteFoundation: input.websiteFoundation, businessQuestionSet: businessQuestionSet ?? undefined,
+        dependencies, signal: input.signal });
+    })();
     if(input.job.artifactContract==="combined_geo_report_v1"&&result.report.commercialOutcome==="completed"){
       const context=await getPendingPaidCombinedContext(input.job.id);
       const questions=input.job.businessQuestionSetId?await getConfirmedBusinessQuestionSet(input.job.reportId,input.job.businessQuestionSetId):null;
@@ -751,6 +1126,310 @@ async function finalizeRecommendationJob(input: {
     return;
   }
   throw new HistoricalRecommendationRuntimeRetiredError();
+}
+
+async function finalizeProviderDiscoveryCombinedJob(input: {
+  job: ScanJobRow;
+  workerId: string;
+  checkpoint: WorkerCheckpoint;
+  websiteFoundation: AiWebsiteReportV1;
+  technicalReport: GeoAuditReport;
+  targetUrl: string;
+  coverage: { plannedPages: number; successfulPages: number; failedPages: number };
+  checkpointJob: WorkerCheckpointWriter;
+  signal?: AbortSignal;
+  remainingMs: number;
+  liveDrill?: StagingLiveDrill;
+  evidenceAssets?: ReportEvidenceAssetRow[];
+  artifactContext?: { orderId: string; artifactRevisionId: string; artifactRevision: number };
+  originalPaidJobId?: string;
+  forceSnapshotRefreshAfter?: string;
+}): Promise<void> {
+  let checkpoint = input.checkpoint;
+  const businessQuestionSet = input.job.businessQuestionSetId
+    ? await getConfirmedBusinessQuestionSet(input.job.reportId, input.job.businessQuestionSetId)
+    : null;
+  const pending = input.artifactContext ?? await getPendingPaidCombinedContext(input.job.id);
+  if (!businessQuestionSet || !pending) throw new Error("The combined job requires its exact locked questions and pending artifact revision.");
+  const evidenceAssets = input.evidenceAssets ?? await listEvidenceAssets(input.job.reportId, input.job.id);
+  await assertReusableEvidenceAssets(evidenceAssets);
+  const resumedV3 = input.job.artifactContract === "combined_geo_report_v3" ? combinedV3ArtifactVerificationResume(checkpoint) : null;
+  if (resumedV3) {
+    const ready = await materializePreparedCombinedArtifactV3(resumedV3.report, evidenceAssets);
+    await terminalizeReadyCombinedArtifact(input, ready, resumedV3.checkpoint.identityHash, resumedV3.commercialSnapshotRefs);
+    return;
+  }
+  createPublicSourceAttemptBudget(input.remainingMs);
+  const client = createConfiguredClient();
+  let generativeCheckpoint: AnswerFirstV3CheckpointV2 | null = null;
+  if (input.job.artifactContract === "combined_geo_report_v3") {
+    const provider = resolveGenerativeSearchAnswerProvider(process.env, {
+      locale: businessQuestionSet.locale,
+      region: businessQuestionSet.region
+    });
+    const collected = await resolveGenerativeAnswerFirstV3({
+      questionSet: businessQuestionSet,
+      provider,
+      locale: businessQuestionSet.locale,
+      region: businessQuestionSet.region,
+      targetUrl: input.targetUrl,
+      targetAliases: businessQuestionSet.identityExclusions,
+      checkpoint: checkpoint.answerFirstV3,
+      signal: input.signal,
+      saveCheckpoint: async (answerFirstV3) => {
+        const next = { ...checkpoint, answerFirstV3 };
+        const updated = await input.checkpointJob({ stage: "synthesizing", phase: "grounded_answer_synthesis", progress: 90, checkpoint: next as JobCheckpoint, ...input.coverage });
+        checkpoint = normalizeCheckpoint(updated.checkpoint);
+      }
+    });
+    generativeCheckpoint = collected.checkpoint;
+  }
+  // Public-search authority and retrieval belong to the audit sidecar. Resolve
+  // them only after the ordinary answers have been safely checkpointed.
+  const runtime = await resolveProductionPublicSearchRuntime({ environment: process.env, getAuthority: getActivePublicSearchSurfaceAuthority });
+  const evidenceCutoffAt = checkpoint.providerDiscovery?.evidenceCutoffAt ?? new Date().toISOString();
+  const providerContext = createProductionProviderDiscoveryContext({
+    runtime,
+    questionSet: businessQuestionSet,
+    artifactContract: input.job.artifactContract === "combined_geo_report_v3" ? "combined_geo_report_v3" : "combined_geo_report_v2",
+    websiteCategories: [input.websiteFoundation.organizationProfile.businessModel ?? "", ...input.websiteFoundation.organizationProfile.productsAndServices].filter(Boolean),
+    websiteFoundationHash: createHash("sha256").update(JSON.stringify(input.websiteFoundation)).digest("hex"),
+    workerId: `provider-discovery:${input.job.id}:${input.workerId}`,
+    evidenceCutoffAt,
+    extractionClient: client,
+    extractionModel: client.configuredModel,
+    forceSnapshotRefreshAfter: input.forceSnapshotRefreshAfter,
+    getCheckpoint: async () => checkpoint.providerDiscovery ?? null,
+    saveCheckpoint: async (providerDiscovery) => {
+      const next = { ...checkpoint, providerDiscovery };
+      const updated = await input.checkpointJob({ stage: "synthesizing", phase: providerDiscovery.phase === "complete" ? "grounded_answer_synthesis" : providerDiscovery.phase, progress: providerPhaseProgress(providerDiscovery.phase), checkpoint: next as JobCheckpoint, ...input.coverage });
+      checkpoint = normalizeCheckpoint(updated.checkpoint);
+    }
+  });
+  const providerResult = await runProviderDiscoveryPipeline({
+    identity: providerContext.identity,
+    dependencies: providerContext.dependencies,
+    hardDeadlineAt: new Date(Date.now() + Math.max(1_000, input.remainingMs)).toISOString(),
+    signal: input.signal
+  });
+  input.signal?.throwIfAborted();
+  const dependencies = createWorkerPublicSourceForensicsDependencies({
+    job: input.job,
+    workerId: input.workerId,
+    coverage: input.coverage,
+    readCheckpoint: () => checkpoint,
+    onCheckpointSaved: async (next) => { checkpoint = next; },
+    checkpointJob: input.checkpointJob,
+    retrieveSource: createWorkerPublicSourceRetriever(),
+    artifactReadiness: { async verify() { /* canonical combined V2 readiness runs below */ } },
+    forceSnapshotRefreshAfter: input.forceSnapshotRefreshAfter,
+    liveDrill: input.liveDrill,
+    signal: input.signal,
+    collaborators: { resolveSnapshot: providerContext.resolveForensicSnapshot, getReport: getSourceForensicReportForJob, saveReport: saveSourceForensicReport }
+  }, runtime);
+  const forensicResult = publicSourceSynthesisResume(checkpoint) ?? await runPublicSourceForensicsPipeline({
+      reportId: input.job.reportId,
+      jobId: input.job.id,
+      ...resolvePublicSourceRunScope(dependencies),
+      targetUrl: input.targetUrl,
+      websiteFoundation: input.websiteFoundation,
+      businessQuestionSet,
+      dependencies,
+      fanoutOverrides: new Map([[providerContext.discoveryFanout.questionId, providerContext.discoveryFanout]]),
+      signal: input.signal
+    });
+  if (input.job.artifactContract === "combined_geo_report_v2" && forensicResult.report.commercialOutcome !== "completed") throw new Error("V2 combined activation requires complete claim-bound public-source coverage.");
+  if (input.job.artifactContract === "combined_geo_report_v3") {
+    const verificationSnapshotId = providerResult.checkpoint.verificationSnapshotId;
+    if (!verificationSnapshotId) throw new Error("V3 provider verification snapshot is unavailable before answer synthesis.");
+    const storedSources = await loadAnswerFirstV3StoredSources([
+      verificationSnapshotId,
+      ...forensicResult.report.snapshotRefs.map(({ snapshotId }) => snapshotId)
+    ]);
+    const provider = resolveGenerativeSearchAnswerProvider(process.env, {
+      locale: runtime.authority.surface.locale,
+      region: runtime.authority.surface.region
+    });
+    const answerResult = await resolveGenerativeAnswerFirstV3({
+      questionSet: businessQuestionSet,
+      provider,
+      locale: runtime.authority.surface.locale,
+      region: runtime.authority.surface.region,
+      targetUrl: input.targetUrl,
+      targetAliases: businessQuestionSet.identityExclusions,
+      competitors: forensicResult.report.sourceGraph.entities
+        .filter(({ status }) => status === "resolved")
+        .map(({ entityId, canonicalName }) => ({ entityId, aliases: [canonicalName] })),
+      auditSources: storedSources,
+      targetPages: input.technicalReport.pages,
+      checkpoint: generativeCheckpoint ?? checkpoint.answerFirstV3,
+      signal: input.signal,
+      saveCheckpoint: async (answerFirstV3) => {
+        const next = { ...checkpoint, answerFirstV3 };
+        const updated = await input.checkpointJob({ stage: "synthesizing", phase: "grounded_answer_synthesis", progress: 98, checkpoint: next as JobCheckpoint, ...input.coverage });
+        checkpoint = normalizeCheckpoint(updated.checkpoint);
+      }
+    });
+    const verificationRef = await providerVerificationCommercialRef(verificationSnapshotId);
+    const snapshotRefs = uniqueSnapshotRefs([...forensicResult.commercialSnapshotRefs, verificationRef]);
+    if (snapshotRefs.length !== 4) throw new Error("V3 combined reports require exactly four immutable market snapshots.");
+    if (!answerResult.checkpoint.sourceSelectionDiagnosis) throw new Error("Prospective V3 artifact requires source selection diagnosis.");
+    const ready = await buildReadyCombinedArtifactV3({
+      artifactRevisionId: pending.artifactRevisionId,
+      artifactRevision: pending.artifactRevision,
+      reportId: input.job.reportId,
+      orderId: pending.orderId,
+      jobId: input.job.id,
+      originalPaidJobId: input.originalPaidJobId ?? input.job.id,
+      targetUrl: input.targetUrl,
+      technicalReport: input.technicalReport,
+      aiReport: input.websiteFoundation,
+      evidenceAssets,
+      businessQuestionSet,
+      answerCards: answerResult.answerCards,
+      sourceSelectionDiagnosis: answerResult.checkpoint.sourceSelectionDiagnosis,
+      engineProvenance: answerResult.checkpoint.engineProvenance,
+      publicSourceForensics: forensicResult.report,
+      providerDiscovery: providerResult.providerDiscovery,
+      languageValidationScope: combinedV3LanguageValidationScope(input.job.reason),
+      onReportPrepared: async (report) => {
+        const next = { ...checkpoint, pendingArtifactVerification: { report, commercialSnapshotRefs: snapshotRefs } };
+        const updated = await input.checkpointJob({ stage: "synthesizing", phase: "artifact_verification", progress: 99, checkpoint: next as JobCheckpoint, ...input.coverage });
+        checkpoint = normalizeCheckpoint(updated.checkpoint);
+      }
+    });
+    await terminalizeReadyCombinedArtifact(input, ready, answerResult.checkpoint.identityHash, snapshotRefs);
+    return;
+  }
+  const groundedAnswerEvidence = groundedEvidenceFromForensic(forensicResult.report);
+  const questionIds = forensicResult.report.questions.questions.slice(1).map(({ id }) => id) as [string, string];
+  const groundedAnswers = await synthesizeGroundedBusinessAnswersV2(client, {
+    questionSet: businessQuestionSet,
+    questionIds,
+    evidence: groundedAnswerEvidence,
+    locale: forensicResult.report.locale,
+    signal: input.signal
+  });
+  const ready = await buildReadyCombinedArtifactV2({
+    artifactRevisionId: pending.artifactRevisionId,
+    artifactRevision: pending.artifactRevision,
+    reportId: input.job.reportId,
+    orderId: pending.orderId,
+    jobId: input.job.id,
+    originalPaidJobId: input.originalPaidJobId ?? input.job.id,
+    targetUrl: input.targetUrl,
+    technicalReport: input.technicalReport,
+    aiReport: input.websiteFoundation,
+    evidenceAssets,
+    businessQuestionSet,
+    businessQuestionAnswers: groundedAnswers,
+    groundedAnswerEvidence,
+    publicSourceForensics: forensicResult.report,
+    providerDiscovery: providerResult.providerDiscovery
+  });
+  const verificationSnapshotId = providerResult.checkpoint.verificationSnapshotId;
+  if (!verificationSnapshotId) throw new Error("V2 provider verification snapshot is unavailable at terminalization.");
+  const verificationRef = await providerVerificationCommercialRef(verificationSnapshotId);
+  const snapshotRefs = uniqueSnapshotRefs([...forensicResult.commercialSnapshotRefs, verificationRef]);
+  if (snapshotRefs.length !== 4) throw new Error("V2 combined reports require exactly four immutable market snapshots.");
+  const terminalInput = {
+    report: ready.report,
+    workerId: input.workerId,
+    checkpointIdentityHash: providerResult.checkpoint.identityHash,
+    snapshotRefs,
+    htmlSha256: ready.htmlSha256,
+    pdfSha256: ready.pdfSha256,
+    pdfStorageKey: ready.pdfStorageKey,
+    pageCount: ready.pageCount
+  };
+  if(input.job.reason==="staging_artifact_refresh") await terminalizeStagingCombinedArtifactRefresh(terminalInput);
+  else if(input.job.reason==="replacement_fulfillment") await terminalizeCombinedReplacement(terminalInput);
+  else if(input.job.reason==="paid_report_correction") await terminalizeCombinedCorrection(terminalInput);
+  else await terminalizePaidCombinedReport(terminalInput);
+}
+
+async function terminalizeReadyCombinedArtifact(
+  input: Parameters<typeof finalizeProviderDiscoveryCombinedJob>[0],
+  ready: Awaited<ReturnType<typeof buildReadyCombinedArtifactV3>>,
+  checkpointIdentityHash: string,
+  snapshotRefs: PublicSourceCommercialSnapshotRef[]
+): Promise<void> {
+  const terminalInput = { report: ready.report, workerId: input.workerId, checkpointIdentityHash, snapshotRefs,
+    htmlSha256: ready.htmlSha256, pdfSha256: ready.pdfSha256, pdfStorageKey: ready.pdfStorageKey, pageCount: ready.pageCount };
+  if(input.job.reason==="staging_artifact_refresh") await terminalizeStagingCombinedArtifactRefresh(terminalInput);
+  else if(input.job.reason==="replacement_fulfillment") await terminalizeCombinedReplacement(terminalInput);
+  else if(input.job.reason==="paid_report_correction") await terminalizeCombinedCorrection(terminalInput);
+  else await terminalizePaidCombinedReport(terminalInput);
+}
+
+function isCombinedGeoReportV3(value: RecommendationForensicReportV2 | CombinedGeoReportV3 | undefined): value is CombinedGeoReportV3 {
+  return Boolean(value && "artifactContract" in value && value.artifactContract === "combined_geo_report_v3");
+}
+
+function groundedEvidenceFromForensic(report: RecommendationForensicReportV2): GroundedAnswerEvidence[] {
+  const questionFanouts = report.questions.questions.slice(1).map((question) => ({ question, queryIds: new Set(report.fanouts.find(({ questionId }) => questionId === question.id)?.queries.map(({ id }) => id) ?? []) }));
+  return questionFanouts.flatMap(({ question, queryIds }) => report.sourceGraph.evidence.flatMap((evidence) => {
+    if (!evidence.queryVariantIds.some((id) => queryIds.has(id)) || !evidence.verifiedExcerpt) return [];
+    const relevant = groundedExcerptRelevant(evidence.verifiedExcerpt, `${question.normalizedText} ${question.derivation.subject}`);
+    return [{ evidenceId: evidence.evidenceId, questionId: question.id, subjectKey: `question:${question.id}`, registrableDomain: evidence.registrableDomain,
+      exactExcerpt: evidence.verifiedExcerpt, eligible: evidence.retrievalReadiness.ready && relevant, direct: evidence.retrievalReadiness.ready && relevant && !evidence.metadataOnly }];
+  }));
+}
+
+function groundedExcerptRelevant(excerpt:string,question:string):boolean{
+  const normalizedQuestion=question.normalize("NFKC").toLocaleLowerCase();
+  const terms=[...(normalizedQuestion.match(/[a-z0-9][a-z0-9-]{2,}/g)??[]),...(normalizedQuestion.match(/[\p{Script=Han}]{2,}/gu)??[]).flatMap((run)=>run.length<=6?[run]:Array.from({length:run.length-1},(_,index)=>run.slice(index,index+2)))];
+  const ignored=new Set(["which","what","where","provide","哪些","什么","如何","是否"]),text=excerpt.normalize("NFKC").toLocaleLowerCase();
+  return [...new Set(terms)].filter((term)=>!ignored.has(term)).some((term)=>text.includes(term));
+}
+
+async function providerVerificationCommercialRef(snapshotId: string): Promise<PublicSourceCommercialSnapshotRef> {
+  const bundle = await getMarketSnapshotBundle(snapshotId);
+  if (!bundle || bundle.snapshot.status !== "completed") throw new Error("Provider verification snapshot is not complete.");
+  const actualCostMicros = bundle.attempts.reduce((total, attempt) => total + (attempt.providerCostMicros ?? 0), 0);
+  return { snapshotId, cacheIdentity: bundle.snapshot.cacheIdentity, freshnessState: "fresh", actualCostMicros, allocatedCostMicros: actualCostMicros, avoidedCostMicros: 0 };
+}
+
+function uniqueSnapshotRefs(values: PublicSourceCommercialSnapshotRef[]): PublicSourceCommercialSnapshotRef[] {
+  return [...new Map(values.map((value) => [value.snapshotId, value])).values()];
+}
+
+async function loadAnswerFirstV3StoredSources(snapshotIds: readonly string[]): Promise<AnswerFirstV3StoredSource[]> {
+  const output: AnswerFirstV3StoredSource[] = [];
+  for (const snapshotId of [...new Set(snapshotIds)]) {
+    const bundle = await getMarketSnapshotBundle(snapshotId);
+    if (!bundle) throw new Error("V3 answer evidence snapshot is unavailable.");
+    const observations = new Map(bundle.observations.map((observation) => [observation.id, observation]));
+    for (const source of bundle.sources) {
+      const observation = observations.get(source.observationId);
+      if (!observation) continue;
+      if (!isAnswerFirstSourceCategory(source.sourceCategory)) continue;
+      output.push({
+        sourceEvidenceId: source.id,
+        observationId: source.observationId,
+        queryId: observation.queryId,
+        canonicalUrl: source.canonicalUrl,
+        title: observation.title,
+        registrableDomain: source.registrableDomain,
+        exactExcerpt: source.excerpt,
+        sourceCategory: source.sourceCategory,
+        observedAt: observation.observedAt.toISOString(),
+        retrievalReady: source.retrievalState === "available" && Boolean(source.excerpt),
+        snapshotKind: bundle.snapshot.snapshotKind as AnswerFirstV3StoredSource["snapshotKind"]
+      });
+    }
+  }
+  return output;
+}
+
+function isAnswerFirstSourceCategory(value: string): value is AnswerFirstV3StoredSource["sourceCategory"] {
+  return ["company_owned", "earned_editorial", "directory_or_reference", "community_or_ugc", "institution", "social", "unknown"].includes(value);
+}
+
+function providerPhaseProgress(phase: ProviderDiscoveryCheckpointV1["phase"]): number {
+  const values: Record<ProviderDiscoveryCheckpointV1["phase"], number> = { provider_discovery_search: 91, candidate_resolution: 92, candidate_verification: 93,
+    provider_source_retrieval: 94, provider_passage_selection: 95, provider_claim_extraction: 96, provider_qualification: 97, grounded_answer_synthesis: 98, complete: 98 };
+  return values[phase];
 }
 
 /**
@@ -864,7 +1543,7 @@ function questionFromFanout(questionId: string, fanout: SearchQueryFanout): Cano
   if (questionId !== fanout.questionId || !fanout.questionSetVersion.trim()) {
     throw new PublicSourceAuthorityUnavailableError("Public-source fanout identity is invalid.");
   }
-  const canonical = fanout.queries.find((query) => query.derivationRuleId === "query-canonical-v1");
+  const canonical = fanout.queries.find((query) => query.derivationRuleId === "query-canonical-v1" || query.derivationRuleId === "provider-discovery-canonical-v1");
   if (!canonical || canonical.questionId !== questionId || canonical.locale !== fanout.surface.locale || canonical.region !== fanout.surface.region) {
     throw new PublicSourceAuthorityUnavailableError("Public-source canonical query is unavailable.");
   }
@@ -888,7 +1567,7 @@ function createWorkerPublicSourceRetriever(): PublicSourceRetriever {
       observationId: observation.observationId,
       queryId: observation.queryId,
       resultUrl: result.url
-    }, { signal });
+    }, { signal, excerptMode: "legacy_prefix" });
     return {
       fact,
       source: {

@@ -4,6 +4,7 @@ export * from "./identity";
 export * from "./questions";
 export * from "./business-questions";
 export * from "./fanout";
+export * from "./provider-query-plan";
 export * from "./registry";
 export * from "./orchestrator";
 export * from "./coverage";

@@ -31,7 +31,6 @@ export interface Dictionary {
     | "loadSample"
     | "copyLink"
     | "copiedLink"
-    | "printReport"
     | "switchToEnglish"
     | "switchToChinese"
     | "backToScanner"
@@ -156,7 +155,6 @@ export interface Dictionary {
     previousPage: string;
     nextPage: string;
     pageStatus: string;
-    printTitle: string;
     backToReport: string;
     errors: Record<"emptyLogs" | "payloadTooLarge" | "saveFailed" | "deleteFailed", string>;
   };
@@ -170,8 +168,6 @@ export interface Dictionary {
     homepagePreviewNotice: string;
     detectedPagesEstimate: string;
     lockedDeepFeatures: string;
-    printLockedTitle: string;
-    printLockedDescription: string;
     technicalScore: string;
     aiDimensions: string;
     organizationProfile: string;
@@ -244,6 +240,7 @@ export interface Dictionary {
     paymentFailed: string;
     paymentRefundPending: string;
     paymentRefunded: string;
+    paymentRefundFailed: string;
     paymentStatusUnavailable: string;
     paymentRefresh: string;
     paymentRefreshStopped: string;

@@ -61,8 +61,7 @@ export function PendingReportView({
         <ReportActions
           dictionary={dictionary}
           htmlHref={`/reports/${reportId}/report.html`}
-          pdfHref={`/api/reports/${reportId}/artifacts/report.pdf`}
-          printEnabled={false}
+          htmlEnabled={false}
           shareHref={overviewHref}
         />
       </section>

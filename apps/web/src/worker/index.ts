@@ -13,6 +13,7 @@ import { positiveInteger, readWorkerConfig } from "./config";
 import { runPostgresPollingLane, runRealtimeLane } from "./drain";
 import { runRecordedBatchDrain } from "./drain-batch";
 import { WorkerPresenceReporter } from "./presence";
+import { prepareWorkerStartup } from "./report-v4-startup-readiness";
 import { createStagingLiveDrill } from "./staging-live-drill";
 
 const config = readWorkerConfig();
@@ -23,7 +24,7 @@ let stopping = false;
 process.once("SIGINT", () => { stopping = true; });
 process.once("SIGTERM", () => { stopping = true; });
 
-await ensureDatabase();
+await prepareWorkerStartup({ ensureDatabase });
 process.stdout.write(`Open GEO Console ${config.tier} worker ${workerId} is ready.\n`);
 
 const queueConfig = readJobQueueConfig();

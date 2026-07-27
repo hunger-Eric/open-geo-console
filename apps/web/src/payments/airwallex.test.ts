@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { AirwallexGateway, verifyAirwallexWebhookSignature } from "./airwallex";
+import { CommerceProviderError } from "@/commerce/provider-error";
 
 describe("AirwallexGateway", () => {
   it("verifies the official timestamp + raw-body HMAC-SHA256 contract", () => {
@@ -175,5 +176,36 @@ describe("AirwallexGateway", () => {
         amountMinor: 19_900,
         currency: "CNY"
       });
+  });
+
+  it("classifies authentication, refund, response-shape, and network failures without provider bodies", async () => {
+    const environment = { COMMERCE_MODE: "test", AIRWALLEX_CLIENT_ID: "client", AIRWALLEX_API_KEY: "key" };
+    const authentication = new AirwallexGateway({
+      environment,
+      fetchImpl: vi.fn().mockResolvedValue(new Response("Bearer must-not-leak", { status: 401 }))
+    });
+    await expect(authentication.getHostedCheckout("int_auth", "order_1")).rejects.toMatchObject({
+      provider: "airwallex", operation: "authentication", category: "http", status: 401
+    });
+
+    const refund = new AirwallexGateway({
+      environment,
+      fetchImpl: vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ token: "access" }), { status: 200 }))
+        .mockResolvedValueOnce(new Response("api_key=must-not-leak", { status: 403 }))
+    });
+    await expect(refund.requestRefund({ orderId: "order_1", paymentIntentId: "int_refund", amountMinor: 100, currency: "CNY", reason: "failed", idempotencyKey: "refund-1" }))
+      .rejects.toMatchObject({ provider: "airwallex", operation: "refund", category: "http", status: 403 });
+
+    const invalid = new AirwallexGateway({ environment, fetchImpl: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })) });
+    await expect(invalid.getHostedCheckout("int_invalid", "order_1")).rejects.toMatchObject({
+      provider: "airwallex", operation: "authentication", category: "invalid_response"
+    });
+
+    const network = new AirwallexGateway({ environment, fetchImpl: vi.fn().mockRejectedValue(new Error("network body must-not-leak")) });
+    const networkError = await network.getHostedCheckout("int_network", "order_1").catch((error) => error);
+    expect(networkError).toBeInstanceOf(CommerceProviderError);
+    expect(networkError).toMatchObject({ provider: "airwallex", operation: "authentication", category: "network" });
+    expect(JSON.stringify(networkError)).not.toContain("must-not-leak");
   });
 });

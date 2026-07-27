@@ -1,10 +1,11 @@
-import type { RetrievedPublicSourceFact } from "@open-geo-console/citation-intelligence";
+import { getPublicSourceDomainIdentity, type RetrievedPublicSourceFact } from "@open-geo-console/citation-intelligence";
 import {
   extractReadableText,
   isAllowedByRobots,
   parseRobotsTxt,
   UrlSafetyError,
   type HostnameResolver,
+  type PublicDocumentAttemptResult,
   type RobotsPolicy
 } from "@open-geo-console/site-crawler";
 import { createSafeFetch } from "@/server/safe-fetch";
@@ -16,12 +17,42 @@ import {
 
 const PUBLIC_SOURCE_CRAWLER_USER_AGENT = "OpenGeoConsoleBot";
 const ROBOTS_MAX_BYTES = 64 * 1024;
-const EXCERPT_MAX_CHARACTERS = 1_000;
+const LEGACY_EXCERPT_MAX_CHARACTERS = 1_000;
 
 export interface PublicSourceRetrieverOptions {
   fetchImpl?: typeof fetch;
   resolver?: HostnameResolver;
   signal?: AbortSignal;
+  excerptMode?: "none" | "legacy_prefix";
+}
+
+export async function executePublicDocumentHttpAttempt(input: {
+  observationId: string;
+  queryId: string;
+  resultUrl: string;
+}, options: PublicSourceRetrieverOptions = {}): Promise<PublicDocumentAttemptResult> {
+  const started = Date.now();
+  const canonicalUrl = createPublicSourceRetrievalRequest(input).resultUrl;
+  let registrableDomain: string;
+  try { registrableDomain = getPublicSourceDomainIdentity(canonicalUrl).registrableDomain; }
+  catch { registrableDomain = new URL(canonicalUrl).hostname.toLocaleLowerCase(); }
+  const fact = await executePublicSourceRetrieval(input, options);
+  const outcome = attemptOutcome(fact);
+  return {
+    method: "http",
+    stage: outcome === "available" ? "terminal" : attemptStage(outcome),
+    outcome,
+    canonicalUrl,
+    ...(fact.finalUrl ? { finalUrl: fact.finalUrl } : {}),
+    registrableDomain,
+    robotsOutcome: fact.robotsAllowed ? "allowed" : fact.retrievalState === "robots_denied" ? "denied" : "unavailable",
+    ...(fact.contentBytes === undefined ? {} : { contentBytes: fact.contentBytes }),
+    durationMs: Math.max(0, Date.now() - started),
+    ...(fact.normalizedText ? { normalizedText: fact.normalizedText } : {}),
+    ...(fact.normalizedContentHash ? { normalizedContentHash: fact.normalizedContentHash } : {}),
+    retryEligible: ["connect_timeout", "robots_unavailable", "http_429", "http_5xx", "internal_failure"].includes(outcome),
+    browserEligible: outcome === "javascript_shell"
+  };
 }
 
 /**
@@ -114,11 +145,12 @@ export async function executePublicSourceRetrieval(input: {
       accessBarrier: "none",
       contentBytes: new TextEncoder().encode(raw).byteLength,
       normalizedText,
-      verifiedExcerpt: normalizedText.slice(0, EXCERPT_MAX_CHARACTERS)
+      ...(options.excerptMode === "legacy_prefix"
+        ? { verifiedExcerpt: normalizedText.slice(0, LEGACY_EXCERPT_MAX_CHARACTERS) }
+        : {})
     });
   } catch (error) {
     if (options.signal?.aborted) throw options.signal.reason;
-    if (isAbort(error)) throw error;
     const common = retrievalCommon(request, visitedUrls, undefined, robotsCheckedOrigins);
     if (error instanceof PublicSourceRobotsDeniedError) {
       return unavailableResult({
@@ -203,6 +235,19 @@ function unavailableResult(input: Parameters<typeof normalizePublicSourceRetriev
 
 class PublicSourceRobotsDeniedError extends Error {}
 
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError");
+function attemptOutcome(fact: RetrievedPublicSourceFact): PublicDocumentAttemptResult["outcome"] {
+  if (fact.retrievalState === "available") return "available";
+  if (fact.retrievalState === "robots_denied") return "robots_denied";
+  if (fact.retrievalState === "unsafe_destination") return "unsafe_destination";
+  if (fact.retrievalState === "login_required" || fact.retrievalState === "paywalled") return "authentication_required";
+  if (fact.retrievalState === "captcha") return "challenge_detected";
+  return "internal_failure";
+}
+
+function attemptStage(outcome: PublicDocumentAttemptResult["outcome"]): PublicDocumentAttemptResult["stage"] {
+  if (outcome === "robots_denied" || outcome === "robots_unavailable") return "robots_evaluation";
+  if (outcome === "unsafe_destination" || outcome === "dns_failed") return "dns_validation";
+  if (outcome === "body_empty" || outcome === "javascript_shell" || outcome === "extraction_failed") return "content_extraction";
+  if (outcome.startsWith("http_") || outcome === "authentication_required" || outcome === "challenge_detected") return "http_response_validation";
+  return "terminal";
 }

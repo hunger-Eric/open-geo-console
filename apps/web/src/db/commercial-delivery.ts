@@ -384,6 +384,7 @@ function sameEmailIntent(row: EmailDeliveryRow, input: QueueCommercialEmailInput
 function isFinalDeliveryTemplate(templateType: EmailTemplateType): boolean {
   return templateType === "report_ready"
     || templateType === "corrected_report_ready"
+    || templateType === "replacement_report_ready"
     || templateType === "limited_report_refund"
     || templateType === "report_failed_refund";
 }

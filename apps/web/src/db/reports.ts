@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { ensureDatabase, getDb, getSqlClient, isMemoryPersistence } from "./index";
 import { memoryDeleteReport, memoryGetReport, memoryRecentReports, memorySaveReport } from "./memory";
 import { scanReports, type ReportLocale, type ScanReportRow } from "./schema";
+import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 
 export interface CreateGeoReportShellInput {
   url: string;
@@ -19,6 +20,12 @@ export async function saveGeoReport(
   siteKey?: string,
   existingId?: string,
   reportLocale?: ReportLocale
+): Promise<ScanReportRow> {
+  return runReportV4GuardedOperation({ guardSite: "legacy_mutation", delegate: () => saveGeoReportUnsafe(url, report, siteKey, existingId, reportLocale) });
+}
+
+async function saveGeoReportUnsafe(
+  url: string, report: GeoAuditReport, siteKey?: string, existingId?: string, reportLocale?: ReportLocale
 ): Promise<ScanReportRow> {
   const existingMemoryRow = isMemoryPersistence() && existingId ? memoryGetReport(existingId) : null;
   const row: ScanReportRow = {

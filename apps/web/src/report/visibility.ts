@@ -3,7 +3,7 @@ import { projectHomepageReport, type GeoAuditReport } from "@open-geo-console/ge
 
 export interface VisibleReportBundle {
   tier: "free" | "deep";
-  canPrint: boolean;
+  canAccessHtmlArtifact: boolean;
   technicalReport: GeoAuditReport;
   aiReport: AiWebsiteReportV1 | null;
 }
@@ -24,7 +24,7 @@ export function buildVisibleReportBundle({
   if (hasDeepAccess && deepAiReport) {
     return {
       tier: "deep",
-      canPrint: true,
+      canAccessHtmlArtifact: true,
       technicalReport: deepTechnicalReport ?? publicTechnicalReport,
       aiReport: deepAiReport
     };
@@ -32,7 +32,7 @@ export function buildVisibleReportBundle({
 
   return {
     tier: "free",
-    canPrint: false,
+    canAccessHtmlArtifact: false,
     technicalReport: projectHomepageReport(publicTechnicalReport),
     aiReport: freeAiReport ? projectFreeAiReport(freeAiReport) : null
   };

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createSearchQueryFanout,
@@ -9,6 +9,9 @@ import {
 } from "@open-geo-console/public-search-observer";
 import { activatePublicSearchSurfaceAuthority, installPublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
+import * as marketSnapshots from "@/db/market-snapshots";
+import { getMarketProviderEvidenceBundle } from "@/db/provider-evidence";
+import { PROVIDER_PASSAGE_SELECTOR_VERSION, selectProviderPassages } from "@open-geo-console/citation-intelligence";
 import { PublicSourceSnapshotAuthorityMismatchError, PublicSourceSnapshotUnavailableError, resolvePublicSourceSnapshot } from "./public-source-snapshot-resolver";
 import { createConcurrencyGate } from "./bounded-scheduler";
 
@@ -65,6 +68,27 @@ describe("public-source snapshot resolver", () => {
     expect(resumedRefresh).toMatchObject({ snapshotId: refreshed.snapshotId, collectedForThisRun: false });
   });
 
+  it("collects a new snapshot when the effective query plan changes under the same fanout version", async () => {
+    const authority = await installAuthority("review-query-plan-identity");
+    const search = vi.fn(async () => observationPayload("complete"));
+    const adapter = fixtureAdapter(authority, search);
+    const genericFanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const policyFanout = {
+      ...genericFanout,
+      queries: genericFanout.queries.map((query, index) => index === 1
+        ? { ...query, exactQuery: `${question.normalizedText} 自有车队 固定运力` }
+        : query)
+    };
+    const common = { authority, adapter, question, evidenceCutoffAt: "2030-01-04T00:00:00.000Z" };
+
+    const first = await resolvePublicSourceSnapshot({ ...common, fanout: genericFanout, leaseOwner: "worker-generic-policy" });
+    const second = await resolvePublicSourceSnapshot({ ...common, fanout: policyFanout, leaseOwner: "worker-logistics-policy" });
+
+    expect(second.snapshotId).not.toBe(first.snapshotId);
+    expect(second.collectedForThisRun).toBe(true);
+    expect(search).toHaveBeenCalledTimes(genericFanout.queries.length + policyFanout.queries.length);
+  });
+
   it("runs no more than two search requests for one question at a time", async () => {
     const authority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
@@ -79,6 +103,62 @@ describe("public-source snapshot resolver", () => {
     });
     await resolvePublicSourceSnapshot({ authority, adapter: fixtureAdapter(authority, search), question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-concurrency" });
     expect(peak).toBe(2);
+  });
+
+  it("renews the snapshot lease while slow source retrieval is still running", async () => {
+    const authority = await installAuthority("review-slow-retrieval");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const retrieveSource = vi.fn(async ({ observation, result }) => {
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      return availableRetrieval(observation, result);
+    });
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-slow-retrieval",
+      leaseDurationMs: 500,
+      retrieveSource,
+      maxSourceRetrievals: 1
+    })).resolves.toMatchObject({ collectedForThisRun: true, availableSourceCount: 1 });
+  });
+
+  it("waits for the matching metadata refresh instead of returning an older completed snapshot", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const discovery = await resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, async () => observationPayload("complete")), question, fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-metadata-discovery",
+      snapshotMetadata: { snapshotKind: "provider_discovery", queryPlanVersion: "provider-query-plan-v1" }
+    });
+    let releaseSearch!: () => void;
+    const searchGate = new Promise<void>((resolve) => { releaseSearch = resolve; });
+    const search = vi.fn(async () => {
+      await searchGate;
+      return observationPayload("complete");
+    });
+    const candidateInput = {
+      authority, adapter: fixtureAdapter(authority, search), question, fanout,
+      evidenceCutoffAt: "2030-01-05T00:00:00.000Z",
+      snapshotMetadata: {
+        snapshotKind: "candidate_verification" as const,
+        parentSnapshotId: discovery.snapshotId,
+        candidateSetHash: "a".repeat(64),
+        queryPlanVersion: "provider-query-plan-v1"
+      }
+    };
+
+    const first = resolvePublicSourceSnapshot({ ...candidateInput, leaseOwner: "worker-metadata-first", waitDeadlineMs: 5_000 });
+    await vi.waitFor(() => expect(search).toHaveBeenCalled());
+    const second = resolvePublicSourceSnapshot({ ...candidateInput, leaseOwner: "worker-metadata-second", waitDeadlineMs: 5_000 });
+    releaseSearch();
+
+    const [created, reused] = await Promise.all([first, second]);
+    expect(reused.snapshotId).toBe(created.snapshotId);
+    expect(reused.collectedForThisRun).toBe(false);
   });
 
   it("resumes a fully searched snapshot and skips source evidence persisted before abort", async () => {
@@ -126,6 +206,67 @@ describe("public-source snapshot resolver", () => {
     expect(resumed.sufficientlyEvidenced).toBe(true);
   });
 
+  it("resumes a terminal mixed search ledger after retrieval abort", async () => {
+    const authority = await installAuthority("review-one");
+    let searchCalls = 0;
+    const search = vi.fn(async () => observationPayload(searchCalls++ === 0 ? "complete" : "unavailable"));
+    const adapter = fixtureAdapter(authority, search);
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const controller = new AbortController();
+    const deadline = new Error("worker deadline after partial search success");
+
+    await expect(resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-mixed-first",
+      signal: controller.signal,
+      retrieveSource: async () => {
+        controller.abort(deadline);
+        throw deadline;
+      }
+    })).rejects.toBe(deadline);
+
+    let resumedRetrievals = 0;
+    const resumed = await resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-mixed-second",
+      retrieveSource: async ({ observation, result }) => {
+        resumedRetrievals += 1;
+        return availableRetrieval(observation, result);
+      }
+    });
+
+    expect(search).toHaveBeenCalledTimes(fanout.queries.length);
+    expect(resumedRetrievals).toBe(1);
+    expect(resumed).toMatchObject({ collectedForThisRun: true, sufficientlyEvidenced: true, availableSourceCount: 1 });
+  });
+
+  it("replaces an incomplete pending search ledger after Worker interruption", async () => {
+    const authority = await installAuthority("review-one");
+    const controller = new AbortController();
+    const deadline = new Error("worker stopped during provider search");
+    let interrupted = false;
+    const search = vi.fn(async () => {
+      if (!interrupted) {
+        interrupted = true;
+        controller.abort(deadline);
+        throw deadline;
+      }
+      return observationPayload("complete");
+    });
+    const adapter = fixtureAdapter(authority, search);
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+
+    await expect(resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-interrupted-first",
+      signal: controller.signal
+    })).rejects.toBe(deadline);
+
+    const resumed = await resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-interrupted-second"
+    });
+
+    expect(resumed).toMatchObject({ collectedForThisRun: true, refreshAttempted: true });
+    expect(search.mock.calls.length).toBeGreaterThan(fanout.queries.length);
+  });
+
   it("persists public contact evidence without treating it as private customer identity", async () => {
     const authority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
@@ -154,6 +295,30 @@ describe("public-source snapshot resolver", () => {
     expect(bundle?.sources).toEqual([
       expect.objectContaining({ retrievalState: "available", excerpt: "Contact public-source@example.test for details." })
     ]);
+  });
+
+  it("persists selected provider passages before completing the snapshot lease", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const resolved = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-provider-passages",
+      retrieveSource: async ({ observation, result }) => {
+        const value = availableRetrieval(observation, result);
+        const excerpt = "Alpha Logistics provides self-operated freight using an owned fleet on a fixed route.";
+        return { ...value, fact: { ...value.fact, normalizedText: excerpt, verifiedExcerpt: excerpt }, source: { ...value.source, excerpt, excerptHash: hash(excerpt), contentHash: hash(excerpt) } };
+      },
+      selectProviderPassages: ({ fact, sourceEvidenceId }) => selectProviderPassages({
+        sourceEvidenceId, normalizedText: fact.normalizedText ?? "", candidateNames: ["Alpha Logistics"], serviceTerms: ["freight"],
+        controlTerms: ["self-operated", "owned"], capabilityTerms: ["fleet", "fixed route"], selectorVersion: PROVIDER_PASSAGE_SELECTOR_VERSION
+      })
+    });
+    const provider = await getMarketProviderEvidenceBundle([resolved.snapshotId]);
+    expect(provider.passages).toEqual([expect.objectContaining({ sourceEvidenceId: expect.any(String), exactExcerpt: expect.stringContaining("owned fleet") })]);
   });
 
   it("downgrades credential-like public content without failing the snapshot", async () => {
@@ -195,12 +360,194 @@ describe("public-source snapshot resolver", () => {
       .rejects.toBeInstanceOf(PublicSourceSnapshotAuthorityMismatchError);
   });
 
+  it("refreshes a completed same-authority lease when its terminal snapshot is outside the evidence cutoff", async () => {
+    const authority = await installAuthority("review-one");
+    const search = vi.fn(async () => observationPayload("complete"));
+    const adapter = fixtureAdapter(authority, search);
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const first = await resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-cutoff-first"
+    });
+
+    const refreshed = await resolvePublicSourceSnapshot({
+      authority, adapter, question, fanout,
+      evidenceCutoffAt: "2020-01-01T00:00:00.000Z",
+      leaseOwner: "worker-cutoff-refresh"
+    });
+
+    expect(refreshed).toMatchObject({ collectedForThisRun: true, refreshAttempted: true });
+    expect(refreshed.snapshotId).not.toBe(first.snapshotId);
+    expect(search).toHaveBeenCalledTimes(fanout.queries.length * 2);
+  });
+
+  it("falls back to the exact completed snapshot when a forced network refresh fails", async () => {
+    const authority = await installAuthority("review-stale-if-error");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const first = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-stale-first"
+    });
+
+    const fallback = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("unavailable")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-05T00:00:00.000Z",
+      leaseOwner: "worker-stale-refresh",
+      forceRefresh: true
+    });
+
+    expect(fallback).toMatchObject({
+      snapshotId: first.snapshotId,
+      collectedForThisRun: false,
+      refreshAttempted: true,
+      refreshFailed: true
+    });
+  });
+
   it("releases a failed lease and throws a safe error when every query fails", async () => {
     const authority = await installAuthority("review-one");
     const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
     await expect(resolvePublicSourceSnapshot({ authority, adapter: fixtureAdapter(authority, async () => observationPayload("unavailable")), question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-failed" }))
       .rejects.toBeInstanceOf(PublicSourceSnapshotUnavailableError);
     await expect(resolvePublicSourceSnapshot({ authority, adapter: fixtureAdapter(authority, async () => observationPayload("complete")), question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-retry" })).resolves.toMatchObject({ collectedForThisRun: true });
+  });
+
+  it("completes exhausted candidate verification from failed supplemental searches", async () => {
+    const authority = await installAuthority("review-candidate-exhaustion");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const discovery = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-candidate-discovery",
+      snapshotMetadata: { snapshotKind: "provider_discovery", queryPlanVersion: "provider-query-plan-v1" }
+    });
+
+    const verification = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("unavailable")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-05T00:00:00.000Z",
+      leaseOwner: "worker-candidate-exhausted",
+      snapshotMetadata: {
+        snapshotKind: "candidate_verification",
+        parentSnapshotId: discovery.snapshotId,
+        candidateSetHash: "b".repeat(64),
+        queryPlanVersion: "provider-query-plan-v1"
+      }
+    });
+    const bundle = await getMarketSnapshotBundle(verification.snapshotId);
+
+    expect(verification).toMatchObject({ collectedForThisRun: true, availableSourceCount: 0, sufficientlyEvidenced: false });
+    expect(verification.observations).toHaveLength(fanout.queries.length);
+    expect(verification.observations.every(({ status }) => status === "unavailable")).toBe(true);
+    expect(bundle?.snapshot.status).toBe("completed");
+    expect(bundle?.attempts.every(({ requestStatus }) => !["pending", "succeeded", "partial"].includes(requestStatus))).toBe(true);
+  });
+
+  it("classifies observation persistence failures and releases the lease", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const append = vi.spyOn(marketSnapshots, "appendMarketSearchObservations")
+      .mockRejectedValueOnce(new Error("database unavailable"));
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-observation-persistence-failed"
+    })).rejects.toMatchObject({
+      name: "PublicSourceSnapshotUnavailableError",
+      stage: "observation_persistence",
+      code: "public_source_snapshot_observation_persistence"
+    });
+    append.mockRestore();
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-observation-persistence-retry"
+    })).resolves.toMatchObject({ collectedForThisRun: true });
+  });
+
+  it("classifies source retrieval failures and releases the lease", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-source-retrieval-failed",
+      retrieveSource: async () => { throw new Error("retrieval transport failed"); }
+    })).rejects.toMatchObject({
+      name: "PublicSourceSnapshotUnavailableError",
+      stage: "source_retrieval",
+      code: "public_source_snapshot_source_retrieval"
+    });
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => observationPayload("complete")),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-source-retrieval-retry"
+    })).resolves.toMatchObject({ collectedForThisRun: true });
+  });
+
+  it("filters invalid provider results before persistence, retrieval, and materialization", async () => {
+    const authority = await installAuthority("review-one");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const retrieveSource = vi.fn(async ({ observation, result }) => availableRetrieval(observation, result));
+    const resolved = await resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, async () => ({
+        ...observationPayload("complete"),
+        results: [
+          { surfaceResultOrder: 1, url: "https://valid.example/services?utm_source=search", title: "Valid service", snippet: "Public logistics service", displayedHost: "valid.example" },
+          { surfaceResultOrder: 2, url: "https://contact.example/ip", title: "Contact 203.0.113.42", snippet: "discard", displayedHost: "contact.example" },
+          { surfaceResultOrder: 3, url: "https://contact.example/email", title: "Contact private@example.test", snippet: "discard", displayedHost: "contact.example" }
+        ],
+        usage: { requestCount: 1, resultCount: 3, estimatedCostMicros: 42, costUncertain: false }
+      })),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-filter-invalid-results",
+      retrieveSource
+    });
+    const bundle = await getMarketSnapshotBundle(resolved.snapshotId);
+    const serialized = JSON.stringify({ bundle, resolved });
+
+    expect(bundle?.snapshot.status).toBe("completed");
+    expect(bundle?.observations).toHaveLength(fanout.queries.length);
+    expect(bundle?.observations.every(({ surfaceResultOrder }) => surfaceResultOrder === 1)).toBe(true);
+    expect(resolved.observations.every(({ results }) => results.length === 1 && results[0]?.surfaceResultOrder === 1)).toBe(true);
+    expect(retrieveSource).toHaveBeenCalled();
+    expect(retrieveSource.mock.calls.every(([input]) => input.result.surfaceResultOrder === 1)).toBe(true);
+    expect(resolved.availableSourceCount).toBe(resolved.retrievals.length);
+    expect(serialized).not.toContain("contact.example/ip");
+    expect(serialized).not.toContain("203.0.113.42");
+    expect(serialized).not.toContain("private@example.test");
   });
 });
 
@@ -232,3 +579,4 @@ function availableRetrieval(observation: Parameters<NonNullable<Parameters<typeo
     source: { retrievalState: "available" as const, excerpt: `Evidence for ${result.title}`, excerptHash: digest, contentHash: digest, sourceCategory: "unknown" as const, entities: [], claims: [], contradictions: [], evidenceFamilyIdentity: digest }
   };
 }
+function hash(value: string): string { return createHash("sha256").update(value).digest("hex"); }

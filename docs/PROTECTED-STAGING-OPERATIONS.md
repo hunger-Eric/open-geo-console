@@ -43,6 +43,24 @@ Protected staging uses `OGC_EVIDENCE_STORAGE=vercel-blob` and the Preview-only `
 
 Vercel Sensitive values are intentionally not decryptable through `vercel env pull`; the generated file contains empty placeholders for those names. For a local Worker drill, explicitly override each required empty placeholder with the separately held staging value in only that process. Merely loading another env file does not replace variables that already exist as empty placeholders. Never weaken the database marker guard, print values, or copy production secrets into `.env.staging.local`.
 
+### Public-search provider probe environment
+
+Run the protected-staging MiMo capability gate only after the staging Worker runtime environment has been generated:
+
+```powershell
+npm run public-search:probe -- --adapter mimo --locale zh-CN --region CN
+```
+
+For the V3 generative-answer mainline, also run the secret-safe same-operation answer/citation probe:
+
+```bash
+npm run generative-answer:staging:probe
+```
+
+The probe must report a nonblank answer and normalized source domains. It reads the merged staging Worker environment, prints no answer prose, credentials, authorization headers, or raw provider response, and does not create a report, order, credit, refund, or email.
+
+The probe intentionally reads `.data/workstation-docker/staging.env`, which is the merged environment consumed by `staging-worker-free` and `staging-worker-deep`. Source files such as `apps/web/.env.staging.local`, `.vercel/.env.preview.local`, and `apps/web/.env.public-search.staging.local` may contain empty Sensitive-value placeholders even when the merged Worker runtime has valid MiMo values. Therefore, inspecting a source placeholder file alone is not evidence that `OGC_PUBLIC_SEARCH_MIMO_BASE_URL`, its API key, or model is missing. Verify the merged file by variable name/non-empty status without printing values, then require the real bounded probe to pass. Never substitute a production env file or copy secrets into tracked files.
+
 If a workstation proxy uses the reserved `198.18.0.0/15` Fake-IP DNS range, the crawler will and must reject the target as an SSRF risk. Do not allowlist the range or disable URL safety. Set `OGC_PUBLIC_DNS_DOH_URL=https://cloudflare-dns.com/dns-query` for that Worker process; both crawl and screenshot-browser validation then use the fixed public resolver while retaining blocked-address checks and safe-fetch IP pinning.
 
 ### One-time paid-report correction
@@ -61,7 +79,19 @@ npm run staging:correction:confirm -- --questions-file <ignored-json-path>
 
 Confirmation creates the unique non-billable correction job and dispatches it. Never prepare or confirm against production, create a replacement order, or manually alter charge/credit/refund rows.
 
-Keep the old active artifact until the new HTML, same-HTML PDF and private evidence all pass readiness. After completion, audit one correction, one locked question set, three questions, one active revision, one artifact-keyed correction email, zero new billing/refund side effects, and identity-free shared snapshot/search/evidence payloads. The accepted concrete drill and browser checklist are recorded under `docs/operations/evidence/2026-07-14-combined-report-correction-acceptance.md`.
+### Audited paid-report replacement
+
+The replacement command is intentionally bound in code to one approved paid failure lineage. It creates no order, charge or credit reservation and never mutates the original job/refund outcome:
+
+```powershell
+npm run staging:replacement:inspect
+npm run staging:replacement:prepare -- --confirm --authorization-ref <operator-reference>
+npm run staging:replacement:resume -- --confirm --authorization-ref <operator-reference>
+```
+
+`prepare` is idempotent. `resume` accepts only the approved failed model-contract checkpoint or its answer-complete language-gate repair state. A successful terminalization activates the replacement revision and queues replacement delivery; a failed attempt leaves the artifact pending and the original commercial state unchanged.
+
+Keep the old active artifact until the new customer HTML, private same-HTML PDF readiness artifact, and private evidence all pass readiness. After completion, audit one correction, one locked question set, three questions, one active revision, one artifact-keyed correction email containing only the secure HTML link, zero new billing/refund side effects, and identity-free shared snapshot/search/evidence payloads. Confirm the internal PDF hash, storage key, and page count from authoritative state; do not request a customer PDF endpoint. The accepted concrete drill and browser checklist are recorded under `docs/operations/evidence/2026-07-14-combined-report-correction-acceptance.md`.
 
 ## Local staging cleanup
 
@@ -91,6 +121,24 @@ Both modes verify the deployment profile and database marker and refuse producti
 
 ## Acceptance
 
+### Report V4 acceptance
+
+The local branch implements schema v40 and the three-scenario V4 acceptance authority. Local readiness is checked with:
+
+```powershell
+npm test
+npm run lint
+npm run build
+npm run report:v4:traceability
+npm run report:v4:acceptance
+```
+
+`report:v4:acceptance` must continue to fail while any registry entry remains `implemented` rather than `verified` or the exact three-scenario protected-staging evidence set is incomplete. Do not manufacture evidence or promote statuses to make the command pass.
+
+A live V4 run requires explicit user authorization for deployment, schema/database mutation, Airwallex Sandbox payment/refund, redirected email, Git push, and pull-request creation. After authorization, align schema v40 plus the protected-staging Web, free Worker, deep Worker, and commerce code before using `report-v4:acceptance:operator` or `report-v4:acceptance:collect`. Use only exact run-produced session/scenario identities and immutable authorities; do not reuse IDs from a prior drill. Production deployment, production database mutation, and production commerce are forbidden for V4 acceptance.
+
+The 2026-07-19 paid core run proves one authorized `combined_geo_report_v4` customer HTML can reach `completed_limited`; it does not complete the three-scenario conformance authority. Its exact identities, content inspection, failed Sandbox cash refund, retried email state, and remaining acceptance work are recorded in `docs/operations/evidence/2026-07-19-report-v4-paid-deep-report.md`.
+
 ### Combined-report presentation refresh
 
 The approved existing report can be refreshed without creating a charge, credit, correction, refund, email, or production write:
@@ -99,9 +147,15 @@ The approved existing report can be refreshed without creating a charge, credit,
 npm run staging:combined:refresh -- --report a71d7481-c5dc-4e2a-a042-b9be878feab8
 ```
 
-The command requires the staging deployment profile and staging database marker. It creates a deep `staging_artifact_refresh` job bound to the active revision and locked question set. The Worker reuses the active technical foundation and screenshots, recollects public sources, and requires one short evidence-constrained answer per question with at least two verified Grade A/B sources from independent domains. The current revision remains active until the shared HTML component, stored PDF, hashes, screenshot readback, and atomic activation all pass. A failed terminal job marks only the pending revision failed. To intentionally refresh an already refreshed revision, inspect it first and pass `--from-revision <active-artifact-revision-id>`.
+The command requires the staging deployment profile and staging database marker. It creates a deep `staging_artifact_refresh` job bound to the active revision and locked question set. The Worker reuses the active technical foundation and screenshots, recollects public sources, and requires one short evidence-constrained answer per question with at least two verified Grade A/B sources from independent domains. The current revision remains active until the customer HTML hash, private same-HTML PDF hash/storage key/page count, screenshot readback, and atomic activation all pass. A failed terminal job marks only the pending revision failed. To intentionally refresh an already refreshed revision, inspect it first and pass `--from-revision <active-artifact-revision-id>`.
 
-Acceptance must record the new revision ID, HTML/PDF hashes and links, source ownership per question, preserved technical citations/screenshots, application-level anonymous `404`, and zero commercial side effects. Never run this command with production environment files or deploy the schema/Worker to production as part of staging acceptance.
+Acceptance must record the new revision ID, authorized customer HTML link and hash, internal PDF hash/storage key/page count, source ownership per question, preserved technical citations/screenshots, application-level anonymous `404` for the HTML artifact, and zero commercial side effects. Confirm that completion email contains only the secure HTML link. Do not request, access, or publish a customer PDF endpoint. Never run this command with production environment files or deploy the schema/Worker to production as part of staging acceptance.
+
+### Provider-discovery V2 acceptance
+
+`combined_geo_report_v2` is a prospective opt-in. Deploy schema v20 and matching Web/free/deep Worker code to protected staging first; do not rewrite existing V1 orders or revisions, and do not set the V2 contract in production. The V2 staging refresh lineage is `evidence_refresh`, which must retain the active artifact until the four snapshot refs, exact provider passages/claims, customer HTML, private PDF readiness and atomic revision activation all pass.
+
+Before a live report, run `npm run test:postgres:staging-security` with an isolated disposable `OGC_TEST_DATABASE_ADMIN_URL`, then run the read-only staging `db:audit`. A timeout or conditional skip is not acceptance. The full evidence checklist, empty-strict-list case and recovery drills are in `docs/operations/provider-discovery-v2-acceptance.md`.
 
 Automated acceptance:
 
@@ -114,6 +168,8 @@ npm run test:postgres:staging-security
 ```
 
 Browser acceptance must prove anonymous denial, authenticated access, more than two distinct staging sites, same-site reuse, forced-new report identity, duplicate-click idempotency, and separation from production data. Provider acceptance additionally requires a real CodingPlan staging call, an Airwallex Sandbox signed Webhook, and a redirected Resend message. Production acceptance must prove the third distinct site returns `429` and staging variables do not change that result.
+
+For an authenticated operator preview of an exact paid staging order, open `/en/reports/{reportId}/staging-access?order={orderId}` (Chinese is the unprefixed canonical interface, so `/zh` redirects). The route issues a one-day cookie only when the persisted order/report pair is paid and either the original fulfillment is deliverable (`completed`/`completed_limited`) or an audited replacement is completed with an active artifact. It redirects to the exact scoped HTML artifact and remains `404` outside protected staging test mode. It does not create a customer PDF or bypass normal emailed access in production.
 
 ## Cloudflare production checklist
 

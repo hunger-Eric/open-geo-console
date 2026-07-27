@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ResendEmailGateway, resolveEnvelopeRecipient } from "./resend";
 import { renderTransactionalEmail } from "./templates";
+import { CommerceProviderError } from "@/commerce/provider-error";
 
 describe("ResendEmailGateway", () => {
   const deliveryEnvironment = {
@@ -91,5 +92,43 @@ describe("ResendEmailGateway", () => {
     });
     expect(rendered.html).not.toContain("<script>");
     expect(rendered.html).not.toContain("<b>bad</b>");
+  });
+
+  it.each([
+    ["report_ready", "en"], ["report_ready", "zh"],
+    ["corrected_report_ready", "en"], ["corrected_report_ready", "zh"],
+    ["replacement_report_ready", "en"], ["replacement_report_ready", "zh"]
+  ] as const)(
+    "delivers %s in %s with only the secure HTML report link",
+    (template, locale) => {
+      const reportUrl = "https://example.com/reports/report-1/report.html?access=secure";
+      const rendered = renderTransactionalEmail({
+        template, locale, orderReference: "OGC-HTML", siteLabel: "example.com", reportUrl
+      });
+      expect(rendered.html).toContain(reportUrl.replaceAll("&", "&amp;"));
+      expect(rendered.text).toContain(reportUrl);
+      expect(rendered.html).not.toMatch(/PDF|\.pdf/i);
+      expect(rendered.text).not.toMatch(/PDF|\.pdf/i);
+    }
+  );
+
+  it("classifies configuration, rate-limit, invalid response, and network failures safely", async () => {
+    const input = {
+      to: "buyer@example.com", template: "payment_confirmed" as const, locale: "en",
+      orderReference: "OGC-FAIL", siteLabel: "example.com", idempotencyKey: "payment_confirmed/failure/v1"
+    };
+    const configuration = new ResendEmailGateway({ environment: {}, fetchImpl: vi.fn() });
+    await expect(configuration.send(input)).rejects.toMatchObject({
+      provider: "resend", operation: "configuration", category: "invalid_configuration"
+    });
+    const limited = new ResendEmailGateway({ environment: deliveryEnvironment, fetchImpl: vi.fn().mockResolvedValue(new Response("secret body", { status: 429 })) });
+    await expect(limited.send(input)).rejects.toMatchObject({ provider: "resend", operation: "send", category: "http", status: 429 });
+    const invalid = new ResendEmailGateway({ environment: deliveryEnvironment, fetchImpl: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })) });
+    await expect(invalid.send(input)).rejects.toMatchObject({ provider: "resend", operation: "send", category: "invalid_response" });
+    const network = new ResendEmailGateway({ environment: deliveryEnvironment, fetchImpl: vi.fn().mockRejectedValue(new Error("recipient buyer@example.com")) });
+    const error = await network.send(input).catch((value) => value);
+    expect(error).toBeInstanceOf(CommerceProviderError);
+    expect(error).toMatchObject({ provider: "resend", operation: "send", category: "network" });
+    expect(JSON.stringify(error)).not.toContain("buyer@example.com");
   });
 });

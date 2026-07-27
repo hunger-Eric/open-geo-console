@@ -18,8 +18,15 @@ export function createPublicSourceRetrievalPlan(
   const domainCounts = new Map<string, number>();
   const plan: PlannedPublicSource[] = [];
 
-  for (const observation of observations) {
-    for (const result of [...observation.results].sort((left, right) => left.surfaceResultOrder - right.surfaceResultOrder)) {
+  const candidates = observations.flatMap((observation, observationOrder) => observation.results.map((result) => ({
+    observation,
+    observationOrder,
+    result,
+    retrievalRisk: retrievalRisk(result.url)
+  }))).sort((left, right) => left.retrievalRisk - right.retrievalRisk ||
+    left.result.surfaceResultOrder - right.result.surfaceResultOrder || left.observationOrder - right.observationOrder);
+
+  for (const { observation, result } of candidates) {
       const canonicalUrl = canonicalizePublicSourceUrl(result.url);
       if (seenUrls.has(canonicalUrl)) continue;
       const registrableDomain = getPublicSourceDomainIdentity(canonicalUrl).registrableDomain;
@@ -28,9 +35,16 @@ export function createPublicSourceRetrievalPlan(
       domainCounts.set(registrableDomain, (domainCounts.get(registrableDomain) ?? 0) + 1);
       plan.push({ observation, result, canonicalUrl, registrableDomain });
       if (plan.length >= maxSources) return plan;
-    }
   }
   return plan;
+}
+
+function retrievalRisk(value: string): number {
+  const url = new URL(value);
+  const path = url.pathname.toLocaleLowerCase();
+  if (/\.(?:pdf|docx?|xlsx?|pptx?|zip|rar)(?:$|\/)/u.test(path)) return 2;
+  if (/(?:^|\/)(?:download|attachment|file)(?:\/|$)/u.test(path) || [...url.searchParams.keys()].some((key) => /^(?:download|attachment|file)$/iu.test(key))) return 1;
+  return 0;
 }
 
 function positive(value: number, label: string): number {

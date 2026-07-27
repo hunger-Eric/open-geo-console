@@ -5,12 +5,13 @@ import { PendingReportView } from "@/components/pending-report-view";
 import { StoredReportFallback } from "@/components/stored-report-fallback";
 import { getBotEvidence } from "@/db/bot-evidence";
 import { getGeoReport } from "@/db/reports";
+import { getActiveCombinedGeoReport } from "@/db/combined-reports";
 import { getDictionary, getLocaleAlternates, isLocale, type Locale } from "@/i18n";
 import { getVisibleReportBundle } from "@/server/visible-ai-report";
 import { cookies } from "next/headers";
 import { reportAccessCookieName, tokenGrantsReportAccess } from "@/server/report-access";
 
-const sections = ["analysis", "issues", "bots", "technical", "print"] as const;
+const sections = ["analysis", "issues", "bots", "technical"] as const;
 
 export const dynamic = "force-dynamic";
 
@@ -47,8 +48,11 @@ export default async function ReportWorkspaceSectionPage({
   }
   const reportLocale: Locale = row.reportLocale ?? locale;
   if (row.activeArtifactRevisionId) {
-    const token=(await cookies()).get(reportAccessCookieName(id,"combined_geo_report_v1"))?.value;
-    if(!await tokenGrantsReportAccess(token,id,"combined_geo_report_v1")) notFound();
+    const active=await getActiveCombinedGeoReport(id);
+    if(!active) notFound();
+    const scope=active.report.artifactContract;
+    const token=(await cookies()).get(reportAccessCookieName(id,scope))?.value;
+    if(!await tokenGrantsReportAccess(token,id,scope)) notFound();
   }
   if (!row.payload) {
     return (
@@ -68,7 +72,7 @@ export default async function ReportWorkspaceSectionPage({
   return (
     <ReportView
       aiReport={visible.aiReport}
-      canPrint={visible.canPrint}
+      htmlEnabled={visible.canAccessHtmlArtifact}
       dictionary={dictionary}
       evidence={evidence?.summary ?? null}
       locale={locale}

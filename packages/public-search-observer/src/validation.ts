@@ -152,10 +152,12 @@ export function parseSearchQueryFanout(value: unknown): SearchQueryFanout {
 
 export function parseMarketSnapshotIdentity(value: unknown): MarketSnapshotIdentity {
   const input = object(value, "identity");
-  only(input, ["id", "normalizedQuestion", "locale", "region", "surfaceId", "surfaceVersion", "fanoutVersion"], "identity");
+  only(input, ["id", "normalizedQuestion", "locale", "region", "surfaceId", "surfaceVersion", "fanoutVersion", "queryPlanHash"], "identity");
   const id = boundedText(input.id, "identity.id", 128);
   if (!/^market-[a-f0-9]{64}$/.test(id)) throw new TypeError("identity.id must be a market SHA-256 identity");
-  return { id, normalizedQuestion: boundedText(input.normalizedQuestion, "identity.normalizedQuestion", 2_000), locale: boundedText(input.locale, "identity.locale", 35), region: boundedText(input.region, "identity.region", 35), surfaceId: boundedText(input.surfaceId, "identity.surfaceId", 200), surfaceVersion: boundedText(input.surfaceVersion, "identity.surfaceVersion", 100), fanoutVersion: boundedText(input.fanoutVersion, "identity.fanoutVersion", 100) };
+  const queryPlanHash = boundedText(input.queryPlanHash, "identity.queryPlanHash", 64);
+  if (!/^[a-f0-9]{64}$/.test(queryPlanHash)) throw new TypeError("identity.queryPlanHash must be a SHA-256 hash");
+  return { id, normalizedQuestion: boundedText(input.normalizedQuestion, "identity.normalizedQuestion", 2_000), locale: boundedText(input.locale, "identity.locale", 35), region: boundedText(input.region, "identity.region", 35), surfaceId: boundedText(input.surfaceId, "identity.surfaceId", 200), surfaceVersion: boundedText(input.surfaceVersion, "identity.surfaceVersion", 100), fanoutVersion: boundedText(input.fanoutVersion, "identity.fanoutVersion", 100), queryPlanHash };
 }
 
 export function parseSearchAttemptUsage(value: unknown): SearchAttemptUsage {

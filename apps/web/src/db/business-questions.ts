@@ -22,13 +22,16 @@ export async function prepareBusinessQuestionCandidates(input: {
   foundation?: AiWebsiteReportV1;
 }): Promise<BusinessQuestionCandidateSet> {
   await ensureDatabase();
-  const existing = await getLatestBusinessQuestionSet(input.reportId);
-  if (existing && (!input.revision || existing.revision === input.revision)) return existing as BusinessQuestionCandidateSet;
   const report = await getGeoReport(input.reportId);
   if (!report) throw new Error("Report not found.");
+  const existing = await getLatestBusinessQuestionSet(input.reportId);
+  const locale = resolveBusinessQuestionLocale(input.locale, report.reportLocale, process.env.OGC_PUBLIC_SEARCH_LOCALE);
+  const immutableExisting = Boolean(existing && "confirmedAt" in existing && existing.confirmedAt);
+  if (existing && (immutableExisting || existing.locale === locale) && (!input.revision || existing.revision === input.revision)) {
+    return existing as BusinessQuestionCandidateSet;
+  }
   const foundation = input.foundation ?? await loadQuestionFoundation(input.reportId);
   const profile = foundation.organizationProfile;
-  const locale = input.locale?.trim() || process.env.OGC_PUBLIC_SEARCH_LOCALE?.trim() || report.reportLocale || "en";
   const region = input.region?.trim() || process.env.OGC_PUBLIC_SEARCH_REGION?.trim() || "global";
   const revision = input.revision ?? ((existing?.revision ?? 0) + 1);
   const candidates = generateBusinessQuestionCandidates({
@@ -98,8 +101,14 @@ export async function confirmBusinessQuestions(input: {
       WHERE id=${input.questionSetId} AND report_id=${input.reportId} FOR UPDATE`;
     const row = rows[0];
     if (!row?.payload) throw new Error("Business question set not found.");
-    if (row.status === "locked") throw new Error("Paid business questions are permanently locked.");
-    if (row.status !== "candidate" && row.status !== "confirmed") throw new Error("Business questions are not correctable in their current state.");
+    if (row.status === "confirmed" || row.status === "locked") {
+      const immutable = row.payload as ConfirmedBusinessQuestionSet;
+      if (matchesImmutableBusinessQuestions(immutable, input.finalTexts)) return { confirmed: immutable } as const;
+      throw new Error(row.status === "locked"
+        ? "Paid business questions are permanently locked."
+        : "Confirmed business questions are immutable.");
+    }
+    if (row.status !== "candidate") throw new Error("Business questions are not correctable in their current state.");
     let confirmed: ConfirmedBusinessQuestionSet;
     try {
       confirmed = confirmBusinessQuestionSet({
@@ -130,6 +139,26 @@ export async function confirmBusinessQuestions(input: {
   });
   if ("neutralizationError" in outcome) throw new TypeError(outcome.neutralizationError);
   return outcome.confirmed;
+}
+
+export function matchesImmutableBusinessQuestions(
+  immutable: ConfirmedBusinessQuestionSet,
+  finalTexts: readonly string[]
+): boolean {
+  return Boolean(immutable.confirmedAt)
+    && immutable.questions.length === 3
+    && finalTexts.length === immutable.questions.length
+    && immutable.questions.every((question, index) =>
+      question.privateText.trim().normalize("NFC") === finalTexts[index]?.trim().normalize("NFC")
+    );
+}
+
+export function resolveBusinessQuestionLocale(
+  requestedLocale: string | undefined,
+  reportLocale: string | null | undefined,
+  environmentLocale: string | undefined
+): string {
+  return requestedLocale?.trim() || reportLocale?.trim() || environmentLocale?.trim() || "en";
 }
 
 export async function getBusinessQuestionSet(reportId: string, id: string): Promise<BusinessQuestionCandidateSet | ConfirmedBusinessQuestionSet | null> {

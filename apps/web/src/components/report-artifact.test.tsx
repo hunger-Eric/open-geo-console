@@ -52,7 +52,7 @@ describe("canonical report artifact", () => {
     expect(html).toContain("Add a concise definition");
     expect(html).toContain("/api/reports/report-1/evidence/asset-1");
     expect(html).toContain("/reports/report-1/legacy-report.html");
-    expect(html).toContain("/api/reports/report-1/artifacts/legacy-report.pdf");
+    expect(html).not.toMatch(/\.pdf\b|>PDF</i);
   });
 
   it("keeps verified evidence visible when screenshots are unavailable", () => {

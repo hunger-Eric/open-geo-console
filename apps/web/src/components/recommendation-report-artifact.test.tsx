@@ -25,7 +25,7 @@ describe("RecommendationReportArtifact", () => {
     expect(html).toContain("Certification and methodology provenance");
     expect(html).toContain("cert-evidence/engine");
     expect(html).toContain("/reports/report-1/recommendation-report.html");
-    expect(html).toContain("/api/reports/report-1/artifacts/recommendation-report.pdf");
+    expect(html).not.toMatch(/\.pdf\b|>PDF</i);
   });
 
   it("allows forensic artifact descendants and long evidence text to shrink on narrow screens", () => {

@@ -6,8 +6,8 @@ import { checkoutIdempotencyHmac } from "@/commerce/idempotency";
 import { assertCommerceReady } from "@/commerce/readiness";
 import {
   attachHostedCheckout,
-  createPaymentOrder,
-  getActivePaymentOrderForReport,
+  createReportV4PaymentOrder,
+  getActiveReportV4PaymentOrderForReport,
   replaceLegacyHostedCheckout
 } from "@/db/commercial-orders";
 import { getGeoReport } from "@/db/reports";
@@ -57,7 +57,7 @@ export async function POST(request: Request, context: RouteContext) {
       amountMinor: price.amountMinor
     };
 
-    const active = await getActivePaymentOrderForReport(id, price.productCode);
+    const active = await getActiveReportV4PaymentOrderForReport(id);
     if (active && active.checkoutIdempotencyHmac !== checkoutHmac) {
       if (active.businessQuestionSetId !== body.questionSetId) {
         return NextResponse.json({ error: "This report already has an active checkout bound to another question set." }, { status: 409 });
@@ -68,7 +68,7 @@ export async function POST(request: Request, context: RouteContext) {
       return checkoutResponse(request, active.id, active.providerCheckoutId, checkoutInput);
     }
 
-    const order = await createPaymentOrder({
+    const order = await createReportV4PaymentOrder({
       checkoutIdempotencyHmac: checkoutHmac,
       provider: "airwallex",
       reportId: id,
@@ -76,7 +76,6 @@ export async function POST(request: Request, context: RouteContext) {
       customerEmailEncrypted: protectedEmail.encrypted,
       customerEmailHmac: protectedEmail.lookupHmac,
       emailKeyVersion: "v1",
-      productCode: price.productCode,
       businessQuestionSetId: typeof body.questionSetId === "string" ? body.questionSetId : "",
       catalogVersion: price.catalogVersion,
       termsVersion: price.purchaseTermsVersion,

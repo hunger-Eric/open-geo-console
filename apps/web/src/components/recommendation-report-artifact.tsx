@@ -3,7 +3,7 @@ import type { RecommendationPrivateReportArtifactModelV1 } from "@/report/artifa
 
 const labels = {
   en: {
-    privateReport: "PRIVATE RECOMMENDATION FORENSIC REPORT", html: "HTML report", pdf: "PDF report",
+    privateReport: "PRIVATE RECOMMENDATION FORENSIC REPORT", html: "HTML report",
     verdict: "Executive verdict", questions: "Market questions", matrix: "Multi-engine observation matrix",
     entities: "Recommended and competing entities", chain: "Owned and third-party citation chains",
     gaps: "Customer vs competitor gaps", provenance: "Certification and methodology provenance",
@@ -14,7 +14,7 @@ const labels = {
     limitations: "Methodology and limitations", coverage: "Coverage context"
   },
   zh: {
-    privateReport: "私密 AI 推荐取证报告", html: "HTML 报告", pdf: "PDF 报告",
+    privateReport: "私密 AI 推荐取证报告", html: "HTML 报告",
     verdict: "老板结论", questions: "高意图市场问题", matrix: "多引擎观察矩阵",
     entities: "推荐与竞争对象", chain: "官网与第三方引用链", grades: "证据等级",
     gaps: "客户与竞争对象差距", provenance: "认证与方法溯源",
@@ -37,7 +37,6 @@ export function RecommendationReportArtifact({ model }: { model: RecommendationP
     <main className="recommendation-artifact">
       <nav className="artifact-actions no-print" aria-label="Report formats">
         <a href={`/reports/${model.reportId}/recommendation-report.html`}>{t.html}</a>
-        <a className="primary" href={`/api/reports/${model.reportId}/artifacts/recommendation-report.pdf`}>{t.pdf}</a>
       </nav>
 
       <header className="cover forensic-cover artifact-section">
