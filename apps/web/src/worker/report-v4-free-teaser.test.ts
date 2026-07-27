@@ -64,6 +64,13 @@ import {
   parseReadyFreeTeaserCheckpoint,
   type FreeTeaserCheckpointV1
 } from "./report-v4-free-teaser";
+import {
+  classifyFreeTeaserResumeKind,
+  createInMemoryFreeTeaserCheckpointSink,
+  expectedExpensiveCallsOnMarkedResume,
+  matchesExpensiveCallBudget,
+  type FreeTeaserResumeKind
+} from "./report-v4-free-teaser-resume-harness";
 
 const CP13_SMOKE_RUN_ID = "cp13-synthetic-mimo-smoke-adc08-r06";
 const CP13_PROMPT_SENTINEL = "CP13_SYNTHETIC_CUSTOMER_PROSE_MUST_NOT_APPEAR";
@@ -991,6 +998,122 @@ describe("free teaser orchestration", () => {
     expect(mocks.answerWithSources).toHaveBeenCalledTimes(answerCalls);
     expect(mocks.enhanceDiagnosis).toHaveBeenCalledTimes(diagnosisCalls);
     expect(mocks.semanticInvoke).toHaveBeenCalledTimes(reviewCalls);
+  });
+
+  it("runs the marked Free V4 resume matrix via the in-memory dry harness", async () => {
+    const sink = createInMemoryFreeTeaserCheckpointSink();
+    const input = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh" as const,
+      admission: admission(),
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      saveCheckpoint: sink.saveCheckpoint
+    };
+
+    await generateFreeTeaser(input);
+    expect(sink.stageSequence()).toEqual([
+      "questions_ready",
+      "observations_ready",
+      "q1_answer_ready",
+      "q1_answer_ready",
+      "ready"
+    ]);
+
+    const byKind = sink.firstByKind();
+    const kinds = [
+      "questions_ready",
+      "observations_ready",
+      "q1_answer_ready",
+      "q1_diagnosis_ready",
+      "ready"
+    ] as const satisfies readonly FreeTeaserResumeKind[];
+    for (const kind of kinds) {
+      expect(byKind[kind], `missing durable checkpoint for ${kind}`).toBeDefined();
+      expect(classifyFreeTeaserResumeKind(byKind[kind]!)).toBe(kind);
+    }
+
+    for (const kind of kinds) {
+      mocks.resolveSnapshot.mockClear();
+      mocks.answerWithSources.mockClear();
+      mocks.enhanceDiagnosis.mockClear();
+      mocks.semanticInvoke.mockClear();
+
+      const resumeSink = createInMemoryFreeTeaserCheckpointSink();
+      await generateFreeTeaser({
+        ...input,
+        checkpoint: byKind[kind]!,
+        saveCheckpoint: resumeSink.saveCheckpoint
+      });
+
+      const observed = {
+        resolveSnapshot: mocks.resolveSnapshot.mock.calls.length,
+        answerWithSources: mocks.answerWithSources.mock.calls.length,
+        enhanceDiagnosis: mocks.enhanceDiagnosis.mock.calls.length,
+        semanticInvoke: mocks.semanticInvoke.mock.calls.length
+      };
+      const expected = expectedExpensiveCallsOnMarkedResume(kind);
+      expect(
+        matchesExpensiveCallBudget(observed, expected),
+        `resume kind ${kind}: observed ${JSON.stringify(observed)} expected ${JSON.stringify(expected)}`
+      ).toBe(true);
+      expect(classifyFreeTeaserResumeKind(resumeSink.saved.at(-1) ?? byKind[kind]!)).toBe("ready");
+    }
+  });
+
+  it("after typed diagnosis failure, resumes from q1_answer_ready without re-answering Q1", async () => {
+    const sink = createInMemoryFreeTeaserCheckpointSink();
+    const input = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh" as const,
+      admission: admission(),
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      saveCheckpoint: sink.saveCheckpoint
+    };
+
+    mocks.enhanceDiagnosis.mockResolvedValueOnce({
+      status: "failed",
+      providerAttempts: 1,
+      failure: {
+        stage: "semantic_contract",
+        code: "invalid_semantic_output",
+        parserPath: "$diagnosisSemanticOutput.targetGap"
+      }
+    });
+
+    await expect(generateFreeTeaser(input)).rejects.toBeInstanceOf(FreeTeaserDiagnosisFailedError);
+
+    const answerReady = sink.firstByKind().q1_answer_ready;
+    expect(answerReady).toBeDefined();
+    expect(answerReady!.q1DiagnosisDraft).toBeUndefined();
+    expect(classifyFreeTeaserResumeKind(answerReady!)).toBe("q1_answer_ready");
+    // Diagnosis failure must not persist a partial diagnosis or ready checkpoint.
+    expect(sink.firstByKind().q1_diagnosis_ready).toBeUndefined();
+    expect(sink.firstByKind().ready).toBeUndefined();
+
+    mocks.resolveSnapshot.mockClear();
+    mocks.answerWithSources.mockClear();
+    mocks.enhanceDiagnosis.mockClear();
+    mocks.semanticInvoke.mockClear();
+
+    const resumed = await generateFreeTeaser({
+      ...input,
+      checkpoint: answerReady!,
+      saveCheckpoint: createInMemoryFreeTeaserCheckpointSink().saveCheckpoint
+    });
+
+    expect(classifyFreeTeaserResumeKind(resumed.checkpoint)).toBe("ready");
+    expect(matchesExpensiveCallBudget({
+      resolveSnapshot: mocks.resolveSnapshot.mock.calls.length,
+      answerWithSources: mocks.answerWithSources.mock.calls.length,
+      enhanceDiagnosis: mocks.enhanceDiagnosis.mock.calls.length,
+      semanticInvoke: mocks.semanticInvoke.mock.calls.length
+    }, expectedExpensiveCallsOnMarkedResume("q1_answer_ready"))).toBe(true);
   });
 
   it("binds target evidence locations to the containing question", () => {

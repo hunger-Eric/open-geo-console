@@ -1,10 +1,10 @@
 # Active Change Scope Lock
 
-Status: `APPROVED` (Phase 3)
+Status: `APPROVED` (Phase 3 complete — local only; no push/deploy)
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: 96% local fault matrix — Phase 3 (APPROVED)`.
+`Current authority: 96% local fault matrix — Phase 3 (APPROVED / complete)`.
 All earlier sections are context only.
 
 ## Historical context — Free V4 teaser typed error boundary (completed work; not current execution)
@@ -241,11 +241,11 @@ manifest included `.codegraph/codegraph.db` (148,279,296 bytes), exceeding the
   Preview/fixed-alias process. No additional output-directory exclusion is
   authorized, and the release remains Staging-only.
 
-## Current authority: 96% local fault matrix — Phase 3 (APPROVED)
+## Current authority: 96% local fault matrix — Phase 3 (APPROVED / complete)
 
-**Status: `APPROVED`** — user authorized "提交本地、开 Phase 3" (2026-07-27).
-Phase 1–2 are completed baselines. **No push / deploy** unless separately
-authorized. Local commit of Phase 1–2 allowlisted surfaces is authorized.
+**Status: `APPROVED` (complete)** — user authorized "提交本地、开 Phase 3"
+(2026-07-27). Phase 1–2 committed as `4e48533`. **No push / deploy** unless
+separately authorized.
 
 ### Phase 3 objective
 
@@ -273,15 +273,27 @@ model/DB/Docker/deploy, no historical Job mutation.
 ### Phase 3 tests allowlist
 
 - `apps/web/src/worker/report-v4-free-teaser.test.ts` — resume matrix + dry harness
-- Optional new test-only helper under
-  `apps/web/src/worker/report-v4-free-teaser-resume-harness.ts` (test import only;
-  no runtime worker wiring) if it keeps the matrix readable
+- `apps/web/src/worker/report-v4-free-teaser-resume-harness.ts` — pure dry harness
+- `apps/web/src/worker/report-v4-free-teaser-resume-harness.test.ts` — harness unit tests
 
 ### Phase 3 budgets
 
-- Production free-teaser: `+40/-20` (zero preferred)
-- Tests + optional harness: `+280/-40`
+- Production free-teaser: `+40/-20` (**measured `+0/-0`** — no production fix required)
+- Tests + harness: measured `~+349/-0` (free-teaser.test `+123`, harness
+  `~+132`, harness.test `~+94`) + ≤20% headroom → **`+419/-0`** (verification-
+  only refresh of prior `+280/-40`; test/harness files only)
 - External actions: all `0`
+
+### Phase 3 delivered
+
+| Resume kind | Expensive re-run budget |
+|-------------|-------------------------|
+| `ready` | all 0 |
+| `q1_diagnosis_ready` | semanticInvoke 1 only |
+| `q1_answer_ready` | enhanceDiagnosis 1 + semanticInvoke 1 |
+| `observations_ready` | answer + diagnosis + review (no snapshot re-resolve) |
+| `questions_ready` | resolveSnapshot 3 + answer + diagnosis + review |
+| typed diagnosis fail → resume | no diagnosis draft saved; resume = q1_answer_ready budget |
 
 ### Phase 3 stop
 
