@@ -126,3 +126,6 @@
 
 - For code navigation after scaffold, initialize or sync CodeGraph before relying on graph output.
 - Treat live website scans as integration evidence; keep unit tests deterministic with mocked fetches.
+- Protected Staging deployment and real-flow acceptance must follow the four separate gates in `docs/PROTECTED-STAGING-OPERATIONS.md`; a unique Preview is artifact identity, while the fixed Protected Staging URL is the only business test entry.
+- Preview authentication, manually injected metadata, `READY`, local checks, and partial-stage success must not be promoted to end-to-end acceptance.
+- Use an independent read-only checker for technical deployment evidence and give the user the runbook's plain-language acceptance card.
