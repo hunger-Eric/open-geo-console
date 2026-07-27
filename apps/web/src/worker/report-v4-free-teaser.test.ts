@@ -612,20 +612,14 @@ describe("free teaser orchestration", () => {
     const diagnosisTargetIds = reviewRequest.input.evidence
       .filter(({ sourceId }) => sourceId === null)
       .map(({ evidenceId }) => evidenceId);
-    const exactAnswerSourceIds = reviewRequest.input.sources
-      .filter(({ questionId }) => questionId === reviewRequest.input.answerSubjects[0]!.questionId)
-      .map(({ sourceId }) => sourceId);
-    const exactAnswerEvidenceIds = reviewRequest.input.evidence
-      .filter(({ sourceId }) => sourceId !== null && exactAnswerSourceIds.includes(sourceId))
-      .map(({ evidenceId }) => evidenceId);
     const diagnosisFields = reviewRequest.input.fields.filter(({ path }) => path.startsWith("q1Diagnosis."));
-    expect(answerField.allowedEvidenceIds).toEqual(exactAnswerEvidenceIds);
-    expect(answerField.allowedSourceIds).toEqual(exactAnswerSourceIds);
+    expect(reviewRequest.input.evidencePolicy).toBe("report_global_v1");
+    expect(answerField.allowedEvidenceIds).toEqual([]);
+    expect(answerField.allowedSourceIds).toEqual([]);
     expect(diagnosisTargetIds).not.toEqual([]);
-    expect(diagnosisFields.some(({ allowedEvidenceIds }) => allowedEvidenceIds.some((id) => diagnosisTargetIds.includes(id)))).toBe(true);
-    expect(answerField.allowedEvidenceIds.every((id) => !diagnosisTargetIds.includes(id))).toBe(true);
+    expect(diagnosisFields.every(({ allowedEvidenceIds, allowedSourceIds }) => allowedEvidenceIds.length === 0 && allowedSourceIds.length === 0)).toBe(true);
     expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toContain(`"path":"${answerField.path}"`);
-    expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toContain(`"allowedEvidenceIds":${JSON.stringify(answerField.allowedEvidenceIds)}`); expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toContain('"referenceRequirement":"at_least_one_exact_local_id"');
+    expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toContain(`"allowedEvidenceIds":${JSON.stringify(answerField.allowedEvidenceIds)}`); expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toContain('"referenceRequirement":"at_least_one_exact_global_id"');
     expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).toContain("Blueprint-only index is an ordering aid; omit index from every output field object.");
     expect(mocks.semanticInvoke.mock.calls[0]![0].systemText).not.toContain(answerField.originalText);
     expect(reviewRequest.input.target.aliases).toEqual([
@@ -1050,6 +1044,12 @@ async function defaultMarketSnapshotBundle(snapshotId: string, originSuffix?: st
 }
 
 function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticReviewOutput {
+  const global = input.evidencePolicy === "report_global_v1" || input.fields.some((field) => field.path.startsWith("foundation."));
+  const globalEvidenceIds = global ? [input.evidence.find(({ eligible }) => eligible === true)?.evidenceId ?? ""] : undefined;
+  const refs = (field: ReportSemanticReviewInput["fields"][number]) => ({
+    evidenceIds: globalEvidenceIds ?? field.allowedEvidenceIds,
+    sourceIds: input.evidencePolicy ? [] : field.allowedSourceIds
+  });
   return {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
     inputHash: input.inputHash,
@@ -1062,8 +1062,8 @@ function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticRev
       correctedText: "Reviewed Brand-X FBA answer.",
       issueCodes: ["language_quality"],
       reason: "The answer needed a clearer direct response.",
-      evidenceIds: field.allowedEvidenceIds,
-      sourceIds: field.allowedSourceIds,
+      ...refs(field),
+      ...(global ? { rejectedEvidence: [], rejectedSources: [] } : {}),
       retainedOriginalTerms: []
     } : field.path === "q1Diagnosis.selectionSummary" && field.originalText.includes("model selected") ? {
       path: field.path,
@@ -1072,8 +1072,8 @@ function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticRev
       correctedText: "Reviewed evidence-bound source selection.",
       issueCodes: ["unsupported_causal_claim"],
       reason: "The source selection description must remain evidence-bound.",
-      evidenceIds: field.allowedEvidenceIds,
-      sourceIds: field.allowedSourceIds,
+      ...refs(field),
+      ...(global ? { rejectedEvidence: [], rejectedSources: [] } : {}),
       retainedOriginalTerms: []
     } : {
       path: field.path,
@@ -1081,8 +1081,8 @@ function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticRev
       decision: "pass",
       issueCodes: [],
       reason: "The prose is natural and faithful to its bound evidence.",
-      evidenceIds: field.allowedEvidenceIds,
-      sourceIds: field.allowedSourceIds,
+      ...refs(field),
+      ...(global ? { rejectedEvidence: [], rejectedSources: [] } : {}),
       retainedOriginalTerms: []
     }),
     questionDistinctness: {
@@ -1108,15 +1108,13 @@ function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticRev
           targetFirstSentence: 1,
           targetRoles: ["answer subject"],
           competitorEntityIds: input.entities.slice(0, 1).map(({ entityId }) => entityId),
-          evidenceIds: field.allowedEvidenceIds,
-          sourceIds: field.allowedSourceIds,
+          ...refs(field),
           reason: "The answer directly responds to the owned question."
         };
       }),
       evidenceUse: input.fields.map((field) => ({
         path: field.path,
-        evidenceIds: field.allowedEvidenceIds,
-        sourceIds: field.allowedSourceIds,
+        ...refs(field),
         reason: "Uses only the exact references bound to this field."
       }))
     },

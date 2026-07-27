@@ -264,7 +264,8 @@ async function paidSemanticFixture() {
       questionId: card.questionId,
       canonicalUrl: source.canonicalUrl,
       originalText,
-      originalTextHash: reportSemanticTextHash(originalText)
+      originalTextHash: reportSemanticTextHash(originalText),
+      eligible: true
     };
   });
   const evidence = sources.map((source) => ({
@@ -272,7 +273,8 @@ async function paidSemanticFixture() {
     questionId: source.questionId,
     sourceId: source.sourceId,
     originalText: source.originalText,
-    originalTextHash: source.originalTextHash
+    originalTextHash: source.originalTextHash,
+    eligible: true
   }));
   const observationResults = sources.map((source, index) => ({
     observationId: `observation-${index + 1}`,
@@ -502,8 +504,9 @@ function validPaidReview(input: ReportSemanticReviewInput): Record<string, unkno
       decision: "pass",
       issueCodes: [],
       reason: "The text is natural and supported by the exact evidence.",
-      evidenceIds: field.allowedEvidenceIds,
-      sourceIds: field.allowedSourceIds,
+      evidenceIds: input.evidencePolicy ? [input.evidence[0]!.evidenceId] : field.allowedEvidenceIds,
+      sourceIds: input.evidencePolicy ? [input.sources[0]!.sourceId] : field.allowedSourceIds,
+      rejectedEvidence: [], rejectedSources: [],
       retainedOriginalTerms: []
     })),
     questionDistinctness: {
@@ -533,8 +536,8 @@ function validPaidReview(input: ReportSemanticReviewInput): Record<string, unkno
       })),
       evidenceUse: input.fields.map((field) => ({
         path: field.path,
-        evidenceIds: field.allowedEvidenceIds,
-        sourceIds: field.allowedSourceIds,
+        evidenceIds: input.evidencePolicy ? [input.evidence[0]!.evidenceId] : field.allowedEvidenceIds,
+        sourceIds: input.evidencePolicy ? [input.sources[0]!.sourceId] : field.allowedSourceIds,
         reason: "The exact references belong to this field."
       })),
       sourceSelection: input.sourceSelectionCatalog!.map((item) => {

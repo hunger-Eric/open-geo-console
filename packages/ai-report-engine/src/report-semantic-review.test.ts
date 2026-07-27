@@ -53,6 +53,7 @@ describe("ReportSemanticReview input authority", () => {
     expect(prompt).toContain("correctedText byte-for-byte different");
     expect(prompt).toContain("Blueprint-only index is an ordering aid; omit index from every output field object.");
     expect(prompt).toContain("path, originalTextHash, decision, optional correctedText, issueCodes, reason, evidenceIds, sourceIds, retainedOriginalTerms");
+    expect(prompt).not.toContain("rejectedEvidence");
     expect(prompt).toContain("complete JSON skeleton and checklist");
   });
   it("creates a canonical input hash independent of object key insertion order", () => {
@@ -134,6 +135,63 @@ describe("ReportSemanticReview input authority", () => {
 });
 
 describe("ReportSemanticReview model output", () => {
+  it("uses eligible report-global references across fields while legacy retains field-local rejection", () => {
+    const global = globalInput();
+    const review = globalReview(global);
+    expect(parseReportSemanticReviewOutput(review, global).fields[0]!.evidenceIds).toEqual(["evidence-q1"]);
+
+    const legacyCore = inputCore();
+    const legacy = createReportSemanticReviewInput(legacyCore);
+    const crossField = validReview(legacy);
+    reviewFields(crossField)[0]!.evidenceIds = ["evidence-q1"];
+    expect(() => parseReportSemanticReviewOutput(crossField, legacy)).toThrow(/disallowed reference/u);
+  });
+
+  it("fails closed global accepted and rejected reference violations while preserving blocked safety", () => {
+    for (const mutate of [
+      (review: Record<string, unknown>) => { reviewFields(review)[0]!.evidenceIds = ["unknown"]; },
+      (review: Record<string, unknown>) => { reviewFields(review)[0]!.evidenceIds = ["ineligible"]; },
+      (review: Record<string, unknown>) => { reviewFields(review)[0]!.evidenceIds = ["missing-eligibility"]; },
+      (review: Record<string, unknown>) => { reviewFields(review)[0]!.rejectedEvidence = [{ evidenceId: "evidence-q1", reason: "not used" }, { evidenceId: "evidence-q1", reason: "duplicate" }]; },
+      (review: Record<string, unknown>) => { reviewFields(review)[0]!.rejectedEvidence = [{ evidenceId: "evidence-q1", reason: "overlap" }]; }
+    ]) {
+      const input = globalInput();
+      const review = globalReview(input);
+      mutate(review);
+      expect(() => parseReportSemanticReviewOutput(review, input)).toThrow(/unknown|eligib|duplicate|overlap/u);
+    }
+    const input = globalInput();
+    const parsed = parseReportSemanticReviewOutput(globalReview(input), input);
+    expect(parsed.fields[0]!.rejectedEvidence).toEqual([{ evidenceId: "global-extra", reason: "Not needed for this conclusion." }]);
+    for (const key of ["rejectedEvidence", "rejectedSources"] as const) {
+      const missing = globalReview(input);
+      delete reviewFields(missing)[0]![key];
+      expect(() => parseReportSemanticReviewOutput(missing, input)).toThrow(/must include rejectedEvidence and rejectedSources/u);
+    }
+
+    const zero = globalReview(input);
+    reviewFields(zero)[0]!.evidenceIds = [];
+    expect(() => parseReportSemanticReviewOutput(zero, input)).toThrow(/requires accepted global/u);
+    reviewFields(zero)[0]!.decision = "blocked";
+    reviewFields(zero)[0]!.issueCodes = ["unsupported"];
+    zero.overallDecision = "blocked";
+    expect(parseReportSemanticReviewOutput(zero, input).fields[0]!.decision).toBe("blocked");
+  });
+
+  it("keeps rejected reference keys outside the legacy exact contract and documents global prompts", () => {
+    const legacy = createReportSemanticReviewInput(inputCore());
+    const legacyReview = validReview(legacy);
+    reviewFields(legacyReview)[0]!.rejectedEvidence = [];
+    expect(() => parseReportSemanticReviewOutput(legacyReview, legacy)).toThrow(/unknown key/u);
+    const global = globalInput();
+    const freeGlobal = buildFreeV4ReportSemanticReviewSystemPrompt(global);
+    expect(freeGlobal).toMatch(/report_global_v1.*rejectedEvidence.*rejectedSources/isu);
+    expect(freeGlobal).toContain("path, originalTextHash, decision, optional correctedText, issueCodes, reason, evidenceIds, sourceIds, rejectedEvidence, rejectedSources, retainedOriginalTerms");
+    const paid = buildPaidV3ReportSemanticReviewSystemPrompt();
+    expect(paid).toMatch(/report_global_v1.*rejectedEvidence.*rejectedSources/isu);
+    expect(paid).not.toMatch(/field-local allowlist/iu);
+  });
+
   it("rejects a blueprint-only index in a response field", () => {
     const core = inputCore();
     core.lifecycle = "free_v4";
@@ -530,6 +588,44 @@ function manifestField(
     allowedEvidenceIds,
     allowedSourceIds
   };
+}
+
+function globalInput(): ReportSemanticReviewInput {
+  const core = inputCore();
+  core.lifecycle = "free_v4";
+  core.evidencePolicy = "report_global_v1";
+  core.sources[0]!.eligible = true;
+  core.evidence[0]!.eligible = true;
+  core.evidence.push(
+    { evidenceId: "global-extra", questionId: "question-2", sourceId: null, originalText: "Eligible global evidence.", originalTextHash: reportSemanticTextHash("Eligible global evidence."), eligible: true },
+    { evidenceId: "ineligible", questionId: "question-2", sourceId: null, originalText: "Ineligible evidence.", originalTextHash: reportSemanticTextHash("Ineligible evidence."), eligible: false },
+    { evidenceId: "missing-eligibility", questionId: "question-2", sourceId: null, originalText: "Missing eligibility.", originalTextHash: reportSemanticTextHash("Missing eligibility.") }
+  );
+  for (const field of core.fields) {
+    field.allowedEvidenceIds = [];
+    field.allowedSourceIds = [];
+  }
+  return createReportSemanticReviewInput(core);
+}
+
+function globalReview(input: ReportSemanticReviewInput): Record<string, unknown> {
+  const review = validReview(input);
+  for (const field of reviewFields(review)) {
+    field.evidenceIds = ["evidence-q1"];
+    field.sourceIds = [];
+    field.rejectedEvidence = [{ evidenceId: "global-extra", reason: "Not needed for this conclusion." }];
+    field.rejectedSources = [];
+  }
+  const annotations = review.annotations as { answers: Array<Record<string, unknown>>; evidenceUse: Array<Record<string, unknown>> };
+  for (const answer of annotations.answers) {
+    answer.evidenceIds = ["evidence-q1"];
+    answer.sourceIds = [];
+  }
+  for (const use of annotations.evidenceUse) {
+    use.evidenceIds = ["evidence-q1"];
+    use.sourceIds = [];
+  }
+  return review;
 }
 
 function validReview(input: ReportSemanticReviewInput): Record<string, unknown> {

@@ -22,8 +22,8 @@ import { hashCombinedGeoReportV3ReceiptExcludedProjection } from "./combined-geo
 const seed = () => ({
   locale: "zh-CN", target: { siteKey: "target", targetUrl: "https://target.example/", aliases: ["target.example", "Target Organization", "Target Legal Entity", "Target Brand"] }, expectedModel: { providerId: "mock", modelId: "model" },
   questions: ["q1", "q2", "q3"].map((questionId) => ({ questionId, originalText: questionId, originalTextHash: reportSemanticTextHash(questionId) })),
-  sources: [{ sourceId: "s1", questionId: "q1", canonicalUrl: "https://source.example/", originalText: "Source text", originalTextHash: reportSemanticTextHash("Source text") }],
-  evidence: [{ evidenceId: "e1", questionId: "q1", sourceId: "s1", originalText: "Evidence text", originalTextHash: reportSemanticTextHash("Evidence text") }],
+  sources: [{ sourceId: "s1", questionId: "q1", canonicalUrl: "https://source.example/", originalText: "Source text", originalTextHash: reportSemanticTextHash("Source text"), eligible: true }],
+  evidence: [{ evidenceId: "e1", questionId: "q1", sourceId: "s1", originalText: "Evidence text", originalTextHash: reportSemanticTextHash("Evidence text"), eligible: true }],
   observationResults: [{ observationId: "o1", resultId: "r1", questionId: "q1", originalText: "Target", originalTextHash: reportSemanticTextHash("Target") }],
   entities: [], answerSubjects: [{ questionId: "q1", fieldPath: "answer" }],
   authorityBindings: authorityBindings(),
@@ -105,6 +105,7 @@ describe("semantic review manifests", () => {
     const input = buildPaidV3SemanticReviewManifest({ ...seed(), sourceSelectionCatalog: sourceSelectionCatalog() });
     const report = { reportId: "report-1", question: "q1", answer: "Target term remains untouched", count: 3 };
     const review = validPaidReview(input);
+    expect((review.fields as Array<Record<string, unknown>>)[0]).toMatchObject({ rejectedEvidence: [], rejectedSources: [] });
     const firstField = (review.fields as Array<Record<string, unknown>>)[0]!;
     firstField.decision = "corrected";
     firstField.correctedText = "Target Brand 提供 FBA 头程服务。";
@@ -476,8 +477,9 @@ function validPaidReview(input: ReportSemanticReviewInput): Record<string, unkno
       decision: "pass",
       issueCodes: [],
       reason: "The text is faithful to the evidence.",
-      evidenceIds: field.allowedEvidenceIds,
-      sourceIds: field.allowedSourceIds,
+      evidenceIds: input.evidencePolicy ? ["e1"] : field.allowedEvidenceIds,
+      sourceIds: input.evidencePolicy ? ["s1"] : field.allowedSourceIds,
+      rejectedEvidence: [], rejectedSources: [],
       retainedOriginalTerms: []
     })),
     questionDistinctness: { decision: "distinct", duplicateGroups: [], reason: "The questions are semantically distinct." },
@@ -495,7 +497,7 @@ function validPaidReview(input: ReportSemanticReviewInput): Record<string, unkno
         sourceIds: [`s${questionId.slice(1)}`],
         reason: `The answer directly addresses ${questionId}.`
       })),
-      evidenceUse: input.fields.map((field) => ({ path: field.path, evidenceIds: field.allowedEvidenceIds, sourceIds: field.allowedSourceIds, reason: "Exact owned references." })),
+      evidenceUse: input.fields.map((field) => ({ path: field.path, evidenceIds: input.evidencePolicy ? ["e1"] : field.allowedEvidenceIds, sourceIds: input.evidencePolicy ? ["s1"] : field.allowedSourceIds, reason: "Exact owned references." })),
       sourceSelection: input.sourceSelectionCatalog!.map((item) => ({
         annotationId: item.annotationId,
         itemId: item.itemId,
@@ -546,7 +548,8 @@ function source(questionId: string, sourceId: string, canonicalUrl: string) {
     questionId,
     canonicalUrl,
     originalText,
-    originalTextHash: reportSemanticTextHash(originalText)
+    originalTextHash: reportSemanticTextHash(originalText),
+    eligible: true
   };
 }
 
@@ -557,7 +560,8 @@ function evidenceRow(questionId: string, sourceId: string, evidenceId: string) {
     questionId,
     sourceId,
     originalText,
-    originalTextHash: reportSemanticTextHash(originalText)
+    originalTextHash: reportSemanticTextHash(originalText),
+    eligible: true
   };
 }
 

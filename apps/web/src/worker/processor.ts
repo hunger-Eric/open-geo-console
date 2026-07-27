@@ -2791,7 +2791,8 @@ function buildPaidV3SemanticAuthorities(input: {
       questionId: card.questionId,
       canonicalUrl: source.canonicalUrl,
       originalText,
-      originalTextHash: reportSemanticTextHash(originalText)
+      originalTextHash: reportSemanticTextHash(originalText),
+      eligible: audit?.retrievalReady === true && audit.exactExcerpt !== null && source.retrievalStatus === "verified_body"
     };
   }));
   const sourceIds = new Set(sources.map(({ sourceId }) => sourceId));
@@ -2800,7 +2801,8 @@ function buildPaidV3SemanticAuthorities(input: {
     questionId: source.questionId,
     sourceId: source.sourceId,
     originalText: source.originalText,
-    originalTextHash: source.originalTextHash
+    originalTextHash: source.originalTextHash,
+    eligible: source.eligible
   }));
   const targetEvidence = answerCards.flatMap((card) =>
     buildFreeTeaserDiagnosisTargetPages(card.questionId, input.admission).flatMap((page) =>
@@ -2811,7 +2813,8 @@ function buildPaidV3SemanticAuthorities(input: {
           questionId: card.questionId,
           sourceId: null,
           originalText,
-          originalTextHash: reportSemanticTextHash(originalText)
+          originalTextHash: reportSemanticTextHash(originalText),
+          eligible: true
         };
       })
     )
@@ -2831,7 +2834,8 @@ function buildPaidV3SemanticAuthorities(input: {
       questionId: null,
       sourceId: null,
       originalText,
-      originalTextHash: reportSemanticTextHash(originalText)
+      originalTextHash: reportSemanticTextHash(originalText),
+      eligible: true
     };
   });
   const identityEvidenceText = JSON.stringify({
@@ -2847,7 +2851,8 @@ function buildPaidV3SemanticAuthorities(input: {
     questionId: null,
     sourceId: null,
     originalText: identityEvidenceText,
-    originalTextHash: reportSemanticTextHash(identityEvidenceText)
+    originalTextHash: reportSemanticTextHash(identityEvidenceText),
+    eligible: true
   };
   const evidence = [...sourceEvidence, ...targetEvidence, ...targetPageEvidence, identityEvidence];
   const observationResults = sources.map((source, index) => ({

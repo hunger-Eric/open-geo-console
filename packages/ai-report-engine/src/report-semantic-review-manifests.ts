@@ -17,6 +17,7 @@ import {
   type ReportSemanticObservationResult,
   type ReportSemanticQuestion,
   type ReportSemanticReviewAuthorityBindings,
+  type ReportSemanticEvidencePolicy,
   type ReportSemanticReviewInput,
   type ReportSemanticReviewReceipt,
   type ReportSemanticSource,
@@ -45,6 +46,7 @@ export interface ReportSemanticManifestFieldSeed {
 }
 
 export interface ReportSemanticManifestSeed {
+  readonly evidencePolicy?: ReportSemanticEvidencePolicy;
   readonly locale: string;
   readonly target: ReportSemanticTargetIdentity;
   readonly expectedModel: ReportSemanticExpectedModel;
@@ -245,12 +247,13 @@ function buildReportSemanticReviewManifest(seed: ReportSemanticManifestSeed, lif
     originalTextHash: reportSemanticTextHash(field.text),
     mutability: field.mutability,
     questionId: field.questionId,
-    allowedEvidenceIds: [...field.allowedEvidenceIds],
-    allowedSourceIds: [...field.allowedSourceIds]
+    allowedEvidenceIds: seed.evidencePolicy ? [] : [...field.allowedEvidenceIds],
+    allowedSourceIds: seed.evidencePolicy ? [] : [...field.allowedSourceIds]
   }));
   return createReportSemanticReviewInput({
     version: "report-semantic-review-v1",
     lifecycle,
+    ...(seed.evidencePolicy ? { evidencePolicy: seed.evidencePolicy } : {}),
     locale: seed.locale,
     target: seed.target,
     expectedModel: seed.expectedModel,
@@ -271,7 +274,7 @@ export function buildFreeV4SemanticReviewManifest(seed: ReportSemanticManifestSe
   return buildReportSemanticReviewManifest(seed, "free_v4");
 }
 export function buildPaidV3SemanticReviewManifest(seed: ReportSemanticManifestSeed): ReportSemanticReviewInput {
-  return buildReportSemanticReviewManifest(seed, "paid_v3");
+  return buildReportSemanticReviewManifest({ ...seed, evidencePolicy: "report_global_v1" }, "paid_v3");
 }
 
 /**

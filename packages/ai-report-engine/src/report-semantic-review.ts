@@ -8,7 +8,7 @@ export function buildReportSemanticReviewSystemPrompt(): string {
     `You are the sole semantic reviewer for ${REPORT_SEMANTIC_REVIEW_CONTRACT}.`,
     "Judge and, where allowed, correct customer prose for natural language, appropriate preservation of brands and technical terms, answer responsiveness, semantic question distinctness, unsupported causal or exaggerated claims, and faithful expression of the supplied evidence.",
     "Return exactly one JSON object and no Markdown, commentary, code fence, or unknown key.",
-    "Copy version, inputHash, providerId, modelId, every ID, every originalTextHash, and every path exactly from the input authority. Never change questions, sources, evidence, observations, entities, hashes, URLs, or non-prose data. Never invent or cite an ID outside the field-owned catalogs.",
+    "Copy version, inputHash, providerId, modelId, every ID, every originalTextHash, and every path exactly from the input authority. Never change questions, sources, evidence, observations, entities, hashes, URLs, or non-prose data. Never invent or cite an ID outside the input catalogs.",
     "The top-level keys are exactly, in this order: version, inputHash, providerId, modelId, fields, questionDistinctness, annotations, overallDecision.",
     "Set version to report-semantic-review-v1. Set inputHash to input.inputHash. Set providerId and modelId to input.expectedModel.providerId and input.expectedModel.modelId.",
     "fields must cover input.fields exactly once and in input order. Each item has exactly: path, originalTextHash, decision, optional correctedText, issueCodes, reason, evidenceIds, sourceIds, retainedOriginalTerms. decision is pass, corrected, or blocked. pass has no correctedText and an empty issueCodes array. corrected is allowed only for a mutable field, must include changed correctedText and nonempty issueCodes. Every correctedText must be natural customer prose in input.locale; preserve brand names, product names, acronyms, model names, and professional terms in their appropriate original form even when they use another language. blocked has no correctedText and nonempty issueCodes. evidenceIds and sourceIds must be subsets of that input field's allowed IDs and must respect question ownership. If either allowedEvidenceIds or allowedSourceIds is nonempty, the field result must return at least one reference across evidenceIds and sourceIds. retainedOriginalTerms is an array of objects with exactly term and reason.",
@@ -29,7 +29,7 @@ export function buildFreeV4ReportSemanticReviewSystemPrompt(input: ReportSemanti
       index,
       path: field.path,
       originalTextHash: field.originalTextHash,
-      mutability: field.mutability, referenceRequirement: field.allowedEvidenceIds.length + field.allowedSourceIds.length ? "at_least_one_exact_local_id" : "none",
+      mutability: field.mutability, referenceRequirement: input.evidencePolicy ? "at_least_one_exact_global_id" : field.allowedEvidenceIds.length + field.allowedSourceIds.length ? "at_least_one_exact_local_id" : "none",
       allowedEvidenceIds: field.allowedEvidenceIds,
       allowedSourceIds: field.allowedSourceIds
     })),
@@ -48,8 +48,12 @@ export function buildFreeV4ReportSemanticReviewSystemPrompt(input: ReportSemanti
   return [
     buildReportSemanticReviewSystemPrompt(),
     "This is a marker-present Free V4 request. Follow the request blueprint below exactly.",
-    "Global catalogs establish known IDs only; they do not widen a field allowlist. Each field result, evidenceUse row, and answer must use only its own listed IDs; a blueprint referenceRequirement of at_least_one_exact_local_id requires at least one exact listed evidenceIds or sourceIds, never both empty. In particular, an answer must not use diagnosis target IDs unless its own answer field allowlist explicitly lists them.",
-    "Blueprint-only index is an ordering aid; omit index from every output field object. Return fields in blueprint order and use only path, originalTextHash, decision, optional correctedText, issueCodes, reason, evidenceIds, sourceIds, retainedOriginalTerms. A mutable corrected field requires correctedText byte-for-byte different from its original text; otherwise use pass. Read-only fields must pass or block.",
+    input.evidencePolicy
+      ? "This is report_global_v1: each field exact schema is path, originalTextHash, decision, optional correctedText, issueCodes, reason, evidenceIds, sourceIds, rejectedEvidence:[{evidenceId,reason}], rejectedSources:[{sourceId,reason}], retainedOriginalTerms. Both rejected arrays are required and may be []. Every non-blocked field, answer, and evidenceUse row must select at least one explicit eligible ID from the report-wide evidence/source catalogs. Field allowlists are non-authoritative compatibility arrays. Never overlap accepted and rejected IDs."
+      : "Global catalogs establish known IDs only; they do not widen a field allowlist. Each field result, evidenceUse row, and answer must use only its own listed IDs; a blueprint referenceRequirement of at_least_one_exact_local_id requires at least one exact listed evidenceIds or sourceIds, never both empty.",
+    input.evidencePolicy
+      ? "Blueprint-only index is an ordering aid; omit index from every output field object. Return fields in blueprint order with path, originalTextHash, decision, optional correctedText, issueCodes, reason, evidenceIds, sourceIds, rejectedEvidence, rejectedSources, retainedOriginalTerms. A mutable corrected field requires correctedText byte-for-byte different from its original text; otherwise use pass. Read-only fields must pass or block."
+      : "Blueprint-only index is an ordering aid; omit index from every output field object. Return fields in blueprint order and use only path, originalTextHash, decision, optional correctedText, issueCodes, reason, evidenceIds, sourceIds, retainedOriginalTerms. A mutable corrected field requires correctedText byte-for-byte different from its original text; otherwise use pass. Read-only fields must pass or block.",
     "Return the complete JSON skeleton and checklist: every top-level key, every field, questionDistinctness, annotations.observationResults, annotations.answers, annotations.evidenceUse, and overallDecision. Do not omit empty arrays or optional values required by the contract.",
     "Free V4 request blueprint (identities and allowlists only; customer prose remains only in the supplied input authority):",
     JSON.stringify(blueprint)
@@ -59,6 +63,18 @@ export function buildFreeV4ReportSemanticReviewSystemPrompt(input: ReportSemanti
 export function buildPaidV3ReportSemanticReviewSystemPrompt(): string {
   return [
     buildReportSemanticReviewSystemPrompt()
+      .replace(
+        "evidenceIds and sourceIds must be subsets of that input field's allowed IDs and must respect question ownership. If either allowedEvidenceIds or allowedSourceIds is nonempty, the field result must return at least one reference across evidenceIds and sourceIds.",
+        "This is report_global_v1: each field exact schema is path, originalTextHash, decision, optional correctedText, issueCodes, reason, evidenceIds, sourceIds, rejectedEvidence:[{evidenceId,reason}], rejectedSources:[{sourceId,reason}], retainedOriginalTerms. Both rejected arrays are required and may be []. evidenceIds and sourceIds must be explicit eligible IDs from the report-wide catalogs, without field ownership or allowlist binding. Every non-blocked field must return at least one accepted reference; accepted and rejected IDs must not overlap."
+      )
+      .replace(
+        "Answer refs must be subsets of the owned answer field catalogs.",
+        "Every non-blocked answer must cite at least one explicit eligible report-global evidence or source ID."
+      )
+      .replace(
+        "annotations.evidenceUse must cover input.fields exactly once and in input order. Each item has exactly path, evidenceIds, sourceIds, reason, using only that field's allowed IDs.",
+        "annotations.evidenceUse must cover input.fields exactly once and in input order. Each non-blocked field must use at least one explicit eligible report-global evidence or source ID."
+      )
       .replace(
         "The top-level keys are exactly, in this order: version, inputHash, providerId, modelId, fields, questionDistinctness, annotations, overallDecision.",
         "The top-level keys are exactly, in this order: version, inputHash, providerId, modelId, fields, questionDistinctness, annotations, sourceSelectionDraft, sourceSelectionDraftHash, overallDecision."
@@ -73,6 +89,7 @@ export function buildPaidV3ReportSemanticReviewSystemPrompt(): string {
 }
 
 export type ReportSemanticReviewLifecycle = "free_v4" | "paid_v3";
+export type ReportSemanticEvidencePolicy = "report_global_v1";
 export type ReportSemanticFieldMutability = "mutable" | "read_only";
 export type ReportSemanticFieldDecision = "pass" | "corrected" | "blocked";
 export type ReportSemanticReviewDecision = "pass" | "corrected" | "blocked";
@@ -115,6 +132,7 @@ export interface ReportSemanticSource {
   readonly canonicalUrl: string;
   readonly originalText: string;
   readonly originalTextHash: string;
+  readonly eligible?: boolean;
 }
 
 export interface ReportSemanticEvidence {
@@ -123,6 +141,7 @@ export interface ReportSemanticEvidence {
   readonly sourceId: string | null;
   readonly originalText: string;
   readonly originalTextHash: string;
+  readonly eligible?: boolean;
 }
 
 export interface ReportSemanticObservationResult {
@@ -166,6 +185,7 @@ export interface ReportSemanticFieldManifestEntry {
 export interface ReportSemanticReviewInputCore {
   readonly version: typeof REPORT_SEMANTIC_REVIEW_CONTRACT;
   readonly lifecycle: ReportSemanticReviewLifecycle;
+  readonly evidencePolicy?: ReportSemanticEvidencePolicy;
   readonly locale: string;
   readonly target: ReportSemanticTargetIdentity;
   readonly expectedModel: ReportSemanticExpectedModel;
@@ -200,6 +220,8 @@ export interface ReportSemanticFieldResult {
   readonly reason: string;
   readonly evidenceIds: readonly string[];
   readonly sourceIds: readonly string[];
+  readonly rejectedEvidence?: readonly { readonly evidenceId: string; readonly reason: string }[];
+  readonly rejectedSources?: readonly { readonly sourceId: string; readonly reason: string }[];
   readonly retainedOriginalTerms: readonly ReportSemanticRetainedTerm[];
 }
 
@@ -316,7 +338,7 @@ export interface AppliedReportSemanticReview {
 }
 
 const INPUT_KEYS = new Set([
-  "version", "lifecycle", "locale", "target", "expectedModel", "questions", "sources", "evidence", "fields",
+  "version", "lifecycle", "evidencePolicy", "locale", "target", "expectedModel", "questions", "sources", "evidence", "fields",
   "observationResults", "entities", "answerSubjects", "sourceSelectionCatalog", "authorityBindings", "nonProseProjectionHash", "inputHash"
 ]);
 const TARGET_KEYS = new Set(["siteKey", "targetUrl", "aliases"]);
@@ -326,8 +348,8 @@ const AUTHORITY_BINDING_KEYS = new Set([
   "publicSourceHash", "providerDiscoveryHash", "technicalFoundationHash", "aiFoundationHash", "evidenceAssetsHash"
 ]);
 const QUESTION_KEYS = new Set(["questionId", "originalText", "originalTextHash"]);
-const SOURCE_KEYS = new Set(["sourceId", "questionId", "canonicalUrl", "originalText", "originalTextHash"]);
-const EVIDENCE_KEYS = new Set(["evidenceId", "questionId", "sourceId", "originalText", "originalTextHash"]);
+const SOURCE_KEYS = new Set(["sourceId", "questionId", "canonicalUrl", "originalText", "originalTextHash", "eligible"]);
+const EVIDENCE_KEYS = new Set(["evidenceId", "questionId", "sourceId", "originalText", "originalTextHash", "eligible"]);
 const OBSERVATION_RESULT_KEYS = new Set(["observationId", "resultId", "questionId", "originalText", "originalTextHash"]);
 const ENTITY_KEYS = new Set(["entityId", "questionId", "kind", "originalText", "originalTextHash"]);
 const ANSWER_SUBJECT_KEYS = new Set(["questionId", "fieldPath"]);
@@ -342,8 +364,11 @@ const OUTPUT_KEYS = new Set([
   "sourceSelectionDraft", "sourceSelectionDraftHash", "overallDecision"
 ]);
 const FIELD_RESULT_KEYS = new Set([
-  "path", "originalTextHash", "decision", "correctedText", "issueCodes", "reason", "evidenceIds", "sourceIds",
+  "path", "originalTextHash", "decision", "correctedText", "issueCodes", "reason", "evidenceIds", "sourceIds", "rejectedEvidence", "rejectedSources",
   "retainedOriginalTerms"
+]);
+const LEGACY_FIELD_RESULT_KEYS = new Set([
+  "path", "originalTextHash", "decision", "correctedText", "issueCodes", "reason", "evidenceIds", "sourceIds", "retainedOriginalTerms"
 ]);
 const RETAINED_TERM_KEYS = new Set(["term", "reason"]);
 const DISTINCTNESS_KEYS = new Set(["decision", "duplicateGroups", "reason"]);
@@ -414,7 +439,7 @@ export function parseReportSemanticReviewOutput(
   const fields = fieldRows.map((row, index) => parseFieldResult(row, input.fields[index]!, input, index));
   assertUnique(fields.map(({ path }) => path), "$reviewOutput.fields paths");
   const questionDistinctness = parseQuestionDistinctness(record.questionDistinctness, input);
-  const annotations = parseAnnotations(record.annotations, input);
+  const annotations = parseAnnotations(record.annotations, input, fields);
   const sourceSelectionDraft = input.sourceSelectionCatalog
     ? parsePaidReviewedSourceSelectionDraft(record.sourceSelectionDraft, input, annotations)
     : undefined;
@@ -623,6 +648,9 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
   const record = requireRecord(value, "$reviewInput");
   requireExact(record.version, REPORT_SEMANTIC_REVIEW_CONTRACT, "$reviewInput.version");
   const lifecycle = requireOneOf(record.lifecycle, ["free_v4", "paid_v3"] as const, "$reviewInput.lifecycle");
+  const evidencePolicy = record.evidencePolicy === undefined
+    ? undefined
+    : (requireExact(record.evidencePolicy, "report_global_v1", "$reviewInput.evidencePolicy"), "report_global_v1" as const);
   const locale = requireBoundedText(record.locale, "$reviewInput.locale", 100);
   const targetRow = strictRecord(record.target, "$reviewInput.target", TARGET_KEYS);
   const target: ReportSemanticTargetIdentity = {
@@ -692,12 +720,12 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
     for (const evidenceId of field.allowedEvidenceIds) {
       const item = evidenceById.get(evidenceId);
       if (!item) throw new TypeError(`$reviewInput.fields ${field.path} allows unknown evidence ${evidenceId}.`);
-      assertCompatibleOwner(field.questionId, item.questionId, `$reviewInput.fields ${field.path} evidence ${evidenceId}`);
+      if (!evidencePolicy) assertCompatibleOwner(field.questionId, item.questionId, `$reviewInput.fields ${field.path} evidence ${evidenceId}`);
     }
     for (const sourceId of field.allowedSourceIds) {
       const source = sourceById.get(sourceId);
       if (!source) throw new TypeError(`$reviewInput.fields ${field.path} allows unknown source ${sourceId}.`);
-      assertCompatibleOwner(field.questionId, source.questionId, `$reviewInput.fields ${field.path} source ${sourceId}`);
+      if (!evidencePolicy) assertCompatibleOwner(field.questionId, source.questionId, `$reviewInput.fields ${field.path} source ${sourceId}`);
     }
   }
   const answerSubjects = requireArray(record.answerSubjects, "$reviewInput.answerSubjects", 3).map((value, index) => {
@@ -751,7 +779,7 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
           for (const evidenceId of allowedEvidenceIds) {
             const item = evidenceById.get(evidenceId);
             if (!item) throw new TypeError(`${path}.allowedEvidenceIds references unknown evidence ${evidenceId}.`);
-            assertCompatibleOwner(questionId, item.questionId, `${path}.allowedEvidenceIds ${evidenceId}`);
+            if (!evidencePolicy) assertCompatibleOwner(questionId, item.questionId, `${path}.allowedEvidenceIds ${evidenceId}`);
           }
           return {
             annotationId: requireBoundedText(row.annotationId, `${path}.annotationId`, MAX_ID_CHARS),
@@ -776,6 +804,7 @@ function parseInputCore(value: unknown): ReportSemanticReviewInputCore {
   return {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
     lifecycle,
+    ...(evidencePolicy ? { evidencePolicy } : {}),
     locale,
     target,
     expectedModel,
@@ -829,7 +858,8 @@ function parseSource(value: unknown, index: number): ReportSemanticSource {
     questionId: requireNullableText(row.questionId, `${path}.questionId`, MAX_ID_CHARS),
     canonicalUrl: requireSafeUrl(row.canonicalUrl, `${path}.canonicalUrl`),
     originalText,
-    originalTextHash
+    originalTextHash,
+    ...(row.eligible === undefined ? {} : { eligible: requireBoolean(row.eligible, `${path}.eligible`) })
   };
 }
 
@@ -844,7 +874,8 @@ function parseEvidence(value: unknown, index: number): ReportSemanticEvidence {
     questionId: requireNullableText(row.questionId, `${path}.questionId`, MAX_ID_CHARS),
     sourceId: requireNullableText(row.sourceId, `${path}.sourceId`, MAX_ID_CHARS),
     originalText,
-    originalTextHash
+    originalTextHash,
+    ...(row.eligible === undefined ? {} : { eligible: requireBoolean(row.eligible, `${path}.eligible`) })
   };
 }
 
@@ -895,7 +926,8 @@ function parseFieldResult(
   index: number
 ): ReportSemanticFieldResult {
   const path = `$reviewOutput.fields[${index}]`;
-  const row = strictRecord(value, path, FIELD_RESULT_KEYS);
+  const global = input.evidencePolicy === "report_global_v1";
+  const row = strictRecord(value, path, global ? FIELD_RESULT_KEYS : LEGACY_FIELD_RESULT_KEYS);
   requireExact(row.path, manifest.path, `${path}.path`);
   requireExact(row.originalTextHash, manifest.originalTextHash, `${path}.originalTextHash`);
   const decision = requireOneOf(row.decision, ["pass", "corrected", "blocked"] as const, `${path}.decision`);
@@ -913,16 +945,27 @@ function parseFieldResult(
   if (decision !== "pass" && issueCodes.length === 0) throw new TypeError(`${path}.issueCodes must explain a non-pass decision.`);
   const evidenceIds = requireUniqueTextArray(row.evidenceIds, `${path}.evidenceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
   const sourceIds = requireUniqueTextArray(row.sourceIds, `${path}.sourceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
-  assertSubset(evidenceIds, manifest.allowedEvidenceIds, `${path}.evidenceIds`);
-  assertSubset(sourceIds, manifest.allowedSourceIds, `${path}.sourceIds`);
-  if (manifest.allowedEvidenceIds.length + manifest.allowedSourceIds.length > 0
+  const evidenceById = new Map(input.evidence.map((item) => [item.evidenceId, item]));
+  const sourceById = new Map(input.sources.map((item) => [item.sourceId, item]));
+  assertSubset(evidenceIds, global ? input.evidence.map(({ evidenceId }) => evidenceId) : manifest.allowedEvidenceIds, `${path}.evidenceIds`);
+  assertSubset(sourceIds, global ? input.sources.map(({ sourceId }) => sourceId) : manifest.allowedSourceIds, `${path}.sourceIds`);
+  if (global) assertGlobalEligibleReferences(evidenceIds, sourceIds, evidenceById, sourceById, path);
+  if (!global && manifest.allowedEvidenceIds.length + manifest.allowedSourceIds.length > 0
       && evidenceIds.length + sourceIds.length === 0) {
     throw new TypeError(`${path} must retain at least one allowed evidence or source reference.`);
   }
-  const evidenceById = new Map(input.evidence.map((item) => [item.evidenceId, item]));
-  const sourceById = new Map(input.sources.map((item) => [item.sourceId, item]));
-  for (const id of evidenceIds) assertCompatibleOwner(manifest.questionId, evidenceById.get(id)!.questionId, `${path}.evidenceIds ${id}`);
-  for (const id of sourceIds) assertCompatibleOwner(manifest.questionId, sourceById.get(id)!.questionId, `${path}.sourceIds ${id}`);
+  if (global && decision !== "blocked" && evidenceIds.length + sourceIds.length === 0) {
+    throw new TypeError(`${path} requires accepted global evidence or source unless blocked.`);
+  }
+  if (!global) {
+    for (const id of evidenceIds) assertCompatibleOwner(manifest.questionId, evidenceById.get(id)!.questionId, `${path}.evidenceIds ${id}`);
+    for (const id of sourceIds) assertCompatibleOwner(manifest.questionId, sourceById.get(id)!.questionId, `${path}.sourceIds ${id}`);
+  }
+  if (global && (row.rejectedEvidence === undefined || row.rejectedSources === undefined)) {
+    throw new TypeError(`${path} must include rejectedEvidence and rejectedSources under report_global_v1.`);
+  }
+  const rejectedEvidence = parseRejectedReferences(row.rejectedEvidence, "evidenceId", evidenceById, evidenceIds, `${path}.rejectedEvidence`);
+  const rejectedSources = parseRejectedReferences(row.rejectedSources, "sourceId", sourceById, sourceIds, `${path}.rejectedSources`);
   const retainedOriginalTerms = requireArray(row.retainedOriginalTerms, `${path}.retainedOriginalTerms`, 500)
     .map((item, termIndex): ReportSemanticRetainedTerm => {
       const termPath = `${path}.retainedOriginalTerms[${termIndex}]`;
@@ -942,8 +985,58 @@ function parseFieldResult(
     reason: requireBoundedText(row.reason, `${path}.reason`, 5_000),
     evidenceIds,
     sourceIds,
+    ...(global || rejectedEvidence.length ? { rejectedEvidence } : {}),
+    ...(global || rejectedSources.length ? { rejectedSources } : {}),
     retainedOriginalTerms
   };
+}
+
+function parseRejectedReferences(
+  value: unknown,
+  idKey: "evidenceId",
+  catalog: ReadonlyMap<string, unknown>,
+  accepted: readonly string[],
+  path: string
+): readonly { readonly evidenceId: string; readonly reason: string }[];
+function parseRejectedReferences(
+  value: unknown,
+  idKey: "sourceId",
+  catalog: ReadonlyMap<string, unknown>,
+  accepted: readonly string[],
+  path: string
+): readonly { readonly sourceId: string; readonly reason: string }[];
+function parseRejectedReferences(
+  value: unknown,
+  idKey: "evidenceId" | "sourceId",
+  catalog: ReadonlyMap<string, unknown>,
+  accepted: readonly string[],
+  path: string
+): readonly ({ readonly evidenceId: string; readonly reason: string } | { readonly sourceId: string; readonly reason: string })[] {
+  if (value === undefined) return [];
+  const rows = requireArray(value, path, MAX_REFS_PER_FIELD);
+  const ids = new Set<string>();
+  return rows.map((value, index) => {
+    const rowPath = `${path}[${index}]`;
+    const row = strictRecord(value, rowPath, new Set([idKey, "reason"]));
+    const id = requireBoundedText(row[idKey], `${rowPath}.${idKey}`, MAX_ID_CHARS);
+    if (!catalog.has(id)) throw new TypeError(`${rowPath} references unknown catalog ID ${id}.`);
+    if (accepted.includes(id)) throw new TypeError(`${rowPath} overlaps an accepted ID ${id}.`);
+    if (ids.has(id)) throw new TypeError(`${path} duplicates ID ${id}.`);
+    ids.add(id);
+    const reason = requireBoundedText(row.reason, `${rowPath}.reason`, 5_000);
+    return idKey === "evidenceId" ? { evidenceId: id, reason } : { sourceId: id, reason };
+  });
+}
+
+function assertGlobalEligibleReferences(
+  evidenceIds: readonly string[],
+  sourceIds: readonly string[],
+  evidenceById: ReadonlyMap<string, ReportSemanticEvidence>,
+  sourceById: ReadonlyMap<string, ReportSemanticSource>,
+  path: string
+): void {
+  for (const id of evidenceIds) if (evidenceById.get(id)?.eligible !== true) throw new TypeError(`${path} accepts evidence ${id} without explicit eligibility.`);
+  for (const id of sourceIds) if (sourceById.get(id)?.eligible !== true) throw new TypeError(`${path} accepts source ${id} without explicit eligibility.`);
 }
 
 function parseQuestionDistinctness(value: unknown, input: ReportSemanticReviewInput): ReportQuestionDistinctnessResult {
@@ -964,7 +1057,7 @@ function parseQuestionDistinctness(value: unknown, input: ReportSemanticReviewIn
   return { decision, duplicateGroups, reason: requireBoundedText(row.reason, `${path}.reason`, 5_000) };
 }
 
-function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): ReportSemanticAnnotations {
+function parseAnnotations(value: unknown, input: ReportSemanticReviewInput, fields: readonly ReportSemanticFieldResult[]): ReportSemanticAnnotations {
   const row = strictRecord(value, "$reviewOutput.annotations", ANNOTATIONS_KEYS);
   const observations = requireArray(row.observationResults, "$reviewOutput.annotations.observationResults", MAX_CATALOG_ROWS);
   if (observations.length !== input.observationResults.length) throw new TypeError("$reviewOutput.annotations.observationResults must cover the input catalog exactly.");
@@ -996,15 +1089,19 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): Rep
     const sourceIds = requireUniqueTextArray(item.sourceIds, `${path}.sourceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
     for (const id of evidenceIds) {
       const evidence = evidenceById.get(id); if (!evidence) throw new TypeError(`${path}.evidenceIds contains unknown reference ${id}.`);
-      assertCompatibleOwner(questionId, evidence.questionId, `${path}.evidenceIds ${id}`);
+      if (!input.evidencePolicy) assertCompatibleOwner(questionId, evidence.questionId, `${path}.evidenceIds ${id}`);
     }
     for (const id of sourceIds) {
       const source = sourceById.get(id); if (!source) throw new TypeError(`${path}.sourceIds contains unknown reference ${id}.`);
-      assertCompatibleOwner(questionId, source.questionId, `${path}.sourceIds ${id}`);
+      if (!input.evidencePolicy) assertCompatibleOwner(questionId, source.questionId, `${path}.sourceIds ${id}`);
     }
     const field = input.fields.find((item) => item.path === subject.fieldPath && item.questionId === questionId)!;
-    assertSubset(evidenceIds, field.allowedEvidenceIds, `${path}.evidenceIds`);
-    assertSubset(sourceIds, field.allowedSourceIds, `${path}.sourceIds`);
+    assertSubset(evidenceIds, input.evidencePolicy ? input.evidence.map(({ evidenceId }) => evidenceId) : field.allowedEvidenceIds, `${path}.evidenceIds`);
+    assertSubset(sourceIds, input.evidencePolicy ? input.sources.map(({ sourceId }) => sourceId) : field.allowedSourceIds, `${path}.sourceIds`);
+    if (input.evidencePolicy) {
+      assertGlobalEligibleReferences(evidenceIds, sourceIds, evidenceById, sourceById, path);
+      if (item.relevance !== "blocked" && evidenceIds.length + sourceIds.length === 0) throw new TypeError(`${path} requires accepted global evidence or source.`);
+    }
     const hasGeo = input.lifecycle === "paid_v3" ||
       item.targetPresence !== undefined ||
       item.targetFirstSentence !== undefined ||
@@ -1045,8 +1142,12 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): Rep
     requireExact(item.path, field.path, `${path}.path`);
     const evidenceIds = requireUniqueTextArray(item.evidenceIds, `${path}.evidenceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
     const sourceIds = requireUniqueTextArray(item.sourceIds, `${path}.sourceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS);
-    assertSubset(evidenceIds, field.allowedEvidenceIds, `${path}.evidenceIds`);
-    assertSubset(sourceIds, field.allowedSourceIds, `${path}.sourceIds`);
+    assertSubset(evidenceIds, input.evidencePolicy ? input.evidence.map(({ evidenceId }) => evidenceId) : field.allowedEvidenceIds, `${path}.evidenceIds`);
+    assertSubset(sourceIds, input.evidencePolicy ? input.sources.map(({ sourceId }) => sourceId) : field.allowedSourceIds, `${path}.sourceIds`);
+    if (input.evidencePolicy) {
+      assertGlobalEligibleReferences(evidenceIds, sourceIds, evidenceById, sourceById, path);
+      if (fields[index]?.decision !== "blocked" && evidenceIds.length + sourceIds.length === 0) throw new TypeError(`${path} requires accepted global evidence or source.`);
+    }
     return { path: field.path, evidenceIds, sourceIds, reason: requireBoundedText(item.reason, `${path}.reason`, 5_000) };
   });
   if (evidenceUse.length !== input.fields.length) throw new TypeError("$reviewOutput.annotations.evidenceUse must cover every field exactly once and in order.");
@@ -1106,7 +1207,8 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput): Rep
     if (evidenceIds.length === 0) {
       throw new TypeError(`${path}.evidenceIds must cite at least one catalog-owned evidence ID.`);
     }
-    assertSubset(evidenceIds, expected.allowedEvidenceIds, `${path}.evidenceIds`);
+    assertSubset(evidenceIds, input.evidencePolicy ? input.evidence.map(({ evidenceId }) => evidenceId) : expected.allowedEvidenceIds, `${path}.evidenceIds`);
+    if (input.evidencePolicy) assertGlobalEligibleReferences(evidenceIds, [], evidenceById, sourceById, path);
     return {
       annotationId: expected.annotationId,
       itemId: expected.itemId,
@@ -1572,6 +1674,11 @@ function requireUniqueTextArray(
 function requireOneOf<const T extends readonly string[]>(value: unknown, allowed: T, path: string): T[number] {
   if (typeof value !== "string" || !allowed.includes(value)) throw new TypeError(`${path} is unsupported.`);
   return value as T[number];
+}
+
+function requireBoolean(value: unknown, path: string): boolean {
+  if (typeof value !== "boolean") throw new TypeError(`${path} must be a boolean.`);
+  return value;
 }
 
 function requireExact(value: unknown, expected: unknown, path: string): void {

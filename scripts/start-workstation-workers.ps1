@@ -1,11 +1,14 @@
 param(
   [switch]$EnableProductionDeep,
   [switch]$SkipBuild,
-  [switch]$PrepareOnly
+  [switch]$PrepareOnly,
+  [switch]$PrepareStagingOnly,
+  [string]$RuntimeInputRoot
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$RuntimeInputRoot = if ([string]::IsNullOrWhiteSpace($RuntimeInputRoot)) { $repoRoot } else { $RuntimeInputRoot }; if (-not (Test-Path -LiteralPath $RuntimeInputRoot -PathType Container)) { throw "Runtime input root is not a directory: $RuntimeInputRoot" }
 $webRoot = Join-Path $repoRoot "apps\web"
 $runtimeDirectory = Join-Path $repoRoot ".data\workstation-docker"
 New-Item -ItemType Directory -Force -Path $runtimeDirectory | Out-Null
@@ -53,6 +56,7 @@ function Write-RuntimeEnv {
     if (Test-Path -LiteralPath $publicSearchPath) { Merge-EnvFile $values $publicSearchPath }
     $values["OGC_DEPLOYMENT_PROFILE"] = "staging"
     $values["VERCEL_ENV"] = "preview"
+    $values["NODE_OPTIONS"] = "--dns-result-order=ipv4first"
   } else {
     Merge-EnvFile $values (Join-Path $repoRoot ".vercel\.env.production.local")
     $values["OGC_DEPLOYMENT_PROFILE"] = "production"
@@ -138,7 +142,14 @@ function Write-RuntimeEnv {
   if ($LASTEXITCODE -ne 0) { throw "Could not restrict permissions on $path." }
 }
 
+$repoRoot = (Resolve-Path -LiteralPath $RuntimeInputRoot).Path; $webRoot = Join-Path $repoRoot "apps\web"
 Write-RuntimeEnv "staging"
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path; $webRoot = Join-Path $repoRoot "apps\web"
+if ($PrepareStagingOnly) {
+  if (-not $PrepareOnly) { throw "-PrepareStagingOnly requires -PrepareOnly." }
+  Write-Host "Docker Desktop staging Worker environment prepared."
+  exit 0
+}
 Write-RuntimeEnv "production"
 
 $productionPath = Join-Path $runtimeDirectory "production.env"
