@@ -146,13 +146,30 @@ fixed web entry for the user to type the site URL and perform any later test.
 - The fixed business entry is
   `https://open-geo-console-staging-itheheda.vercel.app`; a unique Preview is
   artifact identity only and must not be used as the user acceptance site.
+- For this amendment only, the release operator is authorized for Protected
+  Staging Gate 2 Docker work. Read-only preflight may inspect `docker system
+  df`, target-drive free space, Compose/container/image metadata, and exact
+  current/candidate/rollback image IDs plus container references. If
+  `package.json`, `package-lock.json`, `Dockerfile.worker`, the base-image
+  digest, and browser/system dependencies are unchanged, a full Worker build
+  is forbidden; use only a thin source-overlay from the currently accepted
+  exact Worker image, copy the required `apps/` and `packages/` source, and
+  label it with the final candidate full SHA. Recreate only the named Staging
+  Free and Deep Worker services, never Production or commerce. Verify exact
+  image ID/SHA, health, zero restart count, and zero-claim state before the
+  single fixed-alias promotion. Retain current plus one rollback image only;
+  do not prune, clean up, or delete images, volumes, or shared layers.
+  Immediately stop if target free space is below 20 GiB or any identity or
+  rollback evidence is missing. Record before/after free space, `docker system
+  df`, image IDs, container references, and net bytes; after a failed build do
+  not retry until remaining space and retry authority are revalidated.
 - After Gate 3 technical checks, stop at the fixed site. The user—not the
   agent—will type the target URL and initiate any subsequent browser test.
 
 ### Explicit prohibitions for this amendment
 
 The agent must not submit a scan, create a report or job, pay, call a model,
-write the database, replay or mutate historical jobs, run Docker, touch
+write the database, replay or mutate historical jobs, touch
 commerce/payment/refund/email, perform a second report or deployment, or touch
 Production. These actions require a later explicit scope and authorization.
 
