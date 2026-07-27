@@ -2,6 +2,34 @@ import { createHash } from "node:crypto";
 import type { SourceSelectionDiagnosisV1 } from "./source-selection-diagnosis-v1";
 
 export const REPORT_SEMANTIC_REVIEW_CONTRACT = "report-semantic-review-v1" as const;
+export const SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE = "semantic_review_evidence_missing" as const;
+export const SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON = "accepted_global_evidence_or_source_required" as const;
+
+export type ReportSemanticReviewEvidenceMissingManifestKind =
+  | "field"
+  | "answer_annotation"
+  | "evidence_use_annotation";
+
+/** Fail-closed when a non-blocked slot omits accepted global evidence/source under report_global_v1. */
+export class ReportSemanticReviewEvidenceMissingError extends Error {
+  readonly code = SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE;
+  readonly reason: string;
+  readonly fieldPath: string;
+  readonly manifestKind: ReportSemanticReviewEvidenceMissingManifestKind;
+
+  constructor(input: {
+    readonly fieldPath: string;
+    readonly manifestKind: ReportSemanticReviewEvidenceMissingManifestKind;
+    readonly reason?: string;
+  }) {
+    const reason = input.reason ?? SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON;
+    super(`${input.fieldPath} requires accepted global evidence or source unless blocked.`);
+    this.name = "ReportSemanticReviewEvidenceMissingError";
+    this.reason = reason;
+    this.fieldPath = input.fieldPath;
+    this.manifestKind = input.manifestKind;
+  }
+}
 
 export function buildReportSemanticReviewSystemPrompt(): string {
   return [
@@ -955,7 +983,10 @@ function parseFieldResult(
     throw new TypeError(`${path} must retain at least one allowed evidence or source reference.`);
   }
   if (global && decision !== "blocked" && evidenceIds.length + sourceIds.length === 0) {
-    throw new TypeError(`${path} requires accepted global evidence or source unless blocked.`);
+    throw new ReportSemanticReviewEvidenceMissingError({
+      fieldPath: path,
+      manifestKind: "field"
+    });
   }
   if (!global) {
     for (const id of evidenceIds) assertCompatibleOwner(manifest.questionId, evidenceById.get(id)!.questionId, `${path}.evidenceIds ${id}`);
@@ -1100,7 +1131,12 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput, fiel
     assertSubset(sourceIds, input.evidencePolicy ? input.sources.map(({ sourceId }) => sourceId) : field.allowedSourceIds, `${path}.sourceIds`);
     if (input.evidencePolicy) {
       assertGlobalEligibleReferences(evidenceIds, sourceIds, evidenceById, sourceById, path);
-      if (item.relevance !== "blocked" && evidenceIds.length + sourceIds.length === 0) throw new TypeError(`${path} requires accepted global evidence or source.`);
+      if (item.relevance !== "blocked" && evidenceIds.length + sourceIds.length === 0) {
+        throw new ReportSemanticReviewEvidenceMissingError({
+          fieldPath: path,
+          manifestKind: "answer_annotation"
+        });
+      }
     }
     const hasGeo = input.lifecycle === "paid_v3" ||
       item.targetPresence !== undefined ||
@@ -1146,7 +1182,12 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput, fiel
     assertSubset(sourceIds, input.evidencePolicy ? input.sources.map(({ sourceId }) => sourceId) : field.allowedSourceIds, `${path}.sourceIds`);
     if (input.evidencePolicy) {
       assertGlobalEligibleReferences(evidenceIds, sourceIds, evidenceById, sourceById, path);
-      if (fields[index]?.decision !== "blocked" && evidenceIds.length + sourceIds.length === 0) throw new TypeError(`${path} requires accepted global evidence or source.`);
+      if (fields[index]?.decision !== "blocked" && evidenceIds.length + sourceIds.length === 0) {
+        throw new ReportSemanticReviewEvidenceMissingError({
+          fieldPath: path,
+          manifestKind: "evidence_use_annotation"
+        });
+      }
     }
     return { path: field.path, evidenceIds, sourceIds, reason: requireBoundedText(item.reason, `${path}.reason`, 5_000) };
   });

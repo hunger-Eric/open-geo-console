@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   REPORT_SEMANTIC_REVIEW_CONTRACT,
+  ReportSemanticReviewEvidenceMissingError,
+  SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE,
+  SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON,
   applyReportSemanticReview,
   buildFreeV4ReportSemanticReviewSystemPrompt,
   buildPaidV3ReportSemanticReviewSystemPrompt,
@@ -171,7 +174,50 @@ describe("ReportSemanticReview model output", () => {
 
     const zero = globalReview(input);
     reviewFields(zero)[0]!.evidenceIds = [];
-    expect(() => parseReportSemanticReviewOutput(zero, input)).toThrow(/requires accepted global/u);
+    expect(() => parseReportSemanticReviewOutput(zero, input)).toThrow(ReportSemanticReviewEvidenceMissingError);
+    try {
+      parseReportSemanticReviewOutput(zero, input);
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: "ReportSemanticReviewEvidenceMissingError",
+        code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE,
+        reason: SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON,
+        fieldPath: "$reviewOutput.fields[0]",
+        manifestKind: "field",
+        message: expect.stringMatching(/requires accepted global/u)
+      });
+    }
+
+    const missingAnswer = globalReview(input);
+    (missingAnswer.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.evidenceIds = [];
+    (missingAnswer.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.sourceIds = [];
+    expect(() => parseReportSemanticReviewOutput(missingAnswer, input)).toThrow(ReportSemanticReviewEvidenceMissingError);
+    try {
+      parseReportSemanticReviewOutput(missingAnswer, input);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE,
+        reason: SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON,
+        fieldPath: "$reviewOutput.annotations.answers[0]",
+        manifestKind: "answer_annotation"
+      });
+    }
+
+    const missingUse = globalReview(input);
+    (missingUse.annotations as { evidenceUse: Array<Record<string, unknown>> }).evidenceUse[0]!.evidenceIds = [];
+    (missingUse.annotations as { evidenceUse: Array<Record<string, unknown>> }).evidenceUse[0]!.sourceIds = [];
+    expect(() => parseReportSemanticReviewOutput(missingUse, input)).toThrow(ReportSemanticReviewEvidenceMissingError);
+    try {
+      parseReportSemanticReviewOutput(missingUse, input);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE,
+        reason: SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON,
+        fieldPath: "$reviewOutput.annotations.evidenceUse[0]",
+        manifestKind: "evidence_use_annotation"
+      });
+    }
+
     reviewFields(zero)[0]!.decision = "blocked";
     reviewFields(zero)[0]!.issueCodes = ["unsupported"];
     zero.overallDecision = "blocked";

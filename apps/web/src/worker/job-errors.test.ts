@@ -1,8 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { normalizeJobError, PublicSourceRuntimeError, redactDiagnostic, retryDelayMs } from "./job-errors";
-import { ReportLanguageValidationError } from "@open-geo-console/ai-report-engine";
-import { PublicSourceSnapshotUnavailableError } from "./public-source-snapshot-resolver";
+import {
+  ReportLanguageValidationError,
+  ReportSemanticReviewEvidenceMissingError,
+  SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE
+} from "@open-geo-console/ai-report-engine";
+import {
+  MIMO_INVALID_RESPONSE_CODE,
+  ReportV4MimoProviderError
+} from "../report-v4/mimo-provider";
 import { AnswerFirstV3ModelContractInvalidError } from "./answer-first-v3";
+import {
+  MIMO_INVALID_RESPONSE_JOB_CODE,
+  normalizeJobError,
+  PublicSourceRuntimeError,
+  redactDiagnostic,
+  retryDelayMs
+} from "./job-errors";
+import { PublicSourceSnapshotUnavailableError } from "./public-source-snapshot-resolver";
 
 const context = { jobId: "job-1", phase: "public_source_preflight" as const, phaseAttempt: 1, resumeGeneration: 0, configuredSecrets: ["super-secret"] };
 
@@ -74,5 +88,39 @@ describe("job error normalization", () => {
       "stage=semantic_contract; code=invalid_semantic_output; providerAttempts=2; parserPath=$diagnosisSemanticOutput.targetGap"
     ]);
     expect(JSON.stringify(normalized)).not.toMatch(/raw provider|system prompt|evidence prose/i);
+  });
+
+  it("maps structured MiMo invalid response to a transient typed job code", () => {
+    const normalized = normalizeJobError(
+      new ReportV4MimoProviderError(MIMO_INVALID_RESPONSE_CODE, "The MiMo provider response is missing choices."),
+      { ...context, phase: "grounded_answer_synthesis" },
+      new Date("2030-01-01T00:00:00Z")
+    );
+    expect(normalized).toMatchObject({
+      classification: "transient",
+      code: MIMO_INVALID_RESPONSE_JOB_CODE,
+      type: "ReportV4MimoProviderError",
+      message: "The MiMo provider response is missing choices."
+    });
+    expect(normalized.retryableAt).toBeInstanceOf(Date);
+    expect(normalized.code).not.toBe("unexpected_internal_error");
+  });
+
+  it("maps report_global_v1 evidence missing to a permanent typed job code", () => {
+    const normalized = normalizeJobError(
+      new ReportSemanticReviewEvidenceMissingError({
+        fieldPath: "$reviewOutput.fields[0]",
+        manifestKind: "field"
+      }),
+      { ...context, phase: "grounded_answer_synthesis" }
+    );
+    expect(normalized).toMatchObject({
+      classification: "permanent",
+      code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE,
+      type: "ReportSemanticReviewEvidenceMissingError",
+      retryableAt: null
+    });
+    expect(normalized.message).toContain("$reviewOutput.fields[0]");
+    expect(normalized.code).not.toBe("unexpected_internal_error");
   });
 });

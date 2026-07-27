@@ -16,6 +16,10 @@ import {
   resolveReportV4LockedModelRuntime
 } from "./model-runtime-config";
 import {
+  MAX_STRUCTURED_CONTENT_CHARS,
+  MAX_STRUCTURED_CONTENT_PARTS,
+  MIMO_INVALID_RESPONSE_CODE,
+  ReportV4MimoProviderError,
   buildReportV4MimoDiagnosisTokenBudget,
   buildReportV4MimoQuestionTokenBudget,
   createReportV4MimoDiagnosisProvider,
@@ -331,6 +335,322 @@ describe("Report V4 dedicated MiMo provider", () => {
       retryable: true
     });
     expect(malformedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("types structured payload parse failures as mimo_invalid_response without leaking bodies", async () => {
+    const secretBody = "raw-provider-secret-body";
+    const invoker = createReportV4MimoStructuredInvoker({
+      environment: environment(),
+      fetch: vi.fn(async () => new Response(secretBody, { status: 200 }))
+    });
+    await expect(invoker.invoke({
+      operation: "websiteSynthesis",
+      systemText: "Return JSON.",
+      inputText: "input",
+      signal: new AbortController().signal
+    })).rejects.toMatchObject({
+      name: "ReportV4MimoProviderError",
+      code: MIMO_INVALID_RESPONSE_CODE,
+      retryable: true,
+      message: "The MiMo provider returned an invalid response."
+    });
+
+    await expect(createReportV4MimoStructuredInvoker({
+      environment: environment(),
+      fetch: vi.fn(async () => new Response(JSON.stringify({ id: "r1", choices: [] }), { status: 200 }))
+    }).invoke({
+      operation: "websiteSynthesis",
+      systemText: "Return JSON.",
+      inputText: "input",
+      signal: new AbortController().signal
+    })).rejects.toMatchObject({
+      code: MIMO_INVALID_RESPONSE_CODE,
+      message: "The MiMo provider response is missing choices."
+    });
+
+    await expect(createReportV4MimoStructuredInvoker({
+      environment: environment(),
+      fetch: vi.fn(async () => new Response(JSON.stringify({
+        id: "r1",
+        choices: [{ message: { content: null } }]
+      }), { status: 200 }))
+    }).invoke({
+      operation: "websiteSynthesis",
+      systemText: "Return JSON.",
+      inputText: "input",
+      signal: new AbortController().signal
+    })).rejects.toMatchObject({
+      code: MIMO_INVALID_RESPONSE_CODE,
+      message: "The MiMo provider response is missing content."
+    });
+
+    await expect(createReportV4MimoStructuredInvoker({
+      environment: environment(),
+      fetch: vi.fn(async () => new Response(JSON.stringify({
+        id: "r1",
+        choices: [{ message: { content: "not-json{" } }]
+      }), { status: 200 }))
+    }).invoke({
+      operation: "websiteSynthesis",
+      systemText: "Return JSON.",
+      inputText: "input",
+      signal: new AbortController().signal
+    })).rejects.toMatchObject({
+      code: MIMO_INVALID_RESPONSE_CODE,
+      message: "The MiMo provider response content is not valid JSON."
+    });
+
+    try {
+      await invoker.invoke({
+        operation: "websiteSynthesis",
+        systemText: "Return JSON.",
+        inputText: "input",
+        signal: new AbortController().signal
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(ReportV4MimoProviderError);
+      expect(String(error)).not.toContain(secretBody);
+    }
+  });
+
+  it("parses string content and supported text content parts for structured responses", async () => {
+    const stringInvoker = createReportV4MimoStructuredInvoker({
+      environment: environment(),
+      fetch: vi.fn(async () => response({ ok: true, field: "string" }))
+    });
+    await expect(stringInvoker.invoke({
+      operation: "websiteSynthesis",
+      systemText: "Return JSON.",
+      inputText: "input",
+      signal: new AbortController().signal
+    })).resolves.toEqual({ ok: true, field: "string" });
+
+    const partsInvoker = createReportV4MimoStructuredInvoker({
+      environment: environment(),
+      fetch: vi.fn(async () => new Response(JSON.stringify({
+        id: "response-parts",
+        choices: [{
+          message: {
+            content: [
+              { type: "text", text: '{"ok":' },
+              { type: "text", text: "true}" }
+            ]
+          }
+        }]
+      }), { status: 200 }))
+    });
+    await expect(partsInvoker.invoke({
+      operation: "websiteSynthesis",
+      systemText: "Return JSON.",
+      inputText: "input",
+      signal: new AbortController().signal
+    })).resolves.toEqual({ ok: true });
+  });
+
+  it.each([
+    "websiteSynthesis",
+    "questionAnswer",
+    "sourceDiagnosis"
+  ] as const)("applies the same strict content contract for shared %s parsing", async (operation) => {
+    const secret = "raw-provider-secret-body-must-not-leak";
+    const signal = new AbortController().signal;
+    const location = operation === "questionAnswer" ? { country: "CN", region: "CN" } : undefined;
+    const invokeStructured = async (body: unknown) => {
+      const invoker = createReportV4MimoStructuredInvoker({
+        environment: environment(),
+        fetch: vi.fn(async () => new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }))
+      });
+      return invoker.invoke({
+        operation,
+        systemText: "Return JSON.",
+        inputText: "input",
+        signal,
+        ...(location ? { webSearchLocation: location } : {})
+      });
+    };
+
+    await expect(invokeStructured({
+      id: "ok-string",
+      choices: [{ message: { content: JSON.stringify({ ok: true, via: "string" }) } }]
+    })).resolves.toEqual({ ok: true, via: "string" });
+
+    await expect(invokeStructured({
+      id: "ok-parts",
+      choices: [{
+        message: {
+          content: [
+            { type: "text", text: '{"ok":' },
+            { text: 'true,"via":"parts"}', type: "text" }
+          ]
+        }
+      }]
+    })).resolves.toEqual({ ok: true, via: "parts" });
+
+    const rejectCases: Array<{ label: string; body: unknown; message: string | RegExp }> = [
+      {
+        label: "bare string part",
+        body: { id: "x", choices: [{ message: { content: ['{"ok":true}'] } }] },
+        message: "unsupported_content_shape"
+      },
+      {
+        label: "text without type",
+        body: { id: "x", choices: [{ message: { content: [{ text: '{"ok":true}' }] } }] },
+        message: "unsupported_content_shape"
+      },
+      {
+        label: "content field object",
+        body: { id: "x", choices: [{ message: { content: [{ type: "text", content: '{"ok":true}' }] } }] },
+        message: "unsupported_content_shape"
+      },
+      {
+        label: "extra tool_calls field",
+        body: {
+          id: "x",
+          choices: [{
+            message: {
+              content: [{ type: "text", text: '{"ok":true}', tool_calls: [{ id: "c1" }] }]
+            }
+          }]
+        },
+        message: "unsupported_content_shape"
+      },
+      {
+        label: "unknown extra field",
+        body: {
+          id: "x",
+          choices: [{
+            message: {
+              content: [{ type: "text", text: '{"ok":true}', meta: "x" }]
+            }
+          }]
+        },
+        message: "unsupported_content_shape"
+      },
+      {
+        label: "tool_call part",
+        body: {
+          id: "x",
+          choices: [{ message: { content: [{ type: "tool_call", text: '{"ok":true}' }, { type: "text", text: '{"ok":true}' }] } }]
+        },
+        message: "unsupported_content_shape"
+      },
+      {
+        label: "unknown type",
+        body: { id: "x", choices: [{ message: { content: [{ type: "image", text: '{"ok":true}' }] } }] },
+        message: "unsupported_content_shape"
+      },
+      {
+        label: "empty text",
+        body: { id: "x", choices: [{ message: { content: [{ type: "text", text: "" }] } }] },
+        message: "unsupported_content_shape"
+      },
+      {
+        label: "mixed legal and illegal",
+        body: {
+          id: "x",
+          choices: [{
+            message: {
+              content: [
+                { type: "text", text: '{"ok":' },
+                { type: "tool_result", text: "true}" }
+              ]
+            }
+          }]
+        },
+        message: "unsupported_content_shape"
+      },
+      {
+        label: "empty array",
+        body: { id: "x", choices: [{ message: { content: [] } }] },
+        message: "unsupported_content_shape"
+      },
+      {
+        label: "parts over limit",
+        body: {
+          id: "x",
+          choices: [{
+            message: {
+              content: Array.from({ length: MAX_STRUCTURED_CONTENT_PARTS + 1 }, () => ({ type: "text", text: "a" }))
+            }
+          }]
+        },
+        message: "content_parts_limit_exceeded"
+      },
+      {
+        label: "chars over limit",
+        body: {
+          id: "x",
+          choices: [{
+            message: {
+              content: [
+                { type: "text", text: "a".repeat(MAX_STRUCTURED_CONTENT_CHARS) },
+                { type: "text", text: "b" }
+              ]
+            }
+          }]
+        },
+        message: "content_length_limit_exceeded"
+      }
+    ];
+
+    for (const sample of rejectCases) {
+      try {
+        await invokeStructured(sample.body);
+        throw new Error(`expected rejection for ${sample.label}`);
+      } catch (error) {
+        expect(error, sample.label).toBeInstanceOf(ReportV4MimoProviderError);
+        expect(error).toMatchObject({
+          code: MIMO_INVALID_RESPONSE_CODE,
+          retryable: true
+        });
+        expect(String((error as Error).message)).toMatch(sample.message);
+        expect(JSON.stringify(error)).not.toContain(secret);
+        expect(String(error)).not.toContain(secret);
+      }
+    }
+
+    if (operation === "questionAnswer") {
+      const questionProvider = createReportV4MimoQuestionAnswerProvider({
+        environment: environment(),
+        fetch: vi.fn(async () => new Response(JSON.stringify({
+          id: "q-reject",
+          choices: [{ message: { content: [{ type: "tool_call", text: secret }] }, annotations: [] }]
+        }), { status: 200 }))
+      });
+      await expect(questionProvider.answerWithSources(questionInput())).rejects.toMatchObject({
+        name: "ReportV4QuestionProviderError",
+        code: "temporary_provider",
+        retryable: true
+      });
+      try {
+        await questionProvider.answerWithSources(questionInput());
+      } catch (error) {
+        expect(String(error)).not.toContain(secret);
+      }
+    }
+
+    if (operation === "sourceDiagnosis") {
+      const diagnosisProvider = createReportV4MimoDiagnosisProvider({
+        environment: environment(),
+        fetch: vi.fn(async () => new Response(JSON.stringify({
+          id: "d-reject",
+          choices: [{ message: { content: [{ type: "image", text: secret }] } }]
+        }), { status: 200 }))
+      });
+      await expect(diagnosisProvider.generate(diagnosisRequest("diagnose"))).rejects.toMatchObject({
+        name: "ReportV4DiagnosisProviderError",
+        code: "temporary_provider",
+        retryable: true
+      });
+      try {
+        await diagnosisProvider.generate(diagnosisRequest("diagnose"));
+      } catch (error) {
+        expect(String(error)).not.toContain(secret);
+      }
+    }
   });
 
   it("binds question ownership locally and retains only canonical same-response annotations", async () => {

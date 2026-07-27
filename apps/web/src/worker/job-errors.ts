@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
+import {
+  ReportSemanticReviewEvidenceMissingError,
+  SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE
+} from "@open-geo-console/ai-report-engine";
 import type { ScanJobPhase } from "./job-state";
 
 export type JobFailureClassification = "transient" | "operator_repairable" | "target_limitation" | "permanent";
+
+export const MIMO_INVALID_RESPONSE_JOB_CODE = "mimo_invalid_response" as const;
 
 export class JobError extends Error {
   constructor(
@@ -73,11 +79,16 @@ export function normalizeJobError(error: unknown, context: JobErrorContext, now 
   const known = error instanceof JobError ? error : null;
   const source = error instanceof Error ? error : new Error("Non-error value thrown by job execution.");
   const languageValidationFailure = source.name === "ReportLanguageValidationError";
+  const typedBoundary = resolveTypedBoundaryError(error);
   const secrets = context.configuredSecrets ?? [];
   const message = redactDiagnostic(source.message || "Unexpected internal error.", secrets, 1_000);
   const stack = source.stack ? redactDiagnostic(source.stack, secrets) : null;
-  const classification = known?.classification ?? (languageValidationFailure ? "operator_repairable" : classifyUnknown(source));
-  const code = known?.code ?? (languageValidationFailure ? "report_language_validation_failed" : "unexpected_internal_error");
+  const classification = known?.classification
+    ?? typedBoundary?.classification
+    ?? (languageValidationFailure ? "operator_repairable" : classifyUnknown(source));
+  const code = known?.code
+    ?? typedBoundary?.code
+    ?? (languageValidationFailure ? "report_language_validation_failed" : "unexpected_internal_error");
   const causes = collectCauses(source, secrets);
   const fingerprint = createHash("sha256").update(JSON.stringify({
     code, type: source.name || "Error", phase: context.phase, message: normalizeFingerprintMessage(message)
@@ -86,6 +97,23 @@ export function normalizeJobError(error: unknown, context: JobErrorContext, now 
     classification, code, type: source.name || "Error", message, stack, causes, fingerprint,
     retryableAt: classification === "transient" ? new Date(now.getTime() + retryDelayMs(context.phaseAttempt, fingerprint)) : null
   };
+}
+
+/** Maps free-teaser review boundary errors that are not JobError subclasses. */
+function resolveTypedBoundaryError(error: unknown): { code: string; classification: JobFailureClassification } | null {
+  if (error instanceof ReportSemanticReviewEvidenceMissingError) {
+    return { code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE, classification: "permanent" };
+  }
+  if (error && typeof error === "object") {
+    const row = error as { name?: unknown; code?: unknown };
+    if (row.name === "ReportSemanticReviewEvidenceMissingError" || row.code === SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE) {
+      return { code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE, classification: "permanent" };
+    }
+    if (row.name === "ReportV4MimoProviderError" && row.code === MIMO_INVALID_RESPONSE_JOB_CODE) {
+      return { code: MIMO_INVALID_RESPONSE_JOB_CODE, classification: "transient" };
+    }
+  }
+  return null;
 }
 
 export function retryDelayMs(phaseAttempt: number, fingerprint = ""): number {

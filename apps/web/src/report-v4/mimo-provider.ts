@@ -37,7 +37,16 @@ type ReportV4MimoBaseUrl =
 const PROVIDER_SAFETY_MARGIN_TOKENS = 4_096;
 const MAX_DIAGNOSIS_INPUT_LENGTH = 80_000;
 
-type ProviderErrorCode = ReportV4QuestionProviderErrorCode & ReportV4DiagnosisProviderErrorCode;
+/** Shared transport/auth codes plus structured-payload parse failures. */
+export type ReportV4MimoProviderErrorCode =
+  | (ReportV4QuestionProviderErrorCode & ReportV4DiagnosisProviderErrorCode)
+  | "mimo_invalid_response";
+
+type ProviderErrorCode = ReportV4MimoProviderErrorCode;
+
+export const MIMO_INVALID_RESPONSE_CODE = "mimo_invalid_response" as const;
+export const MAX_STRUCTURED_CONTENT_PARTS = 128;
+export const MAX_STRUCTURED_CONTENT_CHARS = 1_000_000;
 
 export interface ReportV4MimoProviderConfig {
   readonly baseUrl: ReportV4MimoBaseUrl;
@@ -98,7 +107,10 @@ export class ReportV4MimoProviderError extends Error {
     super(message);
     this.name = "ReportV4MimoProviderError";
     this.code = code;
-    this.retryable = code === "transport" || code === "rate_limited" || code === "temporary_provider";
+    this.retryable = code === "transport"
+      || code === "rate_limited"
+      || code === "temporary_provider"
+      || code === MIMO_INVALID_RESPONSE_CODE;
   }
 }
 
@@ -270,7 +282,10 @@ function createProviderContext(dependencies: ProviderDependencies): ProviderCont
         try {
           payload = JSON.parse(await response.text());
         } catch {
-          throw new ReportV4MimoProviderError("temporary_provider", "The MiMo provider returned an invalid response.");
+          throw new ReportV4MimoProviderError(
+            MIMO_INVALID_RESPONSE_CODE,
+            "The MiMo provider returned an invalid response."
+          );
         }
         const parsed = parseProviderPayload(payload);
         const completedAt = now().toISOString();
@@ -340,19 +355,70 @@ function parseProviderPayload(payload: unknown): {
   readonly annotations: readonly unknown[];
   readonly providerResponseId: string | null;
 } {
+  let root: Record<string, unknown>;
   try {
-    const root = record(payload);
-    if (!Array.isArray(root.choices) || root.choices.length < 1) throw new TypeError();
-    const choice = record(root.choices[0]);
-    const message = record(choice.message);
-    if (typeof message.content !== "string") throw new TypeError();
-    const value = JSON.parse(message.content) as unknown;
-    const annotations = Array.isArray(message.annotations) ? message.annotations : [];
-    const providerResponseId = root.id == null ? null : boundedText(root.id, "provider response id", 500);
-    return { value, annotations, providerResponseId };
+    root = record(payload);
   } catch {
-    throw new ReportV4MimoProviderError("temporary_provider", "The MiMo provider returned an invalid response.");
+    throw mimoInvalidResponse("The MiMo provider returned an invalid response.");
   }
+  if (!Array.isArray(root.choices) || root.choices.length < 1) {
+    throw mimoInvalidResponse("The MiMo provider response is missing choices.");
+  }
+  let message: Record<string, unknown>;
+  try {
+    message = record(record(root.choices[0]).message);
+  } catch {
+    throw mimoInvalidResponse("The MiMo provider returned an invalid response.");
+  }
+  const contentText = extractMessageContent(message.content);
+  let value: unknown;
+  try {
+    value = JSON.parse(contentText) as unknown;
+  } catch {
+    throw mimoInvalidResponse("The MiMo provider response content is not valid JSON.");
+  }
+  const annotations = Array.isArray(message.annotations) ? message.annotations : [];
+  let providerResponseId: string | null;
+  try {
+    providerResponseId = root.id == null ? null : boundedText(root.id, "provider response id", 500);
+  } catch {
+    throw mimoInvalidResponse("The MiMo provider returned an invalid response.");
+  }
+  return { value, annotations, providerResponseId };
+}
+
+/** Strict string or `{ type: "text", text }` parts only; preventive, not historical proof. */
+function extractMessageContent(content: unknown): string {
+  if (content == null || content === "") throw mimoInvalidResponse("The MiMo provider response is missing content.");
+  if (typeof content === "string") {
+    if (content.length > MAX_STRUCTURED_CONTENT_CHARS) throw mimoInvalidResponse("content_length_limit_exceeded");
+    return content;
+  }
+  if (!Array.isArray(content) || content.length < 1) throw mimoInvalidResponse("unsupported_content_shape");
+  if (content.length > MAX_STRUCTURED_CONTENT_PARTS) throw mimoInvalidResponse("content_parts_limit_exceeded");
+  let totalChars = 0;
+  const parts: string[] = [];
+  for (const part of content) {
+    if (typeof part === "string" || !part || typeof part !== "object" || Array.isArray(part)) {
+      throw mimoInvalidResponse("unsupported_content_shape");
+    }
+    const row = part as Record<string, unknown>;
+    const keys = Object.keys(row);
+    if (keys.length !== 2 || !keys.includes("type") || !keys.includes("text")) {
+      throw mimoInvalidResponse("unsupported_content_shape");
+    }
+    if (row.type !== "text" || typeof row.text !== "string" || row.text.length < 1) {
+      throw mimoInvalidResponse("unsupported_content_shape");
+    }
+    totalChars += row.text.length;
+    if (totalChars > MAX_STRUCTURED_CONTENT_CHARS) throw mimoInvalidResponse("content_length_limit_exceeded");
+    parts.push(row.text);
+  }
+  return parts.join("");
+}
+
+function mimoInvalidResponse(message: string): ReportV4MimoProviderError {
+  return new ReportV4MimoProviderError(MIMO_INVALID_RESPONSE_CODE, message);
 }
 
 function parseWebSearchLocation(
@@ -514,11 +580,18 @@ function statusError(status: number): ReportV4MimoProviderError {
 
 function mapQuestionError(error: unknown): unknown {
   if (!(error instanceof ReportV4MimoProviderError)) return error;
+  // Question provider codes exclude mimo_invalid_response; map to temporary for local retry.
+  if (error.code === MIMO_INVALID_RESPONSE_CODE) {
+    return new ReportV4QuestionProviderError("temporary_provider", error.message);
+  }
   return new ReportV4QuestionProviderError(error.code, error.message);
 }
 
 function mapDiagnosisError(error: unknown): unknown {
   if (!(error instanceof ReportV4MimoProviderError)) return error;
+  if (error.code === MIMO_INVALID_RESPONSE_CODE) {
+    return new ReportV4DiagnosisProviderError("temporary_provider", error.message);
+  }
   return new ReportV4DiagnosisProviderError(error.code, error.message);
 }
 
