@@ -1,96 +1,22 @@
 import {
-  analyzeLogs,
+  analyzeParsedLogs,
   parseLogs,
-  type LogAnalysisResult,
   type NormalizedLogEntry
 } from "@open-geo-console/log-parser";
-import * as simulatorEngine from "@/simulator";
-
-export interface SimulatorRunRequest {
-  sourceUrl?: string;
-  url?: string;
-  [key: string]: unknown;
-}
-
-export interface SimulatorRunResponse {
-  runId: string;
-  sourceUrl: string;
-  generatedAt: string;
-  attempted: unknown[];
-  synthetic: boolean;
-}
-
-export interface MatchLogsRequest {
-  runId?: string;
-  attempted?: unknown;
-  logInput?: string;
-}
-
-export interface AttemptedEntry {
-  id: string;
-  method: string;
-  path?: string;
-  url?: string;
-  userAgent?: string;
-  marker?: string;
-  operator?: string;
-  bot?: string;
-}
-
-export interface ObservedMatch {
-  attemptId: string;
-  method: string;
-  path: string;
-  status: number;
-  timestamp: string;
-  userAgent?: string;
-  matchReasons: string[];
-}
-
-export interface MissingAttempt {
-  attemptId: string;
-  method: string;
-  path?: string;
-  userAgent?: string;
-  reasons: string[];
-}
-
-export interface LogComparisonResult {
-  runId: string;
-  attemptedCount: number;
-  observedMatchCount: number;
-  signals: {
-    parsedLines: number;
-    hasUserAgent: boolean;
-    hasRunMarker: boolean;
-  };
-  warnings: string[];
-  observedMatches: ObservedMatch[];
-  missingAttempted: MissingAttempt[];
-}
-
-type SimulatorModule = Record<string, unknown>;
-type SimulatorRunFunction = (input: SimulatorRunRequest) => Promise<unknown> | unknown;
-type SimulatorMatchFunction = (...args: unknown[]) => Promise<unknown> | unknown;
-
-const runExportCandidates = [
-  "runExternalCrawlerSimulation",
-  "runExternalAiCrawlerSimulator",
-  "runExternalCrawlerSimulator",
-  "runSimulator",
-  "simulateCrawlerRun",
-  "simulateExternalAiCrawlers",
-  "createSimulatorRun"
-];
-
-const matchExportCandidates = [
-  "compareSimulatorRunWithLogEntries",
-  "matchSimulatorRunLogs",
-  "matchSimulatorLogs",
-  "compareSimulatorRunToLogs",
-  "compareSimulatorRunWithLogs",
-  "compareAttemptedToObservedLogs"
-];
+import {
+  compareSimulatorAttemptsWithLogEntries,
+  runExternalCrawlerSimulation,
+  type SimulatorAttempt
+} from "@/simulator";
+import {
+  isSimulatorApiAttempt,
+  type SimulatorApiAttempt,
+  type SimulatorComparisonResult,
+  type SimulatorMatchRequest,
+  type SimulatorMatchResponse,
+  type SimulatorRunRequest,
+  type SimulatorRunResponse
+} from "@/simulator/contracts";
 
 export class SimulatorInputError extends Error {
   constructor(
@@ -101,98 +27,48 @@ export class SimulatorInputError extends Error {
   }
 }
 
-export class SimulatorEngineUnavailableError extends Error {
-  public readonly code = "simulator_engine_unavailable";
+export async function readJsonRequest(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    throw new SimulatorInputError("invalid_json", "Request body must be valid JSON.");
+  }
 }
 
-export async function runSimulator(input: SimulatorRunRequest): Promise<SimulatorRunResponse> {
-  const sourceUrl = normalizeSourceUrl(input.sourceUrl ?? input.url);
-  const simulatorModule = simulatorEngine as SimulatorModule;
-  const run = pickFunction<SimulatorRunFunction>(simulatorModule, runExportCandidates);
+export async function runSimulator(input: unknown): Promise<SimulatorRunResponse> {
+  const request = parseRunRequest(input);
+  const result = await runExternalCrawlerSimulation({ sourceUrl: request.sourceUrl });
 
-  if (!run) {
-    throw new SimulatorEngineUnavailableError(
-      `Simulator engine must export one of: ${runExportCandidates.join(", ")}.`
-    );
-  }
-
-  const rawResult = await run({ ...input, sourceUrl });
-  return normalizeRunResponse(rawResult, sourceUrl);
+  return {
+    runId: result.runId,
+    sourceUrl: result.sourceUrl,
+    generatedAt: result.generatedAt,
+    attempted: result.attempted.map(toApiAttempt)
+  };
 }
 
-export async function maybeRunSimulatorMatcher(input: {
-  runId: string;
-  attempted: AttemptedEntry[];
-  logInput: string;
-  analysis: LogAnalysisResult;
-  entries: NormalizedLogEntry[];
-}): Promise<unknown | undefined> {
-  const simulatorModule = simulatorEngine as SimulatorModule;
-  const match = pickNamedFunction<SimulatorMatchFunction>(simulatorModule, matchExportCandidates);
-  if (!match) {
-    return undefined;
-  }
+export function analyzeSimulatorLogs(input: unknown): SimulatorMatchResponse {
+  const request = parseMatchRequest(input);
+  const entries = parseLogs(request.logInput);
+  const analysis = analyzeParsedLogs(request.logInput, entries);
 
-  if (match.name === "compareSimulatorRunWithLogEntries") {
-    return await match.fn(
-      { runId: input.runId, attempted: input.attempted },
-      input.entries.map((entry) => ({
-        path: entry.path,
-        userAgent: entry.userAgent,
-        status: entry.status,
-        timestamp: entry.timestamp
-      }))
-    );
-  }
-
-  return await match.fn(input);
-}
-
-export function analyzeSimulatorLogs(input: MatchLogsRequest): {
-  analysis: LogAnalysisResult;
-  attempted: AttemptedEntry[];
-  entries: NormalizedLogEntry[];
-  comparison: LogComparisonResult;
-} {
-  if (!input.runId || input.runId.trim() === "") {
-    throw new SimulatorInputError("missing_run_id", "runId is required.");
-  }
-  if (typeof input.logInput !== "string") {
-    throw new SimulatorInputError("missing_log_input", "logInput is required.");
-  }
-
-  const attempted = normalizeAttempted(input.attempted);
-  const entries = parseLogs(input.logInput);
-  const analysis = analyzeLogs(input.logInput);
-  const comparison = buildLogComparison(input.runId, attempted, entries, analysis);
-
-  return { analysis, attempted, entries, comparison };
+  return {
+    analysis,
+    comparison: buildLogComparison(request, entries, analysis.totalLines)
+  };
 }
 
 export function buildLogComparison(
-  runId: string,
-  attempted: AttemptedEntry[],
+  request: SimulatorMatchRequest,
   entries: NormalizedLogEntry[],
-  analysis: LogAnalysisResult
-): LogComparisonResult {
-  const observedMatches: ObservedMatch[] = [];
-  const matchedAttemptIds = new Set<string>();
+  totalLines: number
+): SimulatorComparisonResult {
+  const attempts = compareSimulatorAttemptsWithLogEntries(request.runId, request.attempted, entries);
   const hasUserAgent = entries.some((entry) => Boolean(entry.userAgent));
-  const hasRunMarker = entries.some((entry) => entryHasRunMarker(entry, runId));
-
-  for (const attempt of attempted) {
-    const matches = entries
-      .map((entry) => matchAttemptToEntry(attempt, entry, runId))
-      .filter((match): match is ObservedMatch => match !== null);
-
-    if (matches.length > 0) {
-      matchedAttemptIds.add(attempt.id);
-      observedMatches.push(...matches);
-    }
-  }
-
+  const hasRunMarker = entries.some((entry) => hasRunMarkerFor(entry.path, request.runId));
   const warnings: string[] = [];
-  if (entries.length === 0 && analysis.totalLines > 0) {
+
+  if (entries.length === 0 && totalLines > 0) {
     warnings.push("no_parseable_log_entries");
   }
   if (!hasUserAgent && entries.length > 0) {
@@ -203,36 +79,21 @@ export function buildLogComparison(
   }
 
   return {
-    runId,
-    attemptedCount: attempted.length,
-    observedMatchCount: observedMatches.length,
+    runId: request.runId,
+    attemptedCount: attempts.length,
+    observedCount: attempts.filter((attempt) => attempt.matched).length,
     signals: {
       parsedLines: entries.length,
       hasUserAgent,
       hasRunMarker
     },
     warnings,
-    observedMatches,
-    missingAttempted: attempted
-      .filter((attempt) => !matchedAttemptIds.has(attempt.id))
-      .map((attempt) => ({
-        attemptId: attempt.id,
-        method: attempt.method,
-        path: attempt.path,
-        userAgent: attempt.userAgent,
-        reasons: missingReasons(attempt, hasUserAgent, hasRunMarker)
-      }))
+    attempts: attempts.map(({ attempt, matched, matches }) => ({
+      attemptId: attempt.id,
+      matched,
+      matches
+    }))
   };
-}
-
-export function normalizeAttempted(value: unknown): AttemptedEntry[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((entry, index) => normalizeAttempt(entry, index))
-    .filter((entry): entry is AttemptedEntry => entry !== null);
 }
 
 export function isNetworkFailure(error: unknown): boolean {
@@ -240,185 +101,69 @@ export function isNetworkFailure(error: unknown): boolean {
   return /fetch failed|network|ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN/i.test(message);
 }
 
-function normalizeSourceUrl(value: unknown): string {
-  if (typeof value !== "string" || value.trim() === "") {
+function parseRunRequest(value: unknown): SimulatorRunRequest {
+  if (!isRecord(value) || typeof value.sourceUrl !== "string" || value.sourceUrl.trim() === "") {
     throw new SimulatorInputError("missing_source_url", "sourceUrl is required.");
   }
 
-  const url = new URL(value.startsWith("http") ? value : `https://${value}`);
-  if (!["http:", "https:"].includes(url.protocol)) {
+  let sourceUrl: URL;
+  try {
+    sourceUrl = new URL(value.sourceUrl);
+  } catch {
+    throw new SimulatorInputError("invalid_source_url", "sourceUrl must be a valid URL.");
+  }
+  if (!['http:', 'https:'].includes(sourceUrl.protocol)) {
     throw new SimulatorInputError("unsupported_source_url", "sourceUrl must use HTTP or HTTPS.");
   }
-  url.hash = "";
-  return url.href;
+  sourceUrl.hash = "";
+  return { sourceUrl: sourceUrl.href };
 }
 
-function pickFunction<TFunction>(
-  module: SimulatorModule,
-  candidates: string[]
-): TFunction | undefined {
-  return pickNamedFunction<TFunction>(module, candidates)?.fn;
-}
-
-function pickNamedFunction<TFunction>(
-  module: SimulatorModule,
-  candidates: string[]
-): { name: string; fn: TFunction } | undefined {
-  for (const candidate of candidates) {
-    if (typeof module[candidate] === "function") {
-      return { name: candidate, fn: module[candidate] as TFunction };
-    }
+function parseMatchRequest(value: unknown): SimulatorMatchRequest {
+  if (!isRecord(value) || typeof value.runId !== "string" || value.runId.trim() === "") {
+    throw new SimulatorInputError("missing_run_id", "runId is required.");
   }
-  if (typeof module.default === "function") {
-    return { name: "default", fn: module.default as TFunction };
+  if (typeof value.logInput !== "string") {
+    throw new SimulatorInputError("missing_log_input", "logInput is required.");
   }
-  return undefined;
-}
-
-function normalizeRunResponse(rawResult: unknown, sourceUrl: string): SimulatorRunResponse {
-  const result = isRecord(rawResult) ? rawResult : {};
-  const attempted = Array.isArray(result.attempted) ? result.attempted : [];
-
-  return {
-    runId: stringValue(result.runId) ?? crypto.randomUUID(),
-    sourceUrl: stringValue(result.sourceUrl) ?? sourceUrl,
-    generatedAt: stringValue(result.generatedAt) ?? new Date().toISOString(),
-    attempted,
-    synthetic: booleanValue(result.synthetic) ?? booleanValue(result.simulated) ?? true
-  };
-}
-
-function normalizeAttempt(value: unknown, index: number): AttemptedEntry | null {
-  if (!isRecord(value)) {
-    return null;
+  if (!Array.isArray(value.attempted)) {
+    throw new SimulatorInputError("invalid_attempted", "attempted must be an array.");
   }
-
-  const url = stringValue(value.url);
-  const path = stringValue(value.path) ?? pathFromUrl(url);
-  const userAgent = stringValue(value.userAgent) ?? stringValue(value.user_agent);
-  const method = (stringValue(value.method) ?? "GET").toUpperCase();
-  const id =
-    stringValue(value.id) ??
-    stringValue(value.requestId) ??
-    stringValue(value.attemptId) ??
-    `${method}:${path ?? url ?? "request"}:${userAgent ?? "no-user-agent"}:${index}`;
-
-  return {
-    id,
-    method,
-    path,
-    url,
-    userAgent,
-    marker:
-      stringValue(value.marker) ??
-      stringValue(value.runMarker) ??
-      stringValue(value.ogcRun) ??
-      stringValue(value.ogc_run),
-    operator: stringValue(value.operator),
-    bot: stringValue(value.bot)
-  };
-}
-
-function matchAttemptToEntry(
-  attempt: AttemptedEntry,
-  entry: NormalizedLogEntry,
-  runId: string
-): ObservedMatch | null {
-  const reasons: string[] = [];
-
-  if (entryHasRunMarker(entry, runId)) {
-    reasons.push("ogc_run");
-  }
-  if (attempt.path && pathsEquivalent(attempt.path, entry.path)) {
-    reasons.push("path");
-  }
-  if (attempt.userAgent && entry.userAgent === attempt.userAgent) {
-    reasons.push("user_agent");
-  }
-  if (attempt.method === entry.method.toUpperCase()) {
-    reasons.push("method");
-  }
-
-  const hasObservedAttemptMatch =
-    reasons.includes("ogc_run") && reasons.includes("path") && reasons.includes("user_agent");
-  if (!hasObservedAttemptMatch) {
-    return null;
+  if (!value.attempted.every(isSimulatorApiAttempt)) {
+    throw new SimulatorInputError(
+      "invalid_attempted_entry",
+      "Every attempted entry must include id, method, path, and userAgent."
+    );
   }
 
   return {
-    attemptId: attempt.id,
-    method: entry.method,
-    path: entry.path,
-    status: entry.status,
-    timestamp: entry.timestamp,
-    userAgent: entry.userAgent,
-    matchReasons: reasons
+    runId: value.runId,
+    attempted: value.attempted,
+    logInput: value.logInput
   };
 }
 
-function missingReasons(
-  attempt: AttemptedEntry,
-  hasUserAgent: boolean,
-  hasRunMarker: boolean
-): string[] {
-  const reasons: string[] = [];
-  if (!hasRunMarker) {
-    reasons.push("no_ogc_run_marker_observed");
-  }
-  if (attempt.userAgent && !hasUserAgent) {
-    reasons.push("no_user_agent_observed");
-  }
-  if (reasons.length === 0) {
-    reasons.push("no_matching_observed_log_entry");
-  }
-  return reasons;
+function toApiAttempt(attempt: SimulatorAttempt, index: number): SimulatorApiAttempt {
+  return {
+    id: `${attempt.ruleId}:${attempt.path}:${index}`,
+    method: "GET",
+    path: attempt.path,
+    url: attempt.url,
+    userAgent: attempt.userAgent,
+    ruleId: attempt.ruleId,
+    operator: attempt.operator,
+    bot: attempt.bot
+  };
 }
 
-function entryHasRunMarker(entry: NormalizedLogEntry, runId: string): boolean {
-  return (
-    queryValue(entry.path, "ogc_run") === runId ||
-    queryValue(entry.path, "ogc_run_id") === runId ||
-    entry.path.includes(`ogc_run=${encodeURIComponent(runId)}`) ||
-    entry.path.includes(`ogc_run=${runId}`)
-  );
-}
-
-function pathsEquivalent(left: string, right: string): boolean {
-  return stripQuery(left) === stripQuery(right);
-}
-
-function stripQuery(path: string): string {
-  return path.split("?")[0] ?? path;
-}
-
-function pathFromUrl(value: string | undefined): string | undefined {
-  if (!value) {
-    return undefined;
-  }
+function hasRunMarkerFor(path: string, runId: string): boolean {
   try {
-    return new URL(value).pathname;
+    return new URL(path, "https://open-geo-console.local").searchParams.get("ogc_run") === runId;
   } catch {
-    return value.startsWith("/") ? value : undefined;
+    return false;
   }
-}
-
-function queryValue(path: string, key: string): string | null {
-  try {
-    const url = new URL(path, "https://open-geo-console.local");
-    return url.searchParams.get(key);
-  } catch {
-    return null;
-  }
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-function booleanValue(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

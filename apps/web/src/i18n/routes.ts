@@ -8,6 +8,8 @@ export type LocaleRoutingAction =
 const NON_LOCALIZED_PREFIXES = ["/api", "/_next"];
 const PUBLIC_FILE_PATTERN = /\/[^/]+\.[^/]+$/;
 
+export const INTERFACE_LOCALE_HEADER = "x-ogc-interface-locale";
+
 function splitHref(href: string): { hash: string; pathname: string; query: string } {
   const [beforeHash = "", hash = ""] = href.split("#", 2);
   const [pathname = "", query = ""] = beforeHash.split("?", 2);
@@ -70,12 +72,24 @@ export function withLocale(locale: Locale, href: string): string {
   }
 
   const stripped = stripLocaleFromPathname(pathname);
-  const localizedPathname = stripped.pathname === "/" ? `/${locale}` : `/${locale}${stripped.pathname}`;
+  const prefix = locale === defaultLocale ? "" : `/${locale}`;
+  const localizedPathname = stripped.pathname === "/" ? prefix || "/" : `${prefix}${stripped.pathname}`;
   return `${localizedPathname}${query}${hash}`;
 }
 
 export function switchLocale(pathname: string, locale: Locale): string {
   return withLocale(locale, pathname);
+}
+
+export function getLocaleAlternates(locale: Locale, pathname: string) {
+  return {
+    canonical: withLocale(locale, pathname),
+    languages: {
+      "zh-CN": withLocale("zh", pathname),
+      en: withLocale("en", pathname),
+      "x-default": withLocale(defaultLocale, pathname)
+    }
+  };
 }
 
 export function getLocaleRoutingAction(pathname: string): LocaleRoutingAction {
@@ -85,19 +99,15 @@ export function getLocaleRoutingAction(pathname: string): LocaleRoutingAction {
     return { kind: "next" };
   }
 
-  if (normalized === "/") {
-    return { kind: "redirect", pathname: `/${defaultLocale}` };
-  }
-
   const stripped = stripLocaleFromPathname(normalized);
 
-  if (stripped.locale) {
-    return {
-      kind: "rewrite",
-      locale: stripped.locale,
-      pathname: stripped.pathname
-    };
+  if (stripped.locale === defaultLocale) {
+    return { kind: "redirect", pathname: stripped.pathname };
   }
 
-  return { kind: "next" };
+  if (stripped.locale) {
+    return { kind: "next" };
+  }
+
+  return { kind: "rewrite", locale: defaultLocale, pathname: normalized };
 }

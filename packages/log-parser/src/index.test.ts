@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { analyzeLogs, parseCloudflareJsonLine, parseNginxCombinedLine } from "./index";
+import {
+  analyzeLogs,
+  buildBotEvidenceSummary,
+  parseCloudflareJsonLine,
+  parseNginxCombinedLine
+} from "./index";
 
 describe("log parser", () => {
   it("parses Nginx combined lines and aggregates AI crawler hits", () => {
@@ -13,6 +18,7 @@ describe("log parser", () => {
     expect(result.totalLines).toBe(3);
     expect(result.parsedLines).toBe(2);
     expect(result.aiCrawlerHits).toBe(2);
+    expect(result.visits[0]?.timestamp).toBe("2026-07-08T01:10:11.000Z");
     expect(result.aggregates).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ operator: "OpenAI", bot: "GPTBot", path: "/llms.txt" }),
@@ -195,5 +201,35 @@ describe("log parser", () => {
 
   it("rejects malformed Nginx lines", () => {
     expect(parseNginxCombinedLine("not an access log")).toBeNull();
+  });
+
+  it("builds a deterministic, share-safe bot evidence summary", () => {
+    const input = [
+      '203.0.113.1 - - [08/Jul/2026:09:10:11 +0800] "GET /private/path HTTP/1.1" 200 12 "-" "GPTBot/1.0"',
+      '203.0.113.2 - - [08/Jul/2026:09:11:11 +0800] "GET /about HTTP/1.1" 200 12 "-" "ClaudeBot"'
+    ].join("\n");
+
+    const summary = buildBotEvidenceSummary(
+      analyzeLogs(input),
+      "2026-07-10T00:00:00.000Z"
+    );
+
+    expect(summary).toMatchObject({
+      analysisVersion: 1,
+      analyzedAt: "2026-07-10T00:00:00.000Z",
+      totalLines: 2,
+      parsedLines: 2,
+      aiCrawlerHits: 2,
+      detectedBotCount: 2
+    });
+    expect(summary.bots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ruleId: "openai-gptbot", hits: 1 }),
+        expect.objectContaining({ ruleId: "anthropic-claudebot", hits: 1 })
+      ])
+    );
+    expect(JSON.stringify(summary)).not.toContain("203.0.113");
+    expect(JSON.stringify(summary)).not.toContain("/private/path");
+    expect(JSON.stringify(summary)).not.toContain("GPTBot/1.0");
   });
 });

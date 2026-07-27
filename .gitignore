@@ -13,3 +13,7 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 .codegraph/
+*.tsbuildinfo
+.playwright-cli/
+output/
+.superpowers/

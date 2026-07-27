@@ -1,6 +1,9 @@
-import { matchUserAgent } from "@open-geo-console/crawler-rules";
 import { parseLogs } from "@open-geo-console/log-parser";
-import { DEFAULT_SIMULATOR_TARGET, selectSimulatorBotProfiles } from "./index";
+import {
+  compareSimulatorAttemptsWithLogEntries,
+  DEFAULT_SIMULATOR_TARGET,
+  selectSimulatorBotProfiles
+} from "./index";
 
 const PLAN_PATH = "/llms.txt";
 const RUN_MARKER_PARAM = "ogc_run";
@@ -64,44 +67,31 @@ export function matchExternalAiCrawlerSimulationLogs(input: {
   attempts: ExternalAiCrawlerSimulationAttempt[];
   logs: string;
 }): ExternalAiCrawlerSimulationLogMatchResult {
-  const observed = parseLogs(input.logs).flatMap((entry) => {
-    const entryPath = new URL(entry.path, "https://log.local");
-    if (entryPath.searchParams.get(RUN_MARKER_PARAM) !== input.runId) {
-      return [];
-    }
-
-    const match = matchUserAgent(entry.userAgent);
-    if (!match || !entry.userAgent) {
-      return [];
-    }
-
-    const matchingAttempt = input.attempts.find((attempt) => {
-      const attemptPath = new URL(attempt.path, "https://attempt.local");
-      return attemptPath.pathname === entryPath.pathname && attempt.userAgent === entry.userAgent;
-    });
-    if (!matchingAttempt) {
-      return [];
-    }
-
-    return [
-      {
-        runId: input.runId,
-        operator: match.operator,
-        bot: match.bot,
-        path: entry.path,
-        status: entry.status,
-        userAgent: entry.userAgent
-      }
-    ];
-  });
-
-  const observedAttemptKeys = new Set(
-    observed.map((match) => `${new URL(match.path, "https://log.local").pathname}|${match.userAgent}`)
+  const comparisons = compareSimulatorAttemptsWithLogEntries(
+    input.runId,
+    input.attempts.map((attempt, index) => ({ ...attempt, id: `attempt-${index}` })),
+    parseLogs(input.logs)
   );
-  const unobserved = input.attempts.filter((attempt) => {
-    const attemptPath = new URL(attempt.path, "https://attempt.local");
-    return !observedAttemptKeys.has(`${attemptPath.pathname}|${attempt.userAgent}`);
-  });
+  const observed = comparisons.flatMap(({ attempt, matches }) =>
+    matches.map((entry) => ({
+      runId: input.runId,
+      operator: attempt.operator,
+      bot: attempt.bot,
+      path: entry.path,
+      status: entry.status ?? 0,
+      userAgent: entry.userAgent ?? attempt.userAgent
+    }))
+  );
+  const unobserved = comparisons
+    .filter((comparison) => !comparison.matched)
+    .map(({ attempt }) => ({
+      runId: attempt.runId,
+      operator: attempt.operator,
+      bot: attempt.bot,
+      path: attempt.path,
+      url: attempt.url,
+      userAgent: attempt.userAgent
+    }));
 
   return {
     runId: input.runId,

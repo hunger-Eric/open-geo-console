@@ -66,14 +66,15 @@ describe("external AI crawler simulator evidence contract", () => {
     });
 
     expect(result.analysis.aiCrawlerHits).toBe(1);
-    expect(result.comparison.observedMatchCount).toBe(1);
-    expect(result.comparison.observedMatches[0]).toMatchObject({
+    expect(result.comparison.observedCount).toBe(1);
+    expect(result.comparison.attempts[0]).toMatchObject({
       attemptId: "attempt-gptbot",
-      path: "/llms.txt?ogc_run=ogc_test_observed",
-      userAgent: "GPTBot/1.0",
-      matchReasons: expect.arrayContaining(["ogc_run", "path", "user_agent"])
+      matched: true,
+      matches: [expect.objectContaining({
+        path: "/llms.txt?ogc_run=ogc_test_observed",
+        userAgent: "GPTBot/1.0"
+      })]
     });
-    expect(result.comparison.missingAttempted).toEqual([]);
   });
 
   it("keeps matching logs without the run marker attempted but not observed", () => {
@@ -93,13 +94,9 @@ describe("external AI crawler simulator evidence contract", () => {
     expect(result.analysis.aiCrawlerHits).toBe(1);
     expect(result.comparison.signals.hasRunMarker).toBe(false);
     expect(result.comparison.warnings).toEqual(expect.arrayContaining(["missing_ogc_run_marker"]));
-    expect(result.comparison.observedMatchCount).toBe(0);
-    expect(result.comparison.observedMatches).toEqual([]);
-    expect(result.comparison.missingAttempted).toEqual([
-      expect.objectContaining({
-        attemptId: "attempt-claudebot",
-        reasons: expect.arrayContaining(["no_ogc_run_marker_observed"])
-      })
+    expect(result.comparison.observedCount).toBe(0);
+    expect(result.comparison.attempts).toEqual([
+      expect.objectContaining({ attemptId: "attempt-claudebot", matched: false })
     ]);
   });
 
@@ -122,10 +119,9 @@ describe("external AI crawler simulator evidence contract", () => {
 
     expect(result.analysis.aiCrawlerHits).toBe(0);
     expect(result.comparison.signals.hasRunMarker).toBe(true);
-    expect(result.comparison.observedMatchCount).toBe(0);
-    expect(result.comparison.observedMatches).toEqual([]);
-    expect(result.comparison.missingAttempted).toEqual([
-      expect.objectContaining({ attemptId: "attempt-gptbot" })
+    expect(result.comparison.observedCount).toBe(0);
+    expect(result.comparison.attempts).toEqual([
+      expect.objectContaining({ attemptId: "attempt-gptbot", matched: false })
     ]);
   });
 

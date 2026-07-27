@@ -1,0 +1,8 @@
+import {describe,expect,it,vi} from "vitest";
+import {createTestSourceForensicReport} from "./testing";
+import {createPublicSourceArtifactReadinessGate} from "./artifact-readiness";
+const technical={url:"https://customer-logistics.example/",scannedAt:"2030-01-01T00:00:00.000Z",score:70,pages:[],findings:[],recommendations:[],machineReadableAssets:{robotsTxt:{url:"https://customer-logistics.example/robots.txt",present:true,summary:"ok"},sitemapXml:{url:"https://customer-logistics.example/sitemap.xml",present:true,summary:"ok"},llmsTxt:{url:"https://customer-logistics.example/llms.txt",present:false,summary:"missing"}}};
+describe("public-source artifact readiness",()=>{
+  it("materializes the canonical V2 component and requires a real PDF signature",async()=>{const materializePdf=vi.fn(async({html}:{html:string})=>{expect(html).toContain("公开来源取证报告");return new TextEncoder().encode("%PDF-fixture");});const gate=createPublicSourceArtifactReadinessGate({loadTechnicalReport:async()=>technical,materializePdf});await expect(gate.verify(createTestSourceForensicReport())).resolves.toBeUndefined();expect(materializePdf).toHaveBeenCalledOnce();});
+  it("fails closed when the appendix or PDF is unavailable",async()=>{await expect(createPublicSourceArtifactReadinessGate({loadTechnicalReport:async()=>null,materializePdf:async()=>new Uint8Array()}).verify(createTestSourceForensicReport())).rejects.toThrow(/appendix/);await expect(createPublicSourceArtifactReadinessGate({loadTechnicalReport:async()=>technical,materializePdf:async()=>new Uint8Array()}).verify(createTestSourceForensicReport())).rejects.toThrow(/PDF/);});
+});

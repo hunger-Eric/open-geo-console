@@ -1,0 +1,11 @@
+[build]
+  command = "npm run build --workspace apps/web"
+  publish = "apps/web/.next"
+
+[build.environment]
+  NODE_VERSION = "22"
+  NPM_VERSION = "11.9.0"
+
+# In Netlify, keep the Base directory unset (repository root) and set the
+# Package directory to apps/web. The OpenNext adapter is selected by Netlify's
+# built-in Next.js framework detection.

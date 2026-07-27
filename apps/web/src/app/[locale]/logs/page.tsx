@@ -1,6 +1,16 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { LogAnalyzer } from "@/components/log-analyzer";
-import { getDictionary, isLocale } from "@/i18n";
+import { getDictionary, getLocaleAlternates, isLocale } from "@/i18n";
+
+export async function generateMetadata({
+  params
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  return isLocale(locale) ? { alternates: getLocaleAlternates(locale, "/logs") } : {};
+}
 
 export default async function LogsPage({
   params
@@ -14,7 +24,7 @@ export default async function LogsPage({
   const dictionary = getDictionary(locale);
 
   return (
-    <main className="mx-auto max-w-7xl px-5 py-8">
+    <main className="mx-auto max-w-6xl px-5 py-8 sm:px-8 sm:py-12">
       <LogAnalyzer dictionary={dictionary} locale={locale} />
     </main>
   );
