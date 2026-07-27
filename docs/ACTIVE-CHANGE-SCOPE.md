@@ -9,9 +9,11 @@ All earlier sections are context only.
 
 ## Current authority: Free V4 semantic review batching (APPROVED)
 
-**Status: `APPROVED` (implementation complete locally)** — user approved this
-allowlist ("同意", 2026-07-27). Free V4 batched semantic review is implemented
-in-tree; commit/push/deploy only when separately authorized.
+**Status: `APPROVED` (implemented + Staging Gates 1–3)** — user approved the
+allowlist ("同意") and later "提交并 push + Staging 部署" (2026-07-27).
+Candidate `7b44722b819a5ab20853ca1c666b1bdde9951fe3` is on `origin/main` and
+Protected Staging (Web + Free/Deep Workers). **Gate 4 real-flow not
+authorized.**
 
 ### Problem (evidence-backed; not an estimate)
 
