@@ -1,10 +1,16 @@
 import { createHash } from "node:crypto";
 import {
+  AiClientError,
   ModelTokenBudgetError,
   ReportSemanticReviewEvidenceMissingError,
   SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE
 } from "@open-geo-console/ai-report-engine";
 import type { ScanJobPhase } from "./job-state";
+import {
+  ProviderDiscoveryDeadlineExceededError,
+  ProviderDiscoveryPipelineContractError,
+  ProviderDiscoveryResumeIdentityMismatchError
+} from "./provider-discovery-pipeline";
 
 export type JobFailureClassification = "transient" | "operator_repairable" | "target_limitation" | "permanent";
 
@@ -98,7 +104,7 @@ export function normalizeJobError(error: unknown, context: JobErrorContext, now 
   const known = error instanceof JobError ? error : null;
   const source = error instanceof Error ? error : new Error("Non-error value thrown by job execution.");
   const languageValidationFailure = source.name === "ReportLanguageValidationError";
-  const typedBoundary = resolveTypedBoundaryError(error);
+  const typedBoundary = resolveTypedBoundaryError(error, context);
   const secrets = context.configuredSecrets ?? [];
   const message = redactDiagnostic(source.message || "Unexpected internal error.", secrets, 1_000);
   const stack = source.stack ? redactDiagnostic(source.stack, secrets) : null;
@@ -118,21 +124,51 @@ export function normalizeJobError(error: unknown, context: JobErrorContext, now 
   };
 }
 
-/** Maps provider/review boundary errors that are not JobError subclasses. */
-function resolveTypedBoundaryError(error: unknown): { code: string; classification: JobFailureClassification } | null {
+/** Maps provider/review/discovery boundary errors that are not JobError subclasses. */
+function resolveTypedBoundaryError(
+  error: unknown,
+  context: JobErrorContext
+): { code: string; classification: JobFailureClassification } | null {
   if (error instanceof ReportSemanticReviewEvidenceMissingError) {
     return { code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE, classification: "permanent" };
   }
   if (error instanceof ModelTokenBudgetError) {
     return { code: "model_token_budget_rejected", classification: "permanent" };
   }
+  if (error instanceof ProviderDiscoveryResumeIdentityMismatchError) {
+    return { code: "provider_discovery_resume_identity_mismatch", classification: "permanent" };
+  }
+  if (error instanceof ProviderDiscoveryDeadlineExceededError) {
+    return { code: "provider_discovery_deadline_exceeded", classification: "transient" };
+  }
+  if (error instanceof ProviderDiscoveryPipelineContractError) {
+    return { code: "provider_discovery_pipeline_contract", classification: "permanent" };
+  }
+  if (error instanceof AiClientError) {
+    return mapAiClientJobBoundary(error, context.phase);
+  }
   if (error && typeof error === "object") {
-    const row = error as { name?: unknown; code?: unknown };
+    const row = error as { name?: unknown; code?: unknown; status?: unknown; message?: unknown };
     if (row.name === "ReportSemanticReviewEvidenceMissingError" || row.code === SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE) {
       return { code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE, classification: "permanent" };
     }
     if (row.name === "ModelTokenBudgetError") {
       return { code: "model_token_budget_rejected", classification: "permanent" };
+    }
+    // Duck-typed AiClient / discovery names for cross-bundle rethrows without shared class identity.
+    if (row.name === "AiClientError") {
+      const status = typeof row.status === "number" ? row.status : undefined;
+      const message = typeof row.message === "string" ? row.message : "";
+      return mapAiClientJobBoundary({ status, message }, context.phase);
+    }
+    if (row.name === "ProviderDiscoveryResumeIdentityMismatchError") {
+      return { code: "provider_discovery_resume_identity_mismatch", classification: "permanent" };
+    }
+    if (row.name === "ProviderDiscoveryDeadlineExceededError") {
+      return { code: "provider_discovery_deadline_exceeded", classification: "transient" };
+    }
+    if (row.name === "ProviderDiscoveryPipelineContractError") {
+      return { code: "provider_discovery_pipeline_contract", classification: "permanent" };
     }
     if (row.name === "ReportV4MimoProviderError" && typeof row.code === "string") {
       const mapped = MIMO_PROVIDER_JOB_CLASSIFICATION[row.code];
@@ -173,6 +209,36 @@ function resolveTypedBoundaryError(error: unknown): { code: string; classificati
     }
   }
   return null;
+}
+
+/** Deep claim-extraction (progress 96) vs generic AI client transport taxonomy. */
+function mapAiClientJobBoundary(
+  error: { status?: number; message: string },
+  phase: ScanJobPhase
+): { code: string; classification: JobFailureClassification } {
+  const prefix = phase === "provider_claim_extraction" ? "provider_claim_extraction" : "ai_client";
+  if (error.status === 401 || error.status === 403) {
+    return { code: `${prefix}_authentication`, classification: "operator_repairable" };
+  }
+  if (error.status === 429) {
+    return { code: `${prefix}_rate_limited`, classification: "transient" };
+  }
+  if (typeof error.status === "number" && error.status >= 500) {
+    return { code: `${prefix}_temporary`, classification: "transient" };
+  }
+  if (/aborted|timed out/i.test(error.message)) {
+    return { code: `${prefix}_timeout`, classification: "transient" };
+  }
+  if (/invalid json|non-json|envelope|no message content/i.test(error.message)) {
+    return { code: `${prefix}_invalid_response`, classification: "transient" };
+  }
+  if (/base URL|API key|model is required/i.test(error.message)) {
+    return { code: `${prefix}_configuration`, classification: "operator_repairable" };
+  }
+  if (typeof error.status === "number" && error.status >= 400) {
+    return { code: `${prefix}_configuration`, classification: "operator_repairable" };
+  }
+  return { code: `${prefix}_transport`, classification: "transient" };
 }
 
 export function retryDelayMs(phaseAttempt: number, fingerprint = ""): number {

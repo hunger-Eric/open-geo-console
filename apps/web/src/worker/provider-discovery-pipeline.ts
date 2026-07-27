@@ -159,6 +159,12 @@ function hashCandidates(values: readonly ProviderCandidateQueryIdentity[]): stri
 function hashClaims(values: readonly ProviderClaim[]): string { return sha([...values].sort((a,b)=>a.claimId.localeCompare(b.claimId)).map(({claimId})=>claimId)); }
 function sha(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 function timestamp(value:string,label:string):Date{const date=new Date(value);if(!Number.isFinite(date.getTime()))throw new ProviderDiscoveryPipelineContractError(`${label} is invalid.`);return date;}
-export class ProviderDiscoveryResumeIdentityMismatchError extends Error {}
-export class ProviderDiscoveryDeadlineExceededError extends Error {}
-export class ProviderDiscoveryPipelineContractError extends Error {}
+export class ProviderDiscoveryResumeIdentityMismatchError extends Error {
+  constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = "ProviderDiscoveryResumeIdentityMismatchError"; }
+}
+export class ProviderDiscoveryDeadlineExceededError extends Error {
+  constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = "ProviderDiscoveryDeadlineExceededError"; }
+}
+export class ProviderDiscoveryPipelineContractError extends Error {
+  constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = "ProviderDiscoveryPipelineContractError"; }
+}

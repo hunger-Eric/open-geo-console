@@ -1,13 +1,76 @@
 # Active Change Scope Lock
 
-Status: `APPROVED` (Phase 4 complete — local; push authorized with same user turn)
+Status: `APPROVED` (Phase 5 complete — local; no push/deploy unless asked)
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: 96% local fault matrix — Phase 4 (APPROVED / complete)`.
+`Current authority: 96% local fault matrix — Phase 5 (APPROVED / complete)`.
 All earlier sections are context only.
 
-## Current authority: 96% local fault matrix — Phase 4 (APPROVED / complete)
+## Current authority: 96% local fault matrix — Phase 5 (APPROVED / complete)
+
+**Status: `APPROVED` (complete)** — user opened optional Phase 5 Deep
+`provider_claim_extraction` progress=96 taxonomy (2026-07-27). Phase 1–4 on
+`origin/main` (`5039adc`). **No deploy / push** unless separately authorized.
+
+### Phase 5 objective
+
+Deep paid discovery marks `provider_claim_extraction` at **progress 96** (via
+`providerPhaseProgress`). Failures in that lane must map to **durable, redacted
+job codes** instead of undifferentiated `unexpected_internal_error` when the
+class is known:
+
+1. `ProviderDiscoveryResumeIdentityMismatchError` → permanent
+2. `ProviderDiscoveryDeadlineExceededError` → transient
+3. `ProviderDiscoveryPipelineContractError` → permanent
+4. `AiClientError` during phase `provider_claim_extraction` →
+   `provider_claim_extraction_*` (auth / rate / temporary / timeout /
+   invalid_response / configuration / transport) with correct
+   permanent/transient/operator_repairable
+5. Same `AiClientError` outside that phase → `ai_client_*` (shared transport
+   taxonomy; no raw response body in job diagnostics)
+
+Do **not** redesign the discovery state machine, change progress numbers,
+mutate historical jobs, or log provider response bodies.
+
+### Phase 5 production allowlist
+
+- `apps/web/src/worker/job-errors.ts`
+- `apps/web/src/worker/provider-discovery-pipeline.ts` — only durable `name` on
+  the three ProviderDiscovery* error classes (no pipeline logic change)
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+
+### Phase 5 tests allowlist
+
+- `apps/web/src/worker/job-errors.test.ts`
+
+### Phase 5 budgets
+
+- Production: `+80/-20` (job-errors + pipeline error names)
+- Tests: `+120/-20`
+- External: all `0` (no push/deploy unless asked)
+
+### Phase 5 delivered
+
+| Boundary | Job code | Classification |
+|----------|----------|----------------|
+| Resume identity mismatch | `provider_discovery_resume_identity_mismatch` | permanent |
+| Hard deadline | `provider_discovery_deadline_exceeded` | transient |
+| Pipeline contract | `provider_discovery_pipeline_contract` | permanent |
+| AiClient at `provider_claim_extraction` | `provider_claim_extraction_{authentication,rate_limited,temporary,timeout,invalid_response,configuration,transport}` | auth/config operator_repairable; rest transient |
+| AiClient other phases | `ai_client_*` (same suffixes) | same |
+
+Progress numbers and discovery state machine unchanged. Phase 4 still clears
+public progress when stage is `failed`.
+
+### Phase 5 stop
+
+No processor progress table rewrite, free-teaser, commerce, Docker, deploy,
+historical Job mutation, or public-search adapter production rewrites.
+
+---
+
+## Prior authority: 96% local fault matrix — Phase 4 (APPROVED / complete)
 
 **Status: `APPROVED` (complete)** — user authorized "push、开 Phase 4"
 (2026-07-27). Phase 1–3 on `origin/main` (`14809f6`). **No deploy** unless

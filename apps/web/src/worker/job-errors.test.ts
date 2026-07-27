@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AiClientError,
   ModelTokenBudgetError,
   ReportLanguageValidationError,
   ReportSemanticReviewEvidenceMissingError,
@@ -27,6 +28,11 @@ import {
   FreeTeaserQ1IncompleteError
 } from "./report-v4-free-teaser";
 import { ReportV4QuestionProviderError } from "./report-v4-question-answerer";
+import {
+  ProviderDiscoveryDeadlineExceededError,
+  ProviderDiscoveryPipelineContractError,
+  ProviderDiscoveryResumeIdentityMismatchError
+} from "./provider-discovery-pipeline";
 import { PublicSourceSnapshotUnavailableError } from "./public-source-snapshot-resolver";
 
 const context = { jobId: "job-1", phase: "public_source_preflight" as const, phaseAttempt: 1, resumeGeneration: 0, configuredSecrets: ["super-secret"] };
@@ -251,6 +257,86 @@ describe("job error normalization", () => {
       code: "model_token_budget_rejected",
       type: "ModelTokenBudgetError",
       retryableAt: null
+    });
+  });
+
+  it("maps deep provider discovery pipeline identity mismatch to permanent (progress-96 lane)", () => {
+    const normalized = normalizeJobError(
+      new ProviderDiscoveryResumeIdentityMismatchError("Provider claim set changed during resume."),
+      { ...context, phase: "provider_claim_extraction" }
+    );
+    expect(normalized).toMatchObject({
+      classification: "permanent",
+      code: "provider_discovery_resume_identity_mismatch",
+      type: "ProviderDiscoveryResumeIdentityMismatchError",
+      retryableAt: null
+    });
+    expect(normalized.code).not.toBe("unexpected_internal_error");
+  });
+
+  it("maps provider discovery deadline exceeded to transient", () => {
+    const normalized = normalizeJobError(
+      new ProviderDiscoveryDeadlineExceededError("Provider discovery hard deadline was reached."),
+      { ...context, phase: "provider_claim_extraction" },
+      new Date("2030-01-01T00:00:00Z")
+    );
+    expect(normalized).toMatchObject({
+      classification: "transient",
+      code: "provider_discovery_deadline_exceeded",
+      type: "ProviderDiscoveryDeadlineExceededError"
+    });
+    expect(normalized.retryableAt).toBeInstanceOf(Date);
+  });
+
+  it("maps provider discovery pipeline contract failure to permanent", () => {
+    const normalized = normalizeJobError(
+      new ProviderDiscoveryPipelineContractError("Provider discovery stage is invalid."),
+      { ...context, phase: "provider_passage_selection" }
+    );
+    expect(normalized).toMatchObject({
+      classification: "permanent",
+      code: "provider_discovery_pipeline_contract",
+      type: "ProviderDiscoveryPipelineContractError",
+      retryableAt: null
+    });
+  });
+
+  it.each([
+    [401, "provider_claim_extraction_authentication", "operator_repairable", false],
+    [429, "provider_claim_extraction_rate_limited", "transient", true],
+    [503, "provider_claim_extraction_temporary", "transient", true],
+    [undefined, "provider_claim_extraction_timeout", "transient", true]
+  ] as const)(
+    "maps AiClientError at provider_claim_extraction (progress 96) status %s to %s",
+    (status, jobCode, classification, hasRetry) => {
+      const message = status == null
+        ? "AI request was aborted or timed out."
+        : `AI request failed with HTTP ${status}.`;
+      const normalized = normalizeJobError(
+        new AiClientError(message, status == null ? {} : { status }),
+        { ...context, phase: "provider_claim_extraction" }
+      );
+      expect(normalized).toMatchObject({
+        classification,
+        code: jobCode,
+        type: "AiClientError"
+      });
+      expect(normalized.code).not.toBe("unexpected_internal_error");
+      if (hasRetry) expect(normalized.retryableAt).toBeInstanceOf(Date);
+      else expect(normalized.retryableAt).toBeNull();
+      expect(JSON.stringify(normalized)).not.toMatch(/sk-|api[_-]?key|response body/i);
+    }
+  );
+
+  it("maps AiClientError outside claim extraction to ai_client_* codes", () => {
+    const normalized = normalizeJobError(
+      new AiClientError("The model returned invalid JSON."),
+      { ...context, phase: "grounded_answer_synthesis" }
+    );
+    expect(normalized).toMatchObject({
+      classification: "transient",
+      code: "ai_client_invalid_response",
+      type: "AiClientError"
     });
   });
 });
