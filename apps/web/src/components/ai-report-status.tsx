@@ -17,7 +17,8 @@ export interface PublicJobStatus {
   stage: "queued" | "discovering" | "planning" | "fetching" | "analyzing" | "synthesizing" | "completed" | "completed_limited" | "failed";
   state: PublicReportState;
   executionState: "queued" | "running" | "retry_wait" | "repair_wait" | "completed" | "failed";
-  progress: number;
+  /** Null when public state is unavailable (failed jobs must not advertise mid-run %). */
+  progress: number | null;
   plannedPages: number;
   successfulPages: number;
   failedPages: number;
@@ -154,7 +155,8 @@ export function AiReportStatus({
   }
 
   const job = payload?.job ?? null;
-  const progress = Math.max(0, Math.min(99, job?.progress ?? 0));
+  // Progress bar is only rendered while generating; clamp for display only.
+  const progress = job?.progress == null ? 0 : Math.max(0, Math.min(99, job.progress));
   const queueDescription = job ? getQueueDescription(job, dictionary) : null;
   const statusDescription = payload
     ? getStatusDescription(payload, dictionary, queueDescription)

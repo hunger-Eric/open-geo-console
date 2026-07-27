@@ -1,11 +1,69 @@
 # Active Change Scope Lock
 
-Status: `APPROVED` (Phase 3 complete — local only; no push/deploy)
+Status: `APPROVED` (Phase 4 complete — local; push authorized with same user turn)
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: 96% local fault matrix — Phase 3 (APPROVED / complete)`.
+`Current authority: 96% local fault matrix — Phase 4 (APPROVED / complete)`.
 All earlier sections are context only.
+
+## Current authority: 96% local fault matrix — Phase 4 (APPROVED / complete)
+
+**Status: `APPROVED` (complete)** — user authorized "push、开 Phase 4"
+(2026-07-27). Phase 1–3 on `origin/main` (`14809f6`). **No deploy** unless
+separately authorized.
+
+### Phase 4 objective
+
+Public status/UI progress semantics: a **failed** Free/Deep report job must not
+present as “still generating at 96%”. Clear public progress for terminal
+`unavailable` without inventing a false mid-run or completed percentage.
+
+1. Shared projection: `publicProgressForStage(stage, progress)` returns
+   - `null` when stage is `failed` (public state `unavailable`)
+   - `100` when stage is `completed` / `completed_limited` / legacy `partial`
+   - clamped `0..99` for in-flight stages (never publish 100 while generating)
+2. Report status API uses this projection for `job.progress`.
+3. UI types accept `progress: number | null`; progress bar remains
+   `state === "generating"` only (already true).
+4. Do not mutate stored job rows, retry machine, or invent new public stages.
+
+### Phase 4 production allowlist
+
+- `apps/web/src/report/job-status.ts`
+- `apps/web/src/app/api/reports/[id]/status/route.ts`
+- `apps/web/src/components/ai-report-status.tsx` (type + null-safe progress only)
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+
+### Phase 4 tests allowlist
+
+- `apps/web/src/report/job-status.test.ts`
+- `apps/web/src/app/api/reports/[id]/status/route.test.ts`
+- `apps/web/src/components/ai-report-status.test.ts` (only if needed)
+
+### Phase 4 budgets
+
+- Production: `+60/-20` (track measured)
+- Tests: `+80/-20` (track measured)
+- External: Phase 1–3 push done; Phase 4 push authorized with same user turn;
+  **no deploy**
+
+### Phase 4 delivered
+
+| Input | Public `state` | Public `progress` |
+|-------|----------------|-------------------|
+| stage `failed`, stored progress 96 | `unavailable` | `null` (not 96) |
+| stage `synthesizing`, 96 | `generating` | `96` |
+| stage `completed`, any | `completed` | `100` |
+
+DB job.progress unchanged; only status API projection changes.
+
+### Phase 4 stop
+
+No processor, free-teaser, db terminalize, deep claim-extraction, commerce,
+Docker, or historical Job mutation.
+
+---
 
 ## Historical context — Free V4 teaser typed error boundary (completed work; not current execution)
 

@@ -6,7 +6,7 @@ import { getGeoReport } from "@/db/reports";
 import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
 import { readSemanticReviewContractVersion } from "@/db/report-semantic-review-activation";
 import { freeTeaserCheckpointFromJobCheckpoint, parseReadyFreeTeaserCheckpoint } from "@/worker/report-v4-free-teaser";
-import { publicStateForStage } from "@/report/job-status";
+import { publicProgressForStage, publicStateForStage } from "@/report/job-status";
 import { resolveRequestArtifactScope } from "@/server/report-access";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -61,7 +61,7 @@ export async function GET(request: Request, context: RouteContext) {
         stage: job.stage,
         state: publicStateForStage(job.stage),
         executionState: job.executionState,
-        progress: job.progress,
+        progress: publicProgressForStage(job.stage, job.progress),
         plannedPages: job.plannedPages,
         successfulPages: job.successfulPages,
         failedPages: job.failedPages,

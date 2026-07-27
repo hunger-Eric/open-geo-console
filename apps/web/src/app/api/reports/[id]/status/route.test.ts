@@ -147,8 +147,35 @@ describe("report status artifact scopes", () => {
     });
     expect(await response.json()).toMatchObject({
       hasAiReport: false,
-      job: { stage: "synthesizing", progress: 96 }
+      job: { stage: "synthesizing", state: "generating", progress: 96 }
     });
+  });
+
+  it("clears public progress for a failed free teaser so 96% is not advertised as generating", async () => {
+    mocks.resolveRequestArtifactScope.mockResolvedValue(null);
+    mocks.getAiReport.mockResolvedValue(null);
+    mocks.getReportV4PreAdmissionJob.mockResolvedValue({
+      ...deepJob,
+      id: "teaser-job",
+      reason: "v4_pre_admission",
+      stage: "failed",
+      executionState: "failed",
+      progress: 96,
+      checkpoint: { freeTeaser: { stage: "q1_answer_ready" } }
+    });
+    const response = await GET(new Request("https://example.test/api/reports/report-1/status"), {
+      params: Promise.resolve({ id: "report-1" })
+    });
+    const body = await response.json();
+    expect(body).toMatchObject({
+      hasAiReport: false,
+      job: {
+        stage: "failed",
+        state: "unavailable",
+        progress: null
+      }
+    });
+    expect(body.job.progress).not.toBe(96);
   });
 
   it("exposes anonymous teaser readiness only from the persisted ready checkpoint", async () => {
