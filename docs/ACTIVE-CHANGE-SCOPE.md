@@ -204,3 +204,36 @@ current, and one rollback Worker image IDs; after verification record both
 Workers' image/SHA, tier, Staging identity, restart counts, and no-claim check.
 If any post-change check fails, restore the recorded rollback Worker images and
 fixed alias, then report the rollback identity and before/after evidence.
+
+## Vercel packaging amendment (user-confirmed 2026-07-27)
+
+Status remains `APPROVED`. The user approved fixing the packaging blocker and
+continuing only after its read-only acceptance gate passes. A Vercel dry
+manifest included `.codegraph/codegraph.db` (148,279,296 bytes), exceeding the
+100 MB single-file limit; no deployment was created.
+
+### Narrow allowlist and budget
+
+- Allowlist is exactly the existing `docs/ACTIVE-CHANGE-SCOPE.md` plus a new
+  root `/.vercelignore`.
+- `/.vercelignore` must contain exactly these exclusions: `.codegraph/`,
+  `.data/`, `.tmp/`, `.codex/`, `.vercel/`, `**/node_modules/`, and `**/.next/`.
+- Do not exclude `apps/`, `packages/`, config, or public build-required source;
+  do not modify `vercel.json`, package files, Docker, or runtime behavior.
+- Diff budgets are `.vercelignore` `+7/-0` and this scope amendment `+40/-0`.
+
+### Acceptance gate and stop rule
+
+- The completed Vercel `deploy --dry --format=json` evidence is: exit code 0,
+  `fileCount=1694`, `totalSize=37,885,894`, `max=7,605,346`, no file over 100
+  MB, and required tracked deployment sources present. In the seven excluded
+  directory classes, no regular upload file has content, non-zero size, or a
+  file hash. Vercel zero-byte directory metadata without a SHA is allowed and
+  does not count as upload content.
+- The dry-manifest gate is `PASS` on that evidence. Git may now stage, commit,
+  and push only `docs/ACTIVE-CHANGE-SCOPE.md` and root `/.vercelignore`;
+  exclude `.codex/`, the `.data` release ledger, `.tmp/`, and every other
+  path. A normal (non-forced) push to `main` is allowed only when `behind=0`.
+- After this technical gate, resume the already approved Protected Staging
+  Preview/fixed-alias process. No additional output-directory exclusion is
+  authorized, and the release remains Staging-only.

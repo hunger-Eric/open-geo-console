@@ -1,0 +1,7 @@
+.codegraph/
+.data/
+.tmp/
+.codex/
+.vercel/
+**/node_modules/
+**/.next/
