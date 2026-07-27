@@ -110,10 +110,15 @@ Acceptance:
 5. Empty refs on Free foundation pass; empty refs on Free Q1 answer field with
    allowlist fail typed evidence-missing.
 
-### Baseline
+### Baseline / Staging deploy (user-authorized 2026-07-27)
 
-Prior Staging candidate `7b44722` (batching). This scope is **source-only**;
-deploy not authorized here.
+- Feature commit: `8c9e375577876f60522d7087de9e3e751bc4cf01` on `origin/main`
+- Thin Worker overlay: `open-geo-console:staging-8c9e375-overlay-v1`
+  (base full `staging-330b27a…-full-v1`; rollback image `staging-7b44722-overlay-v1`)
+- Web Preview: `dpl_Ab3KjkHnC5uKv842wpseMpvBK3Lz` → fixed alias
+  `https://open-geo-console-staging-itheheda.vercel.app`
+- Gate 3 catalog read-only: `mode=test`, CNY/USD/HKD prices present
+- **Gate 4 real-flow not authorized**
 
 ---
 
