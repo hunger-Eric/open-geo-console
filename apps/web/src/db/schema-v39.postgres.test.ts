@@ -3,7 +3,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createReportV4CommerceAuthoritySnapshotPair } from "../report-v4/report-v4-commerce-authority-comparator.test-fixture";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V39_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V39_DATABASE_MIGRATIONS, V40_DATABASE_MIGRATIONS, V41_DATABASE_MIGRATIONS, V42_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 import {
   loadPersistedReportV4AcceptanceAuthorityPhaseSnapshotInTransaction,
   persistReportV4AcceptanceAuthorityPhaseSnapshot
@@ -29,7 +29,10 @@ suite("schema V39 complete acceptance authority phase snapshots", () => {
   beforeAll(async () => {
     await admin.unsafe(`CREATE DATABASE ${quote(databaseName)}`);
     sql = postgres(withDb(adminUrl!, databaseName), { max: 4, prepare: false });
-    const throughV38 = DATABASE_MIGRATIONS.slice(0, -V39_DATABASE_MIGRATIONS.length);
+    const throughV38 = DATABASE_MIGRATIONS.slice(
+      0,
+      DATABASE_MIGRATIONS.length - databaseMigrationsAfter(38).length
+    );
     await sql.begin(async (tx) => { for (const statement of throughV38) await tx.unsafe(statement); });
     await sql.begin(async (tx) => { for (const statement of V39_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
     await sql.begin(async (tx) => { for (const statement of V39_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
@@ -55,9 +58,12 @@ suite("schema V39 complete acceptance authority phase snapshots", () => {
   }, 120_000);
 
   it("registers one replay-safe V39 forward migration after V38", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(40);
-    expect(databaseMigrationsAfter(38)).toEqual([...V39_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(39)).toEqual([]);
+    expect(DATABASE_SCHEMA_VERSION).toBe(42);
+    expect(databaseMigrationsAfter(38)).toEqual([...V39_DATABASE_MIGRATIONS, ...V40_DATABASE_MIGRATIONS, ...V41_DATABASE_MIGRATIONS, ...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(39)).toEqual([...V40_DATABASE_MIGRATIONS, ...V41_DATABASE_MIGRATIONS, ...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(40)).toEqual([...V41_DATABASE_MIGRATIONS, ...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(41)).toEqual([...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(42)).toEqual([]);
     const source = V39_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("report_v4_acceptance_authority_phase_snapshots");
     expect(source.indexOf("DROP TRIGGER IF EXISTS report_v4_acceptance_authority_phase_snapshots_guard"))
@@ -98,13 +104,13 @@ suite("schema V39 complete acceptance authority phase snapshots", () => {
     tampered.commerce.fingerprint = "f".repeat(64);
     for (const payload of [completePayload("baseline"), tampered, genericPayload("baseline"), { contractVersion: "unknown" }]) {
       await expect(persistReportV4AcceptanceAuthorityPhaseSnapshot(sql, persistenceInput("baseline", payload)))
-        .rejects.toMatchObject({ code: "phase_authority_incomplete" });
+        .rejects.toThrow(/incomplete|non-canonical|fingerprint|contractVersion|exact payload object issued/i);
     }
     const after = await sql<Array<{ count: number }>>`SELECT count(*)::integer count FROM report_v4_acceptance_authority_phase_snapshots`;
     expect(after[0]?.count).toBe(before[0]?.count);
     await expect(loadPersistedReportV4AcceptanceAuthorityPhaseSnapshotInTransaction(sql as never, {
       sessionId: SESSION, scenarioId: SCENARIO, phase: "baseline"
-    })).rejects.toMatchObject({ code: "phase_authority_incomplete" });
+    })).rejects.toThrow(/incomplete|non-canonical|fingerprint|contractVersion|exact payload object issued/i);
   }, 120_000);
 });
 

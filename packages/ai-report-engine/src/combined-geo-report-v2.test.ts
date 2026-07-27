@@ -3,7 +3,13 @@ import { parseCombinedGeoReportV2, parseProviderDiscoveryV1 } from "./combined-g
 
 describe("combined geo report v2 contracts", () => {
   it("keeps V1 and V2 artifact identities explicit", () => {
-    expect(() => parseCombinedGeoReportV2({ version: 1, artifactContract: "combined_geo_report_v1" })).toThrow(/combined_geo_report_v2/i);
+    const value = { version: 1, artifactContract: "combined_geo_report_v1" };
+    const error = (options?: { semanticValidation?: "legacy" | "deferred" }) => {
+      try { parseCombinedGeoReportV2(value, options); } catch (caught) { return (caught as Error).message; }
+      throw new Error("Expected parser failure.");
+    };
+    expect(error({ semanticValidation: "legacy" })).toBe(error());
+    expect(error({ semanticValidation: "deferred" })).toMatch(/combined_geo_report_v2/iu);
   });
   it("reconciles honest discovery counts", () => {
     const value = discovery();

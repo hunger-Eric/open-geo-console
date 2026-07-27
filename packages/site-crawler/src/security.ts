@@ -8,8 +8,29 @@ export type UrlSafetyErrorCode =
   | "blocked-hostname"
   | "blocked-address"
   | "dns-resolution-failed"
+  | "dns-not-found"
   | "too-many-redirects"
   | "cross-site-redirect";
+
+/**
+ * Thrown by a hostname resolver when the authoritative DNS answer proves the
+ * hostname does not exist (NXDOMAIN). Unlike a transient lookup failure this
+ * can never succeed on retry, so it must not be flattened into a generic
+ * dns-resolution-failed safety error.
+ */
+export class DnsNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DnsNotFoundError";
+  }
+}
+
+export function isDnsNotFoundError(error: unknown): boolean {
+  return (
+    error instanceof DnsNotFoundError ||
+    (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOTFOUND")
+  );
+}
 
 export class UrlSafetyError extends Error {
   readonly code: UrlSafetyErrorCode;
@@ -250,6 +271,9 @@ export async function resolveSafeUrl(
       : await waitForResolver((options.resolver ?? defaultHostnameResolver)(hostname, options.signal), options.signal);
   } catch (error) {
     if (options.signal?.aborted) throw options.signal.reason;
+    if (isDnsNotFoundError(error)) {
+      throw new UrlSafetyError("dns-not-found", "The target hostname does not exist.", url.href);
+    }
     throw new UrlSafetyError("dns-resolution-failed", "The target hostname could not be resolved.", url.href);
   }
   options.signal?.throwIfAborted();

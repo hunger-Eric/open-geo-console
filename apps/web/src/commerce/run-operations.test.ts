@@ -47,6 +47,31 @@ describe("runCommercialOperations", () => {
     expect(mocks.email).not.toHaveBeenCalled();
   });
 
+  it("forwards an exact order filter to only the selected provider operation", async () => {
+    const orderId = "4286cb73-6349-467a-8aaf-9b196624da92";
+    mocks.refunds.mockResolvedValue({ claimed: 1, succeeded: 1, retried: 0, failed: 0 });
+
+    await expect(runCommercialOperations("refunds", { orderId })).resolves.toEqual({
+      refunds: { claimed: 1, succeeded: 1, retried: 0, failed: 0 }
+    });
+
+    expect(mocks.refunds).toHaveBeenCalledWith(25, { orderId });
+    expect(mocks.email).not.toHaveBeenCalled();
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+    expect(mocks.sla).not.toHaveBeenCalled();
+  });
+
+  it("rejects an exact order filter on global operations before any work starts", async () => {
+    const orderId = "4286cb73-6349-467a-8aaf-9b196624da92";
+
+    await expect(runCommercialOperations("all", { orderId })).rejects.toThrow(/only refunds or email/i);
+
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+    expect(mocks.sla).not.toHaveBeenCalled();
+    expect(mocks.refunds).not.toHaveBeenCalled();
+    expect(mocks.email).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid operation before invoking a provider path", async () => {
     await expect(runCommercialOperations("invalid" as never)).rejects.toThrow("Unknown commercial operation.");
     expect(mocks.reconcile).not.toHaveBeenCalled();

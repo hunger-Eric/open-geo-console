@@ -5,7 +5,7 @@ This record contains non-secret protected-staging evidence. Timestamps are UTC. 
 ## Scope and reviewed revisions
 
 - Approved design: `docs/superpowers/specs/2026-07-14-combined-geo-report-business-question-correction-design.md` (`72242e4`).
-- Implementation plan: `docs/superpowers/plans/2026-07-14-combined-geo-report-business-question-correction.md` (`b17f342`).
+- Historical implementation plan: removed from the working tree during task-authority cleanup; recover it from Git commit `b17f342`.
 - Reviewed staging runtime revision: `3bd8ed2c9d9130d42418c07fc311529877862779`.
 - Commercial SKU remains `recommendation_forensics_v1`; the active artifact contract is `combined_geo_report_v1`.
 

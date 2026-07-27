@@ -40,6 +40,8 @@ export interface SourceSelectionDiagnosisBuildInputV1 {
   targetDomain: string;
   targetPages: SourceSelectionTargetPageInputV1[];
   questions: Array<{ questionId: string; answerText: string; sources: SourceSelectionSourceInputV1[] }>;
+  semanticValidation?: "legacy" | "deferred";
+  deferredDraft?: unknown;
 }
 
 export interface SourceContributionV1 {
@@ -125,6 +127,22 @@ export interface SourceSelectionDiagnosisV1 {
 }
 
 export function buildSourceSelectionDiagnosisV1(input: SourceSelectionDiagnosisBuildInputV1): SourceSelectionDiagnosisV1 {
+  if (input.semanticValidation === "deferred") {
+    if (input.deferredDraft === undefined) {
+      throw new TypeError("Deferred source-selection diagnosis requires an externally reviewed draft.");
+    }
+    const draft = parseSourceSelectionDiagnosisV1(input.deferredDraft, {
+      questions: input.questions,
+      semanticValidation: "deferred"
+    });
+    if (draft.inputIdentity.answerHash !== input.answerHash ||
+        draft.inputIdentity.sourceHash !== input.sourceHash ||
+        draft.inputIdentity.targetFoundationHash !== input.targetFoundationHash ||
+        draft.inputIdentity.locale !== input.locale) {
+      throw new TypeError("Deferred source-selection diagnosis identity does not match its exact inputs.");
+    }
+    return draft;
+  }
   const zh = input.locale === "zh";
   const sourceGroups = new Map<string, Array<{ source: SourceSelectionSourceInputV1; answerText: string; questionIndex: number }>>();
   input.questions.forEach((question, questionIndex) => {
@@ -268,7 +286,10 @@ export function buildSourceSelectionDiagnosisV1(input: SourceSelectionDiagnosisB
     targetActions,
     limitations
   };
-  return parseSourceSelectionDiagnosisV1(result, { questions: input.questions });
+  return parseSourceSelectionDiagnosisV1(result, {
+    questions: input.questions,
+    semanticValidation: input.semanticValidation
+  });
 }
 
 export function parseSourceSelectionDiagnosisV1(
@@ -276,6 +297,7 @@ export function parseSourceSelectionDiagnosisV1(
   context: {
     questions: Array<{ questionId: string; answerText: string; sources: SourceSelectionSourceInputV1[] }>;
     allowPersistedIndependentExcerpts?: boolean;
+    semanticValidation?: "legacy" | "deferred";
   }
 ): SourceSelectionDiagnosisV1 {
   rejectProhibitedKeys(value);
@@ -315,7 +337,7 @@ export function parseSourceSelectionDiagnosisV1(
       const source = sourceByKey.get(`${questionId}:${sourceId}`);
       if (!source) throw new TypeError(`Source selection diagnosis references unknown source ${questionId}:${sourceId}.`);
       oneOf(contribution.role, ["candidate_discovery", "definition_or_framework", "first_party_capability", "constraint_or_risk", "comparison", "third_party_validation", "other"] as const, "contribution.role");
-      customerText(contribution.summary, "contribution.summary");
+      customerText(contribution.summary, "contribution.summary", context.semanticValidation);
       const answerExcerpt = nullableText(contribution.answerExcerpt, "contribution.answerExcerpt", 2_000);
       if (answerExcerpt && !questionById.get(questionId)?.answerText.includes(answerExcerpt)) throw new TypeError("Contribution answer excerpt must be an exact persisted answer substring.");
       const sourceExcerpt = nullableText(contribution.sourceExcerpt, "contribution.sourceExcerpt", 2_000);
@@ -329,7 +351,7 @@ export function parseSourceSelectionDiagnosisV1(
       const factor = object(factorValue, "factor");
       const kind = oneOf(factor.factor, ["problem_match", "factual_specificity", "entity_clarity", "source_authority", "accessibility", "freshness"] as const, "factor.factor");
       gapFactors.add(kind);
-      customerText(factor.observation, "factor.observation");
+      customerText(factor.observation, "factor.observation", context.semanticValidation);
       nullableText(factor.evidenceUrl, "factor.evidenceUrl", 2_000);
       nullableText(factor.evidenceExcerpt, "factor.evidenceExcerpt", 2_000);
       validateBasisConfidence(factor.basis, factor.confidence, "factor");
@@ -338,7 +360,7 @@ export function parseSourceSelectionDiagnosisV1(
       const gap = object(gapValue, "targetGap");
       gapFactors.add(oneOf(gap.factor, ["problem_match", "factual_specificity", "entity_clarity", "source_authority", "accessibility", "freshness"] as const, "targetGap.factor"));
       oneOf(gap.targetState, ["present", "weak", "missing", "unavailable"] as const, "targetGap.targetState");
-      customerText(gap.comparison, "targetGap.comparison");
+      customerText(gap.comparison, "targetGap.comparison", context.semanticValidation);
       array(gap.sourceEvidenceRefs, "targetGap.sourceEvidenceRefs");
       array(gap.targetEvidenceRefs, "targetGap.targetEvidenceRefs");
     }
@@ -348,7 +370,7 @@ export function parseSourceSelectionDiagnosisV1(
   for (const patternValue of array(root.sharedPatterns, "$sourceSelectionDiagnosis.sharedPatterns")) {
     const pattern = object(patternValue, "sharedPattern");
     bounded(pattern.patternId, "sharedPattern.patternId", 500);
-    customerText(pattern.summary, "sharedPattern.summary");
+    customerText(pattern.summary, "sharedPattern.summary", context.semanticValidation);
     const supportingProfiles = stringArray(pattern.supportingProfileIds, "sharedPattern.supportingProfileIds");
     const supportingQuestions = stringArray(pattern.supportingQuestionIds, "sharedPattern.supportingQuestionIds");
     if (supportingProfiles.some((id) => !profileIds.has(id))) throw new TypeError("Shared source pattern references an unknown profile.");
@@ -360,8 +382,8 @@ export function parseSourceSelectionDiagnosisV1(
     bounded(action.actionId, "targetAction.actionId", 500);
     oneOf(action.priority, ["high", "medium", "low"] as const, "targetAction.priority");
     oneOf(action.actionFamily, ["first_party_fact_page", "entity_relationship", "accessible_structure", "freshness", "third_party_validation"] as const, "targetAction.actionFamily");
-    customerText(action.title, "targetAction.title");
-    customerText(action.rationale, "targetAction.rationale");
+    customerText(action.title, "targetAction.title", context.semanticValidation);
+    customerText(action.rationale, "targetAction.rationale", context.semanticValidation);
     if (stringArray(action.relatedProfileIds, "targetAction.relatedProfileIds").some((id) => !profileIds.has(id))) throw new TypeError("Target action references an unknown profile.");
     if (stringArray(action.relatedGapFactors, "targetAction.relatedGapFactors").some((factor) => !gapFactors.has(factor as ObservableSelectionFactorKindV1))) throw new TypeError("Target action references an unknown gap factor.");
   }
@@ -370,7 +392,7 @@ export function parseSourceSelectionDiagnosisV1(
     oneOf(limitation.code, ["contribution_unconfirmed", "source_inaccessible", "target_comparison_unavailable", "no_cross_question_pattern", "analysis_unavailable"] as const, "limitation.code");
     oneOf(limitation.scope, ["diagnosis", "profile", "contribution", "target_gap"] as const, "limitation.scope");
     stringArray(limitation.relatedIds, "limitation.relatedIds");
-    customerText(limitation.message, "limitation.message");
+    customerText(limitation.message, "limitation.message", context.semanticValidation);
   }
   return value as SourceSelectionDiagnosisV1;
 }
@@ -453,9 +475,10 @@ function validateBasisConfidence(basisValue: unknown, confidenceValue: unknown, 
   if (!valid) throw new TypeError(`${path} basis and confidence are inconsistent.`);
 }
 
-function customerText(value: unknown, path: string): string {
+function customerText(value: unknown, path: string, semanticValidation: "legacy" | "deferred" = "legacy"): string {
   const result = bounded(value, path, 500);
-  if (/(?:保证|必然).{0,12}(?:选择|引用|推荐)|排名权重|隐藏权重|guarantee.{0,20}(?:select|citation|recommend)|ranking weight|hidden weight|because.{0,20}(?:model|provider).{0,20}(?:selected|ranked)/iu.test(result)) {
+  if (semanticValidation !== "deferred" &&
+      /(?:保证|必然).{0,12}(?:选择|引用|推荐)|排名权重|隐藏权重|guarantee.{0,20}(?:select|citation|recommend)|ranking weight|hidden weight|because.{0,20}(?:model|provider).{0,20}(?:selected|ranked)/iu.test(result)) {
     throw new TypeError(`Causal guarantee language is prohibited at ${path}.`);
   }
   return result;

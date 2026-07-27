@@ -53,8 +53,14 @@ function compactPageEvidence(input: ReportSynthesisInput): Array<Record<string, 
   }));
 }
 
-export function buildSynthesisPrompt(input: ReportSynthesisInput, correctionRequired: readonly string[] = []): string {
-  const languageInstruction = reportLanguageInstruction(input.locale);
+export function buildSynthesisPrompt(
+  input: ReportSynthesisInput,
+  correctionRequired: readonly string[] = [],
+  semanticValidation: "legacy" | "deferred" = "legacy"
+): string {
+  const languageInstruction = semanticValidation === "deferred"
+    ? naturalLanguageInstruction(input.locale)
+    : reportLanguageInstruction(input.locale);
   return JSON.stringify({
     task: "Create a commercial-grade, evidence-grounded AI website analysis report.",
     rules: [
@@ -142,9 +148,12 @@ export async function synthesizeWebsiteReport(
   client: JsonCompletionClient,
   input: ReportSynthesisInput,
   signal?: AbortSignal,
-  correctionRequired: readonly string[] = []
+  correctionRequired: readonly string[] = [],
+  semanticValidation: "legacy" | "deferred" = "legacy"
 ): Promise<SynthesizeReportResult> {
-  const languageInstruction = reportLanguageInstruction(input.locale);
+  const languageInstruction = semanticValidation === "deferred"
+    ? naturalLanguageInstruction(input.locale)
+    : reportLanguageInstruction(input.locale);
   const completion = await client.completeJson({
     signal,
     temperature: 0.1,
@@ -155,7 +164,7 @@ export async function synthesizeWebsiteReport(
         content:
           `You are a senior GEO and website intelligence analyst. Produce a decision-useful JSON report grounded exclusively in supplied website evidence. JSON only. ${languageInstruction}`
       },
-      { role: "user", content: buildSynthesisPrompt(input, correctionRequired) }
+      { role: "user", content: buildSynthesisPrompt(input, correctionRequired, semanticValidation) }
     ]
   });
 
@@ -203,13 +212,15 @@ export async function synthesizeWebsiteReport(
     rejectedFindingIds: verified.rejectedFindingIds,
     rejectedEvidence: verified.rejectedEvidence
   };
-  try {
-    assertWebsiteReportLanguage(finalReport, input);
-  } catch (error) {
-    if (error instanceof ReportLanguageValidationError) {
-      throw new WebsiteReportLanguageValidationError(error, result);
+  if (semanticValidation !== "deferred") {
+    try {
+      assertWebsiteReportLanguage(finalReport, input);
+    } catch (error) {
+      if (error instanceof ReportLanguageValidationError) {
+        throw new WebsiteReportLanguageValidationError(error, result);
+      }
+      throw error;
     }
-    throw error;
   }
   return result;
 }
@@ -217,7 +228,12 @@ export async function synthesizeWebsiteReport(
 export async function synthesizeWebsiteReportWithRecovery(
   client: JsonCompletionClient,
   input: ReportSynthesisInput,
-  options: { maxAttempts?: number; delay?: (milliseconds: number) => Promise<void>; signal?: AbortSignal } = {}
+  options: {
+    maxAttempts?: number;
+    delay?: (milliseconds: number) => Promise<void>;
+    signal?: AbortSignal;
+    semanticValidation?: "legacy" | "deferred";
+  } = {}
 ): Promise<SynthesizeReportResult> {
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const delay = options.delay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
@@ -225,7 +241,7 @@ export async function synthesizeWebsiteReportWithRecovery(
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     options.signal?.throwIfAborted();
     try {
-      return await synthesizeWebsiteReport(client, input, options.signal);
+      return await synthesizeWebsiteReport(client, input, options.signal, [], options.semanticValidation);
     } catch (error) {
       lastError = error;
       if (error instanceof WebsiteReportLanguageValidationError) {
@@ -237,6 +253,10 @@ export async function synthesizeWebsiteReportWithRecovery(
     }
   }
   throw lastError;
+}
+
+function naturalLanguageInstruction(locale: string): string {
+  return `Write natural customer prose for locale ${locale}. Preserve appropriate brand names, product names, acronyms, model names, and professional terms in their original form.`;
 }
 
 async function correctWebsiteReportLanguage(

@@ -157,16 +157,28 @@ describe("exact-commit staging-only Worker launcher", () => {
 
   it("does not mutate staging.env until preflight and image build succeed, and restores exact bytes on failed verification", () => {
     const preflight = source.indexOf("report-v4-staging-preflight.ts");
+    const publicSearchProbe = source.indexOf("probe-public-search.ts");
     const build = source.indexOf("docker build");
     const envMutation = source.indexOf("Set-RuntimeDeploymentVersion $runtimeEnv $revision");
     const compose = source.indexOf("docker compose @composeArgs up");
     expect(preflight).toBeGreaterThan(-1);
-    expect(build).toBeGreaterThan(preflight);
+    expect(publicSearchProbe).toBeGreaterThan(preflight);
+    expect(build).toBeGreaterThan(publicSearchProbe);
     expect(envMutation).toBeGreaterThan(build);
     expect(compose).toBeGreaterThan(envMutation);
     expect(source).toMatch(/ReadAllBytes\(\$runtimeEnv\)/u);
     expect(source).toMatch(/-not \$launchVerified[\s\S]*WriteAllBytes\(\$runtimeEnv, \$originalRuntimeEnvBytes\)/u);
     expect(source).toMatch(/containers were not rolled back and remain unverified/u);
+  });
+
+  it("fails closed on live public-search quality or malformed probe evidence before runtime mutation", () => {
+    expect(source).toMatch(/probe-public-search\.ts --adapter mimo --locale zh-CN --region CN/u);
+    expect(source).toMatch(/Assert-LastExitCode "The protected-Staging public-search quality probe failed\."/u);
+    expect(source).toMatch(/ConvertFrom-Json[\s\S]*malformed evidence/u);
+    expect(source).toMatch(/qualityCases\.Count -ne 3[\s\S]*failedQualityCases\.Count -gt 0/u);
+    for (const name of ["authentication", "rateLimited", "timedOut", "malformed"]) {
+      expect(source).toContain(`"${name}"`);
+    }
   });
 
   it("requires the merged staging env, the three dedicated V4 variables, and the commercial token secret", () => {
@@ -199,6 +211,19 @@ describe("exact-commit staging-only Worker launcher", () => {
     expect(source).not.toMatch(/production-worker|production-commerce|start-workstation-workers|vercel\s+(deploy|alias)|db:migrate|ensureDatabase/iu);
   });
 
+  it("materializes the locked V4 profile and dedicated MiMo bindings only inside the Staging environment branch", () => {
+    const workstationLauncherSource = readFileSync(fileURLToPath(new URL("../../../../scripts/start-workstation-workers.ps1", import.meta.url)), "utf8");
+    const v4Start = workstationLauncherSource.indexOf('if ($Environment -eq "staging") {', workstationLauncherSource.indexOf('$providerNames'));
+    const publicSearchStart = workstationLauncherSource.indexOf('if ($Environment -eq "staging" -and $values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true") {');
+    expect(v4Start).toBeGreaterThan(workstationLauncherSource.indexOf('$providerNames'));
+    expect(publicSearchStart).toBeGreaterThan(v4Start);
+    const v4Block = workstationLauncherSource.slice(v4Start, publicSearchStart);
+    expect(v4Block).toContain('report-v4-mimo-v2.5-pro-v1');
+    expect(v4Block).toContain('"OGC_REPORT_V4_MIMO_BASE_URL" = "OGC_AI_BASE_URL"');
+    expect(v4Block).toContain('"OGC_REPORT_V4_MIMO_API_KEY" = "OGC_AI_API_KEY"');
+    expect(v4Block).toContain('OGC_TOKEN_HASH_SECRET');
+    expect(v4Block).not.toContain('OGC_PUBLIC_SEARCH_');
+  });
   it("verifies both containers against the exact image ID, revision label, and staging markers", () => {
     expect(source).toMatch(/docker image inspect/u);
     expect(source).toMatch(/docker inspect/u);

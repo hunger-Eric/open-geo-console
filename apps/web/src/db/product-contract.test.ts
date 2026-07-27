@@ -11,7 +11,7 @@ describe("persisted payment product to Worker contract", () => {
     expect(fulfillmentMethodologyForProductAdmission("recommendation_forensics_v1"))
       .toBe("public_search_source_forensics_v1");
     expect(fulfillmentMethodologyForProductAdmission("deep_report_v1")).toBeNull();
-    expect(recommendationReportVersionForProductAdmission("recommendation_forensics_v1")).toBe(2);
+    expect(recommendationReportVersionForProductAdmission("recommendation_forensics_v1")).toBe(3);
     expect(recommendationReportVersionForProductAdmission("deep_report_v1")).toBeNull();
   });
 
@@ -23,7 +23,7 @@ describe("persisted payment product to Worker contract", () => {
       refundPolicyVersion: "v1", reportLocale: "en", currency: "USD", amountMinor: 2900
     } satisfies CreatePaymentOrderInput;
     const matching = {
-      ...input, id: "order", fulfillmentMethodology: "public_search_source_forensics_v1", recommendationReportVersion: 2, taxAmountMinor: null
+      ...input, id: "order", fulfillmentMethodology: "public_search_source_forensics_v1", recommendationReportVersion: 3, taxAmountMinor: null
     } as unknown as PaymentOrderRow;
     expect(matchesImmutableOrder(matching, input)).toBe(true);
     expect(matchesImmutableOrder({ ...matching, fulfillmentMethodology: "answer_engine_recommendation_forensics_v1" }, input)).toBe(false);

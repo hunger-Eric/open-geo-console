@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { UrlSafetyError } from "@open-geo-console/site-crawler";
 import type { ScanJobRow } from "@/db/schema";
 import type {
   FinalizeReportV4PreAdmissionSnapshotInput,
@@ -164,6 +165,347 @@ describe("recoverable V4 admission runtime", () => {
       "https://example.com/page-1",
       "https://example.com/page-2"
     ]);
+    expect(harness.finalized?.status).toBe("completed");
+  });
+
+  it("keeps a recursively repeated query-pair news frontier to its three meaningful pagination variants", async () => {
+    const targetUrl = "https://portal.example/";
+    const newsUrls = [1, 2, 3].map((page) => `${targetUrl}news?cursor=feed&page=${page}`);
+    const harness = runtimeHarness([candidate(0, { siteUrl: targetUrl, url: targetUrl })], {
+      discoverCandidates: vi.fn(async (_read, source) => {
+        const sourceUrl = new URL(source.url);
+        if (sourceUrl.pathname === "/") return newsUrls.map((url, index) => candidate(index + 1, { siteUrl: targetUrl, url }));
+        const cursorDepth = sourceUrl.searchParams.getAll("cursor").length;
+        if (cursorDepth >= 30) return [];
+        sourceUrl.searchParams.append("cursor", "feed");
+        return [candidate(9, { siteUrl: targetUrl, url: sourceUrl.href })];
+      }),
+      extractAnalyzableText: (read) => new URL(read.url).pathname === "/news"
+        ? `Fixed public pagination body ${new URL(read.url).searchParams.get("page")}`
+        : "Fixed public homepage body"
+    }, { targetUrl, siteKey: "portal.example" });
+
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 4, successfulPages: 4, failedPages: 0 });
+    expect(harness.finalized?.status).toBe("completed");
+    expect(harness.readRawHtml.mock.calls.filter(([value]) => new URL(value.url).pathname === "/news")).toHaveLength(3);
+    expect(harness.readRawHtml.mock.calls.map(([value]) => value.url)).toEqual([targetUrl, ...newsUrls]);
+    expect(harness.persistedCheckpoint?.queue).toEqual([]);
+    expect(harness.checkpoints.save.mock.calls.every(([, checkpoint]) =>
+      checkpoint.queue.filter(({ url }) => new URL(url).pathname === "/news").length <= 3
+    )).toBe(true);
+  });
+
+  it("checkpoints the same deterministic pagination queue after recursive query-pair discovery", async () => {
+    const targetUrl = "https://portal.example/";
+    const initialNewsUrls = [1, 2, 3].map((page) => `${targetUrl}news?cursor=feed&page=${page}`);
+    const fixtureDependencies: Partial<ReportV4SiteCollectorDependencies> = {
+      discoverCandidates: vi.fn(async (_read, source) => {
+        if (new URL(source.url).pathname === "/") {
+          return initialNewsUrls.map((url, index) => candidate(index + 1, { siteUrl: targetUrl, url }));
+        }
+        const next = new URL(source.url);
+        if (next.searchParams.getAll("cursor").length >= 30) return [];
+        next.searchParams.append("cursor", "feed");
+        return [candidate(9, { siteUrl: targetUrl, url: next.href })];
+      }),
+      extractAnalyzableText: (read: ReportV4HtmlRead) => new URL(read.url).pathname === "/news"
+        ? `Fixed public pagination body ${new URL(read.url).searchParams.get("page")}`
+        : "Fixed public homepage body"
+    };
+    const uninterrupted = runtimeHarness([candidate(0, { siteUrl: targetUrl, url: targetUrl })], fixtureDependencies, {
+      targetUrl, siteKey: "portal.example"
+    });
+    await expect(uninterrupted.run()).resolves.toEqual({ plannedPages: 4, successfulPages: 4, failedPages: 0 });
+    const uninterruptedCheckpoint = structuredClone(uninterrupted.persistedCheckpoint);
+    const uninterruptedFinalized = structuredClone(uninterrupted.finalized);
+    const harness = runtimeHarness([candidate(0, { siteUrl: targetUrl, url: targetUrl })], fixtureDependencies, {
+      targetUrl, siteKey: "portal.example"
+    });
+    let interruptAfterFirstNewsCheckpoint = true;
+    harness.checkpoints.save.mockImplementation(async (_jobId, checkpoint) => {
+      harness.persistedCheckpoint = structuredClone(checkpoint);
+      if (checkpoint.visitedUrlKeys.some((url) => url.includes("/news?cursor=feed&page=1")) && interruptAfterFirstNewsCheckpoint) {
+        interruptAfterFirstNewsCheckpoint = false;
+        throw new Error("interrupted after recursive checkpoint");
+      }
+    });
+
+    await expect(harness.run()).rejects.toThrow("interrupted after recursive checkpoint");
+    expect(harness.persistedCheckpoint?.queue.map(({ url }) => url)).toEqual(initialNewsUrls.slice(1));
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 4, successfulPages: 4, failedPages: 0 });
+    expect(harness.readRawHtml.mock.calls.map(([value]) => value.url)).toEqual([targetUrl, ...initialNewsUrls]);
+    expect(harness.persistedCheckpoint).toEqual(uninterruptedCheckpoint);
+    expect(harness.finalized).toEqual(uninterruptedFinalized);
+    expect(harness.persistedCheckpoint).toMatchObject({ queue: [], knownUrlKeys: [targetUrl, ...initialNewsUrls], visitedUrlKeys: [targetUrl, ...initialNewsUrls] });
+    expect(harness.persistedCheckpoint?.pages).toHaveLength(4);
+  });
+
+  it("recompresses persisted and dynamic candidates into a bounded representative queue with policy provenance", async () => {
+    const targetUrl = "https://portal.example/";
+    const discovered = Array.from({ length: 600 }, (_, index) => `${targetUrl}news/story-${String(index + 1).padStart(3, "0")}`);
+    const harness = runtimeHarness([candidate(0, { siteUrl: targetUrl, url: targetUrl })], {
+      discoverCandidates: vi.fn(async (_read, source) => new URL(source.url).pathname === "/"
+        ? discovered.map((url, index) => candidate(index + 1, { siteUrl: targetUrl, url }))
+        : []),
+      extractAnalyzableText: (read) => new URL(read.url).pathname === "/"
+        ? "Fixed public homepage body"
+        : "Fixed public news body"
+    }, { targetUrl, siteKey: "portal.example" });
+    harness.checkpoints.save.mockImplementation(async (_jobId, checkpoint) => {
+      harness.persistedCheckpoint = checkpoint;
+    });
+
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 601, successfulPages: 2, failedPages: 599 });
+    expect(harness.readRawHtml).toHaveBeenCalledTimes(4);
+    expect(harness.checkpoints.save.mock.calls.every(([, checkpoint]) => checkpoint.queue.length <= 51)).toBe(true);
+    expect(harness.finalized?.status).toBe("completed");
+    expect(harness.finalized?.pages.filter(({ exclusionReason }) => exclusionReason === "policy_excluded")).toHaveLength(597);
+    expect(harness.finalized?.pages.filter(({ analyzable }) => analyzable)).toHaveLength(2);
+  });
+
+  it("bounds more than ten thousand same-template articles without increasing timeouts", async () => {
+    const targetUrl = "https://portal.example/";
+    const candidates = Array.from({ length: 10_001 }, (_, index) => candidate(index + 1, {
+      siteUrl: targetUrl,
+      url: `${targetUrl}news/story-${String(index + 1).padStart(5, "0")}`
+    }));
+    const harness = runtimeHarness(candidates, {
+      extractAnalyzableText: () => "One repeated readable article body"
+    }, { targetUrl, siteKey: "portal.example" });
+
+    await expect(harness.run()).resolves.toEqual({
+      plannedPages: 10_001,
+      successfulPages: 1,
+      failedPages: 10_000
+    });
+    expect(harness.readRawHtml).toHaveBeenCalledTimes(3);
+    expect(harness.finalized?.status).toBe("completed");
+    expect(harness.finalized?.pages).toHaveLength(10_001);
+    expect(harness.finalized?.pages.filter(({ exclusionReason }) =>
+      exclusionReason === "policy_excluded")).toHaveLength(9_998);
+  });
+
+  it("finalizes a recovered 23-body representative snapshot without draining repeated articles", async () => {
+    const targetUrl = "https://example.com/";
+    const evidenceUrls = [
+      targetUrl,
+      ...Array.from({ length: 20 }, (_, index) => `${targetUrl}evidence-${index + 1}`),
+      `${targetUrl}about`,
+      `${targetUrl}services/freight`
+    ];
+    const pending = Array.from({ length: 100 }, (_, index) => candidate(index + 100, {
+      url: `${targetUrl}news/story-${index + 1}`
+    }));
+    const harness = runtimeHarness([]);
+    harness.persistedCheckpoint = {
+      ...checkpointFixture(),
+      queue: pending,
+      knownUrlKeys: [...evidenceUrls, ...pending.map(({ url }) => url)],
+      visitedUrlKeys: evidenceUrls,
+      pages: evidenceUrls.map((url, index) => checkpointPage(index + 1, url))
+    };
+
+    await expect(harness.run()).resolves.toEqual({
+      plannedPages: 123,
+      successfulPages: 23,
+      failedPages: 100
+    });
+    expect(harness.readRawHtml).not.toHaveBeenCalled();
+    expect(harness.finalized?.status).toBe("completed");
+    expect(harness.finalized?.pages.filter(({ exclusionReason }) =>
+      exclusionReason === "policy_excluded")).toHaveLength(100);
+  });
+
+
+  it("keeps the homepage first and preserves explicit exclusion provenance for omitted initial candidates", async () => {
+    const targetUrl = "https://portal.example/";
+    const news = Array.from({ length: 500 }, (_, index) => candidate(index + 1, {
+      siteUrl: targetUrl,
+      url: `${targetUrl}news/story-${String(index + 1).padStart(3, "0")}`
+    }));
+    const robotsCandidate = candidate(999, {
+      siteUrl: targetUrl,
+      url: `${targetUrl}news/zzz`,
+      explicitExclusion: "robots_denied"
+    });
+    const harness = runtimeHarness([news[0]!, candidate(0, { siteUrl: targetUrl, url: targetUrl }), ...news.slice(1), robotsCandidate], {}, {
+      targetUrl, siteKey: "portal.example"
+    });
+    let initialQueue: ReportV4AdmissionCheckpoint | undefined;
+    harness.checkpoints.save.mockImplementation(async (_jobId, checkpoint) => {
+      harness.persistedCheckpoint = structuredClone(checkpoint);
+      if (!initialQueue) {
+        initialQueue = structuredClone(checkpoint);
+        harness.now.mockReturnValue(new Date("2030-01-01T00:10:00.000Z"));
+      }
+    });
+
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 502, successfulPages: 0, failedPages: 502 });
+    expect(initialQueue?.queue[0]?.url).toBe(targetUrl);
+    expect(harness.finalized?.pages).toContainEqual(expect.objectContaining({
+      normalizedUrl: robotsCandidate.url,
+      analyzable: false,
+      retainedText: null,
+      contentHash: null,
+      exclusionReason: "robots_denied"
+    }));
+  });
+
+  it("counts exact duplicate page bodies once while retaining every duplicate URL as exclusion evidence", async () => {
+    const duplicateBody = "The same exact cleaned page body.";
+    const harness = runtimeHarness([candidate(1), candidate(2), candidate(3)], {
+      extractAnalyzableText: (read) => read.url.endsWith("/page-3") ? "A distinct page body." : duplicateBody
+    });
+
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 3, successfulPages: 2, failedPages: 1 });
+    expect(harness.finalized).toMatchObject({
+      status: "completed",
+      pages: [
+        expect.objectContaining({ normalizedUrl: "https://example.com/page-1", analyzable: true }),
+        expect.objectContaining({
+          normalizedUrl: "https://example.com/page-2",
+          analyzable: false,
+          retainedText: null,
+          contentHash: null,
+          exclusionReason: "duplicate_content"
+        }),
+        expect.objectContaining({ normalizedUrl: "https://example.com/page-3", analyzable: true })
+      ]
+    });
+  });
+
+  it("completes an exhausted Shun-shaped frontier when duplicate bodies are the only exclusions", async () => {
+    const targetUrl = "https://shun-express.com/";
+    const candidates = [
+      candidate(1, { siteUrl: targetUrl, url: targetUrl }),
+      candidate(2, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan` }),
+      candidate(3, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan-copy` }),
+      candidate(4, { siteUrl: targetUrl, url: `${targetUrl}route/philippines` })
+    ];
+    const harness = runtimeHarness(candidates, {
+      extractAnalyzableText: (read) => read.url.endsWith("/route/taiwan-copy")
+        ? "Distinct Taiwan route service body"
+        : read.url.endsWith("/route/taiwan") ? "Distinct Taiwan route service body" : `Distinct route body for ${read.url}`
+    }, { targetUrl, siteKey: "shun-express.com" });
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 4, successfulPages: 3, failedPages: 1 });
+    expect(harness.finalized?.status).toBe("completed");
+    expect(harness.finalized?.pages).toContainEqual(expect.objectContaining({
+      normalizedUrl: `${targetUrl}route/taiwan-copy`, analyzable: false, exclusionReason: "duplicate_content"
+    }));
+    expect(new Set(harness.finalized?.pages.flatMap((page) => page.contentHash ? [page.contentHash] : [])).size).toBe(3);
+  });
+
+  it("keeps robots and policy omissions deliverable as completed", async () => {
+    const targetUrl = "https://shun-express.com/";
+    const exhausted = runtimeHarness([
+      candidate(1, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan` }),
+      candidate(2, { siteUrl: targetUrl, url: `${targetUrl}?route%2Ftaiwan=`, explicitExclusion: "robots_denied" }),
+      candidate(3, { siteUrl: targetUrl, url: `${targetUrl}about.html`, explicitExclusion: "policy_excluded" })
+    ], {}, { targetUrl, siteKey: "shun-express.com" });
+    await expect(exhausted.run()).resolves.toEqual({ plannedPages: 3, successfulPages: 1, failedPages: 2 });
+    expect(exhausted.finalized?.status).toBe("completed");
+    expect(exhausted.finalized?.pages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ exclusionReason: null }),
+      expect.objectContaining({ exclusionReason: "robots_denied" }),
+      expect.objectContaining({ exclusionReason: "policy_excluded" })
+    ]));
+  });
+
+  it("completes with generic authenticated-only candidate provenance and no hostname exception", async () => {
+    const targetUrl = "https://portal.example/";
+    const harness = runtimeHarness([
+      candidate(1, { siteUrl: targetUrl, url: targetUrl }),
+      candidate(2, { siteUrl: targetUrl, url: `${targetUrl}account`, access: "login_required" })
+    ], {}, { targetUrl, siteKey: "portal.example" });
+
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 2, successfulPages: 1, failedPages: 1 });
+    expect(harness.finalized?.status).toBe("completed");
+    expect(harness.readRawHtml.mock.calls.map(([value]) => value.url)).toEqual([targetUrl]);
+    expect(harness.finalized?.pages).toContainEqual(expect.objectContaining({
+      normalizedUrl: `${targetUrl}account`,
+      analyzable: false,
+      retainedText: null,
+      contentHash: null,
+      exclusionReason: "login_required"
+    }));
+  });
+
+  it("keeps unresolved transient Shun-shaped reads completed_limited", async () => {
+    const targetUrl = "https://shun-express.com/";
+    const transient = runtimeHarness([
+      candidate(1, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan` }),
+      candidate(2, { siteUrl: targetUrl, url: `${targetUrl}route/philippines` })
+    ], {
+      readRawHtml: vi.fn(async (value) => {
+        if (value.url.endsWith("/route/philippines")) throw new Error("transient upstream reset");
+        return {
+          url: value.url,
+          networkSafety: value.networkSafety,
+          access: value.access,
+          contentType: value.contentType ?? "text/html",
+          html: `Readable evidence for ${value.url}`
+        };
+      })
+    }, { targetUrl, siteKey: "shun-express.com" });
+    await expect(transient.run()).resolves.toEqual({ plannedPages: 2, successfulPages: 1, failedPages: 1 });
+    expect(transient.finalized?.status).toBe("completed_limited");
+    expect(transient.finalized?.pages).toContainEqual(expect.objectContaining({ exclusionReason: "raw_fetch_failed" }));
+  });
+
+  it("completes when the only unresolved-looking residue is a proven-nonexistent hostname", async () => {
+    const targetUrl = "https://shun-express.com/";
+    const harness = runtimeHarness([
+      candidate(1, { siteUrl: targetUrl, url: `${targetUrl}route/taiwan` }),
+      candidate(2, { siteUrl: targetUrl, url: "https://member.shun-express.com/" })
+    ], {
+      readRawHtml: vi.fn(async (value) => {
+        if (value.url.startsWith("https://member.")) {
+          throw new UrlSafetyError("dns-not-found", "The target hostname does not exist.");
+        }
+        return {
+          url: value.url,
+          networkSafety: value.networkSafety,
+          access: value.access,
+          contentType: value.contentType ?? "text/html",
+          html: `Readable evidence for ${value.url}`
+        };
+      })
+    }, { targetUrl, siteKey: "shun-express.com" });
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 2, successfulPages: 1, failedPages: 1 });
+    expect(harness.finalized?.status).toBe("completed");
+    expect(harness.finalized?.pages).toContainEqual(expect.objectContaining({ exclusionReason: "dns_not_found" }));
+  });
+
+  it.each([
+    "raw_fetch_failed",
+    "raw_extraction_failed",
+    "browser_render_failed",
+    "deadline_exceeded"
+  ] as const)("keeps an exhausted frontier with %s completed_limited", async (exclusionReason) => {
+    const harness = runtimeHarness([]);
+    const excludedUrl = "https://example.com/page-2";
+    harness.persistedCheckpoint = {
+      ...checkpointFixture(),
+      queue: [],
+      knownUrlKeys: ["https://example.com/page-1", excludedUrl],
+      visitedUrlKeys: ["https://example.com/page-1", excludedUrl],
+      pages: [
+        checkpointPage(1),
+        {
+          id: "checkpoint-page-2",
+          ordinal: 2,
+          normalizedUrl: excludedUrl,
+          analyzable: false,
+          readMode: null,
+          summary: null,
+          retainedText: null,
+          contentHash: null,
+          exclusionReason
+        }
+      ]
+    };
+
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 2, successfulPages: 1, failedPages: 1 });
     expect(harness.finalized?.status).toBe("completed_limited");
   });
 
@@ -260,15 +602,15 @@ describe("recoverable V4 admission runtime", () => {
     ]);
   });
 
-  it("retains the fifty-first page as custom-service evidence and never reads the fifty-second", async () => {
+  it("retains fifty-first-body custom-service evidence and never starts a fifty-second read", async () => {
     const harness = runtimeHarness(Array.from({ length: 52 }, (_, index) => candidate(index + 1)));
 
-    await expect(harness.run()).resolves.toEqual({ plannedPages: 52, successfulPages: 51, failedPages: 0 });
+    await expect(harness.run()).resolves.toEqual({ plannedPages: 52, successfulPages: 51, failedPages: 1 });
     expect(harness.finalized).toMatchObject({ status: "custom_service" });
-    expect(harness.finalized?.pages).toHaveLength(51);
-    expect(harness.finalized?.pages[50]).toMatchObject({ normalizedUrl: "https://example.com/page-51" });
+    expect(harness.finalized?.pages).toHaveLength(52);
+    expect(harness.finalized?.pages).toContainEqual(expect.objectContaining({ normalizedUrl: "https://example.com/page-51" }));
+    expect(harness.finalized?.pages.filter(({ exclusionReason }) => exclusionReason === "policy_excluded")).toHaveLength(1);
     expect(harness.readRawHtml).toHaveBeenCalledTimes(51);
-    expect(harness.readRawHtml.mock.calls.some(([value]) => value.url.endsWith("/page-52"))).toBe(false);
   });
 
   it("propagates repository failures for job retry and persists terminal snapshot before returning coverage", async () => {
@@ -299,12 +641,13 @@ describe("recoverable V4 admission runtime", () => {
 function runtimeHarness(
   initialCandidates: ReportV4SiteCandidate[],
   collectorOverrides: Partial<ReportV4SiteCollectorDependencies> = {},
-  options: { deadlineMs?: number } = {}
+  options: { deadlineMs?: number; targetUrl?: string; siteKey?: string } = {}
 ) {
+  const targetUrl = options.targetUrl ?? "https://example.com/";
   const identity: ReportV4SiteSnapshotIdentityInput = {
     id: "snapshot-1",
     reportId: "report-1",
-    siteKey: "example.com",
+    siteKey: options.siteKey ?? "example.com",
     collectorConfigIdentityHash: sha("collector-config"),
     capturedAt: new Date("2030-01-01T00:00:00.000Z")
   };
@@ -340,7 +683,7 @@ function runtimeHarness(
   const dependencies: ReportV4AdmissionRuntimeDependencies = { checkpoints, snapshots, collector, now };
   const runner = createReportV4AdmissionRunner({
     identity,
-    targetUrl: "https://example.com/",
+    targetUrl,
     initialCandidates,
     ...(options.deadlineMs ? { deadlineMs: options.deadlineMs } : {})
   }, dependencies);

@@ -107,4 +107,38 @@ describe("source selection diagnosis v1", () => {
     result.sharedPatterns[0]!.summary = "该因素保证模型选择此来源。";
     expect(() => parseSourceSelectionDiagnosisV1(result, { questions: source.questions })).toThrow(/causal|guarantee/i);
   });
+
+  it("accepts an externally reviewed causal-looking draft in deferred mode without deriving replacement semantics", () => {
+    const source = input();
+    const draft = buildSourceSelectionDiagnosisV1(source);
+    draft.sharedPatterns[0]!.summary = "该因素将保证模型选择此来源。";
+    const result = buildSourceSelectionDiagnosisV1({
+      ...source,
+      semanticValidation: "deferred",
+      deferredDraft: draft
+    });
+    expect(result.sharedPatterns[0]!.summary).toBe("该因素将保证模型选择此来源。");
+  });
+
+  it("requires a reviewed deferred draft and still rejects identity or source ownership changes", () => {
+    const source = input();
+    expect(() => buildSourceSelectionDiagnosisV1({ ...source, semanticValidation: "deferred" }))
+      .toThrow(/externally reviewed draft/u);
+
+    const changedIdentity = buildSourceSelectionDiagnosisV1(source);
+    changedIdentity.inputIdentity.answerHash = "f".repeat(64);
+    expect(() => buildSourceSelectionDiagnosisV1({
+      ...source,
+      semanticValidation: "deferred",
+      deferredDraft: changedIdentity
+    })).toThrow(/identity/u);
+
+    const changedSource = buildSourceSelectionDiagnosisV1(source);
+    changedSource.sourceProfiles[0]!.sourceRefs[0]!.sourceId = "unknown";
+    expect(() => buildSourceSelectionDiagnosisV1({
+      ...source,
+      semanticValidation: "deferred",
+      deferredDraft: changedSource
+    })).toThrow(/unknown source/u);
+  });
 });

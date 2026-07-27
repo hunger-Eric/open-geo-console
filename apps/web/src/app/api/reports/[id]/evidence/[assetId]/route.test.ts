@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { requestHasReportAccess, getEvidenceAsset, getObject, getActiveCombinedGeoReport } = vi.hoisted(() => ({
+const { requestHasReportAccess, getEvidenceAsset, getObject, getAnyActiveCombinedGeoReport } = vi.hoisted(() => ({
   requestHasReportAccess: vi.fn(),
   getEvidenceAsset: vi.fn(),
   getObject: vi.fn(),
-  getActiveCombinedGeoReport: vi.fn()
+  getAnyActiveCombinedGeoReport: vi.fn()
 }));
 
 vi.mock("@/server/report-access", () => ({ requestHasReportAccess }));
 vi.mock("@/db/evidence-assets", () => ({ getEvidenceAsset }));
-vi.mock("@/db/combined-reports", () => ({ getActiveCombinedGeoReport }));
+vi.mock("@/db/combined-reports", () => ({ getAnyActiveCombinedGeoReport }));
 vi.mock("@/evidence/storage", () => ({
   createEvidenceStorage: () => ({ get: getObject })
 }));
@@ -22,7 +22,7 @@ describe("private report evidence route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     requestHasReportAccess.mockResolvedValue(false);
-    getActiveCombinedGeoReport.mockResolvedValue(null);
+    getAnyActiveCombinedGeoReport.mockResolvedValue(null);
   });
 
   it("does not reveal asset existence without report access", async () => {
@@ -60,7 +60,7 @@ describe("private report evidence route", () => {
 
   it("authorizes a screenshot only through the exact active V2 artifact scope", async () => {
     requestHasReportAccess.mockImplementation(async (_request: Request, _id: string, scope: string) => scope === "combined_geo_report_v2");
-    getActiveCombinedGeoReport.mockResolvedValue({ report: { artifactContract: "combined_geo_report_v2", originalPaidJobId: "job-v2", jobId: "job-v2" } });
+    getAnyActiveCombinedGeoReport.mockResolvedValue({ report: { artifactContract: "combined_geo_report_v2", originalPaidJobId: "job-v2", jobId: "job-v2" } });
     getEvidenceAsset.mockResolvedValue({ jobId: "job-v2", status: "ready", storageKey: "reports/report-1/evidence/asset-1.jpg" });
     getObject.mockResolvedValue({ body: new Uint8Array([1]), contentType: "image/jpeg" });
     const response = await GET(new Request("https://example.com/api/reports/report-1/evidence/asset-1"), context);
@@ -70,7 +70,7 @@ describe("private report evidence route", () => {
 
   it("authorizes V3 technical evidence only through the exact active V3 scope", async () => {
     requestHasReportAccess.mockImplementation(async (_request: Request, _id: string, scope: string) => scope === "combined_geo_report_v3");
-    getActiveCombinedGeoReport.mockResolvedValue({ report: { artifactContract: "combined_geo_report_v3", originalPaidJobId: "job-v3", jobId: "job-v3" } });
+    getAnyActiveCombinedGeoReport.mockResolvedValue({ report: { artifactContract: "combined_geo_report_v3", originalPaidJobId: "job-v3", jobId: "job-v3" } });
     getEvidenceAsset.mockResolvedValue({ jobId: "job-v3", status: "ready", storageKey: "reports/report-1/evidence/asset-1.jpg" });
     getObject.mockResolvedValue({ body: new Uint8Array([1]), contentType: "image/jpeg" });
     const response = await GET(new Request("https://example.com/api/reports/report-1/evidence/asset-1"), context);

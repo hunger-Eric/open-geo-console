@@ -22,6 +22,10 @@ import {
   createPostgresReportV4AdmissionJobRepository,
   enqueueReportV4PreAdmissionAfterPreview
 } from "./report-v4-admission-jobs";
+import {
+  assertSemanticReviewCarrierUpdate,
+  semanticReviewCarrierUpdateVersion
+} from "./report-semantic-review-activation";
 
 export { getJobCreditStatus } from "./credits";
 
@@ -124,7 +128,7 @@ export function assertFulfillmentPair(
   }
   if (productContract === "recommendation_forensics_v1" &&
       !((methodology === "answer_engine_recommendation_forensics_v1" && reportVersion === 1) ||
-        (methodology === "public_search_source_forensics_v1" && reportVersion === 2) ||
+        (methodology === "public_search_source_forensics_v1" && (reportVersion === 2 || reportVersion === 3)) ||
         (v4PreAdmission && (reason === "standard" || reason === "v4_pre_admission")))) {
     throw new Error("Recommendation-forensics jobs require a matching explicit methodology and report version.");
   }
@@ -319,6 +323,42 @@ export async function claimScanJob(
   return claimedId ? getScanJob(claimedId) : null;
 }
 
+export interface ExactScanJobIdentity { jobId: string; reportId: string; tier: ReportTier; }
+
+/** Exact one-shot claims deliberately perform maintenance only for their target. */
+export async function claimExactScanJob(workerId: string, identity: ExactScanJobIdentity, leaseSeconds = 90): Promise<ScanJobRow | null> {
+  if (!workerId || leaseSeconds < 10) throw new Error("A worker id and a lease of at least 10 seconds are required.");
+  await ensureDatabase();
+  const sql = getSqlClient();
+  await sql.begin(async (tx) => {
+    const recoverable = await tx<{ current_phase: ScanJobPhase; checkpoint_revision: number }[]>`
+      UPDATE scan_jobs SET execution_state='retry_wait', lease_owner=NULL, lease_expires_at=NULL, retry_not_before=NULL,
+        error_code='lease_expired', public_error='The analysis is being recovered after a Worker interruption.', updated_at=now()
+      WHERE id=${identity.jobId} AND report_id=${identity.reportId} AND tier=${identity.tier}
+        AND execution_state='running' AND lease_expires_at <= now() AND phase_attempt < max_attempts
+      RETURNING current_phase, checkpoint_revision`;
+    for (const row of recoverable) await JobTransitionService.appendTransition(tx, { jobId: identity.jobId, fromState: "running", toState: "retry_wait",
+      phase: row.current_phase, checkpointRevision: row.checkpoint_revision, reasonCode: "lease_expired" });
+    await tx`
+      WITH failed AS (
+        UPDATE scan_jobs SET stage='failed', execution_state='failed', current_phase='terminalization', lease_owner=NULL,
+          lease_expires_at=NULL, retry_not_before=NULL, error_code='lease_exhausted',
+          public_error='The analysis could not be completed after multiple attempts.', updated_at=now()
+        WHERE id=${identity.jobId} AND report_id=${identity.reportId} AND tier=${identity.tier}
+          AND execution_state IN ('running','retry_wait') AND (lease_expires_at IS NULL OR lease_expires_at <= now())
+          AND phase_attempt >= max_attempts RETURNING credit_reservation_id
+      ), refunded AS (
+        UPDATE credit_ledger ledger SET status='refunded', refunded_at=now() FROM failed
+        WHERE ledger.id=failed.credit_reservation_id AND ledger.status='reserved' RETURNING ledger.access_key_id,ledger.credits
+      ) UPDATE access_keys access SET credits_remaining=access.credits_remaining+refunded.credits,
+        status=CASE WHEN access.status='exhausted' THEN 'active' ELSE access.status END FROM refunded WHERE access.id=refunded.access_key_id`;
+    await tx`DELETE FROM staging_free_regenerations regeneration USING scan_jobs job WHERE regeneration.job_id=job.id AND job.id=${identity.jobId} AND job.report_id=${identity.reportId} AND job.tier=${identity.tier} AND job.stage='failed'`;
+    await tx`UPDATE report_artifact_revisions artifact SET status='failed' FROM scan_jobs job WHERE artifact.job_id=job.id AND job.id=${identity.jobId} AND job.report_id=${identity.reportId} AND job.tier=${identity.tier} AND job.reason='staging_artifact_refresh' AND job.stage='failed' AND artifact.revision_kind='presentation_refresh' AND artifact.status='pending'`;
+  });
+  const claimedId = await JobTransitionService.claimExact(workerId, identity, leaseSeconds);
+  return claimedId ? getScanJob(claimedId) : null;
+}
+
 export async function heartbeatScanJob(id: string, workerId: string, leaseSeconds = 90): Promise<boolean> {
   await ensureDatabase();
   const sql = getSqlClient();
@@ -362,6 +402,7 @@ export async function checkpointScanJob(
   await ensureDatabase();
   const sql = getSqlClient();
   const checkpoint = JSON.stringify(input.checkpoint ?? {});
+  const semanticReviewContractVersion = semanticReviewCarrierUpdateVersion(input.checkpoint ?? {});
   await sql.begin(async (tx) => {
     const rows = await tx<{ id: string; execution_state: string; checkpoint_revision: number; current_phase: ScanJobPhase }[]>`
       UPDATE scan_jobs
@@ -374,14 +415,22 @@ export async function checkpointScanJob(
       WHERE id = ${id} AND lease_owner = ${workerId} AND lease_expires_at > now()
         AND execution_state = 'running'
         AND (${input.expectedCheckpointRevision ?? null}::integer IS NULL OR checkpoint_revision = ${input.expectedCheckpointRevision ?? null})
+        AND (${semanticReviewContractVersion ?? null}::text IS NULL OR checkpoint->>'semanticReviewContractVersion' = ${semanticReviewContractVersion ?? null})
       RETURNING id, execution_state, checkpoint_revision, current_phase
     `;
     const row = rows[0];
-    if (!row) throw new Error("The scan job lease is missing or expired.");
+    if (!row) throw new Error("The scan job lease is missing, expired, stale, or conflicts with its immutable semantic-review carrier.");
     await JobTransitionService.appendTransition(tx, { jobId: id, fromState: row.execution_state, toState: "running",
       phase: row.current_phase, checkpointRevision: row.checkpoint_revision, reasonCode: "checkpoint_advanced" });
   });
   return (await getScanJob(id))!;
+}
+
+export function assertCheckpointSemanticReviewCarrierUpdate(
+  persisted: JobCheckpoint,
+  update: JobCheckpoint
+): void {
+  assertSemanticReviewCarrierUpdate(persisted, update);
 }
 
 export interface ScanJobCoverage {
@@ -481,7 +530,9 @@ export async function terminalizeScanJob(
       productContract: job.product_contract,
       reason: job.reason,
       stage: input.stage
-    }, createPostgresReportV4AdmissionJobRepository(tx));
+    }, createPostgresReportV4AdmissionJobRepository(tx), {
+      semanticReviewContractVersion: "report-semantic-review-v1"
+    });
     if (!job.credit_reservation_id) return;
 
     const reservations = await tx<{

@@ -7,13 +7,13 @@ export type GenerativeSearchRefusalCode = "safety_refusal" | "policy_refusal" | 
 export interface GenerativeSearchRefusal { code: GenerativeSearchRefusalCode; reason: string; }
 export interface GenerativeSearchSource { sourceId: string; title: string; canonicalUrl: string; registrableDomain: string; citedText: string | null; providerResultOrder: number; }
 export interface GenerativeSearchAnswerResult { questionId: string; answerText: string; sources: GenerativeSearchSource[]; refusal: GenerativeSearchRefusal | null; searchedAt: string; completedAt: string; providerResponseId: string | null; }
-export interface GenerativeSearchAnswerProvider { readonly providerId: string; readonly model: string; readonly searchMode: string; answerWithSources(input: { questionId: string; question: string; locale: string; region: string; signal: AbortSignal }): Promise<GenerativeSearchAnswerResult>; }
+export interface GenerativeSearchAnswerProvider { readonly providerId: string; readonly model: string; readonly searchMode: string; answerWithSources(input: { questionId: string; question: string; locale: string; region: string; signal: AbortSignal; semanticValidation?: "legacy" | "deferred" }): Promise<GenerativeSearchAnswerResult>; }
 
 const refusalCodes = new Set<GenerativeSearchRefusalCode>(["safety_refusal", "policy_refusal", "high_risk_refusal"]);
 const text = (value: unknown, name: string, max: number) => { if (typeof value !== "string") throw new TypeError(`${name} must be a string.`); const v = value.trim(); if (v.length > max) throw new TypeError(`${name} exceeds the retained bound.`); return v; };
 const timestamp = (value: unknown, name: string) => { if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw new TypeError(`${name} must be an ISO timestamp.`); return value; };
 
-export function parseGenerativeSearchAnswerResult(value: unknown, options: { expectedQuestionId: string; locale: string }): GenerativeSearchAnswerResult {
+export function parseGenerativeSearchAnswerResult(value: unknown, options: { expectedQuestionId: string; locale: string; semanticValidation?: "legacy" | "deferred" }): GenerativeSearchAnswerResult {
   if (!value || typeof value !== "object") throw new TypeError("Generative search answer must be an object.");
   const row = value as Record<string, unknown>;
   const questionId = text(row.questionId, "questionId", 500);
@@ -29,7 +29,7 @@ export function parseGenerativeSearchAnswerResult(value: unknown, options: { exp
   }
   if (answerText && refusal) throw new TypeError("answerText and refusal may not be supplied together.");
   if (!answerText && !refusal) throw new TypeError("nonblank answerText is required unless a typed refusal is provided.");
-  assertGenerativeSearchAnswerLanguage([
+  if (options.semanticValidation !== "deferred") assertGenerativeSearchAnswerLanguage([
     ...(answerText ? [{ path: "answerText", text: answerText }] : []),
     ...(refusal ? [{ path: "refusal.reason", text: refusal.reason }] : [])
   ], options.locale);
@@ -72,15 +72,15 @@ export function assertGenerativeSearchAnswerLanguage(
 }
 
 function normalized(value: GenerativeSearchAnswerResult): string { return JSON.stringify(value); }
-export async function generativeSearchAnswerHash(value: unknown): Promise<string> {
+export async function generativeSearchAnswerHash(value: unknown, options?: { semanticValidation?: "legacy" | "deferred"; locale?: string }): Promise<string> {
   if (!value || typeof value !== "object" || typeof (value as Record<string, unknown>).questionId !== "string") throw new TypeError("questionId is required to hash an answer.");
   const questionId = (value as Record<string, unknown>).questionId as string;
   const row = value as Record<string, unknown>;
   const answer = typeof row.answerText === "string" ? row.answerText : "";
   const refusal = row.refusal && typeof row.refusal === "object" ? row.refusal as Record<string, unknown> : null;
   const refusalReason = typeof refusal?.reason === "string" ? refusal.reason : "";
-  const locale = /[\u3400-\u9fff]/u.test(`${answer}${refusalReason}`) ? "zh-CN" : "en-US";
-  return createHash("sha256").update(normalized(parseGenerativeSearchAnswerResult(value, { expectedQuestionId: questionId, locale }))).digest("hex");
+  const locale = options?.locale ?? (/[\u3400-\u9fff]/u.test(`${answer}${refusalReason}`) ? "zh-CN" : "en-US");
+  return createHash("sha256").update(normalized(parseGenerativeSearchAnswerResult(value, { expectedQuestionId: questionId, locale, semanticValidation: options?.semanticValidation }))).digest("hex");
 }
 export async function generativeSearchSourceHash(value: readonly GenerativeSearchSource[]): Promise<string> {
   // PostgreSQL jsonb does not preserve the insertion order of object keys.

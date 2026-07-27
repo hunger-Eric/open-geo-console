@@ -311,6 +311,55 @@ describe("generative answer-first V3 Worker service", () => {
     expect(result.answerCards.every(({ audit }) => audit.searchSourceOnlyCount === 1)).toBe(true);
   });
 
+  it("reuses the exact free-teaser Q1 and calls the paid provider only for Q2 and Q3", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const q1 = generatedAnswer(ids[0], 0);
+    const provider = generativeProvider([generatedAnswer(ids[1], 1), generatedAnswer(ids[2], 2)]);
+    const result = await resolveGenerativeAnswerFirstV3({
+      questionSet,
+      provider,
+      locale: "zh-CN",
+      region: "CN",
+      auditSources: [],
+      seededQ1: {
+        questionSetIdentity: questionSet.contentHash,
+        providerId: provider.providerId,
+        model: provider.model,
+        searchMode: provider.searchMode,
+        locale: "zh-CN",
+        region: "CN",
+        answerResult: q1
+      }
+    });
+
+    expect(result.checkpoint.answerResults[0]).toEqual(q1);
+    expect(result.answerCards[0]!.answerText).toBe(q1.answerText);
+    expect(provider.answerWithSources.mock.calls.map(([request]) => request.questionId)).toEqual([ids[1], ids[2]]);
+  });
+
+  it("fails closed before provider calls when a free-teaser Q1 runtime identity differs", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const provider = generativeProvider([]);
+    await expect(resolveGenerativeAnswerFirstV3({
+      questionSet,
+      provider,
+      locale: "zh-CN",
+      region: "CN",
+      auditSources: [],
+      seededQ1: {
+        questionSetIdentity: questionSet.contentHash,
+        providerId: provider.providerId,
+        model: "different-model",
+        searchMode: provider.searchMode,
+        locale: "zh-CN",
+        region: "CN",
+        answerResult: generatedAnswer(ids[0], 0)
+      }
+    })).rejects.toBeInstanceOf(AnswerFirstV3ResumeIdentityMismatchError);
+    expect(provider.answerWithSources).not.toHaveBeenCalled();
+  });
   it("runs one source correction and degrades to source_limited without erasing the answer", async () => {
     const questionSet = questions();
     const ids = questionIds(questionSet);
@@ -398,6 +447,73 @@ describe("generative answer-first V3 Worker service", () => {
     await expect(resolveGenerativeAnswerFirstV3({ questionSet, provider, locale: "zh-CN", region: "CN", auditSources: [] }))
       .rejects.toMatchObject({ code: "answer_first_v3_model_contract_invalid" });
     expect(provider.answerWithSources.mock.calls.filter(([request]) => request.questionId === ids[0])).toHaveLength(2);
+  });
+
+  it("keeps omitted and explicit legacy requests, cards, and checkpoints identical", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const omittedProvider = generativeProvider(ids.map((id, index) => generatedAnswer(id, index)));
+    const explicitProvider = generativeProvider(ids.map((id, index) => generatedAnswer(id, index)));
+    const now = () => new Date("2030-01-01T00:01:00.000Z");
+    const omitted = await resolveGenerativeAnswerFirstV3({
+      questionSet, provider: omittedProvider, locale: "zh-CN", region: "CN", auditSources: [], now
+    });
+    const explicit = await resolveGenerativeAnswerFirstV3({
+      questionSet, provider: explicitProvider, locale: "zh-CN", region: "CN", auditSources: [], now,
+      semanticValidation: "legacy"
+    });
+    const requestProjection = (calls: typeof explicitProvider.answerWithSources.mock.calls) =>
+      calls.map(([request]) => ({
+        questionId: request.questionId,
+        question: request.question,
+        locale: request.locale,
+        region: request.region,
+        ...(request.semanticValidation ? { semanticValidation: request.semanticValidation } : {})
+      }));
+    expect(requestProjection(explicitProvider.answerWithSources.mock.calls))
+      .toEqual(requestProjection(omittedProvider.answerWithSources.mock.calls));
+    expect(explicit.answerCards).toEqual(omitted.answerCards);
+    expect(explicit.checkpoint).toEqual(omitted.checkpoint);
+  });
+
+  it("returns structure-only deferred drafts without Q1 responsiveness or alias-based diagnosis", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const statistic = { ...generatedAnswer(ids[0], 0), answerText: "市场规模达到一千亿元，同比增长百分之十。" };
+    const provider = generativeProvider([statistic, generatedAnswer(ids[1], 1), generatedAnswer(ids[2], 2)]);
+    const result = await resolveGenerativeAnswerFirstV3({
+      questionSet,
+      provider,
+      locale: "zh-CN",
+      region: "CN",
+      targetUrl: "https://target.example/",
+      targetAliases: ["Target Brand"],
+      competitors: [{ entityId: "competitor-1", aliases: ["Competitor"] }],
+      auditSources: [],
+      targetPages: [],
+      semanticValidation: "deferred"
+    });
+
+    expect(result.checkpoint.stage).toBe("answers_collected");
+    expect(result.answerCardDrafts[0]!.answerText).toBe(statistic.answerText);
+    expect(result.answerCardDrafts.every((card) => !("geoDiagnosis" in card))).toBe(true);
+    expect(result.checkpoint.answerCards).toBeUndefined();
+    expect(result.checkpoint.sourceSelectionDiagnosis).toBeUndefined();
+    expect(provider.answerWithSources).toHaveBeenCalledTimes(3);
+    expect(provider.answerWithSources.mock.calls.every(([request]) => request.semanticValidation === "deferred")).toBe(true);
+  });
+
+  it("still rejects unsafe sources in deferred mode", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const unsafe = {
+      ...generatedAnswer(ids[0], 0),
+      sources: [{ ...generatedAnswer(ids[0], 0).sources[0]!, canonicalUrl: "http://127.0.0.1/private" }]
+    };
+    const provider = generativeProvider([unsafe, generatedAnswer(ids[1], 1), generatedAnswer(ids[2], 2)]);
+    await expect(resolveGenerativeAnswerFirstV3({
+      questionSet, provider, locale: "zh-CN", region: "CN", semanticValidation: "deferred"
+    })).rejects.toMatchObject({ code: "answer_first_v3_model_contract_invalid" });
   });
 });
 

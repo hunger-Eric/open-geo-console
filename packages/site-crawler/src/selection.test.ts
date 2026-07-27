@@ -108,6 +108,19 @@ describe("page classification and sampling", () => {
     expect(new Set(result.map(({ templateKey }) => templateKey)).size).toBe(MAX_CANDIDATE_URLS);
   });
 
+  it("keeps at most three representatives from the same page type and template", () => {
+    const input = Array.from({ length: 200 }, (_, index): PageCandidate => ({
+      ...candidate(index, "news"),
+      url: `https://example.com/news/story-${index + 1}`,
+      templateKey: "/news/:slug"
+    }));
+
+    const result = compressCandidates(input, 51);
+
+    expect(result).toHaveLength(3);
+    expect(result.map(({ url }) => url)).toEqual(input.slice(0, 3).map(({ url }) => url));
+  });
+
   it("selects one free and at most 50 deep pages", () => {
     const input = Array.from({ length: 80 }, (_, index) => candidate(index));
     expect(selectPagesForTier(input, "free")).toHaveLength(FREE_PAGE_LIMIT);

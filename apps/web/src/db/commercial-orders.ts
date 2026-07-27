@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import type postgres from "postgres";
+import { and, asc, eq, isNull, type ExtractTablesWithRelations } from "drizzle-orm";
+import type { PgTransaction } from "drizzle-orm/pg-core";
+import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js";
 import { ensureDatabase, getDb, getSqlClient } from "./index";
 import { hmacSecret, requireSecret } from "./secrets";
 import { resolveCombinedReportContract } from "@/report/combined-report-contract";
@@ -17,8 +20,16 @@ import {
   type PaymentProvider,
   type RecommendationFulfillmentMethodology,
   type RecommendationReportVersion,
-  type ReportLocale
+  type ReportLocale,
+  scanJobs
 } from "./schema";
+import {
+  assertSemanticReviewCarrierEquals,
+  createSemanticReviewInitialCheckpoint,
+  readSemanticReviewContractVersion,
+  resolvePaidV3SemanticReviewContract,
+  type SemanticReviewContractVersion
+} from "./report-semantic-review-activation";
 
 const PAYMENT_CONFIRMATION_TEMPLATE_VERSION = "v1";
 
@@ -68,6 +79,9 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
     )).limit(1);
     if (!questionSet || (questionSet.confidence === "low" && !questionSet.acknowledgedLowConfidence)) {
       throw new CommercialOrderConflictError("Three confirmed business questions are required before checkout.");
+    }
+    if (input.productCode === "recommendation_forensics_v1") {
+      await assertFreeSemanticCheckoutAuthority(tx, input.reportId, input.businessQuestionSetId, questionSet.contentHash);
     }
     const rows = await tx.insert(paymentOrders).values({
       id,
@@ -729,18 +743,41 @@ async function applyPaidPaymentEventInternal(
 
     const combinedReportContract = expectedContract === "report_v4"
       ? "combined_geo_report_v4"
-      : resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: process.env.OGC_COMBINED_REPORT_CONTRACT });
+      : order.recommendation_report_version === 3
+        ? "combined_geo_report_v3"
+        : resolveCombinedReportContract({ OGC_COMBINED_REPORT_CONTRACT: process.env.OGC_COMBINED_REPORT_CONTRACT });
+    const semanticReviewContractVersion = await paidV3SemanticReviewContract(tx, {
+      expectedContract,
+      combinedReportContract,
+      reportId: order.report_id,
+      orderId: order.id,
+      questionSetId: order.business_question_set_id
+    });
+    const initialCheckpoint = JSON.stringify(createSemanticReviewInitialCheckpoint(
+      semanticReviewContractVersion ?? undefined
+    ));
     let jobId = order.fulfillment_job_id ?? reservation.job_id;
     if (!jobId) {
       jobId = ids.jobId;
       await tx`
         INSERT INTO scan_jobs
-          (id, report_id, site_snapshot_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, artifact_contract, business_question_set_id, locale, reason, stage, credit_reservation_id)
+          (id, report_id, site_snapshot_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, artifact_contract, business_question_set_id, locale, reason, stage, credit_reservation_id, checkpoint)
         VALUES
           (${jobId}, ${order.report_id}, ${expectedContract === "report_v4" ? order.site_snapshot_id : null}, 'deep', ${productContractForCode(order.product_code)}, ${order.fulfillment_methodology}, ${order.recommendation_report_version},
            ${order.product_code === "recommendation_forensics_v1" && order.business_question_set_id ? combinedReportContract : productContractForCode(order.product_code)}, ${order.business_question_set_id},
-           ${order.report_locale}, 'standard', 'queued', ${reservation.id})
+            ${order.report_locale}, 'standard', 'queued', ${reservation.id}, ${initialCheckpoint}::jsonb)
       `;
+    }
+    if (expectedContract !== "report_v4" && combinedReportContract === "combined_geo_report_v3") {
+      const [paidJob] = await tx<Array<{ checkpoint: unknown }>>`
+        SELECT checkpoint FROM scan_jobs WHERE id=${jobId} FOR UPDATE
+      `;
+      if (!paidJob) throw new CommercialOrderConflictError("The Paid V3 job authority is unavailable.");
+      try {
+        assertSemanticReviewCarrierEquals(paidJob.checkpoint, semanticReviewContractVersion);
+      } catch (error) {
+        throw new CommercialOrderConflictError("The Paid V3 semantic-review carrier conflicts with its Free lineage.", { cause: error });
+      }
     }
     if (expectedContract === "report_v4") {
       const jobs = await tx<Array<{
@@ -841,6 +878,79 @@ async function applyPaidPaymentEventInternal(
   };
 }
 
+async function paidV3SemanticReviewContract(
+  tx: postgres.TransactionSql,
+  input: {
+    expectedContract: "legacy" | "report_v4";
+    combinedReportContract: string;
+    reportId: string;
+    orderId: string;
+    questionSetId: string | null;
+  }
+): Promise<SemanticReviewContractVersion | null> {
+  if (input.expectedContract === "report_v4" || input.combinedReportContract !== "combined_geo_report_v3" || !input.questionSetId) {
+    return null;
+  }
+  const [freeJob] = await tx<Array<{ stage: string; checkpoint: unknown }>>`
+    SELECT stage,checkpoint FROM scan_jobs
+    WHERE report_id=${input.reportId} AND reason='v4_pre_admission'
+    ORDER BY created_at,id LIMIT 1 FOR SHARE
+  `;
+  if (!freeJob) throw new CommercialOrderConflictError("The Free semantic-review authority is unavailable for this Paid V3 lineage.");
+  try {
+    if (readSemanticReviewContractVersion(freeJob.checkpoint) === null) {
+      throw new CommercialOrderConflictError("New Paid V3 lineages require the Free semantic-review marker.");
+    }
+  } catch (error) {
+    throw new CommercialOrderConflictError("The Free semantic-review carrier is malformed.", { cause: error });
+  }
+  const [questionSet] = await tx<Array<{ content_hash: string | null }>>`
+    SELECT content_hash FROM report_business_question_sets
+    WHERE id=${input.questionSetId} AND report_id=${input.reportId}
+      AND order_id=${input.orderId} AND status='locked'
+  `;
+  if (!questionSet?.content_hash) {
+    throw new CommercialOrderConflictError("The Paid V3 question-set authority is unavailable.");
+  }
+  try {
+    return resolvePaidV3SemanticReviewContract({
+      checkpoint: freeJob.checkpoint,
+      stage: freeJob.stage as import("./schema").ScanJobStage,
+      reportId: input.reportId,
+      questionSetId: input.questionSetId,
+      questionSetIdentity: questionSet.content_hash
+    });
+  } catch (error) {
+    throw new CommercialOrderConflictError("The Free semantic-review carrier is not valid for Paid V3.", { cause: error });
+  }
+}
+
+async function assertFreeSemanticCheckoutAuthority(
+  tx: PgTransaction<PostgresJsQueryResultHKT, typeof import("./schema"), ExtractTablesWithRelations<typeof import("./schema")>>,
+  reportId: string,
+  questionSetId: string,
+  questionSetIdentity: string | null
+): Promise<void> {
+  if (!questionSetIdentity) throw new CommercialOrderConflictError("The Free semantic question-set identity is unavailable.");
+  const [freeJob] = await tx.select({ stage: scanJobs.stage, checkpoint: scanJobs.checkpoint })
+    .from(scanJobs)
+    .where(and(eq(scanJobs.reportId, reportId), eq(scanJobs.reason, "v4_pre_admission")))
+    .orderBy(asc(scanJobs.createdAt), asc(scanJobs.id))
+    .limit(1);
+  if (!freeJob) throw new CommercialOrderConflictError("A terminal reviewed Free teaser is required before checkout.");
+  try {
+    resolvePaidV3SemanticReviewContract({
+      checkpoint: freeJob.checkpoint,
+      stage: freeJob.stage as import("./schema").ScanJobStage,
+      reportId,
+      questionSetId,
+      questionSetIdentity
+    });
+  } catch (error) {
+    throw new CommercialOrderConflictError("The terminal reviewed Free teaser is not eligible for checkout.", { cause: error });
+  }
+}
+
 export function productContractForCode(productCode: string): "legacy_website_audit_v1" | "recommendation_forensics_v1" {
   if (productCode === "recommendation_forensics_v1") return "recommendation_forensics_v1";
   if (productCode === "deep_report_v1") return "legacy_website_audit_v1";
@@ -856,7 +966,7 @@ export function fulfillmentMethodologyForProductAdmission(
 }
 
 export function recommendationReportVersionForProductAdmission(productCode: string): RecommendationReportVersion | null {
-  if (productCode === "recommendation_forensics_v1") return 2;
+  if (productCode === "recommendation_forensics_v1") return 3;
   if (productCode === "deep_report_v1") return null;
   throw new CommercialOrderConflictError("The paid order uses an unsupported recommendation report version.");
 }

@@ -109,21 +109,180 @@ npm run staging:free:cleanup -- --confirm --active-jobs-only
 
 Both modes verify the deployment profile and database marker and refuse production.
 
-## Protected Preview and Webhooks
+## Protected staging deployment and real-flow acceptance
 
-- The fixed test URL is `https://open-geo-console-staging-itheheda.vercel.app`. After each CLI Preview deployment, repoint it explicitly with `npx vercel alias set <new-preview-url> open-geo-console-staging-itheheda.vercel.app`, then repeat the anonymous `302`/`401` checks before browser acceptance.
-- Keep Vercel Standard Authentication enabled for Preview deployments. Anonymous page requests must redirect to Vercel login, and anonymous `POST /api/scan` must be rejected by deployment protection.
-- Keep Airwallex Sandbox and Resend Webhook signature verification enabled in the application. Vercel protection is an outer gate, not a substitute for provider signatures or event idempotency.
-- Pass the current automation bypass only in the provider Webhook URL or another provider-supported secret location. Rotate it through Vercel's protection-bypass API or dashboard; never print, log, commit, or paste the value.
-- After rotation, verify the previous credential is rejected and update Sandbox providers securely. Do not disable Preview authentication to repair delivery.
-- Current production URL: `https://geo.itheheda.online`. Current protected staging URL: `https://open-geo-console-staging-itheheda.vercel.app`.
-- The staging Airwallex and Resend Webhooks use separate provider-specific protection-bypass values. Do not reuse the general automation bypass.
+This section is the current operator authority for Protected Staging deployment
+and complete-flow acceptance. Dated plans, prompts, evidence, old report IDs,
+and later specialized commands are context only; they cannot change this order
+or substitute for a new end-to-end result.
 
-## Acceptance
+### Four separate gates
 
-### Report V4 acceptance
+| Gate | What it proves | What it does not prove |
+| --- | --- | --- |
+| 1. Candidate packaging | Local checks pass and one immutable candidate SHA identifies the Web and Worker source | Nothing has been deployed |
+| 2. Staging deployment | The Web Preview and both Staging Workers run the same SHA | The customer flow works |
+| 3. Fixed-site smoke | The fixed test site serves the candidate and exposes test commerce | A new report or payment succeeds |
+| 4. Real-flow acceptance | One wholly new report completes every persisted stage through accessible Paid V3 HTML | Nothing beyond that exact lineage |
 
-The local branch implements schema v40 and the three-scenario V4 acceptance authority. Local readiness is checked with:
+A later gate cannot be inferred from an earlier one. A passing test/build,
+`READY` deployment, healthy Worker, HTTP 200, or intermediate report stage is
+only a stage result.
+
+### URL roles
+
+- The only business test entry is the fixed Protected Staging URL:
+  `https://open-geo-console-staging-itheheda.vercel.app`.
+- A unique Vercel Preview URL identifies an artifact; it is not the customer
+  acceptance site.
+- Before the fixed alias moves, the fixed site represents the old Web revision
+  and cannot prove the candidate.
+- Direct Vercel Authentication on a unique Preview is not a product failure.
+  Do not rebuild it, create a share link, disable protection, or ask the user
+  to troubleshoot merely to make that URL browsable.
+
+### Gate 1: package one candidate
+
+1. Perform read-only preflight for Git, linked Vercel project/team, Staging
+   database marker/schema, Docker, disk, and current/rollback identities.
+2. Run approved tests, lint, build, and diff checks; these prove readiness only.
+3. Create one candidate commit and use a clean detached worktree at that SHA.
+4. Create a new Preview only when no existing `READY` Preview already matches
+   the candidate. Candidate identity requires:
+   - state `READY`;
+   - target Preview, never Production;
+   - the linked project and team;
+   - `gitCommitSha` equal to the full candidate SHA;
+   - `ogcGitSha` equal to the same SHA; and
+   - the clean detached worktree HEAD equal to the same SHA.
+5. `githubCommitSha` is optional when Vercel/Git supplies it independently.
+   CLI-injected metadata is not independent proof or a reason to redeploy.
+
+Stop if identity is ambiguous. Do not move the fixed alias during this gate.
+
+### Gate 2: deploy the same SHA
+
+1. Record candidate, current, and one rollback image before changing containers.
+2. Follow the Docker/disk rules below and in `AGENTS.md`; source-only changes use
+   the approved thin overlay, never an unnecessary dependency/browser rebuild.
+3. Build from the clean detached worktree and label it with the Web Preview SHA.
+4. Before replacement, require the expected Staging marker/schema and zero
+   claimable, running, expired-recoverable, or exhausted-terminalizable jobs.
+5. Recreate only the named Staging Free and Deep Workers. Verify both use the
+   candidate image/SHA, have the correct tiers and Staging runtime identity,
+   remain healthy with restart count zero, and have not claimed work.
+6. Only after both Workers pass, move the fixed Protected Staging alias once
+   to the already accepted candidate Preview.
+
+If a post-change check fails, restore both Workers and the fixed alias to the
+recorded rollback identities. A rollback does not authorize a rebuild or retry.
+Do not touch Production, the commerce Worker, historical jobs, reports, orders,
+payments, or artifacts.
+
+### Gate 3: smoke-test the fixed site
+
+Use the existing authenticated Protected Staging browser session against the
+fixed URL, not the unique Preview URL:
+
+1. Confirm `/zh` is reachable through the expected locale redirect and renders
+   the candidate site.
+2. Confirm `/api/commerce/catalog` returns HTTP 200, reports `mode=test`, and
+   contains the products required for the authorized test.
+3. Confirm the Web, Free Worker, and Deep Worker still report the same full
+   candidate SHA and Staging identity.
+4. Confirm no report, crawl, model call, order, payment, refund, email, or
+   customer artifact was created by deployment smoke testing.
+
+Anonymous `302`/`401` results remain useful protection checks, but they are not
+business acceptance. If this gate fails after cutover, perform the recorded
+rollback and stop. If it passes, report exactly: **Protected Staging deployment
+completed; real flow not yet accepted.** Then stop before creating a report or
+payment.
+
+### Human-readable deployment acceptance card
+
+An independent read-only checker verifies the technical evidence before and
+after a high-risk deployment. The user receives this plain-language card;
+technical IDs and commands belong in an appendix and are not prerequisites for
+the user's decision.
+
+| User-facing question | Allowed answer |
+| --- | --- |
+| Was another Preview created? | Yes/no, with the concrete reason |
+| Did the fixed test site change? | Not switched / switched / rolled back |
+| Were a report or payment created? | No, unless Gate 4 was separately authorized |
+| Was Production touched? | No |
+| Do Web, Free Worker, and Deep Worker run one version? | Yes/no |
+| What is the current result? | Not run / deployment complete but not real-flow accepted / safely rolled back |
+
+### Gate 4: accept one wholly new real flow
+
+Gate 4 requires a separate `FROZEN` scope and explicit authorization for
+exactly one new report and one Sandbox payment. The acceptance lineage is:
+
+`submitted URL -> Foundation -> Free V4 -> Q1 answer/diagnosis -> semantic receipt -> Sandbox payment -> Paid V3 -> accessible complete HTML`
+
+For that lineage, verify every model, transition, checkpoint, and persistence
+boundary:
+
+| Stage | Required persisted evidence |
+| --- | --- |
+| URL submission | A new report identity and immutable generation locale; no historical identity is reused |
+| Foundation | The Foundation checkpoint and artifact complete for that report |
+| Free V4 | The Free V4 revision is persisted and bound to the same Foundation |
+| Q1 answer/diagnosis | Model-produced answer and diagnosis are persisted for the same report/revision |
+| Semantic review | The constrained model judgment and semantic receipt are persisted; deterministic code may enforce schema/evidence contracts but keyword or length heuristics cannot replace semantic judgment |
+| Language/correction | Language-gate result and any contract-bounded model correction are recorded in the same run; terminal failure cannot be operator-retried |
+| Sandbox payment | One user-authorized payment, verified Webhook, and exactly-once entitlement/Paid V3 job share the lineage |
+| Paid V3 | The Paid V3 revision completes and is the active deliverable |
+| HTML delivery | The report-specific authorized link opens the complete customer HTML |
+
+A bounded model correction inside the authorized generation contract is an
+internal stage of the same run. Once the report or an acceptance gate has
+terminally failed, operators must not retry, resume, repair, replay, clone, pay,
+or reuse that report.
+
+Only success at all seven checks permits the statement that the complete flow
+is fixed. If any check fails:
+
+1. stop without retrying or changing the failed report;
+2. report the actual failed stage and root cause;
+3. create a new precise `FROZEN` repair scope;
+4. repair only after that scope is approved; and
+5. request authorization for another wholly new report after the repair.
+
+Local checks, deployment health, prior reports, or partial success can never
+replace this evidence.
+
+### Preview protection and Webhooks
+
+- Keep Vercel Standard Authentication enabled for Preview deployments.
+  Anonymous page requests must redirect to Vercel login, and anonymous
+  `POST /api/scan` must be rejected by deployment protection.
+- Keep Airwallex Sandbox and Resend Webhook signature verification enabled in
+  the application. Vercel protection is an outer gate, not a substitute for
+  provider signatures or event idempotency.
+- Pass the current automation bypass only in the provider Webhook URL or another
+  provider-supported secret location. Rotate it through Vercel's
+  protection-bypass API or dashboard; never print, log, commit, or paste it.
+- After rotation, verify the previous credential is rejected and update Sandbox
+  providers securely. Do not disable Preview authentication to repair delivery.
+- Current production URL: `https://geo.itheheda.online`. Current protected
+  staging URL: `https://open-geo-console-staging-itheheda.vercel.app`.
+- The staging Airwallex and Resend Webhooks use separate provider-specific
+  protection-bypass values. Do not reuse the general automation bypass.
+
+## Specialized acceptance and maintenance references
+
+The workflows below have narrower historical or maintenance purposes. They do
+not authorize deployment, a report, payment, repair, or reuse, and they cannot
+replace the four-gate current authority above.
+
+### Historical Report V4 three-scenario conformance
+
+The following schema-v40 commands document the historical three-scenario V4
+conformance authority. They are local readiness checks, not current full-flow
+acceptance:
 
 ```powershell
 npm test
@@ -135,11 +294,16 @@ npm run report:v4:acceptance
 
 `report:v4:acceptance` must continue to fail while any registry entry remains `implemented` rather than `verified` or the exact three-scenario protected-staging evidence set is incomplete. Do not manufacture evidence or promote statuses to make the command pass.
 
-A live V4 run requires explicit user authorization for deployment, schema/database mutation, Airwallex Sandbox payment/refund, redirected email, Git push, and pull-request creation. After authorization, align schema v40 plus the protected-staging Web, free Worker, deep Worker, and commerce code before using `report-v4:acceptance:operator` or `report-v4:acceptance:collect`. Use only exact run-produced session/scenario identities and immutable authorities; do not reuse IDs from a prior drill. Production deployment, production database mutation, and production commerce are forbidden for V4 acceptance.
+A live historical V4 conformance run still requires a separate explicit scope
+for deployment, schema/database mutation, Airwallex Sandbox payment/refund,
+redirected email, Git push, and pull-request creation. Use only exact
+run-produced session/scenario identities and immutable authorities; do not
+reuse IDs from a prior drill. Production deployment, production database
+mutation, and production commerce remain forbidden.
 
 The 2026-07-19 paid core run proves one authorized `combined_geo_report_v4` customer HTML can reach `completed_limited`; it does not complete the three-scenario conformance authority. Its exact identities, content inspection, failed Sandbox cash refund, retried email state, and remaining acceptance work are recorded in `docs/operations/evidence/2026-07-19-report-v4-paid-deep-report.md`.
 
-### Combined-report presentation refresh
+### Specialized combined-report presentation refresh
 
 The approved existing report can be refreshed without creating a charge, credit, correction, refund, email, or production write:
 
@@ -151,7 +315,7 @@ The command requires the staging deployment profile and staging database marker.
 
 Acceptance must record the new revision ID, authorized customer HTML link and hash, internal PDF hash/storage key/page count, source ownership per question, preserved technical citations/screenshots, application-level anonymous `404` for the HTML artifact, and zero commercial side effects. Confirm that completion email contains only the secure HTML link. Do not request, access, or publish a customer PDF endpoint. Never run this command with production environment files or deploy the schema/Worker to production as part of staging acceptance.
 
-### Provider-discovery V2 acceptance
+### Historical provider-discovery V2 acceptance
 
 `combined_geo_report_v2` is a prospective opt-in. Deploy schema v20 and matching Web/free/deep Worker code to protected staging first; do not rewrite existing V1 orders or revisions, and do not set the V2 contract in production. The V2 staging refresh lineage is `evidence_refresh`, which must retain the active artifact until the four snapshot refs, exact provider passages/claims, customer HTML, private PDF readiness and atomic revision activation all pass.
 

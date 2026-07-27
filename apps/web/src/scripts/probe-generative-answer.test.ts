@@ -2,12 +2,22 @@ import {readFileSync} from "node:fs";
 import type {GenerativeSearchAnswerProvider} from "@open-geo-console/ai-report-engine";
 import {describe, expect, it} from "vitest";
 import {
+  DEFAULT_GENERATIVE_ANSWER_PROBE_OPTIONS,
+  formatGenerativeAnswerProbeFailure,
   formatGenerativeAnswerProbeSummary,
   parseGenerativeAnswerProbeCommand,
   runGenerativeAnswerProbeCommand
 } from "./probe-generative-answer";
 
 describe("generative-answer staging probe", () => {
+  it("uses one frozen generic input when the checked-in command passes no arguments", () => {
+    expect(parseGenerativeAnswerProbeCommand([])).toEqual({
+      question: "采购跨境物流服务时，应核验哪些公开证据？",
+      locale: "zh-CN",
+      region: "CN"
+    });
+    expect(Object.isFrozen(DEFAULT_GENERATIVE_ANSWER_PROBE_OPTIONS)).toBe(true);
+  });
   it("accepts only one nonblank question, locale, and region", () => {
     expect(parseGenerativeAnswerProbeCommand([
       "--question", "采购跨境物流服务时，应核验哪些限制？",
@@ -26,6 +36,59 @@ describe("generative-answer staging probe", () => {
       "--question", "ordinary question", "--locale", "en", "--region", "US",
       "--customer", "private-customer"
     ])).toThrow(/only --question/i);
+    expect(() => parseGenerativeAnswerProbeCommand([
+      "--question", "ordinary question", "--locale", "en"
+    ])).toThrow(/only --question|required/i);
+    expect(() => parseGenerativeAnswerProbeCommand([
+      "--question", "ordinary question", "--question", "duplicate",
+      "--locale", "en", "--region", "US"
+    ])).toThrow(/duplicate/i);
+    expect(() => parseGenerativeAnswerProbeCommand([
+      "--question", "x".repeat(2_001), "--locale", "en", "--region", "US"
+    ])).toThrow(/safe length/i);
+  });
+
+  it("runs the zero-argument command through guard, resolution, and provider request in order", async () => {
+    const calls: string[] = [];
+    const summary = await runGenerativeAnswerProbeCommand([], {
+      prepare: async () => {
+        calls.push("prepare");
+        return {
+          profile: "staging",
+          databaseFingerprint: "not-output",
+          commerceMode: "sandbox",
+          fulfillmentMode: "batch_24h"
+        };
+      },
+      resolveProvider: (_environment, input) => {
+        calls.push(`resolve:${input.locale}:${input.region}`);
+        return {
+          providerId: "xiaomi-mimo",
+          model: "mimo-v2.5-pro",
+          searchMode: "native_web_search",
+          async answerWithSources(answerInput) {
+            calls.push(`answer:${answerInput.question}`);
+            return {
+              questionId: answerInput.questionId,
+              answerText: "公开证据回答",
+              sources: [],
+              refusal: null,
+              searchedAt: "2030-01-01T00:00:00.000Z",
+              completedAt: "2030-01-01T00:00:01.000Z",
+              providerResponseId: null
+            };
+          }
+        };
+      },
+      signal: new AbortController().signal
+    });
+
+    expect(calls).toEqual([
+      "prepare",
+      "resolve:zh-CN:CN",
+      "answer:采购跨境物流服务时，应核验哪些公开证据？"
+    ]);
+    expect(summary.answerNonblank).toBe(true);
   });
 
   it("runs the protected staging guard first and emits only secret-safe fields", async () => {
@@ -117,6 +180,56 @@ describe("generative-answer staging probe", () => {
     );
     expect(rootPackage.scripts["generative-answer:staging:probe"]).toBe(
       "npm run generative-answer:staging:probe --workspace apps/web --"
+    );
+  });
+
+  it("reports only fixed secret-safe failure stages", async () => {
+    const secret = "SECRET_CUSTOMER_TOKEN_AND_PROVIDER_BODY";
+    const scenarios = [
+      {
+        expected: "command",
+        run: () => runGenerativeAnswerProbeCommand(["--question", secret])
+      },
+      {
+        expected: "staging_guard",
+        run: () => runGenerativeAnswerProbeCommand([], {
+          prepare: async () => { throw new Error(secret); }
+        })
+      },
+      {
+        expected: "provider_resolution",
+        run: () => runGenerativeAnswerProbeCommand([], {
+          prepare: async () => ({profile: "staging", databaseFingerprint: secret, commerceMode: "sandbox", fulfillmentMode: "batch_24h"}),
+          resolveProvider: () => { throw new Error(secret); }
+        })
+      },
+      {
+        expected: "provider_request",
+        run: () => runGenerativeAnswerProbeCommand([], {
+          prepare: async () => ({profile: "staging", databaseFingerprint: secret, commerceMode: "sandbox", fulfillmentMode: "batch_24h"}),
+          resolveProvider: () => ({
+            providerId: "xiaomi-mimo",
+            model: "mimo-v2.5-pro",
+            searchMode: "native_web_search",
+            answerWithSources: async () => { throw new Error(secret); }
+          })
+        })
+      }
+    ];
+
+    for (const scenario of scenarios) {
+      const output = await scenario.run().then(
+        () => { throw new Error("Expected the staged probe failure."); },
+        (error: unknown) => formatGenerativeAnswerProbeFailure(error)
+      );
+      expect(JSON.parse(output)).toEqual({
+        error: "generative_answer_staging_probe_failed",
+        stage: scenario.expected
+      });
+      expect(output).not.toContain(secret);
+    }
+    expect(formatGenerativeAnswerProbeFailure(new Error(secret))).toBe(
+      '{"error":"generative_answer_staging_probe_failed","stage":"unexpected"}'
     );
   });
 });

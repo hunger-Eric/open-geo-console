@@ -170,3 +170,6 @@
 - [x] Recover and accept the paid Chinese V2 limited path for report `6c13e91a-f836-4f04-b426-4b45807234b7`: reuse the persisted public-source artifact during terminalization, bind evidence against the normalized snapshot cutoff, finish `completed_limited`, complete the CNY 199 Sandbox refund, deliver all three emails, and allow protected operator access to the complimentary HTML without exposing a customer PDF.
 - [x] Use an isolated disposable PostgreSQL admin URL to run the schema/V2 suites. The 2026-07-13 market-snapshot suite proves a complete second snapshot for the same fanout and replacement claim after an unexhausted expired running lease (`4/4` tests); this does not substitute for live paid acceptance.
 - [ ] Add any free sample only after paid V2 staging acceptance; never market public-search order as AI rank or recommendation.
+# Open GEO Console Tasks
+
+Task status remains fail-closed where V4 validation is limited or incomplete; consolidation does not mark pending work complete.

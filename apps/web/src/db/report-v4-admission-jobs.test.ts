@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { REPORT_SEMANTIC_REVIEW_CONTRACT } from "@open-geo-console/ai-report-engine";
 import {
   enqueueReportV4PreAdmissionAfterPreview,
   type ReportV4AdmissionJobRepository
@@ -49,6 +50,27 @@ describe("V4 pre-admission job lifecycle", () => {
     expect(createExactlyOnce).toHaveBeenCalledWith(expect.objectContaining({
       reportId: "report-limited",
       reason: "v4_pre_admission"
+    }));
+  });
+
+  it("passes the carrier only through an explicit creation option", async () => {
+    const createExactlyOnce = vi.fn(async () => ({ jobId: "review-admission-job", created: true }));
+    const repository: ReportV4AdmissionJobRepository = { createExactlyOnce };
+    const preview = {
+      reportId: "report-review",
+      locale: "en" as const,
+      tier: "free" as const,
+      productContract: "legacy_website_audit_v1" as const,
+      reason: "standard" as const,
+      stage: "completed" as const
+    };
+
+    await enqueueReportV4PreAdmissionAfterPreview(preview, repository, {
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+    });
+
+    expect(createExactlyOnce).toHaveBeenCalledWith(expect.objectContaining({
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
     }));
   });
 

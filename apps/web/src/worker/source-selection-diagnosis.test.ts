@@ -90,4 +90,33 @@ describe("V3 source selection diagnosis Worker mapping", () => {
     ];
     expect(sourceSelectionTargetFoundationHash(left)).toBe(sourceSelectionTargetFoundationHash(left.toReversed()));
   });
+
+  it("keeps omitted and explicit legacy output identical and accepts only a supplied deferred draft", () => {
+    const cards = [
+      card("q1", "s1", "https://guide.example/a", "verified_body"),
+      card("q2", "s2", "https://guide.example/b", "verified_body"),
+      { ...card("q3", "s3", "https://guide.example/c", "verified_body"), sources: [], status: "source_limited" as const, audit: { verifiedBodyCount: 0, searchSourceOnlyCount: 0, inaccessibleCount: 0 } }
+    ] as [GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerCardV3];
+    const base = {
+      answerCards: cards,
+      auditSources: [audit("a", "https://guide.example/a", true), audit("b", "https://guide.example/b", true)],
+      targetUrl: "https://target.example/",
+      targetPages: [{ url: "https://target.example/", title: "Target", metaDescription: "服务", h1: ["Target"], readableTextLength: 300, hasJsonLd: false, status: 200 }],
+      locale: "zh-CN",
+      answerHash: "a".repeat(64),
+      sourceHash: "b".repeat(64)
+    };
+    const omitted = buildSourceSelectionDiagnosisForGenerativeV3(base);
+    const explicit = buildSourceSelectionDiagnosisForGenerativeV3({ ...base, semanticValidation: "legacy" });
+    expect(explicit).toEqual(omitted);
+
+    omitted.sharedPatterns[0]!.summary = "该因素将保证模型选择此来源。";
+    expect(buildSourceSelectionDiagnosisForGenerativeV3({
+      ...base,
+      semanticValidation: "deferred",
+      deferredDraft: omitted
+    }).sharedPatterns[0]!.summary).toBe("该因素将保证模型选择此来源。");
+    expect(() => buildSourceSelectionDiagnosisForGenerativeV3({ ...base, semanticValidation: "deferred" }))
+      .toThrow(/externally reviewed draft/u);
+  });
 });

@@ -98,12 +98,18 @@ describe("prospective combined report language gate", () => {
   });
 
   it("rejects unsupported presentation terminology policies before deeper parsing", () => {
-    expect(() => parseCombinedGeoReportV1({
+    const value = {
       version: 1,
       artifactContract: "combined_geo_report_v1",
       productCode: "recommendation_forensics_v1",
       presentationTerminologyPolicy: "seo_v1"
-    })).toThrow(/presentationTerminologyPolicy/);
+    };
+    const error = (options?: { semanticValidation?: "legacy" | "deferred" }) => {
+      try { parseCombinedGeoReportV1(value, options); } catch (caught) { return (caught as Error).message; }
+      throw new Error("Expected parser failure.");
+    };
+    expect(error({ semanticValidation: "legacy" })).toBe(error());
+    expect(error({ semanticValidation: "deferred" })).toMatch(/presentationTerminologyPolicy/u);
   });
 });
 

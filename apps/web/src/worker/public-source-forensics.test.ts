@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { MarketSearchObservation, PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import { createTestWebsiteFoundation } from "../public-source-forensics/testing";
+import { buildPublicSourceForensicReport } from "../public-source-forensics/report-builder";
 import { PublicSourceArtifactUnavailableError, PublicSourceResumeIdentityMismatchError, runPublicSourceForensicsPipeline, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
 
 const surface = { surfaceId:"fixture-surface",providerId:"fixture-index",productId:"fixture-search",surfaceKind:"documented_api" as const,
@@ -49,6 +50,30 @@ describe("public-source forensics pipeline", () => {
     const drifted=deps({reports,checkpoints:new Map([["job-d",{identityHash:"wrong",methodology:"public_search_source_forensics_v1",questionSetVersion:"wrong",fanoutVersion:"wrong",authorityId:"wrong",snapshotIds:[],websiteFoundationHash:"wrong",evidenceCutoffAt:"2030-01-02T00:00:00.000Z",locale:"zh-CN",region:"CN",adapterIdentityHash:"wrong"}]]),resolve:async({fanout})=>snapshot(fanout,1)});
     await expect(run("report-d","job-d",drifted)).rejects.toBeInstanceOf(PublicSourceResumeIdentityMismatchError);
   });
+
+  it("keeps explicit legacy builder input identical and forwards only an explicit deferred seam", async () => {
+    const makeDependencies = () => {
+      const buildReport = vi.fn(buildPublicSourceForensicReport);
+      const dependencies = {
+        ...deps({
+          reports: new Map(),
+          checkpoints: new Map(),
+          resolve: async ({ fanout }) => snapshot(fanout, 1)
+        }),
+        buildReport
+      };
+      return { buildReport, dependencies };
+    };
+    const omitted = makeDependencies();
+    const explicit = makeDependencies();
+    const deferred = makeDependencies();
+    const omittedResult = await run("report-e", "job-e", omitted.dependencies);
+    const explicitResult = await run("report-e", "job-e", explicit.dependencies, "legacy");
+    await run("report-e", "job-e", deferred.dependencies, "deferred");
+    expect(explicit.buildReport.mock.calls).toEqual(omitted.buildReport.mock.calls);
+    expect(explicitResult.report).toEqual(omittedResult.report);
+    expect(deferred.buildReport).toHaveBeenCalledWith(expect.objectContaining({ semanticValidation: "deferred" }));
+  });
 });
 
 function deps(input:{reports:Map<string,RecommendationForensicReportV2>;checkpoints:Map<string,PublicSourcePipelineCheckpoint>;resolve:PublicSourceForensicsDependencies["resolveSnapshot"];artifactReadiness?:PublicSourceForensicsDependencies["artifactReadiness"];prepareArtifactVerification?:PublicSourceForensicsDependencies["prepareArtifactVerification"]}):PublicSourceForensicsDependencies{
@@ -56,7 +81,7 @@ function deps(input:{reports:Map<string,RecommendationForensicReportV2>;checkpoi
     getReport:async(id)=>input.reports.get(id)??null,saveReport:async(value)=>{const report=value as RecommendationForensicReportV2;input.reports.set(report.jobId,report);return report;},
     artifactReadiness:input.artifactReadiness??{async verify(){}},prepareArtifactVerification:input.prepareArtifactVerification,now:()=>new Date("2030-01-02T00:00:00.000Z"),costCapMicros:1000};
 }
-function run(reportId:string,jobId:string,dependencies:PublicSourceForensicsDependencies){return runPublicSourceForensicsPipeline({reportId,jobId,locale:"zh-CN",region:"CN",targetUrl:"https://customer-logistics.example/",websiteFoundation:createTestWebsiteFoundation(),dependencies});}
+function run(reportId:string,jobId:string,dependencies:PublicSourceForensicsDependencies,semanticValidation?:"legacy"|"deferred"){return runPublicSourceForensicsPipeline({reportId,jobId,locale:"zh-CN",region:"CN",targetUrl:"https://customer-logistics.example/",websiteFoundation:createTestWebsiteFoundation(),dependencies,semanticValidation});}
 function snapshot(fanout:SearchQueryFanout,index:number){
   const observations:MarketSearchObservation[]=fanout.queries.map((query,order)=>({observationId:`obs-${fanout.questionId}-${order}`,surface,queryId:query.id,exactQuery:query.exactQuery,
     requestedAt:"2030-01-01T00:00:00.000Z",completedAt:"2030-01-01T00:00:01.000Z",status:"complete",results:[{surfaceResultOrder:0,url:`https://source-${index}-${order}.example/fact`,title:"公开货运资料",snippet:"公开资料描述货运能力。",displayedHost:`source-${index}-${order}.example`}],usage:{requestCount:1,resultCount:1,estimatedCostMicros:1}}));

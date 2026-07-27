@@ -214,6 +214,23 @@ describe("Open GEO answer V3 contract", () => {
     expect(parsed[0]!.geoDiagnosis.citedOwnership.unknown).toBe(1);
   });
 
+  it("accepts optional question-local diagnosis and rejects cross-question references", () => {
+    const context = { ...fixtureContext(), locale: "en", missingEvidenceFamiliesByQuestion: [[], [], []] as [string[], string[], string[]] };
+    const value = generativeCards(context);
+    const diagnosis = questionDiagnosis(value[0]!.questionId, value[0]!.sources[0]!.sourceId);
+    value[0] = { ...value[0]!, diagnosis };
+
+    const parsed = parseOpenGeoAnswerCardsV3(value, context);
+    expect(parsed[0]!.diagnosis).toEqual(diagnosis);
+    expect(parsed[1]!.diagnosis).toBeUndefined();
+
+    const foreign = generativeCards(context);
+    foreign[0] = {
+      ...foreign[0]!,
+      diagnosis: questionDiagnosis(foreign[1]!.questionId, foreign[0]!.sources[0]!.sourceId)
+    };
+    expect(() => parseOpenGeoAnswerCardsV3(foreign, context)).toThrow(/evidence|question/i);
+  });
   it("accepts predominantly Chinese generative cards with ordinary industry acronyms", () => {
     const context = fixtureContext();
     const value = generativeCards(context).map((card, index) => ({
@@ -252,6 +269,35 @@ describe("Open GEO answer V3 contract", () => {
     const first=parseOpenGeoAnswerCardsV3(value,context)[0] as GenerativeSearchAnswerCardV3;
     const changed=parseOpenGeoAnswerCardsV3([{...value[0],audit:{verifiedBodyCount:1,searchSourceOnlyCount:0,inaccessibleCount:0}},value[1],value[2]],context)[0] as GenerativeSearchAnswerCardV3;
     expect(changed.provenance.answerHash).toBe(first.provenance.answerHash); expect(changed.provenance.sourceHash).toBe(first.provenance.sourceHash);
+  });
+
+  it("preserves supplied reviewed diagnosis in deferred mode while legacy still recomputes it", () => {
+    const context = {
+      ...fixtureContext(),
+      locale: "en",
+      targetAliases: ["Target"],
+      missingEvidenceFamiliesByQuestion: [[], [], []] as [string[], string[], string[]]
+    };
+    const value = generativeCards(context);
+    const omitted = parseOpenGeoAnswerCardsV3(value, context);
+    const explicit = parseOpenGeoAnswerCardsV3(value, { ...context, semanticValidation: "legacy" });
+    const deferred = parseOpenGeoAnswerCardsV3(value, { ...context, semanticValidation: "deferred" });
+    expect(explicit).toEqual(omitted);
+    expect((omitted[0] as GenerativeSearchAnswerCardV3).geoDiagnosis.targetMentioned).toBe(true);
+    expect((deferred[0] as GenerativeSearchAnswerCardV3).geoDiagnosis.targetMentioned).toBe(false);
+  });
+
+  it("keeps deferred card structure and public URL checks fail closed", () => {
+    const context = {
+      ...fixtureContext(),
+      locale: "en",
+      missingEvidenceFamiliesByQuestion: [[], [], []] as [string[], string[], string[]],
+      semanticValidation: "deferred" as const
+    };
+    const value = generativeCards(context);
+    expect(() => parseOpenGeoAnswerCardsV3(value.slice(0, 2), context)).toThrow(/exactly three/u);
+    const unsafe = { ...value[0], sources: [{ ...value[0].sources[0]!, canonicalUrl: "http://127.0.0.1/private" }] };
+    expect(() => parseOpenGeoAnswerCardsV3([unsafe, value[1], value[2]], context)).toThrow(/public HTTP/u);
   });
 });
 
@@ -367,5 +413,23 @@ function questionSet(): ConfirmedBusinessQuestionSet {
       neutralizationVersion: "identity-neutral-v1",
       neutralContentHash: `neutral-${index}`
     })) as unknown as ConfirmedBusinessQuestionSet["questions"]
+  };
+}
+function questionDiagnosis(questionId: string, sourceId: string): NonNullable<OpenGeoAnswerCardV3["diagnosis"]> {
+  const targetRef = `${questionId}:target:${"c".repeat(64)}`;
+  return {
+    selectionSummary: "The cited source and target page expose concrete, comparable facts.",
+    observableFactors: [
+      { kind: "problem_match", observation: "The source addresses the buyer question directly.", evidenceRefs: [sourceId] },
+      { kind: "factual_specificity", observation: "The answer cites a concrete public statement.", evidenceRefs: [sourceId] },
+      { kind: "target_clarity", observation: "The target page lacks the same level of detail.", evidenceRefs: [targetRef] }
+    ],
+    targetGap: "The target website does not state the relevant facts with equal clarity.",
+    recommendedActions: [
+      { priority: 1, action: "Publish the missing facts on the relevant service page.", evidenceRefs: [targetRef] },
+      { priority: 2, action: "Connect those facts explicitly to the buyer question.", evidenceRefs: [sourceId, targetRef] },
+      { priority: 3, action: "Keep the public details current and easy to verify.", evidenceRefs: [targetRef] }
+    ],
+    detailedEvidenceRefs: [sourceId, targetRef]
   };
 }

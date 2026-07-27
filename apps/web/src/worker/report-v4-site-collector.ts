@@ -1,6 +1,7 @@
 import {
   V4_STANDARD_ANALYZABLE_PAGE_LIMIT,
   classifyAnalyzableSitePage,
+  classifyPageFailure,
   type AnalyzablePageAccess,
   type AnalyzablePageExclusionReason,
   type AnalyzablePageExplicitExclusion,
@@ -49,7 +50,8 @@ export type ReportV4SiteCollectorExclusionReason =
   | AnalyzablePageExclusionReason
   | "raw_fetch_failed"
   | "raw_extraction_failed"
-  | "browser_render_failed";
+  | "browser_render_failed"
+  | "dns_not_found";
 
 export interface ReportV4CollectedPage extends AnalyzableSitePage {
   readonly readability: "direct_readable" | "js_dependent";
@@ -97,7 +99,13 @@ export async function collectReportV4Site(
       raw = await dependencies.readRawHtml(candidate, signal);
     } catch (error) {
       rethrowAbortOrConcurrentError(error, signal);
-      exclusions.push({ url: candidate.url, reason: "raw_fetch_failed" });
+      // A proven-nonexistent hostname (NXDOMAIN/ENOTFOUND) is a terminal,
+      // explained exclusion; every other fetch failure stays retryable.
+      const failure = classifyPageFailure(error);
+      exclusions.push({
+        url: candidate.url,
+        reason: failure.code === "dns-not-found" ? "dns_not_found" : "raw_fetch_failed"
+      });
       continue;
     }
 

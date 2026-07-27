@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type PaidV3SemanticAnswerCardDraft, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -296,7 +296,7 @@ export function restoreWebsiteReportDomainsForArtifact(report: AiWebsiteReportV1
   return restore(report) as AiWebsiteReportV1;
 }
 
-export async function buildReadyCombinedArtifactV3(input: {
+export interface PrepareCombinedGeoReportV3Input {
   artifactRevisionId: string;
   artifactRevision: number;
   reportId: string;
@@ -314,9 +314,66 @@ export async function buildReadyCombinedArtifactV3(input: {
   publicSourceForensics: RecommendationForensicReportV2;
   providerDiscovery: ProviderDiscoveryV1;
   languageValidationScope?: CombinedReportLanguageScope;
+}
+
+export interface BuildReadyCombinedArtifactV3Input extends PrepareCombinedGeoReportV3Input {
   onReportPrepared?: (report: CombinedGeoReportV3) => void | Promise<void>;
-}): Promise<ReadyCombinedArtifactV3> {
+}
+
+export interface PrepareCombinedGeoReportV3SemanticDraftInput extends Omit<PrepareCombinedGeoReportV3Input, "answerCards" | "sourceSelectionDiagnosis"> {
+  answerCards: [PaidV3SemanticAnswerCardDraft, PaidV3SemanticAnswerCardDraft, PaidV3SemanticAnswerCardDraft];
+}
+
+export type CombinedGeoReportV3SemanticDraft = Omit<CombinedGeoReportV3, "answerCards" | "sourceSelectionDiagnosis" | "semanticReviewReceipt"> & {
+  answerCards: [PaidV3SemanticAnswerCardDraft, PaidV3SemanticAnswerCardDraft, PaidV3SemanticAnswerCardDraft];
+};
+
+export async function buildReadyCombinedArtifactV3(input: BuildReadyCombinedArtifactV3Input): Promise<ReadyCombinedArtifactV3> {
   await assertReadyEvidenceAssets(input.evidenceAssets);
+  const report = prepareCombinedGeoReportV3Core(input, {});
+  await input.onReportPrepared?.(report);
+  return materializePreparedCombinedArtifactV3(report, input.evidenceAssets);
+}
+
+export function prepareCombinedGeoReportV3(
+  input: PrepareCombinedGeoReportV3Input,
+  options: { semanticValidation?: "legacy" | "deferred"; reviewedReceiptVerified?: boolean } = {}
+): CombinedGeoReportV3 {
+  assertDeferredReceiptAuthority(options);
+  return prepareCombinedGeoReportV3Core(input, options);
+}
+
+/**
+ * Pure pre-review carrier assembly for marker-selected Paid V3 only. It is
+ * intentionally not parsed, rendered, materialized, or persisted: Q2/Q3
+ * diagnosis, source selection, and the receipt are supplied by the one
+ * semantic-review application before the ordinary deferred readiness seam.
+ */
+export function prepareCombinedGeoReportV3SemanticDraft(
+  input: PrepareCombinedGeoReportV3SemanticDraftInput
+): CombinedGeoReportV3SemanticDraft {
+  return assembleCombinedGeoReportV3(input as unknown as Omit<PrepareCombinedGeoReportV3Input, "sourceSelectionDiagnosis"> & { answerCards: readonly PaidV3SemanticAnswerCardDraft[] }) as CombinedGeoReportV3SemanticDraft;
+}
+
+function prepareCombinedGeoReportV3Core(
+  input: PrepareCombinedGeoReportV3Input,
+  options: { semanticValidation?: "legacy" | "deferred" }
+): CombinedGeoReportV3 {
+  const assembled = assembleCombinedGeoReportV3(input);
+  const report = requireReadyCombinedGeoReportV3(assembled, { semanticValidation: options.semanticValidation ?? "legacy" });
+  if ((options.semanticValidation ?? "legacy") === "legacy") {
+    assertCombinedGeoReportLanguage(
+      { ...report, version: 1, artifactContract: "combined_geo_report_v1", businessQuestionAnswers: undefined },
+      input.languageValidationScope
+    );
+  }
+  return report;
+}
+
+function assembleCombinedGeoReportV3(input: Omit<PrepareCombinedGeoReportV3Input, "sourceSelectionDiagnosis"> & {
+  answerCards: readonly PaidV3SemanticAnswerCardDraft[];
+  sourceSelectionDiagnosis?: SourceSelectionDiagnosisV1;
+}): Record<string, unknown> {
   const forensic = input.publicSourceForensics;
   const systemCopy = combinedArtifactSystemCopy(forensic.locale, {
     technicalPages: input.technicalReport.pages.length,
@@ -331,7 +388,7 @@ export async function buildReadyCombinedArtifactV3(input: {
     coverage: { ...input.aiReport.coverage, samplingMethod: systemCopy.samplingMethod, limitations: systemCopy.limitations }
   }, input.targetUrl);
   const localizedTechnicalReport = localizeTechnicalReportForArtifact(input.technicalReport, forensic.locale);
-  const report = requireReadyCombinedGeoReportV3({
+  return {
     version: 3,
     artifactContract: "combined_geo_report_v3",
     productCode: "recommendation_forensics_v1",
@@ -358,7 +415,7 @@ export async function buildReadyCombinedArtifactV3(input: {
     },
     businessQuestionSet: input.businessQuestionSet,
     answerCards: input.answerCards,
-    sourceSelectionDiagnosis: input.sourceSelectionDiagnosis,
+    ...(input.sourceSelectionDiagnosis ? { sourceSelectionDiagnosis: input.sourceSelectionDiagnosis } : {}),
     engineProvenance: input.engineProvenance,
     providerDiscovery: input.providerDiscovery,
     publicSourceForensics: forensic,
@@ -375,18 +432,19 @@ export async function buildReadyCombinedArtifactV3(input: {
       ])],
       nonCausal: true
     }
-  });
-  assertCombinedGeoReportLanguage({ ...report, version: 1, artifactContract: "combined_geo_report_v1", businessQuestionAnswers: undefined }, input.languageValidationScope);
-  await input.onReportPrepared?.(report);
-  return materializePreparedCombinedArtifactV3(report, input.evidenceAssets);
+  };
 }
 
 export async function materializePreparedCombinedArtifactV3(
   value: unknown,
-  evidenceAssets: ReportEvidenceAssetRow[]
+  evidenceAssets: ReportEvidenceAssetRow[],
+  options: { semanticValidation?: "legacy" | "deferred"; reviewedReceiptVerified?: boolean } = {}
 ): Promise<ReadyCombinedArtifactV3> {
+  assertDeferredReceiptAuthority(options);
   await assertReadyEvidenceAssets(evidenceAssets);
-  const report = requireReadyCombinedGeoReportV3(value);
+  const report = requireReadyCombinedGeoReportV3(value, {
+    semanticValidation: options.semanticValidation ?? "legacy"
+  });
   const locale: "en" | "zh" = report.locale.toLowerCase().startsWith("zh") ? "zh" : "en";
   const model: CombinedPrivateReportArtifactModelV3 = {
     productContract: "combined_geo_report_v3", reportId: report.reportId, locale, combinedReport: report,
@@ -398,12 +456,36 @@ export async function materializePreparedCombinedArtifactV3(
   return materializeReadyArtifact(report, model, html);
 }
 
+function assertDeferredReceiptAuthority(options: { semanticValidation?: "legacy" | "deferred"; reviewedReceiptVerified?: boolean }): void {
+  if (options.semanticValidation === "deferred" && options.reviewedReceiptVerified !== true) {
+    throw new TypeError("Deferred Paid V3 artifact handling requires caller-supplied root-bound receipt verification.");
+  }
+}
+
 export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, html: string): void {
   const required = [
     report.artifactRevisionId,
-    ...report.answerCards.flatMap((card) => card.answerMode === "generative_search_v1"
-      ? [card.exactQuestion, card.answerText, card.refusal?.reason ?? "", ...card.sources.flatMap((source) => [source.title, source.registrableDomain, source.canonicalUrl, source.citedText ?? ""]), ...card.geoDiagnosis.targetRoles, ...card.geoDiagnosis.competitorEntityIds, ...card.geoDiagnosis.missingEvidenceFamilies, card.geoDiagnosis.retestQuestion]
-      : [card.exactQuestion, ...card.sentences.map(({ text }) => text), ...card.sourceEvidence.flatMap((evidence) => [evidence.title, evidence.registrableDomain, evidence.canonicalUrl, evidence.exactExcerpt, evidence.ownershipCategory, evidence.observedAt]), ...card.geoDiagnosis.targetRoles, ...card.geoDiagnosis.competitorEntityIds, ...card.geoDiagnosis.missingEvidenceFamilies, card.geoDiagnosis.retestQuestion]),
+    ...report.answerCards.flatMap((card) => {
+      const answerContent = card.answerMode === "generative_search_v1"
+        ? [card.exactQuestion, card.answerText, card.refusal?.reason ?? "", ...card.sources.flatMap((source) => [source.title, source.registrableDomain, source.canonicalUrl, source.citedText ?? ""])]
+        : [card.exactQuestion, ...card.sentences.map(({ text }) => text), ...card.sourceEvidence.flatMap((evidence) => [evidence.title, evidence.registrableDomain, evidence.canonicalUrl, evidence.exactExcerpt, evidence.ownershipCategory, evidence.observedAt])];
+      if (card.diagnosis) {
+        return [
+          ...answerContent,
+          card.diagnosis.selectionSummary,
+          ...card.diagnosis.observableFactors.map(({ observation }) => observation),
+          card.diagnosis.targetGap,
+          ...card.diagnosis.recommendedActions.map(({ action }) => action)
+        ];
+      }
+      return [
+        ...answerContent,
+        ...card.geoDiagnosis.targetRoles,
+        ...card.geoDiagnosis.competitorEntityIds,
+        ...card.geoDiagnosis.missingEvidenceFamilies,
+        card.geoDiagnosis.retestQuestion
+      ];
+    }),
     ...(report.sourceSelectionDiagnosis ? [
       ...report.sourceSelectionDiagnosis.sourceProfiles.flatMap((profile) => [
         profile.registrableDomain,
@@ -438,6 +520,28 @@ export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, ht
         const evidence = card.sourceEvidence.find((candidate) => candidate.evidenceId === evidenceId);
         const evidenceAt = evidence ? renderedHtmlIndexOf(html, evidence.exactExcerpt, sentenceAt) : -1;
         if (!evidence || evidenceAt < sentenceAt || evidenceAt >= nextSentenceAt) throw new Error("Combined V3 HTML artifact failed adjacent citation completeness readiness.");
+      }
+    }
+  }
+  for (const [cardIndex, card] of report.answerCards.entries()) {
+    if (!card.diagnosis) continue;
+    const questionAt = renderedHtmlIndexOf(html, card.exactQuestion);
+    const nextQuestion = report.answerCards[cardIndex + 1];
+    const cardEnd = nextQuestion ? renderedHtmlIndexOf(html, nextQuestion.exactQuestion, questionAt + 1) : html.length;
+    const answerAnchors = card.answerMode === "generative_search_v1"
+      ? [card.status === "refused" ? card.refusal!.reason : card.answerText, ...card.sources.map(({ canonicalUrl }) => canonicalUrl)]
+      : [...card.sentences.map(({ text }) => text), ...card.sourceEvidence.map(({ exactExcerpt }) => exactExcerpt)];
+    const contentEnd = Math.max(questionAt, ...answerAnchors.map((value) => renderedHtmlIndexOf(html, value, questionAt)));
+    const diagnosisValues = [
+      card.diagnosis.selectionSummary,
+      ...card.diagnosis.observableFactors.map(({ observation }) => observation),
+      card.diagnosis.targetGap,
+      ...card.diagnosis.recommendedActions.map(({ action }) => action)
+    ];
+    for (const value of diagnosisValues) {
+      const diagnosisAt = renderedHtmlIndexOf(html, value, contentEnd);
+      if (diagnosisAt <= contentEnd || diagnosisAt >= cardEnd) {
+        throw new Error("Combined V3 HTML artifact failed answer-source-diagnosis positional completeness readiness.");
       }
     }
   }

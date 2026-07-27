@@ -3,13 +3,16 @@ import type { RecommendationForensicReportV2 } from "@open-geo-console/ai-report
 import type { PublicSearchSurfaceAdapter, PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import type { AiReportRow, ScanJobRow } from "@/db/schema";
 import {
+  assertPaidV3ResumeSemanticAuthority,
   createWorkerPublicSourceForensicsDependencies,
   combinedV3ArtifactVerificationResume,
   combinedV3LanguageValidationScope,
   correctionArtifactVerificationResume,
+  executeReviewedPaidV3ArtifactBoundary,
   isMatchingRecommendationWebsiteFoundation,
   publicSourceArtifactVerificationResume,
   publicSourceSynthesisResume,
+  resolvePaidV3SemanticValidation,
   resolvePublicSourceRunScope,
   resolveRecommendationFulfillmentTarget,
   resolveRecommendationFoundationTarget,
@@ -22,6 +25,24 @@ describe("recommendation website-foundation resume contract", () => {
     expect(combinedV3LanguageValidationScope("replacement_fulfillment")).toBe("presentation_refresh");
     expect(combinedV3LanguageValidationScope("staging_artifact_refresh")).toBe("presentation_refresh");
     expect(combinedV3LanguageValidationScope("standard")).toBeUndefined();
+  });
+
+  it("selects deferred Paid V3 semantics only from the immutable root marker on the ordinary lineage", () => {
+    const paidV3 = {
+      artifactContract: "combined_geo_report_v3",
+      recommendationReportVersion: 3,
+      reason: "standard"
+    } as const;
+    expect(resolvePaidV3SemanticValidation(paidV3, {})).toBe("legacy");
+    expect(resolvePaidV3SemanticValidation(paidV3, {
+      semanticReviewContractVersion: "report-semantic-review-v1"
+    })).toBe("deferred");
+    expect(() => resolvePaidV3SemanticValidation({
+      ...paidV3,
+      reason: "replacement_fulfillment"
+    }, {
+      semanticReviewContractVersion: "report-semantic-review-v1"
+    })).toThrow(/ordinary immutable Paid lineage/i);
   });
 
   it("selects the combined artifact contract only from reviewed deployment configuration", () => {
@@ -82,6 +103,102 @@ describe("recommendation website-foundation resume contract", () => {
     };
     expect(combinedV3ArtifactVerificationResume(checkpoint as never)).toEqual({ report, checkpoint: checkpoint.answerFirstV3, commercialSnapshotRefs: refs });
     expect(combinedV3ArtifactVerificationResume({ ...checkpoint, recovery: { phase: "grounded_answer_synthesis" } } as never)).toBeNull();
+  });
+
+  it("rejects detached Paid receipts and incomplete reviewed projections on resume", () => {
+    const base = {
+      report: {
+        artifactContract: "combined_geo_report_v3",
+        reportId: "report-v3",
+        jobId: "job-v3"
+      },
+      checkpoint: { version: "answer-first-v3-checkpoint-v2" },
+      commercialSnapshotRefs: []
+    };
+    expect(() => assertPaidV3ResumeSemanticAuthority("legacy", base as never)).not.toThrow();
+    expect(() => assertPaidV3ResumeSemanticAuthority("legacy", {
+      ...base,
+      report: { ...base.report, semanticReviewReceipt: { version: "report-semantic-review-v1" } }
+    } as never)).toThrow(/root marker/i);
+    expect(() => assertPaidV3ResumeSemanticAuthority("legacy", {
+      ...base,
+      semanticReview: { version: "report-semantic-review-v1" }
+    } as never)).toThrow(/root marker/i);
+    expect(() => assertPaidV3ResumeSemanticAuthority("deferred", base as never))
+      .toThrow(/complete root-bound semantic projection and receipt/i);
+  });
+
+  it("persists one complete reviewed checkpoint before verification, materialization, and terminalization", async () => {
+    const events: string[] = [];
+    const persistedReport = {
+      artifactContract: "combined_geo_report_v3",
+      reportId: "report-v3",
+      jobId: "job-v3",
+      semanticReviewReceipt: { version: "report-semantic-review-v1" }
+    };
+    const ready = { report: structuredClone(persistedReport), artifact: "fixture" };
+    const answerProvider = vi.fn();
+    const diagnosisProvider = vi.fn();
+    const semanticReviewer = vi.fn();
+    const sourceSelectionSemanticConstructor = vi.fn();
+
+    const result = await executeReviewedPaidV3ArtifactBoundary({
+      persistedReport: persistedReport as never,
+      persistCheckpoint: async () => { events.push("checkpoint"); },
+      verifyProjection: async (report) => {
+        events.push(report === persistedReport ? "verify:persisted" : "verify:ready");
+      },
+      materialize: async () => {
+        events.push("materialize");
+        return ready as never;
+      },
+      terminalize: async () => { events.push("terminalize"); }
+    });
+
+    expect(result).toBe(ready);
+    expect(events).toEqual([
+      "checkpoint",
+      "verify:persisted",
+      "materialize",
+      "verify:ready",
+      "terminalize"
+    ]);
+    expect(answerProvider).not.toHaveBeenCalled();
+    expect(diagnosisProvider).not.toHaveBeenCalled();
+    expect(semanticReviewer).not.toHaveBeenCalled();
+    expect(sourceSelectionSemanticConstructor).not.toHaveBeenCalled();
+  });
+
+  it("resumes the reviewed artifact boundary without a write or semantic call and fails before materialization on tamper", async () => {
+    const persistedReport = {
+      artifactContract: "combined_geo_report_v3",
+      reportId: "report-v3",
+      jobId: "job-v3",
+      semanticReviewReceipt: { version: "report-semantic-review-v1" }
+    };
+    const modelCalls = vi.fn();
+    const materialize = vi.fn(async () => ({ report: structuredClone(persistedReport) as never }));
+    const terminalize = vi.fn(async () => undefined);
+    await executeReviewedPaidV3ArtifactBoundary({
+      persistedReport: persistedReport as never,
+      verifyProjection: async () => undefined,
+      materialize,
+      terminalize
+    });
+    expect(materialize).toHaveBeenCalledOnce();
+    expect(terminalize).toHaveBeenCalledOnce();
+    expect(modelCalls).not.toHaveBeenCalled();
+
+    materialize.mockClear();
+    terminalize.mockClear();
+    await expect(executeReviewedPaidV3ArtifactBoundary({
+      persistedReport: persistedReport as never,
+      verifyProjection: async () => { throw new Error("semantic projection tampered"); },
+      materialize,
+      terminalize
+    })).rejects.toThrow(/tampered/i);
+    expect(materialize).not.toHaveBeenCalled();
+    expect(terminalize).not.toHaveBeenCalled();
   });
 
   it("reuses prepared public-source evidence while rebuilding a V3 artifact after repair", () => {
@@ -226,6 +343,25 @@ describe("worker V2 public-source collaborators", () => {
     expect(liveDrill.inject).toHaveBeenCalledWith({ jobId: job.id, fault: "artifact" });
     await expect(dependencies.getCheckpoint("other-job")).rejects.toThrow(/job/i);
     await expect(dependencies.saveCheckpoint("other-job", checkpointValue())).rejects.toThrow(/job/i);
+
+    const deferredDependencies = createWorkerPublicSourceForensicsDependencies({
+      job,
+      workerId: "worker-v2",
+      coverage: { plannedPages: 3, successfulPages: 3, failedPages: 0 },
+      readCheckpoint: () => checkpoint as never,
+      onCheckpointSaved: async () => undefined,
+      checkpointJob,
+      liveDrill,
+      semanticValidation: "deferred",
+      artifactReadiness: { async verify() {} },
+      retrieveSource: async () => ({ fact: retrieval(), source: sourceEvidence() }),
+      collaborators: {
+        resolveSnapshot,
+        getReport: async () => null,
+        saveReport: async (report) => report as RecommendationForensicReportV2
+      }
+    }, runtime());
+    expect(deferredDependencies.prepareArtifactVerification).toBeUndefined();
   });
 
   it("fails closed when the safe retrieval or artifact collaborator is absent", () => {

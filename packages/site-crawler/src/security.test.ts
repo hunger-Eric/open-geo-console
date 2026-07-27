@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DnsNotFoundError,
   UrlSafetyError,
   isBlockedHostname,
   isBlockedIpAddress,
@@ -55,6 +56,37 @@ describe("crawler URL safety", () => {
         resolver: async () => ["93.184.216.34", "127.0.0.1"]
       })
     ).rejects.toMatchObject({ code: "blocked-address" });
+  });
+
+  it("maps a resolver NXDOMAIN signal to a distinct dns-not-found safety error", async () => {
+    await expect(
+      resolveSafeUrl("https://member.example.com", {
+        resolver: async () => {
+          throw new DnsNotFoundError("Public DNS reports that member.example.com does not exist (NXDOMAIN).");
+        }
+      })
+    ).rejects.toMatchObject({ code: "dns-not-found" });
+  });
+
+  it("maps a system-DNS ENOTFOUND failure to the same dns-not-found safety error", async () => {
+    const enotfound = Object.assign(new Error("getaddrinfo ENOTFOUND member.example.com"), { code: "ENOTFOUND" });
+    await expect(
+      resolveSafeUrl("https://member.example.com", {
+        resolver: async () => {
+          throw enotfound;
+        }
+      })
+    ).rejects.toMatchObject({ code: "dns-not-found" });
+  });
+
+  it("keeps other DNS failures as retryable dns-resolution-failed", async () => {
+    await expect(
+      resolveSafeUrl("https://example.com", {
+        resolver: async () => {
+          throw new Error("queryTimeout EAI_AGAIN example.com");
+        }
+      })
+    ).rejects.toMatchObject({ code: "dns-resolution-failed" });
   });
 
   it("allows only the benchmark proxy range behind an explicit local-development option", async () => {

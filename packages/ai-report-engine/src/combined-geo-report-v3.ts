@@ -16,6 +16,11 @@ import {
   type SourceSelectionDiagnosisV1,
   type SourceSelectionSourceInputV1
 } from "./source-selection-diagnosis-v1";
+import {
+  hashReportSemanticReviewValue,
+  parsePaidV3ReportSemanticReviewReceipt,
+  type PaidV3ReportSemanticReviewReceipt
+} from "./report-semantic-review";
 
 export const COMBINED_GEO_REPORT_V3_VERSION = 3 as const;
 export const COMBINED_GEO_REPORT_V3_CONTRACT = "combined_geo_report_v3" as const;
@@ -26,12 +31,19 @@ export interface CombinedGeoReportV3 extends Omit<CombinedGeoReportV2, "version"
   engineProvenance: OpenGeoEngineProvenanceV3;
   answerCards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
   sourceSelectionDiagnosis?: SourceSelectionDiagnosisV1;
+  semanticReviewReceipt?: PaidV3ReportSemanticReviewReceipt;
 }
 
-export function parseCombinedGeoReportV3(value: unknown): CombinedGeoReportV3 {
+export function parseCombinedGeoReportV3(
+  value: unknown,
+  options: { semanticValidation?: "legacy" | "deferred" } = {}
+): CombinedGeoReportV3 {
   const root = object(value, "$combined");
   exact(root.artifactContract, COMBINED_GEO_REPORT_V3_CONTRACT, "$combined.artifactContract");
   exact(root.version, COMBINED_GEO_REPORT_V3_VERSION, "$combined.version");
+  const semanticReviewReceipt = root.semanticReviewReceipt === undefined
+    ? undefined
+    : parsePaidV3ReportSemanticReviewReceipt(root.semanticReviewReceipt);
   const provenance = parseEngineProvenance(root.engineProvenance);
   const questionSet = object(root.businessQuestionSet, "$combined.businessQuestionSet") as unknown as CombinedGeoReportV2["businessQuestionSet"];
   const preliminaryCards = array(root.answerCards, "$combined.answerCards") as unknown as OpenGeoAnswerCardV3[];
@@ -61,16 +73,18 @@ export function parseCombinedGeoReportV3(value: unknown): CombinedGeoReportV3 {
     }) : [])
   }));
   const base = parseCombinedGeoReportV2({
-    ...root,
-    version: COMBINED_GEO_REPORT_V2_VERSION,
-    artifactContract: COMBINED_GEO_REPORT_V2_CONTRACT,
-    groundedAnswerEvidence,
-    businessQuestionAnswers: {
-      version: "combined-business-question-answers-v2",
-      synthesis: { mode: "claim_bound_model", modelId: provenance.synthesisModel, inputHash: provenance.inputHash },
-      answers: projectedAnswers
-    }
-  });
+      ...root,
+      version: COMBINED_GEO_REPORT_V2_VERSION,
+      artifactContract: COMBINED_GEO_REPORT_V2_CONTRACT,
+      groundedAnswerEvidence,
+      businessQuestionAnswers: {
+        version: "combined-business-question-answers-v2",
+        synthesis: { mode: "claim_bound_model", modelId: provenance.synthesisModel, inputHash: provenance.inputHash },
+        answers: projectedAnswers
+      }
+    },
+    options
+  );
   const resolvedEntities = base.publicSourceForensics.sourceGraph.entities.filter(({ status }) => status === "resolved");
   const targetAliases = base.businessQuestionSet.identityExclusions;
   const targetNormalized = new Set(targetAliases.map(normalize));
@@ -82,11 +96,12 @@ export function parseCombinedGeoReportV3(value: unknown): CombinedGeoReportV3 {
     locale: base.locale,
     targetAliases,
     competitors,
-    missingEvidenceFamiliesByQuestion: preliminaryCards.map((card) => card.geoDiagnosis?.missingEvidenceFamilies ?? []) as [string[], string[], string[]]
+    missingEvidenceFamiliesByQuestion: preliminaryCards.map((card) => card.geoDiagnosis?.missingEvidenceFamilies ?? []) as [string[], string[], string[]],
+    semanticValidation: options.semanticValidation
   });
   const sourceSelectionDiagnosis = root.sourceSelectionDiagnosis === undefined
     ? undefined
-    : parseV3SourceSelectionDiagnosis(root.sourceSelectionDiagnosis, answerCards, base, provenance);
+    : parseV3SourceSelectionDiagnosis(root.sourceSelectionDiagnosis, answerCards, base, provenance, options);
   const { businessQuestionAnswers: _businessQuestionAnswers, ...v3Base } = base;
   return {
     ...v3Base,
@@ -94,15 +109,23 @@ export function parseCombinedGeoReportV3(value: unknown): CombinedGeoReportV3 {
     artifactContract: COMBINED_GEO_REPORT_V3_CONTRACT,
     engineProvenance: provenance,
     answerCards,
-    ...(sourceSelectionDiagnosis ? { sourceSelectionDiagnosis } : {})
+    ...(sourceSelectionDiagnosis ? { sourceSelectionDiagnosis } : {}),
+    ...(semanticReviewReceipt ? { semanticReviewReceipt } : {})
   };
+}
+
+export function hashCombinedGeoReportV3ReceiptExcludedProjection(value: unknown): string {
+  const root = object(value, "$combined");
+  const { semanticReviewReceipt: _semanticReviewReceipt, ...projection } = root;
+  return hashReportSemanticReviewValue(projection);
 }
 
 function parseV3SourceSelectionDiagnosis(
   value: unknown,
   cards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3],
   base: CombinedGeoReportV2,
-  provenance: OpenGeoEngineProvenanceV3
+  provenance: OpenGeoEngineProvenanceV3,
+  options: { semanticValidation?: "legacy" | "deferred" }
 ): SourceSelectionDiagnosisV1 {
   if (cards.some((card) => card.answerMode !== "generative_search_v1")) throw new TypeError("Source selection diagnosis requires generative-search V3 cards.");
   const verifiedExcerptByUrl = new Map<string, string>();
@@ -128,15 +151,22 @@ function parseV3SourceSelectionDiagnosis(
       }))
     };
   });
-  const diagnosis = parseSourceSelectionDiagnosisV1(value, { questions, allowPersistedIndependentExcerpts: true });
+  const diagnosis = parseSourceSelectionDiagnosisV1(value, {
+    questions,
+    allowPersistedIndependentExcerpts: true,
+    semanticValidation: options.semanticValidation
+  });
   if (diagnosis.inputIdentity.answerHash !== provenance.answerHash || diagnosis.inputIdentity.sourceHash !== provenance.evidenceHash) {
     throw new TypeError("Source selection diagnosis answer/source identity does not match V3 provenance.");
   }
   return diagnosis;
 }
 
-export function requireReadyCombinedGeoReportV3(value: unknown): CombinedGeoReportV3 {
-  return parseCombinedGeoReportV3(value);
+export function requireReadyCombinedGeoReportV3(
+  value: unknown,
+  options: { semanticValidation?: "legacy" | "deferred" } = {}
+): CombinedGeoReportV3 {
+  return parseCombinedGeoReportV3(value, options);
 }
 
 function parseEngineProvenance(value: unknown): OpenGeoEngineProvenanceV3 {

@@ -78,7 +78,7 @@ export type RecommendationFulfillmentMethodology =
   | "answer_engine_recommendation_forensics_v1"
   | "public_search_source_forensics_v1"
   | "two_stage_geo_report_v4";
-export type RecommendationReportVersion = 1 | 2 | 4;
+export type RecommendationReportVersion = 1 | 2 | 3 | 4;
 export type PaymentRefundReason = "completed_limited" | "report_failed" | "sla_missed" | "operator_approved";
 export type PaymentRefundState = "pending" | "submitted" | "succeeded" | "failed";
 export type EmailTemplateType =
@@ -131,6 +131,7 @@ export type CitationEvidenceGrade = EvidenceGrade;
 export type { CitationRetrievalState, CitationSourceCategory };
 
 export interface JobCheckpoint {
+  semanticReviewContractVersion?: "report-semantic-review-v1";
   recovery?: {
     schemaVersion: 1;
     phase: ScanJobPhase;

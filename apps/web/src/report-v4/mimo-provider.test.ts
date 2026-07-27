@@ -411,7 +411,47 @@ describe("Report V4 dedicated MiMo provider", () => {
     expect(systemText).toContain('"code": "safety_refusal" | "policy_refusal" | "high_risk_refusal"');
     expect(systemText).toContain("same-response provider URL annotations");
     expect(systemText).toContain("must never be self-reported");
+    expect(systemText).toContain("answerText must be non-empty and refusal must be null unless an explicit typed");
+    expect(systemText).toContain("Only for such a typed refusal may answerText be empty");
+    expect(systemText).toContain("do not substitute research methodology, generic market background, or no-answer wording");
     expect(systemText.length).toBeLessThanOrEqual(5_000);
+  });
+
+  it.each([
+    {
+      intent: "provider discovery",
+      question: "Which providers publicly offer enterprise geocoding APIs in China?",
+      expectedBoundary: "name concrete providers and state the publicly offered service relevant to the question"
+    },
+    {
+      intent: "solution fit",
+      question: "Which geocoding solution fits an offline delivery scenario, and under what conditions?",
+      expectedBoundary: "map each solution to its suitable scenario, delivery conditions, and limitations"
+    },
+    {
+      intent: "purchase verification",
+      question: "What should a buyer verify before purchasing an enterprise geocoding service?",
+      expectedBoundary: "a practical checklist covering service scope, conditions, limitations, and risks"
+    }
+  ])("gives the $intent question its explicit direct-answer boundary", async ({ question, expectedBoundary }) => {
+    const bodies: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return response({ answerText: "A direct answer.", refusal: null });
+    });
+    const provider = createReportV4MimoQuestionAnswerProvider({ environment: environment(), fetch });
+
+    await provider.answerWithSources({ ...questionInput(), question });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const messages = bodies[0]!.messages as Array<{ role: string; content: string }>;
+    expect(messages[0]!.content).toContain("Lead answerText with a direct, useful answer");
+    expect(messages[0]!.content).toContain(expectedBoundary);
+    expect(JSON.parse(messages[1]!.content)).toEqual({
+      question,
+      locale: "en-US",
+      region: "CN"
+    });
   });
 
   it.each(["diagnose", "retry", "correct"] as const)("builds one bounded source-diagnosis request for %s without tools", async (kind) => {
@@ -443,6 +483,35 @@ describe("Report V4 dedicated MiMo provider", () => {
       expect(systemText).toContain('"detailedEvidenceRefs": string[]');
       expect(systemText).toContain('"priority": 1 then 2 then 3');
       expect(systemText).toContain("non-empty subset of detailedEvidenceRefs");
+    }
+  });
+
+  it("builds deferred diagnosis from semantic prose and short aliases without internal evidence IDs", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return response({ selectionSummary: "result" });
+    });
+    const request = semanticDiagnosisRequest("retry");
+
+    await createReportV4MimoDiagnosisProvider({ environment: environment(), fetch }).generate(request);
+
+    const messages = bodies[0]!.messages as Array<{ role: string; content: string }>;
+    const systemText = messages[0]!.content;
+    const input = JSON.parse(messages[1]!.content) as Record<string, unknown>;
+    expect(systemText).toContain("exactly four semantic fields");
+    expect(systemText).toContain('"evidenceKeys": string[]');
+    expect(systemText).toContain("Code owns final hierarchy");
+    expect(systemText).toContain("Do not return priorities, detailedEvidenceRefs, canonical IDs");
+    expect(input).toMatchObject({
+      kind: "retry",
+      mode: "semantic",
+      failureReason: "invalid_semantic_output at $diagnosisSemanticOutput.targetGap"
+    });
+    expect(JSON.stringify(input)).toContain('"evidenceKey":"S1"');
+    expect(JSON.stringify(input)).toContain('"evidenceKey":"T1"');
+    for (const internal of ["question-1", "source-1", "target-location-1", "target-page-1"]) {
+      expect(JSON.stringify(input)).not.toContain(internal);
     }
   });
 
@@ -513,6 +582,37 @@ function diagnosisRequest(kind: "diagnose" | "retry" | "correct"): ReportV4Diagn
   return kind === "correct"
     ? { kind, field: "selectionSummary", invalidValue: "bad", failureReason: "too short", evidence: input, signal: new AbortController().signal }
     : { kind, input, signal: new AbortController().signal };
+}
+
+function semanticDiagnosisRequest(kind: "diagnose" | "retry"): ReportV4DiagnosisProviderRequest {
+  return {
+    kind,
+    mode: "semantic",
+    failureReason: kind === "retry"
+      ? "invalid_semantic_output at $diagnosisSemanticOutput.targetGap"
+      : undefined,
+    input: {
+      question: "Which provider?",
+      answer: "Provider one.",
+      locale: "en-US",
+      evidence: [
+        {
+          evidenceKey: "S1",
+          role: "answer_source",
+          label: "Published service page",
+          text: "Provider one publishes the requested service.",
+          retrievalStatus: "available"
+        },
+        {
+          evidenceKey: "T1",
+          role: "target_page",
+          label: "The target page is relevant.",
+          text: "The target page omits operating conditions."
+        }
+      ]
+    },
+    signal: new AbortController().signal
+  };
 }
 
 function annotation(url: string, title: string) {

@@ -57,6 +57,7 @@ export async function runPublicSourceForensicsPipeline(input: {
   reportId: string; jobId: string; locale: string; region: string; targetUrl: string;
   websiteFoundation: AiWebsiteReportV1; businessQuestionSet?: ConfirmedBusinessQuestionSet; dependencies: PublicSourceForensicsDependencies; signal?: AbortSignal;
   fanoutOverrides?: ReadonlyMap<string, SearchQueryFanout>;
+  semanticValidation?: "legacy" | "deferred";
 }): Promise<{ report: RecommendationForensicReportV2; checkpoint: PublicSourcePipelineCheckpoint; commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[] }> {
   input.signal?.throwIfAborted();
   const existing = await input.dependencies.getReport(input.jobId);
@@ -114,7 +115,8 @@ export async function runPublicSourceForensicsPipeline(input: {
     sourceGraph, websiteFoundationAppendix: input.websiteFoundation, commercialOutcome: decision.outcome,
     cost: { searchCostMicros: actualCostMicros, retrievalCostMicros: 0, synthesisCostMicros: 0, artifactCostMicros: 0, deliveryCostMicros: 0,
       allocatedSharedCostMicros: snapshots.reduce((sum,item)=>sum+item.allocatedCostMicros,0), avoidedCostMicros: snapshots.reduce((sum,item)=>sum+item.avoidedCostMicros,0),
-      priceMicros, refundMicros: decision.settlement === "refund" ? priceMicros : 0 } });
+      priceMicros, refundMicros: decision.settlement === "refund" ? priceMicros : 0 },
+    ...(input.semanticValidation === "deferred" ? { semanticValidation: "deferred" as const } : {}) });
   const commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[] = snapshots.map((item) => ({
     snapshotId: item.snapshotId, cacheIdentity: item.cacheIdentity,
     freshnessState: item.ageMs <= 7 * 24 * 60 * 60 * 1_000 ? "fresh" : item.ageMs <= 30 * 24 * 60 * 60 * 1_000 ? "historical" : "insufficient",

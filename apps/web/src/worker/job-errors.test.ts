@@ -62,4 +62,17 @@ describe("job error normalization", () => {
       retryableAt: null
     });
   });
+
+  it("persists only the bounded diagnosis failure classification from the cause chain", () => {
+    const normalized = normalizeJobError(new Error("Free teaser Q1 diagnosis did not complete.", {
+      cause: new Error(
+        "stage=semantic_contract; code=invalid_semantic_output; providerAttempts=2; parserPath=$diagnosisSemanticOutput.targetGap"
+      )
+    }), context);
+
+    expect(normalized.causes).toEqual([
+      "stage=semantic_contract; code=invalid_semantic_output; providerAttempts=2; parserPath=$diagnosisSemanticOutput.targetGap"
+    ]);
+    expect(JSON.stringify(normalized)).not.toMatch(/raw provider|system prompt|evidence prose/i);
+  });
 });

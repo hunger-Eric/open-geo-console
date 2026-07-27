@@ -19,7 +19,7 @@ The report header shows the persisted generation language. Interface language sw
 
 ## Artifact and language contract
 
-New reports keep their persisted generation locale across model prompts, deterministic labels, final artifact readiness and email. One language correction is permitted inside each model boundary; an exhausted final gate enters `repair_wait`. Foreign source evidence remains verbatim and is labeled `来源原文` / `Source original`.
+New reports keep their persisted generation locale across model prompts, deterministic labels, final artifact readiness and email. **Legacy runtime fact:** current behavior may permit one model correction at a boundary and then enter `repair_wait` after an exhausted deterministic gate; it is not the new marker-bearing specification. **Confirmed target:** marker-bearing Foundation, Free, and Paid natural-language output has one model-owned semantic authority. Code enforces only non-semantic contracts—schema, cardinality, IDs, hashes, URLs, evidence ownership, checkpoints, state, persistence, payment, and access—and must not use word lists, regexes, character ratios, substring checks, code language gates, or local semantic fallback to judge or repair semantics. Foreign source evidence remains verbatim and is labeled `来源原文` / `Source original`.
 
 The canonical server-rendered HTML is the only customer artifact. Workers privately convert the same HTML to PDF for signature/page-count readiness, hashing and storage before activation. Those bytes and database fields are not customer-routable. Existing historical payloads, active revisions and private PDF bytes are not migrated or deleted.
 

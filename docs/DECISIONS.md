@@ -1,5 +1,14 @@
 # Open GEO Console Decisions
 
+## 2026-07-20: Unresolved representative-crawl residue remains fail-closed
+
+Benign duplicate, policy, robots, and permanently invalid optional-link
+exclusions do not alone downgrade an exhausted V4 admission crawl. Any
+unresolved deadline or transient raw-fetch residue still requires
+`completed_limited`; a correct organization identity and unique retained bodies
+cannot override that operational incompleteness. The one final replacement hit
+this boundary, so checkout and all paid fulfillment remained closed.
+
 ## 2026-07-10: Reports are workspaces
 
 The persisted report UUID is the product context. Overview, issues, bot evidence, technical details, and print views are sibling routes under that report. The standalone logs route remains an advanced utility and does not compete with the report journey.
@@ -247,3 +256,30 @@ V4 completion is governed by `config/report-contracts/combined-geo-report-v4.req
 Every non-trivial implementation begins with `docs/ACTIVE-CHANGE-SCOPE.md` in `FROZEN` state. Production-code changes are prohibited until the user explicitly approves its exact file allowlist, forbidden subsystems, diff budget, acceptance checks, and costly external actions. Broad language such as "root cause" or "complete flow" does not expand a narrow product request. Discovering an adjacent defect requires stopping and reporting it; it does not authorize recovery, replay, migration, historical remediation, commerce, crawler, deployment, or refactoring work.
 
 The complete diff is checked against the approved lock before every commit. Any path or behavior outside the lock fails closed and is not committed. Historical jobs and completed external workflows are not replayed or reused unless the approved scope names their exact authority and action. This decision is a collaboration safety boundary, not a temporary task preference.
+
+## 2026-07-20: The failed shun-express V4 admission remains immutable and unpaid
+
+The sole authorized `shun-express.com` V4 pre-admission one-shot completed with an immutable `unavailable` snapshot: one homepage candidate, zero analyzable pages, and one `deadline_exceeded` exclusion. Its job is terminal `completed` and the state machine scheduled no retry, repair, or successor. Checkout correctly refuses that snapshot; no question set, order, payment, credit, artifact, token, email, Core, or diagnosis authority exists.
+
+This result is not a complete-report acceptance and cannot be converted into one by manual replay, a second report, payment, or an unreviewed crawler/state-machine change. The exact scope is frozen and the evidence remains immutable. Production and the historical polluted report/job remain unchanged.
+
+## 2026-07-20: Protected Staging keeps persistent PostgreSQL Worker lanes
+
+Protected Staging requires persistent free and deep PostgreSQL-polling Workers
+when the product is expected to support one-click automatic report generation.
+`POST /api/scan` persists and queues authority; it does not crawl or invoke the
+model. Exact one-shot Workers remain isolation tools for separately approved
+tuples and are not substitutes for the normal user path.
+
+Worker restoration fails closed unless image, OCI revision, runtime marker,
+database marker, Preview SHA, and alias agree and the pre-existing claimable
+queue is empty. Browser acceptance must prove a new submission is automatically
+claimed and completed without an operator command. This decision does not
+authorize historical replay, payment, production mutation, or a second
+`shun-express.com` report.
+
+## 2026-07-24: Marker-bearing natural-language semantics have one model authority
+
+This superseding decision applies to prospective marker-bearing Foundation, Free, and Paid paths. The model uniformly owns review and acceptance of all natural-language semantics. Code owns only non-semantic boundaries: schema, cardinality, IDs, hashes, URLs, evidence ownership, checkpoints, state transitions, persistence, payment, and access. Word lists, regexes, character ratios, substring checks, code language gates, and local semantic fallbacks are not semantic authority and must not authorize or repair a new marker-bearing lineage.
+
+Earlier language-gate decisions remain legacy runtime history. They neither describe the confirmed target nor authorize work on a new marker-bearing path; implementation requires a separately approved active scope.

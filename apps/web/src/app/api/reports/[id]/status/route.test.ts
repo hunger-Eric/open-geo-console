@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getLatestScanJob: vi.fn(),
   getScanJobQueueStatus: vi.fn(),
   getGeoReport: vi.fn(),
+  getReportV4PreAdmissionJob: vi.fn(),
   resolveRequestArtifactScope: vi.fn()
 }));
 
@@ -18,6 +19,14 @@ vi.mock("@/db/jobs", () => ({
   getScanJobQueueStatus: mocks.getScanJobQueueStatus
 }));
 vi.mock("@/db/reports", () => ({ getGeoReport: mocks.getGeoReport }));
+vi.mock("@/db/report-v4-admission-jobs", () => ({ getReportV4PreAdmissionJob: mocks.getReportV4PreAdmissionJob }));
+vi.mock("@/worker/report-v4-free-teaser", () => ({
+  freeTeaserCheckpointFromJobCheckpoint: (checkpoint: { freeTeaser?: unknown } | null | undefined) => checkpoint?.freeTeaser ?? null,
+  parseReadyFreeTeaserCheckpoint: (checkpoint: { stage?: string }) => {
+    if (checkpoint.stage !== "ready") throw new TypeError("not ready");
+    return checkpoint;
+  }
+}));
 vi.mock("@/server/report-access", () => ({ resolveRequestArtifactScope: mocks.resolveRequestArtifactScope }));
 
 import { GET } from "./route";
@@ -51,6 +60,7 @@ describe("report status artifact scopes", () => {
     mocks.getLatestScanJob.mockImplementation(async (_id: string, tier: string) => tier === "deep" ? deepJob : null);
     mocks.getScanJobQueueStatus.mockResolvedValue(null);
     mocks.getJobCreditStatus.mockResolvedValue("settled");
+    mocks.getReportV4PreAdmissionJob.mockResolvedValue(null);
   });
 
   // @requirement GEO-V4-COMMERCE-01
@@ -110,4 +120,42 @@ describe("report status artifact scopes", () => {
       excludeReasons: ["v4_pre_admission"]
     });
   });
-});
+
+  it("keeps a completed homepage preview pending while its teaser checkpoint is incomplete", async () => {
+    mocks.resolveRequestArtifactScope.mockResolvedValue(null);
+    mocks.getAiReport.mockResolvedValue({ locale: "zh", payload: { tier: "free" } });
+    mocks.getReportV4PreAdmissionJob.mockResolvedValue({
+      ...deepJob,
+      id: "teaser-job",
+      reason: "v4_pre_admission",
+      stage: "synthesizing",
+      executionState: "running",
+      progress: 96,
+      checkpoint: { freeTeaser: { stage: "q1_answer_ready" } }
+    });
+    const response = await GET(new Request("https://example.test/api/reports/report-1/status"), {
+      params: Promise.resolve({ id: "report-1" })
+    });
+    expect(await response.json()).toMatchObject({
+      hasAiReport: false,
+      job: { stage: "synthesizing", progress: 96 }
+    });
+  });
+
+  it("exposes anonymous teaser readiness only from the persisted ready checkpoint", async () => {
+    mocks.resolveRequestArtifactScope.mockResolvedValue(null);
+    mocks.getAiReport.mockResolvedValue({ locale: "zh", payload: { tier: "free" } });
+    mocks.getReportV4PreAdmissionJob.mockResolvedValue({
+      ...deepJob,
+      id: "teaser-job",
+      reason: "v4_pre_admission",
+      checkpoint: { freeTeaser: { stage: "ready" } }
+    });
+    const response = await GET(new Request("https://example.test/api/reports/report-1/status"), {
+      params: Promise.resolve({ id: "report-1" })
+    });
+    expect(await response.json()).toMatchObject({
+      hasAiReport: true,
+      job: { stage: "completed", progress: 100 }
+    });
+  });});

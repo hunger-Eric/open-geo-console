@@ -66,7 +66,7 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
     process.env.OGC_TOKEN_HASH_SECRET = `test-secret-${suffix}`;
     delete process.env.OPEN_GEO_DB_PATH;
     await initializeDatabaseEnvironment("staging");
-    await seedReservedActiveCore();
+    await seedReservedReadyCore();
   }, 180_000);
 
   afterAll(async () => {
@@ -111,12 +111,12 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
     await getSqlClient()`UPDATE scan_jobs SET lease_expires_at=now()+interval '5 minutes' WHERE id=${ids.coreJobId}`;
   });
 
-  it("reloads an exact active-reserved crash with zero model calls and atomically completes commerce", async () => {
+  it("reloads an exact ready-reserved crash with zero model calls and atomically completes commerce", async () => {
     const context = await createReportV4ProductionJobRepository().loadClaimedPaidCoreContext({
       coreJobId: ids.coreJobId,
       workerId: ids.workerId
     });
-    expect(context.commercePhase).toBe("reserved_active");
+    expect(context.commercePhase).toBe("reserved");
     let modelCalls = 0;
     let prepareCalls = 0;
     const boundaryEvents: string[] = [];
@@ -238,7 +238,7 @@ function snapshotBundle() {
   };
 }
 
-async function seedReservedActiveCore() {
+async function seedReservedReadyCore() {
   const sql = getSqlClient();
   const report = coreReport();
   await sql`INSERT INTO scan_reports(id,url,site_key,payload,report_locale,technical_status)
@@ -268,9 +268,8 @@ async function seedReservedActiveCore() {
       VALUES(${sha(`checkpoint-${question.order}`)},${ids.reportId},${ids.coreJobId},${ids.questionSetId},${question.questionId},${ids.siteSnapshotId},${question.order},'answered',${sha(`question-${question.order}`)},${sha("model")},${sha(`input-${question.order}`)},1,${JSON.stringify(answerPayload)}::jsonb,${JSON.stringify(sources)}::jsonb,${sha(JSON.stringify(answerPayload))})`;
   }
   await sql`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,config_snapshot_id,revision_kind,revision,artifact_contract,status,payload_identity_hash,html_sha256,readiness,ready_at,activated_at)
-    VALUES(${artifactRevisionId},${ids.reportId},${ids.orderId},${ids.coreJobId},${ids.configSnapshotId},'generation',1,'combined_geo_report_v4','active',${sha(JSON.stringify(report))},${sha("html")},'{"htmlCanonical":true}',now(),now())`;
+    VALUES(${artifactRevisionId},${ids.reportId},${ids.orderId},${ids.coreJobId},${ids.configSnapshotId},'generation',1,'combined_geo_report_v4','ready',${sha(JSON.stringify(report))},${sha("html")},'{"htmlCanonical":true}',now(),NULL)`;
   await sql`INSERT INTO combined_geo_reports(artifact_revision_id,report_id,order_id,job_id,question_set_id,payload) VALUES(${artifactRevisionId},${ids.reportId},${ids.orderId},${ids.coreJobId},${ids.questionSetId},${JSON.stringify(report)}::jsonb)`;
-  await sql`UPDATE scan_reports SET active_artifact_revision_id=${artifactRevisionId} WHERE id=${ids.reportId}`;
 }
 
 async function counts() {

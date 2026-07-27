@@ -6,8 +6,8 @@ import { checkoutIdempotencyHmac } from "@/commerce/idempotency";
 import { assertCommerceReady } from "@/commerce/readiness";
 import {
   attachHostedCheckout,
-  createReportV4PaymentOrder,
-  getActiveReportV4PaymentOrderForReport,
+  createPaymentOrder,
+  getActivePaymentOrderForReport,
   replaceLegacyHostedCheckout
 } from "@/db/commercial-orders";
 import { getGeoReport } from "@/db/reports";
@@ -49,6 +49,10 @@ export async function POST(request: Request, context: RouteContext) {
     const rawIdempotencyKey = request.headers.get("idempotency-key") ?? "";
     const checkoutHmac = checkoutIdempotencyHmac({ rawKey: rawIdempotencyKey, reportId: id });
     const siteKey = report.siteKey ?? createSiteKey(report.url);
+    const businessQuestionSetId = typeof body.questionSetId === "string" ? body.questionSetId.trim() : "";
+    if (!businessQuestionSetId) {
+      return NextResponse.json({ error: "The saved teaser question set is required." }, { status: 409 });
+    }
     const checkoutInput = {
       reportId: id,
       siteKey,
@@ -57,9 +61,9 @@ export async function POST(request: Request, context: RouteContext) {
       amountMinor: price.amountMinor
     };
 
-    const active = await getActiveReportV4PaymentOrderForReport(id);
+    const active = await getActivePaymentOrderForReport(id, "recommendation_forensics_v1");
     if (active && active.checkoutIdempotencyHmac !== checkoutHmac) {
-      if (active.businessQuestionSetId !== body.questionSetId) {
+      if (active.businessQuestionSetId !== businessQuestionSetId) {
         return NextResponse.json({ error: "This report already has an active checkout bound to another question set." }, { status: 409 });
       }
       if (active.customerEmailHmac !== protectedEmail.lookupHmac) {
@@ -68,7 +72,7 @@ export async function POST(request: Request, context: RouteContext) {
       return checkoutResponse(request, active.id, active.providerCheckoutId, checkoutInput);
     }
 
-    const order = await createReportV4PaymentOrder({
+    const order = await createPaymentOrder({
       checkoutIdempotencyHmac: checkoutHmac,
       provider: "airwallex",
       reportId: id,
@@ -76,7 +80,8 @@ export async function POST(request: Request, context: RouteContext) {
       customerEmailEncrypted: protectedEmail.encrypted,
       customerEmailHmac: protectedEmail.lookupHmac,
       emailKeyVersion: "v1",
-      businessQuestionSetId: typeof body.questionSetId === "string" ? body.questionSetId : "",
+      productCode: "recommendation_forensics_v1",
+      businessQuestionSetId,
       catalogVersion: price.catalogVersion,
       termsVersion: price.purchaseTermsVersion,
       refundPolicyVersion: price.refundPolicyVersion,

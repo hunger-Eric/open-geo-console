@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { DnsNotFoundError } from "@open-geo-console/site-crawler";
 import { createCloudflareDohResolver, createSafeFetch } from "./safe-fetch";
 
 const publicResolver = async () => [{ address: "8.8.8.8", family: 4 as const }];
@@ -37,6 +38,13 @@ describe("createSafeFetch", () => {
       expect(new URL(input instanceof Request ? input.url : input.toString()).origin).toBe("https://cloudflare-dns.com");
       expect(init?.headers).toEqual({ accept: "application/dns-json" });
     }
+  });
+
+  it("surfaces an authoritative NXDOMAIN answer as DnsNotFoundError", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ Status: 3 })) as unknown as typeof fetch;
+    const resolver = createCloudflareDohResolver(fetchImpl);
+
+    await expect(resolver("member.example.com")).rejects.toBeInstanceOf(DnsNotFoundError);
   });
 
   it("blocks private destinations before issuing a request", async () => {

@@ -22,7 +22,7 @@ import {
 import { issueReportAccessToken, revokeReportAccessTokens } from "@/db/report-tokens";
 import type { EmailDeliveryRow, PaymentRefundRow } from "@/db/schema";
 import { revealCustomerEmail } from "./customer-email";
-import { ResendEmailGateway } from "@/email/resend";
+import { ResendEmailGateway, resolveEnvelopeRecipient } from "@/email/resend";
 import type { EmailTemplate } from "@/email/gateway";
 import { AirwallexGateway } from "@/payments/airwallex";
 import { getActiveCombinedGeoReport } from "@/db/combined-reports";
@@ -35,9 +35,9 @@ export interface CommercialOperationResult {
   failed: number;
 }
 
-export async function processQueuedCommercialEmails(limit = 25): Promise<CommercialOperationResult> {
+export async function processQueuedCommercialEmails(limit = 25, options: { orderId?: string } = {}): Promise<CommercialOperationResult> {
   const owner = `email-${randomUUID()}`;
-  const deliveries = await claimEmailDeliveries({ owner, limit, leaseSeconds: 120 });
+  const deliveries = await claimEmailDeliveries({ owner, limit, leaseSeconds: 120, ...options });
   const result = emptyResult(deliveries.length);
   const gateway = new ResendEmailGateway();
   for (const delivery of deliveries) {
@@ -84,8 +84,9 @@ async function sendDelivery(delivery: EmailDeliveryRow, owner: string, gateway: 
       requiredBaseUrl()
     ).href;
   }
+  const protectedTestRecipient = resolveEnvelopeRecipient("", process.env);
   const sent = await gateway.send({
-    to: revealCustomerEmail(recipient.customerEmailEncrypted),
+    to: protectedTestRecipient || revealCustomerEmail(recipient.customerEmailEncrypted),
     template: delivery.templateType as EmailTemplate,
     locale: delivery.locale,
     orderReference: order.id,
@@ -97,9 +98,9 @@ async function sendDelivery(delivery: EmailDeliveryRow, owner: string, gateway: 
   if (!marked) throw new Error("commercial_email_lease_lost");
 }
 
-export async function processPendingCommercialRefunds(limit = 25): Promise<CommercialOperationResult> {
+export async function processPendingCommercialRefunds(limit = 25, options: { orderId?: string } = {}): Promise<CommercialOperationResult> {
   const owner = `refund-${randomUUID()}`;
-  const refunds = await claimPendingRefunds({ owner, limit, leaseSeconds: 120 });
+  const refunds = await claimPendingRefunds({ owner, limit, leaseSeconds: 120, ...options });
   const result = emptyResult(refunds.length);
   const gateway = new AirwallexGateway();
   for (const refund of refunds) {

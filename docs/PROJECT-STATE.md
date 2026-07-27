@@ -1,5 +1,7 @@
 # Open GEO Console Project State
 
+The limited V4 validation state below remains authoritative; consolidation does not promote it to complete or verified.
+
 ## Current Goal
 
 Deliver a self-hostable, evidence-bound GEO product whose customer artifact is one secure HTML report. The persisted generation locale remains immutable throughout generation and delivery. Report V4 has no PDF generation or customer-PDF surface; V1-V3 retain their historical private-readiness records.

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { DEEP_PAGE_LIMIT, buildPageCandidate, classifyPageType, compressCandidates, normalizeDiscoveredUrl, type PageType } from "@open-geo-console/site-crawler";
 import type { ScanJobCoverage } from "@/db/jobs";
 import type {
   FinalizeReportV4PreAdmissionSnapshotInput,
@@ -17,8 +18,18 @@ import {
 
 const DEFAULT_DEADLINE_MS = 10 * 60 * 1_000;
 const CUSTOM_SERVICE_PAGE_COUNT = 51;
+const CANDIDATE_READ_LIMIT = DEEP_PAGE_LIMIT + 1;
 const SUMMARY_LIMIT = 1_000;
 const RETAINED_TEXT_LIMIT = 100_000;
+const COVERAGE_LIMITING_EXCLUSION_REASONS = new Set([
+  "raw_fetch_failed",
+  "raw_extraction_failed",
+  "browser_render_failed",
+  "deadline_exceeded"
+]);
+const COMPANY_IDENTITY_PAGE_TYPES = new Set<PageType>(["about", "contact"]);
+const PRIMARY_BUSINESS_PAGE_TYPES = new Set<PageType>(["product", "service", "pricing", "case-study"]);
+const HIGH_VALUE_PAGE_TYPES = new Set<PageType>(["home", ...COMPANY_IDENTITY_PAGE_TYPES, ...PRIMARY_BUSINESS_PAGE_TYPES]);
 
 export interface ReportV4AdmissionRuntimeConfig {
   readonly identity: ReportV4SiteSnapshotIdentityInput;
@@ -77,8 +88,18 @@ export function createReportV4AdmissionRunner(
       checkpoint = validateCheckpoint(checkpoint, normalizedConfig);
     } else {
       checkpoint = initialCheckpoint(normalizedConfig);
-      await dependencies.checkpoints.save(job.id, checkpoint);
     }
+    checkpoint = compressPendingFrontier(checkpoint);
+    await dependencies.checkpoints.save(job.id, checkpoint);
+
+    if (analyzableCount(checkpoint.pages) === CUSTOM_SERVICE_PAGE_COUNT) {
+      checkpoint = appendPolicyExclusions(checkpoint);
+      await dependencies.checkpoints.save(job.id, checkpoint);
+      return finalizeAndReturn(checkpoint, normalizedConfig.identity, dependencies, now, "custom_service");
+    }
+    const ready = await finalizeEvidenceReadyCheckpoint(
+      checkpoint, job.id, normalizedConfig.identity, dependencies, now);
+    if (ready) return ready;
 
     while (checkpoint.queue.length > 0) {
       throwIfExecutionInterrupted(signal, remainingMs);
@@ -109,12 +130,18 @@ export function createReportV4AdmissionRunner(
         result,
         normalizedConfig.identity.id
       );
-      checkpoint = enqueueDiscovered(checkpoint, result.discoveredCandidates);
+      const enqueued = enqueueDiscovered(checkpoint, result.discoveredCandidates);
+      checkpoint = compressPendingFrontier(enqueued.checkpoint);
       await dependencies.checkpoints.save(job.id, checkpoint);
 
       if (analyzableCount(checkpoint.pages) === CUSTOM_SERVICE_PAGE_COUNT) {
+        checkpoint = appendPolicyExclusions(checkpoint);
+        await dependencies.checkpoints.save(job.id, checkpoint);
         return finalizeAndReturn(checkpoint, normalizedConfig.identity, dependencies, now, "custom_service");
       }
+      const ready = await finalizeEvidenceReadyCheckpoint(
+        checkpoint, job.id, normalizedConfig.identity, dependencies, now);
+      if (ready) return ready;
     }
 
     return finalizeAndReturn(checkpoint, normalizedConfig.identity, dependencies, now);
@@ -131,7 +158,7 @@ function validateConfig(config: ReportV4AdmissionRuntimeConfig): Required<Report
 }
 
 function initialCheckpoint(config: Required<ReportV4AdmissionRuntimeConfig>): ReportV4AdmissionCheckpoint {
-  let checkpoint: ReportV4AdmissionCheckpoint = {
+  const checkpoint: ReportV4AdmissionCheckpoint = {
     version: 1,
     snapshotId: config.identity.id,
     reportId: config.identity.reportId,
@@ -145,8 +172,7 @@ function initialCheckpoint(config: Required<ReportV4AdmissionRuntimeConfig>): Re
     visitedUrlKeys: [],
     pages: []
   };
-  checkpoint = enqueueDiscovered(checkpoint, config.initialCandidates);
-  return checkpoint;
+  return compressPendingFrontier(enqueueDiscovered(checkpoint, config.initialCandidates).checkpoint);
 }
 
 function validateCheckpoint(
@@ -170,6 +196,9 @@ function validateCheckpoint(
 function assertCheckpointInvariants(checkpoint: ReportV4AdmissionCheckpoint): void {
   const known = normalizedUniqueUrlSet(checkpoint.knownUrlKeys, "known URL");
   const visited = normalizedUniqueUrlSet(checkpoint.visitedUrlKeys, "visited URL");
+  if (visited.size > CANDIDATE_READ_LIMIT) {
+    throw new Error("The V4 admission checkpoint exceeds the candidate-read budget.");
+  }
   const queueUrls = checkpoint.queue.map((candidate) => {
     if (!candidate || typeof candidate.url !== "string" || candidate.siteUrl !== checkpoint.targetUrl) {
       throw new Error("The V4 admission checkpoint queue identity is invalid.");
@@ -237,17 +266,104 @@ function assertUniqueCheckpointValues(values: readonly string[], field: string):
 function enqueueDiscovered(
   checkpoint: ReportV4AdmissionCheckpoint,
   candidates: ReadonlyArray<ReportV4SiteCandidate>
-): ReportV4AdmissionCheckpoint {
+): { checkpoint: ReportV4AdmissionCheckpoint; added: boolean } {
   const known = new Set(checkpoint.knownUrlKeys);
   const visited = new Set(checkpoint.visitedUrlKeys);
   const queue = [...checkpoint.queue];
+  let added = false;
   for (const candidate of candidates) {
     const key = candidateKeyOrNull(candidate.url);
     if (!key || known.has(key) || visited.has(key)) continue;
     known.add(key);
     queue.push({ ...candidate, siteUrl: checkpoint.targetUrl, url: key });
+    added = true;
   }
-  return { ...checkpoint, queue, knownUrlKeys: [...known] };
+  return { checkpoint: { ...checkpoint, queue, knownUrlKeys: [...known] }, added };
+}
+
+function compressPendingFrontier(checkpoint: ReportV4AdmissionCheckpoint): ReportV4AdmissionCheckpoint {
+  const remaining = Math.max(0, CANDIDATE_READ_LIMIT - checkpoint.visitedUrlKeys.length);
+  const representatives = remaining === 0
+    ? []
+    : compressCandidates(
+        checkpoint.queue.map(({ url }) => buildPageCandidate({ url, sources: ["link"] })), remaining);
+  const homepage = representatives.find(({ pageType }) => pageType === "home");
+  const representativeUrls = new Set(representatives.map(({ url }) => url));
+  const candidatesByUrl = new Map(checkpoint.queue.map((candidate) => [candidate.url, candidate]));
+  const queue = [
+    ...(homepage ? [homepage] : []),
+    ...representatives.filter(({ url }) => url !== homepage?.url)
+  ].flatMap(({ url }) => candidatesByUrl.get(url) ?? []);
+  const pages = [...checkpoint.pages];
+  const persistedUrls = new Set(pages.map(({ normalizedUrl }) => normalizedUrl));
+  for (const candidate of checkpoint.queue) {
+    if (representativeUrls.has(candidate.url) || persistedUrls.has(candidate.url)) continue;
+    persistedUrls.add(candidate.url);
+    pages.push({
+      id: pageId(checkpoint.snapshotId, candidate.url),
+      ordinal: pages.length + 1,
+      normalizedUrl: candidate.url,
+      analyzable: false,
+      readMode: null,
+      summary: null,
+      retainedText: null,
+      contentHash: null,
+      exclusionReason: candidate.explicitExclusion ?? "policy_excluded"
+    });
+  }
+  return { ...checkpoint, queue, pages };
+}
+
+
+function appendPolicyExclusions(checkpoint: ReportV4AdmissionCheckpoint): ReportV4AdmissionCheckpoint {
+  const pages = [...checkpoint.pages];
+  const persistedUrls = new Set(pages.map(({ normalizedUrl }) => normalizedUrl));
+  for (const candidate of checkpoint.queue) {
+    if (persistedUrls.has(candidate.url)) continue;
+    persistedUrls.add(candidate.url);
+    pages.push({
+      id: pageId(checkpoint.snapshotId, candidate.url),
+      ordinal: pages.length + 1,
+      normalizedUrl: candidate.url,
+      analyzable: false,
+      readMode: null,
+      summary: null,
+      retainedText: null,
+      contentHash: null,
+      exclusionReason: candidate.explicitExclusion ?? "policy_excluded"
+    });
+  }
+  return { ...checkpoint, queue: [], pages };
+}
+
+async function finalizeEvidenceReadyCheckpoint(
+  checkpoint: ReportV4AdmissionCheckpoint,
+  jobId: string,
+  identity: ReportV4SiteSnapshotIdentityInput,
+  dependencies: ReportV4AdmissionRuntimeDependencies,
+  now: () => Date
+): Promise<ScanJobCoverage | null> {
+  if (!hasSufficientRepresentativeEvidence(checkpoint)) return null;
+  const terminal = appendPolicyExclusions(checkpoint);
+  await dependencies.checkpoints.save(jobId, terminal);
+  return finalizeAndReturn(terminal, identity, dependencies, now);
+}
+
+function hasSufficientRepresentativeEvidence(checkpoint: ReportV4AdmissionCheckpoint): boolean {
+  const observed = new Set(checkpoint.pages.flatMap((page) =>
+    page.analyzable && page.retainedText
+      ? [classifyPageType(page.normalizedUrl, { description: page.retainedText })]
+      : []
+  ));
+  if (!observed.has("home") ||
+      ![...COMPANY_IDENTITY_PAGE_TYPES].some((type) => observed.has(type)) ||
+      ![...PRIMARY_BUSINESS_PAGE_TYPES].some((type) => observed.has(type))) {
+    return false;
+  }
+  return !checkpoint.queue.some(({ url }) => {
+    const type = classifyPageType(url);
+    return HIGH_VALUE_PAGE_TYPES.has(type) && !observed.has(type);
+  });
 }
 
 function appendCollectionResult(
@@ -351,10 +467,9 @@ async function finalizeAndReturn(
   forcedStatus?: FinalizeReportV4PreAdmissionSnapshotInput["status"]
 ): Promise<ScanJobCoverage> {
   const analyzable = analyzableCount(checkpoint.pages);
-  const excluded = checkpoint.pages.length - analyzable;
   const status = forcedStatus ?? (analyzable === 0
     ? "unavailable"
-    : excluded > 0 ? "completed_limited" : "completed");
+    : hasCoverageLimitingExclusion(checkpoint.pages) ? "completed_limited" : "completed");
   const input: FinalizeReportV4PreAdmissionSnapshotInput = {
     ...identity,
     status,
@@ -381,6 +496,11 @@ function coverageFromBundle(bundle: ReportV4SiteSnapshotBundle): ScanJobCoverage
 
 function analyzableCount(pages: readonly ReportV4SiteSnapshotPageInput[]): number {
   return pages.filter(({ analyzable }) => analyzable).length;
+}
+
+function hasCoverageLimitingExclusion(pages: readonly ReportV4SiteSnapshotPageInput[]): boolean {
+  return pages.some(({ exclusionReason }) =>
+    exclusionReason !== null && COVERAGE_LIMITING_EXCLUSION_REASONS.has(exclusionReason));
 }
 
 function summarize(value: string): string {
@@ -410,13 +530,7 @@ function candidateKeyOrNull(value: string): string | null {
 }
 
 function normalizedHttpUrl(value: string): string | null {
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
+  return normalizeDiscoveredUrl(value, undefined, { allowNonHtml: true })?.toString() ?? null;
 }
 
 function unique(values: readonly string[]): string[] {

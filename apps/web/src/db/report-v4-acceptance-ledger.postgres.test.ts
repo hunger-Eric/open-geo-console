@@ -83,6 +83,25 @@ suite("Report V4 protected-Staging acceptance ledger PostgreSQL", () => {
     })).rejects.toThrow(/idempotency.*conflict/i);
   }, 120_000);
 
+  it("persists canonical fault and checkpoint details as JSONB objects accepted by the database contract", async () => {
+    const repository = repo(sql);
+    const sessionId = "19999999-9999-4999-8999-999999999999";
+    const scenarioId = "29999999-9999-4999-8999-999999999999";
+    await repository.createSession(session(sessionId));
+    await repository.createScenario(scenario(sessionId, scenarioId, "question_failure"));
+    const fault = { fault: "question_failure" as const, occurrence: 1 as const, baselineFingerprint: hash("baseline") };
+    const checkpoint = { checkpointHash: hash("checkpoint"), state: "answered" as const };
+    await expect(repository.appendEvent({ sessionId, scenarioId, kind: "fault_injection", operation: "question_failure",
+      unitId: "fault", attempt: 1, phase: "consumed", details: fault })).resolves.toMatchObject({ inserted: true, event: { details: fault } });
+    await expect(repository.appendEvent({ sessionId, scenarioId, kind: "checkpoint_terminal", operation: "question_answer",
+      unitId: "checkpoint", attempt: 0, phase: "observed", details: checkpoint })).resolves.toMatchObject({ inserted: true, event: { details: checkpoint } });
+    const rows = await sql<Array<{ kind: string; details: unknown; type: string }>>`SELECT kind,details,jsonb_typeof(details) type
+      FROM report_v4_acceptance_events WHERE session_id=${sessionId} ORDER BY sequence`;
+    expect(rows).toEqual([
+      { kind: "fault_injection", details: fault, type: "object" },
+      { kind: "checkpoint_terminal", details: checkpoint, type: "object" }
+    ]);
+  }, 120_000);
   it("rejects event tampering, entity rebinding, and append after failed state", async () => {
     const repository = repo(sql);
     const sessionId = "12222222-2222-4222-8222-222222222222";
@@ -163,6 +182,7 @@ suite("Report V4 protected-Staging acceptance ledger PostgreSQL", () => {
   }, 120_000);
 
   it("persists all legacy and V37 prohibited-operation discriminants without weakening typed details", async () => {
+
     const repository = repo(sql);
     const sessionId = "18888888-8888-4888-8888-888888888888";
     const scenarioId = "28888888-8888-4888-8888-888888888888";

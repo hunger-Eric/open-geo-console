@@ -393,6 +393,17 @@ describe("strict Report V4 processor routing", () => {
     expect(legacy).toBeGreaterThan(v4);
   });
 
+  it("reads the exact root semantic-review marker once and threads it into Free V4 without deriving activation from nested state", () => {
+    const currentJobRead = processorSource.indexOf("const currentJob = await getScanJob(runInput.job.id)");
+    const markerRead = processorSource.indexOf("const semanticReviewContractVersion = readSemanticReviewContractVersion(currentCheckpoint)");
+    const freeTeaserCall = processorSource.indexOf("await generateFreeTeaser({", markerRead);
+    expect(currentJobRead).toBeGreaterThan(-1);
+    expect(markerRead).toBeGreaterThan(currentJobRead);
+    expect(freeTeaserCall).toBeGreaterThan(markerRead);
+    expect(processorSource.slice(freeTeaserCall, freeTeaserCall + 700)).toContain("semanticReviewContractVersion,");
+    expect(processorSource.match(/readSemanticReviewContractVersion\(currentCheckpoint\)/gu)).toHaveLength(1);
+  });
+
   it("threads the process-scoped protected-Staging drill only into the selected V4 production runner", () => {
     expect(processorSource).toContain("options.liveDrill");
     expect(processorSource).toContain("createReportV4CoreProduction({ environment, liveDrill })");

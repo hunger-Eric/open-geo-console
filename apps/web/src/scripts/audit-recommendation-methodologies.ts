@@ -18,7 +18,7 @@ export function summarizeRecommendationMethodologyAudit(rows: RecommendationMeth
 } {
   const invalid = rows.filter((row) =>
     !((row.methodology === "answer_engine_recommendation_forensics_v1" && row.reportVersion === 1) ||
-      (row.methodology === "public_search_source_forensics_v1" && row.reportVersion === 2)) ||
+      (row.methodology === "public_search_source_forensics_v1" && (row.reportVersion === 2 || row.reportVersion === 3))) ||
     (row.pairedMethodology !== undefined &&
       (row.pairedMethodology !== row.methodology || row.pairedReportVersion !== row.reportVersion)));
   const v1Count = rows.filter((row) => row.methodology === "answer_engine_recommendation_forensics_v1").length;

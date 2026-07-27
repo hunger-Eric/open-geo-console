@@ -134,6 +134,18 @@ export function createReportV4AdmissionCollectorDependencies(input: {
           });
           const finalUrl = response.headers.get("x-ogc-final-url") ?? candidate.url;
           const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+          if (isPermanentOptionalPageStatus(response.status)) {
+            return {
+              url: finalUrl,
+              networkSafety: "public",
+              access: "public",
+              contentType,
+              html: "",
+              explicitExclusion: !isAllowedByRobots(finalUrl, input.robotsPolicy)
+                ? "robots_denied" as const
+                : "policy_excluded" as const
+            };
+          }
           if (response.status !== 401 && response.status !== 403 && !response.ok) {
             throw new CrawlPageError("unsupported-content", `Page returned HTTP ${response.status}.`, {
               status: response.status,
@@ -181,7 +193,16 @@ export function createReportV4AdmissionCollectorDependencies(input: {
     async discoverCandidates(read) {
       const discovery = new SiteDiscovery(input.targetUrl);
       discovery.addHtmlDocument(read.html, read.url);
-      return discovery.getUrls().map(({ url }) => reportV4Candidate(input.targetUrl, url, input.robotsPolicy));
+      const candidates: ReportV4SiteCandidate[] = [];
+      const seen = new Set<string>();
+      for (const { url } of discovery.getUrls()) {
+        const candidate = reportV4Candidate(input.targetUrl, url, input.robotsPolicy);
+        const key = reportV4DynamicCandidateKey(candidate);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        candidates.push(candidate);
+      }
+      return candidates;
     }
   };
 }
@@ -526,14 +547,53 @@ export async function renderReportV4AdmissionHtml(
 }
 
 function reportV4Candidate(siteUrl: string, url: string, robotsPolicy: RobotsPolicy): ReportV4SiteCandidate {
+  const canonicalUrl = canonicalizeReportV4AdmissionUrl(siteUrl, url);
   return {
     siteUrl,
-    url,
+    url: canonicalUrl,
     networkSafety: "public",
     access: "public",
     contentType: "text/html",
-    ...(!isAllowedByRobots(url, robotsPolicy) ? { explicitExclusion: "robots_denied" as const } : {})
+    ...(!isAllowedByRobots(canonicalUrl, robotsPolicy) ? { explicitExclusion: "robots_denied" as const } : {})
   };
+}
+
+function canonicalizeReportV4AdmissionUrl(siteUrl: string, url: string): string {
+  const target = new URL(siteUrl);
+  const candidate = new URL(url);
+  if (
+    stripWww(target.hostname) === stripWww(candidate.hostname)
+    && target.protocol === candidate.protocol
+    && effectivePort(target) === effectivePort(candidate)
+  ) {
+    return new URL(`${candidate.pathname}${candidate.search}${candidate.hash}`, target.origin).toString();
+  }
+  return candidate.toString();
+}
+
+function stripWww(hostname: string): string {
+  return hostname.startsWith("www.") ? hostname.slice(4) : hostname;
+}
+
+function effectivePort(url: URL): string {
+  return url.port || (url.protocol === "https:" ? "443" : "80");
+}
+
+function reportV4DynamicCandidateKey(candidate: ReportV4SiteCandidate): string {
+  const url = new URL(candidate.url);
+  return candidate.explicitExclusion === "robots_denied" && url.search
+    ? `robots-denied:${url.origin}${url.pathname}`
+    : candidate.url;
+}
+
+function isPermanentOptionalPageStatus(status: number): boolean {
+  return status >= 400
+    && status < 500
+    && status !== 401
+    && status !== 403
+    && status !== 408
+    && status !== 425
+    && status !== 429;
 }
 
 function excludedByRobots(url: string): ReportV4HtmlRead {

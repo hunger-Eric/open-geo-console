@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getEvidenceAsset } from "@/db/evidence-assets";
 import { createEvidenceStorage } from "@/evidence/storage";
 import { requestHasReportAccess } from "@/server/report-access";
-import { getActiveCombinedGeoReport } from "@/db/combined-reports";
+import { getAnyActiveCombinedGeoReport } from "@/db/combined-reports";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,11 +10,16 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request, context: { params: Promise<{ id: string; assetId: string }> }) {
   const { id, assetId } = await context.params;
   const legacyAccess=await requestHasReportAccess(request,id,"legacy_website_audit_v1");
-  const active=legacyAccess?null:await getActiveCombinedGeoReport(id);
+  const active=legacyAccess?null:await getAnyActiveCombinedGeoReport(id);
   const combinedAccess=Boolean(active&&await requestHasReportAccess(request,id,active.report.artifactContract));
   if(!legacyAccess&&!combinedAccess)return privateError(404);
   const asset = await getEvidenceAsset(id, assetId);
-  if(combinedAccess&&(!active||!asset||![active.report.originalPaidJobId,active.report.jobId].includes(asset.jobId)))return privateError(404);
+  const activeReport = active?.report;
+  const assetJobIds = [
+    activeReport && "originalPaidJobId" in activeReport ? activeReport.originalPaidJobId : null,
+    activeReport && "jobId" in activeReport ? activeReport.jobId : null
+  ];
+  if(combinedAccess&&(!active||!asset||!assetJobIds.includes(asset.jobId)))return privateError(404);
   if (!asset || asset.status !== "ready" || !asset.storageKey) return privateError(404);
   const object = await createEvidenceStorage().get(asset.storageKey);
   if (!object) return privateError(404);

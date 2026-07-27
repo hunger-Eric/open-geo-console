@@ -113,6 +113,26 @@ describe("business question contracts", () => {
     expect(() => confirmBusinessQuestionSet({ candidates, finalTexts: ["Contact buyer@example.com about freight", base[1], base[2]], acknowledgedLowConfidence: true, confirmedAt: "2026-07-14T00:00:00.000Z" })).toThrow(/contact/i);
   });
 
+  it("defers only semantic distinctness for a marked unified review", () => {
+    const candidates = generateBusinessQuestionCandidates({ locale: "en", region: "global", profile });
+    const base = candidates.questions.map(({ generatedText }) => generatedText) as [string, string, string];
+    const confirmed = confirmBusinessQuestionSet({
+      candidates,
+      finalTexts: [base[0], base[0], base[2]],
+      acknowledgedLowConfidence: true,
+      confirmedAt: "2026-07-14T00:00:00.000Z",
+      deferSemanticDistinctness: true
+    });
+    expect(confirmed.questions).toHaveLength(3);
+    expect(() => confirmBusinessQuestionSet({
+      candidates,
+      finalTexts: ["", base[1], base[2]],
+      acknowledgedLowConfidence: true,
+      confirmedAt: "2026-07-14T00:00:00.000Z",
+      deferSemanticDistinctness: true
+    })).toThrow();
+  });
+
   it("converts only the three neutral variants into the shared public-search contract", () => {
     const candidates=generateBusinessQuestionCandidates({locale:"en",region:"global",profile});
     const confirmed=confirmBusinessQuestionSet({candidates,finalTexts:[

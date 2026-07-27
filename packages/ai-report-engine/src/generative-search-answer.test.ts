@@ -26,6 +26,17 @@ describe("parseGenerativeSearchAnswerResult", () => {
     await expect(generativeSearchSourceHash(reordered)).resolves.toBe(await generativeSearchSourceHash(parsed.sources));
   });
   it("rejects prose in the wrong locale", () => { expect(() => parseGenerativeSearchAnswerResult({ ...valid, answerText: "This is an ordinary English sentence." }, { expectedQuestionId: "question-1", locale: "zh-CN" })).toThrow(/language/i); });
+  it("defers language judgment only when the caller explicitly opts into the unified semantic review", async () => {
+    const mixed = { ...valid, answerText: "A new Brand-X FBA product is described in English for this Chinese report." };
+    const parsed = parseGenerativeSearchAnswerResult(mixed, {
+      expectedQuestionId: "question-1",
+      locale: "zh-CN",
+      semanticValidation: "deferred"
+    });
+    expect(parsed.answerText).toContain("Brand-X FBA");
+    await expect(generativeSearchAnswerHash(parsed, { locale: "zh-CN", semanticValidation: "deferred" }))
+      .resolves.toMatch(/^[a-f0-9]{64}$/u);
+  });
   it("rejects an English answer with only a short Chinese preface", () => {
     expect(() => parseGenerativeSearchAnswerResult({
       ...valid,

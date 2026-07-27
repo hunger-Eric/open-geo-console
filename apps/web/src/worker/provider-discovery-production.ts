@@ -209,13 +209,19 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
         standardPlannedQueries, standardCompletedQueries, standardReturnedObservations, standardSafePages });
     },
     resolveStandardQuestions: async ({ signal }) => {
-      const fanouts = createPublicSourceQuestionFanouts({ questions: canonical, authority: input.runtime.authority, excludedIdentities, ordinals: [1, 2] });
-      const resolved = await Promise.all(fanouts.map((fanout, index) => resolvePublicSourceSnapshot({
-        authority: input.runtime.authority, adapter: input.runtime.adapter, question: canonical.questions[index + 1]!, fanout,
-        evidenceCutoffAt: input.evidenceCutoffAt, leaseOwner: input.workerId, signal, retrieveSource: createQuestionRetriever(canonical.questions[index + 1]!),
-        forceRefreshAfter: input.forceSnapshotRefreshAfter,
-        maxSourceRetrievals: 6, maxAvailableSources: 3, maxSourcesPerDomain: 2
-      })));
+      const fanouts = createPublicSourceQuestionFanouts({ questions: canonical, authority: input.runtime.authority, excludedIdentities, ordinals: [1, 2] })
+        .map((fanout) => ({ ...fanout, queries: fanout.queries.slice(0, 3), budget: { ...fanout.budget, timeoutMs: 60_000 } }));
+      const resolved: Awaited<ReturnType<typeof resolvePublicSourceSnapshot>>[] = [];
+      for (const [index, fanout] of fanouts.entries()) {
+        signal?.throwIfAborted();
+        const question = canonical.questions[index + 1]!;
+        resolved.push(await resolvePublicSourceSnapshot({
+          authority: input.runtime.authority, adapter: input.runtime.adapter, question, fanout,
+          evidenceCutoffAt: input.evidenceCutoffAt, leaseOwner: input.workerId, signal, retrieveSource: createQuestionRetriever(question),
+          forceRefreshAfter: input.forceSnapshotRefreshAfter,
+          maxSourceRetrievals: 6, maxAvailableSources: 3, maxSourcesPerDomain: 2, searchConcurrency: 1
+        }));
+      }
       standardPlannedQueries = fanouts.reduce((total, fanout) => total + fanout.queries.length, 0);
       standardCompletedQueries = resolved.reduce((total, value) => total + completedQueries(value.observations), 0);
       standardReturnedObservations = resolved.reduce((total, value) => total + value.observations.reduce((sum, observation) => sum + observation.results.length, 0), 0);

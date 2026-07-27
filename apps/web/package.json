@@ -17,6 +17,8 @@
     "worker:realtime:deep": "node --env-file-if-exists=.env.local --import tsx src/worker/drain-entry.ts realtime deep",
     "worker:staging:free": "node --env-file=.env.staging.local --import tsx src/scripts/staging-worker.ts free",
     "worker:staging:deep": "node --env-file-if-exists=../../.vercel/.env.preview.local --env-file=.env.staging.local --import tsx src/scripts/staging-worker.ts deep",
+    "worker:staging:exact": "node --env-file-if-exists=../../.vercel/.env.preview.local --env-file=.env.staging.local --import tsx src/scripts/staging-exact-worker.ts",
+    "worker:staging:exact-preview": "node --env-file-if-exists=../../.vercel/.env.preview.local --env-file=.env.staging.local --import tsx src/scripts/staging-exact-preview-worker.ts",
     "queue:dispatch": "node --env-file-if-exists=.env.local --import tsx src/scripts/dispatch-job-notifications.ts dispatch",
     "queue:reconcile": "node --env-file-if-exists=.env.local --import tsx src/scripts/dispatch-job-notifications.ts reconcile",
     "commerce:email": "node --env-file-if-exists=.env.local --import tsx src/scripts/commercial-operations.ts email",

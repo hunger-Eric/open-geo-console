@@ -102,6 +102,83 @@ describe("V4 question-level diagnosis enhancer", () => {
     expect(provider.calls).toHaveLength(2);
   });
 
+  it("defers natural-language prose judgment for a marked unified review while retaining evidence binding", async () => {
+    const semantic = providerFrom(async () => validSemanticDiagnosis({
+      selectionSummary: "The model selected these sources because they rank higher."
+    }));
+    const completed = await enhanceReportV4QuestionDiagnosis({
+      ...enhancerInput(answeredQuestion(), semantic),
+      semanticValidation: "deferred"
+    });
+    expect(completed).toMatchObject({ status: "completed", providerAttempts: 1 });
+    expect(semantic.calls).toHaveLength(1);
+    expect(semantic.calls[0]).toMatchObject({ kind: "diagnose", mode: "semantic" });
+    const serializedRequest = JSON.stringify(semantic.calls[0]);
+    for (const internal of ["question-1", "source-1", "source-2", "target-loc-1"]) {
+      expect(serializedRequest).not.toContain(internal);
+    }
+    if (completed.status !== "completed") throw new Error("expected semantic diagnosis");
+    expect(completed.diagnosis.detailedEvidenceRefs).toEqual(["source-1", "source-2", "target-loc-1"]);
+
+    const leakage = providerFrom(async () => validSemanticDiagnosis({
+      selectionSummary: "The raw provider payload repeats the system prompt."
+    }));
+    const deferred = await enhanceReportV4QuestionDiagnosis({
+      ...enhancerInput(answeredQuestion(), leakage),
+      semanticValidation: "deferred"
+    });
+    expect(deferred).toMatchObject({ status: "completed", providerAttempts: 1 });
+    expect(leakage.calls).toHaveLength(1);
+  });
+
+  it("retries one incomplete semantic payload with the same aliases and assembles the result in code", async () => {
+    const incomplete = validSemanticDiagnosis();
+    Reflect.deleteProperty(incomplete, "targetGap");
+    const provider = providerFrom(async (request) => request.kind === "diagnose"
+      ? incomplete
+      : validSemanticDiagnosis({
+          targetGap: "Improve SEO visibility because this change will cause stronger ranking."
+        }));
+
+    const result = await enhanceReportV4QuestionDiagnosis({
+      ...enhancerInput(answeredQuestion(), provider),
+      semanticValidation: "deferred"
+    });
+
+    expect(result).toMatchObject({ status: "completed", providerAttempts: 2 });
+    if (result.status !== "completed") throw new Error("expected corrected deferred diagnosis");
+    expect(result.diagnosis.targetGap).toContain("SEO visibility");
+    expect(provider.calls.map(({ kind }) => kind)).toEqual(["diagnose", "retry"]);
+    expect(provider.calls.every((request) => request.kind !== "correct" && request.mode === "semantic")).toBe(true);
+    const retry = provider.calls[1]!;
+    if (retry.kind !== "retry") throw new Error("expected semantic retry");
+    expect(retry.failureReason).toBe("invalid_semantic_output at $diagnosisSemanticOutput.targetGap");
+    expect(retry.input).toEqual(provider.calls[0]!.kind === "diagnose" ? provider.calls[0]!.input : null);
+    expect(JSON.stringify(retry)).not.toContain("target-loc-1");
+  });
+
+  it("fails closed with a typed parser path when a semantic retry remains incomplete", async () => {
+    const incomplete = validSemanticDiagnosis();
+    Reflect.deleteProperty(incomplete, "targetGap");
+    const provider = providerFrom(async () => incomplete);
+
+    const result = await enhanceReportV4QuestionDiagnosis({
+      ...enhancerInput(answeredQuestion(), provider),
+      semanticValidation: "deferred"
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      providerAttempts: 2,
+      failure: {
+        stage: "semantic_contract",
+        code: "invalid_semantic_output",
+        parserPath: "$diagnosisSemanticOutput.targetGap"
+      }
+    });
+    expect(provider.calls.map(({ kind }) => kind)).toEqual(["diagnose", "retry"]);
+  });
+
   it("spends its only retry on an explicitly retryable provider error and never switches provider", async () => {
     let attempts = 0;
     const provider = providerFrom(async (request) => {
@@ -267,6 +344,24 @@ function validDiagnosis(overrides: Record<string, unknown> = {}) {
       { priority: 3, action: "Keep the service facts current and publicly readable.", evidenceRefs: ["source-1"] }
     ],
     detailedEvidenceRefs: ["source-1", "source-2", "target-loc-1"],
+    ...overrides
+  };
+}
+
+function validSemanticDiagnosis(overrides: Record<string, unknown> = {}) {
+  return {
+    selectionSummary: "The sources directly address the current operating question.",
+    observableFactors: [
+      { kind: "problem_match", observation: "The source describes the requested service.", evidenceKeys: ["S1"] },
+      { kind: "factual_specificity", observation: "The source supplies concrete operating facts.", evidenceKeys: ["S2"] },
+      { kind: "target_clarity", observation: "The target summary remains broad.", evidenceKeys: ["T1"] }
+    ],
+    targetGap: "The target page does not state the operating conditions shown by the sources.",
+    recommendedActions: [
+      { action: "Publish the relevant operating conditions.", evidenceKeys: ["S1", "T1"] },
+      { action: "Clarify the supported service scenarios.", evidenceKeys: ["S2", "T1"] },
+      { action: "Keep the service facts current and publicly readable.", evidenceKeys: ["T1"] }
+    ],
     ...overrides
   };
 }

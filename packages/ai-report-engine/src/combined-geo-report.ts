@@ -162,7 +162,10 @@ function combinedReportProseFields(report: CombinedGeoReportV1): {
   return { fields, allowedTerms };
 }
 
-export function parseCombinedGeoReportV1(value: unknown): CombinedGeoReportV1 {
+export function parseCombinedGeoReportV1(
+  value: unknown,
+  options: { semanticValidation?: "legacy" | "deferred" } = {}
+): CombinedGeoReportV1 {
   const report = object(value, "$combined");
   exact(report.version, COMBINED_GEO_REPORT_VERSION, "version");
   exact(report.artifactContract, COMBINED_GEO_REPORT_CONTRACT, "artifactContract");
@@ -200,7 +203,7 @@ export function parseCombinedGeoReportV1(value: unknown): CombinedGeoReportV1 {
   if (businessQuestionSet.id !== questionSetIdentity || businessQuestionSet.locale !== locale || businessQuestionSet.questions.length !== 3) {
     throw new TypeError("Combined business question identity/locale is invalid.");
   }
-  const publicSourceForensics = parseRecommendationForensicReportV2(report.publicSourceForensics);
+  const publicSourceForensics = parseRecommendationForensicReportV2(report.publicSourceForensics, options);
   if (publicSourceForensics.reportId !== reportId || publicSourceForensics.jobId !== jobId || !sameTarget(publicSourceForensics.targetUrl, targetUrl)
       || publicSourceForensics.evidenceCutoffAt !== evidenceCutoffAt || publicSourceForensics.locale !== locale || publicSourceForensics.region !== region) {
     throw new TypeError("Combined public-source identities do not match the report.");

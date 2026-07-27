@@ -15,7 +15,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 // @requirement GEO-V4-CRAWL-04
 describe("schema v30 V4 runtime persistence substrate", () => {
   it("adds only hierarchical summaries, diagnosis checkpoints and one enhancement per core", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(40);
+    expect(DATABASE_SCHEMA_VERSION).toBe(42);
     const sql = V30_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS report_v4_page_summaries");
     expect(sql).toContain("source_length integer NOT NULL");
@@ -178,14 +178,14 @@ describeDisposablePostgres("schema v30 V4 runtime persistence PostgreSQL constra
 
     await sql`INSERT INTO report_v4_diagnosis_checkpoints
       (identity_hash,report_id,enhancement_job_id,core_artifact_revision_id,config_snapshot_id,question_set_id,
-       question_id,snapshot_id,ordinal,state,input_identity_hash)
+       question_id,snapshot_id,ordinal,state,input_identity_hash,diagnosis_input_payload)
       VALUES(${hash("diagnosis-v30")},'report-v30','enhancement-job-v30','core-revision-v30',${configId},
-       'questions-v30','question-v30-1','snapshot-v30',1,'queued',${hash("diagnosis-input-v30")})`;
+       'questions-v30','question-v30-1','snapshot-v30',1,'queued',${hash("diagnosis-input-v30")},'{}'::jsonb)`;
     await expect(sql`INSERT INTO report_v4_diagnosis_checkpoints
       (identity_hash,report_id,enhancement_job_id,core_artifact_revision_id,config_snapshot_id,question_set_id,
-       question_id,snapshot_id,ordinal,state,input_identity_hash)
+       question_id,snapshot_id,ordinal,state,input_identity_hash,diagnosis_input_payload)
       VALUES(${hash("diagnosis-wrong-snapshot")},'report-v30','enhancement-job-v30','core-revision-v30',${configId},
-       'questions-v30','question-v30-2','snapshot-v30-other',2,'queued',${hash("diagnosis-input-wrong-snapshot")})`)
+       'questions-v30','question-v30-2','snapshot-v30-other',2,'queued',${hash("diagnosis-input-wrong-snapshot")},'{}'::jsonb)`)
       .rejects.toThrow(/exact active core, configuration, snapshot, questions and enhancement job/i);
     const sourceAudit = [{
       questionId: "question-v30-1",
@@ -265,9 +265,9 @@ describeDisposablePostgres("schema v30 V4 runtime persistence PostgreSQL constra
       WHERE enhancement_job_id='enhancement-job-v30' AND ordinal=1`).rejects.toThrow(/immutable/i);
     await expect(sql`INSERT INTO report_v4_diagnosis_checkpoints
       (identity_hash,report_id,enhancement_job_id,core_artifact_revision_id,config_snapshot_id,question_set_id,
-       question_id,snapshot_id,ordinal,state,input_identity_hash,provider_call_count)
+       question_id,snapshot_id,ordinal,state,input_identity_hash,provider_call_count,diagnosis_input_payload)
       VALUES(${hash("diagnosis-too-many-calls")},'report-v30','enhancement-job-v30','core-revision-v30',${configId},
-       'questions-v30','question-v30-2','snapshot-v30',2,'failed',${hash("diagnosis-input-2")},3)`)
+       'questions-v30','question-v30-2','snapshot-v30',2,'failed',${hash("diagnosis-input-2")},3,'{}'::jsonb)`)
       .rejects.toMatchObject({ constraint_name: "report_v4_diagnosis_checkpoints_call_count_check" });
 
     await sql`INSERT INTO report_artifact_revisions

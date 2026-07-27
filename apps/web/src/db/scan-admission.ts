@@ -5,6 +5,8 @@ import { ensureDatabase, getSqlClient, isMemoryPersistence } from "./index";
 import { hmacSecret, requireSecret } from "./secrets";
 import { hashAnonymousIp } from "./trials";
 import type { ReportLocale } from "./schema";
+import { createSemanticReviewInitialCheckpoint } from "./report-semantic-review-activation";
+import { REPORT_SEMANTIC_REVIEW_CONTRACT } from "@open-geo-console/ai-report-engine";
 
 export type ScanAdmissionResult =
   | { outcome: "created"; reportId: string; jobId: string; aiEnabled: boolean }
@@ -118,6 +120,13 @@ export async function admitFreeScan(input: AdmitFreeScanInput): Promise<ScanAdmi
       const activeCounts = await tx<{ count: number }[]>`
         SELECT count(*)::integer AS count FROM scan_jobs
         WHERE tier = 'free' AND stage NOT IN ('completed', 'completed_limited', 'failed')
+          AND NOT (
+            execution_state = 'repair_wait'
+            AND lease_owner IS NULL
+            AND lease_expires_at IS NULL
+            AND retry_not_before IS NULL
+            AND repair_deadline_at IS NULL
+          )
       `;
       if ((activeCounts[0]?.count ?? 0) >= maxActiveStagingJobs) throw new ScanJobCapacityError();
     } else {
@@ -137,6 +146,7 @@ export async function admitFreeScan(input: AdmitFreeScanInput): Promise<ScanAdmi
     const budgetHmac = hmacSecret(`free-ai:${reportId}`, secret);
     const budget = await reserveFreeAiBudget(tx, budgetHmac, input.aiDailyLimit, nowIso.slice(0, 10));
     const checkpoint = {
+      ...createSemanticReviewInitialCheckpoint(REPORT_SEMANTIC_REVIEW_CONTRACT),
       aiEnabled: budget.granted,
       ...(budget.granted ? {} : { aiSkipReason: "daily_budget_exhausted" })
     };

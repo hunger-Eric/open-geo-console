@@ -26,9 +26,14 @@ export interface SourceSelectionDiagnosisForGenerativeV3Input {
   locale: string;
   answerHash: string;
   sourceHash: string;
+  semanticValidation?: "legacy" | "deferred";
+  deferredDraft?: unknown;
 }
 
 export function buildSourceSelectionDiagnosisForGenerativeV3(input: SourceSelectionDiagnosisForGenerativeV3Input): SourceSelectionDiagnosisV1 {
+  if (input.semanticValidation === "deferred" && input.deferredDraft === undefined) {
+    throw new TypeError("Deferred source-selection validation requires an externally reviewed draft.");
+  }
   const auditByUrl = new Map(input.auditSources.map((source) => [comparableUrl(source.canonicalUrl), source]));
   const targetPages = normalizedTargetPages(input.targetPages);
   return buildSourceSelectionDiagnosisV1({
@@ -56,7 +61,10 @@ export function buildSourceSelectionDiagnosisForGenerativeV3(input: SourceSelect
           providerResultOrder: source.providerResultOrder
         };
       })
-    }))
+    })),
+    ...(input.semanticValidation === "deferred"
+      ? { semanticValidation: "deferred" as const, deferredDraft: input.deferredDraft }
+      : {})
   });
 }
 

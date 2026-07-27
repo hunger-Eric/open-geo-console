@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V38_DATABASE_MIGRATIONS, V39_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V38_DATABASE_MIGRATIONS, V39_DATABASE_MIGRATIONS, V40_DATABASE_MIGRATIONS, V41_DATABASE_MIGRATIONS, V42_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const suite = adminUrl ? describe : describe.skip;
@@ -15,7 +15,10 @@ suite("schema V38 website-synthesis input authority", () => {
   const historicalDatabase = `ogc_v38_history_${randomUUID().replaceAll("-", "")}`;
   let empty: ReturnType<typeof postgres>;
   let historical: ReturnType<typeof postgres>;
-  const throughV37 = DATABASE_MIGRATIONS.slice(0, -(V38_DATABASE_MIGRATIONS.length + V39_DATABASE_MIGRATIONS.length));
+  const throughV37 = DATABASE_MIGRATIONS.slice(
+    0,
+    DATABASE_MIGRATIONS.length - databaseMigrationsAfter(37).length
+  );
 
   beforeAll(async () => {
     for (const database of [emptyDatabase, historicalDatabase]) await admin.unsafe(`CREATE DATABASE ${quote(database)}`);
@@ -36,10 +39,13 @@ suite("schema V38 website-synthesis input authority", () => {
   }, 120_000);
 
   it("registers exactly one V38 forward step", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(40);
-    expect(databaseMigrationsAfter(37)).toEqual([...V38_DATABASE_MIGRATIONS, ...V39_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(38)).toEqual([...V39_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(39)).toEqual([]);
+    expect(DATABASE_SCHEMA_VERSION).toBe(42);
+    expect(databaseMigrationsAfter(37)).toEqual([...V38_DATABASE_MIGRATIONS, ...V39_DATABASE_MIGRATIONS, ...V40_DATABASE_MIGRATIONS, ...V41_DATABASE_MIGRATIONS, ...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(38)).toEqual([...V39_DATABASE_MIGRATIONS, ...V40_DATABASE_MIGRATIONS, ...V41_DATABASE_MIGRATIONS, ...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(39)).toEqual([...V40_DATABASE_MIGRATIONS, ...V41_DATABASE_MIGRATIONS, ...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(40)).toEqual([...V41_DATABASE_MIGRATIONS, ...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(41)).toEqual([...V42_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(42)).toEqual([]);
     const source = V38_DATABASE_MIGRATIONS.join("\n");
     expect(source).toContain("input_identity_hash");
     expect(source).toContain("page_summary_identity_set_hash");
