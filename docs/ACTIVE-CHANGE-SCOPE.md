@@ -4,16 +4,124 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Free V4 semantic review batching (APPROVED)`.
+`Current authority: Free V4 field-local evidence re-anchor (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Free V4 semantic review batching (APPROVED)
+## Current authority: Free V4 field-local evidence re-anchor (APPROVED)
 
-**Status: `APPROVED` (implemented + Staging Gates 1–3)** — user approved the
-allowlist ("同意") and later "提交并 push + Staging 部署" (2026-07-27).
-Candidate `7b44722b819a5ab20853ca1c666b1bdde9951fe3` is on `origin/main` and
-Protected Staging (Web + Free/Deep Workers). **Gate 4 real-flow not
-authorized.**
+**Status: `APPROVED`** — user directed implementation (2026-07-27): keep code
+to deterministic work only; model owns analysis/judgment; stop Free V4 from
+forcing Paid-style `report_global_v1` on multi-domain teaser prose.
+
+### Problem (first principles)
+
+Marker-present Free V4 mixed two designs:
+
+1. **Code-only analysis era** — program tried to force “analysis complete”
+   with deterministic gates.
+2. **Model analysis era** — model writes/reviews prose, but Free still applied
+   Paid’s `report_global_v1`: every non-blocked field/answer/evidenceUse must
+   cite a report-wide search catalog.
+
+Free catalog is Q1 sources + limited target page slices. Foundation and
+question texts are **not** authored from that catalog. Result: model often
+returns empty refs → permanent `semantic_review_evidence_missing` (seen on
+Staging job `2ca2ee66-…` after batching cleared `mimo_output_truncated`).
+
+### Design lock (closed)
+
+| Layer | Owner | Free V4 rule |
+|-------|--------|--------------|
+| Materials, IDs, schema, ownership, hashes | Code | Deterministic only |
+| Language, diagnosis meaning, faithfulness | Model | Analysis only |
+| Evidence binding | Field-local allowlists | Non-empty allowlist ⇒ at least one accepted ref on non-blocked **field** result; empty allowlist ⇒ **no** ref required |
+| Free `evidencePolicy` | **Omit** | Free must **not** set `report_global_v1` |
+| Paid V3 | Unchanged | Keeps `report_global_v1` |
+
+Domain expectation for Free manifests (already reflected in field seeds):
+
+- `foundation.*` / `questions[*].text`: empty allowlists → language review only
+- `q1AnswerCard.answerText` / `q1Diagnosis.*`: Q1/diagnosis allowlists → local
+  fail-closed when model omits refs on non-blocked fields
+
+Batching (prior scope) remains the Free generation shape. This scope does not
+re-open maxOutputTokens, historical job repair, deploy, or Gate 4.
+
+### Objective
+
+1. Remove Free teaser `evidencePolicy: "report_global_v1"` so Free uses
+   field-local allowlists and legacy field result schema (no forced
+   rejectedEvidence/rejectedSources global shape).
+2. Map non-empty local allowlist + empty field refs (non-blocked) to typed
+   `ReportSemanticReviewEvidenceMissingError` with local reason (permanent),
+   not a bare TypeError → `unexpected_internal_error`.
+3. Update Free unit tests and review fakes for field-local refs; keep Paid and
+   optional Free+global unit coverage for `report_global_v1`.
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/report-v4-free-teaser.ts` | Drop Free `evidencePolicy`; brief domain comment |
+| `packages/ai-report-engine/src/report-semantic-review.ts` | Local empty-ref typed error; blocked exemption parity |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+### Tests allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/report-v4-free-teaser.test.ts` | Field-local Free expectations + fake review refs |
+| `packages/ai-report-engine/src/report-semantic-review.test.ts` | Local allowlist missing-ref typed error if needed |
+| `apps/web/src/worker/job-errors.test.ts` | Only if reason/message mapping needs it |
+
+### Forbidden
+
+- Paid V3 behavior change
+- Historical job repair/replay
+- Deploy / Docker / Gate 4 without separate authority
+- Weakening ID existence / ownership / receipt / hash gates
+- Silent program rubber-stamp of first global source onto all fields
+- New dependencies / schema migrations
+- UI / commerce / production env mutation
+
+### Diff budget
+
+| Surface | Budget |
+|---------|--------|
+| Production allowlisted | max `+80` / `-40` |
+| Tests allowlisted | max `+120` / `-60` |
+| External expensive actions | `0` |
+
+### Verification
+
+```text
+npx vitest run packages/ai-report-engine/src/report-semantic-review.test.ts apps/web/src/worker/report-v4-free-teaser.test.ts apps/web/src/worker/job-errors.test.ts
+npm run lint
+```
+
+Acceptance:
+
+1. Free review input has **no** `evidencePolicy` / not `report_global_v1`.
+2. Free answer/diagnosis fields retain **non-empty** local allowlists where
+   seeded; foundation/questions keep empty allowlists.
+3. Blueprint `referenceRequirement` is `none` or `at_least_one_exact_local_id`
+   for Free (not global).
+4. Paid V3 still builds with `report_global_v1`.
+5. Empty refs on Free foundation pass; empty refs on Free Q1 answer field with
+   allowlist fail typed evidence-missing.
+
+### Baseline
+
+Prior Staging candidate `7b44722` (batching). This scope is **source-only**;
+deploy not authorized here.
+
+---
+
+## Historical — Free V4 semantic review batching (completed; not current)
+
+**Status: implemented + Staging Gates 1–3** — user approved ("同意") and
+deployed candidate `7b44722b819a5ab20853ca1c666b1bdde9951fe3` (2026-07-27).
+**Gate 4 not authorized under that scope.**
 
 ### Problem (evidence-backed; not an estimate)
 

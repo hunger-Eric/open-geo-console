@@ -4,13 +4,17 @@ import type { SourceSelectionDiagnosisV1 } from "./source-selection-diagnosis-v1
 export const REPORT_SEMANTIC_REVIEW_CONTRACT = "report-semantic-review-v1" as const;
 export const SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE = "semantic_review_evidence_missing" as const;
 export const SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON = "accepted_global_evidence_or_source_required" as const;
+export const SEMANTIC_REVIEW_LOCAL_EVIDENCE_MISSING_REASON = "allowed_local_evidence_or_source_required" as const;
 
 export type ReportSemanticReviewEvidenceMissingManifestKind =
   | "field"
   | "answer_annotation"
   | "evidence_use_annotation";
 
-/** Fail-closed when a non-blocked slot omits accepted global evidence/source under report_global_v1. */
+/**
+ * Fail-closed when a non-blocked slot omits required accepted evidence/source:
+ * report_global_v1 (global catalog) or field-local non-empty allowlists.
+ */
 export class ReportSemanticReviewEvidenceMissingError extends Error {
   readonly code = SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE;
   readonly reason: string;
@@ -23,7 +27,7 @@ export class ReportSemanticReviewEvidenceMissingError extends Error {
     readonly reason?: string;
   }) {
     const reason = input.reason ?? SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON;
-    super(`${input.fieldPath} requires accepted global evidence or source unless blocked.`);
+    super(`${input.fieldPath} requires accepted evidence or source unless blocked.`);
     this.name = "ReportSemanticReviewEvidenceMissingError";
     this.reason = reason;
     this.fieldPath = input.fieldPath;
@@ -1277,15 +1281,20 @@ function parseFieldResult(
   assertSubset(evidenceIds, global ? input.evidence.map(({ evidenceId }) => evidenceId) : manifest.allowedEvidenceIds, `${path}.evidenceIds`);
   assertSubset(sourceIds, global ? input.sources.map(({ sourceId }) => sourceId) : manifest.allowedSourceIds, `${path}.sourceIds`);
   if (global) assertGlobalEligibleReferences(evidenceIds, sourceIds, evidenceById, sourceById, path);
-  if (!global && manifest.allowedEvidenceIds.length + manifest.allowedSourceIds.length > 0
-      && evidenceIds.length + sourceIds.length === 0) {
-    throw new TypeError(`${path} must retain at least one allowed evidence or source reference.`);
-  }
-  if (global && decision !== "blocked" && evidenceIds.length + sourceIds.length === 0) {
-    throw new ReportSemanticReviewEvidenceMissingError({
-      fieldPath: path,
-      manifestKind: "field"
-    });
+  if (decision !== "blocked" && evidenceIds.length + sourceIds.length === 0) {
+    if (global) {
+      throw new ReportSemanticReviewEvidenceMissingError({
+        fieldPath: path,
+        manifestKind: "field"
+      });
+    }
+    if (manifest.allowedEvidenceIds.length + manifest.allowedSourceIds.length > 0) {
+      throw new ReportSemanticReviewEvidenceMissingError({
+        fieldPath: path,
+        manifestKind: "field",
+        reason: SEMANTIC_REVIEW_LOCAL_EVIDENCE_MISSING_REASON
+      });
+    }
   }
   if (!global) {
     for (const id of evidenceIds) assertCompatibleOwner(manifest.questionId, evidenceById.get(id)!.questionId, `${path}.evidenceIds ${id}`);

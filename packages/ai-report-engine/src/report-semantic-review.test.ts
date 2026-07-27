@@ -4,6 +4,7 @@ import {
   ReportSemanticReviewEvidenceMissingError,
   SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE,
   SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON,
+  SEMANTIC_REVIEW_LOCAL_EVIDENCE_MISSING_REASON,
   applyReportSemanticReview,
   assembleFreeV4BatchedSemanticReviewRaw,
   buildFreeV4ReportSemanticReviewSystemPrompt,
@@ -264,7 +265,7 @@ describe("ReportSemanticReview model output", () => {
         reason: SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON,
         fieldPath: "$reviewOutput.fields[0]",
         manifestKind: "field",
-        message: expect.stringMatching(/requires accepted global/u)
+        message: expect.stringMatching(/requires accepted evidence or source/u)
       });
     }
 
@@ -302,6 +303,44 @@ describe("ReportSemanticReview model output", () => {
     reviewFields(zero)[0]!.issueCodes = ["unsupported"];
     zero.overallDecision = "blocked";
     expect(parseReportSemanticReviewOutput(zero, input).fields[0]!.decision).toBe("blocked");
+  });
+
+  it("fail-closes field-local allowlists without report_global_v1, and allows empty refs when allowlists are empty", () => {
+    const freeCore = inputCore();
+    freeCore.lifecycle = "free_v4";
+    freeCore.fields = freeCore.fields.map((field, index) => index === 0
+      ? { ...field, allowedEvidenceIds: [], allowedSourceIds: [] }
+      : field);
+    const noAllow = createReportSemanticReviewInput(freeCore);
+    expect(noAllow.evidencePolicy).toBeUndefined();
+    const noAllowReview = validReview(noAllow);
+    reviewFields(noAllowReview)[0]!.evidenceIds = [];
+    reviewFields(noAllowReview)[0]!.sourceIds = [];
+    expect(parseReportSemanticReviewOutput(noAllowReview, noAllow).fields[0]!.evidenceIds).toEqual([]);
+
+    const withAllowCore = inputCore();
+    withAllowCore.lifecycle = "free_v4";
+    const withAllow = createReportSemanticReviewInput(withAllowCore);
+    expect(withAllow.fields[0]!.allowedSourceIds.length + withAllow.fields[0]!.allowedEvidenceIds.length).toBeGreaterThan(0);
+    const missingLocal = validReview(withAllow);
+    reviewFields(missingLocal)[0]!.evidenceIds = [];
+    reviewFields(missingLocal)[0]!.sourceIds = [];
+    expect(() => parseReportSemanticReviewOutput(missingLocal, withAllow)).toThrow(ReportSemanticReviewEvidenceMissingError);
+    try {
+      parseReportSemanticReviewOutput(missingLocal, withAllow);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE,
+        reason: SEMANTIC_REVIEW_LOCAL_EVIDENCE_MISSING_REASON,
+        fieldPath: "$reviewOutput.fields[0]",
+        manifestKind: "field"
+      });
+    }
+
+    reviewFields(missingLocal)[0]!.decision = "blocked";
+    reviewFields(missingLocal)[0]!.issueCodes = ["unsupported"];
+    missingLocal.overallDecision = "blocked";
+    expect(parseReportSemanticReviewOutput(missingLocal, withAllow).fields[0]!.decision).toBe("blocked");
   });
 
   it("keeps rejected reference keys outside the legacy exact contract and documents global prompts", () => {
@@ -427,7 +466,8 @@ describe("ReportSemanticReview model output", () => {
     const missingRefs = validReview(input);
     reviewFields(missingRefs)[1]!.evidenceIds = [];
     reviewFields(missingRefs)[1]!.sourceIds = [];
-    expect(() => parseReportSemanticReviewOutput(missingRefs, input)).toThrow(/at least one allowed/u);
+    expect(() => parseReportSemanticReviewOutput(missingRefs, input)).toThrow(ReportSemanticReviewEvidenceMissingError);
+    expect(() => parseReportSemanticReviewOutput(missingRefs, input)).toThrow(/requires accepted evidence or source/u);
   });
 
   it("requires non-pass issue codes and a mechanically consistent overall decision", () => {

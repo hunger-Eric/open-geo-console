@@ -1007,8 +1007,12 @@ function buildFreeTeaserSemanticReviewInput(input: {
     .filter((value): value is string => Boolean(value?.trim()))
     .map((value) => value.trim())
     .filter((value, index, values) => values.indexOf(value) === index);
+  // Free V4 is multi-domain: foundation/questions are language-only (empty
+  // allowlists); Q1 answer/diagnosis carry field-local source/evidence IDs.
+  // Do not apply Paid `report_global_v1` — code only validates deterministic
+  // ID/subset/ownership rules; the model owns analysis and which allowed IDs
+  // to cite when a field allowlist is non-empty.
   return buildFreeV4SemanticReviewManifest({
-    evidencePolicy: "report_global_v1",
     locale: input.runtime.authority.surface.locale,
     target: { siteKey: targetHost, targetUrl: input.targetUrl, aliases: targetAliases },
     expectedModel: { providerId: "xiaomi-mimo", modelId: input.modelId },

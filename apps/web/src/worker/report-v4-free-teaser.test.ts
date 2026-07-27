@@ -703,14 +703,21 @@ describe("free teaser orchestration", () => {
       .filter(({ sourceId }) => sourceId === null)
       .map(({ evidenceId }) => evidenceId);
     const diagnosisFields = reviewRequest.input.fields.filter(({ path }) => path.startsWith("q1Diagnosis."));
-    expect(reviewRequest.input.evidencePolicy).toBe("report_global_v1");
-    expect(answerField.allowedEvidenceIds).toEqual([]);
-    expect(answerField.allowedSourceIds).toEqual([]);
+    expect(reviewRequest.input.evidencePolicy).toBeUndefined();
+    expect(answerField.allowedEvidenceIds).toEqual(["q1-source"]);
+    expect(answerField.allowedSourceIds).toEqual(["q1-source"]);
     expect(diagnosisTargetIds).not.toEqual([]);
-    expect(diagnosisFields.every(({ allowedEvidenceIds, allowedSourceIds }) => allowedEvidenceIds.length === 0 && allowedSourceIds.length === 0)).toBe(true);
+    expect(diagnosisFields.every(({ allowedEvidenceIds }) => allowedEvidenceIds.length > 0)).toBe(true);
+    const foundationFields = reviewRequest.input.fields.filter(({ path }) => path.startsWith("foundation."));
+    expect(foundationFields.length).toBeGreaterThan(0);
+    expect(foundationFields.every(({ allowedEvidenceIds, allowedSourceIds }) =>
+      allowedEvidenceIds.length === 0 && allowedSourceIds.length === 0
+    )).toBe(true);
     const allSystem = mocks.semanticInvoke.mock.calls.map((call) => String(call[0].systemText)).join("\n");
     expect(allSystem).toContain(`"path":"${answerField.path}"`);
-    expect(allSystem).toContain('"referenceRequirement":"at_least_one_exact_global_id"');
+    expect(allSystem).toContain('"referenceRequirement":"at_least_one_exact_local_id"');
+    expect(allSystem).toContain('"referenceRequirement":"none"');
+    expect(allSystem).not.toContain("at_least_one_exact_global_id");
     expect(allSystem).toContain("Blueprint-only index is an ordering aid; omit index from every output field object.");
     expect(allSystem).not.toContain(answerField.originalText);
     expect(reviewRequest.input.target.aliases).toEqual([
@@ -1314,11 +1321,13 @@ function semanticReviewBatchSlice(
 }
 
 function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticReviewOutput {
-  const global = input.evidencePolicy === "report_global_v1" || input.fields.some((field) => field.path.startsWith("foundation."));
-  const globalEvidenceIds = global ? [input.evidence.find(({ eligible }) => eligible === true)?.evidenceId ?? ""] : undefined;
+  const global = input.evidencePolicy === "report_global_v1";
+  const globalEvidenceIds = global
+    ? [input.evidence.find(({ eligible }) => eligible === true)?.evidenceId].filter((id): id is string => Boolean(id))
+    : undefined;
   const refs = (field: ReportSemanticReviewInput["fields"][number]) => ({
-    evidenceIds: globalEvidenceIds ?? field.allowedEvidenceIds,
-    sourceIds: input.evidencePolicy ? [] : field.allowedSourceIds
+    evidenceIds: globalEvidenceIds ?? [...field.allowedEvidenceIds],
+    sourceIds: global ? [] as string[] : [...field.allowedSourceIds]
   });
   return {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
