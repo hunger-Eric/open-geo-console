@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  ModelTokenBudgetError,
   ReportSemanticReviewEvidenceMissingError,
   SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE
 } from "@open-geo-console/ai-report-engine";
@@ -8,6 +9,24 @@ import type { ScanJobPhase } from "./job-state";
 export type JobFailureClassification = "transient" | "operator_repairable" | "target_limitation" | "permanent";
 
 export const MIMO_INVALID_RESPONSE_JOB_CODE = "mimo_invalid_response" as const;
+
+/** Durable job codes for structured MiMo provider failures (never raw bodies). */
+const MIMO_PROVIDER_JOB_CLASSIFICATION: Readonly<Record<string, {
+  code: string;
+  classification: JobFailureClassification;
+}>> = Object.freeze({
+  transport: { code: "mimo_transport", classification: "transient" },
+  rate_limited: { code: "mimo_rate_limited", classification: "transient" },
+  temporary_provider: { code: "mimo_temporary_provider", classification: "transient" },
+  mimo_invalid_response: { code: MIMO_INVALID_RESPONSE_JOB_CODE, classification: "transient" },
+  mimo_timeout: { code: "mimo_timeout", classification: "transient" },
+  authentication: { code: "mimo_authentication", classification: "operator_repairable" },
+  configuration: { code: "mimo_configuration", classification: "operator_repairable" },
+  safety: { code: "mimo_safety", classification: "permanent" },
+  mimo_output_truncated: { code: "mimo_output_truncated", classification: "permanent" },
+  mimo_content_filtered: { code: "mimo_content_filtered", classification: "permanent" },
+  contract: { code: "mimo_contract", classification: "permanent" }
+});
 
 export class JobError extends Error {
   constructor(
@@ -99,18 +118,58 @@ export function normalizeJobError(error: unknown, context: JobErrorContext, now 
   };
 }
 
-/** Maps free-teaser review boundary errors that are not JobError subclasses. */
+/** Maps provider/review boundary errors that are not JobError subclasses. */
 function resolveTypedBoundaryError(error: unknown): { code: string; classification: JobFailureClassification } | null {
   if (error instanceof ReportSemanticReviewEvidenceMissingError) {
     return { code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE, classification: "permanent" };
+  }
+  if (error instanceof ModelTokenBudgetError) {
+    return { code: "model_token_budget_rejected", classification: "permanent" };
   }
   if (error && typeof error === "object") {
     const row = error as { name?: unknown; code?: unknown };
     if (row.name === "ReportSemanticReviewEvidenceMissingError" || row.code === SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE) {
       return { code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE, classification: "permanent" };
     }
-    if (row.name === "ReportV4MimoProviderError" && row.code === MIMO_INVALID_RESPONSE_JOB_CODE) {
-      return { code: MIMO_INVALID_RESPONSE_JOB_CODE, classification: "transient" };
+    if (row.name === "ModelTokenBudgetError") {
+      return { code: "model_token_budget_rejected", classification: "permanent" };
+    }
+    if (row.name === "ReportV4MimoProviderError" && typeof row.code === "string") {
+      const mapped = MIMO_PROVIDER_JOB_CLASSIFICATION[row.code];
+      if (mapped) return { code: mapped.code, classification: mapped.classification };
+    }
+    if (row.name === "ReportV4DiagnosisProviderError" && typeof row.code === "string") {
+      const mapped = MIMO_PROVIDER_JOB_CLASSIFICATION[row.code];
+      if (mapped) {
+        return {
+          code: mapped.code.replace(/^mimo_/, "diagnosis_"),
+          classification: mapped.classification
+        };
+      }
+    }
+    if (row.name === "ReportV4QuestionProviderError" && typeof row.code === "string") {
+      const mapped = MIMO_PROVIDER_JOB_CLASSIFICATION[row.code];
+      if (mapped) {
+        return {
+          code: mapped.code.replace(/^mimo_/, "question_"),
+          classification: mapped.classification
+        };
+      }
+    }
+    if (row.name === "MiMoGenerativeSearchAnswerError" && typeof (row as { errorClass?: unknown }).errorClass === "string") {
+      const errorClass = (row as { errorClass: string }).errorClass;
+      if (errorClass === "authentication") {
+        return { code: "generative_search_authentication", classification: "operator_repairable" };
+      }
+      if (errorClass === "unavailable") {
+        return { code: "generative_search_unavailable", classification: "transient" };
+      }
+      if (errorClass === "malformed") {
+        return { code: "generative_search_malformed", classification: "transient" };
+      }
+      if (errorClass === "aborted") {
+        return { code: "generative_search_aborted", classification: "transient" };
+      }
     }
   }
   return null;

@@ -37,16 +37,30 @@ type ReportV4MimoBaseUrl =
 const PROVIDER_SAFETY_MARGIN_TOKENS = 4_096;
 const MAX_DIAGNOSIS_INPUT_LENGTH = 80_000;
 
-/** Shared transport/auth codes plus structured-payload parse failures. */
+/** Shared transport/auth codes plus structured-payload / finish_reason failures. */
 export type ReportV4MimoProviderErrorCode =
   | (ReportV4QuestionProviderErrorCode & ReportV4DiagnosisProviderErrorCode)
-  | "mimo_invalid_response";
+  | "mimo_invalid_response"
+  | "mimo_output_truncated"
+  | "mimo_content_filtered"
+  | "mimo_timeout";
 
 type ProviderErrorCode = ReportV4MimoProviderErrorCode;
 
 export const MIMO_INVALID_RESPONSE_CODE = "mimo_invalid_response" as const;
+export const MIMO_OUTPUT_TRUNCATED_CODE = "mimo_output_truncated" as const;
+export const MIMO_CONTENT_FILTERED_CODE = "mimo_content_filtered" as const;
+export const MIMO_TIMEOUT_CODE = "mimo_timeout" as const;
 export const MAX_STRUCTURED_CONTENT_PARTS = 128;
 export const MAX_STRUCTURED_CONTENT_CHARS = 1_000_000;
+
+const RETRYABLE_PROVIDER_CODES = new Set<ProviderErrorCode>([
+  "transport",
+  "rate_limited",
+  "temporary_provider",
+  MIMO_INVALID_RESPONSE_CODE,
+  MIMO_TIMEOUT_CODE
+]);
 
 export interface ReportV4MimoProviderConfig {
   readonly baseUrl: ReportV4MimoBaseUrl;
@@ -107,25 +121,25 @@ export class ReportV4MimoProviderError extends Error {
     super(message);
     this.name = "ReportV4MimoProviderError";
     this.code = code;
-    this.retryable = code === "transport"
-      || code === "rate_limited"
-      || code === "temporary_provider"
-      || code === MIMO_INVALID_RESPONSE_CODE;
+    this.retryable = RETRYABLE_PROVIDER_CODES.has(code);
   }
 }
 
 export function readReportV4MimoProviderConfig(environment: NodeJS.ProcessEnv): ReportV4MimoProviderConfig {
   const baseUrl = approvedMimoBaseUrl(environment.OGC_REPORT_V4_MIMO_BASE_URL);
   if (!baseUrl) {
-    throw new Error("OGC_REPORT_V4_MIMO_BASE_URL must use the approved MiMo endpoint.");
+    throw new ReportV4MimoProviderError("configuration", "OGC_REPORT_V4_MIMO_BASE_URL must use the approved MiMo endpoint.");
   }
   const apiKey = environment.OGC_REPORT_V4_MIMO_API_KEY;
   if (typeof apiKey !== "string" || !apiKey.trim() || apiKey !== apiKey.trim() || apiKey.length > 4_096) {
-    throw new Error("OGC_REPORT_V4_MIMO_API_KEY must contain a bounded dedicated key.");
+    throw new ReportV4MimoProviderError("configuration", "OGC_REPORT_V4_MIMO_API_KEY must contain a bounded dedicated key.");
   }
   const tokenPlanEndpoint = baseUrl !== MIMO_PAYG_BASE_URL;
   if (tokenPlanEndpoint !== apiKey.startsWith("tp-")) {
-    throw new Error("OGC_REPORT_V4_MIMO_BASE_URL and OGC_REPORT_V4_MIMO_API_KEY must use the same MiMo billing channel.");
+    throw new ReportV4MimoProviderError(
+      "configuration",
+      "OGC_REPORT_V4_MIMO_BASE_URL and OGC_REPORT_V4_MIMO_API_KEY must use the same MiMo billing channel."
+    );
   }
   return Object.freeze({ baseUrl, apiKey });
 }
@@ -272,9 +286,8 @@ function createProviderContext(dependencies: ProviderDependencies): ProviderCont
             body: JSON.stringify(body),
             signal: input.signal
           });
-        } catch {
-          propagateAbort(input.signal);
-          throw new ReportV4MimoProviderError("transport", "The MiMo provider transport failed.");
+        } catch (error) {
+          throw mapTransportFailure(input.signal, error);
         }
         if (!response.ok) throw statusError(response.status);
 
@@ -282,10 +295,7 @@ function createProviderContext(dependencies: ProviderDependencies): ProviderCont
         try {
           payload = JSON.parse(await response.text());
         } catch {
-          throw new ReportV4MimoProviderError(
-            MIMO_INVALID_RESPONSE_CODE,
-            "The MiMo provider returned an invalid response."
-          );
+          throw mimoInvalidResponse("The MiMo provider returned an invalid response.");
         }
         const parsed = parseProviderPayload(payload);
         const completedAt = now().toISOString();
@@ -364,12 +374,15 @@ function parseProviderPayload(payload: unknown): {
   if (!Array.isArray(root.choices) || root.choices.length < 1) {
     throw mimoInvalidResponse("The MiMo provider response is missing choices.");
   }
+  let choice: Record<string, unknown>;
   let message: Record<string, unknown>;
   try {
-    message = record(record(root.choices[0]).message);
+    choice = record(root.choices[0]);
+    message = record(choice.message);
   } catch {
     throw mimoInvalidResponse("The MiMo provider returned an invalid response.");
   }
+  assertFinishReasonAllowed(choice.finish_reason);
   const contentText = extractMessageContent(message.content);
   let value: unknown;
   try {
@@ -385,6 +398,45 @@ function parseProviderPayload(payload: unknown): {
     throw mimoInvalidResponse("The MiMo provider returned an invalid response.");
   }
   return { value, annotations, providerResponseId };
+}
+
+/** Fail closed on truncated or filtered generations without logging body text. */
+function assertFinishReasonAllowed(finishReason: unknown): void {
+  if (finishReason == null || finishReason === "stop") return;
+  if (typeof finishReason !== "string") {
+    throw mimoInvalidResponse("finish_reason_unsupported");
+  }
+  if (finishReason === "length") {
+    throw new ReportV4MimoProviderError(MIMO_OUTPUT_TRUNCATED_CODE, "mimo_output_truncated");
+  }
+  if (finishReason === "content_filter") {
+    throw new ReportV4MimoProviderError(MIMO_CONTENT_FILTERED_CODE, "mimo_content_filtered");
+  }
+  throw mimoInvalidResponse("finish_reason_unsupported");
+}
+
+function mapTransportFailure(signal: AbortSignal, error: unknown): never {
+  if (signal.aborted) {
+    const reason = signal.reason;
+    if (isTimeoutFailure(reason) || isTimeoutFailure(error)) {
+      throw new ReportV4MimoProviderError(MIMO_TIMEOUT_CODE, "The MiMo provider request timed out.");
+    }
+    if (reason !== undefined) throw reason;
+    throw new ReportV4MimoProviderError(MIMO_TIMEOUT_CODE, "The MiMo provider request was aborted.");
+  }
+  if (isTimeoutFailure(error)) {
+    throw new ReportV4MimoProviderError(MIMO_TIMEOUT_CODE, "The MiMo provider request timed out.");
+  }
+  throw new ReportV4MimoProviderError("transport", "The MiMo provider transport failed.");
+}
+
+function isTimeoutFailure(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = "name" in error && typeof error.name === "string" ? error.name : "";
+  const message = "message" in error && typeof error.message === "string" ? error.message : "";
+  return name === "TimeoutError"
+    || (name === "AbortError" && /timeout/i.test(message))
+    || /timeout/i.test(message);
 }
 
 /** Strict string or `{ type: "text", text }` parts only; preventive, not historical proof. */
@@ -580,17 +632,31 @@ function statusError(status: number): ReportV4MimoProviderError {
 
 function mapQuestionError(error: unknown): unknown {
   if (!(error instanceof ReportV4MimoProviderError)) return error;
-  // Question provider codes exclude mimo_invalid_response; map to temporary for local retry.
-  if (error.code === MIMO_INVALID_RESPONSE_CODE) {
+  // Question provider codes are a subset; map extended codes to the nearest local code.
+  if (
+    error.code === MIMO_INVALID_RESPONSE_CODE
+    || error.code === MIMO_TIMEOUT_CODE
+    || error.code === MIMO_OUTPUT_TRUNCATED_CODE
+  ) {
     return new ReportV4QuestionProviderError("temporary_provider", error.message);
+  }
+  if (error.code === MIMO_CONTENT_FILTERED_CODE) {
+    return new ReportV4QuestionProviderError("safety", error.message);
   }
   return new ReportV4QuestionProviderError(error.code, error.message);
 }
 
 function mapDiagnosisError(error: unknown): unknown {
   if (!(error instanceof ReportV4MimoProviderError)) return error;
-  if (error.code === MIMO_INVALID_RESPONSE_CODE) {
+  if (
+    error.code === MIMO_INVALID_RESPONSE_CODE
+    || error.code === MIMO_TIMEOUT_CODE
+    || error.code === MIMO_OUTPUT_TRUNCATED_CODE
+  ) {
     return new ReportV4DiagnosisProviderError("temporary_provider", error.message);
+  }
+  if (error.code === MIMO_CONTENT_FILTERED_CODE) {
+    return new ReportV4DiagnosisProviderError("safety", error.message);
   }
   return new ReportV4DiagnosisProviderError(error.code, error.message);
 }

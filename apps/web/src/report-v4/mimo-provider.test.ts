@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   ModelTokenBudgetError,
   buildModelOperationTokenBudget,
@@ -18,7 +19,10 @@ import {
 import {
   MAX_STRUCTURED_CONTENT_CHARS,
   MAX_STRUCTURED_CONTENT_PARTS,
+  MIMO_CONTENT_FILTERED_CODE,
   MIMO_INVALID_RESPONSE_CODE,
+  MIMO_OUTPUT_TRUNCATED_CODE,
+  MIMO_TIMEOUT_CODE,
   ReportV4MimoProviderError,
   buildReportV4MimoDiagnosisTokenBudget,
   buildReportV4MimoQuestionTokenBudget,
@@ -58,7 +62,13 @@ describe("Report V4 dedicated MiMo provider", () => {
         OGC_PUBLIC_SEARCH_MIMO_API_KEY: "legacy-search-key"
       }
     ]) {
-      expect(() => readReportV4MimoProviderConfig(candidate)).toThrow(/OGC_REPORT_V4_MIMO|endpoint|key/i);
+      expect(() => readReportV4MimoProviderConfig(candidate)).toThrow(ReportV4MimoProviderError);
+      try {
+        readReportV4MimoProviderConfig(candidate);
+      } catch (error) {
+        expect(error).toMatchObject({ code: "configuration", retryable: false });
+        expect(String(error)).toMatch(/OGC_REPORT_V4_MIMO|endpoint|key/i);
+      }
     }
   });
 
@@ -292,6 +302,7 @@ describe("Report V4 dedicated MiMo provider", () => {
   it.each([
     [401, "authentication", false],
     [403, "authentication", false],
+    [408, "temporary_provider", true],
     [429, "rate_limited", true],
     [500, "temporary_provider", true],
     [503, "temporary_provider", true],
@@ -851,7 +862,140 @@ describe("Report V4 dedicated MiMo provider", () => {
     const source = readFileSync(new URL("./mimo-provider.ts", import.meta.url), "utf8");
     expect(source).not.toMatch(/public-search-adapters\/mimo|generative-answer|for\s*\([^)]*attempt/i);
   });
+
+  it("classifies finish_reason length and content_filter without leaking bodies", async () => {
+    const secret = "raw-provider-secret-must-not-leak";
+    await expect(createReportV4MimoStructuredInvoker({
+      environment: environment(),
+      fetch: vi.fn(async () => new Response(JSON.stringify({
+        id: "len",
+        choices: [{ finish_reason: "length", message: { content: JSON.stringify({ secret }) } }]
+      }), { status: 200 }))
+    }).invoke({
+      operation: "websiteSynthesis",
+      systemText: "Return JSON.",
+      inputText: "input",
+      signal: new AbortController().signal
+    })).rejects.toMatchObject({
+      name: "ReportV4MimoProviderError",
+      code: MIMO_OUTPUT_TRUNCATED_CODE,
+      retryable: false,
+      message: "mimo_output_truncated"
+    });
+
+    try {
+      await createReportV4MimoStructuredInvoker({
+        environment: environment(),
+        fetch: vi.fn(async () => new Response(JSON.stringify({
+          id: "filter",
+          choices: [{ finish_reason: "content_filter", message: { content: secret } }]
+        }), { status: 200 }))
+      }).invoke({
+        operation: "websiteSynthesis",
+        systemText: "Return JSON.",
+        inputText: "input",
+        signal: new AbortController().signal
+      });
+      throw new Error("expected content_filter rejection");
+    } catch (error) {
+      expect(error).toMatchObject({ code: MIMO_CONTENT_FILTERED_CODE, retryable: false, message: "mimo_content_filtered" });
+      expect(String(error)).not.toContain(secret);
+    }
+  });
+
+  it("classifies transport timeout and load fixture envelopes", async () => {
+    const timeout = Object.assign(new Error("The operation timed out."), { name: "TimeoutError" });
+    await expect(createReportV4MimoStructuredInvoker({
+      environment: environment(),
+      fetch: vi.fn(async () => { throw timeout; })
+    }).invoke({
+      operation: "websiteSynthesis",
+      systemText: "Return JSON.",
+      inputText: "input",
+      signal: new AbortController().signal
+    })).rejects.toMatchObject({ code: MIMO_TIMEOUT_CODE, retryable: true });
+
+    for (const [name, code] of [
+      ["missing-choices.json", MIMO_INVALID_RESPONSE_CODE],
+      ["finish-length.json", MIMO_OUTPUT_TRUNCATED_CODE],
+      ["finish-content-filter.json", MIMO_CONTENT_FILTERED_CODE],
+      ["truncated-json.json", MIMO_INVALID_RESPONSE_CODE]
+    ] as const) {
+      const fixture = JSON.parse(readFileSync(
+        fileURLToPath(new URL(`./__fixtures__/mimo-provider-errors/${name}`, import.meta.url)),
+        "utf8"
+      ));
+      await expect(createReportV4MimoStructuredInvoker({
+        environment: environment(),
+        fetch: vi.fn(async () => new Response(JSON.stringify(fixture), { status: 200 }))
+      }).invoke({
+        operation: "websiteSynthesis",
+        systemText: "Return JSON.",
+        inputText: "input",
+        signal: new AbortController().signal
+      })).rejects.toMatchObject({ name: "ReportV4MimoProviderError", code });
+    }
+  });
+
+  it("rejects structurally invalid envelopes for 1000 fixed seeds (property/fuzz)", async () => {
+    const seed = 0x96f41a01;
+    const random = mulberry32(seed);
+    let failures = 0;
+    for (let i = 0; i < 1000; i += 1) {
+      const envelope = randomInvalidEnvelope(random, i);
+      try {
+        await createReportV4MimoStructuredInvoker({
+          environment: environment(),
+          fetch: vi.fn(async () => new Response(JSON.stringify(envelope), { status: 200 }))
+        }).invoke({
+          operation: "websiteSynthesis",
+          systemText: "Return JSON.",
+          inputText: "input",
+          signal: new AbortController().signal
+        });
+        throw new Error(`seed=${seed} index=${i} unexpectedly accepted envelope`);
+      } catch (error) {
+        if (!(error instanceof ReportV4MimoProviderError)) {
+          throw new Error(`seed=${seed} index=${i} wrong error type: ${String(error)}`);
+        }
+        if (![
+          MIMO_INVALID_RESPONSE_CODE,
+          MIMO_OUTPUT_TRUNCATED_CODE,
+          MIMO_CONTENT_FILTERED_CODE
+        ].includes(error.code as typeof MIMO_INVALID_RESPONSE_CODE)) {
+          throw new Error(`seed=${seed} index=${i} unexpected code=${error.code}`);
+        }
+        failures += 1;
+      }
+    }
+    expect(failures).toBe(1000);
+  });
 });
+
+function mulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function randomInvalidEnvelope(random: () => number, index: number): unknown {
+  const kind = index % 10;
+  if (kind === 0) return { id: "fuzz", choices: [] };
+  if (kind === 1) return { id: "fuzz", choices: [{ message: { content: null } }] };
+  if (kind === 2) return { id: "fuzz", choices: [{ finish_reason: "length", message: { content: "{\"a\":1}" } }] };
+  if (kind === 3) return { id: "fuzz", choices: [{ finish_reason: "content_filter", message: { content: "{\"a\":1}" } }] };
+  if (kind === 4) return { id: "fuzz", choices: [{ finish_reason: "stop", message: { content: "{not-json" } }] };
+  if (kind === 5) return { id: "fuzz", choices: [{ finish_reason: "tool_calls", message: { content: "{\"a\":1}" } }] };
+  if (kind === 6) return { id: "fuzz", choices: [{ message: { content: [{ type: "text", text: "{\"a\":1}", extra: random() }] } }] };
+  if (kind === 7) return { id: "fuzz", choices: [{ message: { content: ["{\"a\":1}"] } }] };
+  if (kind === 8) return { id: "fuzz", choices: [{ message: { content: [] } }] };
+  return { id: "fuzz", choices: [{ message: {} }] };
+}
 
 function environment(): NodeJS.ProcessEnv {
   return {

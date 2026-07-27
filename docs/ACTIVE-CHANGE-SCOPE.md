@@ -1,14 +1,17 @@
 # Active Change Scope Lock
 
-Status: `APPROVED`
+Status: `APPROVED` (Phase 3)
 
-This file is the sole executable task authority for the current work.
+This file records historical scopes and the **current** executable authority.
+**Current executable authority:** section
+`Current authority: 96% local fault matrix — Phase 3 (APPROVED)`.
+All earlier sections are context only.
 
-## Current scope — Free V4 teaser unified semantic review typed error boundary
+## Historical context — Free V4 teaser typed error boundary (completed work; not current execution)
 
-Status: `APPROVED`
+Status: historical (implementation may already be on `main`; not the active task)
 
-### User-approved decisions (locked)
+### User-approved decisions (locked for that prior task)
 
 - **A:** typed `mimo_invalid_response` + limited transient retry (existing phase attempt budget)
 - **B:** permanent typed fail-closed `semantic_review_evidence_missing` (keep `report_global_v1`)
@@ -237,3 +240,269 @@ manifest included `.codegraph/codegraph.db` (148,279,296 bytes), exceeding the
 - After this technical gate, resume the already approved Protected Staging
   Preview/fixed-alias process. No additional output-directory exclusion is
   authorized, and the release remains Staging-only.
+
+## Current authority: 96% local fault matrix — Phase 3 (APPROVED)
+
+**Status: `APPROVED`** — user authorized "提交本地、开 Phase 3" (2026-07-27).
+Phase 1–2 are completed baselines. **No push / deploy** unless separately
+authorized. Local commit of Phase 1–2 allowlisted surfaces is authorized.
+
+### Phase 3 objective
+
+Prove Free V4 teaser **checkpoint / resume** at every durable stage with an
+**in-memory dry harness** (mocked providers, no real DB, no real model):
+
+1. Resume from each saved stage does **not** re-run already-durable expensive
+   work (snapshot resolve, Q1 generative answer, diagnosis, unified review) when
+   that stage’s artifact is already present.
+2. After a typed diagnosis failure, resume from the last durable
+   `q1_answer_ready` (answer draft, no diagnosis) re-runs diagnosis only and can
+   complete when the provider succeeds.
+3. Corrupt / incomplete stage shapes still fail closed without writing a new
+   checkpoint or invoking later expensive stages.
+
+No prompt rewrite, no claim/lease/CAS redesign, no UI progress rewrite, no real
+model/DB/Docker/deploy, no historical Job mutation.
+
+### Phase 3 production allowlist
+
+- `apps/web/src/worker/report-v4-free-teaser.ts` — only if a proven resume gap
+  requires a minimal fix; prefer test-only if production already correct
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+
+### Phase 3 tests allowlist
+
+- `apps/web/src/worker/report-v4-free-teaser.test.ts` — resume matrix + dry harness
+- Optional new test-only helper under
+  `apps/web/src/worker/report-v4-free-teaser-resume-harness.ts` (test import only;
+  no runtime worker wiring) if it keeps the matrix readable
+
+### Phase 3 budgets
+
+- Production free-teaser: `+40/-20` (zero preferred)
+- Tests + optional harness: `+280/-40`
+- External actions: all `0`
+
+### Phase 3 stop
+
+Do not expand into UI, processor progress mapping, deep discovery 96 path,
+public-search adapter production logic, or deploy without a new scope.
+
+---
+
+## Prior authority: 96% local fault matrix — Phase 2 (APPROVED / complete)
+
+**Status: `APPROVED` (complete)** — user directed "继续" after Phase-1 local
+acceptance (2026-07-27). Local commit authorized with "提交本地" (2026-07-27).
+
+### Phase 2 objective
+
+Type free-teaser **diagnosis failure** and **Q1 incomplete answer** (and map
+diagnosis/provider-class errors at the job boundary) so they no longer collapse
+to `unexpected_internal_error` + blind transient when the stage/code is known.
+Still no prompt rewrite, no state-machine redesign, no UI rewrite, no real
+model/DB/Docker/deploy.
+
+### Phase 2 production allowlist
+
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+- `apps/web/src/worker/job-errors.ts`
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+
+### Phase 2 tests allowlist
+
+- `apps/web/src/worker/job-errors.test.ts`
+- `apps/web/src/worker/report-v4-free-teaser.test.ts` (regression / typed throws only)
+
+### Phase 2 budgets
+
+- Production: `+120/-40` (measured free-teaser+job-errors **`+112/-11`** — under budget)
+- Tests: verification-only refresh to measured `+219/-14` + ≤20% headroom →
+  **`+263/-17`** (was `+200/-40`; allowlisted test files only; no production
+  behavior change from budget refresh)
+- External actions: all `0`
+
+### Phase 2 delivered behavior
+
+| Throw / boundary | Job code | Classification |
+|------------------|----------|----------------|
+| `FreeTeaserDiagnosisFailedError` stage=`semantic_contract` etc. | `free_teaser_diagnosis_<stage>` | permanent (provider transport/rate/temporary → transient; auth/config → operator_repairable) |
+| `FreeTeaserQ1IncompleteError` | `free_teaser_q1_incomplete` | permanent |
+| `ReportV4DiagnosisProviderError` | `diagnosis_*` (from mimo map) | same as MiMo map |
+| `ReportV4QuestionProviderError` | `question_*` | same as MiMo map |
+| `MiMoGenerativeSearchAnswerError` | `generative_search_{authentication,unavailable,malformed,aborted}` | auth→operator_repairable; others→transient |
+
+### Phase 2 stop
+
+Do not expand into checkpoint harness, UI, public-search adapters production
+logic, or deep discovery 96 path without a new scope.
+
+---
+
+## Prior authority: 96% local fault matrix — Phase 1 (APPROVED / complete)
+
+**Status: `APPROVED` (complete)** — user authorized Phase-1 implementation and
+test recap (2026-07-27). Historical detail below remains the Phase-1 contract.
+
+### Objective (Phase 1 only)
+
+Locally enumerate and harden **structured MiMo provider + job-error
+classification** so every failure in the Phase-1 surface maps to a stable,
+redacted, typed code with correct permanent/transient/retry-after semantics.
+Do not assume the provider never fails. Do not dump remaining 96% categories
+into `unexpected_internal_error`.
+
+**Out of Phase 1 (report only; no file authority):** semantic-review
+satisfiability beyond existing typed evidence-missing; public-search/snapshot
+chains; free-teaser checkpoint/resume matrix; UI progress mapping; prompt
+rewrites; state-machine redesign; deep discovery `provider_claim_extraction`
+progress=96 path (see inventory below).
+
+### Baseline
+
+- Workspace: `E:\project\open-geo-console`, branch `main`.
+- Complete HEAD when this Phase-1 block was authored: must be re-read from
+  `git rev-parse HEAD` at approval time (dirty scope-only edits may exist).
+- User-owned dirty at authoring: `M docs/ACTIVE-CHANGE-SCOPE.md`, `?? .codex/`
+  (do not touch `.codex/`).
+- 30-day Staging sample (operator evidence, not authority to mutate jobs):
+  25 Deep jobs, 107 error events; 18 failed; 13 terminal at progress 96;
+  `unexpected_internal_error` 71/20 (events/jobs); public-source 20/8;
+  language 8/6; deferred 5/5; semantic typed 1/1. **96% is multi-cause.**
+- Prior typed work already in tree (if present on HEAD): `mimo_invalid_response`
+  (transient), `semantic_review_evidence_missing` (permanent), strict
+  content-parts. Phase 1 extends provider taxonomy + job-error mapping + local
+  fault fixtures; it does not re-open historical Job mutation.
+
+### Code inventory: where progress can show 96 (read-only)
+
+| Path | Code | Meaning |
+|------|------|---------|
+| Free teaser non-ready | `processor.ts` `withFreeTeaserAfterAdmission` saveCheckpoint: `progress: freeTeaser.stage === "ready" ? 99 : 96` | Any free-teaser stage after admission until `ready` (questions / observations / Q1 / diagnosis / review) displays **96** |
+| Free teaser terminal fail | `jobs.ts` `terminalizeScanJob`: failed keeps prior progress | Failed job can **retain 96** on disk |
+| Free teaser retry window | `executionState=retry_wait`, stage still synthesizing | UI `publicStateForStage` → `generating` + progress 96 |
+| Free teaser terminal UI | stage `failed` → `unavailable` | Progress bar hidden; field may still be 96 |
+| Paid/deep discovery | `providerPhaseProgress`: `provider_claim_extraction: 96` | **Different product path** than free teaser; must not be “fixed” by Phase-1 free-teaser assumptions alone |
+| Paid grounded synthesis | progress 98 not 96 | Not the free-teaser 96 bucket |
+
+Free-teaser stages that checkpoint at 96 (all call `saveCheckpoint(..., phase)` with progress 96 until ready):
+
+1. `question_generation` after questions_ready
+2. `snapshot_resolution` after observations_ready
+3. `grounded_answer_synthesis` after Q1 draft/result
+4. `grounded_answer_synthesis` after diagnosis draft
+5. `grounded_answer_synthesis` after review → ready (then 99)
+
+### Failure classes in Phase-1 surface (must classify, not silence)
+
+**A. Provider preflight (mimo-provider / runtime config)**
+Missing/invalid base URL or key; billing channel mismatch; locked profile drift;
+token budget reject (`ModelTokenBudgetError` if reaches job boundary);
+diagnosis input over bound → existing `configuration`.
+
+**B. Transport / HTTP (mimo-provider `invokeOnce`)**
+Fetch throw → `transport` (retryable).
+401/403 → `authentication` (non-retryable provider; job map TBD in Phase 1).
+429 → `rate_limited` (retryable).
+408 / ≥500 → `temporary_provider` (retryable).
+Other 4xx → `configuration` today.
+Non-JSON body → `mimo_invalid_response` (retryable typed).
+**Gap:** AbortSignal / hang timeout not always distinct codes; no dedicated
+`timeout` code unless derived from abort. **Gap:** `finish_reason`
+(`stop`/`length`/`content_filter`/unknown) is **not** read by structured
+MiMo path today — Phase 1 must define fail-closed handling without logging body.
+
+**C. Envelope / content**
+Missing choices; missing/invalid message; missing content; unsupported
+content-parts shape; parts/length limits; bad JSON content →
+`mimo_invalid_response` (and related stable reasons). Multi-choice: only
+`choices[0]` used (document; do not expand multi-choice product).
+
+**D. Job boundary mapping (job-errors)**
+Today only maps `mimo_invalid_response` and `semantic_review_evidence_missing`.
+Most free-teaser `Error`/`TypeError` and other provider codes still collapse to
+`unexpected_internal_error` + often `transient`. Phase 1 must map structured
+MiMo codes that reach `normalizeJobError` to durable codes and correct
+retryability. **Must** add `OGC_REPORT_V4_MIMO_API_KEY` to processor redact
+list only if processor is allowlisted — **not** in Phase 1 allowlist; report
+as Phase-1.5 gap if redact remains incomplete.
+
+**E. Explicitly NOT Phase 1 (enumerated for later)**
+Public-search / snapshot load failures; diagnosis plain `Error` wrapper;
+semantic field/annotation failures beyond existing evidence-missing type;
+checkpoint CAS; lease; UI progress zeroing on failed; deep
+`provider_claim_extraction` 96.
+
+### Production allowlist (closed — Phase 1)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/report-v4/mimo-provider.ts` | Typed outcomes for transport/HTTP/envelope/content/finish_reason; no raw body logs |
+| `apps/web/src/worker/job-errors.ts` | Map those outcomes to job codes + permanent/transient/retry-after |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | Authorization record only |
+
+### Tests / fixtures allowlist (closed — Phase 1)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/report-v4/mimo-provider.test.ts` | Fixed fixtures + fake-fetch fault injection matrix |
+| `apps/web/src/worker/job-errors.test.ts` | Classification matrix for each new/stable code |
+| `apps/web/src/report-v4/__fixtures__/mimo-provider-errors/**` | Optional fixed response envelopes only; create only if used |
+
+No free-teaser, processor, semantic-review, UI, or db files in Phase 1.
+
+### Required behavior after approval
+
+1. Every Phase-1 injected failure yields a **stable, redacted** code (not
+   undifferentiated `unexpected_internal_error` when the class is known).
+2. Explicit **permanent vs transient** (and retry-after only when transient).
+3. No raw provider body, API keys, tokens, or customer prose in errors/logs.
+4. Fixed-seed property/fuzz ≥ **1000** cases for envelope/content/json structural
+   rejects; failure prints seed.
+5. Local only: fake fetch, no real model, no DB, no Docker, no deploy.
+
+### Diff budget (Phase 1)
+
+| Surface | Budget |
+|---------|--------|
+| Production (2 files) | max `+260` / `-80` |
+| Tests (2 files) | max `+800` / `-80` |
+| Fixtures (optional dir) | max `+300` / `-0` |
+| This scope file | max `+220` / `-80` |
+| Dependencies / migrations | `0` |
+
+### Acceptance (Phase 1)
+
+1. Focused:
+   `npx vitest run apps/web/src/report-v4/mimo-provider.test.ts apps/web/src/worker/job-errors.test.ts`
+2. `npm run lint` · `npm test` · `npm run build` · `git diff --check`
+3. Diff ⊆ allowlist and budgets
+4. Classification matrix table in PR/notes: input → code → permanent/transient → retry
+5. Independent reviewer/tester; **no deploy**
+
+### Expensive external actions
+
+All **0**: real model, DB write, real report/job, Docker, Vercel, push, historical
+Job replay/repair.
+
+### STOP
+
+- Edit production/tests while still `FROZEN`
+- Touch free-teaser, processor, semantic-review, UI, db, deploy
+- Real model/DB/Docker/Vercel
+- Expand Phase 1 into Phase 2–4 without a new approved scope
+
+### Non-executable roadmap (no file authority)
+
+- **Phase 2:** Semantic review satisfiability + free-teaser diagnosis typed
+  errors; allowlist candidates only after new scope
+- **Phase 3:** Checkpoint/resume matrix + in-memory dry harness (no real DB)
+- **Phase 4:** Status/UI progress semantics (failed clears “generating 96%”
+  messaging without inventing false progress)
+- **Phase 5 (optional):** Deep `provider_claim_extraction` progress=96 taxonomy
+- **Deploy stage:** Separate user approval only after local gates pass
+
+### Implementation status
+
+**APPROVED for Phase-1 implementation.** Production edits limited to the closed
+allowlist; external actions remain zero; no deploy.

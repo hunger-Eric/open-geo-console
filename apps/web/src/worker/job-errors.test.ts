@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  ModelTokenBudgetError,
   ReportLanguageValidationError,
   ReportSemanticReviewEvidenceMissingError,
   SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE
 } from "@open-geo-console/ai-report-engine";
 import {
+  MIMO_CONTENT_FILTERED_CODE,
   MIMO_INVALID_RESPONSE_CODE,
+  MIMO_OUTPUT_TRUNCATED_CODE,
+  MIMO_TIMEOUT_CODE,
   ReportV4MimoProviderError
 } from "../report-v4/mimo-provider";
+import { MiMoGenerativeSearchAnswerError } from "../public-search-adapters/mimo/generative-answer";
 import { AnswerFirstV3ModelContractInvalidError } from "./answer-first-v3";
 import {
   MIMO_INVALID_RESPONSE_JOB_CODE,
@@ -16,6 +21,12 @@ import {
   redactDiagnostic,
   retryDelayMs
 } from "./job-errors";
+import { ReportV4DiagnosisProviderError } from "./report-v4-diagnosis-enhancer";
+import {
+  FreeTeaserDiagnosisFailedError,
+  FreeTeaserQ1IncompleteError
+} from "./report-v4-free-teaser";
+import { ReportV4QuestionProviderError } from "./report-v4-question-answerer";
 import { PublicSourceSnapshotUnavailableError } from "./public-source-snapshot-resolver";
 
 const context = { jobId: "job-1", phase: "public_source_preflight" as const, phaseAttempt: 1, resumeGeneration: 0, configuredSecrets: ["super-secret"] };
@@ -77,18 +88,94 @@ describe("job error normalization", () => {
     });
   });
 
-  it("persists only the bounded diagnosis failure classification from the cause chain", () => {
-    const normalized = normalizeJobError(new Error("Free teaser Q1 diagnosis did not complete.", {
-      cause: new Error(
-        "stage=semantic_contract; code=invalid_semantic_output; providerAttempts=2; parserPath=$diagnosisSemanticOutput.targetGap"
-      )
-    }), context);
+  it("persists FreeTeaserDiagnosisFailedError as a durable permanent job code", () => {
+    const normalized = normalizeJobError(
+      new FreeTeaserDiagnosisFailedError(
+        {
+          stage: "semantic_contract",
+          code: "invalid_semantic_output",
+          parserPath: "$diagnosisSemanticOutput.targetGap"
+        },
+        2
+      ),
+      { ...context, phase: "grounded_answer_synthesis" }
+    );
 
-    expect(normalized.causes).toEqual([
-      "stage=semantic_contract; code=invalid_semantic_output; providerAttempts=2; parserPath=$diagnosisSemanticOutput.targetGap"
-    ]);
+    expect(normalized).toMatchObject({
+      classification: "permanent",
+      code: "free_teaser_diagnosis_semantic_contract",
+      type: "FreeTeaserDiagnosisFailedError",
+      retryableAt: null
+    });
+    expect(normalized.message).toContain("stage=semantic_contract");
+    expect(normalized.code).not.toBe("unexpected_internal_error");
     expect(JSON.stringify(normalized)).not.toMatch(/raw provider|system prompt|evidence prose/i);
   });
+
+  it("persists FreeTeaserQ1IncompleteError as a permanent free-teaser job code", () => {
+    const normalized = normalizeJobError(
+      new FreeTeaserQ1IncompleteError(),
+      { ...context, phase: "grounded_answer_synthesis" }
+    );
+    expect(normalized).toMatchObject({
+      classification: "permanent",
+      code: "free_teaser_q1_incomplete",
+      type: "FreeTeaserQ1IncompleteError",
+      retryableAt: null
+    });
+    expect(normalized.code).not.toBe("unexpected_internal_error");
+  });
+
+  it("maps diagnosis provider transport to a transient diagnosis_* job code", () => {
+    const normalized = normalizeJobError(
+      new ReportV4DiagnosisProviderError("transport", "temporary diagnosis transport failure"),
+      { ...context, phase: "grounded_answer_synthesis" },
+      new Date("2030-01-01T00:00:00Z")
+    );
+    expect(normalized).toMatchObject({
+      classification: "transient",
+      code: "diagnosis_transport",
+      type: "ReportV4DiagnosisProviderError"
+    });
+    expect(normalized.retryableAt).toBeInstanceOf(Date);
+    expect(normalized.code).not.toBe("unexpected_internal_error");
+  });
+
+  it("maps question provider authentication to operator-repairable question_* job code", () => {
+    const normalized = normalizeJobError(
+      new ReportV4QuestionProviderError("authentication", "question provider auth failed"),
+      { ...context, phase: "grounded_answer_synthesis" }
+    );
+    expect(normalized).toMatchObject({
+      classification: "operator_repairable",
+      code: "question_authentication",
+      type: "ReportV4QuestionProviderError",
+      retryableAt: null
+    });
+  });
+
+  it.each([
+    ["authentication", "generative_search_authentication", "operator_repairable", false],
+    ["unavailable", "generative_search_unavailable", "transient", true],
+    ["malformed", "generative_search_malformed", "transient", true],
+    ["aborted", "generative_search_aborted", "transient", true]
+  ] as const)(
+    "maps MiMoGenerativeSearchAnswerError %s to %s (%s)",
+    (errorClass, jobCode, classification, hasRetry) => {
+      const normalized = normalizeJobError(
+        new MiMoGenerativeSearchAnswerError(errorClass, `safe ${errorClass}`),
+        { ...context, phase: "grounded_answer_synthesis" }
+      );
+      expect(normalized).toMatchObject({
+        classification,
+        code: jobCode,
+        type: "MiMoGenerativeSearchAnswerError"
+      });
+      expect(normalized.code).not.toBe("unexpected_internal_error");
+      if (hasRetry) expect(normalized.retryableAt).toBeInstanceOf(Date);
+      else expect(normalized.retryableAt).toBeNull();
+    }
+  );
 
   it("maps structured MiMo invalid response to a transient typed job code", () => {
     const normalized = normalizeJobError(
@@ -122,5 +209,48 @@ describe("job error normalization", () => {
     });
     expect(normalized.message).toContain("$reviewOutput.fields[0]");
     expect(normalized.code).not.toBe("unexpected_internal_error");
+  });
+
+  it.each([
+    ["transport", "mimo_transport", "transient", true],
+    ["rate_limited", "mimo_rate_limited", "transient", true],
+    ["temporary_provider", "mimo_temporary_provider", "transient", true],
+    [MIMO_INVALID_RESPONSE_CODE, MIMO_INVALID_RESPONSE_JOB_CODE, "transient", true],
+    [MIMO_TIMEOUT_CODE, "mimo_timeout", "transient", true],
+    ["authentication", "mimo_authentication", "operator_repairable", false],
+    ["configuration", "mimo_configuration", "operator_repairable", false],
+    ["safety", "mimo_safety", "permanent", false],
+    [MIMO_OUTPUT_TRUNCATED_CODE, "mimo_output_truncated", "permanent", false],
+    [MIMO_CONTENT_FILTERED_CODE, "mimo_content_filtered", "permanent", false]
+  ] as const)(
+    "maps MiMo provider code %s to job %s (%s)",
+    (providerCode, jobCode, classification, hasRetry) => {
+      const normalized = normalizeJobError(
+        new ReportV4MimoProviderError(providerCode, `safe ${providerCode}`),
+        { ...context, phase: "grounded_answer_synthesis" }
+      );
+      expect(normalized).toMatchObject({ classification, code: jobCode, type: "ReportV4MimoProviderError" });
+      expect(normalized.code).not.toBe("unexpected_internal_error");
+      if (hasRetry) expect(normalized.retryableAt).toBeInstanceOf(Date);
+      else expect(normalized.retryableAt).toBeNull();
+    }
+  );
+
+  it("maps model token budget rejection to a permanent typed job code", () => {
+    const normalized = normalizeJobError(
+      new ModelTokenBudgetError({
+        accepted: false,
+        code: "context_window_exceeded",
+        estimatedTotalTokens: 20_000,
+        limitTokens: 8_000
+      }),
+      context
+    );
+    expect(normalized).toMatchObject({
+      classification: "permanent",
+      code: "model_token_budget_rejected",
+      type: "ModelTokenBudgetError",
+      retryableAt: null
+    });
   });
 });

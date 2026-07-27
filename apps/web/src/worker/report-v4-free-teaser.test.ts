@@ -58,6 +58,8 @@ vi.mock("./public-source-snapshot-resolver", () => ({ resolvePublicSourceSnapsho
 
 import {
   buildFreeTeaserDiagnosisTargetPages,
+  FreeTeaserDiagnosisFailedError,
+  FreeTeaserQ1IncompleteError,
   generateFreeTeaser,
   parseReadyFreeTeaserCheckpoint,
   type FreeTeaserCheckpointV1
@@ -350,7 +352,7 @@ describe("free teaser orchestration", () => {
     } finally { console.info(JSON.stringify({ runId: CP13_SMOKE_RUN_ID, fetches, status, inputHash: input.inputHash, ...(result ? { fields: result.review.fields.length, receiptHash: result.applied.receipt.reviewHash } : {}) })); }
   }, 200_000);
 
-  it("retains a bounded typed diagnosis cause without exposing provider output", async () => {
+  it("throws a durable typed FreeTeaserDiagnosisFailedError without exposing provider output", async () => {
     mocks.enhanceDiagnosis.mockResolvedValueOnce({
       status: "failed",
       providerAttempts: 1,
@@ -377,12 +379,85 @@ describe("free teaser orchestration", () => {
       error = caught;
     }
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe("Free teaser Q1 diagnosis did not complete.");
-    expect(String((error as Error & { cause?: unknown }).cause)).toContain(
-      "stage=semantic_contract; code=invalid_semantic_output; providerAttempts=1"
+    expect(error).toBeInstanceOf(FreeTeaserDiagnosisFailedError);
+    const typed = error as FreeTeaserDiagnosisFailedError;
+    expect(typed).toMatchObject({
+      name: "FreeTeaserDiagnosisFailedError",
+      code: "free_teaser_diagnosis_semantic_contract",
+      classification: "permanent",
+      diagnosisStage: "semantic_contract",
+      diagnosisCode: "invalid_semantic_output",
+      providerAttempts: 1
+    });
+    expect(typed.message).toBe(
+      "stage=semantic_contract; code=invalid_semantic_output; providerAttempts=1; parserPath=$diagnosisSemanticOutput.observableFactors"
     );
+    expect(typed.code).not.toBe("unexpected_internal_error");
     expect(JSON.stringify(error)).not.toContain("raw provider");
+  });
+
+  it("maps a retryable diagnosis provider stage to a transient free-teaser diagnosis code", async () => {
+    mocks.enhanceDiagnosis.mockResolvedValueOnce({
+      status: "failed",
+      providerAttempts: 2,
+      failure: {
+        stage: "provider",
+        code: "provider_transport",
+        parserPath: null
+      }
+    });
+
+    await expect(generateFreeTeaser({
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh",
+      admission: admission(),
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      saveCheckpoint: vi.fn()
+    })).rejects.toMatchObject({
+      name: "FreeTeaserDiagnosisFailedError",
+      code: "free_teaser_diagnosis_provider",
+      classification: "transient",
+      diagnosisCode: "provider_transport",
+      providerAttempts: 2
+    });
+  });
+
+  it("throws FreeTeaserQ1IncompleteError when Q1 has answer text but no sources", async () => {
+    mocks.answerWithSources.mockImplementation(async (request: { questionId: string }) => ({
+      questionId: request.questionId,
+      answerText: "目标品牌提供跨境物流服务，采购方应核验具体路线条件。",
+      sources: [],
+      refusal: null,
+      searchedAt: "2030-01-01T00:00:02.000Z",
+      completedAt: "2030-01-01T00:00:03.000Z",
+      providerResponseId: "response-1"
+    }));
+
+    let incomplete: unknown;
+    try {
+      await generateFreeTeaser({
+        reportId: "report-1",
+        jobId: "job-1",
+        targetUrl: "https://target.example/",
+        foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+        locale: "zh",
+        admission: admission(),
+        saveCheckpoint: vi.fn()
+      });
+    } catch (caught) {
+      incomplete = caught;
+    }
+
+    expect(incomplete).toBeInstanceOf(FreeTeaserQ1IncompleteError);
+    expect(incomplete).toMatchObject({
+      name: "FreeTeaserQ1IncompleteError",
+      code: "free_teaser_q1_incomplete",
+      classification: "permanent",
+      message: "Free teaser Q1 requires one complete answer with sources."
+    });
   });
 
   it("resolves the three public-search snapshots in ordinal order with one question active at a time", async () => {

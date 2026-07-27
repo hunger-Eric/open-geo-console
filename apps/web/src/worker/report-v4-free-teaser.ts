@@ -49,14 +49,58 @@ import { resolveGenerativeSearchAnswerProvider, resolveProductionPublicSearchRun
 import { buildReportV4MimoDiagnosisTokenBudget, createReportV4MimoDiagnosisProvider, createReportV4MimoStructuredInvoker } from "@/report-v4/mimo-provider";
 import { loadReportV4ModelRuntimeConfig } from "@/report-v4/model-runtime-config";
 import { createConcurrencyGate } from "./bounded-scheduler";
+import { JobError, type JobFailureClassification } from "./job-errors";
 import {
   enhanceReportV4QuestionDiagnosis,
-  formatReportV4DiagnosisFailure
+  formatReportV4DiagnosisFailure,
+  type ReportV4DiagnosisFailure
 } from "./report-v4-diagnosis-enhancer";
 import { createPublicSourceQuestionFanouts } from "./public-source-forensics";
 import { resolvePublicSourceSnapshot } from "./public-source-snapshot-resolver";
 
 export const FREE_TEASER_CHECKPOINT_VERSION = "free-teaser-checkpoint-v1" as const;
+
+/** Durable free-teaser Q1 diagnosis failure (avoids unexpected_internal_error). */
+export class FreeTeaserDiagnosisFailedError extends JobError {
+  readonly diagnosisStage: ReportV4DiagnosisFailure["stage"];
+  readonly diagnosisCode: string;
+  readonly providerAttempts: number;
+
+  constructor(failure: ReportV4DiagnosisFailure, providerAttempts: number) {
+    super(
+      formatReportV4DiagnosisFailure(failure, providerAttempts),
+      `free_teaser_diagnosis_${failure.stage}`,
+      classificationForDiagnosisFailure(failure)
+    );
+    this.name = "FreeTeaserDiagnosisFailedError";
+    this.diagnosisStage = failure.stage;
+    this.diagnosisCode = failure.code;
+    this.providerAttempts = providerAttempts;
+  }
+}
+
+/** Q1 answer missing text/sources/refusal path — permanent incomplete teaser. */
+export class FreeTeaserQ1IncompleteError extends JobError {
+  constructor() {
+    super(
+      "Free teaser Q1 requires one complete answer with sources.",
+      "free_teaser_q1_incomplete",
+      "permanent"
+    );
+    this.name = "FreeTeaserQ1IncompleteError";
+  }
+}
+
+function classificationForDiagnosisFailure(failure: ReportV4DiagnosisFailure): JobFailureClassification {
+  if (failure.stage === "provider") {
+    if (/transport|rate_limited|temporary/i.test(failure.code)) return "transient";
+    if (/authentication|configuration/i.test(failure.code)) return "operator_repairable";
+    return "permanent";
+  }
+  if (failure.stage === "token_budget") return "permanent";
+  if (failure.stage === "input_validation") return "permanent";
+  return "permanent";
+}
 export type FreeTeaserStage = "questions_ready" | "observations_ready" | "q1_answer_ready" | "ready";
 
 type FreeTeaserQ1Draft = Omit<GenerativeSearchAnswerCardV3, "geoDiagnosis" | "diagnosis">;
@@ -294,12 +338,10 @@ export async function generateFreeTeaser(input: {
       semanticValidation: semanticReviewEnabled ? "deferred" : "legacy"
     });
     if (diagnosisResult.status !== "completed") {
-      throw new Error("Free teaser Q1 diagnosis did not complete.", {
-        cause: new Error(formatReportV4DiagnosisFailure(
-          diagnosisResult.failure,
-          diagnosisResult.providerAttempts
-        ))
-      });
+      throw new FreeTeaserDiagnosisFailedError(
+        diagnosisResult.failure,
+        diagnosisResult.providerAttempts
+      );
     }
     const diagnosis = parseReportV4DiagnosisOutputForQuestion(diagnosisResult.diagnosis, {
       questionId: q1Card.questionId,
@@ -705,7 +747,7 @@ async function answerTeaserQuestionOne(input: {
     semanticValidation: input.semanticReviewEnabled ? "deferred" : "legacy"
   });
   if (!parsed.answerText || parsed.refusal || parsed.sources.length === 0) {
-    throw new Error("Free teaser Q1 requires one complete answer with sources.");
+    throw new FreeTeaserQ1IncompleteError();
   }
   const sources = parsed.sources.map((source) => ({
     ...source,
