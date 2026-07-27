@@ -50,7 +50,16 @@ export function classifyFreeTeaserResumeKind(checkpoint: FreeTeaserCheckpointV1)
  * teaser (semantic review enabled) from a durable checkpoint of the given kind.
  * Snapshot re-resolve is never expected once observation IDs are durable.
  */
+/**
+ * Free V4 marker-present review uses structural multi-invoke batches
+ * (readonly fields, mutable fields, observations, answers, evidenceUse).
+ * Empty structural slots are skipped by the engine; Free teaser happy-path
+ * fixtures always produce all five.
+ */
+export const FREE_V4_SEMANTIC_REVIEW_INVOKE_COUNT = 5 as const;
+
 export function expectedExpensiveCallsOnMarkedResume(kind: FreeTeaserResumeKind): FreeTeaserExpensiveCallBudget {
+  const review = FREE_V4_SEMANTIC_REVIEW_INVOKE_COUNT;
   switch (kind) {
     case "ready":
       return ZERO_BUDGET;
@@ -59,28 +68,28 @@ export function expectedExpensiveCallsOnMarkedResume(kind: FreeTeaserResumeKind)
         resolveSnapshot: 0,
         answerWithSources: 0,
         enhanceDiagnosis: 0,
-        semanticInvoke: 1
+        semanticInvoke: review
       });
     case "q1_answer_ready":
       return Object.freeze({
         resolveSnapshot: 0,
         answerWithSources: 0,
         enhanceDiagnosis: 1,
-        semanticInvoke: 1
+        semanticInvoke: review
       });
     case "observations_ready":
       return Object.freeze({
         resolveSnapshot: 0,
         answerWithSources: 1,
         enhanceDiagnosis: 1,
-        semanticInvoke: 1
+        semanticInvoke: review
       });
     case "questions_ready":
       return Object.freeze({
         resolveSnapshot: 3,
         answerWithSources: 1,
         enhanceDiagnosis: 1,
-        semanticInvoke: 1
+        semanticInvoke: review
       });
     default: {
       const _exhaustive: never = kind;

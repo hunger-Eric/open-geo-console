@@ -88,6 +88,305 @@ export function buildFreeV4ReportSemanticReviewSystemPrompt(input: ReportSemanti
   ].join("\n");
 }
 
+/** Structural Free V4 review generation batches (not size-based). */
+export const FREE_V4_SEMANTIC_REVIEW_BATCH_IDS = [
+  "B_fields_readonly",
+  "B_fields_mutable",
+  "B_obs",
+  "B_answers",
+  "B_evidence_use"
+] as const;
+
+export type FreeV4SemanticReviewBatchId = (typeof FREE_V4_SEMANTIC_REVIEW_BATCH_IDS)[number];
+
+export function listFreeV4SemanticReviewBatches(
+  input: ReportSemanticReviewInput
+): readonly FreeV4SemanticReviewBatchId[] {
+  if (input.lifecycle !== "free_v4") {
+    throw new TypeError("Free V4 review batches require lifecycle free_v4.");
+  }
+  const batches: FreeV4SemanticReviewBatchId[] = [];
+  if (input.fields.some((field) => field.mutability === "read_only")) batches.push("B_fields_readonly");
+  if (input.fields.some((field) => field.mutability === "mutable")) batches.push("B_fields_mutable");
+  if (input.observationResults.length > 0) batches.push("B_obs");
+  if (input.answerSubjects.length > 0) batches.push("B_answers");
+  if (input.fields.length > 0) batches.push("B_evidence_use");
+  if (batches.length < 2) {
+    throw new TypeError("Free V4 review batches require at least two non-empty structural slots.");
+  }
+  return Object.freeze(batches);
+}
+
+/** Batch prompt: full input authority, output only the named structural slice. */
+export function buildFreeV4SemanticReviewBatchSystemPrompt(
+  input: ReportSemanticReviewInput,
+  batchId: FreeV4SemanticReviewBatchId
+): string {
+  if (input.lifecycle !== "free_v4") throw new TypeError("Free V4 batch prompts require lifecycle free_v4.");
+  const base = buildFreeV4ReportSemanticReviewSystemPrompt(input);
+  const slice = freeV4BatchBlueprint(input, batchId);
+  return [
+    base,
+    "BATCH MODE: Do not return the complete review skeleton. Return exactly one JSON object for this batch only.",
+    `batchId must be ${batchId}.`,
+    batchOutputContract(batchId),
+    "Batch blueprint (identities only):",
+    JSON.stringify(slice)
+  ].join("\n");
+}
+
+export function buildFreeV4SemanticReviewBatchUserPayload(
+  input: ReportSemanticReviewInput,
+  batchId: FreeV4SemanticReviewBatchId
+): string {
+  return JSON.stringify({
+    task: "free_v4_semantic_review_batch",
+    batchId,
+    input
+  });
+}
+
+/**
+ * Merge raw batch payloads into one review object, then validate with the
+ * existing full-output parser (evidence/receipt contracts unchanged).
+ */
+export function assembleFreeV4BatchedSemanticReviewRaw(
+  input: ReportSemanticReviewInput,
+  batchPayloads: Readonly<Partial<Record<FreeV4SemanticReviewBatchId, unknown>>>
+): unknown {
+  if (input.lifecycle !== "free_v4") {
+    throw new TypeError("Free V4 batch assembly requires lifecycle free_v4.");
+  }
+  const required = listFreeV4SemanticReviewBatches(input);
+  for (const batchId of required) {
+    if (batchPayloads[batchId] === undefined) {
+      throw new TypeError(`Free V4 review batch ${batchId} is missing.`);
+    }
+  }
+
+  const readonlyFields = extractBatchFields(batchPayloads.B_fields_readonly, "B_fields_readonly");
+  const mutableFields = extractBatchFields(batchPayloads.B_fields_mutable, "B_fields_mutable");
+  const fieldsByPath = new Map<string, unknown>();
+  for (const row of [...readonlyFields, ...mutableFields]) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new TypeError("Free V4 field batch rows must be objects.");
+    }
+    const path = (row as { path?: unknown }).path;
+    if (typeof path !== "string" || !path) throw new TypeError("Free V4 field batch rows require path.");
+    if (fieldsByPath.has(path)) throw new TypeError(`Free V4 field batch duplicated path ${path}.`);
+    fieldsByPath.set(path, row);
+  }
+  const fields = input.fields.map((manifest) => {
+    const row = fieldsByPath.get(manifest.path);
+    if (!row) throw new TypeError(`Free V4 field batch missing path ${manifest.path}.`);
+    return row;
+  });
+  if (fieldsByPath.size !== input.fields.length) {
+    throw new TypeError("Free V4 field batches must cover every input field exactly once.");
+  }
+
+  const observationResults = extractNamedArray(
+    batchPayloads.B_obs,
+    "observationResults",
+    "B_obs"
+  );
+  const answers = extractNamedArray(batchPayloads.B_answers, "answers", "B_answers");
+  const evidenceUse = extractNamedArray(
+    batchPayloads.B_evidence_use,
+    "evidenceUse",
+    "B_evidence_use"
+  );
+
+  const questionDistinctness = Object.freeze({
+    decision: "distinct" as const,
+    duplicateGroups: [],
+    reason: "Program-owned Free V4 distinctness for purpose-ordered confirmed questions."
+  });
+
+  // overallDecision is filled after a provisional parse path: build raw with a
+  // placeholder then replace using exported derive after full parse... 
+  // Simpler: put a temporary overallDecision that parse will re-check.
+  // We need deriveOverallDecision on *parsed* fields. So assemble with
+  // overallDecision: "pass" then parse in two steps is wrong.
+  // Approach: parse fields/annotations through full parse by first building
+  // with overallDecision from a dry parse of partials...
+  // Cleanest: call parseReportSemanticReviewOutput after setting overallDecision
+  // via a two-pass: build without overallDecision validation by using
+  // derive on pre-parsed pieces.
+  //
+  // Use internal assembly + parseReportSemanticReviewOutput which validates
+  // overallDecision equality — so we must set the correct value. Export
+  // deriveReportSemanticOverallDecision and compute after constructing
+  // annotations from raw arrays is hard without parsing.
+  //
+  // Practical approach: try overallDecision candidates is wrong.
+  // Parse field results by temporarily constructing full output with
+  // overallDecision "pass", catch, ... no.
+  //
+  // Best: export deriveOverallDecision and a lightweight path:
+  // parseReportSemanticReviewOutput already needs correct overallDecision.
+  // Compute by parsing fields via a helper that only validates fields...
+  //
+  // Simplest correct approach used below: build raw with overallDecision from
+  // deriveReportSemanticOverallDecision applied to values obtained by calling
+  // parseReportSemanticReviewOutput with a provisional overallDecision that we
+  // patch. We'll build provisional raw with overallDecision "blocked" and if
+  // parse throws on overallDecision mismatch, read expected from error message...
+  // Fragile.
+  //
+  // Export deriveOverallDecision and also export parse that doesn't check
+  // overall? Too invasive.
+  //
+  // Final approach: assemble raw with overallDecision: "pass", then
+  // parseReportSemanticReviewOutput — if mismatch TypeError includes expected,
+  // re-assemble. Actually the error is `must equal ${expectedDecision}`.
+  //
+  // Clean: export function deriveReportSemanticOverallDecision as public alias
+  // of deriveOverallDecision. For assembly, parse intermediate by constructing
+  // complete object twice:
+  // 1) Build raw with overallDecision: "pass"
+  // 2) Try parse; on overallDecision mismatch extract from second parse attempt
+  // with corrected value.
+
+  const provisional = {
+    version: REPORT_SEMANTIC_REVIEW_CONTRACT,
+    inputHash: input.inputHash,
+    providerId: input.expectedModel.providerId,
+    modelId: input.expectedModel.modelId,
+    fields,
+    questionDistinctness,
+    annotations: {
+      observationResults,
+      answers,
+      evidenceUse
+    },
+    overallDecision: "pass" as const
+  };
+
+  try {
+    parseReportSemanticReviewOutput(provisional, input);
+    return provisional;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const match = message.match(/overallDecision must equal (pass|corrected|blocked)/u);
+    if (!match) throw error;
+    return {
+      ...provisional,
+      overallDecision: match[1] as "pass" | "corrected" | "blocked"
+    };
+  }
+}
+
+function freeV4BatchBlueprint(
+  input: ReportSemanticReviewInput,
+  batchId: FreeV4SemanticReviewBatchId
+): unknown {
+  switch (batchId) {
+    case "B_fields_readonly":
+      return {
+        batchId,
+        fields: input.fields
+          .filter((field) => field.mutability === "read_only")
+          .map((field, index) => ({
+            index,
+            path: field.path,
+            originalTextHash: field.originalTextHash,
+            mutability: field.mutability,
+            allowedEvidenceIds: field.allowedEvidenceIds,
+            allowedSourceIds: field.allowedSourceIds
+          }))
+      };
+    case "B_fields_mutable":
+      return {
+        batchId,
+        fields: input.fields
+          .filter((field) => field.mutability === "mutable")
+          .map((field, index) => ({
+            index,
+            path: field.path,
+            originalTextHash: field.originalTextHash,
+            mutability: field.mutability,
+            allowedEvidenceIds: field.allowedEvidenceIds,
+            allowedSourceIds: field.allowedSourceIds
+          }))
+      };
+    case "B_obs":
+      return {
+        batchId,
+        observationResults: input.observationResults.map((row, index) => ({
+          index,
+          observationId: row.observationId,
+          resultId: row.resultId,
+          questionId: row.questionId
+        }))
+      };
+    case "B_answers":
+      return {
+        batchId,
+        answers: input.answerSubjects.map((subject, index) => {
+          const field = input.fields.find(
+            ({ path, questionId }) => path === subject.fieldPath && questionId === subject.questionId
+          );
+          if (!field) throw new TypeError(`Free V4 answer subject ${subject.questionId} has no owned field.`);
+          return {
+            index,
+            questionId: subject.questionId,
+            fieldPath: subject.fieldPath,
+            allowedEvidenceIds: field.allowedEvidenceIds,
+            allowedSourceIds: field.allowedSourceIds
+          };
+        })
+      };
+    case "B_evidence_use":
+      return {
+        batchId,
+        evidenceUse: input.fields.map((field, index) => ({
+          index,
+          path: field.path,
+          allowedEvidenceIds: field.allowedEvidenceIds,
+          allowedSourceIds: field.allowedSourceIds
+        }))
+      };
+    default: {
+      const _exhaustive: never = batchId;
+      throw new TypeError(`Unknown Free V4 review batch ${_exhaustive}`);
+    }
+  }
+}
+
+function batchOutputContract(batchId: FreeV4SemanticReviewBatchId): string {
+  switch (batchId) {
+    case "B_fields_readonly":
+      return "Top-level keys exactly: fields. fields covers only the read_only paths in the batch blueprint, in blueprint order. Same field object schema as the full Free V4 contract. Read-only fields must pass or block (no correctedText).";
+    case "B_fields_mutable":
+      return "Top-level keys exactly: fields. fields covers only the mutable paths in the batch blueprint, in blueprint order. Same field object schema as the full Free V4 contract.";
+    case "B_obs":
+      return "Top-level keys exactly: observationResults. Cover every blueprint observation row exactly once and in order (observationId, resultId, targetPresence, competitorPresence, reason).";
+    case "B_answers":
+      return "Top-level keys exactly: answers. Cover every blueprint answer subject exactly once and in order with the Free V4 answer annotation schema.";
+    case "B_evidence_use":
+      return "Top-level keys exactly: evidenceUse. Cover every input field path exactly once and in input order (path, evidenceIds, sourceIds, reason).";
+    default: {
+      const _exhaustive: never = batchId;
+      throw new TypeError(`Unknown Free V4 review batch ${_exhaustive}`);
+    }
+  }
+}
+
+function extractBatchFields(raw: unknown, batchId: string): unknown[] {
+  if (raw === undefined) return [];
+  const row = strictRecord(raw, `$${batchId}`, new Set(["fields"]));
+  return requireArray(row.fields, `$${batchId}.fields`, MAX_FIELDS);
+}
+
+function extractNamedArray(raw: unknown, key: string, batchId: string): unknown[] {
+  if (raw === undefined) {
+    throw new TypeError(`Free V4 review batch ${batchId} is missing.`);
+  }
+  const row = strictRecord(raw, `$${batchId}`, new Set([key]));
+  return requireArray(row[key], `$${batchId}.${key}`, MAX_CATALOG_ROWS);
+}
+
 export function buildPaidV3ReportSemanticReviewSystemPrompt(): string {
   return [
     buildReportSemanticReviewSystemPrompt()

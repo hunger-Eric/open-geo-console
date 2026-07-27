@@ -5,20 +5,100 @@ import {
   SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE,
   SEMANTIC_REVIEW_EVIDENCE_MISSING_REASON,
   applyReportSemanticReview,
+  assembleFreeV4BatchedSemanticReviewRaw,
   buildFreeV4ReportSemanticReviewSystemPrompt,
+  buildFreeV4SemanticReviewBatchSystemPrompt,
   buildPaidV3ReportSemanticReviewSystemPrompt,
   buildReportSemanticReviewSystemPrompt,
   createReportSemanticReviewInput,
   hashReportSemanticReviewValue,
+  listFreeV4SemanticReviewBatches,
   parseReportSemanticReviewInput,
   parseReportSemanticReviewOutput,
   reportSemanticTextHash,
   verifyReportSemanticReviewReceipt,
   deriveFreeObservationMetrics,
+  type FreeV4SemanticReviewBatchId,
   type ReportSemanticFieldManifestEntry,
   type ReportSemanticReviewInput,
   type ReportSemanticReviewInputCore
 } from "./report-semantic-review";
+import { runOfflineReportSemanticReviewBatched } from "./report-semantic-review-provider-adapter";
+
+describe("Free V4 batched semantic review", () => {
+  it("lists structural batches and assembles a full valid review without estimation", async () => {
+    const core = inputCore();
+    core.lifecycle = "free_v4";
+    const input = createReportSemanticReviewInput(core);
+    const batches = listFreeV4SemanticReviewBatches(input);
+    expect(batches.length).toBeGreaterThanOrEqual(2);
+    expect(batches).toContain("B_fields_readonly");
+    expect(batches).toContain("B_fields_mutable");
+
+    const full = validReview(input) as {
+      fields: Array<{ path: string } & Record<string, unknown>>;
+      annotations: {
+        observationResults: unknown[];
+        answers: unknown[];
+        evidenceUse: unknown[];
+      };
+      overallDecision: string;
+    };
+    const payloads: Partial<Record<FreeV4SemanticReviewBatchId, unknown>> = {
+      B_fields_readonly: {
+        fields: full.fields.filter((field) =>
+          input.fields.find((m) => m.path === field.path)?.mutability === "read_only"
+        )
+      },
+      B_fields_mutable: {
+        fields: full.fields.filter((field) =>
+          input.fields.find((m) => m.path === field.path)?.mutability === "mutable"
+        )
+      },
+      B_obs: { observationResults: full.annotations.observationResults },
+      B_answers: { answers: full.annotations.answers },
+      B_evidence_use: { evidenceUse: full.annotations.evidenceUse }
+    };
+    const assembled = assembleFreeV4BatchedSemanticReviewRaw(input, payloads);
+    const parsed = parseReportSemanticReviewOutput(assembled, input);
+    expect(parsed.fields).toHaveLength(input.fields.length);
+    expect(parsed.questionDistinctness.decision).toBe("distinct");
+    expect(parsed.overallDecision).toBe(full.overallDecision);
+
+    let invokes = 0;
+    const offline = await runOfflineReportSemanticReviewBatched(input, async ({ batchId }) => {
+      invokes += 1;
+      expect(buildFreeV4SemanticReviewBatchSystemPrompt(input, batchId)).toContain("BATCH MODE");
+      return payloads[batchId]!;
+    });
+    expect(invokes).toBe(batches.length);
+    expect(offline.batchIds).toEqual(batches);
+    expect(offline.review.fields).toHaveLength(input.fields.length);
+  });
+
+  it("fails closed when a required field path is missing from batches", () => {
+    const core = inputCore();
+    core.lifecycle = "free_v4";
+    const input = createReportSemanticReviewInput(core);
+    const full = validReview(input) as {
+      fields: Array<{ path: string } & Record<string, unknown>>;
+      annotations: {
+        observationResults: unknown[];
+        answers: unknown[];
+        evidenceUse: unknown[];
+      };
+    };
+    expect(() => assembleFreeV4BatchedSemanticReviewRaw(input, {
+      B_fields_readonly: { fields: [] },
+      B_fields_mutable: { fields: full.fields.filter((field) =>
+        input.fields.find((m) => m.path === field.path)?.mutability === "mutable"
+      ) },
+      B_obs: { observationResults: full.annotations.observationResults },
+      B_answers: { answers: full.annotations.answers },
+      B_evidence_use: { evidenceUse: full.annotations.evidenceUse }
+    })).toThrow(/missing path|exactly once/i);
+  });
+});
 
 describe("ReportSemanticReview input authority", () => {
   it("builds a version-locked complete JSON review instruction for real providers", () => {

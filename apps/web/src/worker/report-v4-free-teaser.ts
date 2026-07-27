@@ -4,7 +4,6 @@ import {
   REPORT_SEMANTIC_REVIEW_CONTRACT,
   applyReportSemanticReview,
   buildFreeV4FoundationManifestCoverage,
-  buildFreeV4ReportSemanticReviewSystemPrompt,
   buildFreeV4SemanticReviewManifest,
   deriveFreeObservationMetrics,
   diagnoseGenerativeSearchAnswerCardV3,
@@ -15,7 +14,7 @@ import {
   parseReportV4DiagnosisOutputForQuestion,
   parseReportSemanticReviewOutput,
   reportSemanticTextHash,
-  runOfflineReportSemanticReview,
+  runOfflineReportSemanticReviewBatched,
   verifyReportSemanticReviewReceipt,
   type AiWebsiteReportV1,
   type CombinedGeoReportV4Question,
@@ -899,12 +898,17 @@ async function reviewFreeTeaser(input: {
   const runtime = loadReportV4ModelRuntimeConfig(process.env);
   const reviewInput = buildFreeTeaserSemanticReviewInput({ ...input, card: draft, diagnosis, modelId: runtime.modelProfile.operations.websiteSynthesis.model });
   const structured = createReportV4MimoStructuredInvoker({ environment: process.env, lockedRuntime: runtime });
-  const reviewed = await runOfflineReportSemanticReview(reviewInput, async ({ task, input: exactInput }) => structured.invoke({
-    operation: "websiteSynthesis",
-    systemText: buildFreeV4ReportSemanticReviewSystemPrompt(reviewInput),
-    inputText: JSON.stringify({ task, input: exactInput }),
-    signal: input.signal ?? new AbortController().signal
-  }));
+  const signal = input.signal ?? new AbortController().signal;
+  // Structural multi-invoke Free V4 review (not a single complete-skeleton call).
+  const reviewed = await runOfflineReportSemanticReviewBatched(
+    reviewInput,
+    async ({ systemText, inputText }) => structured.invoke({
+      operation: "websiteSynthesis",
+      systemText,
+      inputText,
+      signal
+    })
+  );
   const answerAnnotation = reviewed.review.annotations.answers[0];
   if (!answerAnnotation || answerAnnotation.targetPresence === undefined || answerAnnotation.targetPresence === "ambiguous" || answerAnnotation.targetFirstSentence === undefined || answerAnnotation.targetRoles === undefined || answerAnnotation.competitorEntityIds === undefined) {
     throw new Error("Marked Free teaser review omitted durable Q1 diagnosis semantics.");

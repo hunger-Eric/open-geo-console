@@ -1,17 +1,248 @@
 # Active Change Scope Lock
 
-Status: `APPROVED` (Phase 5 complete — local; no push/deploy unless asked)
+Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: 96% local fault matrix — Phase 5 (APPROVED / complete)`.
+`Current authority: Free V4 semantic review batching (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: 96% local fault matrix — Phase 5 (APPROVED / complete)
+## Current authority: Free V4 semantic review batching (APPROVED)
+
+**Status: `APPROVED` (implementation complete locally)** — user approved this
+allowlist ("同意", 2026-07-27). Free V4 batched semantic review is implemented
+in-tree; commit/push/deploy only when separately authorized.
+
+### Problem (evidence-backed; not an estimate)
+
+Staging job `c9a11e40-e2b7-480f-9cde-473a96c890ac` (report
+`8fee4621-8147-47d0-87c0-bdd5772ae887`, host `shun-express.com`):
+
+1. Free foundation completed.
+2. Free V4 teaser reached `q1_answer_ready` with Q1 draft + diagnosis draft +
+   three observation snapshots.
+3. Failed in `reviewFreeTeaser` → `runOfflineReportSemanticReview` → MiMo
+   structured invoke with `operation: "websiteSynthesis"`.
+4. Durable error: `ReportV4MimoProviderError` / job code `mimo_output_truncated`
+   / classification **permanent**, from `assertFinishReasonAllowed` when
+   provider `finish_reason === "length"`.
+5. Stack proves failure **before** field-contract parse /
+   `semantic_review_evidence_missing`.
+6. Current contract forces **one** model call to return the **complete**
+   review JSON skeleton (all fields + questionDistinctness + all annotation
+   arrays + overallDecision). That monolithic output shape is the structural
+   hazard; **token estimation is not an acceptance method and must not be
+   used as root-cause authority or gate.**
+
+This scope does **not** claim a single ultimate root cause of all historical
+96% failures. It fixes the Free V4 review generation shape so completion
+truncation on one mega-JSON is no longer the only path.
+
+### Objective
+
+Replace Free V4 **single-shot** `unified_report_semantic_review` generation
+with **structure-based multi-invoke batches**, then **programmatically merge**
+into one `ReportSemanticReviewOutput` that still passes the existing
+`parseReportSemanticReviewOutput` + `applyReportSemanticReview` + receipt
+gates unchanged in meaning.
+
+**Do not** use token/character estimation as a design driver, budget gate, or
+acceptance criterion.
+
+### Required batch design (closed)
+
+Batches are defined by **contract slots and manifest structure**, not size:
+
+| Batch ID | Model produces | Coverage rule |
+|----------|----------------|---------------|
+| `B_fields_readonly` | `fields` subset | Exactly the Free V4 input fields with `mutability === "read_only"`, input order preserved among themselves |
+| `B_fields_mutable` | `fields` subset | Exactly the Free V4 input fields with `mutability === "mutable"`, input order preserved among themselves |
+| `B_obs` | `annotations.observationResults` | Exactly `input.observationResults`, input order |
+| `B_answers` | `annotations.answers` | Exactly `input.answerSubjects`, input order (Free V4: one Q1 subject) |
+| `B_evidence_use` | `annotations.evidenceUse` | Exactly `input.fields`, input order |
+
+**Program-owned after batches (no model inventing overall):**
+
+- Reassemble `fields` in **full input.fields order** from the two field
+  batches.
+- Reassemble `annotations` object.
+- Derive `questionDistinctness` and `overallDecision` with the **same rules
+  already enforced by the parser** (distinct/duplicate/blocked;
+  blocked/corrected/pass from field and answer decisions). If a pure function
+  for overall decision already exists in
+  `packages/ai-report-engine`, reuse it; if not, extract the existing
+  `deriveOverallDecision` (or equivalent) without changing semantics.
+- Set `version`, `inputHash`, `providerId`, `modelId` from input authority
+  (copy, never invent).
+
+**Merge then validate once** with existing
+`parseReportSemanticReviewOutput(merged, fullInput)` (or an internal merge
+helper that ends in that parser). No weakening of
+`report_global_v1` evidence fail-closed rules.
+
+### Free-teaser integration
+
+- `reviewFreeTeaser` in `report-v4-free-teaser.ts` must call the batched
+  path for marker-present Free V4.
+- On batch failure, throw typed errors (see below); **do not** write
+  `stage: "ready"` or partial `semanticReview` that fails closed inconsistently.
+- Checkpoint remains durable at `q1_answer_ready` with drafts when review
+  fails (existing behavior preserved).
+- Resume from `q1_answer_ready` must re-run **only** review batches, not Q1
+  answer, diagnosis, or snapshot resolution (existing resume contract).
+
+### Optional in-scope product tightening (only if cheap and tested)
+
+- Map `mimo_output_truncated` for Free V4 review batches to **transient** with
+  existing phase-attempt budget (not infinite retry), **or** keep permanent
+  but per-batch so a single truncated batch can be retried without redoing
+  successful batches. Prefer **per-batch retry within the existing phase
+  attempt budget** without inventing a new state machine.
+- Do **not** raise `maxOutputTokens` as the primary fix in this scope. A
+  profile bump is out of scope unless a later amendment explicitly allows it.
+
+### Typed errors (job boundary)
+
+Add or map durable codes (redacted, no bodies):
+
+| Event | Job code | Classification |
+|-------|----------|----------------|
+| Batch transport / invalid_response / length on a batch | prefer existing `mimo_*` codes | same as Phase-1 map; length may be transient **only** inside review-batch retry budget if implemented |
+| Merge/parse of assembled review fails closed | keep existing TypeError / evidence-missing paths | unchanged |
+| Incomplete batch coverage (wrong paths/order) | `free_teaser_review_batch_contract` or equivalent permanent | permanent |
+
+No raw provider bodies, secrets, or customer prose in logs beyond current
+redaction.
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `packages/ai-report-engine/src/report-semantic-review.ts` | Batch types, merge, derive overall/distinctness if needed; Free V4 batch prompts that reference **only** the batch's blueprint slice |
+| `packages/ai-report-engine/src/report-semantic-review-provider-adapter.ts` | Batched offline runner entry (e.g. `runOfflineReportSemanticReviewBatched`) while keeping single-shot runner for Paid V3 unless explicitly shared |
+| `packages/ai-report-engine/src/index.ts` | Export new symbols if required |
+| `apps/web/src/worker/report-v4-free-teaser.ts` | Wire Free V4 review to batched runner |
+| `apps/web/src/worker/job-errors.ts` | Map any new Free V4 review-batch JobError / provider codes |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | Authorization record |
+
+### Tests allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `packages/ai-report-engine/src/report-semantic-review.test.ts` | Batch merge; full coverage; fail-closed on missing path; overallDecision parity |
+| `packages/ai-report-engine/src/report-semantic-review-manifests.test.ts` | Only if Free V4 manifest fixtures need batch labels |
+| `apps/web/src/worker/report-v4-free-teaser.test.ts` | Review path uses N invokes; resume from `q1_answer_ready`; truncated batch does not mark ready |
+| `apps/web/src/worker/job-errors.test.ts` | New/adjusted codes only |
+| Optional: `apps/web/src/worker/report-v4-free-teaser-resume-harness.test.ts` | Resume budget still holds |
+
+### Forbidden
+
+- Token/character **estimation** as design authority, acceptance gate, or
+  root-cause claim
+- Changing Paid V3 review to batched **unless** the same pure merge is
+  reused with zero Paid V3 behavior change (default: Free V4 only)
+- DB schema / migrations / historical job repair / resume of `c9a11e40`
+  without a separate amendment
+- Prompt rewrites that relax evidence/source/receipt/hash gates
+- Raising model profile `maxOutputTokens` / context window as primary fix
+- UI progress redesign, commerce, deploy, Docker, production
+- New dependencies
+- Real model calls in unit tests (fake invokers only)
+- Logging raw provider bodies
+
+### Diff budget
+
+| Surface | Budget |
+|---------|--------|
+| Production allowlisted | max `+420` / `-120` |
+| Tests allowlisted | max `+500` / `-80` |
+| Dependencies / migrations | `0` |
+| External expensive actions | `0` (no deploy, no real model, no DB write) |
+
+### Verification (after APPROVED implementation)
+
+Focused:
+
+```text
+npx vitest run packages/ai-report-engine/src/report-semantic-review.test.ts apps/web/src/worker/report-v4-free-teaser.test.ts apps/web/src/worker/job-errors.test.ts
+```
+
+Full local:
+
+```text
+npm run lint
+npm test
+npm run build
+git diff --check
+```
+
+Acceptance checks:
+
+1. Free V4 review path performs **multiple** structured invokes (≥2) for a
+   happy path, not exactly one.
+2. Merged output passes existing full-input parse/apply/receipt.
+3. Injected `finish_reason=length` (or `mimo_output_truncated`) on one batch
+   fails closed without writing ready; other successful batches need not be
+   re-invoked if an in-memory/resume structure is present—or document that
+   all batches re-run only from `q1_answer_ready` with no Q1/diagnosis/snapshot
+   re-run (minimum resume bar).
+4. No test uses token estimates as assertions.
+5. Diff ⊆ allowlist and budgets.
+
+### Expensive external actions
+
+All **0** under this FROZEN→APPROVED implementation slice:
+
+- real model, Docker, Vercel deploy, push (unless later authorized)
+- historical Job mutation / repair of `c9a11e40…`
+- new report/payment
+
+A later **Staging validation amendment** may authorize one new free report or
+one resume of a named job; it is **not** included here.
+
+### STOP
+
+- Edit production/tests while still `FROZEN`
+- Expand into Paid V3 source-selection draft batching
+- Estimate-driven "budget" logic
+- Deploy or historical job ops
+
+### User decision required
+
+Reply **`APPROVED`** (or equivalent explicit approval of this allowlist) to
+start implementation. Phrases like "fix it" without referencing this scope
+do not expand the lock.
+
+---
+
+## Prior authority: Protected Staging deploy of 838a680 (Gates 1–3 complete)
+
+**Status: `APPROVED` (complete for deploy Gates 1–3)** — user authorized
+"push、部署 Staging" (2026-07-27). Candidate full SHA
+`838a680ec1940544bf30e2782594799198812e0b`. **Gate 4 real-flow not
+authorized.** Production not touched.
+
+### Deploy deliverables
+
+| Gate | Result |
+|------|--------|
+| Push | `5039adc..838a680` → `origin/main` |
+| 1 Preview | `dpl_5uK13VGosp1ujFnxWukLJUQj6d99` READY; git/ogc/github SHA = candidate |
+| 2 Workers | thin overlay `staging-838a680-overlay-v1` free+deep; restart 0 |
+| 2 Alias | fixed `open-geo-console-staging-itheheda.vercel.app` → candidate |
+| 3 Catalog | authenticated GET catalog `mode=test` prices CNY/USD/HKD; no report/payment |
+| Production | `geo.itheheda.online` still prior production alias; containers not started |
+
+Ledger (non-git):
+`.data/protected-staging-release-ledger/838a680ec1940544bf30e2782594799198812e0b.json`
+
+---
+
+## Prior authority: 96% local fault matrix — Phase 5 (APPROVED / complete)
 
 **Status: `APPROVED` (complete)** — user opened optional Phase 5 Deep
-`provider_claim_extraction` progress=96 taxonomy (2026-07-27). Phase 1–4 on
-`origin/main` (`5039adc`). **No deploy / push** unless separately authorized.
+`provider_claim_extraction` progress=96 taxonomy (2026-07-27). Deployed to
+Protected Staging under separate user authorization in the same session.
 
 ### Phase 5 objective
 

@@ -47,11 +47,11 @@ describe("free-teaser resume dry harness", () => {
       enhanceDiagnosis: 0,
       semanticInvoke: 0
     });
-    expect(expectedExpensiveCallsOnMarkedResume("q1_diagnosis_ready").semanticInvoke).toBe(1);
+    expect(expectedExpensiveCallsOnMarkedResume("q1_diagnosis_ready").semanticInvoke).toBe(5);
     expect(expectedExpensiveCallsOnMarkedResume("q1_answer_ready")).toMatchObject({
       answerWithSources: 0,
       enhanceDiagnosis: 1,
-      semanticInvoke: 1
+      semanticInvoke: 5
     });
     expect(expectedExpensiveCallsOnMarkedResume("questions_ready").resolveSnapshot).toBe(3);
   });
@@ -89,13 +89,13 @@ describe("free-teaser resume dry harness", () => {
       resolveSnapshot: 0,
       answerWithSources: 1,
       enhanceDiagnosis: 1,
-      semanticInvoke: 1
+      semanticInvoke: 5
     }, budget)).toBe(true);
     expect(matchesExpensiveCallBudget({
       resolveSnapshot: 1,
       answerWithSources: 1,
       enhanceDiagnosis: 1,
-      semanticInvoke: 1
+      semanticInvoke: 5
     }, budget)).toBe(false);
   });
 });
