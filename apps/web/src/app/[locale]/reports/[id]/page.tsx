@@ -111,7 +111,11 @@ export default async function ReportPage({
           url={row.url}
         />;
       }
-      const questionSet = await loadConfirmedFreeTeaserQuestionSet(id, ready);
+      const questionSet = await loadConfirmedFreeTeaserQuestionSet(
+        id,
+        ready,
+        markerPresent ? { semanticReviewContractVersion } : undefined
+      );
       const dictionary = getDictionary(locale);
       return <>
         <CombinedGeoReportV4Teaser model={{

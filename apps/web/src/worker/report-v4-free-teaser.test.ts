@@ -61,6 +61,7 @@ import {
   FreeTeaserDiagnosisFailedError,
   FreeTeaserQ1IncompleteError,
   generateFreeTeaser,
+  loadConfirmedFreeTeaserQuestionSet,
   parseReadyFreeTeaserCheckpoint,
   type FreeTeaserCheckpointV1
 } from "./report-v4-free-teaser";
@@ -743,6 +744,12 @@ describe("free teaser orchestration", () => {
     expect(() => parseReadyFreeTeaserCheckpoint(reorderJsonKeys(first.checkpoint), {
       semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
     })).not.toThrow();
+    // The report page loader must forward the root marker when re-parsing.
+    await expect(loadConfirmedFreeTeaserQuestionSet("report-1", first.checkpoint, {
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+    })).resolves.toMatchObject({ id: "free-questions" });
+    await expect(loadConfirmedFreeTeaserQuestionSet("report-1", first.checkpoint))
+      .rejects.toThrow(/root semantic-review lineage/i);
 
     mocks.prepare.mockClear();
     mocks.confirm.mockClear();

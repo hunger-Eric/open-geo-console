@@ -1223,9 +1223,10 @@ function isConfirmedBusinessQuestionSetIdentity(value: unknown): value is string
 
 export async function loadConfirmedFreeTeaserQuestionSet(
   reportId: string,
-  checkpoint: FreeTeaserCheckpointV1
+  checkpoint: FreeTeaserCheckpointV1,
+  options?: { semanticReviewContractVersion?: typeof REPORT_SEMANTIC_REVIEW_CONTRACT | null }
 ): Promise<ConfirmedBusinessQuestionSet> {
-  const ready = parseReadyFreeTeaserCheckpoint(checkpoint);
+  const ready = parseReadyFreeTeaserCheckpoint(checkpoint, options);
   const questionSet = await getConfirmedBusinessQuestionSet(reportId, ready.questionSetId!);
   if (!questionSet || questionSet.contentHash !== ready.questionSetIdentity) {
     throw new Error("Free teaser question-set authority is unavailable.");

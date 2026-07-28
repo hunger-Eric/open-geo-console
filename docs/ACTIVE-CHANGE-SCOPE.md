@@ -92,6 +92,31 @@ is per-field fallback to original prose; it can never terminalize a job.
 - Tests: ≤ 400 changed lines (tracking bound, may update to measured +20%).
 - Docs: ≤ 60 changed lines.
 
+### Amendment: marker-forwarding fix for the report page loader (APPROVED)
+
+User approved (2026-07-28: "可以，开始修复") a post-Gate-4 latent bug fix plus
+commit, push, and Staging redeploy of the same lineage. Gate 4 job
+`57c1a65d` completed the first ever marker-present ready checkpoint, which
+exposed that `loadConfirmedFreeTeaserQuestionSet`
+(`apps/web/src/worker/report-v4-free-teaser.ts:1224`) re-parses the checkpoint
+without forwarding `semanticReviewContractVersion`, crashing SSR at
+`apps/web/src/app/[locale]/reports/[id]/page.tsx:114` with
+`Free teaser ready checkpoint does not match root semantic-review lineage.`
+
+Additional allowlist (closed):
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/report-v4-free-teaser.ts` | Accept + forward the parse options in `loadConfirmedFreeTeaserQuestionSet` |
+| `apps/web/src/app/[locale]/reports/[id]/page.tsx` | Pass the already-read marker into the loader |
+| `apps/web/src/worker/report-v4-free-teaser.test.ts` | Marker-present ready checkpoint loads through the loader |
+
+Budget: production ≤ 30 changed lines; tests ≤ 60 changed lines. Deploy:
+commit + push + Staging Gates 1–3 redeploy (thin overlay) is authorized;
+rollback identities remain the `22ab4fb` Web deployment and
+`staging-22ab4fb-overlay-v1` Worker image. No new Gate 4 run is required;
+acceptance is the existing report `45a6f76a` rendering without SSR error.
+
 ### Acceptance checks
 
 1. New unit tests replay each historical Free failure class (local missing
