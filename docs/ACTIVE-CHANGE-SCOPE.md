@@ -4,10 +4,94 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Free V4 semantic review graceful degradation (FROZEN)`.
+`Current authority: Paid V3 forensics resume identity and failure transparency (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Free V4 semantic review graceful degradation (FROZEN)
+## Current authority: Paid V3 forensics resume identity and failure transparency (APPROVED)
+
+**Status: `APPROVED`** — user approved this written allowlist (2026-07-28:
+"可以，开始修复"). Implement only within the closed allowlists and budgets
+below. Deploy, Docker, commit/push, and any new paid validation run require
+separate later authorization.
+
+### Baseline and evidence
+
+- HEAD `fc07129`; Staging runs `fc07129` (Web `dpl_J5duwNJsWFdscmus2FadA4gLB98f`
+  + Workers `staging-fc07129-overlay-v1`).
+- Failed paid job `5dbaea88-0f56-49c0-a9f5-f831f75a1549` (report `45a6f76a`),
+  terminal `unexpected_internal_error` at progress 95 after 3 attempts:
+  - Attempt 1: `Paid V3 per-question diagnosis did not complete.`
+    (`processor.ts:2478`), real `result.failure{stage,code,parserPath}` discarded.
+  - Attempts 2–4: `PublicSourceResumeIdentityMismatchError`
+    (`public-source-forensics.ts:102`), empty message normalized to
+    "Unexpected internal error.", misclassified transient.
+  - DB proof: `publicSourceForensics.evidenceCutoffAt=2026-07-28T03:38:01.387Z`
+    while self-collected `snapshot-e747…` has `completed_at=03:40:03` (after
+    the cutoff), so `findExactMarketSnapshot`'s `completed_at <= cutoff`
+    filter excludes the job's own product on every retry → new snapshotId →
+    deterministic identity mismatch. Deferred mode also lacks
+    `prepareArtifactVerification` (`processor.ts:1924`), so retries always
+    re-run the forensics pipeline.
+  - `diagnosisByQuestion` checkpoint empty: attempt 1 died before any
+    per-question diagnosis persisted; its true cause is unknowable until
+    failure detail is preserved (fix 3).
+
+### Design lock
+
+| # | Fix | Rule |
+|---|-----|------|
+| 1 | Forensics resume | When a prior forensics checkpoint exists, resolve its persisted `snapshotIds` by exact ID first; only re-collect snapshots whose exact ID is missing or not completed. No behavior change on the first (no-prior) run. The identity-mismatch guard stays fail-closed for genuine drift. |
+| 2 | Error taxonomy | Register `PublicSourceResumeIdentityMismatchError` in the typed boundary mapping as `permanent` (mirroring the provider-discovery mismatch mapping), so genuine drift fails fast instead of 3 pointless retries. |
+| 3 | Diagnosis failure transparency | `processor.ts:2477-2478` must preserve `result.failure` detail (questionId, stage, code, parserPath, failureReason where present) in the thrown error message; no behavior/classification change beyond message content. |
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/public-source-forensics.ts` | Exact-ID snapshot resume (fix 1) |
+| `apps/web/src/worker/job-errors.ts` | Register mismatch error as permanent (fix 2) |
+| `apps/web/src/worker/processor.ts` | Preserve diagnosis failure detail (fix 3) |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+### Tests allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/public-source-forensics.test.ts` (or the existing forensics/resume test file if named differently) | Resume-by-exact-ID: fresh self-collected snapshot is reused, no mismatch throw |
+| `apps/web/src/worker/job-errors.test.ts` | Mismatch → permanent |
+| `apps/web/src/worker/processor.test.ts` | Diagnosis incompletion error carries failure detail |
+
+### Forbidden
+
+- Historical job repair/replay/clone; the failed job `5dbaea88` stays terminal
+- Paid `report_global_v1` semantic review behavior; Free V4 review code
+- Deploy / Docker / push / any new payment or validation run
+- DB schema, commerce, refund logic, cutoff semantics for first runs,
+  snapshot-collector behavior, prompt or model-profile changes
+
+### Diff budget
+
+- Production source: ≤ 200 changed lines. Hard limit.
+- Tests: ≤ 300 changed lines (tracking bound, may update to measured +20%).
+- Docs: ≤ 70 changed lines.
+
+### Acceptance checks
+
+1. New unit tests: (a) forensics resume reuses exact prior snapshot IDs even
+   when their `completed_at` is after `evidenceCutoffAt` — no throw;
+   (b) genuine identity drift still throws and maps to permanent;
+   (c) diagnosis incompletion error message contains questionId/stage/code.
+2. `npm test`, `npm run lint`, `npm run build` green.
+3. Deploy and a fresh paid validation run (new Sandbox payment) require
+   separate later authorization.
+
+**Deployment authorization (2026-07-28: "三项都同意"):** user authorized
+commit + push of this fix, Staging redeployment (Vercel Web + Docker overlay
+Workers, same procedure as the `fc07129` deployment), and one fresh paid
+validation run (user performs a new Sandbox unlock; the terminal failed job
+`5dbaea88` is not replayed and its refund flow is untouched).
+
+## Historical: Free V4 semantic review graceful degradation (APPROVED, implemented)
 
 **Status: `APPROVED`** — user approved this written allowlist (2026-07-27:
 "同意"). Implement only within the closed allowlists and budgets below.

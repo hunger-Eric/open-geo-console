@@ -70,6 +70,7 @@ import {
   deferredPageAnalysisAuthority,
   dispatchReportV4ProductionJob,
   composeReportV4AcceptanceProductionRunner,
+  createPaidV3DiagnosisIncompleteError,
   hashSynthesisInput,
   isTerminalScanJob,
   mergeCompletedAnalyses,
@@ -807,5 +808,30 @@ describe("marker-present page analysis authority and resume identity", () => {
       restoreTestAi(previousAi);
       vi.clearAllMocks();
     }
+  });
+});
+
+describe("Paid V3 diagnosis failure transparency", () => {
+  it("carries questionId and the failure stage/code/parserPath in the thrown message", () => {
+    const error = createPaidV3DiagnosisIncompleteError("question-2", {
+      providerAttempts: 2,
+      failure: { stage: "semantic_contract", code: "invalid_correction", parserPath: "$diagnosisOutput.fields[3]" }
+    });
+    expect(error.message).toContain("Paid V3 per-question diagnosis did not complete.");
+    expect(error.message).toContain("questionId=question-2");
+    expect(error.message).toContain("stage=semantic_contract");
+    expect(error.message).toContain("code=invalid_correction");
+    expect(error.message).toContain("parserPath=$diagnosisOutput.fields[3]");
+  });
+
+  it("omits the parserPath segment when the failure has none", () => {
+    const error = createPaidV3DiagnosisIncompleteError("question-1", {
+      providerAttempts: 1,
+      failure: { stage: "provider", code: "provider_timeout", parserPath: null }
+    });
+    expect(error.message).toContain("questionId=question-1");
+    expect(error.message).toContain("stage=provider");
+    expect(error.message).toContain("code=provider_timeout");
+    expect(error.message).not.toContain("parserPath");
   });
 });

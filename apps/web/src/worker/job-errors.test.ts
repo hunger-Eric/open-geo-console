@@ -34,6 +34,7 @@ import {
   ProviderDiscoveryResumeIdentityMismatchError
 } from "./provider-discovery-pipeline";
 import { PublicSourceSnapshotUnavailableError } from "./public-source-snapshot-resolver";
+import { PublicSourceResumeIdentityMismatchError } from "./public-source-forensics";
 
 const context = { jobId: "job-1", phase: "public_source_preflight" as const, phaseAttempt: 1, resumeGeneration: 0, configuredSecrets: ["super-secret"] };
 
@@ -299,6 +300,32 @@ describe("job error normalization", () => {
       type: "ProviderDiscoveryPipelineContractError",
       retryableAt: null
     });
+  });
+
+  it("maps public-source forensics resume identity mismatch to permanent with a diagnosable message", () => {
+    const normalized = normalizeJobError(
+      new PublicSourceResumeIdentityMismatchError(),
+      { ...context, phase: "source_retrieval" }
+    );
+    expect(normalized).toMatchObject({
+      classification: "permanent",
+      code: "public_source_resume_identity_mismatch",
+      type: "PublicSourceResumeIdentityMismatchError",
+      retryableAt: null
+    });
+    expect(normalized.message).toBe("Public-source forensics resume identity does not match the persisted checkpoint.");
+  });
+
+  it("maps a duck-typed public-source resume identity mismatch rethrow to permanent", () => {
+    const rethrown = new Error("");
+    rethrown.name = "PublicSourceResumeIdentityMismatchError";
+    const normalized = normalizeJobError(rethrown, { ...context, phase: "source_retrieval" });
+    expect(normalized).toMatchObject({
+      classification: "permanent",
+      code: "public_source_resume_identity_mismatch",
+      retryableAt: null
+    });
+    expect(normalized.message).toBe("Public-source forensics resume identity does not match the persisted checkpoint.");
   });
 
   it.each([

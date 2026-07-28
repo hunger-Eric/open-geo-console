@@ -6,6 +6,7 @@ import {
   SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE
 } from "@open-geo-console/ai-report-engine";
 import type { ScanJobPhase } from "./job-state";
+import { PublicSourceResumeIdentityMismatchError } from "./public-source-forensics";
 import {
   ProviderDiscoveryDeadlineExceededError,
   ProviderDiscoveryPipelineContractError,
@@ -106,7 +107,7 @@ export function normalizeJobError(error: unknown, context: JobErrorContext, now 
   const languageValidationFailure = source.name === "ReportLanguageValidationError";
   const typedBoundary = resolveTypedBoundaryError(error, context);
   const secrets = context.configuredSecrets ?? [];
-  const message = redactDiagnostic(source.message || "Unexpected internal error.", secrets, 1_000);
+  const message = redactDiagnostic(source.message || typedBoundary?.message || "Unexpected internal error.", secrets, 1_000);
   const stack = source.stack ? redactDiagnostic(source.stack, secrets) : null;
   const classification = known?.classification
     ?? typedBoundary?.classification
@@ -128,7 +129,7 @@ export function normalizeJobError(error: unknown, context: JobErrorContext, now 
 function resolveTypedBoundaryError(
   error: unknown,
   context: JobErrorContext
-): { code: string; classification: JobFailureClassification } | null {
+): { code: string; classification: JobFailureClassification; message?: string } | null {
   if (error instanceof ReportSemanticReviewEvidenceMissingError) {
     return { code: SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE, classification: "permanent" };
   }
@@ -137,6 +138,9 @@ function resolveTypedBoundaryError(
   }
   if (error instanceof ProviderDiscoveryResumeIdentityMismatchError) {
     return { code: "provider_discovery_resume_identity_mismatch", classification: "permanent" };
+  }
+  if (error instanceof PublicSourceResumeIdentityMismatchError) {
+    return publicSourceResumeIdentityMismatchBoundary();
   }
   if (error instanceof ProviderDiscoveryDeadlineExceededError) {
     return { code: "provider_discovery_deadline_exceeded", classification: "transient" };
@@ -163,6 +167,9 @@ function resolveTypedBoundaryError(
     }
     if (row.name === "ProviderDiscoveryResumeIdentityMismatchError") {
       return { code: "provider_discovery_resume_identity_mismatch", classification: "permanent" };
+    }
+    if (row.name === "PublicSourceResumeIdentityMismatchError") {
+      return publicSourceResumeIdentityMismatchBoundary();
     }
     if (row.name === "ProviderDiscoveryDeadlineExceededError") {
       return { code: "provider_discovery_deadline_exceeded", classification: "transient" };
@@ -209,6 +216,15 @@ function resolveTypedBoundaryError(
     }
   }
   return null;
+}
+
+/** The mismatch class carries an empty message; give operators a diagnosable one. */
+function publicSourceResumeIdentityMismatchBoundary(): { code: string; classification: JobFailureClassification; message: string } {
+  return {
+    code: "public_source_resume_identity_mismatch",
+    classification: "permanent",
+    message: "Public-source forensics resume identity does not match the persisted checkpoint."
+  };
 }
 
 /** Deep claim-extraction (progress 96) vs generic AI client transport taxonomy. */

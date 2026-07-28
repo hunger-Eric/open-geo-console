@@ -32,6 +32,14 @@ export interface PublicSourceCommercialSnapshotRef {
 export interface PublicSourceForensicsDependencies {
   authority: PublicSearchSurfaceAuthority;
   resolveSnapshot(input: { questionId: string; fanout: SearchQueryFanout; evidenceCutoffAt: string; retrievalGate: ConcurrencyGate }): Promise<ResolvedPublicSourceSnapshot>;
+  /**
+   * Resume path: loads a snapshot persisted by a prior attempt by its exact
+   * ID, bypassing the `completed_at <= evidenceCutoffAt` cache search that
+   * would exclude the job's own fresher product. Returns null when the exact
+   * ID is missing or not completed so the caller re-collects that question
+   * through the normal resolution path.
+   */
+  resolveSnapshotById?(input: { snapshotId: string; questionId: string; fanout: SearchQueryFanout; evidenceCutoffAt: string; retrievalGate: ConcurrencyGate }): Promise<ResolvedPublicSourceSnapshot | null>;
   getCheckpoint(jobId: string): Promise<PublicSourcePipelineCheckpoint | null>;
   saveCheckpoint(jobId: string, checkpoint: PublicSourcePipelineCheckpoint): Promise<void>;
   getReport(jobId: string): Promise<RecommendationForensicReportV2 | null>;
@@ -83,8 +91,16 @@ export async function runPublicSourceForensicsPipeline(input: {
       prior.adapterIdentityHash !== adapterIdentityHash(authority))) throw new PublicSourceResumeIdentityMismatchError();
   const evidenceCutoffAt = prior?.evidenceCutoffAt ?? (input.dependencies.now ?? (() => new Date()))().toISOString();
   const retrievalGate = createConcurrencyGate(4);
-  const snapshots = await Promise.all(fanouts.map(async (fanout) => {
+  const snapshots = await Promise.all(fanouts.map(async (fanout, index) => {
     input.signal?.throwIfAborted();
+    const priorSnapshotId = prior && prior.snapshotIds.length === fanouts.length ? prior.snapshotIds[index]! : null;
+    if (priorSnapshotId && input.dependencies.resolveSnapshotById) {
+      const resumed = await input.dependencies.resolveSnapshotById({ snapshotId: priorSnapshotId, questionId: fanout.questionId, fanout, evidenceCutoffAt, retrievalGate });
+      if (resumed) {
+        if (resumed.snapshotId !== priorSnapshotId || resumed.questionId !== fanout.questionId) throw new PublicSourceResumeIdentityMismatchError();
+        return resumed;
+      }
+    }
     return input.dependencies.resolveSnapshot({ questionId: fanout.questionId, fanout, evidenceCutoffAt, retrievalGate });
   }));
   input.signal?.throwIfAborted();
@@ -159,6 +175,8 @@ function adapterIdentityHash(authority: PublicSearchSurfaceAuthority): string { 
 function sha(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 export class PublicSourceAuthorityUnavailableError extends Error {}
 export class PublicSourceQuestionGenerationError extends Error {}
-export class PublicSourceResumeIdentityMismatchError extends Error {}
+export class PublicSourceResumeIdentityMismatchError extends Error {
+  constructor(message?: string) { super(message); this.name = new.target.name; }
+}
 export class PublicSourceArtifactUnavailableError extends Error {}
 export class PublicSourceReportOutcomeMismatchError extends Error {}

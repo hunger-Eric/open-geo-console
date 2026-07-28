@@ -116,7 +116,7 @@ import { ensureDatabase, getSqlClient } from "@/db";
 import { runReportV4AcceptanceStage } from "./report-v4-acceptance-runner";
 import { inspectReportV4AcceptanceDurableTerminal } from "./report-v4-acceptance-terminal-state";
 import type { ReportV4CommerceAuthoritySnapshotSql } from "@/db/report-v4-commerce-authority-snapshot";
-import { enhanceReportV4QuestionDiagnosis, type ReportV4DiagnosisProvider } from "./report-v4-diagnosis-enhancer";
+import { enhanceReportV4QuestionDiagnosis, formatReportV4DiagnosisFailure, type ReportV4DiagnosisFailure, type ReportV4DiagnosisProvider } from "./report-v4-diagnosis-enhancer";
 import { buildReportV4MimoDiagnosisTokenBudget, createReportV4MimoDiagnosisProvider, createReportV4MimoStructuredInvoker } from "@/report-v4/mimo-provider";
 import { loadReportV4ModelRuntimeConfig } from "@/report-v4/model-runtime-config";
 import type { CombinedGeoReportV4Question, OpenGeoAnswerCardV3 } from "@open-geo-console/ai-report-engine";
@@ -1905,6 +1905,27 @@ export function createWorkerPublicSourceForensicsDependencies(
       forceRefreshAfter: input.forceSnapshotRefreshAfter,
       signal: input.signal
     }),
+    resolveSnapshotById: async ({ snapshotId, questionId, fanout, retrievalGate }) => {
+      // A retry must reuse the exact snapshots its prior attempt persisted,
+      // even when their completed_at is later than the job's evidence cutoff.
+      // Verify the exact ID first, then let the standard resolver materialize
+      // that same snapshot by searching with a cutoff that includes it.
+      const bundle = await getMarketSnapshotBundle(snapshotId);
+      if (!bundle || bundle.snapshot.status !== "completed" || !bundle.snapshot.completedAt) return null;
+      if (bundle.snapshot.surfaceAuthorityVersion !== runtime.authority.authorityId) return null;
+      const resolved = await collaborators.resolveSnapshot({
+        authority: runtime.authority,
+        adapter: runtime.adapter,
+        question: questionFromFanout(questionId, fanout),
+        fanout,
+        evidenceCutoffAt: bundle.snapshot.completedAt.toISOString(),
+        leaseOwner: `public-source:${input.job.id}:${input.workerId}`,
+        retrieveSource: input.retrieveSource,
+        retrievalGate,
+        signal: input.signal
+      });
+      return resolved.snapshotId === snapshotId ? resolved : null;
+    },
     getCheckpoint: async (jobId) => {
       requireJob(jobId);
       return input.readCheckpoint().publicSourceForensics ?? null;
@@ -2399,6 +2420,18 @@ function publicFailure(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 500) : "The AI report task failed.";
 }
 
+/**
+ * Paid V3 diagnosis incompletion previously discarded `result.failure`,
+ * making the real stage/code/parserPath unknowable on retry. Keep the same
+ * generic Error type and control flow, but carry the diagnosable detail.
+ */
+export function createPaidV3DiagnosisIncompleteError(
+  questionId: string,
+  result: { providerAttempts: number; failure: ReportV4DiagnosisFailure }
+): Error {
+  return new Error(`Paid V3 per-question diagnosis did not complete. questionId=${questionId}; ${formatReportV4DiagnosisFailure(result.failure, result.providerAttempts)}`);
+}
+
 async function enhanceV3AnswerCardsWithDiagnosis<T extends PaidV3SemanticAnswerCardDraft>(input: {
   answerCards: readonly T[];
   checkpoint: AnswerFirstV3CheckpointV2;
@@ -2475,7 +2508,7 @@ async function enhanceV3AnswerCardsWithDiagnosis<T extends PaidV3SemanticAnswerC
         signal: input.signal
       });
       if (result.status !== "completed") {
-        throw new Error("Paid V3 per-question diagnosis did not complete.");
+        throw createPaidV3DiagnosisIncompleteError(card.questionId, result);
       }
       diagnosis = parseReportV4DiagnosisOutputForQuestion(result.diagnosis, {
         questionId: card.questionId,

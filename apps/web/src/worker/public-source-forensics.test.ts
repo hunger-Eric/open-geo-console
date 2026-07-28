@@ -51,6 +51,42 @@ describe("public-source forensics pipeline", () => {
     await expect(run("report-d","job-d",drifted)).rejects.toBeInstanceOf(PublicSourceResumeIdentityMismatchError);
   });
 
+  it("resumes by exact prior snapshot IDs even when they completed after the evidence cutoff", async () => {
+    const checkpoints=new Map<string,PublicSourcePipelineCheckpoint>();
+    const store=new Map<string,ReturnType<typeof snapshot>>();
+    const first=deps({reports:new Map(),checkpoints,resolve:async({fanout})=>{const created=snapshot(fanout,1);store.set(created.snapshotId,created);return created;}});
+    await run("report-f","job-f",first);
+    const prior=checkpoints.get("job-f")!;
+    expect(prior.snapshotIds).toHaveLength(3);
+    // The paid-job failure mode: the job's own snapshots completed after its
+    // persisted evidenceCutoffAt, so the `completed_at <= cutoff` cache search
+    // can never find them on retry. Exact-ID resume must still reuse them.
+    for(const [id,stored] of store) store.set(id,{...stored,observedAt:"2030-01-03T00:00:00.000Z"});
+    let recollections=0;
+    const retry=deps({reports:new Map(),checkpoints,resolve:async({fanout})=>{recollections++;return {...snapshot(fanout,2),snapshotId:`recollected-${fanout.questionId}`};},
+      resolveById:async({snapshotId})=>store.get(snapshotId)??null});
+    const resumed=await run("report-f-retry","job-f",retry);
+    expect(recollections).toBe(0);
+    expect(resumed.checkpoint.identityHash).toBe(prior.identityHash);
+    expect(resumed.checkpoint.snapshotIds).toEqual(prior.snapshotIds);
+    expect(resumed.report.snapshotRefs.map(({snapshotId})=>snapshotId)).toEqual(prior.snapshotIds);
+  });
+
+  it("re-collects only a missing exact ID and stays fail-closed on the resulting drift", async () => {
+    const checkpoints=new Map<string,PublicSourcePipelineCheckpoint>();
+    const store=new Map<string,ReturnType<typeof snapshot>>();
+    const first=deps({reports:new Map(),checkpoints,resolve:async({fanout})=>{const created=snapshot(fanout,1);store.set(created.snapshotId,created);return created;}});
+    await run("report-g","job-g",first);
+    const prior=checkpoints.get("job-g")!;
+    store.delete(prior.snapshotIds[1]!);
+    let byIdCalls=0,recollections=0;
+    const retry=deps({reports:new Map(),checkpoints,resolve:async({fanout})=>{recollections++;return {...snapshot(fanout,2),snapshotId:`recollected-${fanout.questionId}`};},
+      resolveById:async({snapshotId})=>{byIdCalls++;return store.get(snapshotId)??null;}});
+    await expect(run("report-g-retry","job-g",retry)).rejects.toBeInstanceOf(PublicSourceResumeIdentityMismatchError);
+    expect(byIdCalls).toBe(3);
+    expect(recollections).toBe(1);
+  });
+
   it("keeps explicit legacy builder input identical and forwards only an explicit deferred seam", async () => {
     const makeDependencies = () => {
       const buildReport = vi.fn(buildPublicSourceForensicReport);
@@ -76,8 +112,8 @@ describe("public-source forensics pipeline", () => {
   });
 });
 
-function deps(input:{reports:Map<string,RecommendationForensicReportV2>;checkpoints:Map<string,PublicSourcePipelineCheckpoint>;resolve:PublicSourceForensicsDependencies["resolveSnapshot"];artifactReadiness?:PublicSourceForensicsDependencies["artifactReadiness"];prepareArtifactVerification?:PublicSourceForensicsDependencies["prepareArtifactVerification"]}):PublicSourceForensicsDependencies{
-  return {authority,resolveSnapshot:input.resolve,getCheckpoint:async(id)=>input.checkpoints.get(id)??null,saveCheckpoint:async(id,c)=>{input.checkpoints.set(id,c);},
+function deps(input:{reports:Map<string,RecommendationForensicReportV2>;checkpoints:Map<string,PublicSourcePipelineCheckpoint>;resolve:PublicSourceForensicsDependencies["resolveSnapshot"];resolveById?:PublicSourceForensicsDependencies["resolveSnapshotById"];artifactReadiness?:PublicSourceForensicsDependencies["artifactReadiness"];prepareArtifactVerification?:PublicSourceForensicsDependencies["prepareArtifactVerification"]}):PublicSourceForensicsDependencies{
+  return {authority,resolveSnapshot:input.resolve,...(input.resolveById?{resolveSnapshotById:input.resolveById}:{}),getCheckpoint:async(id)=>input.checkpoints.get(id)??null,saveCheckpoint:async(id,c)=>{input.checkpoints.set(id,c);},
     getReport:async(id)=>input.reports.get(id)??null,saveReport:async(value)=>{const report=value as RecommendationForensicReportV2;input.reports.set(report.jobId,report);return report;},
     artifactReadiness:input.artifactReadiness??{async verify(){}},prepareArtifactVerification:input.prepareArtifactVerification,now:()=>new Date("2030-01-02T00:00:00.000Z"),costCapMicros:1000};
 }
