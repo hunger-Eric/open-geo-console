@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type postgres from "postgres";
-import { and, asc, eq, isNull, type ExtractTablesWithRelations } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, type ExtractTablesWithRelations } from "drizzle-orm";
 import type { PgTransaction } from "drizzle-orm/pg-core";
 import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js";
 import { ensureDatabase, getDb, getSqlClient } from "./index";
@@ -12,6 +12,7 @@ import { lockReportV4ConfigSnapshotInTransaction } from "./report-v4-config-snap
 import {
   paymentEvents,
   paymentOrders,
+  reportBusinessQuestions,
   reportBusinessQuestionSets,
   reportV4SiteSnapshots,
   type CommerceCurrency,
@@ -20,6 +21,7 @@ import {
   type PaymentProvider,
   type RecommendationFulfillmentMethodology,
   type RecommendationReportVersion,
+  type ReportBusinessQuestionSetRow,
   type ReportLocale,
   scanJobs
 } from "./schema";
@@ -71,12 +73,16 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
   }
   const id = randomUUID();
   const inserted = await getDb().transaction(async (tx) => {
-    const [questionSet] = await tx.select().from(reportBusinessQuestionSets).where(and(
+    const [confirmedSet] = await tx.select().from(reportBusinessQuestionSets).where(and(
       eq(reportBusinessQuestionSets.id, input.businessQuestionSetId),
       eq(reportBusinessQuestionSets.reportId, input.reportId),
       eq(reportBusinessQuestionSets.status, "confirmed"),
       isNull(reportBusinessQuestionSets.orderId)
     )).limit(1);
+    let questionSet: ReportBusinessQuestionSetRow | undefined = confirmedSet;
+    if (!questionSet) {
+      questionSet = await reissueRefundedLockedQuestionSet(tx, input.reportId, input.businessQuestionSetId);
+    }
     if (!questionSet || (questionSet.confidence === "low" && !questionSet.acknowledgedLowConfidence)) {
       throw new CommercialOrderConflictError("Three confirmed business questions are required before checkout.");
     }
@@ -93,7 +99,7 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
       customerEmailHmac: input.customerEmailHmac,
       emailKeyVersion: input.emailKeyVersion,
       productCode: input.productCode,
-      businessQuestionSetId: input.businessQuestionSetId,
+      businessQuestionSetId: questionSet.id,
       fulfillmentMethodology: fulfillmentMethodologyForProductAdmission(input.productCode),
       recommendationReportVersion: recommendationReportVersionForProductAdmission(input.productCode),
       catalogVersion: input.catalogVersion,
@@ -111,7 +117,7 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
         lockedAt: new Date(),
         updatedAt: new Date()
       }).where(and(
-        eq(reportBusinessQuestionSets.id, input.businessQuestionSetId),
+        eq(reportBusinessQuestionSets.id, questionSet.id),
         eq(reportBusinessQuestionSets.status, "confirmed"),
         isNull(reportBusinessQuestionSets.orderId)
       )).returning({ id: reportBusinessQuestionSets.id });
@@ -126,6 +132,77 @@ export async function createPaymentOrder(input: CreatePaymentOrderInput): Promis
     throw new CommercialOrderConflictError("The checkout idempotency key conflicts with another order.");
   }
   return existing;
+}
+
+/**
+ * A terminally refunded order leaves its question set locked forever, while
+ * payment_orders_business_question_set_uidx forbids reusing that set id on a
+ * new order. Only for that exact state, reissue the identical confirmed set
+ * as a new revision bound to no order; every other lock state stays
+ * fail-closed so the caller throws the usual checkout conflict.
+ */
+async function reissueRefundedLockedQuestionSet(
+  tx: PgTransaction<PostgresJsQueryResultHKT, typeof import("./schema"), ExtractTablesWithRelations<typeof import("./schema")>>,
+  reportId: string,
+  priorSetId: string
+): Promise<ReportBusinessQuestionSetRow | undefined> {
+  const [prior] = await tx.select().from(reportBusinessQuestionSets).where(and(
+    eq(reportBusinessQuestionSets.id, priorSetId),
+    eq(reportBusinessQuestionSets.reportId, reportId),
+    eq(reportBusinessQuestionSets.status, "locked")
+  )).limit(1);
+  if (!prior?.orderId || !prior.payload) return undefined;
+  const [boundOrder] = await tx.select({
+    paymentStatus: paymentOrders.paymentStatus,
+    refundStatus: paymentOrders.refundStatus
+  }).from(paymentOrders).where(eq(paymentOrders.id, prior.orderId)).limit(1);
+  if (boundOrder?.paymentStatus !== "paid" || boundOrder.refundStatus !== "refunded") return undefined;
+  const [latest] = await tx.select({ revision: reportBusinessQuestionSets.revision })
+    .from(reportBusinessQuestionSets)
+    .where(eq(reportBusinessQuestionSets.reportId, reportId))
+    .orderBy(desc(reportBusinessQuestionSets.revision))
+    .limit(1);
+  const revision = (latest?.revision ?? prior.revision) + 1;
+  const id = `business-question-set-${createHash("sha256").update(`${prior.id}:reissue:${revision}`).digest("hex")}`;
+  // The set validation trigger demands exactly three child questions before a
+  // row may become confirmed, and the child immutability trigger rejects
+  // writes under a confirmed/locked parent, so the reissue must be built as a
+  // candidate, given its cloned questions, then confirmed. The paid V4 chains
+  // read report_business_questions by question_set_id, so the clone is
+  // required, not optional.
+  await tx.insert(reportBusinessQuestionSets).values({
+    id,
+    reportId,
+    orderId: null,
+    revision,
+    locale: prior.locale,
+    region: prior.region,
+    status: "candidate",
+    confidence: prior.confidence,
+    acknowledgedLowConfidence: prior.acknowledgedLowConfidence,
+    generationRuleVersion: prior.generationRuleVersion,
+    neutralizationVersion: prior.neutralizationVersion,
+    profileEvidenceIdentity: prior.profileEvidenceIdentity,
+    contentHash: prior.contentHash,
+    neutralContentHash: prior.neutralContentHash,
+    payload: { ...prior.payload, id, revision },
+    confirmedAt: prior.confirmedAt,
+    lockedAt: null
+  });
+  const priorQuestions = await tx.select().from(reportBusinessQuestions)
+    .where(eq(reportBusinessQuestions.questionSetId, prior.id));
+  if (priorQuestions.length > 0) {
+    await tx.insert(reportBusinessQuestions).values(priorQuestions.map((question) => ({
+      ...question,
+      id: `${id}:${question.ordinal}`,
+      questionSetId: id
+    })));
+  }
+  const [reissued] = await tx.update(reportBusinessQuestionSets)
+    .set({ status: "confirmed", updatedAt: new Date() })
+    .where(and(eq(reportBusinessQuestionSets.id, id), eq(reportBusinessQuestionSets.status, "candidate")))
+    .returning();
+  return reissued;
 }
 
 export async function createReportV4PaymentOrder(input: CreateReportV4PaymentOrderInput): Promise<PaymentOrderRow> {
