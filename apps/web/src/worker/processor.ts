@@ -2434,14 +2434,28 @@ function publicFailure(error: unknown): string {
 
 /**
  * Paid V3 diagnosis incompletion previously discarded `result.failure`,
- * making the real stage/code/parserPath unknowable on retry. Keep the same
- * generic Error type and control flow, but carry the diagnosable detail.
+ * making the real stage/code/parserPath unknowable on retry. The message
+ * keeps the diagnosable detail and the structured failure rides along so
+ * job-error normalization can classify deterministic input-validation
+ * failures as permanent without parsing prose.
  */
+export class PaidV3DiagnosisIncompleteError extends Error {
+  readonly failure: ReportV4DiagnosisFailure;
+  readonly providerAttempts: number;
+
+  constructor(questionId: string, result: { providerAttempts: number; failure: ReportV4DiagnosisFailure }) {
+    super(`Paid V3 per-question diagnosis did not complete. questionId=${questionId}; ${formatReportV4DiagnosisFailure(result.failure, result.providerAttempts)}`);
+    this.name = "PaidV3DiagnosisIncompleteError";
+    this.failure = result.failure;
+    this.providerAttempts = result.providerAttempts;
+  }
+}
+
 export function createPaidV3DiagnosisIncompleteError(
   questionId: string,
   result: { providerAttempts: number; failure: ReportV4DiagnosisFailure }
 ): Error {
-  return new Error(`Paid V3 per-question diagnosis did not complete. questionId=${questionId}; ${formatReportV4DiagnosisFailure(result.failure, result.providerAttempts)}`);
+  return new PaidV3DiagnosisIncompleteError(questionId, result);
 }
 
 async function enhanceV3AnswerCardsWithDiagnosis<T extends PaidV3SemanticAnswerCardDraft>(input: {

@@ -40,23 +40,83 @@ describe("V4 question-level diagnosis enhancer", () => {
     expect(JSON.stringify(request)).not.toContain("sibling-question");
   });
 
-  it("fails locally with zero provider calls for unavailable, cross-question or over-five-source input", async () => {
+  it("fails locally with zero provider calls for unavailable or cross-question input", async () => {
     const provider = providerFrom(async () => validDiagnosis());
     const unavailable = Object.freeze({ ...answeredQuestion(), status: "unavailable" as const, answer: null, sources: [] });
-    const sixSources = Object.freeze({
-      ...answeredQuestion(),
-      sources: Object.freeze(Array.from({ length: 6 }, (_, index) => source(index + 1)))
-    });
     const wrongTarget = [{ ...targetPages()[0]!, questionId: "question-2" }];
 
     const results = await Promise.all([
       enhanceReportV4QuestionDiagnosis(enhancerInput(unavailable, provider)),
-      enhanceReportV4QuestionDiagnosis(enhancerInput(sixSources, provider)),
       enhanceReportV4QuestionDiagnosis({ ...enhancerInput(answeredQuestion(), provider), targetPages: wrongTarget })
     ]);
 
     expect(results.every((result) => result.status === "failed" && result.diagnosis === undefined)).toBe(true);
     expect(results[0]!.question).toBe(unavailable);
+    expect(provider.calls).toHaveLength(0);
+  });
+
+  it("truncates twenty retrievalStatus-less annotation sources to the first five and reaches the provider", async () => {
+    const question = Object.freeze({
+      ...answeredQuestion(),
+      sources: Object.freeze(Array.from({ length: 20 }, (_, index) => mimoAnnotationSource(index + 1)))
+    } as unknown as CombinedGeoReportV4Question);
+    const provider = providerFrom(async () => validDiagnosis({
+      observableFactors: [
+        { kind: "problem_match", observation: "The source describes the requested service.", evidenceRefs: ["mimo-annotation-1"] },
+        { kind: "factual_specificity", observation: "The source supplies concrete operating facts.", evidenceRefs: ["mimo-annotation-2"] },
+        { kind: "target_clarity", observation: "The target summary remains broad.", evidenceRefs: ["target-loc-1"] }
+      ],
+      recommendedActions: [
+        { priority: 1, action: "Publish the relevant operating conditions.", evidenceRefs: ["mimo-annotation-1", "target-loc-1"] },
+        { priority: 2, action: "Clarify the supported service scenarios.", evidenceRefs: ["mimo-annotation-2", "target-loc-1"] },
+        { priority: 3, action: "Keep the service facts current and publicly readable.", evidenceRefs: ["mimo-annotation-1"] }
+      ],
+      detailedEvidenceRefs: ["mimo-annotation-1", "mimo-annotation-2", "target-loc-1"]
+    }));
+
+    const result = await enhanceReportV4QuestionDiagnosis(enhancerInput(question, provider));
+
+    expect(result.status).toBe("completed");
+    expect(provider.calls).toHaveLength(1);
+    const request = provider.calls[0]!;
+    if (request.kind !== "diagnose") throw new Error("expected initial request");
+    expect(request.input.sources.map(({ sourceId }) => sourceId)).toEqual([
+      "mimo-annotation-1",
+      "mimo-annotation-2",
+      "mimo-annotation-3",
+      "mimo-annotation-4",
+      "mimo-annotation-5"
+    ]);
+    expect(request.input.sources.every(({ retrievalStatus }) => retrievalStatus === "not_checked")).toBe(true);
+    expect(question.sources).toHaveLength(20);
+  });
+
+  it("still fails input validation for genuinely invalid content inside the truncated five", async () => {
+    const provider = providerFrom(async () => validDiagnosis());
+    const duplicateUrl = Object.freeze({
+      ...answeredQuestion(),
+      sources: Object.freeze([source(1), source(2), { ...source(3), canonicalUrl: source(1).canonicalUrl }, source(4)])
+    });
+    const invalidUrl = Object.freeze({
+      ...answeredQuestion(),
+      sources: Object.freeze([source(1), { ...source(2), canonicalUrl: "not-a-url" }])
+    });
+
+    const [duplicate, badUrl] = await Promise.all([
+      enhanceReportV4QuestionDiagnosis(enhancerInput(duplicateUrl, provider)),
+      enhanceReportV4QuestionDiagnosis(enhancerInput(invalidUrl, provider))
+    ]);
+
+    expect(duplicate).toMatchObject({
+      status: "failed",
+      providerAttempts: 0,
+      failure: { stage: "input_validation", code: "invalid_input" }
+    });
+    expect(badUrl).toMatchObject({
+      status: "failed",
+      providerAttempts: 0,
+      failure: { stage: "input_validation", code: "invalid_input" }
+    });
     expect(provider.calls).toHaveLength(0);
   });
 
@@ -315,6 +375,19 @@ function source(index: number) {
     canonicalUrl: `https://source-${index}.example/evidence`,
     citedText: `Published fact ${index}.`,
     retrievalStatus: "available" as const
+  });
+}
+
+// Real answer-card annotation rows carry no retrievalStatus field at all.
+function mimoAnnotationSource(index: number) {
+  return Object.freeze({
+    questionId: "question-1",
+    sourceId: `mimo-annotation-${index}`,
+    title: `Annotation ${index}`,
+    canonicalUrl: `https://annotation-${index}.example/evidence`,
+    citedText: `Cited passage ${index}.`,
+    registrableDomain: `annotation-${index}.example`,
+    providerResultOrder: index
   });
 }
 

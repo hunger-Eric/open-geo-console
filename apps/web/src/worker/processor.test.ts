@@ -71,6 +71,7 @@ import {
   dispatchReportV4ProductionJob,
   composeReportV4AcceptanceProductionRunner,
   createPaidV3DiagnosisIncompleteError,
+  PaidV3DiagnosisIncompleteError,
   hashSynthesisInput,
   isTerminalScanJob,
   mergeCompletedAnalyses,
@@ -833,5 +834,14 @@ describe("Paid V3 diagnosis failure transparency", () => {
     expect(error.message).toContain("stage=provider");
     expect(error.message).toContain("code=provider_timeout");
     expect(error.message).not.toContain("parserPath");
+  });
+
+  it("exposes the structured failure for typed-boundary job classification", () => {
+    const failure = { stage: "input_validation" as const, code: "invalid_input", parserPath: "$diagnosisInput.sources" };
+    const error = createPaidV3DiagnosisIncompleteError("question-3", { providerAttempts: 0, failure });
+    expect(error).toBeInstanceOf(PaidV3DiagnosisIncompleteError);
+    expect(error.name).toBe("PaidV3DiagnosisIncompleteError");
+    expect((error as PaidV3DiagnosisIncompleteError).failure).toEqual(failure);
+    expect((error as PaidV3DiagnosisIncompleteError).providerAttempts).toBe(0);
   });
 });

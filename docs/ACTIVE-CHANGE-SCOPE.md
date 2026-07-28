@@ -4,10 +4,79 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Paid deep resume identity + shared-market guard (APPROVED)`.
+`Current authority: Paid V3 diagnosis input boundary adaptation (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Paid deep resume identity + shared-market guard (APPROVED)
+## Current authority: Paid V3 diagnosis input boundary adaptation (APPROVED)
+
+**Status: `APPROVED`** — user approved this written allowlist and, in the same
+grant (2026-07-28: "全部授权"), authorized implementation, commit + push,
+Staging redeployment (Vercel Web + Docker overlay Workers), refund submission
+via the standard staging commerce reconciliation for any newly failed paid
+order, and one fresh paid validation run (new Sandbox payment by the user).
+
+### Baseline and evidence
+
+- HEAD `07ebd3f`; Staging runs `07ebd3f` (Web `dpl_GGYdPG8SdsGGsGuoRHwW17uTinCe`
+  + Workers `staging-07ebd3f-overlay-v1`, schema V44 applied).
+- Failed paid deep job `1afcaec2-a91d-497d-b04d-076b94054799` (report
+  `fe9ca07b`, order `1dd58782`, Sandbox paid): 5 attempts, all
+  `stage=input_validation; code=invalid_input; parserPath=$diagnosisInput.sources`
+  for `question-0d4bee4d…`, terminal `unexpected_internal_error` at 95.
+- DB proof: the question's persisted answer card carries **20 sources**
+  (`mimo-annotation-1…20`, no `retrievalStatus` field), while
+  `parseReportV4DiagnosisInput` (`packages/ai-report-engine/src/report-v4-diagnosis.ts:137`)
+  allows at most `REPORT_V4_MAX_DIAGNOSIS_SOURCES` (5) and requires
+  `retrievalStatus ∈ {not_checked, available, inaccessible}`.
+- Same root cause as job `5dbaea88` attempt 1 this morning (message then had
+  no detail; the failure-transparency fix in `debe66e` exposed it now).
+
+### Design lock
+
+| # | Rule |
+|---|------|
+| 1 | **Boundary adaptation, not contract loosening.** In `enhanceReportV4QuestionDiagnosis` (`apps/web/src/worker/report-v4-diagnosis-enhancer.ts`), before calling `parseReportV4DiagnosisInput`, normalize `input.question.sources`: keep at most `REPORT_V4_MAX_DIAGNOSIS_SOURCES` entries in their existing order (provider result order), and default a missing/blank `retrievalStatus` to `"not_checked"`. The validator contract itself is unchanged and stays fail-closed. |
+| 2 | **Deterministic input-validation failures are permanent.** Register the diagnosis enhancer's `stage=input_validation` failure as `permanent` in the job-error taxonomy so a deterministic contract violation fails fast instead of burning all retries against the 24h SLA clock. Message/classification mapping only; no behavior change to the enhancer result shape. |
+| 3 | Customer-facing report content is untouched: the answer card keeps all 20 sources for rendering; the cap applies only to the diagnosis provider input. |
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/report-v4-diagnosis-enhancer.ts` | Source cap + retrievalStatus default (rule 1) |
+| `apps/web/src/worker/job-errors.ts` | input_validation → permanent mapping (rule 2) |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+### Tests allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/report-v4-diagnosis-enhancer.test.ts` | >5 sources → capped and completes; missing retrievalStatus → defaults; duplicate/invalid source content still fails closed |
+| `apps/web/src/worker/job-errors.test.ts` | input_validation classification permanent |
+
+### Forbidden
+
+- Changing `packages/ai-report-engine` validator contracts or the 5-source limit
+- Replaying/mutating terminal jobs `1afcaec2`, `b286633f`, `5dbaea88` or their orders
+- Refund/SLA/commerce logic, prompts/model profiles, answer-card rendering
+- Deploy / Docker / push / new payment runs without separate authorization
+
+### Diff budget
+
+- Production source: ≤ 100 changed lines. Hard limit.
+- Tests: ≤ 200 changed lines (tracking bound, measured +20%).
+- Docs: ≤ 60 changed lines.
+
+### Acceptance checks
+
+1. New unit tests: 20-source question (mirroring `question-0d4bee4d` shape)
+   passes diagnosis input validation after the cap; missing retrievalStatus
+   defaults to `not_checked`; genuinely invalid sources still throw.
+2. `npm test`, `npm run lint`, `npm run build` green.
+3. Deploy + fresh paid validation (new Sandbox payment) require separate
+   later authorization.
+
+## Historical: Paid deep resume identity + shared-market guard (APPROVED, implemented)
 
 **Status: `APPROVED`** — user approved this written allowlist (2026-07-28: "批准").
 Implement only within the closed allowlists and budgets below. Deploy, Docker,

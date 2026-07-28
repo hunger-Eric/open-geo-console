@@ -190,6 +190,14 @@ function resolveTypedBoundaryError(
         };
       }
     }
+    if (row.name === "PaidV3DiagnosisIncompleteError") {
+      // Deterministic diagnosis-input rejection can never succeed on retry;
+      // provider/token/contract stages keep their existing classification path.
+      const failure = (row as { failure?: { stage?: unknown } }).failure;
+      if (failure?.stage === "input_validation") {
+        return { code: "paid_v3_diagnosis_input_invalid", classification: "permanent" };
+      }
+    }
     if (row.name === "ReportV4QuestionProviderError" && typeof row.code === "string") {
       const mapped = MIMO_PROVIDER_JOB_CLASSIFICATION[row.code];
       if (mapped) {

@@ -1,5 +1,6 @@
 import {
   ModelTokenBudgetError,
+  REPORT_V4_MAX_DIAGNOSIS_SOURCES,
   assembleReportV4DiagnosisSemanticOutput,
   buildReportV4DiagnosisSemanticInput,
   parseReportV4DiagnosisInput,
@@ -138,13 +139,17 @@ export async function enhanceReportV4QuestionDiagnosis(
       },
       answer: input.question.status === "answered" ? input.question.answer : null,
       locale: input.locale,
-      sources: input.question.sources.map((source) => ({
+      // Boundary adaptation: answer cards may carry more sources than the diagnosis
+      // contract admits (provider result order) and may omit retrievalStatus entirely.
+      // Truncate to the contract cap and default the missing status; the persisted
+      // answer-card sources are untouched.
+      sources: input.question.sources.slice(0, REPORT_V4_MAX_DIAGNOSIS_SOURCES).map((source) => ({
         questionId: source.questionId,
         sourceId: source.sourceId,
         title: source.title,
         canonicalUrl: source.canonicalUrl,
         excerpt: source.citedText,
-        retrievalStatus: source.retrievalStatus
+        retrievalStatus: source.retrievalStatus || "not_checked"
       })),
       targetPages: input.targetPages
     }, { semanticValidation: input.semanticValidation });

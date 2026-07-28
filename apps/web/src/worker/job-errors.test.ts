@@ -35,6 +35,7 @@ import {
 } from "./provider-discovery-pipeline";
 import { PublicSourceSnapshotUnavailableError } from "./public-source-snapshot-resolver";
 import { PublicSourceResumeIdentityMismatchError } from "./public-source-forensics";
+import { createPaidV3DiagnosisIncompleteError } from "./processor";
 
 const context = { jobId: "job-1", phase: "public_source_preflight" as const, phaseAttempt: 1, resumeGeneration: 0, configuredSecrets: ["super-secret"] };
 
@@ -131,6 +132,37 @@ describe("job error normalization", () => {
       retryableAt: null
     });
     expect(normalized.code).not.toBe("unexpected_internal_error");
+  });
+
+  it("classifies a deterministic Paid V3 diagnosis input-validation failure as permanent", () => {
+    const normalized = normalizeJobError(
+      createPaidV3DiagnosisIncompleteError("question-1", {
+        providerAttempts: 0,
+        failure: { stage: "input_validation", code: "invalid_input", parserPath: "$diagnosisInput.sources" }
+      }),
+      { ...context, phase: "grounded_answer_synthesis" }
+    );
+
+    expect(normalized).toMatchObject({
+      classification: "permanent",
+      code: "paid_v3_diagnosis_input_invalid",
+      type: "PaidV3DiagnosisIncompleteError",
+      retryableAt: null
+    });
+    expect(normalized.message).toContain("stage=input_validation");
+  });
+
+  it("keeps non-input Paid V3 diagnosis failures off the permanent path", () => {
+    const normalized = normalizeJobError(
+      createPaidV3DiagnosisIncompleteError("question-1", {
+        providerAttempts: 1,
+        failure: { stage: "provider", code: "provider_timeout", parserPath: null }
+      }),
+      { ...context, phase: "grounded_answer_synthesis" }
+    );
+
+    expect(normalized.classification).not.toBe("permanent");
+    expect(normalized.code).not.toBe("paid_v3_diagnosis_input_invalid");
   });
 
   it("maps diagnosis provider transport to a transient diagnosis_* job code", () => {
