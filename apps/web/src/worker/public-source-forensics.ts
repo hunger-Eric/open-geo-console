@@ -5,6 +5,7 @@ import type { AiWebsiteReportV1, RecommendationForensicReportV2 } from "@open-ge
 import { decidePublicSourceCommercialCoverage } from "@/public-source-forensics/coverage";
 import { buildPublicSourceForensicReport, type PublicSourceForensicReportBuilderInput } from "@/public-source-forensics/report-builder";
 import { createConcurrencyGate, type ConcurrencyGate } from "./bounded-scheduler";
+import { stableJsonHash } from "./provider-discovery-pipeline";
 
 export interface ResolvedPublicSourceSnapshot {
   snapshotId: string; cacheIdentity: string; questionId: string; observedAt: string; ageMs: number;
@@ -84,7 +85,9 @@ export async function runPublicSourceForensicsPipeline(input: {
   const fanouts = createPublicSourceQuestionFanouts({ questions, authority, excludedIdentities }).map((fanout) => input.fanoutOverrides?.get(fanout.questionId) ?? fanout);
   if (fanouts.some((fanout) => fanout.surface.surfaceId !== authority.surface.surfaceId || fanout.surface.surfaceVersion !== authority.surface.surfaceVersion || fanout.questionSetVersion !== questions.questionSetVersion)) throw new PublicSourceAuthorityUnavailableError("Public-source fanout override identity is invalid.");
   const prior = await input.dependencies.getCheckpoint(input.jobId);
-  const websiteFoundationHash = sha(input.websiteFoundation);
+  // Resume freezes the foundation hash from the prior checkpoint so DB/JSON
+  // round-trips of the same website foundation cannot force a full rematch.
+  const websiteFoundationHash = prior?.websiteFoundationHash ?? stableJsonHash(input.websiteFoundation);
   if (prior && (prior.methodology !== "public_search_source_forensics_v1" || prior.questionSetVersion !== questions.questionSetVersion ||
       prior.fanoutVersion !== fanouts[0]!.fanoutVersion || prior.authorityId !== authority.authorityId || prior.websiteFoundationHash !== websiteFoundationHash ||
       prior.locale !== input.locale || prior.region !== input.region ||
@@ -165,12 +168,12 @@ export function createPublicSourceQuestionFanouts(input: {
 function createCheckpoint(value: { input: Parameters<typeof runPublicSourceForensicsPipeline>[0]; questions: ReturnType<typeof generateCanonicalBuyerQuestions>; fanouts: SearchQueryFanout[]; snapshots: ResolvedPublicSourceSnapshot[]; evidenceCutoffAt: string; authority: PublicSearchSurfaceAuthority }): PublicSourcePipelineCheckpoint {
   const core = { methodology: "public_search_source_forensics_v1" as const, questionSetVersion: value.questions.questionSetVersion,
     fanoutVersion: value.fanouts[0]!.fanoutVersion, authorityId: value.authority.authorityId,
-    snapshotIds: value.snapshots.map(({ snapshotId }) => snapshotId), websiteFoundationHash: sha(value.input.websiteFoundation),
+    snapshotIds: value.snapshots.map(({ snapshotId }) => snapshotId), websiteFoundationHash: stableJsonHash(value.input.websiteFoundation),
     evidenceCutoffAt: value.evidenceCutoffAt, locale: value.input.locale, region: value.input.region,
     adapterIdentityHash: adapterIdentityHash(value.authority) };
   return { ...core, identityHash: sha(core) };
 }
-function checkpointFromReport(report: RecommendationForensicReportV2, foundation: AiWebsiteReportV1): PublicSourcePipelineCheckpoint { const core={ methodology: report.methodology, questionSetVersion: report.questions.questionSetVersion, fanoutVersion: report.fanouts[0]!.fanoutVersion, authorityId: report.authority.authorityId, snapshotIds: report.snapshotRefs.map(({snapshotId})=>snapshotId), websiteFoundationHash:sha(foundation), evidenceCutoffAt:report.evidenceCutoffAt, locale:report.locale, region:report.region, adapterIdentityHash:adapterIdentityHash(report.authority) }; return {...core,identityHash:sha(core)}; }
+function checkpointFromReport(report: RecommendationForensicReportV2, foundation: AiWebsiteReportV1): PublicSourcePipelineCheckpoint { const core={ methodology: report.methodology, questionSetVersion: report.questions.questionSetVersion, fanoutVersion: report.fanouts[0]!.fanoutVersion, authorityId: report.authority.authorityId, snapshotIds: report.snapshotRefs.map(({snapshotId})=>snapshotId), websiteFoundationHash:stableJsonHash(foundation), evidenceCutoffAt:report.evidenceCutoffAt, locale:report.locale, region:report.region, adapterIdentityHash:adapterIdentityHash(report.authority) }; return {...core,identityHash:sha(core)}; }
 function adapterIdentityHash(authority: PublicSearchSurfaceAuthority): string { return sha({ adapterVersion: authority.surface.adapterVersion, providerId: authority.surface.providerId, productId: authority.surface.productId, modelSurface: authority.surface.surfaceId, surfaceVersion: authority.surface.surfaceVersion, locale: authority.surface.locale, region: authority.surface.region }); }
 function sha(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 export class PublicSourceAuthorityUnavailableError extends Error {}

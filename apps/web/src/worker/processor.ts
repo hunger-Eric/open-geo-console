@@ -88,7 +88,12 @@ import { phaseForStage, recoveryEnvelope } from "./job-state";
 import type { StagingLiveDrill } from "./staging-live-drill";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
 import { createProductionProviderDiscoveryContext } from "./provider-discovery-production";
-import { runProviderDiscoveryPipeline, type ProviderDiscoveryCheckpointV1 } from "./provider-discovery-pipeline";
+import {
+  identityFromProviderDiscoveryCheckpoint,
+  runProviderDiscoveryPipeline,
+  stableJsonHash,
+  type ProviderDiscoveryCheckpointV1
+} from "./provider-discovery-pipeline";
 import { resolveGenerativeAnswerFirstV3, type AnswerFirstV3Checkpoint, type AnswerFirstV3CheckpointV2, type AnswerFirstV3StoredSource, type DeferredGenerativeAnswerFirstV3 } from "./answer-first-v3";
 import {
   calculateEffectiveCoverage,
@@ -1411,13 +1416,17 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
   // Public-search authority and retrieval belong to the audit sidecar. Resolve
   // them only after the ordinary answers have been safely checkpointed.
   const runtime = await resolveProductionPublicSearchRuntime({ environment: process.env, getAuthority: getActivePublicSearchSurfaceAuthority });
-  const evidenceCutoffAt = checkpoint.providerDiscovery?.evidenceCutoffAt ?? new Date().toISOString();
+  const priorProviderDiscovery = checkpoint.providerDiscovery ?? null;
+  // Mid-job resume freezes identity from the checkpoint so JSON round-trips of the
+  // website foundation cannot invalidate already-completed discovery stages.
+  const evidenceCutoffAt = priorProviderDiscovery?.evidenceCutoffAt ?? new Date().toISOString();
+  const websiteFoundationHash = priorProviderDiscovery?.websiteFoundationHash ?? stableJsonHash(input.websiteFoundation);
   const providerContext = createProductionProviderDiscoveryContext({
     runtime,
     questionSet: businessQuestionSet,
     artifactContract: input.job.artifactContract === "combined_geo_report_v3" ? "combined_geo_report_v3" : "combined_geo_report_v2",
     websiteCategories: [input.websiteFoundation.organizationProfile.businessModel ?? "", ...input.websiteFoundation.organizationProfile.productsAndServices].filter(Boolean),
-    websiteFoundationHash: createHash("sha256").update(JSON.stringify(input.websiteFoundation)).digest("hex"),
+    websiteFoundationHash,
     workerId: `provider-discovery:${input.job.id}:${input.workerId}`,
     evidenceCutoffAt,
     extractionClient: client,
@@ -1430,8 +1439,11 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       checkpoint = normalizeCheckpoint(updated.checkpoint);
     }
   });
+  const providerDiscoveryIdentity = priorProviderDiscovery
+    ? identityFromProviderDiscoveryCheckpoint(priorProviderDiscovery)
+    : providerContext.identity;
   const providerResult = await runProviderDiscoveryPipeline({
-    identity: providerContext.identity,
+    identity: providerDiscoveryIdentity,
     dependencies: providerContext.dependencies,
     hardDeadlineAt: new Date(Date.now() + Math.max(1_000, input.remainingMs)).toISOString(),
     signal: input.signal

@@ -159,6 +159,41 @@ function hashCandidates(values: readonly ProviderCandidateQueryIdentity[]): stri
 function hashClaims(values: readonly ProviderClaim[]): string { return sha([...values].sort((a,b)=>a.claimId.localeCompare(b.claimId)).map(({claimId})=>claimId)); }
 function sha(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 function timestamp(value:string,label:string):Date{const date=new Date(value);if(!Number.isFinite(date.getTime()))throw new ProviderDiscoveryPipelineContractError(`${label} is invalid.`);return date;}
+
+/** Deterministic JSON for identity hashes: object keys sorted recursively; arrays keep order. */
+export function stableJsonStringify(value: unknown): string {
+  return JSON.stringify(canonicalizeJson(value));
+}
+export function stableJsonHash(value: unknown): string {
+  return createHash("sha256").update(stableJsonStringify(value)).digest("hex");
+}
+function canonicalizeJson(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => canonicalizeJson(item));
+  const record = value as Record<string, unknown>;
+  const next: Record<string, unknown> = {};
+  for (const key of Object.keys(record).sort()) next[key] = canonicalizeJson(record[key]);
+  return next;
+}
+
+/** Mid-job resume must reuse the checkpoint identity rather than re-hash live foundation JSON. */
+export function identityFromProviderDiscoveryCheckpoint(checkpoint: ProviderDiscoveryCheckpointV1): ProviderDiscoveryIdentity {
+  return {
+    methodology: checkpoint.methodology,
+    artifactContract: checkpoint.artifactContract,
+    policyId: checkpoint.policyId,
+    policyVersion: checkpoint.policyVersion,
+    queryPlanVersion: checkpoint.queryPlanVersion,
+    passageSelectorVersion: checkpoint.passageSelectorVersion,
+    claimExtractionContract: checkpoint.claimExtractionContract,
+    claimExtractionModel: checkpoint.claimExtractionModel,
+    evidenceCutoffAt: checkpoint.evidenceCutoffAt,
+    adapterIdentityHash: checkpoint.adapterIdentityHash,
+    websiteFoundationHash: checkpoint.websiteFoundationHash,
+    questionSetIdentity: checkpoint.questionSetIdentity
+  };
+}
+
 export class ProviderDiscoveryResumeIdentityMismatchError extends Error {
   constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = "ProviderDiscoveryResumeIdentityMismatchError"; }
 }

@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { runProviderDiscoveryPipeline, type ProviderDiscoveryCheckpointV1, type ProviderDiscoveryPipelineDependencies } from "./provider-discovery-pipeline";
+import {
+  identityFromProviderDiscoveryCheckpoint,
+  runProviderDiscoveryPipeline,
+  stableJsonHash,
+  type ProviderDiscoveryCheckpointV1,
+  type ProviderDiscoveryPipelineDependencies
+} from "./provider-discovery-pipeline";
 
 const fourSnapshotGuardHarness = vi.hoisted(() => {
   const state = {
@@ -90,6 +96,33 @@ describe("provider discovery recoverable pipeline", () => {
     await runProviderDiscoveryPipeline(runInput(dependencies({set:(value)=>{checkpoint=value;}})));
     const changed={...identity(),[field]:field==="evidenceCutoffAt"?"2030-01-01T00:00:01.000Z":`${identity()[field]}-changed`};
     await expect(runProviderDiscoveryPipeline({...runInput(dependencies({get:()=>checkpoint})),identity:changed})).rejects.toThrow(/identity/i);
+  });
+  it("resumes when identity is frozen from the prior checkpoint even if a live foundation hash would drift", async () => {
+    let checkpoint: ProviderDiscoveryCheckpointV1 | null = null;
+    const calls = { discovery: 0, verification: 0, passages: 0 };
+    await expect(runProviderDiscoveryPipeline(runInput(dependencies({
+      get: () => checkpoint,
+      set: (value) => { checkpoint = value; },
+      calls,
+      failPassages: true
+    })))).rejects.toThrow(/passage fixture/i);
+    expect(checkpoint).not.toBeNull();
+    const frozen = identityFromProviderDiscoveryCheckpoint(checkpoint!);
+    const driftedLiveFoundation = { ...frozen, websiteFoundationHash: "f".repeat(64) };
+    await expect(runProviderDiscoveryPipeline({
+      ...runInput(dependencies({ get: () => checkpoint, set: (value) => { checkpoint = value; }, calls })),
+      identity: driftedLiveFoundation
+    })).rejects.toThrow(/identity/i);
+    await expect(runProviderDiscoveryPipeline({
+      ...runInput(dependencies({ get: () => checkpoint, set: (value) => { checkpoint = value; }, calls })),
+      identity: frozen
+    })).resolves.toMatchObject({ checkpoint: { phase: "complete" } });
+    expect(calls.discovery).toBe(1);
+    expect(calls.verification).toBe(1);
+  });
+  it("hashes website foundations independently of object key order", () => {
+    expect(stableJsonHash({ b: 1, a: { d: 2, c: 3 } })).toBe(stableJsonHash({ a: { c: 3, d: 2 }, b: 1 }));
+    expect(stableJsonHash({ a: 1 })).not.toBe(stableJsonHash({ a: 2 }));
   });
   it("stops scheduling work after the hard deadline", async()=>{
     const deps=dependencies({}); deps.now=()=>new Date("2031-01-01T00:00:00.000Z");

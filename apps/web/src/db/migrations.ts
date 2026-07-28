@@ -3936,6 +3936,89 @@ export const V43_DATABASE_MIGRATIONS = [
    END $$`
 ] as const;
 
+/**
+ * V44: query-side shared market rows still reject customer brand exclusions and
+ * private question text. Result-side SERP/evidence bodies only reject order_id
+ * and report_id (and private≠neutral text) so public brand mentions in third-party
+ * titles/snippets no longer fail observation persistence.
+ */
+export const V44_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_reject_private_identity_in_shared_market_data() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE row_payload jsonb := to_jsonb(NEW); shared_payload text; identity text; include_exclusions boolean := false;
+   BEGIN
+     CASE TG_TABLE_NAME
+       WHEN 'market_snapshot_questions' THEN
+         include_exclusions := true;
+         shared_payload := lower(jsonb_build_object(
+           'normalized_question', row_payload->'normalized_question'
+         )::text);
+       WHEN 'market_snapshot_queries' THEN
+         include_exclusions := true;
+         shared_payload := lower(jsonb_build_object(
+           'query_text', row_payload->'query_text'
+         )::text);
+       WHEN 'market_search_attempts' THEN
+         shared_payload := lower(jsonb_build_object(
+           'sanitized_error', row_payload->'sanitized_error'
+         )::text);
+       WHEN 'market_search_observations' THEN
+         shared_payload := lower(jsonb_build_object(
+           'result_url', row_payload->'result_url',
+           'canonical_url', row_payload->'canonical_url',
+           'title', row_payload->'title',
+           'snippet', row_payload->'snippet',
+           'result_metadata', row_payload->'result_metadata'
+         )::text);
+       WHEN 'market_source_evidence' THEN
+         shared_payload := lower(jsonb_build_object(
+           'canonical_url', row_payload->'canonical_url',
+           'registrable_domain', row_payload->'registrable_domain',
+           'excerpt', row_payload->'excerpt',
+           'entities', row_payload->'entities',
+           'claims', row_payload->'claims',
+           'contradictions', row_payload->'contradictions'
+         )::text);
+       WHEN 'market_source_passages' THEN
+         shared_payload := lower(jsonb_build_object(
+           'exact_excerpt', row_payload->'exact_excerpt',
+           'matched_entity_terms', row_payload->'matched_entity_terms',
+           'matched_service_terms', row_payload->'matched_service_terms',
+           'matched_control_terms', row_payload->'matched_control_terms',
+           'matched_capability_terms', row_payload->'matched_capability_terms'
+         )::text);
+       WHEN 'market_provider_claims' THEN
+         shared_payload := lower(jsonb_build_object(
+           'canonical_name', row_payload->'canonical_name',
+           'generic_role', row_payload->'generic_role',
+           'policy_role', row_payload->'policy_role',
+           'capability', row_payload->'capability',
+           'operating_mode', row_payload->'operating_mode',
+           'service_scope', row_payload->'service_scope',
+           'route_scope', row_payload->'route_scope',
+           'exact_excerpt', row_payload->'exact_excerpt',
+           'rejection_reason', row_payload->'rejection_reason'
+         )::text);
+       ELSE
+         RAISE EXCEPTION 'Unsupported shared market data identity guard table.';
+     END CASE;
+     FOR identity IN
+       SELECT value FROM (
+         SELECT sets.order_id AS value FROM report_business_question_sets sets WHERE sets.order_id IS NOT NULL
+         UNION ALL SELECT sets.report_id FROM report_business_question_sets sets
+         UNION ALL SELECT questions.private_text FROM report_business_questions questions
+           WHERE questions.private_text IS NOT NULL AND questions.private_text <> questions.neutral_public_text
+         UNION ALL SELECT jsonb_array_elements_text(sets.payload->'identityExclusions') FROM report_business_question_sets sets
+           WHERE include_exclusions AND jsonb_typeof(sets.payload->'identityExclusions')='array'
+       ) forbidden WHERE value IS NOT NULL AND length(btrim(value)) >= 4
+     LOOP
+       IF position(lower(identity) in shared_payload) > 0 THEN
+         RAISE EXCEPTION 'Shared market data contains private customer identity.';
+       END IF;
+     END LOOP;
+     RETURN NEW;
+   END $$`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -3971,7 +4054,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 40, migrations: V40_DATABASE_MIGRATIONS },
   { version: 41, migrations: V41_DATABASE_MIGRATIONS },
   { version: 42, migrations: V42_DATABASE_MIGRATIONS },
-  { version: 43, migrations: V43_DATABASE_MIGRATIONS }
+  { version: 43, migrations: V43_DATABASE_MIGRATIONS },
+  { version: 44, migrations: V44_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

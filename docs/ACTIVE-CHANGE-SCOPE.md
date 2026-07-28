@@ -4,10 +4,112 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Paid V3 forensics resume identity and failure transparency (APPROVED)`.
+`Current authority: Paid deep resume identity + shared-market guard (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Paid V3 forensics resume identity and failure transparency (APPROVED)
+## Current authority: Paid deep resume identity + shared-market guard (APPROVED)
+
+**Status: `APPROVED`** — user approved this written allowlist (2026-07-28: "批准").
+Implement only within the closed allowlists and budgets below. Deploy, Docker,
+commit/push, and any new paid validation run require separate later authorization.
+
+### Baseline and evidence
+
+- HEAD `debe66e` (local dirty tree may also hold the unfinished reissue WIP under
+  historical authority; that WIP is **out of this scope** and must not be
+  expanded or committed here).
+- Failed paid deep job `b286633f-28bd-4950-bc08-1c1375e4d754`
+  (report `64c7d182-97cc-4cc6-983a-ebf6d65d0a57`, order `11a43674…`):
+  1. Attempt 1: provider discovery reached `phase=complete`; public-source
+     forensics failed at `observation_persistence` with
+     `Shared market data contains private customer identity.` (V42 guard
+     matching `identityExclusions` such as brand/domain inside SERP
+     title/snippet). Classified **transient**.
+  2. Attempt 2: `ProviderDiscoveryResumeIdentityMismatchError` —
+     `websiteFoundationHash` recomputed from DB-loaded foundation
+     (`baef51a8…`) ≠ checkpoint (`ad62a851…`). Classified **permanent** →
+     terminal fail at progress 98.
+- Design intent of shared-market isolation remains valid for **our authored**
+  query/question text. Applying brand `identityExclusions` to third-party SERP
+  result bodies is product-incorrect and causes false permanent-path retries.
+
+### Design lock
+
+| # | Rule |
+|---|------|
+| 1 | **Frozen resume identity for provider discovery.** When a prior `providerDiscovery` checkpoint exists on the job, the pipeline run identity MUST be taken from that checkpoint’s identity fields (including `websiteFoundationHash` and `evidenceCutoffAt`), not recomputed from live `JSON.stringify(websiteFoundation)`. Fresh runs (no prior checkpoint) still build identity from current inputs. Real authority/model/policy changes on a **new** job remain free to form a new identity; mid-job resume must not self-invalidate completed stages. |
+| 2 | **Stable foundation hash on first write.** Fresh `websiteFoundationHash` MUST use a deterministic canonical JSON serialization (sorted object keys, stable array order as-is) before SHA-256, applied consistently at the provider-discovery and public-source-forensics call sites that currently use raw `JSON.stringify`. |
+| 3 | **Shared-market identity guard V44 (function replace only).** Replace `ogc_reject_private_identity_in_shared_market_data` so that: (a) **query-side** tables `market_snapshot_questions` / `market_snapshot_queries` still reject `order_id`, `report_id`, private≠neutral question text, and `identityExclusions` in the same field surfaces V42 already scans for those tables; (b) **result-side** tables `market_search_observations`, `market_source_evidence`, `market_source_passages`, `market_provider_claims`, and `market_search_attempts` reject only `order_id` and `report_id` (and private≠neutral question text if present in the scanned fields) — **not** brand/domain `identityExclusions`. No table/column/index DDL. Trigger names and attachment tables unchanged. |
+| 4 | **No job replay / no historical mutation.** Do not repair, replay, or re-terminalize job `b286633f` or order `11a43674`. No refund/SLA/commerce changes. No deploy/Docker/push in this scope. |
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/processor.ts` | Resume: pass frozen provider-discovery identity when checkpoint exists; stable foundation hash for fresh runs |
+| `apps/web/src/worker/provider-discovery-pipeline.ts` | Optional small helper to extract identity from checkpoint (only if needed to keep processor thin) |
+| `apps/web/src/worker/public-source-forensics.ts` | Stable foundation hash; when prior forensics checkpoint exists, compare using that checkpoint’s `websiteFoundationHash` / freeze resume identity the same way |
+| `apps/web/src/db/migrations.ts` | Add `V44_DATABASE_MIGRATIONS` function replace + wire into migration list |
+| `apps/web/src/db/index.ts` | `DATABASE_SCHEMA_VERSION = 44` |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+### Tests allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/provider-discovery-pipeline.test.ts` | Resume with prior checkpoint ignores recomputed foundation hash drift when identity is frozen from checkpoint (via production wiring test or pipeline identity input) |
+| `apps/web/src/worker/processor.test.ts` and/or new focused unit test under `apps/web/src/worker/` | Fresh vs resume identity construction for provider discovery |
+| `apps/web/src/db/schema-v44.postgres.test.ts` (new) | Query-side still rejects exclusion brand in `normalized_question`/`query_text`; result-side allows brand in title/snippet/excerpt; still rejects order/report id leakage |
+| `apps/web/src/db/index.test.ts` | Schema version 44 + `databaseMigrationsAfter` chain |
+| `apps/web/src/db/schema-v42.postgres.test.ts` | Only if required for version-chain bookkeeping comments; prefer not to weaken V42 historical assertions—V44 tests carry the new contract |
+
+### Forbidden
+
+- Touches to `commercial-orders.ts` / reissue WIP (user-owned dirty files)
+- Refund, SLA, commerce reconciliation, email, checkout UI/routes
+- Replaying or mutating job `b286633f`, order `11a43674`, report `64c7d182`
+- Broad `docker system prune`, production deploy, new paid Sandbox run
+- Softening query-side exclusion checks (questions/queries must still strip brands)
+- LLM-based privacy judgment
+- Changing permanent/transient taxonomy tables beyond what falls out of the above (no drive-by job-errors rewrite unless a single-line mapper is required by a new typed error—prefer none)
+
+### Diff budget
+
+- Production source: ≤ 220 changed lines. Hard limit.
+- Tests: ≤ 280 changed lines (tracking bound, measured +20%).
+- Docs: ≤ 80 changed lines.
+
+### Acceptance checks
+
+1. Unit: provider-discovery resume with prior complete/partial checkpoint succeeds when live foundation JSON hash would differ but checkpoint identity is reused.
+2. Postgres V44: observation title containing a known `identityExclusions` brand is **accepted**; normalized_question containing the same brand is **rejected**; observation containing a `report_id` UUID substring still **rejected**.
+3. `npm test`, `npm run lint`, `npm run build` green.
+4. Deploy / re-run of a paid deep job requires a **separate** later authorization.
+
+**Deployment authorization (2026-07-28: "确认 授权"):** user authorized
+commit + push of this fix **and** the historical question-set reissue fix
+(two separate commits), Staging redeployment (Vercel Web + Docker overlay
+Workers), submission of the pending refund for order `11a43674` via the
+standard staging commerce reconciliation (Sandbox), and one fresh paid
+validation run (user unlocks report `45a6f76a` via the reissue path).
+Terminal jobs `b286633f` / `5dbaea88` remain untouched.
+
+## Historical: Re-checkout after terminal refund via question-set reissue (APPROVED, WIP outside this lock)
+
+**Status: `APPROVED` historically** — user approved (2026-07-28: "批准方案B的修改").
+Local dirty files `commercial-orders.ts` + reissue test may remain user/agent WIP
+but are **not** authorized by the current FROZEN section above.
+
+### Baseline and evidence (historical)
+
+- Report `45a6f76a` re-checkout blocked by locked question set on terminal-refunded order.
+
+### Design lock (historical)
+
+Reissue confirmed question-set revision on terminal-refunded binding only; no
+schema change; no mutation of refunded order.
+
+## Historical: Paid V3 forensics resume identity and failure transparency (APPROVED, implemented)
 
 **Status: `APPROVED`** — user approved this written allowlist (2026-07-28:
 "可以，开始修复"). Implement only within the closed allowlists and budgets
