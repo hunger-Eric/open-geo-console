@@ -83,10 +83,10 @@ import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { JobExecutionLease, configuredJobHardDeadlineMs } from "./job-execution";
 import { escalateFingerprintRecurrence, hasPriorJobErrorFingerprint, normalizeJobError, OrchestrationInvariantError } from "./job-errors";
 import { assertStagingCommandEnvironment } from "@/security/deployment-policy";
-import { createPublicSourceAttemptBudget } from "./public-source-execution-budget";
+import { createPublicSourceAttemptBudget, type PublicSourceAttemptBudget } from "./public-source-execution-budget";
 import { phaseForStage, recoveryEnvelope } from "./job-state";
 import type { StagingLiveDrill } from "./staging-live-drill";
-import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
+import { resolvePublicSourceSnapshot, isDeferrablePublicSourceOutage, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
 import { createProductionProviderDiscoveryContext } from "./provider-discovery-production";
 import {
   identityFromProviderDiscoveryCheckpoint,
@@ -637,8 +637,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       configuredSecrets: [process.env.OGC_AI_API_KEY ?? "", process.env.OGC_PUBLIC_SEARCH_MIMO_API_KEY ?? ""]
     });
     // A recurring transient fingerprint in the same job+phase is deterministic:
-    // escalate to permanent instead of burning the remaining attempts.
-    if (normalized.classification === "transient" && await hasPriorJobErrorFingerprint(job.id, normalized.fingerprint)) {
+    // escalate to permanent instead of burning the remaining attempts. A
+    // deferrable provider outage instead retries without consuming the attempt
+    // budget, bounded by the existing hard deadline/SLA.
+    const deferPhaseAttempt = normalized.classification === "transient" && isDeferrablePublicSourceOutage(error);
+    if (!deferPhaseAttempt && normalized.classification === "transient" && await hasPriorJobErrorFingerprint(job.id, normalized.fingerprint)) {
       normalized = escalateFingerprintRecurrence(normalized);
     }
     // V4 owns commercial terminalization, but ordinary runner failures still
@@ -648,7 +651,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       code: normalized.code, publicMessage: "The analysis is temporarily unavailable.",
       retryable: normalized.classification === "transient",
       classification: normalized.classification === "operator_repairable" ? "operator_repairable" : normalized.classification === "target_limitation" ? "target_limitation" : undefined,
-      internalError: normalized, phase
+      internalError: normalized, phase, ...(deferPhaseAttempt ? { defer: true as const } : {})
     });
     if (job.tier === "free" && failedJob.stage === "failed") {
       const report = await getGeoReport(job.reportId);
@@ -1232,7 +1235,7 @@ async function finalizeRecommendationJob(input: {
       : null;
     const result = resumedPublicSource ?? await (async () => {
       if (checkpointPhase() === "public_source_preflight") input.liveDrill?.inject({ jobId: input.job.id, fault: "v2_runtime" });
-      createPublicSourceAttemptBudget(input.remainingMs);
+      const publicSourceBudget = createPublicSourceAttemptBudget(input.remainingMs);
       const dependencies = await createProductionPublicSourceForensicsDependencies(process.env, {
         createDependencies: async (runtime) => createWorkerPublicSourceForensicsDependencies({
           job: input.job,
@@ -1242,6 +1245,7 @@ async function finalizeRecommendationJob(input: {
           onCheckpointSaved: async (next) => { checkpoint = next; },
           checkpointJob: input.checkpointJob,
           retrieveSource: createWorkerPublicSourceRetriever(),
+          publicSourceBudget,
           // This verifies the canonical V2 HTML and a real Chromium PDF before the
           // atomic terminalization boundary; it never persists a report itself.
           artifactReadiness,
@@ -1391,7 +1395,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     await terminalizeReadyCombinedArtifact(input, ready, resumedV3.checkpoint.identityHash, resumedV3.commercialSnapshotRefs);
     return;
   }
-  createPublicSourceAttemptBudget(input.remainingMs);
+  const publicSourceBudget = createPublicSourceAttemptBudget(input.remainingMs);
   const client = createConfiguredClient();
   let generativeCheckpoint: AnswerFirstV3CheckpointV2 | null = null;
   if (input.job.artifactContract === "combined_geo_report_v3") {
@@ -1463,6 +1467,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     checkpointJob: input.checkpointJob,
     retrieveSource: createWorkerPublicSourceRetriever(),
     artifactReadiness: { async verify() { /* canonical combined V2 readiness runs below */ } },
+    publicSourceBudget,
     forceSnapshotRefreshAfter: input.forceSnapshotRefreshAfter,
     liveDrill: input.liveDrill,
     semanticValidation,
@@ -1882,6 +1887,7 @@ export interface WorkerPublicSourceForensicsDependencyInput {
   retrieveSource?: PublicSourceRetriever;
   artifactReadiness?: ArtifactReadinessGate;
   forceSnapshotRefreshAfter?: string;
+  publicSourceBudget?: PublicSourceAttemptBudget;
   liveDrill?: StagingLiveDrill;
   semanticValidation?: "legacy" | "deferred";
   signal?: AbortSignal;
@@ -1920,6 +1926,7 @@ export function createWorkerPublicSourceForensicsDependencies(
       retrieveSource: input.retrieveSource,
       retrievalGate,
       forceRefreshAfter: input.forceSnapshotRefreshAfter,
+      ...(input.publicSourceBudget ? { executionBudget: input.publicSourceBudget } : {}),
       signal: input.signal
     }),
     resolveSnapshotById: async ({ snapshotId, questionId, fanout, retrievalGate }) => {
@@ -1939,6 +1946,7 @@ export function createWorkerPublicSourceForensicsDependencies(
         leaseOwner: `public-source:${input.job.id}:${input.workerId}`,
         retrieveSource: input.retrieveSource,
         retrievalGate,
+        ...(input.publicSourceBudget ? { executionBudget: input.publicSourceBudget } : {}),
         signal: input.signal
       });
       return resolved.snapshotId === snapshotId ? resolved : null;

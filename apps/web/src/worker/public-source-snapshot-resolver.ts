@@ -25,6 +25,7 @@ import {
   createMarketSnapshotRefresh,
   findResumableMarketSnapshot,
   findExactMarketSnapshot,
+  findPrefixReusableMarketSnapshot,
   getMarketSnapshotBundle,
   heartbeatMarketSnapshotLease,
   releaseFailedMarketSnapshotLease,
@@ -36,6 +37,7 @@ import {
 import { appendMarketSourcePassages } from "@/db/provider-evidence";
 import { createConcurrencyGate, mapWithConcurrency, type ConcurrencyGate } from "./bounded-scheduler";
 import { JobError } from "./job-errors";
+import { splitPublicSourceSubBudgetMs } from "./public-source-execution-budget";
 import { createPublicSourceRetrievalPlan } from "./public-source-plan";
 
 export interface ResolvedPublicSourceSnapshotValue {
@@ -85,6 +87,8 @@ export interface ResolvePublicSourceSnapshotInput {
   maxAvailableSources?: number;
   maxSourcesPerDomain?: number;
   searchConcurrency?: 1 | 2;
+  /** Propagated attempt sub-budgets; split into per-query/per-source deadlines. */
+  executionBudget?: { searchMs: number; retrievalMs: number };
   selectProviderPassages?: (input: { fact: RetrievedPublicSourceFact; sourceEvidenceId: string }) => ProviderEvidencePassage[];
   snapshotMetadata?: {
     snapshotKind: "standard_question" | "provider_discovery" | "candidate_verification";
@@ -96,6 +100,8 @@ export interface ResolvePublicSourceSnapshotInput {
 
 const DEFAULT_LEASE_DURATION_MS = 5 * 60_000;
 const DEFAULT_WAIT_DEADLINE_MS = 15_000;
+/** Grace after a live holder's lease expiry so a completing refresh is never cut off mid-write. */
+const LEASE_WAIT_COMPLETION_GRACE_MS = 30_000;
 
 export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnapshotInput): Promise<ResolvedPublicSourceSnapshotValue> {
   assertExactRuntime(input);
@@ -123,9 +129,13 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
       if (forceRefresh) throw new PublicSourceSnapshotAuthorityMismatchError();
       return resolvePublicSourceSnapshot({ ...input, forceRefresh: true, leaseDurationMs });
     }
+    // A real refresh takes minutes while the holder heartbeats. Block until the
+    // holder's live lease lapses (plus a completion grace) instead of failing
+    // after 15 s and colliding with the same live lease on every retry.
+    const waitDeadlineMs = positive(input.waitDeadlineMs ?? DEFAULT_WAIT_DEADLINE_MS, "waitDeadlineMs");
     const waited = await waitForMarketSnapshot({
       identity,
-      deadline: new Date(Date.now() + positive(input.waitDeadlineMs ?? DEFAULT_WAIT_DEADLINE_MS, "waitDeadlineMs")),
+      deadline: new Date(Math.max(Date.now() + waitDeadlineMs, claim.lease.expiresAt.getTime() + LEASE_WAIT_COMPLETION_GRACE_MS)),
       signal: input.signal,
       acceptSnapshot: (snapshot) => snapshotMetadataMatches(snapshot, input.snapshotMetadata)
     });
@@ -181,6 +191,7 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     } else {
       failureStage = "search_execution";
       await appendMarketSnapshotQueries({ snapshotId: currentSnapshotId, token: claim.token, queries });
+      const perQuerySearchMs = input.executionBudget ? splitPublicSourceSubBudgetMs(input.executionBudget.searchMs, input.fanout.queries.length) : null;
       const queryResults = await mapWithConcurrency(input.fanout.queries, searchConcurrency, async (query, queryOrder) => {
         input.signal?.throwIfAborted();
         const storedQuery = queries[queryOrder]!;
@@ -188,7 +199,7 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
           snapshotId: currentSnapshotId, queryId: storedQuery.id, token: claim.token,
           idempotencyReference: deterministicId("public-search-attempt", [currentSnapshotId, storedQuery.id]), configuredCostMicros: input.fanout.budget.maxCostMicros
         });
-        const observed = await observePublicSearch({ adapter: input.adapter, query, budget: input.fanout.budget, signal: input.signal ?? new AbortController().signal });
+        const observed = await observePublicSearch({ adapter: input.adapter, query, budget: input.fanout.budget, signal: unitDeadlineSignal(input.signal, perQuerySearchMs) });
         // Provider observation identifiers are not guaranteed to be unique
         // across fanout queries. The persisted attempt is the authoritative,
         // snapshot-scoped observation identity used by retrieval provenance.
@@ -247,9 +258,17 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
   } catch (error) {
     await releaseFailedMarketSnapshotLease({ token: claim.token, ...(snapshotId ? { snapshotId } : {}), preserveRefreshingSnapshot: input.signal?.aborted === true }).catch(() => undefined);
     if (input.signal?.aborted) throw input.signal.reason;
-    if (error instanceof PublicSourceSnapshotUnavailableError && prior && ["lease_wait", "search_execution", "source_retrieval"].includes(error.stage)) {
-      const fallback = await resolveExisting({ ...input, identity, evidenceCutoff, snapshotId: prior.snapshot.id, ageMs: prior.ageMs });
-      return { ...fallback, refreshAttempted: true, refreshFailed: true };
+    // Fallback chain, in order: exact metadata-matching prior, then a
+    // prefix-equivalent completed snapshot for the same question + surface
+    // (different identity/fanoutVersion/budget), then a metadata-mismatched
+    // exact prior downgraded to stale-but-usable. All are fallback-only: the
+    // exact-identity fresh refresh above remains the primary path.
+    if (error instanceof PublicSourceSnapshotUnavailableError && ["lease_wait", "search_execution", "source_retrieval"].includes(error.stage)) {
+      const fallbackPrior = prior ?? await findPrefixPrior(input, identity, evidenceCutoff) ?? (metadataMismatch ? exactPrior : null);
+      if (fallbackPrior) {
+        const fallback = await resolveExisting({ ...input, identity, evidenceCutoff, snapshotId: fallbackPrior.snapshot.id, ageMs: fallbackPrior.ageMs, allowStaleMetadata: fallbackPrior !== prior });
+        return { ...fallback, refreshAttempted: true, refreshFailed: true };
+      }
     }
     if (error instanceof PublicSourceSnapshotUnavailableError || error instanceof PublicSourceSnapshotAuthorityMismatchError) throw error;
     throw new PublicSourceSnapshotUnavailableError(failureStage, { cause: error });
@@ -258,12 +277,30 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
   }
 }
 
-async function resolveExisting(input: ResolvePublicSourceSnapshotInput & { identity: ReturnType<typeof createMarketSnapshotIdentity>; evidenceCutoff: Date; snapshotId: string; ageMs: number }): Promise<ResolvedPublicSourceSnapshotValue> {
-  const bundle = await getMarketSnapshotBundle(input.snapshotId);
+/** Prefix-equivalent prior lookup for the fallback chain: same question text + surface, stored queries a strict exact prefix of the fanout's. */
+async function findPrefixPrior(
+  input: ResolvePublicSourceSnapshotInput,
+  identity: ReturnType<typeof createMarketSnapshotIdentity>,
+  evidenceCutoff: Date
+): Promise<Awaited<ReturnType<typeof findPrefixReusableMarketSnapshot>>> {
+  return findPrefixReusableMarketSnapshot({
+    questionHash: sha(input.question.normalizedText),
+    authorityVersion: input.authority.authorityId,
+    locale: identity.locale,
+    region: identity.region,
+    surfaceId: identity.surfaceId,
+    surfaceVersion: identity.surfaceVersion,
+    excludeCacheIdentity: identity.id,
+    queryTexts: input.fanout.queries.map((query) => query.exactQuery),
+    evidenceCutoff
+  });
+}
+
+async function resolveExisting(input: ResolvePublicSourceSnapshotInput & { identity: ReturnType<typeof createMarketSnapshotIdentity>; evidenceCutoff: Date; snapshotId: string; ageMs: number; allowStaleMetadata?: boolean }): Promise<ResolvedPublicSourceSnapshotValue> {  const bundle = await getMarketSnapshotBundle(input.snapshotId);
   if (!bundle || bundle.snapshot.status !== "completed" || bundle.snapshot.surfaceAuthorityVersion !== input.authority.authorityId) {
     throw new PublicSourceSnapshotAuthorityMismatchError();
   }
-  if (!snapshotMetadataMatches(bundle.snapshot, input.snapshotMetadata)) throw new PublicSourceSnapshotAuthorityMismatchError();
+  if (!input.allowStaleMetadata && !snapshotMetadataMatches(bundle.snapshot, input.snapshotMetadata)) throw new PublicSourceSnapshotAuthorityMismatchError();
   const observations = toObservations(bundle, input.authority.surface, input.fanout);
   const retrievals = factsFromBundle(bundle, input.fanout);
   const cost = knownCost(bundle.attempts);
@@ -285,6 +322,7 @@ async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput
   const existingBundle = await getMarketSnapshotBundle(input.snapshotId);
   const existingFacts = existingBundle ? factsFromBundle(existingBundle, input.input.fanout) : [];
   const existingSourceKeys = new Set(existingBundle?.sources.map((source) => `${source.observationId}\n${source.canonicalUrl}`) ?? []);
+  const perSourceRetrievalMs = input.input.executionBudget ? splitPublicSourceSubBudgetMs(input.input.executionBudget.retrievalMs, Math.max(1, plan.length)) : null;
   const storedQueryIds = new Map(input.observations.map(({ observation, storedQueryId }) => [observation.observationId, storedQueryId]));
   const gate = input.input.retrievalGate ?? createConcurrencyGate(4);
   let availableCount = existingFacts.length;
@@ -303,7 +341,7 @@ async function appendRetrievals(input: { input: ResolvePublicSourceSnapshotInput
       await appendMarketSourceEvidence({ token: input.token, sources: [{ ...base, retrievalState: "not_retrieved", sourceCategory: "unknown", entities: [], claims: [], contradictions: [], evidenceFamilyIdentity: deterministicId("evidence-family", [canonicalUrl]) }] });
       return null;
     }
-    const value = await input.input.retrieveSource({ observation, result, signal: input.input.signal ?? new AbortController().signal });
+    const value = await input.input.retrieveSource({ observation, result, signal: unitDeadlineSignal(input.input.signal, perSourceRetrievalMs) });
     if (value.fact.observationId !== observation.observationId || value.fact.queryId !== observation.queryId || canonicalizePublicSourceUrl(value.fact.resultUrl) !== canonicalUrl) throw new PublicSourceSnapshotUnavailableError("source_retrieval");
     try {
       await appendMarketSourceEvidence({ token: input.token, sources: [{ ...base, ...value.source }] });
@@ -451,6 +489,12 @@ function observationId(snapshotId: string, queryId: string, order: number, canon
 function snapshotQueryId(snapshotId: string, queryId: string): string { return deterministicId("market-snapshot-query", [snapshotId, queryId]); }
 function fanoutHash(fanout: SearchQueryFanout): string { return sha(JSON.stringify({ questionId: fanout.questionId, questionSetVersion: fanout.questionSetVersion, fanoutVersion: fanout.fanoutVersion, surface: fanout.surface, queries: fanout.queries.map(({ id, exactQuery, derivationRuleId, resultDepth }) => ({ id, exactQuery, derivationRuleId, resultDepth })) })); }
 function knownCost(attempts: Array<{ providerCostMicros: number | null }>): number { return attempts.reduce((total, attempt) => total + (attempt.providerCostMicros ?? 0), 0); }
+/** Combines the caller's abort signal with a per-unit deadline from a propagated sub-budget. */
+function unitDeadlineSignal(outer: AbortSignal | undefined, deadlineMs: number | null): AbortSignal {
+  if (deadlineMs === null) return outer ?? new AbortController().signal;
+  const timeout = AbortSignal.timeout(deadlineMs);
+  return outer ? AbortSignal.any([outer, timeout]) : timeout;
+}
 function sha(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function snapshotMetadataMatches(
   snapshot: { snapshotKind: string; parentSnapshotId: string | null; candidateSetHash: string | null; queryPlanVersion: string },
@@ -485,4 +529,15 @@ export class PublicSourceSnapshotUnavailableError extends JobError {
       options
     );
   }
+}
+
+/**
+ * Provider-outage stages: the refresh itself could not run, so a later attempt
+ * may succeed. The job defers without consuming its phase-attempt budget
+ * (bounded by the existing hard deadline/SLA); deterministic stages keep the
+ * ordinary transient classification and W1 fingerprint escalation.
+ */
+const DEFERRABLE_OUTAGE_STAGES: ReadonlySet<PublicSourceSnapshotFailureStage> = new Set(["lease_wait", "search_execution", "source_retrieval"]);
+export function isDeferrablePublicSourceOutage(error: unknown): error is PublicSourceSnapshotUnavailableError {
+  return error instanceof PublicSourceSnapshotUnavailableError && DEFERRABLE_OUTAGE_STAGES.has(error.stage);
 }

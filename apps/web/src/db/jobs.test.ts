@@ -4,6 +4,7 @@ import {
   assertCheckpointSemanticReviewCarrierUpdate,
   assertFulfillmentPair,
   deriveScanJobQueueStatus,
+  phaseAttemptAfterFailure,
   retryScanJob
 } from "./jobs";
 
@@ -107,5 +108,14 @@ describe("scan job semantic-review carrier", () => {
     expect(() => assertCheckpointSemanticReviewCarrierUpdate({
       semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
     }, { semanticReviewContractVersion: "report-semantic-review-v2" } as never)).toThrow();
+  });
+});
+
+describe("scan job defer attempt accounting", () => {
+  it("restores the burned attempt only for defer-classified failures", () => {
+    expect(phaseAttemptAfterFailure(3, true)).toBe(2);
+    expect(phaseAttemptAfterFailure(1, true)).toBe(0);
+    expect(phaseAttemptAfterFailure(3, false)).toBe(3);
+    expect(phaseAttemptAfterFailure(3)).toBe(3);
   });
 });

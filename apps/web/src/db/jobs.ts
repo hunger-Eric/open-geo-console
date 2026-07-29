@@ -586,7 +586,7 @@ export async function finishScanJob(
 export async function failScanJob(
   id: string,
   workerId: string,
-  error: { code: string; publicMessage: string; retryable: boolean; classification?: "operator_repairable" | "target_limitation"; internalError?: NormalizedJobError; phase?: ScanJobPhase }
+  error: { code: string; publicMessage: string; retryable: boolean; classification?: "operator_repairable" | "target_limitation"; internalError?: NormalizedJobError; phase?: ScanJobPhase; defer?: boolean }
 ): Promise<ScanJobRow> {
   if (error.classification === "operator_repairable") {
     await ensureDatabase();
@@ -627,14 +627,20 @@ export async function failScanJob(
       FROM scan_jobs WHERE id=${id} AND lease_owner=${workerId} AND lease_expires_at > now() FOR UPDATE
     `;
     const job = candidates[0];
-    if (!job || job.phase_attempt >= job.max_attempts) return false;
+    if (!job) return false;
+    // A deferred failure (provider outage, no prior fallback) retries without
+    // consuming the attempt this claim burned; the existing hard deadline/SLA
+    // remains the bound.
+    const phaseAttempt = phaseAttemptAfterFailure(job.phase_attempt, error.defer);
+    if (phaseAttempt >= job.max_attempts) return false;
     const errorEventId = error.internalError ? await JobTransitionService.appendError(tx, { jobId: id,
       phase: error.phase ?? job.current_phase, checkpointRevision: job.checkpoint_revision, jobAttempt: job.attempts,
       phaseAttempt: job.phase_attempt, resumeGeneration: job.resume_generation, error: error.internalError }) : null;
     const retryAt = error.internalError?.retryableAt?.toISOString() ?? new Date(Date.now() + 15_000).toISOString();
     await tx`
       UPDATE scan_jobs SET execution_state='retry_wait', lease_owner=NULL, lease_expires_at=NULL,
-        retry_not_before=${retryAt}, error_code=${error.code}, public_error=${error.publicMessage}, updated_at=now() WHERE id=${id}
+        retry_not_before=${retryAt}, error_code=${error.code}, public_error=${error.publicMessage},
+        phase_attempt=${phaseAttempt}, updated_at=now() WHERE id=${id}
     `;
     await JobTransitionService.appendTransition(tx, { jobId: id, fromState: job.execution_state, toState: "retry_wait",
       phase: error.phase ?? job.current_phase, checkpointRevision: job.checkpoint_revision, reasonCode: error.code, errorEventId });
@@ -723,6 +729,11 @@ export function isBillableCoverage(input: {
     return false;
   }
   return input.successfulPages / input.plannedPages >= 0.7;
+}
+
+/** Attempt accounting after a failure: a defer restores the attempt the current claim burned. */
+export function phaseAttemptAfterFailure(phaseAttempt: number, defer?: boolean): number {
+  return defer === true ? Math.max(0, phaseAttempt - 1) : phaseAttempt;
 }
 
 export function isTerminalStage(stage: ScanJobStage): boolean {

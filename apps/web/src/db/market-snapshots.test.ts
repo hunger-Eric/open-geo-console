@@ -10,6 +10,7 @@ import {
   completeMarketSnapshotLease,
   createMarketSnapshotRefresh,
   findExactMarketSnapshot,
+  findPrefixReusableMarketSnapshot,
   getMarketSnapshotBundle,
   releaseFailedMarketSnapshotLease,
   waitForMarketSnapshot
@@ -110,6 +111,46 @@ describe("market snapshot deterministic memory repository", () => {
   });
 });
 
+describe("market snapshot prefix-reuse lookup", () => {
+  beforeEach(() => {
+    delete process.env.DATABASE_URL;
+    process.env.OPEN_GEO_DB_PATH = `memory-market-prefix-${randomUUID()}`;
+  });
+
+  it("finds the latest completed strict-prefix snapshot for the same question and surface", async () => {
+    const fixture = await setup("prefix");
+    const texts = ["q-one", "q-two", "q-three"];
+    const snapshot = await completeFixtureWithQueries(fixture.identity, fixture.authorityVersion, "worker-prefix", texts);
+    const found = await findPrefixReusableMarketSnapshot({
+      questionHash: sha(fixture.identity.normalizedQuestion), authorityVersion: fixture.authorityVersion,
+      locale: fixture.identity.locale, region: fixture.identity.region,
+      surfaceId: fixture.identity.surfaceId, surfaceVersion: fixture.identity.surfaceVersion,
+      excludeCacheIdentity: `market-${"0".repeat(64)}`,
+      queryTexts: [...texts, "q-four", "q-five", "q-six"], evidenceCutoff: new Date(Date.now() + 1_000)
+    });
+    expect(found?.snapshot.id).toBe(snapshot.id);
+    expect(found?.freshness).toBe("fresh");
+  });
+
+  it("rejects cross-question, cross-surface, non-prefix, and reordered candidates", async () => {
+    const fixture = await setup("reject");
+    const base = {
+      questionHash: sha(fixture.identity.normalizedQuestion), authorityVersion: fixture.authorityVersion,
+      locale: fixture.identity.locale, region: fixture.identity.region,
+      surfaceId: fixture.identity.surfaceId, surfaceVersion: fixture.identity.surfaceVersion,
+      evidenceCutoff: new Date(Date.now() + 1_000)
+    };
+    await completeFixtureWithQueries(fixture.identity, fixture.authorityVersion, "worker-reject", ["q-two", "q-one"]);
+    const other = `market-${"0".repeat(64)}`;
+    expect(await findPrefixReusableMarketSnapshot({ ...base, excludeCacheIdentity: other, queryTexts: ["q-one", "q-two", "q-three"] })).toBeNull();
+    expect(await findPrefixReusableMarketSnapshot({ ...base, excludeCacheIdentity: other, queryTexts: ["q-zero", "q-two", "q-one", "q-three"] })).toBeNull();
+    expect(await findPrefixReusableMarketSnapshot({ ...base, excludeCacheIdentity: other, queryTexts: ["q-two"] })).toBeNull();
+    expect(await findPrefixReusableMarketSnapshot({ ...base, excludeCacheIdentity: other, questionHash: sha("其他货运问题"), queryTexts: ["q-two", "q-one", "q-three"] })).toBeNull();
+    expect(await findPrefixReusableMarketSnapshot({ ...base, excludeCacheIdentity: other, surfaceId: "surface-b", queryTexts: ["q-two", "q-one", "q-three"] })).toBeNull();
+    expect(await findPrefixReusableMarketSnapshot({ ...base, excludeCacheIdentity: fixture.identity.id, queryTexts: ["q-two", "q-one", "q-three"] })).toBeNull();
+  });
+});
+
 async function setup(variant = "") {
   const surface = { surfaceId: "surface-a", providerId: "provider-a", productId: "search", surfaceKind: "documented_api" as const, contractVersion: "1", surfaceVersion: "2026-07", adapterVersion: "1", locale: "zh-CN", region: "CN" };
   const installed = await installPublicSearchSurfaceAuthority({ environment: "staging", adapterId: "fixture", providerId: surface.providerId, productId: surface.productId, modelId: "fixture-model", adapterVersion: surface.adapterVersion, surfaceId: surface.surfaceId, surfaceVersion: surface.surfaceVersion, localeCapabilities: [surface.locale], regionCapabilities: [surface.region], termsReviewedAt: "2030-01-01T00:00:00.000Z", evidenceReferences: ["review"], capturedAt: "2030-01-02T00:00:00.000Z", active: false });
@@ -136,4 +177,17 @@ async function completeFixture(identity: MarketSnapshotIdentity, authorityVersio
 }
 
 function query(snapshotId: string) { return { id: `query-${sha(snapshotId).slice(0, 16)}`, queryOrder: 0, queryText: "深圳 台湾 运输公司", queryHash: sha("深圳 台湾 运输公司"), derivationRule: "direct" }; }
+
+async function completeFixtureWithQueries(identity: MarketSnapshotIdentity, authorityVersion: string, leaseOwner: string, queryTexts: string[]) {
+  const claim = await acquireMarketSnapshotLease({ cacheIdentity: identity.id, leaseOwner, leaseDurationMs: 10_000 });
+  if (!claim.acquired) throw new Error("Expected fixture lease.");
+  const snapshot = await createMarketSnapshotRefresh({ identity, authorityVersion, token: claim.token, questionHash: sha(identity.normalizedQuestion) });
+  const queries = queryTexts.map((text, queryOrder) => ({ id: `query-${sha(`${snapshot.id}-${queryOrder}`).slice(0, 16)}`, queryOrder, queryText: text, queryHash: sha(text), derivationRule: "direct" }));
+  await appendMarketSnapshotQueries({ snapshotId: snapshot.id, token: claim.token, queries });
+  for (const [queryOrder, stored] of queries.entries()) {
+    const attempt = await beginMarketSearchAttempt({ snapshotId: snapshot.id, queryId: stored.id, token: claim.token, idempotencyReference: `attempt-${snapshot.id}-${queryOrder}`, configuredCostMicros: 1 });
+    await completeMarketSearchAttempt({ attemptId: attempt.id, token: claim.token, requestStatus: "succeeded", usage: { requestCount: 1, resultCount: 0 }, providerCostMicros: 1, costUncertain: false });
+  }
+  return completeMarketSnapshotLease({ snapshotId: snapshot.id, token: claim.token, queryFanoutHash: sha(`fanout-${snapshot.id}`) });
+}
 function sha(value: string) { return createHash("sha256").update(value).digest("hex"); }

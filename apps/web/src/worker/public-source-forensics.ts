@@ -94,18 +94,22 @@ export async function runPublicSourceForensicsPipeline(input: {
       prior.adapterIdentityHash !== adapterIdentityHash(authority))) throw new PublicSourceResumeIdentityMismatchError();
   const evidenceCutoffAt = prior?.evidenceCutoffAt ?? (input.dependencies.now ?? (() => new Date()))().toISOString();
   const retrievalGate = createConcurrencyGate(4);
-  const snapshots = await Promise.all(fanouts.map(async (fanout, index) => {
+  const resolutions = await Promise.all(fanouts.map(async (fanout, index) => {
     input.signal?.throwIfAborted();
     const priorSnapshotId = prior && prior.snapshotIds.length === fanouts.length ? prior.snapshotIds[index]! : null;
     if (priorSnapshotId && input.dependencies.resolveSnapshotById) {
       const resumed = await input.dependencies.resolveSnapshotById({ snapshotId: priorSnapshotId, questionId: fanout.questionId, fanout, evidenceCutoffAt, retrievalGate });
       if (resumed) {
         if (resumed.snapshotId !== priorSnapshotId || resumed.questionId !== fanout.questionId) throw new PublicSourceResumeIdentityMismatchError();
-        return resumed;
+        return { snapshot: resumed, reFetched: false };
       }
     }
-    return input.dependencies.resolveSnapshot({ questionId: fanout.questionId, fanout, evidenceCutoffAt, retrievalGate });
+    // A prior snapshot unavailable at resume is re-collected through the normal
+    // resolution path; the checkpoint below is updated to the new fetch instead
+    // of failing on the resulting identity change.
+    return { snapshot: await input.dependencies.resolveSnapshot({ questionId: fanout.questionId, fanout, evidenceCutoffAt, retrievalGate }), reFetched: priorSnapshotId !== null };
   }));
+  const snapshots = resolutions.map(({ snapshot }) => snapshot);
   input.signal?.throwIfAborted();
   const actualCostMicros = snapshots.reduce((sum, item) => sum + item.actualCostMicros, 0);
   const decision = decidePublicSourceCommercialCoverage({ authorityReady: true, evidenceIsolated: snapshots.every((item) => item.questionId && item.snapshotId),
@@ -118,8 +122,15 @@ export async function runPublicSourceForensicsPipeline(input: {
   const sourceGraph = buildPublicSourceEvidenceGraph({ observations, retrievals,
     customerRegistrableDomain: new URL(input.targetUrl).hostname, competitorRegistrableDomains: [] });
   const checkpoint = createCheckpoint({ input, questions, fanouts, snapshots, evidenceCutoffAt, authority });
-  if (prior && prior.identityHash !== checkpoint.identityHash) throw new PublicSourceResumeIdentityMismatchError();
-  if (!prior) await input.dependencies.saveCheckpoint(input.jobId, checkpoint);
+  if (prior && prior.identityHash !== checkpoint.identityHash) {
+    // Only a re-fetch of an unavailable prior snapshot may move the checkpoint
+    // identity; genuine authority drift (question set, foundation hash) already
+    // failed above and any other divergence stays permanent.
+    if (!resolutions.some(({ reFetched }) => reFetched)) throw new PublicSourceResumeIdentityMismatchError();
+    await input.dependencies.saveCheckpoint(input.jobId, checkpoint);
+  } else if (!prior) {
+    await input.dependencies.saveCheckpoint(input.jobId, checkpoint);
+  }
   const priceMicros = 29_000_000;
   const report = (input.dependencies.buildReport ?? buildPublicSourceForensicReport)({ reportId: input.reportId, jobId: input.jobId,
     targetUrl: input.targetUrl, locale: input.locale, region: input.region, generatedAt: evidenceCutoffAt, evidenceCutoffAt,

@@ -4,10 +4,96 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Code-AI seam hardening W1 — failure-classification skeleton (APPROVED)`.
+`Current authority: Code-AI seam hardening W2 — public-source snapshot availability (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Code-AI seam hardening W1 — failure-classification skeleton (APPROVED)
+## Current authority: Code-AI seam hardening W2 — public-source snapshot availability (APPROVED)
+
+**Status: `APPROVED`** — user approved this written allowlist on 2026-07-29
+("批准"). Deployment, staging reruns, and the MiMo probe remain excluded and
+require separate later authorization.
+
+### Baseline and evidence
+
+- HEAD `b75b750` (W1 committed, not yet deployed; Staging Web runs `e3fe6a0`,
+  Workers `staging-737ad6d-overlay-v1`).
+- Parent design: session plan `shazam-stargirl-stargirl.md` (approved
+  2026-07-29), workstream W2. W1 scope above is complete.
+- Staging evidence:
+  - job `36c78f69` (report `1940f8e8`, paid, failed @98): MiMo outage window
+    from 02:47:54Z; 24/24 fanout attempts timed out (~30 s each) across 4
+    retries ~2 min apart — every retry landed inside the same outage window.
+    Forensics fanout identity `market-28d78e5a…` (6 queries) had **no**
+    completed prior snapshot, while the same question's provider-discovery
+    identity `market-8208165f…` (3 queries, a strict prefix of the 6) had
+    completed snapshots at 01:14 and 02:46 that could not be reused
+    (`public-source-snapshot-resolver.ts:106-111` requires exact identity +
+    metadata match).
+  - job `b286633f` (failed @98): `observation_persistence` privacy-trigger
+    rejection retried as transient, then permanent resume-identity mismatch.
+  - `market_snapshot_leases`: lease-wait deadline is 15 s
+    (`public-source-snapshot-resolver.ts:97-98`) while a real refresh takes
+    minutes, so retries repeatedly collide with the previous lease.
+  - `public-source-execution-budget.ts:20-23` returns sub-budgets that call
+    sites (`processor.ts:1230,:1389`) discard.
+
+### Design lock
+
+| # | Rule |
+|---|------|
+| 1 | **Prefix-equivalent snapshot reuse as fallback only.** When the forensics fanout's first N queries exactly match a completed provider-discovery snapshot's query set for the same question text + surface, the resolver may use that snapshot as the prior-fallback (same role as the existing prior-snapshot path). Exact-identity fresh refresh remains the primary path; reuse never crosses questions and never replaces the primary path. Metadata mismatch on an otherwise usable prior downgrades to "stale but usable" instead of forcing refresh when a refresh is impossible (provider down). |
+| 2 | **Provider-down with no prior → defer, not terminal.** When `PublicSourceSnapshotUnavailableError` has no prior fallback, the job defers to a later attempt *without consuming* `phase_attempt` (new defer classification, narrow change in the attempt-accounting path), bounded by the existing hard deadline/SLA. Deterministic unavailability still fails fast per W1. |
+| 3 | **Lease-wait window matches real refresh duration.** Raise the wait deadline / block-reuse while the holder is actively heartbeating, instead of failing after 15 s and colliding with the same live lease on every retry. |
+| 4 | **Resume re-fetch updates checkpoint identity.** When a prior snapshot is unavailable at resume and a normal re-fetch produces new snapshot IDs, the checkpoint's snapshotIds/identity are updated to the new fetch instead of throwing `PublicSourceResumeIdentityMismatchError`. Genuine authority drift (question set, foundation hash) stays permanent. |
+| 5 | **Sub-budgets are actually propagated.** `searchMs`/`retrievalMs` from the execution budget are passed into resolver/retriever per-query deadlines so a slow provider cannot consume the artifact-verification reserve. |
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/public-source-snapshot-resolver.ts` | Rules 1, 2, 3, 5 |
+| `apps/web/src/worker/public-source-execution-budget.ts` | Rule 5 |
+| `apps/web/src/worker/public-source-forensics.ts` | Rule 4 |
+| `apps/web/src/worker/processor.ts` | Call sites for rules 2, 4, 5 only |
+| `apps/web/src/db/jobs.ts` | Rule 2 defer attempt-accounting only |
+| `apps/web/src/db/market-snapshots.ts` | Amendment 2026-07-29 (user approved "批准修订"): rule 1 read-only prefix-reuse lookup only — one new query function (memory + postgres paths), no schema/migration/privacy-trigger change |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+### Tests allowlist (closed)
+
+| Path | Role |
+|------|------|
+| Existing resolver / forensics / budget / processor test files | New rule assertions; scenario/contract shapes preserved |
+| `apps/web/src/db/market-snapshots.test.ts` | Amendment 2026-07-29 (with the production amendment above): rule 1 prefix-lookup assertions only |
+
+### Forbidden
+
+- `packages/*` (cache-identity derivation, search orchestrator, provider adapters)
+- Privacy triggers, market-table schemas/migrations, prompt/model profiles
+- `max_attempts`/backoff numbers, commercial/refund/SLA logic
+- Deployment, Docker, push, payments, report reruns (separate authorization)
+- Replaying/mutating terminal jobs or orders
+
+### Diff budget
+
+- Production source: ≤ 250 changed lines. Hard limit. (Measured: 185.)
+- Tests: ≤ 363 changed lines (tracking bound updated per the verification-only
+  provision: measured 303 + 20% headroom).
+- Docs: ≤ 80 changed lines.
+
+### Acceptance checks
+
+1. New unit tests: prefix-equivalent reuse is fallback-only and rejects any
+   cross-question/cross-surface match; defer path does not consume
+   `phase_attempt` and still fails fast on deterministic unavailability;
+   lease-wait no longer fails against an actively-heartbeating holder;
+   resume re-fetch updates checkpoint snapshotIds; per-query deadlines
+   receive the propagated sub-budgets.
+2. `npm test`, `npm run lint`, `npm run build` green.
+3. `npm run public-search:probe -- --adapter mimo`, deployment, and any
+   staging rerun require separate later authorization.
+
+## Historical: Code-AI seam hardening W1 — failure-classification skeleton (APPROVED)
 
 **Status: `APPROVED`** — user approved this written allowlist on 2026-07-29
 ("批准，那你都可以退回去，反正都是测试订单"). The same grant authorized

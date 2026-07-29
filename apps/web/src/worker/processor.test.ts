@@ -92,6 +92,7 @@ import {
   selectReusableCompletedPageAnalyses,
   type CompletedPageAnalysis
 } from "./recovery";
+import { PublicSourceSnapshotUnavailableError } from "./public-source-snapshot-resolver";
 
 // @requirement GEO-V4-CONTRACT-01
 // @requirement GEO-V4-DELIVERY-01
@@ -271,6 +272,65 @@ describe("strict Report V4 processor routing", () => {
         retryable: false,
         internalError: expect.objectContaining({ classification: "permanent", retryableAt: null })
       }));
+    } finally {
+      restoreTestAi(previousAi);
+      vi.clearAllMocks();
+    }
+  });
+
+  it("defers a public-source provider outage without consuming the phase attempt budget", async () => {
+    const job = legacyFullRerunJob();
+    const previousAi = configureTestAi();
+    const outage = new PublicSourceSnapshotUnavailableError("search_execution");
+    boundaryMocks.getGeoReport.mockResolvedValueOnce({
+      id: job.reportId,
+      url: "https://example.com/",
+      technicalStatus: "completed"
+    });
+    boundaryMocks.fetchPlannedPagesWithRecovery.mockRejectedValueOnce(outage);
+    boundaryMocks.getScanJob.mockResolvedValueOnce(job);
+    boundaryMocks.failScanJob.mockResolvedValueOnce({ ...job, executionState: "retry_wait" });
+    boundaryMocks.recordPaidJobOutcome.mockResolvedValueOnce(undefined);
+    try {
+      await processScanJob(job, "worker-1");
+
+      // The outage defers instead of entering fingerprint escalation, and the
+      // retry does not burn the attempt this claim consumed.
+      expect(boundaryMocks.hasPriorJobErrorFingerprint).not.toHaveBeenCalled();
+      expect(boundaryMocks.failScanJob).toHaveBeenCalledWith(job.id, "worker-1", expect.objectContaining({
+        retryable: true,
+        defer: true,
+        internalError: expect.objectContaining({ classification: "transient", code: "public_source_snapshot_search_execution" })
+      }));
+    } finally {
+      restoreTestAi(previousAi);
+      vi.clearAllMocks();
+    }
+  });
+
+  it("still fails fast on a recurrent deterministic public-source failure instead of deferring", async () => {
+    const job = legacyFullRerunJob();
+    const previousAi = configureTestAi();
+    const deterministic = new PublicSourceSnapshotUnavailableError("observation_persistence");
+    boundaryMocks.getGeoReport.mockResolvedValueOnce({
+      id: job.reportId,
+      url: "https://example.com/",
+      technicalStatus: "completed"
+    });
+    boundaryMocks.fetchPlannedPagesWithRecovery.mockRejectedValueOnce(deterministic);
+    boundaryMocks.getScanJob.mockResolvedValueOnce(job);
+    boundaryMocks.hasPriorJobErrorFingerprint.mockResolvedValueOnce(true);
+    boundaryMocks.failScanJob.mockResolvedValueOnce({ ...job, stage: "failed", executionState: "failed" });
+    boundaryMocks.recordPaidJobOutcome.mockResolvedValueOnce(undefined);
+    try {
+      await processScanJob(job, "worker-1");
+
+      expect(boundaryMocks.hasPriorJobErrorFingerprint).toHaveBeenCalledTimes(1);
+      expect(boundaryMocks.failScanJob).toHaveBeenCalledWith(job.id, "worker-1", expect.objectContaining({
+        retryable: false,
+        internalError: expect.objectContaining({ classification: "permanent", code: "public_source_snapshot_observation_persistence" })
+      }));
+      expect(boundaryMocks.failScanJob.mock.calls[0]?.[2]).not.toHaveProperty("defer");
     } finally {
       restoreTestAi(previousAi);
       vi.clearAllMocks();

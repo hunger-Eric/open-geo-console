@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createMarketSnapshotIdentity,
   createSearchQueryFanout,
   type CanonicalBuyerQuestion,
   type PublicSearchSurface,
@@ -12,7 +13,7 @@ import { getMarketSnapshotBundle } from "@/db/market-snapshots";
 import * as marketSnapshots from "@/db/market-snapshots";
 import { getMarketProviderEvidenceBundle } from "@/db/provider-evidence";
 import { PROVIDER_PASSAGE_SELECTOR_VERSION, selectProviderPassages } from "@open-geo-console/citation-intelligence";
-import { PublicSourceSnapshotAuthorityMismatchError, PublicSourceSnapshotUnavailableError, resolvePublicSourceSnapshot } from "./public-source-snapshot-resolver";
+import { PublicSourceSnapshotAuthorityMismatchError, PublicSourceSnapshotUnavailableError, isDeferrablePublicSourceOutage, resolvePublicSourceSnapshot } from "./public-source-snapshot-resolver";
 import { createConcurrencyGate } from "./bounded-scheduler";
 
 const surface: PublicSearchSurface = {
@@ -610,6 +611,153 @@ describe("public-source snapshot resolver", () => {
     expect(serialized).not.toContain("contact.example/ip");
     expect(serialized).not.toContain("203.0.113.42");
     expect(serialized).not.toContain("private@example.test");
+  });
+
+  it("downgrades a metadata-mismatched exact prior to stale-but-usable only when the forced refresh is impossible", async () => {
+    const authority = await installAuthority("review-stale-metadata");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const search = vi.fn(async () => observationPayload("complete"));
+    const first = await resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, search), question, fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-stale-metadata-first"
+    });
+    const driftedMetadata = { snapshotKind: "standard_question" as const, queryPlanVersion: "standard-plan-v2" };
+
+    const fallback = await resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, async () => observationPayload("unavailable")), question, fanout,
+      evidenceCutoffAt: "2030-01-05T00:00:00.000Z", leaseOwner: "worker-stale-metadata-outage",
+      snapshotMetadata: driftedMetadata
+    });
+    expect(fallback).toMatchObject({ snapshotId: first.snapshotId, collectedForThisRun: false, refreshAttempted: true, refreshFailed: true });
+
+    // The exact-identity fresh refresh remains the primary path: with the
+    // provider healthy, the mismatched metadata never reuses the stale prior.
+    const refreshed = await resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, search), question, fanout,
+      evidenceCutoffAt: "2030-01-06T00:00:00.000Z", leaseOwner: "worker-stale-metadata-refresh",
+      snapshotMetadata: driftedMetadata
+    });
+    expect(refreshed).toMatchObject({ collectedForThisRun: true, refreshAttempted: true, refreshFailed: false });
+    expect(refreshed.snapshotId).not.toBe(first.snapshotId);
+  });
+
+  it("waits out an actively-heartbeating lease holder instead of failing the lease wait", async () => {
+    const authority = await installAuthority("review-heartbeat-wait");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    let releaseSearch!: () => void;
+    const searchGate = new Promise<void>((resolve) => { releaseSearch = resolve; });
+    const holderSearch = vi.fn(async () => { await searchGate; return observationPayload("complete"); });
+    const holder = resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, holderSearch), question, fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-heartbeat-holder", leaseDurationMs: 400
+    });
+    await vi.waitFor(() => expect(holderSearch).toHaveBeenCalled());
+    // The explicit 50 ms wait deadline is far inside the holder's refresh; the
+    // resolver must wait through the holder's live lease instead of failing.
+    const waiter = resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, async () => observationPayload("complete")), question, fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-heartbeat-waiter", waitDeadlineMs: 50
+    });
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    releaseSearch();
+
+    const [created, reused] = await Promise.all([holder, waiter]);
+    expect(reused.snapshotId).toBe(created.snapshotId);
+    expect(reused.collectedForThisRun).toBe(false);
+  });
+
+  it("applies the propagated search sub-budget as a per-query deadline", async () => {
+    const authority = await installAuthority("review-search-budget");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const search = vi.fn(async () => new Promise<never>(() => { /* a stalled provider never settles */ }));
+
+    await expect(resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, search), question, fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-search-budget",
+      executionBudget: { searchMs: 60, retrievalMs: 60_000 }
+    })).rejects.toMatchObject({ name: "PublicSourceSnapshotUnavailableError", stage: "search_execution" });
+    expect(search).toHaveBeenCalled();
+  });
+
+  it("applies the propagated retrieval sub-budget as a per-source deadline", async () => {
+    const authority = await installAuthority("review-retrieval-budget");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const stalled = vi.fn(async ({ signal }: { signal?: AbortSignal }) => new Promise<never>((_, reject) => {
+      // A real retriever honors the deadline signal; a stalled one is cut off by it.
+      signal?.addEventListener("abort", () => reject(new Error("retrieval exceeded the per-source deadline")));
+    }));
+
+    await expect(resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, async () => observationPayload("complete")), question, fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-retrieval-budget",
+      retrieveSource: stalled,
+      executionBudget: { searchMs: 60_000, retrievalMs: 12 }
+    })).rejects.toMatchObject({ name: "PublicSourceSnapshotUnavailableError", stage: "source_retrieval" });
+    expect(stalled).toHaveBeenCalled();
+
+    await expect(resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, async () => observationPayload("complete")), question, fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-retrieval-budget-retry",
+      retrieveSource: async ({ observation, result }) => availableRetrieval(observation, result),
+      executionBudget: { searchMs: 60_000, retrievalMs: 60_000 }
+    })).resolves.toMatchObject({ collectedForThisRun: true, availableSourceCount: 1 });
+  });
+
+  it("classifies provider-outage stages as deferrable and deterministic stages as ordinary transient", () => {
+    expect(isDeferrablePublicSourceOutage(new PublicSourceSnapshotUnavailableError("lease_wait"))).toBe(true);
+    expect(isDeferrablePublicSourceOutage(new PublicSourceSnapshotUnavailableError("search_execution"))).toBe(true);
+    expect(isDeferrablePublicSourceOutage(new PublicSourceSnapshotUnavailableError("source_retrieval"))).toBe(true);
+    expect(isDeferrablePublicSourceOutage(new PublicSourceSnapshotUnavailableError("observation_persistence"))).toBe(false);
+    expect(isDeferrablePublicSourceOutage(new PublicSourceSnapshotUnavailableError("snapshot_materialization"))).toBe(false);
+    expect(isDeferrablePublicSourceOutage(new PublicSourceSnapshotAuthorityMismatchError())).toBe(false);
+    expect(isDeferrablePublicSourceOutage(new Error("other"))).toBe(false);
+  });
+
+  it("reuses a completed prefix-equivalent snapshot as fallback only when the refresh is impossible", async () => {
+    const authority = await installAuthority("review-prefix-reuse");
+    const search = vi.fn(async () => observationPayload("complete"));
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    // The staging incident shape: a completed three-query provider-pipeline
+    // snapshot whose identity differs from the six-query forensics fanout.
+    const prefixFanout = { ...fanout, queries: fanout.queries.slice(0, 3), budget: { ...fanout.budget, timeoutMs: 60_000 } };
+    expect(createMarketSnapshotIdentity({ question, surface, fanout: prefixFanout }).id)
+      .not.toBe(createMarketSnapshotIdentity({ question, surface, fanout }).id);
+    const prefix = await resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, search), question, fanout: prefixFanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-prefix-plan"
+    });
+
+    const fallback = await resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, async () => observationPayload("unavailable")), question, fanout,
+      evidenceCutoffAt: "2030-01-05T00:00:00.000Z", leaseOwner: "worker-prefix-outage"
+    });
+    expect(fallback).toMatchObject({ snapshotId: prefix.snapshotId, collectedForThisRun: false, refreshAttempted: true, refreshFailed: true });
+    expect(fallback.observations).toHaveLength(3);
+
+    // A provider-healthy fresh refresh succeeds and never uses the prefix path.
+    const refreshed = await resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, search), question, fanout,
+      evidenceCutoffAt: "2030-01-05T00:00:00.000Z", leaseOwner: "worker-prefix-refresh"
+    });
+    expect(refreshed).toMatchObject({ collectedForThisRun: true, refreshAttempted: true, refreshFailed: false });
+    expect(refreshed.snapshotId).not.toBe(prefix.snapshotId);
+  });
+
+  it("never falls back to a prefix snapshot across questions", async () => {
+    const authority = await installAuthority("review-prefix-cross");
+    const fanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const prefixFanout = { ...fanout, queries: fanout.queries.slice(0, 3) };
+    await resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, async () => observationPayload("complete")), question, fanout: prefixFanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-prefix-cross-plan"
+    });
+    const otherQuestion = { ...question, id: "question-public-snapshot-other", exactText: "深圳到日本货运服务商有哪些？", normalizedText: "深圳到日本货运服务商有哪些？" };
+    const otherFanout = createSearchQueryFanout({ question: otherQuestion, surface, excludedIdentities: [] });
+
+    await expect(resolvePublicSourceSnapshot({
+      authority, adapter: fixtureAdapter(authority, async () => observationPayload("unavailable")), question: otherQuestion, fanout: otherFanout,
+      evidenceCutoffAt: "2030-01-05T00:00:00.000Z", leaseOwner: "worker-prefix-cross-question"
+    })).rejects.toBeInstanceOf(PublicSourceSnapshotUnavailableError);
   });
 });
 

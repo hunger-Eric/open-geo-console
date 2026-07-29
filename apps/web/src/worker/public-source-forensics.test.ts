@@ -72,7 +72,7 @@ describe("public-source forensics pipeline", () => {
     expect(resumed.report.snapshotRefs.map(({snapshotId})=>snapshotId)).toEqual(prior.snapshotIds);
   });
 
-  it("re-collects only a missing exact ID and stays fail-closed on the resulting drift", async () => {
+  it("re-collects a missing exact ID and updates the checkpoint to the new fetch", async () => {
     const checkpoints=new Map<string,PublicSourcePipelineCheckpoint>();
     const store=new Map<string,ReturnType<typeof snapshot>>();
     const first=deps({reports:new Map(),checkpoints,resolve:async({fanout})=>{const created=snapshot(fanout,1);store.set(created.snapshotId,created);return created;}});
@@ -82,9 +82,24 @@ describe("public-source forensics pipeline", () => {
     let byIdCalls=0,recollections=0;
     const retry=deps({reports:new Map(),checkpoints,resolve:async({fanout})=>{recollections++;return {...snapshot(fanout,2),snapshotId:`recollected-${fanout.questionId}`};},
       resolveById:async({snapshotId})=>{byIdCalls++;return store.get(snapshotId)??null;}});
-    await expect(run("report-g-retry","job-g",retry)).rejects.toBeInstanceOf(PublicSourceResumeIdentityMismatchError);
+    const resumed=await run("report-g-retry","job-g",retry);
     expect(byIdCalls).toBe(3);
     expect(recollections).toBe(1);
+    const expectedIds=prior.snapshotIds.map((id,index)=>index===1?id.replace(/^snapshot-/,"recollected-"):id);
+    expect(resumed.checkpoint.snapshotIds).toEqual(expectedIds);
+    expect(resumed.checkpoint.identityHash).not.toBe(prior.identityHash);
+    expect(checkpoints.get("job-g")!.snapshotIds).toEqual(expectedIds);
+    expect(resumed.report.snapshotRefs.map(({snapshotId})=>snapshotId)).toEqual(expectedIds);
+  });
+
+  it("stays fail-closed when a resumed snapshot identity contradicts the checkpoint", async () => {
+    const checkpoints=new Map<string,PublicSourcePipelineCheckpoint>();
+    const store=new Map<string,ReturnType<typeof snapshot>>();
+    const first=deps({reports:new Map(),checkpoints,resolve:async({fanout})=>{const created=snapshot(fanout,1);store.set(created.snapshotId,created);return created;}});
+    await run("report-h","job-h",first);
+    const retry=deps({reports:new Map(),checkpoints,resolve:async({fanout})=>snapshot(fanout,2),
+      resolveById:async({snapshotId})=>{const stored=store.get(snapshotId);return stored?{...stored,snapshotId:`foreign-${snapshotId}`}:null;}});
+    await expect(run("report-h-retry","job-h",retry)).rejects.toBeInstanceOf(PublicSourceResumeIdentityMismatchError);
   });
 
   it("keeps explicit legacy builder input identical and forwards only an explicit deferred seam", async () => {

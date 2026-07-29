@@ -507,6 +507,51 @@ export async function findExactMarketSnapshot(input: { identity: MarketSnapshotI
   return { snapshot: clone(snapshot), freshness: ageMs <= FRESH_MS ? "fresh" : ageMs <= STALE_MS ? "stale" : "expired", ageMs };
 }
 
+/**
+ * Read-only prefix-reuse lookup (W2 rule 1). Finds the latest completed
+ * snapshot for the same question text and surface whose stored query texts are
+ * a strict exact prefix of the caller's query list, under a different cache
+ * identity (for example a provider-pipeline three-query plan versus the
+ * forensics six-query fanout). It never crosses questions or surfaces.
+ */
+export async function findPrefixReusableMarketSnapshot(input: {
+  questionHash: string; authorityVersion: string; locale: string; region: string; surfaceId: string; surfaceVersion: string;
+  excludeCacheIdentity: string; queryTexts: readonly string[]; evidenceCutoff: Date;
+}): Promise<{ snapshot: MarketSnapshotQuestionRow; freshness: SnapshotFreshness; ageMs: number } | null> {
+  const questionHash = hashText(input.questionHash, "questionHash");
+  const authorityVersion = bounded(input.authorityVersion, "authorityVersion", 256);
+  const locale = bounded(input.locale, "locale", 35);
+  const region = bounded(input.region, "region", 35);
+  const surfaceId = bounded(input.surfaceId, "surfaceId", 200);
+  const surfaceVersion = bounded(input.surfaceVersion, "surfaceVersion", 100);
+  const excludeCacheIdentity = identityText(input.excludeCacheIdentity);
+  const cutoff = validDate(input.evidenceCutoff, "evidenceCutoff");
+  const queryTexts = input.queryTexts.map((text) => privateSafeText(text, "queryTexts", 2_000));
+  if (queryTexts.length < 2) return null;
+  let rows: MarketSnapshotQuestionRow[];
+  if (isMemoryPersistence()) rows = memoryListMarketSnapshotQuestions();
+  else {
+    await ensureDatabase();
+    rows = (await getSqlClient()<Array<Record<string, unknown>>>`SELECT * FROM market_snapshot_questions WHERE question_hash=${questionHash} AND locale=${locale} AND region=${region} AND surface_id=${surfaceId} AND surface_version=${surfaceVersion} AND surface_authority_version=${authorityVersion} AND status='completed' AND completed_at <= ${cutoff.toISOString()} AND cache_identity <> ${excludeCacheIdentity} ORDER BY completed_at DESC`).map(dbSnapshot);
+  }
+  const candidates = rows.filter((row) => row.status === "completed" && row.completedAt && row.completedAt <= cutoff &&
+    row.questionHash === questionHash && row.locale === locale && row.region === region &&
+    row.surfaceId === surfaceId && row.surfaceVersion === surfaceVersion &&
+    row.surfaceAuthorityVersion === authorityVersion && row.cacheIdentity !== excludeCacheIdentity)
+    .sort((a, b) => b.completedAt!.getTime() - a.completedAt!.getTime());
+  for (const candidate of candidates) {
+    const stored = isMemoryPersistence()
+      ? memoryListMarketSnapshotQueries(candidate.id)
+      : (await getSqlClient()<Array<Record<string, unknown>>>`SELECT * FROM market_snapshot_queries WHERE snapshot_id=${candidate.id} ORDER BY query_order`).map(dbQuery);
+    const ordered = [...stored].sort((a, b) => a.queryOrder - b.queryOrder);
+    if (ordered.length > 0 && ordered.length < queryTexts.length && ordered.every((row, index) => row.queryText === queryTexts[index])) {
+      const ageMs = cutoff.getTime() - candidate.completedAt!.getTime();
+      return { snapshot: clone(candidate), freshness: ageMs <= FRESH_MS ? "fresh" : ageMs <= STALE_MS ? "stale" : "expired", ageMs };
+    }
+  }
+  return null;
+}
+
 export async function waitForMarketSnapshot(input: {
   identity: MarketSnapshotIdentity; deadline: Date; minBackoffMs?: number; maxBackoffMs?: number; signal?: AbortSignal;
   acceptSnapshot?: (snapshot: MarketSnapshotQuestionRow) => boolean;
