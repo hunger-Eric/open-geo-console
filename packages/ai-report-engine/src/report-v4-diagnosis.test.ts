@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  REPORT_V4_MAX_DIAGNOSIS_INPUT_CHARS,
   REPORT_V4_MAX_DIAGNOSIS_SOURCES,
   assembleReportV4DiagnosisSemanticOutput,
   buildReportV4DiagnosisSemanticInput,
+  clampReportV4DiagnosisInputCharacters,
   parseReportV4DiagnosisInput,
   parseReportV4DiagnosisOutput,
   parseReportV4DiagnosisOutputForQuestion
@@ -28,6 +30,44 @@ describe("V4 question-local diagnosis boundary", () => {
     expect("questions" in parsed).toBe(false);
     expect("globalSources" in parsed).toBe(false);
     expect("rawBody" in parsed).toBe(false);
+  });
+
+  it("clamps over-budget diagnosis prose by priority without changing under-budget inputs", () => {
+    const base = diagnosisInput();
+    const under = clampReportV4DiagnosisInputCharacters(base);
+    expect(under).toBe(base);
+
+    const hugeExcerpt = "E".repeat(20_000);
+    const hugeSummary = "S".repeat(20_000);
+    const over = {
+      ...base,
+      sources: Array.from({ length: 5 }, (_, index) => ({
+        ...source(index + 1),
+        title: `Title ${index + 1}`,
+        excerpt: hugeExcerpt
+      })),
+      targetPages: Array.from({ length: 5 }, (_, index) => ({
+        ...targetPage(),
+        pageId: `page-${index + 1}`,
+        url: `https://example.com/page-${index + 1}`,
+        relevanceReason: `Reason ${index + 1} is explicitly relevant.`,
+        summary: hugeSummary,
+        sourceLocations: [{ locationId: `loc-${index + 1}`, startOffset: 0, endOffset: 8 }]
+      }))
+    };
+    const clamped = clampReportV4DiagnosisInputCharacters(over);
+    const chars =
+      clamped.question.text.length
+      + (clamped.answer?.length ?? 0)
+      + clamped.sources.reduce((sum, row) => sum + row.title.length + (row.excerpt?.length ?? 0), 0)
+      + clamped.targetPages.reduce((sum, page) => sum + page.relevanceReason.length + page.summary.length, 0);
+    expect(chars).toBeLessThanOrEqual(REPORT_V4_MAX_DIAGNOSIS_INPUT_CHARS);
+    expect(clamped.question.text).toBe(over.question.text);
+    expect(clamped.answer).toBe(over.answer);
+    expect(clamped.sources.length).toBeGreaterThan(0);
+    // First source keeps full excerpt when budget allows prefix priority.
+    expect(clamped.sources[0]?.excerpt?.length).toBeGreaterThan(0);
+    expect(() => parseReportV4DiagnosisInput(clamped)).not.toThrow();
   });
 
   it("rejects source overflow, cross-question sources, unrelated target pages, and global/raw inputs", () => {

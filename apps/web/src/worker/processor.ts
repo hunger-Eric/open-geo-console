@@ -2631,6 +2631,26 @@ function v3CardToV4Question(card: PaidV3SemanticAnswerCardDraft, index: number):
 
 type PaidV3GenerativeDraftCard = Extract<PaidV3SemanticAnswerCardDraft, { answerMode: "generative_search_v1" }>;
 
+/**
+ * W4 rule 1: which answer-card sources may enter the Paid V3 semantic catalog.
+ * - verified_body + successful retrieval audit → eligible verified body
+ * - search_source_only (SERP hit, body unavailable) → eligible search-summary-only
+ * - inaccessible / other → not eligible (evidence_missing stays permanent when none remain)
+ */
+export function paidV3SemanticSourceCatalogEligibility(input: {
+  readonly retrievalStatus: string;
+  readonly auditRetrievalReady: boolean;
+  readonly auditExactExcerpt: string | null;
+}): { readonly eligible: boolean; readonly evidenceMode: "verified_body" | "search_summary_only" | "unavailable" } {
+  if (input.retrievalStatus === "verified_body" && input.auditRetrievalReady && input.auditExactExcerpt !== null) {
+    return { eligible: true, evidenceMode: "verified_body" };
+  }
+  if (input.retrievalStatus === "search_source_only") {
+    return { eligible: true, evidenceMode: "search_summary_only" };
+  }
+  return { eligible: false, evidenceMode: "unavailable" };
+}
+
 function buildPaidV3SemanticAuthorities(input: {
   answerCards: readonly PaidV3SemanticAnswerCardDraft[];
   questionSet: ConfirmedBusinessQuestionSet;
@@ -2655,6 +2675,13 @@ function buildPaidV3SemanticAuthorities(input: {
   const auditByUrl = new Map(input.storedSources.map((source) => [canonicalUrl(source.canonicalUrl), source]));
   const sources = answerCards.flatMap((card) => card.sources.map((source) => {
     const audit = auditByUrl.get(canonicalUrl(source.canonicalUrl));
+    // W4 rule 1: search-cited body-unavailable sources stay citable as
+    // search_summary_only; inaccessible / never-searched stay ineligible.
+    const catalog = paidV3SemanticSourceCatalogEligibility({
+      retrievalStatus: source.retrievalStatus,
+      auditRetrievalReady: audit?.retrievalReady === true,
+      auditExactExcerpt: audit?.exactExcerpt ?? null
+    });
     const originalText = JSON.stringify({
       title: source.title,
       canonicalUrl: source.canonicalUrl,
@@ -2663,7 +2690,8 @@ function buildPaidV3SemanticAuthorities(input: {
       auditExcerpt: audit?.exactExcerpt ?? null,
       retrievalStatus: source.retrievalStatus,
       ownershipCategory: source.ownershipCategory,
-      providerResultOrder: source.providerResultOrder
+      providerResultOrder: source.providerResultOrder,
+      evidenceMode: catalog.evidenceMode
     });
     return {
       sourceId: source.sourceId,
@@ -2671,7 +2699,7 @@ function buildPaidV3SemanticAuthorities(input: {
       canonicalUrl: source.canonicalUrl,
       originalText,
       originalTextHash: reportSemanticTextHash(originalText),
-      eligible: audit?.retrievalReady === true && audit.exactExcerpt !== null && source.retrievalStatus === "verified_body"
+      eligible: catalog.eligible
     };
   }));
   const sourceIds = new Set(sources.map(({ sourceId }) => sourceId));

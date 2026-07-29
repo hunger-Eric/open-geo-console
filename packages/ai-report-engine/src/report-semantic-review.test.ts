@@ -607,8 +607,9 @@ describe("ReportSemanticReview model output", () => {
     expect(verifyReportSemanticReviewReceipt(applied.receipt, input, review, applied.fields)).toEqual(applied.receipt);
   });
 
-  it("accepts a blocked Paid review as evidence but refuses to apply it", () => {
+  it("accepts a blocked Free report_global review as evidence but refuses to apply it", () => {
     const input = globalInput();
+    expect(input.lifecycle).toBe("free_v4");
     const review = globalReview(input);
     const result = reviewFields(review)[0]!;
     result.decision = "blocked";
@@ -618,6 +619,28 @@ describe("ReportSemanticReview model output", () => {
 
     expect(parseReportSemanticReviewOutput(review, input).overallDecision).toBe("blocked");
     expect(() => applyReportSemanticReview(input, review)).toThrow(/blocked semantic review/u);
+  });
+
+  it("degrades a blocked Paid V3 review to original prose with explicit blocked decisions", () => {
+    const input = paidGlobalInput();
+    expect(input.lifecycle).toBe("paid_v3");
+    const review = globalReview(input);
+    const result = reviewFields(review)[0]!;
+    const original = input.fields[0]!.originalText;
+    result.decision = "blocked";
+    delete (result as { correctedText?: string }).correctedText;
+    result.issueCodes = ["unsupported_causal_claim"];
+    result.reason = "The claim is not supported by the bound evidence.";
+    review.overallDecision = "blocked";
+
+    const applied = applyReportSemanticReview(input, review);
+    expect(applied.receipt.decision).toBe("blocked");
+    expect(applied.fields[0]).toMatchObject({
+      path: input.fields[0]!.path,
+      appliedText: original,
+      decision: "blocked"
+    });
+    expect(verifyReportSemanticReviewReceipt(applied.receipt, input, review, applied.fields)).toEqual(applied.receipt);
   });
 
   it.each([
@@ -1040,6 +1063,25 @@ function freeInput(): ReportSemanticReviewInput {
 function globalInput(): ReportSemanticReviewInput {
   const core = inputCore();
   core.lifecycle = "free_v4";
+  core.evidencePolicy = "report_global_v1";
+  core.sources[0]!.eligible = true;
+  core.evidence[0]!.eligible = true;
+  core.evidence.push(
+    { evidenceId: "global-extra", questionId: "question-2", sourceId: null, originalText: "Eligible global evidence.", originalTextHash: reportSemanticTextHash("Eligible global evidence."), eligible: true },
+    { evidenceId: "ineligible", questionId: "question-2", sourceId: null, originalText: "Ineligible evidence.", originalTextHash: reportSemanticTextHash("Ineligible evidence."), eligible: false },
+    { evidenceId: "missing-eligibility", questionId: "question-2", sourceId: null, originalText: "Missing eligibility.", originalTextHash: reportSemanticTextHash("Missing eligibility.") }
+  );
+  for (const field of core.fields) {
+    field.allowedEvidenceIds = [];
+    field.allowedSourceIds = [];
+  }
+  return createReportSemanticReviewInput(core);
+}
+
+/** Paid V3 + report_global_v1 — same catalog shape as Free global, lifecycle paid_v3. */
+function paidGlobalInput(): ReportSemanticReviewInput {
+  const core = inputCore();
+  core.lifecycle = "paid_v3";
   core.evidencePolicy = "report_global_v1";
   core.sources[0]!.eligible = true;
   core.evidence[0]!.eligible = true;

@@ -576,19 +576,22 @@ export interface ReportSemanticReviewOutput {
   readonly overallDecision: ReportSemanticReviewDecision;
 }
 
+/** Applied field decisions. `blocked` is Paid-only degradation: original prose retained. */
+export type AppliedReportSemanticFieldDecision = "pass" | "corrected" | "blocked";
+
 export interface AppliedReportSemanticField {
   readonly path: string;
   readonly originalTextHash: string;
   readonly appliedText: string;
   readonly appliedTextHash: string;
-  readonly decision: "pass" | "corrected";
+  readonly decision: AppliedReportSemanticFieldDecision;
 }
 
 export interface ReportSemanticReceiptField {
   readonly path: string;
   readonly originalTextHash: string;
   readonly appliedTextHash: string;
-  readonly decision: "pass" | "corrected";
+  readonly decision: AppliedReportSemanticFieldDecision;
 }
 
 export interface ReportSemanticReviewReceipt {
@@ -598,7 +601,8 @@ export interface ReportSemanticReviewReceipt {
   readonly reviewHash: string;
   readonly providerId: string;
   readonly modelId: string;
-  readonly decision: "pass" | "corrected";
+  /** `blocked` is Paid-only: review overall blocked, applied prose kept original. */
+  readonly decision: AppliedReportSemanticFieldDecision;
   readonly fieldCoverageHash: string;
   readonly appliedProseHash: string;
   readonly annotationsHash: string;
@@ -775,19 +779,29 @@ export function applyReportSemanticReview(
   if (currentNonProseHash !== input.nonProseProjectionHash) {
     throw new TypeError("The non-prose projection changed after semantic-review input creation.");
   }
-  if (input.evidencePolicy === "report_global_v1" && review.overallDecision === "blocked") {
+  // Paid V3: blocked overall/fields degrade to original prose + explicit blocked decision.
+  // Free / non-Paid report_global paths stay fail-closed on blocked apply.
+  const paidBlockedDegrade = input.lifecycle === "paid_v3";
+  if (!paidBlockedDegrade && input.evidencePolicy === "report_global_v1" && review.overallDecision === "blocked") {
     throw new TypeError("A blocked semantic review cannot be applied.");
   }
   const fields = review.fields.map((result, index): AppliedReportSemanticField => {
     const manifest = input.fields[index]!;
-    if (result.decision === "blocked") throw new TypeError("A blocked semantic field cannot be applied.");
+    if (result.decision === "blocked" && !paidBlockedDegrade) {
+      throw new TypeError("A blocked semantic field cannot be applied.");
+    }
+    // corrected → correctedText; pass/blocked → original (blocked never rewrites customer prose)
     const appliedText = result.decision === "corrected" ? result.correctedText! : manifest.originalText;
+    const decision: AppliedReportSemanticFieldDecision =
+      result.decision === "corrected" ? "corrected"
+        : result.decision === "blocked" ? "blocked"
+          : "pass";
     return {
       path: manifest.path,
       originalTextHash: manifest.originalTextHash,
       appliedText,
       appliedTextHash: reportSemanticTextHash(appliedText),
-      decision: result.decision
+      decision
     };
   });
   const receiptFields = fields.map(({ path, originalTextHash, appliedTextHash, decision }) => ({
@@ -796,10 +810,12 @@ export function applyReportSemanticReview(
     appliedTextHash,
     decision
   }));
-  // Free overallDecision is code-recomputed from sanitized pass/corrected
-  // field decisions, so it can never be blocked here; this only narrows the
-  // receipt decision type after the global-only rejection above.
-  const receiptDecision: "pass" | "corrected" = review.overallDecision === "blocked" ? "pass" : review.overallDecision;
+  // Free overallDecision is code-recomputed from sanitized pass/corrected field
+  // decisions, so it can never be blocked here. Paid may surface blocked.
+  const receiptDecision: AppliedReportSemanticFieldDecision =
+    review.overallDecision === "blocked"
+      ? (paidBlockedDegrade ? "blocked" : "pass")
+      : review.overallDecision;
   const receipt: ReportSemanticReviewReceipt = {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT,
     lifecycle: input.lifecycle,
@@ -828,12 +844,17 @@ export function verifyReportSemanticReviewReceipt(
 ): ReportSemanticReviewReceipt {
   const input = parseReportSemanticReviewInput(rawInput);
   const review = parseReportSemanticReviewOutput(rawReview, input);
-  if (review.overallDecision === "blocked") throw new TypeError("A blocked semantic review cannot have an applied receipt.");
+  const paidBlockedDegrade = input.lifecycle === "paid_v3";
+  if (review.overallDecision === "blocked" && !paidBlockedDegrade) {
+    throw new TypeError("A blocked semantic review cannot have an applied receipt.");
+  }
   const fields = parseAppliedFields(rawAppliedFields, input);
   for (const [index, field] of fields.entries()) {
     const reviewed = review.fields[index]!;
+    const manifest = input.fields[index]!;
     if (reviewed.decision !== field.decision
-        || (reviewed.decision === "corrected" && reviewed.correctedText !== field.appliedText)) {
+        || (reviewed.decision === "corrected" && reviewed.correctedText !== field.appliedText)
+        || (reviewed.decision === "blocked" && field.appliedText !== manifest.originalText)) {
       throw new TypeError(`Applied semantic field ${field.path} does not match its reviewed result.`);
     }
   }
@@ -847,8 +868,13 @@ export function verifyReportSemanticReviewReceipt(
   const modelId = requireBoundedText(record.modelId, "$reviewReceipt.modelId", MAX_ID_CHARS);
   requireExact(providerId, input.expectedModel.providerId, "$reviewReceipt.providerId");
   requireExact(modelId, input.expectedModel.modelId, "$reviewReceipt.modelId");
-  const decision = requireOneOf(record.decision, ["pass", "corrected"] as const, "$reviewReceipt.decision");
-  const expectedDecision = review.overallDecision;
+  const decision = requireOneOf(
+    record.decision,
+    paidBlockedDegrade ? ["pass", "corrected", "blocked"] as const : ["pass", "corrected"] as const,
+    "$reviewReceipt.decision"
+  );
+  const expectedDecision: AppliedReportSemanticFieldDecision =
+    review.overallDecision === "blocked" && paidBlockedDegrade ? "blocked" : review.overallDecision;
   requireExact(decision, expectedDecision, "$reviewReceipt.decision");
   const coverageHash = requireHash(record.fieldCoverageHash, "$reviewReceipt.fieldCoverageHash");
   requireExact(coverageHash, fieldCoverageHash(input.fields), "$reviewReceipt.fieldCoverageHash");
@@ -907,7 +933,7 @@ export function parsePaidV3ReportSemanticReviewReceipt(value: unknown): PaidV3Re
       path: requireBoundedText(row.path, `${path}.path`, MAX_PATH_CHARS),
       originalTextHash: requireHash(row.originalTextHash, `${path}.originalTextHash`),
       appliedTextHash: requireHash(row.appliedTextHash, `${path}.appliedTextHash`),
-      decision: requireOneOf(row.decision, ["pass", "corrected"] as const, `${path}.decision`)
+      decision: requireOneOf(row.decision, ["pass", "corrected", "blocked"] as const, `${path}.decision`)
     };
   });
   if (fields.length === 0) throw new TypeError("$reviewReceipt.fields must not be empty.");
@@ -919,7 +945,7 @@ export function parsePaidV3ReportSemanticReviewReceipt(value: unknown): PaidV3Re
     reviewHash: requireHash(record.reviewHash, "$reviewReceipt.reviewHash"),
     providerId: requireBoundedText(record.providerId, "$reviewReceipt.providerId", MAX_ID_CHARS),
     modelId: requireBoundedText(record.modelId, "$reviewReceipt.modelId", MAX_ID_CHARS),
-    decision: requireOneOf(record.decision, ["pass", "corrected"] as const, "$reviewReceipt.decision"),
+    decision: requireOneOf(record.decision, ["pass", "corrected", "blocked"] as const, "$reviewReceipt.decision"),
     fieldCoverageHash: requireHash(record.fieldCoverageHash, "$reviewReceipt.fieldCoverageHash"),
     appliedProseHash: requireHash(record.appliedProseHash, "$reviewReceipt.appliedProseHash"),
     annotationsHash: requireHash(record.annotationsHash, "$reviewReceipt.annotationsHash"),
@@ -1984,8 +2010,16 @@ function parseAppliedFields(
     const appliedText = requireBoundedText(row.appliedText, `${path}.appliedText`, MAX_TEXT_CHARS);
     const appliedTextHash = requireHash(row.appliedTextHash, `${path}.appliedTextHash`);
     requireExact(appliedTextHash, reportSemanticTextHash(appliedText), `${path}.appliedTextHash`);
-    const decision = requireOneOf(row.decision, ["pass", "corrected"] as const, `${path}.decision`);
+    const decision = requireOneOf(
+      row.decision,
+      input.lifecycle === "paid_v3" ? ["pass", "corrected", "blocked"] as const : ["pass", "corrected"] as const,
+      `${path}.decision`
+    );
     if (decision === "pass" && appliedText !== manifest.originalText) throw new TypeError(`${path} changed text while claiming pass.`);
+    if (decision === "blocked") {
+      if (input.lifecycle !== "paid_v3") throw new TypeError(`${path} blocked apply is Paid V3 only.`);
+      if (appliedText !== manifest.originalText) throw new TypeError(`${path} blocked apply must retain original prose.`);
+    }
     if (decision === "corrected" && (manifest.mutability !== "mutable" || appliedText === manifest.originalText)) {
       throw new TypeError(`${path} is not a valid mutable correction.`);
     }

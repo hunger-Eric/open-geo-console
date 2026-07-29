@@ -55,6 +55,52 @@ describe("V4 question-level diagnosis enhancer", () => {
     expect(provider.calls).toHaveLength(0);
   });
 
+  it("character-budget clamps oversized sources/pages and still reaches the provider", async () => {
+    // Keep source-1/source-2 + target-loc-1 so default validDiagnosis evidence refs remain valid.
+    const question = Object.freeze({
+      ...answeredQuestion(),
+      sources: Object.freeze([
+        { ...source(1), title: "Source title 1", citedText: "X".repeat(25_000) },
+        { ...source(2), title: "Source title 2", citedText: "X".repeat(25_000) },
+        { ...source(3), title: "Source title 3", citedText: "X".repeat(25_000) },
+        { ...source(4), title: "Source title 4", citedText: "X".repeat(25_000) },
+        { ...source(5), title: "Source title 5", citedText: "X".repeat(25_000) }
+      ])
+    });
+    const pages = Object.freeze([
+      {
+        ...targetPages()[0]!,
+        summary: `${targetPages()[0]!.summary} ${"Y".repeat(20_000)}`
+      },
+      {
+        ...targetPages()[0]!,
+        pageId: "target-page-2",
+        url: "https://target.example/service-2",
+        relevanceReason: "Second page is also explicitly relevant to the question.",
+        summary: "Y".repeat(20_000),
+        sourceLocations: Object.freeze([{ locationId: "target-loc-2", startOffset: 0, endOffset: 8 }])
+      }
+    ]);
+    const provider = providerFrom(async () => validDiagnosis());
+
+    const result = await enhanceReportV4QuestionDiagnosis({
+      ...enhancerInput(question, provider),
+      targetPages: pages
+    });
+
+    expect(result.status).toBe("completed");
+    expect(provider.calls).toHaveLength(1);
+    const request = provider.calls[0]!;
+    if (request.kind !== "diagnose") throw new Error("expected diagnose");
+    const chars =
+      request.input.question.text.length
+      + request.input.answer.length
+      + request.input.sources.reduce((sum, row) => sum + row.title.length + (row.excerpt?.length ?? 0), 0)
+      + request.input.targetPages.reduce((sum, page) => sum + page.relevanceReason.length + page.summary.length, 0);
+    expect(chars).toBeLessThanOrEqual(60_000);
+    expect(request.input.sources.some((row) => (row.excerpt?.length ?? 0) <= 2_000)).toBe(true);
+  });
+
   it("truncates twenty retrievalStatus-less annotation sources to the first five and reaches the provider", async () => {
     const question = Object.freeze({
       ...answeredQuestion(),

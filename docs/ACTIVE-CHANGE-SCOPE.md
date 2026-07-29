@@ -4,16 +4,121 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Code-AI seam hardening W3 — free-teaser degradation safety (APPROVED)`.
+`Current authority: Code-AI seam hardening W4 — Paid V3 evidence and review degradation (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Code-AI seam hardening W3 — free-teaser degradation safety (APPROVED)
+## Current authority: Code-AI seam hardening W4 — Paid V3 evidence and review degradation (APPROVED)
+
+**Status: `APPROVED`** — user approved this written allowlist on 2026-07-29
+("可以", following the recommended path: implement W4 only; W5 deferred;
+deployment/staging paid rerun remain separate later authorization).
+
+### Baseline and evidence
+
+- HEAD `fcc2142` (W1 `b75b750` + W2 `8cde23f` + W3 `fcc2142` committed, not
+  yet deployed; Staging Web `e3fe6a0`, Workers `staging-737ad6d-overlay-v1`).
+- Parent design: session plan `shazam-stargirl-stargirl.md` (approved
+  2026-07-29), workstream W4. W1–W3 scopes are complete (historical below).
+- Code-verified seams at HEAD `fcc2142`:
+  1. **Evidence eligibility intersection kills the job.**
+     `apps/web/src/worker/processor.ts:2674` marks a Paid V3 semantic-catalog
+     source `eligible` only when
+     `audit.retrievalReady && audit.exactExcerpt !== null &&
+     retrievalStatus === "verified_body"`. Search-cited sources whose body
+     retrieval failed stay in the answer card as
+     `search_source_only` (`answer-first-v3.ts:529-530`) but are **ineligible**
+     for the `report_global_v1` catalog. Parse then fails closed with
+     `ReportSemanticReviewEvidenceMissingError`
+     (`packages/ai-report-engine/src/report-semantic-review.ts:20-37`),
+     classified **permanent** (`job-errors.ts:161-162`). V1
+     `verifyReportEvidence` (`evidence.ts:58-100`) already drops bad findings
+     without killing the job — Paid V3 does not yet have that degradation.
+  2. **Blocked review throws TypeError instead of degrading.**
+     Paid manifests force `evidencePolicy: "report_global_v1"`
+     (`report-semantic-review-manifests.ts:276-277`). Application throws on
+     `overallDecision === "blocked"` and on any field
+     `decision === "blocked"` (`report-semantic-review.ts:778-783`), and
+     receipt verification re-throws (`:831`). Free path already synthesizes
+     pass-from-blocked for field-local policy; Paid has no equivalent
+     "keep original prose + explicit blocked annotation" path, so model
+     blocked decisions become bare TypeErrors that burn retries.
+  3. **Diagnosis character budget is count-capped only.**
+     `737ad6d` truncates source **count** to
+     `REPORT_V4_MAX_DIAGNOSIS_SOURCES` (5) in
+     `report-v4-diagnosis-enhancer.ts:146`, but
+     `parseReportV4DiagnosisInput` still rejects when retained characters
+     exceed `REPORT_V4_MAX_DIAGNOSIS_INPUT_CHARS` (60_000)
+     (`report-v4-diagnosis.ts:199-203`). Five sources × long title/excerpt +
+     ten target pages × long summary can exceed 60k without any count
+     overflow — a deterministic `input_validation` fail after expensive
+     upstream work.
+
+### Design lock
+
+| # | Rule |
+|---|------|
+| 1 | **Search-cited, body-unavailable sources stay citable as search-summary-only.** At the Paid V3 semantic-catalog build boundary (`processor.ts` `buildPaidV3SemanticAuthorities`), a source that was returned by public search and is present on the answer card with `retrievalStatus === "search_source_only"` (or equivalent non-verified body) is catalogued as eligible for citation with an explicit search-summary-only signal in its catalog text — not as fully verified body evidence, and never invented. Sources that are truly inaccessible (no search hit / no URL) stay ineligible. `ReportSemanticReviewEvidenceMissingError` remains permanent when a non-blocked slot cites zero accepted IDs after this expansion; the kill path is only removed for the intersection miss where search text exists but body fetch failed. |
+| 2 | **Paid blocked review degrades to original prose + explicit annotation.** For `lifecycle === "paid_v3"` only: when `overallDecision === "blocked"` or a field is `blocked`, `applyReportSemanticReview` (and the complete Paid application path) keeps each blocked field's **original** text, records the blocked decision on the applied field/receipt (or an equivalent explicit blocked annotation already in the review output), and does **not** throw TypeError. Free lifecycle and non-Paid evidence policies stay unchanged. Receipt verification must accept this degraded applied form for Paid only. No second model call is introduced. |
+| 3 | **Diagnosis input is character-budget truncated at the enhancer boundary.** Before `parseReportV4DiagnosisInput`, the enhancer (or a tiny pure helper it calls) enforces `REPORT_V4_MAX_DIAGNOSIS_INPUT_CHARS` by priority truncation: keep full `answer` and `question` first; then truncate `sources` excerpts/titles (provider order, already count-capped at 5); then truncate `targetPages` summaries/reasons. Never drop the question/answer wholesale. Contract caps (source count, page count, per-field max lengths) stay; this is boundary adaptation only, matching the 737ad6d count-cap precedent. |
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/processor.ts` | Rule 1 catalog eligibility only (`buildPaidV3SemanticAuthorities` / source catalog construction); no orchestration, commerce, or snapshot changes |
+| `apps/web/src/worker/report-v4-diagnosis-enhancer.ts` | Rule 3 character-budget truncation before parse |
+| `packages/ai-report-engine/src/report-semantic-review.ts` | Rule 2 Paid-only blocked apply/receipt path; no Free sanitizer / fabrication changes beyond what W3 already shipped |
+| `packages/ai-report-engine/src/report-semantic-review-manifests.ts` | Rule 2 complete Paid application wiring only if the blocked degrade cannot live entirely in `applyReportSemanticReview` |
+| `packages/ai-report-engine/src/report-v4-diagnosis.ts` | Rule 3 only if a pure exportable truncation helper is colocated with the char budget constant; no cap number changes |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+### Tests allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/processor.test.ts` and/or existing Paid V3 processor/diagnosis test files that already cover catalog build | Rule 1: search_source_only sources become citable; inaccessible stay ineligible; evidence_missing still permanent when zero accepted IDs |
+| `apps/web/src/worker/report-v4-diagnosis-enhancer.test.ts` | Rule 3: over-budget inputs are truncated by priority and parse succeeds; under-budget inputs unchanged |
+| `packages/ai-report-engine/src/report-semantic-review.test.ts` | Rule 2: Paid blocked overall/field degrades to original text; Free path still rejects blocked apply as today |
+| `packages/ai-report-engine/src/report-semantic-review-manifests.test.ts` | Rule 2 complete Paid path if manifests.ts is touched |
+| `packages/ai-report-engine/src/report-v4-diagnosis.test.ts` | Rule 3 helper / char-budget assertions if diagnosis.ts is touched |
+| `apps/web/src/worker/paid-v3-semantic-review.test.ts` | Rule 2 end-to-end apply if needed for wiring |
+
+### Forbidden
+
+- Free teaser path, W1 classification, W2 snapshot/resolver/forensics (complete)
+- Prompt text, model profiles, provider adapters, commerce/refund/SLA
+- Changing `REPORT_V4_MAX_DIAGNOSIS_*` numeric caps or relaxing contract validators for counts/IDs
+- Making `ReportSemanticReviewEvidenceMissingError` transient when zero accepted IDs remain
+- Privacy triggers, identity/cross-tenant guards, payment webhooks
+- Deployment, Docker, push, payments, report reruns, replaying terminal jobs
+- W5 privacy result-side filtering (separate optional later scope)
+
+### Diff budget
+
+- Production source: <= 250 changed lines. Hard limit.
+- Tests: <= 350 changed lines (tracking bound; may update to measured +20% under the verification-only provision).
+- Docs: <= 100 changed lines.
+
+### Acceptance checks
+
+1. Unit tests for each rule: search_source_only catalog citation works without
+   inventing body evidence; blocked Paid review applies original prose with
+   explicit blocked signal and does not throw; diagnosis over-char inputs are
+   priority-truncated and pass parse; under-budget diagnosis inputs byte-identical.
+2. Existing Paid V3 / free teaser / diagnosis suites stay green; Free blocked
+   apply behavior unchanged.
+3. `npm test`, `npm run lint`, `npm run build` green.
+4. Deployment, MiMo probe, and staging paid rerun require separate later
+   authorization (shared with W1–W3 once W4 lands).
+
+## Historical: Code-AI seam hardening W3 — free-teaser degradation safety (APPROVED)
 
 **Status: `APPROVED`** — user approved this written allowlist on 2026-07-29
 ("批准 W3"), including the narrow opening of
 `packages/ai-report-engine/src/report-semantic-review.ts` for rule 1's
-degradation-marker exposure only. Deployment and staging reruns remain
-excluded and require separate later authorization.
+degradation-marker exposure only. Implemented and committed as `fcc2142`;
+acceptance checks green (2950 tests, lint 0, build exit 0). Deployment and
+staging reruns remain excluded.
 
 ### Baseline and evidence
 

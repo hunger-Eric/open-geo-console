@@ -4,6 +4,73 @@ export const REPORT_V4_MAX_SOURCE_EXCERPT_CHARS = 2_000 as const;
 export const REPORT_V4_MAX_TARGET_SUMMARY_CHARS = 4_000 as const;
 export const REPORT_V4_MAX_DIAGNOSIS_INPUT_CHARS = 60_000 as const;
 
+/**
+ * Boundary adaptation: keep question + answer intact, then fit sources
+ * (excerpt first, then title, provider order) and finally target-page prose
+ * so retained characters stay within {@link REPORT_V4_MAX_DIAGNOSIS_INPUT_CHARS}.
+ * Trailing sources/pages that cannot keep required non-empty fields are dropped
+ * (count still ≤ existing caps). Never invents content.
+ */
+export function clampReportV4DiagnosisInputCharacters<T extends {
+  readonly question: { readonly text: string };
+  readonly answer: string | null;
+  readonly sources: readonly {
+    readonly title: string;
+    readonly excerpt: string | null;
+  }[];
+  readonly targetPages: readonly {
+    readonly relevanceReason: string;
+    readonly summary: string;
+  }[];
+}>(input: T, maxChars: number = REPORT_V4_MAX_DIAGNOSIS_INPUT_CHARS): T {
+  const answerLength = (input.answer ?? "").length;
+  const retained =
+    input.question.text.length
+    + answerLength
+    + input.sources.reduce((sum, source) => sum + source.title.length + (source.excerpt?.length ?? 0), 0)
+    + input.targetPages.reduce((sum, page) => sum + page.relevanceReason.length + page.summary.length, 0);
+  if (retained <= maxChars) return input;
+
+  let remaining = Math.max(0, maxChars - input.question.text.length - answerLength);
+
+  /** Take up to fieldMax characters without exceeding the residual char budget. */
+  const take = (text: string, fieldMax: number): string => {
+    const budget = Math.min(text.length, fieldMax, remaining);
+    remaining -= budget;
+    return text.slice(0, budget);
+  };
+
+  // Priority: answer/question (reserved) > sources > targetPages.
+  // Within each source: prefer retaining excerpt evidence, then title.
+  // Parser requires non-empty title / relevanceReason / summary — drop rows that cannot fit.
+  // Per-field contract max lengths are also enforced here (count caps stay upstream).
+  const sources: Array<T["sources"][number]> = [];
+  for (const source of input.sources) {
+    if (remaining < 1) break;
+    const excerptRaw = source.excerpt === null
+      ? null
+      : take(source.excerpt, REPORT_V4_MAX_SOURCE_EXCERPT_CHARS);
+    const excerpt = excerptRaw && excerptRaw.length > 0 ? excerptRaw : null;
+    if (remaining < 1) break;
+    const title = take(source.title, 2_000);
+    if (!title) break;
+    sources.push({ ...source, title, excerpt });
+  }
+
+  const targetPages: Array<T["targetPages"][number]> = [];
+  for (const page of input.targetPages) {
+    if (remaining < 2) break;
+    const relevanceReason = take(page.relevanceReason, 2_000);
+    if (!relevanceReason) break;
+    if (remaining < 1) break;
+    const summary = take(page.summary, REPORT_V4_MAX_TARGET_SUMMARY_CHARS);
+    if (!summary) break;
+    targetPages.push({ ...page, relevanceReason, summary });
+  }
+
+  return { ...input, sources, targetPages } as T;
+}
+
 export type ReportV4DiagnosisRetrievalStatus = "not_checked" | "available" | "inaccessible";
 export type ReportV4ObservableFactorKind =
   | "problem_match"

@@ -3,6 +3,7 @@ import {
   REPORT_V4_MAX_DIAGNOSIS_SOURCES,
   assembleReportV4DiagnosisSemanticOutput,
   buildReportV4DiagnosisSemanticInput,
+  clampReportV4DiagnosisInputCharacters,
   parseReportV4DiagnosisInput,
   parseReportV4DiagnosisOutput,
   runWithModelTokenBudget,
@@ -132,17 +133,15 @@ export async function enhanceReportV4QuestionDiagnosis(
   const signal = input.signal ?? new AbortController().signal;
   let diagnosisInput: ReportV4DiagnosisInput;
   try {
-    diagnosisInput = parseReportV4DiagnosisInput({
+    // Boundary adaptation: count cap (737ad6d) + character budget (W4) before parse.
+    // Persisted answer-card sources / target pages are untouched.
+    const clamped = clampReportV4DiagnosisInputCharacters({
       question: {
         questionId: input.question.questionId,
         text: input.question.questionText
       },
       answer: input.question.status === "answered" ? input.question.answer : null,
       locale: input.locale,
-      // Boundary adaptation: answer cards may carry more sources than the diagnosis
-      // contract admits (provider result order) and may omit retrievalStatus entirely.
-      // Truncate to the contract cap and default the missing status; the persisted
-      // answer-card sources are untouched.
       sources: input.question.sources.slice(0, REPORT_V4_MAX_DIAGNOSIS_SOURCES).map((source) => ({
         questionId: source.questionId,
         sourceId: source.sourceId,
@@ -152,7 +151,8 @@ export async function enhanceReportV4QuestionDiagnosis(
         retrievalStatus: source.retrievalStatus || "not_checked"
       })),
       targetPages: input.targetPages
-    }, { semanticValidation: input.semanticValidation });
+    });
+    diagnosisInput = parseReportV4DiagnosisInput(clamped, { semanticValidation: input.semanticValidation });
   } catch (error) {
     propagateCallerAbort(signal);
     return failed(input.question, 0, parserFailure("input_validation", "invalid_input", error));

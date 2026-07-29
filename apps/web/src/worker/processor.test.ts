@@ -77,6 +77,7 @@ import {
   composeReportV4AcceptanceProductionRunner,
   createPaidV3DiagnosisIncompleteError,
   PaidV3DiagnosisIncompleteError,
+  paidV3SemanticSourceCatalogEligibility,
   hashSynthesisInput,
   isTerminalScanJob,
   mergeCompletedAnalyses,
@@ -937,5 +938,33 @@ describe("Paid V3 diagnosis failure transparency", () => {
     expect(error.name).toBe("PaidV3DiagnosisIncompleteError");
     expect((error as PaidV3DiagnosisIncompleteError).failure).toEqual(failure);
     expect((error as PaidV3DiagnosisIncompleteError).providerAttempts).toBe(0);
+  });
+});
+
+describe("paidV3SemanticSourceCatalogEligibility (W4 rule 1)", () => {
+  it("marks verified body and search_source_only as eligible, inaccessible as not", () => {
+    expect(paidV3SemanticSourceCatalogEligibility({
+      retrievalStatus: "verified_body",
+      auditRetrievalReady: true,
+      auditExactExcerpt: "exact body excerpt"
+    })).toEqual({ eligible: true, evidenceMode: "verified_body" });
+
+    expect(paidV3SemanticSourceCatalogEligibility({
+      retrievalStatus: "search_source_only",
+      auditRetrievalReady: false,
+      auditExactExcerpt: null
+    })).toEqual({ eligible: true, evidenceMode: "search_summary_only" });
+
+    expect(paidV3SemanticSourceCatalogEligibility({
+      retrievalStatus: "inaccessible",
+      auditRetrievalReady: false,
+      auditExactExcerpt: null
+    })).toEqual({ eligible: false, evidenceMode: "unavailable" });
+
+    expect(paidV3SemanticSourceCatalogEligibility({
+      retrievalStatus: "verified_body",
+      auditRetrievalReady: false,
+      auditExactExcerpt: null
+    })).toEqual({ eligible: false, evidenceMode: "unavailable" });
   });
 });
