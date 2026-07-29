@@ -865,9 +865,9 @@ describe("free teaser orchestration", () => {
     });
     await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: vi.fn() }))
       .rejects.toMatchObject({
-        name: "OrchestrationInvariantError",
-        code: "orchestration_invariant",
-        classification: "permanent",
+        name: "FreeTeaserQ1AnnotationDegradedError",
+        code: "free_teaser_q1_annotation_degraded",
+        classification: "transient",
         message: expect.stringMatching(/contradictory Q1 entity semantics/i)
       });
 
@@ -889,9 +889,9 @@ describe("free teaser orchestration", () => {
     });
     await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: vi.fn() }))
       .rejects.toMatchObject({
-        name: "OrchestrationInvariantError",
-        code: "orchestration_invariant",
-        classification: "permanent",
+        name: "FreeTeaserQ1AnnotationDegradedError",
+        code: "free_teaser_q1_annotation_degraded",
+        classification: "transient",
         message: expect.stringMatching(/omitted durable Q1 diagnosis semantics/i)
       });
 

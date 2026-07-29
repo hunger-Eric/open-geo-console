@@ -97,12 +97,10 @@ export class FreeTeaserQ1IncompleteError extends JobError {
  * of being persisted as fact. Fingerprint recurrence escalates deterministically.
  */
 export class FreeTeaserQ1AnnotationDegradedError extends JobError {
-  constructor() {
-    super(
-      "Free teaser Q1 review annotation degraded to a synthesized contract fallback.",
-      "free_teaser_q1_annotation_degraded",
-      "transient"
-    );
+  constructor(
+    message = "Free teaser Q1 review annotation degraded to a synthesized contract fallback."
+  ) {
+    super(message, "free_teaser_q1_annotation_degraded", "transient");
     this.name = "FreeTeaserQ1AnnotationDegradedError";
   }
 }
@@ -945,14 +943,21 @@ async function reviewFreeTeaser(input: {
   // A degraded Q1 annotation is a code-synthesized fallback, not model
   // evidence: reject transiently instead of persisting fabricated semantics.
   if (answerAnnotation?.degraded === true) throw new FreeTeaserQ1AnnotationDegradedError();
+  // Model-label incompleteness / self-contradiction is not an orchestration
+  // invariant: pre-W1 bare Errors were transient and retries often self-healed.
+  // Keep permanent only for checkpoint/identity binding guards below.
   if (!answerAnnotation || answerAnnotation.targetPresence === undefined || answerAnnotation.targetPresence === "ambiguous" || answerAnnotation.targetFirstSentence === undefined || answerAnnotation.targetRoles === undefined || answerAnnotation.competitorEntityIds === undefined) {
-    throw new OrchestrationInvariantError("Marked Free teaser review omitted durable Q1 diagnosis semantics.");
+    throw new FreeTeaserQ1AnnotationDegradedError(
+      "Marked Free teaser review omitted durable Q1 diagnosis semantics."
+    );
   }
   const expectedEntityRole = answerAnnotation.targetPresence === "present"
     ? answerAnnotation.competitorEntityIds.length ? "mixed" : "target"
     : answerAnnotation.competitorEntityIds.length ? "competitor" : "none";
   if (answerAnnotation.entityRole === "ambiguous" || answerAnnotation.entityRole !== expectedEntityRole) {
-    throw new OrchestrationInvariantError("Marked Free teaser review returned contradictory Q1 entity semantics.");
+    throw new FreeTeaserQ1AnnotationDegradedError(
+      "Marked Free teaser review returned contradictory Q1 entity semantics."
+    );
   }
   const textByPath = new Map(reviewed.applied.fields.map((field) => [field.path, field.appliedText]));
   const reviewedFoundation = applyReviewedFoundation(input.foundation, textByPath);

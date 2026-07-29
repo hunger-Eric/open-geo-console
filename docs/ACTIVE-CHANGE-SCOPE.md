@@ -4,13 +4,138 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Code-AI seam W-A+W-B — forensic query coverage classification and reuse/contract alignment (APPROVED)`.
+`Current authority: Free teaser Q1 entity contradiction back to transient (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Code-AI seam W-A+W-B — forensic query coverage classification and reuse/contract alignment (APPROVED)
+## Current authority: Free teaser Q1 entity contradiction back to transient (APPROVED)
+
+**Status: `APPROVED`** — user 2026-07-29: free report stuck at 96% again;
+"那这个不对呀…能不能把这个改回来" after Staging `affefb3` job
+`e26c2462` failed permanent on contradictory Q1 entity semantics.
+
+### Baseline
+
+- Job `e26c2462` / report `36a7383d`: `orchestration_invariant` permanent at
+  `grounded_answer_synthesis` —
+  "Marked Free teaser review returned contradictory Q1 entity semantics."
+- W1 `b75b750` converted that throw from bare `Error` (→ transient via
+  `classifyUnknown`) to `OrchestrationInvariantError` (permanent). Pre-W1
+  retries could self-heal when MiMo returned consistent labels; e21ade5 Gate 4
+  free teaser succeeded by luck, not because permanent was correct for model noise.
+- W3 already treats `degraded` annotations as
+  `FreeTeaserQ1AnnotationDegradedError` (transient). Contradiction is the same
+  class of model-label inconsistency, not an orchestration identity bug.
+
+### Design lock
+
+| # | Rule |
+|---|------|
+| 1 | **Contradictory Q1 entityRole vs targetPresence/competitors** throws **`FreeTeaserQ1AnnotationDegradedError` (transient)** — not `OrchestrationInvariantError`. Message may keep the existing wording for operators. |
+| 2 | **Omitted durable Q1 annotation fields** (`targetPresence` missing/ambiguous, missing roles/competitors arrays) also throw **`FreeTeaserQ1AnnotationDegradedError` (transient)** — model incompleteness, same retry path as W3 degraded marker. |
+| 3 | True checkpoint/identity/hash binding guards remain **permanent** `OrchestrationInvariantError`. W1 fingerprint escalation still permanentizes deterministic recurrence. |
+| 4 | No deploy in this scope unless user separately authorizes overlay recreate. |
+
+### Production allowlist
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/report-v4-free-teaser.ts` | Rules 1–2 throw sites only |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+### Tests allowlist
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/report-v4-free-teaser.test.ts` | Expect transient degraded error for contradiction / omitted fields |
+
+### Forbidden
+
+- Paid forensics, W-A/W-B, commerce, schema, prompts, packages/*
+- Permanent→transient for true identity/hash checkpoints
+- Replay historical jobs; production; push
+
+### Diff budget
+
+- Production ≤ 20 lines; tests ≤ 40; docs ≤ 60.
+
+### Acceptance
+
+1. Unit: contradictory / omitted Q1 annotation → `FreeTeaserQ1AnnotationDegradedError`, classification transient.
+2. Unit: existing degraded-marker and permanent checkpoint tests still green.
+3. `npm test` / lint / build green for affected packages.
+4. Staging deploy of this fix is separate (thin overlay) when user asks.
+
+## Historical: Staging deploy affefb3 + Gate 4 new-order acceptance (APPROVED)
+
+**Status: `APPROVED`** — user authorized on 2026-07-29:
+"1. 部署 Staging Workers/Web 到 affefb3  2. 新单 Gate 4 验收（不重放已退款的 8e4f2a77）".
+
+### Baseline and identities
+
+| Role | Identity |
+|------|----------|
+| Candidate SHA (full) | `affefb3174a148d4d8140c9b861f8cf56e5c4f09` |
+| Candidate short | `affefb3` (W-A+W-B on top of e21ade5/W1–W4) |
+| Current Staging Workers | `open-geo-console:staging-e21ade5-overlay-v1` (`a7857e2ec435`), env SHA `e21ade5…` |
+| Rollback Workers | `staging-e21ade5-overlay-v1` |
+| Base full image | `staging-330b27a74c5c3d9d56c71bc8e6ade1859499e92e-full-v1` (`748e2675f280`) |
+| Candidate Worker image | `open-geo-console:staging-affefb3-overlay-v1` thin overlay only |
+| Fixed Staging URL | `https://open-geo-console-staging-itheheda.vercel.app` |
+| Disk free (preflight) | ~87 GiB on E: |
+| Active jobs pre-cutover | 0 |
+
+Source-only since full base (no package-lock / Dockerfile.worker change) → thin overlay required; full Worker rebuild forbidden.
+
+### Design lock
+
+| Gate | Action |
+|------|--------|
+| 1–2 | Detached worktree at `affefb3`; Vercel Preview with `OGC_DEPLOYMENT_VERSION`/`ogcGitSha`; thin overlay; recreate **only** staging free+deep; set `staging.env` version to full candidate SHA; alias after both healthy |
+| 3 | Smoke fixed site / catalog if reachable; no report created by smoke |
+| 4 | **Exactly one new** report + one Sandbox payment. **Forbidden:** replay/repair job `8e4f2a77`, order `2b879fdc`, or any historical terminal. MiMo probe before/at cutover. Failed new paid orders may use standard staging commerce refund |
+
+### Production allowlist (closed)
+
+| Target | Role |
+|--------|------|
+| `.data/staging-release-affefb3/Dockerfile.overlay` | Thin overlay |
+| `open-geo-console:staging-affefb3-overlay-v1` | Candidate Workers |
+| `.data/workstation-docker/staging.env` | `OGC_DEPLOYMENT_VERSION` only (+ merge if needed) |
+| Containers `staging-worker-free`, `staging-worker-deep` | Recreate |
+| Vercel Preview + alias `open-geo-console-staging-itheheda.vercel.app` | Web |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+| `.tmp/*` operator scripts | Disposable |
+
+### Forbidden
+
+- Production, full Worker rebuild, docker prune, historical job/order mutation/replay
+- More than one new paid acceptance lineage without a new scope
+- Push to origin unless asked
+
+### Acceptance checks
+
+1. Free+Deep report candidate SHA, restart 0, presence healthy.
+2. Fixed alias → READY Preview same SHA.
+3. MiMo public-search probe green.
+4. Gate 4: one new lineage completes free teaser + paid V3 HTML, **or** structured failure report (no silent historical repair).
+
+### Execution record 2026-07-29 (deploy)
+
+| Item | Result |
+|------|--------|
+| Thin overlay | `open-geo-console:staging-affefb3-overlay-v1` (`ca1cd1945627`) |
+| Workers | free+deep on affefb3 image; ready; presence SHA `affefb3174a148d4d8140c9b861f8cf56e5c4f09`; 0 active jobs |
+| Preview | `https://open-geo-console-q6w7l33ja-itheheda-6857s-projects.vercel.app` Ready |
+| Alias | fixed Staging URL → that Preview |
+| MiMo probe | 3/3 passed |
+| Production | not touched |
+| Gate 4 | awaiting **new** browser submit+pay (not 8e4f2a77) |
+
+## Historical: Code-AI seam W-A+W-B — forensic query coverage classification and reuse/contract alignment (APPROVED)
 
 **Status: `APPROVED`** — user approved this written allowlist on 2026-07-29
-("批准"). Deployment and a new paid Gate 4 rerun remain out of scope.
+("批准"). Implemented as `affefb3`. Deployment was out of that scope; this
+section is now the code baseline for the deploy above.
 
 ### Baseline and evidence
 
