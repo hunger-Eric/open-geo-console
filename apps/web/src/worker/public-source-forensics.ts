@@ -6,6 +6,7 @@ import { decidePublicSourceCommercialCoverage } from "@/public-source-forensics/
 import { buildPublicSourceForensicReport, type PublicSourceForensicReportBuilderInput } from "@/public-source-forensics/report-builder";
 import { createConcurrencyGate, type ConcurrencyGate } from "./bounded-scheduler";
 import {
+  JobError,
   PublicSourceQueryVariantCoverageError,
   PublicSourceSnapshotQueryBindingError
 } from "./job-errors";
@@ -129,20 +130,20 @@ export async function runPublicSourceForensicsPipeline(input: {
   // W-B: observations with IDs outside the current plan are a hard identity fault.
   if (hasExtraObservedQueryIds(observedIds, planQueryIds)) {
     throw new PublicSourceQueryVariantCoverageError(
-      "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants."
+      "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.", { safeDiagnostics: forensicsTrace("pre_graph_guard", fanouts, snapshots, observedIds, []) }
     );
   }
   // W-B: proper subset (prefix/stale fallback) → effective plan = observed set; never full completed.
   const partialQueryCoverage = isProperSubsetOfPlan(observedIds, planQueryIds);
   if (partialQueryCoverage && observedIds.length === 0) {
     throw new PublicSourceQueryVariantCoverageError(
-      "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants."
+      "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.", { safeDiagnostics: forensicsTrace("pre_graph_guard", fanouts, snapshots, observedIds, []) }
     );
   }
   if (!partialQueryCoverage && !queryIdSetsEqual(observedIds, planQueryIds) && observedIds.length > 0) {
     // Same size but different members (or other non-subset mismatch) — permanent.
     throw new PublicSourceQueryVariantCoverageError(
-      "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants."
+      "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.", { safeDiagnostics: forensicsTrace("pre_graph_guard", fanouts, snapshots, observedIds, []) }
     );
   }
   let effectiveFanouts: SearchQueryFanout[];
@@ -151,7 +152,7 @@ export async function runPublicSourceForensicsPipeline(input: {
       ? projectFanoutsToObservedQueryIds(fanouts, new Set(observedIds))
       : fanouts;
   } catch (error) {
-    throw mapForensicReportContractError(error);
+    throw mapForensicReportContractError(error, forensicsTrace("pre_graph_guard", fanouts, snapshots, observedIds, []));
   }
 
   const actualCostMicros = snapshots.reduce((sum, item) => sum + item.actualCostMicros, 0);
@@ -177,7 +178,7 @@ export async function runPublicSourceForensicsPipeline(input: {
   // Graph dimensions must equal effective plan before we freeze resume identity (B4: parse before checkpoint).
   if (!queryIdSetsEqual(sourceGraph.dimensions.queryVariantIds, fanoutQueryIds(effectiveFanouts))) {
     throw new PublicSourceQueryVariantCoverageError(
-      "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants."
+      "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.", { safeDiagnostics: forensicsTrace("pre_graph_guard", fanouts, snapshots, observedIds, effectiveFanouts, sourceGraph) }
     );
   }
   const priceMicros = 29_000_000;
@@ -187,14 +188,15 @@ export async function runPublicSourceForensicsPipeline(input: {
       ? "公开搜索查询仅为部分覆盖（前缀/不完整观测复用）；结果为受限交付，不是完整 fanout 审计。"
       : "Public-search query coverage is partial (prefix or incomplete observation reuse); delivery is limited, not a full-fanout audit.")
     : null;
+  const snapshotRefs = snapshots.map((snapshot, index) => ({ snapshotId: snapshot.snapshotId,
+    questionId: snapshot.questionId, queryVariantIds: effectiveFanouts[index]!.queries.map(({ id }) => id), observationIds: snapshot.observations.map(({ observationId }) => observationId),
+    freshness: snapshot.ageMs <= 7*24*60*60*1_000 ? ("fresh" as const) : snapshot.ageMs <= 30*24*60*60*1_000 ? ("stale" as const) : ("expired" as const),
+    observedAt: snapshot.observedAt, collectedForThisRun: snapshot.collectedForThisRun }));
   let report: RecommendationForensicReportV2;
   try {
     report = (input.dependencies.buildReport ?? buildPublicSourceForensicReport)({ reportId: input.reportId, jobId: input.jobId,
       targetUrl: input.targetUrl, locale: input.locale, region: input.region, generatedAt: evidenceCutoffAt, evidenceCutoffAt,
-      questions, fanouts: effectiveFanouts, authority, snapshotRefs: snapshots.map((snapshot, index) => ({ snapshotId: snapshot.snapshotId,
-        questionId: snapshot.questionId, queryVariantIds: effectiveFanouts[index]!.queries.map(({ id }) => id), observationIds: snapshot.observations.map(({ observationId }) => observationId),
-        freshness: snapshot.ageMs <= 7*24*60*60*1_000 ? "fresh" : snapshot.ageMs <= 30*24*60*60*1_000 ? "stale" : "expired",
-        observedAt: snapshot.observedAt, collectedForThisRun: snapshot.collectedForThisRun })),
+      questions, fanouts: effectiveFanouts, authority, snapshotRefs,
       coverage: { status: decision.outcome === "completed" ? "complete" : decision.outcome === "completed_limited" ? "partial" : "insufficient",
         completedQueryCount: observations.filter(({ status }) => status === "complete" || status === "partial").length,
         expectedQueryCount: effectiveFanouts.reduce((sum, fanout) => sum + fanout.queries.length, 0), observedResultCount: observations.reduce((sum, item) => sum + item.results.length, 0),
@@ -206,7 +208,7 @@ export async function runPublicSourceForensicsPipeline(input: {
       ...(partialLimitation ? { additionalLimitations: [partialLimitation] } : {}),
       ...(input.semanticValidation === "deferred" ? { semanticValidation: "deferred" as const } : {}) });
   } catch (error) {
-    throw mapForensicReportContractError(error);
+    throw mapForensicReportContractError(error, forensicsTrace("report_parser", fanouts, snapshots, observedIds, effectiveFanouts, sourceGraph, snapshotRefs));
   }
   // B4: only after a parseable report do we freeze publicSourceForensics resume identity.
   const checkpoint = createCheckpoint({ input, questions, fanouts: effectiveFanouts, snapshots, evidenceCutoffAt, authority });
@@ -239,19 +241,31 @@ function uniqueReasons(reasons: readonly string[]): string[] {
 }
 
 /** Map forensic parse TypeErrors for query/snapshot set mismatches to permanent JobErrors (W-A). */
-export function mapForensicReportContractError(error: unknown): never {
+export function mapForensicReportContractError(error: unknown, safeDiagnostics?: import("./job-errors").SafeDiagnostics): never {
   if (error instanceof PublicSourceQueryVariantCoverageError || error instanceof PublicSourceSnapshotQueryBindingError) {
-    throw error;
+    throw (error as JobError).attachSafeDiagnostics(safeDiagnostics);
   }
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("$.sourceGraph.dimensions.queryVariantIds")) {
-    throw new PublicSourceQueryVariantCoverageError(message, { cause: error instanceof Error ? error : undefined });
+    throw new PublicSourceQueryVariantCoverageError(message, { cause: error instanceof Error ? error : undefined, safeDiagnostics });
   }
   if (message.includes("$.snapshotRefs") && /query|snapshot reference/i.test(message)) {
-    throw new PublicSourceSnapshotQueryBindingError(message, { cause: error instanceof Error ? error : undefined });
+    throw new PublicSourceSnapshotQueryBindingError(message, { cause: error instanceof Error ? error : undefined, safeDiagnostics });
   }
   throw error;
 }
+
+function forensicsTrace(origin: "pre_graph_guard" | "report_parser", planned: SearchQueryFanout[], snapshots: ResolvedPublicSourceSnapshot[], observed: string[], effective: SearchQueryFanout[], graph?: { dimensions: { queryVariantIds: readonly string[] } }, snapshotRefs: readonly { questionId: string; queryVariantIds: readonly string[] }[] = []): import("./job-errors").SafeDiagnostics | undefined {
+  try {
+    const plan = fanoutQueryIds(planned), graphIds = graph?.dimensions.queryVariantIds ?? [], ref = new Map(snapshotRefs.map((item) => [item.questionId, item.queryVariantIds]));
+    const q = planned.map((fanout, i) => { const ids = fanoutQueryIds([fanout]), observedIds = observationsForQuestion(snapshots, fanout.questionId), effectiveIds = fanoutQueryIds(effective.filter((item) => item.questionId === fanout.questionId)); const graphForQuestion = graphIds.filter((id) => ids.includes(id)); const refIds = ref.get(fanout.questionId) ?? []; return { i, p: ids.length, ph: traceHash(ids), o: observedIds.length, oh: traceHash(observedIds), e: effectiveIds.length, eh: traceHash(effectiveIds), g: graphForQuestion.length, gh: traceHash(graphForQuestion), s: refIds.length, sh: traceHash(refIds) }; });
+    return { version: 1, origin, revision: deploymentRevision(), questions: q, global: traceCounts(plan, observed, fanoutQueryIds(effective), graphIds, snapshotRefs.flatMap((item) => item.queryVariantIds)), flags: { d: [plan, snapshots.flatMap((item) => item.observations.map(({ queryId }) => queryId)), graphIds].some((ids) => new Set(ids).size !== ids.length), x: hasExtraObservedQueryIds(observed, plan), z: planned.some((fanout) => !observationsForQuestion(snapshots, fanout.questionId).length) } };
+  } catch { return undefined; }
+}
+function observationsForQuestion(snapshots: ResolvedPublicSourceSnapshot[], questionId: string): string[] { return observationQueryIds(snapshots.filter((item) => item.questionId === questionId).flatMap((item) => item.observations)); }
+function traceHash(ids: readonly string[]): string { return createHash("sha256").update(JSON.stringify([...new Set(ids)].sort())).digest("hex").slice(0, 12); }
+function traceCounts(plan: readonly string[], observed: readonly string[], effective: readonly string[], graph: readonly string[], refs: readonly string[]): Record<string, unknown> { return { p0: plan.length, ph0: traceHash(plan), o0: observed.length, oh0: traceHash(observed), e0: effective.length, eh0: traceHash(effective), g0: graph.length, gh0: traceHash(graph), s0: refs.length, sh0: traceHash(refs) }; }
+function deploymentRevision(): string { const value = process.env.OGC_DEPLOYMENT_VERSION?.trim(); return value && /^[a-f0-9]{40}$/i.test(value) ? value.toLowerCase() : "unknown"; }
 
 export function createPublicSourceQuestionFanouts(input: {
   questions: CanonicalBuyerQuestionSet;

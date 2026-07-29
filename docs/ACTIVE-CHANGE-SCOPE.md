@@ -4,8 +4,310 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Free teaser Q1 entity contradiction back to transient (APPROVED)`.
+`Current authority: Protected Staging exactly-one Deep runtime evidence (APPROVED)`.
 All earlier sections are context only.
+
+## Current authority: Protected Staging exactly-one Deep runtime evidence (APPROVED)
+
+**Status: `APPROVED`** — user replied “批准” to the complete approval phrase
+on 2026-07-29. Authorization is bound to exactly one candidate branch/commit
+and push, one same-SHA Web+Free+Deep deployment, one new report/lineage, one
+Sandbox payment, and one Deep job; failure stops immediately, with no retry and
+no Production touch.
+
+### Objective
+
+Promote the locally accepted redacted-trace candidate as an exact commit and
+deploy it to Protected Staging, then execute exactly one new Free → Sandbox
+payment → Deep lineage to obtain real boundary trace and HTML evidence. This is
+not a repair or replay of any historical job.
+
+### Baseline and dirty-file boundary
+
+- Canonical cwd `E:\project\open-geo-console`, branch `main`, HEAD
+  `4112c2e5494e6c2b4045dbfe6a3870c910961c89` (ahead 7).
+- Agent-owned candidate files only: this scope, `apps/web/src/worker/public-source-forensics.ts`,
+  `apps/web/src/worker/job-errors.ts`, and their corresponding tests.
+- Exclude user/unknown dirty ledger test, `.codex/`, and `.tmp/`.
+- Current Staging image: `staging-4112c2e-overlay-v1`,
+  `sha256:1d6e7a...f3522`, restart 0; E: free approximately 86.4 GiB.
+- Source-only change: dependencies, Dockerfile and lockfile unchanged; full
+  Worker build is forbidden, thin overlay only.
+
+### Git strategy and allowlist
+
+`git_operator` may create one ordinary branch (recommended
+`codex/staging-runtime-evidence-4112c2e`) without a worktree, and stage/commit
+only the agent-owned files above plus this scope. Exclude ledger, `.codex/`,
+`.tmp/`, user edits and unknown files. Push the candidate branch only after
+approval; merge, tag, PR, and worktree cleanup are forbidden. Build/deploy only
+from the clean exact-commit artifact, never a dirty working tree; record full
+SHA.
+
+### Four gates and roles
+
+Follow `docs/PROTECTED-STAGING-OPERATIONS.md`. Fixed business URL:
+`https://open-geo-console-staging-itheheda.vercel.app`. Web, Free and Deep must
+share the exact candidate SHA; Vercel Preview identity remains separate from
+the fixed alias. A technical checker must provide the plain-language
+acceptance card. `git_operator` owns Git; `release_operator` build/deploy/
+rollback; `runtime_operator` run/job/lease/checkpoint supervision;
+`browser_qa` fixed URL, Sandbox payment and HTML visual journey; tester/reviewer
+are read-only. Main agent is coordination-only.
+
+### Pre-mutation read-only gates
+
+Verify live DB marker/schema; zero conflicting claimable/running/recoverable/
+exhausted-terminalizable jobs, leases, lineages, orders or payments; candidate
+diff allowlist; `docker system df`, drive free space, current/candidate/
+rollback image IDs; and current service health. If any proof is missing, stop.
+
+### Deployment allowlist and budget
+
+At most one candidate branch push, one unique Vercel Preview and one promotion
+of the fixed Protected Staging alias. Build one thin source-overlay Worker image
+from the exact accepted image, copying only required `apps`/`packages`; recreate
+only named `staging-worker-free` and `staging-worker-deep` plus the same-SHA Web
+actions required by the runbook. Retain current plus one rollback; never delete
+production images or broad-prune. Record before/after disk, image/container
+references and net bytes. On deployment/post-change failure, rollback alias and
+both Workers per runbook.
+
+### Exactly-one real-flow budget
+
+Exactly one new report/lineage, one Sandbox payment, and one Deep job. Use a new
+runbook-approved target URL; never substitute a historical report. Pay only
+after Free/Foundation/Q1/semantic receipt success; Free failure means no
+payment. Payment or Deep failure records the error event/`ogc_trace` then stops.
+No second lineage, retry, replay, repair, reopen, clone, payment, refund, email,
+or production action.
+
+### Acceptance and stop rules
+
+Candidate full SHA must match Vercel Web/Free/Deep and the clean artifact.
+Receipts prove exactly one lineage. Free completes. Paid Deep either returns
+HTML with semantic receipt, acceptance ledger and correct commerce state, or a
+targeted persisted `ogc_trace:v1` failure with origin/count/hash/full SHA and no
+raw identifiers; no reserved-credit terminal anomaly. Independent checker
+delivers the acceptance card. A failed real test is valid diagnosis only, not
+product acceptance.
+
+Stop on scope/diff/dirty mismatch, disk <20 GiB, unclear candidate/rollback,
+DB conflict, SHA mismatch, protected auth/permission failure, Free/payment/Deep
+failure (capture then stop/rollback), any second external action, or missing
+trace; never auto-edit code.
+
+### Budgets
+
+Scope document cumulative `+330/-20` maximum. Source/test code remains within
+the prior scope's existing production/test budgets; no new code budget is
+added. Full Docker build and production deployment/actions are `0`; external
+counts are exactly one deployment, one report, one Sandbox payment and one Deep
+job.
+
+## Historical / local-accepted: Deep runtime-boundary evidence (APPROVED)
+
+**Status: `APPROVED`** — user explicitly approved: “批准当前 Deep runtime-boundary
+evidence scope，将其改为 APPROVED；执行一次性旧测试清理，并按 allowlist 实现脱敏
+trace” (2026-07-29). This approval does not include fresh Staging; the existing
+fresh-Staging prohibition remains in force.
+
+### Objective
+
+Persist a redacted structured trace at the forensics → report-parser failure
+boundary into existing `scan_job_error_events.causes`, distinguishing
+`pre_graph_guard` from `report_parser`. This provides attributable evidence
+for exactly one future fresh Staging lineage; it does not claim to fix business
+logic.
+
+### Baseline
+
+- Branch `main`; HEAD `4112c2e5494e6c2b4045dbfe6a3870c910961c89`.
+- Historical paid Deep job `8e4f2a77…` stopped at `source_retrieval`/
+  terminalization progress `95%`; the DB stack points at the
+  `recommendation-forensic-v2` parser. Historical parser input and container
+  logs were not retained; current Staging `4112c2e` cannot prove the historical
+  attempt SHA. Unit tests cannot accept real runtime behavior.
+
+### Production allowlist
+
+- `apps/web/src/worker/public-source-forensics.ts`: construct a safe trace with
+  origin, hashes/counts/flags and deployment revision; attach it to the
+  existing typed error.
+- `apps/web/src/worker/job-errors.ts`: optional `safeDiagnostics`, strict
+  whitelist, JSON-safe values and length limit, normalized into existing
+  `causes[]`.
+
+Forbidden production paths: `processor.ts`, `worker/index.ts`, `report-builder`,
+`recommendation-forensic-v2`, schema/migrations/new DB columns, commerce,
+settlement, and checkpoint semantics.
+
+### Test allowlist
+
+- `apps/web/src/worker/public-source-forensics.test.ts`
+- `apps/web/src/worker/job-errors.test.ts`
+
+No PostgreSQL integration tests or other test files are allowed.
+
+### One-time superseded-scope cleanup (out-of-scope hygiene)
+
+After explicit approval, the sole additional path is
+`apps/web/src/worker/public-source-query-coverage.test.ts`. The only permitted
+action is to remove or restore the agent-added zero-observed regression edit
+from the superseded test-first scope, without adding or rewriting any other
+test and without touching user changes. This one-time cleanup is not part of
+runtime-evidence acceptance; once completed, this file is forbidden again.
+Its deletion is included in the existing tests budget `+120/-30`; production
+scope and budget do not expand.
+
+### Trace schema and contract
+
+Trace fields: `version`, `origin`, deployment revision, per-question ordinal
+with planned/observed/effective/graph/snapshotRef counts and sorted-set short
+SHA-256 hashes, global counts/hash, and duplicate/foreign/empty flags. Never
+include raw IDs, question text, URLs, customer/provider payloads, tokens, keys,
+or IPs. Successful paths create no event; only errors append one trace to the
+existing error event. Associate `checkpointRevision` through existing
+transition/error-event fields; do not duplicate payloads.
+
+Preserve original error message, code, classification, retry, terminalization,
+settlement, and checkpoint behavior exactly. Preserve the cause chain and
+append one prefix such as `ogc_trace:v1:<compact-json>`, with a strict total
+length (recommended ≤1200 bytes) and key whitelist. Trace failure must never
+mask the original error.
+
+### Diff budgets
+
+| Surface | Budget |
+|---|---:|
+| This scope document | cumulative `+220/-15` |
+| Production total | `+90/-30` hard (`forensics` ≤`+55/-20`, `job-errors` ≤`+35/-10`) |
+| Tests | `+120/-30` |
+| Dependencies / migrations / external actions | `0` |
+
+### Acceptance
+
+Offline tests simulate `pre_graph_guard` and buildReport parser mismatch;
+normalized `causes[]` exposes origin, counts, hashes and revision. Sorting does
+not change hashes; duplicate/foreign/empty flags are correct; no raw ID, URL or
+text appears; over-length traces are safely truncated or rejected while the
+original error remains unchanged. Original code/classification/cause/checkpoint
+ordering remain unchanged. Run focused and related tests, `npm test`, lint,
+build, `git diff --check`, and independent review.
+
+### Stop rules
+
+If the two production files cannot persist the trace into the existing error
+event, stop and report; do not expand to processor/schema. If tracing changes
+classification, settlement, or leaks data, stop. Any out-of-scope path stops
+for reporting. Fresh Staging is not authorized; after local implementation and
+acceptance it requires a second explicit authorization for exactly one new
+lineage and one Sandbox payment, with failure stopping the run.
+
+### Forbidden external actions
+
+All are `0` and forbidden: model, crawl, payment, refund, email, Docker,
+deployment, new report, database write, and historical replay/repair/reopen/
+clone. Fresh Staging is not authorized.
+
+### Prior test-first result (regression context only)
+
+The prior test-first false-green was fixed and its focused suite reported 13
+green, but that cannot prove runtime behavior. Full-run had one out-of-scope
+Windows timeout; lint/build were not run.
+
+## Historical / superseded: Deep public-source query coverage test-first (APPROVED)
+
+**Status: `APPROVED`** — user explicitly approved this exact scope: “批准当前
+Deep test-first scope，将其改为 APPROVED，并开始测试 allowlist” (2026-07-29).
+
+### Objective
+
+Use deterministic unit tests first to reproduce the real `planned/observed`
+shape `6/5, 3/3, 6/1` and determine whether commit `affefb31`'s
+`effectiveFanouts` / subset projection is later rejected by an exact-set
+validator. The first step has **production diff = 0**.
+
+### Baseline
+
+- Branch `main`; HEAD
+  `4112c2e5494e6c2b4045dbfe6a3870c910961c89`.
+- Recent paid Deep job `8e4f2a77…` stopped at
+  `source_retrieval`/terminalization progress `95%` with:
+  ``$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.``
+- Historical jobs are evidence only and must not be repair targets, replayed,
+  reopened, cloned, or mutated.
+
+### Test allowlist (first step; production diff 0)
+
+- `apps/web/src/worker/public-source-forensics.test.ts`
+- `apps/web/src/worker/public-source-query-coverage.test.ts`
+
+### Conditional production allowlist
+
+Only if the real-shape tests fail and prove a projection bug, make the smallest
+fix within this same objective:
+
+- `apps/web/src/worker/public-source-forensics.ts`
+- `apps/web/src/worker/public-source-query-coverage.ts`
+
+`packages/ai-report-engine/src/recommendation-forensic-v2.ts` is explicitly not
+allowed to change; its exact gate must remain intact.
+
+### Canonical invariant
+
+`plannedFanouts` performs only upper-bound, subset, foreign-ID, and per-question
+non-empty checks. Once a non-empty observed subset is accepted, create exactly
+one canonical `effectiveFanouts`; thereafter `report.fanouts`, snapshot-ref
+query IDs, coverage denominator, source-graph expected IDs, and checkpoint all
+bind to it and require exact equality. Partial coverage yields
+`completed_limited` plus a limitation and correct settlement; it must never be
+reported as full `completed`.
+
+### Forbidden
+
+Parser exact-gate changes; citation graph or snapshot resolver changes;
+DB/schema/migration; commerce; prompt/provider; Q1/free; UI; deployment/Docker;
+historical mutation/replay/repair/clone; external model, crawl, payment,
+refund, or email actions.
+
+### Diff budgets
+
+| Surface | Budget |
+|---|---:|
+| This scope document | `+80/-0` (or equivalent under existing format) |
+| Tests | `+100/-20` |
+| Conditional production | `+45/-20` (hard limit) |
+| Dependencies / migrations / external actions | `0` |
+
+Test budgets remain subject to the project's verification-only rule; production
+budget is hard.
+
+### Acceptance
+
+1. Synthetic fixture planned `[6,3,6]`, observed/effective `[5,3,1]`, total
+   `15→9`; outcome `completed_limited`; downstream IDs fully equal; coverage
+   expected `9`; limitation present; checkpoint written only after parse.
+2. Full coverage remains `completed`.
+3. Foreign ID is permanent; any question with zero observed results fails
+   closed.
+4. Tests are synthetic/offline only. Run focused tests, then relevant tests,
+   `npm test`, lint, build, `git diff --check`, and independent review.
+
+### Stop rules
+
+If the new tests pass, production diff must remain `0`; stop speculative fixes
+and report only the need to verify deployed SHA and exact throw origin. A
+separate scope and authorization is required for exactly one fresh Staging
+lineage. If tests fail, the conditional production surface above becomes
+eligible only for the proven projection bug. Any out-of-scope discovery stops
+for reporting. Fresh Staging is not authorized; historical jobs must not be
+replayed.
+
+### Expensive external actions
+
+All are `0` and forbidden. No fresh Staging, model, crawl, payment, refund,
+email, deployment, Docker, database write, or Git state operation is included.
 
 ## Current authority: Free teaser Q1 entity contradiction back to transient (APPROVED)
 

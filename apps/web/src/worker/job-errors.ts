@@ -17,6 +17,8 @@ import {
 export type JobFailureClassification = "transient" | "operator_repairable" | "target_limitation" | "permanent";
 
 export const MIMO_INVALID_RESPONSE_JOB_CODE = "mimo_invalid_response" as const;
+export interface SafeDiagnostics { version: 1; origin: "pre_graph_guard" | "report_parser"; revision: string; questions: readonly Record<string, unknown>[]; global: Record<string, unknown>; flags: Record<string, unknown>; }
+interface JobErrorOptions extends ErrorOptions { safeDiagnostics?: SafeDiagnostics; }
 
 /** Durable job codes for structured MiMo provider failures (never raw bodies). */
 const MIMO_PROVIDER_JOB_CLASSIFICATION: Readonly<Record<string, {
@@ -41,11 +43,14 @@ export class JobError extends Error {
     message: string,
     readonly code: string,
     readonly classification: JobFailureClassification,
-    options?: ErrorOptions
+    options?: JobErrorOptions
   ) {
     super(message, options);
     this.name = new.target.name;
+    this.safeDiagnostics = options?.safeDiagnostics;
   }
+  safeDiagnostics?: SafeDiagnostics;
+  attachSafeDiagnostics(value: SafeDiagnostics | undefined): this { this.safeDiagnostics = value; return this; }
 }
 
 export class PublicSourceRuntimeError extends JobError {
@@ -75,7 +80,7 @@ export class OrchestrationInvariantError extends JobError {
 export class PublicSourceQueryVariantCoverageError extends JobError {
   constructor(
     message = "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.",
-    options?: ErrorOptions
+    options?: JobErrorOptions
   ) {
     super(message, "public_source_query_variant_coverage", "permanent", options);
   }
@@ -85,7 +90,7 @@ export class PublicSourceQueryVariantCoverageError extends JobError {
 export class PublicSourceSnapshotQueryBindingError extends JobError {
   constructor(
     message = "$.snapshotRefs: Every question and fanout query requires one bound market snapshot reference.",
-    options?: ErrorOptions
+    options?: JobErrorOptions
   ) {
     super(message, "public_source_snapshot_query_binding", "permanent", options);
   }
@@ -143,6 +148,8 @@ export function normalizeJobError(error: unknown, context: JobErrorContext, now 
     ?? typedBoundary?.code
     ?? (languageValidationFailure ? "report_language_validation_failed" : "unexpected_internal_error");
   const causes = collectCauses(source, secrets);
+  const trace = known ? encodeSafeDiagnostics(known.safeDiagnostics) : null;
+  if (trace) causes.push(trace);
   const fingerprint = createHash("sha256").update(JSON.stringify({
     code, type: source.name || "Error", phase: context.phase, message: normalizeFingerprintMessage(message)
   })).digest("hex");
@@ -381,6 +388,19 @@ function collectCauses(error: Error, secrets: readonly string[]): string[] {
     current = current instanceof Error ? (current as Error & { cause?: unknown }).cause : undefined;
   }
   return values;
+}
+
+function encodeSafeDiagnostics(value: SafeDiagnostics | undefined): string | null {
+  try {
+    if (!value || value.version !== 1 || !["pre_graph_guard", "report_parser"].includes(value.origin) || !(value.revision === "unknown" || /^[a-f0-9]{40}$/.test(value.revision)) || !Array.isArray(value.questions) || value.questions.length > 3 || !isSafeTracePart(value.global) || !isSafeTracePart(value.flags) || value.questions.some((item) => !isSafeTracePart(item))) return null;
+    const encoded = `ogc_trace:v1:${JSON.stringify({ v: 1, o: value.origin, r: value.revision, q: value.questions, g: value.global, f: value.flags })}`;
+    return Buffer.byteLength(encoded, "utf8") <= 1200 ? encoded : null;
+  } catch { return null; }
+}
+function isSafeTracePart(value: unknown): value is Record<string, unknown> {
+  const allowed = new Set(["i", "p", "ph", "o", "oh", "e", "eh", "g", "gh", "s", "sh", "p0", "ph0", "o0", "oh0", "e0", "eh0", "g0", "gh0", "s0", "sh0", "d", "x", "z"]);
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !allowed.has(key))) return false;
+  return Object.values(value).every((item) => typeof item === "boolean" || (typeof item === "number" && Number.isSafeInteger(item) && item >= 0 && item <= 10_000) || (typeof item === "string" && /^[a-f0-9]{12}$/i.test(item)));
 }
 
 function normalizeFingerprintMessage(value: string): string {

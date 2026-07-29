@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
-import type { MarketSearchObservation, PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
+import { generateCanonicalBuyerQuestions, type MarketSearchObservation, type PublicSearchSurfaceAuthority, type SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import { createTestWebsiteFoundation } from "../public-source-forensics/testing";
 import { buildPublicSourceForensicReport } from "../public-source-forensics/report-builder";
-import { PublicSourceQueryVariantCoverageError } from "./job-errors";
+import { normalizeJobError, PublicSourceQueryVariantCoverageError } from "./job-errors";
 import {
   PublicSourceArtifactUnavailableError,
   PublicSourceResumeIdentityMismatchError,
+  createPublicSourceQuestionFanouts,
+  mapForensicReportContractError,
   runPublicSourceForensicsPipeline,
   type PublicSourceForensicsDependencies,
   type PublicSourcePipelineCheckpoint
@@ -133,44 +135,82 @@ describe("public-source forensics pipeline", () => {
     expect(deferred.buildReport).toHaveBeenCalledWith(expect.objectContaining({ semanticValidation: "deferred" }));
   });
 
-  it("projects prefix/subset observations to an effective plan and caps outcome at completed_limited", async () => {
+  it("binds an asymmetric 6/3/6 plan and 5/3/1 observations to one effective set", async () => {
     const checkpoints = new Map<string, PublicSourcePipelineCheckpoint>();
+    const fanoutOverrides = asymmetricFanoutOverrides();
+    const expectedCounts = [5, 3, 1];
+    const observedCounts = new Map<string, number>([...fanoutOverrides.keys()].map((questionId, index) => [questionId, expectedCounts[index]!] as const));
     const dependencies = deps({
       reports: new Map(),
       checkpoints,
-      resolve: async ({ fanout }) => snapshotPrefix(fanout, 1)
+      resolve: async ({ fanout }) => {
+        const resolved = snapshotObservedCount(fanout, 1, observedCounts.get(fanout.questionId)!);
+        expect(resolved.sufficientlyEvidenced).toBe(true);
+        expect(resolved.availableSourceCount).toBeGreaterThanOrEqual(3);
+        return resolved;
+      }
     });
-    const result = await run("report-partial", "job-partial", dependencies);
+    const result = await run("report-partial", "job-partial", dependencies, "legacy", fanoutOverrides);
+    expect([...fanoutOverrides.values()].map((fanout) => fanout.queries.length)).toEqual([6, 3, 6]);
+    expect([...fanoutOverrides.values()].flatMap((fanout) => fanout.queries)).toHaveLength(15);
     expect(result.report.commercialOutcome).toBe("completed_limited");
-    expect(result.report.fanouts.every((fanout) => fanout.queries.length === 3)).toBe(true);
-    expect(result.report.sourceGraph.dimensions.queryVariantIds).toHaveLength(9);
+    expect(result.report.fanouts.map((fanout) => fanout.queries.length)).toEqual(expectedCounts);
+    const effectiveIds = result.report.fanouts.flatMap((fanout) => fanout.queries.map(({ id }) => id)).sort();
+    expect(result.report.snapshotRefs.flatMap((snapshotRef) => snapshotRef.queryVariantIds).sort()).toEqual(effectiveIds);
+    expect(result.report.sourceGraph.dimensions.queryVariantIds.slice().sort()).toEqual(effectiveIds);
     expect(result.report.coverage.expectedQueryCount).toBe(9);
     expect(result.report.limitations.some((line) => /部分覆盖|partial/i.test(line))).toBe(true);
     // B4: checkpoint only after successful parse
     expect(checkpoints.get("job-partial")?.snapshotIds).toHaveLength(3);
   });
 
-  it("fails permanent when observations carry query ids outside the current fanout plan", async () => {
+  it("records a redacted pre-graph trace for a foreign query id without changing the permanent error", async () => {
+    const checkpoints = new Map<string, PublicSourcePipelineCheckpoint>();
     const dependencies = deps({
       reports: new Map(),
-      checkpoints: new Map(),
+      checkpoints,
       resolve: async ({ fanout }) => {
         const base = snapshot(fanout, 1);
         return {
           ...base,
           observations: base.observations.map((observation, index) =>
             index === 0 ? { ...observation, queryId: "foreign-query-id-not-in-plan" } : observation
-          ),
+          ).concat(base.observations[1]!),
           retrievals: base.retrievals.map((retrieval, index) =>
             index === 0 ? { ...retrieval, queryId: "foreign-query-id-not-in-plan" } : retrieval
           )
         };
       }
     });
-    await expect(run("report-extra", "job-extra", dependencies)).rejects.toBeInstanceOf(PublicSourceQueryVariantCoverageError);
+    const error = await run("report-extra", "job-extra", dependencies).catch((value) => value);
+    expect(error).toBeInstanceOf(PublicSourceQueryVariantCoverageError);
+    const trace = normalizedTrace(error);
+    expect(trace).toMatchObject({ o: "pre_graph_guard", r: "unknown", f: { d: true, x: true }, g: { p0: 18 } });
+    expect(JSON.stringify(trace)).toMatch(/^[^]*$/);
+    expect(JSON.stringify(trace)).not.toMatch(/foreign-query-id|customer-logistics|https?:\/\//i);
+    expect(normalizeJobError(error, forensicErrorContext).classification).toBe("permanent");
+    expect(checkpoints.has("job-extra")).toBe(false);
+  });
+
+  it("records the pre-graph empty flag without freezing a checkpoint", async () => {
+    const checkpoints = new Map<string, PublicSourcePipelineCheckpoint>();
+    const dependencies = deps({ reports: new Map(), checkpoints, resolve: async ({ fanout }) => snapshotObservedCount(fanout, 1, 0) });
+    const error = await run("report-empty", "job-empty", dependencies).catch((value) => value);
+    expect(normalizedTrace(error)).toMatchObject({ o: "pre_graph_guard", f: { z: true } });
+    expect(checkpoints.has("job-empty")).toBe(false);
+  });
+
+  it("aggregates mismatched snapshot observations while flagging the missing planned questions", async () => {
+    const fanoutOverrides = asymmetricFanoutOverrides(), firstQuestionId = [...fanoutOverrides.keys()][0]!;
+    const dependencies = deps({ reports: new Map(), checkpoints: new Map(), resolve: async ({ fanout }) => ({ ...snapshot(fanout, 1), questionId: firstQuestionId }) });
+    const error = await run("report-mismatched", "job-mismatched", dependencies, "legacy", fanoutOverrides).catch((value) => value);
+    const trace = normalizedTrace(error);
+    expect(trace).toMatchObject({ o: "report_parser", f: { z: true }, g: { o0: 15 } });
+    expect(trace.q[0]).toMatchObject({ o: 15 });
   });
 
   it("does not freeze a forensics checkpoint when report build fails after subset projection edge cases", async () => {
+    vi.stubEnv("OGC_DEPLOYMENT_VERSION", "docker-desktop-staging");
     const checkpoints = new Map<string, PublicSourcePipelineCheckpoint>();
     const dependencies = {
       ...deps({
@@ -182,7 +222,28 @@ describe("public-source forensics pipeline", () => {
         throw new TypeError("$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.");
       }
     };
-    await expect(run("report-no-freeze", "job-no-freeze", dependencies)).rejects.toBeInstanceOf(PublicSourceQueryVariantCoverageError);
+    const error = await run("report-no-freeze", "job-no-freeze", dependencies).catch((value) => value);
+    expect(error).toBeInstanceOf(PublicSourceQueryVariantCoverageError);
+    const trace = normalizedTrace(error);
+    expect(trace).toMatchObject({ o: "report_parser", r: "unknown", f: { x: false, z: false }, g: { p0: 18, e0: 18, g0: 18, s0: 18 } });
+    expect(trace.q.every((item: { ph: string; oh: string }) => /^[a-f0-9]{12}$/.test(item.ph) && /^[a-f0-9]{12}$/.test(item.oh))).toBe(true);
+    const reordered = {
+      ...deps({ reports: new Map(), checkpoints: new Map(), resolve: async ({ fanout }) => {
+        const base = snapshot(fanout, 1);
+        return { ...base, observations: [...base.observations].reverse(), retrievals: [...base.retrievals].reverse() };
+      } }),
+      buildReport: dependencies.buildReport
+    };
+    vi.stubEnv("OGC_DEPLOYMENT_VERSION", "A".repeat(40));
+    const reorderedError = await run("report-no-freeze-reordered", "job-no-freeze-reordered", reordered).catch((value) => value);
+    expect(normalizedTrace(reorderedError).q.map((item) => [item.ph, item.oh])).toEqual(trace.q.map((item) => [item.ph, item.oh]));
+    expect(normalizedTrace(reorderedError).r).toBe("a".repeat(40));
+    const typed = new PublicSourceQueryVariantCoverageError("typed", { cause: new Error("nested") });
+    const mapped = (() => { try { mapForensicReportContractError(typed, (error as PublicSourceQueryVariantCoverageError).safeDiagnostics); } catch (value) { return value; } })();
+    expect(mapped).toBe(typed);
+    expect(normalizeJobError(mapped, forensicErrorContext).causes[0]).toBe("nested");
+    vi.unstubAllEnvs();
+    expect(normalizeJobError(error, forensicErrorContext)).toMatchObject({ code: "public_source_query_variant_coverage", classification: "permanent" });
     expect(checkpoints.has("job-no-freeze")).toBe(false);
   });
 });
@@ -192,7 +253,7 @@ function deps(input:{reports:Map<string,RecommendationForensicReportV2>;checkpoi
     getReport:async(id)=>input.reports.get(id)??null,saveReport:async(value)=>{const report=value as RecommendationForensicReportV2;input.reports.set(report.jobId,report);return report;},
     artifactReadiness:input.artifactReadiness??{async verify(){}},prepareArtifactVerification:input.prepareArtifactVerification,now:()=>new Date("2030-01-02T00:00:00.000Z"),costCapMicros:1000};
 }
-function run(reportId:string,jobId:string,dependencies:PublicSourceForensicsDependencies,semanticValidation?:"legacy"|"deferred"){return runPublicSourceForensicsPipeline({reportId,jobId,locale:"zh-CN",region:"CN",targetUrl:"https://customer-logistics.example/",websiteFoundation:createTestWebsiteFoundation(),dependencies,semanticValidation});}
+function run(reportId:string,jobId:string,dependencies:PublicSourceForensicsDependencies,semanticValidation?:"legacy"|"deferred",fanoutOverrides?:ReadonlyMap<string,SearchQueryFanout>){return runPublicSourceForensicsPipeline({reportId,jobId,locale:"zh-CN",region:"CN",targetUrl:"https://customer-logistics.example/",websiteFoundation:createTestWebsiteFoundation(),dependencies,semanticValidation,fanoutOverrides});}
 function snapshot(fanout:SearchQueryFanout,index:number){
   const observations:MarketSearchObservation[]=fanout.queries.map((query,order)=>({observationId:`obs-${fanout.questionId}-${order}`,surface,queryId:query.id,exactQuery:query.exactQuery,
     requestedAt:"2030-01-01T00:00:00.000Z",completedAt:"2030-01-01T00:00:01.000Z",status:"complete",results:[{surfaceResultOrder:0,url:`https://source-${index}-${order}.example/fact`,title:"公开货运资料",snippet:"公开资料描述货运能力。",displayedHost:`source-${index}-${order}.example`}],usage:{requestCount:1,resultCount:1,estimatedCostMicros:1}}));
@@ -200,17 +261,36 @@ function snapshot(fanout:SearchQueryFanout,index:number){
     refreshAttempted:false,refreshFailed:false,sufficientlyEvidenced:true,availableSourceCount:6,observations,retrievals:observations.flatMap((observation)=>observation.results.map((result)=>({observationId:observation.observationId,queryId:observation.queryId,resultUrl:result.url,retrievalState:"available" as const,publiclyRoutable:true,robotsAllowed:true,accessBarrier:"none" as const,contentBytes:100,normalizedText:"公开资料描述货运能力。",normalizedContentHash:`sha256:${"a".repeat(64)}`,verifiedExcerpt:"公开资料描述货运能力。"}))),actualCostMicros:10,allocatedCostMicros:0,avoidedCostMicros:0};
 }
 
-/** Prefix-equivalent prior: only the first three fanout queries were observed. */
-function snapshotPrefix(fanout: SearchQueryFanout, index: number) {
+function snapshotObservedCount(fanout: SearchQueryFanout, index: number, count: number) {
   const full = snapshot(fanout, index);
-  const kept = full.observations.slice(0, 3);
+  const kept = full.observations.slice(0, count);
   const keptIds = new Set(kept.map(({ observationId }) => observationId));
   return {
     ...full,
     refreshAttempted: true,
     refreshFailed: true,
-    availableSourceCount: 3,
+    // Keep every question commercially fully evidenced; only query subset coverage limits this run.
+    availableSourceCount: Math.max(3, count),
     observations: kept,
     retrievals: full.retrievals.filter(({ observationId }) => keptIds.has(observationId))
   };
+}
+
+function asymmetricFanoutOverrides(): ReadonlyMap<string, SearchQueryFanout> {
+  const foundation = createTestWebsiteFoundation();
+  const profile = foundation.organizationProfile;
+  const questions = generateCanonicalBuyerQuestions({ locale: "zh-CN", region: "CN",
+    categoryEvidence: profile.productsAndServices.map((value, index) => ({ value, confidence: "high" as const, sourceId: `website-foundation-category-${index}` })),
+    capabilityEvidence: profile.productsAndServices.map((value, index) => ({ value, confidence: "high" as const, sourceId: `website-foundation-capability-${index}` })),
+    broadCategory: profile.businessModel || "business services",
+    excludedIdentities: [{ kind: "customer_domain" as const, value: "customer-logistics.example" }, ...profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value }))] });
+  const fanouts = createPublicSourceQuestionFanouts({ questions, authority, excludedIdentities: [{ kind: "customer_domain", value: "customer-logistics.example" }, ...profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value }))] });
+  return new Map<string, SearchQueryFanout>(fanouts.map((fanout, index) => [fanout.questionId, index === 1 ? { ...fanout, queries: fanout.queries.slice(0, 3) } : fanout] as const));
+}
+
+const forensicErrorContext = { jobId: "job", phase: "source_retrieval" as const, phaseAttempt: 1, resumeGeneration: 0 };
+function normalizedTrace(error: unknown): { o: string; r: string; q: Array<{ ph: string; oh: string; o?: number }>; g: Record<string, unknown>; f: Record<string, unknown> } {
+  const encoded = normalizeJobError(error, forensicErrorContext).causes.find((item) => item.startsWith("ogc_trace:v1:"));
+  expect(encoded).toBeDefined();
+  return JSON.parse(encoded!.slice("ogc_trace:v1:".length));
 }

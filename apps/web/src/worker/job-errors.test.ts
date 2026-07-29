@@ -17,6 +17,7 @@ import { MiMoGenerativeSearchAnswerError } from "../public-search-adapters/mimo/
 import { AnswerFirstV3ModelContractInvalidError } from "./answer-first-v3";
 import {
   escalateFingerprintRecurrence,
+  JobError,
   MIMO_INVALID_RESPONSE_JOB_CODE,
   normalizeJobError,
   PublicSourceQueryVariantCoverageError,
@@ -44,6 +45,20 @@ import { createPaidV3DiagnosisIncompleteError } from "./processor";
 const context = { jobId: "job-1", phase: "public_source_preflight" as const, phaseAttempt: 1, resumeGeneration: 0, configuredSecrets: ["super-secret"] };
 
 describe("job error normalization", () => {
+  it("appends only a bounded allowlisted trace without changing the original cause or classification", () => {
+    const cause = new Error("original cause");
+    const error = new JobError("unchanged", "safe_trace_code", "permanent", { cause, safeDiagnostics: { version: 1, origin: "pre_graph_guard", revision: "a".repeat(40), questions: [{ i: 0, p: 6, ph: "a".repeat(12) }], global: { p0: 6, ph0: "b".repeat(12) }, flags: { d: false, x: true, z: false } } });
+    const normalized = normalizeJobError(error, context);
+    expect(normalized).toMatchObject({ message: "unchanged", code: "safe_trace_code", classification: "permanent" });
+    expect(normalized.causes[0]).toBe("original cause");
+    expect(JSON.parse(normalized.causes[1]!.replace("ogc_trace:v1:", ""))).toMatchObject({ o: "pre_graph_guard", r: "a".repeat(40) });
+    const oversized = new JobError("unchanged", "safe_trace_code", "permanent", { safeDiagnostics: { ...error.safeDiagnostics!, questions: Array.from({ length: 4 }, () => ({ i: 0 })) } });
+    expect(normalizeJobError(oversized, context).causes.some((item) => item.startsWith("ogc_trace:v1:"))).toBe(false);
+    const invalid = new JobError("unchanged", "safe_trace_code", "permanent", { safeDiagnostics: { ...error.safeDiagnostics!, global: { p0: 6, raw: "https://must-not-persist.example" } } });
+    expect(normalizeJobError(invalid, context).causes.some((item) => item.startsWith("ogc_trace:v1:"))).toBe(false);
+    const invalidRevision = new JobError("unchanged", "safe_trace_code", "permanent", { safeDiagnostics: { ...error.safeDiagnostics!, revision: "rev-1" } });
+    expect(normalizeJobError(invalidRevision, context)).toMatchObject({ message: "unchanged", code: "safe_trace_code", classification: "permanent", causes: [] });
+  });
   it("redacts credentials, URLs and raw IPs before diagnostics persist", () => {
     const error = new Error("Bearer super-secret postgres://alice:password@db.example/app from 203.0.113.42");
     const normalized = normalizeJobError(error, context);
