@@ -59,7 +59,10 @@ const RETRYABLE_PROVIDER_CODES = new Set<ProviderErrorCode>([
   "rate_limited",
   "temporary_provider",
   MIMO_INVALID_RESPONSE_CODE,
-  MIMO_TIMEOUT_CODE
+  MIMO_TIMEOUT_CODE,
+  // Truncation is sampling variance: exactly one in-flight retry, job-level
+  // transient, with fingerprint escalation as the deterministic backstop.
+  MIMO_OUTPUT_TRUNCATED_CODE
 ]);
 
 export interface ReportV4MimoProviderConfig {
@@ -648,10 +651,14 @@ function mapQuestionError(error: unknown): unknown {
 
 function mapDiagnosisError(error: unknown): unknown {
   if (!(error instanceof ReportV4MimoProviderError)) return error;
+  if (error.code === MIMO_OUTPUT_TRUNCATED_CODE) {
+    // Unified truncated rule: exactly one in-flight retry via a retryable
+    // provider code; job-level transient with fingerprint-escalation backstop.
+    return new ReportV4DiagnosisProviderError("temporary_provider", error.message);
+  }
   if (
     error.code === MIMO_INVALID_RESPONSE_CODE
     || error.code === MIMO_TIMEOUT_CODE
-    || error.code === MIMO_OUTPUT_TRUNCATED_CODE
   ) {
     return new ReportV4DiagnosisProviderError("temporary_provider", error.message);
   }

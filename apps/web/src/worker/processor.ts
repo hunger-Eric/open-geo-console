@@ -81,7 +81,7 @@ import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline
 import { discoverSite, fetchEvidencePage, type DiscoveredSite } from "./crawler-runtime";
 import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { JobExecutionLease, configuredJobHardDeadlineMs } from "./job-execution";
-import { normalizeJobError } from "./job-errors";
+import { escalateFingerprintRecurrence, hasPriorJobErrorFingerprint, normalizeJobError, OrchestrationInvariantError } from "./job-errors";
 import { assertStagingCommandEnvironment } from "@/security/deployment-policy";
 import { createPublicSourceAttemptBudget } from "./public-source-execution-budget";
 import { phaseForStage, recoveryEnvelope } from "./job-state";
@@ -631,11 +631,16 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     const currentJob = await getScanJob(job.id);
     if (reportV4ProductionRoutingAttempted && isTerminalScanJob(currentJob)) return;
     const phase = currentJob?.currentPhase ?? phaseForStage(currentJob?.stage ?? job.stage);
-    const normalized = normalizeJobError(error, {
+    let normalized = normalizeJobError(error, {
       jobId: job.id, phase, phaseAttempt: currentJob?.phaseAttempt ?? job.phaseAttempt ?? 0,
       resumeGeneration: currentJob?.resumeGeneration ?? job.resumeGeneration ?? 0,
       configuredSecrets: [process.env.OGC_AI_API_KEY ?? "", process.env.OGC_PUBLIC_SEARCH_MIMO_API_KEY ?? ""]
     });
+    // A recurring transient fingerprint in the same job+phase is deterministic:
+    // escalate to permanent instead of burning the remaining attempts.
+    if (normalized.classification === "transient" && await hasPriorJobErrorFingerprint(job.id, normalized.fingerprint)) {
+      normalized = escalateFingerprintRecurrence(normalized);
+    }
     // V4 owns commercial terminalization, but ordinary runner failures still
     // belong to the canonical job state machine so the original error is
     // durable immediately instead of being replaced later by lease_exhausted.
@@ -1479,7 +1484,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
   if (input.job.artifactContract === "combined_geo_report_v2" && forensicResult.report.commercialOutcome !== "completed") throw new Error("V2 combined activation requires complete claim-bound public-source coverage.");
   if (input.job.artifactContract === "combined_geo_report_v3") {
     const verificationSnapshotId = providerResult.checkpoint.verificationSnapshotId;
-    if (!verificationSnapshotId) throw new Error("V3 provider verification snapshot is unavailable before answer synthesis.");
+    if (!verificationSnapshotId) throw new OrchestrationInvariantError("V3 provider verification snapshot is unavailable before answer synthesis.");
     const storedSources = await loadAnswerFirstV3StoredSources([
       verificationSnapshotId,
       ...forensicResult.report.snapshotRefs.map(({ snapshotId }) => snapshotId)
@@ -1514,12 +1519,12 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       : await resolveGenerativeAnswerFirstV3(answerInput);
     const verificationRef = await providerVerificationCommercialRef(verificationSnapshotId);
     const snapshotRefs = uniqueSnapshotRefs([...forensicResult.commercialSnapshotRefs, verificationRef]);
-    if (snapshotRefs.length !== 4) throw new Error("V3 combined reports require exactly four immutable market snapshots.");
+    if (snapshotRefs.length !== 4) throw new OrchestrationInvariantError("V3 combined reports require exactly four immutable market snapshots.");
     if (semanticValidation === "deferred") {
       const deferredAnswerResult = answerResult as DeferredGenerativeAnswerFirstV3;
       if (!prospectiveTeaser || !Array.isArray(deferredAnswerResult.answerCardDrafts) ||
           deferredAnswerResult.answerCardDrafts.length !== 3) {
-        throw new Error("Reviewed Paid V3 requires deferred answer drafts and its reviewed Free lineage.");
+        throw new OrchestrationInvariantError("Reviewed Paid V3 requires deferred answer drafts and its reviewed Free lineage.");
       }
       const reviewDraftCards = [
         prospectiveTeaser.reviewedFreeQ1,
@@ -1617,7 +1622,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         signal: input.signal
       });
       const receipt = reviewed.report.semanticReviewReceipt;
-      if (!receipt) throw new Error("Reviewed Paid V3 report receipt is unavailable.");
+      if (!receipt) throw new OrchestrationInvariantError("Reviewed Paid V3 report receipt is unavailable.");
       const semanticReview: PaidV3SemanticReviewCheckpointProjection = {
         version: "report-semantic-review-v1",
         input: reviewed.input,
@@ -1682,10 +1687,10 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       return;
     }
     if (!("answerCards" in answerResult)) {
-      throw new Error("Legacy Paid V3 requires complete legacy answer cards.");
+      throw new OrchestrationInvariantError("Legacy Paid V3 requires complete legacy answer cards.");
     }
     const sourceSelectionDiagnosis = answerResult.checkpoint.sourceSelectionDiagnosis;
-    if (!sourceSelectionDiagnosis) throw new Error("Prospective V3 artifact requires source selection diagnosis.");
+    if (!sourceSelectionDiagnosis) throw new OrchestrationInvariantError("Prospective V3 artifact requires source selection diagnosis.");
     const diagnosisResult = prospectiveTeaser
       ? await enhanceV3AnswerCardsWithDiagnosis({
           answerCards: answerResult.answerCards,
@@ -2478,7 +2483,7 @@ async function enhanceV3AnswerCardsWithDiagnosis<T extends PaidV3SemanticAnswerC
     targetPages: buildFreeTeaserDiagnosisTargetPages(card.questionId, input.admission)
   }));
   if (diagnosisInputs.some(({ targetPages }) => targetPages.length === 0)) {
-    throw new Error("Prospective V3 diagnosis requires non-empty target-site evidence for every question.");
+    throw new OrchestrationInvariantError("Prospective V3 diagnosis requires non-empty target-site evidence for every question.");
   }
   const diagnosisIdentityHash = createHash("sha256").update(JSON.stringify({
     version: "paid-v3-question-diagnosis-v1",
@@ -2491,7 +2496,7 @@ async function enhanceV3AnswerCardsWithDiagnosis<T extends PaidV3SemanticAnswerC
   })).digest("hex");
   if (input.checkpoint.diagnosisIdentityHash &&
       input.checkpoint.diagnosisIdentityHash !== diagnosisIdentityHash) {
-    throw new Error("Paid V3 diagnosis checkpoint identity does not match current question evidence.");
+    throw new OrchestrationInvariantError("Paid V3 diagnosis checkpoint identity does not match current question evidence.");
   }
 
   let checkpoint = input.checkpoint;
@@ -2500,13 +2505,13 @@ async function enhanceV3AnswerCardsWithDiagnosis<T extends PaidV3SemanticAnswerC
     input.signal?.throwIfAborted();
     const card = input.answerCards[index]!;
     if (card.answerMode !== "generative_search_v1") {
-      throw new Error("Prospective V3 per-question diagnosis requires generative answer cards.");
+      throw new OrchestrationInvariantError("Prospective V3 per-question diagnosis requires generative answer cards.");
     }
     const targetPages = diagnosisInputs[index]!.targetPages;
     let diagnosis = diagnosisByQuestion[card.questionId];
     if (input.semanticValidation === "deferred" && index === 0) {
       if (!("diagnosis" in card) || !card.diagnosis) {
-        throw new Error("Deferred Paid V3 must reuse the reviewed Free Q1 diagnosis.");
+        throw new OrchestrationInvariantError("Deferred Paid V3 must reuse the reviewed Free Q1 diagnosis.");
       }
       diagnosis = parseReportV4DiagnosisOutputForQuestion(card.diagnosis, {
         questionId: card.questionId,

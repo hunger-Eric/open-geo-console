@@ -5,6 +5,7 @@ import {
   ReportSemanticReviewEvidenceMissingError,
   SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE
 } from "@open-geo-console/ai-report-engine";
+import { getSqlClient } from "@/db";
 import type { ScanJobPhase } from "./job-state";
 import { PublicSourceResumeIdentityMismatchError } from "./public-source-forensics";
 import {
@@ -63,6 +64,12 @@ export class CheckpointValidationError extends JobError {
 export class TerminalizationError extends JobError {
   constructor(message: string, options?: ErrorOptions) { super(message, "terminalization_failed", "permanent", options); }
 }
+/** Orchestration guard invariant violations are deterministic; retry can never fix them. */
+export class OrchestrationInvariantError extends JobError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, "orchestration_invariant", "permanent", options);
+  }
+}
 
 export interface JobErrorContext {
   jobId: string;
@@ -111,7 +118,7 @@ export function normalizeJobError(error: unknown, context: JobErrorContext, now 
   const stack = source.stack ? redactDiagnostic(source.stack, secrets) : null;
   const classification = known?.classification
     ?? typedBoundary?.classification
-    ?? (languageValidationFailure ? "operator_repairable" : classifyUnknown(source));
+    ?? (languageValidationFailure ? "transient" : classifyUnknown(source));
   const code = known?.code
     ?? typedBoundary?.code
     ?? (languageValidationFailure ? "report_language_validation_failed" : "unexpected_internal_error");
@@ -123,6 +130,27 @@ export function normalizeJobError(error: unknown, context: JobErrorContext, now 
     classification, code, type: source.name || "Error", message, stack, causes, fingerprint,
     retryableAt: classification === "transient" ? new Date(now.getTime() + retryDelayMs(context.phaseAttempt, fingerprint)) : null
   };
+}
+
+/**
+ * The fingerprint already embeds the phase, so job_id + fingerprint identifies
+ * a recurrence in the same job+phase. The first occurrence keeps its normal
+ * classification; a recurrence of a transient failure is deterministic and
+ * escalates to permanent instead of consuming further attempts.
+ */
+export async function hasPriorJobErrorFingerprint(jobId: string, fingerprint: string): Promise<boolean> {
+  const rows = await getSqlClient()<Array<{ id: string }>>`
+    SELECT id FROM scan_job_error_events
+    WHERE job_id = ${jobId} AND fingerprint = ${fingerprint}
+    LIMIT 1
+  `;
+  return rows.length > 0;
+}
+
+/** Escalate a recurrent transient failure to permanent; other classifications are unchanged. */
+export function escalateFingerprintRecurrence(normalized: NormalizedJobError): NormalizedJobError {
+  if (normalized.classification !== "transient") return normalized;
+  return { ...normalized, classification: "permanent", retryableAt: null };
 }
 
 /** Maps provider/review/discovery boundary errors that are not JobError subclasses. */
@@ -191,12 +219,12 @@ function resolveTypedBoundaryError(
       }
     }
     if (row.name === "PaidV3DiagnosisIncompleteError") {
-      // Deterministic diagnosis-input rejection can never succeed on retry;
-      // provider/token/contract stages keep their existing classification path.
-      const failure = (row as { failure?: { stage?: unknown } }).failure;
-      if (failure?.stage === "input_validation") {
-        return { code: "paid_v3_diagnosis_input_invalid", classification: "permanent" };
-      }
+      // Structured stage/code drives classification; never parse the prose.
+      const failure = (row as { failure?: { stage?: unknown; code?: unknown } }).failure;
+      const stage = typeof failure?.stage === "string" ? failure.stage : null;
+      const failureCode = typeof failure?.code === "string" ? failure.code : null;
+      const mapped = stage ? mapPaidV3DiagnosisFailure(stage, failureCode) : null;
+      if (mapped) return mapped;
     }
     if (row.name === "ReportV4QuestionProviderError" && typeof row.code === "string") {
       const mapped = MIMO_PROVIDER_JOB_CLASSIFICATION[row.code];
@@ -233,6 +261,38 @@ function publicSourceResumeIdentityMismatchBoundary(): { code: string; classific
     classification: "permanent",
     message: "Public-source forensics resume identity does not match the persisted checkpoint."
   };
+}
+
+/** Deterministic diagnosis-enhancer stages can never succeed on retry. */
+const PAID_V3_DIAGNOSIS_PERMANENT_STAGES: ReadonlySet<string> = new Set([
+  "input_validation",
+  "token_budget",
+  "semantic_contract",
+  "canonical_contract",
+  "correction_contract"
+]);
+
+/** Full Paid V3 diagnosis-enhancer stage/code → job classification table. */
+function mapPaidV3DiagnosisFailure(
+  stage: string,
+  failureCode: string | null
+): { code: string; classification: JobFailureClassification } | null {
+  if (stage === "provider") {
+    if (failureCode === "provider_safety") {
+      return { code: "paid_v3_diagnosis_provider_safety", classification: "permanent" };
+    }
+    if (failureCode === "provider_authentication" || failureCode === "provider_configuration") {
+      return { code: `paid_v3_diagnosis_${failureCode}`, classification: "operator_repairable" };
+    }
+    return { code: `paid_v3_diagnosis_${failureCode ?? "provider"}`, classification: "transient" };
+  }
+  if (stage === "input_validation") {
+    return { code: "paid_v3_diagnosis_input_invalid", classification: "permanent" };
+  }
+  if (PAID_V3_DIAGNOSIS_PERMANENT_STAGES.has(stage)) {
+    return { code: `paid_v3_diagnosis_${stage}`, classification: "permanent" };
+  }
+  return null;
 }
 
 /** Deep claim-extraction (progress 96) vs generic AI client transport taxonomy. */

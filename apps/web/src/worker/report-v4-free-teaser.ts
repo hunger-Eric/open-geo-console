@@ -48,7 +48,7 @@ import { resolveGenerativeSearchAnswerProvider, resolveProductionPublicSearchRun
 import { buildReportV4MimoDiagnosisTokenBudget, createReportV4MimoDiagnosisProvider, createReportV4MimoStructuredInvoker } from "@/report-v4/mimo-provider";
 import { loadReportV4ModelRuntimeConfig } from "@/report-v4/model-runtime-config";
 import { createConcurrencyGate } from "./bounded-scheduler";
-import { JobError, type JobFailureClassification } from "./job-errors";
+import { JobError, OrchestrationInvariantError, type JobFailureClassification } from "./job-errors";
 import {
   enhanceReportV4QuestionDiagnosis,
   formatReportV4DiagnosisFailure,
@@ -911,13 +911,13 @@ async function reviewFreeTeaser(input: {
   );
   const answerAnnotation = reviewed.review.annotations.answers[0];
   if (!answerAnnotation || answerAnnotation.targetPresence === undefined || answerAnnotation.targetPresence === "ambiguous" || answerAnnotation.targetFirstSentence === undefined || answerAnnotation.targetRoles === undefined || answerAnnotation.competitorEntityIds === undefined) {
-    throw new Error("Marked Free teaser review omitted durable Q1 diagnosis semantics.");
+    throw new OrchestrationInvariantError("Marked Free teaser review omitted durable Q1 diagnosis semantics.");
   }
   const expectedEntityRole = answerAnnotation.targetPresence === "present"
     ? answerAnnotation.competitorEntityIds.length ? "mixed" : "target"
     : answerAnnotation.competitorEntityIds.length ? "competitor" : "none";
   if (answerAnnotation.entityRole === "ambiguous" || answerAnnotation.entityRole !== expectedEntityRole) {
-    throw new Error("Marked Free teaser review returned contradictory Q1 entity semantics.");
+    throw new OrchestrationInvariantError("Marked Free teaser review returned contradictory Q1 entity semantics.");
   }
   const textByPath = new Map(reviewed.applied.fields.map((field) => [field.path, field.appliedText]));
   const reviewedFoundation = applyReviewedFoundation(input.foundation, textByPath);

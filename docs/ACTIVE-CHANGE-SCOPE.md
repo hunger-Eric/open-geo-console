@@ -4,10 +4,90 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Vercel serverless DB cold-start resilience (APPROVED)`.
+`Current authority: Code-AI seam hardening W1 — failure-classification skeleton (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Vercel serverless DB cold-start resilience (APPROVED)
+## Current authority: Code-AI seam hardening W1 — failure-classification skeleton (APPROVED)
+
+**Status: `APPROVED`** — user approved this written allowlist on 2026-07-29
+("批准，那你都可以退回去，反正都是测试订单"). The same grant authorized
+standard staging refunds for both test orders (`99cc6ddc` failed-fulfillment
+refund via `commerce:staging:all`, and `9cec1db7` provider-side refund).
+
+### Baseline and evidence
+
+- HEAD `e3fe6a0` (Staging Web `dpl_EBTxqJ3h7w8TAUuSyqD4wvoEAV5n`; Workers
+  `staging-737ad6d-overlay-v1`).
+- Approved total design: session plan `shazam-stargirl-stargirl.md`
+  (code–AI seam hardening, principles P1–P5, workstreams W1–W5), approved by
+  the user on 2026-07-29. This scope implements **workstream W1 only**.
+- Staging evidence of misclassification costs:
+  - job `1afcaec2`: deterministic `input_validation/$diagnosisInput.sources`
+    burned 5 transient attempts before terminal failure.
+  - job `b286633f`: deterministic privacy-trigger rejection
+    (`Shared market data contains private customer identity.`) retried as
+    transient before hitting a permanent resume-identity error.
+  - job `36c78f69`: 4 transient retries all inside one ~8-minute MiMo outage
+    window, terminal @98.
+- Root mechanism: `classifyUnknown` (`apps/web/src/worker/job-errors.ts:275-281`)
+  defaults unknown errors to transient and classifies by English message
+  keywords; orchestration guards throw bare `Error`s that inherit this
+  misclassification.
+
+### Design lock
+
+| # | Rule |
+|---|------|
+| 1 | **Fingerprint escalation.** In `job-errors.ts`, when the same error fingerprint recurs in the same job+phase, classify it permanent instead of consuming further attempts. First occurrence keeps its normal classification. No change to `max_attempts` or backoff numbers. |
+| 2 | **Bare orchestration `Error`s become explicit permanent `JobError`s.** Sites: `processor.ts` (:1482, :1517, :1520-1522, :1620, :2480-2481, :2502-2514, :2539-2542, :1685-1688) and `report-v4-free-teaser.ts:912-921`. Error-class replacement only; no control-flow, checkpoint, or retry-budget changes. |
+| 3 | **Diagnosis-enhancer failure mapping by structured stage/code.** Extend the `job-errors.ts:193-200` handling into a full table: `input_validation`/`token_budget`/`provider_safety`/`semantic_contract`/`canonical_contract`/`correction_contract` → permanent; `provider_authentication`/`provider_configuration` → operator_repairable; provider transient stages → transient. No enhancer behavior change. |
+| 4 | **Model-randomness misclassifications corrected.** Language-validation and Q1-responsiveness failures (`answer-first-v3.ts:754-762` wrapper; `job-errors.ts:107,114-117`) become transient instead of operator_repairable. |
+| 5 | **`mimo_output_truncated` unified.** One rule everywhere: at most one in-flight retry (sampling variance), job-level transient, and rule 1's fingerprint escalation as the deterministic backstop. Align `mimo-provider.ts:57-63` and `:649-657` to that rule. |
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/job-errors.ts` | Rules 1, 3, 4 |
+| `apps/web/src/worker/processor.ts` | Rule 2 error-class replacements only |
+| `apps/web/src/worker/report-v4-free-teaser.ts` | Rule 2 error-class replacements only |
+| `apps/web/src/worker/answer-first-v3.ts` | Rule 4 wrapper only |
+| `apps/web/src/report-v4/mimo-provider.ts` | Rule 5 mapping only |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+### Tests allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/job-errors.test.ts` | Rules 1, 3, 4, 5 classification assertions |
+| `apps/web/src/worker/report-v4-free-teaser.test.ts` | Rule 2 error-class assertions |
+| Existing answer-first / mimo-provider / processor test files | Assertions updated to the new classifications only; no scenario or contract changes |
+
+### Forbidden
+
+- `packages/*` contract validators, prompts, model profiles
+- Snapshot resolver, market-snapshot tables, privacy triggers (W2/W5 scopes)
+- Retry-budget numbers (`max_attempts`, backoff intervals), defer semantics (W2)
+- Commerce, refund, SLA, deployment, Docker, push, payments, report reruns
+- Replaying/mutating terminal jobs or orders
+
+### Diff budget
+
+- Production source: ≤ 200 changed lines. Hard limit.
+- Tests: ≤ 300 changed lines (tracking bound, measured +20%).
+- Docs: ≤ 80 changed lines.
+
+### Acceptance checks
+
+1. New unit tests: fingerprint escalation (first occurrence transient, second
+   occurrence permanent, no further attempts consumed); each converted guard
+   throws a permanent typed `JobError`; enhancer stage/code mapping matches
+   the rule-3 table; language/responsiveness failures classify transient;
+   truncated mapping unified.
+2. `npm test`, `npm run lint`, `npm run build` green.
+3. Deployment and any staging rerun require separate later authorization.
+
+## Historical: Vercel serverless DB cold-start resilience (APPROVED)
 
 **Status: `APPROVED`** — user approved this written allowlist and its
 acceptance plan on 2026-07-28 ("批准并部署冷启动修复"), including Staging

@@ -8,7 +8,8 @@ const boundaryMocks = vi.hoisted(() => ({
   createReportV4AcceptanceObserver: vi.fn(), getGeoReport: vi.fn(),
   fetchPlannedPagesWithRecovery: vi.fn(), calculateEffectiveCoverage: vi.fn(),
   analyzePageBatch: vi.fn(), synthesizeWebsiteReportWithRecovery: vi.fn(),
-  saveAiReport: vi.fn(), purgeExpiredCrawlContent: vi.fn()
+  saveAiReport: vi.fn(), purgeExpiredCrawlContent: vi.fn(),
+  hasPriorJobErrorFingerprint: vi.fn(async () => false)
 }));
 const rerunGuardHarness = vi.hoisted(() => {
   const state = { blockedSite: null as string | null, guardSites: [] as string[], delegatedSites: [] as string[] };
@@ -28,6 +29,10 @@ vi.mock("@/db/jobs", async (importOriginal) => ({
   getScanJob: boundaryMocks.getScanJob, failScanJob: boundaryMocks.failScanJob,
   terminalizeScanJob: boundaryMocks.terminalizeScanJob,
   checkpointScanJob: boundaryMocks.checkpointScanJob, heartbeatScanJob: boundaryMocks.heartbeatScanJob
+}));
+vi.mock("./job-errors", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./job-errors")>(),
+  hasPriorJobErrorFingerprint: boundaryMocks.hasPriorJobErrorFingerprint
 }));
 vi.mock("@/db/commercial-refunds", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/db/commercial-refunds")>(),
@@ -101,6 +106,7 @@ beforeEach(() => {
   rerunGuardHarness.state.guardSites.length = 0;
   rerunGuardHarness.state.delegatedSites.length = 0;
   rerunGuardHarness.run.mockClear();
+  boundaryMocks.hasPriorJobErrorFingerprint.mockReset().mockResolvedValue(false);
 });
 
 describe("strict Report V4 processor routing", () => {
@@ -237,6 +243,34 @@ describe("strict Report V4 processor routing", () => {
       expect(rerunGuardHarness.state.guardSites).toEqual(["full_report_rerun"]);
       expect(rerunGuardHarness.state.delegatedSites).toEqual(["full_report_rerun"]);
       expect(boundaryMocks.fetchPlannedPagesWithRecovery).toHaveBeenCalledTimes(1);
+    } finally {
+      restoreTestAi(previousAi);
+      vi.clearAllMocks();
+    }
+  });
+
+  it("escalates a recurrent transient fingerprint to permanent instead of consuming further attempts", async () => {
+    const job = legacyFullRerunJob();
+    const previousAi = configureTestAi();
+    const recurrent = new Error("stop after proving the rerun side effect");
+    boundaryMocks.getGeoReport.mockResolvedValueOnce({
+      id: job.reportId,
+      url: "https://example.com/",
+      technicalStatus: "completed"
+    });
+    boundaryMocks.fetchPlannedPagesWithRecovery.mockRejectedValueOnce(recurrent);
+    boundaryMocks.getScanJob.mockResolvedValueOnce(job);
+    boundaryMocks.hasPriorJobErrorFingerprint.mockResolvedValueOnce(true);
+    boundaryMocks.failScanJob.mockResolvedValueOnce({ ...job, stage: "failed", executionState: "failed" });
+    boundaryMocks.recordPaidJobOutcome.mockResolvedValueOnce(undefined);
+    try {
+      await processScanJob(job, "worker-1");
+
+      expect(boundaryMocks.hasPriorJobErrorFingerprint).toHaveBeenCalledTimes(1);
+      expect(boundaryMocks.failScanJob).toHaveBeenCalledWith(job.id, "worker-1", expect.objectContaining({
+        retryable: false,
+        internalError: expect.objectContaining({ classification: "permanent", retryableAt: null })
+      }));
     } finally {
       restoreTestAi(previousAi);
       vi.clearAllMocks();

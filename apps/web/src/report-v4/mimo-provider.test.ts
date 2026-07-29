@@ -879,7 +879,7 @@ describe("Report V4 dedicated MiMo provider", () => {
     })).rejects.toMatchObject({
       name: "ReportV4MimoProviderError",
       code: MIMO_OUTPUT_TRUNCATED_CODE,
-      retryable: false,
+      retryable: true,
       message: "mimo_output_truncated"
     });
 

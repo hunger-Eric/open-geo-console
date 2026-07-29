@@ -864,7 +864,36 @@ describe("free teaser orchestration", () => {
       return semanticReviewBatchSlice(parsed.input, parsed.batchId);
     });
     await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: vi.fn() }))
-      .rejects.toThrow(/contradictory Q1 entity semantics/i);
+      .rejects.toMatchObject({
+        name: "OrchestrationInvariantError",
+        code: "orchestration_invariant",
+        classification: "permanent",
+        message: expect.stringMatching(/contradictory Q1 entity semantics/i)
+      });
+
+    mocks.semanticInvoke.mockImplementation(async (request: { inputText: string }) => {
+      const parsed = JSON.parse(request.inputText) as {
+        batchId?: "B_fields_readonly" | "B_fields_mutable" | "B_obs" | "B_answers" | "B_evidence_use";
+        input: ReportSemanticReviewInput;
+      };
+      if (parsed.batchId === "B_answers") {
+        const full = semanticReviewPass(parsed.input);
+        const annotation = full.annotations.answers[0]!;
+        delete annotation.targetPresence;
+        delete annotation.targetFirstSentence;
+        delete annotation.targetRoles;
+        delete annotation.competitorEntityIds;
+        return { answers: full.annotations.answers };
+      }
+      return semanticReviewBatchSlice(parsed.input, parsed.batchId);
+    });
+    await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: vi.fn() }))
+      .rejects.toMatchObject({
+        name: "OrchestrationInvariantError",
+        code: "orchestration_invariant",
+        classification: "permanent",
+        message: expect.stringMatching(/omitted durable Q1 diagnosis semantics/i)
+      });
 
     const degradedFieldSave = vi.fn();
     mocks.semanticInvoke.mockImplementation(async (request: { inputText: string }) => {

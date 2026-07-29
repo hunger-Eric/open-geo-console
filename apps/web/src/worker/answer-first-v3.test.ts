@@ -151,7 +151,7 @@ describe("answer-first V3 Worker service", () => {
     await expect(result).rejects.toMatchObject({
       name: "AnswerFirstV3ModelContractInvalidError",
       code: "answer_first_v3_model_contract_invalid",
-      classification: "operator_repairable"
+      classification: "transient"
     });
     expect(client.completeJson).toHaveBeenCalledTimes(3);
     await expect(result).rejects.toBeInstanceOf(AnswerFirstV3ModelContractInvalidError);

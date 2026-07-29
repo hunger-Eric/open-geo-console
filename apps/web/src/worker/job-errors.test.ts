@@ -16,6 +16,7 @@ import {
 import { MiMoGenerativeSearchAnswerError } from "../public-search-adapters/mimo/generative-answer";
 import { AnswerFirstV3ModelContractInvalidError } from "./answer-first-v3";
 import {
+  escalateFingerprintRecurrence,
   MIMO_INVALID_RESPONSE_JOB_CODE,
   normalizeJobError,
   PublicSourceRuntimeError,
@@ -56,15 +57,15 @@ describe("job error normalization", () => {
     expect(retryDelayMs(99, "ffff")).toBeLessThanOrEqual(15 * 60_000 + 5_000);
   });
 
-  it("routes an exhausted report-language gate to operator repair without an automatic retry", () => {
+  it("routes an exhausted report-language gate to a transient retry", () => {
     const normalized = normalizeJobError(new ReportLanguageValidationError([
       { path: "executiveSummary.overview", reason: "unexpected_english_sentence" }
     ]), context);
     expect(normalized).toMatchObject({
-      classification: "operator_repairable",
-      code: "report_language_validation_failed",
-      retryableAt: null
+      classification: "transient",
+      code: "report_language_validation_failed"
     });
+    expect(normalized.retryableAt).toBeInstanceOf(Date);
   });
 
   it("preserves the safe public-source stage while redacting the underlying cause", () => {
@@ -89,11 +90,11 @@ describe("job error normalization", () => {
     }), context);
 
     expect(normalized).toMatchObject({
-      classification: "operator_repairable",
+      classification: "transient",
       code: "answer_first_v3_model_contract_invalid",
-      type: "AnswerFirstV3ModelContractInvalidError",
-      retryableAt: null
+      type: "AnswerFirstV3ModelContractInvalidError"
     });
+    expect(normalized.retryableAt).toBeInstanceOf(Date);
   });
 
   it("persists FreeTeaserDiagnosisFailedError as a durable permanent job code", () => {
@@ -163,6 +164,69 @@ describe("job error normalization", () => {
 
     expect(normalized.classification).not.toBe("permanent");
     expect(normalized.code).not.toBe("paid_v3_diagnosis_input_invalid");
+  });
+
+  it.each([
+    [{ stage: "token_budget", code: "budget_rejected" }, "paid_v3_diagnosis_token_budget", "permanent", false],
+    [{ stage: "semantic_contract", code: "invalid_semantic_output" }, "paid_v3_diagnosis_semantic_contract", "permanent", false],
+    [{ stage: "canonical_contract", code: "invalid_legacy_output" }, "paid_v3_diagnosis_canonical_contract", "permanent", false],
+    [{ stage: "correction_contract", code: "invalid_correction" }, "paid_v3_diagnosis_correction_contract", "permanent", false],
+    [{ stage: "provider", code: "provider_safety" }, "paid_v3_diagnosis_provider_safety", "permanent", false],
+    [{ stage: "provider", code: "provider_authentication" }, "paid_v3_diagnosis_provider_authentication", "operator_repairable", false],
+    [{ stage: "provider", code: "provider_configuration" }, "paid_v3_diagnosis_provider_configuration", "operator_repairable", false],
+    [{ stage: "provider", code: "provider_transport" }, "paid_v3_diagnosis_provider_transport", "transient", true],
+    [{ stage: "provider", code: "provider_temporary_provider" }, "paid_v3_diagnosis_provider_temporary_provider", "transient", true]
+  ] as const)(
+    "maps Paid V3 diagnosis failure %s to %s (%s)",
+    (failure, jobCode, classification, hasRetry) => {
+      const normalized = normalizeJobError(
+        createPaidV3DiagnosisIncompleteError("question-1", {
+          providerAttempts: 1,
+          failure: { ...failure, parserPath: null }
+        }),
+        { ...context, phase: "grounded_answer_synthesis" }
+      );
+      expect(normalized).toMatchObject({
+        classification,
+        code: jobCode,
+        type: "PaidV3DiagnosisIncompleteError"
+      });
+      expect(normalized.code).not.toBe("unexpected_internal_error");
+      if (hasRetry) expect(normalized.retryableAt).toBeInstanceOf(Date);
+      else expect(normalized.retryableAt).toBeNull();
+    }
+  );
+
+  it("escalates a recurrent transient fingerprint to permanent without consuming further attempts", () => {
+    const first = normalizeJobError(new Error("socket hangup"), context, new Date("2030-01-01T00:00:00Z"));
+    expect(first).toMatchObject({ classification: "transient", code: "unexpected_internal_error" });
+    expect(first.retryableAt).toBeInstanceOf(Date);
+
+    const second = normalizeJobError(new Error("socket hangup"), context, new Date("2030-01-01T00:05:00Z"));
+    expect(second.fingerprint).toBe(first.fingerprint);
+    expect(second.classification).toBe("transient");
+
+    const escalated = escalateFingerprintRecurrence(second);
+    expect(escalated).toMatchObject({
+      classification: "permanent",
+      code: "unexpected_internal_error",
+      fingerprint: first.fingerprint,
+      retryableAt: null
+    });
+  });
+
+  it("leaves non-transient classifications untouched by fingerprint escalation", () => {
+    const permanent = normalizeJobError(
+      new ModelTokenBudgetError({
+        accepted: false,
+        code: "context_window_exceeded",
+        estimatedTotalTokens: 20_000,
+        limitTokens: 8_000
+      }),
+      context
+    );
+    expect(permanent.classification).toBe("permanent");
+    expect(escalateFingerprintRecurrence(permanent)).toBe(permanent);
   });
 
   it("maps diagnosis provider transport to a transient diagnosis_* job code", () => {
