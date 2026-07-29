@@ -520,6 +520,12 @@ export interface ReportSemanticAnswerAnnotation {
   readonly questionId: string;
   readonly relevance: "responsive" | "not_responsive" | "blocked";
   readonly entityRole: "target" | "competitor" | "mixed" | "none" | "ambiguous";
+  /**
+   * Structured Free-lane degradation marker: set only when the row degraded to
+   * the code-synthesized fallback (or echoed an already degraded row), never by
+   * the strict Paid parser. Consumers must not persist degraded rows as fact.
+   */
+  readonly degraded?: true;
   readonly targetPresence?: ReportSemanticPresence;
   readonly targetFirstSentence?: number | null;
   readonly targetRoles?: readonly string[];
@@ -652,6 +658,9 @@ const DISTINCTNESS_KEYS = new Set(["decision", "duplicateGroups", "reason"]);
 const ANNOTATIONS_KEYS = new Set(["observationResults", "answers", "evidenceUse", "sourceSelection"]);
 const OBSERVATION_ANNOTATION_KEYS = new Set(["observationId", "resultId", "targetPresence", "competitorPresence", "reason"]);
 const ANSWER_ANNOTATION_KEYS = new Set(["questionId", "relevance", "entityRole", "targetPresence", "targetFirstSentence", "targetRoles", "competitorEntityIds", "evidenceIds", "sourceIds", "reason"]);
+// The Free sanitizer alone round-trips the structured degradation marker; the
+// strict Paid parser keeps rejecting it as an unknown key.
+const FREE_ANSWER_ANNOTATION_KEYS = new Set([...ANSWER_ANNOTATION_KEYS, "degraded"]);
 const EVIDENCE_USE_KEYS = new Set(["path", "evidenceIds", "sourceIds", "reason"]);
 const SOURCE_SELECTION_ANNOTATION_KEYS = new Set([
   "annotationId", "itemId", "kind", "questionId", "sourceId", "profileId", "actionId",
@@ -1651,9 +1660,10 @@ function sanitizeFreeAnswerAnnotation(row: unknown, subject: ReportSemanticAnswe
   const refs = mountFreeFieldReferences(field, input);
   return degradeFreeRow<ReportSemanticAnswerAnnotation>(
     () => {
-      const item = strictRecord(row, path, ANSWER_ANNOTATION_KEYS);
+      const item = strictRecord(row, path, FREE_ANSWER_ANNOTATION_KEYS);
       const relevance = requireOneOf(item.relevance, ["responsive", "not_responsive", "blocked"] as const, `${path}.relevance`);
       const entityRole = requireOneOf(item.entityRole, ["target", "competitor", "mixed", "none", "ambiguous"] as const, `${path}.entityRole`);
+      const degraded = item.degraded === true;
       const hasGeo = item.targetPresence !== undefined || item.targetFirstSentence !== undefined || item.targetRoles !== undefined || item.competitorEntityIds !== undefined;
       const targetPresence = hasGeo ? requireOneOf(item.targetPresence, ["present", "absent", "ambiguous"] as const, `${path}.targetPresence`) : undefined;
       const targetFirstSentence = !hasGeo ? undefined : item.targetFirstSentence === null ? null : requireNonnegativeInteger(item.targetFirstSentence, `${path}.targetFirstSentence`);
@@ -1663,7 +1673,7 @@ function sanitizeFreeAnswerAnnotation(row: unknown, subject: ReportSemanticAnswe
       if (hasGeo && targetPresence === "absent" && targetRoles!.length !== 0) throw new TypeError(`${path}.targetRoles must be empty when target presence is absent.`);
       const competitorEntityIds = hasGeo ? requireUniqueTextArray(filterFreeRefs(item.competitorEntityIds, freeLegalEntityIds(input, questionId)), `${path}.competitorEntityIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS) : undefined;
       return {
-        questionId, relevance, entityRole, ...(hasGeo ? { targetPresence, targetFirstSentence, targetRoles, competitorEntityIds } : {}),
+        questionId, relevance, entityRole, ...(degraded ? { degraded: true as const } : {}), ...(hasGeo ? { targetPresence, targetFirstSentence, targetRoles, competitorEntityIds } : {}),
         evidenceIds: requireUniqueTextArray(filterFreeRefs(item.evidenceIds, new Set(refs.evidenceIds)), `${path}.evidenceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS),
         sourceIds: requireUniqueTextArray(filterFreeRefs(item.sourceIds, new Set(refs.sourceIds)), `${path}.sourceIds`, MAX_REFS_PER_FIELD, MAX_ID_CHARS),
         reason: requireBoundedText(item.reason, `${path}.reason`, 5_000)
@@ -1671,7 +1681,7 @@ function sanitizeFreeAnswerAnnotation(row: unknown, subject: ReportSemanticAnswe
     },
     // Synthesized fallback mirrors the pre-review draft state: the system's own Q1 answer card presents the target at its first sentence.
     () => ({
-      questionId, relevance: "responsive", entityRole: "target", targetPresence: "present", targetFirstSentence: 1, targetRoles: ["answer subject"], competitorEntityIds: [],
+      questionId, relevance: "responsive", entityRole: "target", degraded: true as const, targetPresence: "present", targetFirstSentence: 1, targetRoles: ["answer subject"], competitorEntityIds: [],
       evidenceIds: refs.evidenceIds, sourceIds: refs.sourceIds, reason: FREE_V4_SEMANTIC_REVIEW_DEGRADED_REASON
     })
   );

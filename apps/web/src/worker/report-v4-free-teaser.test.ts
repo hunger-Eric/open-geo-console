@@ -466,7 +466,7 @@ describe("free teaser orchestration", () => {
     expect(incomplete).toMatchObject({
       name: "FreeTeaserQ1IncompleteError",
       code: "free_teaser_q1_incomplete",
-      classification: "permanent",
+      classification: "transient",
       message: "Free teaser Q1 requires one complete answer with sources."
     });
   });
@@ -727,7 +727,7 @@ describe("free teaser orchestration", () => {
     expect(reviewRequest.input.observationResults.map(({ observationId }) => observationId)).toEqual([
       "snapshot-1-attempt-1", "snapshot-1-attempt-4", "snapshot-2-attempt-1", "snapshot-3-attempt-1"
     ]);
-    expect(first.q1AnswerCard.answerText).toBe("Reviewed Brand-X FBA answer.");
+    expect(first.q1AnswerCard.answerText).toBe("已审阅的目标品牌跨境物流答案。");
     expect(first.q1AnswerCard.diagnosis!.selectionSummary).toBe("Reviewed evidence-bound source selection.");
     expect(first.q1AnswerCard.geoDiagnosis).toMatchObject({
       targetMentioned: true,
@@ -966,6 +966,171 @@ describe("free teaser orchestration", () => {
     await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: transportSave }))
       .rejects.toThrow(/transport failed/i);
     expect(transportSave).not.toHaveBeenCalled();
+  });
+
+  it("rejects a degraded Q1 review annotation transiently instead of persisting fabricated semantics", async () => {
+    const sink = createInMemoryFreeTeaserCheckpointSink();
+    const input = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh" as const,
+      admission: admission(),
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      saveCheckpoint: sink.saveCheckpoint
+    };
+    await generateFreeTeaser(input);
+    const preReview = sink.firstByKind().q1_diagnosis_ready!;
+
+    mocks.semanticInvoke.mockImplementation(async (request: { inputText: string }) => {
+      const parsed = JSON.parse(request.inputText) as {
+        batchId?: "B_fields_readonly" | "B_fields_mutable" | "B_obs" | "B_answers" | "B_evidence_use";
+        input: ReportSemanticReviewInput;
+      };
+      if (parsed.batchId === "B_answers") {
+        const full = semanticReviewPass(parsed.input);
+        // Present target requires a positive first sentence; zero is a contract
+        // violation that degrades the row to the synthesized fallback.
+        full.annotations.answers[0]!.targetFirstSentence = 0;
+        return { answers: full.annotations.answers };
+      }
+      return semanticReviewBatchSlice(parsed.input, parsed.batchId);
+    });
+    const degradedSave = vi.fn();
+    await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: degradedSave }))
+      .rejects.toMatchObject({
+        name: "FreeTeaserQ1AnnotationDegradedError",
+        code: "free_teaser_q1_annotation_degraded",
+        classification: "transient"
+      });
+    // The fabricated targetPresence/entityRole/targetFirstSentence never reached a checkpoint.
+    expect(degradedSave).not.toHaveBeenCalled();
+  });
+
+  it("fails an out-of-locale post-review Q1 answer through the mechanical language gate before persistence", async () => {
+    const sink = createInMemoryFreeTeaserCheckpointSink();
+    const input = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh" as const,
+      admission: admission(),
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      saveCheckpoint: sink.saveCheckpoint
+    };
+    await generateFreeTeaser(input);
+    const preReview = sink.firstByKind().q1_diagnosis_ready!;
+
+    mocks.semanticInvoke.mockImplementation(async (request: { inputText: string }) => {
+      const parsed = JSON.parse(request.inputText) as {
+        batchId?: "B_fields_readonly" | "B_fields_mutable" | "B_obs" | "B_answers" | "B_evidence_use";
+        input: ReportSemanticReviewInput;
+      };
+      if (parsed.batchId === "B_fields_mutable") {
+        const full = semanticReviewPass(parsed.input);
+        return {
+          fields: full.fields
+            .filter((field) => parsed.input.fields.find((manifest) => manifest.path === field.path)?.mutability === "mutable")
+            .map((field) => field.path === "q1AnswerCard.answerText"
+              ? { ...field, correctedText: "Reviewed Brand-X FBA answer." }
+              : field)
+        };
+      }
+      return semanticReviewBatchSlice(parsed.input, parsed.batchId);
+    });
+    const gatedSave = vi.fn();
+    // The deferred parse skipped the language gate; the applied English text in
+    // a zh-CN report must surface the typed transient error before persistence.
+    await expect(generateFreeTeaser({ ...input, checkpoint: preReview, saveCheckpoint: gatedSave }))
+      .rejects.toMatchObject({ name: "ReportLanguageValidationError" });
+    expect(gatedSave).not.toHaveBeenCalled();
+  });
+
+  it("asserts persisted Q1 entityRole consistency when the ready checkpoint is re-verified", async () => {
+    const sink = createInMemoryFreeTeaserCheckpointSink();
+    const input = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh" as const,
+      admission: admission(),
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      saveCheckpoint: sink.saveCheckpoint
+    };
+    const first = await generateFreeTeaser(input);
+    const options = { semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT } as const;
+    expect(() => parseReadyFreeTeaserCheckpoint(first.checkpoint, options)).not.toThrow();
+    expect(first.checkpoint.semanticReview!.output.annotations.answers[0]!.entityRole).toBe("mixed");
+
+    // Forge an entityRole contradicting the persisted presence/competitor
+    // semantics while keeping every receipt hash consistent; verification fails.
+    const forged = structuredClone(first.checkpoint);
+    const output = structuredClone(forged.semanticReview!.output);
+    output.annotations.answers[0]!.entityRole = "target";
+    const applied = applyReportSemanticReview(forged.semanticReview!.input, output);
+    forged.semanticReview = { ...forged.semanticReview!, output, applied };
+    expect(() => parseReadyFreeTeaserCheckpoint(forged, options)).toThrow(/verified annotations/i);
+  });
+
+  it("classifies marked draft-checkpoint guards as transient model incompleteness or permanent invariant", async () => {
+    const sink = createInMemoryFreeTeaserCheckpointSink();
+    const input = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh" as const,
+      admission: admission(),
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      saveCheckpoint: sink.saveCheckpoint
+    };
+    await generateFreeTeaser(input);
+    const answerReady = sink.firstByKind().q1_answer_ready!;
+    const diagnosisReady = sink.firstByKind().q1_diagnosis_ready!;
+    const draft = answerReady.q1AnswerDraft!;
+    const result = answerReady.q1AnswerResult!;
+    const diagnosis = diagnosisReady.q1DiagnosisDraft!;
+
+    // Persisted model-output incompleteness -> transient typed error.
+    await expect(generateFreeTeaser({
+      ...input,
+      checkpoint: { ...answerReady, q1AnswerResult: { ...result, sources: [] } },
+      saveCheckpoint: vi.fn()
+    })).rejects.toMatchObject({
+      name: "FreeTeaserQ1IncompleteError",
+      code: "free_teaser_q1_incomplete",
+      classification: "transient"
+    });
+
+    // Result/draft divergence and provenance binding drift -> permanent invariants.
+    await expect(generateFreeTeaser({
+      ...input,
+      checkpoint: { ...answerReady, q1AnswerResult: { ...result, answerText: `${result.answerText} altered` } },
+      saveCheckpoint: vi.fn()
+    })).rejects.toMatchObject({ name: "OrchestrationInvariantError", code: "orchestration_invariant", classification: "permanent" });
+    await expect(generateFreeTeaser({
+      ...input,
+      checkpoint: { ...answerReady, q1AnswerDraft: { ...draft, provenance: { ...draft.provenance, searchedAt: "2030-01-01T00:00:09.000Z" } } },
+      saveCheckpoint: vi.fn()
+    })).rejects.toMatchObject({ name: "OrchestrationInvariantError", code: "orchestration_invariant", classification: "permanent" });
+
+    // Diagnosis refs outside the current source/target evidence -> permanent invariant.
+    const targetRef = diagnosis.detailedEvidenceRefs.find((ref) => ref.includes(":target:"))!;
+    const forgedTargetRef = `${draft.questionId}:target:${"f".repeat(64)}`;
+    const replaceTargetRefs = (refs: readonly string[]) => refs.map((ref) => ref === targetRef ? forgedTargetRef : ref);
+    await expect(generateFreeTeaser({
+      ...input,
+      checkpoint: { ...diagnosisReady, q1DiagnosisDraft: {
+        ...diagnosis,
+        detailedEvidenceRefs: replaceTargetRefs(diagnosis.detailedEvidenceRefs),
+        observableFactors: diagnosis.observableFactors.map((factor) => ({ ...factor, evidenceRefs: replaceTargetRefs(factor.evidenceRefs) })) as never,
+        recommendedActions: diagnosis.recommendedActions.map((action) => ({ ...action, evidenceRefs: replaceTargetRefs(action.evidenceRefs) })) as never
+      } },
+      saveCheckpoint: vi.fn()
+    })).rejects.toMatchObject({ name: "OrchestrationInvariantError", code: "orchestration_invariant", classification: "permanent" });
   });
 
   it("resumes each marked partial checkpoint without repeating an already durable expensive stage", async () => {
@@ -1382,7 +1547,7 @@ function semanticReviewPass(input: ReportSemanticReviewInput): ReportSemanticRev
       path: field.path,
       originalTextHash: field.originalTextHash,
       decision: "corrected",
-      correctedText: "Reviewed Brand-X FBA answer.",
+      correctedText: "已审阅的目标品牌跨境物流答案。",
       issueCodes: ["language_quality"],
       reason: "The answer needed a clearer direct response.",
       ...refs(field),

@@ -44,7 +44,8 @@ describe("dedicated V4 site synthesis MiMo adapter", () => {
     expect(() => createReportV4MimoSiteSynthesisProvider({ environment: env(), fetch, lockedModelProfile: drift })).toThrow(/drift|approved|invalid/i);
     expect(fetch).not.toHaveBeenCalled();
     const valid = createReportV4MimoSiteSynthesisProvider({ environment: env(), fetch, lockedModelProfile: profilePayload });
-    await expect(valid.analyzePage({ context: { ...context, sourceLength: 100_001 }, retainedText: "x".repeat(100_001) }, new AbortController().signal)).rejects.toThrow(/budget|exceed|token/i);
+    // The calibrated estimator charges ~1 token per 4 ASCII characters.
+    await expect(valid.analyzePage({ context: { ...context, sourceLength: 100_001 * 4 }, retainedText: "x".repeat(100_001 * 4) }, new AbortController().signal)).rejects.toThrow(/budget|exceed|token/i);
     expect(fetch).not.toHaveBeenCalled();
   });
 

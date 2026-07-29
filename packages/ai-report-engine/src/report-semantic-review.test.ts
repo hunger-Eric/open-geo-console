@@ -838,7 +838,7 @@ describe("ReportSemanticReview receipt integrity", () => {
     const zeroSentence = validReview(input);
     (zeroSentence.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.targetFirstSentence = 0;
     expect(parseReportSemanticReviewOutput(zeroSentence, input).annotations.answers[0])
-      .toMatchObject({ targetPresence: "present", targetFirstSentence: 1, reason: "degraded: contract violation" });
+      .toMatchObject({ targetPresence: "present", targetFirstSentence: 1, reason: "degraded: contract violation", degraded: true });
 
     const absentWithRole = validReview(input);
     Object.assign((absentWithRole.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!, {
@@ -847,7 +847,31 @@ describe("ReportSemanticReview receipt integrity", () => {
       targetRoles: ["subject"]
     });
     expect(parseReportSemanticReviewOutput(absentWithRole, input).annotations.answers[0])
-      .toMatchObject({ targetPresence: "present", targetFirstSentence: 1, reason: "degraded: contract violation" });
+      .toMatchObject({ targetPresence: "present", targetFirstSentence: 1, reason: "degraded: contract violation", degraded: true });
+  });
+
+  it("exposes a structured degradation marker that survives re-parse and never crosses the Paid boundary", () => {
+    const input = createReportSemanticReviewInput(inputCore());
+    const malformed = validReview(input);
+    (malformed.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.targetFirstSentence = 0;
+    const parsed = parseReportSemanticReviewOutput(malformed, input);
+    expect(parsed.annotations.answers[0]).toMatchObject({ degraded: true, reason: "degraded: contract violation" });
+
+    // The marker round-trips when the sanitized output is re-parsed, so the
+    // receipt hashes over the persisted projection stay stable.
+    const reparsed = parseReportSemanticReviewOutput(parsed, input);
+    expect(reparsed.annotations.answers[0]).toMatchObject({ degraded: true });
+    expect(hashReportSemanticReviewValue(reparsed.annotations)).toBe(hashReportSemanticReviewValue(parsed.annotations));
+
+    // Valid model rows never acquire the marker.
+    const valid = parseReportSemanticReviewOutput(validReview(input), input);
+    expect(valid.annotations.answers[0]).not.toHaveProperty("degraded");
+
+    // The strict Paid report_global_v1 parser keeps rejecting the marker key.
+    const paidInput = globalInput();
+    const paidReview = globalReview(paidInput);
+    (paidReview.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.degraded = true;
+    expect(() => parseReportSemanticReviewOutput(paidReview, paidInput)).toThrow(/unknown key degraded/u);
   });
 
   it("rejects observation text hash drift and cross-question observation reuse", () => {

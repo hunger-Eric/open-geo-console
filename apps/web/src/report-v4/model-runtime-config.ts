@@ -55,15 +55,28 @@ export const REPORT_V4_MODEL_CAPABILITY_EVIDENCE: readonly ReportV4ModelCapabili
   })
 ]);
 
+// The tokenizer identity is pinned by the locked model profile
+// (config/model-profiles/report-v4-mimo-v2.5-pro.json); only the estimator
+// version moves with the calibration.
 const TOKENIZER_ID = "mimo-v2.5-pro-utf8-conservative-v1";
-const ESTIMATOR_ID = "mimo-v2.5-pro-utf8-byte-upper-bound-v1";
-const utf8 = new TextEncoder();
+const ESTIMATOR_ID = "mimo-v2.5-pro-calibrated-conservative-v2";
 
 const tokenEstimators = createModelTokenEstimatorRegistry([{
   estimatorId: ESTIMATOR_ID,
   tokenizer: TOKENIZER_ID,
   estimateTokens(text: string): number {
-    return utf8.encode(text).byteLength;
+    // Calibrated conservative upper bound: non-ASCII code points (CJK runs are
+    // three UTF-8 bytes each) cost ~1 token apiece, while ASCII (Latin prose,
+    // digits, punctuation, whitespace) averages ~4 characters per token. This
+    // keeps an upper-bound bias for mixed prose without the ~4x Latin
+    // over-count of the previous pure byte-length bound.
+    let ascii = 0;
+    let nonAscii = 0;
+    for (const char of text) {
+      if (char.codePointAt(0)! < 0x80) ascii += 1;
+      else nonAscii += 1;
+    }
+    return Math.ceil(ascii / 4) + nonAscii;
   }
 }]);
 

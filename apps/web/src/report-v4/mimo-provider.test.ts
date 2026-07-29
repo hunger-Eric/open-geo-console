@@ -139,7 +139,8 @@ describe("Report V4 dedicated MiMo provider", () => {
     await expect(invoker.invoke({
       operation: "pageAnalysis",
       systemText: "",
-      inputText: "x".repeat(65_537),
+      // The calibrated estimator charges ~1 token per 4 ASCII characters.
+      inputText: "x".repeat(65_537 * 4),
       signal: new AbortController().signal
     })).rejects.toBeInstanceOf(ModelTokenBudgetError);
     expect(fetch).not.toHaveBeenCalled();

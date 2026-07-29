@@ -112,10 +112,10 @@ describe("Report V4 production model runtime configuration", () => {
     const second = loadReportV4ModelRuntimeConfig(environment());
 
     expect(parseModelProfile(first.modelProfile)).toEqual(first.modelProfile);
-    expect(first.tokenEstimator.estimateTokens("A中🙂")).toBe(8);
+    expect(first.tokenEstimator.estimateTokens("A中🙂")).toBe(3);
     expect(first.tokenEstimator.estimateTokens("A中🙂")).toBe(second.tokenEstimator.estimateTokens("A中🙂"));
     expect(first.tokenEstimator).toMatchObject({
-      estimatorId: "mimo-v2.5-pro-utf8-byte-upper-bound-v1",
+      estimatorId: "mimo-v2.5-pro-calibrated-conservative-v2",
       tokenizer: "mimo-v2.5-pro-utf8-conservative-v1"
     });
     expect(Object.isFrozen(first)).toBe(true);
@@ -125,6 +125,39 @@ describe("Report V4 production model runtime configuration", () => {
     expect(Object.isFrozen(first.resolvedProfile.operations.questionAnswer)).toBe(true);
     expect(Object.isFrozen(first.tokenEstimator)).toBe(true);
     expect(Object.isFrozen(first.tokenEstimators)).toBe(true);
+  });
+
+  it("keeps the calibrated estimator an upper bound on mixed prose without the ~4x Latin over-count", () => {
+    const runtime = loadReportV4ModelRuntimeConfig(environment());
+    const estimate = runtime.tokenEstimator.estimateTokens;
+
+    // Latin prose averages ~4 characters per token; the calibrated bound must
+    // stay at or above a realistic count and far below the old byte-length bound.
+    const latinProse = "The quick brown fox jumps over the lazy dog while the diligent cat watches carefully from the windowsill.";
+    expect(estimate(latinProse)).toBe(Math.ceil(latinProse.length / 4));
+    expect(estimate(latinProse)).toBeGreaterThanOrEqual(latinProse.split(/\s+/u).length);
+    expect(estimate(latinProse)).toBeLessThanOrEqual(latinProse.length / 2);
+
+    // CJK runs are three UTF-8 bytes each and cost ~1 token per character.
+    const cjkProse = "跨境物流服务商应当公开可核验的路线条件与交付时效。";
+    expect(estimate(cjkProse)).toBe([...cjkProse].length);
+
+    // Mixed CJK/Latin fixtures: never under-count a conservative reference of
+    // one token per CJK character plus one per four Latin characters, and never
+    // exceed the historical byte-length upper bound.
+    for (const mixed of [
+      "目标品牌 provides 跨境物流服务 across 华南地区 with documented FBA first-mile routes.",
+      "采购方应核验 delivery windows、路线条件 and 售后条款 before signing.",
+      "Shun Express顺心捷达提供覆盖全国的FBA头程服务。"
+    ]) {
+      const chars = [...mixed];
+      const cjk = chars.filter((char) => /[㐀-鿿]/u.test(char)).length;
+      const latin = chars.filter((char) => /[A-Za-z]/u.test(char)).length;
+      const reference = cjk + Math.ceil(latin / 4);
+      expect(estimate(mixed)).toBeGreaterThanOrEqual(reference);
+      expect(estimate(mixed)).toBeLessThanOrEqual(new TextEncoder().encode(mixed).byteLength);
+    }
+    expect(estimate("")).toBe(0);
   });
 
   it("does not load secrets, API keys, base URLs, or dynamic model overrides into public profile data", () => {
@@ -190,7 +223,8 @@ describe("Report V4 production model runtime configuration", () => {
       operation: "pageAnalysis",
       estimate: {
         systemText: "",
-        inputText: "x".repeat(runtime.modelProfile.operations.pageAnalysis.maxInputTokens + 1),
+        // The calibrated estimator charges ~1 token per 4 ASCII characters.
+        inputText: "x".repeat((runtime.modelProfile.operations.pageAnalysis.maxInputTokens + 1) * 4),
         reservedOutputTokens: 1,
         providerSafetyMarginTokens: 0
       },

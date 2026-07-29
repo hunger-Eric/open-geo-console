@@ -26,6 +26,7 @@ import {
 import { ReportV4DiagnosisProviderError } from "./report-v4-diagnosis-enhancer";
 import {
   FreeTeaserDiagnosisFailedError,
+  FreeTeaserQ1AnnotationDegradedError,
   FreeTeaserQ1IncompleteError
 } from "./report-v4-free-teaser";
 import { ReportV4QuestionProviderError } from "./report-v4-question-answerer";
@@ -121,18 +122,36 @@ describe("job error normalization", () => {
     expect(JSON.stringify(normalized)).not.toMatch(/raw provider|system prompt|evidence prose/i);
   });
 
-  it("persists FreeTeaserQ1IncompleteError as a permanent free-teaser job code", () => {
+  it("persists FreeTeaserQ1IncompleteError as a transient free-teaser job code", () => {
     const normalized = normalizeJobError(
       new FreeTeaserQ1IncompleteError(),
       { ...context, phase: "grounded_answer_synthesis" }
     );
     expect(normalized).toMatchObject({
-      classification: "permanent",
+      classification: "transient",
       code: "free_teaser_q1_incomplete",
-      type: "FreeTeaserQ1IncompleteError",
+      type: "FreeTeaserQ1IncompleteError"
+    });
+    expect(normalized.retryableAt).toBeInstanceOf(Date);
+    expect(normalized.code).not.toBe("unexpected_internal_error");
+  });
+
+  it("persists a degraded Free Q1 review annotation as a transient model-contract failure", () => {
+    const normalized = normalizeJobError(
+      new FreeTeaserQ1AnnotationDegradedError(),
+      { ...context, phase: "grounded_answer_synthesis" }
+    );
+    expect(normalized).toMatchObject({
+      classification: "transient",
+      code: "free_teaser_q1_annotation_degraded",
+      type: "FreeTeaserQ1AnnotationDegradedError"
+    });
+    expect(normalized.retryableAt).toBeInstanceOf(Date);
+    // W1 fingerprint recurrence is the deterministic backstop to permanent.
+    expect(escalateFingerprintRecurrence(normalized)).toMatchObject({
+      classification: "permanent",
       retryableAt: null
     });
-    expect(normalized.code).not.toBe("unexpected_internal_error");
   });
 
   it("classifies a deterministic Paid V3 diagnosis input-validation failure as permanent", () => {

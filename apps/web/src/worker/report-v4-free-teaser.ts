@@ -3,6 +3,7 @@ import {
   REPORT_V4_MAX_DIAGNOSIS_SOURCES,
   REPORT_SEMANTIC_REVIEW_CONTRACT,
   applyReportSemanticReview,
+  assertGenerativeSearchAnswerLanguage,
   buildFreeV4FoundationManifestCoverage,
   buildFreeV4SemanticReviewManifest,
   deriveFreeObservationMetrics,
@@ -78,15 +79,31 @@ export class FreeTeaserDiagnosisFailedError extends JobError {
   }
 }
 
-/** Q1 answer missing text/sources/refusal path — permanent incomplete teaser. */
+/** Q1 answer missing text/sources/refusal path — transient model incompleteness. */
 export class FreeTeaserQ1IncompleteError extends JobError {
   constructor() {
     super(
       "Free teaser Q1 requires one complete answer with sources.",
       "free_teaser_q1_incomplete",
-      "permanent"
+      "transient"
     );
     this.name = "FreeTeaserQ1IncompleteError";
+  }
+}
+
+/**
+ * A degraded Free Q1 review annotation is a synthesized contract fallback, not
+ * model evidence; it must retry as a transient model-contract failure instead
+ * of being persisted as fact. Fingerprint recurrence escalates deterministically.
+ */
+export class FreeTeaserQ1AnnotationDegradedError extends JobError {
+  constructor() {
+    super(
+      "Free teaser Q1 review annotation degraded to a synthesized contract fallback.",
+      "free_teaser_q1_annotation_degraded",
+      "transient"
+    );
+    this.name = "FreeTeaserQ1AnnotationDegradedError";
   }
 }
 
@@ -458,7 +475,16 @@ function verifyFreeTeaserSemanticProjection(checkpoint: FreeTeaserCheckpointV1):
     if (actual.has(field.path) && actual.get(field.path) !== field.appliedText) throw new TypeError(`Free teaser semantic field ${field.path} does not match the checkpoint.`);
   }
   const annotation = output.annotations.answers[0];
+  // entityRole is persisted inside the review output; bind it to the same
+  // presence/competitor semantics the Q1 projection is asserted against, so a
+  // self-consistent-but-contradictory annotation cannot pass silently.
+  const expectedEntityRole = annotation && annotation.targetPresence !== undefined && annotation.competitorEntityIds !== undefined
+    ? annotation.targetPresence === "present"
+      ? annotation.competitorEntityIds.length ? "mixed" : "target"
+      : annotation.competitorEntityIds.length ? "competitor" : "none"
+    : undefined;
   if (!annotation || annotation.targetPresence === undefined || annotation.competitorEntityIds === undefined ||
+      annotation.entityRole !== expectedEntityRole ||
       checkpoint.q1AnswerCard!.geoDiagnosis.targetMentioned !== (annotation.targetPresence === "present") ||
       checkpoint.q1AnswerCard!.geoDiagnosis.targetFirstSentence !== (annotation.targetPresence === "present" ? annotation.targetFirstSentence : null) ||
       sha(checkpoint.q1AnswerCard!.geoDiagnosis.targetRoles) !== sha(annotation.targetRoles) ||
@@ -812,21 +838,27 @@ async function verifyMarkedFreeTeaserDraftCheckpoint(input: {
   const result = checkpoint.q1AnswerResult;
   const draft = checkpoint.q1AnswerDraft;
   if (checkpoint.stage !== "q1_answer_ready" || !result || !draft || checkpoint.questionSetIdentity !== input.questionSet.contentHash) {
-    throw new Error("Marked Free teaser answer draft authority is incomplete.");
+    throw new OrchestrationInvariantError("Marked Free teaser answer draft authority is incomplete.");
   }
   const canonicalQuestion = toCanonicalBuyerQuestionSet(input.questionSet).questions[0]!;
   const expectedQuestion = input.questionSet.questions[0]!.privateText;
   if (createSiteKey(input.targetUrl) !== input.admission.snapshot.siteKey || draft.questionId !== canonicalQuestion.id || draft.exactQuestion !== expectedQuestion ||
       draft.answerMode !== "generative_search_v1" || draft.status !== "answered" || draft.refusal !== null) {
-    throw new Error("Marked Free teaser answer draft does not match its question or target authority.");
+    throw new OrchestrationInvariantError("Marked Free teaser answer draft does not match its question or target authority.");
   }
   const parsed = parseGenerativeSearchAnswerResult(result, {
     expectedQuestionId: canonicalQuestion.id,
     locale: checkpoint.locale,
     semanticValidation: "deferred"
   });
-  if (!parsed.answerText || parsed.refusal || parsed.sources.length === 0 || parsed.answerText !== draft.answerText) {
-    throw new Error("Marked Free teaser answer draft is incomplete or differs from its persisted result.");
+  // An incomplete persisted model answer is model-output incompleteness
+  // (transient); divergence from its checkpointed draft is an internal
+  // contradiction (permanent invariant).
+  if (!parsed.answerText || parsed.refusal || parsed.sources.length === 0) {
+    throw new FreeTeaserQ1IncompleteError();
+  }
+  if (parsed.answerText !== draft.answerText) {
+    throw new OrchestrationInvariantError("Marked Free teaser answer draft differs from its persisted result.");
   }
   const resultSources = parsed.sources.map(canonicalAnswerSourceProjection);
   const draftSources = draft.sources.map(canonicalAnswerSourceProjection);
@@ -839,7 +871,7 @@ async function verifyMarkedFreeTeaserDraftCheckpoint(input: {
       draft.provenance.searchedAt !== parsed.searchedAt || draft.provenance.completedAt !== parsed.completedAt ||
       draft.sources.some((source) => source.retrievalStatus !== "search_source_only" || source.ownershipCategory !== "unknown") ||
       draft.audit.verifiedBodyCount !== 0 || draft.audit.searchSourceOnlyCount !== draft.sources.length || draft.audit.inaccessibleCount !== 0) {
-    throw new Error("Marked Free teaser answer draft hash, source, time, or completeness binding is invalid.");
+    throw new OrchestrationInvariantError("Marked Free teaser answer draft hash, source, time, or completeness binding is invalid.");
   }
   if (!checkpoint.q1DiagnosisDraft) return;
   const diagnosis = parseReportV4DiagnosisOutputForQuestion(checkpoint.q1DiagnosisDraft, {
@@ -851,7 +883,7 @@ async function verifyMarkedFreeTeaserDraftCheckpoint(input: {
   const sourceIds = new Set(draft.sources.map(({ sourceId }) => sourceId));
   if (diagnosis.detailedEvidenceRefs.some((ref) => !sourceIds.has(ref) && !targetEvidenceIds.has(ref)) ||
       hashReportSemanticReviewValue(diagnosis) !== hashReportSemanticReviewValue(checkpoint.q1DiagnosisDraft)) {
-    throw new Error("Marked Free teaser diagnosis draft does not match current source and target evidence.");
+    throw new OrchestrationInvariantError("Marked Free teaser diagnosis draft does not match current source and target evidence.");
   }
 }
 
@@ -910,6 +942,9 @@ async function reviewFreeTeaser(input: {
     })
   );
   const answerAnnotation = reviewed.review.annotations.answers[0];
+  // A degraded Q1 annotation is a code-synthesized fallback, not model
+  // evidence: reject transiently instead of persisting fabricated semantics.
+  if (answerAnnotation?.degraded === true) throw new FreeTeaserQ1AnnotationDegradedError();
   if (!answerAnnotation || answerAnnotation.targetPresence === undefined || answerAnnotation.targetPresence === "ambiguous" || answerAnnotation.targetFirstSentence === undefined || answerAnnotation.targetRoles === undefined || answerAnnotation.competitorEntityIds === undefined) {
     throw new OrchestrationInvariantError("Marked Free teaser review omitted durable Q1 diagnosis semantics.");
   }
@@ -929,6 +964,10 @@ async function reviewFreeTeaser(input: {
     recommendedActions: diagnosis.recommendedActions.map((action, index) => ({ ...action, action: textByPath.get(`q1Diagnosis.recommendedActions[${index}].action`)! })) as unknown as typeof diagnosis.recommendedActions
   };
   const correctedAnswerText = textByPath.get("q1AnswerCard.answerText")!;
+  // The deferred parse skipped the mechanical language gate; the post-review
+  // applied Q1 answer text must pass it before persistence (typed transient
+  // ReportLanguageValidationError, mirroring the paid path).
+  assertGenerativeSearchAnswerLanguage([{ path: "q1AnswerCard.answerText", text: correctedAnswerText }], checkpoint.locale);
   const correctedAnswerResult = { ...checkpoint.q1AnswerResult!, answerText: correctedAnswerText };
   const correctedAnswerHash = await generativeSearchAnswerHash(correctedAnswerResult, { semanticValidation: "deferred", locale: checkpoint.locale });
   const q1AnswerCard: GenerativeSearchAnswerCardV3 = { ...draft, answerText: correctedAnswerText, provenance: { ...draft.provenance, answerHash: correctedAnswerHash }, geoDiagnosis: { targetMentioned: answerAnnotation.targetPresence === "present", targetFirstSentence: answerAnnotation.targetPresence === "present" ? answerAnnotation.targetFirstSentence : null, targetRoles: [...answerAnnotation.targetRoles], competitorEntityIds: [...answerAnnotation.competitorEntityIds], citedOwnership: ownershipCountsFromSources(draft.sources), missingEvidenceFamilies: [], retestQuestion: draft.exactQuestion }, diagnosis: correctedDiagnosis };

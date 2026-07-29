@@ -4,14 +4,122 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Code-AI seam hardening W2 — public-source snapshot availability (APPROVED)`.
+`Current authority: Code-AI seam hardening W3 — free-teaser degradation safety (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Code-AI seam hardening W2 — public-source snapshot availability (APPROVED)
+## Current authority: Code-AI seam hardening W3 — free-teaser degradation safety (APPROVED)
 
 **Status: `APPROVED`** — user approved this written allowlist on 2026-07-29
-("批准"). Deployment, staging reruns, and the MiMo probe remain excluded and
-require separate later authorization.
+("批准 W3"), including the narrow opening of
+`packages/ai-report-engine/src/report-semantic-review.ts` for rule 1's
+degradation-marker exposure only. Deployment and staging reruns remain
+excluded and require separate later authorization.
+
+### Baseline and evidence
+
+- HEAD `8cde23f` (W1+W2 committed, not yet deployed; Staging Web `e3fe6a0`,
+  Workers `staging-737ad6d-overlay-v1`).
+- Parent design: session plan `shazam-stargirl-stargirl.md` (approved
+  2026-07-29), workstream W3.
+- User-visible symptom: free AI preview stalled at 96% on staging
+  (2026-07-28/29) — the second of the two distinct "96%" stalls.
+- Code-verified mechanisms at HEAD `8cde23f`:
+  - `packages/ai-report-engine/src/report-semantic-review.ts:1672-1677`: the
+    degraded-annotation fallback **fabricates** `targetPresence:"present"`,
+    `entityRole:"target"`, `targetFirstSentence:1`. It passes the W1 guard
+    (`report-v4-free-teaser.ts:913-921`) and persists as truth
+    (`targetMentioned:true`, :934); only an uninspected `reason` string marks
+    the degradation.
+  - `entityRole` is validated at the parse boundary
+    (`report-semantic-review.ts:1656`) but never stored or consumed after
+    `report-v4-free-teaser.ts:919`, so self-consistent fabrication is
+    undetectable downstream.
+  - Free-path Q1 incompleteness throws `FreeTeaserQ1IncompleteError`
+    classified **permanent** (`report-v4-free-teaser.ts:82-91,:748-750`)
+    while the paid-path equivalent is transient with one self-correction
+    (`answer-first-v3.ts:360-371,:754-762`); checkpoint-integrity guards at
+    `report-v4-free-teaser.ts:815-854` still throw bare `Error`s.
+  - The free deferred path never runs the mechanical language gate
+    (`report-v4-free-teaser.ts:741-746` parses with `"deferred"`), so no
+    `ReportLanguageValidationError` can fire there — asymmetric with the
+    paid path (typed, transient per W1).
+  - `estimateTokens` is a UTF-8 byte-length upper bound
+    (`apps/web/src/report-v4/model-runtime-config.ts:58-68`), over-counting
+    Latin prose ~4x; every `ModelTokenBudgetError` is **permanent**
+    (`job-errors.ts:164-166`), so an estimation artifact terminally kills
+    jobs.
+
+### Design lock
+
+| # | Rule |
+|---|------|
+| 1 | **A degraded Q1 annotation must not persist as fact.** Expose a structured degradation marker in the review output (narrow change in `report-semantic-review.ts`, instead of relying on the uninspected `reason` string); the free teaser treats a degraded Q1 annotation as a transient model-contract failure (W1 fingerprint escalation is the deterministic backstop) instead of persisting fabricated `targetPresence`/`entityRole`/`targetFirstSentence`. Paid-path review behavior unchanged. |
+| 2 | **entityRole reaches the persistence boundary.** The persisted free-teaser Q1 projection carries/asserts entityRole consistency at the point of write, so a self-consistent-but-fabricated annotation cannot pass silently. No schema change; projection shape change only inside the existing persisted JSON. |
+| 3 | **Free Q1 incompleteness becomes transient.** `FreeTeaserQ1IncompleteError` classification permanent -> transient (model randomness, mirroring the paid path; no correction-retry addition, no retry-count/backoff changes). The bare `Error`s in `verifyMarkedFreeTeaserDraftCheckpoint` (:815-854) become typed JobErrors — transient where the cause is model-output incompleteness, permanent invariant where internal checkpoint state is contradictory. |
+| 4 | **Language gate symmetry.** The post-review applied Q1 answer text passes the existing mechanical language assertion before persistence in the free path; failure surfaces as the existing typed `ReportLanguageValidationError` (already transient per W1). Deferred-mode parse semantics otherwise unchanged. |
+| 5 | **Token estimation calibrated.** Replace the pure byte-length estimator with a calibrated conservative estimator (CJK runs ~ bytes/3, Latin ~ chars/4, keeping an upper-bound bias) so Latin prose is not over-rejected ~4x; `ModelTokenBudgetError` stays permanent for genuine budget excess. Estimator/tokenizer id version bumped in place; no dependency or provider change. |
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/report-v4-free-teaser.ts` | Rules 1, 2, 3, 4 |
+| `apps/web/src/worker/job-errors.ts` | Rule 3 classification mapping only if the error class alone cannot carry it |
+| `apps/web/src/report-v4/model-runtime-config.ts` | Rule 5 estimator only |
+| `packages/ai-report-engine/src/report-semantic-review.ts` | Rule 1 structured degradation marker exposure only — no sanitizer/review logic changes beyond surfacing the marker |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+### Tests allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/report-v4-free-teaser.test.ts` and `report-v4-free-teaser-resume-harness.test.ts` | Rule assertions; scenario shapes preserved |
+| `apps/web/src/worker/job-errors.test.ts` | Rule 3 classification assertions |
+| `packages/ai-report-engine/src/report-semantic-review.test.ts` | Rule 1 marker assertions only |
+| `apps/web/src/report-v4/model-runtime-config.test.ts` | Rule 5 calibration assertions |
+| `apps/web/src/report-v4/mimo-provider.test.ts`, `apps/web/src/report-v4/mimo-site-synthesis-provider.test.ts`, `apps/web/src/worker/report-v4-website-synthesis-production.test.ts` | Amendment 2026-07-29 (user approved "批准夹具修复"): mechanical oversized-fixture resizing only, to restore the declared over-budget-rejection scenario under the rule-5 calibrated estimator; no assertion-contract weakening |
+
+Rule 5 bookkeeping decision 2026-07-29 (user approved "保持 v1 现状"): only
+`ESTIMATOR_ID` was bumped to v2 in code; the tokenizer id pinned in
+`config/model-profiles/report-v4-mimo-v2.5-pro.json` stays
+`mimo-v2.5-pro-utf8-conservative-v1` because the registry resolves the
+estimator by that string at module init. Calibration drift remains detectable
+via the bumped estimator id flowing into `resolvedProfile.operations[*].estimatorId`.
+
+### Forbidden
+
+- All other `packages/*` files (prompts, contract validators, model profiles, provider adapters)
+- `answer-first-v3.ts` and paid V3 diagnosis behavior (W4 scope)
+- Tokenizer/provider dependency additions, `max_attempts`/backoff numbers
+- Market snapshots/resolver/forensics (W2, complete), commerce/refund/SLA
+- Deployment, Docker, push, payments, report reruns (separate authorization)
+- Replaying/mutating terminal jobs or orders
+
+### Diff budget
+
+- Production source: <= 200 changed lines. Hard limit.
+- Tests: <= 300 changed lines (tracking bound, measured +20%).
+- Docs: <= 80 changed lines.
+
+### Acceptance checks
+
+1. New unit tests: a degraded Q1 annotation is rejected as transient and
+   never persisted as `targetMentioned:true`; entityRole consistency is
+   asserted at persistence; `FreeTeaserQ1IncompleteError` and the checkpoint
+   guards classify per rule 3; post-review applied text failing the language
+   gate surfaces a transient `ReportLanguageValidationError`; the calibrated
+   estimator stays an upper bound on mixed CJK/Latin fixtures and no longer
+   ~4x-over-counts Latin prose.
+2. `npm test`, `npm run lint`, `npm run build` green.
+3. Deployment and any staging rerun require separate later authorization.
+
+## Historical: Code-AI seam hardening W2 — public-source snapshot availability (APPROVED)
+
+**Status: `APPROVED`** — user approved this written allowlist on 2026-07-29
+("批准"), plus the rule-1 amendment adding `apps/web/src/db/market-snapshots.ts`
+("批准修订"). Implemented and committed as `8cde23f`; acceptance checks green
+(2943 tests passed, lint 0 errors, build exit 0). Deployment, staging reruns,
+and the MiMo probe remain excluded and require separate later authorization.
 
 ### Baseline and evidence
 

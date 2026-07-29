@@ -135,7 +135,10 @@ describe("production V4 website synthesis", () => {
     const h = repositoryHarness();
     const fetch = vi.fn(async () => response(output));
     const run = createReportV4WebsiteSynthesisProduction({ environment, lockedModelProfile: profilePayload, repository: h.repository, fetch });
-    const pages = Array.from({ length: 50 }, (_, index) => ({ ...page, pageId: `page-${index}`, url: `https://example.com/${index}`, contentHash: index.toString(16).padStart(64, "0"), chunks: [{ ...page.chunks[0], summary: "中".repeat(1_900), sourceLocations: [{ locationId: `loc-${index}`, startOffset: 0, endOffset: 7 }] }] }));
+    // The calibrated estimator charges ~1 token per CJK character; summary text alone tops out at the
+    // 100000-character total cap (~100k tokens, below the 131072-token budget), so the bounded
+    // pageId/locationId fields carry the remaining overflow.
+    const pages = Array.from({ length: 50 }, (_, index) => ({ ...page, pageId: `${"中".repeat(492)}-${index}`, url: `https://example.com/${index}`, contentHash: index.toString(16).padStart(64, "0"), chunks: [{ ...page.chunks[0], summary: "中".repeat(1_900), sourceLocations: [{ locationId: `${"中".repeat(492)}-${index}`, startOffset: 0, endOffset: 7 }] }] }));
     await expect(run({ ...base, pages, signal: new AbortController().signal })).rejects.toThrow(/token|budget|exceed/i);
     expect(h.events).toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
