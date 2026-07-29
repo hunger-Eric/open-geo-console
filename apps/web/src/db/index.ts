@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import dns from "node:dns";
 import type { DeploymentProfile } from "@/security/deployment-policy";
 import {
   assertDeploymentRuntime,
@@ -25,6 +26,9 @@ export function isMemoryPersistence(): boolean {
 
 export function getDb() {
   if (!database) {
+    // Vercel serverless has no IPv6 egress; Node >=17 verbatim DNS order can
+    // blackhole the TCP connect until connect_timeout on cold starts.
+    dns.setDefaultResultOrder("ipv4first");
     const connectionString = getDatabaseUrl();
     client = postgres(connectionString, {
       max: getDatabasePoolSize(),

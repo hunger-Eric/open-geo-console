@@ -4,10 +4,91 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Paid V3 diagnosis input boundary adaptation (APPROVED)`.
+`Current authority: Vercel serverless DB cold-start resilience (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Paid V3 diagnosis input boundary adaptation (APPROVED)
+## Current authority: Vercel serverless DB cold-start resilience (APPROVED)
+
+**Status: `APPROVED`** — user approved this written allowlist and its
+acceptance plan on 2026-07-28 ("批准并部署冷启动修复"), including Staging
+deployment of the Web function changes below. Live evidence at approval time:
+Sandbox order `9cec1db7` was `SUCCEEDED` at Airwallex (23:50:09Z) but two
+webhook deliveries (07:50:10, 08:00:19) reached the function with zero
+`payment_events` rows, and order-status polling lambdas were erroring
+("自动更新已暂停") — the cold-start crash pattern below, now blocking the
+737ad6d paid acceptance.
+
+### Baseline and evidence
+
+- Staging runs `737ad6d` (Web `dpl_Bfp5XRzUYhmhUNcStAyRwh2Auu6q`, alias
+  `open-geo-console-staging-itheheda.vercel.app`, functions in `sin1`).
+- Vercel runtime logs 2026-07-28 17:51 CST (twice): lambdas die on cold start
+  with `An error occurred while loading instrumentation hook:
+  write CONNECT_TIMEOUT ep-broad-sky-aoslq8jq-pooler.c-2.ap-southeast-1.aws.neon.tech:5432`
+  → `Node.js process exited with exit status: 128`.
+- User-visible result: report pages show "This page couldn't load / A server
+  error occurred"; order-status polling pauses ("自动更新已暂停") leaving stale
+  "全额退款已提交，正在等待支付机构确认" copy, although DB shows refund
+  `acbab8a5` **succeeded** and order `1dd58782` `refund_status=refunded` at
+  2026-07-28T07:35:31Z.
+- DB proof the unlock click never reached `createPaymentOrder`: zero
+  `payment_orders` rows after 07:35:31Z.
+- Database is healthy: staging worker container connects in ~460 ms; the Neon
+  pooler hostname resolves 3×AAAA + 3×A and both families are reachable from
+  the user network. Neon sits in `ap-southeast-1`, same region as the lambdas.
+- Root-cause hypothesis: Node ≥17 default verbatim DNS order can pick a AAAA
+  record first on a cold start; Vercel serverless functions have no IPv6
+  egress, so the TCP connect blackholes until the 10 s `connect_timeout`.
+  Intermittency matches per-cold-start DNS answer ordering. Amplifier:
+  `instrumentation.register()` awaits `ensureDatabase()` uncaught, so one
+  failed connect kills the entire lambda (exit 128) instead of failing one
+  request.
+
+### Design lock
+
+| # | Rule |
+|---|------|
+| 1 | **Force IPv4 for DB connections.** Call `dns.setDefaultResultOrder("ipv4first")` inside `getDb()` in `apps/web/src/db/index.ts` before creating the postgres client. No connection-string, env, or Neon-side change. |
+| 2 | **Instrumentation must not kill the lambda.** Wrap the `ensureDatabase()` await in `apps/web/src/instrumentation.ts` in try/catch that logs the error and returns; request handlers keep their own error paths. No retry/backoff machinery. |
+| 3 | No changes to Neon env values, Vercel project settings, commerce/refund logic, UI copy, or worker code. No new dependency. |
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/db/index.ts` | ipv4first DNS result order before client creation (rule 1) |
+| `apps/web/src/instrumentation.ts` | try/catch around cold-start ensureDatabase (rule 2) |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+### Tests allowlist (closed)
+
+No new unit tests: rule 1 is a one-line Node DNS directive and rule 2 is a
+log-and-continue guard; both are verified through the staging acceptance
+window below. Existing suites must stay green.
+
+### Forbidden
+
+- Neon console/env value changes, Vercel project setting changes
+- Switching DB drivers (e.g. Neon serverless HTTP) — that is a separate scope
+- Commerce, refund, UI copy, worker, or prompt changes
+- Replaying/mutating terminal jobs or orders
+
+### Diff budget
+
+- Production source: ≤ 20 changed lines. Hard limit.
+- Docs: ≤ 60 changed lines.
+
+### Acceptance checks
+
+1. `npm test`, `npm run lint`, `npm run build` green.
+2. Deploy to Staging (Vercel Web only; worker image untouched), then a
+   30-minute observation window with user browsing and **zero**
+   `CONNECT_TIMEOUT` / exit-128 events in Vercel logs.
+3. User completes the unlock checkout: a new `payment_orders` row appears and
+   the hosted checkout opens. The fresh paid validation run itself remains
+   governed by the previously authorized validation grant.
+
+## Historical: Paid V3 diagnosis input boundary adaptation (APPROVED)
 
 **Status: `APPROVED`** — user approved this written allowlist and, in the same
 grant (2026-07-28: "全部授权"), authorized implementation, commit + push,
