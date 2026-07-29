@@ -4,14 +4,207 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Code-AI seam hardening W4 — Paid V3 evidence and review degradation (APPROVED)`.
+`Current authority: Code-AI seam W-A+W-B — forensic query coverage classification and reuse/contract alignment (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Code-AI seam hardening W4 — Paid V3 evidence and review degradation (APPROVED)
+## Current authority: Code-AI seam W-A+W-B — forensic query coverage classification and reuse/contract alignment (APPROVED)
+
+**Status: `APPROVED`** — user approved this written allowlist on 2026-07-29
+("批准"). Deployment and a new paid Gate 4 rerun remain out of scope.
+
+### Baseline and evidence
+
+- HEAD / Staging candidate: `e21ade5e739dcfaf9f03621bc2ec0ef8ba4ae16f`
+  (W1–W4 committed and Staging-deployed; Workers
+  `staging-e21ade5-overlay-v1`).
+- Gate 4 lineage (do **not** replay/repair):
+  - Report `addf0b93-baf4-4f89-83cf-3ad07a6e5174`, free V4 teaser **completed**.
+  - Order `2b879fdc-604f-4ba1-8dea-980b2f3d632f` **paid → failed → refunded**.
+  - Paid job `8e4f2a77-40e1-4def-9f81-98481f8fcc46`:
+    1. `public_source_preflight` / `public_source_attempt_deferred` (transient, W2 budget).
+    2. Twice at `source_retrieval`:  
+       `$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.`  
+       First hit classified **transient** (`unexpected_internal_error`); second
+       hit **permanent** via W1 fingerprint escalation.
+- Code-verified mechanism:
+  - Validator: `packages/ai-report-engine/src/recommendation-forensic-v2.ts:89-91`
+    requires set equality of (A) all fanout `query.id`s vs (B)
+    `sourceGraph.dimensions.queryVariantIds` (built only from snapshot
+    observations, `public-source-graph.ts:123-126`).
+  - Forensics builds the report after saving checkpoint
+    (`public-source-forensics.ts:124-149`); phase stamped `source_retrieval`
+    (`processor.ts:1962-1966`).
+  - W2 prefix reuse: `public-source-snapshot-resolver.ts:261-271,280-297`
+    may return a prior whose stored queries are a **strict prefix** of the
+    current fanout → observation query ID set proper subset of plan →
+    deterministic A≠B.
+  - First-hit classification: bare `TypeError` from the parser does not match
+    identity/contract keywords in `classifyUnknown` (`job-errors.ts:335-340`)
+    → transient until fingerprint escalation.
+
+### Design lock
+
+Parent principles (session analysis): P1 fail-binary, P2 reuse must declare
+degraded form, no silent full-success on subset evidence, no historical job
+replay.
+
+| # | Stream | Rule |
+|---|--------|------|
+| A1 | **W-A** | **Forensic query-variant coverage mismatch is permanent on first hit.** Introduce a typed job error (e.g. `PublicSourceQueryVariantCoverageError` or equivalent) thrown at the forensics/report-build boundary when fanout query IDs and graph `dimensions.queryVariantIds` are not the same set. `normalizeJobError` maps it to a stable code (not `unexpected_internal_error`) and classification **`permanent`**. Message may keep the existing path string for operators. |
+| A2 | **W-A** | **Same class for the twin snapshotRef coverage check** when it is the same deterministic set-mismatch family: `recommendation-forensic-v2.ts:78-80` ("Every question and fanout query requires one bound market snapshot reference") if raised from the same build path — typed permanent, not generic TypeError→transient. Do **not** reclassify unrelated TypeErrors (language, evidence binding claims, cost math) in this scope. |
+| A3 | **W-A** | **W1 fingerprint escalation remains** as backstop for any residual untyped recurrence; no change to fingerprint algorithm or max_attempts. |
+| B1 | **W-B** | **Prefix / subset reuse must not claim a full fanout plan.** When a snapshot resolution is a fallback prior whose stored query set is a **proper subset** of the current fanout's query IDs (prefix-equivalent reuse or any refreshFailed+subset observations), the forensics pipeline must **not** build/parse a report that asserts the full fanout query set. |
+| B2 | **W-B** | **Aligned limited path (required when subset is accepted).** If the pipeline continues with a subset-covered question, the **effective query plan** used for `fanouts` / `snapshotRefs.queryVariantIds` / coverage denominator / graph expectation must be exactly the **observed** query-variant ID set for that question, and commercial outcome must be at most **`completed_limited`** (never `completed`), with an explicit limitation reason that states partial query coverage / stale-or-prefix fallback. Prefer reusing existing `decidePublicSourceCommercialCoverage` + limitations machinery. |
+| B3 | **W-B** | **Full `completed` still requires exact cover.** When every question's observations cover the full current fanout query ID set, behavior stays as today (exact equality still required; A1 fires if violated). |
+| B4 | **W-B** | **Do not freeze a resume checkpoint that cannot parse.** Either (1) run the forensic report build/parse before committing `publicSourceForensics` snapshot identity for resume, or (2) on A1/A2 failure clear/omit the bad forensics checkpoint fields so the next attempt does not loop the same frozen subset+full-plan pair. Choose the smaller of the two that keeps resume of *good* snapshots intact; document the choice in the implementation commit message. |
+
+### Production allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/job-errors.ts` | A1–A3 classification mapping only |
+| `apps/web/src/worker/public-source-forensics.ts` | B1–B4 pipeline: effective plan, outcome cap, checkpoint ordering |
+| `apps/web/src/worker/public-source-snapshot-resolver.ts` | B1: surface subset/prefix-fallback signal to caller only (no new cache schema) |
+| `apps/web/src/public-source-forensics/report-builder.ts` | B2: limitations / outcome wiring if required |
+| `apps/web/src/public-source-forensics/coverage.ts` | B2: only if existing decision inputs need a partial-coverage flag |
+| `packages/ai-report-engine/src/recommendation-forensic-v2.ts` | A1/A2: throw typed error **or** keep TypeError only if forensics wraps it before it hits classifyUnknown — prefer typed error at throw site or single wrap in forensics; **no** loosening of the exact-cover rule for `completed` |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+
+Optional single helper file **only if** needed to avoid bloating forensics:
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/public-source-query-coverage.ts` (new) | Pure functions: set equality, subset detection, effective fanout projection |
+
+If created, it is part of this allowlist.
+
+### Tests allowlist (closed)
+
+| Path | Role |
+|------|------|
+| `apps/web/src/worker/job-errors.test.ts` | A1–A3: permanent first-hit, stable code |
+| `apps/web/src/worker/public-source-forensics.test.ts` (or existing forensics test file) | B1–B4: subset → limited/effective plan; full cover → completed still; no full plan + subset graph |
+| `apps/web/src/worker/public-source-snapshot-resolver.test.ts` | B1 signal / prefix fallback does not claim full cover silently |
+| `apps/web/src/public-source-forensics/coverage.test.ts` | B2 only if coverage.ts changes |
+| `apps/web/src/public-source-forensics/report-builder.test.ts` | B2 only if report-builder changes |
+| `packages/ai-report-engine/src/recommendation-forensic-v2` tests (existing) | A1/A2 if throw site changes; **no** weakening of completed exact-cover assertions |
+
+### Forbidden
+
+- W-C/D/E/F from the broader seam plan (finalize budget model, dual-fanout product redesign, UI public_error copy, diagnosis/semantic paths) except as forced by B4 checkpoint ordering inside forensics
+- Loosening exact cover for commercialOutcome `completed`
+- Making A1/A2 **transient** or relying only on fingerprint escalation without first-hit permanent
+- Schema/migrations, privacy triggers, commerce/refund/SLA formulas, max_attempts/backoff numbers
+- Free teaser / Paid V4 two_stage paths unless a shared helper is strictly required (prefer not)
+- Deployment, Docker, push, payments, staging reruns, replaying jobs `8e4f2a77` / order `2b879fdc` / other historical terminals
+- Production
+
+### Diff budget
+
+- Production source: ≤ 280 changed lines. Hard limit.
+- Tests: ≤ 400 changed lines (tracking bound; may update to measured +20% under verification-only provision).
+- Docs: ≤ 120 changed lines.
+
+### Acceptance checks
+
+1. Unit: synthetic full-fanout plan + prefix/subset observations → does **not** parse as `completed`; either permanent typed coverage error **or** `completed_limited` with effective plan === graph query IDs (per B2), never silent full success.
+2. Unit: exact observation cover of full fanout still parses `completed` when commercial coverage says so.
+3. Unit: A1/A2 errors classify **permanent** on first normalize; code ≠ `unexpected_internal_error`.
+4. Unit: B4 — after a coverage mismatch failure, resume does not infinite-loop the same frozen bad forensics identity (test the chosen ordering strategy).
+5. `npm test`, `npm run lint`, `npm run build` green.
+6. Staging deploy + new paid Gate 4 **not** authorized by this scope.
+
+### Explicit non-goals (next scopes)
+
+- W-C dual-fanout product redesign beyond subset/effective-plan handling
+- W-E finalize 600s budget model
+- W-F customer-facing error copy / progress semantics
+- W4 diagnosis paths already landed at `e21ade5`
+
+## Historical: Staging deploy W1–W4 + Gate 4 new-order acceptance (APPROVED)
+
+**Status: `APPROVED`** — user authorized on 2026-07-29 with
+"部署 staging 并做新单验收". Implements Protected Staging Gates 1–4 for
+candidate `e21ade5e739dcfaf9f03621bc2ec0ef8ba4ae16f` (W1–W4 commits on
+`main`). Production is forbidden. Gate 4 paid job failed; free teaser and
+payment path succeeded; refund closed. See execution record below.
+
+### Baseline and identities
+
+| Role | Identity |
+|------|----------|
+| Candidate SHA (full) | `e21ade5e739dcfaf9f03621bc2ec0ef8ba4ae16f` |
+| Candidate short | `e21ade5` (W4; includes W1 `b75b750`, W2 `8cde23f`, W3 `fcc2142`) |
+| Current Staging Workers | image `open-geo-console:staging-737ad6d-overlay-v1` (`4f2fca0e9e53`), env `OGC_DEPLOYMENT_VERSION=a35674b…` (version drift pre-exists) |
+| Rollback Workers | same current image `staging-737ad6d-overlay-v1` |
+| Base full image (overlay parent) | `open-geo-console:staging-330b27a74c5c3d9d56c71bc8e6ade1859499e92e-full-v1` (`748e2675f280`) |
+| Candidate Worker image (to build) | `open-geo-console:staging-e21ade5-overlay-v1` thin source overlay only |
+| Fixed Staging URL | `https://open-geo-console-staging-itheheda.vercel.app` |
+| Disk free (preflight) | ~91 GiB on E: — full rebuild not required |
+
+Source-only since full base: `package.json` / `package-lock.json` /
+`Dockerfile.worker` unchanged → **full Worker rebuild forbidden**; thin
+overlay required.
+
+Pre-cutover jobs: 0 queued/running (checked 2026-07-29).
+
+### Design lock
+
+| Gate | Action |
+|------|--------|
+| 1 | Package candidate: already committed `e21ade5`; local test/lint/build green at W4 commit; create clean detached worktree; Vercel Preview at this SHA with `ogcGitSha`/`OGC_DEPLOYMENT_VERSION` metadata |
+| 2 | Thin overlay build from base full; recreate **only** `staging-worker-free` + `staging-worker-deep` with candidate image; set `OGC_DEPLOYMENT_VERSION` in `.data/workstation-docker/staging.env` to full candidate SHA; after both healthy, move fixed alias once |
+| 3 | Smoke fixed URL locale + commerce catalog test mode; confirm Web/Free/Deep same SHA; **no** report/payment created by smoke |
+| 4 | Exactly **one** new Staging report + **one** Sandbox payment for Gate 4 lineage (submit → free V4 → pay → Paid V3 HTML). Monitor DB; no historical job replay. MiMo `public-search:probe` before paid path. Failed new paid orders may use standard staging commerce refund |
+
+### Production allowlist (closed)
+
+| Path / target | Role |
+|---------------|------|
+| `.data/staging-release-e21ade5/Dockerfile.overlay` | Thin overlay definition (untracked data) |
+| `open-geo-console:staging-e21ade5-overlay-v1` Docker image | Candidate Workers |
+| `.data/workstation-docker/staging.env` | `OGC_DEPLOYMENT_VERSION` only (+ regenerate via existing merge script if needed) |
+| Staging containers `staging-worker-free`, `staging-worker-deep` | Recreate with candidate image |
+| Vercel Preview deployment + alias `open-geo-console-staging-itheheda.vercel.app` | Web cutover |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This authority |
+| Optional: `.tmp/*` operator scripts | Disposable diagnostics only |
+
+### Forbidden
+
+- Production Web, production Workers, production commerce
+- Full `Dockerfile.worker` rebuild / `npm ci` / Playwright install
+- `docker system prune` or broad image prune
+- Touching/replaying historical jobs/orders (`36c78f69`, `9cec1db7`, etc.)
+- More than one new paid acceptance lineage without a new scope
+- Pushing to `origin` unless separately asked
+- W5 code changes
+
+### Acceptance checks
+
+1. Gate 2: Free+Deep workers report candidate SHA, restart count 0, healthy presence; fixed alias points to READY Preview with same SHA.
+2. Gate 3: fixed `/zh` + catalog `mode=test`; no new report from smoke.
+3. Gate 4: one new report completes Free V4 + Paid V3 accessible HTML; record stage evidence; if paid fails, extract structured error only (no silent historical repair).
+4. Rollback path: restore Workers + alias to `staging-737ad6d-overlay-v1` / prior Preview if post-cutover Gate 2/3 fails.
+
+### Execution record 2026-07-29
+
+| Item | Result |
+|------|--------|
+| Thin overlay | `open-geo-console:staging-e21ade5-overlay-v1` (`a7857e2ec435`), label revision full candidate SHA |
+| Workers | free+deep recreated; ready logs; presence SHA `e21ade5e739d…`; restart 0; 0 active jobs |
+| Preview | `https://open-geo-console-7qlpbuj5m-itheheda-6857s-projects.vercel.app` status Ready |
+| Alias | fixed Staging URL → that Preview |
+| MiMo public-search probe | 3/3 cases passed |
+| Generative-answer staging probe | answerNonblank=true, sourceCount=20 |
+| Production | not touched |
+| Gate 4 | authorized; awaiting operator browser new report + Sandbox payment |
+
+## Historical: Code-AI seam hardening W4 — Paid V3 evidence and review degradation (APPROVED)
 
 **Status: `APPROVED`** — user approved this written allowlist on 2026-07-29
 ("可以", following the recommended path: implement W4 only; W5 deferred;
 deployment/staging paid rerun remain separate later authorization).
+Implemented and committed as `e21ade5`.
 
 ### Baseline and evidence
 

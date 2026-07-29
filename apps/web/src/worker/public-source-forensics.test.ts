@@ -3,7 +3,14 @@ import type { RecommendationForensicReportV2 } from "@open-geo-console/ai-report
 import type { MarketSearchObservation, PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import { createTestWebsiteFoundation } from "../public-source-forensics/testing";
 import { buildPublicSourceForensicReport } from "../public-source-forensics/report-builder";
-import { PublicSourceArtifactUnavailableError, PublicSourceResumeIdentityMismatchError, runPublicSourceForensicsPipeline, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
+import { PublicSourceQueryVariantCoverageError } from "./job-errors";
+import {
+  PublicSourceArtifactUnavailableError,
+  PublicSourceResumeIdentityMismatchError,
+  runPublicSourceForensicsPipeline,
+  type PublicSourceForensicsDependencies,
+  type PublicSourcePipelineCheckpoint
+} from "./public-source-forensics";
 
 const surface = { surfaceId:"fixture-surface",providerId:"fixture-index",productId:"fixture-search",surfaceKind:"documented_api" as const,
   contractVersion:"public-search-surface-v1",surfaceVersion:"fixture-v1",adapterVersion:"fixture-adapter-v1",locale:"zh-CN",region:"CN" };
@@ -125,6 +132,59 @@ describe("public-source forensics pipeline", () => {
     expect(explicitResult.report).toEqual(omittedResult.report);
     expect(deferred.buildReport).toHaveBeenCalledWith(expect.objectContaining({ semanticValidation: "deferred" }));
   });
+
+  it("projects prefix/subset observations to an effective plan and caps outcome at completed_limited", async () => {
+    const checkpoints = new Map<string, PublicSourcePipelineCheckpoint>();
+    const dependencies = deps({
+      reports: new Map(),
+      checkpoints,
+      resolve: async ({ fanout }) => snapshotPrefix(fanout, 1)
+    });
+    const result = await run("report-partial", "job-partial", dependencies);
+    expect(result.report.commercialOutcome).toBe("completed_limited");
+    expect(result.report.fanouts.every((fanout) => fanout.queries.length === 3)).toBe(true);
+    expect(result.report.sourceGraph.dimensions.queryVariantIds).toHaveLength(9);
+    expect(result.report.coverage.expectedQueryCount).toBe(9);
+    expect(result.report.limitations.some((line) => /部分覆盖|partial/i.test(line))).toBe(true);
+    // B4: checkpoint only after successful parse
+    expect(checkpoints.get("job-partial")?.snapshotIds).toHaveLength(3);
+  });
+
+  it("fails permanent when observations carry query ids outside the current fanout plan", async () => {
+    const dependencies = deps({
+      reports: new Map(),
+      checkpoints: new Map(),
+      resolve: async ({ fanout }) => {
+        const base = snapshot(fanout, 1);
+        return {
+          ...base,
+          observations: base.observations.map((observation, index) =>
+            index === 0 ? { ...observation, queryId: "foreign-query-id-not-in-plan" } : observation
+          ),
+          retrievals: base.retrievals.map((retrieval, index) =>
+            index === 0 ? { ...retrieval, queryId: "foreign-query-id-not-in-plan" } : retrieval
+          )
+        };
+      }
+    });
+    await expect(run("report-extra", "job-extra", dependencies)).rejects.toBeInstanceOf(PublicSourceQueryVariantCoverageError);
+  });
+
+  it("does not freeze a forensics checkpoint when report build fails after subset projection edge cases", async () => {
+    const checkpoints = new Map<string, PublicSourcePipelineCheckpoint>();
+    const dependencies = {
+      ...deps({
+        reports: new Map(),
+        checkpoints,
+        resolve: async ({ fanout }) => snapshot(fanout, 1)
+      }),
+      buildReport: () => {
+        throw new TypeError("$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.");
+      }
+    };
+    await expect(run("report-no-freeze", "job-no-freeze", dependencies)).rejects.toBeInstanceOf(PublicSourceQueryVariantCoverageError);
+    expect(checkpoints.has("job-no-freeze")).toBe(false);
+  });
 });
 
 function deps(input:{reports:Map<string,RecommendationForensicReportV2>;checkpoints:Map<string,PublicSourcePipelineCheckpoint>;resolve:PublicSourceForensicsDependencies["resolveSnapshot"];resolveById?:PublicSourceForensicsDependencies["resolveSnapshotById"];artifactReadiness?:PublicSourceForensicsDependencies["artifactReadiness"];prepareArtifactVerification?:PublicSourceForensicsDependencies["prepareArtifactVerification"]}):PublicSourceForensicsDependencies{
@@ -138,4 +198,19 @@ function snapshot(fanout:SearchQueryFanout,index:number){
     requestedAt:"2030-01-01T00:00:00.000Z",completedAt:"2030-01-01T00:00:01.000Z",status:"complete",results:[{surfaceResultOrder:0,url:`https://source-${index}-${order}.example/fact`,title:"公开货运资料",snippet:"公开资料描述货运能力。",displayedHost:`source-${index}-${order}.example`}],usage:{requestCount:1,resultCount:1,estimatedCostMicros:1}}));
   return {snapshotId:`snapshot-${fanout.questionId}`,cacheIdentity:`cache-${fanout.questionId}`,questionId:fanout.questionId,observedAt:"2030-01-01T00:00:01.000Z",ageMs:24*60*60*1000,collectedForThisRun:true,
     refreshAttempted:false,refreshFailed:false,sufficientlyEvidenced:true,availableSourceCount:6,observations,retrievals:observations.flatMap((observation)=>observation.results.map((result)=>({observationId:observation.observationId,queryId:observation.queryId,resultUrl:result.url,retrievalState:"available" as const,publiclyRoutable:true,robotsAllowed:true,accessBarrier:"none" as const,contentBytes:100,normalizedText:"公开资料描述货运能力。",normalizedContentHash:`sha256:${"a".repeat(64)}`,verifiedExcerpt:"公开资料描述货运能力。"}))),actualCostMicros:10,allocatedCostMicros:0,avoidedCostMicros:0};
+}
+
+/** Prefix-equivalent prior: only the first three fanout queries were observed. */
+function snapshotPrefix(fanout: SearchQueryFanout, index: number) {
+  const full = snapshot(fanout, index);
+  const kept = full.observations.slice(0, 3);
+  const keptIds = new Set(kept.map(({ observationId }) => observationId));
+  return {
+    ...full,
+    refreshAttempted: true,
+    refreshFailed: true,
+    availableSourceCount: 3,
+    observations: kept,
+    retrievals: full.retrievals.filter(({ observationId }) => keptIds.has(observationId))
+  };
 }

@@ -21,6 +21,8 @@ export interface PublicSourceForensicReportBuilderInput {
   cost: RecommendationForensicCostInput; commercialOutcome: RecommendationForensicReportV2["commercialOutcome"];
   synthesis?: { modelId: string; inputHash: string };
   semanticValidation?: "legacy" | "deferred";
+  /** Extra customer-visible limitations (e.g. partial query coverage). */
+  additionalLimitations?: readonly string[];
 }
 
 export function buildPublicSourceForensicReport(input: PublicSourceForensicReportBuilderInput): RecommendationForensicReportV2 {
@@ -66,7 +68,10 @@ export function buildPublicSourceForensicReport(input: PublicSourceForensicRepor
     operatorCostAccounting: calculateRecommendationForensicCost(input.cost),
     synthesisProvenance: input.synthesis ? { mode: "evidence_constrained_model", ...input.synthesis }
       : { mode: "deterministic_template", inputHash: hash({ sourceGraph: input.sourceGraph, snapshotRefs: input.snapshotRefs }) },
-    limitations: [localized ? "公开搜索顺序不代表 AI 排名，也不保证未来结果。" : "Public-search order is not an AI ranking and does not guarantee future outcomes."],
+    limitations: [
+      localized ? "公开搜索顺序不代表 AI 排名，也不保证未来结果。" : "Public-search order is not an AI ranking and does not guarantee future outcomes.",
+      ...(input.additionalLimitations ?? [])
+    ],
     commercialOutcome: input.commercialOutcome
   };
   return parseRecommendationForensicReportV2(report, {

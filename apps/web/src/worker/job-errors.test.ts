@@ -19,7 +19,9 @@ import {
   escalateFingerprintRecurrence,
   MIMO_INVALID_RESPONSE_JOB_CODE,
   normalizeJobError,
+  PublicSourceQueryVariantCoverageError,
   PublicSourceRuntimeError,
+  PublicSourceSnapshotQueryBindingError,
   redactDiagnostic,
   retryDelayMs
 } from "./job-errors";
@@ -246,6 +248,31 @@ describe("job error normalization", () => {
     );
     expect(permanent.classification).toBe("permanent");
     expect(escalateFingerprintRecurrence(permanent)).toBe(permanent);
+  });
+
+  it("classifies forensic query-variant and snapshot-binding coverage errors as permanent on first hit", () => {
+    const coverage = normalizeJobError(
+      new PublicSourceQueryVariantCoverageError(),
+      { ...context, phase: "source_retrieval" },
+      new Date("2030-01-01T00:00:00Z")
+    );
+    expect(coverage).toMatchObject({
+      classification: "permanent",
+      code: "public_source_query_variant_coverage",
+      type: "PublicSourceQueryVariantCoverageError",
+      retryableAt: null
+    });
+    expect(coverage.code).not.toBe("unexpected_internal_error");
+
+    const binding = normalizeJobError(
+      new PublicSourceSnapshotQueryBindingError(),
+      { ...context, phase: "source_retrieval" }
+    );
+    expect(binding).toMatchObject({
+      classification: "permanent",
+      code: "public_source_snapshot_query_binding",
+      retryableAt: null
+    });
   });
 
   it("maps diagnosis provider transport to a transient diagnosis_* job code", () => {

@@ -71,6 +71,26 @@ export class OrchestrationInvariantError extends JobError {
   }
 }
 
+/** W-A: fanout vs graph query-variant set mismatch — permanent on first hit. */
+export class PublicSourceQueryVariantCoverageError extends JobError {
+  constructor(
+    message = "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.",
+    options?: ErrorOptions
+  ) {
+    super(message, "public_source_query_variant_coverage", "permanent", options);
+  }
+}
+
+/** W-A: snapshotRef / fanout query binding set mismatch — permanent on first hit. */
+export class PublicSourceSnapshotQueryBindingError extends JobError {
+  constructor(
+    message = "$.snapshotRefs: Every question and fanout query requires one bound market snapshot reference.",
+    options?: ErrorOptions
+  ) {
+    super(message, "public_source_snapshot_query_binding", "permanent", options);
+  }
+}
+
 export interface JobErrorContext {
   jobId: string;
   phase: ScanJobPhase;
@@ -170,6 +190,12 @@ function resolveTypedBoundaryError(
   if (error instanceof PublicSourceResumeIdentityMismatchError) {
     return publicSourceResumeIdentityMismatchBoundary();
   }
+  if (error instanceof PublicSourceQueryVariantCoverageError) {
+    return { code: "public_source_query_variant_coverage", classification: "permanent" };
+  }
+  if (error instanceof PublicSourceSnapshotQueryBindingError) {
+    return { code: "public_source_snapshot_query_binding", classification: "permanent" };
+  }
   if (error instanceof ProviderDiscoveryDeadlineExceededError) {
     return { code: "provider_discovery_deadline_exceeded", classification: "transient" };
   }
@@ -198,6 +224,12 @@ function resolveTypedBoundaryError(
     }
     if (row.name === "PublicSourceResumeIdentityMismatchError") {
       return publicSourceResumeIdentityMismatchBoundary();
+    }
+    if (row.name === "PublicSourceQueryVariantCoverageError" || row.code === "public_source_query_variant_coverage") {
+      return { code: "public_source_query_variant_coverage", classification: "permanent" };
+    }
+    if (row.name === "PublicSourceSnapshotQueryBindingError" || row.code === "public_source_snapshot_query_binding") {
+      return { code: "public_source_snapshot_query_binding", classification: "permanent" };
     }
     if (row.name === "ProviderDiscoveryDeadlineExceededError") {
       return { code: "provider_discovery_deadline_exceeded", classification: "transient" };
