@@ -15,6 +15,53 @@ and push, one same-SHA Web+Free+Deep deployment, one new report/lineage, one
 Sandbox payment, and one Deep job; failure stops immediately, with no retry and
 no Production touch.
 
+### Approved amendment (2026-07-30)
+
+- Exactly-one target: `https://shun-express.com/`, locale `zh-CN`.
+- The existing 1 pending report and 5 pending/not-started orders are frozen
+  historical objects: ignore only; do not modify, reuse, claim, replay, repair,
+  reopen, or clone them. If a live active lease or reserved credit appears,
+  stop immediately.
+- For verification/deployment, a temporary clean Git archive may be generated
+  from candidate `4f0fb1f1277b717a22da8e965484809ecff7c692`; it must be removed
+  after completion. The archive does not change the candidate SHA and must not
+  contain working-tree dirty files.
+
+### Approved amendment: one-time V44/staging package (2026-07-30)
+
+The user approved this entire package verbatim: include the V44 ledger
+mechanical test and a new candidate commit/push; rotate only affected Staging
+credentials (never Production); freeze and ignore without modification,
+reuse, claim, replay, repair, reopen or clone exactly 5 `repair_wait`, 4
+historical `running` batch jobs, 1 pending report and 5 orders; run
+`shun-express.com` exactly once with `forceFresh` and the approved locale; allow
+bounded retry within the same job only (no manual retry or second lineage);
+allow atomic email/refund queue records but never send or refund; create/delete
+the temporary clean archive and thin-overlay recipe; perform one same-SHA
+Web/Free/Deep deployment; create one new report, one Sandbox payment and one
+Deep job; failure stops immediately.
+
+- Candidate strategy becomes “next commit, then new full SHA”; the exact SHA is
+  not invented in this document and must be recorded from the clean candidate
+  artifact before deployment.
+- The test allowlist gains exactly one one-time entry:
+  `apps/web/src/db/report-v4-acceptance-ledger.test.ts`, limited to the existing
+  V44 mechanical diff; no other test changes are authorized.
+- Staging-only credential rotation is allowed by category only; never record
+  secrets, values, tokens or keys.
+- The five `repair_wait`, four historical `running` batch jobs, one pending
+  report and five orders must be resolved to exact live-DB IDs (or safe short
+  identifiers/reference query receipts) during read-only preflight. This scope
+  records the freeze class, not unverified IDs; no identifier values are
+  fabricated here. Any live lease or reserved credit remains an immediate stop.
+- Runtime semantics are fixed: `forceFresh`, `zh-CN`, Free V4 → Paid V3,
+  ledger correctness, bounded same-job retry, and atomic queue recording without
+  delivery/refund.
+- The temporary clean archive and thin-overlay recipe must be created from the
+  exact clean candidate, contain no dirty files, preserve the full SHA, and be
+  deleted after verification. Keep current plus one rollback; rollback alias
+  and both Workers on deployment/post-change failure per the runbook.
+
 ### Objective
 
 Promote the locally accepted redacted-trace candidate as an exact commit and
