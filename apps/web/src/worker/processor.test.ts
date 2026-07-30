@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScanJobRow } from "@/db/schema";
 
@@ -10,6 +12,12 @@ const boundaryMocks = vi.hoisted(() => ({
   analyzePageBatch: vi.fn(), synthesizeWebsiteReportWithRecovery: vi.fn(),
   saveAiReport: vi.fn(), purgeExpiredCrawlContent: vi.fn(),
   hasPriorJobErrorFingerprint: vi.fn(async () => false)
+}));
+const evidenceGateMocks = vi.hoisted(() => ({
+  generateFreeTeaser: vi.fn(async () => ({})),
+  getAiReport: vi.fn(),
+  loadReportV4PreAdmissionSnapshot: vi.fn(async () => ({ snapshot: { id: "admission-1" } })),
+  createProductionReportV4AdmissionRunner: vi.fn(() => async () => ({ plannedPages: 1, successfulPages: 1, failedPages: 0 }))
 }));
 const rerunGuardHarness = vi.hoisted(() => {
   const state = { blockedSite: null as string | null, guardSites: [] as string[], delegatedSites: [] as string[] };
@@ -42,7 +50,17 @@ vi.mock("@/db/reports", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/db/reports")>(), getGeoReport: boundaryMocks.getGeoReport
 }));
 vi.mock("@/db/ai-reports", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/db/ai-reports")>(), saveAiReport: boundaryMocks.saveAiReport
+  ...await importOriginal<typeof import("@/db/ai-reports")>(),
+  getAiReport: evidenceGateMocks.getAiReport, saveAiReport: boundaryMocks.saveAiReport
+}));
+vi.mock("./report-v4-free-teaser", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./report-v4-free-teaser")>(), generateFreeTeaser: evidenceGateMocks.generateFreeTeaser
+}));
+vi.mock("@/db/report-v4-site-snapshots", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/db/report-v4-site-snapshots")>(), loadReportV4PreAdmissionSnapshot: evidenceGateMocks.loadReportV4PreAdmissionSnapshot
+}));
+vi.mock("./report-v4-admission-production", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./report-v4-admission-production")>(), createProductionReportV4AdmissionRunner: evidenceGateMocks.createProductionReportV4AdmissionRunner
 }));
 vi.mock("@/db/crawl-evidence", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/db/crawl-evidence")>(),
@@ -498,6 +516,46 @@ describe("strict Report V4 processor routing", () => {
       expect(observe).not.toHaveBeenCalled();
     } finally {
       restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      vi.clearAllMocks();
+    }
+  });
+
+  it("threads the env-gated semantic-review evidence sink into the Free teaser call site", async () => {
+    const previousEvidencePath = process.env.OGC_SEMANTIC_REVIEW_EVIDENCE_PATH;
+    const previousSessionId = process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    delete process.env.OGC_REPORT_V4_ACCEPTANCE_SESSION_ID;
+    delete process.env.OGC_SEMANTIC_REVIEW_EVIDENCE_PATH;
+    const evidencePath = join(mkdtempSync(join(tmpdir(), "ogc-processor-evidence-")), "evidence.jsonl");
+    const job = v4Job({
+      id: "evidence-job", reportId: "evidence-report", reason: "v4_pre_admission",
+      siteSnapshotId: null, creditReservationId: null, businessQuestionSetId: null, checkpoint: {}
+    });
+    boundaryMocks.getGeoReport.mockResolvedValue({ url: "https://target.example/" } as never);
+    evidenceGateMocks.getAiReport.mockResolvedValue({ payload: {} } as never);
+    boundaryMocks.getScanJob.mockResolvedValue(job);
+    try {
+      await processScanJob(job, "worker-1");
+      expect(evidenceGateMocks.generateFreeTeaser).toHaveBeenCalledTimes(1);
+      // Env unset: the call site passes undefined, preserving prior behavior.
+      expect(evidenceGateMocks.generateFreeTeaser.mock.calls[0]![0].onSemanticReviewBatchEvidence).toBeUndefined();
+
+      process.env.OGC_SEMANTIC_REVIEW_EVIDENCE_PATH = evidencePath;
+      evidenceGateMocks.generateFreeTeaser.mockClear();
+      await processScanJob(job, "worker-1");
+      const sink = evidenceGateMocks.generateFreeTeaser.mock.calls[0]![0].onSemanticReviewBatchEvidence as
+        (evidence: unknown) => void;
+      expect(sink).toBeTypeOf("function");
+      sink({
+        batchId: "B_obs", inputIdentities: ["o1/r1"], requestSha256: "b".repeat(64),
+        requestBytes: 10, responseRowCount: 1, responseIdentities: ["o1/r1"], durationMs: 1, errorClass: null
+      });
+      const line = JSON.parse(readFileSync(evidencePath, "utf8").trim()) as Record<string, unknown>;
+      expect(line).toMatchObject({ jobId: "evidence-job", reportId: "evidence-report", batchId: "B_obs" });
+      expect(typeof line.recordedAt).toBe("string");
+    } finally {
+      restoreEnvironment("OGC_SEMANTIC_REVIEW_EVIDENCE_PATH", previousEvidencePath);
+      restoreEnvironment("OGC_REPORT_V4_ACCEPTANCE_SESSION_ID", previousSessionId);
+      rmSync(evidencePath, { force: true });
       vi.clearAllMocks();
     }
   });

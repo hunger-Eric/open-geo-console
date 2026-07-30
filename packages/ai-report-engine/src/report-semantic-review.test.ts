@@ -109,6 +109,36 @@ describe("Free V4 batched semantic review", () => {
       sourceIds: []
     });
   });
+
+  it("ignores undeclared batch envelope keys such as inputHash and parses to the clean-envelope result (C3)", () => {
+    const core = inputCore();
+    core.lifecycle = "free_v4";
+    const input = createReportSemanticReviewInput(core);
+    const full = validReview(input) as {
+      fields: Array<{ path: string } & Record<string, unknown>>;
+      annotations: { observationResults: unknown[]; answers: unknown[]; evidenceUse: unknown[] };
+    };
+    const clean: Record<FreeV4SemanticReviewBatchId, unknown> = {
+      B_fields_readonly: {
+        fields: full.fields.filter((field) => input.fields.find((m) => m.path === field.path)?.mutability === "read_only")
+      },
+      B_fields_mutable: {
+        fields: full.fields.filter((field) => input.fields.find((m) => m.path === field.path)?.mutability === "mutable")
+      },
+      B_obs: { observationResults: full.annotations.observationResults },
+      B_answers: { answers: full.annotations.answers },
+      B_evidence_use: { evidenceUse: full.annotations.evidenceUse }
+    };
+    // The real run-3 envelope carried an undeclared inputHash key on $B_obs.
+    const withExtra = Object.fromEntries(Object.entries(clean).map(([batchId, envelope]) => [
+      batchId,
+      { ...(envelope as Record<string, unknown>), inputHash: input.inputHash }
+    ]));
+    const expected = parseReportSemanticReviewOutput(assembleFreeV4BatchedSemanticReviewRaw(input, clean), input);
+    const actual = parseReportSemanticReviewOutput(assembleFreeV4BatchedSemanticReviewRaw(input, withExtra), input);
+    expect(actual).toEqual(expected);
+    expect(actual.fields).toHaveLength(input.fields.length);
+  });
 });
 
 describe("Free V4 semantic review graceful degradation", () => {
@@ -1160,3 +1190,184 @@ type MutableInputCore = {
 type Mutable<Value> = Value extends object
   ? { -readonly [Key in keyof Value]: Mutable<Value[Key]> }
   : Value;
+
+
+describe("Free V4 batched causal identity evidence (C7/C9)", () => {
+  function identityCore(): MutableInputCore {
+    const core = inputCore();
+    core.lifecycle = "free_v4";
+    const sourceText = "Q2 source";
+    core.sources.push({ sourceId: "source-q2", questionId: "question-2", canonicalUrl: "https://provider.example/q2", originalText: sourceText, originalTextHash: reportSemanticTextHash(sourceText) });
+    const evidenceText = "Q2 evidence";
+    core.evidence.push({ evidenceId: "evidence-q2", questionId: "question-2", sourceId: "source-q2", originalText: evidenceText, originalTextHash: reportSemanticTextHash(evidenceText) });
+    core.fields.push(manifestField("answerCards[1].answerText", "Q2 answer", "question-2", ["evidence-q2"], ["source-q2"]));
+    core.answerSubjects.push({ questionId: "question-2", fieldPath: "answerCards[1].answerText" });
+    core.observationResults.push(
+      { observationId: "observation-2", resultId: "result-2", questionId: "question-2", originalText: "obs two", originalTextHash: reportSemanticTextHash("obs two") },
+      { observationId: "observation-3", resultId: "result-3", questionId: "question-3", originalText: "obs three", originalTextHash: reportSemanticTextHash("obs three") }
+    );
+    return core;
+  }
+
+  function markerPayloads(input: ReportSemanticReviewInput): Record<FreeV4SemanticReviewBatchId, unknown> {
+    const full = validReview(input) as { fields: Array<Record<string, unknown>> };
+    return {
+      B_fields_readonly: { fields: full.fields.filter((row) => input.fields.find((manifest) => manifest.path === row.path)?.mutability === "read_only") },
+      B_fields_mutable: { fields: full.fields.filter((row) => input.fields.find((manifest) => manifest.path === row.path)?.mutability === "mutable") },
+      B_obs: { observationResults: input.observationResults.map((row) => ({ observationId: row.observationId, resultId: row.resultId, targetPresence: "present", competitorPresence: "absent", reason: `MODEL-ROW ${row.observationId}` })) },
+      B_answers: { answers: input.answerSubjects.map((subject) => ({ questionId: subject.questionId, relevance: "responsive", entityRole: "target", targetPresence: "present", targetFirstSentence: 1, targetRoles: ["answer subject"], competitorEntityIds: [], evidenceIds: subject.questionId === "question-1" ? ["evidence-q1"] : ["evidence-q2"], sourceIds: subject.questionId === "question-1" ? ["source-q1"] : ["source-q2"], reason: `MODEL-ROW ${subject.questionId}` })) },
+      B_evidence_use: { evidenceUse: input.fields.map((field) => ({ path: field.path, evidenceIds: [...field.allowedEvidenceIds], sourceIds: [...field.allowedSourceIds], reason: `MODEL-ROW ${field.path}` })) }
+    };
+  }
+
+  async function reviewWithPayloads(input: ReportSemanticReviewInput, payloads: Record<FreeV4SemanticReviewBatchId, unknown>) {
+    const result = await runOfflineReportSemanticReviewBatched(input, async ({ batchId }) => payloads[batchId]);
+    return result.review;
+  }
+
+  it("anchors reordered B_answers rows by echoed questionId so each verdict lands on its own subject", async () => {
+    const input = createReportSemanticReviewInput(identityCore());
+    const payloads = markerPayloads(input);
+    const rows = (payloads.B_answers as { answers: unknown[] }).answers;
+    payloads.B_answers = { answers: [rows[1], rows[0]] };
+    const review = await reviewWithPayloads(input, payloads);
+    // Echoed-identity anchoring (C7): the reorder is harmless — each verdict
+    // lands on the subject whose questionId the row echoed, references intact.
+    expect(review.annotations.answers.map((row) => row.questionId)).toEqual(["question-1", "question-2"]);
+    expect(review.annotations.answers[0]).toMatchObject({ questionId: "question-1", reason: "MODEL-ROW question-1", evidenceIds: ["evidence-q1"], sourceIds: ["source-q1"] });
+    expect(review.annotations.answers[0]!.degraded).toBeUndefined();
+    expect(review.annotations.answers[1]).toMatchObject({ questionId: "question-2", reason: "MODEL-ROW question-2", evidenceIds: ["evidence-q2"], sourceIds: ["source-q2"] });
+    expect(review.annotations.answers[1]!.degraded).toBeUndefined();
+  });
+
+  it("rejects a B_answers row with an unknown, corrupted, duplicated, or missing echoed questionId", async () => {
+    const input = createReportSemanticReviewInput(identityCore());
+    const rows = () => (markerPayloads(input).B_answers as { answers: Array<Record<string, unknown>> }).answers;
+    const withAnswers = async (answers: unknown[]) =>
+      reviewWithPayloads(input, { ...markerPayloads(input), B_answers: { answers } });
+    await expect(withAnswers([{ ...rows()[0]!, questionId: "question-999" }, rows()[1]]))
+      .rejects.toThrow(TypeError);
+    await expect(withAnswers([{ ...rows()[0]!, questionId: "question-999" }, rows()[1]]))
+      .rejects.toThrow(/echoes unknown questionId question-999/u);
+    // The run-2 corruption pattern: "40" inserted into the echoed identity.
+    await expect(withAnswers([{ ...rows()[0]!, questionId: "question-140" }, rows()[1]]))
+      .rejects.toThrow(/echoes unknown questionId question-140/u);
+    await expect(withAnswers([rows()[0], rows()[0], rows()[1]]))
+      .rejects.toThrow(/duplicates questionId question-1/u);
+    const missing = rows()[0]!;
+    delete missing.questionId;
+    await expect(withAnswers([missing, rows()[1]]))
+      .rejects.toThrow(/must echo its questionId identity/u);
+    await expect(withAnswers(["broken"]))
+      .rejects.toThrow(/must be an object/u);
+  });
+
+  it("anchors a B_obs middle-row omission so present rows keep their verdicts and the omitted slot degrades", async () => {
+    const input = createReportSemanticReviewInput(identityCore());
+    const payloads = markerPayloads(input);
+    const rows = (payloads.B_obs as { observationResults: unknown[] }).observationResults;
+    payloads.B_obs = { observationResults: [rows[0], rows[2]] };
+    const review = await reviewWithPayloads(input, payloads);
+    // Echoed-identity anchoring (C7): the remaining rows land on their own
+    // observations; only the omitted slot degrades to the synthesized fallback.
+    expect(review.annotations.observationResults.map((row) => ({ observationId: row.observationId, reason: row.reason }))).toEqual([
+      { observationId: "observation-1", reason: "MODEL-ROW observation-1" },
+      { observationId: "observation-2", reason: "degraded: contract violation" },
+      { observationId: "observation-3", reason: "MODEL-ROW observation-3" }
+    ]);
+    expect(review.annotations.observationResults[0]!.targetPresence).toBe("present");
+    expect(review.annotations.observationResults[1]!.targetPresence).toBe("ambiguous");
+    expect(review.annotations.observationResults[2]!.targetPresence).toBe("present");
+  });
+
+  it("anchors reordered B_obs rows by echoed observationId/resultId so each verdict lands on its own row", async () => {
+    const input = createReportSemanticReviewInput(identityCore());
+    const payloads = markerPayloads(input);
+    const rows = (payloads.B_obs as { observationResults: unknown[] }).observationResults;
+    payloads.B_obs = { observationResults: [rows[2], rows[0], rows[1]] };
+    const review = await reviewWithPayloads(input, payloads);
+    expect(review.annotations.observationResults.map((row) => `${row.observationId}:${row.resultId} <- ${row.reason}`)).toEqual([
+      "observation-1:result-1 <- MODEL-ROW observation-1",
+      "observation-2:result-2 <- MODEL-ROW observation-2",
+      "observation-3:result-3 <- MODEL-ROW observation-3"
+    ]);
+    expect(review.annotations.observationResults.every((row) => row.targetPresence === "present")).toBe(true);
+  });
+
+  it("rejects a B_obs row with an unknown, corrupted, duplicated, or missing echoed observationId/resultId", async () => {
+    const input = createReportSemanticReviewInput(identityCore());
+    const rows = () => (markerPayloads(input).B_obs as { observationResults: Array<Record<string, unknown>> }).observationResults;
+    const withObs = async (observationResults: unknown[]) =>
+      reviewWithPayloads(input, { ...markerPayloads(input), B_obs: { observationResults } });
+    // The run-2 corruption pattern: "40" inserted into the echoed resultId.
+    await expect(withObs([rows()[0], { ...rows()[1]!, resultId: "result-240" }, rows()[2]]))
+      .rejects.toThrow(/echoes unknown observation observation-2:result-240/u);
+    await expect(withObs([rows()[0], rows()[0], rows()[1], rows()[2]]))
+      .rejects.toThrow(/duplicates observation observation-1:result-1/u);
+    const missing = rows()[0]!;
+    delete missing.resultId;
+    await expect(withObs([missing, rows()[1], rows()[2]]))
+      .rejects.toThrow(/must echo its observation identity/u);
+    await expect(withObs(["broken"]))
+      .rejects.toThrow(TypeError);
+  });
+
+  it("anchors reordered B_evidence_use rows by echoed path so each verdict lands on its own field path", async () => {
+    const input = createReportSemanticReviewInput(identityCore());
+    const payloads = markerPayloads(input);
+    const rows = (payloads.B_evidence_use as { evidenceUse: unknown[] }).evidenceUse;
+    payloads.B_evidence_use = { evidenceUse: [...rows].reverse() };
+    const review = await reviewWithPayloads(input, payloads);
+    // Echoed-identity anchoring (C7): the reversed rows land back on their own
+    // paths, keeping each row's allowlist-bound references.
+    expect(review.annotations.evidenceUse.map((row) => `${row.path} <- ${row.reason}`)).toEqual([
+      "executiveSummary.overview <- MODEL-ROW executiveSummary.overview",
+      "answerCards[0].answerText <- MODEL-ROW answerCards[0].answerText",
+      "questions[0].text <- MODEL-ROW questions[0].text",
+      "answerCards[1].answerText <- MODEL-ROW answerCards[1].answerText"
+    ]);
+    expect(review.annotations.evidenceUse[0]).toMatchObject({ evidenceIds: [], sourceIds: ["source-global"] });
+    expect(review.annotations.evidenceUse[1]).toMatchObject({ evidenceIds: ["evidence-q1"], sourceIds: ["source-q1"] });
+    expect(review.annotations.evidenceUse[3]).toMatchObject({ evidenceIds: ["evidence-q2"], sourceIds: ["source-q2"] });
+  });
+
+  it("rejects a B_evidence_use row with an unknown, duplicated, or missing echoed path", async () => {
+    const input = createReportSemanticReviewInput(identityCore());
+    const rows = () => (markerPayloads(input).B_evidence_use as { evidenceUse: Array<Record<string, unknown>> }).evidenceUse;
+    const withUse = async (evidenceUse: unknown[]) =>
+      reviewWithPayloads(input, { ...markerPayloads(input), B_evidence_use: { evidenceUse } });
+    await expect(withUse([{ ...rows()[0]!, path: "executiveSummary.other" }, ...rows().slice(1)]))
+      .rejects.toThrow(/echoes unknown path executiveSummary\.other/u);
+    await expect(withUse([rows()[0], rows()[0], ...rows().slice(1)]))
+      .rejects.toThrow(/duplicates path executiveSummary\.overview/u);
+    const missing = rows()[0]!;
+    delete missing.path;
+    await expect(withUse([missing, ...rows().slice(1)]))
+      .rejects.toThrow(/must echo its path identity/u);
+  });
+
+  it("rejects a positional B_answers anomaly instead of letting it land on annotations.answers[0], the slot the Q1 gate consumes (C9)", async () => {
+    const input = freeInput();
+    const payloads = markerPayloads(input);
+    payloads.B_answers = {
+      answers: [{
+        questionId: "question-999",
+        relevance: "responsive",
+        entityRole: "none",
+        targetPresence: "absent",
+        targetFirstSentence: null,
+        targetRoles: [],
+        competitorEntityIds: [],
+        evidenceIds: ["evidence-q1"],
+        sourceIds: ["source-q1"],
+        reason: "MODEL-ROW wrong-identity"
+      }]
+    };
+    // Echoed-identity anchoring (C7): the unknown echoed questionId fails
+    // closed with a TypeError instead of silently occupying
+    // annotations.answers[0], the slot reviewFreeTeaser's Q1 gate consumes
+    // positionally (apps/web/src/worker/report-v4-free-teaser.ts).
+    await expect(reviewWithPayloads(input, payloads)).rejects.toThrow(TypeError);
+    await expect(reviewWithPayloads(input, payloads)).rejects.toThrow(/echoes unknown questionId question-999/u);
+  });
+});

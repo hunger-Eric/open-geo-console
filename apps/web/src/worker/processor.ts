@@ -131,6 +131,7 @@ import {
   freeTeaserSeededQ1,
   generateFreeTeaser
 } from "./report-v4-free-teaser";
+import { createSemanticReviewBatchEvidenceSink } from "./semantic-review-evidence-sink";
 import { sourceSelectionTargetFoundationHash } from "./source-selection-diagnosis";
 import { runPaidV3SemanticReview, verifyPersistedPaidV3SemanticReview } from "./paid-v3-semantic-review";
 
@@ -705,6 +706,9 @@ function withFreeTeaserAfterAdmission(
       admission,
       checkpoint: freeTeaserCheckpointFromJobCheckpoint(currentCheckpoint),
       semanticReviewContractVersion,
+      onSemanticReviewBatchEvidence: createSemanticReviewBatchEvidenceSink({
+        context: { jobId: runInput.job.id, reportId: runInput.job.reportId }
+      }),
       signal: runInput.signal,
       saveCheckpoint: async (freeTeaser, phase) => {
         const updated = await checkpointJob({

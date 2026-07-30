@@ -24,6 +24,7 @@ import {
   type GenerativeSearchAnswerResult,
   type ReportV4DiagnosisTargetPage,
   type AppliedReportSemanticReview,
+  type FreeV4SemanticReviewBatchEvidence,
   type ReportSemanticReviewInput,
   type ReportSemanticReviewOutput
 } from "@open-geo-console/ai-report-engine";
@@ -190,6 +191,7 @@ export async function generateFreeTeaser(input: {
   checkpoint?: FreeTeaserCheckpointV1 | null;
   semanticReviewContractVersion?: typeof REPORT_SEMANTIC_REVIEW_CONTRACT | null;
   saveCheckpoint: FreeTeaserCheckpointWriter;
+  onSemanticReviewBatchEvidence?: (evidence: FreeV4SemanticReviewBatchEvidence) => void;
   signal?: AbortSignal;
 }): Promise<FreeTeaserResult> {
   input.signal?.throwIfAborted();
@@ -918,6 +920,7 @@ async function reviewFreeTeaser(input: {
   questionSet: ConfirmedBusinessQuestionSet;
   runtime: Awaited<ReturnType<typeof resolveProductionPublicSearchRuntime>>;
   bundles: VerifiedFreeTeaserSnapshotBundles;
+  onSemanticReviewBatchEvidence?: (evidence: FreeV4SemanticReviewBatchEvidence) => void;
   signal?: AbortSignal;
 }): Promise<FreeTeaserCheckpointV1> {
   const checkpoint = input.checkpoint;
@@ -937,7 +940,9 @@ async function reviewFreeTeaser(input: {
       systemText,
       inputText,
       signal
-    })
+    }),
+    undefined,
+    { onBatchEvidence: input.onSemanticReviewBatchEvidence }
   );
   const answerAnnotation = reviewed.review.annotations.answers[0];
   // A degraded Q1 annotation is a code-synthesized fallback, not model

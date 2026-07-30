@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { REPORT_SEMANTIC_REVIEW_CONTRACT, applyReportSemanticReview, buildFreeV4ReportSemanticReviewSystemPrompt, createReportSemanticReviewInput, parseReportSemanticReviewOutput, parseReportV4DiagnosisInput, verifyReportSemanticReviewReceipt, type ReportSemanticReviewInput, type ReportSemanticReviewInputCore, type ReportSemanticReviewOutput } from "@open-geo-console/ai-report-engine";
+import { REPORT_SEMANTIC_REVIEW_CONTRACT, applyReportSemanticReview, buildFreeV4ReportSemanticReviewSystemPrompt, createReportSemanticReviewInput, parseReportSemanticReviewOutput, parseReportV4DiagnosisInput, verifyReportSemanticReviewReceipt, type FreeV4SemanticReviewBatchEvidence, type ReportSemanticReviewInput, type ReportSemanticReviewInputCore, type ReportSemanticReviewOutput } from "@open-geo-console/ai-report-engine";
 import { createMarketSnapshotIdentity, deterministicId, toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet, type SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import { combinedV3ArtifactFixture } from "@/components/combined-artifact-fixtures";
 
@@ -1621,3 +1621,41 @@ function reorderJsonKeys<Value>(value: Value): Value {
     .sort(([left], [right]) => right.localeCompare(left))
     .map(([key, item]) => [key, reorderJsonKeys(item)])) as Value;
 }
+
+
+describe("free teaser semantic-review batch evidence wiring", () => {
+  it("forwards an optional evidence sink receiving one entry per invoked batch in invocation order", async () => {
+    const sink = createInMemoryFreeTeaserCheckpointSink();
+    const evidence: FreeV4SemanticReviewBatchEvidence[] = [];
+    const input = {
+      reportId: "report-1",
+      jobId: "job-1",
+      targetUrl: "https://target.example/",
+      foundation: combinedV3ArtifactFixture().combinedReport.technicalFoundation.aiReport,
+      locale: "zh" as const,
+      admission: admission(),
+      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      saveCheckpoint: sink.saveCheckpoint,
+      onSemanticReviewBatchEvidence: (entry: FreeV4SemanticReviewBatchEvidence) => {
+        evidence.push(entry);
+      }
+    };
+    const result = await generateFreeTeaser(input);
+    expect(result.checkpoint.stage).toBe("ready");
+    const invokedBatchIds = mocks.semanticInvoke.mock.calls.map(([request]) =>
+      (JSON.parse((request as { inputText: string }).inputText) as { batchId?: string }).batchId
+    );
+    expect(invokedBatchIds.length).toBeGreaterThanOrEqual(2);
+    expect(evidence.map((entry) => entry.batchId)).toEqual(invokedBatchIds);
+    for (const entry of evidence) {
+      expect(entry.errorClass).toBeNull();
+      expect(entry.requestSha256).toMatch(/^[0-9a-f]{64}$/u);
+      expect(entry.requestBytes).toBeGreaterThan(0);
+      expect(entry.responseRowCount).toBeGreaterThanOrEqual(0);
+      // Redaction: no model prompt or response prose, no secret material.
+      const serialized = JSON.stringify(entry);
+      expect(serialized).not.toContain("Bearer");
+      expect(serialized).not.toContain("目标品牌提供跨境物流服务");
+    }
+  });
+});

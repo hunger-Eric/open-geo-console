@@ -4,10 +4,497 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Protected Staging exactly-one Deep runtime evidence (APPROVED)`.
+`Current authority: Free semantic-review parser correctness fix (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Protected Staging exactly-one Deep runtime evidence (APPROVED)
+## Current authority: Free semantic-review parser correctness fix (APPROVED)
+
+**Status: `APPROVED`** — written 2026-07-30 FROZEN; user replied "批准" on
+2026-07-30 to the exact allowlist below.
+
+### Completion record (2026-07-30): C3 + C7 fixed, full suite green
+
+- `report-semantic-review.ts` (77 changed lines): `extractBatchFields` /
+  `extractNamedArray` now tolerate keys outside the declared batch envelope
+  (C3); new `anchorFreeBatchRows` anchors `B_obs` (`observationId:resultId`),
+  `B_answers` (`questionId`), and `B_evidence_use` (`path`) rows by echoed
+  identity, failing closed with TypeError on missing/unknown/duplicate/
+  corrupted identities (C7). `B_fields_*` verified already path-anchored.
+- Tests: three `it.todo` converted and passing; new clean-vs-`inputHash`
+  envelope equivalence test; four old positional-behavior tests and the
+  adapter C3 characterization test flipped to the new contract.
+- Acceptance: `npx vitest run` from repo root — 2983 passed, 0 failed
+  (baseline 2978). No commits/pushes/external actions.
+
+### Approved amendment (2026-07-30): adapter C3 characterization test flip
+
+The user approved adding
+`packages/ai-report-engine/src/report-semantic-review-provider-adapter.test.ts`
+to the allowed test files, solely to update its test at line ~126
+("characterizes the untyped post-assembly failure for a batch payload with an
+extra top-level key (C3)") which asserted the OLD C3 defect behavior (extra
+envelope key rejects with /unknown key/). The test is flipped to assert the
+new approved behavior: the extra envelope key is stripped, the batched run
+succeeds, and per-batch evidence keeps `errorClass: null`. No other edit in
+that file; no production/runtime behavior change.
+
+### Objective
+
+Fix the two correctness defects at the Free V4 semantic-review parser
+boundary proven by the 2026-07-30 real-data evidence runs:
+
+1. **C3 — batch envelope tolerance.** The model repeatedly adds extra keys
+   (evidence: `inputHash` on `$B_obs`, twice in run 3, fingerprint-escalated
+   to permanent and killed job `61e9e270`). Batch payload extraction must
+   tolerate/strip keys outside the declared envelope instead of throwing
+   `contains unknown key`, so a benign model habit can never kill a job.
+2. **C7 — echoed-identity anchoring.** Batch rows are currently consumed
+   positionally; run 2 proved the model corrupts echoed identities
+   (`B_obs` row 11: `...0180404924c4a` → `...018040404924c4a`) with zero
+   visibility. Row anchoring for `B_answers` (echoed `questionId`), `B_obs`
+   (echoed `observationId`/`resultId`), and `B_evidence_use` (echoed `path`)
+   must match by identity and degrade-or-reject positional mismatches,
+   converting the three existing `it.todo` entries in
+   `report-semantic-review.test.ts` (lines 1216, 1235, 1258) into passing
+   acceptance tests.
+
+### Baseline
+
+- Working tree as of 2026-07-30, including the uncommitted evidence-sink
+  changes from the previous scope; full suite green (2978 passed).
+- Evidence: `output/semantic-review-evidence-run{1,2,3}.jsonl` and the
+  completion record in the previous scope section below.
+
+### Allowed files
+
+- `packages/ai-report-engine/src/report-semantic-review.ts` (envelope
+  extraction + identity anchoring only)
+- `packages/ai-report-engine/src/report-semantic-review.test.ts`
+
+### Forbidden
+
+- Retry, degradation, or fingerprint-escalation mechanism changes.
+- Business gates (Q1 entity-semantics gate / C11 stays untouched; it is an
+  observation item, not a defect to fix in this scope).
+- Model input construction: prompts, batch payloads, batch blueprint,
+  batch sizing/splitting.
+- Provider adapter transport and orchestration
+  (`report-semantic-review-provider-adapter.ts`): no per-batch isolation
+  (C2), no parallelism — both are deferred timing work for a later scope.
+- The Paid V3 review path.
+- Any external action: no staging drains, no report/job creation, no
+  commits/pushes/deployments, no payment/refund/email actions.
+- Any other file.
+
+### Diff budget
+
+- Production source: ≤ 300 changed lines in `report-semantic-review.ts`.
+- Tests: ≤ 500 changed lines in `report-semantic-review.test.ts`.
+
+### Acceptance checks
+
+- The three `it.todo` entries are converted to real tests and pass.
+- New tests prove an envelope carrying an extra key (e.g. `inputHash`)
+  parses to the same result as the clean envelope.
+- Existing tests covering the current positional-mismatch recording
+  behavior are updated only insofar as the new anchoring contract requires,
+  without weakening any acceptance gate.
+- Full `npx vitest run` from the repository root passes.
+
+### Expensive external actions
+
+None authorized.
+
+## Previous authority: Staging real-data per-batch evidence run (APPROVED)
+
+**Status: `APPROVED`** — user replied “确认” on 2026-07-30 to the complete
+written allowlist below. Only the allowlisted files, behaviors, and external
+actions may be executed.
+
+### Completion record (2026-07-30): 3 evidence sets collected, workers restored
+
+- Run 1 (job `55d5b9d2`, report `34edfec4`): 10 records = 2 passes. Pass 1
+  `B_evidence_use` failed `mimo_invalid_response` after 4 batches succeeded
+  (~325s model time discarded); pass 2 clean. C2 confirmed live.
+- Run 2 (job `be862ed3`, report `5f2e80d0`): 5 records, 1 pass, job
+  completed. `B_obs` index 11: model echoed `search-attempt` id with an
+  inserted `40` (`...0180404924c4a` → `...018040404924c4a`) — identity-echo
+  corruption invisible to index-only anchoring. C7-class risk confirmed live.
+- Run 3 (job `61e9e270`, report `d9bcfdf8`): 20 records = 4 passes, ALL
+  batches identity-clean, yet the job FAILED. Error chain: Q1 contradictory
+  entity semantics (C11, transient) → `$B_obs contains unknown key
+  inputHash` (C3, transient) → Q1 degraded fallback (C11, transient) →
+  `$B_obs contains unknown key inputHash` again (fingerprint recurrence →
+  permanent). The `inputHash` envelope habit killed the job.
+- Paid lane (out of scope, reported as-is): job `24451085` failed with
+  `$reviewInput.sources sourceId must be unique` after a deadline resume;
+  job `345503d9` failed with `The correction screenshot foundation failed
+  completeness or retention validation` (product vs local-Chromium
+  environment undetermined).
+- Docker staging free/deep workers restored via `docker start` (12:5x);
+  frozen historical objects never touched; no commits/pushes/deployments.
+- Evidence artifacts (local, uncommitted): `output/semantic-review-evidence-run{1,2,3}.jsonl`.
+
+### Approved amendment (2026-07-30): local drain may complete the user's new paid deep job
+
+After the scope's "paid deep job is never drained by the local hooked
+worker" line was written, the user made a NEW sandbox payment (order
+`13a2b0ed-c34d-42d6-89c1-778e726ff682`, deep job
+`345503d9-91a8-4d70-a60a-5892a97cc3b1`, queued since 11:44). With both
+Docker workers stopped, the dual-tier evidence drain claimed it. The user
+explicitly approved letting the local worker complete this paid job (the
+evidence sink does not touch the paid V3 path; the drain environment is the
+verified one). Its outcome is reported as-is; if it fails, no repair or
+replay — the failure is evidence, not a task to fix.
+
+### Approved amendment (2026-07-30): teaser runs on the deep lane — dual-tier drains
+
+Architecture finding (verified against live checkpoints): the free teaser
+and its semantic review execute inside the deep-tier `v4_pre_admission`
+job, not the free-tier job. Evidence run 1's free job completed without a
+`freeTeaser` checkpoint; the `v4_pre_admission` job `0f202661` holds
+`freeTeaser.stage="ready"` plus the semantic-review data — it was claimed
+by the running Docker deep worker (no evidence hook), so no evidence was
+captured. No replay of that job.
+
+The user approved: (1) wait for the sandbox-paid deep job
+`24451085-fb77-4b2f-8819-4e1ce1e7b7df` to reach a terminal state on the
+Docker deep worker without interference, then `docker stop
+open-geo-console-staging-worker-deep-1` (restored with `docker start` after
+the evidence runs); (2) exactly 3 further submissions (total 6: 2 env-void,
+1 architecture-void, 3 evidence runs), each confirmed by the user in chat;
+(3) local drains run BOTH `staging-worker.ts free` and `staging-worker.ts
+deep` with `FULFILLMENT_MODE=batch_24h` overridden via process env so each
+invocation drains and exits, and with `OGC_SEMANTIC_REVIEW_EVIDENCE_PATH`
+set per run. The paid deep job is never drained by the local hooked worker.
+
+### Approved amendment (2026-07-30): host drain network path + second void job
+
+Root cause of both void jobs: the workstation requires a proxy for
+international traffic, but importing the `undici` npm package (done by
+`safe-fetch.ts`) replaces the env-proxy dispatcher, so the Cloudflare DoH
+lookup cannot work from the host; the first void job additionally lost DoH
+config via broken bash sourcing, and an orphaned worker process from that
+first drain (created 09:03, killed 09:5x) claimed and killed the second job
+`d648d2cc-0a7c-4bb5-8dd5-cbd479acb2ee` with the same broken environment.
+Both failed jobs remain frozen; the orphan was killed; zero staging-worker
+node processes remain.
+
+Host drains therefore run with `OGC_PUBLIC_DNS_DOH_URL` overridden to empty
+(process env wins over `--env-file`), falling back to system DNS — allowed
+by `docs/PROTECTED-STAGING-OPERATIONS.md:64` outside Fake-IP proxy ranges,
+and verified from the host: the worker's exact `resolveSafeUrl` path
+resolves the target to `120.76.156.213` (real public IP, not 198.18/15),
+the target site answers direct HTTP 200, and the MiMo API host is reachable
+direct. This is a drain-environment configuration only; no file changes.
+
+Evidence runs still target 3 collected evidence sets; total submissions may
+reach 5 (2 void + 3 runs). Each subsequent submission is confirmed by the
+user in chat before the drain starts.
+
+### Approved amendment (2026-07-30): one replacement run after agent-caused env failure
+
+Run 1 (job `69180314-2c79-4863-b185-04258d94f60c`) failed in discovery with
+`UrlSafetyError` because the agent's first drain sourced `staging.env`
+through bash (BOM/quoted values) and lost `OGC_PUBLIC_DNS_DOH_URL`; the
+transient DNS error escalated to permanent on fingerprint recurrence. The
+failed job remains frozen: no repair, replay, retry, or reuse. The user
+approved exactly one replacement submission, so total report creations are
+4 (1 void + 3 evidence runs). Worker environment loading is corrected to
+`node --env-file=.env.staging.local --env-file=../../.data/workstation-docker/staging.env`
+(staging.env last so real values override empty placeholders), matching the
+Docker staging worker runtime; DNS and DoH resolution of the target were
+verified from the host before the replacement run.
+
+### Approved amendment (2026-07-30): report creation path
+
+The fixed staging URL is behind Vercel authentication and no automation
+bypass credential exists locally. The user chose to create the 3 new free
+reports themselves via the staging web UI (`forceFresh`, `zh-CN`,
+`https://shun-express.com/`), one at a time. The agent's external actions
+reduce to: local worker drains against the staging database and the model
+calls of the 3 free-teaser generations. No `POST /api/scan` by the agent.
+
+### Approved amendment (2026-07-30): staging free worker stop/start
+
+Preflight found `open-geo-console-staging-worker-free-1`
+(image `staging-b41cc232-overlay-v1`) running; it lacks the evidence hook
+and would race the local worker. The user explicitly approved: `docker stop`
+on that container before the evidence runs and `docker start` to restore it
+afterwards. No other container is touched; no image is built or removed;
+the deep worker keeps running (it cannot claim free-tier jobs).
+
+Objective (user, 2026-07-30): 先把 Phase A 的逐 batch 证据钩跑一遍真实数据，
+验证它能否捕获真实的模型身份错位，之后再决定修复是否有效、修哪个 batch。
+
+Baseline: HEAD `b41cc232b8dbf1b198ad262124cbacebd49da930` plus the
+uncommitted Phase A changes (the five files listed in the completed Phase A
+section below). Untracked `.codex/` and `.tmp/` remain user-owned, untouched.
+
+Decisions recorded with the user: exactly **3** runs; target
+`https://shun-express.com/` (each run a NEW free report, locale `zh-CN`);
+reports created by the agent via the staging admission path.
+
+Design (lightweight, no deployment):
+
+1. Evidence sink wiring (new, env-gated): a small module
+   `apps/web/src/worker/semantic-review-evidence-sink.ts` that, only when
+   `OGC_SEMANTIC_REVIEW_EVIDENCE_PATH` is set, returns an
+   `onSemanticReviewBatchEvidence` callback appending each
+   `FreeV4SemanticReviewBatchEvidence` record as one redacted JSON line to
+   that local file. `apps/web/src/worker/processor.ts` passes the sink into
+   the existing `generateFreeTeaser` call site (:699) only when the env var
+   is set. Env var unset = zero behavior change; the variable is never added
+   to any staging/production env file — it is set only on the local worker
+   invocation for this evidence run. Records carry the Phase A redacted
+   shape only (ids/hashes/counts/timings/errorClass); a unit test re-asserts
+   redaction and the env gate.
+2. Execution: create the 3 new free reports by `POST /api/scan` with
+   `forceFresh: true`, locale `zh-CN`, to the fixed protected staging URL
+   `https://open-geo-console-staging-itheheda.vercel.app` using the
+   established automation-bypass mechanism from the previous approved
+   staging run (never printing, logging, or committing any bypass or secret
+   value). Drain each job to a terminal state by running
+   `npm run worker:staging:free` **from this working tree** (local process,
+   `.env.staging.local`, staging DB marker enforced) with
+   `OGC_SEMANTIC_REVIEW_EVIDENCE_PATH` pointed at a fresh local evidence
+   file under `output/`. At most 20 worker invocations per run; bounded
+   same-job automatic retry only — no manual retry, no 4th lineage, no
+   repair/replay of any historical object. Run 1 first and verify evidence
+   capture before runs 2 and 3.
+3. Analysis: from the 3 evidence files, compare per batch the
+   `inputIdentities` order vs `responseIdentities` order/overlap,
+   `responseRowCount` vs expected slot count, and `errorClass`; report
+   whether the real staging model exhibits C7-class omission/reorder
+   misattribution and whether the hook attributes failures to the correct
+   batch. The fix decision comes after this report and is NOT in this scope.
+
+Pre-mutation read-only preflight (stop-and-report on any violation):
+
+- Staging DB marker/schema verified; the frozen historical objects (1
+  pending report, 5 pending/not-started orders, 5 `repair_wait`, 4
+  historical `running` batch jobs) remain untouched; any live active lease
+  or reserved credit = immediate stop.
+- No Docker staging free worker is running that could race the local worker
+  for the same jobs (`docker ps` check); if one is running, stop and report
+  instead of racing it.
+- Staging free quota for `shun-express.com` admits the 3 sequential
+  forceFresh regenerations; if quota rows block, stop and report — the only
+  cleanup path is `npm run staging:free:cleanup -- --confirm`, which
+  requires its own explicit user instruction.
+
+Allowed files:
+
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+- `apps/web/src/worker/semantic-review-evidence-sink.ts` (new)
+- `apps/web/src/worker/semantic-review-evidence-sink.test.ts` (new)
+- `apps/web/src/worker/processor.ts` (env-gated sink pass-through only)
+- `apps/web/src/worker/processor.test.ts` or `processor-contract.test.ts`
+  (added test for the gate only; no existing assertion changes)
+- `output/` evidence JSONL files (new, local artifacts, not committed)
+
+Forbidden:
+
+- Retry/backoff/fingerprint logic, parser/sanitize/apply/anchoring,
+  business gates/thresholds, model inputs/prompts/manifests,
+  `mimo-provider.ts` transport, paid lane, DB schema.
+- Any commit, push, branch, Vercel/Docker deployment or image build, any
+  production touch, any payment/refund/email action, any modification of
+  historical jobs/reports/orders, any 4th report/lineage.
+- Committing evidence files or any secret value anywhere.
+
+Diff budget: production source at most 120 added/changed lines; tests at
+most 120 added lines; zero edits or deletions of existing assertions.
+
+Acceptance checks:
+
+- `npx vitest run apps/web/src/worker/semantic-review-evidence-sink.test.ts`
+  plus the touched processor test file green; `npm test` green overall.
+- `git diff --stat` touches only allowlisted paths.
+- Evidence files exist for all completed runs; each line parses as JSON and
+  matches the redacted `FreeV4SemanticReviewBatchEvidence` shape (no prose,
+  no secrets — verified by inspection of the actual files).
+- Final evidence report states, with per-run per-batch tables, whether
+  identity order/count mismatches or unattributed errors occurred on real
+  model output.
+
+Expensive external actions (exactly these, no more): 3 `POST /api/scan`
+report creations against protected staging, 3 crawls of
+`shun-express.com`, the model calls of 3 free-teaser generations (diagnosis
++ at most 5 semantic-review batch calls each), and local worker drains
+against the staging database. No deployment, no payment, no email.
+
+## Historical authority: Free semantic-review provider per-batch causal identity evidence (APPROVED, completed 2026-07-30)
+
+Completed: redacted per-batch evidence hook added at the Free V4 batched
+adapter boundary (+132/-7 production, +304 tests, budget kept); 4
+characterization tests + 3 `it.todo` recorded the C7/C9 index-only
+anchoring misattribution for `B_obs`/`B_answers`/`B_evidence_use`;
+`npm test` 2974 passed; forbidden-file diffs verified empty. The evidence
+hook is the instrument this new scope takes to real staging data.
+
+(Original approved Phase A text follows unchanged.)
+
+**Status: `APPROVED`** — user replied “批准” on 2026-07-30 to the complete
+written allowlist below. Only the allowlisted files and behaviors may be
+touched. The previously APPROVED Protected Staging authority below remains
+on record but is not executable alongside this task.
+
+Objective (user, 2026-07-30, verbatim): 在 Free semantic-review provider
+边界加入 test-first、脱敏、逐 batch 的因果身份证据；不改变重试、parser、
+业务门槛或模型输入。拿到证据后，再决定真正需要修改哪个 batch。
+
+Baseline: HEAD `b41cc232b8dbf1b198ad262124cbacebd49da930`. Working tree has
+no tracked modifications; untracked `.codex/` and `.tmp/` are user-owned and
+stay untouched.
+
+Boundary facts established by read-only exploration (baseline):
+
+- Free V4 batches are the five structural ids in
+  `FREE_V4_SEMANTIC_REVIEW_BATCH_IDS`
+  (`packages/ai-report-engine/src/report-semantic-review.ts:97-104`):
+  `B_fields_readonly`, `B_fields_mutable`, `B_obs`, `B_answers`,
+  `B_evidence_use`.
+- `runOfflineReportSemanticReviewBatched`
+  (`packages/ai-report-engine/src/report-semantic-review-provider-adapter.ts:47-73`)
+  invokes batches sequentially and merges raw payloads; per-batch raw
+  payloads are not persisted anywhere and the returned `batchIds` are
+  discarded by the caller.
+- `parseFreeAnnotations` (`report-semantic-review.ts:1652-1662`) anchors
+  `B_obs`/`B_answers`/`B_evidence_use` rows purely by positional index and
+  never compares model-echoed identity ids — the identity-loss suspect.
+- No logging or persistence of model I/O exists at this boundary; the only
+  redaction infrastructure is `redactDiagnostic`
+  (`apps/web/src/worker/job-errors.ts:118-134`), used for error diagnostics.
+
+Conflict inventory (read-only git+code diagnosis, 2026-07-30; user asked
+"判断代码和 AI 在审批环节打架的所有位置"). Verdict classes:
+PATCHED (sound) / BOOMERANG (patched but recurrent kill) / WORKED-AROUND
+(silent, evidence destroyed) / OPEN.
+
+- C2 OPEN: any single batch's truncation/malformed JSON aborts all 5 batches
+  unattributed — the structured invoker maps no errors
+  (`mimo-provider.ts:159-168`), the adapter loop discards collected payloads
+  (`report-semantic-review-provider-adapter.ts:59-65`), the error carries no
+  batchId.
+- C3 OPEN: batch envelope shape (extra keys from the full base prompt still
+  embedded in every batch prompt, `report-semantic-review.ts:132-135`) throws
+  untyped TypeError (`:2126-2131`) — transient by message-regex luck, then
+  fingerprint-escalated to permanent.
+- C4/C5/C6/C13/C18/C19 WORKED-AROUND: envelope identity fabricated at
+  assembly (`:211-224`); field-row first-wins dedup + synthesized pass
+  (`:176-187`); index-first field anchoring destroys wrong-position model
+  corrections (`:732`, `:1246`); model `overallDecision` discarded
+  (`:748-752`); model evidence refs overwritten by code-mounted refs
+  (`:1322-1329`, `:1375`); out-of-catalog refs silently filtered
+  (`:1379-1382`).
+- C7 OPEN (highest value): `parseFreeAnnotations` index-only anchoring for
+  `B_obs`/`B_answers`/`B_evidence_use` (`:1652-1662`); middle-row omission or
+  reorder shifts valid-looking verdicts onto wrong identities with NO
+  degraded marker; codified by test `report-semantic-review.test.ts:818-843`.
+  Feeds Q1 gate (`report-v4-free-teaser.ts:942`, C9) and persisted metrics
+  (`:979-983`, C20).
+- C11/C12 BOOMERANG: Q1 incomplete/contradictory gates and language gate are
+  transient (`4112c2e`, `b75b750`), but fingerprint recurrence
+  (`job-errors.ts:162-181`) makes a persistent model habit fatal on the
+  second attempt — with the offending model output never recorded.
+- C14/C15/C17 OPEN: TypeError catch-all masks code bugs as model violations
+  (`:1348-1360`); post-assembly errors classified by message regex
+  (`job-errors.ts:374-380`); diagnosis boundary classifies similar failures
+  oppositely (`report-v4-free-teaser.ts:108-117`).
+- C20/C21 OPEN: observation/evidenceUse degradations have no structured
+  flag and are ungated; receipt/checkpoint verification re-derives only from
+  the sanitized projection (`:837-906`), so every silent degradation
+  verifies cleanly — integrity is proved over content the model may never
+  have produced.
+
+Evidence-loss points (why the fight cannot be localized today): adapter
+`batchPayloads` discarded on throw + returned `batchIds` ignored by the only
+caller (`report-v4-free-teaser.ts:933-941`); checkpoint stores only merged
+`{input,output,applied}` (`:983`); provider errors carry no batch context;
+post-assembly parser errors use the merged namespace; degraded rows keep no
+copy of the offending model row; job error records store only redacted
+message + fingerprint; the `4f0fb1f` boundary trace covers the deep lane
+only.
+
+Phase A evidence targets map to: adapter tests → C2/C3; characterization
+tests → C7/C9 (+C5/C6 field-side contrast); redacted per-batch hook → all
+evidence-loss points above.
+
+Phase A (this scope — evidence only, no fix):
+
+1. Test-first adapter-level coverage of `runOfflineReportSemanticReviewBatched`
+   with a mocked invoker (no network/model): per-batch invocation order and
+   batch identity, `batchIds` propagation, merged-raw assembly, transport
+   failure attribution to a specific batch.
+2. Characterization evidence tests for causal-identity anchoring in
+   `B_obs`, `B_answers`, and `B_evidence_use` under middle-row omission and
+   row reordering: each test records which input identity every output row
+   landed on, making silent index-only identity migration visible. These
+   tests characterize current behavior and must pass without any parser
+   change; desired-behavior expectations are recorded as skipped/todo
+   markers, not failing gates.
+3. Redacted per-batch evidence hook at the provider boundary: an optional
+   evidence callback on `runOfflineReportSemanticReviewBatched`, passed
+   through the Free-teaser wiring, recording per batch: `batchId`; input
+   identity digests (the sorted identity ids the batch is responsible for —
+   field `path`/`originalTextHash`, `observationId`/`resultId`,
+   `questionId`, `evidenceId` as applicable per batch type); request payload
+   SHA-256 and byte size; response row counts and echoed identity digests;
+   duration; error class on failure. The hook never records raw prompt or
+   response prose, never records secrets; when no callback is supplied the
+   behavior is unchanged.
+4. Evidence report to the user naming which batch(es) demonstrably lose
+   causal identity. Choosing and implementing the batch fix is NOT in this
+   scope and requires a new scope entry.
+
+Allowed files:
+
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+- `packages/ai-report-engine/src/report-semantic-review-provider-adapter.ts`
+  (optional evidence callback only; no change to batching, merge, parse,
+  or apply behavior)
+- `packages/ai-report-engine/src/report-semantic-review-provider-adapter.test.ts`
+- `packages/ai-report-engine/src/report-semantic-review.test.ts`
+  (added evidence tests only; no existing assertions edited or deleted)
+- `apps/web/src/worker/report-v4-free-teaser.ts` (optional sink pass-through
+  only; no behavioral change when the sink is absent)
+- `apps/web/src/worker/report-v4-free-teaser.test.ts` (wiring test only)
+
+Forbidden:
+
+- Retry/backoff/fingerprint/escalation logic
+  (`apps/web/src/worker/job-errors.ts`).
+- Parser, sanitize, apply, anchoring, and degradation logic in
+  `packages/ai-report-engine/src/report-semantic-review.ts`.
+- Business gates and thresholds: Q1 annotation checks, degradation policy,
+  admission, metrics, readiness.
+- Model inputs: any change to systemText/inputText content, manifest
+  builders, blueprints, prompts, or model parameters; `mimo-provider.ts`
+  transport.
+- Paid lane (`paid-v3-*`), answer-engine-observer, DB schema or persistence
+  shape, staging/production deployments, real model/network calls, and any
+  historical job/report/order/payment object.
+
+Diff budget: production source at most 150 added/changed lines across the
+two allowed production files; tests at most 450 added lines; zero edits or
+deletions of existing test assertions.
+
+Acceptance checks:
+
+- `npx vitest run packages/ai-report-engine/src/report-semantic-review-provider-adapter.test.ts packages/ai-report-engine/src/report-semantic-review.test.ts apps/web/src/worker/report-v4-free-teaser.test.ts` green.
+- `npm test` green.
+- `git diff --stat` touches only allowlisted paths; diff on
+  `report-semantic-review.ts`, `report-semantic-review-manifests.ts`, and
+  `mimo-provider.ts` is empty (model input provably unchanged).
+- A unit test asserts the captured per-batch evidence contains only
+  ids/hashes/counts/timings — no prose bodies, no Authorization or secret
+  material.
+
+Expensive external actions: none. No model calls, no crawls, no payments,
+no deployments, no email.
+
+## Historical authority: Protected Staging exactly-one Deep runtime evidence (APPROVED)
 
 **Status: `APPROVED`** — user replied “批准” to the complete approval phrase
 on 2026-07-29. Authorization is bound to exactly one candidate branch/commit

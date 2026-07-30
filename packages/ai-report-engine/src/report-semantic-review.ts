@@ -155,6 +155,9 @@ export function buildFreeV4SemanticReviewBatchUserPayload(
 /**
  * Merge raw batch payloads into one review object, then validate with the
  * existing full-output parser (evidence/receipt contracts unchanged).
+ * Batch envelopes tolerate undeclared keys (C3), and observation, answer, and
+ * evidence-use rows are anchored by their echoed identity — never by position —
+ * failing closed on a missing, corrupted, unknown, or duplicated identity (C7).
  */
 export function assembleFreeV4BatchedSemanticReviewRaw(
   input: ReportSemanticReviewInput,
@@ -186,16 +189,31 @@ export function assembleFreeV4BatchedSemanticReviewRaw(
     fieldsByPath.get(manifest.path) ?? synthesizeFreeFieldRawResult(manifest, input)
   );
 
-  const observationResults = extractNamedArray(
-    batchPayloads.B_obs,
-    "observationResults",
-    "B_obs"
+  const observationResults = anchorFreeBatchRows(
+    extractNamedArray(batchPayloads.B_obs, "observationResults", "B_obs"),
+    input.observationResults,
+    (row) => `${row.observationId}:${row.resultId}`,
+    (row) => typeof row.observationId === "string" && typeof row.resultId === "string"
+      ? `${row.observationId}:${row.resultId}`
+      : undefined,
+    "observation",
+    "$B_obs.observationResults"
   );
-  const answers = extractNamedArray(batchPayloads.B_answers, "answers", "B_answers");
-  const evidenceUse = extractNamedArray(
-    batchPayloads.B_evidence_use,
-    "evidenceUse",
-    "B_evidence_use"
+  const answers = anchorFreeBatchRows(
+    extractNamedArray(batchPayloads.B_answers, "answers", "B_answers"),
+    input.answerSubjects,
+    (subject) => subject.questionId,
+    (row) => (typeof row.questionId === "string" ? row.questionId : undefined),
+    "questionId",
+    "$B_answers.answers"
+  );
+  const evidenceUse = anchorFreeBatchRows(
+    extractNamedArray(batchPayloads.B_evidence_use, "evidenceUse", "B_evidence_use"),
+    input.fields,
+    (field) => field.path,
+    (row) => (typeof row.path === "string" ? row.path : undefined),
+    "path",
+    "$B_evidence_use.evidenceUse"
   );
 
   const questionDistinctness = Object.freeze({
@@ -325,7 +343,9 @@ function batchOutputContract(batchId: FreeV4SemanticReviewBatchId): string {
 
 function extractBatchFields(raw: unknown, batchId: string): unknown[] {
   if (raw === undefined) return [];
-  const row = strictRecord(raw, `$${batchId}`, new Set(["fields"]));
+  // Envelope tolerance (C3): keys outside the declared envelope are stripped;
+  // only the declared array is read, and row strictness stays unchanged.
+  const row = requireRecord(raw, `$${batchId}`);
   return requireArray(row.fields, `$${batchId}.fields`, MAX_FIELDS);
 }
 
@@ -333,8 +353,36 @@ function extractNamedArray(raw: unknown, key: string, batchId: string): unknown[
   if (raw === undefined) {
     throw new TypeError(`Free V4 review batch ${batchId} is missing.`);
   }
-  const row = strictRecord(raw, `$${batchId}`, new Set([key]));
+  const row = requireRecord(raw, `$${batchId}`);
   return requireArray(row[key], `$${batchId}.${key}`, MAX_CATALOG_ROWS);
+}
+
+/**
+ * Free V4 batch rows are anchored by their echoed identity, never by position
+ * (C7). A missing, corrupted, unknown, or duplicated echoed identity fails
+ * closed with a TypeError; an omitted subject leaves a hole that degrades to
+ * the synthesized fallback inside the Free annotation lane.
+ */
+function anchorFreeBatchRows<Subject>(
+  rows: readonly unknown[],
+  subjects: readonly Subject[],
+  subjectIdentity: (subject: Subject) => string,
+  rowIdentity: (row: Record<string, unknown>) => string | undefined,
+  identityLabel: string,
+  path: string
+): unknown[] {
+  const slotByIdentity = new Map(subjects.map((subject, index) => [subjectIdentity(subject), index]));
+  const aligned: unknown[] = new Array(subjects.length).fill(undefined);
+  for (const [index, value] of rows.entries()) {
+    const rowPath = `${path}[${index}]`;
+    const identity = rowIdentity(requireRecord(value, rowPath));
+    if (identity === undefined) throw new TypeError(`${rowPath} must echo its ${identityLabel} identity.`);
+    const slot = slotByIdentity.get(identity);
+    if (slot === undefined) throw new TypeError(`${rowPath} echoes unknown ${identityLabel} ${identity}.`);
+    if (aligned[slot] !== undefined) throw new TypeError(`${path} duplicates ${identityLabel} ${identity}.`);
+    aligned[slot] = value;
+  }
+  return aligned;
 }
 
 export function buildPaidV3ReportSemanticReviewSystemPrompt(): string {
@@ -1645,9 +1693,10 @@ function parseAnnotations(value: unknown, input: ReportSemanticReviewInput, fiel
 }
 
 /**
- * Free V4 annotation lane: rows align to the input catalogs by index (missing
- * rows synthesized, surplus dropped, order echoes re-anchored), malformed rows
- * degrade to synthesized entries, and references filter to legal subsets.
+ * Free V4 annotation lane: batch assembly has already anchored rows to the
+ * input catalogs by echoed identity, so rows align here by index (missing
+ * rows synthesized, surplus dropped), malformed rows degrade to synthesized
+ * entries, and references filter to legal subsets.
  */
 function parseFreeAnnotations(value: unknown, input: ReportSemanticReviewInput): ReportSemanticAnnotations {
   const row = strictRecord(value, "$reviewOutput.annotations", ANNOTATIONS_KEYS);
