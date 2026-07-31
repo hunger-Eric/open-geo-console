@@ -23,12 +23,25 @@ import {
   type ReportSemanticManifestSeed,
   type ReportSemanticReviewAuthorityBindings
 } from "@open-geo-console/ai-report-engine";
-import type { GenerativeSearchAnswerCardV3 } from "@open-geo-console/ai-report-engine";
+import type { GenerativeSearchAnswerCardV3, ReportSemanticReviewInput } from "@open-geo-console/ai-report-engine";
+import type { PaidV3AnswerPacketV1, PaidV3PacketsByQuestion } from "./paid-v3-answer-packet";
+import {
+  assertNoBodyDuplicationAcrossCatalogs,
+  buildPaidV3CompactReviewUserText,
+  buildPaidV3CompactTransportInput,
+  buildPaidV3SourceDictionary,
+  evaluatePaidV3CompactTokenBudget,
+  type PaidV3SourceDictionary,
+  type PaidV3TransportTokenBreakdown
+} from "./paid-v3-compact-review-input";
 
 /** The injected transport is deliberately the sole model boundary for Paid V3 review. */
 export interface PaidV3WebsiteSynthesisReviewer {
   review(request: { systemText: string; inputText: string; signal?: AbortSignal }): Promise<unknown>;
 }
+
+const COMPACT_REVIEW_SYSTEM_SUFFIX =
+  "\nBodies are only in input.sourceDictionary by sourceId; catalog originalText is a hash shell. Echo input.inputHash (canonical), never transportInputHash.";
 
 export type PaidV3SemanticReviewSourceSelectionContext = PaidV3SourceSelectionValidationContext;
 type PaidV3SourceSelectionIdentityBase = Omit<PaidV3SourceSelectionValidationContext["finalSourceSelectionInputIdentity"], "answerHash">;
@@ -91,6 +104,10 @@ export interface RunPaidV3SemanticReviewInput<T extends {
   readonly reviewedFreeQ1Annotation: ReportSemanticAnswerAnnotation;
   readonly reviewer: PaidV3WebsiteSynthesisReviewer;
   readonly signal?: AbortSignal;
+  /** Compact transport materials; when omitted, built from manifest sources (legacy tests). */
+  readonly sourceDictionary?: PaidV3SourceDictionary;
+  readonly packets?: PaidV3PacketsByQuestion | readonly PaidV3AnswerPacketV1[];
+  readonly onTransportMetrics?: (metrics: PaidV3TransportTokenBreakdown) => void | Promise<void>;
 }
 
 export interface PaidV3SemanticReviewProjection {
@@ -98,6 +115,7 @@ export interface PaidV3SemanticReviewProjection {
   readonly output: ReturnType<typeof parseReportSemanticReviewOutput>;
   readonly applied: ReturnType<typeof applyCompletePaidV3SemanticReviewToReport>;
   readonly report: CombinedGeoReportV3;
+  readonly transportMetrics?: PaidV3TransportTokenBreakdown;
 }
 
 /**
@@ -111,11 +129,30 @@ export async function runPaidV3SemanticReview<T extends {
   const manifestSeed = buildPaidV3SemanticReviewDraft({ ...input.manifest, reportDraft: input.report });
   assertReadOnlyFreeQ1(input.report, input.reviewedFreeQ1, manifestSeed);
   const reviewInput = buildPaidV3SemanticReviewManifest(manifestSeed);
-  const rawReview = await input.reviewer.review({
-    systemText: buildPaidV3ReportSemanticReviewSystemPrompt(),
-    inputText: JSON.stringify({ input: reviewInput }),
-    signal: input.signal
+  assertNoBodyDuplicationAcrossCatalogs(reviewInput);
+  const sourceDictionary = input.sourceDictionary ?? buildDictionaryFromCanonicalSources(reviewInput.sources);
+  const transport = buildPaidV3CompactTransportInput({
+    canonicalReviewInput: reviewInput,
+    packets: input.packets ?? [],
+    sourceDictionary
   });
+  const systemText = buildPaidV3ReportSemanticReviewSystemPrompt() + COMPACT_REVIEW_SYSTEM_SUFFIX;
+  const inputText = buildPaidV3CompactReviewUserText({ transport, canonicalReviewInput: reviewInput });
+  let transportMetrics: PaidV3TransportTokenBreakdown;
+  try {
+    transportMetrics = evaluatePaidV3CompactTokenBudget({
+      systemText, userText: inputText, packets: transport.packets, sourceDictionary,
+      proseFieldsText: JSON.stringify(reviewInput.fields),
+      canonicalInputHash: transport.canonicalInputHash, transportInputHash: transport.transportInputHash
+    });
+  } catch (error) {
+    if (error && typeof error === "object" && "breakdown" in error) {
+      await input.onTransportMetrics?.((error as { breakdown: PaidV3TransportTokenBreakdown }).breakdown);
+    }
+    throw error;
+  }
+  await input.onTransportMetrics?.(transportMetrics);
+  const rawReview = await input.reviewer.review({ systemText, inputText, signal: input.signal });
   const output = parseReportSemanticReviewOutput(rawReview, reviewInput);
   assertPaidV3Q1AnnotationContinuity(
     requirePaidQ1Annotation(output.annotations.answers, input.reviewedFreeQ1.questionId),
@@ -149,7 +186,24 @@ export async function runPaidV3SemanticReview<T extends {
   const bound = bindPaidV3SemanticReviewReceiptToFinalReport(normalizedProjection, applied.receipt);
   const report = requireReadyCombinedGeoReportV3(bound.report, { semanticValidation: "deferred" });
   assertReadOnlyFreeQ1(report, input.reviewedFreeQ1, manifestSeed);
-  return { input: reviewInput, output, applied, report };
+  return { input: reviewInput, output, applied, report, transportMetrics };
+}
+
+function buildDictionaryFromCanonicalSources(
+  sources: ReportSemanticReviewInput["sources"]
+): PaidV3SourceDictionary {
+  const seen = new Set<string>();
+  return buildPaidV3SourceDictionary(sources.flatMap((source) => {
+    if (seen.has(source.sourceId)) return [];
+    seen.add(source.sourceId);
+    return [{
+      sourceId: source.sourceId,
+      canonicalUrl: source.canonicalUrl,
+      title: source.sourceId,
+      citedText: source.originalText,
+      auditExcerpt: null
+    }];
+  }));
 }
 
 async function projectReviewedAnswerResults(

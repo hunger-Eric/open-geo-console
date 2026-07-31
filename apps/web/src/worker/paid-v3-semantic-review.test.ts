@@ -258,7 +258,7 @@ async function paidSemanticFixture() {
   }));
   const sources = generativeCards.map((card) => {
     const source = card.sources[0]!;
-    const originalText = JSON.stringify(source);
+    const originalText = JSON.stringify({ role: "source", sourceId: source.sourceId, title: source.title });
     return {
       sourceId: source.sourceId,
       questionId: card.questionId,
@@ -268,21 +268,27 @@ async function paidSemanticFixture() {
       eligible: true
     };
   });
-  const evidence = sources.map((source) => ({
-    evidenceId: source.sourceId,
-    questionId: source.questionId,
-    sourceId: source.sourceId,
-    originalText: source.originalText,
-    originalTextHash: source.originalTextHash,
-    eligible: true
-  }));
-  const observationResults = sources.map((source, index) => ({
-    observationId: `observation-${index + 1}`,
-    resultId: `result-${index + 1}`,
-    questionId: source.questionId,
-    originalText: source.originalText,
-    originalTextHash: source.originalTextHash
-  }));
+  const evidence = sources.map((source) => {
+    const originalText = JSON.stringify({ role: "evidence", sourceId: source.sourceId });
+    return {
+      evidenceId: source.sourceId,
+      questionId: source.questionId,
+      sourceId: source.sourceId,
+      originalText,
+      originalTextHash: reportSemanticTextHash(originalText),
+      eligible: true
+    };
+  });
+  const observationResults = sources.map((source, index) => {
+    const originalText = JSON.stringify({ role: "observation", sourceId: source.sourceId, index });
+    return {
+      observationId: `observation-${index + 1}`,
+      resultId: `result-${index + 1}`,
+      questionId: source.questionId,
+      originalText,
+      originalTextHash: reportSemanticTextHash(originalText)
+    };
+  });
   const profileId = "profile-source-example";
   const sourceIds = sources.map(({ sourceId }) => sourceId);
   const sourceSelectionCatalogSeeds = [

@@ -86,6 +86,11 @@ vi.mock("@open-geo-console/ai-report-engine", async (importOriginal) => ({
   analyzePageBatch: boundaryMocks.analyzePageBatch,
   synthesizeWebsiteReportWithRecovery: boundaryMocks.synthesizeWebsiteReportWithRecovery
 }));
+const diagnosisEnhancerMock = vi.hoisted(() => ({ enhance: vi.fn() }));
+vi.mock("./report-v4-diagnosis-enhancer", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./report-v4-diagnosis-enhancer")>(),
+  enhanceReportV4QuestionDiagnosis: (...args: unknown[]) => diagnosisEnhancerMock.enhance(...args)
+}));
 vi.mock("@/report-v4/prohibited-operation-guard-runtime", () => ({
   runReportV4GuardedOperation: rerunGuardHarness.run
 }));
@@ -94,11 +99,12 @@ import {
   dispatchReportV4ProductionJob,
   composeReportV4AcceptanceProductionRunner,
   createPaidV3DiagnosisIncompleteError,
-  PaidV3DiagnosisIncompleteError,
-  paidV3SemanticSourceCatalogEligibility,
+  enhanceV3AnswerCardsWithDiagnosis,
   hashSynthesisInput,
   isTerminalScanJob,
   mergeCompletedAnalyses,
+  paidV3SemanticSourceCatalogEligibility,
+  PaidV3DiagnosisIncompleteError,
   processScanJob,
   resolveRecommendationFulfillmentTarget,
   resolveReportV4ProductionTarget,
@@ -1024,5 +1030,258 @@ describe("paidV3SemanticSourceCatalogEligibility (W4 rule 1)", () => {
       auditRetrievalReady: false,
       auditExactExcerpt: null
     })).toEqual({ eligible: false, evidenceMode: "unavailable" });
+  });
+});
+
+describe("enhanceV3AnswerCardsWithDiagnosis packet orchestration", () => {
+  const iso = "2026-07-31T12:00:00.000Z";
+  const hash = "a".repeat(64);
+  function diagnosisFor(sourceId: string, questionId: string) {
+    const targetRef = `${questionId}:target:page-1`;
+    return {
+      selectionSummary: "公开来源给出可核验的服务线索。",
+      targetGap: "目标站缺少对应服务条件说明。",
+      observableFactors: [
+        { kind: "problem_match" as const, observation: "问题匹配充分。", evidenceRefs: [sourceId, targetRef] },
+        { kind: "factual_specificity" as const, observation: "事实具体可核。", evidenceRefs: [sourceId] },
+        { kind: "entity_clarity" as const, observation: "主体识别清晰。", evidenceRefs: [targetRef] }
+      ],
+      recommendedActions: [
+        { priority: 1 as const, action: "补充服务条件。", evidenceRefs: [targetRef] },
+        { priority: 2 as const, action: "对齐买家问题。", evidenceRefs: [sourceId, targetRef] },
+        { priority: 3 as const, action: "维护公开事实。", evidenceRefs: [targetRef] }
+      ],
+      detailedEvidenceRefs: [sourceId, targetRef]
+    };
+  }
+
+  function genCard(questionId: string, sourceId: string, withDiagnosis = false) {
+    return {
+      answerMode: "generative_search_v1" as const,
+      questionId,
+      exactQuestion: `Exact ${questionId}`,
+      answerText: `Answer for ${questionId}`,
+      status: "answered" as const,
+      sources: [{
+        sourceId,
+        title: sourceId,
+        canonicalUrl: `https://${sourceId}.example/`,
+        registrableDomain: `${sourceId}.example`,
+        citedText: "cited",
+        providerResultOrder: 0,
+        retrievalStatus: "search_source_only" as const,
+        ownershipCategory: "company_owned" as const
+      }],
+      ...(withDiagnosis ? { diagnosis: diagnosisFor(sourceId, questionId) } : {}),
+      provenance: {
+        answerHash: hash,
+        sourceHash: hash,
+        searchedAt: iso,
+        completedAt: iso,
+        providerResponseId: "resp"
+      },
+      refusal: null
+    };
+  }
+
+  function admission() {
+    return {
+      snapshot: {
+        id: "admission-1",
+        contentIdentityHash: hash,
+        siteKey: "example.com"
+      },
+      pages: [{
+        id: "page-1",
+        analyzable: true,
+        summary: "Target page summary with enough characters for diagnosis evidence.",
+        normalizedUrl: "https://example.com/",
+        contentHash: hash
+      }]
+    } as const;
+  }
+
+  function baseCheckpoint(cards: ReturnType<typeof genCard>[]) {
+    return {
+      version: "answer-first-v3-checkpoint-v2" as const,
+      stage: "answers_collected" as const,
+      identityHash: hash,
+      questionSetIdentity: "qs-1",
+      providerId: "xiaomi-mimo",
+      model: "mimo-v2.5-pro",
+      searchMode: "web",
+      promptVersion: "generative-search-answer-v1" as const,
+      locale: "zh-CN",
+      region: "CN",
+      answerHash: hash,
+      sourceHash: hash,
+      engineProvenance: {
+        engineId: "open-geo-engine",
+        searchSurface: "xiaomi-mimo:web",
+        queryPlanVersion: "v1",
+        passageSelectorVersion: "v1",
+        synthesisModel: "mimo-v2.5-pro",
+        synthesisPromptVersion: "v1",
+        locale: "zh-CN",
+        region: "CN",
+        searchedAt: "2026-07-31T11:00:00.000Z",
+        evidenceCutoffAt: "2026-07-31T11:30:00.000Z",
+        synthesizedAt: iso,
+        inputHash: hash,
+        evidenceHash: hash,
+        answerHash: hash
+      },
+      answerResults: cards.map((card) => ({
+        questionId: card.questionId,
+        answerText: card.answerText,
+        sources: card.sources,
+        refusal: null,
+        searchedAt: iso,
+        completedAt: iso,
+        providerResponseId: "r"
+      }))
+    };
+  }
+
+  it("runs Q2/Q3 diagnosis with overlapping start and keeps Q2 when Q3 fails", async () => {
+    const q1 = genCard("question-1", "source-1", true);
+    const q2 = genCard("question-2", "source-2");
+    const q3 = genCard("question-3", "source-3");
+    const saves: unknown[] = [];
+    let q2Started = 0;
+    let q3Started = 0;
+    diagnosisEnhancerMock.enhance.mockImplementation(async (input: { question: { questionId: string } }) => {
+      if (input.question.questionId === "question-2") {
+        q2Started = Date.now();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return {
+          status: "completed",
+          question: input.question,
+          diagnosis: diagnosisFor("source-2", "question-2"),
+          providerAttempts: 1
+        };
+      }
+      q3Started = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return {
+        status: "failed",
+        question: input.question,
+        providerAttempts: 1,
+        failure: { stage: "provider", code: "provider_timeout", parserPath: null }
+      };
+    });
+    let caught: unknown;
+    try {
+      await enhanceV3AnswerCardsWithDiagnosis({
+        answerCards: [q1, q2, q3] as never,
+        checkpoint: baseCheckpoint([q1, q2, q3]) as never,
+        questionSetIdentity: "qs-1",
+        admission: admission() as never,
+        locale: "zh-CN",
+        provider: { generate: vi.fn() } as never,
+        modelRuntime: {
+          modelProfile: { operations: { sourceDiagnosis: { model: "mimo", maxOutputTokens: 1, maxInputTokens: 1, contextWindowTokens: 1, tokenizer: "t" } } },
+          tokenEstimators: { resolve: () => ({ estimateTokens: () => 1 }) }
+        } as never,
+        semanticValidation: "deferred",
+        saveCheckpoint: async (checkpoint) => {
+          saves.push(structuredClone(checkpoint));
+        }
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeTruthy();
+    expect(String((caught as Error).message)).toMatch(/question-3|diagnosis/i);
+    expect(saves.length).toBeGreaterThan(0);
+    const last = [...saves].reverse().find((row) => {
+      const packets = (row as { packetsByQuestion?: Record<string, unknown> }).packetsByQuestion;
+      return packets && packets["question-2"] && packets["question-3"];
+    }) as {
+      packetsByQuestion: Record<string, { status: string; providerAttempts: number; failureClassification: string | null; completedAt: string | null }>;
+      paidV3DiagnosisStageTimings?: Record<string, string | number>;
+    };
+    expect(last).toBeTruthy();
+    expect(last.packetsByQuestion["question-2"]!.status).toBe("completed");
+    // Orchestration records at most one step call (enhancer internal attempts are capped to 1).
+    expect(last.packetsByQuestion["question-2"]!.providerAttempts).toBe(1);
+    expect(last.packetsByQuestion["question-3"]!.status).toBe("failed");
+    expect(last.packetsByQuestion["question-3"]!.providerAttempts).toBe(1);
+    expect(last.packetsByQuestion["question-3"]!.failureClassification).toBeTruthy();
+    expect(last.packetsByQuestion["question-3"]!.completedAt).toBeTruthy();
+    expect(last.packetsByQuestion["question-1"]!.providerAttempts).toBe(0);
+    // Completion stamps must ride with the packet save (not only a later success-only write).
+    expect(last.paidV3DiagnosisStageTimings?.q2DiagnosisCompletedAt).toBeTruthy();
+    expect(last.paidV3DiagnosisStageTimings?.q3DiagnosisCompletedAt).toBeTruthy();
+    expect(last.paidV3DiagnosisStageTimings?.q2DiagnosisStartedAt).toBeTruthy();
+    expect(String(last.paidV3DiagnosisStageTimings?.sourceCollectionStartedAt)).not.toBe(
+      String(last.paidV3DiagnosisStageTimings?.sourceCollectionCompletedAt)
+    );
+    expect(q2Started).toBeGreaterThan(0);
+    expect(q3Started).toBeGreaterThan(0);
+    expect(Math.abs(q2Started - q3Started)).toBeLessThan(50);
+  });
+
+  it("invokes the diagnosis enhancer exactly once per paid question (no orchestration retry)", async () => {
+    const q1 = genCard("question-1", "source-1", true);
+    const q2 = genCard("question-2", "source-2");
+    const q3 = genCard("question-3", "source-3");
+    const calls: string[] = [];
+    diagnosisEnhancerMock.enhance.mockImplementation(async (input: { question: { questionId: string } }) => {
+      calls.push(input.question.questionId);
+      return {
+        status: "completed",
+        question: input.question,
+        diagnosis: diagnosisFor(
+          input.question.questionId === "question-2" ? "source-2" : "source-3",
+          input.question.questionId
+        ),
+        providerAttempts: 1
+      };
+    });
+    await enhanceV3AnswerCardsWithDiagnosis({
+      answerCards: [q1, q2, q3] as never,
+      checkpoint: baseCheckpoint([q1, q2, q3]) as never,
+      questionSetIdentity: "qs-1",
+      admission: admission() as never,
+      locale: "zh-CN",
+      provider: { generate: vi.fn() } as never,
+      modelRuntime: {
+        modelProfile: { operations: { sourceDiagnosis: { model: "mimo", maxOutputTokens: 1, maxInputTokens: 1, contextWindowTokens: 1, tokenizer: "t" } } },
+        tokenEstimators: { resolve: () => ({ estimateTokens: () => 1 }) }
+      } as never,
+      semanticValidation: "deferred",
+      saveCheckpoint: async () => undefined
+    });
+    expect(calls.sort()).toEqual(["question-2", "question-3"]);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("does not overwrite a completed packet when a concurrent failed write arrives later (lost-update guard)", async () => {
+    const { mergePaidV3PacketsByQuestion, buildPaidV3AnswerPacketFromGenerativeCard } = await import("./paid-v3-answer-packet");
+    const completed = buildPaidV3AnswerPacketFromGenerativeCard({
+      card: genCard("question-2", "source-2", true) as never,
+      authorityHash: hash,
+      status: "completed",
+      attemptCount: 1,
+      providerAttempts: 1,
+      startedAt: iso,
+      completedAt: iso
+    });
+    const failed = buildPaidV3AnswerPacketFromGenerativeCard({
+      card: genCard("question-2", "source-2") as never,
+      authorityHash: hash,
+      status: "failed",
+      attemptCount: 1,
+      providerAttempts: 1,
+      startedAt: iso,
+      completedAt: iso,
+      failure: { classification: "timeout", retryable: true, reason: "late fail" }
+    });
+    const merged = mergePaidV3PacketsByQuestion(
+      mergePaidV3PacketsByQuestion(undefined, completed),
+      failed
+    );
+    expect(merged["question-2"]!.status).toBe("completed");
   });
 });

@@ -1,25 +1,61 @@
 # Active Change Scope Lock
 
-Status: `FROZEN`
+Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Paid V3 linear orchestration (AnswerPacket + compact review) (FROZEN)`.
-All earlier sections are context only. **Do not edit production code while
-this scope is `FROZEN`.** Change to `APPROVED` only after the user explicitly
-approves the written allowlist below.
+`Current authority: Paid V3 linear orchestration (AnswerPacket + compact review) (APPROVED)`.
+All earlier sections are context only.
 
 ---
 
-## Current authority: Paid V3 linear orchestration (AnswerPacket + compact review) (FROZEN)
+## Current authority: Paid V3 linear orchestration (AnswerPacket + compact review) (APPROVED)
 
-**Status: `FROZEN`** — written 2026-07-31 from the user-supplied
-「Paid V3 线性编排改造计划」; **amended same day** for five pre-approval
-tightening items (exact test paths, numstat budgets, compact-vs-canonical
-authority, concrete checkpoint paths, remove
-`public-source-execution-budget.ts` from allowlist) **and** for untracked
-baseline / untracked budget audit rules. Awaiting explicit user approval of
-**this amended** allowlist before any production implementation.
+**Status: `APPROVED`** — written 2026-07-31 FROZEN; amended for five pre-approval
+tightening items and untracked baseline rules; **user authorized execution
+2026-07-31** (“我手动提交了，你开始执行吧”) after committing the scope at
+`bb43ece0704f210c9eb35b3a6d43a9d121528c56`. Implementation may touch only the
+written allowlist.
+
+### Implementation progress (implementer note — not full acceptance)
+
+**User amendment 2026-07-31 (binding for this candidate):** remove AnswerPacket
+retry/resume state machine; **each Paid V3 model step at most one call**;
+keep compact dictionary, dedupe, token gate, and Q2/Q3 parallel diagnosis.
+
+Implemented:
+
+- Q1 Free reuse: `providerAttempts = 0` (no model call)
+- Q2/Q3 diagnosis: exactly one `enhanceReportV4QuestionDiagnosis` call each,
+  via `Promise.allSettled` (parallel); no packet resume skip, no packet-layer
+  retry loop; `shouldRetryPaidV3PacketAttempt` always returns `false`;
+  `attemptCountMax = 1`
+- Final websiteSynthesis: exactly one reviewer.review after compact token gate
+- Compact: sourceDictionary + hash shells; no 4× body re-copy
+- Token gate: distinct max_input / max_output / context_window; fail-close
+  metrics via `onTransportMetrics(breakdown)` before rethrow
+- Stage timings co-persist with packets (including on Q3 fail)
+- Packets remain checkpoint snapshots only (not a resume SM)
+
+**Verification (this candidate, pre-commit):**
+
+- Allowlisted vitest (4 files): **76 PASS**
+  (`paid-v3-answer-packet`, `paid-v3-compact-review-input`,
+  `paid-v3-semantic-review`, `processor`)
+- `npm run build`: **PASS**
+- Independent no-auto-retry/resume/defer check (model-step surface):
+  - `shouldRetryPaidV3PacketAttempt` → always `false` (no caller loop)
+  - `enhanceV3AnswerCardsWithDiagnosis`: Q1 Free reuse 0 calls; Q2/Q3 each
+    one `enhanceReportV4QuestionDiagnosis`; parallel `allSettled`; no skip-
+    completed resume path
+  - `runPaidV3SemanticReview`: single `reviewer.review` after token gate
+  - Note: pre-existing **enhancer-internal** semantic/provider retry inside
+    `enhanceReportV4QuestionDiagnosis` (not on this allowlist) is unchanged;
+    orchestration records at most `providerAttempts=1` and never re-invokes
+- Budget vs `b597f96`: production **1167** / 1200; tests **931** / 1800
+- Untracked only the four allowlisted new files
+
+**Still out of this scope:** Staging deploy + new report lineage.
 
 ### Objective
 
@@ -39,11 +75,13 @@ Modify **only** Staging Paid V3 `combined_geo_report_v3` so that:
 5. Model output still applies onto the existing canonical review input,
    receipt, applied fields, and **unchanged** `CombinedGeoReportV3` /
    customer HTML contracts.
-6. Paid V3 error recovery converges to: single-call timeout; **one** retry
-   only for transient network/provider errors; **zero** retry for token /
-   contract / identity / permanent errors; resume runs only unfinished
-   packets; healthy path must not whole-phase re-enter solely because of a
-   600s stage budget.
+6. Paid V3 model steps are **strictly at most one call each** (Q1 diagnosis =
+   Free reuse / 0 calls; Q2 diagnosis ≤1; Q3 diagnosis ≤1; final synthesis ≤1).
+   **No** packet-layer automatic retry, defer-for-retry, or resume-of-unfinished
+   packets. Failures classify for metadata only (`shouldRetry` always false).
+   Healthy path must not whole-phase re-enter solely because of a 600s stage
+   budget. (Job-level PostgreSQL worker recovery remains out of this scope’s
+   model-step contract.)
 
 **Out of this implementation scope (require separate later authorization):**
 

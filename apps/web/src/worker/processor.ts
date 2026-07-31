@@ -124,7 +124,7 @@ import type { ReportV4CommerceAuthoritySnapshotSql } from "@/db/report-v4-commer
 import { enhanceReportV4QuestionDiagnosis, formatReportV4DiagnosisFailure, type ReportV4DiagnosisFailure, type ReportV4DiagnosisProvider } from "./report-v4-diagnosis-enhancer";
 import { buildReportV4MimoDiagnosisTokenBudget, createReportV4MimoDiagnosisProvider, createReportV4MimoStructuredInvoker } from "@/report-v4/mimo-provider";
 import { loadReportV4ModelRuntimeConfig } from "@/report-v4/model-runtime-config";
-import type { CombinedGeoReportV4Question, OpenGeoAnswerCardV3 } from "@open-geo-console/ai-report-engine";
+import type { CombinedGeoReportV4Question, GenerativeSearchAnswerCardV3, OpenGeoAnswerCardV3 } from "@open-geo-console/ai-report-engine";
 import {
   buildFreeTeaserDiagnosisTargetPages,
   freeTeaserCheckpointFromJobCheckpoint,
@@ -134,6 +134,15 @@ import {
 import { createSemanticReviewBatchEvidenceSink } from "./semantic-review-evidence-sink";
 import { sourceSelectionTargetFoundationHash } from "./source-selection-diagnosis";
 import { runPaidV3SemanticReview, verifyPersistedPaidV3SemanticReview } from "./paid-v3-semantic-review";
+import {
+  buildPaidV3AnswerPacketFromGenerativeCard,
+  classifyPaidV3PacketError,
+  mergePaidV3PacketsByQuestion
+} from "./paid-v3-answer-packet";
+import {
+  buildPaidV3SourceDictionary,
+  slimOriginalTextPlaceholder
+} from "./paid-v3-compact-review-input";
 
 interface StoredPageEvidence {
   page: ExtractedPage;
@@ -173,6 +182,10 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
   };
   providerDiscovery?: ProviderDiscoveryCheckpointV1;
   answerFirstV3?: AnswerFirstV3Checkpoint;
+  paidV3Review?: {
+    transportMetrics?: import("./paid-v3-compact-review-input").PaidV3TransportTokenBreakdown;
+    stageTimings?: Record<string, string | number>;
+  };
   combinedQuestionAnswers?: CombinedBusinessQuestionAnswers;
   discoverySnapshot?: DiscoverySnapshot;
   pageAnalysisContentHashes?: Record<string, string>;
@@ -1610,26 +1623,65 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         environment: process.env,
         lockedRuntime: modelRuntime
       });
-      const reviewed = await runPaidV3SemanticReview({
-        report: semanticDraft,
-        manifest: {
-          ...semanticAuthorities.manifest,
-          authorityBindings
-        },
-        sourceSelectionContext: semanticAuthorities.sourceSelectionContext,
-        answerResults: diagnosisResult.checkpoint.answerResults,
-        reviewedFreeQ1: prospectiveTeaser.reviewedFreeQ1,
-        reviewedFreeQ1Annotation,
-        reviewer: {
-          review: ({ systemText, inputText, signal }) => structuredReviewer.invoke({
-            operation: "websiteSynthesis",
-            systemText,
-            inputText,
-            signal: signal ?? new AbortController().signal
-          })
-        },
-        signal: input.signal
-      });
+      const stageTimings: Record<string, string | number> = {
+        ...(diagnosisResult.checkpoint.paidV3DiagnosisStageTimings ?? {}),
+        finalSynthesisStartedAt: new Date().toISOString()
+      };
+      const writePaidV3Meta = async (
+        metrics: import("./paid-v3-compact-review-input").PaidV3TransportTokenBreakdown | undefined,
+        timings: Record<string, string | number>
+      ) => {
+        const updated = await input.checkpointJob({
+          stage: "synthesizing",
+          phase: "grounded_answer_synthesis",
+          progress: 98,
+          checkpoint: {
+            ...checkpoint,
+            answerFirstV3: diagnosisResult.checkpoint,
+            paidV3Review: {
+              ...(metrics ? { transportMetrics: metrics } : {}),
+              ...(checkpoint.paidV3Review?.transportMetrics && !metrics
+                ? { transportMetrics: checkpoint.paidV3Review.transportMetrics }
+                : {}),
+              stageTimings: timings
+            }
+          } as JobCheckpoint,
+          ...input.coverage
+        });
+        checkpoint = normalizeCheckpoint(updated.checkpoint);
+      };
+      let reviewed: Awaited<ReturnType<typeof runPaidV3SemanticReview>>;
+      try {
+        reviewed = await runPaidV3SemanticReview({
+          report: semanticDraft,
+          manifest: { ...semanticAuthorities.manifest, authorityBindings },
+          sourceSelectionContext: semanticAuthorities.sourceSelectionContext,
+          answerResults: diagnosisResult.checkpoint.answerResults,
+          reviewedFreeQ1: prospectiveTeaser.reviewedFreeQ1,
+          reviewedFreeQ1Annotation,
+          sourceDictionary: semanticAuthorities.sourceDictionary,
+          packets: diagnosisResult.checkpoint.packetsByQuestion ?? {},
+          onTransportMetrics: (metrics) => writePaidV3Meta(metrics, {
+            ...stageTimings,
+            finalSynthesisBudgetCheckedAt: new Date().toISOString()
+          }),
+          reviewer: {
+            review: ({ systemText, inputText, signal }) => structuredReviewer.invoke({
+              operation: "websiteSynthesis",
+              systemText,
+              inputText,
+              signal: signal ?? new AbortController().signal
+            })
+          },
+          signal: input.signal
+        });
+      } catch (error) {
+        stageTimings.finalSynthesisCompletedAt = new Date().toISOString();
+        await writePaidV3Meta(checkpoint.paidV3Review?.transportMetrics, stageTimings);
+        throw error;
+      }
+      stageTimings.finalSynthesisCompletedAt = new Date().toISOString();
+      await writePaidV3Meta(reviewed.transportMetrics, stageTimings);
       const receipt = reviewed.report.semanticReviewReceipt;
       if (!receipt) throw new OrchestrationInvariantError("Reviewed Paid V3 report receipt is unavailable.");
       const semanticReview: PaidV3SemanticReviewCheckpointProjection = {
@@ -2475,7 +2527,11 @@ export function createPaidV3DiagnosisIncompleteError(
   return new PaidV3DiagnosisIncompleteError(questionId, result);
 }
 
-async function enhanceV3AnswerCardsWithDiagnosis<T extends PaidV3SemanticAnswerCardDraft>(input: {
+/**
+ * Paid V3 diagnosis: Q1 Free reuse (0 model calls); Q2/Q3 exactly one enhancer
+ * invocation each, in parallel. No packet resume and no packet-layer retry.
+ */
+export async function enhanceV3AnswerCardsWithDiagnosis<T extends PaidV3SemanticAnswerCardDraft>(input: {
   answerCards: readonly T[];
   checkpoint: AnswerFirstV3CheckpointV2;
   questionSetIdentity: string;
@@ -2486,10 +2542,9 @@ async function enhanceV3AnswerCardsWithDiagnosis<T extends PaidV3SemanticAnswerC
   semanticValidation?: "legacy" | "deferred";
   saveCheckpoint(checkpoint: AnswerFirstV3CheckpointV2): Promise<void>;
   signal?: AbortSignal;
-}): Promise<{
-  answerCards: [T, T, T];
-  checkpoint: AnswerFirstV3CheckpointV2;
-}> {
+}): Promise<{ answerCards: [T, T, T]; checkpoint: AnswerFirstV3CheckpointV2 }> {
+  type GenCard = Extract<PaidV3SemanticAnswerCardDraft, { answerMode: "generative_search_v1" }>;
+  type Diag = NonNullable<GenerativeSearchAnswerCardV3["diagnosis"]>;
   const diagnosisInputs = input.answerCards.map((card) => ({
     questionId: card.questionId,
     targetPages: buildFreeTeaserDiagnosisTargetPages(card.questionId, input.admission)
@@ -2506,88 +2561,118 @@ async function enhanceV3AnswerCardsWithDiagnosis<T extends PaidV3SemanticAnswerC
     locale: input.locale,
     evidence: diagnosisInputs
   })).digest("hex");
-  if (input.checkpoint.diagnosisIdentityHash &&
-      input.checkpoint.diagnosisIdentityHash !== diagnosisIdentityHash) {
+  if (input.checkpoint.diagnosisIdentityHash && input.checkpoint.diagnosisIdentityHash !== diagnosisIdentityHash) {
     throw new OrchestrationInvariantError("Paid V3 diagnosis checkpoint identity does not match current question evidence.");
   }
-
   let checkpoint = input.checkpoint;
   const diagnosisByQuestion = { ...(checkpoint.diagnosisByQuestion ?? {}) };
-  for (let index = 0; index < input.answerCards.length; index += 1) {
-    input.signal?.throwIfAborted();
+  let packetsByQuestion = { ...(checkpoint.packetsByQuestion ?? {}) };
+  const stageTimings: Record<string, string | number> = {};
+  let writeChain: Promise<void> = Promise.resolve();
+  const enqueue = (mutator: (c: AnswerFirstV3CheckpointV2) => AnswerFirstV3CheckpointV2) => {
+    writeChain = writeChain.then(async () => {
+      checkpoint = mutator(checkpoint);
+      await input.saveCheckpoint(checkpoint);
+    });
+    return writeChain;
+  };
+  const gen = (index: number): GenCard => {
     const card = input.answerCards[index]!;
     if (card.answerMode !== "generative_search_v1") {
       throw new OrchestrationInvariantError("Prospective V3 per-question diagnosis requires generative answer cards.");
     }
-    const targetPages = diagnosisInputs[index]!.targetPages;
-    let diagnosis = diagnosisByQuestion[card.questionId];
-    if (input.semanticValidation === "deferred" && index === 0) {
+    return card as GenCard;
+  };
+  const parseDiag = (value: unknown, card: GenCard) => parseReportV4DiagnosisOutputForQuestion(value, {
+    questionId: card.questionId, sourceEvidenceIds: card.sources.map((s) => s.sourceId)
+  }, { semanticValidation: input.semanticValidation });
+  const ep = input.checkpoint.engineProvenance;
+  if (ep?.searchedAt) stageTimings.sourceCollectionStartedAt = ep.searchedAt;
+  if (ep?.evidenceCutoffAt) stageTimings.sourceCollectionCompletedAt = ep.evidenceCutoffAt;
+  const answers = input.checkpoint.answerResults;
+  if (answers?.[1]) { stageTimings.q2AnswerStartedAt = answers[1].searchedAt; stageTimings.q2AnswerCompletedAt = answers[1].completedAt; }
+  if (answers?.[2]) { stageTimings.q3AnswerStartedAt = answers[2].searchedAt; stageTimings.q3AnswerCompletedAt = answers[2].completedAt; }
+  const t0 = Date.now();
+  const persist = async (card: GenCard, diagnosis: Diag | null, status: "completed" | "failed", providerAttempts: number, startedAt: string, error?: unknown) => {
+    const attempts = Math.min(1, Math.max(0, providerAttempts)); // orchestration layer: at most one step call
+    const classified = error ? classifyPaidV3PacketError(error) : null;
+    const packet = buildPaidV3AnswerPacketFromGenerativeCard({
+      card: (diagnosis ? { ...card, diagnosis } : { ...card, diagnosis: undefined }) as never,
+      authorityHash: diagnosisIdentityHash, status, attemptCount: attempts, providerAttempts: attempts,
+      startedAt, completedAt: new Date().toISOString(),
+      ...(status === "failed" && classified ? {
+        failure: {
+          classification: classified.classification, retryable: false,
+          reason: error instanceof Error ? error.message : String(error ?? "failed")
+        }
+      } : {})
+    });
+    if (diagnosis) diagnosisByQuestion[card.questionId] = diagnosis;
+    packetsByQuestion = mergePaidV3PacketsByQuestion(packetsByQuestion, packet) as typeof packetsByQuestion;
+    stageTimings.aggregateProviderAttempts = Object.values(packetsByQuestion).reduce((n, p) => n + p.providerAttempts, 0);
+    stageTimings.stageDurationMs = Date.now() - t0;
+    await enqueue((c) => ({
+      ...c, diagnosisIdentityHash,
+      diagnosisByQuestion: { ...(c.diagnosisByQuestion ?? {}), ...diagnosisByQuestion },
+      packetsByQuestion: { ...(c.packetsByQuestion ?? {}), ...packetsByQuestion },
+      paidV3DiagnosisStageTimings: { ...stageTimings }
+    }));
+  };
+  const runOne = async (index: 0 | 1 | 2): Promise<void> => {
+    input.signal?.throwIfAborted();
+    const card = gen(index);
+    const key = (`q${index + 1}Diagnosis`) as "q1Diagnosis" | "q2Diagnosis" | "q3Diagnosis";
+    const startedAt = new Date().toISOString();
+    stageTimings[`${key}StartedAt`] = startedAt;
+    const done = () => { stageTimings[`${key}CompletedAt`] = new Date().toISOString(); };
+    // Q1 Free reuse: zero model calls. No packet resume path.
+    if (index === 0 && input.semanticValidation === "deferred") {
       if (!("diagnosis" in card) || !card.diagnosis) {
         throw new OrchestrationInvariantError("Deferred Paid V3 must reuse the reviewed Free Q1 diagnosis.");
       }
-      diagnosis = parseReportV4DiagnosisOutputForQuestion(card.diagnosis, {
-        questionId: card.questionId,
-        sourceEvidenceIds: card.sources.map(({ sourceId }) => sourceId)
-      }, { semanticValidation: "deferred" });
-      diagnosisByQuestion[card.questionId] = diagnosis;
-      continue;
+      done();
+      await persist(card, parseDiag(card.diagnosis, card), "completed", 0, startedAt);
+      return;
     }
-    if (diagnosis) {
-      diagnosis = parseReportV4DiagnosisOutputForQuestion(diagnosis, {
-        questionId: card.questionId,
-        sourceEvidenceIds: card.sources.map(({ sourceId }) => sourceId)
-      }, { semanticValidation: input.semanticValidation });
-    } else {
+    // Exactly one enhancer invocation per paid diagnosis step (no orchestration retry).
+    try {
       const result = await enhanceReportV4QuestionDiagnosis({
-        question: v3CardToV4Question(card, index),
-        locale: input.locale,
-        targetPages,
+        question: v3CardToV4Question(card, index), locale: input.locale, targetPages: diagnosisInputs[index]!.targetPages,
         provider: input.provider,
-        getTokenBudget: (request) => buildReportV4MimoDiagnosisTokenBudget({
-          runtime: input.modelRuntime,
-          request
-        }),
-        semanticValidation: input.semanticValidation,
-        signal: input.signal
+        getTokenBudget: (request) => buildReportV4MimoDiagnosisTokenBudget({ runtime: input.modelRuntime, request }),
+        semanticValidation: input.semanticValidation, signal: input.signal
       });
       if (result.status !== "completed") {
-        throw createPaidV3DiagnosisIncompleteError(card.questionId, result);
+        const err = createPaidV3DiagnosisIncompleteError(card.questionId, result);
+        done();
+        await persist(card, null, "failed", Math.min(1, result.providerAttempts || 1), startedAt, err);
+        throw err;
       }
-      diagnosis = parseReportV4DiagnosisOutputForQuestion(result.diagnosis, {
-        questionId: card.questionId,
-        sourceEvidenceIds: card.sources.map(({ sourceId }) => sourceId)
-      }, { semanticValidation: input.semanticValidation });
-      diagnosisByQuestion[card.questionId] = diagnosis;
-      checkpoint = {
-        ...checkpoint,
-        diagnosisIdentityHash,
-        diagnosisByQuestion
-      };
-      await input.saveCheckpoint(checkpoint);
+      done();
+      await persist(card, parseDiag(result.diagnosis, card), "completed", Math.min(1, result.providerAttempts || 1), startedAt);
+    } catch (error) {
+      if (packetsByQuestion[card.questionId]?.status === "failed") throw error;
+      done();
+      await persist(card, null, "failed", 1, startedAt, error);
+      throw error;
     }
-  }
-
-  const enhanced = input.answerCards.map((card) => ({
-    ...card,
-    diagnosis: diagnosisByQuestion[card.questionId]!
-  })) as [T, T, T];
+  };
+  await runOne(0);
+  const settled = await Promise.allSettled([runOne(1), runOne(2)]);
+  await writeChain;
+  const rejected = settled.find((row): row is PromiseRejectedResult => row.status === "rejected");
+  if (rejected) throw rejected.reason;
+  const enhanced = input.answerCards.map((card) => ({ ...card, diagnosis: diagnosisByQuestion[card.questionId]! })) as [T, T, T];
+  stageTimings.stageDurationMs = Date.now() - t0;
+  stageTimings.aggregateProviderAttempts = Object.values(packetsByQuestion).reduce((n, p) => n + p.providerAttempts, 0);
   const ready: AnswerFirstV3CheckpointV2 = {
-    ...checkpoint,
-    stage: "per_question_diagnosis_ready",
-    diagnosisIdentityHash,
-    diagnosisByQuestion,
+    ...checkpoint, stage: "per_question_diagnosis_ready", diagnosisIdentityHash, diagnosisByQuestion, packetsByQuestion,
+    paidV3DiagnosisStageTimings: stageTimings,
     ...(input.semanticValidation === "deferred" ? {} : {
-      answerCards: enhanced as [
-        Extract<OpenGeoAnswerCardV3, { answerMode: "generative_search_v1" }>,
-        Extract<OpenGeoAnswerCardV3, { answerMode: "generative_search_v1" }>,
-        Extract<OpenGeoAnswerCardV3, { answerMode: "generative_search_v1" }>
-      ]
+      answerCards: enhanced as [Extract<OpenGeoAnswerCardV3, { answerMode: "generative_search_v1" }>, Extract<OpenGeoAnswerCardV3, { answerMode: "generative_search_v1" }>, Extract<OpenGeoAnswerCardV3, { answerMode: "generative_search_v1" }>]
     })
   };
-  if (checkpoint.stage !== ready.stage ||
-      JSON.stringify(checkpoint.answerCards) !== JSON.stringify(ready.answerCards)) {
-    await input.saveCheckpoint(ready);
-  }
+  await input.saveCheckpoint(ready);
   return { answerCards: enhanced, checkpoint: ready };
 }
 
@@ -2669,6 +2754,7 @@ function buildPaidV3SemanticAuthorities(input: {
   answerCards: [PaidV3GenerativeDraftCard, PaidV3GenerativeDraftCard, PaidV3GenerativeDraftCard];
   manifest: Parameters<typeof runPaidV3SemanticReview>[0]["manifest"];
   sourceSelectionContext: Parameters<typeof runPaidV3SemanticReview>[0]["sourceSelectionContext"];
+  sourceDictionary: ReturnType<typeof buildPaidV3SourceDictionary>;
 } {
   if (input.answerCards.length !== 3 || input.answerCards.some((card) => card.answerMode !== "generative_search_v1")) {
     throw new Error("Reviewed Paid V3 requires exactly three generative answer drafts.");
@@ -2677,26 +2763,28 @@ function buildPaidV3SemanticAuthorities(input: {
   const canonicalQuestions = toCanonicalBuyerQuestionSet(input.questionSet).questions;
   if (canonicalQuestions.length !== 3) throw new Error("Reviewed Paid V3 requires exactly three canonical questions.");
   const auditByUrl = new Map(input.storedSources.map((source) => [canonicalUrl(source.canonicalUrl), source]));
+  const seenSourceIds = new Set<string>();
+  const sourceDictionary = buildPaidV3SourceDictionary(answerCards.flatMap((card) => card.sources.flatMap((source) => {
+    if (seenSourceIds.has(source.sourceId)) return [];
+    seenSourceIds.add(source.sourceId);
+    const audit = auditByUrl.get(canonicalUrl(source.canonicalUrl));
+    return [{
+      sourceId: source.sourceId,
+      canonicalUrl: source.canonicalUrl,
+      title: source.title,
+      citedText: source.citedText,
+      auditExcerpt: audit?.exactExcerpt ?? null
+    }];
+  })));
   const sources = answerCards.flatMap((card) => card.sources.map((source) => {
     const audit = auditByUrl.get(canonicalUrl(source.canonicalUrl));
-    // W4 rule 1: search-cited body-unavailable sources stay citable as
-    // search_summary_only; inaccessible / never-searched stay ineligible.
     const catalog = paidV3SemanticSourceCatalogEligibility({
       retrievalStatus: source.retrievalStatus,
       auditRetrievalReady: audit?.retrievalReady === true,
       auditExactExcerpt: audit?.exactExcerpt ?? null
     });
-    const originalText = JSON.stringify({
-      title: source.title,
-      canonicalUrl: source.canonicalUrl,
-      registrableDomain: source.registrableDomain,
-      citedText: source.citedText,
-      auditExcerpt: audit?.exactExcerpt ?? null,
-      retrievalStatus: source.retrievalStatus,
-      ownershipCategory: source.ownershipCategory,
-      providerResultOrder: source.providerResultOrder,
-      evidenceMode: catalog.evidenceMode
-    });
+    const entry = sourceDictionary[source.sourceId]!;
+    const originalText = slimOriginalTextPlaceholder(source.sourceId, entry.hashes.bodyHash);
     return {
       sourceId: source.sourceId,
       questionId: card.questionId,
@@ -2707,14 +2795,17 @@ function buildPaidV3SemanticAuthorities(input: {
     };
   }));
   const sourceIds = new Set(sources.map(({ sourceId }) => sourceId));
-  const sourceEvidence = sources.map((source) => ({
-    evidenceId: source.sourceId,
-    questionId: source.questionId,
-    sourceId: source.sourceId,
-    originalText: source.originalText,
-    originalTextHash: source.originalTextHash,
-    eligible: source.eligible
-  }));
+  const sourceEvidence = sources.map((source) => {
+    const originalText = slimOriginalTextPlaceholder(`evidence:${source.sourceId}`, source.originalTextHash);
+    return {
+      evidenceId: source.sourceId,
+      questionId: source.questionId,
+      sourceId: source.sourceId,
+      originalText,
+      originalTextHash: reportSemanticTextHash(originalText),
+      eligible: source.eligible
+    };
+  });
   const targetEvidence = answerCards.flatMap((card) =>
     buildFreeTeaserDiagnosisTargetPages(card.questionId, input.admission).flatMap((page) =>
       page.sourceLocations.map((location) => {
@@ -2766,20 +2857,26 @@ function buildPaidV3SemanticAuthorities(input: {
     eligible: true
   };
   const evidence = [...sourceEvidence, ...targetEvidence, ...targetPageEvidence, identityEvidence];
-  const observationResults = sources.map((source, index) => ({
-    observationId: `paid-v3-answer-source-observation:${index + 1}:${source.questionId}`,
-    resultId: source.sourceId,
-    questionId: source.questionId!,
-    originalText: source.originalText,
-    originalTextHash: source.originalTextHash
-  }));
-  const entities = sources.map((source, index) => ({
-    entityId: `paid-v3-source-entity:${index + 1}:${createHash("sha256").update(`${source.questionId}\0${source.sourceId}`).digest("hex").slice(0, 16)}`,
-    questionId: source.questionId,
-    kind: "competitor_candidate" as const,
-    originalText: source.originalText,
-    originalTextHash: source.originalTextHash
-  }));
+  const observationResults = sources.map((source, index) => {
+    const originalText = slimOriginalTextPlaceholder(`observation:${source.sourceId}:${index}`, source.originalTextHash);
+    return {
+      observationId: `paid-v3-answer-source-observation:${index + 1}:${source.questionId}`,
+      resultId: source.sourceId,
+      questionId: source.questionId!,
+      originalText,
+      originalTextHash: reportSemanticTextHash(originalText)
+    };
+  });
+  const entities = sources.map((source, index) => {
+    const originalText = slimOriginalTextPlaceholder(`entity:${source.sourceId}:${index}`, source.originalTextHash);
+    return {
+      entityId: `paid-v3-source-entity:${index + 1}:${createHash("sha256").update(`${source.questionId}\0${source.sourceId}`).digest("hex").slice(0, 16)}`,
+      questionId: source.questionId,
+      kind: "competitor_candidate" as const,
+      originalText,
+      originalTextHash: reportSemanticTextHash(originalText)
+    };
+  });
   const targetHost = new URL(input.targetUrl).hostname;
   const targetAliases = [
     targetHost,
@@ -2905,6 +3002,7 @@ function buildPaidV3SemanticAuthorities(input: {
 
   return {
     answerCards,
+    sourceDictionary,
     manifest: {
       locale: input.questionSet.locale,
       target: { siteKey: targetHost, targetUrl: input.targetUrl, aliases: targetAliases },

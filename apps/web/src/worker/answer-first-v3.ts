@@ -78,6 +78,10 @@ export interface AnswerFirstV3CheckpointV2 {
   sourceSelectionDiagnosis?: SourceSelectionDiagnosisV1;
   diagnosisIdentityHash?: string;
   diagnosisByQuestion?: Record<string, NonNullable<GenerativeSearchAnswerCardV3["diagnosis"]>>;
+  /** Per-question Paid V3 answer packets (checkpoint snapshots; not a resume SM). */
+  packetsByQuestion?: Record<string, import("./paid-v3-answer-packet").PaidV3AnswerPacketV1>;
+  /** Diagnosis-phase timings merged into checkpoint.paidV3Review.stageTimings by the orchestrator. */
+  paidV3DiagnosisStageTimings?: Record<string, string | number>;
 }
 
 export type AnswerFirstV3Checkpoint = AnswerFirstV3CheckpointV1 | AnswerFirstV3CheckpointV2;
