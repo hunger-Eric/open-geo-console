@@ -1,22 +1,20 @@
 # Active Change Scope Lock
 
-Status: `FROZEN`
+Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Staging deploy + new Paid V3 lineage for f879808 (FROZEN)`.
-All earlier sections are context only. **Do not deploy or create a report
-until this scope is explicitly APPROVED.**
+`Current authority: Staging deploy + new Paid V3 lineage for f879808 (APPROVED)`.
+All earlier sections are context only.
 
 ---
 
-## Current authority: Staging deploy + new Paid V3 lineage for f879808 (FROZEN)
+## Current authority: Staging deploy + new Paid V3 lineage for f879808 (APPROVED)
 
-**Status: `FROZEN`** — written 2026-07-31 after implementation candidate
-`f879808b5a0a1021683087df208feccb794c22cd` was committed. No Staging
-mutation, Docker build, Preview deploy, report, crawl, model call, order,
-payment, refund, or email may start until the user explicitly approves this
-allowlist.
+**Status: `APPROVED`** — written 2026-07-31 FROZEN; **user approved 2026-07-31**
+(“批准”) for Gates 1–4: thin Staging deploy of
+`f879808b5a0a1021683087df208feccb794c22cd` plus one wholly new free→paid
+lineage. Touch only the written allowlist and expensive-action caps.
 
 ### Objective
 
