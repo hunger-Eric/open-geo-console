@@ -39,7 +39,17 @@
 - Do not repeat a completed crawl, model run, payment, refund, email pass, deployment, or other costly external workflow unless the active scope explicitly authorizes the repeat and records why existing evidence is invalid.
 - Before every commit, compare the complete diff with the approved allowlist and budget. Any out-of-scope path or behavior makes the task fail closed: do not commit it, remove only the agent-owned out-of-scope edit, and request user direction.
 - The active scope lock overrides implementation plans, old chat instructions, inferred cleanup work, and convenience refactors. User-owned dirty files remain untouched.
-- Personal work remains on an ordinary branch; do not create or use additional worktrees for personal changes.
+- Temporary task/personal branches may be used only when necessary; do not create additional worktrees, and close them under the branch lifecycle rules below.
+
+## Branch Lifecycle and Task Closeout
+
+- `main` is the only default long-lived branch. Temporary branches require a clear task purpose and must not become long-lived state.
+- A task branch is complete only after proportionate verification passes, every retained commit is reachable from `main`, local and remote `main` identity is verified, and temporary local and remote branches are deleted.
+- Before branch operations, verify cwd, remotes, full SHA, status, worktrees, and branch reachability. Stop on dirty worktrees, unique unresolved commits, or conflicts.
+- `main` may advance only by fast-forward or an explicitly approved ordinary merge; force-push and history rewriting are forbidden.
+- Remote push, merge, and branch deletion still require current explicit authorization. Without it, report `closeout pending` and do not claim full completion.
+- If a branch is occupied by another worktree, detach or remove it only when that worktree is clean and its retained commits already have an authoritative reachable location; deleting the directory requires separate authorization. Never overwrite user changes.
+- After closeout, reread `git status`, `git branch -a`, `git ls-remote --heads`, and `git worktree list`, and report the `main` SHA, cleanliness, and remaining refs/worktrees.
 
 ## Core Commands
 
