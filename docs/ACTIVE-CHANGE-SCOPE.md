@@ -1,23 +1,170 @@
 # Active Change Scope Lock
 
-Status: `APPROVED`
+Status: `FROZEN`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Paid V3 linear orchestration (AnswerPacket + compact review) (APPROVED)`.
-All earlier sections are context only.
+`Current authority: Staging deploy + new Paid V3 lineage for f879808 (FROZEN)`.
+All earlier sections are context only. **Do not deploy or create a report
+until this scope is explicitly APPROVED.**
 
 ---
 
-## Current authority: Paid V3 linear orchestration (AnswerPacket + compact review) (APPROVED)
+## Current authority: Staging deploy + new Paid V3 lineage for f879808 (FROZEN)
 
-**Status: `APPROVED`** — written 2026-07-31 FROZEN; amended for five pre-approval
-tightening items and untracked baseline rules; **user authorized execution
-2026-07-31** (“我手动提交了，你开始执行吧”) after committing the scope at
-`bb43ece0704f210c9eb35b3a6d43a9d121528c56`. Implementation may touch only the
-written allowlist.
+**Status: `FROZEN`** — written 2026-07-31 after implementation candidate
+`f879808b5a0a1021683087df208feccb794c22cd` was committed. No Staging
+mutation, Docker build, Preview deploy, report, crawl, model call, order,
+payment, refund, or email may start until the user explicitly approves this
+allowlist.
 
-### Implementation progress (implementer note — not full acceptance)
+### Objective
+
+1. Deploy **one** Staging candidate built from
+   `f879808b5a0a1021683087df208feccb794c22cd` (Paid V3 compact + one-call
+   model steps; no packet retry/resume SM).
+2. After Gates 1–3 pass, run **exactly one wholly new** free→paid Staging
+   report lineage (Gate 4) and record:
+   - wall-clock total duration (job start → paid terminal / HTML ready)
+   - Paid V3 model step call counts (Q1 diagnosis = 0; Q2 diagnosis ≤1;
+     Q3 diagnosis ≤1; final websiteSynthesis ≤1; no packet-layer retry)
+   - compact transport token metrics (`paidV3Review.transportMetrics` /
+     estimate under `websiteSynthesis` 131072 input lock)
+   - final customer HTML accessibility and completeness for that report
+
+Target band for healthy wall time remains **3–6 minutes** for the Paid V3
+deep phase when evidence is normal; measure and report actuals either way.
+
+### Baseline (recorded at FROZEN write)
+
+| Item | Value |
+|---|---|
+| Candidate commit (exact) | `f879808b5a0a1021683087df208feccb794c22cd` |
+| Branch | `codex/staging-runtime-evidence-4112c2e` |
+| Current Staging Worker image | `open-geo-console:staging-b597f96-overlay-v1` (`5ce966c9029b`) |
+| Current Staging containers | `open-geo-console-staging-worker-free-1`, `…-deep-1` on above image |
+| Rollback Worker image | **same current** `staging-b597f96-overlay-v1` (`5ce966c9029b`) until candidate verified |
+| Full Worker base (overlay FROM) | `open-geo-console:staging-330b27a74c5c3d9d56c71bc8e6ade1859499e92e-full-v1` (`748e2675f280`) |
+| Disk at FROZEN | E: **~85.6 GiB free**; Docker images 60 / ~34.2GB |
+| package-lock / Dockerfile.worker / base digest | **unchanged** vs full base → **full Worker rebuild forbidden** |
+| Historical frozen identities (never replay) | reports/jobs `55770e59`, `d6a98e5e`, `6704ad4f`, `7373d419`, `7aaf726c` |
+
+### Allowed actions (only after APPROVED)
+
+**Gate 1 — preflight (read-only first, then deploy prep):**
+
+- Confirm Staging DB marker / env; zero claimable or running Staging jobs
+  before cutover (or wait/drain only; no force-fail historical jobs).
+- Re-record disk free space and `docker system df`.
+- Push candidate SHA if not on origin; clean detached worktree at
+  `f879808…` under `.data/staging-release-f879808/`.
+- One Staging Preview for the candidate (git integration or CLI deploy from
+  that worktree only).
+
+**Gate 2 — thin overlay only:**
+
+- Build **one** thin source-overlay image:
+  - path: `.data/staging-release-f879808/Dockerfile.overlay`
+  - `FROM open-geo-console:staging-330b27a74c5c3d9d56c71bc8e6ade1859499e92e-full-v1`
+  - `COPY apps/ packages/` only; label revision = full `f879808…` SHA
+  - tag: `open-geo-console:staging-f879808-overlay-v1`
+- Set `.data/workstation-docker/staging.env` `OGC_DEPLOYMENT_VERSION` to full
+  candidate SHA.
+- Recreate **only** `staging-worker-free` and `staging-worker-deep`.
+- Roles after verify: candidate = new overlay image ID; current retained as
+  rollback = `5ce966c9029b` (`staging-b597f96-overlay-v1`); no other image
+  deletion unless this scope later records exact unreferenced IDs.
+- Move fixed Protected Staging alias **once** to the candidate Preview.
+
+**Gate 3 — protection smoke only:**
+
+- Anonymous `/zh` protection, `POST /api/scan` rejected, catalog protection
+  as per `docs/PROTECTED-STAGING-OPERATIONS.md`.
+- **No** report/crawl/model/order/payment/refund/email from smoke.
+
+**Gate 4 — one wholly new lineage (only after Gate 3 pass + explicit user
+OK if user wants a second confirmation; otherwise APPROVED of this whole
+scope authorizes Gate 4):**
+
+- One new Staging free report on a **new** site/URL (not historical IDs).
+- One Sandbox payment → exactly-once Paid V3 deep job for that report only.
+- Capture evidence:
+  - job/report IDs, stage timestamps, `paidV3DiagnosisStageTimings`,
+    `paidV3Review.stageTimings` / `transportMetrics`
+  - packet `providerAttempts` (Q1=0, Q2≤1, Q3≤1)
+  - token estimate vs 131072 lock
+  - authorized customer HTML fetch success
+- On any terminal failure: **stop**; no retry/resume/repair of that lineage;
+  write a new FROZEN repair scope.
+
+### File allowlist (this scope)
+
+| Path | Purpose |
+|---|---|
+| `docs/ACTIVE-CHANGE-SCOPE.md` | Status / completion records |
+| `.data/staging-release-f879808/**` | Detached worktree + Dockerfile.overlay (ephemeral deploy artifact; not committed) |
+| `.data/workstation-docker/staging.env` | `OGC_DEPLOYMENT_VERSION` only |
+| `.data/workstation-docker/staging-head.override.yaml` | Image tag for the two staging workers only |
+
+**No production application source edits.** Candidate code is already at
+`f879808`. Any required code fix is a **new** scope.
+
+### Forbidden
+
+- Production Web/Workers/data/commerce.
+- Full Worker image rebuild (`npm ci`, Playwright, base OS packages).
+- Broad Docker prune / image mass delete.
+- Historical report/job/order replay, resume, refund, or clone.
+- Second Staging report/payment without a new approved scope.
+- Changing `websiteSynthesis.maxInputTokens` (remains 131072).
+- Code/test changes outside this scope’s file allowlist.
+
+### Diff budget
+
+- Application production/test: **0** (already committed at `f879808`).
+- Scope doc edits only for status transitions and evidence tables.
+
+### Expensive external actions (cap)
+
+| Action | Max count |
+|---|---|
+| `git push` of candidate (if needed) | 1 |
+| Staging Preview deploy | 1 |
+| Thin overlay Docker build | 1 |
+| Staging free+deep container recreate | 1 pair |
+| Fixed alias move | 1 |
+| Free report submission | 1 (new lineage) |
+| Sandbox payment / Paid deep job | 1 |
+| Customer HTML open/fetch | as needed for that one report only |
+
+### Acceptance checks
+
+1. Both Staging workers image ID = candidate overlay; `OGC_DEPLOYMENT_VERSION`
+   = full `f879808…`; restart count 0; ready; no unexpected claimed work at
+   cutover end.
+2. Gate 3 smoke green; no smoke-created commercial artifacts.
+3. One new free→paid lineage reaches Paid V3 terminal with accessible HTML
+   **or** fail-closed with recorded root cause and no silent retry.
+4. Evidence table filled: wall time, call counts, token metrics, HTML status.
+5. Production never touched; historical IDs untouched.
+
+### Rollback
+
+If Gate 2/3 fails after cutover: restore workers to
+`open-geo-console:staging-b597f96-overlay-v1` (`5ce966c9029b`), restore
+`OGC_DEPLOYMENT_VERSION` / alias to pre-cutover values, stop. No second
+overlay build without re-approval.
+
+---
+
+## Previous authority: Paid V3 linear orchestration (AnswerPacket + compact review) (APPROVED — implementation complete)
+
+**Status was `APPROVED`** — implementation committed at
+`f879808b5a0a1021683087df208feccb794c22cd`. Superseded as **current** by the
+Staging deploy FROZEN scope above. Code contract remains binding for that
+SHA.
+
+### Implementation progress (closed for this code candidate)
 
 **User amendment 2026-07-31 (binding for this candidate):** remove AnswerPacket
 retry/resume state machine; **each Paid V3 model step at most one call**;
@@ -37,27 +184,15 @@ Implemented:
 - Stage timings co-persist with packets (including on Q3 fail)
 - Packets remain checkpoint snapshots only (not a resume SM)
 
-**Verification (this candidate, pre-commit):**
+**Verification (candidate commit f879808):**
 
 - Allowlisted vitest (4 files): **76 PASS**
-  (`paid-v3-answer-packet`, `paid-v3-compact-review-input`,
-  `paid-v3-semantic-review`, `processor`)
 - `npm run build`: **PASS**
-- Independent no-auto-retry/resume/defer check (model-step surface):
-  - `shouldRetryPaidV3PacketAttempt` → always `false` (no caller loop)
-  - `enhanceV3AnswerCardsWithDiagnosis`: Q1 Free reuse 0 calls; Q2/Q3 each
-    one `enhanceReportV4QuestionDiagnosis`; parallel `allSettled`; no skip-
-    completed resume path
-  - `runPaidV3SemanticReview`: single `reviewer.review` after token gate
-  - Note: pre-existing **enhancer-internal** semantic/provider retry inside
-    `enhanceReportV4QuestionDiagnosis` (not on this allowlist) is unchanged;
-    orchestration records at most `providerAttempts=1` and never re-invokes
+- Independent no-auto-retry/resume/defer check on model-step surface (see
+  progress notes above)
 - Budget vs `b597f96`: production **1167** / 1200; tests **931** / 1800
-- Untracked only the four allowlisted new files
 
-**Still out of this scope:** Staging deploy + new report lineage.
-
-### Objective
+### Objective (historical — code work)
 
 Modify **only** Staging Paid V3 `combined_geo_report_v3` so that:
 
