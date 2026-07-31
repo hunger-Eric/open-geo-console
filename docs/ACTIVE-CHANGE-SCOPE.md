@@ -1,13 +1,513 @@
 # Active Change Scope Lock
 
-Status: `APPROVED`
+Status: `FROZEN`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Protected Staging deployment of the duplicate-sourceId fix (APPROVED)`.
-All earlier sections are context only.
+`Current authority: Paid V3 linear orchestration (AnswerPacket + compact review) (FROZEN)`.
+All earlier sections are context only. **Do not edit production code while
+this scope is `FROZEN`.** Change to `APPROVED` only after the user explicitly
+approves the written allowlist below.
 
-## Current authority: Protected Staging deployment of the duplicate-sourceId fix (APPROVED)
+---
+
+## Current authority: Paid V3 linear orchestration (AnswerPacket + compact review) (FROZEN)
+
+**Status: `FROZEN`** — written 2026-07-31 from the user-supplied
+「Paid V3 线性编排改造计划」; **amended same day** for five pre-approval
+tightening items (exact test paths, numstat budgets, compact-vs-canonical
+authority, concrete checkpoint paths, remove
+`public-source-execution-budget.ts` from allowlist) **and** for untracked
+baseline / untracked budget audit rules. Awaiting explicit user approval of
+**this amended** allowlist before any production implementation.
+
+### Objective
+
+Modify **only** Staging Paid V3 `combined_geo_report_v3` so that:
+
+1. **Q1 is reused** from the already-reviewed Free checkpoint (zero new model
+   calls for Q1 answer/diagnosis).
+2. **Q2 and Q3** run independent parallel paths (answer already parallel;
+   diagnosis becomes parallel).
+3. Each question produces a bounded **`PaidV3AnswerPacketV1`**, checkpointed
+   per question on completion.
+4. Final **websiteSynthesis** receives only: three AnswerPackets + one
+   deduped `sourceDictionary` + necessary target/evidence refs + reviewable
+   prose fields + authority hashes — **not** four catalogs that re-copy the
+   same source body text (root cause of estimate **174024 > 131072** on
+   historical failed job `d6a98e5e`, report `55770e59` — frozen forever).
+5. Model output still applies onto the existing canonical review input,
+   receipt, applied fields, and **unchanged** `CombinedGeoReportV3` /
+   customer HTML contracts.
+6. Paid V3 error recovery converges to: single-call timeout; **one** retry
+   only for transient network/provider errors; **zero** retry for token /
+   contract / identity / permanent errors; resume runs only unfinished
+   packets; healthy path must not whole-phase re-enter solely because of a
+   600s stage budget.
+
+**Out of this implementation scope (require separate later authorization):**
+
+- Staging deployment of a new candidate image.
+- One wholly new Staging report/order/payment lineage for Gate 4 acceptance.
+- Production anything.
+- Replay/resume/repair of any historical report/job/order (including
+  `55770e59`, `d6a98e5e`, `6704ad4f`, `7373d419`, `7aaf726c`).
+
+### Baseline
+
+| Item | Value |
+|---|---|
+| Baseline HEAD (exact) | `b597f968c16842d39a154493cdff3f5b9911c22f` |
+| Branch (working) | `codex/staging-runtime-evidence-4112c2e` |
+| Staging Worker image (current) | `staging-b597f96-overlay-v1` |
+| Locked final review operation budget | `websiteSynthesis.maxInputTokens = 131072` (do **not** raise) |
+| Known failure evidence (context only) | report `55770e59`, paid job `d6a98e5e`, estimate 174024 > 131072 |
+
+Confirmed product facts (do not regress):
+
+- Q1 already reuses Free results and must not re-call the provider.
+- Q2/Q3 answer generation is already parallel; keep that.
+- Q2/Q3 diagnosis is currently serial (`processor.ts` ~2514 region) — make parallel.
+- Do **not** modify diagnosis `semanticProjection` (not the 174024 main path).
+- Final review currently re-expands source bodies across sources/evidence/
+  observations/entities + bloated `sourceSelectionCatalog`.
+
+### Production file allowlist
+
+**5 existing + 2 new** (tightened 2026-07-31: `public-source-execution-budget.ts`
+removed — see § defer localization).
+
+Existing (edit only as required by the objective):
+
+- `apps/web/src/worker/processor.ts`
+- `apps/web/src/worker/answer-first-v3.ts`
+- `apps/web/src/worker/paid-v3-semantic-review.ts`
+- `packages/ai-report-engine/src/report-semantic-review-manifests.ts`
+- `packages/ai-report-engine/src/report-semantic-review.ts`
+
+New narrow modules (create only these two unless contract forces a stop-and-report):
+
+- `apps/web/src/worker/paid-v3-answer-packet.ts`
+- `apps/web/src/worker/paid-v3-compact-review-input.ts`
+
+Scope-document only (not counted in production/test budgets):
+
+- `docs/ACTIVE-CHANGE-SCOPE.md` (status transitions and completion records)
+
+**Not on allowlist (must not change under this scope):**
+
+- `apps/web/src/worker/public-source-execution-budget.ts` — shared 600s budget
+  module. Paid V3 defer localization is done **only** by adjusting Paid V3
+  gate **call sites** in `processor.ts` (persist completed packets first;
+  only unfinished public-source work may defer). Default 600s behavior for
+  Free/V2/other workers must remain unchanged. If an implementer later
+  proves the budget module itself must change: **stop**, request scope
+  expansion that names (1) Paid-V3-only new API, (2) unique call site,
+  (3) Free/V2 regression tests, (4) no default-600s behavior change.
+
+**Expand only on stop-and-report:** if a required call contract cannot be
+completed inside the files above, stop and request allowlist expansion.
+Do not pre-add unrelated files.
+
+### Test file allowlist
+
+Exact paths only (verified present on tree 2026-07-31 unless marked **new**).
+No globs, no “siblings”, no “and/or”, no “related tests”.
+
+**New (must create with these exact names):**
+
+- `apps/web/src/worker/paid-v3-answer-packet.test.ts`
+- `apps/web/src/worker/paid-v3-compact-review-input.test.ts`
+
+**Existing (may edit only these):**
+
+- `apps/web/src/worker/paid-v3-semantic-review.test.ts`
+- `apps/web/src/worker/answer-first-v3.test.ts`
+- `apps/web/src/worker/processor-contract.test.ts`
+- `apps/web/src/worker/processor.test.ts`
+- `packages/ai-report-engine/src/report-semantic-review-manifests.test.ts`
+- `packages/ai-report-engine/src/report-semantic-review.test.ts`
+
+Any other test path is out of scope. Adding a different test file requires
+a written allowlist amendment and user re-approval.
+
+### Diff budgets (auditable)
+
+| Surface | Hard / tracking | Cap |
+|---|---|---|
+| Production source | **Hard** | **≤ 1 200** lines |
+| Tests | Tracking (Agents.md test-only amendment allowed) | **≤ 1 800** lines |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | Excluded | not counted |
+| Non-allowlisted paths | Forbidden | any change → fail closed |
+
+**Counting rules (mandatory, independent reviewer must re-run):**
+
+1. **Baseline commit:** `b597f968c16842d39a154493cdff3f5b9911c22f`
+2. **Metric (tracked/index):** `git diff --numstat <baseline>...HEAD` and
+   uncommitted `git diff --numstat` / `git diff --numstat --cached` against
+   the same baseline tree — sum **added + deleted** for each path.
+3. **Production total** = sum of numstat (added+deleted) over the **seven**
+   production allowlist paths only (5 existing + 2 new), **plus** full line
+   counts of any **new untracked** allowlisted new production files (rule 9).
+4. **Test total** = sum of numstat (added+deleted) over the **eight** test
+   allowlist paths only (2 new + 6 existing), **plus** full line counts of
+   any **new untracked** allowlisted new test files (rule 9).
+5. Scope doc, pre-existing user/runtime trees (rule 10), and any
+   non-allowlisted path **must not** be mixed into either total.
+6. Production total **> 1 200** → **stop immediately; do not commit**.
+7. Test total **> 1 800** → stop unless a verification-only budget amendment
+   is recorded first under Agents.md (measured + ≤20% headroom); production
+   budget may never use that escape hatch.
+8. Vague phrases such as “changed lines total” without numstat + untracked
+   audit evidence are non-compliant.
+9. **Untracked-file audit (mandatory before every budget audit and every
+   commit attempt):**
+   - Re-run `git ls-files --others --exclude-standard`.
+   - Compare against the **pre-implementation untracked baseline** recorded
+     below.
+   - Paths present in the baseline → **leave untouched**; do not treat as
+     candidate work; do not delete/edit as part of this scope; do not count
+     into production/test budgets or candidate diff.
+   - Paths **new relative to baseline**:
+     - Allowed **only** if the exact path is an allowlisted **new**
+       production or test file named in this scope
+       (`paid-v3-answer-packet.ts`, `paid-v3-compact-review-input.ts`,
+       `paid-v3-answer-packet.test.ts`,
+       `paid-v3-compact-review-input.test.ts`).
+     - Each such allowed new untracked file counts **all lines in the file**
+       (full file line count) into the corresponding production or test
+       budget (in addition to any later numstat once staged/committed).
+     - **Any other newly appeared untracked path** is **out-of-scope** →
+       **stop immediately; do not commit**.
+10. **User/runtime baseline trees (do not touch, do not count):**
+    `.codex/` and `.tmp/` and every path under them that appears in the
+    pre-implementation untracked baseline. They are user/runtime files, not
+    candidate diff.
+
+### Pre-implementation untracked baseline (recorded 2026-07-31, pre-code)
+
+Command: `git ls-files --others --exclude-standard`  
+Working tree at baseline commit `b597f968c16842d39a154493cdff3f5b9911c22f`
+with only `docs/ACTIVE-CHANGE-SCOPE.md` dirty (scope lock; excluded from
+prod/test budgets).
+
+```text
+.codex/config.toml
+.tmp/check-staging-jobs.mjs
+.tmp/compare-174k.mjs
+.tmp/free-teaser-keys.json
+.tmp/gate4-evidence.mjs
+.tmp/inspect-allowed-ids.mjs
+.tmp/inspect-detailed-refs.mjs
+.tmp/inspect-evidence-size.mjs
+.tmp/inspect-free-review-original.mjs
+.tmp/inspect-paid-token.mjs
+.tmp/job-d6-sizes.json
+.tmp/job-detail.mjs
+.tmp/measure-admission-and-draft.mjs
+.tmp/measure-ai-foundation.mjs
+.tmp/measure-audit-excerpts.mjs
+.tmp/measure-checkpoint.mjs
+.tmp/measure-free-teaser.mjs
+.tmp/measure-snapshot-excerpts.mjs
+.tmp/paid-deep.mjs
+.tmp/paid-job-detail.mjs
+.tmp/preview-env-pull.env
+.tmp/rebuild-review-input-size.mjs
+.tmp/rebuild-review-size.json
+.tmp/schema-cols.mjs
+.tmp/semantic-size-estimate.json
+.tmp/watch-staging-latest.mjs
+```
+
+**Interpretation:** every path above is baseline-present. Relative to this
+list, the **only** untracked paths that may appear later without being
+out-of-scope are the four allowlisted **new** files:
+
+- `apps/web/src/worker/paid-v3-answer-packet.ts`
+- `apps/web/src/worker/paid-v3-compact-review-input.ts`
+- `apps/web/src/worker/paid-v3-answer-packet.test.ts`
+- `apps/web/src/worker/paid-v3-compact-review-input.test.ts`
+
+### Forbidden subsystems / behaviors
+
+- PostgreSQL schema and migrations.
+- Payment, refund, order, email, entitlement.
+- API routes and customer UI.
+- HTML / artifact **output contract** changes (structure of
+  `CombinedGeoReportV3` and customer HTML must remain).
+- Free V4 behavior changes.
+- V2 Worker paths.
+- Production Workers / production deployment / production data.
+- Model, provider, or context-window **configuration** changes (including
+  raising `websiteSynthesis` 131072).
+- Diagnosis `semanticProjection`.
+- Generic workflow frameworks unrelated to Paid V3 packet orchestration.
+- Historical reports, jobs, orders, artifacts (no replay/resume/repair/clone;
+  especially `55770e59` / `d6a98e5e` and earlier frozen lineages).
+- Global deletion of `public_source_attempt_deferred` semantics.
+- Dockerfile, dependency, or base-image changes.
+- Commerce Worker changes.
+- Any Staging deploy, alias move, image build, report submission, order, or
+  payment under **this** scope (those need a **separate** later scope after
+  local acceptance).
+
+### Compact transport vs canonical review authority (contract lock)
+
+This is a hard product contract for the compact final reducer. Solving tokens
+must **not** quietly change receipt/hash authority.
+
+| Concept | Role |
+|---|---|
+| **`canonicalReviewInput`** | Sole authority for artifact materialization, receipt binding, apply validation, and customer-facing review application. Existing **`canonicalInputHash` / `inputHash` semantics stay**. |
+| **`compactTransportInput`** | WebsiteSynthesis **transport only** — three AnswerPackets + deduped `sourceDictionary` + necessary refs + reviewable prose + authority hashes. Has its own **`transportInputHash`**. |
+| Model echo | Model **must echo `canonicalInputHash`**. **`transportInputHash` must never replace** canonical hash in receipts, applied fields, or persistence. |
+| Pre-call bind | Before the provider call, every compact source/evidence/entity/observation **ref must resolve** into the canonical manifest (fail closed on foreign/missing). |
+| Model source IDs | Every source ID returned by the model **must be a member of the compact `sourceDictionary`** (and thus of the canonical source set). |
+| Post-return | Parse/validate/apply **only** against **`canonicalReviewInput`**. Compact transport is discarded as authority after the call. |
+| Unchanged | CombinedGeoReportV3 schema, receipt field set (except carrying the same canonical hashes), applied-field contract, customer HTML. |
+
+### Checkpoint paths (exact JSONB shapes)
+
+No new DB columns / migrations. All state lives on existing
+`scan_jobs.checkpoint`.
+
+**Per-question packets** (map keyed by real `questionId`, not q1/q2/q3 labels):
+
+```text
+checkpoint.answerFirstV3.packetsByQuestion.<questionId>
+```
+
+Each packet object **must** bind at least:
+
+| Field | Required |
+|---|---|
+| `version` | yes (`PaidV3AnswerPacketV1`) |
+| `questionId` | yes |
+| `authorityHash` | yes |
+| `inputHash` | yes |
+| `outputHash` | yes when status is terminal success |
+| `status` | yes (`pending` \| `completed` \| `failed`) |
+| `attemptCount` | yes (provider attempts for this packet; max 2) |
+| `startedAt` | yes when work begins |
+| `completedAt` | yes when terminal |
+| plus packet body | `question`, `answer`, `claims`, `sourceIds`, `shortEvidenceRefs`, `diagnosis`, `caveats` per AnswerPacket contract |
+
+**Paid V3 review / metrics** (sibling under checkpoint root or under
+answerFirstV3 only if version-guarded; prefer explicit root path):
+
+```text
+checkpoint.paidV3Review.transportMetrics
+checkpoint.paidV3Review.stageTimings
+```
+
+`transportMetrics` **must** include (when final synthesis is attempted):
+
+- `packetTokensByQuestion` (map questionId → estimate)
+- `sourceDictionaryTokens`
+- `proseTokens`
+- `systemTokens`
+- `reservedOutputTokens`
+- `safetyMarginTokens`
+- `totalEstimatedTokens`
+- `transportInputHash`
+- `canonicalInputHash` (the authority hash, not a substitute for transport)
+
+`stageTimings` **must** include ISO timestamps and/or duration ms for:
+
+- `sourceCollectionStartedAt` / `sourceCollectionCompletedAt`
+- `q2AnswerStartedAt` / `q2AnswerCompletedAt`
+- `q3AnswerStartedAt` / `q3AnswerCompletedAt`
+- `q2DiagnosisStartedAt` / `q2DiagnosisCompletedAt`
+- `q3DiagnosisStartedAt` / `q3DiagnosisCompletedAt`
+- `finalSynthesisStartedAt` / `finalSynthesisCompletedAt`
+- `stageDurationMs` as applicable
+- per-packet / aggregate `providerAttemptCount`
+
+Never persist: API keys, full access tokens, raw customer secrets, full model
+prompt bodies.
+
+**Concurrency / resume rules:**
+
+- Keep legacy `answerResults` / `diagnosisByQuestion` temporarily for existing
+  artifact contracts while packets are the resume authority.
+- Per-question write on completion; **no parallel whole-checkpoint clobber**
+  (serial merge or existing CAS/identity guard).
+- Crash/resume runs **only** unfinished `packetsByQuestion` entries.
+
+### Implementation checklist (authorized only after APPROVED)
+
+1. **`PaidV3AnswerPacketV1`** — see checkpoint packet fields above. No
+   duplicated source bodies; source IDs resolve to the shared dictionary;
+   foreign/missing/duplicate refs fail closed; deterministic serialization;
+   explicit per-field bounds; Q1 projected from reviewed Free checkpoint
+   (no model call).
+2. **Persist packets** at
+   `checkpoint.answerFirstV3.packetsByQuestion.<questionId>` with the
+   required bindings; metrics/timings at `checkpoint.paidV3Review.*`.
+3. **Keep Q2/Q3 answer parallelism**; prove Q1 zero new provider calls;
+   simultaneous Q2/Q3 start; stable order by question identity; Q2 success
+   survives Q3 failure; resume runs only unfinished packets.
+4. **Parallelize Q2/Q3 diagnosis**; per-question bounded inputs; per-question
+   timeout; merge packet on each completion; Q1 diagnosis remains reused.
+5. **Deduped `sourceDictionary`** — each source body at most once
+   (`url`, `title`, `boundedExcerpt`, `hashes`); all other structures use
+   refs only; assert one sourceId → one canonical source; no four-catalog
+   body re-copy; missing ID / authority hash mismatch fail closed.
+6. **Compact final reducer** for websiteSynthesis **transport** only; honor
+   the compact-vs-canonical contract table above in full.
+7. **Aggregate token budget preflight** before final model call using compact
+   transport size: system + compact input + reserved output + safety margin.
+   Fixture 3×20 unique sources must stay under locked 131072; over-limit →
+   structured error, **provider callback must not run**; write
+   `checkpoint.paidV3Review.transportMetrics` before/at the fail-closed.
+8. **Paid V3 packet retry contract** — network / 429 / 5xx / explicit
+   timeout: at most one retry; token/contract/parse/identity/hash/
+   permanent: zero retry; lease wait may re-claim; max two provider
+   attempts per packet; persist `attemptCount`, classification, retry reason
+   on the packet and/or `paidV3Review`.
+9. **Localize 600s defer without editing
+   `public-source-execution-budget.ts`** — only Paid V3 gate placement in
+   `processor.ts`: completed packets always saved first; only unfinished
+   public-source/provider work may defer; resume unfinished packets only;
+   healthy path must not discard progress solely because the whole stage has
+   <600s remaining. Free/V2/other workers unchanged. Touching the shared
+   budget module → stop and request expanded scope as noted in the
+   production allowlist.
+10. **Stage timing** written to `checkpoint.paidV3Review.stageTimings` as
+    specified above.
+
+### Local acceptance (this scope, after APPROVED implementation)
+
+**Commands (minimum) — exact targeted paths first, then full suite:**
+
+```text
+npx vitest run apps/web/src/worker/paid-v3-answer-packet.test.ts apps/web/src/worker/paid-v3-compact-review-input.test.ts apps/web/src/worker/paid-v3-semantic-review.test.ts apps/web/src/worker/answer-first-v3.test.ts apps/web/src/worker/processor-contract.test.ts apps/web/src/worker/processor.test.ts packages/ai-report-engine/src/report-semantic-review-manifests.test.ts packages/ai-report-engine/src/report-semantic-review.test.ts
+npm test
+npm run lint
+npm run build
+```
+
+**Budget audit commands (independent reviewer; also required before any
+commit attempt):**
+
+```text
+git ls-files --others --exclude-standard
+git diff --numstat b597f968c16842d39a154493cdff3f5b9911c22f
+git diff --numstat
+git diff --numstat --cached
+```
+
+1. Diff untracked list against the pre-implementation baseline above.
+2. Any untracked path not in baseline and not one of the four allowlisted
+   **new** files → **stop; do not commit**.
+3. For each allowlisted new untracked file, add **full file line count** to
+   production or test budget as applicable.
+4. Sum numstat added+deleted for the seven production and eight test
+   allowlist paths. Scope doc and baseline `.codex/` / `.tmp/` excluded.
+5. Production total >1200 → **no commit**.
+
+**Process gates (mandatory):**
+
+| Gate | Owner | Rule |
+|---|---|---|
+| Diff ↔ allowlist | Implementer + independent reviewer | Every changed path must be an exact allowlisted production or test path; out-of-scope → fail closed, do not commit |
+| Untracked ↔ baseline | Implementer + independent reviewer | Re-run `git ls-files --others --exclude-standard` vs pre-implementation baseline; only the four allowlisted **new** paths may newly appear; any other new untracked path → stop, no commit; baseline `.codex/` / `.tmp/` untouched and uncounted |
+| Production budget | Independent reviewer | numstat production allowlist + full line counts of new untracked production allowlist files ≤ 1 200 |
+| Test budget | Independent reviewer | numstat test allowlist + full line counts of new untracked test allowlist files ≤ 1 800 (or amended per Agents.md test-only rule) |
+| Read-only design/contract review | **Independent reviewer** (not the implementer) | AnswerPacket bounds; compact-vs-canonical authority; checkpoint paths; retry contract; no Free/V2/commerce/schema drift; no 131072 raise; budget module untouched |
+| Test execution | **Independent tester** (not the implementer) | Runs the local acceptance commands and reports pass/fail evidence |
+| Self-acceptance | Forbidden | Implementer must **not** declare full acceptance complete |
+
+**Required automated coverage (must be proven in allowlisted tests):**
+
+- AnswerPacket deterministic serialization and field bounds
+- source ID resolve; missing/foreign/duplicate refs fail closed
+- compact `sourceDictionary` dedupe; same originalText body not repeated
+  across four catalogs
+- aggregate token budget; over-limit path: structured error and
+  **provider callback not invoked**
+- permanent / token / contract / identity errors: **zero** retry
+- transient network/429/5xx: **exactly one** retry; `attemptCount` persisted
+- Q2/Q3 answer time overlap; Q2/Q3 diagnosis time overlap
+- Q2 success + Q3 failure: Q2 packet retained; resume runs only Q3
+- checkpoint **lost-update** injection does not drop a completed packet
+- **identity/hash drift** fail closed
+- `canonicalInputHash` remains authority; `transportInputHash` distinct and
+  never substitutes in receipt/apply
+- timing and token breakdown **written** to
+  `checkpoint.paidV3Review.stageTimings` /
+  `checkpoint.paidV3Review.transportMetrics`
+- CombinedGeoReportV3 / receipt / applied fields contracts hold
+- Free V4 and commerce surfaces show **no** behavior change in covered tests
+- capacity fixture 3 questions × 20 unique sources under locked 131072
+  **without** raising the model limit
+- healthy path: no whole-phase re-claim solely from stage-budget remainder
+
+### Staging acceptance (NOT authorized by this scope)
+
+Requires a **separate** later scope with explicit user approval for:
+
+- Exactly **one** new Staging candidate (commit + thin overlay or
+  justified full build per Docker discipline).
+- Exactly **one** new report lineage (no historical reuse).
+- Exactly **one** new sandbox order/payment.
+- **No** Production touch.
+- **No** restore/replay of historical failed reports (including `55770e59`).
+
+**Acceptance card (required fields when that scope runs):**
+
+- exact branch / HEAD
+- candidate image ID
+- Worker `OGC_DEPLOYMENT_VERSION`
+- report ID, job IDs, order ID
+- Q1 zero new provider calls (evidence)
+- Q2/Q3 answer time-overlap evidence
+- Q2/Q3 diagnosis time-overlap evidence
+- per-question `providerAttempts`
+- compact input token breakdown (the persisted components above)
+- final total estimated tokens
+- end-to-end wall time
+- job completed 100%
+- `active_artifact_revision_id` non-null
+- customer HTML accessible
+- fulfillment / refund status correct
+
+**Performance targets (Staging acceptance scope):**
+
+- Healthy path under normal provider conditions: **3–6 minutes** target.
+- Healthy path must **not** take a whole-phase 600s defer.
+- If wall time **> 6 minutes**, report **per-stage durations** (not total only).
+
+### Expensive external actions (this FROZEN→APPROVED implementation scope)
+
+- Local unit/integration tests and lint/build only.
+- **Zero** Staging deploy, **zero** new report/order/payment, **zero**
+  live crawl/model spend beyond what existing local mocks use.
+- Staging candidate + one live lineage: **later scope only**.
+
+### Approval phrase
+
+User must explicitly approve this written allowlist (e.g. 「批准」 referring
+to this section). Until then: **FROZEN** — scope-doc edits only; no
+production or test implementation edits.
+
+### Estimated effort (planning only, non-binding)
+
+- Implementation + local verification: 7–10 engineering days
+- Staging deploy + one new acceptance lineage: 1–2 days (separate scope)
+- Total: ~8–12 engineering days
+
+---
+
+## Previous authority: Replacement Gate 4 paid real-flow acceptance on b597f96 (APPROVED — superseded as current)
+
+**Status was `APPROVED`** for monitoring one user-submitted free→paid lineage
+on `b597f96`. That monitoring authority is **no longer current**. Historical
+failed lineages from that period remain frozen (no retry/resume/repair).
+Superseded 2026-07-31 by Paid V3 linear orchestration FROZEN scope above.
+
+## Previous authority: Protected Staging deployment of the duplicate-sourceId fix (APPROVED)
 
 **Status: `APPROVED`** — user replied "批准" and quoted the three-step plan
 on 2026-07-30. Same four-gate shape as the previous deployment scope;
@@ -65,6 +565,25 @@ later scopes, not this one.
 
 One commit + push, one Preview build, one thin overlay build, two container
 recreations, one alias move. Nothing else.
+
+### Completion record (2026-07-31): Gates 1–3 passed for `b597f96`
+
+- Candidate commit `b597f968c16842d39a154493cdff3f5b9911c22f` pushed; clean
+  detached worktree `.data/staging-release-b597f96/worktree`; candidate
+  Preview `open-geo-console-70qal2yyx-...vercel.app` READY in 2m via CLI
+  deploy from the worktree (git integration again silent).
+- Thin overlay `open-geo-console:staging-b597f96-overlay-v1`
+  (`5ce966c9029b`, revision label full SHA) on base full `748e2675f280`;
+  `staging.env` `OGC_DEPLOYMENT_VERSION` = full candidate SHA.
+- Recreated ONLY staging free/deep workers: image `5ce966c9029b`, version
+  `b597f968...`, restart 0, `ready`, no claimed work. Fixed alias moved
+  once to the candidate Preview.
+- Roles: candidate `5ce966c9029b`; rollback `staging-cd5053d-overlay-v1`
+  (`49ce21595b61`, retained). Disk: E: 87 GiB free; images 59→60.
+- Gate 3 anonymous smoke: `/zh` 302, `POST /api/scan` 401, catalog 302.
+  No report/payment created by smoke.
+- Status: **Protected Staging deployment completed; real flow not yet
+  accepted.** Replacement Gate 4 attempt is the next scope.
 
 ## Previous authority: Paid V3 review-input duplicate sourceId repair (APPROVED)
 
