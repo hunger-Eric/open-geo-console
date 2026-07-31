@@ -63,7 +63,7 @@ async function requestOnce(config: MiMoPublicSearchConfig, transport: typeof fet
     const parsedRecord = record(parsed); if (!parsedRecord) throw new MiMoGenerativeSearchAnswerError("malformed", "MiMo answer content was malformed.");
     // The question ID is local correlation metadata, not generated prose. Bind
     // it to the request so a model echo cannot misroute an otherwise valid answer.
-    const annotationSources = extractAnnotationSources(payload);
+    const annotationSources = extractAnnotationSources(payload, request.questionId);
     const raw = { ...parsedRecord, questionId: request.questionId, sources: annotationSources.length ? annotationSources : parsedRecord.sources, searchedAt, completedAt: now().toISOString(), providerResponseId: extractId(payload) };
     try { return semanticDeferred
       ? parseGenerativeSearchAnswerResult(raw, { expectedQuestionId: request.questionId, locale: request.locale, semanticValidation: "deferred" })
@@ -77,7 +77,7 @@ async function requestOnce(config: MiMoPublicSearchConfig, transport: typeof fet
 function record(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function extractContent(value: unknown): string | null { const root = record(value); const choices = root?.choices; const first = Array.isArray(choices) ? record(choices[0]) : null; const message = record(first?.message); const c = message?.content; if (typeof c === "string") return c; if (Array.isArray(c)) return c.map((x) => record(x)?.text).filter((x): x is string => typeof x === "string").join(""); return null; }
 function extractId(value: unknown): string | null { const id = record(value)?.id; return typeof id === "string" ? id : null; }
-function extractAnnotationSources(value: unknown) {
+function extractAnnotationSources(value: unknown, questionId: string) {
   const root=record(value); const choices=root?.choices; const first=Array.isArray(choices)?record(choices[0]):null; const message=record(first?.message); const annotations=message?.annotations;
   if(!Array.isArray(annotations))return [];
   return annotations.flatMap((item,index)=>{
@@ -85,7 +85,7 @@ function extractAnnotationSources(value: unknown) {
     try { const parsed=parseHttpUrl(row.url); if(isBlockedHostname(parsed.hostname))return []; }
     catch { return []; }
     const citedText=typeof row.summary==="string"&&row.summary.trim()?row.summary.trim().slice(0,2_000):null;
-    return [{sourceId:`mimo-annotation-${index+1}`,title:row.title.trim().slice(0,500),canonicalUrl:row.url,citedText,providerResultOrder:index}];
+    return [{sourceId:`mimo-annotation-${questionId}-${index+1}`,title:row.title.trim().slice(0,500),canonicalUrl:row.url,citedText,providerResultOrder:index}];
   }).slice(0,20);
 }
 function languageShape(value: unknown): string { if(typeof value!=="string")return "(answer type is not text)."; const cjk=(value.match(/[\u3400-\u9fff]/gu)??[]).length; const latin=(value.match(/[A-Za-z]/gu)??[]).length; return `(answer length ${value.length}, CJK ${cjk}, Latin ${latin}).`; }

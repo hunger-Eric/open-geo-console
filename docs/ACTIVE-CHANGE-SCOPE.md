@@ -4,10 +4,361 @@ Status: `APPROVED`
 
 This file records historical scopes and the **current** executable authority.
 **Current executable authority:** section
-`Current authority: Free semantic-review parser correctness fix (APPROVED)`.
+`Current authority: Protected Staging deployment of the duplicate-sourceId fix (APPROVED)`.
 All earlier sections are context only.
 
-## Current authority: Free semantic-review parser correctness fix (APPROVED)
+## Current authority: Protected Staging deployment of the duplicate-sourceId fix (APPROVED)
+
+**Status: `APPROVED`** — user replied "批准" and quoted the three-step plan
+on 2026-07-30. Same four-gate shape as the previous deployment scope;
+`docs/PROTECTED-STAGING-OPERATIONS.md` remains the operator contract.
+
+### Objective
+
+Deploy the duplicate-sourceId fix (3-line change in
+`apps/web/src/public-search-adapters/mimo/generative-answer.ts`, full suite
+2984 green) to Protected Staging as one new candidate commit: commit + push,
+thin source-overlay Worker image, recreate only `staging-worker-free` /
+`staging-worker-deep`, move the fixed alias, Gate 3 protection smoke.
+A replacement Gate 4 acceptance and the `7373d419` refund/SLA are SEPARATE
+later scopes, not this one.
+
+### Allowed actions
+
+- Commit the fix files (`generative-answer.ts`, its test, this scope doc)
+  on branch `codex/staging-runtime-evidence-4112c2e`; push to origin.
+- Gate 1: read-only preflight (staging marker, zero claimable/running jobs,
+  disk/`docker system df` record, current/rollback image identities);
+  clean detached worktree at the new candidate SHA; candidate Preview —
+  git-integration if it registers, otherwise CLI deploy from the worktree
+  (justified by the 2026-07-30 ~35-min integration silence).
+- Gate 2: ONE thin overlay image `.data/staging-release-<short>/Dockerfile.overlay`
+  on base full `748e2675f280`, tag `open-geo-console:staging-<short>-overlay-v1`,
+  revision label = full candidate SHA; set
+  `.data/workstation-docker/staging.env` `OGC_DEPLOYMENT_VERSION` to the full
+  candidate SHA; recreate ONLY the two staging workers; verify image ID /
+  SHA / restart count 0 / ready / no claimed work; move the fixed alias once.
+- Gate 3: anonymous protection smoke only (`/zh` 302 SSO, `POST /api/scan`
+  401, catalog 302 SSO). No report/crawl/model call/order/payment/refund/
+  email created by smoke.
+- Scope-document bookkeeping edits only.
+
+### Forbidden
+
+- Production anything; commerce Worker; historical jobs/reports/orders
+  (incl. `7aaf726c`, `7373d419` refund handling — deferred to its scope);
+  any new report/payment from the agent side; any code/test edit beyond the
+  already-finished fix (zero new diff); full Worker rebuild; broad Docker
+  cleanup; removing any image except a superseded unreferenced staging
+  overlay whose exact ID this scope records at that time.
+
+### Acceptance checks
+
+- Web Preview READY + both staging workers report the full candidate SHA,
+  restart count 0, no claimed work; fixed alias moved once.
+- Rollback identities recorded before mutation (current
+  `staging-cd5053d-overlay-v1` `49ce21595b61` becomes the rollback).
+- If any gate fails: restore workers + alias to recorded rollback identities
+  and stop; no rebuild/retry without new approval.
+
+### Expensive external actions
+
+One commit + push, one Preview build, one thin overlay build, two container
+recreations, one alias move. Nothing else.
+
+## Previous authority: Paid V3 review-input duplicate sourceId repair (APPROVED)
+
+**Status: `APPROVED`** — written 2026-07-30 FROZEN; user replied "批准，退款
+修复好了在处理" on 2026-07-30. Refund/SLA for order `7373d419` is deferred
+until after the fix, per the same reply.
+
+### Completion record (2026-07-30): 3-line fix, full suite green
+
+- `apps/web/src/public-search-adapters/mimo/generative-answer.ts` (3 changed
+  lines): `extractAnnotationSources` takes `request.questionId` (already
+  threaded via `answer-first-v3.ts:353`, no call-site change needed) and the
+  id scheme is now `mimo-annotation-<questionId>-<index+1>`. Question ids are
+  deterministic and unique per question, so per-question id namespaces are
+  disjoint; the uniqueness contract holds untouched.
+- Test: new flatten-style test proves 3 per-question answers × 2 annotation
+  sources yield 6 unique question-namespaced ids (8 added lines).
+- Full `npx vitest run`: 2984 passed, 0 failed (baseline 2983).
+- No commits; no evidence the model-JSON id path collides in practice.
+
+### Objective
+
+Fix the root cause that killed Paid V3 job `7aaf726c` (and earlier
+`24451085`) with `$reviewInput.sources sourceId must be unique`:
+the MiMo citation-annotation path generates index-based source ids
+(`mimo-annotation-${index+1}`) independently for each per-question answer
+call, so Q1/Q2/Q3 (including the seeded free-lane Q1 card) collide when the
+Paid V3 manifest flattens all cards' sources
+(`apps/web/src/worker/processor.ts:2680-2708`). Namespace the generated
+annotation ids with the owning question identity at generation time so the
+uniqueness contract holds across question-owned source sets.
+
+### Allowed files
+
+- `apps/web/src/public-search-adapters/mimo/generative-answer.ts`
+  (id generation, ~line 88; thread the question identity in if needed)
+- `apps/web/src/worker/answer-first-v3.ts` (call-site threading only)
+- Their direct test files.
+
+### Forbidden
+
+- Deduping or dropping rows at the manifest flatMap site (silently loses
+  question source ownership — the wrong fix).
+- Weakening the uniqueness contract in `report-semantic-review.ts`.
+- Changes to retry/resume/fingerprint logic, business gates, model prompts,
+  or the semantic-review parser.
+- Any deployment/container/alias/payment/refund/email action; any repair or
+  replay of failed jobs `7aaf726c`/`24451085`; any other file.
+- If implementation reveals the model-JSON path also emits colliding ids
+  (not just the annotation path), STOP and report instead of expanding.
+
+### Notes
+
+- Id-scheme change alters `generativeSearchSourceHash`/`generativeSearchAnswerHash`;
+  in-flight jobs resuming across this change would fail closed by design.
+  Currently zero in-flight staging jobs, so the window is clean.
+- Deploying this fix (thin overlay + alias) and a replacement Gate 4 attempt
+  each need their own scopes afterward.
+
+### Diff budget
+
+Production ≤ 120 changed lines; tests ≤ 250 changed lines.
+
+### Acceptance checks
+
+- New tests: three per-question answers each producing annotation-derived
+  ids no longer collide in the flattened Paid V3 manifest; the full
+  `grounded_answer_synthesis` review-input validation accepts the manifest.
+- Full `npx vitest run` green.
+
+## Previous authority: Gate 4 paid deep-report real-flow acceptance (APPROVED)
+
+**Status: `APPROVED`** — written 2026-07-30 FROZEN; user confirmed by
+action on 2026-07-30 ("看一下我新提交的付费订单"), submitting exactly the one
+Sandbox payment this scope authorizes. All remaining agent actions are
+read-only monitoring.
+
+### Objective
+
+Accept the complete paid lineage on Protected Staging on the fix build
+`cd5053d`, continuing the fresh lineage created in the previous scope:
+`submitted URL -> Foundation -> Free V4 -> Q1 answer/diagnosis -> semantic
+receipt -> Sandbox payment -> Paid V3 -> accessible complete HTML`.
+
+The first five stages are already persisted for report
+`6704ad4f-4a83-4fa8-82fa-06717632ddd7` (verification record above). This
+scope authorizes exactly the remaining stages: ONE user-initiated Sandbox
+payment on that report, its webhook/entitlement/Paid V3 job, and delivery
+verification.
+
+### Allowed actions
+
+- Pre-payment read-only checks plus the bounded MiMo capability probe
+  (`npm run public-search:probe -- --adapter mimo --locale zh-CN --region CN`)
+  which creates no report/order/credit/refund/email.
+- The user completes exactly ONE Airwallex Sandbox payment for report
+  `6704ad4f` through the normal staging checkout UI. The agent never touches
+  the payment itself.
+- The user may submit ONE additional free report only if report `6704ad4f`'s
+  checkout is technically impossible; that requires a chat confirmation
+  first and remains one report total.
+- Agent: read-only monitoring of the order/webhook/entitlement/Paid V3 job/
+  revision/artifact state; verification of the seven Gate 4 stage checks
+  from persisted state; reporting. If the deep job is not claimed because a
+  worker lane is down, the agent may `docker start` the existing staging
+  worker containers only (they already run the candidate image).
+- Scope-document bookkeeping edits only.
+
+### Forbidden
+
+- A second payment, a second order, or any new report beyond the one named
+  above without new approval.
+- Retry, resume, repair, replay, clone, or reuse of any failed report/job/
+  order, including the historical paid failures `24451085`/`345503d9`.
+- Manual alteration of charge/credit/refund rows; any refund action
+  (commercial reconciliation/SLA is a separate future scope).
+- Any code or test edit (zero diff budget); any deployment, alias move,
+  container recreation, or image build; production anything.
+- Agent-side report/job creation, payment, refund, or email sending.
+
+### Acceptance checks (all seven, from persisted state)
+
+1. Payment: one user-authorized Sandbox payment, verified webhook, and an
+   exactly-once entitlement/Paid V3 job sharing the lineage.
+2. Paid V3 revision completes and becomes the active deliverable.
+3. The report-specific authorized link opens the complete customer HTML.
+4. Every model/transition/checkpoint/persistence boundary of the lineage
+   verified; zero error events or explicitly explained transient events on
+   the Paid V3 job.
+5. If any check fails: stop without retrying or changing the failed report;
+   report the actual failed stage and root cause; a repair needs a new
+   FROZEN scope; another wholly new attempt needs new authorization.
+
+### Expensive external actions
+
+Exactly one user-initiated Sandbox payment and its downstream Paid V3 model
+calls. Nothing else.
+
+### Failure record (2026-07-30): Gate 4 attempt failed at Paid V3 — root cause identified
+
+- Order `7373d419-1d62-4f62-83ba-9eb657efaf00`: payment `paid` via verified
+  webhook; exactly-once fulfillment job `7aaf726c-5147-4872-8083-53aba9555887`
+  created 15:21:02Z. Per Gate 4 stop rules the job was NOT retried/repaired.
+- Job progression: website_synthesis → public_source_preflight (2 transient
+  network errors "fetch failed"/"terminated", self-recovered on attempt 2) →
+  grounded_answer_synthesis: `$reviewInput.sources sourceId must be unique.`
+  transient 15:43:31Z → recurred 15:44:48Z → fingerprint recurrence →
+  **permanent, job failed** at terminalization (23:46 local).
+- Root cause (code-traced): `apps/web/src/worker/processor.ts:2680-2708`
+  flattens all answer cards' sources without namespacing; the MiMo
+  citation-annotation path (`apps/web/src/public-search-adapters/mimo/generative-answer.ts:88`)
+  assigns index-based ids `mimo-annotation-N` per per-question answer call,
+  so Q1 (seeded free-lane card)/Q2/Q3 collide; the uniqueness contract at
+  `packages/ai-report-engine/src/report-semantic-review.ts:1040` correctly
+  rejects. Same error as historical paid job `24451085` — a standing Paid V3
+  defect, unrelated to the C3/C7 parser fix (output side), and triggered
+  when MiMo returns annotation citations for ≥2 questions.
+- Commercial state: order paid, fulfillment failed, refund not initiated;
+  SLA deadline 2026-07-31 15:21Z. Any refund/SLA action awaits user
+  direction (separate scope).
+- Repair scope written above (FROZEN, awaiting approval).
+
+## Previous authority: Protected Staging deployment of the C3+C7 parser fix (APPROVED)
+
+**Status: `APPROVED`** — written 2026-07-30 FROZEN; user replied "批准" on
+2026-07-30 to the exact allowlist below.
+
+### Objective
+
+Deploy commit `cd5053d` (C3 envelope tolerance + C7 echoed-identity
+anchoring, full suite 2983 green) to Protected Staging only — Web Preview,
+Staging Free/Deep Workers, then the fixed alias — so the user can verify the
+fix themselves in the browser with one wholly new free report.
+
+### Baseline
+
+- Candidate commit `cd5053d` on branch `codex/staging-runtime-evidence-4112c2e`
+  (already created; nothing else to commit for this scope).
+- Source-only change: `package.json`, `package-lock.json`,
+  `Dockerfile.worker`, base-image digest, and browser/system dependencies are
+  unchanged versus the currently accepted Staging Worker image (verified in
+  Gate 1 preflight before any build).
+- Fixed staging URL `https://open-geo-console-staging-itheheda.vercel.app`;
+  staging DB marker verified read-only in Gate 1.
+
+### Allowed actions
+
+- **Gate 1**: read-only preflight (git, Vercel link, staging DB
+  marker/schema, Docker/disk incl. `docker system df` and free-space record,
+  current/rollback image identities); `npm run lint`, `npm run build`,
+  `npx vitest run` (already green, rerun allowed); clean detached worktree at
+  `cd5053d`; `git push` of branch `codex/staging-runtime-evidence-4112c2e`
+  to origin so Vercel builds the candidate Preview (or reuse an existing
+  READY Preview whose gitCommitSha/ogcGitSha equal `cd5053d`).
+- **Gate 2**: build ONE thin source-overlay Worker image from the detached
+  worktree on top of the currently accepted exact Staging Worker image (copy
+  only `apps/` + `packages/` source, candidate revision label; no `npm ci`,
+  no Playwright/Chromium/OS installs); pre-replacement check of staging
+  marker/schema and zero claimable/running jobs; recreate ONLY
+  `staging-worker-free` and `staging-worker-deep`; verify image/SHA/tier/
+  identity/health/restart-count-zero/no-claimed-work; then move the fixed
+  Protected Staging alias once to the accepted candidate Preview. After
+  verification, remove only the superseded unreferenced test/staging overlay
+  image whose exact ID this scope records at that time; retain current + one
+  rollback.
+- **Gate 3**: read-only smoke from the agent side (candidate SHA/identity
+  reported by Web + both Workers, commerce catalog mode=test where reachable
+  without authentication). No report, crawl, model call, order, payment,
+  refund, or email created by smoke.
+- **User browser verification**: the user submits exactly ONE new free report
+  (`forceFresh`, `https://shun-express.com/`, zh-CN) on the fixed staging URL.
+  The agent performs only read-only status queries (job checkpoints, error
+  events, semantic-review stage outcome) and reports: whether the
+  `inputHash`-class death is gone, whether any identity corruption was
+  rejected transiently, and the measured semantic-review wall time.
+- Scope-document bookkeeping edits only.
+
+### Forbidden
+
+- Production anything (deploy, DB, commerce, images, cleanup).
+- The commerce Worker; historical jobs/reports/orders/payments/artifacts.
+- Creating any report/order/payment/refund/email from the agent side.
+- A second report submission without new approval; no replay/repair/retry of
+  any failed job — a failure is evidence, handled per Gate 4 stop rules.
+- Any production-code or test edit (zero diff budget; this scope deploys
+  `cd5053d` exactly as committed).
+- Full Worker image rebuild, `docker cp`, in-container edits, broad Docker
+  cleanup commands, `docker system/image/builder prune`.
+- Sandbox payment / Gate 4 full paid lineage (deferred; needs its own scope).
+
+### Acceptance checks
+
+- Gates 1-3 pass per the runbook; Web + Free Worker + Deep Worker all report
+  SHA `cd5053d` with staging identity.
+- User's single new free report reaches a terminal state; agent reports the
+  three verification findings above from persisted state only.
+- If any gate fails: execute the recorded rollback (Workers + alias) and
+  stop; a rollback does not authorize rebuild or retry.
+
+### Expensive external actions
+
+- One `git push` of the candidate branch; one Vercel Preview build; one fixed
+  alias move; one thin-overlay Worker image build + two container recreations;
+  one user-initiated free report (its crawl + model calls). Nothing else.
+
+### Completion record (2026-07-30): Gates 1–3 passed, awaiting user browser verification
+
+- Gate 1: preflight green (staging DB marker `staging`, 5 inert historical
+  `repair_wait` jobs, no claimable/running work; E: 87 GiB free). lint 0
+  errors, build OK, vitest 2983 green at `cd5053d`. Clean detached worktree
+  `.data/staging-release-cd5053d/worktree` at
+  `cd5053d2db5d0515f0e1e1fedfa49f313580ddff`. Branch pushed; the git
+  integration did not register a build after ~35 min (matching a previous
+  ~35 min lag), so the candidate Preview was created via CLI from the
+  detached worktree: `open-geo-console-p4l5yqcv5-...vercel.app`, READY in
+  2m. CLI-deploy metadata is not treated as independent proof; the worktree
+  HEAD is the identity anchor.
+- Gate 2: thin overlay `open-geo-console:staging-cd5053d-overlay-v1`
+  (`49ce21595b61`, revision label full SHA) built on base full `748e2675f280`;
+  `.data/workstation-docker/staging.env` `OGC_DEPLOYMENT_VERSION` set to the
+  full candidate SHA. Recreated ONLY `staging-worker-free` /
+  `staging-worker-deep`: both on image `49ce21595b61`, restart count 0,
+  report `ready`, claimed no work. Fixed alias moved once to the candidate.
+  Roles: candidate `49ce21595b61`; rollback `staging-b41cc232-overlay-v1`
+  (`77b8d11d7a75`, retained). No older unreferenced staging overlays removed
+  (exact-ID listing not in this scope). Disk: images 58→59, 34.17→34.19 GB;
+  E: 87 GiB free before/after.
+- Gate 3: anonymous `/zh` → 302 Vercel SSO; anonymous `POST /api/scan` →
+  401; anonymous catalog → 302 SSO. No report/crawl/model call/order/
+  payment/refund/email created by smoke. Authenticated smoke (locale render,
+  catalog mode=test) deferred to the user's browser session.
+- Status: **Protected Staging deployment completed; real flow not yet
+  accepted.** User browser verification (one new free report) is next.
+
+### Verification record (2026-07-30): one user-submitted free report, full lineage green
+
+- User submitted exactly one free report via the fixed staging URL
+  (`forceFresh`, shun-express.com, zh-CN): report
+  `6704ad4f-4a83-4fa8-82fa-06717632ddd7`, free job
+  `36886cac-88be-44cf-b876-b71300fe1781` (completed ~4 min), deep
+  `v4_pre_admission` job `01330f02-4c8e-4fa3-b540-11cb8d1b86d4`
+  (15:08:48Z → completed by 15:16:49Z, ≤8 min wall incl. question
+  generation, snapshot resolution, answer synthesis, semantic review,
+  terminalization).
+- **Zero error events** on the deep job: no transient retries, no
+  `unknown key`/`inputHash` death, no identity-rejection events. The
+  `freeTeaser` stage reached `ready` with the semantic review
+  input/output/applied persisted.
+- Honest caveat: this live sample was clean, so C3/C7 failure-mode
+  handling is proven by the unit/contract tests, not stress-tested by this
+  run; the run proves the fixed build completes the real flow end-to-end.
+- No repair/replay/second submission; read-only monitoring only.
+
+## Previous authority: Free semantic-review parser correctness fix (APPROVED)
 
 **Status: `APPROVED`** — written 2026-07-30 FROZEN; user replied "批准" on
 2026-07-30 to the exact allowlist below.
