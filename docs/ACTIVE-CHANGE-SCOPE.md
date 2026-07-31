@@ -16,6 +16,12 @@ All earlier sections are context only.
 `f879808b5a0a1021683087df208feccb794c22cd` plus one wholly new free→paid
 lineage. Touch only the written allowlist and expensive-action caps.
 
+**Execution outcome:** Gates **1–3 PASS** (candidate Workers + alias live).
+Gate **4 FAIL-CLOSED** on Free V4 pre-admission (`PostgresError: unsupported
+Unicode escape sequence` for `cloudflare.com`); Paid V3 path not exercised.
+See completion record below. No further mutation under this scope without a
+new approval.
+
 ### Objective
 
 1. Deploy **one** Staging candidate built from
@@ -152,6 +158,51 @@ If Gate 2/3 fails after cutover: restore workers to
 `open-geo-console:staging-b597f96-overlay-v1` (`5ce966c9029b`), restore
 `OGC_DEPLOYMENT_VERSION` / alias to pre-cutover values, stop. No second
 overlay build without re-approval.
+
+### Completion record (2026-07-31): Gates 1–3 PASS; Gate 4 FAIL-CLOSED
+
+**Gates 1–3 — Protected Staging deployment of `f879808` completed**
+
+| Item | Value |
+|---|---|
+| Candidate code SHA | `f879808b5a0a1021683087df208feccb794c22cd` |
+| Scope-status commits | `0707e86` (FROZEN), `c3eca1f` (APPROVED) — pushed |
+| Thin overlay tag | `open-geo-console:staging-f879808-overlay-v1` |
+| Candidate image ID | `sha256:9b6eec90a89381e6a2fad3f62c00d9f72fa709933ea321c1c07d2c4f3189882f` |
+| Rollback image | `staging-b597f96-overlay-v1` (`5ce966c9029b`) retained |
+| Workers | free+deep only recreated; image ID above; `OGC_DEPLOYMENT_VERSION=f879808…`; restart **0**; ready |
+| Preview | `open-geo-console-mwyub64q7-itheheda-6857s-projects.vercel.app` READY (~2m) |
+| Fixed alias | `open-geo-console-staging-itheheda.vercel.app` → candidate Preview (once) |
+| Gate 3 smoke | `/zh` 302 SSO; `POST /api/scan` **401**; catalog 302 SSO |
+| Production | not started (pre-existing exited containers untouched) |
+| Disk after | E: **~85.5 GiB** free; images 61 / ~34.21GB |
+
+Status after Gate 3: **Protected Staging deployment completed; real flow not yet accepted.**
+
+**Gate 4 — one new lineage FAIL-CLOSED (no retry)**
+
+| Item | Value |
+|---|---|
+| URL | `https://www.cloudflare.com` (agent-submitted via `vercel curl` + protection bypass; `forceFresh=true`, locale `zh`) |
+| Report | `df79ebe5-0bce-4b85-b24a-f3795cc3169e` |
+| Free job | `47d63516-3fd7-4be9-832d-1b8c35c070d9` — **completed** (~2m49s wall: 08:15:37Z→08:18:26Z); product `legacy_website_audit_v1`; technical completed; `hasTechnicalReport=true` |
+| Free V4 / deep pre-admission job | `1368e5b8-0b3f-462d-956c-c190808b8c1e` — reason `v4_pre_admission`; contract `combined_geo_report_v4` / `two_stage_geo_report_v4`; **failed** permanent |
+| Orders / credits | **0** (no Sandbox payment; deep job is free-lane V4 pre-admission, not Paid V3) |
+| Fail phase | `admission` |
+| Root error | `PostgresError: unsupported Unicode escape sequence` (fingerprint `41022e40…`); two events (transient then permanent recurrence) 08:19:30Z / 08:19:54Z |
+| Site scale evidence | planned_pages **1813**, successful 17 / failed 1765 — Cloudflare is a pathological Free V4 admission target |
+| Paid V3 steps | **never reached** (no Q1 Free-reuse packets, no compact token gate, no websiteSynthesis on this lineage) |
+| Call counts / token / Paid HTML | **N/A** — out of reach on this lineage |
+| Customer HTML | `/reports/{id}/report.html` → 404 without access token; status API shows `hasAiReport=false`, technical completed, active deep preview failed |
+| Stop rule | **observed** — no retry/resume/repair of `df79ebe5` / `1368e5b8`; historical IDs still frozen |
+
+**Gate 4 acceptance: NOT met.** Deployment of the Paid V3 candidate workers is live, but this lineage did not exercise the compact one-call Paid V3 path.
+
+**Recommended next scope (requires new user approval):**
+
+1. One wholly new free→paid lineage on a **small** Staging site (not Cloudflare-scale).
+2. Optional: investigate Free V4 admission unicode-escape fail-closed for large page texts (separate allowlist if production code changes needed).
+3. Do **not** replay `df79ebe5` / `1368e5b8`.
 
 ---
 
