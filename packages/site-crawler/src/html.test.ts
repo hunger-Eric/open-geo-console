@@ -91,6 +91,13 @@ describe("HTML extraction", () => {
     expect(extractReadableText(`<main>${"x".repeat(1000)}</main>`, 100)).toHaveLength(100);
   });
 
+  it("canonicalizes raw and numeric-reference U+0000 before returning readable text", () => {
+    const text = extractReadableText("<main>alpha&#0;omega\u0000tail</main>");
+
+    expect(text).toBe("alpha\uFFFDomega\uFFFDtail");
+    expect(text).not.toContain("\u0000");
+  });
+
   it("requests a browser fallback for thin hydration shells", () => {
     const html = '<html><body><div id="__next"></div><script id="__NEXT_DATA__">{}</script></body></html>';
     expect(detectBrowserFallback(html, "", 500)).toEqual({

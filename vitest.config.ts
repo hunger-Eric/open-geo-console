@@ -10,7 +10,7 @@ export default defineConfig({
     }
   },
   test: {
-    include: ["packages/**/*.test.ts", "apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
+    include: ["packages/**/*.test.ts", "apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx", "scripts/**/*.test.ts"],
     globals: true
   }
 });

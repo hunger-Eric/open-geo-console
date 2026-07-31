@@ -51,6 +51,7 @@
     "staging:correction:confirm": "npm run staging:correction:confirm --workspace apps/web --",
     "staging:combined:refresh": "npm run staging:combined:refresh --workspace apps/web --",
     "test:postgres:staging-security": "npm run test:postgres:staging-security --workspace apps/web",
+    "test:postgres:disposable": "node scripts/run-disposable-postgres-tests.mjs",
     "db:migrate:sqlite": "npm run db:migrate:sqlite --workspace apps/web --",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspace apps/web",

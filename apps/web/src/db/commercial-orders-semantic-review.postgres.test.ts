@@ -1,5 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { REPORT_SEMANTIC_REVIEW_CONTRACT } from "@open-geo-console/ai-report-engine";
+import {
+  REPORT_SEMANTIC_REVIEW_CONTRACT,
+  applyReportSemanticReview,
+  buildFreeV4SemanticReviewManifest,
+  hashReportSemanticReviewValue,
+  parseReportSemanticReviewOutput,
+  reportSemanticTextHash
+} from "@open-geo-console/ai-report-engine";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -125,12 +132,14 @@ describeDisposablePostgres("Paid V3 semantic-review checkpoint carrier", () => {
     `).resolves.toEqual([{ checkpoint: {}, checkpoint_revision: 0 }]);
   }, 120_000);
 
-  it("keeps the Paid V3 checkpoint empty when the Free authority is marker-absent", async () => {
+  it("rejects a new Paid V3 transition when the Free authority is marker-absent", async () => {
     const fixture = await seedPaidV3Fixture("legacy", "absent");
-    const paid = await applyPaidPaymentEvent(eventInput(fixture.orderId, "legacy"));
-    await expect(getSqlClient()<Array<{ checkpoint: Record<string, unknown> }>>`
-      SELECT checkpoint FROM scan_jobs WHERE id=${paid.jobId}
-    `).resolves.toEqual([{ checkpoint: {} }]);
+    await expect(applyPaidPaymentEvent(eventInput(fixture.orderId, "legacy")))
+      .rejects.toThrow(/marker|carrier/i);
+    await expect(getSqlClient()<Array<{ count: number }>>`
+      SELECT count(*)::int count FROM scan_jobs
+      WHERE report_id=${fixture.reportId} AND reason='standard' AND tier='deep'
+    `).resolves.toEqual([{ count: 0 }]);
   }, 120_000);
 
   it("rolls back payment, credit, job and artifact effects for a mismatched marker-bearing lineage", async () => {
@@ -181,16 +190,7 @@ async function seedPaidV3Fixture(suffix: string, carrier: "exact" | "absent" | "
     content_hash=${questionSetIdentity},neutral_content_hash=${hash(`neutral-${suffix}`)},payload='{}'::jsonb
     WHERE id=${questionSetId}`;
 
-  const freeCheckpoint = carrier === "absent" ? {} : {
-    semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
-    freeTeaser: {
-      version: "free-teaser-checkpoint-v1",
-      stage: "ready",
-      reportId,
-      questionSetId,
-      questionSetIdentity: carrier === "mismatch" ? hash("wrong-lineage") : questionSetIdentity
-    }
-  };
+  const freeCheckpoint = carrier === "absent" ? {} : reviewedFreeCheckpoint(reportId, questionSetId, questionSetIdentity);
   await sql`INSERT INTO scan_jobs
     (id,report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,
      artifact_contract,locale,reason,stage,execution_state,current_phase,progress,checkpoint)
@@ -214,7 +214,81 @@ async function seedPaidV3Fixture(suffix: string, carrier: "exact" | "absent" | "
     currency: "USD",
     amountMinor: 2900
   });
+  if (carrier === "mismatch") {
+    const mismatched = {
+      ...freeCheckpoint,
+      freeTeaser: { ...freeCheckpoint.freeTeaser, questionSetIdentity: hash("wrong-lineage") }
+    };
+    await sql`UPDATE scan_jobs SET checkpoint=${JSON.stringify(mismatched)}::jsonb WHERE id=${`free-${suffix}`}`;
+  }
   return { reportId, orderId: order.id };
+}
+
+function reviewedFreeCheckpoint(reportId: string, questionSetId: string, questionSetIdentity: string) {
+  const answerText = "The target provides a supported service answer.";
+  const selectionSummary = "The evidence directly supports the selected answer.";
+  const targetGap = "The target should publish more specific proof.";
+  const questions = [1, 2, 3].map((ordinal) => {
+    const originalText = `Question ${ordinal}?`;
+    return { questionId: `question-${ordinal}`, originalText, originalTextHash: reportSemanticTextHash(originalText) };
+  });
+  const sourceText = "The target publishes a directly relevant service fact.";
+  const evidenceText = "A retained excerpt supports the service statement.";
+  const fields = [
+    ["q1AnswerCard.answerText", answerText],
+    ["q1Diagnosis.selectionSummary", selectionSummary],
+    ["q1Diagnosis.targetGap", targetGap]
+  ].map(([path, text]) => ({
+    path, text, mutability: "mutable" as const, questionId: questions[0]!.questionId,
+    allowedEvidenceIds: ["evidence-q1"], allowedSourceIds: ["source-q1"]
+  }));
+  const input = buildFreeV4SemanticReviewManifest({
+    locale: "en",
+    target: { siteKey: "target.example", targetUrl: "https://target.example/", aliases: ["target.example", "Target", "Target Company", "Target Brand"] },
+    expectedModel: { providerId: "fixture", modelId: "semantic-review" },
+    questions,
+    sources: [{ sourceId: "source-q1", questionId: questions[0]!.questionId, canonicalUrl: "https://source.example/q1", originalText: sourceText, originalTextHash: reportSemanticTextHash(sourceText) }],
+    evidence: [{ evidenceId: "evidence-q1", questionId: questions[0]!.questionId, sourceId: "source-q1", originalText: evidenceText, originalTextHash: reportSemanticTextHash(evidenceText) }],
+    observationResults: [], entities: [],
+    answerSubjects: [{ questionId: questions[0]!.questionId, fieldPath: "q1AnswerCard.answerText" }],
+    fields,
+    nonProseProjectionHash: hashReportSemanticReviewValue({ reportId, questionSetId })
+  });
+  const output = parseReportSemanticReviewOutput({
+    version: REPORT_SEMANTIC_REVIEW_CONTRACT,
+    inputHash: input.inputHash,
+    providerId: input.expectedModel.providerId,
+    modelId: input.expectedModel.modelId,
+    fields: input.fields.map((field) => ({
+      path: field.path, originalTextHash: field.originalTextHash, decision: "pass", issueCodes: [],
+      reason: "The prose is supported by the exact evidence.", evidenceIds: field.allowedEvidenceIds,
+      sourceIds: field.allowedSourceIds, retainedOriginalTerms: []
+    })),
+    questionDistinctness: { decision: "distinct", duplicateGroups: [], reason: "The questions cover different buyer decisions." },
+    annotations: {
+      observationResults: [],
+      answers: [{
+        questionId: questions[0]!.questionId, relevance: "responsive", entityRole: "target",
+        targetPresence: "present", targetFirstSentence: 1, targetRoles: ["service provider"],
+        competitorEntityIds: [], evidenceIds: ["evidence-q1"], sourceIds: ["source-q1"],
+        reason: "The answer directly identifies the target service."
+      }],
+      evidenceUse: input.fields.map((field) => ({
+        path: field.path, evidenceIds: field.allowedEvidenceIds, sourceIds: field.allowedSourceIds,
+        reason: "The exact references support this field."
+      }))
+    },
+    overallDecision: "pass"
+  }, input);
+  const applied = applyReportSemanticReview(input, output);
+  return {
+    semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+    freeTeaser: {
+      version: "free-teaser-checkpoint-v1", stage: "ready", reportId, questionSetId, questionSetIdentity,
+      q1AnswerCard: { answerText, diagnosis: { selectionSummary, targetGap } },
+      semanticReview: { version: REPORT_SEMANTIC_REVIEW_CONTRACT, input, output, applied }
+    }
+  };
 }
 
 async function seedRunningPreAdmission(suffix: string, marked: boolean) {

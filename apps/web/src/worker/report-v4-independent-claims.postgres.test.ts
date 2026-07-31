@@ -4,7 +4,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabase, getSqlClient, initializeDatabaseEnvironment } from "../db";
 import { claimScanJob } from "../db/jobs";
-import { terminalizePaidReportV4Core } from "../db/public-source-commerce";
+import { enqueuePaidReportV4DiagnosisEnhancement, terminalizePaidReportV4Core } from "../db/public-source-commerce";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const suite = adminUrl ? describe : describe.skip;
@@ -94,9 +94,16 @@ suite("Report V4 independent PostgreSQL claims", () => {
     expect(afterCoreClaim).toEqual({ jobs: 1, enhancements: 0, diagnoses: 0, enhancement_artifacts: 0 });
 
     const report = coreReport();
-    await persistActiveCore(report);
-    const terminal = await terminalizePaidReportV4Core({ report, workerId: coreWinner.workerId });
-    expect(terminal.enhancementJobId).not.toBe(ids.coreJobId);
+    await persistReadyCore(report);
+    await terminalizePaidReportV4Core({ report, workerId: coreWinner.workerId });
+    const enhancement = await enqueuePaidReportV4DiagnosisEnhancement({
+      reportId: ids.reportId, coreJobId: ids.coreJobId, orderId: ids.orderId,
+      siteSnapshotId: ids.siteSnapshotId, questionSetId: ids.questionSetId,
+      configSnapshotId, locale: "en"
+    });
+    if (enhancement.status !== "enqueued") throw new Error("Expected the independent enhancement job to be enqueued.");
+    const enhancementJobId = enhancement.enhancementJobId;
+    expect(enhancementJobId).not.toBe(ids.coreJobId);
 
     const lanes = await getSqlClient()<Array<Record<string, unknown>>>`
       SELECT id,reason,site_snapshot_id,credit_reservation_id,stage,execution_state,lease_owner
@@ -113,7 +120,7 @@ suite("Report V4 independent PostgreSQL claims", () => {
         lease_owner: null
       }),
       expect.objectContaining({
-        id: terminal.enhancementJobId,
+        id: enhancementJobId,
         reason: "v4_diagnosis_enhancement",
         site_snapshot_id: null,
         credit_reservation_id: null,
@@ -129,7 +136,7 @@ suite("Report V4 independent PostgreSQL claims", () => {
     const enhancementWorker = `enhancement-worker-${suffix}`;
     const enhancementClaim = await claimScanJob(enhancementWorker, "deep", 90);
     expect(enhancementClaim).toMatchObject({
-      id: terminal.enhancementJobId,
+      id: enhancementJobId,
       reportId: ids.reportId,
       reason: "v4_diagnosis_enhancement",
       siteSnapshotId: null,
@@ -140,7 +147,7 @@ suite("Report V4 independent PostgreSQL claims", () => {
     expect(await claimScanJob(`idle-worker-${suffix}`, "deep", 90)).toBeNull();
     expect((await getSqlClient()<Array<{ count: number }>>`
       SELECT count(*)::int count FROM scan_job_transition_events
-      WHERE job_id=${terminal.enhancementJobId} AND reason_code='lease_claimed'
+      WHERE job_id=${enhancementJobId} AND reason_code='lease_claimed'
     `)[0]!.count).toBe(1);
     expect((await getSqlClient()<Array<{ count: number }>>`
       SELECT count(*)::int count FROM report_v4_diagnosis_checkpoints WHERE report_id=${ids.reportId}
@@ -199,19 +206,29 @@ async function seedQueuedCore(): Promise<void> {
       'model-v4',${modelProfileHash},'{}'::jsonb,'report-v4',${reportProfileHash},'{}'::jsonb)`;
 }
 
-async function persistActiveCore(report: CombinedGeoReportV4): Promise<void> {
+async function persistReadyCore(report: CombinedGeoReportV4): Promise<void> {
   const sql = getSqlClient();
+  for (const question of report.questions) {
+    const { sources, ...answerPayload } = question;
+    await sql`INSERT INTO report_v4_question_checkpoints
+      (identity_hash,report_id,job_id,question_set_id,question_id,snapshot_id,ordinal,state,
+       question_identity_hash,model_config_identity_hash,input_identity_hash,provider_call_count,
+       answer_payload,source_payload,answer_content_hash)
+      VALUES(${sha(`checkpoint-${question.order}`)},${ids.reportId},${ids.coreJobId},${ids.questionSetId},
+        ${question.questionId},${ids.siteSnapshotId},${question.order},'answered',${sha(`question-${question.order}`)},
+        ${modelProfileHash},${sha(`input-${question.order}`)},1,${JSON.stringify(answerPayload)}::jsonb,
+        ${JSON.stringify(sources)}::jsonb,${sha(JSON.stringify(answerPayload))})`;
+  }
   await sql`INSERT INTO report_artifact_revisions
     (id,report_id,order_id,job_id,config_snapshot_id,revision_kind,revision,artifact_contract,status,
      payload_identity_hash,html_sha256,readiness,ready_at,activated_at)
     VALUES(${ids.coreArtifactId},${ids.reportId},${ids.orderId},${ids.coreJobId},${configSnapshotId},
-      'generation',1,'combined_geo_report_v4','active',${sha(stableJson(report))},${sha("core-html")},
-      '{"htmlCanonical":true}'::jsonb,now(),now())`;
+      'generation',1,'combined_geo_report_v4','ready',${sha(stableJson(report))},${sha("core-html")},
+      '{"htmlCanonical":true}'::jsonb,now(),NULL)`;
   await sql`INSERT INTO combined_geo_reports
     (artifact_revision_id,report_id,order_id,job_id,question_set_id,payload)
     VALUES(${ids.coreArtifactId},${ids.reportId},${ids.orderId},${ids.coreJobId},${ids.questionSetId},
       ${JSON.stringify(report)}::jsonb)`;
-  await sql`UPDATE scan_reports SET active_artifact_revision_id=${ids.coreArtifactId} WHERE id=${ids.reportId}`;
 }
 
 function coreReport(): CombinedGeoReportV4 {

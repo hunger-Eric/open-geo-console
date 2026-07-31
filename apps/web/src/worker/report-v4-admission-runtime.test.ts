@@ -39,6 +39,16 @@ describe("recoverable V4 admission runtime", () => {
     });
     expect(harness.finalized!.pages[0]).toMatchObject({ retainedText, contentHash: sha(retainedText) });
   });
+
+  it("rejects injected collector text that violates the canonical U+0000 invariant", async () => {
+    const harness = runtimeHarness([candidate(1)], {
+      extractAnalyzableText: () => "unsafe\u0000collector text"
+    });
+
+    await expect(harness.run()).rejects.toThrow(/U\+0000|canonical/i);
+    expect(harness.snapshots.finalize).not.toHaveBeenCalled();
+  });
+
   it("propagates an exact caller abort that lands between the preflight check and operation listener setup", async () => {
     const callerReason = new Error("caller lease aborted in setup race");
     let abortedReads = 0;

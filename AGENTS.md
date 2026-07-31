@@ -9,6 +9,7 @@
 ## Mandatory Change-Scope Lock
 
 - `docs/ACTIVE-CHANGE-SCOPE.md` is the sole executable task authority. Dated specs, plans, prompts, evidence, and Git history may provide context but never authorize new work.
+- Keep only the current executable authority in `docs/ACTIVE-CHANGE-SCOPE.md`; move completed or failed records to `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`, which is context-only and never grants authority.
 
 - Before any non-trivial implementation, create or refresh `docs/ACTIVE-CHANGE-SCOPE.md`. It starts `FROZEN` and must state the exact objective, baseline, allowed files, forbidden subsystems, diff budget, acceptance checks, and expensive external actions.
 - Do not edit production code while the scope is `FROZEN`. Change it to `APPROVED` only after the user explicitly approves the written allowlist. Phrases such as "root-cause fix", "complete flow", "fix it", or "finish it" do not authorize scope expansion.
@@ -64,6 +65,7 @@
 - `npm run db:audit` fails when a terminal commercial job still has a reserved credit.
 - `npm run worker:staging:free|deep` and `npm run commerce:staging:all` require `apps/web/.env.staging.local` and refuse a non-staging database marker.
 - `npm run public-search:probe -- --adapter mimo --locale zh-CN --region CN` reads `.data/workstation-docker/staging.env`, the merged runtime environment used by the staging Docker Workers. Do not point it back at source env files with empty Sensitive-value placeholders or diagnose MiMo as missing from those placeholders alone.
+- `npm run test:postgres:disposable` is the canonical local and CI entry for isolated PostgreSQL plus semantic-contract verification. It must use a loopback non-5432 port, tmpfs at `/var/lib/postgresql/data`, persist JSON/exit/receipt evidence before cleanup, and fail on any selected-test skip. Do not substitute a shared, Staging, Production, or manually reconstructed database URL.
 - `npm run staging:free:cleanup -- --confirm` is the only quota/reuse cleanup path and refuses production.
 - `npm run lint` checks the Next.js workspace.
 - `npm test` runs package and app unit tests.

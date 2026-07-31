@@ -24,6 +24,7 @@ import {
   type ReportSemanticReviewInput
 } from "@open-geo-console/ai-report-engine";
 import { toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
+import { extractReadableText } from "@open-geo-console/site-crawler";
 import { createTestSourceForensicReport } from "../public-source-forensics/testing";
 import { prepareCombinedGeoReportV3SemanticDraft, type PrepareCombinedGeoReportV3Input } from "../report/combined-artifact-readiness";
 import type { PublicSearchSurfaceAuthority, SearchQueryFanout } from "@open-geo-console/public-search-observer";
@@ -58,6 +59,11 @@ describePostgres("schema-v16 recovery checkpoint authority", () => {
     reportId: `recovery-report-marked-paid-v3-${suffix}`,
     jobId: `recovery-job-marked-paid-v3-${suffix}`,
     workerId: `recovery-worker-marked-paid-v3-${suffix}`
+  };
+  const unicodeCheckpoint = {
+    reportId: `recovery-report-unicode-checkpoint-${suffix}`,
+    jobId: `recovery-job-unicode-checkpoint-${suffix}`,
+    workerId: `recovery-worker-unicode-checkpoint-${suffix}`
   };
 
   beforeAll(async () => {
@@ -100,6 +106,11 @@ describePostgres("schema-v16 recovery checkpoint authority", () => {
     await sql`INSERT INTO scan_jobs
       (id,report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,artifact_contract,locale,stage,execution_state,current_phase,lease_owner,lease_expires_at,checkpoint)
       VALUES (${markedPaidV3.jobId},${markedPaidV3.reportId},'deep','recommendation_forensics_v1','public_search_source_forensics_v1',2,'combined_geo_report_v3','zh','synthesizing','running','grounded_answer_synthesis',${markedPaidV3.workerId},now()+interval '10 minutes',${JSON.stringify({ semanticReviewContractVersion: "report-semantic-review-v1" })}::jsonb)`;
+    await sql`INSERT INTO scan_reports (id,url,site_key,report_locale,technical_status)
+      VALUES (${unicodeCheckpoint.reportId},'https://unicode-checkpoint.example','unicode-checkpoint.example','en','completed')`;
+    await sql`INSERT INTO scan_jobs
+      (id,report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,artifact_contract,locale,reason,stage,execution_state,current_phase,lease_owner,lease_expires_at)
+      VALUES (${unicodeCheckpoint.jobId},${unicodeCheckpoint.reportId},'deep','recommendation_forensics_v1','two_stage_geo_report_v4',4,'combined_geo_report_v4','en','v4_pre_admission','discovering','running','admission',${unicodeCheckpoint.workerId},now()+interval '10 minutes')`;
   }, 120_000);
 
   afterAll(async () => {
@@ -107,6 +118,7 @@ describePostgres("schema-v16 recovery checkpoint authority", () => {
     for (const row of rows) await sql`DELETE FROM scan_reports WHERE id=${row.reportId}`;
     await sql`DELETE FROM scan_reports WHERE id=${artifactGate.reportId}`;
     await sql`DELETE FROM scan_reports WHERE id=${markedPaidV3.reportId}`;
+    await sql`DELETE FROM scan_reports WHERE id=${unicodeCheckpoint.reportId}`;
     await closeDatabase();
     if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = originalDatabaseUrl;
@@ -118,6 +130,22 @@ describePostgres("schema-v16 recovery checkpoint authority", () => {
     if (containerName) {
       await execFileAsync("docker", ["rm", "-f", containerName], { timeout: 30_000 });
     }
+  }, 120_000);
+
+  it("persists crawler-canonicalized U+0000 input through the real PostgreSQL JSONB checkpoint", async () => {
+    const retainedText = extractReadableText("<main>alpha&#0;omega\u0000tail</main>");
+    const written = await checkpointScanJob(unicodeCheckpoint.jobId, unicodeCheckpoint.workerId, {
+      stage: "discovering",
+      phase: "admission",
+      progress: 10,
+      checkpoint: { reportV4Admission: { retainedText } }
+    });
+    const persisted = await getScanJob(unicodeCheckpoint.jobId);
+
+    expect(retainedText).toBe("alpha\uFFFDomega\uFFFDtail");
+    expect(JSON.stringify(written.checkpoint)).not.toContain("\\u0000");
+    expect(written.checkpoint).toMatchObject({ reportV4Admission: { retainedText } });
+    expect(persisted?.checkpoint).toMatchObject({ reportV4Admission: { retainedText } });
   }, 120_000);
 
   it.each(rows)("persists $phase through repair_wait and resumes the verified V2 checkpoint", async (row) => {
@@ -375,11 +403,17 @@ async function paidSemanticFixture(ids: { reportId: string; jobId: string }) {
   const questions = cards.map((card) => ({ questionId: card.questionId, originalText: card.exactQuestion, originalTextHash: reportSemanticTextHash(card.exactQuestion) }));
   const sources = cards.map((card) => {
     const source = card.sources[0]!;
-    const originalText = JSON.stringify(source);
-    return { sourceId: source.sourceId, questionId: card.questionId, canonicalUrl: source.canonicalUrl, originalText, originalTextHash: reportSemanticTextHash(originalText) };
+    const originalText = JSON.stringify({ role: "source", sourceId: source.sourceId, title: source.title });
+    return { sourceId: source.sourceId, questionId: card.questionId, canonicalUrl: source.canonicalUrl, originalText, originalTextHash: reportSemanticTextHash(originalText), eligible: true };
   });
-  const evidence = sources.map((source) => ({ evidenceId: source.sourceId, questionId: source.questionId, sourceId: source.sourceId, originalText: source.originalText, originalTextHash: source.originalTextHash }));
-  const observationResults = sources.map((source, index) => ({ observationId: `observation-${index + 1}`, resultId: `result-${index + 1}`, questionId: source.questionId, originalText: source.originalText, originalTextHash: source.originalTextHash }));
+  const evidence = sources.map((source) => {
+    const originalText = JSON.stringify({ role: "evidence", sourceId: source.sourceId });
+    return { evidenceId: source.sourceId, questionId: source.questionId, sourceId: source.sourceId, originalText, originalTextHash: reportSemanticTextHash(originalText), eligible: true };
+  });
+  const observationResults = sources.map((source, index) => {
+    const originalText = JSON.stringify({ role: "observation", sourceId: source.sourceId, index });
+    return { observationId: `observation-${index + 1}`, resultId: `result-${index + 1}`, questionId: source.questionId, originalText, originalTextHash: reportSemanticTextHash(originalText) };
+  });
   const profileId = "profile-source-example";
   const sourceIds = sources.map(({ sourceId }) => sourceId);
   const sourceSelectionCatalogSeeds = [
@@ -433,12 +467,12 @@ function validPaidReview(input: ReportSemanticReviewInput): Record<string, unkno
   };
   return {
     version: REPORT_SEMANTIC_REVIEW_CONTRACT, inputHash: input.inputHash, providerId: input.expectedModel.providerId, modelId: input.expectedModel.modelId,
-    fields: input.fields.map((field) => ({ path: field.path, originalTextHash: field.originalTextHash, decision: "pass", issueCodes: [], reason: "The text is natural and supported by the exact evidence.", evidenceIds: field.allowedEvidenceIds, sourceIds: field.allowedSourceIds, retainedOriginalTerms: [] })),
+    fields: input.fields.map((field) => ({ path: field.path, originalTextHash: field.originalTextHash, decision: "pass", issueCodes: [], reason: "The text is natural and supported by the exact evidence.", evidenceIds: input.evidencePolicy ? [input.evidence[0]!.evidenceId] : field.allowedEvidenceIds, sourceIds: input.evidencePolicy ? [input.sources[0]!.sourceId] : field.allowedSourceIds, rejectedEvidence: [], rejectedSources: [], retainedOriginalTerms: [] })),
     questionDistinctness: { decision: "distinct", duplicateGroups: [], reason: "The three buyer questions address different decisions." },
     annotations: {
       observationResults: input.observationResults.map(({ observationId, resultId }) => ({ observationId, resultId, targetPresence: "present", competitorPresence: "absent", reason: "The observation refers to the target." })),
       answers: input.answerSubjects.map(({ questionId }, index) => ({ questionId, relevance: "responsive", entityRole: "target", targetPresence: "present", targetFirstSentence: 1, targetRoles: ["service provider"], competitorEntityIds: [], evidenceIds: [`s${index + 1}`], sourceIds: [`s${index + 1}`], reason: "The answer responds directly using its owned source." })),
-      evidenceUse: input.fields.map((field) => ({ path: field.path, evidenceIds: field.allowedEvidenceIds, sourceIds: field.allowedSourceIds, reason: "The exact references belong to this field." })),
+      evidenceUse: input.fields.map((field) => ({ path: field.path, evidenceIds: input.evidencePolicy ? [input.evidence[0]!.evidenceId] : field.allowedEvidenceIds, sourceIds: input.evidencePolicy ? [input.sources[0]!.sourceId] : field.allowedSourceIds, reason: "The exact references belong to this field." })),
       sourceSelection: input.sourceSelectionCatalog!.map((item) => { const factorIndex = factorItems.findIndex(({ itemId }) => itemId === item.itemId); const actionIndex = actionItems.findIndex(({ itemId }) => itemId === item.itemId); return { annotationId: item.annotationId, itemId: item.itemId, kind: item.kind, questionId: item.questionId, sourceId: item.sourceId, profileId: item.profileId, actionId: item.actionId, contributionRole: item.kind === "contribution" ? "first_party_capability" : null, targetState: item.kind === "target_state" ? "missing" : null, factorClassification: item.kind === "factor" ? factorKinds[factorIndex]! : null, actionFamily: item.kind === "action" ? actionFamilies[actionIndex]! : null, priority: item.kind === "action" ? priorities[actionIndex]! : null, evidenceIds: item.allowedEvidenceIds, reason: "The catalog-bound evidence supports this semantic value." }; })
     }, sourceSelectionDraft, sourceSelectionDraftHash: hashReportSemanticReviewValue(sourceSelectionDraft), overallDecision: "pass"
   };

@@ -48,11 +48,11 @@ export function decodeHtmlEntities(value: string): string {
   return value.replace(/&(#x[\da-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
     if (entity.startsWith("#x")) {
       const code = Number.parseInt(entity.slice(2), 16);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+      return Number.isFinite(code) ? String.fromCodePoint(code === 0 ? 0xfffd : code) : match;
     }
     if (entity.startsWith("#")) {
       const code = Number.parseInt(entity.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+      return Number.isFinite(code) ? String.fromCodePoint(code === 0 ? 0xfffd : code) : match;
     }
     return named[entity.toLowerCase()] ?? match;
   });
@@ -60,6 +60,7 @@ export function decodeHtmlEntities(value: string): string {
 
 function normalizeText(value: string): string {
   return decodeHtmlEntities(value)
+    .replace(/\u0000/gu, "\uFFFD")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p\s*>|<\/li\s*>|<\/h[1-6]\s*>|<\/div\s*>/gi, "\n")
     .replace(/<[^>]+>/g, " ")

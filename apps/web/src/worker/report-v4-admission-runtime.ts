@@ -231,7 +231,8 @@ function assertCheckpointInvariants(checkpoint: ReportV4AdmissionCheckpoint): vo
     if (page.analyzable) {
       analyzablePages += 1;
       if (typeof page.retainedText !== "string" || !page.retainedText.trim() ||
-          page.retainedText.length > RETAINED_TEXT_LIMIT || page.contentHash !== sha(page.retainedText) ||
+          page.retainedText.includes("\u0000") || page.retainedText.length > RETAINED_TEXT_LIMIT ||
+          page.contentHash !== sha(page.retainedText) ||
           typeof page.summary !== "string" || page.summary.length > SUMMARY_LIMIT) {
         throw new Error("The V4 admission checkpoint retained-text evidence is invalid.");
       }
@@ -380,7 +381,9 @@ function appendCollectionResult(
     const normalizedUrl = normalizedHttpUrl(page.normalizedUrl);
     if (!normalizedUrl || persistedUrls.has(normalizedUrl)) continue;
     persistedUrls.add(normalizedUrl);
-    const contentHash = sha(page.analyzableText);
+    assertCanonicalExternalText(page.analyzableText);
+    const retainedText = page.analyzableText;
+    const contentHash = sha(retainedText);
     if (analyzableContentHashes.has(contentHash)) {
       pages.push({
         id: pageId(snapshotId, normalizedUrl),
@@ -402,8 +405,8 @@ function appendCollectionResult(
       normalizedUrl,
       analyzable: true,
       readMode: page.readability,
-      summary: summarize(page.analyzableText),
-      retainedText: page.analyzableText,
+      summary: summarize(retainedText),
+      retainedText,
       contentHash,
       exclusionReason: null
     });
@@ -506,6 +509,12 @@ function hasCoverageLimitingExclusion(pages: readonly ReportV4SiteSnapshotPageIn
 
 function summarize(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, SUMMARY_LIMIT);
+}
+
+function assertCanonicalExternalText(value: string): void {
+  if (value.includes("\u0000")) {
+    throw new Error("The V4 admission collector returned non-canonical U+0000 text.");
+  }
 }
 
 function pageId(snapshotId: string, normalizedUrl: string): string {

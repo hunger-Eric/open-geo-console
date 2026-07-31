@@ -1,0 +1,42 @@
+name: PostgreSQL contracts
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve PostgreSQL image
+        run: docker pull postgres:16-alpine
+
+      - name: Run PostgreSQL and semantic contract gate
+        run: npm run test:postgres:disposable
+
+      - name: Upload PostgreSQL test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-contract-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .data/test-runs/postgres-disposable/
+          if-no-files-found: error
+          retention-days: 14

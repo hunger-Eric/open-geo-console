@@ -65,7 +65,11 @@ describeDisposablePostgres("V4 page-summary repository PostgreSQL parity", () =>
       reportId: "report-main", snapshotId: "snapshot-main",
       pageUrl: "https://example.com/snapshot-main-page-1",
        contentHash: hash(retainedText("snapshot-main-page-1")), snapshotContentIdentityHash: hash("snapshot-main")
-    }, repository)).resolves.toEqual(loaded[0]);
+    }, repository)).resolves.toMatchObject({
+      chunks: [{ sourceLocations: [{ locationId: "snapshot-main-page-1:0-20" }] }]
+    });
+    expect(loaded[0]!.chunks[0]!.sourceLocations[0]!.locationId)
+      .not.toBe("snapshot-main-page-1:0-20");
     await expect(repository.loadForWebsiteSynthesis({
       reportId: "wrong-report", snapshotId: "snapshot-main", contentIdentityHash: hash("snapshot-main")
     }))
