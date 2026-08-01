@@ -1,14 +1,20 @@
 import {
+  FREE_V4_DIRECT_SEMANTICS_VERSION,
   REPORT_SEMANTIC_REVIEW_CONTRACT,
   parseReportSemanticReviewInput,
   parseReportSemanticReviewOutput,
-  verifyReportSemanticReviewReceipt
+  parseGenerativeSearchAnswerResult,
+  verifyReportSemanticReviewReceipt,
+  verifyFreeV4DirectAnalysisReceipt,
+  verifyFreeV4DirectCoreReceipt
 } from "@open-geo-console/ai-report-engine";
 import type { JobCheckpoint, ScanJobStage } from "./schema";
 
 export type SemanticReviewContractVersion = typeof REPORT_SEMANTIC_REVIEW_CONTRACT;
+export type FreeDirectSemanticsVersion = typeof FREE_V4_DIRECT_SEMANTICS_VERSION;
 
 const CARRIER_KEY = "semanticReviewContractVersion" as const;
+const FREE_DIRECT_CARRIER_KEY = "freeDirectSemanticsVersion" as const;
 
 export function createSemanticReviewInitialCheckpoint(
   version?: SemanticReviewContractVersion
@@ -16,6 +22,21 @@ export function createSemanticReviewInitialCheckpoint(
   if (version === undefined) return {};
   requireVersion(version, "$checkpoint.semanticReviewContractVersion");
   return { semanticReviewContractVersion: version };
+}
+
+export function createFreeDirectSemanticsInitialCheckpoint(): JobCheckpoint {
+  return { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION };
+}
+
+export function readFreeDirectSemanticsVersion(value: unknown): FreeDirectSemanticsVersion | null {
+  const checkpoint = record(value, "$checkpoint");
+  const declared = Object.prototype.hasOwnProperty.call(checkpoint, FREE_DIRECT_CARRIER_KEY);
+  assertNoNestedCarrier(checkpoint, FREE_DIRECT_CARRIER_KEY);
+  if (!declared) return null;
+  if (checkpoint[FREE_DIRECT_CARRIER_KEY] !== FREE_V4_DIRECT_SEMANTICS_VERSION) {
+    throw new TypeError(`$checkpoint.${FREE_DIRECT_CARRIER_KEY} must equal ${FREE_V4_DIRECT_SEMANTICS_VERSION}.`);
+  }
+  return FREE_V4_DIRECT_SEMANTICS_VERSION;
 }
 
 export function readSemanticReviewContractVersion(value: unknown): SemanticReviewContractVersion | null {
@@ -32,10 +53,23 @@ export function assertSemanticReviewCarrierUpdate(
 ): void {
   const persisted = readSemanticReviewContractVersion(persistedValue);
   const proposed = semanticReviewCarrierUpdateVersion(updateValue);
-  if (proposed === undefined) return;
-  if (proposed !== persisted) {
+  if (proposed !== undefined && proposed !== persisted) {
     throw new Error("The semantic-review checkpoint carrier is immutable after job creation.");
   }
+  const persistedFree = readFreeDirectSemanticsVersion(persistedValue);
+  const proposedFree = freeDirectSemanticsCarrierUpdateVersion(updateValue);
+  if (proposedFree !== undefined && proposedFree !== persistedFree) {
+    throw new Error("The Free direct-semantics checkpoint carrier is immutable after job creation.");
+  }
+}
+
+export function freeDirectSemanticsCarrierUpdateVersion(
+  updateValue: unknown
+): FreeDirectSemanticsVersion | undefined {
+  const update = record(updateValue, "$checkpointUpdate");
+  const declared = Object.prototype.hasOwnProperty.call(update, FREE_DIRECT_CARRIER_KEY);
+  const proposed = readFreeDirectSemanticsVersion(update);
+  return declared ? proposed ?? undefined : undefined;
 }
 
 export function semanticReviewCarrierUpdateVersion(
@@ -64,7 +98,11 @@ export function resolvePaidV3SemanticReviewContract(input: {
   questionSetIdentity: string;
 }): SemanticReviewContractVersion | null {
   const version = readSemanticReviewContractVersion(input.checkpoint);
-  if (version === null) return null;
+  const freeDirectVersion = readFreeDirectSemanticsVersion(input.checkpoint);
+  if (version !== null && freeDirectVersion !== null) {
+    throw new Error("A Free job cannot carry both legacy review and direct semantic authority.");
+  }
+  if (version === null && freeDirectVersion === null) return null;
   if (input.stage !== "completed" && input.stage !== "completed_limited") {
     throw new Error("A marker-bearing Free teaser must be terminal before Paid V3 creation.");
   }
@@ -75,8 +113,105 @@ export function resolvePaidV3SemanticReviewContract(input: {
       teaser.questionSetIdentity !== input.questionSetIdentity) {
     throw new Error("The marker-bearing Free teaser does not match the Paid V3 question lineage.");
   }
+  if (freeDirectVersion !== null) {
+    assertTerminalFreeDirectReceipt(teaser);
+    // The Direct receipts authorize checkout; they do not masquerade as the
+    // legacy global semantic-review carrier used by Paid V3.
+    return null;
+  }
   assertTerminalFreeSemanticReceipt(teaser);
   return version;
+}
+
+function assertTerminalFreeDirectReceipt(teaser: Record<string, unknown>): void {
+  const core = record(teaser.q1AnswerDraft, "$checkpoint.freeTeaser.q1AnswerDraft");
+  const provenance = record(core.provenance, "$checkpoint.freeTeaser.q1AnswerDraft.provenance");
+  const answerResult = record(teaser.q1AnswerResult, "$checkpoint.freeTeaser.q1AnswerResult");
+  const analysis = record(teaser.directAnalysis, "$checkpoint.freeTeaser.directAnalysis");
+  const bindings = teaser.directAnalysisHandleBindings;
+  const questions = teaser.directQuestionTexts;
+  if (teaser.directAnalysisStatus !== "completed" ||
+      !Array.isArray(bindings) || !Array.isArray(questions) || questions.length !== 3 ||
+      !teaser.directCoreReceipt || !teaser.directAnalysisReceipt) {
+    throw new Error("The Free direct core and completed analysis receipts are incomplete.");
+  }
+  const parsedAnswer = parseGenerativeSearchAnswerResult(answerResult, {
+    expectedQuestionId: requireText(core.questionId, "$checkpoint.freeTeaser.q1AnswerDraft.questionId"),
+    locale: requireText(teaser.locale, "$checkpoint.freeTeaser.locale"),
+    semanticValidation: "free_direct"
+  });
+  if (parsedAnswer.answerText !== core.answerText || JSON.stringify(parsedAnswer.refusal) !== JSON.stringify(core.refusal) ||
+      JSON.stringify(parsedAnswer.sources.map(answerSourceProjection)) !==
+        JSON.stringify((Array.isArray(core.sources) ? core.sources : []).map(answerSourceProjection))) {
+    throw new Error("The Free direct Q1 core differs from its provider answer authority.");
+  }
+  const coreReceipt = verifyFreeV4DirectCoreReceipt(teaser.directCoreReceipt, {
+    questionSetIdentity: requireText(teaser.questionSetIdentity, "$checkpoint.freeTeaser.questionSetIdentity"),
+    questions: questions.map((question, index) => requireText(question, `$checkpoint.freeTeaser.directQuestionTexts[${index}]`)),
+    questionId: requireText(core.questionId, "$checkpoint.freeTeaser.q1AnswerDraft.questionId"),
+    questionText: requireText(core.exactQuestion, "$checkpoint.freeTeaser.q1AnswerDraft.exactQuestion"),
+    answer: teaser.q1AnswerResult,
+    sources: core.sources,
+    providerResponseId: parsedAnswer.providerResponseId,
+    providerId: requireText(provenance.providerId, "$checkpoint.freeTeaser.q1AnswerDraft.provenance.providerId"),
+    model: requireText(provenance.model, "$checkpoint.freeTeaser.q1AnswerDraft.provenance.model"),
+    searchMode: requireText(provenance.searchMode, "$checkpoint.freeTeaser.q1AnswerDraft.provenance.searchMode"),
+    searchedAt: requireText(provenance.searchedAt, "$checkpoint.freeTeaser.q1AnswerDraft.provenance.searchedAt"),
+    completedAt: requireText(provenance.completedAt, "$checkpoint.freeTeaser.q1AnswerDraft.provenance.completedAt"),
+    nonProseProjection: {
+      version: teaser.version,
+      identityHash: teaser.identityHash,
+      reportId: teaser.reportId,
+      admissionSnapshotId: teaser.admissionSnapshotId,
+      admissionContentIdentityHash: teaser.admissionContentIdentityHash,
+      foundationHash: teaser.foundationHash,
+      locale: teaser.locale,
+      region: teaser.region,
+      authorityId: teaser.authorityId,
+      evidenceCutoffAt: teaser.evidenceCutoffAt,
+      questionSetId: teaser.questionSetId,
+      questionSetIdentity: teaser.questionSetIdentity,
+      questionId: core.questionId,
+      answerHash: provenance.answerHash,
+      sourceHash: provenance.sourceHash
+    }
+  });
+  verifyFreeV4DirectAnalysisReceipt(teaser.directAnalysisReceipt, {
+    coreReceiptHash: coreReceipt.receiptHash,
+    analysis: analysis as never,
+    handleBindings: bindings.map((binding, index) => {
+      const row = record(binding, `$checkpoint.freeTeaser.directAnalysisHandleBindings[${index}]`);
+      return {
+        handle: requireText(row.handle, `$checkpoint.freeTeaser.directAnalysisHandleBindings[${index}].handle`),
+        evidenceRef: requireText(row.evidenceRef, `$checkpoint.freeTeaser.directAnalysisHandleBindings[${index}].evidenceRef`)
+      };
+    }),
+    nonProseProjection: {
+      version: teaser.version,
+      identityHash: teaser.identityHash,
+      reportId: teaser.reportId,
+      admissionSnapshotId: teaser.admissionSnapshotId,
+      admissionContentIdentityHash: teaser.admissionContentIdentityHash,
+      foundationHash: teaser.foundationHash,
+      locale: teaser.locale,
+      region: teaser.region,
+      authorityId: teaser.authorityId,
+      questionSetIdentity: teaser.questionSetIdentity,
+      analysisStatus: teaser.directAnalysisStatus
+    }
+  });
+}
+
+function answerSourceProjection(value: unknown): unknown {
+  const source = record(value, "$checkpoint.freeTeaser.q1AnswerDraft.sources[]");
+  return {
+    sourceId: source.sourceId,
+    title: source.title,
+    canonicalUrl: source.canonicalUrl,
+    registrableDomain: source.registrableDomain,
+    citedText: source.citedText ?? null,
+    providerResultOrder: source.providerResultOrder
+  };
 }
 
 /**
@@ -125,9 +260,9 @@ function record(value: unknown, path: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function assertNoNestedCarrier(root: Record<string, unknown>): void {
+function assertNoNestedCarrier(root: Record<string, unknown>, carrierKey: string = CARRIER_KEY): void {
   const pending = Object.entries(root)
-    .filter(([key]) => key !== CARRIER_KEY)
+    .filter(([key]) => key !== carrierKey)
     .map(([, value]) => value);
   const seen = new Set<object>();
   while (pending.length) {
@@ -140,9 +275,14 @@ function assertNoNestedCarrier(root: Record<string, unknown>): void {
       continue;
     }
     const row = value as Record<string, unknown>;
-    if (Object.prototype.hasOwnProperty.call(row, CARRIER_KEY)) {
-      throw new TypeError(`$checkpoint.${CARRIER_KEY} must be declared only at the checkpoint root.`);
+    if (Object.prototype.hasOwnProperty.call(row, carrierKey)) {
+      throw new TypeError(`$checkpoint.${carrierKey} must be declared only at the checkpoint root.`);
     }
     pending.push(...Object.values(row));
   }
+}
+
+function requireText(value: unknown, path: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new TypeError(`${path} must be nonblank text.`);
+  return value;
 }

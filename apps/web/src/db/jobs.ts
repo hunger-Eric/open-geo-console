@@ -24,6 +24,7 @@ import {
 } from "./report-v4-admission-jobs";
 import {
   assertSemanticReviewCarrierUpdate,
+  freeDirectSemanticsCarrierUpdateVersion,
   semanticReviewCarrierUpdateVersion
 } from "./report-semantic-review-activation";
 
@@ -392,6 +393,7 @@ export async function checkpointScanJob(
   const sql = getSqlClient();
   const checkpoint = JSON.stringify(input.checkpoint ?? {});
   const semanticReviewContractVersion = semanticReviewCarrierUpdateVersion(input.checkpoint ?? {});
+  const freeDirectSemanticsVersion = freeDirectSemanticsCarrierUpdateVersion(input.checkpoint ?? {});
   await sql.begin(async (tx) => {
     const rows = await tx<{ id: string; execution_state: string; checkpoint_revision: number; current_phase: ScanJobPhase }[]>`
       UPDATE scan_jobs
@@ -405,6 +407,7 @@ export async function checkpointScanJob(
         AND execution_state = 'running'
         AND (${input.expectedCheckpointRevision ?? null}::integer IS NULL OR checkpoint_revision = ${input.expectedCheckpointRevision ?? null})
         AND (${semanticReviewContractVersion ?? null}::text IS NULL OR checkpoint->>'semanticReviewContractVersion' = ${semanticReviewContractVersion ?? null})
+        AND (${freeDirectSemanticsVersion ?? null}::text IS NULL OR checkpoint->>'freeDirectSemanticsVersion' = ${freeDirectSemanticsVersion ?? null})
       RETURNING id, execution_state, checkpoint_revision, current_phase
     `;
     const row = rows[0];
@@ -520,7 +523,7 @@ export async function terminalizeScanJob(
       reason: job.reason,
       stage: input.stage
     }, createPostgresReportV4AdmissionJobRepository(tx), {
-      semanticReviewContractVersion: "report-semantic-review-v1"
+      freeDirectSemanticsVersion: "free-v4-direct-semantics-v1"
     });
     if (!job.credit_reservation_id) return;
 

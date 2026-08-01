@@ -333,6 +333,33 @@ describe("strict Report V4 processor routing", () => {
     }
   });
 
+  it("does not defer a transient V4 pre-admission failure into another direct-model run", async () => {
+    const job = v4Job({
+      reason: "v4_pre_admission",
+      businessQuestionSetId: null,
+      siteSnapshotId: null,
+      creditReservationId: null,
+      checkpoint: { freeDirectSemanticsVersion: "free-v4-direct-semantics-v1" },
+      maxAttempts: 1
+    });
+    const outage = new PublicSourceSnapshotUnavailableError("search_execution");
+    boundaryMocks.getScanJob.mockResolvedValueOnce(job);
+    boundaryMocks.failScanJob.mockResolvedValueOnce({ ...job, stage: "failed", executionState: "failed" });
+    try {
+      await processScanJob(job, "worker-1", {
+        reportV4PreAdmissionRunner: vi.fn(async () => { throw outage; })
+      });
+
+      expect(boundaryMocks.failScanJob).toHaveBeenCalledWith(job.id, "worker-1", expect.objectContaining({
+        retryable: true,
+        internalError: expect.objectContaining({ classification: "transient", code: "public_source_snapshot_search_execution" })
+      }));
+      expect(boundaryMocks.failScanJob.mock.calls[0]?.[2]).not.toHaveProperty("defer");
+    } finally {
+      vi.clearAllMocks();
+    }
+  });
+
   it("still fails fast on a recurrent deterministic public-source failure instead of deferring", async () => {
     const job = legacyFullRerunJob();
     const previousAi = configureTestAi();
@@ -542,7 +569,6 @@ describe("strict Report V4 processor routing", () => {
     try {
       await processScanJob(job, "worker-1");
       expect(evidenceGateMocks.generateFreeTeaser).toHaveBeenCalledTimes(1);
-      // Env unset: the call site passes undefined, preserving prior behavior.
       expect(evidenceGateMocks.generateFreeTeaser.mock.calls[0]![0].onSemanticReviewBatchEvidence).toBeUndefined();
 
       process.env.OGC_SEMANTIC_REVIEW_EVIDENCE_PATH = evidencePath;

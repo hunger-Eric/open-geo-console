@@ -28,6 +28,7 @@ import {
 import {
   assertSemanticReviewCarrierEquals,
   createSemanticReviewInitialCheckpoint,
+  readFreeDirectSemanticsVersion,
   readSemanticReviewContractVersion,
   resolvePaidV3SemanticReviewContract,
   type SemanticReviewContractVersion
@@ -975,8 +976,9 @@ async function paidV3SemanticReviewContract(
   `;
   if (!freeJob) throw new CommercialOrderConflictError("The Free semantic-review authority is unavailable for this Paid V3 lineage.");
   try {
-    if (readSemanticReviewContractVersion(freeJob.checkpoint) === null) {
-      throw new CommercialOrderConflictError("New Paid V3 lineages require the Free semantic-review marker.");
+    if (readSemanticReviewContractVersion(freeJob.checkpoint) === null &&
+        readFreeDirectSemanticsVersion(freeJob.checkpoint) === null) {
+      throw new CommercialOrderConflictError("New Paid V3 lineages require a Free semantic authority carrier.");
     }
   } catch (error) {
     throw new CommercialOrderConflictError("The Free semantic-review carrier is malformed.", { cause: error });

@@ -1,11 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  REPORT_SEMANTIC_REVIEW_CONTRACT,
-  applyReportSemanticReview,
-  buildFreeV4SemanticReviewManifest,
-  hashReportSemanticReviewValue,
-  parseReportSemanticReviewOutput,
-  reportSemanticTextHash
+  FREE_V4_DIRECT_SEMANTICS_VERSION,
+  createFreeV4DirectAnalysisReceipt,
+  createFreeV4DirectCoreReceipt
 } from "@open-geo-console/ai-report-engine";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -50,16 +47,14 @@ describeDisposablePostgres("Paid V3 semantic-review checkpoint carrier", () => {
     await admin.end({ timeout: 5 });
   }, 60_000);
 
-  it("copies an exact Free marker into the Paid V3 job and preserves it on idempotent replay", async () => {
-    const fixture = await seedPaidV3Fixture("marked", "exact");
-    const first = await applyPaidPaymentEvent(eventInput(fixture.orderId, "marked"));
-    const duplicate = await applyPaidPaymentEvent(eventInput(fixture.orderId, "marked"));
+  it("verifies both Free direct receipts without forging the legacy Paid marker", async () => {
+    const fixture = await seedPaidV3Fixture("direct", "direct");
+    const first = await applyPaidPaymentEvent(eventInput(fixture.orderId, "direct"));
+    const duplicate = await applyPaidPaymentEvent(eventInput(fixture.orderId, "direct"));
     expect(duplicate).toMatchObject({ duplicate: true, jobId: first.jobId });
     await expect(getSqlClient()<Array<{ checkpoint: Record<string, unknown> }>>`
       SELECT checkpoint FROM scan_jobs WHERE id=${first.jobId}
-    `).resolves.toEqual([{ checkpoint: {
-      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
-    } }]);
+    `).resolves.toEqual([{ checkpoint: {} }]);
   }, 120_000);
 
   it("creates the Free carrier atomically and never retrofits an exactly-once row", async () => {
@@ -68,22 +63,22 @@ describeDisposablePostgres("Paid V3 semantic-review checkpoint carrier", () => {
     const first = await getSqlClient().begin((tx) => enqueueReportV4PreAdmissionAfterPreview(
       preview,
       createPostgresReportV4AdmissionJobRepository(tx),
-      { semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT }
+      { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION }
     ));
     const duplicate = await getSqlClient().begin((tx) => enqueueReportV4PreAdmissionAfterPreview(
       preview,
       createPostgresReportV4AdmissionJobRepository(tx),
-      { semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT }
+      { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION }
     ));
     expect(first).toMatchObject({ created: true });
     expect(duplicate).toEqual({ jobId: first!.jobId, created: false });
-    await expect(getSqlClient()<Array<{ checkpoint: Record<string, unknown>; dispatches: number }>>`
-      SELECT checkpoint,
+    await expect(getSqlClient()<Array<{ checkpoint: Record<string, unknown>; max_attempts: number; dispatches: number }>>`
+      SELECT checkpoint,max_attempts,
         (SELECT count(*)::int FROM job_dispatch_outbox WHERE job_id=scan_jobs.id) dispatches
       FROM scan_jobs WHERE id=${first!.jobId}
     `).resolves.toEqual([{ checkpoint: {
-      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
-    }, dispatches: 1 }]);
+      freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION
+    }, max_attempts: 1, dispatches: 1 }]);
     await expect(getSqlClient().begin((tx) => enqueueReportV4PreAdmissionAfterPreview(
       preview,
       createPostgresReportV4AdmissionJobRepository(tx)
@@ -98,7 +93,7 @@ describeDisposablePostgres("Paid V3 semantic-review checkpoint carrier", () => {
     await expect(getSqlClient().begin((tx) => enqueueReportV4PreAdmissionAfterPreview(
       legacyPreview,
       createPostgresReportV4AdmissionJobRepository(tx),
-      { semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT }
+      { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION }
     ))).rejects.toThrow(/creation authority/i);
     await expect(getSqlClient()<Array<{ checkpoint: Record<string, unknown> }>>`
       SELECT checkpoint FROM scan_jobs WHERE id=${legacy!.jobId}
@@ -115,7 +110,7 @@ describeDisposablePostgres("Paid V3 semantic-review checkpoint carrier", () => {
       expectedCheckpointRevision: 0
     });
     expect(updated.checkpoint).toMatchObject({
-      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION,
       targetPageCount: 3
     });
 
@@ -124,7 +119,7 @@ describeDisposablePostgres("Paid V3 semantic-review checkpoint carrier", () => {
       stage: "analyzing",
       phase: "page_analysis",
       progress: 50,
-      checkpoint: { semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT },
+      checkpoint: { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION },
       expectedCheckpointRevision: 0
     })).rejects.toThrow(/immutable/i);
     await expect(getSqlClient()<Array<{ checkpoint: Record<string, unknown>; checkpoint_revision: number }>>`
@@ -169,7 +164,7 @@ describeDisposablePostgres("Paid V3 semantic-review checkpoint carrier", () => {
   }, 120_000);
 });
 
-async function seedPaidV3Fixture(suffix: string, carrier: "exact" | "absent" | "mismatch") {
+async function seedPaidV3Fixture(suffix: string, carrier: "direct" | "absent" | "mismatch") {
   const sql = getSqlClient();
   const reportId = `report-${suffix}`;
   const questionSetId = `questions-${suffix}`;
@@ -190,7 +185,7 @@ async function seedPaidV3Fixture(suffix: string, carrier: "exact" | "absent" | "
     content_hash=${questionSetIdentity},neutral_content_hash=${hash(`neutral-${suffix}`)},payload='{}'::jsonb
     WHERE id=${questionSetId}`;
 
-  const freeCheckpoint = carrier === "absent" ? {} : reviewedFreeCheckpoint(reportId, questionSetId, questionSetIdentity);
+  const freeCheckpoint = carrier === "absent" ? {} : directFreeCheckpoint(reportId, questionSetId, questionSetIdentity);
   await sql`INSERT INTO scan_jobs
     (id,report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,
      artifact_contract,locale,reason,stage,execution_state,current_phase,progress,checkpoint)
@@ -224,71 +219,62 @@ async function seedPaidV3Fixture(suffix: string, carrier: "exact" | "absent" | "
   return { reportId, orderId: order.id };
 }
 
-function reviewedFreeCheckpoint(reportId: string, questionSetId: string, questionSetIdentity: string) {
-  const answerText = "The target provides a supported service answer.";
-  const selectionSummary = "The evidence directly supports the selected answer.";
-  const targetGap = "The target should publish more specific proof.";
-  const questions = [1, 2, 3].map((ordinal) => {
-    const originalText = `Question ${ordinal}?`;
-    return { questionId: `question-${ordinal}`, originalText, originalTextHash: reportSemanticTextHash(originalText) };
-  });
-  const sourceText = "The target publishes a directly relevant service fact.";
-  const evidenceText = "A retained excerpt supports the service statement.";
-  const fields = [
-    ["q1AnswerCard.answerText", answerText],
-    ["q1Diagnosis.selectionSummary", selectionSummary],
-    ["q1Diagnosis.targetGap", targetGap]
-  ].map(([path, text]) => ({
-    path, text, mutability: "mutable" as const, questionId: questions[0]!.questionId,
-    allowedEvidenceIds: ["evidence-q1"], allowedSourceIds: ["source-q1"]
-  }));
-  const input = buildFreeV4SemanticReviewManifest({
-    locale: "en",
-    target: { siteKey: "target.example", targetUrl: "https://target.example/", aliases: ["target.example", "Target", "Target Company", "Target Brand"] },
-    expectedModel: { providerId: "fixture", modelId: "semantic-review" },
-    questions,
-    sources: [{ sourceId: "source-q1", questionId: questions[0]!.questionId, canonicalUrl: "https://source.example/q1", originalText: sourceText, originalTextHash: reportSemanticTextHash(sourceText) }],
-    evidence: [{ evidenceId: "evidence-q1", questionId: questions[0]!.questionId, sourceId: "source-q1", originalText: evidenceText, originalTextHash: reportSemanticTextHash(evidenceText) }],
-    observationResults: [], entities: [],
-    answerSubjects: [{ questionId: questions[0]!.questionId, fieldPath: "q1AnswerCard.answerText" }],
-    fields,
-    nonProseProjectionHash: hashReportSemanticReviewValue({ reportId, questionSetId })
-  });
-  const output = parseReportSemanticReviewOutput({
-    version: REPORT_SEMANTIC_REVIEW_CONTRACT,
-    inputHash: input.inputHash,
-    providerId: input.expectedModel.providerId,
-    modelId: input.expectedModel.modelId,
-    fields: input.fields.map((field) => ({
-      path: field.path, originalTextHash: field.originalTextHash, decision: "pass", issueCodes: [],
-      reason: "The prose is supported by the exact evidence.", evidenceIds: field.allowedEvidenceIds,
-      sourceIds: field.allowedSourceIds, retainedOriginalTerms: []
-    })),
-    questionDistinctness: { decision: "distinct", duplicateGroups: [], reason: "The questions cover different buyer decisions." },
-    annotations: {
-      observationResults: [],
-      answers: [{
-        questionId: questions[0]!.questionId, relevance: "responsive", entityRole: "target",
-        targetPresence: "present", targetFirstSentence: 1, targetRoles: ["service provider"],
-        competitorEntityIds: [], evidenceIds: ["evidence-q1"], sourceIds: ["source-q1"],
-        reason: "The answer directly identifies the target service."
-      }],
-      evidenceUse: input.fields.map((field) => ({
-        path: field.path, evidenceIds: field.allowedEvidenceIds, sourceIds: field.allowedSourceIds,
-        reason: "The exact references support this field."
-      }))
-    },
-    overallDecision: "pass"
-  }, input);
-  const applied = applyReportSemanticReview(input, output);
-  return {
-    semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT,
-    freeTeaser: {
-      version: "free-teaser-checkpoint-v1", stage: "ready", reportId, questionSetId, questionSetIdentity,
-      q1AnswerCard: { answerText, diagnosis: { selectionSummary, targetGap } },
-      semanticReview: { version: REPORT_SEMANTIC_REVIEW_CONTRACT, input, output, applied }
+function directFreeCheckpoint(reportId: string, questionSetId: string, questionSetIdentity: string) {
+  const questions = ["Question 1?", "Question 2?", "Question 3?"];
+  const answerSources = [{
+    sourceId: "source-q1", title: "Source", canonicalUrl: "https://source.example/q1",
+    registrableDomain: "source.example", citedText: "Evidence", providerResultOrder: 0
+  }];
+  const sources = answerSources.map((source) => ({ ...source, retrievalStatus: "search_source_only", ownershipCategory: "unknown" }));
+  const bindings = [{ handle: "S1", evidenceRef: "source-q1" }];
+  const answerResult = {
+    questionId: "question-1", answerText: "Direct answer.", sources: answerSources, refusal: null,
+    searchedAt: "2030-01-01T00:00:00.000Z", completedAt: "2030-01-01T00:00:01.000Z", providerResponseId: "response-1"
+  };
+  const provenance = {
+    providerId: "fixture", model: "model", searchMode: "native", promptVersion: "generative-search-answer-v1",
+    searchedAt: answerResult.searchedAt, completedAt: answerResult.completedAt,
+    answerHash: hash(answerResult), sourceHash: hash(answerSources)
+  };
+  const analysis = {
+    summary: "Direct natural analysis.", observations: [], recommendations: [], evidenceHandles: ["S1"]
+  };
+  const teaser: Record<string, unknown> = {
+    version: "free-teaser-checkpoint-v1", stage: "ready", identityHash: "c".repeat(64), reportId,
+    admissionSnapshotId: "admission-1", admissionContentIdentityHash: "d".repeat(64), foundationHash: "e".repeat(64),
+    locale: "en", region: "US", authorityId: "authority-1", evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
+    questionSetId, questionSetIdentity, directQuestionTexts: questions,
+    directAnalysisStatus: "completed", directAnalysis: analysis, directAnalysisHandleBindings: bindings,
+    readyAt: "2030-01-01T00:01:00.000Z", q1AnswerResult: answerResult,
+    q1AnswerDraft: {
+      questionId: "question-1", exactQuestion: "Question 1?", answerMode: "generative_search_v1", status: "answered",
+      answerText: "Direct answer.", refusal: null, sources, provenance,
+      audit: { verifiedBodyCount: 0, searchSourceOnlyCount: 1, inaccessibleCount: 0 }
     }
   };
+  teaser.directCoreReceipt = createFreeV4DirectCoreReceipt({
+    questionSetIdentity, questions, questionId: "question-1", questionText: "Question 1?", answer: answerResult, sources,
+    providerResponseId: "response-1", providerId: provenance.providerId, model: provenance.model,
+    searchMode: provenance.searchMode, searchedAt: provenance.searchedAt, completedAt: provenance.completedAt,
+    nonProseProjection: {
+      version: teaser.version, identityHash: teaser.identityHash, reportId,
+      admissionSnapshotId: teaser.admissionSnapshotId, admissionContentIdentityHash: teaser.admissionContentIdentityHash,
+      foundationHash: teaser.foundationHash, locale: teaser.locale, region: teaser.region, authorityId: teaser.authorityId,
+      evidenceCutoffAt: teaser.evidenceCutoffAt, questionSetId, questionSetIdentity,
+      questionId: "question-1", answerHash: provenance.answerHash, sourceHash: provenance.sourceHash
+    }
+  });
+  teaser.directAnalysisReceipt = createFreeV4DirectAnalysisReceipt({
+    coreReceiptHash: (teaser.directCoreReceipt as { receiptHash: string }).receiptHash,
+    analysis, handleBindings: bindings,
+    nonProseProjection: {
+      version: teaser.version, identityHash: teaser.identityHash, reportId,
+      admissionSnapshotId: teaser.admissionSnapshotId, admissionContentIdentityHash: teaser.admissionContentIdentityHash,
+      foundationHash: teaser.foundationHash, locale: teaser.locale, region: teaser.region,
+      authorityId: teaser.authorityId, questionSetIdentity, analysisStatus: teaser.directAnalysisStatus
+    }
+  });
+  return { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION, freeTeaser: teaser };
 }
 
 async function seedRunningPreAdmission(suffix: string, marked: boolean) {
@@ -299,7 +285,7 @@ async function seedRunningPreAdmission(suffix: string, marked: boolean) {
      artifact_contract,locale,reason,stage,execution_state,current_phase,progress,lease_owner,lease_expires_at,checkpoint)
     VALUES(${jobId},${`report-${suffix}`},'deep','recommendation_forensics_v1','two_stage_geo_report_v4',4,
       'combined_geo_report_v4','en','v4_pre_admission','analyzing','running','page_analysis',40,${`worker-${marked ? "marked" : "legacy"}`},now()+interval '5 minutes',
-      ${JSON.stringify(marked ? { semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT } : {})}::jsonb)`;
+      ${JSON.stringify(marked ? { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION } : {})}::jsonb)`;
   return { jobId };
 }
 
@@ -331,8 +317,8 @@ function eventInput(orderId: string, suffix: string): ApplyPaidPaymentEventInput
   };
 }
 
-function hash(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
+function hash(value: unknown): string {
+  return createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
 }
 
 function quote(value: string): string {

@@ -15,7 +15,7 @@ import { getVisibleReportBundle } from "@/server/visible-ai-report";
 import { cookies } from "next/headers";
 import { reportAccessCookieName, tokenGrantsReportAccess } from "@/server/report-access";
 import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
-import { readSemanticReviewContractVersion } from "@/db/report-semantic-review-activation";
+import { readFreeDirectSemanticsVersion, readSemanticReviewContractVersion } from "@/db/report-semantic-review-activation";
 import {
   freeTeaserCheckpointFromJobCheckpoint,
   loadConfirmedFreeTeaserQuestionSet,
@@ -76,13 +76,19 @@ export default async function ReportPage({
     if (preAdmissionJob) {
       const checkpoint = freeTeaserCheckpointFromJobCheckpoint(preAdmissionJob.checkpoint);
       const semanticReviewContractVersion = readSemanticReviewContractVersion(preAdmissionJob.checkpoint);
-      const markerPresent = semanticReviewContractVersion !== null;
+      const freeDirectSemanticsVersion = readFreeDirectSemanticsVersion(preAdmissionJob.checkpoint);
+      const markerPresent = semanticReviewContractVersion !== null || freeDirectSemanticsVersion !== null;
+      const carrierOptions = freeDirectSemanticsVersion
+        ? { freeDirectSemanticsVersion }
+        : semanticReviewContractVersion
+          ? { semanticReviewContractVersion }
+          : undefined;
       let ready = null;
       try {
         ready = checkpoint
           ? parseReadyFreeTeaserCheckpoint(
               checkpoint,
-              markerPresent ? { semanticReviewContractVersion } : undefined
+              carrierOptions
             )
           : null;
       } catch {
@@ -90,7 +96,8 @@ export default async function ReportPage({
       }
       if (markerPresent) {
         // Marker-present: only receipt-bound reviewed projection; no unreviewed fallback.
-        if (!ready || !ready.reviewedFoundation || !ready.q1AnswerCard) {
+        if (!ready || (!freeDirectSemanticsVersion && !ready.reviewedFoundation) ||
+            (freeDirectSemanticsVersion ? !ready.q1AnswerDraft : !ready.q1AnswerCard) || !visible.aiReport) {
           return <PendingReportView
             createdAt={row.createdAt}
             dictionary={getDictionary(locale)}
@@ -114,9 +121,10 @@ export default async function ReportPage({
       const questionSet = await loadConfirmedFreeTeaserQuestionSet(
         id,
         ready,
-        markerPresent ? { semanticReviewContractVersion } : undefined
+        carrierOptions
       );
       const dictionary = getDictionary(locale);
+      const checkoutEligible = !freeDirectSemanticsVersion || ready.directAnalysisStatus === "completed";
       return <>
         <CombinedGeoReportV4Teaser model={{
           reportId: id,
@@ -127,18 +135,25 @@ export default async function ReportPage({
             score: visible.technicalReport.score,
             findings: visible.technicalReport.findings
           },
-          aiReport: ready.reviewedFoundation,
+          aiReport: freeDirectSemanticsVersion ? visible.aiReport! : ready.reviewedFoundation!,
           questionSet,
-          q1AnswerCard: ready.q1AnswerCard!,
-          brandMentionCount: ready.metrics!.brandMentionCount,
-          competitorMentionCount: ready.metrics!.competitorMentionCount
+          q1AnswerCard: freeDirectSemanticsVersion ? ready.q1AnswerDraft! : ready.q1AnswerCard!,
+          ...(freeDirectSemanticsVersion
+            ? {
+                directAnalysisStatus: ready.directAnalysisStatus!,
+                directAnalysis: ready.directAnalysis ?? null
+              }
+            : {
+                brandMentionCount: ready.metrics!.brandMentionCount,
+                competitorMentionCount: ready.metrics!.competitorMentionCount
+              })
         }}/>
-        <div id="checkout" className="mx-auto w-full max-w-[1120px] px-5 pb-12">
+        {checkoutEligible ? <div id="checkout" className="mx-auto w-full max-w-[1120px] px-5 pb-12">
           <Suspense fallback={null}>
             <PaymentReturnBanner dictionary={dictionary} reportId={id} />
           </Suspense>
           <CommercialCheckout dictionary={dictionary} locale={reportLocale} reportId={id} />
-        </div>
+        </div> : null}
       </>;
     }
   }

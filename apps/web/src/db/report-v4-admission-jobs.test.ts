@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { REPORT_SEMANTIC_REVIEW_CONTRACT } from "@open-geo-console/ai-report-engine";
+import { FREE_V4_DIRECT_SEMANTICS_VERSION } from "@open-geo-console/ai-report-engine";
 import {
   enqueueReportV4PreAdmissionAfterPreview,
   type ReportV4AdmissionJobRepository
@@ -29,7 +29,8 @@ describe("V4 pre-admission job lifecycle", () => {
       fulfillmentMethodology: "two_stage_geo_report_v4",
       recommendationReportVersion: 4,
       artifactContract: "combined_geo_report_v4",
-      reason: "v4_pre_admission"
+      reason: "v4_pre_admission",
+      maxAttempts: 1
     });
   });
 
@@ -66,11 +67,11 @@ describe("V4 pre-admission job lifecycle", () => {
     };
 
     await enqueueReportV4PreAdmissionAfterPreview(preview, repository, {
-      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+      freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION
     });
 
     expect(createExactlyOnce).toHaveBeenCalledWith(expect.objectContaining({
-      semanticReviewContractVersion: REPORT_SEMANTIC_REVIEW_CONTRACT
+      freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION
     }));
   });
 

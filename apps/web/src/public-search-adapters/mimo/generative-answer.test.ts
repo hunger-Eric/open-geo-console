@@ -44,6 +44,53 @@ describe("MiMo generative answer adapter", () => {
     expect(retry.messages[1]!.content).not.toContain("JSON or language contract");
   });
 
+  it("uses one direct attempt and accepts only same-response URL annotations as sources", async () => {
+    const response = {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "resp-direct",
+        choices: [{ message: {
+          content: JSON.stringify({ answerText: mixedLanguage.answerText, refusal: null }),
+          annotations: [{ type: "url_citation", url: "https://authority.example/direct", title: "Direct source", summary: "Evidence" }]
+        } }]
+      })
+    } as Response;
+    const transport = vi.fn(async () => response);
+    const result = await createMiMoGenerativeSearchAnswerProvider({ config, fetch: transport })
+      .answerWithSources({ ...input, semanticValidation: "free_direct" });
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(result.sources).toEqual([expect.objectContaining({ canonicalUrl: "https://authority.example/direct" })]);
+    expect(result.sources).not.toEqual(expect.arrayContaining([expect.objectContaining({ sourceId: "source-1" })]));
+    const sent = JSON.parse(String(transport.mock.calls[0]![1]!.body)) as { messages: Array<{ content: string }> };
+    expect(sent.messages[0]!.content).toContain("This answer is final");
+    expect(sent.messages[0]!.content).toContain("model-reported source fields are ignored");
+
+    const selfReportedSources = vi.fn(async () => body({ answerText: mixedLanguage.answerText, refusal: null, sources: valid.sources }));
+    const ignored = await createMiMoGenerativeSearchAnswerProvider({ config, fetch: selfReportedSources })
+      .answerWithSources({ ...input, semanticValidation: "free_direct" });
+    expect(ignored.sources).toEqual([]);
+    expect(selfReportedSources).toHaveBeenCalledTimes(1);
+
+    const malformedTransport = vi.fn(async () => body({ answerText: "", refusal: null }));
+    await expect(createMiMoGenerativeSearchAnswerProvider({ config, fetch: malformedTransport })
+      .answerWithSources({ ...input, semanticValidation: "free_direct" }))
+      .rejects.toMatchObject({ errorClass: "malformed" });
+    expect(malformedTransport).toHaveBeenCalledTimes(1);
+
+    const unsafeAnnotation = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ choices: [{ message: {
+        content: JSON.stringify({ answerText: mixedLanguage.answerText, refusal: null }),
+        annotations: [{ type: "url_citation", url: "http://127.0.0.1/private", title: "Unsafe" }]
+      } }] })
+    } as Response));
+    await expect(createMiMoGenerativeSearchAnswerProvider({ config, fetch: unsafeAnnotation })
+      .answerWithSources({ ...input, semanticValidation: "free_direct" }))
+      .rejects.toMatchObject({ errorClass: "malformed" });
+    expect(unsafeAnnotation).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps omitted and explicit legacy requests on the exact same prompt and parser behavior", async () => {
     const sent: string[] = [];
     const makeProvider = () => createMiMoGenerativeSearchAnswerProvider({ config, fetch: async (_url, init) => { sent.push(String(init?.body)); return body(valid); } });

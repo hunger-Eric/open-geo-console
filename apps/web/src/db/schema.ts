@@ -132,6 +132,7 @@ export type { CitationRetrievalState, CitationSourceCategory };
 
 export interface JobCheckpoint {
   semanticReviewContractVersion?: "report-semantic-review-v1";
+  freeDirectSemanticsVersion?: "free-v4-direct-semantics-v1";
   recovery?: {
     schemaVersion: 1;
     phase: ScanJobPhase;

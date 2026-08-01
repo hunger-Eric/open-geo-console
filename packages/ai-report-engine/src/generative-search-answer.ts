@@ -7,13 +7,13 @@ export type GenerativeSearchRefusalCode = "safety_refusal" | "policy_refusal" | 
 export interface GenerativeSearchRefusal { code: GenerativeSearchRefusalCode; reason: string; }
 export interface GenerativeSearchSource { sourceId: string; title: string; canonicalUrl: string; registrableDomain: string; citedText: string | null; providerResultOrder: number; }
 export interface GenerativeSearchAnswerResult { questionId: string; answerText: string; sources: GenerativeSearchSource[]; refusal: GenerativeSearchRefusal | null; searchedAt: string; completedAt: string; providerResponseId: string | null; }
-export interface GenerativeSearchAnswerProvider { readonly providerId: string; readonly model: string; readonly searchMode: string; answerWithSources(input: { questionId: string; question: string; locale: string; region: string; signal: AbortSignal; semanticValidation?: "legacy" | "deferred" }): Promise<GenerativeSearchAnswerResult>; }
+export interface GenerativeSearchAnswerProvider { readonly providerId: string; readonly model: string; readonly searchMode: string; answerWithSources(input: { questionId: string; question: string; locale: string; region: string; signal: AbortSignal; semanticValidation?: "legacy" | "deferred" | "free_direct" }): Promise<GenerativeSearchAnswerResult>; }
 
 const refusalCodes = new Set<GenerativeSearchRefusalCode>(["safety_refusal", "policy_refusal", "high_risk_refusal"]);
 const text = (value: unknown, name: string, max: number) => { if (typeof value !== "string") throw new TypeError(`${name} must be a string.`); const v = value.trim(); if (v.length > max) throw new TypeError(`${name} exceeds the retained bound.`); return v; };
 const timestamp = (value: unknown, name: string) => { if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw new TypeError(`${name} must be an ISO timestamp.`); return value; };
 
-export function parseGenerativeSearchAnswerResult(value: unknown, options: { expectedQuestionId: string; locale: string; semanticValidation?: "legacy" | "deferred" }): GenerativeSearchAnswerResult {
+export function parseGenerativeSearchAnswerResult(value: unknown, options: { expectedQuestionId: string; locale: string; semanticValidation?: "legacy" | "deferred" | "free_direct" }): GenerativeSearchAnswerResult {
   if (!value || typeof value !== "object") throw new TypeError("Generative search answer must be an object.");
   const row = value as Record<string, unknown>;
   const questionId = text(row.questionId, "questionId", 500);
@@ -29,7 +29,7 @@ export function parseGenerativeSearchAnswerResult(value: unknown, options: { exp
   }
   if (answerText && refusal) throw new TypeError("answerText and refusal may not be supplied together.");
   if (!answerText && !refusal) throw new TypeError("nonblank answerText is required unless a typed refusal is provided.");
-  if (options.semanticValidation !== "deferred") assertGenerativeSearchAnswerLanguage([
+  if (options.semanticValidation !== "deferred" && options.semanticValidation !== "free_direct") assertGenerativeSearchAnswerLanguage([
     ...(answerText ? [{ path: "answerText", text: answerText }] : []),
     ...(refusal ? [{ path: "refusal.reason", text: refusal.reason }] : [])
   ], options.locale);
@@ -72,7 +72,7 @@ export function assertGenerativeSearchAnswerLanguage(
 }
 
 function normalized(value: GenerativeSearchAnswerResult): string { return JSON.stringify(value); }
-export async function generativeSearchAnswerHash(value: unknown, options?: { semanticValidation?: "legacy" | "deferred"; locale?: string }): Promise<string> {
+export async function generativeSearchAnswerHash(value: unknown, options?: { semanticValidation?: "legacy" | "deferred" | "free_direct"; locale?: string }): Promise<string> {
   if (!value || typeof value !== "object" || typeof (value as Record<string, unknown>).questionId !== "string") throw new TypeError("questionId is required to hash an answer.");
   const questionId = (value as Record<string, unknown>).questionId as string;
   const row = value as Record<string, unknown>;

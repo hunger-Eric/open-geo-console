@@ -2,92 +2,336 @@
 
 Status: `APPROVED`
 
-This file contains only the current executable authority. Completed and failed
-scopes are context-only in `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`.
+## Proposal: restore the original two-call Direct semantic boundary
 
-## Current authority: disposable PostgreSQL verification infrastructure (APPROVED)
+The user approved the implementation allowlist on 2026-08-01. The candidate is
+implemented; the commit and Protected Staging amendment below awaits approval.
 
-**Status:** `APPROVED` — the user explicitly approved this exact allowlist and external-action envelope on 2026-07-31.
+### User-observable objective
 
-Verification-only amendment (2026-07-31): `vitest.config.ts` is added solely
-to collect the already allowlisted `scripts/**/*.test.ts` runner test. This
-changes no production/runtime behavior, dependency, schema, or acceptance gate.
+A fresh Free V4 Direct run must:
 
-Approved scope amendment (2026-07-31): after the first authoritative default
-run proved that the repository's PostgreSQL files require incompatible PG16,
-Staging-profile, and PG17 environments, the user approved replacing suffix-wide
-selection with an explicit canonical PG16 inventory, fixing four stale test
-fixtures, and leaving the Staging/PG17 matrix to a separate future scope.
+1. use the existing deterministic confirmed buyer-question set and send only
+   Q1 to the native-search answer model;
+2. persist Q1 plus same-response provider URL annotations as an independently
+   readable core result and seal it with a core receipt;
+3. call the analysis model exactly once with the unchanged answer or typed
+   refusal, answer-source aliases, and unassessed submitted-site page aliases;
+4. persist a completed flexible analysis and its receipt, or retain the Q1 core
+   while marking analysis incomplete;
+5. make checkout depend only on a valid core receipt plus a completed analysis
+   with a valid analysis receipt.
 
-### User-observable outcome
+Direct makes exactly two model calls in order: `q1_answer -> analysis`.
+It makes zero question-editor calls, zero legacy observation searches, and zero
+global semantic-review calls. Q2 and Q3 remain confirmed visible locked
+questions for a later Paid continuation and are not searched during Free.
 
-One repository-owned `npm run test:postgres:disposable` command reliably creates an isolated PostgreSQL test runtime, executes selected or default PostgreSQL/semantic-contract suites without conditional skip, persists machine-readable evidence before cleanup, removes only its run-owned resources, and returns an authoritative exit status. GitHub CI exercises the default gate. This task also delivers the pending U+0000 repair only after the new runner proves its five focused suites and the repository gates.
-
-### Baseline
+### Baseline and current evidence
 
 - Repository: `E:\project\open-geo-console`, branch `main`.
-- Local HEAD and `origin/main`: `fbdd41155d3c0495d2422d1b177ba91cb61812dd`.
-- Existing dirty implementation is limited to the U+0000 boundary, its tests, the Paid V3 fixture repair, and this scope migration.
-- PostgreSQL image authority: existing local `postgres:16-alpine`; runtime records its exact image ID.
-- `freight_lead_agent-postgres-1` and host port `5432` are foreign/shared and forbidden.
+- HEAD and `origin/main`:
+  `2a208ea6d971c148336b19cfb29e3c1606cfe956`.
+- Current worktree: 40 tracked dirty paths plus 4 untracked Direct files.
+  The tracked diff measures `+2368/-2879`; the four untracked files contain
+  867 lines. All existing dirty work must be preserved until an approved edit
+  intentionally retains, reduces, or restores an exact path below.
+- Replacement disposable PostgreSQL evidence passed `275/275`, zero skip:
+  `.data/test-runs/postgres-disposable/pg-20260801052141-b6a8973f/receipt.json`.
+- The only real Direct sequence sent exactly three requests. Question editing
+  and Q1 completed; analysis did not return a completed outcome:
+  `apps/web/.data/test-runs/free-v4-direct-real/direct-20260801053627187-2736a3c0/direct-semantics-receipt.json`.
+- The failure evidence did not retain the raw analysis output or its specific
+  failure classification. It proves the boundary only and does not authorize a
+  provider-, transport-, or field-specific root-cause claim.
+- The Direct carrier is uncommitted and unpublished. Correct
+  `free-v4-direct-semantics-v1` in place; do not add a compatibility version.
 
-### Exact file allowlist
+### Model-owned analysis contract
 
-- New runtime: `scripts/run-disposable-postgres-tests.mjs`.
-- New runtime tests: `scripts/run-disposable-postgres-tests.test.ts`.
-- Test collection: `vitest.config.ts` (`scripts/**/*.test.ts` only).
-- Root command: `package.json` (`test:postgres:disposable` only; no dependency change).
-- New CI: `.github/workflows/postgres-contracts.yml`.
-- Project rules: `AGENTS.md`.
-- Current/history authority: `docs/ACTIVE-CHANGE-SCOPE.md`, `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`.
-- Retained pending repair: `packages/site-crawler/src/html.ts`, `packages/site-crawler/src/html.test.ts`, `apps/web/src/worker/report-v4-admission-runtime.ts`, `apps/web/src/worker/report-v4-admission-runtime.test.ts`, `apps/web/src/db/recovery-state.postgres.test.ts`.
-- Approved canonical-suite fixture repairs: `apps/web/src/db/commercial-orders-semantic-review.postgres.test.ts`, `apps/web/src/db/report-v4-acceptance-ledger.postgres.test.ts`, `apps/web/src/db/report-v4-page-summaries.postgres.test.ts`, `apps/web/src/worker/report-v4-independent-claims.postgres.test.ts`.
+The analysis model receives:
 
-No other file may change. `package-lock.json`, dependencies, schemas, migrations, production database code, prompts, models, Worker orchestration, commerce, deployment, and Staging are forbidden.
+- the exact confirmed Q1 text;
+- authoritative target canonical name, aliases, and domain;
+- the unchanged answer or typed refusal;
+- same-response answer sources aliased as `S1..`;
+- unassessed submitted-site page candidates aliased as `T1..`; and
+- the requested locale.
 
-### Runtime contract
+The retained minimum projection is:
 
-- Node-only orchestrator; no new dependency. Default command selects an explicit canonical PG16 test inventory plus the canonical semantic-contract set. Every discovered `*.postgres.test.ts` file must be classified exactly once as canonical PG16, Staging-profile, or PG17; an unclassified/duplicate entry fails before Docker. The PG16 runner refuses a focused Staging-profile or PG17 PostgreSQL file. Positional compatible test paths select a focused subset.
-- Allocate an OS-free `127.0.0.1` port and reject `5432`. Name and label every container with a fresh run ID.
-- Start `postgres:16-alpine` with `--tmpfs /var/lib/postgresql/data:rw,size=1g`; no named or anonymous data volume is allowed. Verify image, tmpfs mount, port, name, label, and zero foreign-container overlap before tests.
-- Separate phases: Docker/image preflight; container creation; `pg_isready`; exact `SELECT 1`; Vitest invocation; JSON/exit-code persistence; JSON parsing; exact-resource cleanup; cleanup verification; final receipt.
-- Persist `.data/test-runs/postgres-disposable/<run-id>/vitest.json`, `exit-code.txt`, and `receipt.json` before cleanup. The ignored run directory remains available as evidence.
-- A passing result requires Vitest exit `0`, `numFailedTests=0`, `numPendingTests=0`, `numPassedTests=numTotalTests`, every selected file present in the JSON, successful exact-container cleanup, no run-owned volume, and foreign PostgreSQL still untouched.
-- Infrastructure preflight may use at most three fresh setup attempts before Vitest begins; each failed attempt cleans only its exact run-owned container. Once Vitest starts, that invocation is never automatically retried.
-- The original loop used three Vitest invocations (one focused failure, one focused pass, one incompatible suffix-wide default failure) plus one setup-only invocation. This approved amendment authorizes at most three additional disposable Vitest invocations: one fixture-focused check, one canonical default gate, and one in-allowlist correction. No model, crawl, payment, email, deploy, Staging, PG17 runtime, or customer-data action is authorized.
+```json
+{
+  "summary": "natural analysis",
+  "observations": ["zero or more natural observations"],
+  "recommendations": ["zero or more natural recommendations"],
+  "evidenceHandles": ["zero or more S/T handles"]
+}
+```
 
-### CI contract
+The model owns all semantic meaning: whether the answer is useful, whether the
+target appears, what gaps exist, how many observations or recommendations are
+appropriate, and which current handles support the analysis.
 
-- GitHub Actions runs on every pull request and every push to `main`, uses `npm ci`, then runs `npm run test:postgres:disposable` with the classified canonical PG16 plus semantic-contract selection. It must not claim coverage for the separately classified Staging-profile or PG17 suites.
-- The workflow uploads the run-owned receipt/JSON evidence with `if: always()` and cannot convert a skip, missing file, malformed JSON, cleanup failure, or nonzero exit into success.
-- CI uses no application secrets, Staging database, production database, service deployment, or publication.
+Unknown additional model fields are ignored. Observation, recommendation, and
+handle lists are variable length, including zero, within basic retained-size
+bounds. The program must not require factor-kind enums, exactly three items,
+fixed priorities, `targetFirstSentence`, `targetRoles`,
+`competitorLabels`, `targetEvidenceState`, or nested per-item evidence keys.
 
-### Scope-history contract
+### Program-owned integrity
 
-- `docs/ACTIVE-CHANGE-SCOPE.md` contains exactly one current authority and no previous-authority sections; target size is at most 180 lines.
-- The exact pre-migration working-tree snapshot (4,239 lines and 239,873 UTF-8 bytes before the archive header) is preserved in `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`. It intentionally includes user-owned uncommitted scope history beyond the 4,068-line HEAD version; replacing it from HEAD would lose that history. The archive is context-only and never executable authority.
-- `AGENTS.md` records this current/history split and directs PostgreSQL/semantic-contract changes through the disposable command with zero skipped selected tests.
+Program code may enforce only:
 
-### Acceptance
+- exact report, job, question-set, Q1, provider-response, and checkpoint
+  identities;
+- Q1 request text equality with the confirmed question;
+- JSON object/basic field types, serializability, non-finite/cycle rejection,
+  and bounded total/item sizes;
+- provider URL annotations coming from the same answer response;
+- public HTTP(S) URL safety, canonicalization, local source IDs, and hashes;
+- `evidenceHandles` membership in the current S/T alias map, uniqueness, and
+  receipt binding;
+- core and analysis receipt hashes, persistence identity, and tamper detection;
+- fail-closed checkout with no order or Paid job creation when either receipt
+  is missing/invalid or analysis is not completed.
 
-1. Unit tests prove Docker args include the exact tmpfs, port `5432` is rejected, preflight retries stop once Vitest begins, evidence precedes cleanup, malformed/missing/skipped JSON fails, selected files are checked, and cleanup targets only the recorded run ID/container.
-2. `npm run test:postgres:disposable -- --help` and a no-Docker dry-run/selection check pass.
-3. Historical focused run `pg-20260731120917-121edeea` proved the five-file U+0000 path at `133 passed`, `0 failed`, `0 skipped`. The final runner restricts future focused database invocations to the canonical PG16 or semantic inventory; the site-crawler unit path is covered by `npm test`, while the canonical run covers its PostgreSQL/runtime consumers.
-4. A fixture-focused disposable check covers the four newly allowlisted stale fixtures with zero failures/skips. The default canonical PG16/semantic-contract command then runs once locally with zero selected-test skips; its receipt proves the selected inventory and explicit excluded classifications. Existing unrelated failures may be fixed only if they are inside this allowlist; otherwise stop before delivery.
-5. `npm run lint`, `npm test`, `npm run build`, runner unit tests, workflow/static review, and `git diff --check` pass. The byte-preserved history file is checked by its exact 4,239-line/239,873-byte boundary and is excluded from whitespace normalization; `git diff --check` must pass for every other path. The known Windows preflight timeout must pass independently if it times out in the full parallel suite.
-6. Exact diff/allowlist/budget audit passes; no container or volume with the run label remains; freight PostgreSQL remains healthy and unchanged.
+Program code must not infer or rewrite answer relevance, target presence,
+target-page relevance, competitor meaning, evidence sufficiency, observation
+count, recommendation count, or semantic quality.
 
-### Local verification evidence
+### Core and analysis state semantics
 
-- Focused U+0000 run `pg-20260731120917-121edeea`: `133/133`, zero skipped.
-- Final canonical run `pg-20260731124225-19e25f9a`: 55 selected files, `272/272`, zero skipped; inventory `50` canonical PG16, `8` Staging-profile, `5` PG17; tmpfs/no-volume, evidence-before-cleanup, and exact cleanup verified. The runtime operator independently observed the foreign freight PostgreSQL still healthy on `5432` after each run.
-- Runner unit tests `10/10`, lint exit `0`, build exit `0`, and `git diff --check` passed outside the byte-preserved archive; its three historical trailing-whitespace lines remain unchanged and its exact boundary passed. Full `npm test` passed `3013` tests except the known two Windows PowerShell five-second parallel timeouts; the exact timeout file independently passed `23/23`.
-- Independent reviewer found no remaining actionable issue and approved routing the local commit through `git_operator`. CI/remote parity/clean worktree remain delivery gates.
+#### Q1 core
 
-### Budgets and delivery
+- A nonblank answer or an existing typed refusal is a completed Q1 outcome.
+- Zero provider annotations is an honest empty source set, not by itself a
+  technical failure. A typed refusal may retain any same-response annotations.
+- Harmless extra JSON fields in answer content are ignored. Model-reported
+  source fields are ignored; provider URL annotations remain source authority.
+- The core receipt binds Q1 identity/text, answer/refusal, accepted annotations,
+  provider/model/search metadata, timestamps, report/job/admission identity,
+  and the relevant hashes.
+- The core is persisted before analysis and remains readable independently.
 
-- Runtime script `+620/-0`; runtime test `+430/-0`; test configuration `+1/-0`; CI `+100/-0`; rules/current-scope content `+200/-40`; pending production repair remains `+80/-20`; pending tests and the four approved fixture repairs remain `+500/-60`; dependencies/schema `0`.
-- The 4,239-line, 239,873-byte pre-migration working-tree relocation from `ACTIVE-CHANGE-SCOPE.md` to `ACTIVE-CHANGE-SCOPE-HISTORY.md` is a byte-preserving mechanical move plus at most ten archive-header lines and is tracked separately from the content budgets; it is not the older 4,068-line HEAD snapshot. The new active file must remain at most 180 lines.
-- After all local gates pass, route Git mutation through `git_operator`: stage exactly the allowlist, commit on `main` as `test: add disposable PostgreSQL verification`, and non-force push to `origin/main`.
-- Observe the new GitHub Actions run. Up to two additional in-allowlist correction commits/non-force pushes are authorized only for failures caused by this runner/workflow; no force push or branch creation. Final completion requires green CI, matching local/remote HEAD, and a clean worktree.
-- Stop and report only if the same blocker survives the bounded correction envelope, an out-of-scope production/schema/dependency change is required, foreign resources would be touched, or authorization expands to deployment/Staging/business side effects.
+#### Analysis
+
+- A structurally valid minimum projection is `completed`, including negative
+  prose, empty lists, no target mention, insufficient evidence, and refusal
+  analysis.
+- Transport/provider rejection, non-JSON content, missing minimum fields,
+  unsafe size/type, or a nonexistent evidence handle makes only the analysis
+  `incomplete`.
+- Analysis failure must not delete, hide, rewrite, or invalidate the Q1 core.
+- Direct makes one analysis request and no correction/retry request.
+
+#### Run lifecycle
+
+- A Direct run is fresh and linear. It makes at most one answer request and one
+  analysis request.
+- Analysis incomplete ends the job as a core-complete limited outcome. It does
+  not leave a retryable/resumable Direct checkpoint.
+- Re-entering a nonterminal Direct checkpoint must not issue another model
+  request. The user starts a new report/run when they want another attempt.
+
+### Reader and checkout behavior
+
+- The report page always shows a receipt-verified Q1 answer/refusal and its
+  same-response sources when the core is complete.
+- A completed analysis renders its natural summary and variable observation
+  and recommendation lists. An incomplete analysis renders an explicit
+  analysis-unavailable state without fabricated content.
+- The status route exposes distinct core readiness, analysis status, and
+  checkout eligibility instead of collapsing them into one `ready` boolean.
+- Server-side checkout verifies both receipts and completed analysis status.
+  Missing, incomplete, or tampered authority fails closed before creating an
+  order or Paid job.
+- Historical marker-absent Free rendering and existing Paid V3 review meaning
+  remain unchanged.
+
+## Exact allowed production/runtime files
+
+Only these files may retain or receive production/runtime behavior changes:
+
+- `apps/web/package.json`
+- `apps/web/src/app/[locale]/reports/[id]/page.tsx`
+- `apps/web/src/app/api/reports/[id]/status/route.ts`
+- `apps/web/src/components/combined-geo-report-v4-teaser.tsx`
+- `apps/web/src/db/commercial-orders.ts`
+- `apps/web/src/db/jobs.ts`
+- `apps/web/src/db/report-semantic-review-activation.ts`
+- `apps/web/src/db/report-v4-admission-jobs.ts`
+- `apps/web/src/db/scan-admission.ts`
+- `apps/web/src/db/schema.ts`
+- `apps/web/src/public-search-adapters/mimo/generative-answer.ts`
+- `apps/web/src/report-v4/mimo-provider.ts`
+- `apps/web/src/scripts/probe-free-v4-direct-semantics.ts`
+- `apps/web/src/worker/processor.ts`
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+- `package.json`
+- `packages/ai-report-engine/src/free-v4-direct-semantics.ts`
+- `packages/ai-report-engine/src/generative-search-answer.ts`
+- `packages/ai-report-engine/src/index.ts`
+
+## Exact allowed focused tests
+
+Only these test paths may be changed:
+
+- `apps/web/src/components/combined-geo-report-v4-teaser.test.tsx`
+- `apps/web/src/db/commercial-orders-semantic-review.postgres.test.ts`
+- `apps/web/src/db/report-semantic-review-activation.test.ts`
+- `apps/web/src/db/report-v4-admission-jobs.test.ts`
+- `apps/web/src/public-search-adapters/mimo/generative-answer.test.ts`
+- `apps/web/src/report-v4/mimo-provider.test.ts`
+- `apps/web/src/scripts/probe-free-v4-direct-semantics.test.ts`
+- `apps/web/src/worker/processor.test.ts`
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+- `packages/ai-report-engine/src/free-v4-direct-semantics.test.ts`
+- `packages/ai-report-engine/src/generative-search-answer.test.ts`
+
+## Reduction-only dirty paths
+
+These prior first-cut files may be edited only to remove the agent-owned Direct
+changes and restore their HEAD behavior/content. They may not retain new Direct
+behavior:
+
+- `apps/web/src/db/business-questions.test.ts`
+- `apps/web/src/db/business-questions.ts`
+- `apps/web/src/worker/report-v4-diagnosis-enhancer.test.ts`
+- `apps/web/src/worker/report-v4-diagnosis-enhancer.ts`
+- `apps/web/src/worker/semantic-review-evidence-sink.test.ts`
+- `apps/web/src/worker/semantic-review-evidence-sink.ts`
+- `packages/ai-report-engine/src/report-semantic-review-provider-adapter.test.ts`
+- `packages/ai-report-engine/src/report-semantic-review-provider-adapter.ts`
+- `packages/ai-report-engine/src/report-semantic-review.test.ts`
+- `packages/ai-report-engine/src/report-semantic-review.ts`
+- `packages/ai-report-engine/src/report-v4-diagnosis.ts`
+- `packages/public-search-observer/src/business-questions.test.ts`
+- `packages/public-search-observer/src/business-questions.ts`
+
+Authority bookkeeping may update only:
+
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+- `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`
+
+No other source, test, fixture, snapshot, script, package, configuration, or
+documentation path is implicitly allowlisted.
+
+## Explicitly forbidden
+
+- Question-editor model calls or a replacement question-generation model step.
+- Exact-three observation/action requirements, fixed semantic enums, strict
+  unknown-field rejection, nested evidence mini-DSLs, or code-generated
+  semantic fallbacks.
+- Paid V3 prompt/parser/review changes, legacy Free semantic changes, crawler or
+  public-search expansion, payment/refund/settlement changes, dependency
+  changes, database/SQL migrations, schema-meaning changes, or a new report
+  type.
+- Automatic retry, correction call, defer, resume, replay, compatibility
+  version, state-machine expansion, historical report mutation, or repair.
+- Production, shared-database mutation, payment, email, publication, and
+  customer-data mutation remain forbidden. Protected Staging and Git may be
+  used only by the exact pending amendment after it is approved.
+
+## Diff budget
+
+- Every reduction-only path must finish at zero diff against HEAD.
+- Retained production/runtime behavior, excluding the probe script and package
+  script entries: maximum `+950/-650`.
+- Direct probe and its two package script entries: maximum `+320/-320`.
+- Focused tests: maximum `+1100/-1800`.
+- Authority/history text: maximum `+500/-500`.
+- Dependencies, migrations, generated artifacts, Paid-only behavior, and files
+  outside the exact lists: `0`.
+- The measured final complete diff, not this tracking budget, is authoritative.
+  Stop before further edits if the implementation cannot fit these bounds.
+
+Verification-only amendment (2026-08-01): the focused-test deletion bound was
+raised from 1100 to 1800 after the measured Direct fixture simplification reached
+1662 deleted lines. This changes no production behavior or acceptance gate.
+
+## Local acceptance checks after approval
+
+1. Call-order tests prove exactly `q1_answer -> analysis`, one call each, with
+   zero question-editor, observation-resolver, global-review, correction, or
+   retry calls.
+2. Answer tests prove harmless extra fields are ignored; answer, typed refusal,
+   zero annotations, and same-response annotations remain valid core outcomes;
+   foreign/unsafe annotations and identity/hash tampering fail closed.
+3. Checkpoint tests prove the core receipt is persisted before analysis and
+   remains readable when analysis is incomplete.
+4. Analysis tests prove 0/1/N observations and recommendations plus harmless
+   extra fields complete successfully; an unknown handle makes only analysis
+   incomplete; negative semantic results are completed outcomes.
+5. Lifecycle tests prove a nonterminal persisted Direct checkpoint cannot issue
+   another model request and analysis incomplete produces a terminal limited
+   result rather than retry/resume state.
+6. UI/status tests prove Q1 remains visible independently, analysis incomplete
+   is explicit, variable lists render, and checkout requires receipt-verified
+   completed analysis.
+7. Checkout/PostgreSQL-focused tests prove only valid core receipt + completed
+   valid analysis receipt can create the Paid continuation;
+   missing/tampered/incomplete inputs create no order/job.
+8. Existing focused legacy Free and Paid V3 tests pass without meaning changes.
+9. Run the exact focused Vitest files above with zero skip, then
+   `npm run lint`, `npm run build`, `npm test`, and
+   `git diff --check`. Automated checks are regression evidence only.
+10. Re-read the final code and complete diff to confirm the exact allowlist,
+    zero-diff reduction paths, budgets, two-call boundary, and semantic
+    ownership table.
+
+## Pending commit and Protected Staging amendment
+
+The first Preview command was rejected before creation because it used the
+personal display name; the corrected team-slug attempt awaits user approval.
+
+- Amend the existing unpushed local candidate only with this corrected scope;
+  retain message `fix: restore direct AI semantic boundary`. Git push is `0`.
+- Create one temporary clean detached worktree at that candidate SHA and remove
+  it after deployment evidence is retained; do not create a branch.
+- Create at most one Vercel Preview for linked project `open-geo-console`, team
+  `itheheda-6857s-projects`, and require READY plus matching full `gitCommitSha`, `ogcGitSha`,
+  and detached-worktree HEAD before any alias switch.
+- Build one thin source-overlay image tagged
+  `open-geo-console:staging-<candidate-short-sha>-overlay-v1` from current exact
+  image `sha256:9b6eec90a89381e6a2fad3f62c00d9f72fa709933ea321c1c07d2c4f3189882f`.
+  The package change is script-only; lockfile, dependencies, Worker Dockerfile,
+  browser/system inputs, and base image remain unchanged. Full build is `0`.
+- Recheck staging schema `44`, marker `staging`, and zero active/recoverable jobs;
+  recreate only staging Free and Deep Workers, then require candidate SHA,
+  staging/preview/test identity, correct tiers, restart count zero, and no claim.
+- Retain rollback image `sha256:5ce966c9029b2b8d48fc5e536f7c7732442593c725884ad1e5d61e9aea88bee3`.
+  On failure restore both Workers and the fixed alias once, then stop; no retry.
+- After both Workers pass, switch only
+  `https://open-geo-console-staging-itheheda.vercel.app` to the accepted Preview
+  and perform Gate 3 smoke without creating a report or model/payment action.
+- Production, commerce Worker, historical data, report creation, payment,
+  email, cleanup, Git push/merge/tag, and Gate 4 execution by the agent: `0`.
+- The user's later manual webpage submission is separate acceptance evidence;
+  deployment success must not be reported as real-flow acceptance.
+
+## External-action budget after amendment approval
+
+- Local edits inside the exact allowlist and deterministic local checks: allowed
+  only after this scope changes to `APPROVED`.
+- Disposable PostgreSQL invocation: exactly `1` fresh local full Free Direct
+  example for `https://shun-express.com/`, explicitly authorized by the user on
+  2026-08-01. It may create only the new local report/job and disposable test
+  data required for this example; the database must be cleaned up by its
+  canonical disposable runner after evidence is persisted.
+- Real model test runs: unlimited while this scope remains `APPROVED`, as
+  explicitly authorized by the user on 2026-08-01. Every run remains a fresh
+  fixed-input two-call probe with no in-run retry and no database/report/job/UI
+  action; a failed run may be followed by another fresh test run.
+- Git and Protected Staging: only the exact pending amendment above.
+- Production, payment, email, publication, and agent-created real flow: `0`.
+
+## Stop conditions
+
+- Do not edit production or tests while status remains `FROZEN`.
+- Stop if implementation needs a path outside the exact list, cannot restore a
+  reduction-only path without overwriting unrelated user work, exceeds a
+  budget, or requires a migration/dependency/Paid/legacy semantic change.
+- Stop before any database, Docker, browser, deployment, Git,
+  payment, email, or publication action unless the user grants that exact new
+  authority.

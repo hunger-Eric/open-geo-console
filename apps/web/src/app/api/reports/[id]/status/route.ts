@@ -4,7 +4,7 @@ import { getActiveCombinedGeoReport } from "@/db/combined-reports";
 import { getJobCreditStatus, getLatestScanJob, getScanJobQueueStatus } from "@/db/jobs";
 import { getGeoReport } from "@/db/reports";
 import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
-import { readSemanticReviewContractVersion } from "@/db/report-semantic-review-activation";
+import { readFreeDirectSemanticsVersion, readSemanticReviewContractVersion } from "@/db/report-semantic-review-activation";
 import { freeTeaserCheckpointFromJobCheckpoint, parseReadyFreeTeaserCheckpoint } from "@/worker/report-v4-free-teaser";
 import { publicProgressForStage, publicStateForStage } from "@/report/job-status";
 import { resolveRequestArtifactScope } from "@/server/report-access";
@@ -37,7 +37,7 @@ export async function GET(request: Request, context: RouteContext) {
     readsV4Artifact ? getActiveCombinedGeoReport(id, "combined_geo_report_v4") : Promise.resolve(null)
   ]);
   const job = deepJob ?? preAdmissionJob ?? freeJob;
-  const freeTeaserReady = isReadyFreeTeaser(preAdmissionJob?.checkpoint);
+  const freeTeaserStatus = readFreeTeaserStatus(preAdmissionJob?.checkpoint);
   const aiReport = deepAiReport ?? freeAiReport;
   const queue = job ? await getScanJobQueueStatus(job.id) : null;
   const creditStatus = job ? await getJobCreditStatus(job.id) : null;
@@ -70,7 +70,8 @@ export async function GET(request: Request, context: RouteContext) {
         waitReason: job.executionState === "queued" ? queue?.waitReason ?? null : null,
         activeTier: job.executionState === "queued" ? queue?.activeTier ?? null : null
       } : null,
-      hasAiReport: Boolean(activeV4Report ?? (preAdmissionJob ? freeTeaserReady : aiReport)),
+      hasAiReport: Boolean(activeV4Report ?? (preAdmissionJob ? freeTeaserStatus.coreReady : aiReport)),
+      freeTeaser: preAdmissionJob ? freeTeaserStatus : null,
       hasTechnicalReport: Boolean(report.payload),
       technicalStatus: report.technicalStatus,
       technicalErrorCode: report.technicalErrorCode,
@@ -92,20 +93,34 @@ function compactReportLocale(locale: string): "en" | "zh" | null {
   return compact === "en" || compact === "zh" ? compact : null;
 }
 
-function isReadyFreeTeaser(checkpoint: Parameters<typeof freeTeaserCheckpointFromJobCheckpoint>[0]): boolean {
+function readFreeTeaserStatus(checkpoint: Parameters<typeof freeTeaserCheckpointFromJobCheckpoint>[0]): {
+  ready: boolean;
+  coreReady: boolean;
+  analysisStatus: "completed" | "incomplete" | null;
+  checkoutEligible: boolean;
+} {
   const teaser = freeTeaserCheckpointFromJobCheckpoint(checkpoint);
-  if (!teaser) return false;
+  if (!teaser) return { ready: false, coreReady: false, analysisStatus: null, checkoutEligible: false };
   try {
     const semanticReviewContractVersion = readSemanticReviewContractVersion(checkpoint);
-    if (semanticReviewContractVersion !== null) {
+    const freeDirectSemanticsVersion = readFreeDirectSemanticsVersion(checkpoint);
+    if (freeDirectSemanticsVersion !== null) {
+      const ready = parseReadyFreeTeaserCheckpoint(teaser, { freeDirectSemanticsVersion });
+      return {
+        ready: true,
+        coreReady: true,
+        analysisStatus: ready.directAnalysisStatus!,
+        checkoutEligible: ready.directAnalysisStatus === "completed"
+      };
+    } else if (semanticReviewContractVersion !== null) {
       // Marker-present: reviewed-ready parse with root marker only.
       parseReadyFreeTeaserCheckpoint(teaser, { semanticReviewContractVersion });
     } else {
       // Marker-absent: original ready semantics (no options).
       parseReadyFreeTeaserCheckpoint(teaser);
     }
-    return true;
+    return { ready: true, coreReady: true, analysisStatus: null, checkoutEligible: true };
   } catch {
-    return false;
+    return { ready: false, coreReady: false, analysisStatus: null, checkoutEligible: false };
   }
 }

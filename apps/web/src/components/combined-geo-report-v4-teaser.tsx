@@ -1,5 +1,6 @@
 import React, { type ReactNode } from "react";
 import type {
+  FreeV4DirectAnalysis,
   OpenGeoAnswerCardV3
 } from "@open-geo-console/ai-report-engine";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -35,6 +36,7 @@ const TEASER_EXTRA_CSS = `
 .absence-figure strong{color:var(--forest,#173f37);display:block;font-size:38px;line-height:1}
 .absence-figure span{color:var(--muted,#687570);font-size:11px;font-weight:750}
 .absence-summary{font-size:15px;line-height:1.65;color:var(--muted,#687570);margin-bottom:0}
+.semantic-outcome{background:var(--teaser-soft);border-radius:12px;display:grid;gap:10px;margin-top:20px;padding:20px}.semantic-outcome strong{color:var(--forest,#173f37);font-size:20px}.semantic-outcome p{color:var(--muted,#687570);line-height:1.65;margin:0}.semantic-outcome dl{display:grid;gap:8px;margin:0}.semantic-outcome dt{color:var(--muted,#687570);font-size:11px;font-weight:750}.semantic-outcome dd{color:var(--forest,#173f37);margin:0}
 .teaser-proof-section>h2{max-width:800px}
 .teaser-q1-card{background:#fff;border:1px solid var(--line,#d9d8cf);border-top:5px solid var(--teal,#0c7a6d);border-radius:14px;padding:clamp(22px,4vw,38px);box-shadow:none}
 .formatted-answer{color:#293b35;display:grid;font-size:16px;gap:14px;line-height:1.78;margin-top:4px}
@@ -60,7 +62,7 @@ const TEASER_EXTRA_CSS = `
 @media(max-width:760px){.report-shell{padding:12px;gap:12px}.report-v4-teaser .report-hero,.report-v4-teaser .report-section{border-radius:14px;padding:22px}.report-v4-teaser .answer-first-hero{grid-template-columns:minmax(0,1fr)}.report-v4-teaser .answer-first-hero>.metadata-grid{grid-column:1;grid-row:auto;margin-top:18px}.hero-actions{grid-column:1}.score-big{font-size:50px}.dimension-score-list,.teaser-source-grid,.locked-question-grid,.issue-title-list{grid-template-columns:minmax(0,1fr)}.teaser-source-card{padding:14px}.teaser-sources-heading{align-items:start;display:grid}.answer-card-heading{gap:8px}.formatted-answer{font-size:15px}.absence-figure strong{font-size:32px}}
 `;
 
-export interface FreeTeaserModel {
+interface FreeTeaserModelBase {
   readonly reportId: string;
   readonly targetUrl: string;
   readonly locale: "en" | "zh";
@@ -68,14 +70,26 @@ export interface FreeTeaserModel {
   readonly technicalReport: { score: number; findings: { id: string; title: string; description: string; recommendation: string }[] };
   readonly aiReport: AiWebsiteReportV1;
   readonly questionSet: ConfirmedBusinessQuestionSet;
-  readonly q1AnswerCard: OpenGeoAnswerCardV3 | null;
+  readonly q1AnswerCard: OpenGeoAnswerCardV3 | DirectQ1Core | null;
+}
+
+export type FreeTeaserModel = FreeTeaserModelBase & ({
+  readonly directAnalysisStatus: "completed" | "incomplete";
+  readonly directAnalysis: FreeV4DirectAnalysis | null;
+  readonly brandMentionCount?: never;
+  readonly competitorMentionCount?: never;
+} | {
+  readonly directAnalysisStatus?: never;
+  readonly directAnalysis?: never;
   readonly brandMentionCount: number;
   readonly competitorMentionCount: number;
-}
+});
 
 export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTeaserModel }) {
   const copy = model.locale === "zh" ? ZH : EN;
   const questions = model.questionSet.questions;
+  const isDirect = model.directAnalysisStatus !== undefined;
+  const checkoutEligible = !isDirect || model.directAnalysisStatus === "completed";
   return <>
   <style dangerouslySetInnerHTML={{ __html: ARTIFACT_CSS + TEASER_EXTRA_CSS }} />
   <main className="report-shell report-v4-teaser" data-report-version="4-teaser" data-artifact-revision="free-teaser">
@@ -83,10 +97,10 @@ export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTease
       <p className="eyebrow">{copy.kicker}</p>
       <h1>{copy.title}</h1>
       <p className="lede">{copy.introduction}</p>
-      <div className="hero-actions">
+      {checkoutEligible ? <div className="hero-actions">
         <a className="cta-button" data-teaser-cta-position="early" href="#checkout">{copy.ctaButton}</a>
         <p className="hero-assurance">{copy.ctaAssurance}</p>
-      </div>
+      </div> : null}
       <dl className="metadata-grid">
         <Meta label={copy.target}>{model.targetUrl}</Meta>
         <Meta label={copy.generated}>{model.generatedAt}</Meta>
@@ -110,12 +124,14 @@ export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTease
       </section>
 
       <section className="report-section" data-ai-absence="true">
-        <p className="section-index">02</p><h2>{copy.aiAbsence}</h2>
-        <div className="absence-figures" aria-label={copy.aiAbsence}>
-          <div className="absence-figure"><strong>{model.brandMentionCount}</strong><span>{copy.brandMentions}</span></div>
-          <div className="absence-figure competitor"><strong>{model.competitorMentionCount}</strong><span>{copy.competitorMentions}</span></div>
-        </div>
-        <p className="absence-summary">{copy.absenceSummary(model.brandMentionCount, model.competitorMentionCount)}</p>
+        <p className="section-index">02</p><h2>{isDirect ? copy.q1SemanticOutcome : copy.aiAbsence}</h2>
+        {isDirect ? <DirectAnalysis status={model.directAnalysisStatus} analysis={model.directAnalysis} copy={copy}/> : <>
+          <div className="absence-figures" aria-label={copy.aiAbsence}>
+            <div className="absence-figure"><strong>{model.brandMentionCount}</strong><span>{copy.brandMentions}</span></div>
+            <div className="absence-figure competitor"><strong>{model.competitorMentionCount}</strong><span>{copy.competitorMentions}</span></div>
+          </div>
+          <p className="absence-summary">{copy.absenceSummary(model.brandMentionCount, model.competitorMentionCount)}</p>
+        </>}
       </section>
     </div>
 
@@ -123,10 +139,10 @@ export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTease
       <p className="section-index">03</p><h2>{copy.customerQuestions}</h2>
       {model.q1AnswerCard
         ? <TeaserQ1Card card={model.q1AnswerCard} question={questions[0]!.neutralPublicText} locale={model.locale} copy={copy}/>
-        : <TeaserLockedCard question={questions[0]!.neutralPublicText} questionOrder={1} copy={copy}/>
+        : <TeaserLockedCard question={questions[0]!.neutralPublicText} questionOrder={1} copy={copy} showCta={checkoutEligible}/>
       }
       <div className="locked-question-grid">
-        {questions.slice(1).map((question, index) => <TeaserLockedCard key={question.neutralPublicText} question={question.neutralPublicText} questionOrder={index + 2} copy={copy}/>)}
+        {questions.slice(1).map((question, index) => <TeaserLockedCard key={question.neutralPublicText} question={question.neutralPublicText} questionOrder={index + 2} copy={copy} showCta={checkoutEligible}/>)}
       </div>
     </section>
 
@@ -138,16 +154,40 @@ export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTease
       </li>)}</ul>
     </section>
 
-    <section className="report-section teaser-cta-section" data-teaser-cta="true">
+    {checkoutEligible ? <section className="report-section teaser-cta-section" data-teaser-cta="true">
       <h2>{copy.ctaTitle}</h2>
       <p>{copy.ctaBody}</p>
       <a className="cta-button" data-teaser-cta-position="final" href="#checkout">{copy.ctaButton}</a>
-    </section>
+    </section> : null}
   </main>
   </>;
 }
 
-function TeaserQ1Card({ card, question, locale, copy }: { card: OpenGeoAnswerCardV3; question: string; locale: "en" | "zh"; copy: Copy }) {
+function DirectAnalysis({ status, analysis, copy }: {
+  readonly status: "completed" | "incomplete";
+  readonly analysis: FreeV4DirectAnalysis | null;
+  readonly copy: Copy;
+}) {
+  if (status === "incomplete" || !analysis) {
+    return <div className="semantic-outcome" data-direct-analysis-status="incomplete">
+      <strong>{copy.analysisUnavailable}</strong><p>{copy.analysisUnavailableBody}</p>
+    </div>;
+  }
+  return <div className="semantic-outcome" data-direct-analysis-status="completed">
+    <strong>{copy.analysisComplete}</strong>
+    <p>{analysis.summary}</p>
+    {analysis.observations.length > 0 && <ul data-direct-observation-count={analysis.observations.length}>
+      {analysis.observations.map((observation, index) => <li key={index}>{observation}</li>)}
+    </ul>}
+    {analysis.recommendations.length > 0 && <ol data-direct-recommendation-count={analysis.recommendations.length}>
+      {analysis.recommendations.map((recommendation, index) => <li key={index}>{recommendation}</li>)}
+    </ol>}
+  </div>;
+}
+
+type DirectQ1Core = Omit<Extract<OpenGeoAnswerCardV3, { readonly answerMode: "generative_search_v1" }>, "geoDiagnosis" | "diagnosis">;
+
+function TeaserQ1Card({ card, question, locale, copy }: { card: OpenGeoAnswerCardV3 | DirectQ1Core; question: string; locale: "en" | "zh"; copy: Copy }) {
   return <article className="answer-card teaser-q1-card" data-open-geo-answer-card="true" data-question-order="1">
     <header className="answer-card-heading">
       <div><p className="eyebrow">{copy.question} 1</p><h3>{question}</h3></div>
@@ -156,11 +196,12 @@ function TeaserQ1Card({ card, question, locale, copy }: { card: OpenGeoAnswerCar
     {card.answerMode === "generative_search_v1"
       ? <>
           <FormattedAnswer text={card.answerText} questionId={card.questionId}/>
+          {card.refusal && <p className="business-question-answer" data-generative-refusal={card.refusal.code}>{card.refusal.reason}</p>}
           {card.sources.length > 0 && <TeaserSources card={card} locale={locale} copy={copy}/>
           }
         </>
       : <div className="answer-prose">{card.sentences.filter((sentence) => sentence.kind !== "scope_note").map((sentence) => <p className="business-question-answer" key={sentence.sentenceId}>{sentence.text}</p>)}</div>}
-    {card.diagnosis && <section className="teaser-diagnosis" data-question-diagnosis="true">
+    {"diagnosis" in card && card.diagnosis && <section className="teaser-diagnosis" data-question-diagnosis="true">
       <p className="diagnosis-kicker">{copy.questionDiagnosis}</p>
       <h4>{copy.diagnosisSummary}</h4>
       <p className="teaser-diagnosis-summary">{card.diagnosis.selectionSummary}</p>
@@ -175,7 +216,7 @@ function TeaserQ1Card({ card, question, locale, copy }: { card: OpenGeoAnswerCar
   </article>;
 }
 
-type GenerativeCard = Extract<OpenGeoAnswerCardV3, { readonly answerMode: "generative_search_v1" }>;
+type GenerativeCard = Extract<OpenGeoAnswerCardV3, { readonly answerMode: "generative_search_v1" }> | DirectQ1Core;
 type TeaserSource = GenerativeCard["sources"][number];
 const FEATURED_SOURCE_COUNT = 5;
 
@@ -228,7 +269,7 @@ function inlineAnswerText(text: string): ReactNode[] {
       : <React.Fragment key={index}>{part}</React.Fragment>
   );
 }
-function TeaserLockedCard({ question, questionOrder, copy }: { question: string; questionOrder: number; copy: Copy }) {
+function TeaserLockedCard({ question, questionOrder, copy, showCta }: { question: string; questionOrder: number; copy: Copy; showCta: boolean }) {
   return <article className="answer-card teaser-locked-card" data-locked-question="true" data-question-order={questionOrder}>
     <header className="answer-card-heading">
       <div><p className="eyebrow">{copy.question} {questionOrder}</p><h3>{question}</h3></div>
@@ -237,7 +278,7 @@ function TeaserLockedCard({ question, questionOrder, copy }: { question: string;
     <div className="locked-content-placeholder">
       <span className="lock-icon" aria-hidden="true">&#x1F512;</span>
       <p>{copy.lockedBody}</p>
-      <a className="cta-inline" href={`#checkout`}>{copy.ctaInline}</a>
+      {showCta ? <a className="cta-inline" href="#checkout">{copy.ctaInline}</a> : null}
     </div>
   </article>;
 }
@@ -250,6 +291,7 @@ interface Copy {
   kicker: string; title: string; introduction: string; target: string; generated: string;
   techScore: string; aiAbsence: string; absenceSummary: (brand: number, competitor: number) => string;
   brandMentions: string; competitorMentions: string;
+  q1SemanticOutcome: string; analysisComplete: string; analysisUnavailable: string; analysisUnavailableBody: string;
   issuePreview: string; remediationLocked: string; customerQuestions: string; question: string; locked: string; lockedBody: string; ctaInline: string;
   ctaTitle: string; ctaBody: string; ctaButton: string; ctaAssurance: string;
   sources: string; sourceCount: (count: number) => string; moreSources: (count: number) => string;
@@ -262,6 +304,8 @@ const EN: Copy = {
   techScore: "Technical score", aiAbsence: "AI answer presence",
   absenceSummary: (brand, competitor) => `Across 3 buyer questions, your brand appeared ${brand} time(s) while competitors appeared ${competitor} time(s).`,
   brandMentions: "Your brand", competitorMentions: "Competitors",
+  q1SemanticOutcome: "Q1 analysis", analysisComplete: "Analysis complete", analysisUnavailable: "Analysis unavailable",
+  analysisUnavailableBody: "The Q1 answer and its sources completed successfully, but the separate analysis did not complete for this run.",
   issuePreview: "Issue preview", remediationLocked: "Remediation is included in the full report.",
   customerQuestions: "Buyer questions", question: "Question", locked: "Locked", lockedBody: "Unlock the full answer with sources and diagnosis.", ctaInline: "Unlock full report",
   ctaTitle: "Get the complete analysis", ctaBody: "Unlock all 3 answers with sources, per-question diagnosis, and prioritized GEO actions.", ctaButton: "Unlock full report", ctaAssurance: "One-time payment · report-specific access",
@@ -270,6 +314,8 @@ const EN: Copy = {
 };
 
 const ZH: Copy = {
+  q1SemanticOutcome: "Q1 分析", analysisComplete: "分析已完成", analysisUnavailable: "分析未完成",
+  analysisUnavailableBody: "Q1 答案和来源已完成，但本次运行的独立分析未完成。",
   kicker: "免费预览", title: "你的官网 AI 可见性快照", introduction: "了解你的官网在 AI 生成答案中的表现，以及需要修复的问题。",
   target: "检测网站", generated: "生成时间",
   techScore: "技术评分", aiAbsence: "AI 答案存在感",

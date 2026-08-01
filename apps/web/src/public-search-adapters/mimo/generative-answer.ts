@@ -24,11 +24,18 @@ Write answerText and refusal.reason naturally in the requested locale. Preserve 
 A later unified evidence-bound semantic review owns final language and terminology judgment. Return the complete answer and sources without rejecting or retrying merely because appropriate non-Chinese terms are present.
 ${SYSTEM}`;
 
+const FREE_DIRECT_SYSTEM = `Return JSON only.
+Answer the supplied buyer question completely using native web search, in natural prose for the requested locale. This answer is final: do not describe research procedure or defer judgment to a later review.
+Only make provider and service claims that are supported by the native-search results used for this response. Prefer direct service pages or authoritative registries over unrelated pages, and omit a named provider when the search evidence does not support the claimed service.
+Return a JSON object containing {"answerText":string,"refusal":null|{"code":"safety_refusal"|"policy_refusal"|"high_risk_refusal","reason":string}}. Use non-empty answerText and null refusal for an answer. Only for a genuine typed refusal, use empty answerText and the typed refusal. Source authority comes only from provider URL annotations attached to this response; model-reported source fields are ignored.
+Preserve appropriate brand names, product names, acronyms, model names, and professional terms in their original language.`;
+
 export function createMiMoGenerativeSearchAnswerProvider(input: { config: MiMoPublicSearchConfig; fetch?: typeof fetch; now?: () => Date }): GenerativeSearchAnswerProvider {
   const transport = input.fetch ?? fetch;
   const now = input.now ?? (() => new Date());
   return { providerId: "xiaomi-mimo", model: input.config.model, searchMode: "native_web_search", async answerWithSources(request) {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    const maximumAttempts = request.semanticValidation === "free_direct" ? 1 : 2;
+    for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
       try { return await requestOnce(input.config, transport, now, request, attempt === 1); }
       catch (error) {
         if (attempt === 0 && error instanceof MiMoGenerativeSearchAnswerError && error.errorClass === "malformed") continue;
@@ -45,6 +52,7 @@ async function requestOnce(config: MiMoPublicSearchConfig, transport: typeof fet
     let response: Response;
     const chinese = request.locale.toLowerCase().startsWith("zh");
     const semanticDeferred = request.semanticValidation === "deferred";
+    const freeDirect = request.semanticValidation === "free_direct";
     const localeInstruction = chinese ? "除来源标题和引用原文外，answerText 和 refusal.reason 必须全部使用简体中文；不要写任何英文单词或缩写，把专业术语翻译为中文。" : "Write answerText and refusal.reason in English; preserve only source-original fields.";
     const correctionText = correction ? (chinese
       ? "\n上一次输出未满足 JSON 或语言契约。请严格返回指定对象，用简体中文完整回答；answerText 不得包含任何英文字母、英文缩写或括号内英文，并列出本次回答实际使用的公开来源。"
@@ -53,7 +61,7 @@ async function requestOnce(config: MiMoPublicSearchConfig, transport: typeof fet
       ? "Write natural Simplified Chinese while preserving appropriate brands, products, acronyms, model names, and professional terms in their original language."
       : "Write natural prose in the requested locale while preserving appropriate brands, products, acronyms, model names, and professional terms in their original language.";
     const deferredCorrectionText = "\nThe previous output failed the JSON or structural contract. Return exactly the requested object with a complete natural answer in the requested locale, preserving appropriate original-language brands and professional terms, and the public sources used.";
-    try { response = await transport(`${config.baseUrl}/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` }, body: JSON.stringify({ model: config.model, messages: [{ role: "system", content: semanticDeferred ? DEFERRED_SYSTEM : chinese ? CHINESE_SYSTEM : SYSTEM }, { role: "user", content: `Question: ${request.question}\nLocale: ${request.locale}\nRegion: ${request.region}\n${semanticDeferred ? deferredLocaleInstruction : localeInstruction}${correction && semanticDeferred ? deferredCorrectionText : correctionText}` }], tools: [{ type: "web_search", force_search: true, limit: 10 }], response_format: { type: "json_object" }, temperature: 0.1, stream: false, thinking: { type: "disabled" } }), signal: request.signal }); }
+    try { response = await transport(`${config.baseUrl}/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` }, body: JSON.stringify({ model: config.model, messages: [{ role: "system", content: freeDirect ? FREE_DIRECT_SYSTEM : semanticDeferred ? DEFERRED_SYSTEM : chinese ? CHINESE_SYSTEM : SYSTEM }, { role: "user", content: `Question: ${request.question}\nLocale: ${request.locale}\nRegion: ${request.region}\n${semanticDeferred || freeDirect ? deferredLocaleInstruction : localeInstruction}${correction && semanticDeferred ? deferredCorrectionText : correctionText}` }], tools: [{ type: "web_search", force_search: true, limit: 10 }], response_format: { type: "json_object" }, temperature: 0.1, stream: false, thinking: { type: "disabled" } }), signal: request.signal }); }
     catch (error) { if (isAbort(error)) throw new MiMoGenerativeSearchAnswerError("aborted", "MiMo answer request was aborted."); throw new MiMoGenerativeSearchAnswerError("unavailable", "MiMo answer transport failed."); }
     if (response.status === 401 || response.status === 403) throw new MiMoGenerativeSearchAnswerError("authentication", "MiMo answer authentication failed.");
     if (!response.ok) throw new MiMoGenerativeSearchAnswerError("unavailable", `MiMo answer request failed with HTTP ${response.status}.`);
@@ -63,9 +71,13 @@ async function requestOnce(config: MiMoPublicSearchConfig, transport: typeof fet
     const parsedRecord = record(parsed); if (!parsedRecord) throw new MiMoGenerativeSearchAnswerError("malformed", "MiMo answer content was malformed.");
     // The question ID is local correlation metadata, not generated prose. Bind
     // it to the request so a model echo cannot misroute an otherwise valid answer.
-    const annotationSources = extractAnnotationSources(payload, request.questionId);
-    const raw = { ...parsedRecord, questionId: request.questionId, sources: annotationSources.length ? annotationSources : parsedRecord.sources, searchedAt, completedAt: now().toISOString(), providerResponseId: extractId(payload) };
-    try { return semanticDeferred
+    const annotationSources = extractAnnotationSources(payload, request.questionId, freeDirect);
+    const raw = freeDirect
+      ? { answerText: parsedRecord.answerText, refusal: parsedRecord.refusal, questionId: request.questionId, sources: annotationSources, searchedAt, completedAt: now().toISOString(), providerResponseId: extractId(payload) }
+      : { ...parsedRecord, questionId: request.questionId, sources: annotationSources.length ? annotationSources : parsedRecord.sources, searchedAt, completedAt: now().toISOString(), providerResponseId: extractId(payload) };
+    try { return freeDirect
+      ? parseGenerativeSearchAnswerResult(raw, { expectedQuestionId: request.questionId, locale: request.locale, semanticValidation: "free_direct" })
+      : semanticDeferred
       ? parseGenerativeSearchAnswerResult(raw, { expectedQuestionId: request.questionId, locale: request.locale, semanticValidation: "deferred" })
       : parseGenerativeSearchAnswerResult(raw, { expectedQuestionId: request.questionId, locale: request.locale }); }
     catch (error) {
@@ -77,13 +89,17 @@ async function requestOnce(config: MiMoPublicSearchConfig, transport: typeof fet
 function record(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function extractContent(value: unknown): string | null { const root = record(value); const choices = root?.choices; const first = Array.isArray(choices) ? record(choices[0]) : null; const message = record(first?.message); const c = message?.content; if (typeof c === "string") return c; if (Array.isArray(c)) return c.map((x) => record(x)?.text).filter((x): x is string => typeof x === "string").join(""); return null; }
 function extractId(value: unknown): string | null { const id = record(value)?.id; return typeof id === "string" ? id : null; }
-function extractAnnotationSources(value: unknown, questionId: string) {
+function extractAnnotationSources(value: unknown, questionId: string, failOnUnsafe = false) {
   const root=record(value); const choices=root?.choices; const first=Array.isArray(choices)?record(choices[0]):null; const message=record(first?.message); const annotations=message?.annotations;
   if(!Array.isArray(annotations))return [];
   return annotations.flatMap((item,index)=>{
-    const row=record(item); if(row?.type!=="url_citation"||typeof row.url!=="string"||typeof row.title!=="string"||!row.url.trim()||!row.title.trim()||row.url.length>2_000)return [];
-    try { const parsed=parseHttpUrl(row.url); if(isBlockedHostname(parsed.hostname))return []; }
-    catch { return []; }
+    const row=record(item); if(row?.type!=="url_citation")return [];
+    if(typeof row.url!=="string"||typeof row.title!=="string"||!row.url.trim()||!row.title.trim()||row.url.length>2_000) {
+      if (failOnUnsafe) throw new MiMoGenerativeSearchAnswerError("malformed", "MiMo returned an invalid provider URL annotation.");
+      return [];
+    }
+    try { const parsed=parseHttpUrl(row.url); if(isBlockedHostname(parsed.hostname))throw new Error("private destination"); }
+    catch { if (failOnUnsafe) throw new MiMoGenerativeSearchAnswerError("malformed", "MiMo returned an unsafe provider URL annotation."); return []; }
     const citedText=typeof row.summary==="string"&&row.summary.trim()?row.summary.trim().slice(0,2_000):null;
     return [{sourceId:`mimo-annotation-${questionId}-${index+1}`,title:row.title.trim().slice(0,500),canonicalUrl:row.url,citedText,providerResultOrder:index}];
   }).slice(0,20);

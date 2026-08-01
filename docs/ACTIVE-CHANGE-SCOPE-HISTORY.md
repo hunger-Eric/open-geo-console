@@ -4249,3 +4249,172 @@ Job replay/repair.
 
 **APPROVED for Phase-1 implementation.** Production edits limited to the closed
 allowlist; external actions remain zero; no deploy.
+
+---
+
+## 2026-08-01 — Free V4 semantic ownership cut (completed local implementation)
+
+- Baseline: `main` at `2a208ea6d971c148336b19cfb29e3c1606cfe956`.
+- Objective: make the model the sole owner of semantic atoms while code retains
+  structural, identity, ownership, and deterministic-derivation authority.
+- Implemented within the approved semantic engine, provider adapter, Free Worker,
+  focused tests, and retained read-only probe allowlist.
+- Focused result: 105 selected tests passed with zero selected-test skips; lint
+  had zero errors and build passed. Full `npm test` retained one unrelated
+  Windows PowerShell five-second timeout, so it was not represented as globally
+  green. Independent review found no P0-P2 issue in the scoped cut.
+- No real model acceptance, database mutation, deployment, Git publication, or
+  branch closeout was claimed under that scope.
+- Superseded as executable authority by the separately approved one-run runtime
+  scope in `docs/ACTIVE-CHANGE-SCOPE.md`.
+
+---
+
+## 2026-08-01 — One minimal real-model Free V4 semantic sequence (terminal)
+
+- Preflight evidence:
+  `.data/test-runs/free-v4-final-semantic/preflight-20260801021218-3af5e2f7`.
+  It completed with exit `0`, provider calls `0`, exact authority confirmed,
+  read-only unpooled Staging access, and unchanged database fingerprint.
+- Live evidence:
+  `.data/test-runs/free-v4-final-semantic/semantic-20260801021258-3d15986a`.
+  Exactly six sequential required batches were called and persisted once; no
+  retry was issued. It completed `semantic_failed`, exit `1`, with unchanged
+  database fingerprint and no final checkpoint or accepted guard receipt.
+- The previous `B_answers` routing/entity-role conflict was crossed: the model
+  omitted `entityRole` and the program derived it without contradictory
+  semantic arbitration.
+- First exact offline replay failure: `B_fields_readonly.fields` was a path-keyed
+  object rather than the required array. Independent later defects included an
+  undeclared mutable-field key, boolean observation-presence values, prose in
+  the answer relevance enum, and a structurally valid model judgment that all
+  three questions were duplicates, which would independently block apply.
+- Runtime verdict: not accepted. This terminal evidence authorizes no retry,
+  repair, deployment, database mutation, or Git action.
+
+---
+
+## 2026-08-01 - Disposable PostgreSQL direct-carrier verification (terminal)
+
+- Canonical receipt:
+  `.data/test-runs/postgres-disposable/pg-20260801033636-f71e415e/receipt.json`.
+- The isolated PostgreSQL 16 container used loopback port `64542`, tmpfs at
+  `/var/lib/postgresql/data`, and was removed after JSON and exit-code evidence
+  were persisted.
+- Result: `274/275` tests passed, `1` failed, `0` skipped. The failure proved
+  that `commercial-orders.ts` still rejected the new Free direct carrier before
+  reaching the direct-aware receipt resolver.
+- The stale precheck was corrected locally. Independent review also identified
+  and the implementation removed the outer-job retry route by binding new V4
+  pre-admission jobs to one attempt and prohibiting deferred attempt restoration
+  for that reason.
+- No second PostgreSQL invocation is authorized, so those corrections retain
+  focused/build evidence only and are not represented as database-verified.
+
+---
+
+## 2026-08-01 - Free V4 direct-semantics v1 first cut (superseded before publication)
+
+- Baseline: `main` at `2a208ea6d971c148336b19cfb29e3c1606cfe956` with the
+  uncommitted direct-carrier implementation still present in the worktree.
+- The first cut removed the Free global semantic reviewer and introduced a
+  separate Free carrier, direct question editor, Q1 answer assessment,
+  diagnosis handles, compact receipt, checkout verification, and one-attempt
+  pre-admission execution.
+- Deeper inspection proved that this was call separation rather than complete
+  semantic-authority separation: Direct still ran three legacy observation
+  searches before Q1, derived three-question-looking metrics from one Q1
+  assessment, searched and displayed a neutralized question while Q1 used the
+  private variant, rejected typed refusal before diagnosis, and labelled every
+  target page as relevant before the model selected evidence.
+- The Direct carrier was not committed, pushed, deployed, or accepted by a
+  real-model Direct run. Its disposable PostgreSQL database was destroyed by
+  the canonical runner. Therefore no historical Direct checkpoint migration or
+  compatibility version is authorized or required.
+- This authority is superseded by the frozen Q1-only correction scope in
+  `docs/ACTIVE-CHANGE-SCOPE.md`. The existing dirty files are preserved as a
+  reviewable baseline, not treated as completed or accepted work.
+
+---
+
+## 2026-08-01 - Q1-only semantic-authority correction local checkpoint
+
+- The correction removed all Direct observation resolver calls and legacy
+  three-question metrics, enforced one identity-neutral persisted/Q1/UI
+  question, accepted typed refusal, and made target-page relevance plus the
+  final target-evidence state model-owned.
+- Direct receipt and checkout readers now bind the typed outcome and target
+  evidence state; refusal, blocked, and not-responsive outcomes fail closed
+  before checkout or Paid-job seeding.
+- Focused Direct/Paid/processor/provider checks passed `310/310`; the final
+  business-question group passed `41/41`; lint completed with zero errors and
+  six pre-existing warnings; and the production build completed successfully.
+- The full deterministic suite passed `3013` tests with `204` skipped. Its only
+  two failures were five-second Windows PowerShell timeouts in the Staging
+  preflight file; the same file then passed `23/23` in isolation. This is not
+  represented as a globally green suite or real semantic acceptance.
+- Final diff check passed, all dirty paths remained within the approved
+  allowlist, and the four audited program-owned semantic coercion patterns were
+  absent. No PostgreSQL run, real-model call, deployment, or Git mutation was
+  performed for this correction.
+
+---
+
+## 2026-08-01 - Conditional closeout stopped during disposable PostgreSQL run
+
+- The user authorized one conditional chain: one canonical disposable
+  PostgreSQL run; only on success, one no-retry real-model sequence; only on
+  success and final audit, commit and push `main`.
+- Run `pg-20260801050748-beed6154` completed disposable setup on loopback port
+  `52950` with tmpfs at `/var/lib/postgresql/data`, then recorded
+  `testStartedAt=2026-08-01T05:07:54.855Z`.
+- Its persisted receipt remained `tests_running`; the process exited without
+  `vitest.json`, `exit-code.txt`, terminal result, or cleanup evidence. Docker
+  API access was unavailable during the read-only recovery check, so container
+  cleanup could not be independently confirmed.
+- Because Vitest had already started, the formal allowance was consumed. The
+  fail-stop condition prevented any model call, Git stage/commit/push, or
+  Staging action.
+
+---
+
+## 2026-08-01 - Replacement PostgreSQL pass and real-model diagnosis stop
+
+- Replacement run `pg-20260801052141-b6a8973f` passed `275/275` selected tests
+  with zero failures and zero skip on loopback port `60796`, using the required
+  PostgreSQL tmpfs. Its terminal receipt was `passed`, exit code was `0`, and
+  its run-owned container was removed.
+- Read-only runtime inspection proved the prior Direct probe was a zero-call
+  fixture. A verification-only amendment converted that existing allowlisted
+  probe into a live three-stage runner with a guarded maximum of three external
+  requests, no database/report/job/UI path, and no retry. Its injected focused
+  test and the Web production build passed before the live run.
+- Live run `direct-20260801053627187-2736a3c0` sent exactly three requests to
+  the configured MiMo endpoint. `question_editor` and `q1_answer` completed;
+  `diagnosis_assessment` did not return a completed Direct outcome. The run
+  stopped with exit code `1` and no retry.
+- The failure receipt omitted the diagnosis enhancer's specific failure object
+  and the already completed Q1 result. The current evidence therefore proves
+  the failing boundary but not whether the third-stage cause was transport,
+  provider status, token budget, or invalid semantic output. No Git or Staging
+  action was performed.
+
+---
+
+## 2026-08-01 - Three-call Direct semantic DSL scope superseded by approved two-call design
+
+- The user approved returning to the original product design: one native-search
+  Q1 answer followed by one independent natural-language analysis. The model
+  question editor is removed from the Direct runtime path.
+- Read-only inspection found that the API guarantees only `json_object`, while
+  the first cut required an exact six-field diagnosis object, fixed enum
+  values, exactly three observations, exactly three recommendations, nested
+  evidence keys, target sentence/role/competitor fields, and rejected harmless
+  additional fields.
+- The first cut also made the completed Q1 answer unreadable unless diagnosis
+  completed and the single combined receipt reached `ready`. This conflicts
+  with the approved rule that Q1 plus same-response sources is the independent
+  core result and analysis failure only marks analysis incomplete.
+- The old conditional PostgreSQL/model/Git closeout chain is terminal and
+  grants no continuing permissions. Its code and evidence remain preserved in
+  the dirty worktree/history until the new exact scope is approved.

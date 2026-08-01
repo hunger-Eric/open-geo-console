@@ -143,4 +143,46 @@ describe("free V4 teaser renderer", () => {
     expect(html).toContain('data-teaser-cta-position="early"');
     expect(html).toContain('data-teaser-cta-position="final"');
   });
+
+  it("renders a completed Direct negative analysis with Q1 and checkout actions", () => {
+    const legacy = teaserModel();
+    const { brandMentionCount: _brand, competitorMentionCount: _competitor, ...base } = legacy;
+    void _brand;
+    void _competitor;
+    const model: FreeTeaserModel = {
+      ...base,
+      directAnalysisStatus: "completed",
+      directAnalysis: {
+        summary: "The answer did not address the buyer question.",
+        observations: ["One natural observation."],
+        recommendations: [],
+        evidenceHandles: []
+      }
+    };
+    const html = renderToStaticMarkup(createElement(CombinedGeoReportV4Teaser, { model }));
+    expect(html).toContain('data-direct-analysis-status="completed"');
+    expect(html).toContain("The answer did not address the buyer question.");
+    expect(html).toContain("One natural observation.");
+    expect(html).toContain('data-generative-answer="public-question-1"');
+    expect(html).not.toContain("Across 3 buyer questions");
+    expect(html).toContain('data-teaser-cta-position="early"');
+    expect(html).toContain('data-teaser-cta-position="final"');
+    expect(html).toContain('href="#checkout"');
+  });
+
+  it("renders Q1 and an explicit unavailable state when Direct analysis is incomplete", () => {
+    const legacy = teaserModel();
+    const { brandMentionCount: _brand, competitorMentionCount: _competitor, ...base } = legacy;
+    void _brand;
+    void _competitor;
+    const html = renderToStaticMarkup(createElement(CombinedGeoReportV4Teaser, { model: {
+      ...base,
+      directAnalysisStatus: "incomplete",
+      directAnalysis: null
+    } }));
+    expect(html).toContain('data-direct-analysis-status="incomplete"');
+    expect(html).toContain("Analysis unavailable");
+    expect(html).toContain('data-generative-answer="public-question-1"');
+    expect(html).not.toContain('href="#checkout"');
+  });
 });

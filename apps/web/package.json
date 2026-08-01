@@ -36,6 +36,7 @@
     "recommendation:methodology:audit": "node --env-file-if-exists=.env.local --import tsx src/scripts/audit-recommendation-methodologies.ts",
     "public-search:probe": "node --env-file=../../.data/workstation-docker/staging.env --import tsx src/scripts/probe-public-search.ts",
     "generative-answer:staging:probe": "node --env-file=../../.data/workstation-docker/staging.env --import tsx src/scripts/probe-generative-answer.ts",
+    "test:free-v4-direct:probe": "node --env-file=../../.data/workstation-docker/staging.env --import tsx src/scripts/probe-free-v4-direct-semantics.ts",
     "report:v4:traceability": "node --import tsx src/scripts/audit-report-v4-conformance.ts traceability",
     "report:v4:matrix": "node --import tsx src/scripts/audit-report-v4-conformance.ts traceability --write-matrix",
     "report:v4:acceptance": "node --import tsx src/scripts/audit-report-v4-conformance.ts acceptance",

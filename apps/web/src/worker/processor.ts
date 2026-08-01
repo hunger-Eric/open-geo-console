@@ -55,7 +55,10 @@ import {
 import { getAiReport, saveAiReport } from "@/db/ai-reports";
 import { getConfirmedBusinessQuestionSet } from "@/db/business-questions";
 import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
-import { readSemanticReviewContractVersion } from "@/db/report-semantic-review-activation";
+import {
+  readFreeDirectSemanticsVersion,
+  readSemanticReviewContractVersion
+} from "@/db/report-semantic-review-activation";
 import { loadReportV4PreAdmissionSnapshot } from "@/db/report-v4-site-snapshots";
 import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
@@ -621,7 +624,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     const homepageUrl = new URL(discovery.targetUrl).href;
     const homepageSucceeded = crawl.pages.some(({ page }) => canonicalUrl(page.url) === canonicalUrl(homepageUrl));
     const evidenceValidated = synthesis.rejectedFindingIds.length === 0 || synthesis.report.findings.length > 0;
-    const billable = isBillableCoverage({
+    const terminalCandidate = await getScanJob(job.id);
+    const terminalFreeTeaser = freeTeaserCheckpointFromJobCheckpoint(terminalCandidate?.checkpoint);
+    const directAnalysisIncomplete = readFreeDirectSemanticsVersion(terminalCandidate?.checkpoint ?? {}) !== null &&
+      terminalFreeTeaser?.stage === "ready" && terminalFreeTeaser.directAnalysisStatus === "incomplete";
+    const billable = !directAnalysisIncomplete && isBillableCoverage({
       plannedPages: effectiveCoverage.effectivePlannedPages,
       successfulPages: effectiveCoverage.analyzedPages,
       homepageSucceeded,
@@ -654,7 +661,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     // escalate to permanent instead of burning the remaining attempts. A
     // deferrable provider outage instead retries without consuming the attempt
     // budget, bounded by the existing hard deadline/SLA.
-    const deferPhaseAttempt = normalized.classification === "transient" && isDeferrablePublicSourceOutage(error);
+    const deferPhaseAttempt = readFreeDirectSemanticsVersion(job.checkpoint) === null &&
+      normalized.classification === "transient" && isDeferrablePublicSourceOutage(error);
     if (!deferPhaseAttempt && normalized.classification === "transient" && await hasPriorJobErrorFingerprint(job.id, normalized.fingerprint)) {
       normalized = escalateFingerprintRecurrence(normalized);
     }
@@ -710,6 +718,7 @@ function withFreeTeaserAfterAdmission(
     if (!currentJob) throw new Error("Free teaser pre-admission job disappeared.");
     let currentCheckpoint = currentJob.checkpoint;
     const semanticReviewContractVersion = readSemanticReviewContractVersion(currentCheckpoint);
+    const freeDirectSemanticsVersion = readFreeDirectSemanticsVersion(currentCheckpoint);
     await generateFreeTeaser({
       reportId: runInput.job.reportId,
       jobId: runInput.job.id,
@@ -719,6 +728,7 @@ function withFreeTeaserAfterAdmission(
       admission,
       checkpoint: freeTeaserCheckpointFromJobCheckpoint(currentCheckpoint),
       semanticReviewContractVersion,
+      freeDirectSemanticsVersion,
       onSemanticReviewBatchEvidence: createSemanticReviewBatchEvidenceSink({
         context: { jobId: runInput.job.id, reportId: runInput.job.reportId }
       }),
@@ -1324,15 +1334,19 @@ async function resolveProspectiveV3TeaserContext(
       admission.snapshot.contentIdentityHash !== teaserCheckpoint.admissionContentIdentityHash) {
     throw new Error("Prospective Paid V3 Admission evidence does not match the free teaser.");
   }
-  const seededQ1 = freeTeaserSeededQ1(teaserCheckpoint, questionSet, semanticValidation === "deferred"
-    ? { semanticReviewContractVersion: "report-semantic-review-v1" }
-    : {});
-  if (!teaserCheckpoint.q1AnswerCard || teaserCheckpoint.q1AnswerCard.answerMode !== "generative_search_v1") {
+  const directVersion = readFreeDirectSemanticsVersion(preAdmissionJob.checkpoint);
+  const seededQ1 = freeTeaserSeededQ1(teaserCheckpoint, questionSet, directVersion
+    ? { freeDirectSemanticsVersion: directVersion }
+    : semanticValidation === "deferred"
+      ? { semanticReviewContractVersion: "report-semantic-review-v1" }
+      : {});
+  const q1Core = teaserCheckpoint.q1AnswerDraft ?? teaserCheckpoint.q1AnswerCard;
+  if (!q1Core || q1Core.answerMode !== "generative_search_v1") {
     throw new Error("Prospective Paid V3 reviewed Free Q1 is unavailable.");
   }
   return {
     seededQ1,
-    reviewedFreeQ1: teaserCheckpoint.q1AnswerCard,
+    reviewedFreeQ1: q1Core as Extract<OpenGeoAnswerCardV3, { answerMode: "generative_search_v1" }>,
     reviewedFreeCheckpoint: teaserCheckpoint,
     admission
   };

@@ -12,9 +12,9 @@ import {
   type ScanJobRow
 } from "./schema";
 import {
-  assertSemanticReviewCarrierEquals,
-  createSemanticReviewInitialCheckpoint,
-  type SemanticReviewContractVersion
+  createFreeDirectSemanticsInitialCheckpoint,
+  readFreeDirectSemanticsVersion,
+  type FreeDirectSemanticsVersion
 } from "./report-semantic-review-activation";
 
 export interface CompletedPreviewJobIdentity {
@@ -35,7 +35,8 @@ export interface ReportV4PreAdmissionJobIdentity {
   recommendationReportVersion: 4;
   artifactContract: Extract<ReportArtifactContract, "combined_geo_report_v4">;
   reason: "v4_pre_admission";
-  semanticReviewContractVersion?: SemanticReviewContractVersion;
+  maxAttempts: 1;
+  freeDirectSemanticsVersion?: FreeDirectSemanticsVersion;
 }
 
 export interface ReportV4AdmissionEnqueueResult {
@@ -55,7 +56,7 @@ export interface ReportV4AdmissionJobRepository {
 export async function enqueueReportV4PreAdmissionAfterPreview(
   preview: CompletedPreviewJobIdentity,
   repository: ReportV4AdmissionJobRepository,
-  options: { semanticReviewContractVersion?: SemanticReviewContractVersion } = {}
+  options: { freeDirectSemanticsVersion?: FreeDirectSemanticsVersion } = {}
 ): Promise<ReportV4AdmissionEnqueueResult | null> {
   if (preview.tier !== "free" ||
       preview.productContract !== "legacy_website_audit_v1" ||
@@ -72,8 +73,9 @@ export async function enqueueReportV4PreAdmissionAfterPreview(
     recommendationReportVersion: 4,
     artifactContract: "combined_geo_report_v4",
     reason: "v4_pre_admission",
-    ...(options.semanticReviewContractVersion
-      ? { semanticReviewContractVersion: options.semanticReviewContractVersion }
+    maxAttempts: 1,
+    ...(options.freeDirectSemanticsVersion
+      ? { freeDirectSemanticsVersion: options.freeDirectSemanticsVersion }
       : {})
   });
 }
@@ -84,22 +86,24 @@ export function createPostgresReportV4AdmissionJobRepository(
   return {
     async createExactlyOnce(input) {
       const requestedJobId = randomUUID();
-      const initialCheckpoint = JSON.stringify(createSemanticReviewInitialCheckpoint(input.semanticReviewContractVersion));
-      const inserted = await tx<Array<{ id: string; checkpoint: unknown }>>`
+      const initialCheckpoint = JSON.stringify(input.freeDirectSemanticsVersion
+        ? createFreeDirectSemanticsInitialCheckpoint()
+        : {});
+      const inserted = await tx<Array<{ id: string; checkpoint: unknown; max_attempts: number }>>`
         INSERT INTO scan_jobs (
           id,report_id,tier,product_contract,fulfillment_methodology,
-          recommendation_report_version,artifact_contract,locale,reason,checkpoint
+          recommendation_report_version,artifact_contract,locale,reason,checkpoint,max_attempts
         ) VALUES (
           ${requestedJobId},${input.reportId},${input.tier},${input.productContract},
           ${input.fulfillmentMethodology},${input.recommendationReportVersion},
-          ${input.artifactContract},${input.locale},${input.reason},${initialCheckpoint}::jsonb
+          ${input.artifactContract},${input.locale},${input.reason},${initialCheckpoint}::jsonb,${input.maxAttempts}
         )
         ON CONFLICT (report_id) WHERE reason='v4_pre_admission' DO NOTHING
-        RETURNING id,checkpoint
+        RETURNING id,checkpoint,max_attempts
       `;
       const created = Boolean(inserted[0]);
-      const existing = created ? inserted : await tx<Array<{ id: string; checkpoint: unknown }>>`
-        SELECT id,checkpoint FROM scan_jobs
+      const existing = created ? inserted : await tx<Array<{ id: string; checkpoint: unknown; max_attempts: number }>>`
+        SELECT id,checkpoint,max_attempts FROM scan_jobs
         WHERE report_id=${input.reportId} AND reason='v4_pre_admission'
         ORDER BY created_at,id
         LIMIT 1
@@ -107,7 +111,12 @@ export function createPostgresReportV4AdmissionJobRepository(
       const row = existing[0];
       const jobId = row?.id;
       if (!jobId) throw new Error("The V4 pre-admission job identity could not be created or resolved.");
-      assertSemanticReviewCarrierEquals(row.checkpoint, input.semanticReviewContractVersion ?? null);
+      if (readFreeDirectSemanticsVersion(row.checkpoint) !== (input.freeDirectSemanticsVersion ?? null)) {
+        throw new Error("The V4 pre-admission Free direct-semantics carrier conflicts with its creation authority.");
+      }
+      if (row.max_attempts !== input.maxAttempts) {
+        throw new Error("The V4 pre-admission Free direct-semantics job must allow exactly one run attempt.");
+      }
       if (created) {
         await tx`
           INSERT INTO job_dispatch_outbox (id,job_id,tier,schema_version,state)

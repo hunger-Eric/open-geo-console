@@ -1,21 +1,27 @@
 import { createHash } from "node:crypto";
 import {
+  FREE_V4_DIRECT_SEMANTICS_VERSION,
   REPORT_V4_MAX_DIAGNOSIS_SOURCES,
   REPORT_SEMANTIC_REVIEW_CONTRACT,
   applyReportSemanticReview,
   assertGenerativeSearchAnswerLanguage,
   buildFreeV4FoundationManifestCoverage,
   buildFreeV4SemanticReviewManifest,
+  createFreeV4DirectAnalysisReceipt,
+  createFreeV4DirectCoreReceipt,
   deriveFreeObservationMetrics,
   diagnoseGenerativeSearchAnswerCardV3,
   generativeSearchAnswerHash,
   generativeSearchSourceHash,
   hashReportSemanticReviewValue,
   parseGenerativeSearchAnswerResult,
+  parseFreeV4DirectAnalysis,
   parseReportV4DiagnosisOutputForQuestion,
   parseReportSemanticReviewOutput,
   reportSemanticTextHash,
   runOfflineReportSemanticReviewBatched,
+  verifyFreeV4DirectAnalysisReceipt,
+  verifyFreeV4DirectCoreReceipt,
   verifyReportSemanticReviewReceipt,
   type AiWebsiteReportV1,
   type CombinedGeoReportV4Question,
@@ -26,7 +32,12 @@ import {
   type AppliedReportSemanticReview,
   type FreeV4SemanticReviewBatchEvidence,
   type ReportSemanticReviewInput,
-  type ReportSemanticReviewOutput
+  type ReportSemanticReviewOutput,
+  type FreeV4DirectAnalysis,
+  type FreeV4DirectAnalysisReceipt,
+  type FreeV4DirectAnalysisStatus,
+  type FreeV4DirectCoreReceipt,
+  type FreeV4DirectEvidenceBinding
 } from "@open-geo-console/ai-report-engine";
 import {
   createMarketSnapshotIdentity,
@@ -47,7 +58,7 @@ import type { JobCheckpoint } from "@/db/schema";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
 import type { ReportV4SiteSnapshotBundle } from "@/db/report-v4-site-snapshots";
 import { resolveGenerativeSearchAnswerProvider, resolveProductionPublicSearchRuntime } from "@/public-source-forensics/production-runtime";
-import { buildReportV4MimoDiagnosisTokenBudget, createReportV4MimoDiagnosisProvider, createReportV4MimoStructuredInvoker } from "@/report-v4/mimo-provider";
+import { buildReportV4MimoDiagnosisTokenBudget, createReportV4MimoDiagnosisProvider, createReportV4MimoStructuredInvoker, type ReportV4MimoStructuredInvoker } from "@/report-v4/mimo-provider";
 import { loadReportV4ModelRuntimeConfig } from "@/report-v4/model-runtime-config";
 import { createConcurrencyGate } from "./bounded-scheduler";
 import { JobError, OrchestrationInvariantError, type JobFailureClassification } from "./job-errors";
@@ -93,14 +104,11 @@ export class FreeTeaserQ1IncompleteError extends JobError {
 }
 
 /**
- * A degraded Free Q1 review annotation is a synthesized contract fallback, not
- * model evidence; it must retry as a transient model-contract failure instead
- * of being persisted as fact. Fingerprint recurrence escalates deterministically.
+ * Invalid Free Q1 model output is a typed model-contract failure rather than
+ * an orchestration invariant. Fingerprint recurrence escalates deterministically.
  */
 export class FreeTeaserQ1AnnotationDegradedError extends JobError {
-  constructor(
-    message = "Free teaser Q1 review annotation degraded to a synthesized contract fallback."
-  ) {
+  constructor(message = "Free teaser Q1 semantic output failed its model contract.") {
     super(message, "free_teaser_q1_annotation_degraded", "transient");
     this.name = "FreeTeaserQ1AnnotationDegradedError";
   }
@@ -118,7 +126,7 @@ function classificationForDiagnosisFailure(failure: ReportV4DiagnosisFailure): J
 }
 export type FreeTeaserStage = "questions_ready" | "observations_ready" | "q1_answer_ready" | "ready";
 
-type FreeTeaserQ1Draft = Omit<GenerativeSearchAnswerCardV3, "geoDiagnosis" | "diagnosis">;
+export type FreeTeaserQ1Core = Omit<GenerativeSearchAnswerCardV3, "geoDiagnosis" | "diagnosis">;
 type MarketSnapshotBundle = NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>;
 type VerifiedFreeTeaserSnapshotBundles = readonly [MarketSnapshotBundle, MarketSnapshotBundle, MarketSnapshotBundle];
 export interface FreeTeaserSemanticReviewProjection {
@@ -152,18 +160,24 @@ export interface FreeTeaserCheckpointV1 {
   readonly metrics?: FreeTeaserMetrics;
   readonly q1AnswerResult?: GenerativeSearchAnswerResult;
   readonly q1AnswerCard?: GenerativeSearchAnswerCardV3;
-  readonly q1AnswerDraft?: FreeTeaserQ1Draft;
+  readonly q1AnswerDraft?: FreeTeaserQ1Core;
   readonly q1DiagnosisDraft?: NonNullable<GenerativeSearchAnswerCardV3["diagnosis"]>;
   readonly reviewedFoundation?: AiWebsiteReportV1;
   readonly semanticReview?: FreeTeaserSemanticReviewProjection;
+  readonly directQuestionTexts?: readonly [string, string, string];
+  readonly directCoreReceipt?: FreeV4DirectCoreReceipt;
+  readonly directAnalysisStatus?: FreeV4DirectAnalysisStatus;
+  readonly directAnalysis?: FreeV4DirectAnalysis;
+  readonly directAnalysisHandleBindings?: readonly FreeV4DirectEvidenceBinding[];
+  readonly directAnalysisReceipt?: FreeV4DirectAnalysisReceipt;
   readonly readyAt?: string;
 }
 
 export interface FreeTeaserResult {
   readonly checkpoint: FreeTeaserCheckpointV1;
   readonly questionSet: ConfirmedBusinessQuestionSet;
-  readonly q1AnswerCard: GenerativeSearchAnswerCardV3;
-  readonly metrics: FreeTeaserMetrics;
+  readonly q1AnswerCore: FreeTeaserQ1Core | GenerativeSearchAnswerCardV3;
+  readonly metrics?: FreeTeaserMetrics;
 }
 
 export interface FreeTeaserSeededQ1 {
@@ -190,22 +204,29 @@ export async function generateFreeTeaser(input: {
   admission: ReportV4SiteSnapshotBundle;
   checkpoint?: FreeTeaserCheckpointV1 | null;
   semanticReviewContractVersion?: typeof REPORT_SEMANTIC_REVIEW_CONTRACT | null;
+  freeDirectSemanticsVersion?: typeof FREE_V4_DIRECT_SEMANTICS_VERSION | null;
   saveCheckpoint: FreeTeaserCheckpointWriter;
   onSemanticReviewBatchEvidence?: (evidence: FreeV4SemanticReviewBatchEvidence) => void;
   signal?: AbortSignal;
+  structuredInvoker?: ReportV4MimoStructuredInvoker;
 }): Promise<FreeTeaserResult> {
   input.signal?.throwIfAborted();
   assertTerminalAdmission(input.admission, input.reportId);
   const semanticReviewEnabled = input.semanticReviewContractVersion === REPORT_SEMANTIC_REVIEW_CONTRACT;
+  const freeDirectEnabled = input.freeDirectSemanticsVersion === FREE_V4_DIRECT_SEMANTICS_VERSION;
+  if (semanticReviewEnabled && freeDirectEnabled) throw new Error("Free teaser cannot use legacy and direct semantic carriers together.");
   if (input.semanticReviewContractVersion !== null && input.semanticReviewContractVersion !== undefined && !semanticReviewEnabled) {
     throw new Error("Unsupported Free teaser semantic-review contract.");
+  }
+  if (input.freeDirectSemanticsVersion !== null && input.freeDirectSemanticsVersion !== undefined && !freeDirectEnabled) {
+    throw new Error("Unsupported Free direct-semantics contract.");
   }
 
   const runtime = await resolveProductionPublicSearchRuntime({
     environment: process.env,
     getAuthority: getActivePublicSearchSurfaceAuthority
   });
-  const foundationHash = sha(input.foundation);
+  const foundationHash = hashFreeTeaserFoundation(input.foundation);
   const admissionContentIdentityHash = input.admission.snapshot.contentIdentityHash!;
   const identityCore = {
     version: FREE_TEASER_CHECKPOINT_VERSION,
@@ -221,12 +242,15 @@ export async function generateFreeTeaser(input: {
   let checkpoint = input.checkpoint ?? null;
   if (checkpoint) {
     assertCheckpointIdentity(checkpoint, identityCore, identityHash);
-    assertSemanticReviewCheckpointMode(checkpoint, semanticReviewEnabled);
+    assertSemanticReviewCheckpointMode(checkpoint, semanticReviewEnabled, freeDirectEnabled);
+  }
+  if (freeDirectEnabled && checkpoint && checkpoint.stage !== "ready") {
+    throw new Error("A nonterminal Free direct checkpoint cannot be resumed; start a new report run.");
   }
   const evidenceCutoffAt = checkpoint?.evidenceCutoffAt ?? new Date().toISOString();
 
   let questionSet: ConfirmedBusinessQuestionSet;
-  if (semanticReviewEnabled && checkpoint?.stage === "ready") {
+  if ((semanticReviewEnabled || freeDirectEnabled) && checkpoint?.stage === "ready") {
     if (!checkpoint.questionSetId || !checkpoint.questionSetIdentity) throw new Error("Marked Free teaser ready checkpoint has no question-set authority.");
     const persistedQuestionSet = await getConfirmedBusinessQuestionSet(input.reportId, checkpoint.questionSetId);
     if (!persistedQuestionSet || persistedQuestionSet.contentHash !== checkpoint.questionSetIdentity) {
@@ -258,12 +282,15 @@ export async function generateFreeTeaser(input: {
       identityHash,
       evidenceCutoffAt,
       questionSetId: questionSet.id,
-      questionSetIdentity: questionSet.contentHash
+      questionSetIdentity: questionSet.contentHash,
+      ...(freeDirectEnabled
+        ? { directQuestionTexts: questionSet.questions.map(({ neutralPublicText }) => neutralPublicText) as [string, string, string] }
+        : {})
     };
     await input.saveCheckpoint(checkpoint, "question_generation");
   }
 
-  if (!checkpoint.observationSnapshotIds || (!semanticReviewEnabled && !checkpoint.metrics)) {
+  if (!freeDirectEnabled && (!checkpoint.observationSnapshotIds || (!semanticReviewEnabled && !checkpoint.metrics))) {
     const observed = await observeTeaserQuestions({
       reportId: input.reportId,
       jobId: input.jobId,
@@ -272,7 +299,7 @@ export async function generateFreeTeaser(input: {
       questionSet,
       evidenceCutoffAt,
       runtime,
-      semanticReviewEnabled,
+      semanticReviewEnabled: semanticReviewEnabled || freeDirectEnabled,
       signal: input.signal
     });
     checkpoint = {
@@ -307,39 +334,87 @@ export async function generateFreeTeaser(input: {
     }
   }
 
-  if (checkpoint.stage !== "ready" && (!checkpoint.q1AnswerResult || (semanticReviewEnabled ? !checkpoint.q1AnswerDraft : !checkpoint.q1AnswerCard))) {
+  if (checkpoint.stage !== "ready" && (!checkpoint.q1AnswerResult || (semanticReviewEnabled || freeDirectEnabled ? !checkpoint.q1AnswerDraft : !checkpoint.q1AnswerCard))) {
     const q1 = await answerTeaserQuestionOne({
       questionSet,
       targetUrl: input.targetUrl,
       locale: runtime.authority.surface.locale,
       region: runtime.authority.surface.region,
       signal: input.signal,
-      semanticReviewEnabled
+      semanticMode: freeDirectEnabled ? "free_direct" : semanticReviewEnabled ? "deferred" : "legacy"
     });
-    const answeredCheckpoint: FreeTeaserCheckpointV1 = {
+    const answeredCore: FreeTeaserCheckpointV1 = {
       ...checkpoint,
       stage: "q1_answer_ready",
       q1AnswerResult: q1.answerResult,
-      ...(semanticReviewEnabled ? { q1AnswerDraft: q1.draft } : { q1AnswerCard: q1.card! })
+      ...(semanticReviewEnabled || freeDirectEnabled ? { q1AnswerDraft: q1.draft } : { q1AnswerCard: q1.card! })
     };
-    if (semanticReviewEnabled) {
+    const answeredCheckpoint: FreeTeaserCheckpointV1 = freeDirectEnabled
+      ? {
+          ...answeredCore,
+          directCoreReceipt: createFreeV4DirectCoreReceipt(freeDirectCoreReceiptInput(answeredCore))
+        }
+      : answeredCore;
+    if (semanticReviewEnabled || freeDirectEnabled) {
       await verifyMarkedFreeTeaserDraftCheckpoint({ checkpoint: answeredCheckpoint, questionSet, targetUrl: input.targetUrl, admission: input.admission });
     }
     checkpoint = answeredCheckpoint;
     await input.saveCheckpoint(checkpoint, "grounded_answer_synthesis");
   }
 
-  if (semanticReviewEnabled && checkpoint.stage === "q1_answer_ready") {
+  if ((semanticReviewEnabled || freeDirectEnabled) && checkpoint.stage === "q1_answer_ready") {
     await verifyMarkedFreeTeaserDraftCheckpoint({ checkpoint, questionSet, targetUrl: input.targetUrl, admission: input.admission });
   }
 
-  if (checkpoint.stage !== "ready" && !(semanticReviewEnabled && checkpoint.q1DiagnosisDraft)) {
+  if (freeDirectEnabled && checkpoint.stage === "q1_answer_ready") {
+    const q1Core = checkpoint.q1AnswerDraft!;
+    const directInput = buildFreeV4DirectAnalysisInput({
+      question: q1Core.exactQuestion,
+      answer: { answerText: q1Core.answerText, refusal: q1Core.refusal },
+      sources: q1Core.sources,
+      targetPages: buildFreeTeaserDiagnosisTargetPages(q1Core.questionId, input.admission),
+      targetIdentity: freeV4DirectTargetIdentity(input.targetUrl, input.foundation),
+      locale: runtime.authority.surface.locale
+    });
+    try {
+      const rawAnalysis = await invokeFreeV4DirectAnalysis({
+        payload: directInput.payload,
+        signal: input.signal,
+        structuredInvoker: input.structuredInvoker
+      });
+      const analysis = parseFreeV4DirectAnalysis(rawAnalysis, {
+        allowedEvidenceHandles: directInput.handleBindings.map(({ handle }) => handle)
+      });
+      const completedCore: FreeTeaserCheckpointV1 = {
+        ...checkpoint,
+        stage: "ready",
+        directAnalysisStatus: "completed",
+        directAnalysis: analysis,
+        directAnalysisHandleBindings: directInput.handleBindings,
+        readyAt: new Date().toISOString()
+      };
+      checkpoint = {
+        ...completedCore,
+        directAnalysisReceipt: createFreeV4DirectAnalysisReceipt(freeDirectAnalysisReceiptInput(completedCore))
+      };
+    } catch {
+      input.signal?.throwIfAborted();
+      checkpoint = {
+        ...checkpoint,
+        stage: "ready",
+        directAnalysisStatus: "incomplete",
+        readyAt: new Date().toISOString()
+      };
+    }
+    await input.saveCheckpoint(checkpoint, "grounded_answer_synthesis");
+  }
+
+  if (!freeDirectEnabled && checkpoint.stage !== "ready" && !(semanticReviewEnabled && checkpoint.q1DiagnosisDraft)) {
     const q1Card = semanticReviewEnabled ? checkpoint.q1AnswerDraft! : checkpoint.q1AnswerCard!;
     const targetPages = buildFreeTeaserDiagnosisTargetPages(
       q1Card.questionId,
       input.admission
     );
-    if (!targetPages.length) throw new Error("Free teaser Q1 diagnosis requires target-site evidence.");
     const question = toDiagnosisQuestion(q1Card);
     const diagnosisResult = await enhanceReportV4QuestionDiagnosis({
       question,
@@ -380,7 +455,13 @@ export async function generateFreeTeaser(input: {
   }
 
   if (semanticReviewEnabled && checkpoint.stage !== "ready") {
-    const reviewedCheckpoint = await reviewFreeTeaser({ ...input, checkpoint, questionSet, runtime, bundles: verifiedSnapshotBundles! });
+    const reviewedCheckpoint = await reviewFreeTeaser({
+      ...input,
+      checkpoint,
+      questionSet,
+      runtime,
+      bundles: verifiedSnapshotBundles!
+    });
     const verifiedReady = parseReadyFreeTeaserCheckpoint(reviewedCheckpoint, {
       semanticReviewContractVersion: input.semanticReviewContractVersion
     });
@@ -398,14 +479,45 @@ export async function generateFreeTeaser(input: {
   }
 
   const ready = parseReadyFreeTeaserCheckpoint(checkpoint, {
-    semanticReviewContractVersion: input.semanticReviewContractVersion
+    semanticReviewContractVersion: input.semanticReviewContractVersion,
+    freeDirectSemanticsVersion: input.freeDirectSemanticsVersion
   });
   return {
     checkpoint: ready,
     questionSet,
-    q1AnswerCard: ready.q1AnswerCard!,
-    metrics: ready.metrics!
+    q1AnswerCore: ready.q1AnswerDraft ?? ready.q1AnswerCard!,
+    ...(ready.metrics ? { metrics: ready.metrics } : {})
   };
+}
+
+async function invokeFreeV4DirectAnalysis(input: {
+  payload: unknown;
+  signal?: AbortSignal;
+  structuredInvoker?: ReportV4MimoStructuredInvoker;
+}): Promise<unknown> {
+  const signal = input.signal ?? new AbortController().signal;
+  signal.throwIfAborted();
+  const structured = input.structuredInvoker ?? createReportV4MimoStructuredInvoker({
+    environment: process.env,
+    lockedRuntime: loadReportV4ModelRuntimeConfig(process.env)
+  });
+  const output = await structured.invoke({
+    operation: "sourceDiagnosis",
+    systemText: [
+      "Analyze the supplied native-search answer and its actual source annotations.",
+      "Explain why those sources support the answer, whether the submitted site appears, what gaps remain, and what should be improved.",
+      "targetIdentity is authoritative. When naming the submitted target, use targetIdentity.canonicalName exactly; do not translate, abbreviate, or invent another target name. Its aliases and domain identify the same target.",
+      "The S and T handles are the only evidence handles you may cite. T pages are unassessed candidates, not proof of relevance.",
+      "List every S/T handle actually relied on by the summary, observations, or recommendations. Do not recommend adding the submitted target merely because a T page exists.",
+      "Negative outcomes, no target mention, insufficient evidence, and refusals are valid analysis results.",
+      "Return one JSON object with summary, observations, recommendations, and evidenceHandles.",
+      "observations, recommendations, and evidenceHandles are arrays of any appropriate length, including zero. Extra fields are ignored."
+    ].join("\n"),
+    inputText: JSON.stringify(input.payload),
+    signal
+  });
+  signal.throwIfAborted();
+  return output;
 }
 
 export function freeTeaserCheckpointFromJobCheckpoint(value: JobCheckpoint | null | undefined): FreeTeaserCheckpointV1 | null {
@@ -419,7 +531,10 @@ export function freeTeaserCheckpointFromJobCheckpoint(value: JobCheckpoint | nul
 
 export function parseReadyFreeTeaserCheckpoint(
   value: unknown,
-  options?: { semanticReviewContractVersion?: typeof REPORT_SEMANTIC_REVIEW_CONTRACT | null }
+  options?: {
+    semanticReviewContractVersion?: typeof REPORT_SEMANTIC_REVIEW_CONTRACT | null;
+    freeDirectSemanticsVersion?: typeof FREE_V4_DIRECT_SEMANTICS_VERSION | null;
+  }
 ): FreeTeaserCheckpointV1 {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Free teaser checkpoint must be an object.");
   const checkpoint = value as FreeTeaserCheckpointV1;
@@ -429,17 +544,17 @@ export function parseReadyFreeTeaserCheckpoint(
   if (!isHash(checkpoint.identityHash) || !isHash(checkpoint.admissionContentIdentityHash) ||
       !isHash(checkpoint.foundationHash) || !isConfirmedBusinessQuestionSetIdentity(checkpoint.questionSetIdentity) ||
       !checkpoint.questionSetId || !checkpoint.reportId || !checkpoint.admissionSnapshotId ||
-      !checkpoint.q1AnswerCard || !checkpoint.q1AnswerResult || !checkpoint.metrics ||
-      checkpoint.observationSnapshotIds?.length !== 3 || !checkpoint.readyAt) {
+      !checkpoint.q1AnswerResult || !checkpoint.readyAt) {
     throw new TypeError("Free teaser checkpoint is incomplete.");
   }
-  if (checkpoint.q1AnswerCard.questionId !== checkpoint.q1AnswerResult.questionId ||
-      !checkpoint.q1AnswerCard.diagnosis) {
-    throw new TypeError("Free teaser Q1 identity is invalid.");
-  }
   const semanticReviewEnabled = options?.semanticReviewContractVersion === REPORT_SEMANTIC_REVIEW_CONTRACT;
+  const freeDirectEnabled = options?.freeDirectSemanticsVersion === FREE_V4_DIRECT_SEMANTICS_VERSION;
+  if (semanticReviewEnabled && freeDirectEnabled) throw new TypeError("Free teaser cannot verify two semantic carriers.");
   if (options?.semanticReviewContractVersion !== null && options?.semanticReviewContractVersion !== undefined && !semanticReviewEnabled) {
     throw new TypeError("Unsupported Free teaser semantic-review contract.");
+  }
+  if (options?.freeDirectSemanticsVersion !== null && options?.freeDirectSemanticsVersion !== undefined && !freeDirectEnabled) {
+    throw new TypeError("Unsupported Free direct-semantics contract.");
   }
   if (semanticReviewEnabled !== Boolean(checkpoint.semanticReview)) {
     throw new TypeError("Free teaser ready checkpoint does not match root semantic-review lineage.");
@@ -447,12 +562,203 @@ export function parseReadyFreeTeaserCheckpoint(
   if (semanticReviewEnabled && !checkpoint.reviewedFoundation) {
     throw new TypeError("Free teaser ready checkpoint is missing its reviewed Foundation projection.");
   }
-  parseReportV4DiagnosisOutputForQuestion(checkpoint.q1AnswerCard.diagnosis, {
-    questionId: checkpoint.q1AnswerCard.questionId,
-    sourceEvidenceIds: checkpoint.q1AnswerCard.sources.map(({ sourceId }) => sourceId)
-  }, { semanticValidation: semanticReviewEnabled ? "deferred" : "legacy" });
+  if (freeDirectEnabled) {
+    if (checkpoint.semanticReview || checkpoint.reviewedFoundation || checkpoint.q1AnswerCard ||
+        !checkpoint.q1AnswerDraft || !checkpoint.directQuestionTexts || !checkpoint.directCoreReceipt ||
+        !checkpoint.directAnalysisStatus || checkpoint.metrics || checkpoint.observationSnapshotIds) {
+      throw new TypeError("Free direct ready checkpoint is missing its direct semantic authority.");
+    }
+    if (checkpoint.directQuestionTexts[0] !== checkpoint.q1AnswerDraft.exactQuestion ||
+        checkpoint.q1AnswerDraft.questionId !== checkpoint.q1AnswerResult.questionId) {
+      throw new TypeError("Free direct Q1 prose does not match the final question set.");
+    }
+    verifyDirectQ1CoreProjection(checkpoint);
+    verifyFreeV4DirectCoreReceipt(checkpoint.directCoreReceipt, freeDirectCoreReceiptInput(checkpoint));
+    if (checkpoint.directAnalysisStatus === "completed") {
+      if (!checkpoint.directAnalysis || !checkpoint.directAnalysisHandleBindings || !checkpoint.directAnalysisReceipt) {
+        throw new TypeError("Free direct completed analysis is missing its receipt authority.");
+      }
+      verifyFreeV4DirectAnalysisReceipt(
+        checkpoint.directAnalysisReceipt,
+        freeDirectAnalysisReceiptInput(checkpoint)
+      );
+    } else if (checkpoint.directAnalysisStatus === "incomplete") {
+      if (checkpoint.directAnalysis || checkpoint.directAnalysisHandleBindings || checkpoint.directAnalysisReceipt) {
+        throw new TypeError("Free direct incomplete analysis must not carry an unverified projection.");
+      }
+    } else {
+      throw new TypeError("Free direct analysis status is invalid.");
+    }
+  } else if (checkpoint.directCoreReceipt || checkpoint.directQuestionTexts || checkpoint.directAnalysisStatus ||
+      checkpoint.directAnalysis || checkpoint.directAnalysisHandleBindings || checkpoint.directAnalysisReceipt) {
+    throw new TypeError("Legacy Free teaser checkpoint contains an unexpected direct semantic projection.");
+  } else if (!checkpoint.metrics || checkpoint.observationSnapshotIds?.length !== 3) {
+    throw new TypeError("Legacy Free teaser checkpoint is missing its observation metrics authority.");
+  } else if (!checkpoint.q1AnswerCard || checkpoint.q1AnswerCard.questionId !== checkpoint.q1AnswerResult.questionId ||
+      !checkpoint.q1AnswerCard.diagnosis) {
+    throw new TypeError("Free teaser Q1 identity is invalid.");
+  }
+  if (!freeDirectEnabled) {
+    parseReportV4DiagnosisOutputForQuestion(checkpoint.q1AnswerCard!.diagnosis, {
+      questionId: checkpoint.q1AnswerCard!.questionId,
+      sourceEvidenceIds: checkpoint.q1AnswerCard!.sources.map(({ sourceId }) => sourceId)
+    }, { semanticValidation: semanticReviewEnabled ? "deferred" : "legacy" });
+  }
   if (semanticReviewEnabled) verifyFreeTeaserSemanticProjection(checkpoint);
   return checkpoint;
+}
+
+function freeDirectCoreReceiptInput(checkpoint: FreeTeaserCheckpointV1) {
+  if (!checkpoint.questionSetIdentity || !checkpoint.directQuestionTexts || !checkpoint.q1AnswerDraft ||
+      !checkpoint.q1AnswerResult) {
+    throw new TypeError("Free direct core receipt input is incomplete.");
+  }
+  const core = checkpoint.q1AnswerDraft;
+  return {
+    questionSetIdentity: checkpoint.questionSetIdentity,
+    questions: checkpoint.directQuestionTexts,
+    questionId: core.questionId,
+    questionText: core.exactQuestion,
+    answer: checkpoint.q1AnswerResult,
+    sources: core.sources,
+    providerResponseId: checkpoint.q1AnswerResult.providerResponseId,
+    providerId: core.provenance.providerId,
+    model: core.provenance.model,
+    searchMode: core.provenance.searchMode,
+    searchedAt: core.provenance.searchedAt,
+    completedAt: core.provenance.completedAt,
+    nonProseProjection: {
+      version: checkpoint.version,
+      identityHash: checkpoint.identityHash,
+      reportId: checkpoint.reportId,
+      admissionSnapshotId: checkpoint.admissionSnapshotId,
+      admissionContentIdentityHash: checkpoint.admissionContentIdentityHash,
+      foundationHash: checkpoint.foundationHash,
+      locale: checkpoint.locale,
+      region: checkpoint.region,
+      authorityId: checkpoint.authorityId,
+      evidenceCutoffAt: checkpoint.evidenceCutoffAt,
+      questionSetId: checkpoint.questionSetId,
+      questionSetIdentity: checkpoint.questionSetIdentity,
+      questionId: core.questionId,
+      answerHash: core.provenance.answerHash,
+      sourceHash: core.provenance.sourceHash
+    }
+  } as const;
+}
+
+function freeDirectAnalysisReceiptInput(checkpoint: FreeTeaserCheckpointV1) {
+  if (!checkpoint.directCoreReceipt || !checkpoint.directAnalysis || !checkpoint.directAnalysisHandleBindings ||
+      checkpoint.directAnalysisStatus !== "completed") {
+    throw new TypeError("Free direct analysis receipt input is incomplete.");
+  }
+  return {
+    coreReceiptHash: checkpoint.directCoreReceipt.receiptHash,
+    analysis: checkpoint.directAnalysis,
+    handleBindings: checkpoint.directAnalysisHandleBindings,
+    nonProseProjection: {
+      version: checkpoint.version,
+      identityHash: checkpoint.identityHash,
+      reportId: checkpoint.reportId,
+      admissionSnapshotId: checkpoint.admissionSnapshotId,
+      admissionContentIdentityHash: checkpoint.admissionContentIdentityHash,
+      foundationHash: checkpoint.foundationHash,
+      locale: checkpoint.locale,
+      region: checkpoint.region,
+      authorityId: checkpoint.authorityId,
+      questionSetIdentity: checkpoint.questionSetIdentity,
+      analysisStatus: checkpoint.directAnalysisStatus
+    }
+  } as const;
+}
+
+function verifyDirectQ1CoreProjection(checkpoint: FreeTeaserCheckpointV1): void {
+  const core = checkpoint.q1AnswerDraft!;
+  const parsed = parseGenerativeSearchAnswerResult(checkpoint.q1AnswerResult, {
+    expectedQuestionId: core.questionId,
+    locale: checkpoint.locale,
+    semanticValidation: "free_direct"
+  });
+  if (parsed.answerText !== core.answerText ||
+      hashReportSemanticReviewValue(parsed.refusal) !== hashReportSemanticReviewValue(core.refusal) ||
+      sha(parsed.sources.map(canonicalAnswerSourceProjection)) !== sha(core.sources.map(canonicalAnswerSourceProjection)) ||
+      core.provenance.answerHash !== sha(JSON.stringify(parsed)) ||
+      core.provenance.sourceHash !== canonicalAnswerSourceHash(parsed.sources) ||
+      core.provenance.searchedAt !== parsed.searchedAt || core.provenance.completedAt !== parsed.completedAt ||
+      core.sources.some((source) => source.retrievalStatus !== "search_source_only" || source.ownershipCategory !== "unknown") ||
+      core.audit.verifiedBodyCount !== 0 || core.audit.searchSourceOnlyCount !== core.sources.length ||
+      core.audit.inaccessibleCount !== 0) {
+    throw new TypeError("Free direct Q1 core does not match its provider answer and annotation authority.");
+  }
+}
+
+function buildFreeV4DirectAnalysisInput(input: {
+  question: string;
+  answer: { readonly answerText: string; readonly refusal: FreeTeaserQ1Core["refusal"] };
+  sources: FreeTeaserQ1Core["sources"];
+  targetPages: readonly ReportV4DiagnosisTargetPage[];
+  targetIdentity: {
+    readonly canonicalName: string;
+    readonly aliases: readonly string[];
+    readonly domain: string;
+  };
+  locale: string;
+}): {
+  readonly payload: unknown;
+  readonly handleBindings: readonly FreeV4DirectEvidenceBinding[];
+} {
+  const sourceAliases = input.sources.map((source, index) => ({
+    handle: `S${index + 1}`,
+    title: source.title,
+    url: source.canonicalUrl,
+    citedText: source.citedText
+  }));
+  const targetAliases = input.targetPages.map((page, index) => ({
+    handle: `T${index + 1}`,
+    url: page.url,
+    summary: page.summary
+  }));
+  const handleBindings = Object.freeze([
+    ...input.sources.map((source, index) => Object.freeze({
+      handle: `S${index + 1}`,
+      evidenceRef: source.sourceId
+    })),
+    ...input.targetPages.map((page, index) => Object.freeze({
+      handle: `T${index + 1}`,
+      evidenceRef: page.sourceLocations[0]!.locationId
+    }))
+  ]);
+  return Object.freeze({
+    payload: Object.freeze({
+      locale: input.locale,
+      question: input.question,
+      answer: input.answer,
+      answerSources: sourceAliases,
+      targetIdentity: input.targetIdentity,
+      submittedSitePages: targetAliases
+    }),
+    handleBindings
+  });
+}
+
+function freeV4DirectTargetIdentity(targetUrl: string, foundation: AiWebsiteReportV1): {
+  readonly canonicalName: string;
+  readonly aliases: readonly string[];
+  readonly domain: string;
+} {
+  const profile = foundation.organizationProfile;
+  const domain = new URL(targetUrl).hostname.replace(/^www\./u, "").toLocaleLowerCase();
+  const aliases = [...new Set([
+    profile.organizationName,
+    profile.legalEntity,
+    ...(profile.brandNames ?? [])
+  ].filter((value): value is string => Boolean(value?.trim())).map((value) => value.trim()))];
+  const canonicalName = profile.organizationName?.trim()
+    || profile.legalEntity?.trim()
+    || aliases[0]
+    || domain;
+  if (!aliases.includes(canonicalName)) aliases.unshift(canonicalName);
+  return Object.freeze({ canonicalName, aliases: Object.freeze(aliases), domain });
 }
 
 function verifyFreeTeaserSemanticProjection(checkpoint: FreeTeaserCheckpointV1): void {
@@ -475,16 +781,7 @@ function verifyFreeTeaserSemanticProjection(checkpoint: FreeTeaserCheckpointV1):
     if (actual.has(field.path) && actual.get(field.path) !== field.appliedText) throw new TypeError(`Free teaser semantic field ${field.path} does not match the checkpoint.`);
   }
   const annotation = output.annotations.answers[0];
-  // entityRole is persisted inside the review output; bind it to the same
-  // presence/competitor semantics the Q1 projection is asserted against, so a
-  // self-consistent-but-contradictory annotation cannot pass silently.
-  const expectedEntityRole = annotation && annotation.targetPresence !== undefined && annotation.competitorEntityIds !== undefined
-    ? annotation.targetPresence === "present"
-      ? annotation.competitorEntityIds.length ? "mixed" : "target"
-      : annotation.competitorEntityIds.length ? "competitor" : "none"
-    : undefined;
   if (!annotation || annotation.targetPresence === undefined || annotation.competitorEntityIds === undefined ||
-      annotation.entityRole !== expectedEntityRole ||
       checkpoint.q1AnswerCard!.geoDiagnosis.targetMentioned !== (annotation.targetPresence === "present") ||
       checkpoint.q1AnswerCard!.geoDiagnosis.targetFirstSentence !== (annotation.targetPresence === "present" ? annotation.targetFirstSentence : null) ||
       sha(checkpoint.q1AnswerCard!.geoDiagnosis.targetRoles) !== sha(annotation.targetRoles) ||
@@ -554,13 +851,16 @@ function writeFoundationProjectionText(root: Record<string, unknown>, path: stri
 export function freeTeaserSeededQ1(
   checkpointValue: FreeTeaserCheckpointV1,
   questionSet: ConfirmedBusinessQuestionSet,
-  options: { semanticReviewContractVersion?: typeof REPORT_SEMANTIC_REVIEW_CONTRACT | null } = {}
+  options: {
+    semanticReviewContractVersion?: typeof REPORT_SEMANTIC_REVIEW_CONTRACT | null;
+    freeDirectSemanticsVersion?: typeof FREE_V4_DIRECT_SEMANTICS_VERSION | null;
+  } = {}
 ): FreeTeaserSeededQ1 {
   const checkpoint = parseReadyFreeTeaserCheckpoint(checkpointValue, options);
   if (checkpoint.questionSetIdentity !== questionSet.contentHash) {
     throw new Error("Paid V3 question set does not match the free teaser.");
   }
-  const card = checkpoint.q1AnswerCard!;
+  const card = checkpoint.q1AnswerDraft ?? checkpoint.q1AnswerCard!;
   return {
     questionSetIdentity: checkpoint.questionSetIdentity!,
     providerId: card.provenance.providerId,
@@ -589,7 +889,7 @@ export function buildFreeTeaserDiagnosisTargetPages(
         questionId,
         pageId: page.id,
         url: page.normalizedUrl,
-        relevanceReason: "The page contains directly verifiable information relevant to this question.",
+        relevanceReason: "Unassessed submitted-site page candidate.",
         summary,
         sourceLocations: Object.freeze([{
           locationId,
@@ -667,7 +967,7 @@ function createFreeTeaserFanouts(
   }));
 }
 
-async function loadVerifiedFreeTeaserSnapshotBundles(input: {
+export async function loadVerifiedFreeTeaserSnapshotBundles(input: {
   snapshotIds: readonly [string, string, string];
   targetUrl: string;
   foundation: AiWebsiteReportV1;
@@ -750,8 +1050,8 @@ async function answerTeaserQuestionOne(input: {
   locale: string;
   region: string;
   signal?: AbortSignal;
-  semanticReviewEnabled: boolean;
-}): Promise<{ answerResult: GenerativeSearchAnswerResult; draft: FreeTeaserQ1Draft; card?: GenerativeSearchAnswerCardV3 }> {
+  semanticMode: "legacy" | "deferred" | "free_direct";
+}): Promise<{ answerResult: GenerativeSearchAnswerResult; draft: FreeTeaserQ1Core; card?: GenerativeSearchAnswerCardV3 }> {
   const provider: GenerativeSearchAnswerProvider = resolveGenerativeSearchAnswerProvider(process.env, {
     locale: input.locale,
     region: input.region
@@ -760,18 +1060,25 @@ async function answerTeaserQuestionOne(input: {
   const question = input.questionSet.questions[0]!;
   const raw = await provider.answerWithSources({
     questionId: canonical.id,
-    question: question.privateText,
+    question: input.semanticMode === "free_direct" ? question.neutralPublicText : question.privateText,
     locale: input.locale,
     region: input.region,
     signal: input.signal ?? new AbortController().signal,
-    ...(input.semanticReviewEnabled ? { semanticValidation: "deferred" as const } : {})
+    ...(input.semanticMode === "legacy" ? {} : { semanticValidation: input.semanticMode })
   });
-  const parsed = parseGenerativeSearchAnswerResult(raw, {
-    expectedQuestionId: canonical.id,
-    locale: input.locale,
-    semanticValidation: input.semanticReviewEnabled ? "deferred" : "legacy"
-  });
-  if (!parsed.answerText || parsed.refusal || parsed.sources.length === 0) {
+  let parsed: GenerativeSearchAnswerResult;
+  try {
+    parsed = parseGenerativeSearchAnswerResult(raw, {
+      expectedQuestionId: canonical.id,
+      locale: input.locale,
+      semanticValidation: input.semanticMode
+    });
+  } catch {
+    throw new FreeTeaserQ1AnnotationDegradedError(
+      "Free teaser Q1 answer or provider annotations failed the direct model contract."
+    );
+  }
+  if (input.semanticMode !== "free_direct" && (!parsed.answerText || parsed.refusal || parsed.sources.length === 0)) {
     throw new FreeTeaserQ1IncompleteError();
   }
   const sources = parsed.sources.map((source) => ({
@@ -780,14 +1087,14 @@ async function answerTeaserQuestionOne(input: {
     ownershipCategory: "unknown" as const
   }));
   const [answerHash, sourceHash] = await Promise.all([
-    generativeSearchAnswerHash(parsed, { semanticValidation: input.semanticReviewEnabled ? "deferred" : "legacy", locale: input.locale }),
+    generativeSearchAnswerHash(parsed, { semanticValidation: input.semanticMode, locale: input.locale }),
     generativeSearchSourceHash(parsed.sources)
   ]);
-  const draft: FreeTeaserQ1Draft = {
+  const draft: FreeTeaserQ1Core = {
     answerMode: "generative_search_v1",
     questionId: parsed.questionId,
-    exactQuestion: question.privateText,
-    status: "answered",
+    exactQuestion: input.semanticMode === "free_direct" ? question.neutralPublicText : question.privateText,
+    status: parsed.refusal ? "refused" : "answered",
     answerText: parsed.answerText,
     sources,
     provenance: {
@@ -800,7 +1107,7 @@ async function answerTeaserQuestionOne(input: {
       answerHash,
       sourceHash
     },
-    refusal: null,
+    refusal: parsed.refusal,
     audit: {
       verifiedBodyCount: 0,
       searchSourceOnlyCount: sources.length,
@@ -808,7 +1115,7 @@ async function answerTeaserQuestionOne(input: {
     }
   };
   let card: GenerativeSearchAnswerCardV3 | undefined;
-  if (!input.semanticReviewEnabled) {
+  if (input.semanticMode === "legacy") {
     const { audit, ...cardCore } = draft;
     card = {
       ...cardCore,
@@ -841,29 +1148,38 @@ async function verifyMarkedFreeTeaserDraftCheckpoint(input: {
     throw new OrchestrationInvariantError("Marked Free teaser answer draft authority is incomplete.");
   }
   const canonicalQuestion = toCanonicalBuyerQuestionSet(input.questionSet).questions[0]!;
-  const expectedQuestion = input.questionSet.questions[0]!.privateText;
+  const direct = Boolean(checkpoint.directQuestionTexts);
+  const expectedQuestion = direct
+    ? input.questionSet.questions[0]!.neutralPublicText
+    : input.questionSet.questions[0]!.privateText;
   if (createSiteKey(input.targetUrl) !== input.admission.snapshot.siteKey || draft.questionId !== canonicalQuestion.id || draft.exactQuestion !== expectedQuestion ||
-      draft.answerMode !== "generative_search_v1" || draft.status !== "answered" || draft.refusal !== null) {
+      draft.answerMode !== "generative_search_v1" ||
+      (direct
+        ? (draft.status === "answered") === Boolean(draft.refusal)
+        : draft.status !== "answered" || draft.refusal !== null)) {
     throw new OrchestrationInvariantError("Marked Free teaser answer draft does not match its question or target authority.");
   }
   const parsed = parseGenerativeSearchAnswerResult(result, {
     expectedQuestionId: canonicalQuestion.id,
     locale: checkpoint.locale,
-    semanticValidation: "deferred"
+    semanticValidation: checkpoint.directQuestionTexts ? "free_direct" : "deferred"
   });
   // An incomplete persisted model answer is model-output incompleteness
   // (transient); divergence from its checkpointed draft is an internal
   // contradiction (permanent invariant).
-  if (!parsed.answerText || parsed.refusal || parsed.sources.length === 0) {
+  if (!direct && (!parsed.answerText || parsed.refusal || parsed.sources.length === 0)) {
     throw new FreeTeaserQ1IncompleteError();
   }
-  if (parsed.answerText !== draft.answerText) {
+  if (parsed.answerText !== draft.answerText || hashReportSemanticReviewValue(parsed.refusal) !== hashReportSemanticReviewValue(draft.refusal)) {
     throw new OrchestrationInvariantError("Marked Free teaser answer draft differs from its persisted result.");
   }
   const resultSources = parsed.sources.map(canonicalAnswerSourceProjection);
   const draftSources = draft.sources.map(canonicalAnswerSourceProjection);
   const [answerHash, sourceHash] = await Promise.all([
-    generativeSearchAnswerHash(parsed, { semanticValidation: "deferred", locale: checkpoint.locale }),
+    generativeSearchAnswerHash(parsed, {
+      semanticValidation: checkpoint.directQuestionTexts ? "free_direct" : "deferred",
+      locale: checkpoint.locale
+    }),
     generativeSearchSourceHash(parsed.sources)
   ]);
   if (hashReportSemanticReviewValue(resultSources) !== hashReportSemanticReviewValue(draftSources) ||
@@ -873,7 +1189,14 @@ async function verifyMarkedFreeTeaserDraftCheckpoint(input: {
       draft.audit.verifiedBodyCount !== 0 || draft.audit.searchSourceOnlyCount !== draft.sources.length || draft.audit.inaccessibleCount !== 0) {
     throw new OrchestrationInvariantError("Marked Free teaser answer draft hash, source, time, or completeness binding is invalid.");
   }
+  if (direct) {
+    if (!checkpoint.directCoreReceipt) {
+      throw new OrchestrationInvariantError("Free direct Q1 core receipt is missing.");
+    }
+    verifyFreeV4DirectCoreReceipt(checkpoint.directCoreReceipt, freeDirectCoreReceiptInput(checkpoint));
+  }
   if (!checkpoint.q1DiagnosisDraft) return;
+  if (direct) throw new OrchestrationInvariantError("Free direct Q1 core cannot contain a legacy diagnosis draft.");
   const diagnosis = parseReportV4DiagnosisOutputForQuestion(checkpoint.q1DiagnosisDraft, {
     questionId: draft.questionId,
     sourceEvidenceIds: draft.sources.map(({ sourceId }) => sourceId)
@@ -887,13 +1210,13 @@ async function verifyMarkedFreeTeaserDraftCheckpoint(input: {
   }
 }
 
-function toDiagnosisQuestion(card: FreeTeaserQ1Draft | GenerativeSearchAnswerCardV3): CombinedGeoReportV4Question {
+function toDiagnosisQuestion(card: FreeTeaserQ1Core | GenerativeSearchAnswerCardV3): CombinedGeoReportV4Question {
   return {
     order: 1,
     questionId: card.questionId,
     questionText: card.exactQuestion,
-    status: "answered",
-    answer: card.answerText,
+    status: card.refusal ? "unavailable" : "answered",
+    answer: card.refusal ? null : card.answerText,
     sources: card.sources.slice(0, REPORT_V4_MAX_DIAGNOSIS_SOURCES).map((source) => ({
       questionId: card.questionId,
       sourceId: source.sourceId,
@@ -932,37 +1255,22 @@ async function reviewFreeTeaser(input: {
   const reviewInput = buildFreeTeaserSemanticReviewInput({ ...input, card: draft, diagnosis, modelId: runtime.modelProfile.operations.websiteSynthesis.model });
   const structured = createReportV4MimoStructuredInvoker({ environment: process.env, lockedRuntime: runtime });
   const signal = input.signal ?? new AbortController().signal;
-  // Structural multi-invoke Free V4 review (not a single complete-skeleton call).
   const reviewed = await runOfflineReportSemanticReviewBatched(
     reviewInput,
-    async ({ systemText, inputText }) => structured.invoke({
-      operation: "websiteSynthesis",
-      systemText,
-      inputText,
-      signal
-    }),
+    async ({ systemText, inputText }) => structured.invoke({ operation: "websiteSynthesis", systemText, inputText, signal }),
     undefined,
     { onBatchEvidence: input.onSemanticReviewBatchEvidence }
   );
   const answerAnnotation = reviewed.review.annotations.answers[0];
-  // A degraded Q1 annotation is a code-synthesized fallback, not model
-  // evidence: reject transiently instead of persisting fabricated semantics.
   if (answerAnnotation?.degraded === true) throw new FreeTeaserQ1AnnotationDegradedError();
-  // Model-label incompleteness / self-contradiction is not an orchestration
-  // invariant: pre-W1 bare Errors were transient and retries often self-healed.
-  // Keep permanent only for checkpoint/identity binding guards below.
   if (!answerAnnotation || answerAnnotation.targetPresence === undefined || answerAnnotation.targetPresence === "ambiguous" || answerAnnotation.targetFirstSentence === undefined || answerAnnotation.targetRoles === undefined || answerAnnotation.competitorEntityIds === undefined) {
-    throw new FreeTeaserQ1AnnotationDegradedError(
-      "Marked Free teaser review omitted durable Q1 diagnosis semantics."
-    );
+    throw new FreeTeaserQ1AnnotationDegradedError("Marked Free teaser review omitted durable Q1 diagnosis semantics.");
   }
   const expectedEntityRole = answerAnnotation.targetPresence === "present"
     ? answerAnnotation.competitorEntityIds.length ? "mixed" : "target"
     : answerAnnotation.competitorEntityIds.length ? "competitor" : "none";
   if (answerAnnotation.entityRole === "ambiguous" || answerAnnotation.entityRole !== expectedEntityRole) {
-    throw new FreeTeaserQ1AnnotationDegradedError(
-      "Marked Free teaser review returned contradictory Q1 entity semantics."
-    );
+    throw new FreeTeaserQ1AnnotationDegradedError("Marked Free teaser review returned contradictory Q1 entity semantics.");
   }
   const textByPath = new Map(reviewed.applied.fields.map((field) => [field.path, field.appliedText]));
   const reviewedFoundation = applyReviewedFoundation(input.foundation, textByPath);
@@ -974,13 +1282,16 @@ async function reviewFreeTeaser(input: {
     recommendedActions: diagnosis.recommendedActions.map((action, index) => ({ ...action, action: textByPath.get(`q1Diagnosis.recommendedActions[${index}].action`)! })) as unknown as typeof diagnosis.recommendedActions
   };
   const correctedAnswerText = textByPath.get("q1AnswerCard.answerText")!;
-  // The deferred parse skipped the mechanical language gate; the post-review
-  // applied Q1 answer text must pass it before persistence (typed transient
-  // ReportLanguageValidationError, mirroring the paid path).
   assertGenerativeSearchAnswerLanguage([{ path: "q1AnswerCard.answerText", text: correctedAnswerText }], checkpoint.locale);
   const correctedAnswerResult = { ...checkpoint.q1AnswerResult!, answerText: correctedAnswerText };
   const correctedAnswerHash = await generativeSearchAnswerHash(correctedAnswerResult, { semanticValidation: "deferred", locale: checkpoint.locale });
-  const q1AnswerCard: GenerativeSearchAnswerCardV3 = { ...draft, answerText: correctedAnswerText, provenance: { ...draft.provenance, answerHash: correctedAnswerHash }, geoDiagnosis: { targetMentioned: answerAnnotation.targetPresence === "present", targetFirstSentence: answerAnnotation.targetPresence === "present" ? answerAnnotation.targetFirstSentence : null, targetRoles: [...answerAnnotation.targetRoles], competitorEntityIds: [...answerAnnotation.competitorEntityIds], citedOwnership: ownershipCountsFromSources(draft.sources), missingEvidenceFamilies: [], retestQuestion: draft.exactQuestion }, diagnosis: correctedDiagnosis };
+  const q1AnswerCard: GenerativeSearchAnswerCardV3 = {
+    ...draft,
+    answerText: correctedAnswerText,
+    provenance: { ...draft.provenance, answerHash: correctedAnswerHash },
+    geoDiagnosis: { targetMentioned: answerAnnotation.targetPresence === "present", targetFirstSentence: answerAnnotation.targetPresence === "present" ? answerAnnotation.targetFirstSentence : null, targetRoles: [...answerAnnotation.targetRoles], competitorEntityIds: [...answerAnnotation.competitorEntityIds], citedOwnership: ownershipCountsFromSources(draft.sources), missingEvidenceFamilies: [], retestQuestion: draft.exactQuestion },
+    diagnosis: correctedDiagnosis
+  };
   const metrics = { questionCount: 3 as const, ...deriveFreeObservationMetrics(reviewed.review) };
   const checkpointCore = { ...checkpoint };
   delete checkpointCore.q1AnswerDraft;
@@ -997,7 +1308,7 @@ function buildFreeTeaserSemanticReviewInput(input: {
   questionSet: ConfirmedBusinessQuestionSet;
   runtime: Awaited<ReturnType<typeof resolveProductionPublicSearchRuntime>>;
   bundles: VerifiedFreeTeaserSnapshotBundles;
-  card: FreeTeaserQ1Draft | GenerativeSearchAnswerCardV3;
+  card: FreeTeaserQ1Core | GenerativeSearchAnswerCardV3;
   diagnosis: NonNullable<GenerativeSearchAnswerCardV3["diagnosis"]>;
   modelId: string;
   originalTextByPath?: ReadonlyMap<string, string>;
@@ -1108,7 +1419,7 @@ function freeTeaserNonProseProjectionHash(input: {
   identityHash: string;
   questionSetIdentity: string;
   observationSnapshotIds: readonly [string, string, string];
-  card: FreeTeaserQ1Draft | GenerativeSearchAnswerCardV3;
+  card: FreeTeaserQ1Core | GenerativeSearchAnswerCardV3;
   diagnosis: NonNullable<GenerativeSearchAnswerCardV3["diagnosis"]>;
 }): string {
   const stableProvenance = {
@@ -1220,8 +1531,14 @@ function assertCheckpointIdentity(
   }
 }
 
-function assertSemanticReviewCheckpointMode(checkpoint: FreeTeaserCheckpointV1, semanticReviewEnabled: boolean): void {
-  if (!semanticReviewEnabled && (checkpoint.q1AnswerDraft || checkpoint.q1DiagnosisDraft || checkpoint.semanticReview)) {
+function assertSemanticReviewCheckpointMode(
+  checkpoint: FreeTeaserCheckpointV1,
+  semanticReviewEnabled: boolean,
+  freeDirectEnabled: boolean
+): void {
+  if (!semanticReviewEnabled && !freeDirectEnabled && (checkpoint.q1AnswerDraft || checkpoint.q1DiagnosisDraft || checkpoint.semanticReview ||
+      checkpoint.directCoreReceipt || checkpoint.directAnalysisStatus || checkpoint.directAnalysis ||
+      checkpoint.directAnalysisHandleBindings || checkpoint.directAnalysisReceipt)) {
     throw new Error("Legacy Free teaser cannot consume a semantic-review checkpoint projection.");
   }
   if (semanticReviewEnabled && ((checkpoint.q1AnswerCard && !checkpoint.semanticReview) ||
@@ -1248,6 +1565,31 @@ function assertSemanticReviewCheckpointMode(checkpoint: FreeTeaserCheckpointV1, 
             : false;
     if (!validShape) throw new Error("Marked Free teaser checkpoint stage shape is invalid.");
   }
+  if (freeDirectEnabled) {
+    if (checkpoint.semanticReview || checkpoint.reviewedFoundation || !checkpoint.directQuestionTexts) {
+      throw new Error("Free direct checkpoint does not match direct semantic lineage.");
+    }
+    const hasSnapshots = checkpoint.observationSnapshotIds?.length === 3;
+    const hasResult = Boolean(checkpoint.q1AnswerResult);
+    const hasDraft = Boolean(checkpoint.q1AnswerDraft);
+    const hasCard = Boolean(checkpoint.q1AnswerCard);
+    const hasCoreReceipt = Boolean(checkpoint.directCoreReceipt);
+    const hasAnalysisStatus = Boolean(checkpoint.directAnalysisStatus);
+    const hasAnalysis = Boolean(checkpoint.directAnalysis);
+    const hasBindings = Boolean(checkpoint.directAnalysisHandleBindings);
+    const hasAnalysisReceipt = Boolean(checkpoint.directAnalysisReceipt);
+    const hasMetrics = Boolean(checkpoint.metrics);
+    const validShape = checkpoint.stage === "questions_ready"
+      ? !hasSnapshots && !hasResult && !hasDraft && !hasCard && !hasCoreReceipt && !hasAnalysisStatus &&
+        !hasAnalysis && !hasBindings && !hasAnalysisReceipt && !hasMetrics
+      : checkpoint.stage === "q1_answer_ready"
+          ? !hasSnapshots && hasResult && hasDraft && !hasCard && hasCoreReceipt && !hasAnalysisStatus &&
+            !hasAnalysis && !hasBindings && !hasAnalysisReceipt && !hasMetrics
+          : checkpoint.stage === "ready"
+            ? !hasSnapshots && hasResult && hasDraft && !hasCard && hasCoreReceipt && hasAnalysisStatus && !hasMetrics
+            : false;
+    if (!validShape) throw new Error("Free direct checkpoint stage shape is invalid.");
+  }
 }
 
 function compareStableText(left: string, right: string): number {
@@ -1262,6 +1604,11 @@ function sha(value: unknown): string {
   return createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
 }
 
+/** Canonical Free V4 checkpoint identity for the complete persisted Foundation payload. */
+export function hashFreeTeaserFoundation(foundation: AiWebsiteReportV1): string {
+  return sha(foundation);
+}
+
 function isHash(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 }
@@ -1273,7 +1620,10 @@ function isConfirmedBusinessQuestionSetIdentity(value: unknown): value is string
 export async function loadConfirmedFreeTeaserQuestionSet(
   reportId: string,
   checkpoint: FreeTeaserCheckpointV1,
-  options?: { semanticReviewContractVersion?: typeof REPORT_SEMANTIC_REVIEW_CONTRACT | null }
+  options?: {
+    semanticReviewContractVersion?: typeof REPORT_SEMANTIC_REVIEW_CONTRACT | null;
+    freeDirectSemanticsVersion?: typeof FREE_V4_DIRECT_SEMANTICS_VERSION | null;
+  }
 ): Promise<ConfirmedBusinessQuestionSet> {
   const ready = parseReadyFreeTeaserCheckpoint(checkpoint, options);
   const questionSet = await getConfirmedBusinessQuestionSet(reportId, ready.questionSetId!);

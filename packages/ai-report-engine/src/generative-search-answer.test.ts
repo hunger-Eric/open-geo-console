@@ -10,6 +10,12 @@ describe("parseGenerativeSearchAnswerResult", () => {
   it("rejects reversed timestamps", () => { expect(() => parseGenerativeSearchAnswerResult({ ...valid, searchedAt: "2030-01-01T00:00:02.000Z" }, { expectedQuestionId: "question-1", locale: "zh-CN" })).toThrow(/completedAt/); });
   it("rejects private URLs", () => { expect(() => parseGenerativeSearchAnswerResult({ ...valid, sources: [{ ...valid.sources[0], canonicalUrl: "http://127.0.0.1/private" }] }, { expectedQuestionId: "question-1", locale: "zh-CN" })).toThrow(/public HTTP/i); });
   it("accepts typed refusals", () => { const parsed = parseGenerativeSearchAnswerResult({ ...valid, answerText: "", sources: [], refusal: { code: "safety_refusal", reason: "服务商安全拒绝。" } }, { expectedQuestionId: "question-1", locale: "zh-CN" }); expect(parsed.refusal?.code).toBe("safety_refusal"); });
+  it("keeps Direct zero-source answers and refusal annotations as valid core outcomes", () => {
+    expect(parseGenerativeSearchAnswerResult({ ...valid, sources: [], harmlessExtra: true }, { expectedQuestionId: "question-1", locale: "zh-CN", semanticValidation: "free_direct" }).sources).toEqual([]);
+    const refused = parseGenerativeSearchAnswerResult({ ...valid, answerText: "", refusal: { code: "policy_refusal", reason: "服务商政策拒绝。" } }, { expectedQuestionId: "question-1", locale: "zh-CN", semanticValidation: "free_direct" });
+    expect(refused.refusal?.code).toBe("policy_refusal");
+    expect(refused.sources).toHaveLength(1);
+  });
   it("produces a stable hash", async () => { await expect(generativeSearchAnswerHash(valid)).resolves.toMatch(/^[a-f0-9]{64}$/); });
   it("hashes a localized typed refusal", async () => { await expect(generativeSearchAnswerHash({ ...valid, answerText: "", sources: [], refusal: { code: "policy_refusal", reason: "服务商政策拒绝。" } })).resolves.toMatch(/^[a-f0-9]{64}$/); });
   it("hashes source arrays stably regardless of order", async () => { const parsed = parseGenerativeSearchAnswerResult(valid, { expectedQuestionId: "question-1", locale: "zh-CN" }); await expect(generativeSearchSourceHash(parsed.sources)).resolves.toBe(await generativeSearchSourceHash([...parsed.sources].reverse())); });
