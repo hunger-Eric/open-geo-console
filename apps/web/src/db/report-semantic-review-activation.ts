@@ -83,9 +83,12 @@ export function semanticReviewCarrierUpdateVersion(
 
 export function assertSemanticReviewCarrierEquals(
   checkpoint: unknown,
-  expected: SemanticReviewContractVersion | null
+  expected: SemanticReviewContractVersion | FreeDirectSemanticsVersion | null
 ): void {
-  if (readSemanticReviewContractVersion(checkpoint) !== expected) {
+  const semantic = readSemanticReviewContractVersion(checkpoint);
+  const direct = readFreeDirectSemanticsVersion(checkpoint);
+  if ((expected === FREE_V4_DIRECT_SEMANTICS_VERSION && (direct !== expected || semantic !== null)) ||
+      (expected !== FREE_V4_DIRECT_SEMANTICS_VERSION && (semantic !== expected || direct !== null))) {
     throw new Error("The semantic-review checkpoint carrier does not match the job creation authority.");
   }
 }
@@ -96,7 +99,7 @@ export function resolvePaidV3SemanticReviewContract(input: {
   reportId: string;
   questionSetId: string;
   questionSetIdentity: string;
-}): SemanticReviewContractVersion | null {
+}): SemanticReviewContractVersion | FreeDirectSemanticsVersion | null {
   const version = readSemanticReviewContractVersion(input.checkpoint);
   const freeDirectVersion = readFreeDirectSemanticsVersion(input.checkpoint);
   if (version !== null && freeDirectVersion !== null) {
@@ -115,9 +118,7 @@ export function resolvePaidV3SemanticReviewContract(input: {
   }
   if (freeDirectVersion !== null) {
     assertTerminalFreeDirectReceipt(teaser);
-    // The Direct receipts authorize checkout; they do not masquerade as the
-    // legacy global semantic-review carrier used by Paid V3.
-    return null;
+    return freeDirectVersion;
   }
   assertTerminalFreeSemanticReceipt(teaser);
   return version;
@@ -127,13 +128,10 @@ function assertTerminalFreeDirectReceipt(teaser: Record<string, unknown>): void 
   const core = record(teaser.q1AnswerDraft, "$checkpoint.freeTeaser.q1AnswerDraft");
   const provenance = record(core.provenance, "$checkpoint.freeTeaser.q1AnswerDraft.provenance");
   const answerResult = record(teaser.q1AnswerResult, "$checkpoint.freeTeaser.q1AnswerResult");
-  const analysis = record(teaser.directAnalysis, "$checkpoint.freeTeaser.directAnalysis");
-  const bindings = teaser.directAnalysisHandleBindings;
   const questions = teaser.directQuestionTexts;
-  if (teaser.directAnalysisStatus !== "completed" ||
-      !Array.isArray(bindings) || !Array.isArray(questions) || questions.length !== 3 ||
-      !teaser.directCoreReceipt || !teaser.directAnalysisReceipt) {
-    throw new Error("The Free direct core and completed analysis receipts are incomplete.");
+  if (!Array.isArray(questions) || questions.length !== 3 || !teaser.directCoreReceipt ||
+      (teaser.directAnalysisStatus !== "completed" && teaser.directAnalysisStatus !== "incomplete")) {
+    throw new Error("The Free direct core receipt or analysis status is incomplete.");
   }
   const parsedAnswer = parseGenerativeSearchAnswerResult(answerResult, {
     expectedQuestionId: requireText(core.questionId, "$checkpoint.freeTeaser.q1AnswerDraft.questionId"),
@@ -176,6 +174,17 @@ function assertTerminalFreeDirectReceipt(teaser: Record<string, unknown>): void 
       sourceHash: provenance.sourceHash
     }
   });
+  if (teaser.directAnalysisStatus === "incomplete") {
+    if (teaser.directAnalysis !== undefined || teaser.directAnalysisHandleBindings !== undefined || teaser.directAnalysisReceipt !== undefined) {
+      throw new Error("The Free direct incomplete analysis must not carry an unverified projection.");
+    }
+    return;
+  }
+  const analysis = record(teaser.directAnalysis, "$checkpoint.freeTeaser.directAnalysis");
+  const bindings = teaser.directAnalysisHandleBindings;
+  if (!Array.isArray(bindings) || !teaser.directAnalysisReceipt) {
+    throw new Error("The Free direct completed analysis receipt is incomplete.");
+  }
   verifyFreeV4DirectAnalysisReceipt(teaser.directAnalysisReceipt, {
     coreReceiptHash: coreReceipt.receiptHash,
     analysis: analysis as never,

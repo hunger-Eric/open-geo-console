@@ -29,8 +29,38 @@ export interface FreeV4DirectAnalysisReceipt {
   readonly coreReceiptHash: string; readonly analysisHash: string; readonly handleBindingsHash: string;
   readonly nonProseProjectionHash: string; readonly receiptHash: string;
 }
+export interface PaidV3DirectAnswerCardReceipt {
+  readonly version: typeof FREE_V4_DIRECT_SEMANTICS_VERSION; readonly kind: "paid_answer_card";
+  readonly coreReceiptHash: string; readonly answerCardHash: string; readonly receiptHash: string;
+}
+export interface PaidV3DirectQuestionSemantics {
+  readonly questionId: string;
+  readonly answerCardHash: string;
+  readonly answerCardReceipt: PaidV3DirectAnswerCardReceipt;
+  readonly analysisStatus: FreeV4DirectAnalysisStatus;
+  readonly coreReceipt: FreeV4DirectCoreReceipt;
+  readonly analysis?: FreeV4DirectAnalysis;
+  readonly handleBindings?: readonly FreeV4DirectEvidenceBinding[];
+  readonly analysisReceipt?: FreeV4DirectAnalysisReceipt;
+}
+export interface PaidV3DirectSemantics {
+  readonly version: typeof FREE_V4_DIRECT_SEMANTICS_VERSION;
+  readonly questions: readonly [PaidV3DirectQuestionSemantics, PaidV3DirectQuestionSemantics, PaidV3DirectQuestionSemantics];
+}
+export function hashPaidV3DirectAnswerCard(card: {
+  readonly answerMode: unknown; readonly questionId: unknown; readonly exactQuestion: unknown;
+  readonly status: unknown; readonly answerText: unknown; readonly sources: unknown;
+  readonly provenance: unknown; readonly refusal: unknown; readonly audit: unknown;
+}): string {
+  return hashFreeV4DirectSemanticValue({
+    answerMode: card.answerMode, questionId: card.questionId, exactQuestion: card.exactQuestion,
+    status: card.status, answerText: card.answerText, sources: card.sources,
+    provenance: card.provenance, refusal: card.refusal, audit: card.audit
+  });
+}
 const CORE_RECEIPT_FIELDS = new Set(["version", "kind", "questionSetIdentity", "questionsHash", "questionId", "questionTextHash", "answerHash", "sourcesHash", "providerMetadataHash", "nonProseProjectionHash", "receiptHash"]);
 const ANALYSIS_RECEIPT_FIELDS = new Set(["version", "kind", "coreReceiptHash", "analysisHash", "handleBindingsHash", "nonProseProjectionHash", "receiptHash"]);
+const PAID_ANSWER_CARD_RECEIPT_FIELDS = new Set(["version", "kind", "coreReceiptHash", "answerCardHash", "receiptHash"]);
 export function parseFreeV4DirectAnalysis(value: unknown, options: { readonly allowedEvidenceHandles: readonly string[] }): FreeV4DirectAnalysis {
   const row = object(value, "$analysis");
   if (canonicalJson(value).length > 50_000) throw new TypeError("$analysis exceeds the retained size bound.");
@@ -47,6 +77,27 @@ export function parseFreeV4DirectAnalysis(value: unknown, options: { readonly al
   });
 }
 export const hashFreeV4DirectSemanticValue = (value: unknown): string => sha256(canonicalJson(value));
+export function createPaidV3DirectAnswerCardReceipt(input: {
+  readonly coreReceiptHash: string; readonly answerCardHash: string;
+}): PaidV3DirectAnswerCardReceipt {
+  const body = Object.freeze({
+    version: FREE_V4_DIRECT_SEMANTICS_VERSION,
+    kind: "paid_answer_card" as const,
+    coreReceiptHash: shaText(input.coreReceiptHash, "$paidAnswerCardReceiptInput.coreReceiptHash"),
+    answerCardHash: shaText(input.answerCardHash, "$paidAnswerCardReceiptInput.answerCardHash")
+  });
+  return Object.freeze({ ...body, receiptHash: hashFreeV4DirectSemanticValue(body) });
+}
+export function parsePaidV3DirectAnswerCardReceipt(value: unknown): PaidV3DirectAnswerCardReceipt {
+  const row = strictReceiptObject(value, "$paidAnswerCardReceipt", PAID_ANSWER_CARD_RECEIPT_FIELDS);
+  if (row.version !== FREE_V4_DIRECT_SEMANTICS_VERSION || row.kind !== "paid_answer_card") throw new TypeError("$paidAnswerCardReceipt version or kind is invalid.");
+  const coreReceiptHash = shaText(row.coreReceiptHash, "$paidAnswerCardReceipt.coreReceiptHash");
+  const answerCardHash = shaText(row.answerCardHash, "$paidAnswerCardReceipt.answerCardHash");
+  const receiptHash = shaText(row.receiptHash, "$paidAnswerCardReceipt.receiptHash");
+  const expected = createPaidV3DirectAnswerCardReceipt({ coreReceiptHash, answerCardHash });
+  if (expected.receiptHash !== receiptHash) throw new TypeError("$paidAnswerCardReceipt.receiptHash is invalid.");
+  return expected;
+}
 export function createFreeV4DirectCoreReceipt(input: FreeV4DirectCoreReceiptInput): FreeV4DirectCoreReceipt {
   const core = coreReceiptBody(input); return Object.freeze({ ...core, receiptHash: hashFreeV4DirectSemanticValue(core) });
 }
@@ -58,6 +109,19 @@ export function verifyFreeV4DirectCoreReceipt(value: unknown, input: FreeV4Direc
   }
   return expected;
 }
+export function parseFreeV4DirectCoreReceipt(value: unknown): FreeV4DirectCoreReceipt {
+  const row = strictReceiptObject(value, "$freeDirectCoreReceipt", CORE_RECEIPT_FIELDS);
+  if (row.version !== FREE_V4_DIRECT_SEMANTICS_VERSION || row.kind !== "core") throw new TypeError("$freeDirectCoreReceipt version or kind is invalid.");
+  boundedText(row.questionSetIdentity, "$freeDirectCoreReceipt.questionSetIdentity", 500);
+  boundedText(row.questionId, "$freeDirectCoreReceipt.questionId", 500);
+  for (const field of ["questionsHash", "questionTextHash", "answerHash", "sourcesHash", "providerMetadataHash", "nonProseProjectionHash"] as const) {
+    shaText(row[field], `$freeDirectCoreReceipt.${field}`);
+  }
+  const receiptHash = shaText(row.receiptHash, "$freeDirectCoreReceipt.receiptHash");
+  const { receiptHash: _receiptHash, ...body } = row;
+  if (hashFreeV4DirectSemanticValue(body) !== receiptHash) throw new TypeError("$freeDirectCoreReceipt.receiptHash is invalid.");
+  return row as unknown as FreeV4DirectCoreReceipt;
+}
 export function createFreeV4DirectAnalysisReceipt(input: FreeV4DirectAnalysisReceiptInput): FreeV4DirectAnalysisReceipt {
   const core = analysisReceiptBody(input); return Object.freeze({ ...core, receiptHash: hashFreeV4DirectSemanticValue(core) });
 }
@@ -68,6 +132,58 @@ export function verifyFreeV4DirectAnalysisReceipt(value: unknown, input: FreeV4D
     if (row[key] !== expected[key]) throw new TypeError(`$freeDirectAnalysisReceipt.${key} does not match the current analysis.`);
   }
   return expected;
+}
+export function parseFreeV4DirectAnalysisReceipt(value: unknown): FreeV4DirectAnalysisReceipt {
+  const row = strictReceiptObject(value, "$freeDirectAnalysisReceipt", ANALYSIS_RECEIPT_FIELDS);
+  if (row.version !== FREE_V4_DIRECT_SEMANTICS_VERSION || row.kind !== "analysis") throw new TypeError("$freeDirectAnalysisReceipt version or kind is invalid.");
+  for (const field of ["coreReceiptHash", "analysisHash", "handleBindingsHash", "nonProseProjectionHash"] as const) {
+    shaText(row[field], `$freeDirectAnalysisReceipt.${field}`);
+  }
+  const receiptHash = shaText(row.receiptHash, "$freeDirectAnalysisReceipt.receiptHash");
+  const { receiptHash: _receiptHash, ...body } = row;
+  if (hashFreeV4DirectSemanticValue(body) !== receiptHash) throw new TypeError("$freeDirectAnalysisReceipt.receiptHash is invalid.");
+  return row as unknown as FreeV4DirectAnalysisReceipt;
+}
+export function parsePaidV3DirectSemantics(
+  value: unknown,
+  expectedQuestionIds: readonly [string, string, string]
+): PaidV3DirectSemantics {
+  const row = object(value, "$paidDirectSemantics");
+  if (row.version !== FREE_V4_DIRECT_SEMANTICS_VERSION) throw new TypeError(`$paidDirectSemantics.version must equal ${FREE_V4_DIRECT_SEMANTICS_VERSION}.`);
+  if (!Array.isArray(row.questions) || row.questions.length !== 3) throw new TypeError("$paidDirectSemantics.questions must contain exactly three results.");
+  const questions = row.questions.map((item, index): PaidV3DirectQuestionSemantics => {
+    const question = object(item, `$paidDirectSemantics.questions[${index}]`);
+    const questionId = boundedText(question.questionId, `$paidDirectSemantics.questions[${index}].questionId`, 500);
+    if (questionId !== expectedQuestionIds[index]) throw new TypeError(`$paidDirectSemantics.questions[${index}].questionId does not match the locked question.`);
+    const answerCardHash = shaText(question.answerCardHash, `$paidDirectSemantics.questions[${index}].answerCardHash`);
+    const analysisStatus = question.analysisStatus;
+    if (analysisStatus !== "completed" && analysisStatus !== "incomplete") throw new TypeError(`$paidDirectSemantics.questions[${index}].analysisStatus is invalid.`);
+    const coreReceipt = parseFreeV4DirectCoreReceipt(question.coreReceipt);
+    if (coreReceipt.questionId !== questionId) throw new TypeError(`$paidDirectSemantics.questions[${index}].coreReceipt does not match its question.`);
+    const answerCardReceipt = parsePaidV3DirectAnswerCardReceipt(question.answerCardReceipt);
+    if (answerCardReceipt.coreReceiptHash !== coreReceipt.receiptHash || answerCardReceipt.answerCardHash !== answerCardHash) {
+      throw new TypeError(`$paidDirectSemantics.questions[${index}].answerCardReceipt does not bind its core and rendered answer.`);
+    }
+    if (analysisStatus === "incomplete") {
+      if (question.analysis !== undefined || question.handleBindings !== undefined || question.analysisReceipt !== undefined) {
+        throw new TypeError(`$paidDirectSemantics.questions[${index}] incomplete analysis cannot carry completed analysis fields.`);
+      }
+      return Object.freeze({ questionId, answerCardHash, answerCardReceipt, analysisStatus, coreReceipt });
+    }
+    const handleBindings = parseHandleBindings(question.handleBindings as readonly FreeV4DirectEvidenceBinding[]);
+    const analysis = parseFreeV4DirectAnalysis(question.analysis, { allowedEvidenceHandles: handleBindings.map(({ handle }) => handle) });
+    const analysisReceipt = parseFreeV4DirectAnalysisReceipt(question.analysisReceipt);
+    if (analysisReceipt.coreReceiptHash !== coreReceipt.receiptHash ||
+        analysisReceipt.analysisHash !== hashFreeV4DirectSemanticValue(analysis) ||
+        analysisReceipt.handleBindingsHash !== hashFreeV4DirectSemanticValue(handleBindings)) {
+      throw new TypeError(`$paidDirectSemantics.questions[${index}] analysis receipt does not match its retained analysis.`);
+    }
+    return Object.freeze({ questionId, answerCardHash, answerCardReceipt, analysisStatus, coreReceipt, analysis, handleBindings, analysisReceipt });
+  });
+  return Object.freeze({
+    version: FREE_V4_DIRECT_SEMANTICS_VERSION,
+    questions: questions as unknown as PaidV3DirectSemantics["questions"]
+  });
 }
 function coreReceiptBody(input: FreeV4DirectCoreReceiptInput): Omit<FreeV4DirectCoreReceipt, "receiptHash"> {
   const questionSetIdentity = boundedText(input.questionSetIdentity, "$coreReceiptInput.questionSetIdentity", 500);

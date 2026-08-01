@@ -146,6 +146,7 @@ import {
   buildPaidV3SourceDictionary,
   slimOriginalTextPlaceholder
 } from "./paid-v3-compact-review-input";
+import { buildPaidV3DirectSemantics } from "./paid-v3-direct-semantics";
 
 interface StoredPageEvidence {
   page: ExtractedPage;
@@ -995,7 +996,7 @@ export function combinedV3ArtifactVerificationResume(checkpoint: WorkerCheckpoin
 }
 
 export function assertPaidV3ResumeSemanticAuthority(
-  semanticValidation: "legacy" | "deferred",
+  semanticValidation: "legacy" | "deferred" | "free_direct",
   resumed: NonNullable<ReturnType<typeof combinedV3ArtifactVerificationResume>>
 ): void {
   if (semanticValidation === "legacy" &&
@@ -1005,6 +1006,10 @@ export function assertPaidV3ResumeSemanticAuthority(
   if (semanticValidation === "deferred" &&
       (resumed.semanticReview === undefined || resumed.report.semanticReviewReceipt === undefined)) {
     throw new Error("Reviewed Paid V3 resume requires its complete root-bound semantic projection and receipt.");
+  }
+  if (semanticValidation === "free_direct" &&
+      (resumed.semanticReview !== undefined || resumed.report.semanticReviewReceipt !== undefined || !resumed.report.directSemantics)) {
+    throw new Error("Direct Paid V3 resume requires its Direct question semantics and forbids legacy semantic review.");
   }
 }
 
@@ -1125,16 +1130,18 @@ export async function executeReviewedPaidV3ArtifactBoundary<TReady extends { rep
 export function resolvePaidV3SemanticValidation(
   job: Pick<ScanJobRow, "artifactContract" | "recommendationReportVersion" | "reason">,
   checkpoint: JobCheckpoint
-): "legacy" | "deferred" {
+): "legacy" | "deferred" | "free_direct" {
   if (job.artifactContract !== "combined_geo_report_v3" || job.recommendationReportVersion !== 3) {
     return "legacy";
   }
   const version = readSemanticReviewContractVersion(checkpoint);
-  if (version === null) return "legacy";
+  const directVersion = readFreeDirectSemanticsVersion(checkpoint);
+  if (version !== null && directVersion !== null) throw new Error("Paid V3 cannot carry both legacy and Direct semantic authority.");
+  if (version === null && directVersion === null) return "legacy";
   if (job.reason !== "standard") {
     throw new Error("Semantic-reviewed Paid V3 is allowed only for the ordinary immutable Paid lineage.");
   }
-  return "deferred";
+  return directVersion ? "free_direct" : "deferred";
 }
 
 /**
@@ -1311,7 +1318,7 @@ async function resolveProspectiveV3TeaserContext(
   reportId: string,
   targetUrl: string,
   questionSet: ConfirmedBusinessQuestionSet,
-  semanticValidation: "legacy" | "deferred"
+  semanticValidation: "legacy" | "deferred" | "free_direct"
 ): Promise<{
   seededQ1: ReturnType<typeof freeTeaserSeededQ1>;
   reviewedFreeQ1: Extract<OpenGeoAnswerCardV3, { answerMode: "generative_search_v1" }>;
@@ -1422,7 +1429,11 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       });
       return;
     }
-    const ready = await materializePreparedCombinedArtifactV3(resumedV3.report, evidenceAssets);
+    const ready = await materializePreparedCombinedArtifactV3(
+      resumedV3.report,
+      evidenceAssets,
+      semanticValidation === "free_direct" ? { semanticValidation: "free_direct" } : {}
+    );
     await terminalizeReadyCombinedArtifact(input, ready, resumedV3.checkpoint.identityHash, resumedV3.commercialSnapshotRefs);
     return;
   }
@@ -1443,7 +1454,11 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       targetAliases: businessQuestionSet.identityExclusions,
       seededQ1: prospectiveTeaser?.seededQ1,
       checkpoint: checkpoint.answerFirstV3,
-      ...(semanticValidation === "deferred" ? { semanticValidation: "deferred" as const } : {}),
+      ...(semanticValidation === "deferred"
+        ? { semanticValidation: "deferred" as const }
+        : semanticValidation === "free_direct"
+          ? { semanticValidation: "free_direct" as const }
+          : {}),
       signal: input.signal,
       saveCheckpoint: async (answerFirstV3) => {
         const next = { ...checkpoint, answerFirstV3 };
@@ -1501,7 +1516,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     publicSourceBudget,
     forceSnapshotRefreshAfter: input.forceSnapshotRefreshAfter,
     liveDrill: input.liveDrill,
-    semanticValidation,
+    semanticValidation: semanticValidation === "deferred" ? "deferred" : "legacy",
     signal: input.signal,
     collaborators: { resolveSnapshot: providerContext.resolveForensicSnapshot, getReport: getSourceForensicReportForJob, saveReport: saveSourceForensicReport }
   }, runtime);
@@ -1552,7 +1567,9 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     };
     const answerResult = semanticValidation === "deferred"
       ? await resolveGenerativeAnswerFirstV3({ ...answerInput, semanticValidation: "deferred" })
-      : await resolveGenerativeAnswerFirstV3(answerInput);
+      : semanticValidation === "free_direct"
+        ? await resolveGenerativeAnswerFirstV3({ ...answerInput, semanticValidation: "free_direct" })
+        : await resolveGenerativeAnswerFirstV3(answerInput);
     const verificationRef = await providerVerificationCommercialRef(verificationSnapshotId);
     const snapshotRefs = uniqueSnapshotRefs([...forensicResult.commercialSnapshotRefs, verificationRef]);
     if (snapshotRefs.length !== 4) throw new OrchestrationInvariantError("V3 combined reports require exactly four immutable market snapshots.");
@@ -1759,6 +1776,50 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
           snapshotRefs
         )
       });
+      return;
+    }
+    if (semanticValidation === "free_direct") {
+      if (!prospectiveTeaser || !("answerCards" in answerResult)) {
+        throw new OrchestrationInvariantError("Direct Paid V3 requires its completed Free lineage and three Direct answer cards.");
+      }
+      const sourceSelectionDiagnosis = answerResult.checkpoint.sourceSelectionDiagnosis;
+      if (!sourceSelectionDiagnosis) throw new OrchestrationInvariantError("Direct Paid V3 requires its existing source-selection diagnosis.");
+      const directSemantics = await buildPaidV3DirectSemantics({
+        questionSet: businessQuestionSet,
+        answerCards: answerResult.answerCards,
+        answerCheckpoint: answerResult.checkpoint,
+        freeCheckpoint: prospectiveTeaser.reviewedFreeCheckpoint,
+        admission: prospectiveTeaser.admission,
+        targetUrl: input.targetUrl,
+        foundation: input.websiteFoundation,
+        locale: runtime.authority.surface.locale,
+        signal: input.signal
+      });
+      const ready = await buildReadyCombinedArtifactV3({
+        artifactRevisionId: pending.artifactRevisionId,
+        artifactRevision: pending.artifactRevision,
+        reportId: input.job.reportId,
+        orderId: pending.orderId,
+        jobId: input.job.id,
+        originalPaidJobId: input.originalPaidJobId ?? input.job.id,
+        targetUrl: input.targetUrl,
+        technicalReport: input.technicalReport,
+        aiReport: input.websiteFoundation,
+        evidenceAssets,
+        businessQuestionSet,
+        answerCards: answerResult.answerCards,
+        sourceSelectionDiagnosis,
+        engineProvenance: answerResult.checkpoint.engineProvenance,
+        publicSourceForensics: forensicResult.report,
+        providerDiscovery: providerResult.providerDiscovery,
+        directSemantics,
+        onReportPrepared: async (report) => {
+          const next = { ...checkpoint, answerFirstV3: answerResult.checkpoint, pendingArtifactVerification: { report, commercialSnapshotRefs: snapshotRefs } };
+          const updated = await input.checkpointJob({ stage: "synthesizing", phase: "artifact_verification", progress: 99, checkpoint: next as JobCheckpoint, ...input.coverage });
+          checkpoint = normalizeCheckpoint(updated.checkpoint);
+        }
+      }, { semanticValidation: "free_direct" });
+      await terminalizeReadyCombinedArtifact(input, ready, answerResult.checkpoint.identityHash, snapshotRefs);
       return;
     }
     if (!("answerCards" in answerResult)) {

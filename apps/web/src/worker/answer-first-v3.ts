@@ -131,7 +131,7 @@ export interface ResolveGenerativeAnswerFirstV3Input {
   saveCheckpoint?(checkpoint: AnswerFirstV3CheckpointV2): Promise<void>;
   now?: () => Date;
   signal?: AbortSignal;
-  semanticValidation?: "legacy" | "deferred";
+  semanticValidation?: "legacy" | "deferred" | "free_direct";
 }
 
 export type GenerativeSearchAnswerCardDraftV3 = Omit<GenerativeSearchAnswerCardV3, "geoDiagnosis">;
@@ -320,6 +320,7 @@ export async function resolveGenerativeAnswerFirstV3(
   input: ResolveGenerativeAnswerFirstV3Input
 ): Promise<ResolvedGenerativeAnswerFirstV3 | DeferredGenerativeAnswerFirstV3> {
   const semanticDeferred = input.semanticValidation === "deferred";
+  const semanticDirect = input.semanticValidation === "free_direct";
   const publicQuestions = toCanonicalBuyerQuestionSet(input.questionSet).questions;
   const mappedQuestions = input.questionSet.questions.map((question, index) => ({
     id: publicQuestions[index]!.id,
@@ -359,9 +360,13 @@ export async function resolveGenerativeAnswerFirstV3(
         locale: input.locale,
         region: input.region,
         signal,
-        ...(semanticDeferred ? { semanticValidation: "deferred" as const } : {})
+        ...(semanticDeferred
+          ? { semanticValidation: "deferred" as const }
+          : semanticDirect
+            ? { semanticValidation: "free_direct" as const }
+            : {})
       });
-      if (!semanticDeferred && index === 0 && parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
+      if (!semanticDeferred && !semanticDirect && index === 0 && parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
         parsed = await callGenerativeProvider(input.provider, {
           questionId: question.id,
           question: question.exactText + "\n" + q1Correction(input.locale),
@@ -373,7 +378,7 @@ export async function resolveGenerativeAnswerFirstV3(
           throw new AnswerFirstV3ModelContractInvalidError({ cause: new TypeError("Question 1 answer is nonresponsive market-statistic-only output.") });
         }
       }
-      if (parsed.answerText && parsed.sources.length === 0) {
+      if (!semanticDirect && parsed.answerText && parsed.sources.length === 0) {
         const answerWithoutSources = parsed;
         const corrected = await callGenerativeProvider(input.provider, {
           questionId: question.id,
@@ -386,7 +391,7 @@ export async function resolveGenerativeAnswerFirstV3(
         if (corrected.answerText && corrected.refusal === null) parsed = corrected;
         else parsed = answerWithoutSources;
       }
-      if (!semanticDeferred && index === 0 && parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
+      if (!semanticDeferred && !semanticDirect && index === 0 && parsed.answerText && !isResponsiveProviderAnswer(parsed.answerText)) {
         throw new AnswerFirstV3ModelContractInvalidError({ cause: new TypeError("Question 1 answer is nonresponsive market-statistic-only output.") });
       }
       return parsed;
@@ -408,7 +413,9 @@ export async function resolveGenerativeAnswerFirstV3(
   }
   const perAnswerHashes = await Promise.all(answerResults.map((answer) => semanticDeferred
     ? generativeSearchAnswerHash(answer, { locale: input.locale, semanticValidation: "deferred" })
-    : generativeSearchAnswerHash(answer)));
+    : semanticDirect
+      ? generativeSearchAnswerHash(answer, { locale: input.locale, semanticValidation: "free_direct" })
+      : generativeSearchAnswerHash(answer)));
   const perSourceHashes = await Promise.all(answerResults.map((answer) => generativeSearchSourceHash(answer.sources)));
   const answerHash = hash(perAnswerHashes);
   const sourceHash = hash(perSourceHashes);
@@ -492,9 +499,13 @@ function validateSeededQ1(
   const parsed = parseGenerativeSearchAnswerResult(seed.answerResult, {
     expectedQuestionId: question.id,
     locale: input.locale,
-    ...(input.semanticValidation === "deferred" ? { semanticValidation: "deferred" as const } : {})
+    ...(input.semanticValidation === "deferred"
+      ? { semanticValidation: "deferred" as const }
+      : input.semanticValidation === "free_direct"
+        ? { semanticValidation: "free_direct" as const }
+        : {})
   });
-  if (!parsed.answerText || parsed.refusal || parsed.sources.length === 0) {
+  if (input.semanticValidation !== "free_direct" && (!parsed.answerText || parsed.refusal || parsed.sources.length === 0)) {
     throw new AnswerFirstV3ResumeIdentityMismatchError("Free teaser Q1 is not a complete reusable answer.");
   }
   return parsed;
@@ -509,7 +520,7 @@ async function callGenerativeProvider(
     return parseGenerativeSearchAnswerResult(raw, {
       expectedQuestionId: request.questionId,
       locale: request.locale,
-      ...(request.semanticValidation === "deferred" ? { semanticValidation: "deferred" as const } : {})
+      ...(request.semanticValidation ? { semanticValidation: request.semanticValidation } : {})
     });
   } catch (error) {
     throw new AnswerFirstV3ModelContractInvalidError({ cause: error });
@@ -587,7 +598,8 @@ function materializeLegacyGenerativeCards(
     questionSet: input.questionSet,
     locale: input.locale,
     targetAliases: input.targetAliases,
-    competitors: input.competitors
+    competitors: input.competitors,
+    ...(input.semanticValidation === "free_direct" ? { semanticValidation: "free_direct" as const } : {})
   });
 }
 

@@ -4418,3 +4418,22 @@ allowlist; external actions remain zero; no deploy.
 - The old conditional PostgreSQL/model/Git closeout chain is terminal and
   grants no continuing permissions. Its code and evidence remain preserved in
   the dirty worktree/history until the new exact scope is approved.
+
+---
+
+## 2026-08-01 - Free Direct boundary shipped, Paid continuation failed
+
+- Commit `5d2e64d8e4abe29d45250729986c4831908484a4` restored the Free Direct
+  two-call boundary and was deployed to the Staging Free and Deep Workers.
+- Fresh Free job `276d58a0-66fd-4c19-b168-f2dab03de1b9` completed with its
+  Direct core and analysis receipts, so the Free boundary itself passed.
+- Its fresh Paid continuation job `686915a3-05c7-440a-ab73-cd0569386efc`
+  lost the Direct carrier at checkout, entered the marker-absent legacy Paid V3
+  path, and failed at progress 98 on Q3 with
+  `correction_contract/invalid_correction` after Q1 and Q2 were already
+  complete. Report `e34ea7e0-9031-40b4-b0aa-299d0dc0ee5c` therefore never
+  became a deliverable.
+- The preceding scope intentionally excluded Paid V3. It is closed as a
+  successful Free-only change but an incomplete Free-to-Paid product outcome.
+  This history is context only and grants no authority to modify or replay any
+  historical job, order, payment, report, refund, or deployment.

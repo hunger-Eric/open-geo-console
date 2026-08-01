@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type PaidV3SemanticAnswerCardDraft, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type PaidV3DirectSemantics, type PaidV3SemanticAnswerCardDraft, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -313,6 +313,7 @@ export interface PrepareCombinedGeoReportV3Input {
   engineProvenance: OpenGeoEngineProvenanceV3;
   publicSourceForensics: RecommendationForensicReportV2;
   providerDiscovery: ProviderDiscoveryV1;
+  directSemantics?: PaidV3DirectSemantics;
   languageValidationScope?: CombinedReportLanguageScope;
 }
 
@@ -328,16 +329,19 @@ export type CombinedGeoReportV3SemanticDraft = Omit<CombinedGeoReportV3, "answer
   answerCards: [PaidV3SemanticAnswerCardDraft, PaidV3SemanticAnswerCardDraft, PaidV3SemanticAnswerCardDraft];
 };
 
-export async function buildReadyCombinedArtifactV3(input: BuildReadyCombinedArtifactV3Input): Promise<ReadyCombinedArtifactV3> {
+export async function buildReadyCombinedArtifactV3(
+  input: BuildReadyCombinedArtifactV3Input,
+  options: { semanticValidation?: "legacy" | "free_direct" } = {}
+): Promise<ReadyCombinedArtifactV3> {
   await assertReadyEvidenceAssets(input.evidenceAssets);
-  const report = prepareCombinedGeoReportV3Core(input, {});
+  const report = prepareCombinedGeoReportV3Core(input, options);
   await input.onReportPrepared?.(report);
-  return materializePreparedCombinedArtifactV3(report, input.evidenceAssets);
+  return materializePreparedCombinedArtifactV3(report, input.evidenceAssets, options);
 }
 
 export function prepareCombinedGeoReportV3(
   input: PrepareCombinedGeoReportV3Input,
-  options: { semanticValidation?: "legacy" | "deferred"; reviewedReceiptVerified?: boolean } = {}
+  options: { semanticValidation?: "legacy" | "deferred" | "free_direct"; reviewedReceiptVerified?: boolean } = {}
 ): CombinedGeoReportV3 {
   assertDeferredReceiptAuthority(options);
   return prepareCombinedGeoReportV3Core(input, options);
@@ -357,7 +361,7 @@ export function prepareCombinedGeoReportV3SemanticDraft(
 
 function prepareCombinedGeoReportV3Core(
   input: PrepareCombinedGeoReportV3Input,
-  options: { semanticValidation?: "legacy" | "deferred" }
+  options: { semanticValidation?: "legacy" | "deferred" | "free_direct" }
 ): CombinedGeoReportV3 {
   const assembled = assembleCombinedGeoReportV3(input);
   const report = requireReadyCombinedGeoReportV3(assembled, { semanticValidation: options.semanticValidation ?? "legacy" });
@@ -416,6 +420,7 @@ function assembleCombinedGeoReportV3(input: Omit<PrepareCombinedGeoReportV3Input
     businessQuestionSet: input.businessQuestionSet,
     answerCards: input.answerCards,
     ...(input.sourceSelectionDiagnosis ? { sourceSelectionDiagnosis: input.sourceSelectionDiagnosis } : {}),
+    ...(input.directSemantics ? { directSemantics: input.directSemantics } : {}),
     engineProvenance: input.engineProvenance,
     providerDiscovery: input.providerDiscovery,
     publicSourceForensics: forensic,
@@ -438,7 +443,7 @@ function assembleCombinedGeoReportV3(input: Omit<PrepareCombinedGeoReportV3Input
 export async function materializePreparedCombinedArtifactV3(
   value: unknown,
   evidenceAssets: ReportEvidenceAssetRow[],
-  options: { semanticValidation?: "legacy" | "deferred"; reviewedReceiptVerified?: boolean } = {}
+  options: { semanticValidation?: "legacy" | "deferred" | "free_direct"; reviewedReceiptVerified?: boolean } = {}
 ): Promise<ReadyCombinedArtifactV3> {
   assertDeferredReceiptAuthority(options);
   await assertReadyEvidenceAssets(evidenceAssets);
@@ -456,19 +461,26 @@ export async function materializePreparedCombinedArtifactV3(
   return materializeReadyArtifact(report, model, html);
 }
 
-function assertDeferredReceiptAuthority(options: { semanticValidation?: "legacy" | "deferred"; reviewedReceiptVerified?: boolean }): void {
+function assertDeferredReceiptAuthority(options: { semanticValidation?: "legacy" | "deferred" | "free_direct"; reviewedReceiptVerified?: boolean }): void {
   if (options.semanticValidation === "deferred" && options.reviewedReceiptVerified !== true) {
     throw new TypeError("Deferred Paid V3 artifact handling requires caller-supplied root-bound receipt verification.");
   }
 }
 
 export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, html: string): void {
+  const directByQuestion = new Map(report.directSemantics?.questions.map((result) => [result.questionId, result]) ?? []);
   const required = [
     report.artifactRevisionId,
     ...report.answerCards.flatMap((card) => {
       const answerContent = card.answerMode === "generative_search_v1"
         ? [card.exactQuestion, card.answerText, card.refusal?.reason ?? "", ...card.sources.flatMap((source) => [source.title, source.registrableDomain, source.canonicalUrl, source.citedText ?? ""])]
         : [card.exactQuestion, ...card.sentences.map(({ text }) => text), ...card.sourceEvidence.flatMap((evidence) => [evidence.title, evidence.registrableDomain, evidence.canonicalUrl, evidence.exactExcerpt, evidence.ownershipCategory, evidence.observedAt])];
+      const direct = directByQuestion.get(card.questionId);
+      if (direct) {
+        return direct.analysisStatus === "completed" && direct.analysis
+          ? [...answerContent, direct.analysis.summary, ...direct.analysis.observations, ...direct.analysis.recommendations]
+          : answerContent;
+      }
       if (card.diagnosis) {
         return [
           ...answerContent,

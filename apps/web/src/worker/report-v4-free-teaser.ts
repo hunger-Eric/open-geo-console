@@ -490,7 +490,7 @@ export async function generateFreeTeaser(input: {
   };
 }
 
-async function invokeFreeV4DirectAnalysis(input: {
+export async function invokeFreeV4DirectAnalysis(input: {
   payload: unknown;
   signal?: AbortSignal;
   structuredInvoker?: ReportV4MimoStructuredInvoker;
@@ -692,7 +692,7 @@ function verifyDirectQ1CoreProjection(checkpoint: FreeTeaserCheckpointV1): void 
   }
 }
 
-function buildFreeV4DirectAnalysisInput(input: {
+export function buildFreeV4DirectAnalysisInput(input: {
   question: string;
   answer: { readonly answerText: string; readonly refusal: FreeTeaserQ1Core["refusal"] };
   sources: FreeTeaserQ1Core["sources"];
@@ -741,7 +741,7 @@ function buildFreeV4DirectAnalysisInput(input: {
   });
 }
 
-function freeV4DirectTargetIdentity(targetUrl: string, foundation: AiWebsiteReportV1): {
+export function freeV4DirectTargetIdentity(targetUrl: string, foundation: AiWebsiteReportV1): {
   readonly canonicalName: string;
   readonly aliases: readonly string[];
   readonly domain: string;

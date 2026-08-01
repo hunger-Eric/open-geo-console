@@ -287,6 +287,23 @@ describe("Open GEO answer V3 contract", () => {
     expect((deferred[0] as GenerativeSearchAnswerCardV3).geoDiagnosis.targetMentioned).toBe(false);
   });
 
+  it("does not require or accept legacy question diagnosis fields in Direct mode", () => {
+    const context = {
+      ...fixtureContext(),
+      locale: "en",
+      targetAliases: ["Target provider"],
+      missingEvidenceFamiliesByQuestion: [[], [], []] as [string[], string[], string[]],
+      semanticValidation: "free_direct" as const
+    };
+    const withoutLegacyDiagnosis = generativeCards(context).map(({ geoDiagnosis: _geoDiagnosis, ...card }) => card);
+    const parsed = parseOpenGeoAnswerCardsV3(withoutLegacyDiagnosis, context);
+    expect(parsed[0]!.geoDiagnosis.targetMentioned).toBe(true);
+    expect(() => parseOpenGeoAnswerCardsV3([
+      { ...withoutLegacyDiagnosis[0]!, diagnosis: questionDiagnosis(withoutLegacyDiagnosis[0]!.questionId, withoutLegacyDiagnosis[0]!.sources[0]!.sourceId) },
+      withoutLegacyDiagnosis[1]!, withoutLegacyDiagnosis[2]!
+    ], context)).toThrow(/not allowed for Direct/i);
+  });
+
   it("keeps deferred card structure and public URL checks fail closed", () => {
     const context = {
       ...fixtureContext(),

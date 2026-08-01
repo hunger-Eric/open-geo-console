@@ -12,7 +12,7 @@ import {
   type ApplyPaidPaymentEventInput
 } from "./commercial-orders";
 import { closeDatabase, getSqlClient, initializeDatabaseEnvironment } from "./index";
-import { checkpointScanJob } from "./jobs";
+import { checkpointScanJob, claimExactScanJob, failScanJob } from "./jobs";
 import {
   createPostgresReportV4AdmissionJobRepository,
   enqueueReportV4PreAdmissionAfterPreview
@@ -47,14 +47,35 @@ describeDisposablePostgres("Paid V3 semantic-review checkpoint carrier", () => {
     await admin.end({ timeout: 5 });
   }, 60_000);
 
-  it("verifies both Free direct receipts without forging the legacy Paid marker", async () => {
+  it("verifies both Free direct receipts and carries the Direct marker to Paid", async () => {
     const fixture = await seedPaidV3Fixture("direct", "direct");
     const first = await applyPaidPaymentEvent(eventInput(fixture.orderId, "direct"));
     const duplicate = await applyPaidPaymentEvent(eventInput(fixture.orderId, "direct"));
     expect(duplicate).toMatchObject({ duplicate: true, jobId: first.jobId });
-    await expect(getSqlClient()<Array<{ checkpoint: Record<string, unknown> }>>`
-      SELECT checkpoint FROM scan_jobs WHERE id=${first.jobId}
-    `).resolves.toEqual([{ checkpoint: {} }]);
+    await expect(getSqlClient()<Array<{ checkpoint: Record<string, unknown>; max_attempts: number }>>`
+      SELECT checkpoint,max_attempts FROM scan_jobs WHERE id=${first.jobId}
+    `).resolves.toEqual([{ checkpoint: {
+      freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION
+    }, max_attempts: 1 }]);
+  }, 120_000);
+
+  it("terminalizes a transient Direct Paid failure after its single authorized Worker attempt", async () => {
+    const fixture = await seedPaidV3Fixture("direct-one-attempt", "direct");
+    const created = await applyPaidPaymentEvent(eventInput(fixture.orderId, "direct-one-attempt"));
+    const claimed = await claimExactScanJob("direct-worker", {
+      jobId: created.jobId!, reportId: fixture.reportId, tier: "deep"
+    });
+    expect(claimed).toMatchObject({ executionState: "running", phaseAttempt: 1, maxAttempts: 1 });
+
+    const failed = await failScanJob(created.jobId!, "direct-worker", {
+      code: "direct_provider_unavailable",
+      publicMessage: "The Direct provider is unavailable.",
+      retryable: true
+    });
+    expect(failed).toMatchObject({ stage: "failed", executionState: "failed", maxAttempts: 1 });
+    expect(await claimExactScanJob("second-worker", {
+      jobId: created.jobId!, reportId: fixture.reportId, tier: "deep"
+    })).toBeNull();
   }, 120_000);
 
   it("creates the Free carrier atomically and never retrofits an exactly-once row", async () => {

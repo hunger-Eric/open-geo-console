@@ -39,6 +39,13 @@ describe("recommendation website-foundation resume contract", () => {
     expect(resolvePaidV3SemanticValidation(paidV3, {
       semanticReviewContractVersion: "report-semantic-review-v1"
     })).toBe("deferred");
+    expect(resolvePaidV3SemanticValidation(paidV3, {
+      freeDirectSemanticsVersion: "free-v4-direct-semantics-v1"
+    })).toBe("free_direct");
+    expect(() => resolvePaidV3SemanticValidation(paidV3, {
+      semanticReviewContractVersion: "report-semantic-review-v1",
+      freeDirectSemanticsVersion: "free-v4-direct-semantics-v1"
+    })).toThrow(/both legacy and Direct/i);
     expect(() => resolvePaidV3SemanticValidation({
       ...paidV3,
       reason: "replacement_fulfillment"

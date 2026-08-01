@@ -100,7 +100,7 @@ describe("semantic-review checkpoint carrier", () => {
     } as Parameters<typeof resolvePaidV3SemanticReviewContract>[0])).toThrow(/terminal|lineage/i);
   });
 
-  it("verifies both terminal Direct receipts without minting a legacy Paid marker", () => {
+  it("verifies both terminal Direct receipts and carries the Direct Paid marker", () => {
     const checkpoint = directReadyCheckpoint();
     expect(resolvePaidV3SemanticReviewContract({
       checkpoint,
@@ -108,7 +108,7 @@ describe("semantic-review checkpoint carrier", () => {
       reportId: "report-1",
       questionSetId: "questions-1",
       questionSetIdentity: "a".repeat(64)
-    })).toBeNull();
+    })).toBe(FREE_V4_DIRECT_SEMANTICS_VERSION);
     (checkpoint.freeTeaser.q1AnswerDraft as { answerText: string }).answerText = "tampered";
     expect(() => resolvePaidV3SemanticReviewContract({
       checkpoint,
@@ -126,7 +126,22 @@ describe("semantic-review checkpoint carrier", () => {
       reportId: "report-1",
       questionSetId: "questions-1",
       questionSetIdentity: "a".repeat(64)
-    })).toBeNull();
+    })).toBe(FREE_V4_DIRECT_SEMANTICS_VERSION);
+  });
+
+  it("carries a receipt-valid Direct core when optional Free analysis is unavailable", () => {
+    const checkpoint = directReadyCheckpoint();
+    checkpoint.freeTeaser.directAnalysisStatus = "incomplete";
+    delete checkpoint.freeTeaser.directAnalysis;
+    delete checkpoint.freeTeaser.directAnalysisHandleBindings;
+    delete checkpoint.freeTeaser.directAnalysisReceipt;
+    expect(resolvePaidV3SemanticReviewContract({
+      checkpoint,
+      stage: "completed_limited",
+      reportId: "report-1",
+      questionSetId: "questions-1",
+      questionSetIdentity: "a".repeat(64)
+    })).toBe(FREE_V4_DIRECT_SEMANTICS_VERSION);
   });
 });
 

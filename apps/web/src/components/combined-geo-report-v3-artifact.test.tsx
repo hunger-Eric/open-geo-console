@@ -162,6 +162,28 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).not.toContain("data-cross-question-diagnosis");
   });
 
+  it("renders Direct analyses while preserving the complete technical report and screenshots",()=>{
+    const model=generativeModel();
+    model.locale="en";
+    model.combinedReport.directSemantics={
+      version:"free-v4-direct-semantics-v1",
+      questions:model.combinedReport.answerCards.map((card,index)=>index===2
+        ? {questionId:card.questionId,answerCardHash:"a".repeat(64),answerCardReceipt:{} as never,analysisStatus:"incomplete" as const,coreReceipt:{} as never}
+        : {questionId:card.questionId,answerCardHash:"a".repeat(64),answerCardReceipt:{} as never,analysisStatus:"completed" as const,coreReceipt:{} as never,
+          analysis:{summary:`Direct summary ${index+1}`,observations:[`Direct observation ${index+1}`],recommendations:[`Direct recommendation ${index+1}`],evidenceHandles:[]},
+          handleBindings:[],analysisReceipt:{} as never}) as never
+    };
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    expect(html).toContain("Direct summary 1");
+    expect(html).toContain("Direct observation 2");
+    expect(html).toContain("optional analysis is unavailable");
+    expect(html.match(/data-direct-analysis-status=/g)).toHaveLength(3);
+    expect(html).toContain("V3 technical finding");
+    expect(html).toContain("V3 Page Title");
+    expect(html).toContain("/api/reports/report/evidence/asset-1");
+    expect(html).not.toContain("Target mentioned");
+  });
+
   it("renders source-limited answers and typed refusals without turning audit failures into answer copy",()=>{
     const model=generativeModel();
     const sourceLimited=model.combinedReport.answerCards[1]!;

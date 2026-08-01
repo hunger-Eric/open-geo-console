@@ -21,6 +21,13 @@ import {
   parsePaidV3ReportSemanticReviewReceipt,
   type PaidV3ReportSemanticReviewReceipt
 } from "./report-semantic-review";
+import {
+  FREE_V4_DIRECT_SEMANTICS_VERSION,
+  hashFreeV4DirectSemanticValue,
+  hashPaidV3DirectAnswerCard,
+  parsePaidV3DirectSemantics,
+  type PaidV3DirectSemantics
+} from "./free-v4-direct-semantics";
 
 export const COMBINED_GEO_REPORT_V3_VERSION = 3 as const;
 export const COMBINED_GEO_REPORT_V3_CONTRACT = "combined_geo_report_v3" as const;
@@ -32,11 +39,12 @@ export interface CombinedGeoReportV3 extends Omit<CombinedGeoReportV2, "version"
   answerCards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
   sourceSelectionDiagnosis?: SourceSelectionDiagnosisV1;
   semanticReviewReceipt?: PaidV3ReportSemanticReviewReceipt;
+  directSemantics?: PaidV3DirectSemantics;
 }
 
 export function parseCombinedGeoReportV3(
   value: unknown,
-  options: { semanticValidation?: "legacy" | "deferred" } = {}
+  options: { semanticValidation?: "legacy" | "deferred" | "free_direct" } = {}
 ): CombinedGeoReportV3 {
   const root = object(value, "$combined");
   exact(root.artifactContract, COMBINED_GEO_REPORT_V3_CONTRACT, "$combined.artifactContract");
@@ -57,6 +65,15 @@ export function parseCombinedGeoReportV3(
     direct: evidence.direct
   }));
   const publicQuestionIds = toCanonicalBuyerQuestionSet(questionSet).questions.map(({ id }) => id);
+  const directSemantics = root.directSemantics === undefined
+    ? undefined
+    : parsePaidV3DirectSemantics(root.directSemantics, publicQuestionIds as [string, string, string]);
+  if (options.semanticValidation === "free_direct") {
+    if (!directSemantics || semanticReviewReceipt) throw new TypeError("Direct Paid V3 requires Direct question semantics and forbids a legacy semantic-review receipt.");
+    if (directSemantics.version !== FREE_V4_DIRECT_SEMANTICS_VERSION) throw new TypeError("Direct Paid V3 semantic version is invalid.");
+  } else if (directSemantics) {
+    throw new TypeError("Direct Paid V3 semantics require the Direct lineage parser.");
+  }
   const projectedAnswers = preliminaryCards.slice(1).map((card, answerIndex) => ({
     questionId: publicQuestionIds[answerIndex + 1],
     purpose: answerIndex === 0 ? "customer_region_fit" : "purchase_delivery_risk",
@@ -83,7 +100,7 @@ export function parseCombinedGeoReportV3(
         answers: projectedAnswers
       }
     },
-    options
+    { semanticValidation: options.semanticValidation === "free_direct" ? "deferred" : options.semanticValidation }
   );
   const resolvedEntities = base.publicSourceForensics.sourceGraph.entities.filter(({ status }) => status === "resolved");
   const targetAliases = base.businessQuestionSet.identityExclusions;
@@ -99,6 +116,11 @@ export function parseCombinedGeoReportV3(
     missingEvidenceFamiliesByQuestion: preliminaryCards.map((card) => card.geoDiagnosis?.missingEvidenceFamilies ?? []) as [string[], string[], string[]],
     semanticValidation: options.semanticValidation
   });
+  if (directSemantics) assertPaidV3DirectAnswerCardBindings({
+    questionSetIdentity: base.businessQuestionSet.contentHash,
+    answerCards,
+    directSemantics
+  });
   const sourceSelectionDiagnosis = root.sourceSelectionDiagnosis === undefined
     ? undefined
     : parseV3SourceSelectionDiagnosis(root.sourceSelectionDiagnosis, answerCards, base, provenance, options);
@@ -110,8 +132,27 @@ export function parseCombinedGeoReportV3(
     engineProvenance: provenance,
     answerCards,
     ...(sourceSelectionDiagnosis ? { sourceSelectionDiagnosis } : {}),
-    ...(semanticReviewReceipt ? { semanticReviewReceipt } : {})
+    ...(semanticReviewReceipt ? { semanticReviewReceipt } : {}),
+    ...(directSemantics ? { directSemantics } : {})
   };
+}
+
+export function assertPaidV3DirectAnswerCardBindings(input: {
+  readonly questionSetIdentity: string;
+  readonly answerCards: readonly [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3];
+  readonly directSemantics: PaidV3DirectSemantics;
+}): void {
+  const exactQuestions = input.answerCards.map(({ exactQuestion }) => exactQuestion);
+  input.directSemantics.questions.forEach((result, index) => {
+    const card = input.answerCards[index]!;
+    if (card.answerMode !== "generative_search_v1" ||
+        result.coreReceipt.questionSetIdentity !== input.questionSetIdentity ||
+        result.coreReceipt.questionsHash !== hashFreeV4DirectSemanticValue(exactQuestions) ||
+        result.coreReceipt.questionTextHash !== hashFreeV4DirectSemanticValue(card.exactQuestion) ||
+        result.answerCardHash !== hashPaidV3DirectAnswerCard(card)) {
+      throw new TypeError(`$combined.directSemantics.questions[${index}] does not match its rendered answer card lineage.`);
+    }
+  });
 }
 
 export function hashCombinedGeoReportV3ReceiptExcludedProjection(value: unknown): string {
@@ -125,7 +166,7 @@ function parseV3SourceSelectionDiagnosis(
   cards: [OpenGeoAnswerCardV3, OpenGeoAnswerCardV3, OpenGeoAnswerCardV3],
   base: CombinedGeoReportV2,
   provenance: OpenGeoEngineProvenanceV3,
-  options: { semanticValidation?: "legacy" | "deferred" }
+  options: { semanticValidation?: "legacy" | "deferred" | "free_direct" }
 ): SourceSelectionDiagnosisV1 {
   if (cards.some((card) => card.answerMode !== "generative_search_v1")) throw new TypeError("Source selection diagnosis requires generative-search V3 cards.");
   const verifiedExcerptByUrl = new Map<string, string>();
@@ -154,7 +195,7 @@ function parseV3SourceSelectionDiagnosis(
   const diagnosis = parseSourceSelectionDiagnosisV1(value, {
     questions,
     allowPersistedIndependentExcerpts: true,
-    semanticValidation: options.semanticValidation
+    semanticValidation: options.semanticValidation === "free_direct" ? "deferred" : options.semanticValidation
   });
   if (diagnosis.inputIdentity.answerHash !== provenance.answerHash || diagnosis.inputIdentity.sourceHash !== provenance.evidenceHash) {
     throw new TypeError("Source selection diagnosis answer/source identity does not match V3 provenance.");
@@ -164,7 +205,7 @@ function parseV3SourceSelectionDiagnosis(
 
 export function requireReadyCombinedGeoReportV3(
   value: unknown,
-  options: { semanticValidation?: "legacy" | "deferred" } = {}
+  options: { semanticValidation?: "legacy" | "deferred" | "free_direct" } = {}
 ): CombinedGeoReportV3 {
   return parseCombinedGeoReportV3(value, options);
 }

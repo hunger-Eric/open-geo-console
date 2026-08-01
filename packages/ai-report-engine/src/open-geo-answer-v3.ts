@@ -111,7 +111,7 @@ export interface OpenGeoAnswerCardsV3Context {
   targetAliases?: readonly string[];
   competitors?: readonly { entityId: string; aliases: readonly string[] }[];
   missingEvidenceFamiliesByQuestion?: readonly [readonly string[], readonly string[], readonly string[]];
-  semanticValidation?: "legacy" | "deferred";
+  semanticValidation?: "legacy" | "deferred" | "free_direct";
 }
 
 export interface OpenGeoAnswerSynthesisV3Input extends OpenGeoAnswerCardsV3Context {
@@ -159,7 +159,7 @@ export function parseOpenGeoAnswerCardsV3(
     ...(context.targetAliases ?? []),
     ...(context.competitors ?? []).flatMap(({ aliases }) => aliases)
   ];
-  if (context.semanticValidation !== "deferred") {
+  if (context.semanticValidation !== "deferred" && context.semanticValidation !== "free_direct") {
     assertGenerativeSearchAnswerLanguage(generativeAnswerFields, context.locale);
     assertReportLanguage(generatedFields, context.locale, allowedTerms);
   }
@@ -228,14 +228,17 @@ function parseGenerativeCard(value: unknown, cardIndex:number, canonical:{id:str
   const provenance: GenerativeSearchAnswerProvenanceV3 = { providerId:text(p.providerId,`${path}.provenance.providerId`), model:text(p.model,`${path}.provenance.model`), searchMode:text(p.searchMode,`${path}.provenance.searchMode`), promptVersion:oneOf(p.promptVersion,["generative-search-answer-v1"] as const,`${path}.provenance.promptVersion`), searchedAt:timestamp(p.searchedAt,`${path}.provenance.searchedAt`), completedAt:timestamp(p.completedAt,`${path}.provenance.completedAt`), answerHash:hash(p.answerHash,`${path}.provenance.answerHash`), sourceHash:hash(p.sourceHash,`${path}.provenance.sourceHash`) };
   if (Date.parse(provenance.completedAt) < Date.parse(provenance.searchedAt)) throw new TypeError(`${path}.provenance.completedAt must follow searchedAt.`);
   const audit = record(row.audit,`${path}.audit`); const parsedAudit = {verifiedBodyCount:nonnegative(audit.verifiedBodyCount,`${path}.audit.verifiedBodyCount`),searchSourceOnlyCount:nonnegative(audit.searchSourceOnlyCount,`${path}.audit.searchSourceOnlyCount`),inaccessibleCount:nonnegative(audit.inaccessibleCount,`${path}.audit.inaccessibleCount`)};
-  parseDiagnosis(row.geoDiagnosis, `${path}.geoDiagnosis`);
+  if (context.semanticValidation !== "free_direct") parseDiagnosis(row.geoDiagnosis, `${path}.geoDiagnosis`);
   const geoDiagnosis = context.semanticValidation === "deferred"
     ? row.geoDiagnosis as OpenGeoAnswerDiagnosisV3
     : diagnoseGenerativeSearchAnswerCardV3({answerText,sources},{exactQuestion:canonical.exactQuestion,locale:context.locale,targetAliases:context.targetAliases??[],competitors:context.competitors??[],missingEvidenceFamilies:context.missingEvidenceFamiliesByQuestion?.[cardIndex]??[]});
+  if (context.semanticValidation === "free_direct" && row.diagnosis !== undefined) {
+    throw new TypeError(`${path}.diagnosis is not allowed for Direct semantics.`);
+  }
   const diagnosis = row.diagnosis === undefined ? undefined : parseReportV4DiagnosisOutputForQuestion(
     row.diagnosis,
     { questionId: canonical.id, sourceEvidenceIds: sources.map(({ sourceId }) => sourceId) },
-    { semanticValidation: context.semanticValidation }
+    { semanticValidation: context.semanticValidation === "free_direct" ? "deferred" : context.semanticValidation }
   );
   return {answerMode:"generative_search_v1",questionId:canonical.id,exactQuestion:canonical.exactQuestion,status,answerText,sources,provenance,refusal,geoDiagnosis,audit:parsedAudit,...(diagnosis ? { diagnosis } : {})};
 }
@@ -433,7 +436,7 @@ function parseCard(
   const diagnosis = row.diagnosis === undefined ? undefined : parseReportV4DiagnosisOutputForQuestion(
     row.diagnosis,
     { questionId: canonical.id, sourceEvidenceIds: sourceEvidence.map(({ evidenceId }) => evidenceId) },
-    { semanticValidation: context.semanticValidation }
+    { semanticValidation: context.semanticValidation === "free_direct" ? "deferred" : context.semanticValidation }
   );
   return { questionId: canonical.id, exactQuestion: canonical.exactQuestion, status, sentences, sourceEvidence, coverage, geoDiagnosis, ...(diagnosis ? { diagnosis } : {}) };
 }

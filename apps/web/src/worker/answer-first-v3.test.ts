@@ -515,6 +515,33 @@ describe("generative answer-first V3 Worker service", () => {
       questionSet, provider, locale: "zh-CN", region: "CN", semanticValidation: "deferred"
     })).rejects.toMatchObject({ code: "answer_first_v3_model_contract_invalid" });
   });
+
+  it("reuses Direct Q1 and calls Q2/Q3 exactly once without source correction", async () => {
+    const questionSet = questions();
+    const ids = questionIds(questionSet);
+    const q1 = generatedAnswer(ids[0], 0);
+    const q2 = { ...generatedAnswer(ids[1], 1), sources: [] };
+    const q3 = { ...generatedAnswer(ids[2], 2), answerText: "", sources: [], refusal: { code: "policy_refusal" as const, reason: "Provider declined." } };
+    const provider = generativeProvider([q2, q3]);
+    const result = await resolveGenerativeAnswerFirstV3({
+      questionSet, provider, locale: "zh-CN", region: "CN", targetUrl: "https://target.example/",
+      auditSources: [], targetPages: [], semanticValidation: "free_direct",
+      seededQ1: {
+        questionSetIdentity: questionSet.contentHash,
+        providerId: provider.providerId,
+        model: provider.model,
+        searchMode: provider.searchMode,
+        locale: "zh-CN",
+        region: "CN",
+        answerResult: q1
+      }
+    });
+
+    expect(provider.answerWithSources).toHaveBeenCalledTimes(2);
+    expect(provider.answerWithSources.mock.calls.every(([request]) => request.semanticValidation === "free_direct")).toBe(true);
+    expect(result.answerCards.map(({ status }) => status)).toEqual(["answered", "source_limited", "refused"]);
+    expect(result.checkpoint.sourceSelectionDiagnosis).toBeDefined();
+  });
 });
 
 function generatedAnswer(questionId: string, index: number): GenerativeSearchAnswerResult {

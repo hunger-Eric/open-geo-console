@@ -4,6 +4,7 @@ import type {
   GenerativeSearchAnswerCardV3,
   LegacyEvidenceBoundAnswerCardV3,
   OpenGeoAnswerOwnershipCategoryV3,
+  PaidV3DirectQuestionSemantics,
   ReportV4DiagnosisOutput
 } from "@open-geo-console/ai-report-engine";
 import type { CombinedPrivateReportArtifactModelV3 } from "@/report/artifact-model";
@@ -13,10 +14,11 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
   const { combinedReport: report } = model;
   const zh = model.locale === "zh";
   const copy = zh ? ZH : EN;
+  const directByQuestion=new Map(report.directSemantics?.questions.map((result)=>[result.questionId,result])??[]);
   const ordinals=citationOrdinals(report.answerCards);
   const answered=report.answerCards.filter(({status})=>status==="answered").length;
   const limited=report.answerCards.filter(({status})=>status!=="answered").length;
-  const mentioned=report.answerCards.filter(({geoDiagnosis})=>geoDiagnosis.targetMentioned).length;
+  const mentioned=report.directSemantics ? null : report.answerCards.filter(({geoDiagnosis})=>geoDiagnosis.targetMentioned).length;
   return <main className="report-shell answer-first-report" data-artifact-revision={report.artifactRevisionId}>
     <header className="report-hero answer-first-hero">
       <p className="eyebrow">{copy.kicker}</p>
@@ -33,7 +35,7 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
       <p className="section-index">01</p><h2>{copy.executive}</h2>
       <p className="summary-copy">{report.technicalFoundation.aiReport.executiveSummary.overview}</p>
       <dl className="answer-metric-grid">
-        <Meta label={copy.answered}>{answered}/3</Meta><Meta label={copy.limited}>{limited}/3</Meta><Meta label={copy.mentioned}>{mentioned}/3</Meta>
+        <Meta label={copy.answered}>{answered}/3</Meta><Meta label={copy.limited}>{limited}/3</Meta>{mentioned === null ? null : <Meta label={copy.mentioned}>{mentioned}/3</Meta>}
       </dl>
     </section>
 
@@ -42,7 +44,7 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
       <p>{copy.answerMethod}</p>
       <div className="answer-card-list">
         {report.answerCards.map((card, cardIndex) => card.answerMode === "generative_search_v1"
-          ? <GenerativeSearchAnswerCard card={card} cardIndex={cardIndex} locale={model.locale} key={card.questionId}/>
+          ? <GenerativeSearchAnswerCard card={card} cardIndex={cardIndex} locale={model.locale} direct={directByQuestion.get(card.questionId)} key={card.questionId}/>
           : <LegacyEvidenceBoundAnswerCard card={card} cardIndex={cardIndex} locale={model.locale} ordinals={ordinals} key={card.questionId}/>)}
       </div>
     </section>
@@ -113,7 +115,7 @@ function AnswerCardShell({cardIndex,status,question,locale,children}:{cardIndex:
   </article>;
 }
 
-function GenerativeSearchAnswerCard({card,cardIndex,locale}:{card:GenerativeSearchAnswerCardV3;cardIndex:number;locale:"en"|"zh"}){
+function GenerativeSearchAnswerCard({card,cardIndex,locale,direct}:{card:GenerativeSearchAnswerCardV3;cardIndex:number;locale:"en"|"zh";direct?:PaidV3DirectQuestionSemantics}){
   const zh=locale==="zh", copy=zh?ZH:EN;
   return <AnswerCardShell cardIndex={cardIndex} status={card.status} question={card.exactQuestion} locale={locale}>
     {card.status === "refused"
@@ -132,11 +134,25 @@ function GenerativeSearchAnswerCard({card,cardIndex,locale}:{card:GenerativeSear
         </div>
       </article>)}
     </div>}
-    {card.diagnosis
-      ? <DiagnosisSummary diagnosis={card.diagnosis} locale={locale}/>
-      : <GeoDiagnosis card={card} locale={locale}/>}
+    {direct
+      ? <DirectAnalysis result={direct} locale={locale}/>
+      : card.diagnosis
+        ? <DiagnosisSummary diagnosis={card.diagnosis} locale={locale}/>
+        : <GeoDiagnosis card={card} locale={locale}/>}
     <dl className="answer-provenance"><Meta label={copy.model}>{card.provenance.model}</Meta><Meta label={copy.searchMode}>{card.provenance.searchMode}</Meta><Meta label={copy.searched}>{card.provenance.searchedAt}</Meta></dl>
   </AnswerCardShell>;
+}
+
+function DirectAnalysis({result,locale}:{result:PaidV3DirectQuestionSemantics;locale:"en"|"zh"}){
+  const copy=locale==="zh"?ZH:EN;
+  if(result.analysisStatus!=="completed"||!result.analysis){
+    return <section className="model-diagnosis direct-analysis" data-direct-analysis-status="incomplete"><h4>{copy.aiAnalysis}</h4><p>{locale==="zh"?"本题答案及来源已保留；附加分析未完成。":"The answer and its sources are retained; optional analysis is unavailable."}</p></section>;
+  }
+  return <section className="model-diagnosis direct-analysis" data-direct-analysis-status="completed">
+    <h4>{copy.aiAnalysis}</h4><p className="selection-summary">{result.analysis.summary}</p>
+    <List label={copy.observableFactors} items={result.analysis.observations}/>
+    <List label={copy.recommendedActions} items={result.analysis.recommendations}/>
+  </section>;
 }
 
 function LegacyEvidenceBoundAnswerCard({card,cardIndex,locale,ordinals}:{card:LegacyEvidenceBoundAnswerCardV3;cardIndex:number;locale:"en"|"zh";ordinals:Map<string,number>}){

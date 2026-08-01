@@ -612,6 +612,30 @@ describe("strict Report V4 processor routing", () => {
     expect(processorSource.match(/readSemanticReviewContractVersion\(currentCheckpoint\)/gu)).toHaveLength(1);
   });
 
+  it("keeps the complete Paid report inputs while Direct bypasses the legacy diagnosis and semantic-review boundary", () => {
+    const directStart = processorSource.indexOf('if (semanticValidation === "free_direct")');
+    const legacyStart = processorSource.indexOf('if (!("answerCards" in answerResult))', directStart);
+    expect(directStart).toBeGreaterThan(-1);
+    expect(legacyStart).toBeGreaterThan(directStart);
+
+    const directBranch = processorSource.slice(directStart, legacyStart);
+    for (const retainedInput of [
+      "technicalReport: input.technicalReport",
+      "aiReport: input.websiteFoundation",
+      "evidenceAssets,",
+      "businessQuestionSet,",
+      "answerCards: answerResult.answerCards",
+      "sourceSelectionDiagnosis,",
+      "publicSourceForensics: forensicResult.report",
+      "providerDiscovery: providerResult.providerDiscovery"
+    ]) {
+      expect(directBranch).toContain(retainedInput);
+    }
+    expect(directBranch).toContain("buildPaidV3DirectSemantics({");
+    expect(directBranch).not.toContain("enhanceV3AnswerCardsWithDiagnosis({");
+    expect(directBranch).not.toContain("runPaidV3SemanticReview({");
+  });
+
   it("threads the process-scoped protected-Staging drill only into the selected V4 production runner", () => {
     expect(processorSource).toContain("options.liveDrill");
     expect(processorSource).toContain("createReportV4CoreProduction({ environment, liveDrill })");

@@ -27,10 +27,12 @@ import {
 } from "./schema";
 import {
   assertSemanticReviewCarrierEquals,
+  createFreeDirectSemanticsInitialCheckpoint,
   createSemanticReviewInitialCheckpoint,
   readFreeDirectSemanticsVersion,
   readSemanticReviewContractVersion,
   resolvePaidV3SemanticReviewContract,
+  type FreeDirectSemanticsVersion,
   type SemanticReviewContractVersion
 } from "./report-semantic-review-activation";
 
@@ -831,19 +833,22 @@ async function applyPaidPaymentEventInternal(
       orderId: order.id,
       questionSetId: order.business_question_set_id
     });
-    const initialCheckpoint = JSON.stringify(createSemanticReviewInitialCheckpoint(
-      semanticReviewContractVersion ?? undefined
-    ));
+    const initialCheckpoint = JSON.stringify(
+      semanticReviewContractVersion === "free-v4-direct-semantics-v1"
+        ? createFreeDirectSemanticsInitialCheckpoint()
+        : createSemanticReviewInitialCheckpoint(semanticReviewContractVersion ?? undefined)
+    );
     let jobId = order.fulfillment_job_id ?? reservation.job_id;
     if (!jobId) {
       jobId = ids.jobId;
       await tx`
         INSERT INTO scan_jobs
-          (id, report_id, site_snapshot_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, artifact_contract, business_question_set_id, locale, reason, stage, credit_reservation_id, checkpoint)
+          (id, report_id, site_snapshot_id, tier, product_contract, fulfillment_methodology, recommendation_report_version, artifact_contract, business_question_set_id, locale, reason, stage, credit_reservation_id, checkpoint, max_attempts)
         VALUES
           (${jobId}, ${order.report_id}, ${expectedContract === "report_v4" ? order.site_snapshot_id : null}, 'deep', ${productContractForCode(order.product_code)}, ${order.fulfillment_methodology}, ${order.recommendation_report_version},
            ${order.product_code === "recommendation_forensics_v1" && order.business_question_set_id ? combinedReportContract : productContractForCode(order.product_code)}, ${order.business_question_set_id},
-            ${order.report_locale}, 'standard', 'queued', ${reservation.id}, ${initialCheckpoint}::jsonb)
+            ${order.report_locale}, 'standard', 'queued', ${reservation.id}, ${initialCheckpoint}::jsonb,
+            ${semanticReviewContractVersion === "free-v4-direct-semantics-v1" ? 1 : 3})
       `;
     }
     if (expectedContract !== "report_v4" && combinedReportContract === "combined_geo_report_v3") {
@@ -965,7 +970,7 @@ async function paidV3SemanticReviewContract(
     orderId: string;
     questionSetId: string | null;
   }
-): Promise<SemanticReviewContractVersion | null> {
+): Promise<SemanticReviewContractVersion | FreeDirectSemanticsVersion | null> {
   if (input.expectedContract === "report_v4" || input.combinedReportContract !== "combined_geo_report_v3" || !input.questionSetId) {
     return null;
   }
