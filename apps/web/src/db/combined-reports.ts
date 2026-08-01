@@ -3,6 +3,7 @@ import {
   parseCombinedGeoReportV2,
   parseCombinedGeoReportV3,
   parseCombinedGeoReportV4,
+  FREE_V4_DIRECT_SEMANTICS_VERSION,
   type CombinedGeoReportV1,
   type CombinedGeoReportV2,
   type CombinedGeoReportV3,
@@ -61,13 +62,16 @@ export async function getActiveCombinedGeoReport(
     pdf_sha256: string | null;
     artifact_contract: string;
     report_locale: string | null;
+    free_direct_semantics_version: string | null;
     payload: unknown;
   }>>`
     SELECT artifact.id AS artifact_revision_id,artifact.revision,artifact.pdf_storage_key,artifact.artifact_contract,
-      artifact.html_sha256,artifact.pdf_sha256,report.report_locale,combined.payload
+      artifact.html_sha256,artifact.pdf_sha256,report.report_locale,
+      job.checkpoint->>'freeDirectSemanticsVersion' AS free_direct_semantics_version,combined.payload
     FROM scan_reports report
     JOIN report_artifact_revisions artifact ON artifact.id=report.active_artifact_revision_id AND artifact.report_id=report.id
     JOIN combined_geo_reports combined ON combined.artifact_revision_id=artifact.id AND combined.report_id=report.id
+    JOIN scan_jobs job ON job.id=artifact.job_id AND job.report_id=report.id
     WHERE report.id=${reportId} AND artifact.status='active'
       AND artifact.artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2','combined_geo_report_v3','combined_geo_report_v4')
     LIMIT 1`;
@@ -105,7 +109,10 @@ export async function getActiveCombinedGeoReport(
   };
   try {
     if (row.artifact_contract === "combined_geo_report_v3") {
-      const report = parseCombinedGeoReportV3(row.payload);
+      if (row.free_direct_semantics_version !== null && row.free_direct_semantics_version !== FREE_V4_DIRECT_SEMANTICS_VERSION) return null;
+      const report = parseCombinedGeoReportV3(row.payload, row.free_direct_semantics_version === FREE_V4_DIRECT_SEMANTICS_VERSION
+        ? { semanticValidation: "free_direct" }
+        : {});
       if (!matchesArtifactIdentity(report, row, reportId) || report.artifactRevision !== row.revision) return null;
       return { ...legacyArtifact, artifactContract: row.artifact_contract, report };
     }

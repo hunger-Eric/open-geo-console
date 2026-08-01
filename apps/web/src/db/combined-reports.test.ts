@@ -8,13 +8,18 @@ const mocks = vi.hoisted(() => {
     sql: vi.fn(async () => state.rows),
     parseV1: vi.fn((value: unknown) => value),
     parseV2: vi.fn((value: unknown) => value),
-    parseV3: vi.fn((value: unknown) => value),
+    parseV3: vi.fn((value: unknown, options: { semanticValidation?: string } = {}) => {
+      const direct = Boolean(value && typeof value === "object" && "directSemantics" in value);
+      if (direct !== (options.semanticValidation === "free_direct")) throw new TypeError("V3 semantic mode mismatch");
+      return value;
+    }),
     parseV4: vi.fn((value: unknown) => value)
   };
 });
 
 vi.mock("./index", () => ({ ensureDatabase: mocks.ensureDatabase, getSqlClient: () => mocks.sql }));
 vi.mock("@open-geo-console/ai-report-engine", () => ({
+  FREE_V4_DIRECT_SEMANTICS_VERSION: "free-v4-direct-semantics-v1",
   parseCombinedGeoReportV1: mocks.parseV1,
   parseCombinedGeoReportV2: mocks.parseV2,
   parseCombinedGeoReportV3: mocks.parseV3,
@@ -93,6 +98,28 @@ describe("active combined report loader", () => {
     await expect(getActiveCombinedGeoReport("report-1")).resolves.toBeNull();
   });
 
+  it("selects the Direct parser only from the immutable Paid root carrier", async () => {
+    const payload = { ...legacyPayload(), directSemantics: { version: "free-v4-direct-semantics-v1" } };
+    mocks.state.rows = [row({ artifact_contract: "combined_geo_report_v3", artifact_revision_id: "revision-v3", revision: 3,
+      pdf_storage_key: "private/report.pdf", pdf_sha256: "p".repeat(64), payload,
+      free_direct_semantics_version: "free-v4-direct-semantics-v1" })];
+
+    await expect(getActiveCombinedGeoReport("report-1", "combined_geo_report_v3")).resolves.toMatchObject({ report: payload });
+    expect(mocks.parseV3).toHaveBeenCalledWith(payload, { semanticValidation: "free_direct" });
+
+    vi.clearAllMocks();
+    mocks.state.rows = [row({ artifact_contract: "combined_geo_report_v3", artifact_revision_id: "revision-v3", revision: 3,
+      pdf_storage_key: "private/report.pdf", pdf_sha256: "p".repeat(64), payload })];
+    await expect(getActiveCombinedGeoReport("report-1", "combined_geo_report_v3")).resolves.toBeNull();
+
+    vi.clearAllMocks();
+    mocks.state.rows = [row({ artifact_contract: "combined_geo_report_v3", artifact_revision_id: "revision-v3", revision: 3,
+      pdf_storage_key: "private/report.pdf", pdf_sha256: "p".repeat(64), payload,
+      free_direct_semantics_version: "unknown-direct-version" })];
+    await expect(getActiveCombinedGeoReport("report-1", "combined_geo_report_v3")).resolves.toBeNull();
+    expect(mocks.parseV3).not.toHaveBeenCalled();
+  });
+
   it.each([
     { name: "expected contract", contract: "combined_geo_report_v4" as const, overrides: { artifact_contract: "combined_geo_report_v3" } },
     { name: "payload contract", contract: "combined_geo_report_v4" as const, overrides: { payload: { ...v4Payload(), artifactContract: "combined_geo_report_v3" } } },
@@ -115,6 +142,7 @@ function row(overrides: Record<string, unknown> = {}) {
     pdf_sha256: null,
     artifact_contract: "combined_geo_report_v4",
     report_locale: "en",
+    free_direct_semantics_version: null,
     payload: v4Payload(),
     ...overrides
   };

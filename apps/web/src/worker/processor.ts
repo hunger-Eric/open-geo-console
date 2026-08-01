@@ -664,6 +664,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     // budget, bounded by the existing hard deadline/SLA.
     const deferPhaseAttempt = readFreeDirectSemanticsVersion(job.checkpoint) === null &&
       normalized.classification === "transient" && isDeferrablePublicSourceOutage(error);
+    const directPaidOneShot = job.tier === "deep" && readFreeDirectSemanticsVersion(job.checkpoint) !== null;
     if (!deferPhaseAttempt && normalized.classification === "transient" && await hasPriorJobErrorFingerprint(job.id, normalized.fingerprint)) {
       normalized = escalateFingerprintRecurrence(normalized);
     }
@@ -672,8 +673,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     // durable immediately instead of being replaced later by lease_exhausted.
     const failedJob = await failScanJob(job.id, workerId, {
       code: normalized.code, publicMessage: "The analysis is temporarily unavailable.",
-      retryable: normalized.classification === "transient",
-      classification: normalized.classification === "operator_repairable" ? "operator_repairable" : normalized.classification === "target_limitation" ? "target_limitation" : undefined,
+      retryable: !directPaidOneShot && normalized.classification === "transient",
+      classification: directPaidOneShot ? undefined : normalized.classification === "operator_repairable" ? "operator_repairable" : normalized.classification === "target_limitation" ? "target_limitation" : undefined,
       internalError: normalized, phase, ...(deferPhaseAttempt ? { defer: true as const } : {})
     });
     if (job.tier === "free" && failedJob.stage === "failed") {
@@ -1424,7 +1425,8 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
           input,
           ready,
           resumedV3.checkpoint.identityHash,
-          resumedV3.commercialSnapshotRefs
+          resumedV3.commercialSnapshotRefs,
+          "deferred"
         )
       });
       return;
@@ -1434,7 +1436,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       evidenceAssets,
       semanticValidation === "free_direct" ? { semanticValidation: "free_direct" } : {}
     );
-    await terminalizeReadyCombinedArtifact(input, ready, resumedV3.checkpoint.identityHash, resumedV3.commercialSnapshotRefs);
+    await terminalizeReadyCombinedArtifact(input, ready, resumedV3.checkpoint.identityHash, resumedV3.commercialSnapshotRefs, semanticValidation);
     return;
   }
   const publicSourceBudget = createPublicSourceAttemptBudget(input.remainingMs);
@@ -1773,7 +1775,8 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
           input,
           ready,
           diagnosisResult.checkpoint.identityHash,
-          snapshotRefs
+          snapshotRefs,
+          "deferred"
         )
       });
       return;
@@ -1819,7 +1822,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
           checkpoint = normalizeCheckpoint(updated.checkpoint);
         }
       }, { semanticValidation: "free_direct" });
-      await terminalizeReadyCombinedArtifact(input, ready, answerResult.checkpoint.identityHash, snapshotRefs);
+      await terminalizeReadyCombinedArtifact(input, ready, answerResult.checkpoint.identityHash, snapshotRefs, "free_direct");
       return;
     }
     if (!("answerCards" in answerResult)) {
@@ -1873,7 +1876,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         checkpoint = normalizeCheckpoint(updated.checkpoint);
       }
     });
-    await terminalizeReadyCombinedArtifact(input, ready, diagnosisResult.checkpoint.identityHash, snapshotRefs);
+    await terminalizeReadyCombinedArtifact(input, ready, diagnosisResult.checkpoint.identityHash, snapshotRefs, "legacy");
     return;
   }
   const groundedAnswerEvidence = groundedEvidenceFromForensic(forensicResult.report);
@@ -1924,10 +1927,12 @@ async function terminalizeReadyCombinedArtifact(
   input: Parameters<typeof finalizeProviderDiscoveryCombinedJob>[0],
   ready: Awaited<ReturnType<typeof buildReadyCombinedArtifactV3>>,
   checkpointIdentityHash: string,
-  snapshotRefs: PublicSourceCommercialSnapshotRef[]
+  snapshotRefs: PublicSourceCommercialSnapshotRef[],
+  semanticValidation: "legacy" | "deferred" | "free_direct"
 ): Promise<void> {
   const terminalInput = { report: ready.report, workerId: input.workerId, checkpointIdentityHash, snapshotRefs,
-    htmlSha256: ready.htmlSha256, pdfSha256: ready.pdfSha256, pdfStorageKey: ready.pdfStorageKey, pageCount: ready.pageCount };
+    htmlSha256: ready.htmlSha256, pdfSha256: ready.pdfSha256, pdfStorageKey: ready.pdfStorageKey, pageCount: ready.pageCount,
+    semanticValidation };
   await terminalizePaidCombinedReport(terminalInput);
 }
 

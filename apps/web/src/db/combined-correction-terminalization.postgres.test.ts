@@ -4,7 +4,21 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("@open-geo-console/ai-report-engine", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@open-geo-console/ai-report-engine")>();
-  return { ...actual, requireReadyCombinedGeoReportV3: (value: unknown) => value };
+  return {
+    ...actual,
+    requireReadyCombinedGeoReportV3: (
+      value: unknown,
+      options: { semanticValidation?: "legacy" | "deferred" | "free_direct" } = {},
+    ) => {
+      const hasDirectSemantics = Boolean(
+        value && typeof value === "object" && "directSemantics" in value,
+      );
+      if (hasDirectSemantics !== (options.semanticValidation === "free_direct")) {
+        throw new TypeError("Direct Paid V3 semantics require the Direct lineage parser.");
+      }
+      return value;
+    },
+  };
 });
 
 import { closeDatabase, ensureDatabase, getSqlClient } from "./index";
@@ -49,7 +63,7 @@ describePostgres("paid combined V3 atomic terminalization",()=>{
       await sql`UPDATE report_business_question_sets SET status='locked',content_hash=${`content-${row.outcome}`},neutral_content_hash=${`neutral-${row.outcome}`},payload='{}'::jsonb,confirmed_at=now(),locked_at=now() WHERE id=${row.questionSetId}`;
       await sql`INSERT INTO access_keys(id,key_prefix,key_hmac,status,credits_remaining,payment_order_id) VALUES(${row.accessId},'v3',${`hmac-${row.accessId}`},'exhausted',0,${row.orderId})`;
       await sql`INSERT INTO scan_jobs(id,report_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,artifact_contract,business_question_set_id,locale,stage,execution_state,current_phase,lease_owner,lease_expires_at,credit_reservation_id,checkpoint)
-        VALUES(${row.jobId},${row.reportId},'deep','recommendation_forensics_v1','public_search_source_forensics_v1',2,'combined_geo_report_v3',${row.questionSetId},'zh','synthesizing','running','terminalization',${workerId},now()+interval '1 hour',${row.creditId},${JSON.stringify({answerFirstV3:{identityHash:checkpointIdentityHash}})}::jsonb)`;
+        VALUES(${row.jobId},${row.reportId},'deep','recommendation_forensics_v1','public_search_source_forensics_v1',2,'combined_geo_report_v3',${row.questionSetId},'zh','synthesizing','running','terminalization',${workerId},now()+interval '1 hour',${row.creditId},${JSON.stringify({answerFirstV3:{identityHash:checkpointIdentityHash},...(row.outcome==="completed"?{freeDirectSemanticsVersion:"free-v4-direct-semantics-v1"}:{})})}::jsonb)`;
       await sql`UPDATE payment_orders SET fulfillment_job_id=${row.jobId} WHERE id=${row.orderId}`;
       await sql`INSERT INTO credit_ledger(id,access_key_id,report_id,idempotency_key,payment_order_id,job_id,credits,status) VALUES(${row.creditId},${row.accessId},${row.reportId},${`credit-${row.orderId}`},${row.orderId},${row.jobId},1,'reserved')`;
       await sql`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,revision,artifact_contract,status,payload_identity_hash) VALUES(${row.artifactRevisionId},${row.reportId},${row.orderId},${row.jobId},1,'combined_geo_report_v3','pending',${`payload-${row.outcome}`})`;
@@ -65,6 +79,10 @@ describePostgres("paid combined V3 atomic terminalization",()=>{
 
   it("rolls back injected boundaries and persists each commercial result exactly once",async()=>{
     const complete=records[0]!;
+    const mismatchedReport={...input(complete).report};
+    delete mismatchedReport.directSemantics;
+    await expect(terminalizePaidCombinedReport({...input(complete),report:mismatchedReport,semanticValidation:"legacy"}))
+      .rejects.toThrow(/immutable root carrier/i);
     for(const faultAfter of ["report","refs","job","credit","order","email"] as const){
       await expect(terminalizePaidCombinedReport(input(complete,faultAfter))).rejects.toThrow(/Injected fault/);
       expect(await state(complete)).toMatchObject({reports:0,emails:0,refunds:0,stage:"synthesizing",credit:"reserved",fulfillment:"processing"});
@@ -86,8 +104,10 @@ describePostgres("paid combined V3 atomic terminalization",()=>{
     const report={version:3,artifactContract:"combined_geo_report_v3",reportId:row.reportId,jobId:row.jobId,orderId:row.orderId,
       artifactRevisionId:row.artifactRevisionId,artifactRevision:1,questionSetIdentity:row.questionSetId,evidenceCutoffAt:new Date().toISOString(),
       answerCards:statuses.map((status,index)=>({status,sentences:status==="insufficient"?[]:[{kind:"grounded_claim",evidenceIds:[`evidence-${index}`]}]})),
-      publicSourceForensics:{commercialOutcome:"completed"}};
-    return {report,workerId,checkpointIdentityHash,snapshotRefs:[],htmlSha256:"a".repeat(64),pdfSha256:"b".repeat(64),pdfStorageKey:`private/${row.artifactRevisionId}.pdf`,pageCount:5,faultAfter};
+      publicSourceForensics:{commercialOutcome:"completed"},
+      ...(row.outcome==="completed"?{directSemantics:{version:"free-v4-direct-semantics-v1"}}:{})};
+    return {report,workerId,checkpointIdentityHash,snapshotRefs:[],htmlSha256:"a".repeat(64),pdfSha256:"b".repeat(64),pdfStorageKey:`private/${row.artifactRevisionId}.pdf`,pageCount:5,faultAfter,
+      semanticValidation:row.outcome==="completed"?"free_direct" as const:"legacy" as const};
   }
   async function state(row:typeof records[number]){return (await getSqlClient()<Array<{reports:number;emails:number;refunds:number;stage:string;credit:string;fulfillment:string;active:number}>>`
     SELECT (SELECT count(*)::int FROM combined_geo_reports WHERE job_id=${row.jobId}) reports,

@@ -3,19 +3,26 @@ import { requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, require
 import { ensureDatabase, getSqlClient } from "./index";
 import type { PaidPublicSourceSnapshotRef } from "./public-source-commerce";
 import { JobTransitionService } from "@/worker/job-transition-service";
+import { readFreeDirectSemanticsVersion } from "./report-semantic-review-activation";
+
+type PaidV3SemanticValidationMode = "legacy" | "deferred" | "free_direct";
 
 export async function terminalizePaidCombinedReport(input: {
   report: unknown; workerId: string; checkpointIdentityHash: string; snapshotRefs: readonly PaidPublicSourceSnapshotRef[];
   htmlSha256:string;pdfSha256:string;pdfStorageKey:string;pageCount:number;
+  semanticValidation?: PaidV3SemanticValidationMode;
   faultAfter?:"report"|"refs"|"job"|"credit"|"order"|"email";
 }):Promise<{report:CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3;outcome:"completed"|"completed_limited"|"failed";refundId:string|null;emailDeliveryId:string}>{
-  const report=readyCombined(input.report);
+  const semanticValidation=input.semanticValidation??"legacy";
+  const report=readyCombined(input.report,semanticValidation);
   const outcome=report.artifactContract==="combined_geo_report_v3"?combinedV3CommercialOutcome(report.answerCards):report.publicSourceForensics.commercialOutcome;
   if((report.artifactContract!=="combined_geo_report_v3"&&outcome!=="completed")||input.pageCount<5)throw new Error("Only a ready combined report may terminalize a paid order.");
   await ensureDatabase();
   return getSqlClient().begin(async(tx)=>{
     const job=(await tx<Array<{execution_state:string;checkpoint_revision:number;lease_owner:string|null;lease_expires_at:string|null;credit_reservation_id:string|null;checkpoint:Record<string,unknown>;business_question_set_id:string|null;artifact_contract:string|null}>>`
       SELECT execution_state,checkpoint_revision,lease_owner,lease_expires_at,credit_reservation_id,checkpoint,business_question_set_id,artifact_contract FROM scan_jobs WHERE id=${report.jobId} AND report_id=${report.reportId} FOR UPDATE`)[0];
+    const directVersion=readFreeDirectSemanticsVersion(job?.checkpoint??{});
+    if((semanticValidation==="free_direct")!==(directVersion!==null))throw new Error("Paid combined terminalization semantic mode does not match its immutable root carrier.");
     const checkpoint=combinedCheckpoint(job?.checkpoint,report.artifactContract);
     if(!job||job.execution_state!=="running"||job.lease_owner!==input.workerId||!job.lease_expires_at||Date.parse(job.lease_expires_at)<=Date.now()||!job.credit_reservation_id||job.business_question_set_id!==report.questionSetIdentity||job.artifact_contract!==report.artifactContract||checkpoint?.identityHash!==input.checkpointIdentityHash)throw new Error("Paid combined activation requires its exact leased job and reservation.");
     const order=(await tx<Array<{id:string;provider:string;amount_minor:number;currency:string;report_locale:string;fulfillment_status:string;refund_status:string}>>`SELECT id,provider,amount_minor,currency,report_locale,fulfillment_status,refund_status FROM payment_orders WHERE id=${report.orderId} AND fulfillment_job_id=${report.jobId} AND report_id=${report.reportId} AND payment_status='paid' FOR UPDATE`)[0];
@@ -86,9 +93,10 @@ export function combinedV3CommercialOutcome(cards: readonly OpenGeoAnswerCardV3[
   if(legacyCards.every(({status})=>status!=="insufficient"))return "completed_limited";
   return legacyCards.some(({sentences})=>sentences.some(({kind,evidenceIds})=>kind==="grounded_claim"&&evidenceIds.length>0))?"completed_limited":"failed";
 }
-function readyCombined(value:unknown):CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3{
+function readyCombined(value:unknown,semanticValidation:PaidV3SemanticValidationMode):CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3{
   const contract=value&&typeof value==="object"&&!Array.isArray(value)?(value as {artifactContract?:unknown}).artifactContract:null;
-  if(contract==="combined_geo_report_v3")return requireReadyCombinedGeoReportV3(value);
+  if(contract==="combined_geo_report_v3")return requireReadyCombinedGeoReportV3(value,{semanticValidation});
+  if(semanticValidation!=="legacy")throw new TypeError("Only Paid V3 supports a non-legacy semantic-validation mode.");
   if(contract==="combined_geo_report_v2")return requireReadyCombinedGeoReportV2(value);
   if(contract==="combined_geo_report_v1")return requireReadyCombinedGeoReport(value);
   throw new TypeError("Combined artifact contract is unsupported.");

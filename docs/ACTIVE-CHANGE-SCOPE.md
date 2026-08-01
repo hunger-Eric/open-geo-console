@@ -7,6 +7,21 @@ complete Paid deep report and replace only the question-diagnosis and semantic
 judgment layer that terminally fails at progress 98. The implementation must
 remain the smallest change that satisfies that boundary.
 
+Approved amendment on 2026-08-01 after the first fresh Direct Paid V3
+acceptance lineage reached a complete private readiness PDF but failed before
+atomic activation. The amendment adds only the terminal write parser, active
+customer-read parser, and Direct one-Worker-attempt enforcement needed to
+finish the approved user-visible objective. The failed report, order, job,
+refund, credit, queued email, and orphaned private PDF remain historical
+read-only state and must not be repaired, replayed, deleted, or reused.
+
+Current execution boundary, explicitly narrowed by the user on 2026-08-01:
+make only the local code changes above and run the affected basic tests. Do not
+commit, push, deploy, build or replace Worker images, start Staging services,
+create a report/order/payment, call a model, run commerce, mutate historical
+state, or perform browser acceptance. Deployment and manual Web submission
+belong to the user's separate follow-up workflow.
+
 ## Proposal: finish the Free Direct to Paid V3 product boundary
 
 This is the single approval boundary for implementation, proportionate local
@@ -164,6 +179,16 @@ seams, but it may not replace the Paid report with a question-only artifact.
 - `apps/web/src/db/schema.ts`
   - TypeScript-only checkpoint projection changes; no table, column, enum, or
     migration changes.
+- `apps/web/src/db/combined-correction-terminalization.ts`
+  - accept the explicit semantic-validation mode from the Worker;
+  - parse Direct V3 only as `free_direct` and verify that mode against the
+    immutable Paid root checkpoint before any activation write;
+  - preserve legacy and reviewed V3 behavior.
+- `apps/web/src/db/combined-reports.ts`
+  - read the immutable Paid root Direct carrier with the active artifact;
+  - parse an active Direct V3 payload only as `free_direct` and fail closed on
+    marker/payload mismatch;
+  - preserve all legacy/V2/V4 read behavior.
 
 Production-source budget: at most `+1800/-1200` measured lines across only the
 files above. Existing unrelated dirty content in an allowlisted file must not
@@ -183,6 +208,8 @@ be rewritten, normalized, staged, or claimed.
 - `packages/ai-report-engine/src/free-v4-direct-semantics.test.ts`
 - `packages/ai-report-engine/src/open-geo-answer-v3.test.ts`
 - `packages/ai-report-engine/src/combined-geo-report-v3.test.ts`
+- `apps/web/src/db/combined-correction-terminalization.postgres.test.ts`
+- `apps/web/src/db/combined-reports.test.ts`
 - `docs/ACTIVE-CHANGE-SCOPE.md`
 - `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`
 
@@ -231,6 +258,15 @@ production budget is hard.
    their answers and same-response sources, plus completed or explicitly
    unavailable analysis. The Paid job must not call the legacy diagnosis or
    final review operations and must not fail at 98 on a correction contract.
+8. A real Direct V3 payload crosses the terminalization and active-loader
+   boundaries with the explicit `free_direct` mode, while absent/mismatched
+   root carriers fail closed and legacy V3 remains unchanged.
+9. Any Direct Paid Worker failure is terminal on its first Worker claim and
+   cannot enter `retry_wait`; legacy jobs retain their existing retry contract.
+
+For the current local-only execution, acceptance is limited to focused tests
+covering items 1, 8, and 9. Items 2-7 remain downstream acceptance criteria
+and are not authorized actions in this task.
 
 ### Authorized expensive and external actions after approval
 

@@ -351,7 +351,7 @@ describe("strict Report V4 processor routing", () => {
       });
 
       expect(boundaryMocks.failScanJob).toHaveBeenCalledWith(job.id, "worker-1", expect.objectContaining({
-        retryable: true,
+        retryable: false,
         internalError: expect.objectContaining({ classification: "transient", code: "public_source_snapshot_search_execution" })
       }));
       expect(boundaryMocks.failScanJob.mock.calls[0]?.[2]).not.toHaveProperty("defer");
