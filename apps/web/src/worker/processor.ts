@@ -517,7 +517,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         batchSize: 4,
         maxCharactersPerPage: 30_000,
         signal: execution.controller.signal,
-        completedAnalyses: checkpoint.completedPageAnalyses.map(({ analysis }) => analysis),
+        completedAnalyses: (checkpoint.completedPageAnalyses ?? []).map(({ analysis }) => analysis),
         onBatchComplete: async (batch) => {
           checkpoint.completedPageAnalyses = mergeCompletedAnalyses(
             checkpoint.completedPageAnalyses ?? [],
