@@ -1620,14 +1620,17 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         checkpoint = normalizeCheckpoint(updated.checkpoint);
       }
     };
-    const resolveAnswers = () => semanticValidation === "deferred"
-      ? resolveGenerativeAnswerFirstV3({ ...answerInput, semanticValidation: "deferred" })
-      : semanticValidation === "free_direct"
-        ? resolveGenerativeAnswerFirstV3({ ...answerInput, semanticValidation: "free_direct" })
-        : resolveGenerativeAnswerFirstV3(answerInput);
     const answerResult = await tracePaidV3DirectStep(input.trace, "grounded_answer_collection", {
       phase: "grounded_answer_synthesis", configuredMaxAttempts: semanticValidation === "free_direct" ? 1 : undefined
-    }, resolveAnswers);
+    }, async (): Promise<Awaited<ReturnType<typeof resolveGenerativeAnswerFirstV3>>> => {
+      if (semanticValidation === "deferred") {
+        return resolveGenerativeAnswerFirstV3({ ...answerInput, semanticValidation: "deferred" });
+      }
+      if (semanticValidation === "free_direct") {
+        return resolveGenerativeAnswerFirstV3({ ...answerInput, semanticValidation: "free_direct" });
+      }
+      return resolveGenerativeAnswerFirstV3(answerInput);
+    });
     input.trace?.emit("checkpoint_observed", "grounded_answer_collection", {
       phase: "grounded_answer_synthesis",
       providerCallCount: answerResult.checkpoint.answerResults?.slice(1).filter(Boolean).length ?? 0
