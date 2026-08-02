@@ -141,7 +141,7 @@ export type GenerativeAnswerCardDraftTuple = [
   GenerativeSearchAnswerCardDraftV3,
   GenerativeSearchAnswerCardDraftV3
 ];
-interface ResolvedGenerativeAnswerFirstV3 {
+export interface ResolvedGenerativeAnswerFirstV3 {
   checkpoint: AnswerFirstV3CheckpointV2;
   answerCards: GenerativeAnswerCardTuple;
   reused: boolean;

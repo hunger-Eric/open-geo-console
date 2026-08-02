@@ -97,7 +97,7 @@ import {
   stableJsonHash,
   type ProviderDiscoveryCheckpointV1
 } from "./provider-discovery-pipeline";
-import { resolveGenerativeAnswerFirstV3, type AnswerFirstV3Checkpoint, type AnswerFirstV3CheckpointV2, type AnswerFirstV3StoredSource, type DeferredGenerativeAnswerFirstV3 } from "./answer-first-v3";
+import { resolveGenerativeAnswerFirstV3, type AnswerFirstV3Checkpoint, type AnswerFirstV3CheckpointV2, type AnswerFirstV3StoredSource, type DeferredGenerativeAnswerFirstV3, type ResolvedGenerativeAnswerFirstV3 } from "./answer-first-v3";
 import {
   calculateEffectiveCoverage,
   determineResumeStage,
@@ -1620,9 +1620,10 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         checkpoint = normalizeCheckpoint(updated.checkpoint);
       }
     };
+    // resolveGenerativeAnswerFirstV3 is overloaded; keep runtime selection and only time/log the call.
     const answerResult = await tracePaidV3DirectStep(input.trace, "grounded_answer_collection", {
       phase: "grounded_answer_synthesis", configuredMaxAttempts: semanticValidation === "free_direct" ? 1 : undefined
-    }, async (): Promise<Awaited<ReturnType<typeof resolveGenerativeAnswerFirstV3>>> => {
+    }, async (): Promise<DeferredGenerativeAnswerFirstV3 | ResolvedGenerativeAnswerFirstV3> => {
       if (semanticValidation === "deferred") {
         return resolveGenerativeAnswerFirstV3({ ...answerInput, semanticValidation: "deferred" });
       }
