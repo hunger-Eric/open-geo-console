@@ -30,6 +30,14 @@ describe("payment return presentation", () => {
       .toBe(dictionary.commerce.paymentRefunded);
   });
 
+  it("distinguishes a queued refund from one submitted to the provider", () => {
+    expect(getPaymentReturnView({ ...base, paymentStatus: "paid", refundStatus: "pending" }, "success", dictionary).message)
+      .toBe(dictionary.commerce.paymentRefundPending);
+    expect(getPaymentReturnView({ ...base, paymentStatus: "paid", refundStatus: "submitted" }, "success", dictionary).message)
+      .toBe(dictionary.commerce.paymentRefundSubmitted);
+    expect(dictionary.commerce.paymentRefundPending).not.toBe(dictionary.commerce.paymentRefundSubmitted);
+  });
+
   it("states that operator help is required when the authoritative refund failed", () => {
     const status = { ...base, paymentStatus: "paid" as const, fulfillmentStatus: "failed" as const, refundStatus: "failed" as const };
     expect(getPaymentReturnView(status, "success", dictionary).message)

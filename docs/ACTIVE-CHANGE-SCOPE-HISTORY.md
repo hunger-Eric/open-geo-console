@@ -4458,3 +4458,29 @@ allowlist; external actions remain zero; no deploy.
 - The failed report, job, order `bc9242f2-0822-44a5-b9ed-dbeb7848e11a`, pending
   refund, and pending artifact remain immutable historical state. This closed
   scope grants no replay, repair, deployment, model call, or new submission.
+
+---
+
+## 2026-08-02 - Paid V3 Direct first linear latency repair locally verified; attribution remained incomplete
+
+- The approved local-only repair kept `free_direct` through website page
+  analysis and website synthesis, forced those Direct model steps to one
+  attempt, removed the 600-second public-source reserve gate for Direct,
+  grouped visual evidence by canonical URL, and separated pending-refund copy
+  from submitted-refund copy. It did not deploy, create a report/order, call a
+  live model or payment platform, mutate historical data, or perform Git work.
+- Focused tests passed, lint completed with no errors, and the third authorized
+  canonical disposable PostgreSQL run passed its selected combined test with
+  receipt `pg-20260802064751-f4b8d3e0` on loopback port `58000`, PostgreSQL
+  tmpfs, zero skip, and normal run-owned container cleanup.
+- A subsequent read-only completeness audit found two remaining default retry
+  surfaces: page planning and provider-claim extraction. It also found that the
+  combined regression composed leaf functions instead of exercising the real
+  orchestration/readiness chain, so it could not prove every runtime carrier.
+- The current source writes progress `85` before website synthesis and does not
+  write `90` until synthesis, visual evidence, and AI-report persistence all
+  finish. The public status surface omits `currentPhase`, so the displayed 85%
+  cannot identify which operation is active or failed.
+- This scope is superseded by an opt-in diagnostic-trace scope. The retained
+  implementation and tests are local evidence only; no production usability
+  or live root-cause resolution is claimed.

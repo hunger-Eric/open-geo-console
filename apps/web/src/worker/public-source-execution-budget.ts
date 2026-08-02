@@ -17,8 +17,14 @@ export class PublicSourceAttemptDeferredError extends JobError {
   }
 }
 
-export function createPublicSourceAttemptBudget(remainingMs: number): PublicSourceAttemptBudget {
-  if (!Number.isFinite(remainingMs) || remainingMs < 600_000) throw new PublicSourceAttemptDeferredError();
+export function createPublicSourceAttemptBudget(
+  remainingMs: number,
+  options: { semanticValidation?: "legacy" | "deferred" | "free_direct" } = {}
+): PublicSourceAttemptBudget {
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) throw new PublicSourceAttemptDeferredError();
+  if (options.semanticValidation !== "free_direct" && remainingMs < 600_000) {
+    throw new PublicSourceAttemptDeferredError();
+  }
   return { searchMs: 180_000, retrievalMs: 180_000, artifactReserveMs: 180_000, cleanupMarginMs: 60_000 };
 }
 

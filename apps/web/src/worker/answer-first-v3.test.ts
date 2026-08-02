@@ -522,8 +522,21 @@ describe("generative answer-first V3 Worker service", () => {
     const q1 = generatedAnswer(ids[0], 0);
     const q2 = { ...generatedAnswer(ids[1], 1), sources: [] };
     const q3 = { ...generatedAnswer(ids[2], 2), answerText: "", sources: [], refusal: { code: "policy_refusal" as const, reason: "Provider declined." } };
-    const provider = generativeProvider([q2, q3]);
-    const result = await resolveGenerativeAnswerFirstV3({
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let maxActive = 0;
+    const provider = {
+      providerId: "fixture",
+      model: "fixture-model",
+      searchMode: "native_web_search",
+      answerWithSources: vi.fn(async ({ questionId }: { questionId: string }) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise<void>((resolve) => releases.push(() => { active -= 1; resolve(); }));
+        return questionId === ids[1] ? q2 : q3;
+      })
+    } satisfies GenerativeSearchAnswerProvider;
+    const pending = resolveGenerativeAnswerFirstV3({
       questionSet, provider, locale: "zh-CN", region: "CN", targetUrl: "https://target.example/",
       auditSources: [], targetPages: [], semanticValidation: "free_direct",
       seededQ1: {
@@ -536,6 +549,10 @@ describe("generative answer-first V3 Worker service", () => {
         answerResult: q1
       }
     });
+    await vi.waitFor(() => expect(provider.answerWithSources).toHaveBeenCalledTimes(2));
+    expect(maxActive).toBe(2);
+    releases.splice(0).forEach((release) => release());
+    const result = await pending;
 
     expect(provider.answerWithSources).toHaveBeenCalledTimes(2);
     expect(provider.answerWithSources.mock.calls.every(([request]) => request.semanticValidation === "free_direct")).toBe(true);

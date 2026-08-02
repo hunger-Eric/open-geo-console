@@ -60,6 +60,7 @@ export const CANONICAL_POSTGRES_TESTS = Object.freeze([
   "apps/web/src/db/schema-v42.postgres.test.ts",
   "apps/web/src/db/schema-v43.postgres.test.ts",
   "apps/web/src/db/schema-v44.postgres.test.ts",
+  "apps/web/src/worker/paid-v3-direct-linear-flow.postgres.test.ts",
   "apps/web/src/worker/report-v4-core-production.postgres.test.ts",
   "apps/web/src/worker/report-v4-enhancement-production.postgres.test.ts",
   "apps/web/src/worker/report-v4-independent-claims.postgres.test.ts"

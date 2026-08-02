@@ -36,6 +36,7 @@ import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-gu
 import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { createPublicSourceQuestionFanouts } from "./public-source-forensics";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
+import { paidV3TraceUrlIdentity, type PaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
 import type {
   ProviderDiscoveryCheckpointV1,
   ProviderDiscoveryIdentity,
@@ -60,6 +61,7 @@ export interface ProductionProviderDiscoveryInput {
   evidenceCutoffAt: string;
   extractionClient: JsonCompletionClient;
   extractionModel: string;
+  trace?: PaidV3DirectDebugTrace;
   forceSnapshotRefreshAfter?: string;
   getCheckpoint(): Promise<ProviderDiscoveryCheckpointV1 | null>;
   saveCheckpoint(checkpoint: ProviderDiscoveryCheckpointV1): Promise<void>;
@@ -127,6 +129,7 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
       candidates,
       passages: selected,
       bundle: verificationBundle,
+      trace: input.trace,
       signal
     });
     if (claims.length) {
@@ -402,7 +405,7 @@ function selectPassagesForFact(fact: { normalizedText?: string }, sourceEvidence
     serviceTerms: language, controlTerms, capabilityTerms, selectorVersion: PROVIDER_PASSAGE_SELECTOR_VERSION });
 }
 
-async function extractClaims(input: { client: JsonCompletionClient; locale: string; question: string; policy: ProviderQualificationPolicy; candidates: readonly ProviderCandidateQueryIdentity[]; passages: ProviderEvidencePassage[]; bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>; signal?: AbortSignal }): Promise<ProviderClaim[]> {
+async function extractClaims(input: { client: JsonCompletionClient; locale: string; question: string; policy: ProviderQualificationPolicy; candidates: readonly ProviderCandidateQueryIdentity[]; passages: ProviderEvidencePassage[]; bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>; trace?: PaidV3DirectDebugTrace; signal?: AbortSignal }): Promise<ProviderClaim[]> {
   const accepted: ProviderClaim[] = [];
   for (const source of input.bundle.sources) {
     const sourcePassages = input.passages.filter(({ sourceEvidenceId }) => sourceEvidenceId === source.id);
@@ -411,8 +414,15 @@ async function extractClaims(input: { client: JsonCompletionClient; locale: stri
     for (const candidate of input.candidates.filter(({ canonicalName }) => sourcePassages.some(({ matchedEntityTerms }) => matchedEntityTerms.some((term) => same(term, canonicalName))))) {
       let extracted: Awaited<ReturnType<typeof extractProviderClaimCandidates>>;
       try {
-        extracted = await extractProviderClaimCandidates(input.client, { locale: input.locale, question: input.question, policy: input.policy, candidate,
+        const extract = () => extractProviderClaimCandidates(input.client, { locale: input.locale, question: input.question, policy: input.policy, candidate,
           source: { sourceEvidenceId: source.id, canonicalUrl: source.canonicalUrl, title: observation?.title ?? source.registrableDomain, registrableDomain: source.registrableDomain }, passages: sourcePassages, signal: input.signal });
+        extracted = input.trace
+          ? await input.trace.span("provider_claim_extraction", {
+              phase: "provider_claim_extraction",
+              citationCount: sourcePassages.length,
+              ...paidV3TraceUrlIdentity(source.canonicalUrl)
+            }, extract)
+          : await extract();
       } catch (error) {
         if (isModelClaimContractError(error)) continue;
         throw error;
@@ -423,6 +433,13 @@ async function extractClaims(input: { client: JsonCompletionClient; locale: stri
         const validation = validateProviderClaimCandidate(candidateClaim, { passage, policy: input.policy, subjectEntityId: candidate.entityId,
           canonicalSubjectName: candidate.canonicalName, registrableDomain: source.registrableDomain, sourceAuthority: source.sourceCategory,
           sourceEligibility: source.retrievalState === "available" && !["unknown", "directory_or_reference", "community_or_ugc"].includes(source.sourceCategory) });
+        input.trace?.emit("gate_result", "provider_claim_validation", {
+          phase: "provider_claim_extraction",
+          validator: "validateProviderClaimCandidate",
+          outcome: validation.status,
+          ...(validation.status === "rejected" ? { errorCode: validation.rejected.reason } : {}),
+          ...paidV3TraceUrlIdentity(source.canonicalUrl)
+        });
         if (validation.status === "accepted") accepted.push(validation.accepted);
       }
     }

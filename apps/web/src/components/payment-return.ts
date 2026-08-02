@@ -59,7 +59,8 @@ export function getPaymentReturnView(status: PublicOrderStatus | null, hint: Ret
   if (!status) return { kind: hint === "cancel" ? "warning" : "pending", message: hint === "cancel" ? dictionary.commerce.paymentNotCompleted : dictionary.commerce.paymentConfirming } as const;
   if (status.refundStatus === "refunded") return { kind: "warning", message: dictionary.commerce.paymentRefunded } as const;
   if (status.refundStatus === "failed") return { kind: "warning", message: dictionary.commerce.paymentRefundFailed } as const;
-  if (status.refundStatus === "pending" || status.refundStatus === "submitted") return { kind: "warning", message: dictionary.commerce.paymentRefundPending } as const;
+  if (status.refundStatus === "pending") return { kind: "warning", message: dictionary.commerce.paymentRefundPending } as const;
+  if (status.refundStatus === "submitted") return { kind: "warning", message: dictionary.commerce.paymentRefundSubmitted } as const;
   if (status.paymentStatus === "cancelled") return { kind: "warning", message: dictionary.commerce.paymentCancelled } as const;
   if (status.paymentStatus === "failed") return { kind: "warning", message: dictionary.commerce.paymentNotCompleted } as const;
   if (status.paymentStatus !== "paid") return { kind: hint === "cancel" ? "warning" : "pending", message: hint === "cancel" ? dictionary.commerce.paymentNotCompleted : dictionary.commerce.paymentConfirming } as const;

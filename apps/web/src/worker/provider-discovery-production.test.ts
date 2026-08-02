@@ -8,6 +8,7 @@ import {
   sanitizePreVerificationCheckpoint
 } from "./provider-discovery-production";
 import { runProviderDiscoveryPipeline } from "./provider-discovery-pipeline";
+import { PAID_V3_DIRECT_DEBUG_TRACE_PREFIX, createPaidV3DirectDebugTrace, type PaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
 
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), providerBundle: vi.fn(), snapshotBundle: vi.fn(), appendClaims: vi.fn() }));
 const providerGuardHarness = vi.hoisted(() => {
@@ -51,6 +52,26 @@ beforeEach(() => {
 });
 
 describe("production provider discovery composition", () => {
+  it("traces the actual extraction and code validation boundary without model content", async () => {
+    const lines: string[] = [];
+    const trace = createPaidV3DirectDebugTrace({
+      jobId: "job-1", reportId: "report-1", remainingMs: () => 400_000,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => lines.push(line)
+    })!;
+    const { context, extractionClient, passage } = providerGuardContext(trace);
+
+    await context.dependencies.extractClaims({ passages: [passage] });
+
+    expect(extractionClient.completeJson).toHaveBeenCalledTimes(1);
+    const events = lines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string; validator?: string });
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "step_started", step: "provider_claim_extraction" }),
+      expect.objectContaining({ kind: "step_succeeded", step: "provider_claim_extraction" }),
+      expect.objectContaining({ kind: "gate_result", step: "provider_claim_validation", validator: "validateProviderClaimCandidate" })
+    ]));
+    expect(lines.join("\n")).not.toContain(passage.exactExcerpt);
+  });
+
   it("blocks provider claim extraction before the application adapter is called", async () => {
     const { context, extractionClient, getCheckpoint, passage } = providerGuardContext();
     providerGuardHarness.state.blockedSite = "provider_claim";
@@ -418,7 +439,7 @@ describe("production provider discovery composition", () => {
   });
 });
 
-function providerGuardContext() {
+function providerGuardContext(trace?: PaidV3DirectDebugTrace) {
   const passage = {
     passageId: "passage-alpha",
     sourceEvidenceId: "source-alpha",
@@ -497,6 +518,7 @@ function providerGuardContext() {
     evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
     extractionModel: "fixture-model",
     extractionClient,
+    trace,
     getCheckpoint,
     saveCheckpoint: async () => undefined
   });

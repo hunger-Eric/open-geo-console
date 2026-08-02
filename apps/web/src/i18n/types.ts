@@ -239,6 +239,7 @@ export interface Dictionary {
     paymentCompleted: string;
     paymentFailed: string;
     paymentRefundPending: string;
+    paymentRefundSubmitted: string;
     paymentRefunded: string;
     paymentRefundFailed: string;
     paymentStatusUnavailable: string;

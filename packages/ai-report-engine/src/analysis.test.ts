@@ -60,6 +60,16 @@ describe("analyzePageBatch semantic-validation seam", () => {
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
+  it("keeps Direct page analysis to one call even when the caller requests retries", async () => {
+    const client = clientReturning({
+      analyses: [{ ...mixedLanguageAnalysis.analyses[0], url: "https://other.example/" }]
+    });
+    await expect(analyzePageBatch(client, {
+      pages: [page], locale: "zh-CN", maxAttempts: 3, semanticValidation: "free_direct"
+    })).rejects.toThrow(/required page analyses/u);
+    expect(client.completeJson).toHaveBeenCalledOnce();
+  });
+
   it("R6-shaped foundation summary is not rejected by language gate when deferred for Free semantic review", async () => {
     // Mirrors protected-staging R6: language validation failed at analyses[0].summary
     // under legacy gates; deferred Free foundation must survive until ReportSemanticReview.

@@ -56,9 +56,9 @@ function compactPageEvidence(input: ReportSynthesisInput): Array<Record<string, 
 export function buildSynthesisPrompt(
   input: ReportSynthesisInput,
   correctionRequired: readonly string[] = [],
-  semanticValidation: "legacy" | "deferred" = "legacy"
+  semanticValidation: "legacy" | "deferred" | "free_direct" = "legacy"
 ): string {
-  const languageInstruction = semanticValidation === "deferred"
+  const languageInstruction = semanticValidation !== "legacy"
     ? naturalLanguageInstruction(input.locale)
     : reportLanguageInstruction(input.locale);
   return JSON.stringify({
@@ -149,9 +149,9 @@ export async function synthesizeWebsiteReport(
   input: ReportSynthesisInput,
   signal?: AbortSignal,
   correctionRequired: readonly string[] = [],
-  semanticValidation: "legacy" | "deferred" = "legacy"
+  semanticValidation: "legacy" | "deferred" | "free_direct" = "legacy"
 ): Promise<SynthesizeReportResult> {
-  const languageInstruction = semanticValidation === "deferred"
+  const languageInstruction = semanticValidation !== "legacy"
     ? naturalLanguageInstruction(input.locale)
     : reportLanguageInstruction(input.locale);
   const completion = await client.completeJson({
@@ -212,7 +212,7 @@ export async function synthesizeWebsiteReport(
     rejectedFindingIds: verified.rejectedFindingIds,
     rejectedEvidence: verified.rejectedEvidence
   };
-  if (semanticValidation !== "deferred") {
+  if (semanticValidation === "legacy") {
     try {
       assertWebsiteReportLanguage(finalReport, input);
     } catch (error) {
@@ -232,10 +232,12 @@ export async function synthesizeWebsiteReportWithRecovery(
     maxAttempts?: number;
     delay?: (milliseconds: number) => Promise<void>;
     signal?: AbortSignal;
-    semanticValidation?: "legacy" | "deferred";
+    semanticValidation?: "legacy" | "deferred" | "free_direct";
   } = {}
 ): Promise<SynthesizeReportResult> {
-  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+  const maxAttempts = options.semanticValidation === "free_direct"
+    ? 1
+    : Math.max(1, options.maxAttempts ?? 3);
   const delay = options.delay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {

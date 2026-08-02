@@ -68,6 +68,8 @@ describe("disposable PostgreSQL test runner", () => {
   it("selects inventoried focused tests and rejects arbitrary or escaping paths", async () => {
     await expect(selectTestFiles(["apps/web/src/db/recovery-state.postgres.test.ts"]))
       .resolves.toEqual(["apps/web/src/db/recovery-state.postgres.test.ts"]);
+    await expect(selectTestFiles(["apps/web/src/worker/paid-v3-direct-linear-flow.postgres.test.ts"]))
+      .resolves.toEqual(["apps/web/src/worker/paid-v3-direct-linear-flow.postgres.test.ts"]);
     await expect(selectTestFiles(["scripts/run-disposable-postgres-tests.test.ts"]))
       .rejects.toThrow(/canonical PG16|semantic-contract/i);
     await expect(selectTestFiles(["../outside.test.ts"]))
@@ -77,7 +79,10 @@ describe("disposable PostgreSQL test runner", () => {
   it("classifies every PostgreSQL test exactly once and fails inventory drift", () => {
     const discovered = [...CANONICAL_POSTGRES_TESTS, ...STAGING_PROFILE_POSTGRES_TESTS, ...POSTGRES_17_TESTS];
     expect(validatePostgresInventory(discovered)).toMatchObject({
-      canonical: expect.arrayContaining(["apps/web/src/db/recovery-state.postgres.test.ts"]),
+      canonical: expect.arrayContaining([
+        "apps/web/src/db/recovery-state.postgres.test.ts",
+        "apps/web/src/worker/paid-v3-direct-linear-flow.postgres.test.ts"
+      ]),
       stagingProfile: expect.arrayContaining(["apps/web/src/db/staging-security.postgres.test.ts"]),
       postgres17: expect.arrayContaining(["apps/web/src/db/report-v4-artifact-persistence.postgres.test.ts"])
     });

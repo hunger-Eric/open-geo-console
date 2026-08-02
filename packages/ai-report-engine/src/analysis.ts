@@ -22,7 +22,7 @@ import type {
 export interface AnalyzePagesInput {
   pages: readonly ExtractedPage[];
   locale: string;
-  semanticValidation?: "legacy" | "deferred";
+  semanticValidation?: "legacy" | "deferred" | "free_direct";
   batchSize?: number;
   maxCharactersPerPage?: number;
   signal?: AbortSignal;
@@ -272,14 +272,15 @@ export async function analyzePageBatch(
   client: JsonCompletionClient,
   input: AnalyzePagesInput
 ): Promise<PageAnalysisBatch> {
-  const semanticDeferred = input.semanticValidation === "deferred";
+  const semanticDirect = input.semanticValidation === "free_direct";
+  const semanticDeferred = input.semanticValidation === "deferred" || semanticDirect;
   const batchSize = Math.max(1, Math.min(input.batchSize ?? 4, 10));
   const maxCharacters = Math.max(1_000, Math.min(input.maxCharactersPerPage ?? 30_000, 100_000));
   const analyses: PageAnalysis[] = [...(input.completedAnalyses ?? [])];
   const completedUrls = new Set(analyses.map(({ url }) => canonicalUrl(url)));
   const pendingPages = input.pages.filter((page) => !completedUrls.has(canonicalUrl(page.url)));
   let modelId = client.configuredModel;
-  const maxAttempts = Math.max(1, input.maxAttempts ?? 3);
+  const maxAttempts = semanticDirect ? 1 : Math.max(1, input.maxAttempts ?? 3);
   const retryDelay = input.retryDelay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
 
   for (let start = 0; start < pendingPages.length; start += batchSize) {

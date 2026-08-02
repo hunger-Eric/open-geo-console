@@ -14,6 +14,7 @@ import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-sear
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
 import type { ReportV4SiteSnapshotBundle } from "@/db/report-v4-site-snapshots";
 import type { AnswerFirstV3CheckpointV2 } from "./answer-first-v3";
+import type { PaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
 import {
   buildFreeTeaserDiagnosisTargetPages,
   buildFreeV4DirectAnalysisInput,
@@ -33,6 +34,7 @@ export async function buildPaidV3DirectSemantics(input: {
   locale: string;
   signal?: AbortSignal;
   analyze?: (payload: unknown, signal: AbortSignal) => Promise<unknown>;
+  trace?: PaidV3DirectDebugTrace;
 }): Promise<PaidV3DirectSemantics> {
   const free = input.freeCheckpoint;
   if (!free.directCoreReceipt || !free.q1AnswerDraft ||
@@ -105,11 +107,20 @@ export async function buildPaidV3DirectSemantics(input: {
     try {
       const signal = input.signal ?? new AbortController().signal;
       signal.throwIfAborted();
-      const raw = await analyze(directInput.payload, signal);
-      signal.throwIfAborted();
-      const analysis = parseFreeV4DirectAnalysis(raw, {
-        allowedEvidenceHandles: directInput.handleBindings.map(({ handle }) => handle)
-      });
+      const invoke = async () => {
+        const raw = await analyze(directInput.payload, signal);
+        signal.throwIfAborted();
+        return parseFreeV4DirectAnalysis(raw, {
+          allowedEvidenceHandles: directInput.handleBindings.map(({ handle }) => handle)
+        });
+      };
+      const analysis = input.trace
+        ? await input.trace.span(`q${index + 1}_direct_analysis`, {
+            phase: "grounded_answer_synthesis",
+            providerCallOrdinal: 1,
+            configuredMaxAttempts: 1
+          }, invoke)
+        : await invoke();
       const analysisReceipt = createFreeV4DirectAnalysisReceipt({
         coreReceiptHash: coreReceipt.receiptHash,
         analysis,

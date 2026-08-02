@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildSynthesisPrompt, synthesizeWebsiteReport } from "./synthesis";
+import { buildSynthesisPrompt, synthesizeWebsiteReport, synthesizeWebsiteReportWithRecovery } from "./synthesis";
 import type { JsonCompletionClient, JsonCompletionRequest } from "./client";
 import type { ExtractedPage, ReportSynthesisInput } from "./types";
 
@@ -97,6 +97,18 @@ describe("website synthesis semantic-validation seam", () => {
     const result = await synthesizeWebsiteReport(client, input(), undefined, [], "deferred");
     expect(result.report.executiveSummary.overview).toBe("Target Brand offers API-first FBA logistics。");
     expect(result.report.organizationProfile.capabilities).toEqual(["Cloudflare Workers integration"]);
+    expect(client.completeJson).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Direct website synthesis to one call and fails malformed structure closed", async () => {
+    const invalid = modelOutput();
+    (invalid.dimensionScores as unknown[]).pop();
+    const client = clientReturning(invalid);
+    await expect(synthesizeWebsiteReportWithRecovery(client, input(), {
+      maxAttempts: 3,
+      semanticValidation: "free_direct",
+      delay: async () => undefined
+    })).rejects.toThrow();
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 

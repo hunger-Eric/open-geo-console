@@ -15,6 +15,17 @@ describe("public-source attempt budget", () => {
     expect(() => createPublicSourceAttemptBudget(599_999)).toThrow(PublicSourceAttemptDeferredError);
   });
 
+  it("lets Direct use the actual positive remaining job time without a fresh-attempt reserve", () => {
+    expect(createPublicSourceAttemptBudget(244_000, { semanticValidation: "free_direct" })).toEqual({
+      searchMs: 180_000,
+      retrievalMs: 180_000,
+      artifactReserveMs: 180_000,
+      cleanupMarginMs: 60_000
+    });
+    expect(() => createPublicSourceAttemptBudget(0, { semanticValidation: "free_direct" }))
+      .toThrow(PublicSourceAttemptDeferredError);
+  });
+
   it("splits propagated sub-budgets into bounded per-unit deadlines", () => {
     expect(splitPublicSourceSubBudgetMs(180_000, 6)).toBe(30_000);
     expect(splitPublicSourceSubBudgetMs(180_000, 12)).toBe(15_000);

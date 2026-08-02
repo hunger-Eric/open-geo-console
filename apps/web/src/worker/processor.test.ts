@@ -10,7 +10,7 @@ const boundaryMocks = vi.hoisted(() => ({
   createReportV4AcceptanceObserver: vi.fn(), getGeoReport: vi.fn(),
   fetchPlannedPagesWithRecovery: vi.fn(), calculateEffectiveCoverage: vi.fn(),
   analyzePageBatch: vi.fn(), synthesizeWebsiteReportWithRecovery: vi.fn(),
-  saveAiReport: vi.fn(), purgeExpiredCrawlContent: vi.fn(),
+  saveAiReport: vi.fn(), purgeExpiredCrawlContent: vi.fn(), auditSite: vi.fn(), captureVisualEvidence: vi.fn(),
   hasPriorJobErrorFingerprint: vi.fn(async () => false)
 }));
 const evidenceGateMocks = vi.hoisted(() => ({
@@ -66,6 +66,12 @@ vi.mock("@/db/crawl-evidence", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/db/crawl-evidence")>(),
   purgeExpiredCrawlContent: boundaryMocks.purgeExpiredCrawlContent
 }));
+vi.mock("@open-geo-console/geo-auditor", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@open-geo-console/geo-auditor")>(), auditSite: boundaryMocks.auditSite
+}));
+vi.mock("./visual-evidence", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./visual-evidence")>(), captureReportVisualEvidence: boundaryMocks.captureVisualEvidence
+}));
 vi.mock("./report-v4-acceptance-observer", async (importOriginal) => ({
   ...await importOriginal<typeof import("./report-v4-acceptance-observer")>(),
   createReportV4AcceptanceObserver: boundaryMocks.createReportV4AcceptanceObserver
@@ -118,6 +124,7 @@ import {
   type CompletedPageAnalysis
 } from "./recovery";
 import { PublicSourceSnapshotUnavailableError } from "./public-source-snapshot-resolver";
+import { PAID_V3_DIRECT_DEBUG_TRACE_PREFIX } from "./paid-v3-direct-debug-trace";
 
 // @requirement GEO-V4-CONTRACT-01
 // @requirement GEO-V4-DELIVERY-01
@@ -897,6 +904,84 @@ describe("marker-present page analysis authority and resume identity", () => {
     expect(resolveRequiredDeferredPageAnalysisAuthority("deferred", checkpoint)).toEqual(deferred());
     expect(mergeCompletedAnalyses([], [analysis], new Map([[url, pageEvidence]]), deferredPageAnalysisAuthority(marker))[0]!.analysisAuthority)
       .toEqual(deferred());
+  });
+
+  it("keeps a Paid Direct root marker in Direct mode for page analysis and synthesis", () => {
+    const direct = {
+      tier: "deep",
+      artifactContract: "combined_geo_report_v3",
+      recommendationReportVersion: 3,
+      reason: "standard"
+    } as never;
+    const checkpoint = { freeDirectSemanticsVersion: "free-v4-direct-semantics-v1" } as never;
+    expect(resolveWebsiteAnalysisSemanticValidation(direct, checkpoint)).toBe("free_direct");
+    expect(resolveRequiredDeferredPageAnalysisAuthority("free_direct", checkpoint)).toBeNull();
+  });
+
+  it("separates the coarse 85 percent bracket into synthesis, visual, and persistence trace spans", async () => {
+    const planned = { url, pageType: "home" as const, priority: 100, reason: "checkpoint" };
+    const job = v4Job({
+      fulfillmentMethodology: "public_search_source_forensics_v1",
+      recommendationReportVersion: 3,
+      artifactContract: "combined_geo_report_v3",
+      siteSnapshotId: null,
+      currentPhase: "page_analysis",
+      stage: "analyzing",
+      maxAttempts: 1,
+      checkpoint: {
+        freeDirectSemanticsVersion: "free-v4-direct-semantics-v1",
+        discoverySnapshot: { targetUrl: url, candidates: [planned], robotsPolicy: { allowed: true }, estimatedPages: 1 },
+        targetPageCount: 1, rankedCandidates: [planned], rankedCandidateUrls: [url],
+        effectivePlan: [planned], effectivePlannedUrls: [url], planningCompleted: true,
+        completedCrawlUrls: [url], completedPageAnalyses: []
+      }
+    } as Partial<ScanJobRow>);
+    const crawlPage = { page: { url, pageType: "home" as const, title: "Home", text: "body" }, httpStatus: 200, contentHash: "content-home" };
+    const persistError = new Error("sentinel persistence failure");
+    const previousAi = configureTestAi();
+    const previousTrace = process.env.OGC_PAID_V3_DEBUG_TRACE;
+    process.env.OGC_PAID_V3_DEBUG_TRACE = "1";
+    const traceLines: string[] = [];
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation((line) => { traceLines.push(String(line)); });
+    boundaryMocks.getGeoReport.mockReset().mockResolvedValue({ id: job.reportId, url, technicalStatus: "completed", siteKey: "example.com" });
+    boundaryMocks.getScanJob.mockReset().mockResolvedValue(job);
+    boundaryMocks.failScanJob.mockReset().mockResolvedValue({ ...job, stage: "failed", executionState: "failed" });
+    boundaryMocks.heartbeatScanJob.mockReset().mockResolvedValue(true);
+    boundaryMocks.fetchPlannedPagesWithRecovery.mockReset().mockResolvedValue({
+      pages: [crawlPage], checkpoint: { ...job.checkpoint, completedCrawlUrls: [url] }, exhaustedTransientUrls: []
+    });
+    boundaryMocks.auditSite.mockReset().mockResolvedValue({ url, pages: [] });
+    boundaryMocks.analyzePageBatch.mockReset().mockResolvedValue({ analyses: [analysis], modelId: "fixture" });
+    boundaryMocks.synthesizeWebsiteReportWithRecovery.mockReset().mockResolvedValue({
+      report: { tier: "deep", targetUrl: url, findings: [], organizationProfile: {}, provenance: {} },
+      rejectedFindingIds: [], rejectedEvidence: []
+    });
+    boundaryMocks.captureVisualEvidence.mockReset().mockResolvedValue(undefined);
+    boundaryMocks.saveAiReport.mockReset().mockRejectedValue(persistError);
+    let revision = 0;
+    boundaryMocks.checkpointScanJob.mockReset().mockImplementation(async (_id, _workerId, input) => ({
+      ...job, stage: input.stage, progress: input.progress, checkpoint: input.checkpoint ?? job.checkpoint,
+      checkpointRevision: ++revision, currentPhase: input.phase ?? "website_synthesis", phaseAttempt: 0,
+      resumeGeneration: job.resumeGeneration, plannedPages: input.plannedPages ?? 1,
+      successfulPages: input.successfulPages ?? 1, failedPages: input.failedPages ?? 0
+    }));
+    try {
+      await expect(processScanJob(job, "worker-1")).resolves.toBeUndefined();
+      const events = traceLines.filter((line) => line.startsWith(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX))
+        .map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string });
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "step_succeeded", step: "website_synthesis" }),
+        expect.objectContaining({ kind: "step_succeeded", step: "visual_evidence" }),
+        expect.objectContaining({ kind: "step_failed", step: "ai_report_persist" })
+      ]));
+      expect(boundaryMocks.failScanJob).toHaveBeenCalledTimes(1);
+      expect(traceLines.join("\n")).not.toContain(persistError.message);
+    } finally {
+      consoleInfo.mockRestore();
+      restoreTestAi(previousAi);
+      restoreEnvironment("OGC_PAID_V3_DEBUG_TRACE", previousTrace);
+      vi.clearAllMocks();
+    }
   });
 
   it("marker-present partial legacy checkpoint: incompatible entries are not reusable", () => {

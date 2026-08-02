@@ -9,6 +9,7 @@ import {
 } from "@open-geo-console/ai-report-engine";
 import { describe, expect, it, vi } from "vitest";
 import { buildPaidV3DirectSemantics } from "./paid-v3-direct-semantics";
+import { PAID_V3_DIRECT_DEBUG_TRACE_PREFIX, createPaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
 
 describe("Paid V3 Direct semantics", () => {
   it("reuses Q1, calls Q2/Q3 analysis once, and keeps an invalid analysis incomplete", async () => {
@@ -26,12 +27,23 @@ describe("Paid V3 Direct semantics", () => {
       coreReceiptHash: q1Core.receiptHash, analysis: q1Analysis, handleBindings: q1Bindings,
       nonProseProjection: { questionId: "q1", analysisStatus: "completed" }
     });
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let maxActive = 0;
     const analyze = vi.fn(async (payload: unknown) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise<void>((resolve) => releases.push(() => { active -= 1; resolve(); }));
       const question = (payload as { question: string }).question;
       if (question === "Question 3") return { wrong: true };
       return { summary: "Q2 analysis", observations: ["Observation"], recommendations: [], evidenceHandles: ["S1"] };
     });
-    const result = await buildPaidV3DirectSemantics({
+    const traceLines: string[] = [];
+    const trace = createPaidV3DirectDebugTrace({
+      jobId: "job-1", reportId: "report-1", remainingMs: () => 500_000,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => traceLines.push(line)
+    })!;
+    const pending = buildPaidV3DirectSemantics({
       questionSet: { contentHash: "a".repeat(64) } as never,
       answerCards: cards,
       answerCheckpoint: {
@@ -48,14 +60,25 @@ describe("Paid V3 Direct semantics", () => {
       targetUrl: "https://example.com",
       foundation: { organizationProfile: { organizationName: "Example", legalEntity: null, brandNames: [] } } as never,
       locale: "en",
-      analyze
+      analyze,
+      trace
     });
+    await vi.waitFor(() => expect(analyze).toHaveBeenCalledTimes(2));
+    expect(maxActive).toBe(2);
+    releases.splice(0).forEach((release) => release());
+    const result = await pending;
 
     expect(analyze).toHaveBeenCalledTimes(2);
     expect(result.questions.map(({ analysisStatus }) => analysisStatus)).toEqual(["completed", "completed", "incomplete"]);
     expect(result.questions[0]!.coreReceipt).toBe(q1Core);
     expect(result.questions[1]!.analysis?.summary).toBe("Q2 analysis");
     expect(result.questions[2]!.analysis).toBeUndefined();
+    const traceEvents = traceLines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string });
+    expect(traceEvents.filter(({ kind }) => kind === "step_started").map(({ step }) => step).sort()).toEqual([
+      "q2_direct_analysis", "q3_direct_analysis"
+    ]);
+    expect(traceEvents.filter(({ kind, step }) => kind === "step_succeeded" && step === "q2_direct_analysis")).toHaveLength(1);
+    expect(traceEvents.filter(({ kind, step }) => kind === "step_failed" && step === "q3_direct_analysis")).toHaveLength(1);
     expect(parsePaidV3DirectSemantics(result, ["q1", "q2", "q3"])).toEqual(result);
     expect(() => assertPaidV3DirectAnswerCardBindings({
       questionSetIdentity: "a".repeat(64), answerCards: cards, directSemantics: result

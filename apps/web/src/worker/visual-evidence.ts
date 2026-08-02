@@ -5,6 +5,7 @@ import type { EvidenceAssetKind } from "@/db/schema";
 import { createEvidenceStorage, evidenceStorageKey, type EvidenceStorage } from "@/evidence/storage";
 import { resolveSafeUrl } from "@open-geo-console/site-crawler";
 import { configuredPublicDnsResolver } from "@/server/safe-fetch";
+import { paidV3TraceUrlIdentity, type PaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
 
 const VIEWPORT = { width: 1440, height: 1000 } as const;
 const allowBenchmarkNetwork = process.env.OGC_ALLOW_BENCHMARK_NETWORK === "true";
@@ -48,12 +49,24 @@ export function visualEvidenceHash(request: Pick<CaptureRequest, "citation" | "c
   ].join("\0")).digest("hex");
 }
 
+export function groupVisualEvidenceRequests(requests: readonly CaptureRequest[]): CaptureRequest[][] {
+  const groups = new Map<string, CaptureRequest[]>();
+  for (const request of requests) {
+    const key = canonicalUrl(request.citation.url);
+    const group = groups.get(key) ?? [];
+    group.push(request);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
 export async function captureReportVisualEvidence(input: {
   reportId: string;
   jobId: string;
   report: AiWebsiteReportV1;
   pages: VisualEvidencePage[];
   storage?: EvidenceStorage;
+  trace?: PaidV3DirectDebugTrace;
 }): Promise<void> {
   const requests = buildVisualEvidenceRequests(input.report, input.pages);
   if (requests.length === 0) return;
@@ -61,7 +74,13 @@ export async function captureReportVisualEvidence(input: {
   let storage: EvidenceStorage;
   try {
     storage = input.storage ?? createEvidenceStorage();
-  } catch {
+  } catch (error) {
+    input.trace?.emit("step_failed", "visual_storage_configuration", {
+      phase: "website_synthesis",
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      citationCount: requests.length,
+      uniqueUrlCount: groupVisualEvidenceRequests(requests).length
+    });
     await Promise.all(requests.map((request) => saveUnavailable(input, request, intendedKind(request), "storage_configuration")));
     return;
   }
@@ -69,15 +88,19 @@ export async function captureReportVisualEvidence(input: {
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: process.env.OGC_BROWSER_HEADLESS !== "false" });
   try {
-    for (const request of requests) {
-      await captureCitation(input, request, storage, browser).catch(async (error) => {
-        console.error("Visual evidence citation capture failed.", {
-          reportId: input.reportId,
-          findingId: request.findingId,
-          citationIndex: request.citationIndex,
-          error: sanitizedCaptureError(error)
-        });
-        await saveUnavailable(input, request, intendedKind(request), "capture_failed");
+    for (const group of groupVisualEvidenceRequests(requests)) {
+      const first = group[0];
+      const details = {
+        phase: "website_synthesis",
+        citationCount: group.length,
+        ...(first ? paidV3TraceUrlIdentity(first.citation.url) : {})
+      };
+      const capture = () => captureUrlGroup(input, group, storage, browser);
+      await (input.trace ? input.trace.span("visual_url_navigation", details, capture) : capture()).catch(async (error) => {
+        await Promise.all(group.map(async (request) => {
+          logCaptureFailure(input.reportId, request, error);
+          await saveUnavailable(input, request, intendedKind(request), "capture_failed");
+        }));
       });
     }
   } finally {
@@ -85,12 +108,14 @@ export async function captureReportVisualEvidence(input: {
   }
 }
 
-async function captureCitation(
-  input: Pick<Parameters<typeof captureReportVisualEvidence>[0], "reportId" | "jobId">,
-  request: CaptureRequest,
+async function captureUrlGroup(
+  input: Pick<Parameters<typeof captureReportVisualEvidence>[0], "reportId" | "jobId" | "trace">,
+  requests: readonly CaptureRequest[],
   storage: EvidenceStorage,
   browser: Awaited<ReturnType<(Awaited<typeof import("playwright")>)["chromium"]["launch"]>>
 ) {
+  const first = requests[0];
+  if (!first) return;
   const context = await browser.newContext({
     userAgent: "OpenGeoConsoleBot/1.0 (+https://github.com/open-geo-console)",
     javaScriptEnabled: true,
@@ -110,47 +135,76 @@ async function captureCitation(
         await route.abort();
       }
     });
-    await resolveSafeUrl(request.citation.url, { allowBenchmarkNetwork, resolver });
-    await page.goto(request.citation.url, { waitUntil: "networkidle", timeout: 30_000 });
+    await resolveSafeUrl(first.citation.url, { allowBenchmarkNetwork, resolver });
+    await page.goto(first.citation.url, { waitUntil: "networkidle", timeout: 30_000 });
     await resolveSafeUrl(page.url(), { allowBenchmarkNetwork, resolver });
     const capturedAt = new Date();
 
-    if (request.severity === "critical") {
-      const rect = await locateQuoteRect(page, request.citation.quote);
-      if (rect) {
-        try {
-          await persistCapture(input, request, storage, "issue_crop", await page.screenshot({
-            type: "jpeg",
-            quality: 88,
-            clip: paddedClip(rect)
-          }), capturedAt);
-          await persistCapture(input, request, storage, "context", await page.screenshot({
-            type: "jpeg",
-            quality: 68,
-            fullPage: false
-          }), capturedAt);
-          return;
-        } catch {
-          // A stale or oversized DOM rectangle must degrade to a readable viewport,
-          // not make the verified citation disappear from the report.
-        }
-      }
-      await persistCapture(input, request, storage, "viewport", await page.screenshot({
-        type: "jpeg",
-        quality: 78,
-        fullPage: false
-      }), capturedAt);
-      return;
+    for (const request of requests) {
+      const capture = () => captureCitationOnPage(input, request, storage, page, capturedAt);
+      await (input.trace ? input.trace.span("visual_citation_capture", {
+        phase: "website_synthesis",
+        citationCount: 1,
+        ...paidV3TraceUrlIdentity(request.citation.url)
+      }, capture) : capture()).catch(async (error) => {
+        logCaptureFailure(input.reportId, request, error);
+        await saveUnavailable(input, request, intendedKind(request), "capture_failed");
+      });
     }
-
-    await persistCapture(input, request, storage, "compact", await page.screenshot({
-      type: "jpeg",
-      quality: 74,
-      fullPage: false
-    }), capturedAt);
   } finally {
     await context.close();
   }
+}
+
+async function captureCitationOnPage(
+  input: Pick<Parameters<typeof captureReportVisualEvidence>[0], "reportId" | "jobId">,
+  request: CaptureRequest,
+  storage: EvidenceStorage,
+  page: import("playwright").Page,
+  capturedAt: Date
+) {
+  if (request.severity === "critical") {
+    const rect = await locateQuoteRect(page, request.citation.quote);
+    if (rect) {
+      try {
+        await persistCapture(input, request, storage, "issue_crop", await page.screenshot({
+          type: "jpeg",
+          quality: 88,
+          clip: paddedClip(rect)
+        }), capturedAt);
+        await persistCapture(input, request, storage, "context", await page.screenshot({
+          type: "jpeg",
+          quality: 68,
+          fullPage: false
+        }), capturedAt);
+        return;
+      } catch {
+        // A stale or oversized DOM rectangle must degrade to a readable viewport,
+        // not make the verified citation disappear from the report.
+      }
+    }
+    await persistCapture(input, request, storage, "viewport", await page.screenshot({
+      type: "jpeg",
+      quality: 78,
+      fullPage: false
+    }), capturedAt);
+    return;
+  }
+
+  await persistCapture(input, request, storage, "compact", await page.screenshot({
+    type: "jpeg",
+    quality: 74,
+    fullPage: false
+  }), capturedAt);
+}
+
+function logCaptureFailure(reportId: string, request: CaptureRequest, error: unknown): void {
+  console.error("Visual evidence citation capture failed.", {
+    reportId,
+    findingId: request.findingId,
+    citationIndex: request.citationIndex,
+    error: sanitizedCaptureError(error)
+  });
 }
 
 async function locateQuoteRect(page: import("playwright").Page, quote: string) {
