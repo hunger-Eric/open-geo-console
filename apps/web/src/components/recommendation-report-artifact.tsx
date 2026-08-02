@@ -106,7 +106,7 @@ export function RecommendationReportArtifact({ model }: { model: RecommendationP
         </ul>
         <div className="citation-list">{report.citationSources.map((source) => (
           <article className="citation-row" key={source.id}>
-            <div className="grade-mark" aria-label={`${t.grades}: ${gradeByCitation.get(source.id) ?? "D"}`}>{gradeByCitation.get(source.id) ?? "D"}</div>
+            <div className={`grade-mark grade-mark-${(gradeByCitation.get(source.id) ?? "D").toLowerCase()}`} aria-label={`${t.grades}: ${gradeByCitation.get(source.id) ?? "D"}`}>{gradeByCitation.get(source.id) ?? "D"}</div>
             <div><p className="citation-category">{source.category} · #{source.providerOrder + 1}</p><h3><a href={source.url}>{source.title}</a></h3>
               <p>{source.retrieval.verifiedExcerpt ?? `${t.unknown}: ${source.retrieval.state}`}</p>
               <small>{model.locale === "zh" ? "观察到的引用关联；不表示该来源导致排序。" : "Observed citation association; this does not mean the source caused a ranking."}</small>

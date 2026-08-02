@@ -69,7 +69,7 @@ function QuestionCard({
         <p className="eyebrow">{copy.question} {question.order}</p>
         <h2 id={titleId}>{question.questionText}</h2>
       </div>
-      <p className="answer-status">{question.status === "answered" ? copy.answered : copy.unavailableStatus}</p>
+      <p className={`answer-status answer-status-${question.status}`}>{question.status === "answered" ? copy.answered : copy.unavailableStatus}</p>
     </header>
 
     <section className="answer-conclusion" data-question-stage="conclusion" aria-labelledby={`${titleId}-conclusion`}>
@@ -132,7 +132,7 @@ function QuestionSources({ copy, sources }: { readonly copy: Copy; readonly sour
     <h4>{copy.sources}</h4>
     <ol className="source-card-list">
       {sources.map((source, index) => <li className="source-card" data-question-source="true" key={source.sourceId}>
-        <div className="source-ordinal" aria-hidden="true">[{index + 1}]</div>
+        <div className="source-ordinal" aria-hidden="true">{index + 1}</div>
         <div className="source-content">
           <h5>
             <a href={source.canonicalUrl} rel="noreferrer noopener" target="_blank">{source.title}</a>
