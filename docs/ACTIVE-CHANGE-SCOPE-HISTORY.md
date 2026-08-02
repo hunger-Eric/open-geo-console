@@ -4583,3 +4583,43 @@ allowlist; external actions remain zero; no deploy.
   mutation, Git operation, commit, or push was performed. Real Protected
   Staging usefulness still requires separate deployment and fresh-report
   authority.
+
+---
+
+## 2026-08-02 - Paid V3 snapshot binding and one-attempt repair delivered; live acceptance separate
+
+- The approved scope added schema V45 so exact standard Paid V3 jobs can bind
+  their completed public-search market snapshots while preserving the exact V2
+  contract and existing identity/freshness/ownership/cost guards.
+- Paid V3 Direct page planning, page-analysis batches, and website synthesis
+  were configured for one model attempt, and the real four-reference
+  PostgreSQL regression was added.
+- The change was committed and delivered to `origin/main` as
+  `91ef797dc7509060187b6db90ffaa7f1c49249e3`.
+- A separately observed successful report was executed on the earlier release
+  `c5f4ae5791e35eb7b47833ef15131bb635ac91ec`; it proves the Staging Paid V3
+  path but is not live acceptance of the later `91ef797` repair itself.
+- This scope is closed. No further code, test, database, runtime, deployment or
+  Git authority remains from it.
+
+---
+
+## 2026-08-02 - Paid V3 Protected Staging success evidence versioned
+
+- The user approved a documentation-only closeout for the successfully opened
+  private HTML report `646a6d93-ed3c-4d66-847f-93535f0075be`.
+- PostgreSQL and release-ledger evidence proves payment `paid`, fulfillment
+  `completed`, refund `not_required`, job progress `100` at attempt `1/1`, six
+  successful pages, and one active `combined_geo_report_v3` artifact.
+- The executed source was `c5f4ae5791e35eb7b47833ef15131bb635ac91ec`.
+  Later `main` revision `91ef797dc7509060187b6db90ffaa7f1c49249e3`
+  is explicitly outside this live-acceptance claim.
+- Email remained `queued` with zero attempts and is excluded from the accepted
+  path. The browser observation is user-supplied; independent browser QA was
+  blocked by Vercel SSO and produced no screenshot.
+- The durable record is
+  `docs/operations/evidence/2026-08-02-paid-v3-direct-staging-success.md`,
+  versioned by annotated evidence tag
+  `paid-v3-staging-acceptance-v1.0.0`. It is not a package or Production
+  release and grants no optimization, deployment, runtime, or historical-data
+  authority.
