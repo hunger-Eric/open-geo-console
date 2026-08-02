@@ -2,9 +2,9 @@
 
 import { CircleAlert, CircleCheck, Loader2, RefreshCw } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dictionary } from "@/i18n";
-import { fetchPaymentReturnStatus, getPaymentReturnView, isTerminalPaymentReturn, type PublicOrderStatus, type ReturnHint } from "./payment-return";
+import { attemptPaymentCompletionHandoff, fetchPaymentReturnStatus, getPaymentReturnView, isTerminalPaymentReturn, type PublicOrderStatus, type ReturnHint } from "./payment-return";
 
 interface ReturnContext { orderId: string; hint: ReturnHint }
 
@@ -37,6 +37,7 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [pollingStopped, setPollingStopped] = useState(false);
+  const accessAttemptedFor = useRef<string | null>(null);
 
   const loadStatus = useCallback(async (signal?: AbortSignal) => {
     if (!context) return null;
@@ -53,6 +54,17 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
       const next = await response.json() as PublicOrderStatus;
       setStatus(next);
       setUnavailable(false);
+      const expectedDestination = `/reports/${encodeURIComponent(reportId)}/report.html`;
+      await attemptPaymentCompletionHandoff({
+        status: next,
+        orderId: context.orderId,
+        attemptedFor: accessAttemptedFor.current,
+        completionUrl: `/api/reports/${encodeURIComponent(reportId)}/orders/${encodeURIComponent(context.orderId)}/completion-access`,
+        expectedDestination,
+        markAttempted: (orderId) => { accessAttemptedFor.current = orderId; },
+        navigate: (destination) => window.location.replace(destination),
+        signal
+      });
       return next;
     } catch {
       if (!signal?.aborted) setUnavailable(true);

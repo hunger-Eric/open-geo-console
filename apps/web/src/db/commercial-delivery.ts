@@ -154,12 +154,17 @@ export async function claimEmailDeliveries(input: {
   limit?: number;
   leaseSeconds?: number;
   orderId?: string;
+  createdAtOrAfter?: Date;
 }): Promise<EmailDeliveryRow[]> {
   const limit = input.limit ?? 10;
   const leaseSeconds = input.leaseSeconds ?? 60;
   const orderId = input.orderId?.trim() ?? null;
+  const createdAtOrAfter = input.createdAtOrAfter ?? null;
   assertLeaseInput(input.owner, limit, leaseSeconds);
   if (orderId !== null && !isUuid(orderId)) throw new Error("A valid email order ID is required.");
+  if (createdAtOrAfter && !Number.isFinite(createdAtOrAfter.getTime())) {
+    throw new Error("A valid email activation timestamp is required.");
+  }
   await ensureDatabase();
   const rows = await getSqlClient()<{ id: string }[]>`
     UPDATE email_deliveries
@@ -171,6 +176,8 @@ export async function claimEmailDeliveries(input: {
       SELECT id FROM email_deliveries
       WHERE state = 'queued'
         AND (${orderId}::text IS NULL OR order_id = ${orderId})
+        AND (${createdAtOrAfter?.toISOString() ?? null}::timestamptz IS NULL
+          OR created_at >= ${createdAtOrAfter?.toISOString() ?? null}::timestamptz)
         AND next_retry_at <= now()
         AND (lease_expires_at IS NULL OR lease_expires_at <= now())
       ORDER BY next_retry_at, created_at, id

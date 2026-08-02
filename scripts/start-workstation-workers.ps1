@@ -3,6 +3,7 @@ param(
   [switch]$SkipBuild,
   [switch]$PrepareOnly,
   [switch]$PrepareStagingOnly,
+  [switch]$InitializeStagingEmailActivation,
   [string]$RuntimeInputRoot
 )
 
@@ -142,8 +143,81 @@ function Write-RuntimeEnv {
   if ($LASTEXITCODE -ne 0) { throw "Could not restrict permissions on $path." }
 }
 
+function Write-StagingCommerceEnv {
+  $values = @{}
+  $commerceSourceNames = @(
+    "DATABASE_URL", "COMMERCE_MODE", "OGC_TEST_EMAIL_RECIPIENT", "RESEND_API_KEY",
+    "RESEND_FROM_EMAIL", "OGC_REPLY_TO_EMAIL", "OGC_TOKEN_HASH_SECRET", "OGC_DATABASE_POOL_SIZE"
+  )
+  Merge-EnvFile $values (Join-Path $repoRoot ".vercel\.env.preview.local") -AllowedNames $commerceSourceNames
+  Merge-EnvFile $values (Join-Path $webRoot ".env.staging.local") -AllowedNames $commerceSourceNames
+  Merge-EnvFile $values (Join-Path $runtimeDirectory "staging.env") -AllowedNames $commerceSourceNames
+  $values["OGC_DEPLOYMENT_PROFILE"] = "staging"
+  $values["VERCEL_ENV"] = "preview"
+  $values["NODE_ENV"] = "production"
+  $values["OGC_STAGING_EMAIL_INTERVAL_MS"] = "5000"
+  $values["OGC_REPORT_BASE_URL"] = "https://open-geo-console-staging-itheheda.vercel.app"
+  if ($values["COMMERCE_MODE"] -ne "test") { throw "Staging email delivery requires COMMERCE_MODE=test." }
+
+  $path = Join-Path $runtimeDirectory "staging-commerce.env"
+  $activationPath = Join-Path $runtimeDirectory "staging-commerce.activation"
+  $activation = $null
+  if (Test-Path -LiteralPath $path) {
+    foreach ($line in Get-Content -LiteralPath $path) {
+      if ($line -match '^OGC_STAGING_EMAIL_ACTIVATION_AT=(.*)$') { $activation = Convert-EnvValue $matches[1] }
+    }
+  }
+  $persistedActivation = if (Test-Path -LiteralPath $activationPath) {
+    (Get-Content -LiteralPath $activationPath -Raw).Trim()
+  } else { $null }
+  if (-not [string]::IsNullOrWhiteSpace($activation) -and
+      -not [string]::IsNullOrWhiteSpace($persistedActivation) -and
+      $activation -ne $persistedActivation) {
+    throw "The Staging email activation authorities disagree."
+  }
+  if ($InitializeStagingEmailActivation -and
+      (-not [string]::IsNullOrWhiteSpace($activation) -or
+       -not [string]::IsNullOrWhiteSpace($persistedActivation))) {
+    throw "Staging email activation is already initialized."
+  }
+  if ([string]::IsNullOrWhiteSpace($activation)) { $activation = $persistedActivation }
+  if ([string]::IsNullOrWhiteSpace($activation)) {
+    if (-not $InitializeStagingEmailActivation) {
+      throw "Staging email activation is absent; initialize it explicitly once."
+    }
+    $activation = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", [Globalization.CultureInfo]::InvariantCulture)
+  }
+  $parsedActivation = [DateTime]::MinValue
+  if (-not [DateTime]::TryParseExact($activation, "yyyy-MM-ddTHH:mm:ss.fffZ",
+      [Globalization.CultureInfo]::InvariantCulture,
+      [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal,
+      [ref]$parsedActivation) -or $parsedActivation.Kind -ne [DateTimeKind]::Utc) {
+    throw "The Staging email activation timestamp is invalid."
+  }
+  $values["OGC_STAGING_EMAIL_ACTIVATION_AT"] = $activation
+
+  $required = @(
+    "DATABASE_URL", "OGC_DEPLOYMENT_PROFILE", "VERCEL_ENV", "COMMERCE_MODE",
+    "OGC_TEST_EMAIL_RECIPIENT", "RESEND_API_KEY", "RESEND_FROM_EMAIL",
+    "OGC_REPLY_TO_EMAIL", "OGC_REPORT_BASE_URL", "OGC_TOKEN_HASH_SECRET",
+    "OGC_STAGING_EMAIL_ACTIVATION_AT"
+  )
+  Require-Values $values $required "Staging email delivery"
+  $placeholders = @($required | Where-Object { $values[$_] -eq "[SENSITIVE]" })
+  if ($placeholders.Count -gt 0) { throw "Staging email delivery has unresolved Sensitive placeholders: $($placeholders -join ', ')." }
+  $allowed = @($required + @("NODE_ENV", "OGC_DATABASE_POOL_SIZE", "OGC_STAGING_EMAIL_INTERVAL_MS"))
+  $lines = @($allowed | Sort-Object -Unique | ForEach-Object { "$_=$($values[$_])" })
+  [System.IO.File]::WriteAllLines($path, $lines, [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($activationPath, $activation, [System.Text.UTF8Encoding]::new($false))
+  & icacls.exe $path /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not restrict permissions on the Staging email runtime file." }
+  & icacls.exe $activationPath /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not restrict permissions on the Staging email activation file." }
+}
+
 $repoRoot = (Resolve-Path -LiteralPath $RuntimeInputRoot).Path; $webRoot = Join-Path $repoRoot "apps\web"
 Write-RuntimeEnv "staging"
+Write-StagingCommerceEnv
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path; $webRoot = Join-Path $repoRoot "apps\web"
 if ($PrepareStagingOnly) {
   if (-not $PrepareOnly) { throw "-PrepareStagingOnly requires -PrepareOnly." }
@@ -185,7 +259,7 @@ Push-Location $repoRoot
 try {
   if (-not $SkipBuild) { docker compose build staging-worker-free }
   if ($LASTEXITCODE -ne 0) { throw "Worker image build failed." }
-  $services = @("staging-worker-free", "staging-worker-deep", "production-worker-free", "production-commerce")
+  $services = @("staging-worker-free", "staging-worker-deep", "staging-commerce", "production-worker-free", "production-commerce")
   if ($script:ProductionDeepReady) { $services += "production-worker-deep" }
   docker compose --profile workstation --profile workstation-production-deep up -d @services
   if ($LASTEXITCODE -ne 0) { throw "Worker containers did not start." }

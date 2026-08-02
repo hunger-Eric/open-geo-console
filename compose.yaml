@@ -87,6 +87,18 @@ services:
       - path: ./.data/workstation-docker/staging.env
         format: raw
 
+  staging-commerce:
+    image: "${OGC_APP_IMAGE:-open-geo-console:local}"
+    profiles: ["workstation"]
+    working_dir: /app/apps/web
+    command: ["npm", "run", "commerce:staging:email:realtime"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    env_file:
+      - path: ./.data/workstation-docker/staging-commerce.env
+        format: raw
+
   production-worker-free:
     image: "${OGC_APP_IMAGE:-open-geo-console:local}"
     profiles: ["workstation"]

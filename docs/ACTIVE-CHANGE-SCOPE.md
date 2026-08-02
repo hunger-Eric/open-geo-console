@@ -89,12 +89,17 @@ Scope authority/history only:
 - `apps/web/src/server/payment-return-access.test.ts` (new)
 - `apps/web/src/components/payment-return-banner.test.ts`
 - `apps/web/src/components/payment-refresh-button.test.tsx`
-- `apps/web/src/db/commercial-delivery.test.ts`
+- `apps/web/src/db/commercial-orders-v4.postgres.test.ts`
 - `apps/web/src/commerce/operations.test.ts`
 - `apps/web/src/scripts/staging-email-consumer.test.ts` (new)
 
 No other source, test, fixture, configuration, documentation, package, lockfile,
 or generated file is allowed.
+
+Verification-only amendment recorded on 2026-08-03: the originally named
+`commercial-delivery.test.ts` does not exist. The existing canonical disposable
+PostgreSQL commerce test above is used instead to prove the activation cutoff;
+this amendment changes no production behavior, schema, dependency, or gate.
 
 ## Required behavior
 

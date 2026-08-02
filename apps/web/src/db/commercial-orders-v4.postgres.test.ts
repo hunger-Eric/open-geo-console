@@ -254,6 +254,31 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
     await expect(sql`SELECT attempts,lease_owner FROM email_deliveries WHERE id=${unrelatedEmailId}`).resolves.toEqual([{ attempts: 0, lease_owner: null }]);
 
   });
+
+  it("never leases an email created before the Staging activation timestamp", async () => {
+    const [order] = await getSqlClient()<Array<{ id: string }>>`
+      SELECT id FROM payment_orders WHERE report_id='report-main' LIMIT 1`;
+    const cutoff = new Date("2030-01-01T00:00:00.000Z");
+    const beforeId = randomUUID();
+    const afterId = randomUUID();
+    const sql = getSqlClient();
+    await sql`INSERT INTO email_deliveries
+      (id,order_id,report_id,template_type,template_version,locale,recipient_ref,provider,
+       business_idempotency_key,state,next_retry_at,created_at,updated_at)
+      VALUES
+      (${beforeId},${order!.id},'report-main','payment_confirmed','v1','en',${order!.id},'resend',
+       ${`activation-before/${beforeId}`},'queued','2026-01-01T00:00:00.000Z','2029-12-31T23:59:59.999Z','2029-12-31T23:59:59.999Z'),
+      (${afterId},${order!.id},'report-main','payment_confirmed','v1','en',${order!.id},'resend',
+       ${`activation-after/${afterId}`},'queued','2026-01-01T00:00:00.000Z','2030-01-01T00:00:00.001Z','2030-01-01T00:00:00.001Z')`;
+
+    await expect(claimEmailDeliveries({
+      owner: "staging-activation-test",
+      orderId: order!.id,
+      createdAtOrAfter: cutoff
+    })).resolves.toEqual([expect.objectContaining({ id: afterId, attempts: 1 })]);
+    await expect(sql`SELECT attempts,lease_owner FROM email_deliveries WHERE id=${beforeId}`)
+      .resolves.toEqual([{ attempts: 0, lease_owner: null }]);
+  });
 });
 
 async function seedCheckoutFixture(suffix: string, status: "completed" | "completed_limited"): Promise<void> {

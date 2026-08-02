@@ -39,6 +39,19 @@ npm run commerce:staging:all
 
 These commands do not fall back to `.env.local`; they refuse a non-staging profile, a production database marker, or live commerce. Both Worker lanes must be scheduled in production, but must never share model, Queue, HMAC, payment, or email credentials with staging.
 
+The workstation launcher additionally starts `staging-commerce`, a persistent
+email-only consumer. Its ignored `.data/workstation-docker/staging-commerce.env`
+contains an allowlisted secret set and a stable
+`OGC_STAGING_EMAIL_ACTIVATION_AT`. On the first authorized installation only,
+prepare with `-InitializeStagingEmailActivation`; all later prepares omit that
+switch and fail if both activation authorities are lost. Prepare twice before first start and verify
+the timestamp is unchanged in both the runtime file and the separate activation
+authority; an invalid/disagreeing timestamp or required Staging email setting
+fails closed. Only the named test-email fields from the merged Staging Worker
+runtime are projected into the consumer file, and `[SENSITIVE]` placeholders
+are rejected. The SQL claim boundary excludes every earlier row, so this
+service must not be used to repair or replay historical email.
+
 Protected staging uses `OGC_EVIDENCE_STORAGE=vercel-blob` and the Preview-only `open-geo-console-staging-evidence` Private Blob store. Vercel Web Functions use the project connection's rotating OIDC; before a workstation deep-Worker drill, run `npx vercel pull --yes --environment=preview` so `.vercel/.env.preview.local` contains the store's external-worker token. `npm run worker:staging:deep` loads only that ignored file plus `apps/web/.env.staging.local`; required Sensitive model/Queue values still need their existing explicit process-only overrides. Production may use a separate Private Blob or S3-compatible adapter. Filesystem storage remains local-development-only and is rejected for staging/production. Customer reads always pass through the report-authorized evidence route.
 
 Vercel Sensitive values are intentionally not decryptable through `vercel env pull`; the generated file contains empty placeholders for those names. For a local Worker drill, explicitly override each required empty placeholder with the separately held staging value in only that process. Merely loading another env file does not replace variables that already exist as empty placeholders. Never weaken the database marker guard, print values, or copy production secrets into `.env.staging.local`.
@@ -332,6 +345,11 @@ npm run test:postgres:staging-security
 ```
 
 Browser acceptance must prove anonymous denial, authenticated access, more than two distinct staging sites, same-site reuse, forced-new report identity, duplicate-click idempotency, and separation from production data. Provider acceptance additionally requires a real CodingPlan staging call, an Airwallex Sandbox signed Webhook, and a redirected Resend message. Production acceptance must prove the third distinct site returns `429` and staging variables do not change that result.
+
+Paid-return acceptance must also prove that the same browser automatically
+lands on `/reports/{reportId}/report.html` only after the exact paid,
+deliverable, active-artifact state exists; a fresh redirected report-ready
+email leaves `queued`; and an anonymous request to that HTML remains denied.
 
 For an authenticated operator preview of an exact paid staging order, open `/en/reports/{reportId}/staging-access?order={orderId}` (Chinese is the unprefixed canonical interface, so `/zh` redirects). The route issues a one-day cookie only when the persisted order/report pair is paid and either the original fulfillment is deliverable (`completed`/`completed_limited`) or an audited replacement is completed with an active artifact. It redirects to the exact scoped HTML artifact and remains `404` outside protected staging test mode. It does not create a customer PDF or bypass normal emailed access in production.
 

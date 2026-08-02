@@ -41,6 +41,47 @@ export async function fetchPaymentReturnStatus(
   }
 }
 
+export function shouldAttemptCompletionAccess(status: PublicOrderStatus): boolean {
+  return status.paymentStatus === "paid"
+    && (status.fulfillmentStatus === "completed" || status.fulfillmentStatus === "completed_limited");
+}
+
+export async function fetchPaymentCompletionAccess(
+  url: string,
+  expectedDestination: string,
+  options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {}
+): Promise<string | null> {
+  const response = await (options.fetchImpl ?? fetch)(url, {
+    method: "POST",
+    cache: "no-store",
+    signal: options.signal
+  });
+  if (!response.ok) return null;
+  const payload = await response.json() as { destination?: unknown };
+  return payload.destination === expectedDestination ? expectedDestination : null;
+}
+
+export async function attemptPaymentCompletionHandoff(input: {
+  status: PublicOrderStatus;
+  orderId: string;
+  attemptedFor: string | null;
+  completionUrl: string;
+  expectedDestination: string;
+  markAttempted: (orderId: string) => void;
+  fetchAccess?: typeof fetchPaymentCompletionAccess;
+  navigate?: (destination: string) => void;
+  signal?: AbortSignal;
+}): Promise<void> {
+  if (!shouldAttemptCompletionAccess(input.status) || input.attemptedFor === input.orderId) return;
+  input.markAttempted(input.orderId);
+  const destination = await (input.fetchAccess ?? fetchPaymentCompletionAccess)(
+    input.completionUrl,
+    input.expectedDestination,
+    { signal: input.signal }
+  );
+  if (destination) (input.navigate ?? ((value) => window.location.replace(value)))(destination);
+}
+
 export function buildHppReturnUrls(currentUrl: string, orderId: string) {
   const base = new URL(currentUrl);
   base.hash = "";
