@@ -4623,3 +4623,24 @@ allowlist; external actions remain zero; no deploy.
   `paid-v3-staging-acceptance-v1.0.0`. It is not a package or Production
   release and grants no optimization, deployment, runtime, or historical-data
   authority.
+
+---
+
+## 2026-08-02 - Customer report presentation refinement and Protected Staging deployment
+
+- The approved presentation-only scope refined the customer HTML report
+  typography, spacing, card treatment, contrast, evidence-image overflow, and
+  V4 divider/badge presentation without changing report data or business
+  behavior. Focused component tests, lint, build, diff checks, and desktop/mobile
+  preview review passed.
+- Candidate `12670b3eab0b0fdae638cd1c02d822752271d15d` was committed locally,
+  deployed as a Vercel Preview, and assigned to the fixed Protected Staging
+  alias. Matching thin-overlay Staging free/deep Workers were started; Production
+  was untouched.
+- A user-created Paid V3 report subsequently proved report generation and
+  artifact activation but exposed a separate delivery defect: the browser never
+  automatically exchanged the completed order for report access, and Staging
+  had no automatic Commerce consumer. This superseding task is not authorized by
+  the presentation scope.
+- The prior preview harness and unrelated dirty files remain preserved in the
+  worktree. They are not authority for the new delivery repair.

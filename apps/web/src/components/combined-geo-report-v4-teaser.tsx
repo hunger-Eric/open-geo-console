@@ -37,6 +37,9 @@ const TEASER_EXTRA_CSS = `
 .absence-figure span{color:var(--muted,#687570);font-size:11px;font-weight:750}
 .absence-summary{font-size:15px;line-height:1.65;color:var(--muted,#687570);margin-bottom:0}
 .semantic-outcome{background:var(--teaser-soft);border-radius:12px;display:grid;gap:10px;margin-top:20px;padding:20px}.semantic-outcome strong{color:var(--forest,#173f37);font-size:20px}.semantic-outcome p{color:var(--muted,#687570);line-height:1.65;margin:0}.semantic-outcome dl{display:grid;gap:8px;margin:0}.semantic-outcome dt{color:var(--muted,#687570);font-size:11px;font-weight:750}.semantic-outcome dd{color:var(--forest,#173f37);margin:0}
+.technical-score-layout--solo{grid-template-columns:minmax(0,1fr);justify-items:start}
+.semantic-outcome p{max-width:75ch}.semantic-outcome ul,.semantic-outcome ol{display:grid;gap:10px;list-style:none;margin:6px 0 0;max-width:88ch;padding:0}.semantic-outcome li{color:var(--muted,#687570);font-size:14px;line-height:1.7;padding-left:20px;position:relative}.semantic-outcome ul>li:before{background:var(--teal,#0c7a6d);border-radius:999px;content:"";height:6px;left:2px;position:absolute;top:9px;width:6px}.semantic-outcome ol{counter-reset:semantic-rec}.semantic-outcome ol>li{counter-increment:semantic-rec;padding-left:36px}.semantic-outcome ol>li:before{align-items:center;background:var(--teal,#0c7a6d);border-radius:999px;color:#fff;content:counter(semantic-rec,decimal-leading-zero);display:flex;font-family:ui-monospace,monospace;font-size:10px;font-weight:800;height:22px;justify-content:center;left:0;position:absolute;top:1px;width:22px}
+.report-v4-teaser .executive-summary{position:sticky;top:20px}
 .teaser-proof-section>h2{max-width:800px}
 .teaser-q1-card{background:#fff;border:1px solid var(--line,#d9d8cf);border-top:5px solid var(--teal,#0c7a6d);border-radius:14px;padding:clamp(22px,4vw,38px);box-shadow:none}
 .formatted-answer{color:#293b35;display:grid;font-size:16px;gap:14px;line-height:1.78;margin-top:4px}
@@ -103,23 +106,23 @@ export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTease
       </div> : null}
       <dl className="metadata-grid">
         <Meta label={copy.target}>{model.targetUrl}</Meta>
-        <Meta label={copy.generated}>{model.generatedAt}</Meta>
+        <Meta label={copy.generated}><time dateTime={model.generatedAt}>{formatGeneratedAt(model.generatedAt, model.locale)}</time></Meta>
       </dl>
     </header>
 
     <div className="teaser-overview-grid">
       <section className="report-section executive-summary" data-executive-summary="true">
         <p className="section-index">01</p><h2>{copy.techScore}</h2>
-        <div className="technical-score-layout">
+        <div className={`technical-score-layout${model.aiReport.dimensionScores.length === 0 ? " technical-score-layout--solo" : ""}`}>
           <div className="technical-score-hero">
             <span className="score-big">{model.technicalReport.score}</span>
             <span className="score-label">/100</span>
           </div>
-          <div className="dimension-score-list">
+          {model.aiReport.dimensionScores.length > 0 ? <div className="dimension-score-list">
             {model.aiReport.dimensionScores.map((score) => <article key={score.dimension} className="dimension-row">
-              <strong>{score.score}</strong><div><h4>{score.dimension}</h4></div>
+              <strong>{score.score}</strong><div><h4>{humanizeDimension(score.dimension)}</h4></div>
             </article>)}
-          </div>
+          </div> : null}
         </div>
       </section>
 
@@ -285,6 +288,16 @@ function TeaserLockedCard({ question, questionOrder, copy, showCta }: { question
 
 function Meta({ label, children }: { label: string; children: ReactNode }) {
   return <div><dt>{label}</dt><dd>{children}</dd></div>;
+}
+
+function formatGeneratedAt(value: string, locale: "en" | "zh"): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function humanizeDimension(value: string): string {
+  return value.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
 }
 
 interface Copy {

@@ -2,159 +2,218 @@
 
 Status: `APPROVED`
 
-The user explicitly approved this exact written allowlist on 2026-08-02 and
-additionally authorized, after implementation and local verification pass,
-redeploying the changed source to the local Docker staging environment so the
-user can manually submit a website and inspect the final report pages. That
-deployment must follow the Docker discipline in `AGENTS.md`: this is a
-source-only change, so a full Worker image build is forbidden; use a thin
-source-overlay image based on the currently accepted exact image, copy only
-the required `apps/` and `packages/` source, recreate only the named staging
-services, and record `docker system df`, drive free space, and exact image
-IDs (candidate / current / one rollback) before and after. If the staging web
-entry that serves report pages is not one of the local Docker services, stop
-and report instead of improvising a deployment path.
+Approved by the user on 2026-08-03. The user additionally authorized the agent
+to complete the single fresh Protected Staging Sandbox payment interaction and
+acceptance path without waiting for the user to remain present. All original
+count limits, fail-closed stop conditions, and Production prohibitions remain
+unchanged.
+
+This scope is executable only within the exact allowlist and external-action
+budget below.
 
 ## Objective
 
-Visual/layout refinement ("精修") of the customer-facing HTML report artifacts:
-the two free reports (legacy website audit, recommendation forensics including
-its public-source v2 variant) and the deep report (combined GEO report V4).
-Keep the existing paper/forest/teal design identity; improve typographic
-hierarchy, spacing rhythm, card texture, and color/contrast refinement; fix
-the evidence-screenshot overflow and stray divider defects visible in current
-renders. No functional, data, or copy changes.
+Remove the two confirmed causes that strand a paid customer on the payment
+status page after the private HTML artifact becomes active:
 
-## Baseline
+1. Automatically exchange the same browser's checkout-return session for a
+   scoped report-access cookie and navigate that browser to the canonical HTML
+   artifact after persisted paid, deliverable, active-artifact state exists.
+2. Run a persistent Protected Staging email consumer for newly created Staging
+   deliveries so payment and report-ready email do not require an operator
+   button or manual command.
 
-- Repository root: `E:/project/open-geo-console`; `main` HEAD is
-  `2a85133c3a39aee735c906590d74cca8f7d0f873`; worktree is clean except the
-  agent-owned untracked temporary preview harness `apps/web/.tmp-preview/`.
-- Current renders captured as before-evidence PNG/HTML under
-  `apps/web/.tmp-preview/out/` (4 reports × desktop/mobile).
+Email remains the independent fallback. The browser exchange must never treat
+`payment_return=success`, an order ID, provider query parameters, or the public
+status endpoint as report-access authority.
 
-## Allowed files (exact allowlist)
+## Confirmed baseline
 
-Production source (styling and presentational markup only):
+- Repository: `E:/project/open-geo-console`.
+- Branch / HEAD: local `main` at
+  `12670b3eab0b0fdae638cd1c02d822752271d15d`; this commit has not been pushed.
+- Protected Staging fixed alias serves that Web candidate; Staging free/deep
+  Workers use the matching thin overlay. Production is outside this task.
+- Current worktree contains unrelated/pre-existing dirty paths that must remain
+  untouched and excluded from this task's diff/commit:
+  `apps/web/next-env.d.ts`,
+  `apps/web/src/components/combined-geo-report-v4-teaser.tsx`, and
+  `apps/web/.tmp-preview/`.
+- Observed report `c9acc3f9-9ddf-473a-8c2e-786049e8cb20`, order
+  `98244fcf-ca4d-452d-93fb-e16c02c1d09f`: paid/completed, job 100%, one active
+  `combined_geo_report_v3` artifact; its `payment_confirmed` and `report_ready`
+  deliveries remained `queued` with `attempts=0`.
+- Staging currently has 26 historical queued email rows in total. They are
+  historical state and must not be claimed by the new persistent consumer.
+- First divergence: paid terminalization marks fulfillment completed and queues
+  email, while the client treats fulfillment completion as terminal without an
+  access exchange. Staging has only a manual Commerce runner and no persistent
+  email consumer.
 
-- `apps/web/src/report/artifact-styles.ts` (shared `ARTIFACT_CSS`; screen and
-  print rules)
-- `apps/web/src/components/report-artifact.tsx`
-- `apps/web/src/components/recommendation-report-artifact.tsx`
-- `apps/web/src/components/public-source-forensics-report-artifact.tsx`
-- `apps/web/src/components/combined-geo-report-v4-artifact.tsx`
+## Allowed production/runtime files (exact allowlist)
 
-Tests (only where class/structure assertions must follow the markup changes):
+Browser return capability and automatic HTML handoff:
 
-- `apps/web/src/components/report-artifact.test.tsx`
-- `apps/web/src/components/recommendation-report-artifact.test.tsx`
-- `apps/web/src/components/public-source-forensics-report-artifact.test.tsx`
-- `apps/web/src/components/combined-geo-report-v4-artifact.test.tsx`
-- `apps/web/src/app/reports/[id]/report.html/page.test.tsx`
+- `apps/web/src/app/api/reports/[id]/checkout/route.ts`
+- `apps/web/src/app/api/reports/[id]/orders/[orderId]/completion-access/route.ts`
+  (new)
+- `apps/web/src/server/payment-return-access.ts` (new)
+- `apps/web/src/components/payment-return.ts`
+- `apps/web/src/components/payment-return-banner.tsx`
 
-Temporary, agent-owned, deleted before closeout:
+Future-only Protected Staging email consumption:
 
-- `apps/web/.tmp-preview/` (preview render/screenshot harness and outputs)
+- `apps/web/src/db/commercial-delivery.ts`
+- `apps/web/src/commerce/operations.ts`
+- `apps/web/src/scripts/staging-email-consumer.ts` (new)
+- `apps/web/package.json`
+- `package.json`
+- `compose.yaml`
+- `scripts/start-workstation-workers.ps1`
 
-## Behavioral boundary
+Existing reader-facing operations documentation made inaccurate by this change:
 
-- Component edits are limited to presentational wrappers, class names, and
-  element grouping. No visible copy/text changes, no locale changes, no data
-  shape changes, no changes to business logic (including the V4 5-source
-  truncation, evidence asset selection, grade/status mapping, severity
-  mapping, and all conditional rendering semantics).
-- `combined-geo-report-v1/v2/v3` artifacts share `ARTIFACT_CSS` and will
-  inherit global stylesheet changes, but their component files must not be
-  edited.
+- `docs/PROTECTED-STAGING-OPERATIONS.md`
+- `docs/COMMERCIAL-OPERATIONS.md`
 
-## Forbidden subsystems
+Scope authority/history only:
 
-- No changes under `packages/` (crawler-rules, log-parser, geo-auditor,
-  site-crawler, ai-report-engine, public-search-observer,
-  answer-engine-observer, citation-intelligence), `apps/web/src/worker/`,
-  `apps/web/src/app/api/`, `apps/web/src/db/`, server actions, persistence,
-  or any data-collection/crawling/model-calling path.
-- No Docker image/container changes, no deployment, no staging/production
-  runs, no new reports/orders/payments/emails, no database access or schema
-  changes, no dependency or lockfile changes, no git mutations without
-  separate explicit authorization.
-- `.tmp-preview` must never be committed.
+- `docs/ACTIVE-CHANGE-SCOPE.md`
+- `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`
+
+## Allowed test files (exact allowlist)
+
+- `apps/web/src/app/api/reports/[id]/checkout/route.test.ts`
+- `apps/web/src/app/api/reports/[id]/orders/[orderId]/completion-access/route.test.ts`
+  (new)
+- `apps/web/src/server/payment-return-access.test.ts` (new)
+- `apps/web/src/components/payment-return-banner.test.ts`
+- `apps/web/src/components/payment-refresh-button.test.tsx`
+- `apps/web/src/db/commercial-delivery.test.ts`
+- `apps/web/src/commerce/operations.test.ts`
+- `apps/web/src/scripts/staging-email-consumer.test.ts` (new)
+
+No other source, test, fixture, configuration, documentation, package, lockfile,
+or generated file is allowed.
+
+## Required behavior
+
+### Secure same-browser completion access
+
+- A successful checkout response sets a Secure, HttpOnly, SameSite=Lax,
+  time-bounded signed return-capability cookie bound to the exact report and
+  order. The cookie contains no email, provider secret, report token, or raw
+  database authority.
+- The completion-access POST endpoint requires that signed capability and the
+  exact persisted report/order binding. It succeeds only when payment is
+  `paid`, fulfillment is `completed` or `completed_limited`, and the report has
+  an exact active artifact.
+- The endpoint derives artifact scope only from the active artifact, issues the
+  existing scoped report-access token/cookie, and returns the canonical customer
+  HTML destination. Invalid, expired, cross-report, unpaid, non-deliverable, or
+  artifact-missing requests fail closed without disclosing which check failed.
+- The payment banner attempts the exchange once after trusted completed state
+  and replaces the current location with the returned HTML destination. Email
+  remains the fallback if the exchange is unavailable; cancel, payment failure,
+  report failure, and refund states never receive access.
+- The public order-status endpoint and query string remain non-authoritative.
+  Anonymous direct access to report HTML remains denied.
+
+### Automatic future Staging email delivery
+
+- Add one persistent `staging-commerce`/email-consumer service using Staging-only
+  test credentials and the same immutable candidate image as the Staging Web
+  and report Workers.
+- The consumer processes only queued email rows with `created_at` on or after a
+  persisted activation timestamp written to its ignored runtime environment.
+  Restarts reuse that same timestamp so post-activation backlog is not skipped.
+- The consumer must not run refund, SLA, payment, report, or reconciliation
+  operations and must not claim any of the 26 pre-activation historical queued
+  emails. All Staging envelopes remain redirected to
+  `OGC_TEST_EMAIL_RECIPIENT`.
+- The workstation launcher must fail closed if required Staging email secrets,
+  database/profile/mode, base URL, or activation timestamp is absent. It must
+  not copy model, browser, evidence-storage, or Production secrets into the
+  Staging email runtime file.
+- Production Commerce configuration and behavior remain unchanged.
+
+## Forbidden subsystems and behaviors
+
+- No schema or migration changes, dependency changes, lockfile changes, price or
+  product changes, payment Webhook changes, provider checkout changes, report
+  generation changes, model/crawler/public-search changes, artifact rendering
+  changes, access-token schema/semantics changes, refunds, SLA behavior, or
+  historical repair/replay.
+- No use of the order ID, Airwallex success URL, provider intent ID, public
+  status response, email address, or test-recipient identity alone as an access
+  credential.
+- No claiming, sending, failing, refunding, deleting, or otherwise mutating the
+  26 pre-activation historical queued emails/orders.
+- No Production database, containers, images, deployment, email, payments,
+  alias, branch, or environment changes.
+- No edits to the existing unrelated dirty files or preview harness.
+- No broad Docker cleanup, full Worker build, worktree creation/deletion, force
+  Git operation, push, merge, tag, or remote-branch deletion without the
+  separately listed and approved action below.
 
 ## Diff budget
 
-- Production source: at most ~700 changed lines total across the five
-  allowlisted production files (the stylesheet dominates).
-- Tests: at most ~200 changed lines, assertion-following edits only.
-- Any breach is a stop-and-report condition.
+- Production/runtime code and configuration: at most 650 changed lines across
+  the twelve allowlisted files, including new files.
+- Tests: at most 500 changed lines across the eight allowlisted test files.
+- Documentation and scope records: at most 220 changed lines excluding the
+  archived prior scope already moved to history.
+- Any required production behavior or file outside this budget/allowlist is a
+  stop-and-report condition.
 
-## Acceptance checks
+## Local acceptance checks
 
-1. Preview harness re-renders all 4 reports at desktop (1440px) and mobile
-   (390px) with zero page errors; after-screenshots reviewed against
-   before-screenshots for hierarchy, spacing, typography, and color, with no
-   layout regressions (overflow, clipped tables, broken grids).
-2. The four allowlisted component test files plus
-   `app/reports/[id]/report.html/page.test.tsx` pass under `npm test` (or the
-   project's vitest invocation for these files).
-3. `npm run lint` passes for `apps/web`.
-4. `git diff --check` clean; diff contains only allowlisted paths.
-5. `apps/web/.tmp-preview/` is removed before closeout; final `git status`
-   shows only allowlisted modifications.
+1. Focused tests prove signed-capability issue/validation, exact report/order
+   binding, expiry, active-scope derivation, report-cookie issuance, one-shot
+   client handoff, fail-closed states, activation-cutoff filtering, retry
+   behavior, and no pre-activation claim.
+2. The completion route's anonymous/cross-order/unpaid/missing-artifact cases
+   return the same safe denial and never issue a report cookie.
+3. A disposable PostgreSQL test proves a queued row immediately before the
+   activation timestamp remains untouched while a row immediately after it is
+   claimable; selected-test skip is failure.
+4. `docker compose config` contains exactly one Staging email consumer using the
+   intended ignored env file; PowerShell prepare-only validation preserves one
+   stable activation timestamp and prints no values.
+5. `npm run lint`, the Web build, `git diff --check`, allowlist comparison, and
+   candidate diff review pass. Existing unrelated dirty files remain unchanged.
 
-## Expensive external actions
+## Expensive external actions requiring this scope's explicit approval
 
-None authorized. All verification is local: static rendering via the
-temporary harness, unit tests, and lint. No crawling, model calls, database,
-network scans, or deployments.
+These actions are authorized only after local checks pass, and only if the user
+approves this entire FROZEN scope:
 
-## Execution record (2026-08-02)
+1. Git: use one `codex/` task branch if needed, create one candidate commit from
+   only allowlisted files, and do not push/merge/delete remote refs.
+2. Protected Staging deployment: create at most one new Vercel Preview from the
+   exact clean candidate; build one source-only thin overlay (no full Worker
+   build); recreate exactly `staging-worker-free`, `staging-worker-deep`, and the
+   new `staging-commerce`; move the fixed alias once only after identity/readiness
+   gates pass. Retain one exact rollback image; Production remains untouched.
+3. Existing incident delivery: after deployment, process email for exact order
+   `98244fcf-ca4d-452d-93fb-e16c02c1d09f` only, sending at most its two existing
+   redirected Staging emails. Do not run an unscoped Commerce drain.
+4. Fresh acceptance: create exactly one wholly new Protected Staging report and
+   one Airwallex Sandbox payment, with the user completing the hosted payment
+   interaction. Allow only that lineage's normal Free/Deep model work and at
+   most two redirected test emails. Do not reuse or mutate another report/order.
+5. Acceptance must prove the same browser automatically lands on the canonical
+   authorized HTML report, the report-ready email leaves `queued`, the access
+   cookie is scoped to the active artifact, anonymous HTML remains denied, and
+   zero historical queued emails/refunds were touched.
 
-Implementation and local verification (complete):
+Any failure stops the live sequence. It does not authorize a second report,
+payment, Preview, build, alias move, email pass, replay, refund, or retry.
 
-- Changed production files (4): `apps/web/src/report/artifact-styles.ts`
-  (+10/-10 giant template lines), `recommendation-report-artifact.tsx` (+1/-1,
-  `grade-mark-${grade}` modifier), `public-source-forensics-report-artifact.tsx`
-  (+1/-1, same), `combined-geo-report-v4-artifact.tsx` (+2/-2,
-  `answer-status-${status}` modifier and plain ordinal for the circular badge).
-  No copy, locale, data-shape, or logic changes. `report-artifact.tsx` needed
-  no edits; all its fixes are CSS-only.
-- Tests: the five allowlisted test files pass 19/19 with zero test-file edits.
-  `npm run lint`: 0 errors (6 pre-existing worker warnings, unrelated).
-  `git diff --check` clean; diff touches only allowlisted paths.
-- Before/after screenshots (desktop 1440px + mobile 390px, 4 reports each)
-  reviewed: hierarchy, spacing, typography, color refined; evidence-image
-  overflow and stray V4 divider fixed; no mobile overflow or clipped tables.
+## Completion boundary
 
-Staging Docker redeploy (complete, thin source-overlay per AGENTS.md):
-
-- Preflight: E: 53 GiB free; C: only 4.8 GiB free (Docker Desktop VM disk) —
-  full builds are off the table, overlay adds only KB-scale layers. Current
-  image `open-geo-console:staging-91ef797-overlay-v1` (`sha256:3f436e73...`),
-  retained as the current/rollback image; candidate diff verified source-only
-  (no `package.json` / lockfile / `Dockerfile.worker` changes).
-- Candidate: `open-geo-console:staging-2a85133c-style-overlay-v1`
-  (`sha256:26bb8f77...`), built FROM the current image with only the four
-  changed `apps/web/src` files copied; revision label
-  `2a85133c-report-style-v1`. New code verified inside the image.
-- `.data/workstation-docker/staging-head.override.yaml` re-pinned to the
-  candidate image and `OGC_DEPLOYMENT_VERSION: 2a85133c-report-style-v1`
-  (deployment mechanics only); `staging-worker-free` and
-  `staging-worker-deep` recreated, both `running=true`, logs show free/deep
-  workers ready. No other services, images, or volumes touched.
-- Post-deploy: `docker system df` images 66 total / 32.11 GB (net +1 image,
-  shared layers — no meaningful disk increase); C: still 4.8 GiB free.
-- Rollback: re-pin the override to
-  `open-geo-console:staging-91ef797-overlay-v1` and recreate the same two
-  services.
-
-Known boundary for manual browser acceptance:
-
-- The report HTML pages are rendered by the Next.js web app
-  (`apps/web`), which is not a local Docker service. The worker overlay
-  covers worker-side rendering (private PDF readiness); browser-visible page
-  styling is served by whatever web deployment the user tests against.
-  Viewing options reported to the user; no web deployment was improvised.
-
-Pending closeout: user manual browser test, then removal of
-`apps/web/.tmp-preview/` (contains the harness, before/after screenshots, and
-the overlay build context).
+Implementation is not complete until both automatic paths pass: same-browser
+HTML navigation and independent redirected email delivery. Unit tests, build,
+Preview READY, active artifact state, or queued email alone are insufficient.
+Without the fresh exact-lineage real-flow evidence, report status must remain
+"implemented and locally verified; Protected Staging usability unverified."
