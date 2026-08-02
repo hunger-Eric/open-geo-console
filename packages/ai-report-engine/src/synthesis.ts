@@ -1,4 +1,4 @@
-import type { JsonCompletionClient } from "./client";
+import { isRetryableAiClientError, type JsonCompletionClient } from "./client";
 import { sha256Hex, verifyReportEvidence, type RejectedEvidence } from "./evidence";
 import {
   AI_REPORT_PROMPT_VERSION,
@@ -235,9 +235,7 @@ export async function synthesizeWebsiteReportWithRecovery(
     semanticValidation?: "legacy" | "deferred" | "free_direct";
   } = {}
 ): Promise<SynthesizeReportResult> {
-  const maxAttempts = options.semanticValidation === "free_direct"
-    ? 1
-    : Math.max(1, options.maxAttempts ?? 3);
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
   const delay = options.delay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -246,6 +244,11 @@ export async function synthesizeWebsiteReportWithRecovery(
       return await synthesizeWebsiteReport(client, input, options.signal, [], options.semanticValidation);
     } catch (error) {
       lastError = error;
+      if (options.semanticValidation === "free_direct") {
+        if (!isRetryableAiClientError(error) || attempt >= maxAttempts) throw error;
+        await delayWithSignal(delay, Math.min(2_000, 250 * (2 ** (attempt - 1))), options.signal);
+        continue;
+      }
       if (error instanceof WebsiteReportLanguageValidationError) {
         if (attempt >= maxAttempts) throw error;
         await delayWithSignal(delay, Math.min(2_000, 250 * (2 ** (attempt - 1))), options.signal);

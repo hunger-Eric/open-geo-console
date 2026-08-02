@@ -11,6 +11,7 @@ import {
   PublicSourceSnapshotQueryBindingError
 } from "./job-errors";
 import { stableJsonHash } from "./provider-discovery-pipeline";
+import { tracePaidV3DirectStep, type PaidV3DirectDebugTrace, type PaidV3DirectDebugTraceDetails } from "./paid-v3-direct-debug-trace";
 import {
   fanoutQueryIds,
   hasExtraObservedQueryIds,
@@ -80,24 +81,44 @@ export async function runPublicSourceForensicsPipeline(input: {
   websiteFoundation: AiWebsiteReportV1; businessQuestionSet?: ConfirmedBusinessQuestionSet; dependencies: PublicSourceForensicsDependencies; signal?: AbortSignal;
   fanoutOverrides?: ReadonlyMap<string, SearchQueryFanout>;
   semanticValidation?: "legacy" | "deferred";
+  trace?: PaidV3DirectDebugTrace;
 }): Promise<{ report: RecommendationForensicReportV2; checkpoint: PublicSourcePipelineCheckpoint; commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[] }> {
   input.signal?.throwIfAborted();
-  const existing = await input.dependencies.getReport(input.jobId);
+  const existing = await tracePaidV3DirectStep(input.trace, "public_source_report_load", {
+    phase: "source_retrieval"
+  }, () => input.dependencies.getReport(input.jobId));
   if (existing) return { report: existing, checkpoint: checkpointFromReport(existing, input.websiteFoundation), commercialSnapshotRefs: [] };
-  const authority = input.dependencies.authority;
-  if (!authority.active || authority.surface.locale !== input.locale || authority.surface.region !== input.region) throw new PublicSourceAuthorityUnavailableError();
+  const authority = runForensicsTraceGate(input.trace, "public_source_authority", {
+    phase: "public_source_preflight"
+  }, () => {
+    const value = input.dependencies.authority;
+    if (!value.active || value.surface.locale !== input.locale || value.surface.region !== input.region) throw new PublicSourceAuthorityUnavailableError();
+    return value;
+  });
   const profile = input.websiteFoundation.organizationProfile;
-  const questions = input.businessQuestionSet ? toCanonicalBuyerQuestionSet(input.businessQuestionSet) : generateCanonicalBuyerQuestions({ locale: input.locale, region: input.region,
-    categoryEvidence: profile.productsAndServices.map((value, index) => ({ value, confidence: "high" as const, sourceId: `website-foundation-category-${index}` })),
-    capabilityEvidence: profile.productsAndServices.map((value, index) => ({ value, confidence: "high" as const, sourceId: `website-foundation-capability-${index}` })),
-    broadCategory: profile.businessModel || "business services",
-    excludedIdentities: [{ kind: "customer_domain", value: new URL(input.targetUrl).hostname },
-      ...(profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value })))] });
-  if (questions.questions.length !== 3 || (!input.businessQuestionSet && questions.confidence !== "high")) throw new PublicSourceQuestionGenerationError();
+  const questions = runForensicsTraceGate(input.trace, "public_source_questions", {
+    phase: "public_source_preflight", completedCount: 3
+  }, () => {
+    const value = input.businessQuestionSet ? toCanonicalBuyerQuestionSet(input.businessQuestionSet) : generateCanonicalBuyerQuestions({ locale: input.locale, region: input.region,
+      categoryEvidence: profile.productsAndServices.map((item, index) => ({ value: item, confidence: "high" as const, sourceId: `website-foundation-category-${index}` })),
+      capabilityEvidence: profile.productsAndServices.map((item, index) => ({ value: item, confidence: "high" as const, sourceId: `website-foundation-capability-${index}` })),
+      broadCategory: profile.businessModel || "business services",
+      excludedIdentities: [{ kind: "customer_domain", value: new URL(input.targetUrl).hostname },
+        ...(profile.brandNames.map((item) => ({ kind: "customer_brand" as const, value: item })))] });
+    if (value.questions.length !== 3 || (!input.businessQuestionSet && value.confidence !== "high")) throw new PublicSourceQuestionGenerationError();
+    return value;
+  });
   const excludedIdentities: CustomerIdentityExclusion[] = [{ kind: "customer_domain", value: new URL(input.targetUrl).hostname }, ...profile.brandNames.map((value) => ({ kind: "customer_brand" as const, value }))];
-  const fanouts = createPublicSourceQuestionFanouts({ questions, authority, excludedIdentities }).map((fanout) => input.fanoutOverrides?.get(fanout.questionId) ?? fanout);
-  if (fanouts.some((fanout) => fanout.surface.surfaceId !== authority.surface.surfaceId || fanout.surface.surfaceVersion !== authority.surface.surfaceVersion || fanout.questionSetVersion !== questions.questionSetVersion)) throw new PublicSourceAuthorityUnavailableError("Public-source fanout override identity is invalid.");
-  const prior = await input.dependencies.getCheckpoint(input.jobId);
+  const fanouts = runForensicsTraceGate(input.trace, "public_source_fanout", {
+    phase: "public_source_preflight", questionOrdinal: 1
+  }, () => {
+    const value = createPublicSourceQuestionFanouts({ questions, authority, excludedIdentities }).map((fanout) => input.fanoutOverrides?.get(fanout.questionId) ?? fanout);
+    if (value.some((fanout) => fanout.surface.surfaceId !== authority.surface.surfaceId || fanout.surface.surfaceVersion !== authority.surface.surfaceVersion || fanout.questionSetVersion !== questions.questionSetVersion)) throw new PublicSourceAuthorityUnavailableError("Public-source fanout override identity is invalid.");
+    return value;
+  });
+  const prior = await tracePaidV3DirectStep(input.trace, "public_source_checkpoint_load", {
+    phase: "source_retrieval"
+  }, () => input.dependencies.getCheckpoint(input.jobId));
   // Resume freezes the foundation hash from the prior checkpoint so DB/JSON
   // round-trips of the same website foundation cannot force a full rematch.
   const websiteFoundationHash = prior?.websiteFoundationHash ?? stableJsonHash(input.websiteFoundation);
@@ -107,7 +128,9 @@ export async function runPublicSourceForensicsPipeline(input: {
       prior.adapterIdentityHash !== adapterIdentityHash(authority))) throw new PublicSourceResumeIdentityMismatchError();
   const evidenceCutoffAt = prior?.evidenceCutoffAt ?? (input.dependencies.now ?? (() => new Date()))().toISOString();
   const retrievalGate = createConcurrencyGate(4);
-  const resolutions = await Promise.all(fanouts.map(async (fanout, index) => {
+  const resolutions = await Promise.all(fanouts.map((fanout, index) => tracePaidV3DirectStep(input.trace, "public_source_snapshot_resolution", {
+    phase: "source_retrieval", snapshotOrdinal: index + 1, snapshotCount: fanouts.length
+  }, async () => {
     input.signal?.throwIfAborted();
     const priorSnapshotId = prior && prior.snapshotIds.length === fanouts.length ? prior.snapshotIds[index]! : null;
     if (priorSnapshotId && input.dependencies.resolveSnapshotById) {
@@ -121,30 +144,31 @@ export async function runPublicSourceForensicsPipeline(input: {
     // resolution path; the checkpoint below is updated to the new fetch instead
     // of failing on the resulting identity change.
     return { snapshot: await input.dependencies.resolveSnapshot({ questionId: fanout.questionId, fanout, evidenceCutoffAt, retrievalGate }), reFetched: priorSnapshotId !== null };
-  }));
+  })));
   const snapshots = resolutions.map(({ snapshot }) => snapshot);
   input.signal?.throwIfAborted();
+  const coverageStarted = Date.now(); input.trace?.emit("step_started", "public_source_coverage_guard", { phase: "source_retrieval", snapshotCount: snapshots.length });
   const observations = snapshots.flatMap(({ observations: values }) => values);
   const planQueryIds = fanoutQueryIds(fanouts);
   const observedIds = observationQueryIds(observations);
   // W-B: observations with IDs outside the current plan are a hard identity fault.
   if (hasExtraObservedQueryIds(observedIds, planQueryIds)) {
-    throw new PublicSourceQueryVariantCoverageError(
+    failForensicsGate(input.trace, "public_source_coverage_guard", coverageStarted, new PublicSourceQueryVariantCoverageError(
       "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.", { safeDiagnostics: forensicsTrace("pre_graph_guard", fanouts, snapshots, observedIds, []) }
-    );
+    ));
   }
   // W-B: proper subset (prefix/stale fallback) → effective plan = observed set; never full completed.
   const partialQueryCoverage = isProperSubsetOfPlan(observedIds, planQueryIds);
   if (partialQueryCoverage && observedIds.length === 0) {
-    throw new PublicSourceQueryVariantCoverageError(
+    failForensicsGate(input.trace, "public_source_coverage_guard", coverageStarted, new PublicSourceQueryVariantCoverageError(
       "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.", { safeDiagnostics: forensicsTrace("pre_graph_guard", fanouts, snapshots, observedIds, []) }
-    );
+    ));
   }
   if (!partialQueryCoverage && !queryIdSetsEqual(observedIds, planQueryIds) && observedIds.length > 0) {
     // Same size but different members (or other non-subset mismatch) — permanent.
-    throw new PublicSourceQueryVariantCoverageError(
+    failForensicsGate(input.trace, "public_source_coverage_guard", coverageStarted, new PublicSourceQueryVariantCoverageError(
       "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.", { safeDiagnostics: forensicsTrace("pre_graph_guard", fanouts, snapshots, observedIds, []) }
-    );
+    ));
   }
   let effectiveFanouts: SearchQueryFanout[];
   try {
@@ -152,8 +176,10 @@ export async function runPublicSourceForensicsPipeline(input: {
       ? projectFanoutsToObservedQueryIds(fanouts, new Set(observedIds))
       : fanouts;
   } catch (error) {
+    input.trace?.failed("public_source_coverage_guard", { phase: "source_retrieval", durationMs: Date.now() - coverageStarted }, error);
     throw mapForensicReportContractError(error, forensicsTrace("pre_graph_guard", fanouts, snapshots, observedIds, []));
   }
+  input.trace?.emit("step_succeeded", "public_source_coverage_guard", { phase: "source_retrieval", disposition: partialQueryCoverage ? "partial" : "complete", durationMs: Date.now() - coverageStarted });
 
   const actualCostMicros = snapshots.reduce((sum, item) => sum + item.actualCostMicros, 0);
   let decision = decidePublicSourceCommercialCoverage({ authorityReady: true, evidenceIsolated: snapshots.every((item) => item.questionId && item.snapshotId),
@@ -173,14 +199,20 @@ export async function runPublicSourceForensicsPipeline(input: {
     };
   }
   const retrievals = snapshots.flatMap(({ retrievals: values }) => values);
-  const sourceGraph = buildPublicSourceEvidenceGraph({ observations, retrievals,
-    customerRegistrableDomain: new URL(input.targetUrl).hostname, competitorRegistrableDomains: [] });
+  const sourceGraph = runForensicsTraceGate(input.trace, "public_source_evidence_graph_build", { phase: "source_retrieval", sourceCount: retrievals.length },
+    () => buildPublicSourceEvidenceGraph({ observations, retrievals,
+      customerRegistrableDomain: new URL(input.targetUrl).hostname, competitorRegistrableDomains: [] }));
+  const graphGuardStarted = Date.now(); input.trace?.emit("step_started", "public_source_evidence_graph_contract", { phase: "source_retrieval", sourceCount: retrievals.length });
   // Graph dimensions must equal effective plan before we freeze resume identity (B4: parse before checkpoint).
   if (!queryIdSetsEqual(sourceGraph.dimensions.queryVariantIds, fanoutQueryIds(effectiveFanouts))) {
-    throw new PublicSourceQueryVariantCoverageError(
+    failForensicsGate(input.trace, "public_source_evidence_graph_contract", graphGuardStarted, new PublicSourceQueryVariantCoverageError(
       "$.sourceGraph.dimensions.queryVariantIds: Source graph must cover the exact report query variants.", { safeDiagnostics: forensicsTrace("pre_graph_guard", fanouts, snapshots, observedIds, effectiveFanouts, sourceGraph) }
-    );
+    ));
   }
+  input.trace?.emit("step_succeeded", "public_source_evidence_graph_contract", {
+    phase: "source_retrieval", snapshotCount: snapshots.length, sourceCount: retrievals.length,
+    disposition: partialQueryCoverage ? "partial" : "complete", durationMs: Date.now() - graphGuardStarted
+  });
   const priceMicros = 29_000_000;
   const zh = input.locale.toLowerCase().startsWith("zh");
   const partialLimitation = partialQueryCoverage
@@ -192,7 +224,7 @@ export async function runPublicSourceForensicsPipeline(input: {
     questionId: snapshot.questionId, queryVariantIds: effectiveFanouts[index]!.queries.map(({ id }) => id), observationIds: snapshot.observations.map(({ observationId }) => observationId),
     freshness: snapshot.ageMs <= 7*24*60*60*1_000 ? ("fresh" as const) : snapshot.ageMs <= 30*24*60*60*1_000 ? ("stale" as const) : ("expired" as const),
     observedAt: snapshot.observedAt, collectedForThisRun: snapshot.collectedForThisRun }));
-  let report: RecommendationForensicReportV2;
+  let report: RecommendationForensicReportV2; const reportBuildStarted = Date.now(); input.trace?.emit("step_started", "public_source_report_build", { phase: "source_retrieval" });
   try {
     report = (input.dependencies.buildReport ?? buildPublicSourceForensicReport)({ reportId: input.reportId, jobId: input.jobId,
       targetUrl: input.targetUrl, locale: input.locale, region: input.region, generatedAt: evidenceCutoffAt, evidenceCutoffAt,
@@ -208,8 +240,12 @@ export async function runPublicSourceForensicsPipeline(input: {
       ...(partialLimitation ? { additionalLimitations: [partialLimitation] } : {}),
       ...(input.semanticValidation === "deferred" ? { semanticValidation: "deferred" as const } : {}) });
   } catch (error) {
+    input.trace?.failed("public_source_report_build", { phase: "source_retrieval", durationMs: Date.now() - reportBuildStarted }, error);
     throw mapForensicReportContractError(error, forensicsTrace("report_parser", fanouts, snapshots, observedIds, effectiveFanouts, sourceGraph, snapshotRefs));
   }
+  input.trace?.emit("step_succeeded", "public_source_report_build", {
+    phase: "source_retrieval", snapshotCount: snapshots.length, outcome: decision.outcome, durationMs: Date.now() - reportBuildStarted
+  });
   // B4: only after a parseable report do we freeze publicSourceForensics resume identity.
   const checkpoint = createCheckpoint({ input, questions, fanouts: effectiveFanouts, snapshots, evidenceCutoffAt, authority });
   if (prior && prior.identityHash !== checkpoint.identityHash) {
@@ -217,9 +253,13 @@ export async function runPublicSourceForensicsPipeline(input: {
     // identity; genuine authority drift (question set, foundation hash) already
     // failed above and any other divergence stays permanent.
     if (!resolutions.some(({ reFetched }) => reFetched)) throw new PublicSourceResumeIdentityMismatchError();
-    await input.dependencies.saveCheckpoint(input.jobId, checkpoint);
+    await tracePaidV3DirectStep(input.trace, "public_source_checkpoint_persist", {
+      phase: "source_retrieval", snapshotCount: snapshots.length
+    }, () => input.dependencies.saveCheckpoint(input.jobId, checkpoint));
   } else if (!prior) {
-    await input.dependencies.saveCheckpoint(input.jobId, checkpoint);
+    await tracePaidV3DirectStep(input.trace, "public_source_checkpoint_persist", {
+      phase: "source_retrieval", snapshotCount: snapshots.length
+    }, () => input.dependencies.saveCheckpoint(input.jobId, checkpoint));
   }
   const commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[] = snapshots.map((item) => ({
     snapshotId: item.snapshotId, cacheIdentity: item.cacheIdentity,
@@ -227,14 +267,38 @@ export async function runPublicSourceForensicsPipeline(input: {
     actualCostMicros: item.actualCostMicros, allocatedCostMicros: item.allocatedCostMicros, avoidedCostMicros: item.avoidedCostMicros
   }));
   input.signal?.throwIfAborted();
-  await input.dependencies.prepareArtifactVerification?.({ jobId: input.jobId, report, checkpoint, commercialSnapshotRefs });
+  if (input.dependencies.prepareArtifactVerification) await tracePaidV3DirectStep(input.trace, "public_source_prepare_artifact", {
+    phase: "artifact_verification", snapshotCount: snapshots.length
+  }, () => input.dependencies.prepareArtifactVerification!({ jobId: input.jobId, report, checkpoint, commercialSnapshotRefs }));
   input.signal?.throwIfAborted();
-  await input.dependencies.artifactReadiness.verify(report);
+  await tracePaidV3DirectStep(input.trace, "public_source_artifact_readiness", {
+    phase: "artifact_verification"
+  }, () => input.dependencies.artifactReadiness.verify(report));
   input.signal?.throwIfAborted();
-  const stored = input.dependencies.deferReportPersistence ? report : await input.dependencies.saveReport(report);
+  const stored = input.dependencies.deferReportPersistence ? report : await tracePaidV3DirectStep(input.trace, "public_source_report_persist", {
+    phase: "source_retrieval", outcome: decision.outcome
+  }, () => input.dependencies.saveReport(report));
   if (stored.reportId !== input.reportId || stored.jobId !== input.jobId || stored.commercialOutcome !== decision.outcome) throw new PublicSourceReportOutcomeMismatchError();
+  input.trace?.emit("gate_result", "public_source_forensics_summary", {
+    phase: "source_retrieval", snapshotCount: snapshots.length, sourceCount: retrievals.length,
+    outcome: decision.outcome, disposition: "ready"
+  });
   return { report: stored, checkpoint, commercialSnapshotRefs };
 }
+
+function runForensicsTraceGate<T>(trace: PaidV3DirectDebugTrace | undefined, step: string, details: PaidV3DirectDebugTraceDetails, operation: () => T): T {
+  const started = Date.now(), finished = () => ({ ...details, durationMs: Date.now() - started }); trace?.emit("step_started", step, details);
+  try {
+    const value = operation();
+    trace?.emit("step_succeeded", step, finished());
+    return value;
+  } catch (error) {
+    trace?.failed(step, finished(), error);
+    throw error;
+  }
+}
+
+function failForensicsGate(trace: PaidV3DirectDebugTrace | undefined, step: string, started: number, error: Error): never { trace?.failed(step, { phase: "source_retrieval", durationMs: Date.now() - started }, error); throw error; }
 
 function uniqueReasons(reasons: readonly string[]): string[] {
   return [...new Set(reasons.filter((reason) => reason.trim()))];

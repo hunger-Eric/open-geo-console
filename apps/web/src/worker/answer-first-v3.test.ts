@@ -10,6 +10,7 @@ import {
   resolveGenerativeAnswerFirstV3,
   type AnswerFirstV3StoredSource
 } from "./answer-first-v3";
+import { PAID_V3_DIRECT_DEBUG_TRACE_PREFIX, createPaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
 
 describe("answer-first V3 Worker service", () => {
   it("projects Q1 provider evidence with customer-visible source metadata", () => {
@@ -536,9 +537,16 @@ describe("generative answer-first V3 Worker service", () => {
         return questionId === ids[1] ? q2 : q3;
       })
     } satisfies GenerativeSearchAnswerProvider;
+    const traceLines: string[] = [];
+    const trace = createPaidV3DirectDebugTrace({
+      jobId: "job-1", reportId: "report-1", remainingMs: () => 300_000,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => traceLines.push(line)
+    })!;
     const pending = resolveGenerativeAnswerFirstV3({
       questionSet, provider, locale: "zh-CN", region: "CN", targetUrl: "https://target.example/",
       auditSources: [], targetPages: [], semanticValidation: "free_direct",
+      trace,
+      saveCheckpoint: vi.fn(async () => undefined),
       seededQ1: {
         questionSetIdentity: questionSet.contentHash,
         providerId: provider.providerId,
@@ -558,6 +566,14 @@ describe("generative answer-first V3 Worker service", () => {
     expect(provider.answerWithSources.mock.calls.every(([request]) => request.semanticValidation === "free_direct")).toBe(true);
     expect(result.answerCards.map(({ status }) => status)).toEqual(["answered", "source_limited", "refused"]);
     expect(result.checkpoint.sourceSelectionDiagnosis).toBeDefined();
+    const events = traceLines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string; questionOrdinal?: number });
+    expect(events.filter(({ kind, step }) => kind === "step_started" && step === "answer_question_resolution")
+      .map(({ questionOrdinal }) => questionOrdinal).sort()).toEqual([2, 3]);
+    for (const step of ["answer_hash_assembly", "answer_checkpoint_persist"]) {
+      expect(events).toContainEqual(expect.objectContaining({ kind: "step_started", step }));
+      expect(events).toContainEqual(expect.objectContaining({ kind: "step_succeeded", step }));
+    }
+    expect(events).toContainEqual(expect.objectContaining({ kind: "step_succeeded", step: "answer_card_assembly", durationMs: expect.any(Number) }));
   });
 });
 

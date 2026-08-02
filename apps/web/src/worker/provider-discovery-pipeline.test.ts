@@ -7,6 +7,7 @@ import {
   type ProviderDiscoveryCheckpointV1,
   type ProviderDiscoveryPipelineDependencies
 } from "./provider-discovery-pipeline";
+import { PAID_V3_DIRECT_DEBUG_TRACE_PREFIX, createPaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
 
 const fourSnapshotGuardHarness = vi.hoisted(() => {
   const state = {
@@ -128,6 +129,27 @@ describe("provider discovery recoverable pipeline", () => {
     const deps=dependencies({}); deps.now=()=>new Date("2031-01-01T00:00:00.000Z");
     await expect(runProviderDiscoveryPipeline({...runInput(deps),hardDeadlineAt:"2030-01-01T01:00:00.000Z"})).rejects.toThrow(/deadline/i);
     expect(deps.runDiscovery).not.toHaveBeenCalled();
+  });
+  it("names every internal stage and checkpoint without changing call counts", async () => {
+    const deps = dependencies({});
+    const lines: string[] = [];
+    const trace = createPaidV3DirectDebugTrace({
+      jobId: "job-1", reportId: "report-1", remainingMs: () => 60_000,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => lines.push(line)
+    })!;
+
+    await runProviderDiscoveryPipeline({ ...runInput(deps), trace });
+
+    const events = lines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string });
+    for (const step of ["provider_checkpoint_load", "provider_discovery_search", "provider_candidate_verification",
+      "provider_source_retrieval", "provider_passage_selection", "provider_claim_extraction_stage",
+      "provider_qualification", "provider_standard_questions", "provider_projection", "provider_checkpoint_persist"]) {
+      expect(events).toContainEqual(expect.objectContaining({ kind: "step_started", step }));
+      expect(events).toContainEqual(expect.objectContaining({ kind: "step_succeeded", step }));
+    }
+    expect(deps.runDiscovery).toHaveBeenCalledTimes(1);
+    expect(deps.runVerification).toHaveBeenCalledTimes(1);
+    expect(deps.resolveStandardQuestions).toHaveBeenCalledTimes(1);
   });
 });
 

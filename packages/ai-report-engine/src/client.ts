@@ -32,17 +32,33 @@ export interface OpenAiCompatibleClientOptions {
   defaultHeaders?: Record<string, string>;
 }
 
-export class AiClientError extends Error {
-  readonly status?: number;
-  readonly responseBody?: string;
+export type AiClientErrorCode = "invalid_json" | "non_json_response" | "invalid_response" | "empty_content" | "output_truncated"
+  | "timeout" | "aborted" | "network" | "rate_limited" | "temporary_provider"
+  | "authentication" | "configuration" | "request_rejected";
 
-  constructor(message: string, options: { status?: number; responseBody?: string; cause?: unknown } = {}) {
+const RETRYABLE_AI_CLIENT_CODES = new Set<AiClientErrorCode>([
+  "invalid_json", "non_json_response", "invalid_response", "empty_content", "output_truncated", "timeout", "network", "rate_limited", "temporary_provider"
+]);
+
+export class AiClientError extends Error {
+  readonly code: AiClientErrorCode; readonly retryable: boolean; readonly status?: number;
+  readonly finishReason?: string; readonly responseChars?: number; readonly outputTokens?: number;
+
+  constructor(message: string, options: {
+    code?: AiClientErrorCode; status?: number; finishReason?: string; responseChars?: number; outputTokens?: number; cause?: unknown;
+  } = {}) {
     super(message, { cause: options.cause });
     this.name = "AiClientError";
+    this.code = options.code ?? inferAiClientErrorCode(message, options.status);
+    this.retryable = RETRYABLE_AI_CLIENT_CODES.has(this.code);
     this.status = options.status;
-    this.responseBody = options.responseBody;
+    this.finishReason = safeFinishReason(options.finishReason);
+    this.responseChars = safeCount(options.responseChars);
+    this.outputTokens = safeCount(options.outputTokens);
   }
 }
+
+export function isRetryableAiClientError(error: unknown): error is AiClientError { return error instanceof AiClientError && error.retryable; }
 
 function chatCompletionsUrl(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, "");
@@ -67,7 +83,7 @@ function extractMessageContent(content: unknown): string {
   return "";
 }
 
-export function parseJsonContent(content: string): unknown {
+export function parseJsonContent(content: string, metadata: { status?: number; finishReason?: string; outputTokens?: number } = {}): unknown {
   const trimmed = content.trim();
   const fenceMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   const candidate = fenceMatch?.[1] ?? trimmed;
@@ -92,8 +108,8 @@ export function parseJsonContent(content: string): unknown {
     }
 
     throw new AiClientError("The model returned invalid JSON.", {
-      responseBody: content.slice(0, 2_000),
-      cause: firstError
+      code: metadata.finishReason === "length" ? "output_truncated" : "invalid_json",
+      status: metadata.status, finishReason: metadata.finishReason, responseChars: content.length, outputTokens: metadata.outputTokens, cause: firstError
     });
   }
 }
@@ -123,7 +139,8 @@ export class OpenAiCompatibleClient implements JsonCompletionClient {
 
   async completeJson(request: JsonCompletionRequest): Promise<JsonCompletionResult> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(new Error("AI request timed out.")), this.timeoutMs);
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(new Error("AI request timed out.")); }, this.timeoutMs);
     const abortFromCaller = () => controller.abort(request.signal?.reason);
     request.signal?.addEventListener("abort", abortFromCaller, { once: true });
 
@@ -150,8 +167,7 @@ export class OpenAiCompatibleClient implements JsonCompletionClient {
 
       if (!response.ok) {
         throw new AiClientError(`AI request failed with HTTP ${response.status}.`, {
-          status: response.status,
-          responseBody: responseText.slice(0, 2_000)
+          status: response.status, code: statusErrorCode(response.status), responseChars: responseText.length
         });
       }
 
@@ -160,30 +176,40 @@ export class OpenAiCompatibleClient implements JsonCompletionClient {
         envelope = JSON.parse(responseText);
       } catch (cause) {
         throw new AiClientError("AI endpoint returned a non-JSON response.", {
-          status: response.status,
-          responseBody: responseText.slice(0, 2_000),
-          cause
+          code: "non_json_response", status: response.status, responseChars: responseText.length, cause
         });
       }
 
       if (!envelope || typeof envelope !== "object") {
-        throw new AiClientError("AI endpoint returned an invalid response envelope.");
+        throw new AiClientError("AI endpoint returned an invalid response envelope.", {
+          code: "invalid_response", status: response.status, responseChars: responseText.length
+        });
       }
 
       const record = envelope as Record<string, unknown>;
       const choices = Array.isArray(record.choices) ? record.choices : [];
       const firstChoice = choices[0];
+      const choiceRecord = firstChoice && typeof firstChoice === "object" ? firstChoice as Record<string, unknown> : {};
+      const finishReason = typeof choiceRecord.finish_reason === "string" ? choiceRecord.finish_reason : undefined;
+      const usage = record.usage && typeof record.usage === "object" ? record.usage as Record<string, unknown> : {};
+      const outputTokens = safeCount(usage.completion_tokens ?? usage.output_tokens);
       const message = firstChoice && typeof firstChoice === "object"
-        ? (firstChoice as Record<string, unknown>).message
+        ? choiceRecord.message
         : undefined;
       const content = message && typeof message === "object"
         ? extractMessageContent((message as Record<string, unknown>).content)
         : "";
 
-      if (!content) throw new AiClientError("AI endpoint returned no message content.");
+      const responseMetadata = { status: response.status, finishReason, responseChars: content.length, outputTokens };
+      if (finishReason === "length") {
+        throw new AiClientError("AI endpoint truncated the model output.", { code: "output_truncated", ...responseMetadata });
+      }
+      if (!content.trim()) {
+        throw new AiClientError("AI endpoint returned no message content.", { code: "empty_content", ...responseMetadata });
+      }
 
       return {
-        value: parseJsonContent(content),
+        value: parseJsonContent(content, { status: response.status, finishReason, outputTokens }),
         rawContent: content,
         modelId: typeof record.model === "string" ? record.model : this.configuredModel,
         requestId: response.headers.get("x-request-id") ?? undefined
@@ -191,14 +217,34 @@ export class OpenAiCompatibleClient implements JsonCompletionClient {
     } catch (error) {
       if (error instanceof AiClientError) throw error;
       if (controller.signal.aborted) {
-        throw new AiClientError("AI request was aborted or timed out.", { cause: error });
+        throw new AiClientError(timedOut ? "AI request timed out." : "AI request was aborted.", {
+          code: timedOut ? "timeout" : "aborted", cause: error
+        });
       }
-      throw new AiClientError("AI request failed.", { cause: error });
+      throw new AiClientError("AI request failed.", { code: "network", cause: error });
     } finally {
       clearTimeout(timeout);
       request.signal?.removeEventListener("abort", abortFromCaller);
     }
   }
+}
+
+function safeCount(value: unknown): number | undefined { return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : undefined; }
+function safeFinishReason(value: unknown): string | undefined { return typeof value === "string" && /^[a-z0-9_-]{1,40}$/i.test(value) ? value : undefined; }
+
+function statusErrorCode(status: number): AiClientErrorCode {
+  return status === 401 || status === 403 ? "authentication" : status === 429 ? "rate_limited" : status >= 500 ? "temporary_provider" : "request_rejected";
+}
+
+function inferAiClientErrorCode(message: string, status?: number): AiClientErrorCode {
+  if (status !== undefined) return statusErrorCode(status);
+  if (/invalid json/i.test(message)) return "invalid_json";
+  if (/non-json/i.test(message)) return "non_json_response";
+  if (/no message content/i.test(message)) return "empty_content";
+  if (/base URL|API key|model is required/i.test(message)) return "configuration";
+  if (/aborted/i.test(message)) return "aborted";
+  if (/timed out/i.test(message)) return "timeout";
+  return "network";
 }
 
 export function createOpenAiCompatibleClient(

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildSynthesisPrompt, synthesizeWebsiteReport, synthesizeWebsiteReportWithRecovery } from "./synthesis";
-import type { JsonCompletionClient, JsonCompletionRequest } from "./client";
+import { AiClientError, type JsonCompletionClient, type JsonCompletionRequest } from "./client";
 import type { ExtractedPage, ReportSynthesisInput } from "./types";
 
 const page: ExtractedPage = {
@@ -100,7 +100,7 @@ describe("website synthesis semantic-validation seam", () => {
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
-  it("keeps Direct website synthesis to one call and fails malformed structure closed", async () => {
+  it("keeps Direct website-synthesis contract failures to one call", async () => {
     const invalid = modelOutput();
     (invalid.dimensionScores as unknown[]).pop();
     const client = clientReturning(invalid);
@@ -109,6 +109,54 @@ describe("website synthesis semantic-validation seam", () => {
       semanticValidation: "free_direct",
       delay: async () => undefined
     })).rejects.toThrow();
+    expect(client.completeJson).toHaveBeenCalledOnce();
+  });
+
+  it("recovers Direct website synthesis from one transient invalid-JSON response", async () => {
+    const requests: JsonCompletionRequest[] = [];
+    const client: JsonCompletionClient = {
+      configuredModel: "mock-model",
+      completeJson: vi.fn(async (request) => {
+        requests.push(request);
+        if (requests.length === 1) {
+          throw new AiClientError("The model returned invalid JSON.", { code: "invalid_json" });
+        }
+        const value = modelOutput();
+        return { value, modelId: "mock-model", rawContent: JSON.stringify(value) };
+      })
+    };
+
+    const result = await synthesizeWebsiteReportWithRecovery(client, input(), {
+      maxAttempts: 3, semanticValidation: "free_direct", delay: async () => undefined
+    });
+
+    expect(result.report.organizationProfile.organizationName).toBe("Target Brand");
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    expect(requests[1]).toEqual(requests[0]);
+  });
+
+  it("stops Direct website synthesis after three transient failures", async () => {
+    const finalCause = new AiClientError("truncated", { code: "output_truncated", finishReason: "length", responseChars: 100 });
+    const client: JsonCompletionClient = {
+      configuredModel: "mock-model",
+      completeJson: vi.fn()
+        .mockRejectedValueOnce(new AiClientError("invalid", { code: "invalid_json" }))
+        .mockRejectedValueOnce(new AiClientError("empty", { code: "empty_content" }))
+        .mockRejectedValueOnce(finalCause)
+    };
+
+    await expect(synthesizeWebsiteReportWithRecovery(client, input(), {
+      maxAttempts: 3, semanticValidation: "free_direct", delay: async () => undefined
+    })).rejects.toBe(finalCause);
+    expect(client.completeJson).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry Direct authentication failures", async () => {
+    const failure = new AiClientError("unauthorized", { status: 401, code: "authentication" });
+    const client: JsonCompletionClient = { configuredModel: "mock-model", completeJson: vi.fn().mockRejectedValue(failure) };
+    await expect(synthesizeWebsiteReportWithRecovery(client, input(), {
+      maxAttempts: 3, semanticValidation: "free_direct", delay: async () => undefined
+    })).rejects.toBe(failure);
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 

@@ -407,6 +407,8 @@ function selectPassagesForFact(fact: { normalizedText?: string }, sourceEvidence
 
 async function extractClaims(input: { client: JsonCompletionClient; locale: string; question: string; policy: ProviderQualificationPolicy; candidates: readonly ProviderCandidateQueryIdentity[]; passages: ProviderEvidencePassage[]; bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>; trace?: PaidV3DirectDebugTrace; signal?: AbortSignal }): Promise<ProviderClaim[]> {
   const accepted: ProviderClaim[] = [];
+  let rejectedCount = 0;
+  let skippedCount = 0;
   for (const source of input.bundle.sources) {
     const sourcePassages = input.passages.filter(({ sourceEvidenceId }) => sourceEvidenceId === source.id);
     if (!sourcePassages.length) continue;
@@ -424,12 +426,26 @@ async function extractClaims(input: { client: JsonCompletionClient; locale: stri
             }, extract)
           : await extract();
       } catch (error) {
-        if (isModelClaimContractError(error)) continue;
+        if (isModelClaimContractError(error)) {
+          skippedCount += 1;
+          input.trace?.degraded("provider_claim_contract", {
+            phase: "provider_claim_extraction", skippedCount, disposition: "model_contract_skipped",
+            ...paidV3TraceUrlIdentity(source.canonicalUrl)
+          }, error);
+          continue;
+        }
         throw error;
       }
       for (const candidateClaim of extracted.candidates) {
         const passage = sourcePassages.find(({ exactExcerpt }) => exactExcerpt.includes(candidateClaim.exactExcerpt));
-        if (!passage) continue;
+        if (!passage) {
+          skippedCount += 1;
+          input.trace?.emit("gate_result", "provider_claim_passage_binding", {
+            phase: "provider_claim_extraction", outcome: "skipped", errorCode: "passage_mismatch",
+            skippedCount, ...paidV3TraceUrlIdentity(source.canonicalUrl)
+          });
+          continue;
+        }
         const validation = validateProviderClaimCandidate(candidateClaim, { passage, policy: input.policy, subjectEntityId: candidate.entityId,
           canonicalSubjectName: candidate.canonicalName, registrableDomain: source.registrableDomain, sourceAuthority: source.sourceCategory,
           sourceEligibility: source.retrievalState === "available" && !["unknown", "directory_or_reference", "community_or_ugc"].includes(source.sourceCategory) });
@@ -441,10 +457,19 @@ async function extractClaims(input: { client: JsonCompletionClient; locale: stri
           ...paidV3TraceUrlIdentity(source.canonicalUrl)
         });
         if (validation.status === "accepted") accepted.push(validation.accepted);
+        else rejectedCount += 1;
       }
     }
   }
-  return [...new Map(accepted.map((claim) => [claim.claimId, claim])).values()].sort((left, right) => left.claimId.localeCompare(right.claimId));
+  const uniqueAccepted = [...new Map(accepted.map((claim) => [claim.claimId, claim])).values()].sort((left, right) => left.claimId.localeCompare(right.claimId));
+  const summary = {
+    phase: "provider_claim_extraction", claimCount: accepted.length + rejectedCount + skippedCount,
+    acceptedCount: uniqueAccepted.length, rejectedCount, skippedCount,
+    disposition: skippedCount > 0 ? "continued_with_skips" : "complete"
+  };
+  if (skippedCount > 0) input.trace?.degraded("provider_claim_extraction_summary", summary);
+  else input.trace?.emit("gate_result", "provider_claim_extraction_summary", summary);
+  return uniqueAccepted;
 }
 
 function projectProviderDiscovery(input: { policy: ProviderQualificationPolicy; discovery: ProviderDiscoveryStage; retrieval: ProviderRetrievalStage; passages: ProviderEvidencePassage[]; claims: ProviderClaim[]; qualification: ReturnType<ProviderQualificationPolicy["qualify"]>; bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>; extractionModel: string; verificationPlannedQueries: number; verificationCompletedQueries: number; verificationReturnedObservations: number; standardPlannedQueries: number; standardCompletedQueries: number; standardReturnedObservations: number; standardSafePages: number }): ProviderDiscoveryV1 {

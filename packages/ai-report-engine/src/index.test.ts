@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AI_WEBSITE_REPORT_VERSION,
   AI_REPORT_PROMPT_VERSION,
+  AiClientError,
   COMBINED_GEO_REPORT_CONTRACT,
   COMBINED_GEO_REPORT_V2_CONTRACT,
   COMBINED_GEO_REPORT_V3_CONTRACT,
@@ -218,6 +219,37 @@ describe("OpenAI-compatible client", () => {
       expect.any(Object)
     );
     expect(result).toMatchObject({ value: { ok: true }, modelId: "served-model", requestId: "request-1" });
+  });
+
+  it("classifies provider-declared output truncation with safe metadata only", async () => {
+    const client = new OpenAiCompatibleClient({
+      baseUrl: "https://models.example/v1", apiKey: "secret", model: "configured-model",
+      fetch: vi.fn(async () => new Response(JSON.stringify({
+        choices: [{ finish_reason: "length", message: { content: "{\"partial\":" } }],
+        usage: { completion_tokens: 8000 }
+      }), { status: 200 })) as typeof fetch
+    });
+
+    await expect(client.completeJson({ messages: [{ role: "user", content: "JSON" }] })).rejects.toMatchObject({
+      name: "AiClientError", code: "output_truncated", finishReason: "length", responseChars: 11, outputTokens: 8000
+    });
+  });
+
+  it.each([
+    [429, "rate_limited", true],
+    [503, "temporary_provider", true],
+    [401, "authentication", false],
+    [400, "request_rejected", false]
+  ] as const)("classifies HTTP %s as %s", async (status, code, retryable) => {
+    const client = new OpenAiCompatibleClient({
+      baseUrl: "https://models.example/v1", apiKey: "secret", model: "configured-model",
+      fetch: vi.fn(async () => new Response("SENTINEL_PROVIDER_BODY", { status })) as typeof fetch
+    });
+    const error = await client.completeJson({ messages: [{ role: "user", content: "JSON" }] })
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ name: "AiClientError", code, status });
+    expect((error as AiClientError).retryable).toBe(retryable);
+    expect(JSON.stringify(error)).not.toContain("SENTINEL_PROVIDER_BODY");
   });
 });
 

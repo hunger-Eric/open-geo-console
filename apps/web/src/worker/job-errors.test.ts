@@ -69,6 +69,18 @@ describe("job error normalization", () => {
     expect(redactDiagnostic("Cookie=abc")).toContain("[REDACTED]");
   });
 
+  it("normalizes a typed AI provider failure through the page-batch cause chain", () => {
+    const provider = new AiClientError("The model returned invalid JSON.", {
+      code: "invalid_json", finishReason: "stop", responseChars: 321
+    });
+    const batch = new Error("The model returned invalid JSON.", { cause: provider });
+    batch.name = "PageAnalysisBatchError";
+
+    expect(normalizeJobError(batch, { ...context, phase: "page_analysis" })).toMatchObject({
+      code: "ai_client_invalid_response", classification: "transient", type: "PageAnalysisBatchError"
+    });
+  });
+
   it("keeps stable operator-repairable codes and deterministic bounded backoff", () => {
     const normalized = normalizeJobError(new PublicSourceRuntimeError("disabled", "public_source_runtime_disabled"), context, new Date("2030-01-01T00:00:00Z"));
     expect(normalized).toMatchObject({ classification: "operator_repairable", code: "public_source_runtime_disabled", retryableAt: null });

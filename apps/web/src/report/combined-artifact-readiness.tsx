@@ -15,6 +15,13 @@ import { exportCanonicalArtifactHtmlPdf } from "./pdf-export";
 import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 import { localizeTechnicalReportForArtifact } from "./technical-report-localization";
 import { createEvidenceStorage, evidenceStorageKey } from "@/evidence/storage";
+import type { PaidV3DirectDebugTrace, PaidV3DirectDebugTraceDetails } from "@/worker/paid-v3-direct-debug-trace";
+
+type V3ArtifactReadinessOptions = {
+  semanticValidation?: "legacy" | "deferred" | "free_direct";
+  reviewedReceiptVerified?: boolean;
+  trace?: PaidV3DirectDebugTrace;
+};
 
 export interface ReadyCombinedArtifact {
   report: CombinedGeoReportV1;
@@ -177,15 +184,21 @@ async function assertReadyEvidenceAssets(evidenceAssets: ReportEvidenceAssetRow[
 export async function materializeReadyArtifact<T extends CombinedGeoReportV1 | CombinedGeoReportV2 | CombinedGeoReportV3>(
   report: T,
   model: CombinedPrivateReportArtifactModel,
-  html: string
+  html: string,
+  trace?: PaidV3DirectDebugTrace
 ): Promise<{ report: T; html: string; pdf: Buffer; htmlSha256: string; pdfSha256: string; pdfStorageKey: string; pageCount: number }> {
-  const pdf = await runReportV4GuardedOperation({ guardSite: "pdf_readiness_chromium", delegate: () => exportCanonicalArtifactHtmlPdf(html) });
-  if (pdf.subarray(0, 5).toString("utf8") !== "%PDF-") throw new Error("Combined PDF artifact has an invalid signature.");
-  const pageCount = Math.max(0, pdf.toString("latin1").match(/\/Type\s*\/Page\b/g)?.length ?? 0);
-  if (pageCount < 5) throw new Error(`Combined PDF artifact is not substantive (${pageCount} pages).`);
+  const pdf = await traceArtifactStep(trace, "combined_pdf_render", { phase: "artifact_verification" },
+    () => runReportV4GuardedOperation({ guardSite: "pdf_readiness_chromium", delegate: () => exportCanonicalArtifactHtmlPdf(html) }));
+  const pageCount = traceArtifactGate(trace, "combined_pdf_validation", { phase: "artifact_verification" }, () => {
+    if (pdf.subarray(0, 5).toString("utf8") !== "%PDF-") throw new Error("Combined PDF artifact has an invalid signature.");
+    const count = Math.max(0, pdf.toString("latin1").match(/\/Type\s*\/Page\b/g)?.length ?? 0);
+    if (count < 5) throw new Error(`Combined PDF artifact is not substantive (${count} pages).`);
+    return count;
+  });
   const pdfStorageKey = evidenceStorageKey(model.reportId, model.artifactRevisionId, "pdf");
   const storage = createEvidenceStorage();
-  await runReportV4GuardedOperation({ guardSite: "pdf_readiness_storage", delegate: () => storage.put(pdfStorageKey, pdf, "application/pdf") });
+  await traceArtifactStep(trace, "combined_pdf_storage", { phase: "artifact_verification", pageCount },
+    () => runReportV4GuardedOperation({ guardSite: "pdf_readiness_storage", delegate: () => storage.put(pdfStorageKey, pdf, "application/pdf") }));
   return { report, html, pdf, htmlSha256: sha(html), pdfSha256: sha(pdf), pdfStorageKey, pageCount };
 }
 
@@ -331,11 +344,17 @@ export type CombinedGeoReportV3SemanticDraft = Omit<CombinedGeoReportV3, "answer
 
 export async function buildReadyCombinedArtifactV3(
   input: BuildReadyCombinedArtifactV3Input,
-  options: { semanticValidation?: "legacy" | "free_direct" } = {}
+  options: V3ArtifactReadinessOptions = {}
 ): Promise<ReadyCombinedArtifactV3> {
-  await assertReadyEvidenceAssets(input.evidenceAssets);
-  const report = prepareCombinedGeoReportV3Core(input, options);
-  await input.onReportPrepared?.(report);
+  await traceArtifactStep(options.trace, "combined_evidence_assets", {
+    phase: "artifact_verification", assetCount: input.evidenceAssets.length
+  }, () => assertReadyEvidenceAssets(input.evidenceAssets));
+  const report = traceArtifactGate(options.trace, "combined_report_contract", {
+    phase: "artifact_verification"
+  }, () => prepareCombinedGeoReportV3Core(input, options));
+  if (input.onReportPrepared) await traceArtifactStep(options.trace, "combined_report_checkpoint", {
+    phase: "artifact_verification", progress: 99
+  }, () => Promise.resolve(input.onReportPrepared!(report)));
   return materializePreparedCombinedArtifactV3(report, input.evidenceAssets, options);
 }
 
@@ -443,22 +462,46 @@ function assembleCombinedGeoReportV3(input: Omit<PrepareCombinedGeoReportV3Input
 export async function materializePreparedCombinedArtifactV3(
   value: unknown,
   evidenceAssets: ReportEvidenceAssetRow[],
-  options: { semanticValidation?: "legacy" | "deferred" | "free_direct"; reviewedReceiptVerified?: boolean } = {}
+  options: V3ArtifactReadinessOptions = {}
 ): Promise<ReadyCombinedArtifactV3> {
-  assertDeferredReceiptAuthority(options);
-  await assertReadyEvidenceAssets(evidenceAssets);
-  const report = requireReadyCombinedGeoReportV3(value, {
+  traceArtifactGate(options.trace, "combined_receipt_authority", { phase: "artifact_verification" }, () => assertDeferredReceiptAuthority(options));
+  await traceArtifactStep(options.trace, "combined_evidence_assets", {
+    phase: "artifact_verification", assetCount: evidenceAssets.length
+  }, () => assertReadyEvidenceAssets(evidenceAssets));
+  const report = traceArtifactGate(options.trace, "combined_report_schema", { phase: "artifact_verification" }, () => requireReadyCombinedGeoReportV3(value, {
     semanticValidation: options.semanticValidation ?? "legacy"
-  });
+  }));
   const locale: "en" | "zh" = report.locale.toLowerCase().startsWith("zh") ? "zh" : "en";
   const model: CombinedPrivateReportArtifactModelV3 = {
     productContract: "combined_geo_report_v3", reportId: report.reportId, locale, combinedReport: report,
     technicalReport: report.technicalFoundation.technicalReport, evidenceAssets,
     artifactRevisionId: report.artifactRevisionId, pdfStorageKey: "pending"
   };
-  const html = renderCanonicalCombinedArtifactHtml(model);
-  assertCombinedV3HtmlCompleteness(report, html);
-  return materializeReadyArtifact(report, model, html);
+  const html = traceArtifactGate(options.trace, "combined_html_render", { phase: "artifact_verification" }, () => {
+    const rendered = renderCanonicalCombinedArtifactHtml(model);
+    assertCombinedV3HtmlCompleteness(report, rendered);
+    return rendered;
+  });
+  return materializeReadyArtifact(report, model, html, options.trace);
+}
+
+function traceArtifactStep<T>(trace: PaidV3DirectDebugTrace | undefined, step: string,
+  details: PaidV3DirectDebugTraceDetails, operation: () => Promise<T>): Promise<T> {
+  return trace ? trace.span(step, details, operation) : operation();
+}
+
+function traceArtifactGate<T>(trace: PaidV3DirectDebugTrace | undefined, step: string,
+  details: PaidV3DirectDebugTraceDetails, operation: () => T): T {
+  const started = Date.now();
+  trace?.emit("step_started", step, details);
+  try {
+    const value = operation();
+    trace?.emit("step_succeeded", step, { ...details, durationMs: Date.now() - started });
+    return value;
+  } catch (error) {
+    trace?.failed(step, { ...details, durationMs: Date.now() - started }, error);
+    throw error;
+  }
 }
 
 function assertDeferredReceiptAuthority(options: { semanticValidation?: "legacy" | "deferred" | "free_direct"; reviewedReceiptVerified?: boolean }): void {

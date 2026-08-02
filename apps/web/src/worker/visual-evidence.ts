@@ -69,24 +69,42 @@ export async function captureReportVisualEvidence(input: {
   trace?: PaidV3DirectDebugTrace;
 }): Promise<void> {
   const requests = buildVisualEvidenceRequests(input.report, input.pages);
-  if (requests.length === 0) return;
+  if (requests.length === 0) {
+    input.trace?.emit("gate_result", "visual_evidence_summary", {
+      phase: "visual_evidence", citationCount: 0, completedCount: 0, degradedCount: 0, disposition: "no_citations"
+    });
+    return;
+  }
+  let completedCount = 0;
+  let degradedCount = 0;
 
   let storage: EvidenceStorage;
+  const storageConfigStarted = Date.now(); input.trace?.emit("step_started", "visual_storage_configuration", { phase: "visual_evidence" });
   try {
     storage = input.storage ?? createEvidenceStorage();
+    input.trace?.emit("step_succeeded", "visual_storage_configuration", { phase: "visual_evidence", durationMs: Date.now() - storageConfigStarted });
   } catch (error) {
-    input.trace?.emit("step_failed", "visual_storage_configuration", {
+    input.trace?.failed("visual_storage_configuration", {
       phase: "website_synthesis",
-      errorName: error instanceof Error ? error.name : "UnknownError",
       citationCount: requests.length,
-      uniqueUrlCount: groupVisualEvidenceRequests(requests).length
-    });
+      uniqueUrlCount: groupVisualEvidenceRequests(requests).length,
+      durationMs: Date.now() - storageConfigStarted
+    }, error);
     await Promise.all(requests.map((request) => saveUnavailable(input, request, intendedKind(request), "storage_configuration")));
+    input.trace?.degraded("visual_evidence_summary", {
+      phase: "visual_evidence", citationCount: requests.length, completedCount: 0, degradedCount: requests.length,
+      disposition: "continued_with_unavailable_assets"
+    }, error);
     return;
   }
 
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: process.env.OGC_BROWSER_HEADLESS !== "false" });
+  const launchBrowser = async () => {
+    const { chromium } = await import("playwright");
+    return chromium.launch({ headless: process.env.OGC_BROWSER_HEADLESS !== "false" });
+  };
+  const browser = input.trace
+    ? await input.trace.span("visual_browser_launch", { phase: "visual_evidence" }, launchBrowser)
+    : await launchBrowser();
   try {
     for (const group of groupVisualEvidenceRequests(requests)) {
       const first = group[0];
@@ -96,16 +114,31 @@ export async function captureReportVisualEvidence(input: {
         ...(first ? paidV3TraceUrlIdentity(first.citation.url) : {})
       };
       const capture = () => captureUrlGroup(input, group, storage, browser);
-      await (input.trace ? input.trace.span("visual_url_navigation", details, capture) : capture()).catch(async (error) => {
+      let groupCompletedCount = 0;
+      try {
+        groupCompletedCount = await (input.trace ? input.trace.span("visual_url_navigation", details, capture) : capture());
+        degradedCount += group.length - groupCompletedCount;
+      } catch (error) {
+        degradedCount += group.length;
         await Promise.all(group.map(async (request) => {
           logCaptureFailure(input.reportId, request, error);
           await saveUnavailable(input, request, intendedKind(request), "capture_failed");
         }));
-      });
+      }
+      completedCount += groupCompletedCount;
     }
   } finally {
-    await browser.close();
+    const closeBrowser = () => browser.close();
+    await (input.trace
+      ? input.trace.span("visual_browser_close", { phase: "visual_evidence" }, closeBrowser)
+      : closeBrowser());
   }
+  const summary = {
+    phase: "visual_evidence", citationCount: requests.length, completedCount, degradedCount,
+    disposition: degradedCount > 0 ? "continued_with_unavailable_assets" : "ready"
+  };
+  if (degradedCount > 0) input.trace?.degraded("visual_evidence_summary", summary);
+  else input.trace?.emit("gate_result", "visual_evidence_summary", summary);
 }
 
 async function captureUrlGroup(
@@ -113,9 +146,10 @@ async function captureUrlGroup(
   requests: readonly CaptureRequest[],
   storage: EvidenceStorage,
   browser: Awaited<ReturnType<(Awaited<typeof import("playwright")>)["chromium"]["launch"]>>
-) {
+): Promise<number> {
   const first = requests[0];
-  if (!first) return;
+  if (!first) return 0;
+  let completedCount = 0;
   const context = await browser.newContext({
     userAgent: "OpenGeoConsoleBot/1.0 (+https://github.com/open-geo-console)",
     javaScriptEnabled: true,
@@ -142,18 +176,22 @@ async function captureUrlGroup(
 
     for (const request of requests) {
       const capture = () => captureCitationOnPage(input, request, storage, page, capturedAt);
+      let captureSucceeded = true;
       await (input.trace ? input.trace.span("visual_citation_capture", {
         phase: "website_synthesis",
         citationCount: 1,
         ...paidV3TraceUrlIdentity(request.citation.url)
       }, capture) : capture()).catch(async (error) => {
+        captureSucceeded = false;
         logCaptureFailure(input.reportId, request, error);
         await saveUnavailable(input, request, intendedKind(request), "capture_failed");
       });
+      if (captureSucceeded) completedCount += 1;
     }
   } finally {
     await context.close();
   }
+  return completedCount;
 }
 
 async function captureCitationOnPage(

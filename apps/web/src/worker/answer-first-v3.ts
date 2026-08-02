@@ -26,6 +26,7 @@ import {
 import type { SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 import { toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import { JobError } from "./job-errors";
+import { tracePaidV3DirectStep, type PaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
 import {
   buildSourceSelectionDiagnosisForGenerativeV3,
   type SourceSelectionTargetPageSignal
@@ -132,6 +133,7 @@ export interface ResolveGenerativeAnswerFirstV3Input {
   now?: () => Date;
   signal?: AbortSignal;
   semanticValidation?: "legacy" | "deferred" | "free_direct";
+  trace?: PaidV3DirectDebugTrace;
 }
 
 export type GenerativeSearchAnswerCardDraftV3 = Omit<GenerativeSearchAnswerCardV3, "geoDiagnosis">;
@@ -327,6 +329,9 @@ export async function resolveGenerativeAnswerFirstV3(
     exactText: question.privateText
   }));
   if (mappedQuestions.length !== 3) throw new TypeError("Generative answer-first V3 requires exactly three questions.");
+  input.trace?.emit("gate_result", "answer_question_set_validation", {
+    phase: "grounded_answer_synthesis", completedCount: mappedQuestions.length, disposition: "valid"
+  });
   const questions = [mappedQuestions[0]!, mappedQuestions[1]!, mappedQuestions[2]!] as const;
   const identity = {
     version: GENERATIVE_ANSWER_FIRST_V3_CHECKPOINT_VERSION,
@@ -339,21 +344,37 @@ export async function resolveGenerativeAnswerFirstV3(
     region: input.region
   };
   const identityHash = hash(identity);
-  const resumed = input.checkpoint?.version === GENERATIVE_ANSWER_FIRST_V3_CHECKPOINT_VERSION
-    ? validateGenerativeCheckpoint(input.checkpoint, identityHash, identity)
-    : null;
-  if (input.checkpoint && !resumed) {
-    throw new AnswerFirstV3ResumeIdentityMismatchError("A legacy V3 checkpoint cannot create a generative-search answer card.");
+  let resumed: AnswerFirstV3CheckpointV2 | null;
+  const checkpointValidationStarted = Date.now(); input.trace?.emit("step_started", "answer_checkpoint_validation", { phase: "grounded_answer_synthesis" });
+  try {
+    resumed = input.checkpoint?.version === GENERATIVE_ANSWER_FIRST_V3_CHECKPOINT_VERSION
+      ? validateGenerativeCheckpoint(input.checkpoint, identityHash, identity)
+      : null;
+    if (input.checkpoint && !resumed) throw new AnswerFirstV3ResumeIdentityMismatchError("A legacy V3 checkpoint cannot create a generative-search answer card.");
+    input.trace?.emit("step_succeeded", "answer_checkpoint_validation", { phase: "grounded_answer_synthesis", disposition: resumed ? "reused" : "not_present", durationMs: Date.now() - checkpointValidationStarted });
+  } catch (error) {
+    input.trace?.failed("answer_checkpoint_validation", { phase: "grounded_answer_synthesis", disposition: "rejected", durationMs: Date.now() - checkpointValidationStarted }, error);
+    throw error;
   }
 
-  const seededQ1 = input.seededQ1
-    ? validateSeededQ1(input.seededQ1, input, questions[0])
-    : null;
+  let seededQ1: GenerativeSearchAnswerResult | null = null;
+  const seededQ1Started = Date.now(); input.trace?.emit("step_started", "answer_seeded_q1_validation", { phase: "grounded_answer_synthesis", questionOrdinal: 1 });
+  try {
+    seededQ1 = input.seededQ1 ? validateSeededQ1(input.seededQ1, input, questions[0]) : null;
+    input.trace?.emit("step_succeeded", "answer_seeded_q1_validation", { phase: "grounded_answer_synthesis", questionOrdinal: 1, disposition: seededQ1 ? "reused" : "not_present", durationMs: Date.now() - seededQ1Started });
+  } catch (error) {
+    input.trace?.failed("answer_seeded_q1_validation", { phase: "grounded_answer_synthesis", questionOrdinal: 1, disposition: "rejected", durationMs: Date.now() - seededQ1Started }, error);
+    throw error;
+  }
   let answerResults = resumed?.answerResults;
   let providerCalls = false;
   if (!answerResults) {
     const signal = input.signal ?? new AbortController().signal;
-    const generateAnswer = async (question: (typeof questions)[number], index: number) => {
+    const generateAnswer = async (question: (typeof questions)[number], index: number) => tracePaidV3DirectStep(
+      input.trace, "answer_question_resolution", {
+        phase: "grounded_answer_synthesis", questionOrdinal: index + 1,
+        configuredMaxAttempts: semanticDirect ? 1 : undefined
+      }, async () => {
       let parsed = await callGenerativeProvider(input.provider, {
         questionId: question.id,
         question: question.exactText,
@@ -395,7 +416,7 @@ export async function resolveGenerativeAnswerFirstV3(
         throw new AnswerFirstV3ModelContractInvalidError({ cause: new TypeError("Question 1 answer is nonresponsive market-statistic-only output.") });
       }
       return parsed;
-    };
+    });
     if (seededQ1) {
       const generated = await Promise.all([
         generateAnswer(questions[1], 1),
@@ -411,12 +432,16 @@ export async function resolveGenerativeAnswerFirstV3(
     }
     providerCalls = true;
   }
-  const perAnswerHashes = await Promise.all(answerResults.map((answer) => semanticDeferred
-    ? generativeSearchAnswerHash(answer, { locale: input.locale, semanticValidation: "deferred" })
-    : semanticDirect
-      ? generativeSearchAnswerHash(answer, { locale: input.locale, semanticValidation: "free_direct" })
-      : generativeSearchAnswerHash(answer)));
-  const perSourceHashes = await Promise.all(answerResults.map((answer) => generativeSearchSourceHash(answer.sources)));
+  const { perAnswerHashes, perSourceHashes } = await tracePaidV3DirectStep(input.trace, "answer_hash_assembly", {
+    phase: "grounded_answer_synthesis", completedCount: answerResults.length
+  }, async () => ({
+    perAnswerHashes: await Promise.all(answerResults.map((answer) => semanticDeferred
+      ? generativeSearchAnswerHash(answer, { locale: input.locale, semanticValidation: "deferred" })
+      : semanticDirect
+        ? generativeSearchAnswerHash(answer, { locale: input.locale, semanticValidation: "free_direct" })
+        : generativeSearchAnswerHash(answer))),
+    perSourceHashes: await Promise.all(answerResults.map((answer) => generativeSearchSourceHash(answer.sources)))
+  }));
   const answerHash = hash(perAnswerHashes);
   const sourceHash = hash(perSourceHashes);
   if (resumed && (resumed.answerHash !== answerHash || resumed.sourceHash !== sourceHash ||
@@ -451,9 +476,19 @@ export async function resolveGenerativeAnswerFirstV3(
     engineProvenance,
     answerResults
   };
-  if (providerCalls) await input.saveCheckpoint?.(collected);
+  if (providerCalls && input.saveCheckpoint) await tracePaidV3DirectStep(input.trace, "answer_checkpoint_persist", {
+    phase: "grounded_answer_synthesis", progress: 98, disposition: "answers_collected"
+  }, () => input.saveCheckpoint!(collected));
 
-  const answerCardDrafts = buildGenerativeCardDrafts(input, questions, answerResults, perAnswerHashes, perSourceHashes);
+  let answerCardDrafts: GenerativeAnswerCardDraftTuple;
+  const cardAssemblyStarted = Date.now(); input.trace?.emit("step_started", "answer_card_assembly", { phase: "grounded_answer_synthesis" });
+  try {
+    answerCardDrafts = buildGenerativeCardDrafts(input, questions, answerResults, perAnswerHashes, perSourceHashes);
+    input.trace?.emit("step_succeeded", "answer_card_assembly", { phase: "grounded_answer_synthesis", completedCount: answerCardDrafts.length, disposition: "drafts_ready", durationMs: Date.now() - cardAssemblyStarted });
+  } catch (error) {
+    input.trace?.failed("answer_card_assembly", { phase: "grounded_answer_synthesis", durationMs: Date.now() - cardAssemblyStarted }, error);
+    throw error;
+  }
   if (semanticDeferred) {
     return { checkpoint: collected, answerCardDrafts, reused: !providerCalls };
   }
@@ -478,7 +513,9 @@ export async function resolveGenerativeAnswerFirstV3(
     : cardsReady;
   if (!resumed?.answerCards || JSON.stringify(resumed.answerCards) !== JSON.stringify(answerCards) ||
       JSON.stringify(resumed.sourceSelectionDiagnosis) !== JSON.stringify(ready.sourceSelectionDiagnosis)) {
-    await input.saveCheckpoint?.(ready);
+    if (input.saveCheckpoint) await tracePaidV3DirectStep(input.trace, "answer_checkpoint_persist", {
+      phase: "grounded_answer_synthesis", progress: 98, disposition: ready.stage
+    }, () => input.saveCheckpoint!(ready));
   }
   return { checkpoint: ready, answerCards, reused: !providerCalls };
 }

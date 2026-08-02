@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { AiClientError } from "@open-geo-console/ai-report-engine";
 import {
   PAID_V3_DIRECT_DEBUG_TRACE_PREFIX,
   createPaidV3DirectDebugTrace,
@@ -88,6 +89,86 @@ describe("Paid V3 Direct debug trace", () => {
     expect(lines[0]).not.toContain("SECRET_MODEL_TEXT");
     expect(paidV3TraceUrlIdentity("https://192.0.2.10/private").registrableHost).toBe("ip-host");
     expect(paidV3TraceUrlIdentity("https://[2001:db8::1]/private").registrableHost).toBe("ip-host");
+  });
+
+  it("emits safe provider metadata through a wrapped batch error without content", async () => {
+    const lines: string[] = [];
+    const trace = createPaidV3DirectDebugTrace({
+      jobId: "job-1", reportId: "report-1", remainingMs: () => 1,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => lines.push(line)
+    })!;
+    const provider = new AiClientError("SENTINEL_MODEL_PROSE", {
+      code: "output_truncated", status: 200, finishReason: "length", responseChars: 4321, outputTokens: 8000
+    });
+    const batch = new Error("SENTINEL_BATCH_MESSAGE", { cause: provider });
+    batch.name = "PageAnalysisBatchError";
+
+    await expect(trace.span("page_analysis", { phase: "page_analysis" }, async () => { throw batch; })).rejects.toBe(batch);
+
+    const event = lines.map(parseLine).find(({ kind }) => kind === "step_failed");
+    expect(event).toMatchObject({
+      errorName: "PageAnalysisBatchError", errorCode: "output_truncated", providerStatus: 200,
+      finishReason: "length", responseChars: 4321, outputTokens: 8000
+    });
+    expect(lines.join("\n")).not.toContain("SENTINEL_MODEL_PROSE");
+    expect(lines.join("\n")).not.toContain("SENTINEL_BATCH_MESSAGE");
+  });
+
+  it("records safe stage dispositions without letting a broken writer alter the job", async () => {
+    const lines: string[] = [];
+    const trace = createPaidV3DirectDebugTrace({
+      jobId: "job-1", reportId: "report-1", remainingMs: () => 1,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => lines.push(line)
+    })!;
+    const error = new AiClientError("SENTINEL_PROVIDER_MESSAGE", { code: "provider_timeout", status: 504 });
+
+    trace.degraded("visual_evidence_summary", {
+      phase: "visual_evidence", progress: 90, completedCount: 2, degradedCount: 1,
+      disposition: "continued_without_visual_evidence"
+    }, error);
+    trace.failed("answer_checkpoint_persist", {
+      phase: "answer_collection", checkpointRevision: 7, resumeGeneration: 2
+    }, error);
+
+    expect(lines.map(parseLine)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "step_degraded", step: "visual_evidence_summary", progress: 90,
+        completedCount: 2, degradedCount: 1, disposition: "continued_without_visual_evidence",
+        errorCode: "provider_timeout", providerStatus: 504
+      }),
+      expect.objectContaining({
+        kind: "step_failed", step: "answer_checkpoint_persist", checkpointRevision: 7,
+        resumeGeneration: 2, errorCode: "provider_timeout"
+      })
+    ]));
+    expect(lines.join("\n")).not.toContain("SENTINEL_PROVIDER_MESSAGE");
+
+    const value = { preserved: true };
+    const brokenTrace = createPaidV3DirectDebugTrace({
+      jobId: "job-1", reportId: "report-1", remainingMs: () => 1,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: () => { throw new Error("WRITER_FAILURE"); }
+    })!;
+    expect(await brokenTrace.span("safe_observer", {}, async () => value)).toBe(value);
+    await expect(brokenTrace.span("safe_observer", {}, async () => { throw error; })).rejects.toBe(error);
+    expect(() => brokenTrace.degraded("safe_observer", {}, error)).not.toThrow();
+  });
+
+  it("rejects secret-shaped error names and codes", async () => {
+    const lines: string[] = [];
+    const trace = createPaidV3DirectDebugTrace({
+      jobId: "job-1", reportId: "report-1", remainingMs: () => 1,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => lines.push(line)
+    })!;
+    const error = new Error("not logged") as Error & { code: string };
+    error.name = "sk-live-secret";
+    error.code = "api_key_secret_value";
+
+    await expect(trace.span("secret_shaped_error", {}, async () => { throw error; })).rejects.toBe(error);
+
+    const event = lines.map(parseLine).find(({ kind }) => kind === "step_failed")!;
+    expect(event.errorName).toBe("UnknownError");
+    expect(event).not.toHaveProperty("errorCode");
+    expect(lines.join("\n")).not.toMatch(/sk-live|api_key|secret_value/i);
   });
 });
 

@@ -4484,3 +4484,102 @@ allowlist; external actions remain zero; no deploy.
 - This scope is superseded by an opt-in diagnostic-trace scope. The retained
   implementation and tests are local evidence only; no production usability
   or live root-cause resolution is claimed.
+
+---
+
+## 2026-08-02 - Paid V3 Direct trace completed; fresh 65% failure isolated
+
+- The approved default-off diagnostic trace was implemented and later used by
+  the fresh Paid job `c819b85a-1800-47bb-9ce2-d7eeb83f979c` on Staging Worker
+  revision/image `0df7acd14c9a4a8c50f1bae782c5996e95bdfb25`.
+- The trace and PostgreSQL state isolated the terminal boundary to the first
+  page-analysis provider call: it ran for about 74 seconds and returned content
+  that the JSON client could not parse. The job stopped at progress `65` with
+  `attempts=1`, `max_attempts=1`; no page-analysis batch or combined artifact
+  completed.
+- The reconstructed four-page request was below the local prompt-truncation
+  boundary. Current trace and persistence did not retain `finish_reason`, safe
+  response length/usage, or a causal provider code, so the historical output's
+  exact malformed-versus-truncated subtype cannot be recovered.
+- Repository history confirmed that commit `fa5afbfd` changed Direct page
+  analysis and website synthesis from bounded leaf attempts to one attempt.
+  Invalid-JSON page-analysis failures also predated that commit. The confirmed
+  regression is therefore loss of transient leaf recovery, not creation of the
+  provider's malformed JSON.
+- The failed report, job, paid order, pending refund, and pending artifact
+  remain immutable historical state. No replay, repair, refund, deployment,
+  configuration change, model call, or database write was performed during the
+  diagnosis.
+- This diagnostic scope is closed and superseded by a separate FROZEN repair
+  scope. This history grants no implementation or external-action authority.
+
+---
+
+## 2026-08-02 - Paid V3 Direct transient leaf recovery repaired locally
+
+- The user approved the exact six-production-file repair scope. The change
+  keeps the Paid job authority at `max_attempts=1` and gives only the Direct
+  page-analysis and website-synthesis provider leaves up to three identical
+  calls for typed invalid/non-JSON, empty, output-truncated, timeout, network,
+  `429`, or `5xx` failures.
+- Parsed contract, semantic, language, identity, URL/evidence, `400/401/403`,
+  configuration, and hard-deadline abort failures remain one-call failures.
+  No alternate model/endpoint, prompt mutation, fallback, whole-job replay, or
+  historical-state change was added.
+- `AiClientError` now carries stable safe codes plus bounded provider status,
+  finish reason, response-character count, and output-token count. Raw provider
+  bodies are no longer retained on the error. Page-analysis preserves the final
+  provider error as its cause; job normalization and the default-off Direct
+  trace follow that bounded cause chain without logging model content.
+- Final focused verification passed `150/150` tests across the AI client,
+  page-analysis, website-synthesis, job-error, and trace files. The exact Paid
+  processor boundary test passed `1/1` and proved job `maxAttempts=1` with
+  Direct leaf `maxAttempts=3`.
+- The complete processor test file retained one source-string slicing assertion
+  failure that was already present in the pre-implementation red run; the new
+  runtime boundary test in that file passes. It was not altered outside this
+  scope.
+- `npm run lint` completed with zero errors and six pre-existing warnings.
+  `npm run build` completed successfully across all workspaces and the Next.js
+  application.
+- Production diff measured `+134/-38` lines; test diff measured `+212/-5`.
+  Every per-file and aggregate budget passed, no unexpected path appeared, and
+  all unrelated user-owned dirty files remained untouched.
+- No PostgreSQL/Docker workflow, browser submission, live website/model call,
+  deployment, payment/refund action, Git operation, or historical report/job
+  replay was performed. Real Protected Staging usability remains unverified and
+  requires separate authority.
+
+---
+
+## 2026-08-02 - Paid V3 Direct 65%-to-100% failure trace completed locally
+
+- The approved default-off `OGC_PAID_V3_DEBUG_TRACE=1` console trace now covers
+  every enumerated boundary from the first persisted 65% checkpoint through
+  100% terminalization, including page checkpoints, visual degradation,
+  locked/resume context, answer collection, provider discovery, public-source
+  forensics, Direct incomplete dispositions, artifact readiness, terminal
+  transaction writes, final failure persistence, and commercial reconciliation.
+- The trace remains a no-throw observer. It does not alter model/provider calls,
+  retries, concurrency, deadlines, progress, checkpoint meaning, report or
+  artifact content, persistence order, settlement, refunds, email, or terminal
+  outcomes. Exact secret-like error names/codes are suppressed in addition to
+  prompts, content, URLs, headers, raw database values, messages, and stacks.
+- Final focused verification passed `181/181` tests across the ten allowed test
+  files. A final affected-file run passed `44/44`. `npm run lint` completed with
+  zero errors and six pre-existing warnings. The full workspace build passed,
+  and the final post-adjustment Web build also passed with 18 static pages.
+- Independent test and read-only review were completed. The reviewer found no
+  remaining P0/P1 issue. The remaining evidence gap is limited to separately
+  injecting a few observer-only failure branches and to real PostgreSQL/browser
+  behavior, which this scope expressly forbade.
+- Every production-file budget passed. `processor.ts` measured approximately
+  `+122/-49` for this scope after subtracting its scope-start `+4/-4` baseline;
+  all other production files were within their recorded per-file limits, and
+  the aggregate test diff remained below its approved budget.
+- Existing unrelated dirty files and the prior approved transient-leaf repair
+  were preserved. No PostgreSQL/Docker workflow, browser submission, live
+  report/model call, deployment, payment/refund/email action, historical-state
+  mutation, Git operation, commit, or push was performed. Real Protected
+  Staging usefulness still requires separate deployment and fresh-report
+  authority.

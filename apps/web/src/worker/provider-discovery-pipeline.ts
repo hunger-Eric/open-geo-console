@@ -4,6 +4,7 @@ import type { ProviderDiscoveryV1 } from "@open-geo-console/ai-report-engine";
 import type { ProviderCandidateQueryIdentity } from "@open-geo-console/public-search-observer";
 import { runReportV4GuardedOperation } from "@/report-v4/prohibited-operation-guard-runtime";
 import type { ScanJobPhase } from "./job-state";
+import { tracePaidV3DirectStep, type PaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
 
 export const PROVIDER_DISCOVERY_CHECKPOINT_VERSION = "provider-discovery-checkpoint-v1" as const;
 export type ProviderPipelinePhase = Extract<ScanJobPhase,
@@ -78,6 +79,7 @@ export async function runProviderDiscoveryPipeline(input: {
   dependencies: ProviderDiscoveryPipelineDependencies;
   hardDeadlineAt: string;
   signal?: AbortSignal;
+  trace?: PaidV3DirectDebugTrace;
 }): Promise<{ providerDiscovery: ProviderDiscoveryV1; checkpoint: ProviderDiscoveryCheckpointV1; coverage: { status: "complete" | "partial" | "insufficient" } }> {
   return runReportV4GuardedOperation({
     guardSite: "four_snapshot",
@@ -90,12 +92,18 @@ async function runProviderDiscoveryPipelineUnsafe(input: {
   dependencies: ProviderDiscoveryPipelineDependencies;
   hardDeadlineAt: string;
   signal?: AbortSignal;
+  trace?: PaidV3DirectDebugTrace;
 }): Promise<{ providerDiscovery: ProviderDiscoveryV1; checkpoint: ProviderDiscoveryCheckpointV1; coverage: { status: "complete" | "partial" | "insufficient" } }> {
   const deadline = timestamp(input.hardDeadlineAt, "hardDeadlineAt");
   const identity = parseIdentity(input.identity);
   const expectedIdentityHash = sha(identity);
-  const prior = await input.dependencies.getCheckpoint();
-  if (prior) validateCheckpointIdentity(prior, identity, expectedIdentityHash);
+  const prior = await tracePaidV3DirectStep(input.trace, "provider_checkpoint_load", {
+    phase: "provider_discovery_search"
+  }, async () => {
+    const value = await input.dependencies.getCheckpoint();
+    if (value) validateCheckpointIdentity(value, identity, expectedIdentityHash);
+    return value;
+  });
   let checkpoint = prior ?? checkpointFor(identity, expectedIdentityHash);
   const guard = () => {
     input.signal?.throwIfAborted();
@@ -103,52 +111,87 @@ async function runProviderDiscoveryPipelineUnsafe(input: {
   };
 
   guard();
-  const discovery = checkpoint.artifacts.discovery ?? await input.dependencies.runDiscovery(input.signal);
-  validateDiscovery(discovery);
-  if (!checkpoint.artifacts.discovery) checkpoint = await save(input.dependencies, checkpoint, { phase: "candidate_resolution", discoverySnapshotId: discovery.snapshotId, artifacts: { ...checkpoint.artifacts, discovery } });
+  const discovery = await tracePaidV3DirectStep(input.trace, "provider_discovery_search", {
+    phase: "provider_discovery_search"
+  }, async () => {
+    const value = checkpoint.artifacts.discovery ?? await input.dependencies.runDiscovery(input.signal);
+    validateDiscovery(value);
+    return value;
+  });
+  if (!checkpoint.artifacts.discovery) checkpoint = await save(input.dependencies, checkpoint, { phase: "candidate_resolution", discoverySnapshotId: discovery.snapshotId, artifacts: { ...checkpoint.artifacts, discovery } }, input.trace);
 
   guard();
   const candidateSetHash = hashCandidates(discovery.candidates);
   if (checkpoint.candidateSetHash && checkpoint.candidateSetHash !== candidateSetHash) throw new ProviderDiscoveryResumeIdentityMismatchError("Provider candidate set changed during resume.");
-  checkpoint = checkpoint.candidateSetHash ? checkpoint : await save(input.dependencies, checkpoint, { phase: "candidate_verification", candidateSetHash });
-  const verification = checkpoint.artifacts.verification ?? await input.dependencies.runVerification({ discovery, candidateSetHash, signal: input.signal });
-  if (verification.candidateSetHash !== candidateSetHash) throw new ProviderDiscoveryResumeIdentityMismatchError("Verification candidate-set hash does not match discovery.");
-  if (!checkpoint.artifacts.verification) checkpoint = await save(input.dependencies, checkpoint, { phase: "provider_source_retrieval", verificationSnapshotId: verification.snapshotId, artifacts: { ...checkpoint.artifacts, verification } });
+  checkpoint = checkpoint.candidateSetHash ? checkpoint : await save(input.dependencies, checkpoint, { phase: "candidate_verification", candidateSetHash }, input.trace);
+  const verification = await tracePaidV3DirectStep(input.trace, "provider_candidate_verification", {
+    phase: "candidate_verification", sourceCount: discovery.candidates.length
+  }, async () => {
+    const value = checkpoint.artifacts.verification ?? await input.dependencies.runVerification({ discovery, candidateSetHash, signal: input.signal });
+    if (value.candidateSetHash !== candidateSetHash) throw new ProviderDiscoveryResumeIdentityMismatchError("Verification candidate-set hash does not match discovery.");
+    return value;
+  });
+  if (!checkpoint.artifacts.verification) checkpoint = await save(input.dependencies, checkpoint, { phase: "provider_source_retrieval", verificationSnapshotId: verification.snapshotId, artifacts: { ...checkpoint.artifacts, verification } }, input.trace);
 
   guard();
-  const retrieval = checkpoint.artifacts.retrieval ?? await input.dependencies.retrieveSources({ verification, signal: input.signal });
-  if (retrieval.verificationSnapshotId !== verification.snapshotId) throw new ProviderDiscoveryResumeIdentityMismatchError("Provider retrieval does not match the verification snapshot.");
-  if (!checkpoint.artifacts.retrieval) checkpoint = await save(input.dependencies, checkpoint, { phase: "provider_passage_selection", artifacts: { ...checkpoint.artifacts, retrieval } });
+  const retrieval = await tracePaidV3DirectStep(input.trace, "provider_source_retrieval", {
+    phase: "provider_source_retrieval"
+  }, async () => {
+    const value = checkpoint.artifacts.retrieval ?? await input.dependencies.retrieveSources({ verification, signal: input.signal });
+    if (value.verificationSnapshotId !== verification.snapshotId) throw new ProviderDiscoveryResumeIdentityMismatchError("Provider retrieval does not match the verification snapshot.");
+    return value;
+  });
+  if (!checkpoint.artifacts.retrieval) checkpoint = await save(input.dependencies, checkpoint, { phase: "provider_passage_selection", artifacts: { ...checkpoint.artifacts, retrieval } }, input.trace);
 
   guard();
-  const passages = checkpoint.artifacts.passages ?? await input.dependencies.selectPassages({ verification, retrieval, signal: input.signal });
-  validatePassages(passages);
-  if (!checkpoint.artifacts.passages) checkpoint = await save(input.dependencies, checkpoint, { phase: "provider_claim_extraction", artifacts: { ...checkpoint.artifacts, passages } });
+  const passages = await tracePaidV3DirectStep(input.trace, "provider_passage_selection", {
+    phase: "provider_passage_selection", sourceCount: retrieval.sourceEvidenceIds.length
+  }, async () => {
+    const value = checkpoint.artifacts.passages ?? await input.dependencies.selectPassages({ verification, retrieval, signal: input.signal });
+    validatePassages(value);
+    return value;
+  });
+  if (!checkpoint.artifacts.passages) checkpoint = await save(input.dependencies, checkpoint, { phase: "provider_claim_extraction", artifacts: { ...checkpoint.artifacts, passages } }, input.trace);
 
   guard();
-  const claims = checkpoint.artifacts.claims ?? await input.dependencies.extractClaims({ passages, signal: input.signal });
+  const claims = await tracePaidV3DirectStep(input.trace, "provider_claim_extraction_stage", {
+    phase: "provider_claim_extraction", citationCount: passages.length
+  }, () => checkpoint.artifacts.claims
+    ? Promise.resolve(checkpoint.artifacts.claims)
+    : input.dependencies.extractClaims({ passages, signal: input.signal }));
   const claimSetHash = hashClaims(claims);
   if (checkpoint.claimSetHash && checkpoint.claimSetHash !== claimSetHash) throw new ProviderDiscoveryResumeIdentityMismatchError("Provider claim set changed during resume.");
-  if (!checkpoint.artifacts.claims) checkpoint = await save(input.dependencies, checkpoint, { phase: "provider_qualification", claimSetHash, artifacts: { ...checkpoint.artifacts, claims } });
+  if (!checkpoint.artifacts.claims) checkpoint = await save(input.dependencies, checkpoint, { phase: "provider_qualification", claimSetHash, artifacts: { ...checkpoint.artifacts, claims } }, input.trace);
 
   guard();
-  const qualification = checkpoint.artifacts.qualification ?? await input.dependencies.qualify({ claims, signal: input.signal });
-  if (qualification.policyId !== identity.policyId || qualification.policyVersion !== identity.policyVersion) throw new ProviderDiscoveryResumeIdentityMismatchError("Qualification policy identity does not match the checkpoint.");
-  if (!checkpoint.artifacts.qualification) checkpoint = await save(input.dependencies, checkpoint, { phase: "grounded_answer_synthesis", artifacts: { ...checkpoint.artifacts, qualification } });
+  const qualification = await tracePaidV3DirectStep(input.trace, "provider_qualification", {
+    phase: "provider_qualification", claimCount: claims.length
+  }, async () => {
+    const value = checkpoint.artifacts.qualification ?? await input.dependencies.qualify({ claims, signal: input.signal });
+    if (value.policyId !== identity.policyId || value.policyVersion !== identity.policyVersion) throw new ProviderDiscoveryResumeIdentityMismatchError("Qualification policy identity does not match the checkpoint.");
+    return value;
+  });
+  if (!checkpoint.artifacts.qualification) checkpoint = await save(input.dependencies, checkpoint, { phase: "grounded_answer_synthesis", artifacts: { ...checkpoint.artifacts, qualification } }, input.trace);
 
   guard();
   const standardQuestionSnapshotIds = checkpoint.standardQuestionSnapshotIds.length === 2
     ? checkpoint.standardQuestionSnapshotIds as [string, string]
-    : await input.dependencies.resolveStandardQuestions({ evidenceCutoffAt: identity.evidenceCutoffAt, signal: input.signal });
+    : await tracePaidV3DirectStep(input.trace, "provider_standard_questions", {
+        phase: "grounded_answer_synthesis", questionOrdinal: 2
+      }, () => input.dependencies.resolveStandardQuestions({ evidenceCutoffAt: identity.evidenceCutoffAt, signal: input.signal }));
   if (standardQuestionSnapshotIds.length !== 2 || new Set(standardQuestionSnapshotIds).size !== 2) throw new ProviderDiscoveryPipelineContractError("Questions 2 and 3 require two unique standard snapshots.");
-  const providerDiscovery = checkpoint.artifacts.providerDiscovery ?? await input.dependencies.projectProviderDiscovery({ discovery, verification, retrieval, passages, claims, qualification });
+  const providerDiscovery = await tracePaidV3DirectStep(input.trace, "provider_projection", {
+    phase: "grounded_answer_synthesis", claimCount: claims.length
+  }, () => checkpoint.artifacts.providerDiscovery
+    ? Promise.resolve(checkpoint.artifacts.providerDiscovery)
+    : input.dependencies.projectProviderDiscovery({ discovery, verification, retrieval, passages, claims, qualification }));
   if (providerDiscovery.policy.policyId !== identity.policyId || providerDiscovery.policy.policyVersion !== identity.policyVersion || providerDiscovery.identity.candidateSetHash !== candidateSetHash || providerDiscovery.identity.claimSetHash !== claimSetHash) throw new ProviderDiscoveryPipelineContractError("Projected provider discovery identities do not reconcile.");
-  if (!checkpoint.artifacts.providerDiscovery || checkpoint.standardQuestionSnapshotIds.length !== 2) checkpoint = await save(input.dependencies, checkpoint, { phase: "complete", standardQuestionSnapshotIds: [...standardQuestionSnapshotIds], artifacts: { ...checkpoint.artifacts, providerDiscovery } });
+  if (!checkpoint.artifacts.providerDiscovery || checkpoint.standardQuestionSnapshotIds.length !== 2) checkpoint = await save(input.dependencies, checkpoint, { phase: "complete", standardQuestionSnapshotIds: [...standardQuestionSnapshotIds], artifacts: { ...checkpoint.artifacts, providerDiscovery } }, input.trace);
   const status = providerDiscovery.execution.coverage === "insufficient" ? "insufficient" : providerDiscovery.strict.length === 0 ? "partial" : providerDiscovery.execution.coverage;
   return { providerDiscovery, checkpoint, coverage: { status } };
 }
 
-async function save(deps: ProviderDiscoveryPipelineDependencies, current: ProviderDiscoveryCheckpointV1, patch: Partial<ProviderDiscoveryCheckpointV1>): Promise<ProviderDiscoveryCheckpointV1> { const next = { ...current, ...patch }; await deps.saveCheckpoint(next); return next; }
+async function save(deps: ProviderDiscoveryPipelineDependencies, current: ProviderDiscoveryCheckpointV1, patch: Partial<ProviderDiscoveryCheckpointV1>, trace?: PaidV3DirectDebugTrace): Promise<ProviderDiscoveryCheckpointV1> { const next = { ...current, ...patch }; await tracePaidV3DirectStep(trace, "provider_checkpoint_persist", { phase: patch.phase ?? current.phase }, () => deps.saveCheckpoint(next)); return next; }
 function checkpointFor(identity: ProviderDiscoveryIdentity, identityHash: string): ProviderDiscoveryCheckpointV1 { return { version: PROVIDER_DISCOVERY_CHECKPOINT_VERSION, identityHash, ...identity, phase: "provider_discovery_search", discoverySnapshotId: null, verificationSnapshotId: null, standardQuestionSnapshotIds: [], candidateSetHash: null, claimSetHash: null, artifacts: {} }; }
 function validateCheckpointIdentity(checkpoint: ProviderDiscoveryCheckpointV1, identity: ProviderDiscoveryIdentity, identityHash: string): void { if (checkpoint.version !== PROVIDER_DISCOVERY_CHECKPOINT_VERSION || checkpoint.identityHash !== identityHash || identityKeys.some((key) => checkpoint[key] !== identity[key])) throw new ProviderDiscoveryResumeIdentityMismatchError("Provider discovery checkpoint identity does not match this run."); }
 const identityKeys: (keyof ProviderDiscoveryIdentity)[] = ["methodology","artifactContract","policyId","policyVersion","queryPlanVersion","passageSelectorVersion","claimExtractionContract","claimExtractionModel","evidenceCutoffAt","adapterIdentityHash","websiteFoundationHash","questionSetIdentity"];

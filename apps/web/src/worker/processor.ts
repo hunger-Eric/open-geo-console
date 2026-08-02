@@ -147,7 +147,7 @@ import {
   slimOriginalTextPlaceholder
 } from "./paid-v3-compact-review-input";
 import { buildPaidV3DirectSemantics } from "./paid-v3-direct-semantics";
-import { createPaidV3DirectDebugTrace, tracePaidV3DirectStep, type PaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
+import { createPaidV3DirectDebugTrace, tracePaidV3DirectStep, type PaidV3DirectDebugTrace, type PaidV3DirectDebugTraceDetails } from "./paid-v3-direct-debug-trace";
 
 interface StoredPageEvidence {
   page: ExtractedPage;
@@ -495,16 +495,19 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         requiredDeferredAuthority: requiredDeferredPageAnalysisAuthority
       }
     );
-    await saveCheckpoint("analyzing", 65, checkpoint, {
+    await tracePaidV3DirectStep(directTrace, "page_analysis_initial_checkpoint", {
+      phase: "page_analysis", progress: 65, pageCount: crawl.pages.length
+    }, () => saveCheckpoint("analyzing", 65, checkpoint, {
       plannedPages: checkpoint.effectivePlan!.length,
       successfulPages: crawlSuccessCount,
       failedPages: failureCount(checkpoint)
-    });
+    }));
     options.liveDrill?.inject({ jobId: job.id, fault: "model" });
 
     let analyzed;
+    let pageAnalysisBatchOrdinal = 0;
     try {
-      const analysisClient = directTrace?.wrapJsonClient("page_analysis_provider_call", client, 1) ?? client;
+      const analysisClient = directTrace?.wrapJsonClient("page_analysis_provider_call", client, 3) ?? client;
       analyzed = await tracePaidV3DirectStep(directTrace, "page_analysis", {
         phase: "page_analysis", pageCount: crawl.pages.length, batchCount: Math.ceil(crawl.pages.length / 4)
       }, () => analyzePageBatch(analysisClient, {
@@ -513,27 +516,30 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         ...(websiteAnalysisSemanticValidation !== "legacy"
           ? { semanticValidation: websiteAnalysisSemanticValidation }
           : {}),
-        ...(websiteAnalysisSemanticValidation === "free_direct" ? { maxAttempts: 1 } : {}),
+        ...(websiteAnalysisSemanticValidation === "free_direct" ? { maxAttempts: 3 } : {}),
         batchSize: 4,
         maxCharactersPerPage: 30_000,
         signal: execution.controller.signal,
         completedAnalyses: (checkpoint.completedPageAnalyses ?? []).map(({ analysis }) => analysis),
         onBatchComplete: async (batch) => {
+          pageAnalysisBatchOrdinal += 1;
           checkpoint.completedPageAnalyses = mergeCompletedAnalyses(
             checkpoint.completedPageAnalyses ?? [],
             batch,
             evidenceByUrl,
             writeAuthority
           );
-          await saveCheckpoint("analyzing", analysisProgress(
-            checkpoint.completedPageAnalyses.length,
-            crawl.pages.length
-          ), checkpoint, {
+          const completedAnalysisCount = checkpoint.completedPageAnalyses.length;
+          const progress = analysisProgress(completedAnalysisCount, crawl.pages.length);
+          await tracePaidV3DirectStep(directTrace, "page_analysis_batch_checkpoint", {
+            phase: "page_analysis", progress, batchOrdinal: pageAnalysisBatchOrdinal,
+            completedCount: completedAnalysisCount, pageCount: crawl.pages.length
+          }, () => saveCheckpoint("analyzing", progress, checkpoint, {
             plannedPages: checkpoint.effectivePlan!.length,
             // Analysis-derived success only; crawl success was recorded above.
-            successfulPages: checkpoint.completedPageAnalyses.length,
+            successfulPages: completedAnalysisCount,
             failedPages: failureCount(checkpoint)
-          });
+          }));
         }
       }));
     } catch (error) {
@@ -544,10 +550,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
           evidenceByUrl,
           writeAuthority
         );
-        await saveCheckpoint("analyzing", analysisProgress(
-          checkpoint.completedPageAnalyses.length,
-          crawl.pages.length
-        ), checkpoint);
+        const progress = analysisProgress(checkpoint.completedPageAnalyses.length, crawl.pages.length);
+        await tracePaidV3DirectStep(directTrace, "page_analysis_partial_failure_checkpoint", {
+          phase: "page_analysis", progress, completedCount: checkpoint.completedPageAnalyses.length,
+          pageCount: crawl.pages.length, disposition: "partial_analysis_saved"
+        }, () => saveCheckpoint("analyzing", progress, checkpoint));
       }
       // Fail closed: do not synthesize a mixed/partial foundation after reanalysis failure.
       throw error;
@@ -584,9 +591,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       completedEntries: checkpoint.completedPageAnalyses
     });
     checkpoint.synthesisInputHash = synthesisInputHash;
-    await saveCheckpoint("synthesizing", 85, checkpoint);
+    await tracePaidV3DirectStep(directTrace, "website_synthesis_checkpoint", {
+      phase: "website_synthesis", progress: 85, completedCount: checkpoint.completedPageAnalyses.length
+    }, () => saveCheckpoint("synthesizing", 85, checkpoint));
 
-    const synthesisClient = directTrace?.wrapJsonClient("website_synthesis_provider_call", client, 1) ?? client;
+    const synthesisClient = directTrace?.wrapJsonClient("website_synthesis_provider_call", client, 3) ?? client;
     const synthesis = await tracePaidV3DirectStep(directTrace, "website_synthesis", {
       phase: "website_synthesis", pageCount: crawl.pages.length
     }, () => synthesizeWebsiteReportWithRecovery(synthesisClient, {
@@ -601,7 +610,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       ...(websiteAnalysisSemanticValidation !== "legacy"
         ? { semanticValidation: websiteAnalysisSemanticValidation }
         : {}),
-      ...(websiteAnalysisSemanticValidation === "free_direct" ? { maxAttempts: 1 } : {})
+      ...(websiteAnalysisSemanticValidation === "free_direct" ? { maxAttempts: 3 } : {})
     }));
     const reportToPersist = job.tier === "free" ? projectFreeAiReport(synthesis.report) : synthesis.report;
     if (job.tier === "deep") {
@@ -618,7 +627,10 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
           contentHash: evidence.contentHash
         })),
         ...(directTrace ? { trace: directTrace } : {})
-      })).catch(() => {
+      })).catch((error) => {
+        directTrace?.degraded("visual_evidence_summary", {
+          phase: "visual_evidence", progress: 90, disposition: "continued_without_visual_evidence"
+        }, error);
         console.error("Visual evidence capture unavailable.", { reportId: job.reportId, jobId: job.id });
       });
     }
@@ -631,11 +643,13 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         contractVersion: 2,
         websiteFoundation: { completed: true, synthesisInputHash }
       };
-      const preflightCheckpoint = await checkpointJob({ stage: "synthesizing", phase: "public_source_preflight", progress: 90, checkpoint: checkpoint as JobCheckpoint,
-        plannedPages: effectiveCoverage.effectivePlannedPages,
-        successfulPages: effectiveCoverage.analyzedPages,
-        failedPages: failureCount(checkpoint)
-      });
+      const preflightCheckpoint = await tracePaidV3DirectStep(directTrace, "public_source_preflight_checkpoint", {
+        phase: "public_source_preflight", progress: 90
+      }, () => checkpointJob({ stage: "synthesizing", phase: "public_source_preflight", progress: 90, checkpoint: checkpoint as JobCheckpoint,
+          plannedPages: effectiveCoverage.effectivePlannedPages,
+          successfulPages: effectiveCoverage.analyzedPages,
+          failedPages: failureCount(checkpoint)
+        }));
       checkpoint = normalizeCheckpoint(preflightCheckpoint.checkpoint);
       await finalizeRecommendationJob({
         job, workerId, checkpoint, websiteFoundation: reportToPersist, targetUrl: discovery.targetUrl,
@@ -673,7 +687,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       }
     });
     if (job.tier === "deep") {
-      await recordCommercialOutcomeSafely(job.id, terminalJob.stage as "completed" | "completed_limited");
+      await recordCommercialOutcomeSafely(job.id, terminalJob.stage as "completed" | "completed_limited", directTrace ?? undefined);
     }
   } catch (error) {
     if (error instanceof ReportValidationError) {
@@ -705,12 +719,15 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     // V4 owns commercial terminalization, but ordinary runner failures still
     // belong to the canonical job state machine so the original error is
     // durable immediately instead of being replaced later by lease_exhausted.
-    const failedJob = await failScanJob(job.id, workerId, {
+    const failedJob = await tracePaidV3DirectStep(directTrace, "failure_state_persist", {
+      phase, errorCode: normalized.code, failureClassification: normalized.classification,
+      resumeGeneration: currentJob?.resumeGeneration ?? job.resumeGeneration ?? 0
+    }, () => failScanJob(job.id, workerId, {
       code: normalized.code, publicMessage: "The analysis is temporarily unavailable.",
       retryable: !directPaidOneShot && normalized.classification === "transient",
       classification: directPaidOneShot ? undefined : normalized.classification === "operator_repairable" ? "operator_repairable" : normalized.classification === "target_limitation" ? "target_limitation" : undefined,
       internalError: normalized, phase, ...(deferPhaseAttempt ? { defer: true as const } : {})
-    });
+    }));
     if (job.tier === "free" && failedJob.stage === "failed") {
       const report = await getGeoReport(job.reportId);
       if (report && report.technicalStatus !== "completed") {
@@ -721,7 +738,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       }
     }
     if (!reportV4ProductionRoutingAttempted && job.tier === "deep" && job.reason !== "v4_pre_admission" && failedJob.stage === "failed") {
-      await recordCommercialOutcomeSafely(job.id, "failed");
+      await recordCommercialOutcomeSafely(job.id, "failed", directTrace ?? undefined);
     }
   } finally {
     directTrace?.emit("job_stopped", "job_execution");
@@ -1416,20 +1433,39 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
   trace?: PaidV3DirectDebugTrace;
 }): Promise<void> {
   let checkpoint = input.checkpoint;
-  const businessQuestionSet = input.job.businessQuestionSetId
-    ? await getConfirmedBusinessQuestionSet(input.job.reportId, input.job.businessQuestionSetId)
-    : null;
-  const pending = input.artifactContext ?? await getPendingPaidCombinedContext(input.job.id);
+  const businessQuestionSet = await tracePaidV3DirectStep(input.trace, "combined_question_context_load", {
+    phase: "public_source_preflight"
+  }, () => input.job.businessQuestionSetId
+    ? getConfirmedBusinessQuestionSet(input.job.reportId, input.job.businessQuestionSetId)
+    : Promise.resolve(null));
+  const pending = input.artifactContext ?? await tracePaidV3DirectStep(input.trace, "combined_artifact_context_load", {
+    phase: "public_source_preflight"
+  }, () => getPendingPaidCombinedContext(input.job.id));
   if (!businessQuestionSet || !pending) throw new Error("The combined job requires its exact locked questions and pending artifact revision.");
-  const semanticValidation = resolvePaidV3SemanticValidation(input.job, checkpoint);
-  const evidenceAssets = input.evidenceAssets ?? await listEvidenceAssets(input.job.reportId, input.job.id);
-  await assertReusableEvidenceAssets(evidenceAssets);
+  const semanticValidation = tracePaidV3DirectGate(input.trace, "combined_semantic_mode", {
+    phase: "public_source_preflight"
+  }, () => resolvePaidV3SemanticValidation(input.job, checkpoint));
+  input.trace?.emit("gate_result", "combined_semantic_mode", {
+    phase: "public_source_preflight", disposition: semanticValidation
+  });
+  const evidenceAssets = input.evidenceAssets ?? await tracePaidV3DirectStep(input.trace, "combined_evidence_asset_load", {
+    phase: "public_source_preflight"
+  }, () => listEvidenceAssets(input.job.reportId, input.job.id));
+  await tracePaidV3DirectStep(input.trace, "combined_evidence_asset_guard", {
+    phase: "public_source_preflight", assetCount: evidenceAssets.length
+  }, () => assertReusableEvidenceAssets(evidenceAssets));
   const prospectiveTeaser = input.job.recommendationReportVersion === 3
-    ? await resolveProspectiveV3TeaserContext(input.job.reportId, input.targetUrl, businessQuestionSet, semanticValidation)
+    ? await tracePaidV3DirectStep(input.trace, "combined_free_lineage_load", {
+        phase: "public_source_preflight"
+      }, () => resolveProspectiveV3TeaserContext(input.job.reportId, input.targetUrl, businessQuestionSet, semanticValidation))
     : null;
-  const resumedV3 = input.job.artifactContract === "combined_geo_report_v3" ? combinedV3ArtifactVerificationResume(checkpoint) : null;
+  const resumedV3 = tracePaidV3DirectGate(input.trace, "combined_resume_decision", {
+    phase: "artifact_verification", resumeGeneration: input.job.resumeGeneration
+  }, () => input.job.artifactContract === "combined_geo_report_v3" ? combinedV3ArtifactVerificationResume(checkpoint) : null);
   if (resumedV3) {
-    assertPaidV3ResumeSemanticAuthority(semanticValidation, resumedV3);
+    tracePaidV3DirectGate(input.trace, "combined_resume_authority", {
+      phase: "artifact_verification", resumeGeneration: input.job.resumeGeneration, disposition: "resume"
+    }, () => assertPaidV3ResumeSemanticAuthority(semanticValidation, resumedV3));
     if (semanticValidation === "deferred") {
       if (!prospectiveTeaser) throw new Error("Reviewed Paid V3 resume requires its reviewed Free lineage.");
       const reviewedFreeQ1Annotation = paidV3ReviewedFreeQ1Annotation(prospectiveTeaser.reviewedFreeCheckpoint);
@@ -1469,12 +1505,16 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       });
       return;
     }
-    const ready = await materializePreparedCombinedArtifactV3(
+    const ready = await tracePaidV3DirectStep(input.trace, "combined_artifact_resume_materialization", {
+      phase: "artifact_verification", progress: 99, resumeGeneration: input.job.resumeGeneration
+    }, () => materializePreparedCombinedArtifactV3(
       resumedV3.report,
       evidenceAssets,
-      semanticValidation === "free_direct" ? { semanticValidation: "free_direct" } : {}
-    );
-    await terminalizeReadyCombinedArtifact(input, ready, resumedV3.checkpoint.identityHash, resumedV3.commercialSnapshotRefs, semanticValidation);
+      semanticValidation === "free_direct" ? { semanticValidation: "free_direct", trace: input.trace } : {}
+    ));
+    await tracePaidV3DirectStep(input.trace, "terminalization", {
+      phase: "terminalization", artifactState: "ready", resumeGeneration: input.job.resumeGeneration
+    }, () => terminalizeReadyCombinedArtifact(input, ready, resumedV3.checkpoint.identityHash, resumedV3.commercialSnapshotRefs, semanticValidation));
     return;
   }
   const publicSourceBudget = await tracePaidV3DirectStep(input.trace, "public_source_budget_admission", {
@@ -1499,6 +1539,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       targetAliases: businessQuestionSet.identityExclusions,
       seededQ1: prospectiveTeaser?.seededQ1,
       checkpoint: checkpoint.answerFirstV3,
+      trace: input.trace,
       ...(semanticValidation === "deferred"
         ? { semanticValidation: "deferred" as const }
         : semanticValidation === "free_direct"
@@ -1519,7 +1560,9 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
   }
   // Public-search authority and retrieval belong to the audit sidecar. Resolve
   // them only after the ordinary answers have been safely checkpointed.
-  const runtime = await resolveProductionPublicSearchRuntime({ environment: process.env, getAuthority: getActivePublicSearchSurfaceAuthority });
+  const runtime = await tracePaidV3DirectStep(input.trace, "public_search_runtime_resolution", {
+    phase: "public_source_preflight"
+  }, () => resolveProductionPublicSearchRuntime({ environment: process.env, getAuthority: getActivePublicSearchSurfaceAuthority }));
   const priorProviderDiscovery = checkpoint.providerDiscovery ?? null;
   // Mid-job resume freezes identity from the checkpoint so JSON round-trips of the
   // website foundation cannot invalidate already-completed discovery stages.
@@ -1554,7 +1597,8 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     identity: providerDiscoveryIdentity,
     dependencies: providerContext.dependencies,
     hardDeadlineAt: new Date(Date.now() + Math.max(1_000, input.remainingMs)).toISOString(),
-    signal: input.signal
+    signal: input.signal,
+    trace: input.trace
   }));
   input.signal?.throwIfAborted();
   const dependencies = createWorkerPublicSourceForensicsDependencies({
@@ -1585,16 +1629,19 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       dependencies,
       fanoutOverrides: new Map([[providerContext.discoveryFanout.questionId, providerContext.discoveryFanout]]),
       ...(semanticValidation === "deferred" ? { semanticValidation: "deferred" as const } : {}),
+      trace: input.trace,
       signal: input.signal
     }));
   if (input.job.artifactContract === "combined_geo_report_v2" && forensicResult.report.commercialOutcome !== "completed") throw new Error("V2 combined activation requires complete claim-bound public-source coverage.");
   if (input.job.artifactContract === "combined_geo_report_v3") {
     const verificationSnapshotId = providerResult.checkpoint.verificationSnapshotId;
     if (!verificationSnapshotId) throw new OrchestrationInvariantError("V3 provider verification snapshot is unavailable before answer synthesis.");
-    const storedSources = await loadAnswerFirstV3StoredSources([
+    const storedSources = await tracePaidV3DirectStep(input.trace, "answer_evidence_source_load", {
+      phase: "grounded_answer_synthesis", snapshotCount: forensicResult.report.snapshotRefs.length + 1
+    }, () => loadAnswerFirstV3StoredSources([
       verificationSnapshotId,
       ...forensicResult.report.snapshotRefs.map(({ snapshotId }) => snapshotId)
-    ]);
+    ]));
     const provider = traceGenerativeAnswerProvider(resolveGenerativeSearchAnswerProvider(process.env, {
       locale: runtime.authority.surface.locale,
       region: runtime.authority.surface.region
@@ -1613,6 +1660,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       targetPages: input.technicalReport.pages,
       seededQ1: prospectiveTeaser?.seededQ1,
       checkpoint: generativeCheckpoint ?? checkpoint.answerFirstV3,
+      trace: input.trace,
       signal: input.signal,
       saveCheckpoint: async (answerFirstV3: AnswerFirstV3CheckpointV2) => {
         const next = { ...checkpoint, answerFirstV3 };
@@ -1636,9 +1684,14 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       phase: "grounded_answer_synthesis",
       providerCallCount: answerResult.checkpoint.answerResults?.slice(1).filter(Boolean).length ?? 0
     });
-    const verificationRef = await providerVerificationCommercialRef(verificationSnapshotId);
-    const snapshotRefs = uniqueSnapshotRefs([...forensicResult.commercialSnapshotRefs, verificationRef]);
-    if (snapshotRefs.length !== 4) throw new OrchestrationInvariantError("V3 combined reports require exactly four immutable market snapshots.");
+    const snapshotRefs = await tracePaidV3DirectStep(input.trace, "commercial_snapshot_binding", {
+      phase: "grounded_answer_synthesis", snapshotCount: 4
+    }, async () => {
+      const verificationRef = await providerVerificationCommercialRef(verificationSnapshotId);
+      const values = uniqueSnapshotRefs([...forensicResult.commercialSnapshotRefs, verificationRef]);
+      if (values.length !== 4) throw new OrchestrationInvariantError("V3 combined reports require exactly four immutable market snapshots.");
+      return values;
+    });
     if (semanticValidation === "deferred") {
       const deferredAnswerResult = answerResult as DeferredGenerativeAnswerFirstV3;
       if (!prospectiveTeaser || !Array.isArray(deferredAnswerResult.answerCardDrafts) ||
@@ -1888,7 +1941,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
           const updated = await input.checkpointJob({ stage: "synthesizing", phase: "artifact_verification", progress: 99, checkpoint: next as JobCheckpoint, ...input.coverage });
           checkpoint = normalizeCheckpoint(updated.checkpoint);
         }
-      }, { semanticValidation: "free_direct" }));
+      }, { semanticValidation: "free_direct", trace: input.trace }));
       await tracePaidV3DirectStep(input.trace, "terminalization", {
         phase: "terminalization", artifactState: "ready"
       }, () => terminalizeReadyCombinedArtifact(input, ready, answerResult.checkpoint.identityHash, snapshotRefs, "free_direct"));
@@ -2004,7 +2057,7 @@ async function terminalizeReadyCombinedArtifact(
 ): Promise<void> {
   const terminalInput = { report: ready.report, workerId: input.workerId, checkpointIdentityHash, snapshotRefs,
     htmlSha256: ready.htmlSha256, pdfSha256: ready.pdfSha256, pdfStorageKey: ready.pdfStorageKey, pageCount: ready.pageCount,
-    semanticValidation };
+    semanticValidation, trace: input.trace };
   await terminalizePaidCombinedReport(terminalInput);
 }
 
@@ -2278,11 +2331,17 @@ function createWorkerPublicSourceArtifactReadinessGate(): ArtifactReadinessGate 
 
 async function recordCommercialOutcomeSafely(
   jobId: string,
-  outcome: "completed" | "completed_limited" | "failed"
+  outcome: "completed" | "completed_limited" | "failed",
+  trace?: PaidV3DirectDebugTrace
 ): Promise<void> {
   try {
-    await recordPaidJobOutcome({ jobId, outcome });
+    await tracePaidV3DirectStep(trace, "commercial_outcome_reconciliation", {
+      phase: "terminalization", outcome
+    }, () => recordPaidJobOutcome({ jobId, outcome }));
   } catch (error) {
+    trace?.degraded("commercial_outcome_reconciliation_required", {
+      phase: "terminalization", outcome, disposition: "operator_reconciliation_required"
+    }, error);
     console.error("Commercial outcome reconciliation required:", error instanceof Error ? error.name : "unknown_error");
   }
 }
@@ -2513,6 +2572,20 @@ function traceGenerativeAnswerProvider(provider: GenerativeSearchAnswerProvider,
     phase: "grounded_answer_synthesis", providerCallOrdinal: ++ordinal, configuredMaxAttempts: 1,
     configuredModel: provider.model
   }, () => provider.answerWithSources(request)) };
+}
+
+function tracePaidV3DirectGate<T>(trace: PaidV3DirectDebugTrace | undefined, step: string,
+  details: PaidV3DirectDebugTraceDetails, operation: () => T): T {
+  const started = Date.now();
+  trace?.emit("step_started", step, details);
+  try {
+    const value = operation();
+    trace?.emit("step_succeeded", step, { ...details, durationMs: Date.now() - started });
+    return value;
+  } catch (error) {
+    trace?.failed(step, { ...details, durationMs: Date.now() - started }, error);
+    throw error;
+  }
 }
 
 function fetchWithSignal(fetchImpl: typeof fetch, signal: AbortSignal): typeof fetch {

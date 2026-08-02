@@ -9,17 +9,29 @@ export interface PaidV3DirectDebugTraceDetails {
   providerCallCount?: number; pageCount?: number; batchCount?: number; citationCount?: number; uniqueUrlCount?: number;
   canonicalUrlHash?: string; registrableHost?: string; validator?: string; violationCount?: number; schemaPaths?: string[];
   errorName?: string; errorCode?: string; outcome?: string; artifactState?: string; fulfillmentState?: string; refundState?: string;
+  providerStatus?: number; finishReason?: string; responseChars?: number; outputTokens?: number;
+  progress?: number; batchOrdinal?: number; questionOrdinal?: number; snapshotOrdinal?: number; snapshotCount?: number;
+  sourceCount?: number; claimCount?: number; acceptedCount?: number; rejectedCount?: number; skippedCount?: number;
+  degradedCount?: number; assetCount?: number; completedCount?: number; checkpointRevision?: number; resumeGeneration?: number;
+  failureClassification?: string; disposition?: string; emailState?: string;
+  durationMs?: number;
 }
 
 export interface PaidV3DirectDebugTrace {
   emit(kind: string, step: string, details?: PaidV3DirectDebugTraceDetails): void;
+  degraded(step: string, details?: PaidV3DirectDebugTraceDetails, error?: unknown): void;
+  failed(step: string, details?: PaidV3DirectDebugTraceDetails, error?: unknown): void;
   span<T>(step: string, details: PaidV3DirectDebugTraceDetails, operation: () => Promise<T>): Promise<T>;
   wrapJsonClient(step: string, client: JsonCompletionClient, configuredMaxAttempts?: number): JsonCompletionClient;
 }
 
 const detailKeys = ["phase", "configuredModel", "configuredMaxAttempts", "providerCallOrdinal", "providerCallCount", "pageCount", "batchCount",
   "citationCount", "uniqueUrlCount", "canonicalUrlHash", "registrableHost", "validator", "violationCount", "schemaPaths",
-  "errorName", "errorCode", "outcome", "artifactState", "fulfillmentState", "refundState"] as const;
+  "errorName", "errorCode", "outcome", "artifactState", "fulfillmentState", "refundState",
+  "providerStatus", "finishReason", "responseChars", "outputTokens", "progress", "batchOrdinal", "questionOrdinal",
+  "snapshotOrdinal", "snapshotCount", "sourceCount", "claimCount", "acceptedCount", "rejectedCount", "skippedCount",
+  "degradedCount", "assetCount", "completedCount", "checkpointRevision", "resumeGeneration", "failureClassification",
+  "disposition", "emailState"] as const;
 
 export function createPaidV3DirectDebugTrace(input: {
   jobId: string; reportId: string; remainingMs: () => number; environment?: NodeJS.ProcessEnv; write?: (line: string) => void;
@@ -27,15 +39,25 @@ export function createPaidV3DirectDebugTrace(input: {
   if ((input.environment ?? process.env).OGC_PAID_V3_DEBUG_TRACE !== "1") return null;
   const write = input.write ?? ((line: string) => console.info(line));
   const emit = (kind: string, step: string, details: PaidV3DirectDebugTraceDetails = {}) => {
-    write(`${PAID_V3_DIRECT_DEBUG_TRACE_PREFIX} ${JSON.stringify({
-      schemaVersion: 1, recordedAt: new Date().toISOString(), kind, step, jobId: input.jobId, reportId: input.reportId,
-      semanticValidation: "free_direct",
-      remainingMs: Math.max(0, Math.trunc(input.remainingMs())),
-      ...safeDetails(details)
-    })}`);
+    try {
+      write(`${PAID_V3_DIRECT_DEBUG_TRACE_PREFIX} ${JSON.stringify({
+        schemaVersion: 1, recordedAt: new Date().toISOString(), kind, step, jobId: input.jobId, reportId: input.reportId,
+        semanticValidation: "free_direct",
+        remainingMs: Math.max(0, Math.trunc(input.remainingMs())),
+        ...safeDetails(details)
+      })}`);
+    } catch {
+      // Debug tracing is an observer and must never alter fulfillment behavior.
+    }
   };
   return {
     emit,
+    degraded(step, details = {}, error) {
+      emit("step_degraded", step, { ...details, ...(error === undefined ? {} : safeError(error)) });
+    },
+    failed(step, details = {}, error) {
+      emit("step_failed", step, { ...details, ...(error === undefined ? {} : safeError(error)) });
+    },
     async span(step, details, operation) {
       const started = Date.now();
       emit("step_started", step, details);
@@ -91,14 +113,31 @@ function durationDetails(started: number): { durationMs: number } {
   return { durationMs: Math.max(0, Date.now() - started) };
 }
 
-function safeError(error: unknown): Pick<PaidV3DirectDebugTraceDetails, "errorName" | "errorCode" | "violationCount" | "schemaPaths"> {
-  const row = error && typeof error === "object" ? error as Record<string, unknown> : {};
+function safeError(error: unknown): Pick<PaidV3DirectDebugTraceDetails,
+  "errorName" | "errorCode" | "violationCount" | "schemaPaths" | "providerStatus" | "finishReason" | "responseChars" | "outputTokens"> {
+  const top = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  let row = top;
+  for (let depth = 0; depth < 4 && typeof row.code !== "string"; depth += 1) {
+    const cause = row.cause;
+    if (!cause || typeof cause !== "object") break;
+    row = cause as Record<string, unknown>;
+  }
   const rawPaths = [row.issues, row.violations].flatMap((value) => Array.isArray(value) ? value : [])
     .map((value) => value && typeof value === "object" ? (value as Record<string, unknown>).path : undefined)
     .filter((value): value is string => typeof value === "string" && /^\$?[\w.\[\]-]{1,200}$/.test(value));
-  const code = typeof row.code === "string" && /^[a-z0-9_:-]{1,80}$/i.test(row.code) ? row.code : undefined;
-  return { errorName: error instanceof Error ? error.name : "UnknownError", ...(code ? { errorCode: code } : {}),
+  const code = typeof row.code === "string" && safeTraceToken(row.code, 80) ? row.code : undefined;
+  const finishReason = typeof row.finishReason === "string" && /^[a-z0-9_-]{1,40}$/i.test(row.finishReason) ? row.finishReason : undefined;
+  const rawName = error instanceof Error ? error.name : "UnknownError";
+  const errorName = safeTraceToken(rawName, 80) ? rawName : "UnknownError";
+  return { errorName, ...(code ? { errorCode: code } : {}),
+    ...(typeof row.status === "number" ? { providerStatus: row.status } : {}), ...(finishReason ? { finishReason } : {}),
+    ...(typeof row.responseChars === "number" ? { responseChars: row.responseChars } : {}),
+    ...(typeof row.outputTokens === "number" ? { outputTokens: row.outputTokens } : {}),
     ...(rawPaths.length ? { violationCount: rawPaths.length, schemaPaths: [...new Set(rawPaths)].slice(0, 24) } : {}) };
+}
+
+function safeTraceToken(value: string, maxLength: number): boolean {
+  return new RegExp(`^[a-z0-9_:-]{1,${maxLength}}$`, "i").test(value) && !/(?:sk-|bearer|secret|token|api[_-]?key)/i.test(value);
 }
 
 function safeDetails(details: PaidV3DirectDebugTraceDetails & { durationMs?: number }): Record<string, unknown> {

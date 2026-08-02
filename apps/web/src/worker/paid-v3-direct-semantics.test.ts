@@ -73,12 +73,19 @@ describe("Paid V3 Direct semantics", () => {
     expect(result.questions[0]!.coreReceipt).toBe(q1Core);
     expect(result.questions[1]!.analysis?.summary).toBe("Q2 analysis");
     expect(result.questions[2]!.analysis).toBeUndefined();
-    const traceEvents = traceLines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string });
+    const traceEvents = traceLines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string; outcome?: string });
     expect(traceEvents.filter(({ kind }) => kind === "step_started").map(({ step }) => step).sort()).toEqual([
       "q2_direct_analysis", "q3_direct_analysis"
     ]);
     expect(traceEvents.filter(({ kind, step }) => kind === "step_succeeded" && step === "q2_direct_analysis")).toHaveLength(1);
     expect(traceEvents.filter(({ kind, step }) => kind === "step_failed" && step === "q3_direct_analysis")).toHaveLength(1);
+    expect(traceEvents).toContainEqual(expect.objectContaining({
+      kind: "step_degraded", step: "q3_direct_semantics_status", outcome: "incomplete",
+      disposition: "analysis_failure_converted_to_incomplete"
+    }));
+    expect(traceEvents).toContainEqual(expect.objectContaining({
+      kind: "gate_result", step: "paid_direct_semantics_summary", completedCount: 2, degradedCount: 1
+    }));
     expect(parsePaidV3DirectSemantics(result, ["q1", "q2", "q3"])).toEqual(result);
     expect(() => assertPaidV3DirectAnswerCardBindings({
       questionSetIdentity: "a".repeat(64), answerCards: cards, directSemantics: result

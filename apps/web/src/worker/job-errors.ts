@@ -137,7 +137,7 @@ export function normalizeJobError(error: unknown, context: JobErrorContext, now 
   const known = error instanceof JobError ? error : null;
   const source = error instanceof Error ? error : new Error("Non-error value thrown by job execution.");
   const languageValidationFailure = source.name === "ReportLanguageValidationError";
-  const typedBoundary = resolveTypedBoundaryError(error, context);
+  const typedBoundary = resolveTypedBoundaryErrorChain(error, context);
   const secrets = context.configuredSecrets ?? [];
   const message = redactDiagnostic(source.message || typedBoundary?.message || "Unexpected internal error.", secrets, 1_000);
   const stack = source.stack ? redactDiagnostic(source.stack, secrets) : null;
@@ -181,6 +181,19 @@ export function escalateFingerprintRecurrence(normalized: NormalizedJobError): N
 }
 
 /** Maps provider/review/discovery boundary errors that are not JobError subclasses. */
+function resolveTypedBoundaryErrorChain(
+  error: unknown,
+  context: JobErrorContext
+): { code: string; classification: JobFailureClassification; message?: string } | null {
+  let current: unknown = error;
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    const mapped = resolveTypedBoundaryError(current, context);
+    if (mapped) return mapped;
+    current = current instanceof Error ? (current as Error & { cause?: unknown }).cause : undefined;
+  }
+  return null;
+}
+
 function resolveTypedBoundaryError(
   error: unknown,
   context: JobErrorContext
@@ -224,7 +237,7 @@ function resolveTypedBoundaryError(
     if (row.name === "AiClientError") {
       const status = typeof row.status === "number" ? row.status : undefined;
       const message = typeof row.message === "string" ? row.message : "";
-      return mapAiClientJobBoundary({ status, message }, context.phase);
+      return mapAiClientJobBoundary({ status, message, code: row.code }, context.phase);
     }
     if (row.name === "ProviderDiscoveryResumeIdentityMismatchError") {
       return { code: "provider_discovery_resume_identity_mismatch", classification: "permanent" };
@@ -336,10 +349,24 @@ function mapPaidV3DiagnosisFailure(
 
 /** Deep claim-extraction (progress 96) vs generic AI client transport taxonomy. */
 function mapAiClientJobBoundary(
-  error: { status?: number; message: string },
+  error: { status?: number; message: string; code?: unknown },
   phase: ScanJobPhase
 ): { code: string; classification: JobFailureClassification } {
   const prefix = phase === "provider_claim_extraction" ? "provider_claim_extraction" : "ai_client";
+  if (error.code === "authentication") {
+    return { code: `${prefix}_authentication`, classification: "operator_repairable" };
+  }
+  if (error.code === "configuration" || error.code === "request_rejected") {
+    return { code: `${prefix}_configuration`, classification: "operator_repairable" };
+  }
+  if (error.code === "rate_limited") return { code: `${prefix}_rate_limited`, classification: "transient" };
+  if (error.code === "temporary_provider") return { code: `${prefix}_temporary`, classification: "transient" };
+  if (error.code === "timeout" || error.code === "aborted") return { code: `${prefix}_timeout`, classification: "transient" };
+  if (error.code === "output_truncated") return { code: `${prefix}_output_truncated`, classification: "transient" };
+  if (["invalid_json", "non_json_response", "invalid_response", "empty_content"].includes(String(error.code))) {
+    return { code: `${prefix}_invalid_response`, classification: "transient" };
+  }
+  if (error.code === "network") return { code: `${prefix}_transport`, classification: "transient" };
   if (error.status === 401 || error.status === 403) {
     return { code: `${prefix}_authentication`, classification: "operator_repairable" };
   }

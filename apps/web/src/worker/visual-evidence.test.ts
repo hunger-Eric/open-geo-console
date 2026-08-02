@@ -130,10 +130,40 @@ describe("visual evidence requests", () => {
     expect(captureMocks.saveEvidenceAsset.mock.calls.map(([asset]) => [
       asset.findingId, asset.citationIndex, asset.sourceUrl, asset.contentHash, asset.evidenceHash
     ])).toHaveLength(11);
-    const traceEvents = traceLines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string });
+    const traceEvents = traceLines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string; completedCount?: number; degradedCount?: number });
     expect(traceEvents.filter(({ kind, step }) => kind === "step_started" && step === "visual_url_navigation")).toHaveLength(4);
     expect(traceEvents.filter(({ kind, step }) => kind === "step_succeeded" && step === "visual_url_navigation")).toHaveLength(4);
     expect(traceEvents.filter(({ kind, step }) => kind === "step_started" && step === "visual_citation_capture")).toHaveLength(11);
+    expect(traceEvents).toContainEqual(expect.objectContaining({ kind: "step_succeeded", step: "visual_browser_launch" }));
+    expect(traceEvents).toContainEqual(expect.objectContaining({ kind: "step_succeeded", step: "visual_browser_close" }));
+    expect(traceEvents).toContainEqual(expect.objectContaining({
+      kind: "gate_result", step: "visual_evidence_summary", completedCount: 11, degradedCount: 0
+    }));
+  });
+
+  it("records the final degraded disposition when a citation cannot be captured", async () => {
+    captureMocks.screenshot.mockRejectedValueOnce(new Error("SENTINEL_SCREENSHOT_FAILURE"));
+    const storage = {
+      provider: "filesystem" as const,
+      put: vi.fn(async () => undefined), get: vi.fn(async () => null), delete: vi.fn(async () => undefined)
+    };
+    const traceLines: string[] = [];
+    const trace = createPaidV3DirectDebugTrace({
+      jobId: "job-1", reportId: "report-1", remainingMs: () => 600_000,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => traceLines.push(line)
+    })!;
+
+    await captureReportVisualEvidence({
+      reportId: "report-1", jobId: "job-1", report,
+      pages: [{ url: "https://example.com/page", contentHash: "page-hash" }], storage, trace
+    });
+
+    const events = traceLines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "step_degraded", step: "visual_evidence_summary", completedCount: 0,
+      degradedCount: 1, disposition: "continued_with_unavailable_assets"
+    }));
+    expect(traceLines.join("\n")).not.toContain("SENTINEL_SCREENSHOT_FAILURE");
   });
 
   it("clamps issue crops to the rendered document bounds", () => {
@@ -145,5 +175,28 @@ describe("visual evidence requests", () => {
       documentWidth: 1440,
       documentHeight: 1000
     })).toEqual({ x: 1356, y: 956, width: 84, height: 44 });
+  });
+
+  it("attributes browser launch failure without logging its message", async () => {
+    const failure = new Error("SENTINEL_BROWSER_LAUNCH_MESSAGE");
+    captureMocks.launch.mockRejectedValueOnce(failure);
+    const traceLines: string[] = [];
+    const trace = createPaidV3DirectDebugTrace({
+      jobId: "job-1", reportId: "report-1", remainingMs: () => 600_000,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => traceLines.push(line)
+    })!;
+    const storage = {
+      provider: "filesystem" as const,
+      put: vi.fn(async () => undefined), get: vi.fn(async () => null), delete: vi.fn(async () => undefined)
+    };
+
+    await expect(captureReportVisualEvidence({
+      reportId: "report-1", jobId: "job-1", report,
+      pages: [{ url: "https://example.com/page", contentHash: "page-hash" }], storage, trace
+    })).rejects.toBe(failure);
+
+    const events = traceLines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as Record<string, unknown>);
+    expect(events).toContainEqual(expect.objectContaining({ kind: "step_failed", step: "visual_browser_launch", errorName: "Error" }));
+    expect(traceLines.join("\n")).not.toContain("SENTINEL_BROWSER_LAUNCH_MESSAGE");
   });
 });

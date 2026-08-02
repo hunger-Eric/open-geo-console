@@ -1,4 +1,4 @@
-import type { JsonCompletionClient } from "./client";
+import { isRetryableAiClientError, type JsonCompletionClient } from "./client";
 import { validateEvidenceCitation } from "./evidence";
 import {
   GEO_TERMINOLOGY_POLICY,
@@ -35,8 +35,8 @@ export interface AnalyzePagesInput {
 export class PageAnalysisBatchError extends Error {
   readonly completedAnalyses: PageAnalysis[];
 
-  constructor(message: string, completedAnalyses: PageAnalysis[]) {
-    super(message);
+  constructor(message: string, completedAnalyses: PageAnalysis[], options?: ErrorOptions) {
+    super(message, options);
     this.name = "PageAnalysisBatchError";
     this.completedAnalyses = completedAnalyses;
   }
@@ -280,7 +280,7 @@ export async function analyzePageBatch(
   const completedUrls = new Set(analyses.map(({ url }) => canonicalUrl(url)));
   const pendingPages = input.pages.filter((page) => !completedUrls.has(canonicalUrl(page.url)));
   let modelId = client.configuredModel;
-  const maxAttempts = semanticDirect ? 1 : Math.max(1, input.maxAttempts ?? 3);
+  const maxAttempts = Math.max(1, input.maxAttempts ?? 3);
   const retryDelay = input.retryDelay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
 
   for (let start = 0; start < pendingPages.length; start += batchSize) {
@@ -296,6 +296,7 @@ export async function analyzePageBatch(
       const isLanguageCorrectionCall = !semanticDeferred && languageFeedback.length > 0;
       let correctionCandidateApplied = false;
       try {
+        input.signal?.throwIfAborted();
         const languageInstruction = semanticDeferred
           ? naturalLanguageInstruction(input.locale)
           : reportLanguageInstruction(input.locale);
@@ -386,6 +387,11 @@ export async function analyzePageBatch(
         break;
       } catch (error) {
         lastError = error;
+        if (semanticDirect) {
+          if (!isRetryableAiClientError(error) || attempt >= maxAttempts) break;
+          await retryDelay(Math.min(2_000, 250 * (2 ** (attempt - 1))));
+          continue;
+        }
         if (isLanguageCorrectionCall && error instanceof ReportLanguageValidationError) {
           const withoutInvalidOptionalProse = omitInvalidOptionalPageAnalysisProse(languageCorrectionDraft ?? [], error);
           if (withoutInvalidOptionalProse) {
@@ -412,7 +418,8 @@ export async function analyzePageBatch(
     if (!parsed) {
       throw new PageAnalysisBatchError(
         lastError instanceof Error ? lastError.message : "The page analysis batch failed.",
-        analyses
+        analyses,
+        { cause: lastError }
       );
     }
     analyses.push(...parsed);

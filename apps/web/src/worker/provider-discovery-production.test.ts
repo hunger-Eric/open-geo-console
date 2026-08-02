@@ -67,7 +67,8 @@ describe("production provider discovery composition", () => {
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "step_started", step: "provider_claim_extraction" }),
       expect.objectContaining({ kind: "step_succeeded", step: "provider_claim_extraction" }),
-      expect.objectContaining({ kind: "gate_result", step: "provider_claim_validation", validator: "validateProviderClaimCandidate" })
+      expect.objectContaining({ kind: "gate_result", step: "provider_claim_validation", validator: "validateProviderClaimCandidate" }),
+      expect.objectContaining({ kind: "gate_result", step: "provider_claim_extraction_summary", acceptedCount: 1, rejectedCount: 0, skippedCount: 0 })
     ]));
     expect(lines.join("\n")).not.toContain(passage.exactExcerpt);
   });

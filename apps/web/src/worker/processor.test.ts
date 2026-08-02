@@ -620,8 +620,10 @@ describe("strict Report V4 processor routing", () => {
   });
 
   it("keeps the complete Paid report inputs while Direct bypasses the legacy diagnosis and semantic-review boundary", () => {
-    const directStart = processorSource.indexOf('if (semanticValidation === "free_direct")');
+    const directSemanticsCall = processorSource.indexOf("const directSemantics = await buildPaidV3DirectSemantics");
+    const directStart = processorSource.lastIndexOf('if (semanticValidation === "free_direct")', directSemanticsCall);
     const legacyStart = processorSource.indexOf('if (!("answerCards" in answerResult))', directStart);
+    expect(directSemanticsCall).toBeGreaterThan(-1);
     expect(directStart).toBeGreaterThan(-1);
     expect(legacyStart).toBeGreaterThan(directStart);
 
@@ -641,6 +643,17 @@ describe("strict Report V4 processor routing", () => {
     expect(directBranch).toContain("buildPaidV3DirectSemantics({");
     expect(directBranch).not.toContain("enhanceV3AnswerCardsWithDiagnosis({");
     expect(directBranch).not.toContain("runPaidV3SemanticReview({");
+  });
+
+  it("attributes Direct semantic-mode and resume authority before materialization", () => {
+    const semanticMode = processorSource.indexOf('tracePaidV3DirectGate(input.trace, "combined_semantic_mode"');
+    const resumeDecision = processorSource.indexOf('tracePaidV3DirectGate(input.trace, "combined_resume_decision"');
+    const resumeAuthority = processorSource.indexOf('tracePaidV3DirectGate(input.trace, "combined_resume_authority"');
+    const resumeMaterialization = processorSource.indexOf('tracePaidV3DirectStep(input.trace, "combined_artifact_resume_materialization"');
+    expect(semanticMode).toBeGreaterThan(-1);
+    expect(resumeDecision).toBeGreaterThan(semanticMode);
+    expect(resumeAuthority).toBeGreaterThan(resumeDecision);
+    expect(resumeMaterialization).toBeGreaterThan(resumeAuthority);
   });
 
   it("threads the process-scoped protected-Staging drill only into the selected V4 production runner", () => {
@@ -975,6 +988,13 @@ describe("marker-present page analysis authority and resume identity", () => {
         expect.objectContaining({ kind: "step_failed", step: "ai_report_persist" })
       ]));
       expect(boundaryMocks.failScanJob).toHaveBeenCalledTimes(1);
+      expect(job.maxAttempts).toBe(1);
+      expect(boundaryMocks.analyzePageBatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        semanticValidation: "free_direct", maxAttempts: 3
+      }));
+      expect(boundaryMocks.synthesizeWebsiteReportWithRecovery).toHaveBeenCalledWith(
+        expect.anything(), expect.anything(), expect.objectContaining({ semanticValidation: "free_direct", maxAttempts: 3 })
+      );
       expect(traceLines.join("\n")).not.toContain(persistError.message);
     } finally {
       consoleInfo.mockRestore();

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { analyzePageBatch } from "./analysis";
-import type { JsonCompletionClient, JsonCompletionRequest } from "./client";
+import { PageAnalysisBatchError, analyzePageBatch } from "./analysis";
+import { AiClientError, type AiClientErrorCode, type JsonCompletionClient, type JsonCompletionRequest } from "./client";
 import type { ExtractedPage } from "./types";
 
 const page: ExtractedPage = {
@@ -60,13 +60,97 @@ describe("analyzePageBatch semantic-validation seam", () => {
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
-  it("keeps Direct page analysis to one call even when the caller requests retries", async () => {
+  it("keeps Direct semantic-contract failures to one call even when the caller requests retries", async () => {
     const client = clientReturning({
       analyses: [{ ...mixedLanguageAnalysis.analyses[0], url: "https://other.example/" }]
     });
     await expect(analyzePageBatch(client, {
       pages: [page], locale: "zh-CN", maxAttempts: 3, semanticValidation: "free_direct"
     })).rejects.toThrow(/required page analyses/u);
+    expect(client.completeJson).toHaveBeenCalledOnce();
+  });
+
+  it("retries the identical Direct page-analysis request after transient invalid JSON", async () => {
+    const requests: JsonCompletionRequest[] = [];
+    const client: JsonCompletionClient = {
+      configuredModel: "mock-model",
+      completeJson: vi.fn(async (request) => {
+        requests.push(request);
+        if (requests.length === 1) {
+          throw new AiClientError("The model returned invalid JSON.", { code: "invalid_json", responseChars: 17 });
+        }
+        return { value: mixedLanguageAnalysis, modelId: "mock-model", rawContent: JSON.stringify(mixedLanguageAnalysis) };
+      })
+    };
+
+    const result = await analyzePageBatch(client, {
+      pages: [page], locale: "zh-CN", maxAttempts: 3, semanticValidation: "free_direct",
+      retryDelay: async () => undefined
+    });
+
+    expect(result.analyses).toHaveLength(1);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+    expect(requests[1]).toEqual(requests[0]);
+  });
+
+  it.each(["non_json_response", "empty_content", "output_truncated", "timeout", "network", "rate_limited", "temporary_provider"] as AiClientErrorCode[])(
+    "retries the other approved Direct transient condition %s",
+    async (code) => {
+      const client = clientReturning(mixedLanguageAnalysis);
+      vi.mocked(client.completeJson).mockRejectedValueOnce(new AiClientError(code, { code }));
+      await expect(analyzePageBatch(client, {
+        pages: [page], locale: "zh-CN", maxAttempts: 3, semanticValidation: "free_direct", retryDelay: async () => undefined
+      })).resolves.toMatchObject({ analyses: [expect.objectContaining({ url: page.url })] });
+      expect(client.completeJson).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it("exhausts three Direct transient failures and preserves the final typed cause", async () => {
+    const finalCause = new AiClientError("The model returned invalid JSON.", { code: "invalid_json", responseChars: 23 });
+    const client: JsonCompletionClient = {
+      configuredModel: "mock-model",
+      completeJson: vi.fn()
+        .mockRejectedValueOnce(new AiClientError("The model returned invalid JSON.", { code: "invalid_json" }))
+        .mockRejectedValueOnce(new AiClientError("The model returned invalid JSON.", { code: "invalid_json" }))
+        .mockRejectedValueOnce(finalCause)
+    };
+
+    const promise = analyzePageBatch(client, {
+      pages: [page], locale: "zh-CN", maxAttempts: 3, semanticValidation: "free_direct",
+      retryDelay: async () => undefined
+    });
+    await expect(promise).rejects.toMatchObject({ name: "PageAnalysisBatchError", cause: finalCause });
+    await promise.catch((error: unknown) => expect(error).toBeInstanceOf(PageAnalysisBatchError));
+    expect(client.completeJson).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    new AiClientError("unauthorized", { status: 401, code: "authentication" }),
+    new AiClientError("bad request", { status: 400, code: "request_rejected" }),
+    new AiClientError("configuration", { code: "configuration" }),
+    new AiClientError("deadline aborted", { code: "aborted" })
+  ])("does not retry a non-transient Direct client failure", async (failure) => {
+    const client: JsonCompletionClient = {
+      configuredModel: "mock-model",
+      completeJson: vi.fn().mockRejectedValue(failure)
+    };
+    await expect(analyzePageBatch(client, {
+      pages: [page], locale: "zh-CN", maxAttempts: 3, semanticValidation: "free_direct",
+      retryDelay: async () => undefined
+    })).rejects.toMatchObject({ cause: failure });
+    expect(client.completeJson).toHaveBeenCalledOnce();
+  });
+
+  it("does not start another Direct call when the hard-deadline signal aborts between attempts", async () => {
+    const controller = new AbortController();
+    const client: JsonCompletionClient = {
+      configuredModel: "mock-model",
+      completeJson: vi.fn().mockRejectedValue(new AiClientError("temporary", { code: "temporary_provider", status: 503 }))
+    };
+    await expect(analyzePageBatch(client, {
+      pages: [page], locale: "zh-CN", maxAttempts: 3, semanticValidation: "free_direct", signal: controller.signal,
+      retryDelay: async () => controller.abort(new Error("hard deadline"))
+    })).rejects.toMatchObject({ name: "PageAnalysisBatchError" });
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 

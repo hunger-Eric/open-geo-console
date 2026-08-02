@@ -57,6 +57,7 @@ import {
 import { ARTIFACT_CSS } from "./artifact-styles";
 import { buildSourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 import { toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
+import { PAID_V3_DIRECT_DEBUG_TRACE_PREFIX, createPaidV3DirectDebugTrace } from "@/worker/paid-v3-direct-debug-trace";
 
 beforeEach(() => {
   readinessGuardHarness.state.blockedSite = null;
@@ -408,6 +409,11 @@ describe("combined artifact canonical rendering",()=>{
   it("keeps legacy build ordering from prepared callback through PDF and storage", async () => {
     const input = v3PreparationInput();
     let callbackReportId: string | null = null;
+    const traceLines: string[] = [];
+    const trace = createPaidV3DirectDebugTrace({
+      jobId: input.jobId, reportId: input.reportId, remainingMs: () => 60_000,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => traceLines.push(line)
+    })!;
     const result = await buildReadyCombinedArtifactV3({
       ...input,
       onReportPrepared(report) {
@@ -415,11 +421,19 @@ describe("combined artifact canonical rendering",()=>{
         expect(readinessSideEffects.storage.put).not.toHaveBeenCalled();
         callbackReportId = report.reportId;
       }
-    });
+    }, { trace });
     expect(callbackReportId).toBe(input.reportId);
     expect(readinessSideEffects.exportPdf).toHaveBeenCalledOnce();
     expect(readinessSideEffects.storage.put).toHaveBeenCalledOnce();
     expect(result.report.reportId).toBe(input.reportId);
+    const events = traceLines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string; durationMs?: number });
+    for (const step of ["combined_evidence_assets", "combined_report_contract", "combined_report_checkpoint",
+      "combined_report_schema", "combined_html_render", "combined_pdf_render", "combined_pdf_validation", "combined_pdf_storage"]) {
+      expect(events).toContainEqual(expect.objectContaining({ kind: "step_started", step }));
+      expect(events).toContainEqual(expect.objectContaining({ kind: "step_succeeded", step }));
+    }
+    expect(events.find(({ kind, step }) => kind === "step_succeeded" && step === "combined_report_contract")?.durationMs)
+      .toEqual(expect.any(Number));
   });
 
   it("rejects a canonical V3 artifact when a rendered citation is missing", () => {

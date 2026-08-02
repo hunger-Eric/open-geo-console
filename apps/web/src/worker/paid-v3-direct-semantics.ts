@@ -64,6 +64,10 @@ export async function buildPaidV3DirectSemantics(input: {
       analysisReceipt: free.directAnalysisReceipt!
     } : {})
   });
+  input.trace?.emit("gate_result", "q1_direct_semantics_status", {
+    phase: "grounded_answer_synthesis", questionOrdinal: 1, outcome: q1.analysisStatus,
+    disposition: q1.analysisStatus === "completed" ? "reused_verified_free_lineage" : "reused_incomplete_free_lineage"
+  });
   const questions = input.answerCards.map(({ exactQuestion }) => exactQuestion);
   const targetIdentity = freeV4DirectTargetIdentity(input.targetUrl, input.foundation);
   const analyze = input.analyze ?? ((payload, signal) => invokeFreeV4DirectAnalysis({ payload, signal }));
@@ -132,6 +136,9 @@ export async function buildPaidV3DirectSemantics(input: {
           analysisStatus: "completed"
         }
       });
+      input.trace?.emit("gate_result", `q${index + 1}_direct_semantics_status`, {
+        phase: "grounded_answer_synthesis", questionOrdinal: index + 1, outcome: "completed", disposition: "analysis_bound"
+      });
       return Object.freeze({
         questionId: card.questionId,
         answerCardHash,
@@ -142,11 +149,20 @@ export async function buildPaidV3DirectSemantics(input: {
         handleBindings: directInput.handleBindings,
         analysisReceipt
       });
-    } catch {
+    } catch (error) {
       input.signal?.throwIfAborted();
+      input.trace?.degraded(`q${index + 1}_direct_semantics_status`, {
+        phase: "grounded_answer_synthesis", questionOrdinal: index + 1, outcome: "incomplete",
+        disposition: "analysis_failure_converted_to_incomplete"
+      }, error);
       return Object.freeze({ questionId: card.questionId, answerCardHash, answerCardReceipt, analysisStatus: "incomplete", coreReceipt });
     }
   }));
+  input.trace?.emit("gate_result", "paid_direct_semantics_summary", {
+    phase: "grounded_answer_synthesis", completedCount: [q1, ...generated].filter(({ analysisStatus }) => analysisStatus === "completed").length,
+    degradedCount: [q1, ...generated].filter(({ analysisStatus }) => analysisStatus === "incomplete").length,
+    disposition: [q1, ...generated].every(({ analysisStatus }) => analysisStatus === "completed") ? "complete" : "complete_with_incomplete_analysis"
+  });
   return Object.freeze({
     version: FREE_V4_DIRECT_SEMANTICS_VERSION,
     questions: Object.freeze([q1, generated[0], generated[1]]) as PaidV3DirectSemantics["questions"]

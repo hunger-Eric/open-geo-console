@@ -13,6 +13,7 @@ import {
   type PublicSourceForensicsDependencies,
   type PublicSourcePipelineCheckpoint
 } from "./public-source-forensics";
+import { PAID_V3_DIRECT_DEBUG_TRACE_PREFIX, createPaidV3DirectDebugTrace, type PaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
 
 const surface = { surfaceId:"fixture-surface",providerId:"fixture-index",productId:"fixture-search",surfaceKind:"documented_api" as const,
   contractVersion:"public-search-surface-v1",surfaceVersion:"fixture-v1",adapterVersion:"fixture-adapter-v1",locale:"zh-CN",region:"CN" };
@@ -52,6 +53,32 @@ describe("public-source forensics pipeline", () => {
     await expect(run("report-c","job-c",closed)).rejects.toBeInstanceOf(PublicSourceArtifactUnavailableError);
     expect(order).toEqual(["checkpoint","artifact"]);
     expect(prepareArtifactVerification).toHaveBeenCalledWith(expect.objectContaining({ jobId:"job-c", report:expect.objectContaining({ reportId:"report-c" }) }));
+  });
+
+  it("traces each snapshot and the report/checkpoint/artifact persistence boundaries", async () => {
+    const lines: string[] = [];
+    const trace = createPaidV3DirectDebugTrace({
+      jobId: "job-trace", reportId: "report-trace", remainingMs: () => 300_000,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => lines.push(line)
+    })!;
+    const dependencies = deps({
+      reports: new Map(), checkpoints: new Map(), resolve: async ({ fanout }, index = 0) => snapshot(fanout, index),
+      prepareArtifactVerification: vi.fn(async () => undefined)
+    });
+
+    await run("report-trace", "job-trace", dependencies, undefined, undefined, trace);
+
+    const events = lines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string; snapshotOrdinal?: number; durationMs?: number });
+    expect(events.filter(({ kind, step }) => kind === "step_started" && step === "public_source_snapshot_resolution")
+      .map(({ snapshotOrdinal }) => snapshotOrdinal).sort()).toEqual([1, 2, 3]);
+    for (const step of ["public_source_checkpoint_persist", "public_source_prepare_artifact",
+      "public_source_artifact_readiness", "public_source_report_persist"]) {
+      expect(events).toContainEqual(expect.objectContaining({ kind: "step_started", step }));
+      expect(events).toContainEqual(expect.objectContaining({ kind: "step_succeeded", step }));
+    }
+    expect(events).toContainEqual(expect.objectContaining({ kind: "gate_result", step: "public_source_forensics_summary" }));
+    expect(events.find(({ kind, step }) => kind === "step_succeeded" && step === "public_source_authority")?.durationMs)
+      .toEqual(expect.any(Number));
   });
 
   it("refuses resume identity drift", async () => {
@@ -166,6 +193,11 @@ describe("public-source forensics pipeline", () => {
 
   it("records a redacted pre-graph trace for a foreign query id without changing the permanent error", async () => {
     const checkpoints = new Map<string, PublicSourcePipelineCheckpoint>();
+    const traceLines: string[] = [];
+    const debugTrace = createPaidV3DirectDebugTrace({
+      jobId: "job-extra", reportId: "report-extra", remainingMs: () => 60_000,
+      environment: { OGC_PAID_V3_DEBUG_TRACE: "1" }, write: (line) => traceLines.push(line)
+    })!;
     const dependencies = deps({
       reports: new Map(),
       checkpoints,
@@ -182,12 +214,17 @@ describe("public-source forensics pipeline", () => {
         };
       }
     });
-    const error = await run("report-extra", "job-extra", dependencies).catch((value) => value);
+    const error = await run("report-extra", "job-extra", dependencies, undefined, undefined, debugTrace).catch((value) => value);
     expect(error).toBeInstanceOf(PublicSourceQueryVariantCoverageError);
-    const trace = normalizedTrace(error);
-    expect(trace).toMatchObject({ o: "pre_graph_guard", r: "unknown", f: { d: true, x: true }, g: { p0: 18 } });
-    expect(JSON.stringify(trace)).toMatch(/^[^]*$/);
-    expect(JSON.stringify(trace)).not.toMatch(/foreign-query-id|customer-logistics|https?:\/\//i);
+    const normalized = normalizedTrace(error);
+    expect(normalized).toMatchObject({ o: "pre_graph_guard", r: "unknown", f: { d: true, x: true }, g: { p0: 18 } });
+    expect(JSON.stringify(normalized)).toMatch(/^[^]*$/);
+    expect(JSON.stringify(normalized)).not.toMatch(/foreign-query-id|customer-logistics|https?:\/\//i);
+    const events = traceLines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as Record<string, unknown>);
+    expect(events.filter(({ step }) => step === "public_source_coverage_guard")).toEqual([
+      expect.objectContaining({ kind: "step_started" }),
+      expect.objectContaining({ kind: "step_failed", durationMs: expect.any(Number) })
+    ]);
     expect(normalizeJobError(error, forensicErrorContext).classification).toBe("permanent");
     expect(checkpoints.has("job-extra")).toBe(false);
   });
@@ -253,7 +290,7 @@ function deps(input:{reports:Map<string,RecommendationForensicReportV2>;checkpoi
     getReport:async(id)=>input.reports.get(id)??null,saveReport:async(value)=>{const report=value as RecommendationForensicReportV2;input.reports.set(report.jobId,report);return report;},
     artifactReadiness:input.artifactReadiness??{async verify(){}},prepareArtifactVerification:input.prepareArtifactVerification,now:()=>new Date("2030-01-02T00:00:00.000Z"),costCapMicros:1000};
 }
-function run(reportId:string,jobId:string,dependencies:PublicSourceForensicsDependencies,semanticValidation?:"legacy"|"deferred",fanoutOverrides?:ReadonlyMap<string,SearchQueryFanout>){return runPublicSourceForensicsPipeline({reportId,jobId,locale:"zh-CN",region:"CN",targetUrl:"https://customer-logistics.example/",websiteFoundation:createTestWebsiteFoundation(),dependencies,semanticValidation,fanoutOverrides});}
+function run(reportId:string,jobId:string,dependencies:PublicSourceForensicsDependencies,semanticValidation?:"legacy"|"deferred",fanoutOverrides?:ReadonlyMap<string,SearchQueryFanout>,trace?:PaidV3DirectDebugTrace){return runPublicSourceForensicsPipeline({reportId,jobId,locale:"zh-CN",region:"CN",targetUrl:"https://customer-logistics.example/",websiteFoundation:createTestWebsiteFoundation(),dependencies,semanticValidation,fanoutOverrides,trace});}
 function snapshot(fanout:SearchQueryFanout,index:number){
   const observations:MarketSearchObservation[]=fanout.queries.map((query,order)=>({observationId:`obs-${fanout.questionId}-${order}`,surface,queryId:query.id,exactQuery:query.exactQuery,
     requestedAt:"2030-01-01T00:00:00.000Z",completedAt:"2030-01-01T00:00:01.000Z",status:"complete",results:[{surfaceResultOrder:0,url:`https://source-${index}-${order}.example/fact`,title:"公开货运资料",snippet:"公开资料描述货运能力。",displayedHost:`source-${index}-${order}.example`}],usage:{requestCount:1,resultCount:1,estimatedCostMicros:1}}));
