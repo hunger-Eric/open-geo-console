@@ -253,8 +253,9 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
   };
   let checkpoint = normalizeCheckpoint(job.checkpoint);
   const websiteAnalysisSemanticValidation = resolveWebsiteAnalysisSemanticValidation(job, checkpoint);
-  const directTrace = job.tier === "deep" && job.artifactContract === "combined_geo_report_v3" &&
-      websiteAnalysisSemanticValidation === "free_direct"
+  const paidV3Direct = job.tier === "deep" && job.artifactContract === "combined_geo_report_v3" &&
+    websiteAnalysisSemanticValidation === "free_direct";
+  const directTrace = paidV3Direct
     ? createPaidV3DirectDebugTrace({ jobId: job.id, reportId: job.reportId, remainingMs: () => execution.remainingMs() })
     : null;
   directTrace?.emit("job_started", "job_admission", { phase: job.currentPhase });
@@ -402,7 +403,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     }
 
     if (resumeStage === "planning" || !checkpoint.effectivePlan?.length) {
-      const planningClient = directTrace?.wrapJsonClient("page_planning_provider_call", client, 3) ?? client;
+      const planningClient = directTrace?.wrapJsonClient("page_planning_provider_call", client, 1) ?? client;
       const pagePlan = await tracePaidV3DirectStep(directTrace, "page_planning", {
         phase: "planning", pageCount: discovery.candidates.length
       }, () => planPagesWithRecovery(planningClient, {
@@ -411,7 +412,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         targetUrl: discovery.targetUrl,
         candidates: discovery.candidates,
         signal: execution.controller.signal
-      }));
+      }, paidV3Direct ? { maxAttempts: 1 } : {}));
       if (pagePlan.selected.length === 0) {
         throw new Error("No public representative pages could be planned.");
       }
@@ -507,7 +508,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     let analyzed;
     let pageAnalysisBatchOrdinal = 0;
     try {
-      const analysisClient = directTrace?.wrapJsonClient("page_analysis_provider_call", client, 3) ?? client;
+      const analysisClient = directTrace?.wrapJsonClient("page_analysis_provider_call", client, 1) ?? client;
       analyzed = await tracePaidV3DirectStep(directTrace, "page_analysis", {
         phase: "page_analysis", pageCount: crawl.pages.length, batchCount: Math.ceil(crawl.pages.length / 4)
       }, () => analyzePageBatch(analysisClient, {
@@ -516,7 +517,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         ...(websiteAnalysisSemanticValidation !== "legacy"
           ? { semanticValidation: websiteAnalysisSemanticValidation }
           : {}),
-        ...(websiteAnalysisSemanticValidation === "free_direct" ? { maxAttempts: 3 } : {}),
+        ...(paidV3Direct ? { maxAttempts: 1 } :
+          websiteAnalysisSemanticValidation === "free_direct" ? { maxAttempts: 3 } : {}),
         batchSize: 4,
         maxCharactersPerPage: 30_000,
         signal: execution.controller.signal,
@@ -595,7 +597,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       phase: "website_synthesis", progress: 85, completedCount: checkpoint.completedPageAnalyses.length
     }, () => saveCheckpoint("synthesizing", 85, checkpoint));
 
-    const synthesisClient = directTrace?.wrapJsonClient("website_synthesis_provider_call", client, 3) ?? client;
+    const synthesisClient = directTrace?.wrapJsonClient("website_synthesis_provider_call", client, 1) ?? client;
     const synthesis = await tracePaidV3DirectStep(directTrace, "website_synthesis", {
       phase: "website_synthesis", pageCount: crawl.pages.length
     }, () => synthesizeWebsiteReportWithRecovery(synthesisClient, {
@@ -610,7 +612,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       ...(websiteAnalysisSemanticValidation !== "legacy"
         ? { semanticValidation: websiteAnalysisSemanticValidation }
         : {}),
-      ...(websiteAnalysisSemanticValidation === "free_direct" ? { maxAttempts: 3 } : {})
+      ...(paidV3Direct ? { maxAttempts: 1 } :
+        websiteAnalysisSemanticValidation === "free_direct" ? { maxAttempts: 3 } : {})
     }));
     const reportToPersist = job.tier === "free" ? projectFreeAiReport(synthesis.report) : synthesis.report;
     if (job.tier === "deep") {

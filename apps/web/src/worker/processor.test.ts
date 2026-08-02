@@ -990,11 +990,15 @@ describe("marker-present page analysis authority and resume identity", () => {
       expect(boundaryMocks.failScanJob).toHaveBeenCalledTimes(1);
       expect(job.maxAttempts).toBe(1);
       expect(boundaryMocks.analyzePageBatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-        semanticValidation: "free_direct", maxAttempts: 3
+        semanticValidation: "free_direct", maxAttempts: 1
       }));
       expect(boundaryMocks.synthesizeWebsiteReportWithRecovery).toHaveBeenCalledWith(
-        expect.anything(), expect.anything(), expect.objectContaining({ semanticValidation: "free_direct", maxAttempts: 3 })
+        expect.anything(), expect.anything(), expect.objectContaining({ semanticValidation: "free_direct", maxAttempts: 1 })
       );
+      expect(processorSource).toContain("paidV3Direct ? { maxAttempts: 1 } : {}");
+      expect(processorSource).toContain('wrapJsonClient("page_planning_provider_call", client, 1)');
+      expect(processorSource).toContain('wrapJsonClient("page_analysis_provider_call", client, 1)');
+      expect(processorSource).toContain('wrapJsonClient("website_synthesis_provider_call", client, 1)');
       expect(traceLines.join("\n")).not.toContain(persistError.message);
     } finally {
       consoleInfo.mockRestore();
@@ -1002,6 +1006,38 @@ describe("marker-present page analysis authority and resume identity", () => {
       restoreEnvironment("OGC_PAID_V3_DEBUG_TRACE", previousTrace);
       vi.clearAllMocks();
     }
+  });
+
+  it("one Direct attempt prevents planner, page analysis, and synthesis from making a second provider call", async () => {
+    const actual = await vi.importActual<typeof import("@open-geo-console/ai-report-engine")>("@open-geo-console/ai-report-engine");
+    const failure = new actual.AiClientError("transient invalid JSON", { code: "invalid_json" });
+    const failingClient = () => ({
+      configuredModel: "fixture-model",
+      completeJson: vi.fn().mockRejectedValue(failure)
+    });
+    const planClient = failingClient();
+    const plan = await actual.planPagesWithRecovery(planClient, {
+      tier: "deep", locale: "en", targetUrl: url,
+      candidates: [{ url, pageType: "home", priority: 100, reason: "fixture" }]
+    }, { maxAttempts: 1, delay: async () => undefined });
+    expect(plan.fallbackUsed).toBe(true);
+    expect(planClient.completeJson).toHaveBeenCalledOnce();
+
+    const analysisClient = failingClient();
+    await expect(actual.analyzePageBatch(analysisClient, {
+      pages: [{ url, pageType: "home", title: "Home", text: "Verified page text." }],
+      locale: "en", semanticValidation: "free_direct", maxAttempts: 1,
+      retryDelay: async () => undefined
+    })).rejects.toThrow();
+    expect(analysisClient.completeJson).toHaveBeenCalledOnce();
+
+    const synthesisClient = failingClient();
+    await expect(actual.synthesizeWebsiteReportWithRecovery(synthesisClient, {
+      targetUrl: url, tier: "deep", locale: "en",
+      pages: [{ url, pageType: "home", title: "Home", text: "Verified page text." }],
+      pageAnalyses: [analysis], coverage, generatedAt: "2026-08-02T00:00:00.000Z"
+    }, { semanticValidation: "free_direct", maxAttempts: 1, delay: async () => undefined })).rejects.toBe(failure);
+    expect(synthesisClient.completeJson).toHaveBeenCalledOnce();
   });
 
   it("marker-present partial legacy checkpoint: incompatible entries are not reusable", () => {

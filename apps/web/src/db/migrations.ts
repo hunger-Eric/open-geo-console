@@ -4019,6 +4019,45 @@ export const V44_DATABASE_MIGRATIONS = [
    END $$`
 ] as const;
 
+/**
+ * V45: Paid V3 reuses the completed public-search snapshot reference table
+ * during atomic combined-report terminalization. Admit only its exact job
+ * identity while preserving the existing V2 contract and snapshot guards.
+ */
+export const V45_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_validate_report_market_snapshot_ref()
+   RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE snapshot_completed_at timestamptz;
+   BEGIN
+     IF NOT EXISTS (
+       SELECT 1 FROM scan_jobs job WHERE job.id = NEW.job_id AND job.report_id = NEW.report_id
+         AND job.product_contract = 'recommendation_forensics_v1'
+         AND job.fulfillment_methodology = 'public_search_source_forensics_v1'
+         AND (
+           job.recommendation_report_version = 2
+           OR (
+             job.tier = 'deep' AND job.reason = 'standard'
+             AND job.recommendation_report_version = 3
+             AND job.artifact_contract = 'combined_geo_report_v3'
+           )
+         )
+     ) THEN RAISE EXCEPTION 'Market snapshot references require an exact V2 public-search or standard Paid V3 job.'; END IF;
+     SELECT completed_at INTO snapshot_completed_at FROM market_snapshot_questions
+       WHERE id = NEW.snapshot_id AND cache_identity = NEW.cache_identity AND status = 'completed';
+     IF snapshot_completed_at IS NULL THEN RAISE EXCEPTION 'Market snapshot references require a completed snapshot.'; END IF;
+     IF snapshot_completed_at > NEW.evidence_cutoff OR NEW.evidence_cutoff > now() THEN
+       RAISE EXCEPTION 'Market snapshot reference cutoff cannot precede the snapshot or be in the future.';
+     END IF;
+     IF NEW.freshness_state IS DISTINCT FROM (CASE
+       WHEN NEW.evidence_cutoff <= snapshot_completed_at + interval '7 days' THEN 'fresh'
+       WHEN NEW.evidence_cutoff <= snapshot_completed_at + interval '30 days' THEN 'historical'
+       ELSE 'insufficient' END) THEN
+       RAISE EXCEPTION 'Market snapshot freshness state does not match its evidence cutoff.';
+     END IF;
+     RETURN NEW;
+   END $$`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -4055,7 +4094,8 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 41, migrations: V41_DATABASE_MIGRATIONS },
   { version: 42, migrations: V42_DATABASE_MIGRATIONS },
   { version: 43, migrations: V43_DATABASE_MIGRATIONS },
-  { version: 44, migrations: V44_DATABASE_MIGRATIONS }
+  { version: 44, migrations: V44_DATABASE_MIGRATIONS },
+  { version: 45, migrations: V45_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

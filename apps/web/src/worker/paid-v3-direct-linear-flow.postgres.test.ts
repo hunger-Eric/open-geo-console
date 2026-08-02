@@ -44,6 +44,12 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
     questions: `direct-questions-${suffix}`, artifact: `direct-artifact-${suffix}`,
     access: `direct-access-${suffix}`, credit: `direct-credit-${suffix}`, worker: `direct-worker-${suffix}`
   };
+  const snapshots = Array.from({ length: 4 }, (_, index) => ({
+    id: `direct-snapshot-${index}-${suffix}`,
+    cacheIdentity: `direct-cache-${index}-${suffix}`,
+    queryId: `direct-query-${index}-${suffix}`,
+    attemptId: `direct-attempt-${index}-${suffix}`
+  }));
   const databaseName = `ogc_direct_linear_${suffix}`;
   const admin = postgres(adminUrl!, { max: 1, prepare: false });
   const originalDatabaseUrl = process.env.DATABASE_URL;
@@ -83,6 +89,17 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
       await sql`UPDATE payment_orders SET fulfillment_job_id=${ids.job} WHERE id=${ids.order}`;
       await sql`INSERT INTO credit_ledger(id,access_key_id,report_id,idempotency_key,payment_order_id,job_id,credits,status) VALUES(${ids.credit},${ids.access},${ids.report},${`credit-${ids.order}`},${ids.order},${ids.job},1,'reserved')`;
       await sql`INSERT INTO report_artifact_revisions(id,report_id,order_id,job_id,revision,artifact_contract,status,payload_identity_hash) VALUES(${ids.artifact},${ids.report},${ids.order},${ids.job},1,'combined_geo_report_v3','pending',${`payload-${suffix}`})`;
+      await sql`INSERT INTO public_search_surface_authorities(authority_version,adapter_id,provider_id,product_id,model_id,adapter_version,surface_id,surface_version,environment,locale_capabilities,region_capabilities,terms_reviewed_at,evidence_references,active,captured_at)
+        VALUES(${`direct-authority-${suffix}`},'fixture-adapter','fixture-provider','fixture-product','fixture-model','fixture-v1','fixture-search','fixture-search-v1','staging','["zh-CN"]','["CN"]',now(),'["fixture://review"]',true,now())`;
+      for (const [index, snapshot] of snapshots.entries()) {
+        await sql`INSERT INTO market_snapshot_questions(id,cache_identity,normalized_question,question_hash,locale,region,surface_authority_version,surface_id,surface_version,fanout_version,status,completion_version,snapshot_kind,query_plan_version)
+          VALUES(${snapshot.id},${snapshot.cacheIdentity},${`generic market question ${index + 1}`},${`direct-question-hash-${index}-${suffix}`},'zh-CN','CN',${`direct-authority-${suffix}`},'fixture-search','fixture-search-v1','fixture-fanout-v1','refreshing',1,'standard_question','fixture-plan-v1')`;
+        await sql`INSERT INTO market_snapshot_queries(id,snapshot_id,query_order,query_text,query_hash,derivation_rule)
+          VALUES(${snapshot.queryId},${snapshot.id},0,${`generic market query ${index + 1}`},${`direct-query-hash-${index}-${suffix}`},'exact-question')`;
+        await sql`INSERT INTO market_search_attempts(id,snapshot_id,query_id,authority_version,attempt_number,request_status,idempotency_reference,usage,configured_cost_micros,provider_cost_micros,cost_uncertain,completed_at)
+          VALUES(${snapshot.attemptId},${snapshot.id},${snapshot.queryId},${`direct-authority-${suffix}`},1,'succeeded',${`direct-idempotency-${index}-${suffix}`},'{}',0,0,false,now()-interval '2 minutes')`;
+        await sql`UPDATE market_snapshot_questions SET status='completed',query_fanout_hash=${`direct-fanout-hash-${index}-${suffix}`},completed_at=now()-interval '1 minute' WHERE id=${snapshot.id}`;
+      }
     } catch (error) {
       setupError = error;
     }
@@ -99,9 +116,16 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
   }, 120_000);
 
   it("uses every Direct model step once, navigates four URLs, and completes without refund", async () => {
-    if (setupError) throw setupError;
+    expect(setupError, "disposable PostgreSQL setup must complete before the combined assertion").toBeUndefined();
     configureBrowser();
-    const forensicBase = createTestSourceForensicReport({ reportId: ids.report, jobId: ids.job });
+    const cutoffRow = (await getSqlClient()<Array<{ evidence_cutoff_at: string }>>`
+      SELECT (now()-interval '1 second')::text AS evidence_cutoff_at`)[0]!;
+    const evidenceCutoffAt = cutoffRow.evidence_cutoff_at;
+    const forensicBase = {
+      ...createTestSourceForensicReport({ reportId: ids.report, jobId: ids.job }),
+      generatedAt: evidenceCutoffAt,
+      evidenceCutoffAt
+    };
     const questionSet = confirmedQuestions(forensicBase, ids.questions);
     const canonical = toCanonicalBuyerQuestionSet(questionSet).questions;
     const replacements = new Map(forensicBase.questions.questions.map((question, index) => [question.id, canonical[index]!.id]));
@@ -119,7 +143,7 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
       organizationSignals: [], strengths: [], findings: []
     })) });
     const analyzed = await analyzePageBatch(pageClient, {
-      pages, locale: forensic.locale, semanticValidation: "free_direct", maxAttempts: 3
+      pages, locale: forensic.locale, semanticValidation: "free_direct", maxAttempts: 1
     });
     expect(pageClient.completeJson).toHaveBeenCalledOnce();
 
@@ -129,7 +153,7 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
       coverage: { discoveredPages: 4, plannedPages: 4, analyzedPages: 4, failedPages: 0,
         samplingMethod: "四个代表页面的直接分析。", pageTypesCovered: ["home", "other"], limitations: [] },
       generatedAt: forensic.generatedAt
-    }, { semanticValidation: "free_direct", maxAttempts: 3, delay: async () => undefined });
+    }, { semanticValidation: "free_direct", maxAttempts: 1, delay: async () => undefined });
     expect(synthesisClient.completeJson).toHaveBeenCalledOnce();
 
     const questionIds = canonical.map(({ id }) => id) as [string, string, string];
@@ -237,17 +261,21 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
     })}::jsonb WHERE id=${ids.job}`;
     const result = await terminalizePaidCombinedReport({
       report, workerId: ids.worker, checkpointIdentityHash: answerResult.checkpoint.identityHash,
-      snapshotRefs: [], htmlSha256: "a".repeat(64), pdfSha256: "b".repeat(64),
+      snapshotRefs: snapshots.map((snapshot) => ({
+        snapshotId: snapshot.id, cacheIdentity: snapshot.cacheIdentity, freshnessState: "fresh",
+        actualCostMicros: 0, allocatedCostMicros: 0, avoidedCostMicros: 0
+      })), htmlSha256: "a".repeat(64), pdfSha256: "b".repeat(64),
       pdfStorageKey: `private/${ids.artifact}.pdf`, pageCount: 5, semanticValidation: "free_direct"
     });
     expect(result).toMatchObject({ outcome: "completed", refundId: null });
-    const state = (await getSqlClient()<Array<{ artifact_status: string; stage: string; fulfillment: string; refund_status: string; refunds: number }>>`
+    const state = (await getSqlClient()<Array<{ artifact_status: string; stage: string; fulfillment: string; refund_status: string; refs: number; refunds: number }>>`
       SELECT (SELECT status FROM report_artifact_revisions WHERE id=${ids.artifact}) artifact_status,
         (SELECT stage FROM scan_jobs WHERE id=${ids.job}) stage,
         (SELECT fulfillment_status FROM payment_orders WHERE id=${ids.order}) fulfillment,
         (SELECT refund_status FROM payment_orders WHERE id=${ids.order}) refund_status,
+        (SELECT count(*)::int FROM report_market_snapshot_refs WHERE job_id=${ids.job}) refs,
         (SELECT count(*)::int FROM payment_refunds WHERE order_id=${ids.order}) refunds`)[0]!;
-    expect(state).toEqual({ artifact_status: "active", stage: "completed", fulfillment: "completed", refund_status: "not_required", refunds: 0 });
+    expect(state).toEqual({ artifact_status: "active", stage: "completed", fulfillment: "completed", refund_status: "not_required", refs: 4, refunds: 0 });
   }, 120_000);
 });
 
