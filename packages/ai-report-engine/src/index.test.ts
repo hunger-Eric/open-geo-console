@@ -715,6 +715,42 @@ describe("report validation and synthesis", () => {
     expect(correctionPayload.pageEvidence).toBeUndefined();
   });
 
+  it("drops only language-invalid optional report prose when the bounded correction envelope is unusable", async () => {
+    const invalid = chineseReportModelOutput();
+    const profile = invalid.organizationProfile as Record<string, unknown>;
+    profile.brandNames = ["Example", "Unapproved Express Brand"];
+    const summary = invalid.executiveSummary as Record<string, unknown>;
+    summary.keyRisks = ["信任细节不足", "Add more customer proof before purchase decisions."];
+    summary.topPriorities = ["补充来源证据", "Publish better customer case studies immediately."];
+    const finding = (invalid.findings as Array<Record<string, unknown>>)[0]!;
+    finding.rewriteExample = "Add a clear customer proof section to every service page.";
+    const immediate = ((invalid.roadmap as Record<string, unknown>).immediate as Array<Record<string, unknown>>)[0]!;
+    immediate.actions = ["添加来源", "Publish verified source details.", "Add better customer case studies."];
+    const unchangedSummary = profile.summary;
+    const unchangedQuote = ((finding.evidence as Array<Record<string, unknown>>)[0]!).quote;
+    const client = mockClient([invalid, { corrections: [] }]);
+
+    const result = await synthesizeWebsiteReportWithRecovery(client, synthesisInput("zh-CN"), {
+      maxAttempts: 3,
+      delay: async () => undefined
+    });
+
+    expect(result.report.organizationProfile.brandNames).toEqual(["Example"]);
+    expect(result.report.organizationProfile.summary).toBe(unchangedSummary);
+    expect(result.report).toMatchObject({
+      version: 1,
+      tier: "deep",
+      targetUrl: page.url,
+      provenance: { locale: "zh-CN" }
+    });
+    expect(result.report.executiveSummary.keyRisks).toEqual(["信任细节不足"]);
+    expect(result.report.executiveSummary.topPriorities).toEqual(["补充来源证据"]);
+    expect(result.report.findings[0]?.rewriteExample).toBeUndefined();
+    expect(result.report.findings[0]?.evidence[0]?.quote).toBe(unchangedQuote);
+    expect(result.report.roadmap.immediate[0]?.actions).toEqual(["添加来源"]);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
+
   it("corrects legacy SEO terminology in synthesis using the existing single correction", async () => {
     const invalid = reportModelOutput(1);
     (invalid.executiveSummary as Record<string, unknown>).overview = "Improve SEO visibility with clearer evidence.";

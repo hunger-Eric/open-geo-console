@@ -4437,3 +4437,24 @@ allowlist; external actions remain zero; no deploy.
   successful Free-only change but an incomplete Free-to-Paid product outcome.
   This history is context only and grants no authority to modify or replay any
   historical job, order, payment, report, refund, or deployment.
+
+---
+
+## 2026-08-02 - Direct Paid terminalization shipped; fresh chain reached a new upstream failure
+
+- Commits `ee166d1204a7b302e90aedba8050cf7bb5074558` and
+  `839e31449ca487cf73887c44bdb38b48c6f74d7f` carried the Direct authority into
+  Paid V3, selected the explicit `free_direct` terminal parser, and preserved
+  the one-Worker-attempt contract. `main` and `origin/main` both reached the
+  latter commit, and the named Staging Workers used its thin overlay image.
+- Fresh report `72fcba4f-8f37-4f84-81c0-58b31ee5deec` completed Free and V4
+  pre-admission. Its Direct Paid job
+  `d98425c0-5433-4288-b271-de0102a6c770` carried the correct root marker and
+  `max_attempts=1`, then failed earlier at progress 85 in `website_synthesis`.
+- The current-task error event identified six optional/list prose paths that
+  failed Chinese language validation. The one existing correction call
+  returned, but its strict exact-path correction envelope was rejected; zero
+  Deep AI rows, combined reports, or ready artifacts were produced.
+- The failed report, job, order `bc9242f2-0822-44a5-b9ed-dbeb7848e11a`, pending
+  refund, and pending artifact remain immutable historical state. This closed
+  scope grants no replay, repair, deployment, model call, or new submission.

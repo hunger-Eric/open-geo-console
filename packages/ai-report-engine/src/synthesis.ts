@@ -308,9 +308,58 @@ async function correctWebsiteReportLanguage(
   const corrected = normalizedCorrections
     ? applyWebsiteLanguageCorrections(error.draft.report, normalizedCorrections)
     : null;
-  if (!corrected) throw error;
-  assertWebsiteReportLanguage(corrected, input);
-  return { ...error.draft, report: corrected };
+  const deliverable = corrected ?? omitInvalidOptionalWebsiteReportProse(error.draft.report, error);
+  if (!deliverable) throw error;
+  assertWebsiteReportLanguage(deliverable, input);
+  return { ...error.draft, report: deliverable };
+}
+
+const REMOVABLE_WEBSITE_REPORT_ARRAY_PATH = /^(?:organizationProfile\.brandNames|executiveSummary\.(?:strengths|keyRisks|topPriorities)|pageTypeAnalyses\[\d+]\.(?:strengths|commonIssues|recommendations)|roadmap\.(?:immediate|nextPhase|ongoing)\[\d+]\.actions)\[(\d+)]$/;
+
+function omitInvalidOptionalWebsiteReportProse(
+  draft: AiWebsiteReportV1,
+  error: ReportLanguageValidationError
+): AiWebsiteReportV1 | null {
+  if (error.violations.length === 0) return null;
+  const pruned = structuredClone(draft) as AiWebsiteReportV1;
+  const removals = new Map<string, Set<number>>();
+  for (const { path } of error.violations) {
+    const rewrite = /^findings\[(\d+)]\.rewriteExample$/.exec(path);
+    if (rewrite) {
+      const finding = pruned.findings[Number(rewrite[1])];
+      if (!finding || finding.rewriteExample === undefined) return null;
+      delete finding.rewriteExample;
+      continue;
+    }
+    const removable = REMOVABLE_WEBSITE_REPORT_ARRAY_PATH.exec(path);
+    if (!removable) return null;
+    const parentPath = path.slice(0, path.lastIndexOf("["));
+    const collection = reportValueAtPath(pruned, parentPath);
+    const index = Number(removable[1]);
+    if (!Array.isArray(collection) || index >= collection.length) return null;
+    const indices = removals.get(parentPath) ?? new Set<number>();
+    indices.add(index);
+    removals.set(parentPath, indices);
+  }
+  for (const [parentPath, indices] of removals) {
+    const collection = reportValueAtPath(pruned, parentPath);
+    if (!Array.isArray(collection)) return null;
+    for (const index of [...indices].sort((left, right) => right - left)) collection.splice(index, 1);
+  }
+  try {
+    return parseAiWebsiteReportV1(pruned);
+  } catch {
+    return null;
+  }
+}
+
+function reportValueAtPath(root: unknown, path: string): unknown {
+  let value = root;
+  for (const segment of path.replace(/\[(\d+)]/g, ".$1").split(".")) {
+    if (!value || typeof value !== "object") return undefined;
+    value = (value as Record<string, unknown>)[segment];
+  }
+  return value;
 }
 
 function parseWebsiteLanguageCorrections(value: unknown, expectedPaths: readonly string[]): WebsiteLanguageCorrection[] | null {
