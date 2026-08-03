@@ -4644,3 +4644,28 @@ allowlist; external actions remain zero; no deploy.
   the presentation scope.
 - The prior preview harness and unrelated dirty files remain preserved in the
   worktree. They are not authority for the new delivery repair.
+
+---
+
+## 2026-08-03 - Free report teaser page presentation refinement and Protected Staging redeployment
+
+- The approved teaser scope refined the free report funnel page
+  (`combined-geo-report-v4-teaser.tsx`): localized generation-time formatting,
+  humanized dimension keys, single-score layout when dimension scores are
+  absent, and structured list/ordered-list typography in the semantic outcome
+  block. No data, copy, or business behavior changes. Teaser component tests
+  (5/5), the four artifact test files (17/17), lint, and diff checks passed;
+  desktop and mobile renders of a real Staging teaser report were reviewed.
+- Candidate `2dc9278fe807c5812542df03cfcf334d0ca97855` was committed locally,
+  deployed as Vercel Preview
+  `https://open-geo-console-3g37b4xuq-itheheda-6857s-projects.vercel.app`, and
+  the fixed Protected Staging alias `open-geo-console-staging-itheheda.vercel.app`
+  was reassigned to it. Anonymous smoke: `/zh` -> SSO 302, `/api/scan` -> 401.
+- Thin-overlay Staging free/deep Workers were rebuilt as
+  `open-geo-console:staging-2dc9278-style-overlay-v1` (image id `d6a730bc9d35`,
+  parent `staging-12670b3-style-overlay-v1`) and recreated; both containers run
+  with `OGC_DEPLOYMENT_VERSION=2dc9278fe807c5812542df03cfcf334d0ca97855`.
+  Rollback image `open-geo-console:staging-12670b3-style-overlay-v1`
+  (`901be8795886`) remains available.
+- Post-deploy `docker system df`: Images 32.17GB (8.091GB reclaimable), Build
+  Cache 21.1GB; drive free space C: 4.4GB, E: 53GB. Production was untouched.
