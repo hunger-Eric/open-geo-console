@@ -4669,3 +4669,21 @@ allowlist; external actions remain zero; no deploy.
   (`901be8795886`) remains available.
 - Post-deploy `docker system df`: Images 32.17GB (8.091GB reclaimable), Build
   Cache 21.1GB; drive free space C: 4.4GB, E: 53GB. Production was untouched.
+
+---
+
+## 2026-08-03 - Paid HTML report hero and timestamp presentation fix
+
+- User review of the generated deep report found the standalone HTML hero
+  metadata column wrapping the URL mid-token, showing raw ISO timestamps, and
+  wrapping the full revision UUID across five lines; appendix provenance
+  timestamps were also raw ISO. The user approved fixing both within a
+  concurrent addendum scope.
+- Fix: `.answer-first-hero>.metadata-grid` now stacks vertically
+  (`artifact-styles.ts`, shared by V3+V4 artifacts); V3 artifact formats hero
+  generated time, appendix searched/cutoff times, and source observation times
+  by report locale, and shows a shortened revision id with the full id in the
+  tooltip; V4 artifact hero generated time is formatted likewise. V3 test
+  expectation updated to the locale-formatted value. 17/17 artifact tests and
+  15/15 related report tests passed; lint clean; the real Staging deep report
+  (`c9acc3f9`) hero and appendix were screenshot-verified before and after.

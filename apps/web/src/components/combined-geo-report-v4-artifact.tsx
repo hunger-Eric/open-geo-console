@@ -17,7 +17,7 @@ export function CombinedGeoReportV4Artifact({ report }: { readonly report: Combi
         <Meta label={copy.target}>
           <a href={report.targetUrl} rel="noreferrer noopener" target="_blank">{report.targetUrl}</a>
         </Meta>
-        <Meta label={copy.generated}>{report.generatedAt}</Meta>
+        <Meta label={copy.generated}>{formatTimestamp(report.generatedAt, report.locale)}</Meta>
       </dl>
     </header>
 
@@ -192,6 +192,12 @@ function TextList({
 
 function Meta({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return <div><dt>{label}</dt><dd>{children}</dd></div>;
+}
+
+function formatTimestamp(value: string, locale: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(locale.toLocaleLowerCase("en-US").startsWith("zh") ? "zh-CN" : "en-US", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 function retrievalStatusLabel(status: CombinedGeoReportV4SourceRetrievalStatus, copy: Copy): string {

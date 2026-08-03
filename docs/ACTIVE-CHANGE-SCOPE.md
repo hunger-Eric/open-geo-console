@@ -217,3 +217,22 @@ HTML navigation and independent redirected email delivery. Unit tests, build,
 Preview READY, active artifact state, or queued email alone are insufficient.
 Without the fresh exact-lineage real-flow evidence, report status must remain
 "implemented and locally verified; Protected Staging usability unverified."
+
+## 2026-08-03 concurrent addendum — paid HTML report hero/timestamp presentation fix
+
+Approved by the user on 2026-08-03, running concurrently with the delivery
+scope above. This addendum adds exactly these files to the executable
+allowlist for a presentation-only fix of the paid standalone HTML report:
+stack the hero metadata grid so URLs/revision ids stop wrapping mid-token,
+format ISO timestamps for the report locale, and shorten the displayed
+revision id (full id remains in the tooltip). No data, copy, or behavior
+changes.
+
+- `apps/web/src/report/artifact-styles.ts`
+- `apps/web/src/components/combined-geo-report-v3-artifact.tsx`
+- `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx`
+- `apps/web/src/components/combined-geo-report-v4-artifact.tsx`
+
+Redeploy to Protected Staging (Vercel Preview + thin-overlay free/deep
+Workers + fixed alias) is authorized as before; Production remains
+untouched and no push/merge of remote refs is performed.

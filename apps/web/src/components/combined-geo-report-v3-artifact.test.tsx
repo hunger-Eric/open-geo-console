@@ -82,7 +82,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
 
   it("shows complete source and deterministic GEO diagnosis fields",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:combinedV3ArtifactFixture()}));
-    for(const value of ["V3 Source 1","v3-source-1.example","https://v3-source-1.example/page","V3 exact source excerpt 1","Third-party editorial","2026-07-15T00:00:00.000Z","V3 grounded answer sentence 1.","V3 missing evidence 1","V3 retest question 1"]){
+    for(const value of ["V3 Source 1","v3-source-1.example","https://v3-source-1.example/page","V3 exact source excerpt 1","Third-party editorial",new Intl.DateTimeFormat("en-US",{dateStyle:"medium",timeStyle:"short"}).format(new Date("2026-07-15T00:00:00.000Z")),"V3 grounded answer sentence 1.","V3 missing evidence 1","V3 retest question 1"]){
       expect(html).toContain(value);
     }
     expect(html).toContain("V3 technical finding");

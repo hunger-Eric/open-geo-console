@@ -26,8 +26,8 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
       <p className="lede">{copy.scope}</p>
       <dl className="metadata-grid">
         <Meta label={copy.target}>{report.targetUrl}</Meta>
-        <Meta label={copy.generated}>{report.generatedAt}</Meta>
-        <Meta label={copy.revision}>{report.artifactRevisionId}</Meta>
+        <Meta label={copy.generated}>{formatTimestamp(report.generatedAt,model.locale)}</Meta>
+        <Meta label={copy.revision}><span title={report.artifactRevisionId}>{shortRevisionId(report.artifactRevisionId)}</span></Meta>
       </dl>
     </header>
 
@@ -82,7 +82,7 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
     <section className="report-section methodology-appendix" data-methodology-appendix="true">
       <p className="section-index">05</p><h2>{copy.appendix}</h2>
       <p>{copy.scope}</p>
-      <dl className="provenance-grid"><Meta label={copy.searchSurface}>{report.engineProvenance.searchSurface}</Meta><Meta label={copy.searched}>{report.engineProvenance.searchedAt}</Meta><Meta label={copy.cutoff}>{report.engineProvenance.evidenceCutoffAt}</Meta><Meta label={copy.model}>{report.engineProvenance.synthesisModel}</Meta><Meta label={copy.queryPlan}>{report.engineProvenance.queryPlanVersion}</Meta><Meta label={copy.passage}>{report.engineProvenance.passageSelectorVersion}</Meta></dl>
+      <dl className="provenance-grid"><Meta label={copy.searchSurface}>{report.engineProvenance.searchSurface}</Meta><Meta label={copy.searched}>{formatTimestamp(report.engineProvenance.searchedAt,model.locale)}</Meta><Meta label={copy.cutoff}>{formatTimestamp(report.engineProvenance.evidenceCutoffAt,model.locale)}</Meta><Meta label={copy.model}>{report.engineProvenance.synthesisModel}</Meta><Meta label={copy.queryPlan}>{report.engineProvenance.queryPlanVersion}</Meta><Meta label={copy.passage}>{report.engineProvenance.passageSelectorVersion}</Meta></dl>
       <h3>{copy.coverage}</h3><ul>{report.methodology.limitations.map((item)=><li key={item}>{item}</li>)}</ul>
       <div className="answer-audit-list">{report.answerCards.map((card) => card.answerMode === "generative_search_v1"
         ? <dl data-answer-audit={card.questionId} key={card.questionId}><Meta label={copy.verifiedBody}>{card.audit.verifiedBodyCount}</Meta><Meta label={copy.searchSourceOnly}>{card.audit.searchSourceOnlyCount}</Meta><Meta label={copy.inaccessible}>{card.audit.inaccessibleCount}</Meta></dl>
@@ -92,6 +92,8 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
 }
 
 function Meta({label,children}:{label:string;children:ReactNode}){return <div><dt>{label}</dt><dd>{children}</dd></div>;}
+function formatTimestamp(value:string,locale:"en"|"zh"){const date=new Date(value);if(Number.isNaN(date.getTime()))return value;return new Intl.DateTimeFormat(locale==="zh"?"zh-CN":"en-US",{dateStyle:"medium",timeStyle:"short"}).format(date);}
+function shortRevisionId(value:string){return value.length>12?`${value.slice(0,8)}…`:value;}
 function List({label,items}:{label:string;items:readonly string[]}){return items.length?<div><strong>{label}</strong><ul>{items.map((item)=><li key={item}>{item}</li>)}</ul></div>:null;}
 function citationOrdinals(cards:CombinedPrivateReportArtifactModelV3["combinedReport"]["answerCards"]){const result=new Map<string,number>();for(const card of cards){if(card.answerMode === "generative_search_v1")continue;for(const sentence of card.sentences)for(const id of sentence.evidenceIds)if(!result.has(id))result.set(id,result.size+1);}return result;}
 
@@ -161,7 +163,7 @@ function LegacyEvidenceBoundAnswerCard({card,cardIndex,locale,ordinals}:{card:Le
     {card.status === "insufficient" && <p className="business-question-answer insufficient-answer">{copy.insufficient}</p>}
     <div className="answer-prose">{card.sentences.map((sentence)=><div className="answer-sentence" data-answer-sentence={sentence.sentenceId} key={sentence.sentenceId}>
       <p className="business-question-answer">{sentence.text}{sentence.kind!=="scope_note"&&<span className="sentence-citations">{sentence.evidenceIds.map((id)=><sup data-citation-ordinal={ordinals.get(id)} key={id}>[{ordinals.get(id)}]</sup>)}</span>}</p>
-      {sentence.kind!=="scope_note"&&<div className="answer-sources"><h4>{copy.sources}</h4>{sentence.evidenceIds.map((id)=>{const evidence=card.sourceEvidence.find((candidate)=>candidate.evidenceId===id);if(!evidence)return null;const ordinal=ordinals.get(id)!;return <article className="source-card" data-answer-source={id} data-citation-ordinal={ordinal} data-source-type={evidence.ownershipCategory} data-supported-sentence={sentence.sentenceId} key={id}><div className="source-ordinal">[{ordinal}]</div><div className="source-content"><h5><a href={evidence.canonicalUrl}>{evidence.title}</a></h5><dl className="source-metadata"><Meta label={copy.domain}>{evidence.registrableDomain}</Meta><Meta label={copy.sourceType}>{sourceTypeLabel(evidence.ownershipCategory,zh)}</Meta><Meta label={copy.observed}>{evidence.observedAt}</Meta></dl><p className="source-url"><a href={evidence.canonicalUrl}>{evidence.canonicalUrl}</a></p><blockquote><span>{copy.excerpt}</span>{evidence.exactExcerpt}</blockquote></div></article>;})}</div>}
+      {sentence.kind!=="scope_note"&&<div className="answer-sources"><h4>{copy.sources}</h4>{sentence.evidenceIds.map((id)=>{const evidence=card.sourceEvidence.find((candidate)=>candidate.evidenceId===id);if(!evidence)return null;const ordinal=ordinals.get(id)!;return <article className="source-card" data-answer-source={id} data-citation-ordinal={ordinal} data-source-type={evidence.ownershipCategory} data-supported-sentence={sentence.sentenceId} key={id}><div className="source-ordinal">[{ordinal}]</div><div className="source-content"><h5><a href={evidence.canonicalUrl}>{evidence.title}</a></h5><dl className="source-metadata"><Meta label={copy.domain}>{evidence.registrableDomain}</Meta><Meta label={copy.sourceType}>{sourceTypeLabel(evidence.ownershipCategory,zh)}</Meta><Meta label={copy.observed}>{formatTimestamp(evidence.observedAt,locale)}</Meta></dl><p className="source-url"><a href={evidence.canonicalUrl}>{evidence.canonicalUrl}</a></p><blockquote><span>{copy.excerpt}</span>{evidence.exactExcerpt}</blockquote></div></article>;})}</div>}
     </div>)}</div>
     {card.diagnosis
       ? <DiagnosisSummary diagnosis={card.diagnosis} locale={locale}/>
