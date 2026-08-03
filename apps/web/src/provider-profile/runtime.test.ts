@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ProviderProfileRuntimeError,
   prepareProviderProfileRuntime,
@@ -22,6 +22,34 @@ describe("unified Worker provider profile runtime", () => {
     expect(runtime.generalClient.configuredModel).toBe(modelId);
     expect(Object.isFrozen(runtime)).toBe(true);
     expect(Object.isFrozen(runtime.summary)).toBe(true);
+  });
+
+  it.each([
+    ["mimo_native", mimoEnvironment()],
+    ["sensenova_anysearch", sensenovaEnvironment()]
+  ] as const)("derives the %s general client timeout from the locked model profile", async (_id, environment) => {
+    vi.useFakeTimers();
+    try {
+      let observedSignal: AbortSignal | undefined;
+      const fetchMock = vi.fn(((_url: unknown, init?: RequestInit) => {
+        observedSignal = init?.signal as AbortSignal | undefined;
+        return new Promise((_resolve, reject) => {
+          observedSignal?.addEventListener("abort", () => reject(observedSignal.reason), { once: true });
+        });
+      }) as unknown as typeof globalThis.fetch);
+      const runtime = resolveProviderProfileRuntime(environment, { fetch: fetchMock });
+      const expectedMs = Math.max(...Object.values(runtime.modelRuntime.modelProfile.operations).map((operation) => operation.timeoutMs));
+      expect(expectedMs).toBeGreaterThan(60_000);
+      const settled = runtime.generalClient.completeJson({ messages: [{ role: "user", content: "ping" }] })
+        .then(() => "resolved", (error: unknown) => String(error));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(observedSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(expectedMs - 60_000);
+      expect(observedSignal?.aborted).toBe(true);
+      await expect(settled).resolves.toContain("AI request timed out.");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fails closed for missing, unknown, incomplete and half-switched profiles without exposing secrets", () => {

@@ -191,6 +191,7 @@ function createMiMoRuntime(
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     model: modelRuntime.modelProfile.operations.pageAnalysis.model,
+    timeoutMs: generalClientTimeoutMs(modelRuntime),
     fetch: dependencies.fetch,
     useJsonResponseFormat: true
   });
@@ -239,6 +240,7 @@ function createSenseNovaRuntime(
   const generalClient = createOpenAiCompatibleClient({
     ...config,
     model: modelRuntime.modelProfile.operations.pageAnalysis.model,
+    timeoutMs: generalClientTimeoutMs(modelRuntime),
     fetch: dependencies.fetch,
     useJsonResponseFormat: true
   });
@@ -272,6 +274,11 @@ function createSenseNovaRuntime(
   };
   resolveAnySearchGenerativeSearchAnswerProvider(environment, { locale, region }, { ...dependencies, client: generalClient });
   return Object.freeze(runtime);
+}
+
+function generalClientTimeoutMs(runtime: ReportV4ModelRuntimeConfig): number {
+  // generalClient serves every profile operation; cover the slowest declared one.
+  return Math.max(...Object.values(runtime.modelProfile.operations).map((operation) => operation.timeoutMs));
 }
 
 function assertLockedRuntime(
