@@ -5136,3 +5136,76 @@ revised scope.
   recording zero model, search, crawl, database, payment and email calls.
 - No Git operation, deployment, Docker action or customer-data mutation
   occurred. This scope is closed.
+
+---
+
+## 2026-08-03 - Paid report presentation commit completed locally
+
+- The approved local-commit-only scope created exactly one commit,
+  `95e7fb296f6a308b92e4279f9d076a745e22b888`, with parent
+  `be3c032e0a73b6a13b80b6901617a4203e7881c6` and message
+  `feat: restore paid report template and content focus`.
+- The commit contains exactly the 14 approved tracked paths. Cached diff and
+  whitespace checks passed; the only remaining canonical-worktree status is
+  the preserved user-owned untracked `apps/web/.tmp-preview/`.
+- No push, merge, rebase, branch/worktree mutation, Docker action, deployment,
+  report, payment or email occurred under the Git scope.
+- That scope is closed. Protected Staging deployment is governed only by the
+  new active FROZEN scope.
+
+---
+
+## 2026-08-03 - Paid report candidate deployed to Protected Staging Gates 1-3
+
+- The user approved the exact deployment-only scope for candidate
+  `95e7fb296f6a308b92e4279f9d076a745e22b888`.
+- One Vercel Preview was created: `dpl_J71XhBtERHciEMEd8DjWNc8SWPYM`.
+  Independent metadata inspection proved READY Preview identity and exact
+  `gitCommitSha` / `ogcGitSha` equality with the candidate.
+- One thin source-overlay Worker image was built:
+  `open-geo-console:staging-95e7fb2-paid-report-overlay-v1`, image
+  `sha256:95a62dcdfc1f91ff834e67d642609c682e79d9a550660073a6ef374bcfb4e83e`.
+  No dependency, browser or operating-system rebuild occurred.
+- Only the Staging Free and Deep Workers were recreated. Both run the candidate
+  SHA with the Staging profile, correct realtime tier and restart count zero.
+  Queue counts were zero before and after replacement.
+- The fixed Protected Staging alias was moved once to the candidate Preview.
+  Authenticated browser QA rendered the Chinese landing page with no page
+  console errors; an authenticated catalog read returned HTTP 200,
+  `enabled=true`, `mode=test` and CNY/USD/HKD prices.
+- Thirteen bounded database counts for reports, jobs, crawl/model/search rows,
+  orders, payments, refunds, emails and artifacts were identical before and
+  after Gate 3. No report, crawl, model/search operation, order, payment,
+  refund, email or customer artifact was created by deployment smoke testing.
+- E: free space changed from 55,110,230,016 to 55,096,504,320 bytes. The prior
+  accepted Web deployment and Worker image remain available as rollback; no
+  cleanup was performed.
+- Production, the Commerce service, historical data, Git remotes/main,
+  `apps/web/.tmp-preview/**` and the read-mode worktree were untouched.
+- Independent read-only review accepted Gates 1-3. Terminal status:
+  **Protected Staging deployment completed; real flow not yet accepted.**
+- A fresh manually submitted report/payment/email path is Gate 4 and was not
+  authorized or performed by this scope.
+
+---
+
+## 2026-08-03 - Unified provider profile design completed
+
+- The user approved a single canonical `OGC_PROVIDER_PROFILE` selector with
+  two initial complete capability bundles: `mimo_native` and
+  `sensenova_anysearch`.
+- The design maps general analysis, V4 structured operations, public search,
+  grounded buyer answers, source diagnosis and GEO article generation through
+  one immutable startup-resolved bundle. Secrets remain separate data inputs
+  and cannot independently select a route.
+- Missing/incompatible configuration, conflicting legacy routing variables or
+  an inactive search authority fails Worker startup before job claim. Runtime
+  capability probes and automatic provider fallback are prohibited.
+- Existing MiMo, SenseNova and AnySearch clients, prompts, report contracts,
+  persistence, orchestration, payment and historical reports remain outside
+  the change. Existing/in-flight jobs keep their immutable provider/model
+  snapshots.
+- The design is recorded at
+  `docs/superpowers/specs/2026-08-03-unified-provider-profile-design.md`.
+  Implementation, runtime activation, deployment and a fresh report remain
+  separately scoped work.

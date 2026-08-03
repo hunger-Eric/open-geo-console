@@ -1,98 +1,120 @@
 # Active Change Scope Lock
 
-Status: `APPROVED`
+Status: `COMPLETE`
 
-Approved by the user on 2026-08-03 for the exact 14-file local commit and
-local-commit-only boundary below. The same message requested deployment next;
-deployment remains outside this scope and requires its own target-specific
-FROZEN authority after this commit succeeds.
+Approved by the user on 2026-08-03 for the exact specification-only allowlist
+and one-local-documentation-commit boundary below.
 
 ## Objective
 
-Create exactly one local Git commit containing the already completed and
-verified Paid V3 template restoration, customer-content focus, Direct/GEO
-prompt corrections, deterministic tests and closeout records.
-
-No production behavior may be edited under this scope. No push, merge, rebase,
-deployment or remote mutation is authorized.
+Convert the user-approved unified provider-profile design into one reviewable
+design specification and one local documentation commit. This scope authorizes
+no implementation or runtime change.
 
 ## Baseline
 
 - Repository: `E:/project/open-geo-console`.
-- Branch: `codex/delivery-root-fix`.
-- HEAD: `be3c032e0a73b6a13b80b6901617a4203e7881c6`.
-- Remote: `origin=https://github.com/hunger-Eric/open-geo-console.git`.
-- Current tracked diff: exactly the 14 files listed below.
-- User-owned untracked `apps/web/.tmp-preview/**` must remain untouched and
-  uncommitted.
-- Ignored `.data/**`, including local diagnostic HTML, receipts and screenshots,
-  must remain uncommitted.
-- Detached worktrees `.data/candidate-worktree` and
-  `.data/deploy-worktree-readmode` must remain untouched.
-- Current branch and `main` are not in a safe fast-forward relationship; this
-  scope forbids merge, rebase, branch cleanup or main advancement.
+- Branch / HEAD: `codex/delivery-root-fix` at
+  `95e7fb296f6a308b92e4279f9d076a745e22b888`.
+- The completed Protected Staging deployment closeout is already present as
+  uncommitted edits to `docs/ACTIVE-CHANGE-SCOPE.md` and
+  `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`; preserve it in this documentation
+  commit.
+- User-owned untracked `apps/web/.tmp-preview/**` remains excluded and must not
+  be touched or staged.
+- Existing ignored `.data/**` and detached worktrees remain untouched.
 
-## Exact commit allowlist
+## Exact allowlist
 
-- `apps/web/src/components/combined-artifact-fixtures.ts`
-- `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx`
-- `apps/web/src/components/combined-geo-report-v3-artifact.tsx`
-- `apps/web/src/components/source-selection-diagnosis-section.test.tsx`
-- `apps/web/src/components/source-selection-diagnosis-section.tsx`
-- `apps/web/src/report/artifact-styles.ts`
-- `apps/web/src/report/combined-artifact-readiness.test.tsx`
-- `apps/web/src/worker/geo-article-example.test.ts`
-- `apps/web/src/worker/geo-article-example.ts`
-- `apps/web/src/worker/report-v4-free-teaser.test.ts`
-- `apps/web/src/worker/report-v4-free-teaser.ts`
-- `design-qa.md`
+- `docs/superpowers/specs/2026-08-03-unified-provider-profile-design.md`
+  - Record the approved two-profile design: `mimo_native` and
+    `sensenova_anysearch`.
+  - Define one canonical selector, capability mapping, credential/config input
+    boundaries, startup fail-closed behavior, provider construction flow,
+    legacy selector treatment, error handling, migration, tests and live
+    acceptance.
+  - Explicitly preserve existing provider clients, report prompts/contracts,
+    persistence, orchestration, payments and historical reports.
 - `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`
+  - Preserve the completed deployment record and append this spec-only scope
+    closeout after the specification passes self-review.
 - `docs/ACTIVE-CHANGE-SCOPE.md`
+  - Record approval and close this documentation-only authority.
 
-No other tracked or untracked path may be staged.
+No other file may be edited or staged.
 
-## Authorized Git actions after explicit approval
+## Design constraints
 
-1. Re-read cwd, branch, full HEAD, remote, worktrees and status.
-2. Fail closed if HEAD, branch, tracked path set or ownership changed.
-3. Stage only the exact 14-file allowlist using explicit literal paths.
-4. Verify `git diff --cached --name-status`, `git diff --cached --check` and
-   confirm `apps/web/.tmp-preview/**` plus `.data/**` are absent.
+1. `OGC_PROVIDER_PROFILE` is the only provider-routing selector.
+2. Secrets remain separate inputs and never become selector logic.
+3. `mimo_native` maps analysis, structured V4 operations, native search and
+   generative answers to existing MiMo providers.
+4. `sensenova_anysearch` maps analysis/structured synthesis to the existing
+   OpenAI-compatible SenseNova client, source retrieval to AnySearch, and
+   grounded answers to SenseNova over AnySearch evidence.
+5. Every active report stage must receive providers from the resolved profile;
+   no consumer may independently default to MiMo or inspect a legacy selector.
+6. Missing credentials, incompatible legacy routing values, inactive search
+   authority or incomplete capability wiring fails Worker startup before a job
+   can be claimed.
+7. No runtime capability probing or automatic provider fallback.
+8. The eventual implementation must remain local to provider resolution,
+   startup readiness and existing provider entry points; no database, schema,
+   report contract, UI, payment, task-state or historical-data change.
+9. The failed report `5cddd8e2-df16-4289-87a3-21914e527a61` remains terminal
+   and must not be repaired, replayed or used as implementation acceptance.
+
+## Authorized Git actions after approval
+
+1. Write and self-review the exact design specification.
+2. Verify no placeholders, contradictions, ambiguous routing, hidden provider
+   defaults or implementation scope expansion remain.
+3. Stage only the three allowlisted documentation paths.
+4. Run `git diff --cached --check` and verify `apps/web/.tmp-preview/**` plus
+   `.data/**` are absent.
 5. Create exactly one local commit with message:
-   `feat: restore paid report template and content focus`.
-6. Re-read commit identity and status. The only permitted remaining status is
-   the preserved untracked `apps/web/.tmp-preview/`.
-
-## Existing verification accepted for this commit
-
-- Focused tests: 5 files, 54/54 passed, 0 skipped.
-- Scoped lint: passed with zero warnings and errors.
-- Full workspace build: passed; 18/18 static pages generated.
-- `git diff --check`: passed.
-- Codex in-app-browser QA passed at 1440x1024 and 390x844 with 9/9 TOC
-  anchors, two loaded evidence images, no overflow, no console errors and no
-  P0/P1/P2 findings.
-- No code changed after those checks; only the scope authority changes here.
-
-## Forbidden actions
-
-- No production/test refactor, formatting pass or content adjustment.
-- No staging of `apps/web/.tmp-preview/**`, `.data/**` or any non-allowlisted
-  file.
-- No amend, reset, stash, checkout, clean, cherry-pick, merge or rebase.
-- No branch/worktree creation, deletion, detachment or cleanup.
-- No push, pull, fetch, tag, PR, remote branch mutation, deployment, Docker,
-  model/search/crawl/database/payment/email call or customer-data mutation.
+   `docs: design unified provider profile`.
+6. Do not push, merge, rebase, tag, deploy or change branches/worktrees.
 
 ## Acceptance
 
-- Exactly one new local commit exists on `codex/delivery-root-fix` with parent
-  `be3c032e0a73b6a13b80b6901617a4203e7881c6`.
-- The commit contains exactly the 14 allowlisted paths and passes cached diff
-  checks.
-- `apps/web/.tmp-preview/**`, `.data/**`, detached worktrees, main and all
-  remotes remain unchanged.
-- The final response reports the full commit SHA and makes clear that the live
-  website is not updated until a separately approved push/deployment.
+- The spec provides an exact profile-to-capability mapping and one startup
+  resolution path covering analysis, search, grounded answers, V4 structured
+  synthesis/diagnosis and GEO article generation.
+- It explains why a launcher-only environment-variable patch is insufficient
+  and how the minimal design reuses existing clients without a broad rewrite.
+- It defines deterministic unit/startup/integration tests and a separately
+  authorized fresh Protected Staging report acceptance path.
+- It contains no TBD/TODO, secret value, unsupported provider claim or
+  implementation code.
+- Exactly one local documentation commit contains only the three allowlisted
+  paths. No production/runtime behavior changes.
 
-Implementation is authorized only for the exact Git actions above.
+## Forbidden actions
+
+- No production, test, fixture, dependency, config, launcher or runtime edit.
+- No provider/model/search/crawl/database/report/order/payment/email call.
+- No repair/replay of the failed report or any historical data.
+- No push, PR, deployment, Docker action, branch/worktree mutation or cleanup.
+- No edit or staging of `apps/web/.tmp-preview/**` or `.data/**`.
+
+## Stop conditions
+
+- The design requires a new schema, report contract, provider client rewrite,
+  runtime probe/fallback or behavior outside provider routing/startup readiness.
+- Exact routing for an active report stage cannot be determined from current
+  source without implementation experimentation.
+- Any next action needs a production edit, external call or expanded Git scope.
+
+Documentation work is authorized only within this exact scope.
+
+## Closeout
+
+- The approved design specification was written and self-reviewed at
+  `docs/superpowers/specs/2026-08-03-unified-provider-profile-design.md`.
+- It contains no TODO/TBD, defines complete two-profile routing, startup
+  failure semantics, historical isolation, deterministic verification and a
+  separately authorized Protected Staging acceptance path.
+- No production/runtime/test/configuration behavior or external system was
+  changed. The remaining authorized action is the exact local documentation
+  commit defined above.
