@@ -30,6 +30,7 @@ describe("public-source forensics pipeline", () => {
     const dependencies = deps({ reports, checkpoints, resolve: async ({ fanout, retrievalGate }) => {
       retrievalGates.add(retrievalGate);
       expect(fanout.budget.maxResults).toBe(3);
+      expect(fanout.budget.timeoutMs).toBe(60_000);
       expect(fanout.queries).toHaveLength(6);
       expect(fanout.queries.every(({ resultDepth }) => resultDepth === 3)).toBe(true);
       const key=fanout.questionId; const existing=cache.get(key); if(existing) return {...existing,collectedForThisRun:false,actualCostMicros:0,avoidedCostMicros:10};

@@ -2,223 +2,228 @@
 
 Status: `APPROVED`
 
-Approved by the user on 2026-08-03. The user additionally authorized the agent
-to complete the single fresh Protected Staging Sandbox payment interaction and
-acceptance path without waiting for the user to remain present. All original
-count limits, fail-closed stop conditions, and Production prohibitions remain
-unchanged.
-
-This scope is executable only within the exact allowlist and external-action
-budget below.
+The user approved the recommended design (complete public-search fanout once,
+then exact snapshot reuse) on 2026-08-03 and explicitly approved the original
+three-file written scope on 2026-08-03. Pre-implementation identity inspection
+then proved that the provider-standard fanout's 60-second timeout and the
+forensic fanout's 30-second timeout produce different immutable snapshot
+identities. The user explicitly approved the minimal fourth runtime file
+`apps/web/src/worker/public-source-forensics.ts` on 2026-08-03. This scope is
+executable only within the resulting four-file runtime allowlist and all other
+recorded limits.
 
 ## Objective
 
-Remove the two confirmed causes that strand a paid customer on the payment
-status page after the private HTML artifact becomes active:
+Remove the confirmed structural public-search duplication and deadline error
+from the Paid V3 Direct generation path with the smallest production change:
 
-1. Automatically exchange the same browser's checkout-return session for a
-   scoped report-access cookie and navigate that browser to the canonical HTML
-   artifact after persisted paid, deliverable, active-artifact state exists.
-2. Run a persistent Protected Staging email consumer for newly created Staging
-   deliveries so payment and report-ready email do not require an operator
-   button or manual command.
+1. The provider-standard-question stage produces the same complete six-query
+   fanout that the later public-source-forensics stage requires.
+2. The later stage reuses that exact completed snapshot and performs no second
+   external search for the same query identities.
+3. The fixed 180-second search sub-budget is divided by concurrency waves, not
+   raw query count. Six queries at concurrency two receive a 60-second unit
+   deadline instead of 30 seconds while the total wall-clock budget remains
+   bounded.
 
-Email remains the independent fallback. The browser exchange must never treat
-`payment_return=success`, an order ID, provider query parameters, or the public
-status endpoint as report-access authority.
+The existing secure browser handoff and future-only Staging email consumer in
+baseline commit `8d903b349985b8e08879c95eb9f25cce621bf192` are retained unchanged
+and must pass the same one fresh end-to-end acceptance path.
 
 ## Confirmed baseline
 
 - Repository: `E:/project/open-geo-console`.
-- Branch / HEAD: local `main` at
-  `12670b3eab0b0fdae638cd1c02d822752271d15d`; this commit has not been pushed.
-- Protected Staging fixed alias serves that Web candidate; Staging free/deep
-  Workers use the matching thin overlay. Production is outside this task.
-- Current worktree contains unrelated/pre-existing dirty paths that must remain
-  untouched and excluded from this task's diff/commit:
-  `apps/web/next-env.d.ts`,
-  `apps/web/src/components/combined-geo-report-v4-teaser.tsx`, and
-  `apps/web/.tmp-preview/`.
-- Observed report `c9acc3f9-9ddf-473a-8c2e-786049e8cb20`, order
-  `98244fcf-ca4d-452d-93fb-e16c02c1d09f`: paid/completed, job 100%, one active
-  `combined_geo_report_v3` artifact; its `payment_confirmed` and `report_ready`
-  deliveries remained `queued` with `attempts=0`.
-- Staging currently has 26 historical queued email rows in total. They are
-  historical state and must not be claimed by the new persistent consumer.
-- First divergence: paid terminalization marks fulfillment completed and queues
-  email, while the client treats fulfillment completion as terminal without an
-  access exchange. Staging has only a manual Commerce runner and no persistent
-  email consumer.
+- Branch / HEAD: `codex/delivery-root-fix` at
+  `8d903b349985b8e08879c95eb9f25cce621bf192`.
+- Current unrelated/concurrent worktree dirt is
+  `apps/web/next.config.ts`,
+  `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx`,
+  `apps/web/src/components/combined-geo-report-v3-artifact.tsx`,
+  `apps/web/src/components/combined-geo-report-v4-artifact.tsx`,
+  `apps/web/src/report/artifact-styles.ts`, and the untracked
+  `apps/web/.tmp-preview/`; all must remain untouched and excluded.
+- Paid V3 jobs `348d7574-c2c7-4d43-9ee8-46bf95415398` and
+  `5452db0a-e95d-4981-b2d8-a15e5ed6d703` completed in 854.168 seconds and
+  851.823 seconds respectively with the same structural phase pattern.
+- In the user-observed job, one three-query snapshot completed in 167.766
+  seconds. The immediately following six-query refresh repeated the exact same
+  first three query hashes, split the 180-second budget into 30-second unit
+  deadlines, recorded six cancelled attempts, consumed another 107.390
+  seconds, and fell back to the completed prefix snapshot.
+- Queue delay was 0.696 seconds. The paid job used one job attempt, zero resume
+  generations, and no replacement fulfillment; job-level retry/recovery is not
+  the cause of this incident.
+- Existing detailed Paid V3 trace output is console-only and the incident
+  container has been replaced. Durable PostgreSQL transition/snapshot/attempt
+  ledgers are the acceptance authority for this optimization.
+- `createMarketSnapshotIdentity` includes the fanout budget, including
+  `timeoutMs`, in `queryPlanHash`. Therefore a 60-second provider-standard
+  snapshot cannot be exactly reused by the current 30-second forensic fanout;
+  changing only resolver execution time would make persisted identity
+  untruthful.
 
 ## Allowed production/runtime files (exact allowlist)
 
-Browser return capability and automatic HTML handoff:
+- `apps/web/src/worker/provider-discovery-production.ts`
+- `apps/web/src/worker/public-source-execution-budget.ts`
+- `apps/web/src/worker/public-source-forensics.ts`
+- `apps/web/src/worker/public-source-snapshot-resolver.ts`
 
-- `apps/web/src/app/api/reports/[id]/checkout/route.ts`
-- `apps/web/src/app/api/reports/[id]/orders/[orderId]/completion-access/route.ts`
-  (new)
-- `apps/web/src/server/payment-return-access.ts` (new)
-- `apps/web/src/components/payment-return.ts`
-- `apps/web/src/components/payment-return-banner.tsx`
+No other production, runtime, package, configuration, schema, migration,
+prompt, model, crawler, report, commerce, delivery, access, rendering, storage,
+or UI file is allowed.
 
-Future-only Protected Staging email consumption:
+## Allowed test files (exact allowlist)
 
-- `apps/web/src/db/commercial-delivery.ts`
-- `apps/web/src/commerce/operations.ts`
-- `apps/web/src/scripts/staging-email-consumer.ts` (new)
-- `apps/web/package.json`
-- `package.json`
-- `compose.yaml`
-- `scripts/start-workstation-workers.ps1`
-
-Existing reader-facing operations documentation made inaccurate by this change:
-
-- `docs/PROTECTED-STAGING-OPERATIONS.md`
-- `docs/COMMERCIAL-OPERATIONS.md`
+- `apps/web/src/worker/provider-discovery-production.test.ts`
+- `apps/web/src/worker/public-source-execution-budget.test.ts`
+- `apps/web/src/worker/public-source-snapshot-resolver.test.ts`
+- `apps/web/src/worker/public-source-forensics.test.ts`
+- `apps/web/src/worker/paid-v3-direct-linear-flow.postgres.test.ts`
 
 Scope authority/history only:
 
 - `docs/ACTIVE-CHANGE-SCOPE.md`
 - `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`
 
-## Allowed test files (exact allowlist)
-
-- `apps/web/src/app/api/reports/[id]/checkout/route.test.ts`
-- `apps/web/src/app/api/reports/[id]/orders/[orderId]/completion-access/route.test.ts`
-  (new)
-- `apps/web/src/server/payment-return-access.test.ts` (new)
-- `apps/web/src/components/payment-return-banner.test.ts`
-- `apps/web/src/components/payment-refresh-button.test.tsx`
-- `apps/web/src/db/commercial-orders-v4.postgres.test.ts`
-- `apps/web/src/commerce/operations.test.ts`
-- `apps/web/src/scripts/staging-email-consumer.test.ts` (new)
-
-No other source, test, fixture, configuration, documentation, package, lockfile,
-or generated file is allowed.
-
-Verification-only amendment recorded on 2026-08-03: the originally named
-`commercial-delivery.test.ts` does not exist. The existing canonical disposable
-PostgreSQL commerce test above is used instead to prove the activation cutoff;
-this amendment changes no production behavior, schema, dependency, or gate.
+No new test harness, fixture family, evidence document, dependency, or generated
+file is allowed.
 
 ## Required behavior
 
-### Secure same-browser completion access
+### One complete search product
 
-- A successful checkout response sets a Secure, HttpOnly, SameSite=Lax,
-  time-bounded signed return-capability cookie bound to the exact report and
-  order. The cookie contains no email, provider secret, report token, or raw
-  database authority.
-- The completion-access POST endpoint requires that signed capability and the
-  exact persisted report/order binding. It succeeds only when payment is
-  `paid`, fulfillment is `completed` or `completed_limited`, and the report has
-  an exact active artifact.
-- The endpoint derives artifact scope only from the active artifact, issues the
-  existing scoped report-access token/cookie, and returns the canonical customer
-  HTML destination. Invalid, expired, cross-report, unpaid, non-deliverable, or
-  artifact-missing requests fail closed without disclosing which check failed.
-- The payment banner attempts the exchange once after trusted completed state
-  and replaces the current location with the returned HTML destination. Email
-  remains the fallback if the exchange is unavailable; cancel, payment failure,
-  report failure, and refund states never receive access.
-- The public order-status endpoint and query string remain non-authoritative.
-  Anonymous direct access to report HTML remains denied.
+- Provider standard questions use the complete canonical fanout needed by
+  public-source forensics; they do not truncate it to a three-query prefix.
+- Query ordering, exact query text, query IDs, fanout version, authority,
+  locale, region, cost cap, and maximum query count remain unchanged from the
+  existing full forensic plan. The canonical timeout changes uniformly from
+  30 to 60 seconds, producing one new truthful identity shared by both stages;
+  no historical snapshot is modified.
+- The ordinary exact-snapshot cache identity is the only reuse authority. Do
+  not introduce a second cache, job-local mutable ledger, cross-snapshot row
+  copying, or broadened prefix equivalence.
+- When the exact completed snapshot exists, public-source forensics performs
+  zero new adapter calls for that fanout.
+- Resume and concurrent lease contenders keep the existing idempotency,
+  snapshot ownership, and immutable provenance rules.
 
-### Automatic future Staging email delivery
+### Concurrency-aware bounded deadlines
 
-- Add one persistent `staging-commerce`/email-consumer service using Staging-only
-  test credentials and the same immutable candidate image as the Staging Web
-  and report Workers.
-- The consumer processes only queued email rows with `created_at` on or after a
-  persisted activation timestamp written to its ignored runtime environment.
-  Restarts reuse that same timestamp so post-activation backlog is not skipped.
-- The consumer must not run refund, SLA, payment, report, or reconciliation
-  operations and must not claim any of the 26 pre-activation historical queued
-  emails. All Staging envelopes remain redirected to
-  `OGC_TEST_EMAIL_RECIPIENT`.
-- The workstation launcher must fail closed if required Staging email secrets,
-  database/profile/mode, base URL, or activation timestamp is absent. It must
-  not copy model, browser, evidence-storage, or Production secrets into the
-  Staging email runtime file.
-- Production Commerce configuration and behavior remain unchanged.
+- Search concurrency remains bounded at two.
+- A search sub-budget is divided by `ceil(unit count / concurrency)`. For
+  180,000 milliseconds, six queries, and concurrency two, the unit deadline is
+  60,000 milliseconds.
+- The total search sub-budget, artifact reserve, cleanup margin, job deadline,
+  provider adapter, provider/model selection, and external-call maximum do not
+  increase.
+- Source-document retrieval budgeting is unchanged; the confirmed defect is
+  limited to search-query budgeting.
 
-## Forbidden subsystems and behaviors
+### Fail-closed behavior
 
-- No schema or migration changes, dependency changes, lockfile changes, price or
-  product changes, payment Webhook changes, provider checkout changes, report
-  generation changes, model/crawler/public-search changes, artifact rendering
-  changes, access-token schema/semantics changes, refunds, SLA behavior, or
-  historical repair/replay.
-- No use of the order ID, Airwallex success URL, provider intent ID, public
-  status response, email address, or test-recipient identity alone as an access
-  credential.
-- No claiming, sending, failing, refunding, deleting, or otherwise mutating the
-  26 pre-activation historical queued emails/orders.
-- No Production database, containers, images, deployment, email, payments,
-  alias, branch, or environment changes.
-- No edits to the existing unrelated dirty files or preview harness.
-- No broad Docker cleanup, full Worker build, worktree creation/deletion, force
-  Git operation, push, merge, tag, or remote-branch deletion without the
-  separately listed and approved action below.
+- No retry, fallback provider, alternate model, replay, replacement job, or
+  additional search attempt is added.
+- A completed exact snapshot is reused; a real refresh failure retains the
+  existing exact-prior, strict-prefix, and metadata fallback order.
+- Partial evidence remains partial. Existing `completed_limited`, settlement,
+  refund, source-coverage, artifact-readiness, and terminalization semantics
+  must not be weakened or bypassed.
+- Performance improvement must not come from removing queries, evidence,
+  validation, private PDF readiness, or customer delivery checks.
+
+## Explicit non-goals
+
+- No website-synthesis prompt, 12,000-token ceiling, model, or report-shape
+  change.
+- No page-analysis batching/concurrency change.
+- No crawler, candidate ranking, DNS, 404, or page-count change.
+- No Chromium/PDF/browser pooling, evidence-storage, HTML activation, or report
+  presentation change.
+- No durable trace schema, telemetry service, progress UI, or logging project.
+- No payment, email, checkout, access-token, refund, SLA, price, product, or
+  historical-data change.
+- No V4 contract or Production change.
 
 ## Diff budget
 
-- Production/runtime code and configuration: at most 650 changed lines across
-  the twelve allowlisted files, including new files.
-- Tests: at most 500 changed lines across the eight allowlisted test files.
-- Documentation and scope records: at most 220 changed lines excluding the
-  archived prior scope already moved to history.
-- Any required production behavior or file outside this budget/allowlist is a
-  stop-and-report condition.
+- Production/runtime: at most 180 changed lines across the four allowlisted
+  files.
+- Tests: at most 300 changed lines across the five allowlisted test files.
+- Scope/history: at most 440 changed lines, including replacement of the prior
+  active scope and its bounded history entry.
+- No single new abstraction may be introduced unless both allowed runtime
+  callers use it and a focused test proves its boundary.
+
+Any required behavior or file outside this allowlist/budget is a stop-and-report
+condition, not authority to refactor or expand the scope.
 
 ## Local acceptance checks
 
-1. Focused tests prove signed-capability issue/validation, exact report/order
-   binding, expiry, active-scope derivation, report-cookie issuance, one-shot
-   client handoff, fail-closed states, activation-cutoff filtering, retry
-   behavior, and no pre-activation claim.
-2. The completion route's anonymous/cross-order/unpaid/missing-artifact cases
-   return the same safe denial and never issue a report cookie.
-3. A disposable PostgreSQL test proves a queued row immediately before the
-   activation timestamp remains untouched while a row immediately after it is
-   claimable; selected-test skip is failure.
-4. `docker compose config` contains exactly one Staging email consumer using the
-   intended ignored env file; PowerShell prepare-only validation preserves one
-   stable activation timestamp and prints no values.
-5. `npm run lint`, the Web build, `git diff --check`, allowlist comparison, and
-   candidate diff review pass. Existing unrelated dirty files remain unchanged.
+1. A unit test proves 180,000 ms / six queries / concurrency two yields a
+   60,000 ms unit deadline and rejects invalid unit/concurrency inputs.
+2. A resolver test proves at most two query calls are active simultaneously and
+   all six complete within three concurrency waves.
+3. Provider-production tests prove standard-question fanouts are complete and
+   no longer force concurrency one.
+4. An exact-identity test proves the later forensic resolution reuses the
+   completed full snapshot with zero additional adapter calls.
+5. A PostgreSQL linear-flow test proves each query hash has at most one actual
+   search attempt in the paid lineage, exact snapshot IDs remain immutable, and
+   resume does not create a second attempt set.
+6. Existing prefix fallback tests prove a real failed refresh remains truthful
+   partial coverage and does not become a false full completion.
+7. Focused affected tests, the canonical selected disposable PostgreSQL test,
+   `npm run lint`, `npm run build`, `git diff --check`, complete allowlist/diff
+   review, and an unchanged unrelated-worktree check pass.
 
-## Expensive external actions requiring this scope's explicit approval
+Automated checks prove regression coverage only; they do not prove real report
+generation or customer delivery.
 
-These actions are authorized only after local checks pass, and only if the user
-approves this entire FROZEN scope:
+## Expensive external actions requiring explicit approval of this FROZEN scope
 
-1. Git: use one `codex/` task branch if needed, create one candidate commit from
-   only allowlisted files, and do not push/merge/delete remote refs.
-2. Protected Staging deployment: create at most one new Vercel Preview from the
-   exact clean candidate; build one source-only thin overlay (no full Worker
-   build); recreate exactly `staging-worker-free`, `staging-worker-deep`, and the
-   new `staging-commerce`; move the fixed alias once only after identity/readiness
-   gates pass. Retain one exact rollback image; Production remains untouched.
-3. Existing incident delivery: after deployment, process email for exact order
-   `98244fcf-ca4d-452d-93fb-e16c02c1d09f` only, sending at most its two existing
-   redirected Staging emails. Do not run an unscoped Commerce drain.
-4. Fresh acceptance: create exactly one wholly new Protected Staging report and
-   one Airwallex Sandbox payment, with the user completing the hosted payment
-   interaction. Allow only that lineage's normal Free/Deep model work and at
-   most two redirected test emails. Do not reuse or mutate another report/order.
-5. Acceptance must prove the same browser automatically lands on the canonical
-   authorized HTML report, the report-ready email leaves `queued`, the access
-   cookie is scoped to the active artifact, anonymous HTML remains denied, and
-   zero historical queued emails/refunds were touched.
+After all local checks pass, this scope proposes exactly one bounded live
+sequence:
 
-Any failure stops the live sequence. It does not authorize a second report,
-payment, Preview, build, alias move, email pass, replay, refund, or retry.
+1. Git: create at most one additional local candidate commit containing only
+   the allowlisted optimization, tests, and scope records. Do not push, merge,
+   tag, or delete refs.
+2. Protected Staging deployment: after the required disk/image preflight,
+   create at most one Vercel Preview from the exact candidate; build at most one
+   source-only thin Worker overlay; recreate only `staging-worker-free`,
+   `staging-worker-deep`, and the baseline `staging-commerce` service; move the
+   fixed alias once only after identity/readiness gates pass. Production is
+   forbidden.
+3. Fresh acceptance: create exactly one new Protected Staging report and one
+   Airwallex Sandbox payment. Permit only that lineage's normal Free/Deep work
+   and at most its two redirected test emails.
+4. Inspect only that new lineage's transition, snapshot, query, attempt,
+   artifact, order, access, and delivery records. Cache reuse is acceptable
+   evidence only when the exact completed snapshot identity is proven and no
+   adapter call was needed.
+5. Acceptance must prove: no duplicate external attempt for the same query hash
+   in the paid lineage; no six-call 30-second budget cancellation pattern; an
+   honestly complete or limited terminal outcome; an active private HTML
+   artifact; automatic same-browser navigation; redirected report email sent;
+   scoped access succeeds; anonymous access remains denied; and zero historical
+   rows/refunds were touched.
+
+Any failure stops the live sequence. It does not authorize a second Preview,
+image build, report, payment, email pass, alias move, retry, replay, refund, or
+historical repair.
+
+## Performance observation, not acceptance substitution
+
+The measured structural saving is estimated at 95-125 seconds, with an expected
+paid wall time around 11 minutes 20 seconds to 11 minutes 50 seconds under
+similar provider latency. External latency varies, so total wall time is a
+recorded observation rather than the sole pass gate. The hard performance gate
+is removal of duplicate external query attempts and the incorrect 30-second
+six-query cancellation pattern without reducing coverage or correctness.
 
 ## Completion boundary
 
-Implementation is not complete until both automatic paths pass: same-browser
-HTML navigation and independent redirected email delivery. Unit tests, build,
-Preview READY, active artifact state, or queued email alone are insufficient.
-Without the fresh exact-lineage real-flow evidence, report status must remain
-"implemented and locally verified; Protected Staging usability unverified."
+The optimization is complete only when local checks and the single fresh
+Protected Staging lineage both pass. Implementation alone, unit tests, build,
+Preview readiness, cache presence, artifact activation, browser navigation, or
+email delivery alone cannot substitute for the combined acceptance result.

@@ -19,6 +19,7 @@ import {
 import {
   createProviderDiscoveryQueryPlan,
   createProviderVerificationQueryPlan,
+  createMarketSnapshotIdentity,
   PROVIDER_QUERY_PLAN_VERSION,
   assertNoCustomerIdentity,
   toCanonicalBuyerQuestionSet,
@@ -37,6 +38,7 @@ import { executePublicSourceRetrieval } from "./public-source-retriever";
 import { createPublicSourceQuestionFanouts } from "./public-source-forensics";
 import { resolvePublicSourceSnapshot, type InjectedPublicSourceRetrieval, type PublicSourceRetriever } from "./public-source-snapshot-resolver";
 import { paidV3TraceUrlIdentity, type PaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
+import { ProviderDiscoveryResumeIdentityMismatchError } from "./provider-discovery-pipeline";
 import type {
   ProviderDiscoveryCheckpointV1,
   ProviderDiscoveryIdentity,
@@ -81,6 +83,7 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
   const question = canonical.questions[0]!;
   const policy = selectProviderQualificationPolicy({ question: question.normalizedText, locale: question.locale, websiteCategories: input.websiteCategories });
   const excludedIdentities: CustomerIdentityExclusion[] = input.questionSet.identityExclusions.map((value) => ({ kind: "private_identity", value }));
+  const standardFanouts = createPublicSourceQuestionFanouts({ questions: canonical, authority: input.runtime.authority, excludedIdentities, ordinals: [1, 2] });
   const planInput = { question, surface: input.runtime.authority.surface, policy: { policyId: policy.policyId, policyVersion: policy.version, queryFacets: policy.queryFacets }, excludedIdentities };
   const discoveryPlan = createProviderDiscoveryQueryPlan(planInput);
   const discoveryFanout = toFanout(discoveryPlan, canonical.questionSetVersion);
@@ -144,7 +147,18 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
   };
 
   const dependencies: ProviderDiscoveryPipelineDependencies = {
-    getCheckpoint: async () => sanitizePreVerificationCheckpoint(await input.getCheckpoint(), excludedIdentities),
+    getCheckpoint: async () => {
+      const checkpoint = sanitizePreVerificationCheckpoint(await input.getCheckpoint(), excludedIdentities);
+      if (checkpoint?.standardQuestionSnapshotIds.length === standardFanouts.length) {
+        for (const [index, snapshotId] of checkpoint.standardQuestionSnapshotIds.entries()) {
+          const bundle = await getMarketSnapshotBundle(snapshotId);
+          const question = canonical.questions[index + 1]!;
+          const expected = createMarketSnapshotIdentity({ question, surface: input.runtime.authority.surface, fanout: standardFanouts[index]! });
+          if (!bundle || bundle.snapshot.status !== "completed" || bundle.snapshot.cacheIdentity !== expected.id) throw new ProviderDiscoveryResumeIdentityMismatchError(`Standard-question snapshot identity changed during resume (${snapshotId}).`);
+        }
+      }
+      return checkpoint;
+    },
     saveCheckpoint: input.saveCheckpoint,
     runDiscovery: async (signal) => {
       discoveryResolved = await resolvePublicSourceSnapshot({
@@ -212,20 +226,18 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
         standardPlannedQueries, standardCompletedQueries, standardReturnedObservations, standardSafePages });
     },
     resolveStandardQuestions: async ({ signal }) => {
-      const fanouts = createPublicSourceQuestionFanouts({ questions: canonical, authority: input.runtime.authority, excludedIdentities, ordinals: [1, 2] })
-        .map((fanout) => ({ ...fanout, queries: fanout.queries.slice(0, 3), budget: { ...fanout.budget, timeoutMs: 60_000 } }));
       const resolved: Awaited<ReturnType<typeof resolvePublicSourceSnapshot>>[] = [];
-      for (const [index, fanout] of fanouts.entries()) {
+      for (const [index, fanout] of standardFanouts.entries()) {
         signal?.throwIfAborted();
         const question = canonical.questions[index + 1]!;
         resolved.push(await resolvePublicSourceSnapshot({
           authority: input.runtime.authority, adapter: input.runtime.adapter, question, fanout,
           evidenceCutoffAt: input.evidenceCutoffAt, leaseOwner: input.workerId, signal, retrieveSource: createQuestionRetriever(question),
           forceRefreshAfter: input.forceSnapshotRefreshAfter,
-          maxSourceRetrievals: 6, maxAvailableSources: 3, maxSourcesPerDomain: 2, searchConcurrency: 1
+          maxSourceRetrievals: 6, maxAvailableSources: 3, maxSourcesPerDomain: 2
         }));
       }
-      standardPlannedQueries = fanouts.reduce((total, fanout) => total + fanout.queries.length, 0);
+      standardPlannedQueries = standardFanouts.reduce((total, fanout) => total + fanout.queries.length, 0);
       standardCompletedQueries = resolved.reduce((total, value) => total + completedQueries(value.observations), 0);
       standardReturnedObservations = resolved.reduce((total, value) => total + value.observations.reduce((sum, observation) => sum + observation.results.length, 0), 0);
       standardSafePages = resolved.reduce((total, value) => total + value.availableSourceCount, 0);

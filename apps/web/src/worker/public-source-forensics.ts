@@ -341,7 +341,7 @@ export function createPublicSourceQuestionFanouts(input: {
   if (!ordinals.length || new Set(ordinals).size !== ordinals.length || ordinals.some((ordinal) => !Number.isSafeInteger(ordinal) || ordinal < 0 || ordinal >= input.questions.questions.length)) throw new TypeError("Public-source fanout ordinals are invalid.");
   return ordinals.map((ordinal) => createSearchQueryFanout({
     question: input.questions.questions[ordinal]!, surface: input.authority.surface, resultDepth: 3,
-    budget: { ...DEFAULT_QUERY_BUDGET, maxResults: 3 }, excludedIdentities: input.excludedIdentities
+    budget: { ...DEFAULT_QUERY_BUDGET, maxResults: 3, timeoutMs: 60_000 }, excludedIdentities: input.excludedIdentities
   }));
 }
 

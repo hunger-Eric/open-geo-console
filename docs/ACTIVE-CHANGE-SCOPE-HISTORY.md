@@ -4644,3 +4644,27 @@ allowlist; external actions remain zero; no deploy.
   the presentation scope.
 - The prior preview harness and unrelated dirty files remain preserved in the
   worktree. They are not authority for the new delivery repair.
+
+---
+
+## 2026-08-03 - Paid report browser/email delivery repair implemented locally; live acceptance superseded
+
+- The approved delivery scope implemented secure same-browser completion
+  access and a future-only Protected Staging email consumer. The retained local
+  candidate is commit `8d903b349985b8e08879c95eb9f25cce621bf192` on
+  `codex/delivery-root-fix`.
+- Focused local verification, lint, build, compose validation, and the bounded
+  disposable PostgreSQL commerce test passed before the external sequence.
+- The sole authorized Vercel upload did not produce a usable new candidate, so
+  no fixed-alias move, matching Worker/Commerce replacement, incident email
+  pass, fresh report, Sandbox payment, or live usability acceptance followed.
+- The user then requested a root-cause latency audit. Durable Staging job,
+  transition, snapshot, query, and attempt evidence confirmed that two recent
+  Paid V3 jobs both took about 14 minutes and repeatedly executed the same
+  first three public-search query identities before a six-query refresh was
+  cancelled by non-concurrency-aware per-query deadlines.
+- This record is context only. It grants no authority to retry the prior
+  deployment, send historical email, create a report or payment, modify report
+  generation, or perform Git/Production actions. The next active scope must
+  explicitly combine any retained delivery behavior with the separately
+  approved minimal search optimization and one fresh acceptance path.
