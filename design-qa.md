@@ -49,3 +49,81 @@ The implementation keeps the report URL in a dedicated context block rather than
 - P3: the reference includes a cross-site selector and bot coverage percentage. Both were intentionally omitted because the current product has no site entity and log evidence must not affect GEO scoring.
 
 final result: passed
+
+## 2026-08-03 - Paid V3 editorial template restoration
+
+### Visual truth and artifacts
+
+- Reference: `C:/Users/fengc/.codex/skills/artifact-template-open-geo-paid-report/assets/reference.png`
+- Fixture-only implementation: `.data/local-diagnostics/template-restoration-20260803/report-preview.html`
+- Desktop evidence: `.data/local-diagnostics/template-restoration-20260803/desktop.png`
+- Mobile evidence: `.data/local-diagnostics/template-restoration-20260803/mobile.png`
+- Fixture receipt records zero model, search, crawl, database and payment calls.
+
+### Independent browser QA
+
+- The deep-green rail, warm-paper continuous document and compact numbered
+  editorial hierarchy match the retained reference composition.
+- The visible section sequence is `00 -> 01 -> 02 -> 03 -> 04 -> 05 -> 06 ->
+  07 -> 08`; answers, evidence and target-site gaps visibly progress as
+  `02 -> 03 -> 04`.
+- All 9/9 table-of-contents links were clicked in the in-app browser and landed
+  on the unique, visible target section. The artifact has no `<details>` or
+  fold-control dependency.
+- Desktop measured `scrollWidth = clientWidth = 1265`. At a 390px viewport,
+  document `scrollWidth = clientWidth = 375` after accounting for the vertical
+  scrollbar; there is no horizontal overflow.
+- The local page console contained no errors. The first mobile pass exposed a
+  P1 overflow from unbroken fixture text; the scoped Paid V3 wrapping fix was
+  applied and the final fresh browser pass cleared it.
+- Final P0/P1/P2/P3 findings: none.
+
+final result: passed
+
+---
+
+## 2026-08-03 - Paid V3 content focus and technical-evidence preservation
+
+### Content and structure
+
+- Sections 00-07 now lead with customer findings and report content; fixed
+  reading instructions, task narration and teacher-like method copy are absent.
+- Section 00 presents an evidence-derived conclusion and first action. Sections
+  01-04 retain the progressive website-facts, answer, source and target-gap
+  sequence.
+- The GEO article is uninterrupted through its FAQ. One consolidated writing-
+  strategy block follows the article and preserves every rationale/evidence ref.
+- Method, provenance, generation mode, source boundaries and limitations are
+  confined to Section 08.
+
+### Technical preservation
+
+- Section 05 retains deterministic findings, page rows, dimension scores, model
+  findings, recommendations, evidence quotations, source URLs, page-type
+  analysis and every ready evidence asset.
+- Fixture QA exercised two ready evidence assets. Both loaded from cache-busted
+  local URLs with nontrivial natural dimensions; no broken image remained.
+- Section 06 retained all three roadmap phases.
+
+### Verification evidence
+
+- Focused tests: 5 files, 54/54 passed, 0 skipped.
+- Scoped lint: passed with 0 errors and 0 warnings.
+- Full workspace build: passed; Next.js compiled successfully and generated
+  18/18 static pages.
+- `git diff --check`: passed.
+- Local fixture preview:
+  `.data/local-diagnostics/paid-report-content-focus-20260803/index.html`.
+- Desktop evidence:
+  `.data/local-diagnostics/paid-report-content-focus-20260803/desktop.png`.
+- Mobile evidence:
+  `.data/local-diagnostics/paid-report-content-focus-20260803/mobile.png`.
+- Independent Codex in-app-browser QA passed at 1440x1024 and 390x844: 9/9
+  TOC anchors matched unique sections, both evidence images loaded, article
+  preceded writing strategy, no horizontal overflow and no console errors.
+- The preview receipt records zero model, search, crawl, database, payment and
+  email calls. No Git operation or deployment occurred.
+
+Final P0/P1/P2 findings: none.
+
+final result: passed

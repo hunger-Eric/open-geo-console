@@ -9,14 +9,20 @@ export function combinedArtifactFixture(): CombinedPrivateReportArtifactModel {
   })));
   return {
     productContract: "combined_geo_report_v1", reportId: "report", locale: "en", artifactRevisionId: "artifact", pdfStorageKey: "reports/report.pdf",
-    evidenceAssets: [{ id: "asset-1", findingId: "technical-finding", citationIndex: 0, status: "ready" }],
+    evidenceAssets: [
+      { id: "asset-1", findingId: "technical-finding", citationIndex: 0, status: "ready" },
+      { id: "asset-2", findingId: "technical-finding", citationIndex: 1, status: "ready" }
+    ],
     technicalReport: { score: 80, findings: [], pages: [], machineReadableAssets: {} },
     combinedReport: {
       artifactContract: "combined_geo_report_v1", artifactRevision: 1, targetUrl: "https://example.com/", evidenceCutoffAt: "2026-07-14T00:00:00.000Z",
       technicalFoundation: {
         technicalReport: { score: 80, findings: [], pages: [], machineReadableAssets: {} },
         aiReport: { organizationProfile: { organizationName: "Example" }, executiveSummary: { overview: "Overview" }, dimensionScores: [],
-          findings: [{ id: "technical-finding", title: "Technical finding", severity: "high", impact: "Impact", recommendation: "Fix it", evidence: [{ quote: "Technical proof quote", url: "https://example.com/technical-proof" }] }],
+          findings: [{ id: "technical-finding", title: "Technical finding", severity: "high", impact: "Impact", recommendation: "Fix it", evidence: [
+            { quote: "Technical proof quote", url: "https://example.com/technical-proof" },
+            { quote: "Second technical proof quote", url: "https://example.com/second-technical-proof" }
+          ] }],
           pageTypeAnalyses: [], coverage: { limitations: [] }, roadmap: { immediate: [], nextPhase: [], ongoing: [] } }
       },
       businessQuestionSet: { questions: purposes.map((purpose, index) => ({ purpose, privateText: `Business question ${index + 1}` })) },

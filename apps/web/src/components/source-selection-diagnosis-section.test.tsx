@@ -38,21 +38,24 @@ describe("SourceSelectionDiagnosisSection", () => {
   it("renders source profiles, observed factors, target gaps, and actions", () => {
     const diagnosis = buildSourceSelectionDiagnosisV1(input());
     const html = renderToStaticMarkup(createElement(SourceSelectionDiagnosisSection, { diagnosis, locale: "zh", targetUrl: "https://target.example/", questions }));
-    for (const value of ["来源选择诊断", "guide.example", "哪些服务商值得考虑", "为答案贡献了什么", "可观察入选因素", "目标网站进入答案的优先路径", "建设可独立引用的服务事实页", "可以确认", "不能断言"]) {
+    for (const value of ["来源选择诊断", "guide.example", "哪些服务商值得考虑", "为答案贡献了什么", "可观察入选因素", "目标网站进入答案的优先路径", "建设可独立引用的服务事实页"]) {
       expect(html).toContain(value);
     }
+    expect(html).not.toContain("可以确认");
+    expect(html).not.toContain("不能断言");
     expect(html).not.toContain("完整答案");
     expect(html).not.toContain("有限答案");
     expect(html).not.toContain("目标品牌出现");
   });
 
-  it("renders partial limitations without empty panels", () => {
+  it("keeps partial source findings without main-layer method or limitation copy", () => {
     const value = input();
     value.questions[0]!.sources[0]!.retrievalStatus = "inaccessible";
     value.questions[0]!.sources[0]!.auditExcerpt = null;
     const diagnosis = buildSourceSelectionDiagnosisV1(value);
     const html = renderToStaticMarkup(createElement(SourceSelectionDiagnosisSection, { diagnosis, locale: "zh", targetUrl: "https://target.example/", questions }));
-    expect(html).toContain("部分页面当前无法独立访问");
+    expect(html).toContain("guide.example");
+    expect(html).not.toContain("部分页面当前无法独立访问");
     expect(html).not.toContain("<ul></ul>");
   });
 

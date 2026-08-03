@@ -61,7 +61,7 @@ function articleModel() {
     generationMode:"model",
     targetQuestionIds:model.combinedReport.answerCards.map(({questionId})=>questionId),
     title:"目标品牌跨境物流选择指南",
-    introduction:"这篇示例先说明网站事实，再回答买家问题。",
+    introduction:"目标品牌公开了跨境物流服务范围、适用客户与采购核验信息。",
     sections:[
       {id:"facts",heading:"先确认服务范围",paragraphs:["说明公开服务、客户与覆盖区域。"]},
       {id:"proof",heading:"再连接可核验证据",paragraphs:["把关键结论连接到服务页、案例和流程。"]}
@@ -110,23 +110,45 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).toContain("V3 technical finding");
     expect(html).toContain("V3 Page Title");
     expect(html).toContain("/api/reports/report/evidence/asset-1");
+    expect(html).toContain("/api/reports/report/evidence/asset-2");
+    expect(html).toContain("Technical proof quote");
+    expect(html).toContain("Second technical proof quote");
+    expect(html).toContain("https://example.com/technical-proof");
+    expect(html).toContain("https://example.com/second-technical-proof");
   });
 
-  it("renders the read-mode chrome: section TOC, folded detail sections, and expand controls",()=>{
-    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:combinedV3ArtifactFixture()}));
+  it("renders the 00-08 report rail and always-visible progressive sections without fold controls",()=>{
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:articleModel()}));
     expect(html).toContain('class="artifact-toc"');
     expect(html).toContain('href="#artifact-sec-context"');
+    expect(html).toContain('href="#artifact-sec-answers"');
+    expect(html).toContain('href="#artifact-sec-evidence"');
+    expect(html).toContain('href="#artifact-sec-absence"');
+    expect(html).toContain('href="#artifact-sec-article"');
     expect(html).toContain('href="#artifact-sec-appendix"');
-    expect(html.match(/<details class="fold" /g)).toHaveLength(5);
-    expect(html).toContain('data-fold="open"');
-    expect(html).toContain('data-fold="close"');
+    const sections=["artifact-sec-guide","artifact-sec-context","artifact-sec-answers","artifact-sec-evidence","artifact-sec-absence","artifact-sec-technical","artifact-sec-actions","artifact-sec-article","artifact-sec-appendix"].map((id)=>html.indexOf(`id="${id}"`));
+    expect(sections).toEqual([...sections].sort((a,b)=>a-b));
+    expect(html).not.toContain("<details");
+    expect(html).not.toContain('data-fold="open"');
+    expect(html).not.toContain('data-fold="close"');
     expect(html).toContain('class="artifact-to-top"');
     expect(html).toContain('id="artifact-sec-context"');
   });
 
+  it("leads with persisted conclusions and removes fixed reading instructions from the main report",()=>{
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:articleModel()}));
+    for(const value of ["核心结论","当前结论","首要行动","网站当前技术得分"]){
+      expect(html).toContain(value);
+    }
+    for(const value of ["报告目的","报告一句话","基于以上网站公开信息","先看 AI 对每个买家问题","答案不是凭空生成的","必须沿着答案和来源逐题解释","以下路线图汇总"]){
+      expect(html).not.toContain(value);
+    }
+  });
+
   it("uses GEO-only customer language and exposes no customer PDF surface or external-platform attribution",()=>{
     const visible=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:combinedV3ArtifactFixture()})).replace(/<[^>]+>/g," ");
-    expect(visible).toContain("Open GEO paid deep report");
+    expect(visible).toContain("Open GEO");
+    expect(visible).toContain("Decision-ready reporting");
     expect(visible).not.toMatch(/\bSEO\b|ChatGPT|Gemini|Kimi|Doubao|豆包|\.pdf\b|download pdf|print report|PDF 下载|打印报告/i);
   });
 
@@ -154,8 +176,8 @@ describe("CombinedGeoReportV3Artifact",()=>{
     const model=combinedV3ArtifactFixture();
     model.locale="zh";
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
-    expect(html).toContain("Open GEO 付费深度报告");
-    expect(html).toContain("完整技术分析");
+    expect(html).toContain("帮你决策的报告");
+    expect(html).toContain("网站可见性与技术诊断");
   });
 
   it("renders each complete generative answer before the sources returned by the same operation",()=>{
@@ -164,7 +186,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).toContain("正文已独立核验");
     expect(html).toContain("仅模型搜索来源");
     expect(html).toContain("当前无法访问");
-    expect(html).toContain("完整技术分析");
+    expect(html).toContain("网站可见性与技术诊断");
     expect(html).not.toMatch(/report\.pdf|Print \/ PDF|打印 \/ PDF/);
     expect(html.indexOf("data-answer-audit")).toBeGreaterThan(html.indexOf("服务商甲提供跨境海运方案 3"));
   });
@@ -210,11 +232,13 @@ describe("CombinedGeoReportV3Artifact",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
     expect(html).toContain("Direct summary 1");
     expect(html).toContain("Direct observation 2");
-    expect(html).toContain("optional analysis is unavailable");
+    expect(html).toContain("available public evidence does not support a reliable source-gap conclusion");
     expect(html.match(/data-direct-analysis-status=/g)).toHaveLength(3);
     expect(html).toContain("V3 technical finding");
     expect(html).toContain("V3 Page Title");
     expect(html).toContain("/api/reports/report/evidence/asset-1");
+    expect(html).toContain("/api/reports/report/evidence/asset-2");
+    expect(html.match(/data-evidence-asset=/g)).toHaveLength(2);
     expect(html).not.toContain("Target mentioned");
   });
 
@@ -232,17 +256,35 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).not.toContain("当前可核验正文仍不足");
   });
 
+  it("maps customer-visible zero-based provider references to displayed source ordinals",()=>{
+    const model=generativeModel();
+    const first=model.combinedReport.answerCards[0]!;
+    if(first.answerMode!=="generative_search_v1")throw new TypeError("generative fixture mismatch");
+    first.answerText="服务商甲提供跨境海运方案（来源0）。";
+    first.sources[0]!.providerResultOrder=0;
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    const visible=html.replace(/<[^>]+>/g," ");
+    expect(visible).toContain("服务商甲提供跨境海运方案（[1]）。");
+    expect(visible).not.toContain("来源0");
+    expect(first.answerText).toContain("来源0");
+  });
+
   it("renders the paid GEO article and its rationale after the unified action plan",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:articleModel()}));
     const actionsAt=html.indexOf("data-unified-actions");
     const articleAt=html.indexOf("data-geo-article-generation-mode=\"model\"");
+    const faqAt=html.indexOf("采购前先核对什么？");
+    const strategyAt=html.indexOf("data-article-writing-strategy");
     const appendixAt=html.indexOf("data-methodology-appendix");
     expect(actionsAt).toBeGreaterThan(0);
     expect(actionsAt).toBeLessThan(articleAt);
-    expect(articleAt).toBeLessThan(appendixAt);
-    for(const value of ["目标品牌跨境物流选择指南","先确认服务范围","为什么这样写","先建立网站事实","采购前先核对什么？"]){
+    expect(articleAt).toBeLessThan(faqAt);
+    expect(faqAt).toBeLessThan(strategyAt);
+    expect(strategyAt).toBeLessThan(appendixAt);
+    for(const value of ["目标品牌跨境物流选择指南","先确认服务范围","写作策略与证据依据","先建立网站事实","采购前先核对什么？"]){
       expect(html).toContain(value);
     }
+    expect(html.indexOf("文章生成方式")).toBeGreaterThan(appendixAt);
     expect(html.match(/data-open-geo-answer-card="true"/g)).toHaveLength(3);
   });
 });

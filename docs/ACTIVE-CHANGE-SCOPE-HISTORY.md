@@ -4758,3 +4758,381 @@ allowlist; external actions remain zero; no deploy.
   services were unchanged.
 - This admission is closed. It authorizes no production-source edit, provider
   authority mutation, Git action or deployment.
+
+---
+
+## 2026-08-03 - AnySearch grounding implemented locally; deployment stopped at rights evidence
+
+- Commit `be3c032e0a73b6a13b80b6901617a4203e7881c6` added the approved
+  AnySearch REST adapter, AnySearch-grounded SenseNova answer provider,
+  compile-time runtime/certification wiring, launcher validation and secret
+  redaction together with the previously approved report redesign and GEO
+  article presentation.
+- Focused AnySearch tests passed 25/25, the full workspace build passed, and
+  the disposable Paid V3 Direct PostgreSQL regression passed 1/1 with no skip.
+  The existing article-project AnySearch key was copied only into ignored
+  Open GEO Console runtime configuration and was not committed or disclosed.
+- The authenticated certification, authority activation and deployment were
+  not executed. AnySearch's current public Terms/Privacy views did not return
+  legal text and their public legal endpoints returned HTTP 404, so commercial
+  storage/display rights for URL/title/snippet remained ambiguous under the
+  approved stop condition.
+- The local commit was not pushed because a branch push could trigger an
+  uncertified Preview deployment. `apps/web/.tmp-preview/` remained untracked
+  and untouched. This archived scope grants no new external-call, Git,
+  deployment or authority permission.
+
+---
+
+## 2026-08-03 - One-pass local AnySearch/SenseNova report diagnostic completed
+
+- The user approved one fault-first local diagnostic at commit
+  `be3c032e0a73b6a13b80b6901617a4203e7881c6`: three fixed neutral buyer
+  questions, exactly three AnySearch calls, up to five SenseNova calls, no
+  retry, no database, crawl, deployment, certification or customer mutation.
+- Run `68327506cf574956b344c7e92f307e0e` completed with three AnySearch HTTP
+  200 responses and four successful SenseNova operations (three grounded
+  answers plus one GEO article). Ranked result counts were 10/9/10; selected
+  source counts were 2/3/9. Every selected URL belonged to its same-call
+  AnySearch result set and no invented URL was detected.
+- DSV appeared in none of the three selected source sets or answers. Q3
+  selected nine sources, heavily concentrated on one domain, and generated
+  inline numbered-source prose including a zero-based `来源0`, exposing source
+  diversity and customer-readable citation-mapping problems.
+- The existing Paid V3 combined resolver could not accept the three already
+  generated answers without a validated production checkpoint and would have
+  redispatched provider calls. The diagnostic stopped that branch rather than
+  retrying or inventing a parallel production schema.
+- A local fixture-bannered Paid V3 preview was rendered. Browser QA produced
+  desktop (1440 viewport) and mobile (390 viewport) screenshots with no
+  non-file browser requests. High-impact findings: TOC anchors target closed
+  `details` sections without opening them, so the main report remains unreadable;
+  and the DSV target URL is visually combined with Example/Overview/V3 fixture
+  content in the body, which remains easy to misread despite the banner.
+- Mobile TOC width overflow, hidden target-absence explanation, Q3's nine-card
+  source density and unloaded file-mode technical evidence image were retained
+  as medium visual risks. Desktop document width itself did not overflow, the
+  banner was prominent, and the intended section order remained visible.
+- Redacted artifacts are retained only under ignored directory
+  `.data/local-diagnostics/anysearch-sensenova-report-68327506cf574956b344c7e92f307e0e/`.
+  Secret/content scans passed. No fix, retry, push, deployment or external
+  action followed; this scope is exhausted and grants no repair authority.
+
+---
+
+## 2026-08-03 - Paid V3 editorial template restored locally
+
+- The approved two-file production scope recomposed the prospective Paid V3
+  HTML into the retained deep-green-rail and warm-paper editorial template,
+  with visible `00-08` progression from website facts through answers,
+  evidence, target absence, technical diagnosis, actions, GEO article and
+  methodology.
+- All paid technical evidence and GEO article rationale remain present. The
+  customer-visible source ordinal display now maps zero-based provider
+  references to one-based displayed rows without rewriting persisted answers.
+- The existing canonical readiness contract remains unchanged. The component
+  preserves each question's source-order evidence chain in HTML while CSS
+  presents the intended `02 answers -> 03 evidence -> 04 absence` progression.
+- Focused tests passed 34/34, scoped lint passed, the full workspace build
+  passed, and `git diff --check` passed.
+- Independent in-app-browser QA passed on desktop and 390px mobile after one
+  scoped wrapping repair: 9/9 TOC links worked, no horizontal overflow,
+  `<details>` dependency or console error remained, and final P0/P1/P2/P3
+  findings were none.
+- Local preview evidence is retained only under ignored directory
+  `.data/local-diagnostics/template-restoration-20260803/` and records zero
+  model, search, crawl, database and payment calls. No Git operation,
+  deployment or customer-data mutation occurred. This scope is closed.
+
+# 2026-08-03 — Superseded renderer-only content-focus scope
+
+- Status: superseded before approval; no production implementation was
+  authorized under that scope.
+- Reason: read-only first-principles tracing confirmed that the active Direct
+  source-analysis prompt and GEO-article prompt also inject task/rubric voice
+  into customer-visible prose. The replacement FROZEN scope includes those two
+  prompt surfaces and makes full technical/screenshot preservation explicit.
+- The current template-restoration working-tree baseline remains unchanged.
+
+
+# 2026-08-03 — Completed Paid V3 content focus and technical-evidence preservation
+
+## Approved scope record
+
+Status: `APPROVED`
+
+Approved by the user on 2026-08-03 for the exact allowlist and behavior below.
+
+## Objective
+
+Remove prompt-shaped, teacher-like and report-production narration from the
+prospective Paid V3 customer report while preserving the complete report chain,
+all website/technical diagnosis, and every ready visual-evidence screenshot.
+
+The customer reading order remains:
+
+`website facts -> buyer answer -> source contribution -> target absence/gap ->
+website and technical diagnosis -> actions -> publish-ready GEO article ->
+method appendix`.
+
+The change must address both confirmed sources of the problem:
+
+1. fixed renderer copy currently explains how the report should be read; and
+2. the active Direct analysis and GEO-article prompts currently instruct the
+   model to explain the analysis/writing task, allowing that rubric voice to
+   become customer-visible prose.
+
+Production edits are authorized only within this exact allowlist and behavior.
+
+## Root-cause baseline
+
+- Repository: `E:/project/open-geo-console`.
+- Branch / HEAD: `codex/delivery-root-fix` at
+  `be3c032e0a73b6a13b80b6901617a4203e7881c6`.
+- The immediately preceding approved Paid V3 template restoration remains
+  uncommitted and is the visual/behavioral baseline for this scope.
+- Existing modified baseline files that must be preserved:
+  - `apps/web/src/components/combined-geo-report-v3-artifact.tsx`
+  - `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx`
+  - `apps/web/src/report/artifact-styles.ts`
+  - `design-qa.md`
+  - `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`
+  - this scope file.
+- User-owned untracked `apps/web/.tmp-preview/` is excluded and must remain
+  untouched.
+- Confirmed first divergence in the active AnySearch/SenseNova Direct path:
+  - `invokeFreeV4DirectAnalysis` asks the model to `Analyze` and `Explain why`;
+    its `summary`, `observations` and `recommendations` are rendered directly.
+  - `generateGeoArticleExample` asks for an article and an explanation of why
+    every section is written that way; its fallback also describes itself as an
+    example and says what an article should do.
+  - the renderer adds further report-guide, reading-order and method narration.
+- Eliminated cause: the current template-restoration diff did not delete the
+  technical findings, page table, dimension scores, model findings, page-type
+  analysis, evidence quotations, evidence URLs, or ready evidence-image loop.
+- The current fixture-only `file://` preview contains one ready screenshot tag,
+  but its `/api/reports/.../evidence/...` URL cannot resolve from a local file.
+  That preview is not evidence that production screenshots were deleted.
+- Literal hidden-prompt leakage is not confirmed. Existing customer-prose
+  checks already reject internal phrases such as system prompt, raw provider
+  JSON and tool-call arguments. The confirmed defect is prompt/rubric voice in
+  otherwise valid customer prose.
+
+## Exact production allowlist
+
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+  - Change only the shared Direct source-analysis system text used by Free Q1
+    and reused for Paid Q2/Q3.
+  - Require customer-visible fields to state the business conclusion directly:
+    what the sources establish, what role each source played, whether the
+    target appeared, the target's concrete gap, and the next action.
+  - Prohibit task/method narration such as describing the analysis, the report,
+    the supplied payload, the prompt, the evidence contract, or what the reader
+    will see next.
+  - Preserve the exact JSON shape, evidence-handle rules, target identity,
+    one-call behavior, failure-to-incomplete behavior and receipts.
+- `apps/web/src/worker/geo-article-example.ts`
+  - Make the model-owned title, introduction, sections and FAQ a publish-ready
+    customer article, with no self-description as an example/report and no
+    narration about how an article should be written.
+  - Keep `rationale` as a separate structured field that explains the evidence
+    and business reason for each section; it must not leak into article prose.
+  - Apply the same separation to the deterministic fallback.
+  - Preserve the one-call limit, timeout, fallback, output schema, evidence-ref
+    validation, locked buyer questions and all factual bounds.
+- `apps/web/src/components/combined-geo-report-v3-artifact.tsx`
+  - Replace Section 00 reading instructions with a compact conclusion selected
+    only from already persisted answer, diagnosis, action and technical fields.
+  - Remove fixed procedural narration from Sections 01-04 and 06; each section
+    must enter its actual customer findings directly.
+  - Keep the complete GEO article uninterrupted, followed by one consolidated
+    writing-strategy block containing every existing rationale/evidence ref.
+  - Move generation mode, limitations, provenance and method statements into
+    Section 08.
+  - Preserve all three buyer questions, complete answers, source evidence,
+    target gaps, actions, article content and methodology.
+  - Preserve the complete Section 05 technical surface: every deterministic
+    finding, page row, dimension score, model finding and recommendation,
+    evidence quotation, evidence URL, ready evidence image, and page-type
+    analysis. Do not slice, summarize, hide or drop these values.
+- `apps/web/src/components/source-selection-diagnosis-section.tsx`
+  - Keep customer-substantive source reasoning in Section 03: dominant pattern,
+    target position, priority breakthrough, per-source contribution, observable
+    factors, target comparisons and target actions.
+  - Remove visible purpose/method preambles and move limitation/trust copy to
+    Section 08 without changing diagnosis data, source order or claims.
+- `apps/web/src/report/artifact-styles.ts`
+  - Style the conclusion, consolidated writing strategy and methodology notes
+    within the restored Paid V3 visual system.
+  - Keep technical evidence cards and screenshots clearly visible, captioned
+    and responsive rather than visually burying them in the long section.
+  - Preserve the deep-green rail, warm-paper document, 00-08 structure and all
+    Free/other artifact styles.
+
+No other production/runtime file is allowed.
+
+## Exact test, fixture and evidence allowlist
+
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+  - Assert the Direct analysis prompt requests direct customer conclusions and
+    contains no instruction to narrate the analysis/report process.
+  - Preserve the exact call count, handle binding and incomplete fallback tests.
+- `apps/web/src/worker/geo-article-example.test.ts`
+  - Assert the prompt separates publish-ready article prose from rationale.
+  - Assert model and fallback article bodies contain no example/report/writing-
+    instruction narration while rationale remains complete.
+- `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx`
+  - Prove conclusion-first copy, no fixed procedural narration, complete article
+    before writing strategy, and method content only in Section 08.
+  - Prove every technical value and every ready evidence image is still present.
+- `apps/web/src/components/source-selection-diagnosis-section.test.tsx`
+  - Prove substantive source reasoning remains and method boilerplate is absent.
+- `apps/web/src/report/combined-artifact-readiness.test.tsx`
+  - Prove all existing required values and ready evidence assets remain in the
+    canonical HTML and the readiness contract still passes.
+- `apps/web/src/components/combined-artifact-fixtures.ts`
+  - Fixture-only additions if needed to represent multiple technical findings,
+    source quotations and ready screenshot assets in deterministic QA.
+- `design-qa.md`
+  - Append a separated content-and-technical-preservation QA result; preserve
+    all earlier history.
+- Ignored evidence only under
+  `.data/local-diagnostics/paid-report-content-focus-*`:
+  - fixture-only HTML and desktop/mobile screenshots;
+  - evidence images must be locally resolvable in the QA capture rather than
+    broken `file://` API URLs;
+  - zero model, search, crawl, database, payment or email calls.
+- Scope authority/history only:
+  - `docs/ACTIVE-CHANGE-SCOPE.md`
+  - `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`
+
+No new production component, abstraction, dependency, route, schema, config,
+tracked screenshot or report contract is allowed.
+
+## Required customer behavior
+
+1. Model-owned customer prose starts with the finding, not the task. It must not
+   say that it is analyzing, explaining, demonstrating, generating, following a
+   prompt, using supplied input, or teaching the reader how the report works.
+2. Direct analysis follows `conclusion -> source contribution -> target gap ->
+   action`. Honest uncertainty remains allowed, but it must describe the
+   observed business limitation rather than the analysis process.
+3. The GEO article title, introduction, body and FAQ read as a page the customer
+   could publish after review. Only the separate post-article writing-strategy
+   block explains why sections were written that way.
+4. Section 00 leads with an evidence-derived conclusion. Section 01 starts with
+   website facts, Section 02 with the first buyer answer, Section 03 with source
+   evidence, and Section 04 with the target conclusion/gap.
+5. Section 05 remains a full website visibility and technical diagnosis. It
+   retains all technical arrays and text, and renders every ready evidence asset
+   associated with each finding/citation. No `slice`, collapsed omission or
+   single-image cap may be introduced.
+6. Evidence screenshots have a visible caption/source and fit desktop/mobile
+   width without clipping. A deterministic QA preview must display at least one
+   real fixture image successfully; a broken image icon is a failed check.
+7. Section 06 retains the full roadmap. Section 07 retains the complete article,
+   FAQ and all rationale. Section 08 retains provenance, search/model metadata,
+   coverage, limitations, generation mode and non-causality boundaries.
+8. The visible and semantic 00-08 order, all 9 TOC anchors, mobile reflow and
+   no-horizontal-overflow guarantee remain unchanged.
+9. Stored reports, source ordering, access, readiness, locale, model selection,
+   fulfillment and all commercial behavior remain unchanged.
+
+## Forbidden behavior
+
+- No change to AnySearch retrieval, SenseNova transport/model selection, answer
+  source selection, call counts, retries, timeouts, evidence handles, receipts,
+  checkpoints, Worker orchestration, crawler, database, schema or report shape.
+- No change to the inactive deferred semantic-review path or its large final
+  synthesis contract; the scoped prompt fix is limited to the currently selected
+  AnySearch/SenseNova Direct path plus its GEO-article call.
+- No new validator that could reject a structurally valid provider response and
+  turn a completed analysis/report into an incomplete or failed one.
+- No removal, summarization or relocation out of Section 05 of technical facts,
+  screenshots, quotations, URLs, page rows, findings or page-type analyses.
+- No new model call and no renderer-authored unsupported business claim.
+- No change to payment, order, Webhook, entitlement, credit, refund, email,
+  redirect, access control, customer PDF or historical reports.
+- No deployment, Docker, Vercel, Staging, Production, Git commit/push/merge or
+  branch/worktree operation.
+- No edits or cleanup under `apps/web/.tmp-preview/`.
+- No visual redesign beyond the already approved restored template.
+
+## Incremental diff budget
+
+Measured from the working-tree snapshot at creation of this revised FROZEN
+scope:
+
+- Direct analysis prompt: at most 24 changed production lines.
+- GEO article prompt and deterministic fallback: at most 90 changed production
+  lines.
+- Paid V3 artifact component: at most 220 changed production lines.
+- Source-selection diagnosis component: at most 100 changed production lines.
+- Paid V3 scoped styles: at most 110 changed production lines.
+- Aggregate production diff for this scope: at most 544 changed lines.
+- Tests and deterministic fixture: at most 320 changed lines total.
+- `design-qa.md` plus scope/history closeout: at most 200 changed lines total.
+
+Exceeding a production limit is a stop-and-report condition.
+
+## Acceptance checks
+
+1. Focused Direct analysis, GEO article, Paid V3 component, source-selection and
+   combined-readiness tests pass with no skip.
+2. Tests capture the exact outbound prompt text and prove customer fields are
+   requested as direct findings while rationale remains a separate field.
+3. Static rendered-HTML assertions prove every fixture technical value and every
+   ready evidence asset remains present, and article prose precedes rationale.
+4. Scoped lint passes for all changed production/test files.
+5. The full workspace production build passes.
+6. `git diff --check` passes; the incremental diff stays inside this allowlist
+   and budget; the preceding template-restoration work remains intact.
+7. A zero-external-call fixture preview is inspected at desktop and 390px mobile:
+   - Sections 00-07 contain findings/content rather than task instructions;
+   - Section 05 visibly contains the complete technical groups and at least one
+     successfully loaded evidence screenshot with source/caption;
+   - the full article is uninterrupted and writing strategy follows it;
+   - method/trust/limitation content appears in Section 08;
+   - 9/9 TOC links work, no horizontal overflow and no console errors.
+8. `design-qa.md` may say `final result: passed` only when no P0/P1/P2 content,
+   technical-preservation, broken-image or responsive finding remains.
+
+## Stop conditions
+
+- A required conclusion is not already present in persisted Paid V3 data.
+- Correcting the customer tone requires a report schema/validator/version change
+  or any additional provider call.
+- A required fix needs a production file outside the five-file allowlist.
+- A ready production evidence asset is missing before rendering, which would be
+  a generation/storage issue rather than this presentation scope.
+- A required customer-facing prompt fix is found only in the inactive deferred
+  semantic-review path; that is a separate approval decision.
+- Browser QA cannot obtain a fresh fixture capture or finds an unresolved P0/P1/
+  P2 within budget.
+- Any step would require an external provider call, database mutation,
+  deployment, Git action or historical-data mutation.
+
+Implementation is authorized under the user's explicit approval of this exact
+revised scope.
+## Closeout result
+
+- Customer-visible Direct analysis and GEO-article prompts now request findings
+  and publish-ready prose instead of task or writing-process narration.
+- The Paid V3 renderer now leads with a persisted-data conclusion, keeps the
+  complete article before one consolidated writing-strategy block, and moves
+  method, limitations, provenance and generation mode into Section 08.
+- Section 05 still renders every deterministic finding, page row, dimension
+  score, model finding, recommendation, evidence quotation, source URL, ready
+  evidence image and page-type analysis. The deterministic fixture proves two
+  ready evidence assets render together.
+- Focused tests passed 54/54; scoped lint passed with no output; the full
+  workspace build compiled successfully and generated 18/18 static pages;
+  `git diff --check` passed.
+- Independent Codex in-app-browser QA passed at 1440x1024 and 390x844 with
+  9/9 TOC anchors, two nontrivial loaded evidence images, no horizontal
+  overflow, no console errors and no P0/P1/P2 findings.
+- Evidence is retained under
+  `.data/local-diagnostics/paid-report-content-focus-20260803/` with a receipt
+  recording zero model, search, crawl, database, payment and email calls.
+- No Git operation, deployment, Docker action or customer-data mutation
+  occurred. This scope is closed.

@@ -35,6 +35,7 @@ function input(client: JsonCompletionClient, locale = "en"): GeoArticleExampleIn
       ...report.technicalFoundation.aiReport,
       organizationProfile: {
         ...report.technicalFoundation.aiReport.organizationProfile,
+        organizationName: "Target Co",
         summary: "Example provides verifiable professional services.",
         productsAndServices: ["Professional service"],
         targetAudiences: ["Business buyers"],
@@ -50,7 +51,7 @@ function modelArticle(questionId: string) {
   return {
     targetQuestionIds: [questionId],
     title: "A practical logistics provider guide",
-    introduction: "This example turns verified website facts into a buyer-oriented article.",
+    introduction: "Public information identifies the service scope, operating conditions, and proof buyers should verify.",
     sections: [
       { id: "scope", heading: "Confirm the service scope", paragraphs: ["Start with the exact service, audience, region, and operating limits stated on the website."] },
       { id: "proof", heading: "Connect claims to public proof", paragraphs: ["Link important claims to service pages, processes, cases, or other evidence that a buyer can verify."] }
@@ -69,6 +70,14 @@ describe("GEO article example generation", () => {
     const completeJson = vi.fn(async () => ({ value: modelArticle(request.answerCards[0].questionId), modelId: "fixture", rawContent: "{}" }));
     const article = await generateGeoArticleExample({ ...request, client: { configuredModel: "fixture", completeJson } });
     expect(completeJson).toHaveBeenCalledTimes(1);
+    const modelRequest = completeJson.mock.calls[0]![0] as { messages: Array<{ role: string; content: string }> };
+    const system = modelRequest.messages.find(({ role }) => role === "system")?.content ?? "";
+    const user = modelRequest.messages.find(({ role }) => role === "user")?.content ?? "{}";
+    expect(system).toContain("publish-ready customer article");
+    expect(system).toContain("Keep rationale separate from the article");
+    const payload = JSON.parse(user) as { task: string; constraints: string[] };
+    expect(payload.task).toContain("publish-ready GEO article");
+    expect(payload.constraints).toContain("Put writing reasons only in rationale.");
     expect(article.generationMode).toBe("model");
     expect(article.sections).toHaveLength(2);
     expect(article.rationale.map(({ sectionId }) => sectionId)).toEqual(["scope", "proof"]);
@@ -108,5 +117,18 @@ describe("GEO article example generation", () => {
     expect(article.generationMode).toBe("deterministic_fallback");
     expect(article.rationale).toHaveLength(article.sections.length);
     expect(article.targetQuestionIds).toHaveLength(3);
+    const articleBody = [article.title, article.introduction, ...article.sections.flatMap(({ heading, paragraphs }) => [heading, ...paragraphs]), ...article.faq.flatMap(({ question, answer }) => [question, answer])].join(" ");
+    expect(articleBody).not.toMatch(/\b(?:report|example|prompt|input|generation process|writing method)\b/iu);
+    expect(articleBody).not.toMatch(/报告|示例|提示词|输入材料|生成过程|写作方法/u);
+  });
+
+  it("keeps the Chinese fallback publish-ready and free of corrupted text", () => {
+    const { client: _client, ...fallbackInput } = input({ configuredModel: "fixture", completeJson: vi.fn() }, "zh-CN");
+    void _client;
+    const article = buildGeoArticleFallback(fallbackInput);
+    const articleBody = [article.title, article.introduction, ...article.sections.flatMap(({ heading, paragraphs }) => [heading, ...paragraphs]), ...article.faq.flatMap(({ question, answer }) => [question, answer])].join(" ");
+    expect(articleBody).toContain("服务范围与适用对象");
+    expect(articleBody).not.toMatch(/报告|示例|提示词|输入材料|生成过程|写作方法/u);
+    expect(articleBody).not.toMatch(/鍏|銆|鈥/u);
   });
 });

@@ -297,7 +297,7 @@ function geoArticleFor(input: PrepareCombinedGeoReportV3Input): NonNullable<Prep
     generationMode: "deterministic_fallback",
     targetQuestionIds: input.answerCards.map(({ questionId }) => questionId),
     title: "客户企业跨境货运选择与核验指南",
-    introduction: "这篇示例根据网站事实和三个买家问题组织内容。",
+    introduction: "客户企业公开了跨境货运服务范围、适用客户和采购前可核验的信息。",
     sections: [
       { id: "facts", heading: "先确认服务范围", paragraphs: ["说明公开服务、客户与覆盖区域。"] },
       { id: "proof", heading: "连接可核验的公开证据", paragraphs: ["让重要结论可以回到公开页面复核。"] }
@@ -319,6 +319,7 @@ describe("combined artifact canonical rendering",()=>{
     expect(canonicalHtml).toContain("data-business-question-section=\"true\"");
     expect(canonicalHtml.match(/class="business-question-answer"/g)).toHaveLength(3);
     expect(canonicalHtml).toContain("/api/reports/report/evidence/asset-1");
+    expect(canonicalHtml).toContain("/api/reports/report/evidence/asset-2");
   });
 
   it("builds deterministic methodology and coverage prose in the persisted locale", () => {
@@ -376,6 +377,11 @@ describe("combined artifact canonical rendering",()=>{
     expect(html).toContain("V3 exact source excerpt 1");
     expect(html).toContain("V3 technical finding");
     expect(html).toContain("V3 Page Title");
+    expect(html).toContain("Technical proof quote");
+    expect(html).toContain("Second technical proof quote");
+    expect(html).toContain("/api/reports/report/evidence/asset-1");
+    expect(html).toContain("/api/reports/report/evidence/asset-2");
+    expect(html.match(/data-evidence-asset=/g)).toHaveLength(2);
     expect(html).toContain("artifact-v3");
   });
 

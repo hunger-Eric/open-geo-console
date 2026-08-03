@@ -504,8 +504,9 @@ export async function invokeFreeV4DirectAnalysis(input: {
   const output = await structured.invoke({
     operation: "sourceDiagnosis",
     systemText: [
-      "Analyze the supplied native-search answer and its actual source annotations.",
-      "Explain why those sources support the answer, whether the submitted site appears, what gaps remain, and what should be improved.",
+      "Write customer-visible GEO findings for the native-search answer and its actual source annotations.",
+      "Lead summary with the concrete answer-and-source conclusion, then state whether the submitted site appears and its specific gap. Write observations as facts contributed by the returned sources, and recommendations as direct actions for the submitted site.",
+      "Do not narrate the analysis task, report structure, supplied payload, instructions, evidence contract, or writing process. Do not tell the reader what this section will explain.",
       "targetIdentity is authoritative. When naming the submitted target, use targetIdentity.canonicalName exactly; do not translate, abbreviate, or invent another target name. Its aliases and domain identify the same target.",
       "The S and T handles are the only evidence handles you may cite. T pages are unassessed candidates, not proof of relevance.",
       "List every S/T handle actually relied on by the summary, observations, or recommendations. Do not recommend adding the submitted target merely because a T page exists.",

@@ -65,26 +65,26 @@ export function buildGeoArticleFallback(input: Omit<GeoArticleExampleInput, "cli
   const sections = zh ? [
     {
       id: "website-facts",
-      heading: "先确认服务范围与适用对象",
+      heading: "服务范围与适用对象",
       paragraphs: [
-        safeText(`${organization}在官网中公开表达的服务包括${services.length ? services.join("、") : "相关专业服务"}。${audiences.length ? `这些服务主要面向${audiences.join("、")}。` : "采购前应进一步确认具体适用对象。"}`),
-        safeText(regions.length ? `网站提到的市场或服务区域包括${regions.join("、")}，实际覆盖范围仍应以可核验页面和具体项目条件为准。` : "网站尚未清楚列出完整服务区域，采购前应核对目的地、时效和限制条件。")
+        safeText(`${organization}在官网公开的服务包括${services.length ? services.join("、") : "相关专业服务"}。${audiences.length ? `主要服务对象包括${audiences.join("、")}。` : "采购前需要确认具体适用对象。"}`),
+        safeText(regions.length ? `公开的市场或服务区域包括${regions.join("、")}，具体覆盖范围仍以对应服务页面和项目条件为准。` : "官网尚未清楚列出完整服务区域，采购前需要核对目的地、时效和限制条件。")
       ]
     },
     {
       id: "buyer-decision",
-      heading: "把买家问题写成可以直接核验的答案",
-      paragraphs: [safeText(answerText(input.answerCards[0], "当前公开信息应围绕服务能力、适用条件和限制形成直接答案。"))]
+      heading: "买家最关心的选择问题",
+      paragraphs: [safeText(answerText(input.answerCards[0], "现有公开信息表明，采购判断需要同时核对服务能力、适用条件和明确限制。"))]
     },
     {
       id: "verification",
-      heading: "补充能够被公开验证的证据",
-      paragraphs: ["文章不应只描述优势，还应连接到服务页、流程、案例、资质或其他可核验材料，并明确不适用条件。这样既方便买家判断，也方便后续使用同一问题复测信息是否完整。"]
+      heading: "采购前需要核验的公开依据",
+      paragraphs: ["重要服务结论需要对应到可访问的服务页、流程、案例、资质或其他公开材料，并同时说明适用条件和限制。买家可以据此核对服务是否匹配实际需求。"]
     }
   ] : [
     {
       id: "website-facts",
-      heading: "Start with service scope and audience",
+      heading: "Service scope and intended buyers",
       paragraphs: [
         safeText(`${organization} describes ${services.length ? services.join(", ") : "its professional services"} on its website.${audiences.length ? ` The stated audiences include ${audiences.join(", ")}.` : " Buyers should confirm the exact audience and operating conditions."}`),
         safeText(regions.length ? `The stated markets or service regions include ${regions.join(", ")}. Buyers should verify the exact coverage and constraints on the relevant service page.` : "The website does not clearly enumerate complete service regions, so buyers should verify destinations, timing, and constraints before purchase.")
@@ -92,32 +92,32 @@ export function buildGeoArticleFallback(input: Omit<GeoArticleExampleInput, "cli
     },
     {
       id: "buyer-decision",
-      heading: "Turn the buyer question into a verifiable answer",
-      paragraphs: [safeText(answerText(input.answerCards[0], "Public information should answer the buyer question with specific capabilities, conditions, and limits."))]
+      heading: "The buyer's primary decision question",
+      paragraphs: [safeText(answerText(input.answerCards[0], "The public information supports a purchase decision only when capabilities, conditions, and limits are stated specifically."))]
     },
     {
       id: "verification",
-      heading: "Connect claims to public proof",
-      paragraphs: ["The article should connect each important claim to a service page, process, case study, credential, or other verifiable material and state relevant limitations. This helps buyers evaluate the offer and supports repeatable retesting with the same questions."]
+      heading: "Public proof to verify before purchase",
+      paragraphs: ["Important service claims need a corresponding service page, process, case study, credential, or other accessible proof, together with relevant conditions and limitations. Buyers can use those materials to verify whether the offer fits their needs."]
     }
   ];
   const article = {
     version: GEO_ARTICLE_EXAMPLE_VERSION,
     generationMode: "deterministic_fallback" as const,
     targetQuestionIds: questions.map(({ id }) => id),
-    title: zh ? `${organization}服务选择与核验指南` : `${organization} service selection and verification guide`,
+    title: zh ? `${organization}服务选择与采购核验指南` : `${organization} service selection and purchase verification guide`,
     introduction: zh
-      ? "下面是一篇基于本次网站事实和买家问题组织的GEO文章示例。它不承诺排名或引用结果，只示范如何把可核验信息写得更容易理解。"
-      : "This GEO article example is organized from the verified website facts and buyer questions in this report. It does not promise ranking or citation outcomes; it demonstrates how to present verifiable information clearly.",
+      ? `${organization}的公开信息可以帮助买家初步判断服务范围、适用对象和采购条件。以下内容汇总当前可核验事实，并列出采购前需要进一步确认的依据。`
+      : `${organization}'s public information helps buyers assess service scope, intended users, and purchase conditions. The following sections summarize the currently verifiable facts and the proof buyers should confirm before purchase.`,
     sections,
     faq: questions.map((question, index) => ({
       question: safeText(question.text),
-      answer: safeText(answerText(input.answerCards[index]!, zh ? "当前报告没有足够信息形成更具体的回答。" : "The report does not contain enough information for a more specific answer."))
+      answer: safeText(answerText(input.answerCards[index]!, zh ? "现有公开信息不足以形成更具体的答案，采购前需要向服务方核实。" : "The available public information does not support a more specific answer; buyers should confirm it with the provider."))
     })),
     rationale: sections.map((section, index) => ({
       sectionId: section.id,
       reason: zh
-        ? ["先建立网站公开事实，避免文章脱离真实业务。", "直接回应买家问题，让文章承担明确的检索与决策任务。", "解释证据和限制，避免只有宣传性结论。"][index]!
+        ? ["先建立网站公开事实，避免正文脱离真实业务。", "直接回应买家问题，让内容承担明确的采购决策任务。", "连接证据和限制，避免只有宣传性结论。"][index]!
         : ["Establish public website facts before making any recommendation.", "Answer the buyer question directly so the article has a clear retrieval and decision purpose.", "Explain evidence and limitations instead of relying on promotional claims."][index]!,
       evidenceRefs: [index === 0 ? findingRef : questionRefs[Math.min(index - 1, questionRefs.length - 1)]!]
     }))
@@ -145,8 +145,8 @@ function compactArticleInput(input: GeoArticleExampleInput, evidenceRefs: readon
   const profile = input.aiReport.organizationProfile;
   const questions = articleQuestions(input);
   return {
-    task: "Write one evidence-grounded GEO article example and explain why each section is written that way.",
-    constraints: ["Return JSON only.", "Use only supplied facts.", "Do not promise rankings, recommendations, or future citations.", "Use only the supplied evidenceRefs."],
+    task: "Produce one evidence-grounded, publish-ready GEO article plus a separate rationale for each section.",
+    constraints: ["Return JSON only.", "Use only supplied facts.", "Keep title, introduction, sections, and FAQ free of report, example, prompt, input, generation, or writing-process narration.", "Put writing reasons only in rationale.", "Do not promise rankings, recommendations, or future citations.", "Use only the supplied evidenceRefs."],
     locale: input.locale,
     targetUrl: input.targetUrl,
     evidenceRefs,
@@ -187,8 +187,8 @@ function articleQuestions(input: Omit<GeoArticleExampleInput, "client">): { id: 
 
 function articleSystemPrompt(locale: string): string {
   return locale.toLowerCase().startsWith("zh")
-    ? "你是GEO内容编辑。只输出JSON。根据已提供的网站事实、买家问题和证据引用写一篇完整但克制的中文示例文章，并逐节解释写作理由。不得补充输入之外的事实，不得承诺排名、推荐或未来引用。"
-    : "You are a GEO content editor. Return JSON only. Write a complete but restrained article from the supplied website facts, buyer questions, and evidence references, then explain the rationale for every section. Do not add facts or promise ranking, recommendation, or future citation outcomes.";
+    ? "你是GEO内容编辑。只输出JSON。title、introduction、sections和faq必须组成一篇客户审核后可直接发布的中文文章，直接陈述业务事实、买家答案和可核验依据，不得提到报告、示例、提示词、输入材料、生成过程或写作方法。rationale必须与文章正文分开，仅解释各节的证据依据和商业目的。不得补充输入之外的事实，不得承诺排名、推荐或未来引用。"
+    : "You are a GEO content editor. Return JSON only. title, introduction, sections, and faq must form a publish-ready customer article that directly states business facts, buyer answers, and verifiable proof without mentioning a report, example, prompt, supplied input, generation process, or writing method. Keep rationale separate from the article and use it only for each section's evidence basis and business purpose. Do not add facts or promise ranking, recommendation, or future citation outcomes.";
 }
 
 function answerText(card: OpenGeoAnswerCardV3, fallback: string): string {

@@ -122,6 +122,11 @@ describe("Free V4 direct teaser orchestration", () => {
       }
     });
     expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("targetIdentity");
+    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("customer-visible GEO findings");
+    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("concrete answer-and-source conclusion");
+    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("Do not narrate the analysis task");
+    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).not.toContain("Analyze the supplied");
+    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).not.toContain("Explain why those sources");
     expect(result.q1AnswerCore.answerText).toContain("Provider A");
     expect(result.checkpoint.directAnalysis?.observations).toHaveLength(1);
     expect(result.checkpoint.directAnalysisReceipt).toBeDefined();
