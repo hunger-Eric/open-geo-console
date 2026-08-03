@@ -4698,3 +4698,41 @@ allowlist; external actions remain zero; no deploy.
   (`d6a730bc9d35`) remains available. Post-deploy `docker system df`: Images
   32.17GB (8.091GB reclaimable); drive free space C: 4.4GB, E: 53GB.
   Production was untouched.
+
+## 2026-08-03 — paid HTML report reading mode (TOC + progressive disclosure)
+
+- Candidate `2f6cde0b070fe806bbdda3fca1f3c8c575aa635e` adds a reading-mode
+  layer to the paid standalone HTML report (v3 artifact only): sticky section
+  TOC with scroll highlighting (desktop sidebar; mobile horizontal bar with
+  non-shrinking items), sections 02-05 collapsed by default in `<details>`
+  folds with expand-all/collapse-all controls, TOC clicks open the target
+  fold and set the active item immediately (fixes collapsed-anchor jumps
+  missing the IntersectionObserver band), a back-to-top button, and print
+  CSS that forces all folds open. No report wording or data changes. The
+  inline interaction script is allowlisted in the artifact route CSP by
+  exact SHA-256 hash (`script-src 'self' 'sha256-TT/VSgv49sgdqIhnNDgQ5eXr0Qd4fFzK13gJRefZ/js='`);
+  no `unsafe-inline`. Evidence observation time is now wrapped in
+  `<time datetime>` — this repairs a regression from `2be0677` where the
+  locale-formatted timestamp removed the raw ISO value from the HTML and
+  broke the canonical `assertCombinedV3HtmlCompleteness` production gate
+  for future paid V3 artifact builds.
+- Verification: 145/145 tests across components/report/app report routes
+  (including the readiness gate suite 20/20), eslint clean, `git diff
+  --check` clean. Local real-render (staging DB, report `c9acc3f9`)
+  confirmed: 5 TOC links, active state follows TOC jumps to appendix and
+  diagnosis sections, expand-all opens 4 folds, desktop and mobile
+  screenshots reviewed.
+- Deployed as Vercel Preview
+  `https://open-geo-console-j9u71ivm1-itheheda-6857s-projects.vercel.app`
+  and the fixed Protected Staging alias was reassigned to it. Anonymous
+  smoke: `/zh` -> SSO 302, `/api/scan` -> 401. Thin-overlay Staging
+  free/deep Workers rebuilt as
+  `open-geo-console:staging-2f6cde0-style-overlay-v2` (parent
+  `staging-2be0677-style-overlay-v1`) and recreated; rollback image
+  `open-geo-console:staging-2be0677-style-overlay-v1` (`5cb3a2b3a929`)
+  remains available. Production was untouched; no remote refs pushed.
+- Operational note: an earlier Preview (`44018omoo`) and overlay `-v1` were
+  built from `.data/candidate-worktree` after a concurrent agent checked
+  out `ae3f436` there mid-deploy; both were rebuilt from a clean detached
+  worktree at `2f6cde0` (`.data/deploy-worktree-readmode`) and the alias
+  and Workers above point only at the corrected artifacts.
