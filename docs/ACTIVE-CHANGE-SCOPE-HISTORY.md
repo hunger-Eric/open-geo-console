@@ -5239,3 +5239,37 @@ revised scope.
   Terminal status: **local implementation and automated verification complete;
   Git and Protected Staging acceptance pending separate authorization, with
   acceptance requiring exactly one fresh report.**
+
+---
+
+## 2026-08-03 - Unified provider profile release stopped before push
+
+- The user approved the complete Git-and-Protected-Staging scope and explicitly
+  accepted the documented Staging-only AnySearch legal risk.
+- Git candidate packaging succeeded locally: one exact 46-path commit
+  `62352e8bb0397e8edd7d3e00fdcc54456c9874f4`, parent
+  `24a2619d0e56450bae0305a889b1fd72aa95224d`, message
+  `feat: unify provider profile routing`. Cached whitespace and secret checks
+  passed. The commit was not pushed.
+- Read-only Staging preflight passed at schema 45 with zero claimable,
+  expired-recoverable and exhausted-terminalizable jobs. No AnySearch authority
+  existed; the exact active MiMo rollback authority remained intact.
+- Ignored Staging source configuration was switched to
+  `sensenova_anysearch` and generated once with the approved PrepareOnly path.
+  The merged runtime contained SenseNova/AnySearch data, no nonblank stale MiMo
+  V4 routing, and no provider variables in the commerce projection. Existing
+  running Free/Deep containers were not recreated and remained healthy on
+  rollback image `95a62dcd...`, restart count zero.
+- The first branch-scoped Vercel Preview variable upsert failed with exit code
+  1 while saving `OGC_PUBLIC_SEARCH_ADAPTER`; Vercel CLI 56.4.1 returned no
+  attributable platform error. The required single read-only follow-up listed
+  zero variables for Preview branch `codex/delivery-root-fix`, proving no
+  partial remote configuration was retained.
+- The release stopped immediately. No signing secret was generated; no
+  AnySearch/SenseNova call, certification artifact, authority install/activate,
+  push, Preview, Docker build/recreation, alias move, report, job, order,
+  payment, refund or email occurred. Production and all historical data were
+  untouched.
+- Terminal status: **candidate committed locally; release blocked before push
+  by the branch-scoped Vercel environment-variable write path. A new FROZEN
+  recovery scope is required before any retry or alternative configuration.**

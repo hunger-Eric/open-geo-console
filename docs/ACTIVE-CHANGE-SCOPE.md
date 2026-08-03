@@ -2,309 +2,220 @@
 
 Status: `APPROVED`
 
-This is the complete audited Git-and-Protected-Staging release authority for
-the locally verified unified Provider Profile implementation. The user
-explicitly approved this exact scope and accepted its stated Protected-Staging-
-only AnySearch legal risk on 2026-08-03.
+This is the single approved recovery authority after the 2026-08-03 unified
+Provider Profile release stopped before push. The user explicitly approved this
+exact FROZEN scope on 2026-08-03. The complete remaining release surface is
+locked here so no further piecemeal permission request is needed if every gate
+passes.
 
 ## User-observable objective
 
-Create one immutable candidate commit from the current implementation, push
-only branch `codex/delivery-root-fix`, and deploy that exact SHA to the fixed
-Protected Staging site with both Staging Workers using
-`OGC_PROVIDER_PROFILE=sensenova_anysearch`. Stop after Gate 3 so the user can
-submit and test a wholly new report themselves.
+Push the already verified unified Provider Profile candidate and deploy that
+exact recovery SHA to the fixed Protected Staging site with both Staging
+Workers using `OGC_PROVIDER_PROFILE=sensenova_anysearch`. Install and activate
+the required AnySearch Staging authority first, stop after technical Gate 3,
+and hand `https://open-geo-console-staging-itheheda.vercel.app` to the user for
+their own new-report test. This scope does not authorize that report submission.
 
-The fixed business-test entry is:
-`https://open-geo-console-staging-itheheda.vercel.app`.
+## Current baseline and retained state
 
-## Baseline and current identities
-
-- Canonical repository/worktree: `E:/project/open-geo-console`; no additional
-  worktree may be created or used.
-- Branch: `codex/delivery-root-fix`.
-- Parent HEAD: `24a2619d0e56450bae0305a889b1fd72aa95224d`.
-- Remote: `origin=https://github.com/hunger-Eric/open-geo-console.git`.
-- Remote currently has only `main` at
-  `2a85133c3a39aee735c906590d74cca8f7d0f873`; the task branch does not yet
-  exist remotely. Neither local nor remote `main` may change.
-- Linked Vercel project/team:
-  `prj_WVpdlJfsEp0YyWM2W54w8oBy985S` /
-  `team_PbYYV2K2zBjTeThfavXStTOI`.
-- Current fixed-site deployment/rollback Web identity:
-  `dpl_J71XhBtERHciEMEd8DjWNc8SWPYM`, Preview, READY.
-- Current and rollback Worker image:
-  `open-geo-console:staging-95e7fb2-paid-report-overlay-v1`, exact image
+- Canonical worktree only: `E:/project/open-geo-console` on branch
+  `codex/delivery-root-fix`, HEAD
+  `62352e8bb0397e8edd7d3e00fdcc54456c9874f4` (the verified 46-path feature
+  commit), parent `24a2619d0e56450bae0305a889b1fd72aa95224d`.
+- Remote `origin=https://github.com/hunger-Eric/open-geo-console.git` has
+  `main` at `2a85133c3a39aee735c906590d74cca8f7d0f873`; the task branch is absent.
+  Local and remote `main` must not change.
+- The only tracked working-tree changes are the prior fail-closed closeout in
+  `docs/ACTIVE-CHANGE-SCOPE.md` and
+  `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`. No implementation path is dirty.
+- `apps/web/.tmp-preview/**`, `.data/candidate-worktree/**`, and
+  `.data/deploy-worktree-readmode/**` must not be read as build sources,
+  edited, removed, committed, or otherwise used.
+- Ignored Staging inputs and generated Worker environment already select
+  `sensenova_anysearch`, SenseNova `deepseek-v4-flash`, AnySearch, `zh-CN` and
+  `CN`; required provider credentials are nonblank. Existing Free/Deep Workers
+  have not been restarted and remain running with restart count zero on exact
+  rollback image
   `sha256:95a62dcdfc1f91ff834e67d642609c682e79d9a550660073a6ef374bcfb4e83e`.
-- Current running Staging containers are
-  `open-geo-console-staging-worker-free-1` and
-  `open-geo-console-staging-worker-deep-1`, both on the preceding image.
-- E: free space at audit was 55,004,557,312 bytes; Docker images used 32.19 GB
-  and build cache used 21.64 GB.
-- `package.json`, `package-lock.json`, `apps/web/package.json`,
-  `Dockerfile.worker`, browser/system dependencies and base-image inputs are
-  unchanged. A full Worker build is forbidden.
-- The merged Staging configuration is currently the known half-switch:
-  SenseNova `deepseek-v4-flash` and AnySearch credentials are present, but
-  `OGC_PROVIDER_PROFILE` is missing and legacy assertions still name MiMo.
-- Staging has no installed or active AnySearch authority. Existing active MiMo
-  rollback authority is
-  `public-search-authority-101c9dbb38db639d7f5b4207f8eb14e9832008672df617858239b6770b546c6e`.
-- The historical failed report
-  `5cddd8e2-df16-4289-87a3-21914e527a61` remains forbidden from repair,
-  replay, reopening, cloning or acceptance use.
-- `apps/web/.tmp-preview/**`, `.data/candidate-worktree/**` and
-  `.data/deploy-worktree-readmode/**` remain excluded and untouched.
+- Fixed-site rollback Web deployment is
+  `dpl_J71XhBtERHciEMEd8DjWNc8SWPYM`, Preview, READY.
+- Linked Vercel project is `prj_WVpdlJfsEp0YyWM2W54w8oBy985S`, owned by
+  team slug `itheheda-6857s-projects`. The branch currently has zero scoped
+  Preview variables. The previous failed command incorrectly supplied the
+  `team_...` ID to the CLI's slug-oriented `--scope` option.
+- Current E: free space is 54,882,361,344 bytes; Docker images use 32.19 GB
+  and build cache 21.64 GB. Dependency/base-image inputs are unchanged, so a
+  full Worker build is forbidden.
+- Staging has no AnySearch certification artifact or authority. The existing
+  active MiMo rollback authority stays installed and active.
+- Historical report `5cddd8e2-df16-4289-87a3-21914e527a61` remains forbidden
+  from repair, replay, reopening, cloning, or acceptance use.
 
-## Exact tracked Git candidate allowlist
+## Exact tracked-file and Git authority
 
-The Git operator may stage exactly the following 46 implementation and
-scope/history paths, and no others:
+- Before release, change only this file's status from `FROZEN` to `APPROVED`.
+- The Git operator may create exactly one documentation-only recovery commit
+  containing only `docs/ACTIVE-CHANGE-SCOPE.md` and
+  `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`, with parent
+  `62352e8bb0397e8edd7d3e00fdcc54456c9874f4` and message
+  `chore: authorize provider profile staging recovery`.
+- No production/configuration/test file may change. The complete recovery
+  candidate is the new documentation-only commit; all runtime source must be
+  byte-identical to feature commit `62352e8b...`.
+- Push exactly once, without force, to new branch
+  `origin/codex/delivery-root-fix`. No merge, rebase, tag, PR, branch deletion,
+  `main` update, extra commit, or extra push is allowed.
+- Diff budget before the recovery commit: exactly two tracked documentation
+  paths and zero production/configuration/test lines. Cached whitespace and
+  secret scans must pass.
 
-- `.env.example`
-- `AGENTS.md`
-- `README.md`
-- `apps/web/src/db/commercial-orders-v4.postgres.test.ts`
-- `apps/web/src/provider-profile/runtime.test.ts`
-- `apps/web/src/provider-profile/runtime.ts`
-- `apps/web/src/public-source-forensics/production-runtime.test.ts`
-- `apps/web/src/public-source-forensics/production-runtime.ts`
-- `apps/web/src/recommendation-forensics/active-runtime-reachability.test.ts`
-- `apps/web/src/recommendation-forensics/product-availability.test.ts`
-- `apps/web/src/recommendation-forensics/product-availability.ts`
-- `apps/web/src/report-v4/mimo-provider.test.ts`
-- `apps/web/src/report-v4/mimo-provider.ts`
-- `apps/web/src/report-v4/mimo-site-synthesis-provider.test.ts`
-- `apps/web/src/report-v4/mimo-site-synthesis-provider.ts`
-- `apps/web/src/report-v4/model-runtime-config.test.ts`
-- `apps/web/src/report-v4/model-runtime-config.ts`
-- `apps/web/src/report-v4/openai-compatible-provider.test.ts`
-- `apps/web/src/report-v4/openai-compatible-provider.ts`
-- `apps/web/src/scripts/batch-drain.ts`
-- `apps/web/src/scripts/probe-public-search.test.ts`
-- `apps/web/src/scripts/probe-public-search.ts`
-- `apps/web/src/scripts/report-v4-staging-preflight.test.ts`
-- `apps/web/src/worker/processor.test.ts`
-- `apps/web/src/worker/processor.ts`
-- `apps/web/src/worker/report-v4-admission-production.test.ts`
-- `apps/web/src/worker/report-v4-core-production.ts`
-- `apps/web/src/worker/report-v4-enhancement-production.postgres.test.ts`
-- `apps/web/src/worker/report-v4-enhancement-production.ts`
-- `apps/web/src/worker/report-v4-free-teaser.test.ts`
-- `apps/web/src/worker/report-v4-free-teaser.ts`
-- `apps/web/src/worker/report-v4-oversized-token-acceptance-probe.test.ts`
-- `apps/web/src/worker/report-v4-startup-readiness.test.ts`
-- `apps/web/src/worker/report-v4-startup-readiness.ts`
-- `compose.yaml`
-- `config/model-profiles/report-v4-sensenova-deepseek-v4-flash-v1.json`
-- `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`
-- `docs/ACTIVE-CHANGE-SCOPE.md`
-- `docs/COMMERCIAL-OPERATIONS.md`
-- `docs/DECISIONS.md`
-- `docs/PROTECTED-STAGING-OPERATIONS.md`
-- `docs/operations/public-search-surface-certification.md`
-- `packages/ai-report-engine/src/model-profile-registry.test.ts`
-- `packages/ai-report-engine/src/model-profile-registry.ts`
-- `scripts/start-report-v4-staging-workers.ps1`
-- `scripts/start-workstation-workers.ps1`
+## Vercel branch configuration recovery
 
-No additional tracked file edit is allowed. The only tracked changes after
-approval are the mechanical `FROZEN` to `APPROVED` status update before the
-candidate commit and the scope/history closeout after Gate 3.
-
-## Git actions
-
-1. Reconfirm cwd, branch, parent HEAD, remotes, worktrees, full diff, secrets,
-   allowlist and budgets. Stop on any unexplained change.
-2. Reuse the completed local evidence: 20 deterministic test files / 266 tests,
-   scoped ESLint with zero errors, `git diff --check`, secret-pattern scan, and
-   the complete workspace/Next.js build. No provider or database test is
-   inferred from that evidence.
-3. Stage only the exact 46 paths, run cached diff/whitespace/secret checks, and
-   create exactly one commit with message
-   `feat: unify provider profile routing` and parent equal to the baseline HEAD.
-4. Push exactly once to new remote branch
-   `origin/codex/delivery-root-fix` without force, merge, rebase, tag, PR,
-   remote deletion or any `main` update.
-5. The canonical worktree must remain the sole clean candidate source at the
-   committed SHA. Do not create, detach, remove or use another worktree.
-
-## Staging-only configuration writes
-
-- Update only ignored `apps/web/.env.staging.local` to select
-  `sensenova_anysearch` and the matching locked model profile.
-- Update only ignored `apps/web/.env.public-search.staging.local` so the legacy
-  adapter assertion, if retained, is `anysearch`.
-- Regenerate only `.data/workstation-docker/staging.env` and its byte-stable
-  Staging commerce projection using
-  `scripts/start-workstation-workers.ps1 -PrepareOnly -PrepareStagingOnly`.
-  Verify secrets only as present/absent and never print values. The regenerated
-  Worker environment must contain the selected profile and no nonblank stale
-  MiMo V4 routing values.
-- Upsert only these branch-scoped Vercel Preview variables for Git branch
-  `codex/delivery-root-fix`:
+- Use the verified linked project explicitly with
+  `--project prj_WVpdlJfsEp0YyWM2W54w8oBy985S`; omit `--scope` entirely.
+- The first write must be the real target
+  `OGC_PUBLIC_SEARCH_ADAPTER=anysearch` for Preview branch
+  `codex/delivery-root-fix`, using `--no-sensitive --force --yes`. If it fails,
+  stop with no retry or alternate path.
+- If it succeeds, upsert only these additional branch-scoped Preview values:
   `OGC_PROVIDER_PROFILE=sensenova_anysearch`,
   `OGC_REPORT_V4_MODEL_PROFILE_ID=report-v4-sensenova-deepseek-v4-flash-v1`,
-  `OGC_PUBLIC_SEARCH_ADAPTER=anysearch`,
   `OGC_PUBLIC_SEARCH_RUNTIME_ENABLED=true`,
-  `OGC_PUBLIC_SEARCH_LOCALE=zh-CN`, and
-  `OGC_PUBLIC_SEARCH_REGION=CN`.
-- Generate one new cryptographically random certification signing secret
-  without printing it; use it only in the release process and store the same
-  value as branch-scoped Vercel Preview Sensitive variable
-  `OGC_PUBLIC_SEARCH_CERTIFICATION_SIGNING_SECRET`. Upsert matching non-secret
-  branch-scoped values
-  `OGC_PUBLIC_SEARCH_CERTIFICATION_SIGNING_KEY_ID=provider-profile-20260803`
-  and `OGC_PUBLIC_SEARCH_CERTIFICATION_SIGNING_VERSION=v1`. Do not overwrite
-  or rotate another branch/environment's signing authority.
+  `OGC_PUBLIC_SEARCH_LOCALE=zh-CN`, `OGC_PUBLIC_SEARCH_REGION=CN`,
+  `OGC_PUBLIC_SEARCH_CERTIFICATION_SIGNING_KEY_ID=provider-profile-20260803-recovery-v1`,
+  and `OGC_PUBLIC_SEARCH_CERTIFICATION_SIGNING_VERSION=v1` as non-sensitive;
+  plus one newly generated random
+  `OGC_PUBLIC_SEARCH_CERTIFICATION_SIGNING_SECRET` as sensitive.
+- Generate the signing secret once without printing or persisting it in an env
+  file. Reuse it only in the same release process for certification/install
+  verification and the single branch-scoped Vercel Sensitive value.
+- After all writes, list only the target branch's variable names/targets and
+  confirm the exact nine-name set without reading secret values.
+- If a later variable write fails, remove only the branch-scoped variables
+  successfully written by this attempt, verify the branch set is empty, and
+  stop. No retry, Production/Development variable, other branch, team, project,
+  or inherited Preview value may be changed.
 
-## AnySearch certification and exact external-call budget
+## AnySearch certification, authority, and provider budget
 
-Approval explicitly accepts a **Protected-Staging-only business risk**: the
-official AnySearch legal page currently says its legal agreement is not yet
-published. This scope may not create Production authority. The private
-certification record must transparently use these official references and
-must not claim stronger rights than they state:
+The user previously accepted, and approval of this recovery scope reaffirms,
+the Protected-Staging-only legal risk that the AnySearch agreement is not
+published/available as a complete service contract. The certification must use
+only these references and must not claim broader rights:
 
-- terms: `https://www.anysearch.com/legal?type=tos` (agreement unpublished);
-- commercial use: `https://anysearch.com/pricing` (Free small-project and
-  Enterprise deployment tiers);
-- storage/display: `https://anysearch.com/faq` (REST structured JSON and query
-  non-retention; no separate output-display licence was located).
+- terms: `https://www.anysearch.com/legal?type=tos`;
+- commercial use: `https://anysearch.com/pricing`;
+- storage/display: `https://anysearch.com/faq`.
 
-The release operator may:
+The release operator may perform exactly these actions, in this order:
 
-1. Run exactly one AnySearch certification command for `zh-CN` / `CN`. It
-   performs exactly three real AnySearch requests and writes one signed private
-   artifact at
-   `.data/public-search-certification/anysearch-provider-profile-20260803.json`.
-2. Install exactly that artifact once as one inactive deterministic Staging
-   authority, then activate exactly that authority once. Existing MiMo
-   authority stays installed and active for rollback; no other row changes.
-3. Run exactly one secret-safe generative-answer probe with question
-   `采购跨境物流服务时，应核验哪些公开证据？`. It performs one additional
-   AnySearch request and one SenseNova `deepseek-v4-flash` request, prints no
-   answer prose or credentials, and creates no report/job/order.
+1. Recheck Staging database marker/schema and require zero claimable, running,
+   expired-recoverable, and exhausted-terminalizable jobs.
+2. Run one AnySearch certification for `zh-CN` / `CN`, exactly three live
+   AnySearch requests, writing only
+   `.data/public-search-certification/anysearch-provider-profile-20260803-recovery.json`.
+3. Install exactly that signed artifact once as one inactive deterministic
+   Staging authority, then activate exactly that authority once. Verify the
+   complete adapter/provider/product/model/version/surface/locale/region
+   identity and that exactly one matching AnySearch authority is active. The
+   separate MiMo rollback authority remains unchanged.
+4. Run `npm run generative-answer:staging:probe` exactly once with its fixed
+   secret-safe operation. It makes one additional AnySearch request and one
+   SenseNova `deepseek-v4-flash` request, prints no answer prose or credentials,
+   and creates no report/job/order.
 
-Total authorized live provider budget is therefore exactly four AnySearch
-requests plus one SenseNova request, with no retry after a typed failure.
+Total live provider budget is exactly four AnySearch requests and one
+SenseNova request. Any typed failure stops immediately; no provider retry,
+fallback, substitute query, or second artifact is authorized.
 
-## Protected Staging Gates 1-3
+## Protected Staging deployment Gates 1-3
 
-1. Before mutation, read the Staging marker/schema and exact queue counts.
-   Require zero claimable, running, expired-recoverable or
-   exhausted-terminalizable work. Database access is read-only except for the
-   single authority installation and activation above.
-2. After the branch push, reuse an existing READY candidate Preview only if its
-   independent `gitCommitSha` and `ogcGitSha` both equal the candidate full SHA;
-   otherwise allow exactly one new Preview. Never create two Previews.
-3. Build exactly one thin source-overlay Worker image from the current exact
-   rollback image. The deterministic tag is
-   `open-geo-console:staging-<candidate-short>-provider-profile-overlay-v1`.
-   The inline temporary Dockerfile may copy only `apps/`, `packages/`, and the
-   exact new locked JSON under `config/model-profiles/`; it must label the full
-   candidate SHA. No `npm ci`, dependency/browser/OS install, full build,
-   `docker cp`, running-container edit or retry is allowed.
-4. Recreate exactly `staging-worker-free` and `staging-worker-deep` once using
-   the candidate image and regenerated environment. Do not restart or recreate
-   Staging commerce or any Production service. Verify exact image ID/revision,
-   `sensenova_anysearch`, tiers, Staging identity, health/readiness, zero restart
-   count and zero claimed work.
-5. Only after Web and both Workers share the candidate SHA, move the fixed
-   Protected Staging alias exactly once to the READY candidate Preview.
-6. Run Gate 3 smoke only: authenticated `/zh`, test-mode commerce catalog,
-   exact Web/Free/Deep SHA identity, and before/after database counts proving
-   no report, crawl, model/search row, order, payment, refund, email or customer
-   artifact was created by smoke. Browser QA may not submit a URL.
-7. An independent read-only reviewer must accept Gates 1-3. Then stop and hand
-   the fixed URL to the user for their own test; Gate 4 is not authorized.
+1. After configuration, authority and probe pass, push the exact recovery
+   candidate once. Accept only the Git-integrated Preview created by that push;
+   do not run a second/manual Preview deployment. Require READY plus independent
+   `gitCommitSha` and `ogcGitSha` equal to the full recovery SHA.
+2. Record disk/Docker/container/image state again. Build exactly one thin
+   source-overlay image from rollback image `95a62dcd...`, tagged
+   `open-geo-console:staging-<recovery-short>-provider-profile-overlay-v1`,
+   copying only `apps/`, `packages/`, and the exact locked JSON under
+   `config/model-profiles/`, with the full recovery SHA label. No `npm ci`,
+   browser/OS/dependency install, full build, `docker cp`, running-container
+   edit, or build retry is allowed.
+3. Recreate exactly `staging-worker-free` and `staging-worker-deep` once with
+   the candidate image and existing generated Staging environment. Do not
+   restart/recreate Staging commerce or any Production service. Require exact
+   image/revision/profile/tier/Staging identity, restart count zero, readiness,
+   and zero claimed work.
+4. Only after Web and both Workers share the recovery SHA, move the fixed
+   Protected Staging alias exactly once to that READY Preview.
+5. Browser QA may perform only Gate 3 smoke: authenticated `/zh`, test-mode
+   catalog, and exact Web/Free/Deep identity, with before/after database counts
+   proving no report, crawl, model/search row, job, order, payment, refund,
+   email, or customer artifact was created. It may not submit a URL.
+6. An independent read-only reviewer must accept Gates 1-3. Then stop and hand
+   the fixed URL to the user. Gate 4/new-report creation remains user-owned.
 
-## Exact image retention and cleanup
+## Image retention, rollback, and evidence
 
-After the candidate Workers are healthy, retain only the candidate image and
-rollback image `95a62dcd...`. The release operator may remove the following
-exact older Staging image IDs only after rechecking that no container references
-them; a referenced image is skipped and reported, never force-removed:
-
-- `sha256:b08ea493fc2a87dc4c49c5263680a21a8627ee713c08be027bac5cea64be2032`
-- `sha256:23c9cb696e0fd62986862a355b16eaef60f4aa391111bd36ce59c474e7d056bb`
-- `sha256:5cb3a2b3a929c0f44b7d1b97e2252d7c94e4b154af08bddc0ef87a1743cac8e4`
-- `sha256:d6a730bc9d35ddcf75697b13004e3613bf61b4536a914c00f427ecd2dde2f247`
-- `sha256:7b08c1e1a4778f8f0581cdf550571931202cc2df94cc49c772c25af9dabb8e20`
-- `sha256:26bb8f778d05d3b30fa948087d6ddee30ed456797f943d227bf9c5f2ff7e624b`
-- `sha256:901be87958868cdf32dbb2a4b51e6aa111f37780d06616c4d2dfa06a4e3e1650`
-- `sha256:3f436e73870a2b8c22d10b12413e2acf3b06bfe9a202ae2035497b7e3f448039`
-- `sha256:4a28445023a7211605ae47f4c30189d2f797872db679aab0e2627e909505f56a`
-- `sha256:5ef0fecd18b5d010ce73acfed077f3083bb8545faa670c9a1b84ed4cd4b264c4`
-- `sha256:0b62fd4561c20adc38139774e16785b55fa00050d85c58ec9e4f486a61dc7dfe`
-- `sha256:02b474693b25bd91b50fa127821d56b2d43261667785b6e01ff4b786a2590064`
-- `sha256:1cdc060d597c70b5d1ee0670a90672608da18b906303ffb586bddea2fe840c29`
-- `sha256:8a62a930f5a590a340b4db10cca83084b8f6674b457b0de500d1a9ce356f7695`
-- `sha256:ea1d552f5d97d384dd1327eee464165ed73b4be35e0e7cfc2c41f48a5fbe6797`
-- `sha256:748e2675f2801b8633118f472c4dc749c8adc595b64e74b6996c4955d47480fa`
-
-No broad Docker prune, volume deletion, builder prune, Production image cleanup
-or unrelated container action is allowed. Record before/after free space,
-Docker usage, exact image/container references and net bytes.
-
-## Rollback authority
-
-- Before the fixed alias moves, any failure stops without deployment retry;
-  preserve failed artifacts as evidence.
-- If candidate Workers were recreated but not accepted, restore their exact
-  previous image `95a62dcd...` and original runtime-env bytes once.
-- If Gate 3 fails after alias cutover, restore both Workers and the fixed alias
-  once to image `95a62dcd...` and deployment
-  `dpl_J71XhBtERHciEMEd8DjWNc8SWPYM`, then stop.
-- The candidate AnySearch authority may remain installed/active because it is
-  identity-scoped and MiMo rollback authority remains independently active;
-  no destructive authority delete/deactivation is authorized.
-
-## Evidence and closeout writes
-
-- Write one secret-free, access-restricted, idempotent release ledger at
-  `.data/protected-staging-release-ledger/<candidate-full-sha>.json` recording
-  candidate/current/rollback identities, Vercel action, authority version,
-  provider-call counts, Worker image/container IDs, alias action, database
-  before/after counts, Docker/disk deltas and terminal status.
-- After Gate 3, append the result to
+- Retain only the candidate image and rollback image `95a62dcd...` for this
+  Staging line. After verifying no container references them, remove only these
+  16 exact older Staging image IDs; skip and report any referenced image:
+  `sha256:b08ea493fc2a87dc4c49c5263680a21a8627ee713c08be027bac5cea64be2032`,
+  `sha256:23c9cb696e0fd62986862a355b16eaef60f4aa391111bd36ce59c474e7d056bb`,
+  `sha256:5cb3a2b3a929c0f44b7d1b97e2252d7c94e4b154af08bddc0ef87a1743cac8e4`,
+  `sha256:d6a730bc9d35ddcf75697b13004e3613bf61b4536a914c00f427ecd2dde2f247`,
+  `sha256:7b08c1e1a4778f8f0581cdf550571931202cc2df94cc49c772c25af9dabb8e20`,
+  `sha256:26bb8f778d05d3b30fa948087d6ddee30ed456797f943d227bf9c5f2ff7e624b`,
+  `sha256:901be87958868cdf32dbb2a4b51e6aa111f37780d06616c4d2dfa06a4e3e1650`,
+  `sha256:3f436e73870a2b8c22d10b12413e2acf3b06bfe9a202ae2035497b7e3f448039`,
+  `sha256:4a28445023a7211605ae47f4c30189d2f797872db679aab0e2627e909505f56a`,
+  `sha256:5ef0fecd18b5d010ce73acfed077f3083bb8545faa670c9a1b84ed4cd4b264c4`,
+  `sha256:0b62fd4561c20adc38139774e16785b55fa00050d85c58ec9e4f486a61dc7dfe`,
+  `sha256:02b474693b25bd91b50fa127821d56b2d43261667785b6e01ff4b786a2590064`,
+  `sha256:1cdc060d597c70b5d1ee0670a90672608da18b906303ffb586bddea2fe840c29`,
+  `sha256:8a62a930f5a590a340b4db10cca83084b8f6674b457b0de500d1a9ce356f7695`,
+  `sha256:ea1d552f5d97d384dd1327eee464165ed73b4be35e0e7cfc2c41f48a5fbe6797`,
+  `sha256:748e2675f2801b8633118f472c4dc749c8adc595b64e74b6996c4955d47480fa`.
+- No broad Docker/image/builder/volume prune is allowed. Production images and
+  containers are untouchable. Record before/after free space, `docker system
+  df`, image IDs/sizes, container references, and net bytes.
+- Before alias movement, any failure stops without deployment retry. If the
+  candidate Workers were recreated but not accepted, restore both once to
+  image `95a62dcd...` and the exact prior runtime-env bytes.
+- If Gate 3 fails after alias cutover, restore both Workers once and restore the
+  alias once to deployment `dpl_J71XhBtERHciEMEd8DjWNc8SWPYM`, then stop.
+- The installed AnySearch authority/artifact may remain because this was
+  explicitly requested and is identity-scoped. No authority delete,
+  deactivation, historical mutation, or MiMo change is authorized.
+- Write one secret-free ignored ledger at
+  `.data/protected-staging-release-ledger/<recovery-full-sha>.json` with all
+  identities, call counts, mutations, gates, rollback data, and terminal state.
+- At terminal success/failure, append one record to
   `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md` and reduce this file to `Status: NONE`.
-  These local closeout edits are not pushed because a second push could create
-  an unauthorized second Preview; report the two-document local dirty state.
-- Keep remote task branch and candidate commit for the user's test. No merge,
-  PR, tag, branch deletion or `main` closeout is authorized.
+  These two local closeout edits remain uncommitted/unpushed; report them.
 
-## Explicitly forbidden
+## Explicitly forbidden and stop conditions
 
-- No Production deployment, Production configuration, Production database,
-  Production Worker, Production commerce or Production image action.
-- No report submission, crawl, report/job/order creation, payment, refund,
-  email, customer artifact, historical mutation, replay, repair or Gate 4.
-- No schema/migration/dependency/prompt/report-contract/state-machine/UI change.
-- No extra tracked edit, extra commit/push/Preview/provider call/authority row,
-  Docker build or alias move beyond the exact budgets above.
-- Never print, commit or place secrets in the ledger, logs or chat.
-
-## Stop conditions
-
-- The user does not explicitly accept the stated AnySearch staging-only legal
-  risk and this complete action list.
-- Any Git path, baseline, remote, worktree, secret scan or budget differs.
-- Staging marker/schema/queue state is unsafe, AnySearch certification or
-  generative answer probe fails, or exact authority identity cannot be proven.
-- Target free space falls below 20 GiB, rollback identity is missing, the thin
-  image build fails, a Worker claims work/restarts/fails readiness, or Web and
-  Workers do not share one full SHA.
-- Candidate Preview identity is ambiguous or Gate 3 produces any business/data
-  side effect. Stop or perform the single authorized rollback; never improvise
-  a repair or retry.
+- No Production action; no report submission, crawl, job/order/payment/refund/
+  email/customer artifact; no historical repair/replay; no schema, migration,
+  dependency, prompt, report contract/structure, state-machine, payment, email,
+  or UI change.
+- No extra provider call, authority row, Vercel variable/branch/project,
+  Preview, commit/push, Docker build/service, alias move, or external write.
+- Stop on any baseline/diff/secret/worktree/remote mismatch, unsafe queue,
+  certification/probe/authority failure, unexpected Vercel branch state,
+  Preview identity ambiguity, less than 20 GiB free space, missing rollback,
+  image/build/readiness/restart/SHA failure, or any Gate 3 business/data effect.
+  Use only the exact cleanup/rollback above; never improvise or retry.
 
 ## Approval gate
 
-Explicit approval of this FROZEN scope authorizes all and only the actions
-above, including the stated staging-only AnySearch legal risk, four AnySearch
-requests, one SenseNova request, one AnySearch authority install/activation,
-one Git commit/push, at most one Preview, one thin image build, two Staging
-Worker replacements, one alias cutover, conditional exact rollback, and the
-listed unreferenced-image removals. Approval does not authorize the user's
-later report test; the user performs that themselves after handoff.
+Explicit approval of this FROZEN authorizes all and only the actions above:
+one documentation recovery commit and push, nine branch-scoped Preview variable
+upserts with exact failure cleanup, four AnySearch requests, one SenseNova
+request, one AnySearch authority install/activation, one Git-integrated Preview,
+one thin image build, two Staging Worker replacements, one alias cutover, exact
+conditional rollback/cleanup, Gate 3 smoke/review, ledger and local closeout
+documents. It accepts the stated Staging-only AnySearch contract risk. It does
+not authorize Production or the user's later report test.
