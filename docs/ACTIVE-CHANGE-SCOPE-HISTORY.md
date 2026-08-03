@@ -4668,3 +4668,28 @@ allowlist; external actions remain zero; no deploy.
   generation, or perform Git/Production actions. The next active scope must
   explicitly combine any retained delivery behavior with the separately
   approved minimal search optimization and one fresh acceptance path.
+
+---
+
+## 2026-08-03 - Paid V3 public-search duplication optimization implemented locally; Staging acceptance blocked
+
+- The approved four-runtime-file optimization made Provider Q2/Q3 produce the
+  complete six-query public-search fanout once, aligned the canonical timeout
+  at 60 seconds, divided the 180-second search budget by concurrency waves, and
+  added an overall search deadline.
+- Resume now verifies the two standard snapshot identities before reuse. An
+  older three-query checkpoint fails closed before any new adapter call rather
+  than silently repeating its first three queries.
+- Focused tests passed 63/63, the disposable PostgreSQL linear-flow test passed
+  1/1 with zero skips, lint had zero errors, the full build passed, and an
+  independent review found no blocking issue.
+- The retained local candidate is
+  `ae3f43664f62510a72da74b11519bb9b2a0e8136` on
+  `codex/delivery-root-fix`.
+- No Preview, Worker overlay, alias move, report, payment or email acceptance
+  was performed. Release preflight stopped when Staging Workers and the fixed
+  alias changed concurrently under an unattributed external deployment, so
+  live acceptance of this candidate remains unproven.
+- This archived record grants no authority to overwrite that concurrent
+  deployment, retry external actions, or claim the report delivery/latency
+  incident fixed in Staging or Production.
