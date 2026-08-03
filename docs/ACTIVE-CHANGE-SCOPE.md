@@ -236,3 +236,27 @@ changes.
 Redeploy to Protected Staging (Vercel Preview + thin-overlay free/deep
 Workers + fixed alias) is authorized as before; Production remains
 untouched and no push/merge of remote refs is performed.
+
+## 2026-08-03 concurrent addendum — paid HTML report reading mode (TOC + progressive disclosure)
+
+Approved by the user on 2026-08-03 (option A+B), running concurrently with the
+delivery scope above. This addendum adds exactly these files to the executable
+allowlist for a presentation-only reading-mode change on the paid standalone
+HTML report (v3 artifact): a sticky section TOC (desktop sidebar, mobile
+horizontal bar) with scroll highlighting, collapsible sections 02-05 with
+expand/collapse-all controls, a back-to-top button, and print output that
+forces all folds open. No report data, wording, or collection logic changes;
+section titles reuse existing copy. One inline `<script>` powers the
+interaction and is allowlisted in the artifact route CSP by exact SHA-256
+hash (no `unsafe-inline`). Also wraps the evidence observation time in
+`<time datetime>` so the ISO value stays in the HTML for the canonical
+completeness gate while the visible text remains locale-formatted.
+
+- `apps/web/src/report/artifact-styles.ts`
+- `apps/web/src/components/combined-geo-report-v3-artifact.tsx`
+- `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx`
+- `apps/web/next.config.ts`
+
+Redeploy to Protected Staging (Vercel Preview + thin-overlay free/deep
+Workers + fixed alias) is authorized as before; Production remains
+untouched and no push/merge of remote refs is performed.

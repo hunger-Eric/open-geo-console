@@ -19,6 +19,7 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
   const answered=report.answerCards.filter(({status})=>status==="answered").length;
   const limited=report.answerCards.filter(({status})=>status!=="answered").length;
   const mentioned=report.directSemantics ? null : report.answerCards.filter(({geoDiagnosis})=>geoDiagnosis.targetMentioned).length;
+  const diagnosisTitle=report.sourceSelectionDiagnosis ? copy.sourceDiagnosis : copy.crossQuestion;
   return <main className="report-shell answer-first-report" data-artifact-revision={report.artifactRevisionId}>
     <header className="report-hero answer-first-hero">
       <p className="eyebrow">{copy.kicker}</p>
@@ -31,13 +32,26 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
       </dl>
     </header>
 
-    <section className="report-section executive-summary" data-executive-summary="true">
+    <div className="artifact-read-layout">
+      <nav className="artifact-toc" aria-label={copy.toc}>
+        <a href="#artifact-sec-executive"><span>01</span>{copy.executive}</a>
+        <a href="#artifact-sec-answers"><span>02</span>{copy.answers}</a>
+        <a href="#artifact-sec-diagnosis"><span>03</span>{diagnosisTitle}</a>
+        <a href="#artifact-sec-technical"><span>04</span>{copy.technical}</a>
+        <a href="#artifact-sec-appendix"><span>05</span>{copy.appendix}</a>
+      </nav>
+      <div className="artifact-read-content">
+
+    <section className="report-section executive-summary" id="artifact-sec-executive" data-executive-summary="true">
       <p className="section-index">01</p><h2>{copy.executive}</h2>
       <p className="summary-copy">{report.technicalFoundation.aiReport.executiveSummary.overview}</p>
       <dl className="answer-metric-grid">
         <Meta label={copy.answered}>{answered}/3</Meta><Meta label={copy.limited}>{limited}/3</Meta>{mentioned === null ? null : <Meta label={copy.mentioned}>{mentioned}/3</Meta>}
       </dl>
     </section>
+
+      <div className="artifact-foldbar"><button type="button" data-fold="open">{copy.expandAll}</button><button type="button" data-fold="close">{copy.collapseAll}</button></div>
+      <Fold id="artifact-sec-answers" index="02" title={copy.answers}>
 
     <section className="report-section" data-answer-first-section="true">
       <p className="section-index">02</p><h2>{copy.answers}</h2>
@@ -49,7 +63,9 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
       </div>
     </section>
 
-    {report.sourceSelectionDiagnosis
+      </Fold>
+      <Fold id="artifact-sec-diagnosis" index="03" title={diagnosisTitle}>
+      {report.sourceSelectionDiagnosis
       ? <SourceSelectionDiagnosisSection
           diagnosis={report.sourceSelectionDiagnosis}
           locale={model.locale}
@@ -58,7 +74,9 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
         />
       : <LegacyCrossQuestionDiagnosis report={report} locale={model.locale}/>}
 
-    <section className="report-section" data-technical-analysis="true">
+      </Fold>
+      <Fold id="artifact-sec-technical" index="04" title={copy.technical}>
+      <section className="report-section" data-technical-analysis="true">
       <p className="section-index">04</p><h2>{copy.technical}</h2>
       <h3>{copy.technicalFindings}</h3>
       <div className="finding-list">{report.technicalFoundation.technicalReport.findings.map((finding) => <article className="finding-card" key={finding.id}><h4>{finding.title}</h4><p>{finding.description}</p><p className="recommendation">{finding.recommendation}</p></article>)}</div>
@@ -79,7 +97,9 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
       <div className="technical-roadmap">{(["immediate","nextPhase","ongoing"] as const).map((phase)=><section key={phase}><h4>{roadmapLabel(phase,zh)}</h4>{report.technicalFoundation.aiReport.roadmap[phase].map((item,index)=><article key={`${phase}-${index}`}><h5>{item.title}</h5><p>{item.rationale}</p><ul>{item.actions.map((action)=><li key={action}>{action}</li>)}</ul></article>)}</section>)}</div>
     </section>
 
-    <section className="report-section methodology-appendix" data-methodology-appendix="true">
+      </Fold>
+      <Fold id="artifact-sec-appendix" index="05" title={copy.appendix}>
+      <section className="report-section methodology-appendix" data-methodology-appendix="true">
       <p className="section-index">05</p><h2>{copy.appendix}</h2>
       <p>{copy.scope}</p>
       <dl className="provenance-grid"><Meta label={copy.searchSurface}>{report.engineProvenance.searchSurface}</Meta><Meta label={copy.searched}>{formatTimestamp(report.engineProvenance.searchedAt,model.locale)}</Meta><Meta label={copy.cutoff}>{formatTimestamp(report.engineProvenance.evidenceCutoffAt,model.locale)}</Meta><Meta label={copy.model}>{report.engineProvenance.synthesisModel}</Meta><Meta label={copy.queryPlan}>{report.engineProvenance.queryPlanVersion}</Meta><Meta label={copy.passage}>{report.engineProvenance.passageSelectorVersion}</Meta></dl>
@@ -88,10 +108,38 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
         ? <dl data-answer-audit={card.questionId} key={card.questionId}><Meta label={copy.verifiedBody}>{card.audit.verifiedBodyCount}</Meta><Meta label={copy.searchSourceOnly}>{card.audit.searchSourceOnlyCount}</Meta><Meta label={copy.inaccessible}>{card.audit.inaccessibleCount}</Meta></dl>
         : <dl data-answer-coverage={card.questionId} key={card.questionId}><Meta label={copy.plannedQueries}>{card.coverage.plannedQueries}</Meta><Meta label={copy.completedQueries}>{card.coverage.completedQueries}</Meta><Meta label={copy.returnedResults}>{card.coverage.returnedResults}</Meta><Meta label={copy.attemptedRetrievals}>{card.coverage.attemptedRetrievals}</Meta><Meta label={copy.safelyRetrievedPages}>{card.coverage.safelyRetrievedPages}</Meta><Meta label={copy.eligibleDirectEvidence}>{card.coverage.eligibleDirectEvidence}</Meta></dl>)}</div>
     </section>
+      </Fold>
+      </div>
+    </div>
+    <button type="button" className="artifact-to-top">{copy.backToTop}</button>
+    <script dangerouslySetInnerHTML={{ __html: ARTIFACT_READ_SCRIPT }} />
   </main>;
 }
 
 function Meta({label,children}:{label:string;children:ReactNode}){return <div><dt>{label}</dt><dd>{children}</dd></div>;}
+function Fold({id,index,title,children}:{id:string;index:string;title:string;children:ReactNode}){
+  return <details className="fold" id={id}>
+    <summary><span className="sn">{index}</span><span className="st">{title}</span><span className="chev" aria-hidden="true">▸</span></summary>
+    <div className="fold-body">{children}</div>
+  </details>;
+}
+
+const ARTIFACT_READ_SCRIPT = `(function(){
+  var links=[].slice.call(document.querySelectorAll('.artifact-toc a[href^="#"]'));
+  var secs=links.map(function(a){return document.querySelector(a.getAttribute('href'));}).filter(Boolean);
+  function mark(id){links.forEach(function(l){l.classList.toggle('active',l.getAttribute('href')==='#'+id);});}
+  links.forEach(function(l){l.addEventListener('click',function(){var t=document.querySelector(l.getAttribute('href'));if(t&&t.tagName==='DETAILS')t.open=true;if(t)mark(t.id);});});
+  if('IntersectionObserver' in window){
+    var obs=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){mark(e.target.id);}});},{rootMargin:'-5% 0px -75% 0px'});
+    secs.forEach(function(s){obs.observe(s);});
+  }
+  var openBtn=document.querySelector('[data-fold="open"]');
+  var closeBtn=document.querySelector('[data-fold="close"]');
+  if(openBtn)openBtn.addEventListener('click',function(){document.querySelectorAll('details.fold').forEach(function(d){d.open=true;});});
+  if(closeBtn)closeBtn.addEventListener('click',function(){document.querySelectorAll('details.fold').forEach(function(d){d.open=false;});});
+  var top=document.querySelector('.artifact-to-top');
+  if(top)top.addEventListener('click',function(){window.scrollTo({top:0,behavior:'smooth'});});
+})();`;
 function formatTimestamp(value:string,locale:"en"|"zh"){const date=new Date(value);if(Number.isNaN(date.getTime()))return value;return new Intl.DateTimeFormat(locale==="zh"?"zh-CN":"en-US",{dateStyle:"medium",timeStyle:"short"}).format(date);}
 function shortRevisionId(value:string){return value.length>12?`${value.slice(0,8)}…`:value;}
 function List({label,items}:{label:string;items:readonly string[]}){return items.length?<div><strong>{label}</strong><ul>{items.map((item)=><li key={item}>{item}</li>)}</ul></div>:null;}
@@ -163,7 +211,7 @@ function LegacyEvidenceBoundAnswerCard({card,cardIndex,locale,ordinals}:{card:Le
     {card.status === "insufficient" && <p className="business-question-answer insufficient-answer">{copy.insufficient}</p>}
     <div className="answer-prose">{card.sentences.map((sentence)=><div className="answer-sentence" data-answer-sentence={sentence.sentenceId} key={sentence.sentenceId}>
       <p className="business-question-answer">{sentence.text}{sentence.kind!=="scope_note"&&<span className="sentence-citations">{sentence.evidenceIds.map((id)=><sup data-citation-ordinal={ordinals.get(id)} key={id}>[{ordinals.get(id)}]</sup>)}</span>}</p>
-      {sentence.kind!=="scope_note"&&<div className="answer-sources"><h4>{copy.sources}</h4>{sentence.evidenceIds.map((id)=>{const evidence=card.sourceEvidence.find((candidate)=>candidate.evidenceId===id);if(!evidence)return null;const ordinal=ordinals.get(id)!;return <article className="source-card" data-answer-source={id} data-citation-ordinal={ordinal} data-source-type={evidence.ownershipCategory} data-supported-sentence={sentence.sentenceId} key={id}><div className="source-ordinal">[{ordinal}]</div><div className="source-content"><h5><a href={evidence.canonicalUrl}>{evidence.title}</a></h5><dl className="source-metadata"><Meta label={copy.domain}>{evidence.registrableDomain}</Meta><Meta label={copy.sourceType}>{sourceTypeLabel(evidence.ownershipCategory,zh)}</Meta><Meta label={copy.observed}>{formatTimestamp(evidence.observedAt,locale)}</Meta></dl><p className="source-url"><a href={evidence.canonicalUrl}>{evidence.canonicalUrl}</a></p><blockquote><span>{copy.excerpt}</span>{evidence.exactExcerpt}</blockquote></div></article>;})}</div>}
+      {sentence.kind!=="scope_note"&&<div className="answer-sources"><h4>{copy.sources}</h4>{sentence.evidenceIds.map((id)=>{const evidence=card.sourceEvidence.find((candidate)=>candidate.evidenceId===id);if(!evidence)return null;const ordinal=ordinals.get(id)!;return <article className="source-card" data-answer-source={id} data-citation-ordinal={ordinal} data-source-type={evidence.ownershipCategory} data-supported-sentence={sentence.sentenceId} key={id}><div className="source-ordinal">[{ordinal}]</div><div className="source-content"><h5><a href={evidence.canonicalUrl}>{evidence.title}</a></h5><dl className="source-metadata"><Meta label={copy.domain}>{evidence.registrableDomain}</Meta><Meta label={copy.sourceType}>{sourceTypeLabel(evidence.ownershipCategory,zh)}</Meta><Meta label={copy.observed}><time dateTime={evidence.observedAt}>{formatTimestamp(evidence.observedAt,locale)}</time></Meta></dl><p className="source-url"><a href={evidence.canonicalUrl}>{evidence.canonicalUrl}</a></p><blockquote><span>{copy.excerpt}</span>{evidence.exactExcerpt}</blockquote></div></article>;})}</div>}
     </div>)}</div>
     {card.diagnosis
       ? <DiagnosisSummary diagnosis={card.diagnosis} locale={locale}/>
@@ -189,8 +237,8 @@ function DiagnosisSummary({diagnosis,locale}:{diagnosis:ReportV4DiagnosisOutput;
     <ol className="recommended-action-list">{diagnosis.recommendedActions.map((action)=><li key={action.priority}><span className="action-priority">{action.priority}</span> {action.action}</li>)}</ol>
   </section>;
 }
-const ZH = { kicker:"Open GEO 生成式答案",title:"答案优先 GEO 报告",scope:"以下答案由 Open GEO 通过带联网搜索的模型生成；每个答案下方仅列出同次回答返回的来源，不代表任何外部问答平台的实际回答。",target:"检测网站",generated:"生成时间",revision:"报告版本",executive:"执行摘要",answered:"完整答案",limited:"有限答案",mentioned:"目标品牌出现",answers:"三个标准客户问题",answerMethod:"先展示完整答案，再紧邻展示同次模型回答返回的来源；独立取回核验仅作为次要审计标签。",question:"客户问题",insufficient:"证据不足：当前公开证据不足以生成可靠答案。",plannedQueries:"计划查询",completedQueries:"完成查询",returnedResults:"搜索返回",attemptedRetrievals:"取回尝试",safelyRetrievedPages:"安全取回",eligibleDirectEvidence:"合格直接证据",sources:"本句来源",answerSources:"本次回答来源",domain:"域名",sourceType:"来源类型",observed:"观察时间",excerpt:"来源原文",providerExcerpt:"模型返回的引用片段",diagnosis:"GEO 诊断",questionDiagnosis:"本题诊断",targetMention:"目标品牌出现",firstPosition:"首次出现句序",targetRoles:"目标品牌角色",competitors:"竞争品牌",sourceStructure:"引用来源结构",missing:"缺失证据",retest:"复测问题：",yes:"是",no:"否",notPresent:"未出现",none:"无",crossQuestion:"跨问题 GEO 总结",technical:"完整技术分析",technicalFindings:"确定性技术发现",pageAnalysis:"页面级分析",pageTitle:"页面标题",body:"页面描述",dimensionScores:"技术维度评分",aiAnalysis:"模型技术说明与建议",pageTypes:"页面类型分析",strengths:"优势",issues:"问题",recommendations:"建议",roadmap:"实施路线图",appendix:"证据与方法附录",searchSurface:"公开搜索面",searched:"搜索时间",cutoff:"证据截止时间",model:"综合模型",searchMode:"搜索模式",queryPlan:"查询计划",passage:"段落选择",coverage:"局限与覆盖",sourceLimited:"答案已生成，但同次回答没有可安全展示的公开来源。",verifiedBody:"正文已独立核验",searchSourceOnly:"仅模型搜索来源",inaccessible:"当前无法访问",observableFactors:"可观察因素",targetGap:"目标官网差距",recommendedActions:"优先行动" };
-const EN = { kicker:"Open GEO generated answer",title:"Answer-first GEO report",scope:"Open GEO generated these answers with a web-search-enabled model. Sources shown below each answer are only those returned by that same operation; these are not answers observed from an external answer platform.",target:"Audited website",generated:"Generated",revision:"Artifact revision",executive:"Executive summary",answered:"Complete answers",limited:"Limited answers",mentioned:"Target mentioned",answers:"Three standard customer questions",answerMethod:"The complete answer appears first, followed immediately by sources returned by the same model operation. Independent retrieval is a secondary audit label.",question:"Customer question",insufficient:"Insufficient evidence: the available public evidence cannot support a reliable answer.",plannedQueries:"Planned queries",completedQueries:"Completed queries",returnedResults:"Search results returned",attemptedRetrievals:"Retrieval attempts",safelyRetrievedPages:"Safely retrieved",eligibleDirectEvidence:"Eligible direct evidence",sources:"Sources for this sentence",answerSources:"Sources returned with this answer",domain:"Domain",sourceType:"Source type",observed:"Observed",excerpt:"Source excerpt",providerExcerpt:"Provider-returned cited text",diagnosis:"GEO diagnosis",questionDiagnosis:"Question diagnosis",targetMention:"Target brand mentioned",firstPosition:"First sentence position",targetRoles:"Target roles",competitors:"Competitors",sourceStructure:"Citation-source structure",missing:"Missing evidence",retest:"Retest question:",yes:"Yes",no:"No",notPresent:"Not present",none:"None",crossQuestion:"Cross-question GEO summary",technical:"Complete technical analysis",technicalFindings:"Deterministic technical findings",pageAnalysis:"Page-level analysis",pageTitle:"Page title",body:"Page description",dimensionScores:"Technical dimension scores",aiAnalysis:"Model technical analysis and recommendations",pageTypes:"Page-type analysis",strengths:"Strengths",issues:"Issues",recommendations:"Recommendations",roadmap:"Implementation roadmap",appendix:"Evidence and methodology appendix",searchSurface:"Public-search surface",searched:"Searched",cutoff:"Evidence cutoff",model:"Synthesis model",searchMode:"Search mode",queryPlan:"Query plan",passage:"Passage selector",coverage:"Coverage and limitations",sourceLimited:"The answer was generated, but the same operation returned no public source that can be displayed safely.",verifiedBody:"Body independently verified",searchSourceOnly:"Model search source only",inaccessible:"Currently inaccessible",observableFactors:"Observable factors",targetGap:"Target website gap",recommendedActions:"Recommended actions" };
+const ZH = { kicker:"Open GEO 生成式答案",title:"答案优先 GEO 报告",scope:"以下答案由 Open GEO 通过带联网搜索的模型生成；每个答案下方仅列出同次回答返回的来源，不代表任何外部问答平台的实际回答。",target:"检测网站",generated:"生成时间",revision:"报告版本",executive:"执行摘要",answered:"完整答案",limited:"有限答案",mentioned:"目标品牌出现",answers:"三个标准客户问题",answerMethod:"先展示完整答案，再紧邻展示同次模型回答返回的来源；独立取回核验仅作为次要审计标签。",question:"客户问题",insufficient:"证据不足：当前公开证据不足以生成可靠答案。",plannedQueries:"计划查询",completedQueries:"完成查询",returnedResults:"搜索返回",attemptedRetrievals:"取回尝试",safelyRetrievedPages:"安全取回",eligibleDirectEvidence:"合格直接证据",sources:"本句来源",answerSources:"本次回答来源",domain:"域名",sourceType:"来源类型",observed:"观察时间",excerpt:"来源原文",providerExcerpt:"模型返回的引用片段",diagnosis:"GEO 诊断",questionDiagnosis:"本题诊断",targetMention:"目标品牌出现",firstPosition:"首次出现句序",targetRoles:"目标品牌角色",competitors:"竞争品牌",sourceStructure:"引用来源结构",missing:"缺失证据",retest:"复测问题：",yes:"是",no:"否",notPresent:"未出现",none:"无",crossQuestion:"跨问题 GEO 总结",technical:"完整技术分析",technicalFindings:"确定性技术发现",pageAnalysis:"页面级分析",pageTitle:"页面标题",body:"页面描述",dimensionScores:"技术维度评分",aiAnalysis:"模型技术说明与建议",pageTypes:"页面类型分析",strengths:"优势",issues:"问题",recommendations:"建议",roadmap:"实施路线图",appendix:"证据与方法附录",searchSurface:"公开搜索面",searched:"搜索时间",cutoff:"证据截止时间",model:"综合模型",searchMode:"搜索模式",queryPlan:"查询计划",passage:"段落选择",coverage:"局限与覆盖",sourceLimited:"答案已生成，但同次回答没有可安全展示的公开来源。",verifiedBody:"正文已独立核验",searchSourceOnly:"仅模型搜索来源",inaccessible:"当前无法访问",observableFactors:"可观察因素",targetGap:"目标官网差距",recommendedActions:"优先行动",toc:"报告目录",expandAll:"全部展开",collapseAll:"全部收起",backToTop:"回到顶部",sourceDiagnosis:"来源选择诊断" };
+const EN = { kicker:"Open GEO generated answer",title:"Answer-first GEO report",scope:"Open GEO generated these answers with a web-search-enabled model. Sources shown below each answer are only those returned by that same operation; these are not answers observed from an external answer platform.",target:"Audited website",generated:"Generated",revision:"Artifact revision",executive:"Executive summary",answered:"Complete answers",limited:"Limited answers",mentioned:"Target mentioned",answers:"Three standard customer questions",answerMethod:"The complete answer appears first, followed immediately by sources returned by the same model operation. Independent retrieval is a secondary audit label.",question:"Customer question",insufficient:"Insufficient evidence: the available public evidence cannot support a reliable answer.",plannedQueries:"Planned queries",completedQueries:"Completed queries",returnedResults:"Search results returned",attemptedRetrievals:"Retrieval attempts",safelyRetrievedPages:"Safely retrieved",eligibleDirectEvidence:"Eligible direct evidence",sources:"Sources for this sentence",answerSources:"Sources returned with this answer",domain:"Domain",sourceType:"Source type",observed:"Observed",excerpt:"Source excerpt",providerExcerpt:"Provider-returned cited text",diagnosis:"GEO diagnosis",questionDiagnosis:"Question diagnosis",targetMention:"Target brand mentioned",firstPosition:"First sentence position",targetRoles:"Target roles",competitors:"Competitors",sourceStructure:"Citation-source structure",missing:"Missing evidence",retest:"Retest question:",yes:"Yes",no:"No",notPresent:"Not present",none:"None",crossQuestion:"Cross-question GEO summary",technical:"Complete technical analysis",technicalFindings:"Deterministic technical findings",pageAnalysis:"Page-level analysis",pageTitle:"Page title",body:"Page description",dimensionScores:"Technical dimension scores",aiAnalysis:"Model technical analysis and recommendations",pageTypes:"Page-type analysis",strengths:"Strengths",issues:"Issues",recommendations:"Recommendations",roadmap:"Implementation roadmap",appendix:"Evidence and methodology appendix",searchSurface:"Public-search surface",searched:"Searched",cutoff:"Evidence cutoff",model:"Synthesis model",searchMode:"Search mode",queryPlan:"Query plan",passage:"Passage selector",coverage:"Coverage and limitations",sourceLimited:"The answer was generated, but the same operation returned no public source that can be displayed safely.",verifiedBody:"Body independently verified",searchSourceOnly:"Model search source only",inaccessible:"Currently inaccessible",observableFactors:"Observable factors",targetGap:"Target website gap",recommendedActions:"Recommended actions",toc:"Contents",expandAll:"Expand all",collapseAll:"Collapse all",backToTop:"Back to top",sourceDiagnosis:"Source selection diagnosis" };
 function statusLabel(status:string,zh:boolean){return zh?({answered:"已回答",source_limited:"答案已生成，来源有限",refused:"模型拒绝回答",limited:"有限证据",observed:"仅搜索观察",unresolved:"尚无法核验",insufficient:"证据不足"}[status]??status):({answered:"Answered",source_limited:"Answered, sources limited",refused:"Provider refusal",limited:"Limited evidence",observed:"Search observation only",unresolved:"Not yet verifiable",insufficient:"Insufficient evidence"}[status]??status);}
 function sourceTypeLabel(value:OpenGeoAnswerOwnershipCategoryV3,zh:boolean){const labels:Record<OpenGeoAnswerOwnershipCategoryV3,[string,string]>={target_owned:["目标品牌自有","Target-owned"],competitor_owned:["竞争品牌自有","Competitor-owned"],third_party_editorial:["第三方编辑来源","Third-party editorial"],directory:["目录","Directory"],government:["政府","Government"],other:["其他","Other"],institution:["机构","Institution"],community:["社区","Community"],social:["社交平台","Social"],unknown:["未分类","Unknown"]};return labels[value][zh?0:1];}
 function retrievalStatusLabel(value:GenerativeSearchAnswerCardV3["sources"][number]["retrievalStatus"],zh:boolean){return zh?({verified_body:"正文已独立核验",search_source_only:"仅模型搜索来源",inaccessible:"当前无法访问"}[value]):({verified_body:"Body independently verified",search_source_only:"Model search source only",inaccessible:"Currently inaccessible"}[value]);}

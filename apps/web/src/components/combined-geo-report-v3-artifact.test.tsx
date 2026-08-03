@@ -90,6 +90,18 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).toContain("/api/reports/report/evidence/asset-1");
   });
 
+  it("renders the read-mode chrome: section TOC, folded detail sections, and expand controls",()=>{
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:combinedV3ArtifactFixture()}));
+    expect(html).toContain('class="artifact-toc"');
+    expect(html).toContain('href="#artifact-sec-executive"');
+    expect(html).toContain('href="#artifact-sec-appendix"');
+    expect(html.match(/<details class="fold" /g)).toHaveLength(4);
+    expect(html).toContain('data-fold="open"');
+    expect(html).toContain('data-fold="close"');
+    expect(html).toContain('class="artifact-to-top"');
+    expect(html).toContain('id="artifact-sec-executive"');
+  });
+
   it("uses GEO-only customer language and exposes no customer PDF surface or external-platform attribution",()=>{
     const visible=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:combinedV3ArtifactFixture()})).replace(/<[^>]+>/g," ");
     expect(visible).toContain("Open GEO generated answer");
