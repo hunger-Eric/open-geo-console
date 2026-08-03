@@ -4687,3 +4687,14 @@ allowlist; external actions remain zero; no deploy.
   expectation updated to the locale-formatted value. 17/17 artifact tests and
   15/15 related report tests passed; lint clean; the real Staging deep report
   (`c9acc3f9`) hero and appendix were screenshot-verified before and after.
+- Candidate `2be0677772ee034e99182cdaf4d75c2c3bdd65e4` was committed locally,
+  deployed as Vercel Preview
+  `https://open-geo-console-75i5zt9g9-itheheda-6857s-projects.vercel.app`, and
+  the fixed Protected Staging alias was reassigned to it. Anonymous smoke:
+  `/zh` -> SSO 302, `/api/scan` -> 401. Thin-overlay Staging free/deep Workers
+  were rebuilt as `open-geo-console:staging-2be0677-style-overlay-v1` (image id
+  `5cb3a2b3a929`, parent `staging-2dc9278-style-overlay-v1`) and recreated;
+  rollback image `open-geo-console:staging-2dc9278-style-overlay-v1`
+  (`d6a730bc9d35`) remains available. Post-deploy `docker system df`: Images
+  32.17GB (8.091GB reclaimable); drive free space C: 4.4GB, E: 53GB.
+  Production was untouched.
