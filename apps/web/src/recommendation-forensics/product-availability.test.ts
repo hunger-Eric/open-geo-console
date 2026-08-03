@@ -1,7 +1,7 @@
 import {describe,expect,it} from "vitest";
 import type {PublicSearchSurfaceAuthorityRow} from "@/db/schema";
 import {evaluateRecommendationProductAvailability} from "./product-availability";
-const environment={OGC_PUBLIC_SEARCH_RUNTIME_ENABLED:"true",OGC_DEPLOYMENT_PROFILE:"staging",OGC_PUBLIC_SEARCH_SURFACE_ID:"public-web",OGC_PUBLIC_SEARCH_SURFACE_VERSION:"2026-07",OGC_PUBLIC_SEARCH_LOCALE:"zh-CN",OGC_PUBLIC_SEARCH_REGION:"CN"};
+const environment={NODE_ENV:"test",OGC_PROVIDER_PROFILE:"mimo_native",OGC_PUBLIC_SEARCH_RUNTIME_ENABLED:"true",OGC_DEPLOYMENT_PROFILE:"staging",OGC_PUBLIC_SEARCH_SURFACE_ID:"public-web",OGC_PUBLIC_SEARCH_SURFACE_VERSION:"2026-07",OGC_PUBLIC_SEARCH_LOCALE:"zh-CN",OGC_PUBLIC_SEARCH_REGION:"CN"};
 const authority:PublicSearchSurfaceAuthorityRow={authorityVersion:"authority-v2",surfaceId:"public-web",surfaceVersion:"2026-07",environment:"staging",localeCapabilities:["zh-CN"],regionCapabilities:["CN"],termsReviewedAt:new Date("2030-01-01T00:00:00Z"),evidenceReferences:["review"],active:true,capturedAt:new Date("2030-01-02T00:00:00Z"),createdAt:new Date("2030-01-02T00:00:00Z")};
 describe("V2 recommendation product availability",()=>{
   it("cannot be opened by flags or historical V1 state without an exact V2 authority and registry",()=>{expect(evaluateRecommendationProductAvailability({environment:{...environment,OGC_PUBLIC_SEARCH_RUNTIME_ENABLED:"false",OGC_RECOMMENDATION_PUBLIC_ENABLED:"true"},authority,registryReady:true,builderAvailable:true,artifactGateAvailable:true})).toMatchObject({ready:false,code:"disabled"});expect(evaluateRecommendationProductAvailability({environment,authority:null,registryReady:true,builderAvailable:true,artifactGateAvailable:true})).toMatchObject({ready:false,code:"authority_unavailable"});});

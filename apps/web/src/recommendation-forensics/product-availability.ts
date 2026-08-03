@@ -15,7 +15,7 @@ export function evaluateRecommendationProductAvailability(input:{environment:Nod
 export async function getRecommendationProductAvailability(environment:NodeJS.ProcessEnv=process.env):Promise<RecommendationProductAvailability>{
   if(environment.OGC_PUBLIC_SEARCH_RUNTIME_ENABLED!=="true")return closed("disabled");
   const profile=environment.OGC_DEPLOYMENT_PROFILE; if(profile!=="staging"&&profile!=="production")return closed("environment");
-  const required=[environment.OGC_PUBLIC_SEARCH_ADAPTER,environment.OGC_PUBLIC_SEARCH_LOCALE,environment.OGC_PUBLIC_SEARCH_REGION]; if(required.some((value)=>!value?.trim()))return closed("runtime_incomplete");
+  const required=[environment.OGC_PROVIDER_PROFILE,environment.OGC_PUBLIC_SEARCH_LOCALE,environment.OGC_PUBLIC_SEARCH_REGION]; if(required.some((value)=>!value?.trim()))return closed("runtime_incomplete");
   try{
     const {resolveProductionPublicSearchRuntime}=await import("@/public-source-forensics/production-runtime");
     await resolveProductionPublicSearchRuntime({environment,getAuthority:(await import("@/db/public-search-authority")).getActivePublicSearchSurfaceAuthority});

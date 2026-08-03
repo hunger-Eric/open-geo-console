@@ -65,43 +65,16 @@ function Write-RuntimeEnv {
     if (-not $values.ContainsKey("COMMERCE_MODE")) { $values["COMMERCE_MODE"] = "disabled" }
   }
 
-  $providerNames = @("OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL", "OGC_AI_TIMEOUT_MS", "OGC_AI_JSON_RESPONSE_FORMAT")
+  $providerNames = @(
+    "OGC_PROVIDER_PROFILE", "OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL",
+    "OGC_AI_TIMEOUT_MS", "OGC_AI_JSON_RESPONSE_FORMAT", "OGC_REPORT_V4_MODEL_PROFILE_ID",
+    "OGC_REPORT_V4_MIMO_BASE_URL", "OGC_REPORT_V4_MIMO_API_KEY", "OGC_TOKEN_HASH_SECRET",
+    "OGC_PUBLIC_SEARCH_RUNTIME_ENABLED", "OGC_PUBLIC_SEARCH_ADAPTER", "OGC_PUBLIC_SEARCH_LOCALE",
+    "OGC_PUBLIC_SEARCH_REGION", "OGC_PUBLIC_SEARCH_AUTHORITY_VERSION", "OGC_PUBLIC_SEARCH_MIMO_BASE_URL",
+    "OGC_PUBLIC_SEARCH_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_MODEL",
+    "OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL", "OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY"
+  )
   Merge-EnvFile $values (Join-Path $webRoot ".env.local") -AllowedNames $providerNames -OnlyIfMissing
-  if ($Environment -eq "staging") {
-    $stagingV4Names = @(
-      "OGC_REPORT_V4_MODEL_PROFILE_ID",
-      "OGC_REPORT_V4_MIMO_BASE_URL",
-      "OGC_REPORT_V4_MIMO_API_KEY",
-      "OGC_TOKEN_HASH_SECRET"
-    )
-    Merge-EnvFile $values (Join-Path $webRoot ".env.local") -AllowedNames $stagingV4Names -OnlyIfMissing
-    if (-not $values.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -or [string]::IsNullOrWhiteSpace($values["OGC_REPORT_V4_MODEL_PROFILE_ID"])) {
-      $values["OGC_REPORT_V4_MODEL_PROFILE_ID"] = "report-v4-mimo-v2.5-pro-v1"
-    }
-    foreach ($binding in @{
-      "OGC_REPORT_V4_MIMO_BASE_URL" = "OGC_AI_BASE_URL"
-      "OGC_REPORT_V4_MIMO_API_KEY" = "OGC_AI_API_KEY"
-    }.GetEnumerator()) {
-      if ((-not $values.ContainsKey($binding.Key) -or [string]::IsNullOrWhiteSpace($values[$binding.Key])) -and
-          $values.ContainsKey($binding.Value) -and -not [string]::IsNullOrWhiteSpace($values[$binding.Value])) {
-        $values[$binding.Key] = $values[$binding.Value]
-      }
-    }
-  }
-  if ($Environment -eq "staging" -and $values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true" -and $values["OGC_PUBLIC_SEARCH_ADAPTER"] -eq "mimo") {
-    $publicSearchMiMoFallbacks = @{
-      "OGC_PUBLIC_SEARCH_MIMO_BASE_URL" = "OGC_AI_BASE_URL"
-      "OGC_PUBLIC_SEARCH_MIMO_API_KEY" = "OGC_AI_API_KEY"
-      "OGC_PUBLIC_SEARCH_MIMO_MODEL" = "OGC_AI_MODEL"
-    }
-    foreach ($target in $publicSearchMiMoFallbacks.Keys) {
-      $source = $publicSearchMiMoFallbacks[$target]
-      if ((-not $values.ContainsKey($target) -or [string]::IsNullOrWhiteSpace($values[$target])) -and
-          $values.ContainsKey($source) -and -not [string]::IsNullOrWhiteSpace($values[$source])) {
-        $values[$target] = $values[$source]
-      }
-    }
-  }
   $values["FULFILLMENT_MODE"] = "realtime"
   $values["OGC_JOB_QUEUE_PROVIDER"] = "postgres"
   $values["OGC_WORKER_POLL_MS"] = "5000"
@@ -109,19 +82,23 @@ function Write-RuntimeEnv {
   $values["OGC_DEPLOYMENT_VERSION"] = "docker-desktop-$Environment"
   $values["NODE_ENV"] = "production"
 
-  Require-Values $values @("DATABASE_URL", "OGC_DEPLOYMENT_PROFILE", "OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL") "$Environment Worker"
+  Require-Values $values @("DATABASE_URL", "OGC_DEPLOYMENT_PROFILE", "OGC_PROVIDER_PROFILE", "OGC_TOKEN_HASH_SECRET", "OGC_PUBLIC_SEARCH_RUNTIME_ENABLED", "OGC_PUBLIC_SEARCH_LOCALE", "OGC_PUBLIC_SEARCH_REGION") "$Environment Worker"
+  if ($values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -ne "true") { throw "$Environment Worker requires OGC_PUBLIC_SEARCH_RUNTIME_ENABLED=true." }
+  $profile = $values["OGC_PROVIDER_PROFILE"]
+  if ($profile -eq "mimo_native") {
+    Require-Values $values @("OGC_REPORT_V4_MIMO_BASE_URL", "OGC_REPORT_V4_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_BASE_URL", "OGC_PUBLIC_SEARCH_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_MODEL") "$Environment MiMo provider profile"
+    if ($values.ContainsKey("OGC_PUBLIC_SEARCH_ADAPTER") -and $values["OGC_PUBLIC_SEARCH_ADAPTER"] -ne "mimo") { throw "OGC_PUBLIC_SEARCH_ADAPTER conflicts with mimo_native." }
+    if ($values.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -and $values["OGC_REPORT_V4_MODEL_PROFILE_ID"] -ne "report-v4-mimo-v2.5-pro-v1") { throw "OGC_REPORT_V4_MODEL_PROFILE_ID conflicts with mimo_native." }
+  } elseif ($profile -eq "sensenova_anysearch") {
+    Require-Values $values @("OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL", "OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL", "OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY") "$Environment SenseNova and AnySearch provider profile"
+    if (($values.ContainsKey("OGC_REPORT_V4_MIMO_BASE_URL") -and -not [string]::IsNullOrWhiteSpace($values["OGC_REPORT_V4_MIMO_BASE_URL"])) -or ($values.ContainsKey("OGC_REPORT_V4_MIMO_API_KEY") -and -not [string]::IsNullOrWhiteSpace($values["OGC_REPORT_V4_MIMO_API_KEY"]))) { throw "Stale MiMo V4 routing values conflict with sensenova_anysearch." }
+    if ($values.ContainsKey("OGC_PUBLIC_SEARCH_ADAPTER") -and $values["OGC_PUBLIC_SEARCH_ADAPTER"] -ne "anysearch") { throw "OGC_PUBLIC_SEARCH_ADAPTER conflicts with sensenova_anysearch." }
+    if ($values.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -and $values["OGC_REPORT_V4_MODEL_PROFILE_ID"] -ne "report-v4-sensenova-deepseek-v4-flash-v1") { throw "OGC_REPORT_V4_MODEL_PROFILE_ID conflicts with sensenova_anysearch." }
+  } else {
+    throw "OGC_PROVIDER_PROFILE is unsupported: $profile"
+  }
   if ($Environment -eq "staging") {
-    Require-Values $values @("OGC_EVIDENCE_STORAGE", "BLOB_READ_WRITE_TOKEN", "OGC_REPORT_V4_MODEL_PROFILE_ID", "OGC_REPORT_V4_MIMO_BASE_URL", "OGC_REPORT_V4_MIMO_API_KEY", "OGC_TOKEN_HASH_SECRET") "Staging Worker"
-    if ($values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true") {
-      Require-Values $values @("OGC_PUBLIC_SEARCH_ADAPTER", "OGC_PUBLIC_SEARCH_LOCALE", "OGC_PUBLIC_SEARCH_REGION") "Staging public-search runtime"
-      if ($values["OGC_PUBLIC_SEARCH_ADAPTER"] -eq "mimo") {
-        Require-Values $values @("OGC_PUBLIC_SEARCH_MIMO_BASE_URL", "OGC_PUBLIC_SEARCH_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_MODEL") "Staging MiMo public-search runtime"
-      } elseif ($values["OGC_PUBLIC_SEARCH_ADAPTER"] -eq "anysearch") {
-        Require-Values $values @("OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL", "OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY") "Staging AnySearch public-search runtime"
-      } else {
-        throw "Staging public-search adapter is unsupported: $($values["OGC_PUBLIC_SEARCH_ADAPTER"])"
-      }
-    }
+    Require-Values $values @("OGC_EVIDENCE_STORAGE", "BLOB_READ_WRITE_TOKEN") "Staging Worker"
   }
   if ($Environment -eq "production") {
     if ($values["OGC_EVIDENCE_STORAGE"] -eq "vercel-blob") {
@@ -243,6 +220,21 @@ $commerceExcluded = @(
   "OGC_AI_JSON_RESPONSE_FORMAT",
   "OGC_AI_MODEL",
   "OGC_AI_TIMEOUT_MS",
+  "OGC_PROVIDER_PROFILE",
+  "OGC_REPORT_V4_MODEL_PROFILE_ID",
+  "OGC_REPORT_V4_MIMO_BASE_URL",
+  "OGC_REPORT_V4_MIMO_API_KEY",
+  "OGC_TOKEN_HASH_SECRET",
+  "OGC_PUBLIC_SEARCH_RUNTIME_ENABLED",
+  "OGC_PUBLIC_SEARCH_ADAPTER",
+  "OGC_PUBLIC_SEARCH_LOCALE",
+  "OGC_PUBLIC_SEARCH_REGION",
+  "OGC_PUBLIC_SEARCH_AUTHORITY_VERSION",
+  "OGC_PUBLIC_SEARCH_MIMO_BASE_URL",
+  "OGC_PUBLIC_SEARCH_MIMO_API_KEY",
+  "OGC_PUBLIC_SEARCH_MIMO_MODEL",
+  "OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL",
+  "OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY",
   "OGC_DEPLOYMENT_VERSION",
   "OGC_EVIDENCE_STORAGE",
   "OGC_JOB_QUEUE_PROVIDER",

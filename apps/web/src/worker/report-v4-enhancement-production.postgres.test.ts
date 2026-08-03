@@ -30,6 +30,7 @@ const suffix = randomUUID().replaceAll("-", "");
 const databaseName = `ogc_v4_enhancement_runner_${suffix}`;
 const testEnvironment = {
   NODE_ENV: "test",
+  OGC_PROVIDER_PROFILE: "mimo_native",
   OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_MIMO_V25_PRO_PROFILE_ID
 } as NodeJS.ProcessEnv;
 const lockedModelProfile = loadReportV4ModelRuntimeConfig(testEnvironment).modelProfile;

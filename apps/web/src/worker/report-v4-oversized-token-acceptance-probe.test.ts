@@ -135,6 +135,8 @@ describe("Report V4 oversized-token protected acceptance probe", () => {
 
 function modelRuntime() {
   return loadReportV4ModelRuntimeConfig({
+    NODE_ENV: "test",
+    OGC_PROVIDER_PROFILE: "mimo_native",
     OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_MIMO_V25_PRO_PROFILE_ID
   });
 }

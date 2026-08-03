@@ -283,3 +283,20 @@ authorize historical replay, payment, production mutation, or a second
 This superseding decision applies to prospective marker-bearing Foundation, Free, and Paid paths. The model uniformly owns review and acceptance of all natural-language semantics. Code owns only non-semantic boundaries: schema, cardinality, IDs, hashes, URLs, evidence ownership, checkpoints, state transitions, persistence, payment, and access. Word lists, regexes, character ratios, substring checks, code language gates, and local semantic fallbacks are not semantic authority and must not authorize or repair a new marker-bearing lineage.
 
 Earlier language-gate decisions remain legacy runtime history. They neither describe the confirmed target nor authorize work on a new marker-bearing path; implementation requires a separately approved active scope.
+
+## 2026-08-03: Worker provider routing has one canonical profile selector
+
+`OGC_PROVIDER_PROFILE` supersedes independent runtime selection by report model,
+V4 MiMo configuration or `OGC_PUBLIC_SEARCH_ADAPTER`. The initial complete
+profiles are `mimo_native` and `sensenova_anysearch`. Each binds general model
+transport, V4 structured operations, buyer answers, public retrieval, source
+diagnosis, GEO writing and exact active search authority as one immutable
+startup-resolved bundle.
+
+Legacy adapter/model-profile variables may remain for one migration release
+only as compatibility assertions. Missing, incomplete or conflicting profile
+data fails both Worker entry paths before presence, batch creation or job claim.
+There is no model-name inference, runtime capability probe, supplier fallback,
+historical replay or reinterpretation of an incompatible locked snapshot.
+Adapter-specific certification commands remain explicit evidence tools and do
+not select the Worker runtime.

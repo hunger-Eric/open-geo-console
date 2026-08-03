@@ -74,15 +74,19 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
       selectedFields: { providerStatus: "SUCCEEDED" }
     };
     const previousModelProfile = process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
+    const previousProviderProfile = process.env.OGC_PROVIDER_PROFILE;
     let paid: Awaited<ReturnType<typeof applyReportV4PaidPaymentEvent>>;
     let duplicate: Awaited<ReturnType<typeof applyReportV4PaidPaymentEvent>>;
     try {
       process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = "report-v4-mimo-v2.5-pro-v1";
+      process.env.OGC_PROVIDER_PROFILE = "mimo_native";
       paid = await applyReportV4PaidPaymentEvent(eventInput);
       duplicate = await applyReportV4PaidPaymentEvent(eventInput);
     } finally {
       if (previousModelProfile === undefined) delete process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
       else process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = previousModelProfile;
+      if (previousProviderProfile === undefined) delete process.env.OGC_PROVIDER_PROFILE;
+      else process.env.OGC_PROVIDER_PROFILE = previousProviderProfile;
     }
 
     expect(duplicate).toMatchObject({ duplicate: true, jobId: paid.jobId, dispatchId: paid.dispatchId, emailDeliveryId: paid.emailDeliveryId });
@@ -174,7 +178,9 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
         (SELECT fulfillment_status FROM payment_orders WHERE id=${order.id}) fulfillment_status,
         (SELECT fulfillment_job_id FROM payment_orders WHERE id=${order.id}) fulfillment_job_id`;
     const previous = process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
+    const previousProviderProfile = process.env.OGC_PROVIDER_PROFILE;
     try {
+      process.env.OGC_PROVIDER_PROFILE = "mimo_native";
       process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = "missing-profile";
       await expect(applyReportV4PaidPaymentEvent({
         provider: "airwallex", providerEventId: "event-v4-rollback", eventType: "payment_intent.succeeded",
@@ -184,6 +190,8 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
     } finally {
       if (previous === undefined) delete process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
       else process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = previous;
+      if (previousProviderProfile === undefined) delete process.env.OGC_PROVIDER_PROFILE;
+      else process.env.OGC_PROVIDER_PROFILE = previousProviderProfile;
     }
     const [after] = await getSqlClient()<Array<{ events: number; jobs: number; credits: number; outbox: number; emails: number; configs: number; payment_status: string; fulfillment_status: string; fulfillment_job_id: string | null }>>`
       SELECT
@@ -206,7 +214,9 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
       SELECT (SELECT count(*)::int FROM payment_events WHERE order_id=${order.id}) events,
              (SELECT count(*)::int FROM report_v4_config_snapshots WHERE report_id='report-main') configs`;
     const previous = process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
+    const previousProviderProfile = process.env.OGC_PROVIDER_PROFILE;
     try {
+      process.env.OGC_PROVIDER_PROFILE = "mimo_native";
       process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = "drifted-profile";
       await expect(applyReportV4PaidPaymentEvent({
         provider: "airwallex", providerEventId: "event-v4-main", eventType: "payment_intent.succeeded",
@@ -215,6 +225,8 @@ describeDisposablePostgres("V4 checkout and verified paid-event PostgreSQL bound
     } finally {
       if (previous === undefined) delete process.env.OGC_REPORT_V4_MODEL_PROFILE_ID;
       else process.env.OGC_REPORT_V4_MODEL_PROFILE_ID = previous;
+      if (previousProviderProfile === undefined) delete process.env.OGC_PROVIDER_PROFILE;
+      else process.env.OGC_PROVIDER_PROFILE = previousProviderProfile;
     }
     const [after] = await getSqlClient()<Array<{ events: number; configs: number }>>`
       SELECT (SELECT count(*)::int FROM payment_events WHERE order_id=${order.id}) events,

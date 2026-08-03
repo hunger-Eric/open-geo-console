@@ -391,6 +391,11 @@ describe("production V4 pre-admission composition", () => {
 
     expect(persistent).toContain("processScanJob(job, owner");
     expect(batch).toContain("processScanJob(job, workerId)");
+    expect(persistent).toContain("await prepareWorkerStartup({ ensureDatabase })");
+    expect(batch).toContain("await prepareWorkerStartup({ ensureDatabase })");
+    expect(persistent.indexOf("await prepareWorkerStartup")).toBeLessThan(persistent.indexOf("await presence.start"));
+    expect(batch.indexOf("await prepareWorkerStartup")).toBeLessThan(batch.indexOf("await presence.start"));
+    expect(batch.indexOf("await prepareWorkerStartup")).toBeLessThan(batch.indexOf("await runRecordedBatchDrain"));
     expect(persistent).not.toContain("createProductionReportV4AdmissionRunner");
     expect(batch).not.toContain("createProductionReportV4AdmissionRunner");
     expect(processor).toContain("createProductionReportV4AdmissionRunner");

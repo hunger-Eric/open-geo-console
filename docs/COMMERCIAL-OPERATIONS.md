@@ -19,7 +19,9 @@ Customer promise: a paid report is delivered by email within 24 hours of confirm
 | System | Variables |
 | --- | --- |
 | Neon | `DATABASE_URL`, `OGC_DATABASE_POOL_SIZE` |
-| Model provider | `OGC_AI_BASE_URL`, `OGC_AI_API_KEY`, `OGC_AI_MODEL` |
+| Worker provider route | `OGC_PROVIDER_PROFILE` (`mimo_native` or `sensenova_anysearch`) |
+| MiMo profile data | `OGC_REPORT_V4_MIMO_BASE_URL`, `OGC_REPORT_V4_MIMO_API_KEY`, `OGC_PUBLIC_SEARCH_MIMO_BASE_URL`, `OGC_PUBLIC_SEARCH_MIMO_API_KEY`, `OGC_PUBLIC_SEARCH_MIMO_MODEL` |
+| SenseNova + AnySearch profile data | `OGC_AI_BASE_URL`, `OGC_AI_API_KEY`, `OGC_AI_MODEL`, `OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL`, `OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY` |
 | Application HMAC | `OGC_TOKEN_HASH_SECRET`, `OGC_IP_HASH_SECRET`, `OGC_PAYMENT_IDEMPOTENCY_SECRET` |
 | Customer email protection | `OGC_EMAIL_ENCRYPTION_SECRET`, `OGC_EMAIL_LOOKUP_SECRET` |
 | Cloudflare Turnstile | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `TURNSTILE_EXPECTED_HOSTNAME` |

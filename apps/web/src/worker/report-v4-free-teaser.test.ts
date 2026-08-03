@@ -40,6 +40,25 @@ vi.mock("@/report-v4/mimo-provider", () => ({
 vi.mock("@/report-v4/model-runtime-config", () => ({
   loadReportV4ModelRuntimeConfig: () => ({ modelProfile: { operations: { sourceDiagnosis: { model: "fixture-model" } } } })
 }));
+vi.mock("@/provider-profile/runtime", () => ({
+  getPreparedProviderProfileRuntime: () => ({
+    profileId: "mimo_native",
+    modelRuntime: { modelProfile: { operations: { sourceDiagnosis: { model: "fixture-model" }, websiteSynthesis: { model: "fixture-model" } } } },
+    publicSearchRuntime: {
+      authority: {
+        authorityId: "authority-1",
+        surface: { surfaceId: "surface-1", surfaceVersion: "surface-v1", locale: "en-US", region: "US" }
+      },
+      adapter: { id: "adapter-1" }
+    },
+    createQuestionAnswerProvider: () => ({
+      providerId: "fixture-provider", model: "fixture-model", searchMode: "native_web_search",
+      answerWithSources: mocks.answerWithSources
+    }),
+    createStructuredInvoker: () => ({ invoke: mocks.structuredInvoke }),
+    createDiagnosisProvider: vi.fn()
+  })
+}));
 vi.mock("./report-v4-diagnosis-enhancer", () => ({
   enhanceReportV4QuestionDiagnosis: vi.fn(),
   formatReportV4DiagnosisFailure: vi.fn()

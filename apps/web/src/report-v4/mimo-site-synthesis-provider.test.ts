@@ -7,6 +7,8 @@ import {
 } from "./mimo-site-synthesis-provider";
 
 const env = () => ({
+  NODE_ENV: "test",
+  OGC_PROVIDER_PROFILE: "mimo_native",
   OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
   OGC_REPORT_V4_MIMO_API_KEY: "secret",
   OGC_REPORT_V4_MODEL_PROFILE_ID: "report-v4-mimo-v2.5-pro-v1"

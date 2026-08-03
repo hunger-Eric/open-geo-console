@@ -118,6 +118,22 @@ describe("V4 model profile runtime registry", () => {
     })).toThrow(/sourceDiagnosis.*structuredOutput|required/i);
   });
 
+  it("admits externally grounded question answers when the profile and adapter both declare no native search", () => {
+    const external = profile();
+    external.operations.questionAnswer.nativeWebSearch = false;
+    const capability = providerCapability();
+    capability.operations[2]!.nativeWebSearch = false;
+    const registry = createModelProfileRegistry({
+      profiles: [external],
+      providers: createModelProviderCapabilityRegistry([capability]),
+      estimators: estimatorRegistry()
+    });
+    expect(registry.load("fixture-profile").operations.questionAnswer).toMatchObject({
+      nativeWebSearch: false,
+      structuredOutput: true
+    });
+  });
+
   it("rejects secret-like and unknown provider capability fields", () => {
     expect(() => createModelProviderCapabilityRegistry([{
       ...providerCapability(),

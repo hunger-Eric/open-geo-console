@@ -172,7 +172,9 @@ describe("exact-commit staging-only Worker launcher", () => {
   });
 
   it("fails closed on live public-search quality or malformed probe evidence before runtime mutation", () => {
-    expect(source).toMatch(/probe-public-search\.ts --adapter mimo --locale zh-CN --region CN/u);
+    expect(source).toMatch(/probe-public-search\.ts --adapter \$probeAdapter --locale zh-CN --region CN/u);
+    expect(source).toMatch(/mimo_native[\s\S]*\$probeAdapter = "mimo"/u);
+    expect(source).toMatch(/sensenova_anysearch[\s\S]*\$probeAdapter = "anysearch"/u);
     expect(source).toMatch(/Assert-LastExitCode "The protected-Staging public-search quality probe failed\."/u);
     expect(source).toMatch(/ConvertFrom-Json[\s\S]*malformed evidence/u);
     expect(source).toMatch(/qualityCases\.Count -ne 3[\s\S]*failedQualityCases\.Count -gt 0/u);
@@ -181,28 +183,30 @@ describe("exact-commit staging-only Worker launcher", () => {
     }
   });
 
-  it("requires the merged staging env, the three dedicated V4 variables, and the commercial token secret", () => {
+  it("requires the merged staging env, canonical profile, selected provider data, and commercial token secret", () => {
     expect(source).toContain(".data\\workstation-docker\\staging.env");
     for (const name of [
-      "OGC_REPORT_V4_MODEL_PROFILE_ID",
+      "OGC_PROVIDER_PROFILE",
       "OGC_REPORT_V4_MIMO_BASE_URL",
       "OGC_REPORT_V4_MIMO_API_KEY",
+      "OGC_AI_BASE_URL",
+      "OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY",
       "OGC_TOKEN_HASH_SECRET"
     ]) expect(source).toContain(name);
   });
 
-  it("copies the commercial token secret into Staging without adding it to the production fallback", () => {
-    expect(workstationLauncherSource).toMatch(/if \(\$Environment -eq "staging"\)[\s\S]*OGC_TOKEN_HASH_SECRET/u);
-    expect(workstationLauncherSource).toMatch(/Require-Values \$values[\s\S]*OGC_TOKEN_HASH_SECRET[\s\S]*Staging Worker/u);
-    expect(workstationLauncherSource).not.toMatch(/\$providerNames\s*=\s*@\([^\n]*OGC_TOKEN_HASH_SECRET/u);
+  it("carries the commercial token secret only to Workers and excludes it from commerce", () => {
+    expect(workstationLauncherSource).toContain('"OGC_TOKEN_HASH_SECRET"');
+    expect(workstationLauncherSource).toMatch(/Require-Values \$values[\s\S]*OGC_TOKEN_HASH_SECRET/u);
+    expect(workstationLauncherSource).toMatch(/\$commerceExcluded = @\([\s\S]*OGC_TOKEN_HASH_SECRET/u);
   });
 
-  it("materializes the locked V4 profile and dedicated MiMo bindings only inside the Staging environment branch", () => {
-    expect(workstationLauncherSource).toMatch(/if \(\$Environment -eq "staging"\)[\s\S]*report-v4-mimo-v2\.5-pro-v1/u);
-    expect(workstationLauncherSource).toMatch(/OGC_REPORT_V4_MIMO_BASE_URL"\s*=\s*"OGC_AI_BASE_URL/u);
-    expect(workstationLauncherSource).toMatch(/OGC_REPORT_V4_MIMO_API_KEY"\s*=\s*"OGC_AI_API_KEY/u);
-    expect(workstationLauncherSource).toMatch(/Require-Values \$values[\s\S]*OGC_REPORT_V4_MODEL_PROFILE_ID[\s\S]*OGC_REPORT_V4_MIMO_BASE_URL[\s\S]*OGC_REPORT_V4_MIMO_API_KEY[\s\S]*Staging Worker/u);
-    expect(workstationLauncherSource).not.toMatch(/\$providerNames\s*=\s*@\([^\n]*OGC_REPORT_V4_/u);
+  it("validates both complete profiles without launcher-derived routing defaults", () => {
+    expect(workstationLauncherSource).toMatch(/\$profile -eq "mimo_native"[\s\S]*OGC_REPORT_V4_MIMO_BASE_URL[\s\S]*OGC_PUBLIC_SEARCH_MIMO_MODEL/u);
+    expect(workstationLauncherSource).toMatch(/\$profile -eq "sensenova_anysearch"[\s\S]*OGC_AI_BASE_URL[\s\S]*OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY/u);
+    expect(workstationLauncherSource).toContain("Stale MiMo V4 routing values conflict with sensenova_anysearch");
+    expect(workstationLauncherSource).not.toMatch(/OGC_REPORT_V4_MODEL_PROFILE_ID"\]\s*=\s*"report-v4/u);
+    expect(workstationLauncherSource).not.toMatch(/OGC_REPORT_V4_MIMO_BASE_URL"\s*=\s*"OGC_AI_BASE_URL/u);
   });
 
   it("recreates only the two staging lanes and never delegates to broad workstation or deployment commands", () => {
@@ -211,19 +215,6 @@ describe("exact-commit staging-only Worker launcher", () => {
     expect(source).not.toMatch(/production-worker|production-commerce|start-workstation-workers|vercel\s+(deploy|alias)|db:migrate|ensureDatabase/iu);
   });
 
-  it("materializes the locked V4 profile and dedicated MiMo bindings only inside the Staging environment branch", () => {
-    const workstationLauncherSource = readFileSync(fileURLToPath(new URL("../../../../scripts/start-workstation-workers.ps1", import.meta.url)), "utf8");
-    const v4Start = workstationLauncherSource.indexOf('if ($Environment -eq "staging") {', workstationLauncherSource.indexOf('$providerNames'));
-    const publicSearchStart = workstationLauncherSource.indexOf('if ($Environment -eq "staging" -and $values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true") {');
-    expect(v4Start).toBeGreaterThan(workstationLauncherSource.indexOf('$providerNames'));
-    expect(publicSearchStart).toBeGreaterThan(v4Start);
-    const v4Block = workstationLauncherSource.slice(v4Start, publicSearchStart);
-    expect(v4Block).toContain('report-v4-mimo-v2.5-pro-v1');
-    expect(v4Block).toContain('"OGC_REPORT_V4_MIMO_BASE_URL" = "OGC_AI_BASE_URL"');
-    expect(v4Block).toContain('"OGC_REPORT_V4_MIMO_API_KEY" = "OGC_AI_API_KEY"');
-    expect(v4Block).toContain('OGC_TOKEN_HASH_SECRET');
-    expect(v4Block).not.toContain('OGC_PUBLIC_SEARCH_');
-  });
   it("verifies both containers against the exact image ID, revision label, and staging markers", () => {
     expect(source).toMatch(/docker image inspect/u);
     expect(source).toMatch(/docker inspect/u);

@@ -85,6 +85,9 @@ export interface ReportV4MimoStructuredInvoker {
   invoke(input: ReportV4MimoStructuredInvokeInput): Promise<unknown>;
 }
 
+export type ReportV4StructuredInvokeInput = ReportV4MimoStructuredInvokeInput;
+export type ReportV4StructuredInvoker = ReportV4MimoStructuredInvoker;
+
 export interface ProviderDependencies {
   readonly environment: NodeJS.ProcessEnv;
   readonly fetch?: typeof globalThis.fetch;
@@ -211,15 +214,22 @@ export function createReportV4MimoQuestionAnswerProvider(
 export function createReportV4MimoDiagnosisProvider(
   dependencies: ProviderDependencies
 ): ReportV4DiagnosisProvider {
-  const context = createProviderContext(dependencies);
+  const invoker = createReportV4MimoStructuredInvoker(dependencies);
+  return createReportV4DiagnosisProvider(invoker, mapDiagnosisError);
+}
+
+export function createReportV4DiagnosisProvider(
+  invoker: ReportV4StructuredInvoker,
+  mapError: (error: unknown) => unknown = (error) => error
+): ReportV4DiagnosisProvider {
   return Object.freeze({
     async generate(request: ReportV4DiagnosisProviderRequest): Promise<unknown> {
       request.signal.throwIfAborted();
       try {
-        return (await context.invokeOnce(diagnosisInvocation(request))).value;
+        return await invoker.invoke(buildReportV4DiagnosisInvocation(request));
       } catch (error) {
         propagateAbort(request.signal);
-        throw mapDiagnosisError(error);
+        throw mapError(error);
       }
     }
   });
@@ -236,7 +246,7 @@ export function buildReportV4MimoDiagnosisTokenBudget(
   value: ReportV4MimoDiagnosisTokenBudgetInput
 ): ModelTokenBudgetInput {
   const runtime = requireApprovedLockedRuntime(value.runtime);
-  return buildInvocationTokenBudget(runtime, diagnosisInvocation(value.request));
+  return buildInvocationTokenBudget(runtime, buildReportV4DiagnosisInvocation(value.request));
 }
 
 function createProviderContext(dependencies: ProviderDependencies): ProviderContext {
@@ -359,6 +369,13 @@ function buildInvocationTokenBudget(
 export function buildReportV4MimoStructuredTokenBudget(
   runtime: ReportV4ModelRuntimeConfig,
   input: Pick<ReportV4MimoStructuredInvokeInput, "operation" | "systemText" | "inputText">
+): ModelTokenBudgetInput {
+  return buildReportV4StructuredTokenBudget(runtime, input);
+}
+
+export function buildReportV4StructuredTokenBudget(
+  runtime: ReportV4ModelRuntimeConfig,
+  input: Pick<ReportV4StructuredInvokeInput, "operation" | "systemText" | "inputText">
 ): ModelTokenBudgetInput {
   return buildInvocationTokenBudget(requireApprovedLockedRuntime(runtime), input);
 }
@@ -556,7 +573,7 @@ function questionInvocation(input: ReportV4QuestionProviderInput): ReportV4MimoS
   });
 }
 
-function diagnosisInvocation(request: ReportV4DiagnosisProviderRequest): ReportV4MimoStructuredInvokeInput {
+export function buildReportV4DiagnosisInvocation(request: ReportV4DiagnosisProviderRequest): ReportV4StructuredInvokeInput {
   const inputText = diagnosisInputText(request);
   if (inputText.length > MAX_DIAGNOSIS_INPUT_LENGTH) {
     throw new ReportV4MimoProviderError("configuration", "The V4 diagnosis input exceeds its retained bound.");

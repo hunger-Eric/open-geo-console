@@ -1000,6 +1000,8 @@ function randomInvalidEnvelope(random: () => number, index: number): unknown {
 
 function environment(): NodeJS.ProcessEnv {
   return {
+    NODE_ENV: "test",
+    OGC_PROVIDER_PROFILE: "mimo_native",
     OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
     OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
     OGC_REPORT_V4_MIMO_API_KEY: "v4-secret"
@@ -1016,6 +1018,8 @@ function tokenPlanEnvironment(): NodeJS.ProcessEnv {
 
 function providerEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
+    NODE_ENV: "test",
+    OGC_PROVIDER_PROFILE: "mimo_native",
     OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
     OGC_REPORT_V4_MIMO_API_KEY: "v4-secret",
     ...overrides

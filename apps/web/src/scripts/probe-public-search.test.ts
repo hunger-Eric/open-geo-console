@@ -11,7 +11,7 @@ describe("public-search executable readiness probe", () => {
   it("accepts only three passing quality cases with complete failure semantics", async () => {
     expect(() => parsePublicSearchProbeCommand(
       ["--adapter", "caller-module", "--locale", "zh-CN", "--region", "CN"]
-    )).toThrow(/mimo/i);
+    )).toThrow(/approved|MiMo|AnySearch/i);
     const runProbe = vi.fn(async () => summary());
     const result = await runPublicSearchProbeCommand(
       ["--adapter", "mimo", "--locale", "zh-CN", "--region", "CN"],
@@ -20,6 +20,16 @@ describe("public-search executable readiness probe", () => {
 
     expect(() => assertPublicSearchProbeReadiness(result)).not.toThrow();
     expect(runProbe).toHaveBeenCalledWith(expect.objectContaining({locale: "zh-CN", region: "CN"}));
+  });
+
+  it("dispatches the explicit AnySearch adapter without inferring from credentials", async () => {
+    const runProbe = vi.fn(async () => ({ ...summary(), adapterId: "anysearch" as const }));
+    const result = await runPublicSearchProbeCommand(
+      ["--adapter", "anysearch", "--locale", "zh-CN", "--region", "CN"],
+      { environment: { NODE_ENV: "test", OGC_PUBLIC_SEARCH_MIMO_API_KEY: "irrelevant" }, runProbe }
+    );
+    expect(result.adapterId).toBe("anysearch");
+    expect(runProbe).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ locale: "zh-CN", region: "CN" }));
   });
 
   it("fails closed when a quality case times out or a case is missing", () => {

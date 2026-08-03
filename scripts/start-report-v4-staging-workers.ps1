@@ -7,11 +7,12 @@ $runtimeEnv = Join-Path $repoRoot ".data\workstation-docker\staging.env"
 $composeOverride = Join-Path ([System.IO.Path]::GetTempPath()) "ogc-report-v4-staging-$PID.compose.yaml"
 $allowedUntrackedAssetsEntry = "?? assets/"
 $allowedProtectedPlanEntry = "?? docs/superpowers/plans/2026-07-15-v3-paid-acceptance-remediation.md"
-$requiredV4Names = @(
-  "OGC_REPORT_V4_MODEL_PROFILE_ID",
-  "OGC_REPORT_V4_MIMO_BASE_URL",
-  "OGC_REPORT_V4_MIMO_API_KEY",
-  "OGC_TOKEN_HASH_SECRET"
+$requiredProviderNames = @(
+  "OGC_PROVIDER_PROFILE",
+  "OGC_TOKEN_HASH_SECRET",
+  "OGC_PUBLIC_SEARCH_RUNTIME_ENABLED",
+  "OGC_PUBLIC_SEARCH_LOCALE",
+  "OGC_PUBLIC_SEARCH_REGION"
 )
 
 function Assert-LastExitCode {
@@ -140,6 +141,8 @@ $previousImage = $env:OGC_APP_IMAGE
 $originalRuntimeEnvBytes = $null
 $runtimeEnvChanged = $false
 $launchVerified = $false
+$requiredRuntimeNames = @()
+$probeAdapter = $null
 try {
   Assert-ExactSourceWorktree $repoRoot
 
@@ -153,12 +156,28 @@ try {
     "OGC_DEPLOYMENT_PROFILE",
     "VERCEL_ENV",
     "COMMERCE_MODE"
-  ) + $requiredV4Names)
+  ) + $requiredProviderNames)
   if ($runtime["OGC_DEPLOYMENT_PROFILE"] -ne "staging" -or
       $runtime["VERCEL_ENV"] -ne "preview" -or
       $runtime["COMMERCE_MODE"] -ne "test") {
     throw "The merged Worker environment is not an exact protected-Staging runtime."
   }
+  if ($runtime["OGC_PROVIDER_PROFILE"] -eq "mimo_native") {
+    $requiredRuntimeNames = $requiredProviderNames + @("OGC_REPORT_V4_MIMO_BASE_URL", "OGC_REPORT_V4_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_BASE_URL", "OGC_PUBLIC_SEARCH_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_MODEL")
+    $probeAdapter = "mimo"
+    if ($runtime.ContainsKey("OGC_PUBLIC_SEARCH_ADAPTER") -and $runtime["OGC_PUBLIC_SEARCH_ADAPTER"] -ne "mimo") { throw "OGC_PUBLIC_SEARCH_ADAPTER conflicts with mimo_native." }
+    if ($runtime.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -and $runtime["OGC_REPORT_V4_MODEL_PROFILE_ID"] -ne "report-v4-mimo-v2.5-pro-v1") { throw "OGC_REPORT_V4_MODEL_PROFILE_ID conflicts with mimo_native." }
+  } elseif ($runtime["OGC_PROVIDER_PROFILE"] -eq "sensenova_anysearch") {
+    $requiredRuntimeNames = $requiredProviderNames + @("OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL", "OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL", "OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY")
+    $probeAdapter = "anysearch"
+    if (($runtime.ContainsKey("OGC_REPORT_V4_MIMO_BASE_URL") -and -not [string]::IsNullOrWhiteSpace($runtime["OGC_REPORT_V4_MIMO_BASE_URL"])) -or ($runtime.ContainsKey("OGC_REPORT_V4_MIMO_API_KEY") -and -not [string]::IsNullOrWhiteSpace($runtime["OGC_REPORT_V4_MIMO_API_KEY"]))) { throw "Stale MiMo V4 routing values conflict with sensenova_anysearch." }
+    if ($runtime.ContainsKey("OGC_PUBLIC_SEARCH_ADAPTER") -and $runtime["OGC_PUBLIC_SEARCH_ADAPTER"] -ne "anysearch") { throw "OGC_PUBLIC_SEARCH_ADAPTER conflicts with sensenova_anysearch." }
+    if ($runtime.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -and $runtime["OGC_REPORT_V4_MODEL_PROFILE_ID"] -ne "report-v4-sensenova-deepseek-v4-flash-v1") { throw "OGC_REPORT_V4_MODEL_PROFILE_ID conflicts with sensenova_anysearch." }
+  } else {
+    throw "OGC_PROVIDER_PROFILE is unsupported."
+  }
+  Require-NonblankValues $runtime $requiredRuntimeNames
+  if ($runtime["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -ne "true") { throw "Protected Staging requires OGC_PUBLIC_SEARCH_RUNTIME_ENABLED=true." }
   $originalRuntimeEnvBytes = [System.IO.File]::ReadAllBytes($runtimeEnv)
 
   Push-Location (Join-Path $repoRoot "apps\web")
@@ -169,7 +188,7 @@ try {
     $currentSchemaVersion = [int]$preflight.currentSchemaVersion
     if ($currentSchemaVersion -lt 34) { throw "The Report V4 preflight returned an invalid current schema version." }
 
-    $probeOutput = (& node "--env-file=$runtimeEnv" --import tsx src/scripts/probe-public-search.ts --adapter mimo --locale zh-CN --region CN | Out-String).Trim()
+    $probeOutput = (& node "--env-file=$runtimeEnv" --import tsx src/scripts/probe-public-search.ts --adapter $probeAdapter --locale zh-CN --region CN | Out-String).Trim()
     Assert-LastExitCode "The protected-Staging public-search quality probe failed."
     try { $probe = $probeOutput | ConvertFrom-Json }
     catch { throw "The protected-Staging public-search quality probe returned malformed evidence." }
@@ -227,11 +246,12 @@ try {
     $containerInspection = Wait-WorkerReadiness $containerId $expectedTier
     if ([string]$containerInspection.Image -ne $expectedImageId) { throw "A staging Worker container does not use the exact built image ID." }
     $containerEnvironment = Read-ContainerEnvironment $containerId
-    Require-NonblankValues $containerEnvironment $requiredV4Names
+    Require-NonblankValues $containerEnvironment $requiredRuntimeNames
     if ($containerEnvironment["OGC_DEPLOYMENT_PROFILE"] -ne "staging" -or
         $containerEnvironment["VERCEL_ENV"] -ne "preview" -or
         $containerEnvironment["COMMERCE_MODE"] -ne "test" -or
         $containerEnvironment["OGC_WORKER_TIER"] -ne $expectedTier -or
+        $containerEnvironment["OGC_PROVIDER_PROFILE"] -ne $runtime["OGC_PROVIDER_PROFILE"] -or
         $containerEnvironment["OGC_DEPLOYMENT_VERSION"] -ne $revision) {
       throw "A staging Worker container does not match the exact revision or protected-Staging markers."
     }

@@ -64,7 +64,7 @@
 - `npm run browser:install` installs Chromium for JavaScript-rendered page fallback.
 - `npm run db:audit` fails when a terminal commercial job still has a reserved credit.
 - `npm run worker:staging:free|deep` and `npm run commerce:staging:all` require `apps/web/.env.staging.local` and refuse a non-staging database marker.
-- `npm run public-search:probe -- --adapter mimo --locale zh-CN --region CN` reads `.data/workstation-docker/staging.env`, the merged runtime environment used by the staging Docker Workers. Do not point it back at source env files with empty Sensitive-value placeholders or diagnose MiMo as missing from those placeholders alone.
+- `npm run public-search:probe -- --adapter <mimo|anysearch> --locale zh-CN --region CN` reads `.data/workstation-docker/staging.env`, the merged runtime environment used by the staging Docker Workers. Use `mimo` for `OGC_PROVIDER_PROFILE=mimo_native` and `anysearch` for `sensenova_anysearch`; do not point it back at source env files with empty Sensitive-value placeholders or diagnose a provider as missing from those placeholders alone.
 - `npm run test:postgres:disposable` is the canonical local and CI entry for isolated PostgreSQL plus semantic-contract verification. It must use a loopback non-5432 port, tmpfs at `/var/lib/postgresql/data`, persist JSON/exit/receipt evidence before cleanup, and fail on any selected-test skip. Do not substitute a shared, Staging, Production, or manually reconstructed database URL.
 - `npm run staging:free:cleanup -- --confirm` is the only quota/reuse cleanup path and refuses production.
 - `npm run lint` checks the Next.js workspace.

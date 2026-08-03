@@ -43,8 +43,7 @@ import { createReportV4ProductionJobRepository } from "../db/report-v4-productio
 import { resolvePaidReportV4SiteSnapshot } from "../db/report-v4-site-snapshots";
 import { createProductionReportV4AcceptanceSiteReadManifestRepository } from "../db/report-v4-site-read-manifest";
 import {
-  buildReportV4MimoDiagnosisTokenBudget,
-  createReportV4MimoDiagnosisProvider
+  buildReportV4MimoDiagnosisTokenBudget
 } from "../report-v4/mimo-provider";
 import {
   resolveReportV4LockedModelRuntime,
@@ -55,6 +54,7 @@ import {
   type ReportV4ReportRuntimeConfig
 } from "../report-v4/report-runtime-config";
 import { renderReportV4Html } from "../report/report-v4-html";
+import { getPreparedProviderProfileRuntime } from "../provider-profile/runtime";
 import {
   enhanceReportV4QuestionDiagnosis,
   ReportV4DiagnosisProviderError,
@@ -201,6 +201,7 @@ export function createReportV4EnhancementProductionWithDependencies(
 function liveDependencies(
   options: ReportV4EnhancementProductionOptions
 ): Omit<ReportV4EnhancementProductionDependencies, "loadClaimedContext"> {
+  const providerRuntime = getPreparedProviderProfileRuntime();
   const configSnapshots = createReportV4ConfigSnapshotRepository();
   const revisions = createPostgresReportV4ArtifactRevisionExecutor();
   const artifacts = createPostgresReportV4ArtifactPersistenceStore();
@@ -234,6 +235,7 @@ function liveDependencies(
       const modelRuntime = resolveReportV4LockedModelRuntime(configSnapshot.modelProfile);
       const reportRuntime = loadReportV4ReportRuntimeConfig(context.lineage.locale);
       if (modelRuntime.modelProfile.profileId !== configSnapshot.modelProfileId
+        || modelRuntime !== providerRuntime.modelRuntime
         || hashStable(modelRuntime.modelProfile) !== configSnapshot.modelProfileHash
         || reportRuntime.reportProfile.profileId !== configSnapshot.reportProfileId
         || hashStable(reportRuntime.reportProfile) !== configSnapshot.reportProfileHash
@@ -343,12 +345,7 @@ function createLiveStageDependencies(input: {
                 })
               }),
               repository: input.diagnosisCheckpoints,
-              provider: createReportV4MimoDiagnosisProvider({
-                environment: input.options.environment,
-                lockedRuntime: execution.modelRuntime,
-                ...(input.options.fetch ? { fetch: input.options.fetch } : {}),
-                ...(input.options.now ? { now: input.options.now } : {})
-              }),
+              provider: getPreparedProviderProfileRuntime().createDiagnosisProvider(execution.modelRuntime),
               acceptanceRuntime: input.acceptanceRuntime ?? null,
               signal: request.signal
             });

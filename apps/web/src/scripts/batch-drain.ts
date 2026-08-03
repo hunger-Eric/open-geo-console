@@ -11,6 +11,7 @@ import { positiveInteger, parseWorkerTier } from "@/worker/config";
 import { runRecordedBatchDrain } from "@/worker/drain-batch";
 import { WorkerPresenceReporter } from "@/worker/presence";
 import { processScanJob } from "@/worker/processor";
+import { prepareWorkerStartup } from "@/worker/report-v4-startup-readiness";
 
 const tier = parseWorkerTier(process.argv[2]);
 const replicas = positiveInteger(
@@ -27,7 +28,7 @@ const presence = new WorkerPresenceReporter({ heartbeatWorkerPresence, removeWor
   onError: () => process.stderr.write("Worker presence heartbeat failed.\n")
 });
 
-await ensureDatabase();
+await prepareWorkerStartup({ ensureDatabase });
 await presence.start();
 try {
   const result = await runRecordedBatchDrain({

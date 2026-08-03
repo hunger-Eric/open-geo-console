@@ -9,12 +9,16 @@ import {
   type ResolvedModelProfile
 } from "@open-geo-console/ai-report-engine";
 import profilePayload from "../../../../config/model-profiles/report-v4-mimo-v2.5-pro.json";
+import sensenovaProfilePayload from "../../../../config/model-profiles/report-v4-sensenova-deepseek-v4-flash-v1.json";
 
 export const REPORT_V4_MIMO_V25_PRO_PROFILE_ID = "report-v4-mimo-v2.5-pro-v1" as const;
+export const REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID = "report-v4-sensenova-deepseek-v4-flash-v1" as const;
 
 export const REPORT_V4_MODEL_PROFILE_IDS = Object.freeze([
-  REPORT_V4_MIMO_V25_PRO_PROFILE_ID
+  REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
+  REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID
 ] as const);
+export type ReportV4ModelProfileId = (typeof REPORT_V4_MODEL_PROFILE_IDS)[number];
 
 export interface ReportV4ModelCapabilityEvidence {
   readonly capability:
@@ -60,6 +64,8 @@ export const REPORT_V4_MODEL_CAPABILITY_EVIDENCE: readonly ReportV4ModelCapabili
 // version moves with the calibration.
 const TOKENIZER_ID = "mimo-v2.5-pro-utf8-conservative-v1";
 const ESTIMATOR_ID = "mimo-v2.5-pro-calibrated-conservative-v2";
+const SENSENOVA_TOKENIZER_ID = "deepseek-v4-flash-utf8-conservative-v1";
+const SENSENOVA_ESTIMATOR_ID = "deepseek-v4-flash-utf8-conservative-v1";
 
 const tokenEstimators = createModelTokenEstimatorRegistry([{
   estimatorId: ESTIMATOR_ID,
@@ -78,6 +84,10 @@ const tokenEstimators = createModelTokenEstimatorRegistry([{
     }
     return Math.ceil(ascii / 4) + nonAscii;
   }
+}, {
+  estimatorId: SENSENOVA_ESTIMATOR_ID,
+  tokenizer: SENSENOVA_TOKENIZER_ID,
+  estimateTokens: conservativeUtf8Estimate
 }]);
 
 const providerCapabilities = createModelProviderCapabilityRegistry([{
@@ -89,11 +99,21 @@ const providerCapabilities = createModelProviderCapabilityRegistry([{
     operationCapability("questionAnswer", "openai-chat-completions-web-search-structured-output", true),
     operationCapability("sourceDiagnosis", "openai-chat-completions-structured-output", false)
   ]
+}, {
+  provider: "sensenova",
+  adapterId: "sensenova-openai-compatible-json-v1",
+  operations: [
+    operationCapability("pageAnalysis", "openai-chat-completions-structured-output", false),
+    operationCapability("websiteSynthesis", "openai-chat-completions-structured-output", false),
+    operationCapability("questionAnswer", "external-search-grounded-structured-output", false),
+    operationCapability("sourceDiagnosis", "openai-chat-completions-structured-output", false)
+  ]
 }]);
 
 const modelProfile = parseModelProfile(profilePayload);
+const sensenovaModelProfile = parseModelProfile(sensenovaProfilePayload);
 const profileRegistry = createModelProfileRegistry({
-  profiles: [modelProfile],
+  profiles: [modelProfile, sensenovaModelProfile],
   providers: providerCapabilities,
   estimators: tokenEstimators
 });
@@ -102,6 +122,7 @@ const profileRegistry = createModelProfileRegistry({
 // any report is admitted. The snapshot-safe profile remains the strict public
 // ModelProfile shape; endpoint and estimator resolution are admission checks.
 const resolvedProfile = profileRegistry.load(REPORT_V4_MIMO_V25_PRO_PROFILE_ID);
+const sensenovaResolvedProfile = profileRegistry.load(REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID);
 
 const runtime = Object.freeze({
   modelProfile,
@@ -109,23 +130,28 @@ const runtime = Object.freeze({
   tokenEstimator: tokenEstimators.resolve(TOKENIZER_ID),
   tokenEstimators
 });
+const sensenovaRuntime = Object.freeze({
+  modelProfile: sensenovaModelProfile,
+  resolvedProfile: sensenovaResolvedProfile,
+  tokenEstimator: tokenEstimators.resolve(SENSENOVA_TOKENIZER_ID),
+  tokenEstimators
+});
 
-const APPROVED_RUNTIMES: Readonly<Record<typeof REPORT_V4_MIMO_V25_PRO_PROFILE_ID, ReportV4ModelRuntimeConfig>> =
+const APPROVED_RUNTIMES: Readonly<Record<ReportV4ModelProfileId, ReportV4ModelRuntimeConfig>> =
   Object.freeze({
-    [REPORT_V4_MIMO_V25_PRO_PROFILE_ID]: runtime
+    [REPORT_V4_MIMO_V25_PRO_PROFILE_ID]: runtime,
+    [REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID]: sensenovaRuntime
   });
 
 export function loadReportV4ModelRuntimeConfig(
   environment: NodeJS.ProcessEnv
 ): ReportV4ModelRuntimeConfig {
-  const profileId = environment.OGC_REPORT_V4_MODEL_PROFILE_ID;
-  if (typeof profileId !== "string" || profileId.length === 0) {
-    throw new Error("OGC_REPORT_V4_MODEL_PROFILE_ID is required for Report V4 runtime admission.");
+  const expectedProfileId = modelProfileIdForProviderProfile(environment.OGC_PROVIDER_PROFILE);
+  const legacyProfileId = environment.OGC_REPORT_V4_MODEL_PROFILE_ID;
+  if (legacyProfileId !== undefined && legacyProfileId !== expectedProfileId) {
+    throw new Error("OGC_REPORT_V4_MODEL_PROFILE_ID conflicts with OGC_PROVIDER_PROFILE; no fallback is allowed.");
   }
-  if (profileId !== REPORT_V4_MIMO_V25_PRO_PROFILE_ID) {
-    throw new Error(`Unsupported OGC_REPORT_V4_MODEL_PROFILE_ID ${JSON.stringify(profileId)}; no fallback is allowed.`);
-  }
-  return APPROVED_RUNTIMES[profileId];
+  return APPROVED_RUNTIMES[expectedProfileId];
 }
 
 /**
@@ -140,10 +166,19 @@ export function resolveReportV4LockedModelRuntime(value: unknown): ReportV4Model
   } catch (error) {
     throw new Error("The locked Report V4 model profile is invalid and cannot be admitted.", { cause: error });
   }
-  if (stableJson(lockedProfile) !== stableJson(modelProfile)) {
+  const approved = REPORT_V4_MODEL_PROFILE_IDS
+    .map((profileId) => APPROVED_RUNTIMES[profileId])
+    .find((candidate) => stableJson(lockedProfile) === stableJson(candidate.modelProfile));
+  if (!approved) {
     throw new Error("The locked Report V4 model profile has drifted from the approved capability profile.");
   }
-  return runtime;
+  return approved;
+}
+
+export function modelProfileIdForProviderProfile(value: string | undefined): ReportV4ModelProfileId {
+  if (value === "mimo_native") return REPORT_V4_MIMO_V25_PRO_PROFILE_ID;
+  if (value === "sensenova_anysearch") return REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID;
+  throw new Error("OGC_PROVIDER_PROFILE must be exactly mimo_native or sensenova_anysearch; no default is allowed.");
 }
 
 function operationCapability(
@@ -169,4 +204,14 @@ function stableJson(value: unknown): string {
       .join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function conservativeUtf8Estimate(text: string): number {
+  let ascii = 0;
+  let nonAscii = 0;
+  for (const char of text) {
+    if (char.codePointAt(0)! < 0x80) ascii += 1;
+    else nonAscii += 1;
+  }
+  return Math.ceil(ascii / 4) + nonAscii;
 }

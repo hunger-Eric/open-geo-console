@@ -5,7 +5,6 @@ import {
   ReportValidationError,
   analyzePageBatch,
   combinedBusinessQuestionAnswerInputHash,
-  createOpenAiCompatibleClient,
   hashReportSemanticReviewValue,
   inferPageType,
   planPagesWithRecovery,
@@ -60,7 +59,6 @@ import {
   readSemanticReviewContractVersion
 } from "@/db/report-semantic-review-activation";
 import { loadReportV4PreAdmissionSnapshot } from "@/db/report-v4-site-snapshots";
-import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
 import { listEvidenceAssets } from "@/db/evidence-assets";
 import { terminalizePaidCombinedReport } from "@/db/combined-correction-terminalization";
@@ -77,7 +75,7 @@ import type { JobCheckpoint, ReportEvidenceAssetRow, ScanJobRow } from "@/db/sch
 import { projectFreeAiReport } from "@/report/visibility";
 import { createSafeFetch } from "@/server/safe-fetch";
 import { captureReportVisualEvidence } from "./visual-evidence";
-import { createProductionPublicSourceForensicsDependencies, resolveGenerativeSearchAnswerProvider, resolveProductionPublicSearchRuntime } from "@/public-source-forensics/production-runtime";
+import { createProductionPublicSourceForensicsDependencies } from "@/public-source-forensics/production-runtime";
 import { createPublicSourceArtifactReadinessGate } from "@/public-source-forensics/artifact-readiness";
 import { exportCanonicalArtifactHtmlPdf } from "@/report/pdf-export";
 import { PublicSourceAuthorityUnavailableError, runPublicSourceForensicsPipeline, type ArtifactReadinessGate, type PublicSourceCommercialSnapshotRef, type PublicSourceForensicsDependencies, type PublicSourcePipelineCheckpoint } from "./public-source-forensics";
@@ -125,8 +123,9 @@ import { runReportV4AcceptanceStage } from "./report-v4-acceptance-runner";
 import { inspectReportV4AcceptanceDurableTerminal } from "./report-v4-acceptance-terminal-state";
 import type { ReportV4CommerceAuthoritySnapshotSql } from "@/db/report-v4-commerce-authority-snapshot";
 import { enhanceReportV4QuestionDiagnosis, formatReportV4DiagnosisFailure, type ReportV4DiagnosisFailure, type ReportV4DiagnosisProvider } from "./report-v4-diagnosis-enhancer";
-import { buildReportV4MimoDiagnosisTokenBudget, createReportV4MimoDiagnosisProvider, createReportV4MimoStructuredInvoker } from "@/report-v4/mimo-provider";
-import { loadReportV4ModelRuntimeConfig } from "@/report-v4/model-runtime-config";
+import { buildReportV4MimoDiagnosisTokenBudget } from "@/report-v4/mimo-provider";
+import type { ReportV4ModelRuntimeConfig } from "@/report-v4/model-runtime-config";
+import { getPreparedProviderProfileRuntime } from "@/provider-profile/runtime";
 import type { CombinedGeoReportV4Question, GenerativeSearchAnswerCardV3, GenerativeSearchAnswerProvider, OpenGeoAnswerCardV3 } from "@open-geo-console/ai-report-engine";
 import {
   buildFreeTeaserDiagnosisTargetPages,
@@ -1334,6 +1333,7 @@ async function finalizeRecommendationJob(input: {
       if (checkpointPhase() === "public_source_preflight") input.liveDrill?.inject({ jobId: input.job.id, fault: "v2_runtime" });
       const publicSourceBudget = createPublicSourceAttemptBudget(input.remainingMs);
       const dependencies = await createProductionPublicSourceForensicsDependencies(process.env, {
+        resolveRuntime: async () => getPreparedProviderProfileRuntime().publicSearchRuntime,
         createDependencies: async (runtime) => createWorkerPublicSourceForensicsDependencies({
           job: input.job,
           workerId: input.workerId,
@@ -1532,7 +1532,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
   const client = input.trace?.wrapJsonClient("provider_claim_extraction_provider_call", configuredClient, 3) ?? configuredClient;
   let generativeCheckpoint: AnswerFirstV3CheckpointV2 | null = null;
   if (input.job.artifactContract === "combined_geo_report_v3") {
-    const provider = traceGenerativeAnswerProvider(resolveGenerativeSearchAnswerProvider(process.env, {
+    const provider = traceGenerativeAnswerProvider(getPreparedProviderProfileRuntime().createQuestionAnswerProvider({
       locale: businessQuestionSet.locale,
       region: businessQuestionSet.region
     }), input.trace, "initial_answer_provider_call");
@@ -1570,7 +1570,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
   // them only after the ordinary answers have been safely checkpointed.
   const runtime = await tracePaidV3DirectStep(input.trace, "public_search_runtime_resolution", {
     phase: "public_source_preflight"
-  }, () => resolveProductionPublicSearchRuntime({ environment: process.env, getAuthority: getActivePublicSearchSurfaceAuthority }));
+  }, async () => getPreparedProviderProfileRuntime().publicSearchRuntime);
   const priorProviderDiscovery = checkpoint.providerDiscovery ?? null;
   // Mid-job resume freezes identity from the checkpoint so JSON round-trips of the
   // website foundation cannot invalidate already-completed discovery stages.
@@ -1650,7 +1650,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
       verificationSnapshotId,
       ...forensicResult.report.snapshotRefs.map(({ snapshotId }) => snapshotId)
     ]));
-    const provider = traceGenerativeAnswerProvider(resolveGenerativeSearchAnswerProvider(process.env, {
+    const provider = traceGenerativeAnswerProvider(getPreparedProviderProfileRuntime().createQuestionAnswerProvider({
       locale: runtime.authority.surface.locale,
       region: runtime.authority.surface.region
     }), input.trace, "grounded_answer_provider_call");
@@ -1711,14 +1711,14 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         deferredAnswerResult.answerCardDrafts[1],
         deferredAnswerResult.answerCardDrafts[2]
       ] as const;
-      const modelRuntime = loadReportV4ModelRuntimeConfig(process.env);
+      const modelRuntime = getPreparedProviderProfileRuntime().modelRuntime;
       const diagnosisResult = await enhanceV3AnswerCardsWithDiagnosis({
         answerCards: reviewDraftCards,
         checkpoint: answerResult.checkpoint,
         questionSetIdentity: businessQuestionSet.contentHash,
         admission: prospectiveTeaser.admission,
         locale: runtime.authority.surface.locale,
-        provider: createReportV4MimoDiagnosisProvider({ environment: process.env }),
+        provider: getPreparedProviderProfileRuntime().createDiagnosisProvider(modelRuntime),
         modelRuntime,
         semanticValidation: "deferred",
         signal: input.signal,
@@ -1777,10 +1777,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         aiFoundation: input.websiteFoundation,
         evidenceAssets
       });
-      const structuredReviewer = createReportV4MimoStructuredInvoker({
-        environment: process.env,
-        lockedRuntime: modelRuntime
-      });
+      const structuredReviewer = getPreparedProviderProfileRuntime().createStructuredInvoker(modelRuntime);
       const stageTimings: Record<string, string | number> = {
         ...(diagnosisResult.checkpoint.paidV3DiagnosisStageTimings ?? {}),
         finalSynthesisStartedAt: new Date().toISOString()
@@ -1983,8 +1980,8 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
           questionSetIdentity: businessQuestionSet.contentHash,
           admission: prospectiveTeaser.admission,
           locale: runtime.authority.surface.locale,
-          provider: createReportV4MimoDiagnosisProvider({ environment: process.env }),
-          modelRuntime: loadReportV4ModelRuntimeConfig(process.env),
+          provider: getPreparedProviderProfileRuntime().createDiagnosisProvider(),
+          modelRuntime: getPreparedProviderProfileRuntime().modelRuntime,
           signal: input.signal,
           saveCheckpoint: async (answerFirstV3) => {
             const next = { ...checkpoint, answerFirstV3 };
@@ -2571,17 +2568,7 @@ export function mergeCompletedAnalyses(
 }
 
 function createConfiguredClient() {
-  const baseUrl = process.env.OGC_AI_BASE_URL?.trim();
-  const apiKey = process.env.OGC_AI_API_KEY?.trim();
-  const model = process.env.OGC_AI_MODEL?.trim();
-  if (!baseUrl || !apiKey || !model) throw new Error("AI analysis is not configured on this deployment.");
-  return createOpenAiCompatibleClient({
-    baseUrl,
-    apiKey,
-    model,
-    timeoutMs: configuredAiTimeoutMs(),
-    useJsonResponseFormat: process.env.OGC_AI_JSON_RESPONSE_FORMAT === "true"
-  });
+  return getPreparedProviderProfileRuntime().generalClient;
 }
 
 function traceGenerativeAnswerProvider(provider: GenerativeSearchAnswerProvider, trace: PaidV3DirectDebugTrace | undefined,
@@ -2611,11 +2598,6 @@ function tracePaidV3DirectGate<T>(trace: PaidV3DirectDebugTrace | undefined, ste
 
 function fetchWithSignal(fetchImpl: typeof fetch, signal: AbortSignal): typeof fetch {
   return (input, init = {}) => fetchImpl(input, { ...init, signal });
-}
-
-function configuredAiTimeoutMs(): number {
-  const configured = Number(process.env.OGC_AI_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : 180_000;
 }
 
 /**
@@ -2795,7 +2777,7 @@ export async function enhanceV3AnswerCardsWithDiagnosis<T extends PaidV3Semantic
   admission: NonNullable<Awaited<ReturnType<typeof loadReportV4PreAdmissionSnapshot>>>;
   locale: string;
   provider: ReportV4DiagnosisProvider;
-  modelRuntime: ReturnType<typeof loadReportV4ModelRuntimeConfig>;
+  modelRuntime: ReportV4ModelRuntimeConfig;
   semanticValidation?: "legacy" | "deferred";
   saveCheckpoint(checkpoint: AnswerFirstV3CheckpointV2): Promise<void>;
   signal?: AbortSignal;

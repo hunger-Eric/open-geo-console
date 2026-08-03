@@ -58,10 +58,13 @@ Vercel Sensitive values are intentionally not decryptable through `vercel env pu
 
 ### Public-search provider probe environment
 
-Run the protected-staging MiMo capability gate only after the staging Worker runtime environment has been generated:
+Run the protected-staging capability gate only after the staging Worker runtime environment has been generated. The explicit adapter must match the canonical profile:
 
 ```powershell
+# OGC_PROVIDER_PROFILE=mimo_native
 npm run public-search:probe -- --adapter mimo --locale zh-CN --region CN
+# OGC_PROVIDER_PROFILE=sensenova_anysearch
+npm run public-search:probe -- --adapter anysearch --locale zh-CN --region CN
 ```
 
 For the V3 generative-answer mainline, also run the secret-safe same-operation answer/citation probe:
@@ -72,7 +75,7 @@ npm run generative-answer:staging:probe
 
 The probe must report a nonblank answer and normalized source domains. It reads the merged staging Worker environment, prints no answer prose, credentials, authorization headers, or raw provider response, and does not create a report, order, credit, refund, or email.
 
-The probe intentionally reads `.data/workstation-docker/staging.env`, which is the merged environment consumed by `staging-worker-free` and `staging-worker-deep`. Source files such as `apps/web/.env.staging.local`, `.vercel/.env.preview.local`, and `apps/web/.env.public-search.staging.local` may contain empty Sensitive-value placeholders even when the merged Worker runtime has valid MiMo values. Therefore, inspecting a source placeholder file alone is not evidence that `OGC_PUBLIC_SEARCH_MIMO_BASE_URL`, its API key, or model is missing. Verify the merged file by variable name/non-empty status without printing values, then require the real bounded probe to pass. Never substitute a production env file or copy secrets into tracked files.
+The probe intentionally reads `.data/workstation-docker/staging.env`, which is the merged environment consumed by `staging-worker-free` and `staging-worker-deep`. Source files may contain empty Sensitive-value placeholders even when the merged Worker runtime has valid selected-profile values. Inspecting a source placeholder alone is therefore not evidence that MiMo, SenseNova or AnySearch data is missing. Verify `OGC_PROVIDER_PROFILE` and only its required variable names/non-empty status without printing values, then require the matching bounded probe to pass. Never substitute a production env file or copy secrets into tracked files.
 
 If a workstation proxy uses the reserved `198.18.0.0/15` Fake-IP DNS range, the crawler will and must reject the target as an SSRF risk. Do not allowlist the range or disable URL safety. Set `OGC_PUBLIC_DNS_DOH_URL=https://cloudflare-dns.com/dns-query` for that Worker process; both crawl and screenshot-browser validation then use the fixed public resolver while retaining blocked-address checks and safe-fetch IP pinning.
 

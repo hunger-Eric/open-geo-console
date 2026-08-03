@@ -5209,3 +5209,33 @@ revised scope.
   `docs/superpowers/specs/2026-08-03-unified-provider-profile-design.md`.
   Implementation, runtime activation, deployment and a fresh report remain
   separately scoped work.
+
+---
+
+## 2026-08-03 - Unified provider profile implemented locally
+
+- The user approved the final audited FROZEN allowlist. Local implementation
+  completed on branch `codex/delivery-root-fix` at unchanged baseline HEAD
+  `24a2619d0e56450bae0305a889b1fd72aa95224d`; no Git state change was made.
+- `OGC_PROVIDER_PROFILE` is the only routing selector. `mimo_native` keeps MiMo
+  native search, while `sensenova_anysearch` binds SenseNova
+  `deepseek-v4-flash` to AnySearch without runtime fallback.
+- Worker startup now validates the complete selected profile before database
+  preparation, resolves the exact active public-search authority after
+  connectivity, and publishes one immutable provider bundle before presence,
+  batch drain or claim.
+- Existing clients, prompts, report contracts, persistence and orchestration
+  were retained. No schema, task-state, payment, email or UI behavior changed.
+- Measured change was 929 production/configuration lines, 47 locked-profile
+  JSON lines, 502 test lines and 78 reader-projection lines beyond the scope
+  refresh, all within the approved budgets. All 45 changed paths matched the
+  allowlist and the non-test secret-pattern scan was clean.
+- Deterministic verification passed: 20 files / 266 tests, scoped ESLint with
+  zero errors, `git diff --check`, and the complete workspace/Next.js build.
+  Full ESLint remained blocked only by 17 pre-existing errors in excluded
+  `apps/web/.tmp-preview/debug-readiness.ts`; that directory was untouched.
+- PostgreSQL fixture tests, real provider/search/database calls, Docker,
+  deployment, Git writes and report generation were not run or performed.
+  Terminal status: **local implementation and automated verification complete;
+  Git and Protected Staging acceptance pending separate authorization, with
+  acceptance requiring exactly one fresh report.**
