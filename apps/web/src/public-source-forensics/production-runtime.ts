@@ -1,20 +1,26 @@
 import type { PublicSearchSurfaceAdapter, PublicSearchSurfaceAuthority } from "@open-geo-console/public-search-observer";
 import { createApprovedPublicSearchAdapterRegistry, selectApprovedPublicSearchAdapterFactory } from "@/public-search-adapters/registry";
 import { createMiMoPublicSearchAdapterFactory } from "@/public-search-adapters/mimo/adapter";
+import { createAnySearchPublicSearchAdapterFactory } from "@/public-search-adapters/anysearch/adapter";
 import type { PublicSearchAdapterFactory, PublicSearchAdapterIdentity } from "@/public-search-adapters/types";
 import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import type { PublicSearchSurfaceAuthorityRow } from "@/db/schema";
 import type { PublicSourceForensicsDependencies } from "@/worker/public-source-forensics";
 import { PublicSourceRuntimeError } from "@/worker/job-errors";
 import { resolveMiMoGenerativeSearchAnswerProvider } from "@/public-search-adapters/mimo/generative-answer";
+import { resolveAnySearchGenerativeSearchAnswerProvider } from "@/public-search-adapters/anysearch/generative-answer";
 import type { GenerativeSearchAnswerProvider } from "@open-geo-console/ai-report-engine";
 
-export const APPROVED_FACTORIES = createApprovedPublicSearchAdapterRegistry([createMiMoPublicSearchAdapterFactory()]);
+export const APPROVED_FACTORIES = createApprovedPublicSearchAdapterRegistry([
+  createMiMoPublicSearchAdapterFactory(),
+  createAnySearchPublicSearchAdapterFactory()
+]);
 
 export function resolveGenerativeSearchAnswerProvider(environment: NodeJS.ProcessEnv, input: { locale: string; region: string }, dependencies: { fetch?: typeof fetch; now?: () => Date } = {}): GenerativeSearchAnswerProvider {
   const adapter = environment.OGC_PUBLIC_SEARCH_ADAPTER ?? "mimo";
-  if (adapter !== "mimo") throw new PublicSourceRuntimeError("Generative-search answer provider is unavailable.", "public_source_runtime_unsupported");
-  return resolveMiMoGenerativeSearchAnswerProvider(environment, input, dependencies);
+  if (adapter === "mimo") return resolveMiMoGenerativeSearchAnswerProvider(environment, input, dependencies);
+  if (adapter === "anysearch") return resolveAnySearchGenerativeSearchAnswerProvider(environment, input, dependencies);
+  throw new PublicSourceRuntimeError("Generative-search answer provider is unavailable.", "public_source_runtime_unsupported");
 }
 
 export interface ProductionPublicSourceForensicsRuntimeOptions {

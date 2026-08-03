@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApprovedPublicSearchAdapterRegistry } from "@/public-search-adapters/registry";
 import { createMiMoPublicSearchAdapterFactory } from "@/public-search-adapters/mimo/adapter";
+import { createAnySearchPublicSearchAdapterFactory } from "@/public-search-adapters/anysearch/adapter";
 import type { PublicSourceForensicsDependencies } from "@/worker/public-source-forensics";
 import {
   createProductionPublicSourceForensicsDependencies,
@@ -20,6 +21,21 @@ describe("production public-search runtime", () => {
   it("constructs only an exact registered runtime", async () => {
     const runtime=await resolveProductionPublicSearchRuntime({environment,registry:createApprovedPublicSearchAdapterRegistry([createMiMoPublicSearchAdapterFactory()]),getAuthority:async()=>authority()});
     expect(runtime.identity).toMatchObject({adapterId:"mimo",providerId:"xiaomi-mimo",modelId:"mimo-v2.5-pro"});
+  });
+
+  it("constructs the exact AnySearch runtime without MiMo configuration", async () => {
+    const anySearchEnvironment = {
+      ...environment,
+      OGC_PUBLIC_SEARCH_ADAPTER: "anysearch",
+      OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL: "https://api.anysearch.com/v1/search",
+      OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY: "anysearch-key"
+    };
+    const runtime = await resolveProductionPublicSearchRuntime({
+      environment: anySearchEnvironment,
+      registry: createApprovedPublicSearchAdapterRegistry([createAnySearchPublicSearchAdapterFactory()]),
+      getAuthority: async () => ({ ...authority(), adapterId: "anysearch", providerId: "anysearch", productId: "unified-search", modelId: "anysearch-unified-search-v1", adapterVersion: "anysearch-rest-adapter-v1", surfaceId: "anysearch-unified-search", surfaceVersion: "anysearch-unified-search-v1" })
+    });
+    expect(runtime.identity).toMatchObject({ adapterId: "anysearch", providerId: "anysearch", modelId: "anysearch-unified-search-v1" });
   });
 
   it("constructs injectable snapshot and persistence dependencies only after exact runtime resolution", async () => {

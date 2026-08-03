@@ -54,8 +54,29 @@ function generativeModel() {
   return model;
 }
 
+function articleModel() {
+  const model=generativeModel();
+  model.combinedReport.geoArticleExample={
+    version:"geo_article_example_v1",
+    generationMode:"model",
+    targetQuestionIds:model.combinedReport.answerCards.map(({questionId})=>questionId),
+    title:"目标品牌跨境物流选择指南",
+    introduction:"这篇示例先说明网站事实，再回答买家问题。",
+    sections:[
+      {id:"facts",heading:"先确认服务范围",paragraphs:["说明公开服务、客户与覆盖区域。"]},
+      {id:"proof",heading:"再连接可核验证据",paragraphs:["把关键结论连接到服务页、案例和流程。"]}
+    ],
+    faq:[{question:"采购前先核对什么？",answer:"先核对服务范围、限制与公开证据。"}],
+    rationale:[
+      {sectionId:"facts",reason:"先建立网站事实，避免结论脱离实际业务。",evidenceRefs:[`question:${model.combinedReport.answerCards[0]!.questionId}`]},
+      {sectionId:"proof",reason:"解释答案为什么成立以及如何复核。",evidenceRefs:[`question:${model.combinedReport.answerCards[1]!.questionId}`]}
+    ]
+  };
+  return model;
+}
+
 describe("CombinedGeoReportV3Artifact",()=>{
-  it("renders answer-first content in the fixed order with derived adjacent citations",()=>{
+  it("renders website context before answers, diagnosis, technical evidence, actions, and methodology",()=>{
     const model=combinedV3ArtifactFixture();
     const first=model.combinedReport.answerCards[0];
     const second={...first.sourceEvidence[0],evidenceId:"v3-evidence-1-b",canonicalUrl:"https://second-source.example/fact",title:"Second source",registrableDomain:"second-source.example",exactExcerpt:"Second exact excerpt"};
@@ -63,13 +84,14 @@ describe("CombinedGeoReportV3Artifact",()=>{
     first.sentences[0]!.evidenceIds.push(second.evidenceId);
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
 
-    const summaryAt=html.indexOf("data-executive-summary");
+    const contextAt=html.indexOf("data-website-context");
     const answersAt=html.indexOf("data-answer-first-section");
     const crossQuestionAt=html.indexOf("data-cross-question-diagnosis");
     const technicalAt=html.indexOf("data-technical-analysis");
+    const actionsAt=html.indexOf("data-unified-actions");
     const appendixAt=html.indexOf("data-methodology-appendix");
-    expect(summaryAt).toBeGreaterThan(0);
-    expect([summaryAt,answersAt,crossQuestionAt,technicalAt,appendixAt]).toEqual([...new Set([summaryAt,answersAt,crossQuestionAt,technicalAt,appendixAt])].sort((a,b)=>a-b));
+    expect(contextAt).toBeGreaterThan(0);
+    expect([contextAt,answersAt,crossQuestionAt,technicalAt,actionsAt,appendixAt]).toEqual([...new Set([contextAt,answersAt,crossQuestionAt,technicalAt,actionsAt,appendixAt])].sort((a,b)=>a-b));
     expect(html.match(/data-open-geo-answer-card="true"/g)).toHaveLength(3);
     expect(html.indexOf("V3 exact question 1")).toBeLessThan(html.indexOf("V3 exact question 2"));
     expect(html.indexOf("V3 exact question 2")).toBeLessThan(html.indexOf("V3 exact question 3"));
@@ -93,18 +115,18 @@ describe("CombinedGeoReportV3Artifact",()=>{
   it("renders the read-mode chrome: section TOC, folded detail sections, and expand controls",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:combinedV3ArtifactFixture()}));
     expect(html).toContain('class="artifact-toc"');
-    expect(html).toContain('href="#artifact-sec-executive"');
+    expect(html).toContain('href="#artifact-sec-context"');
     expect(html).toContain('href="#artifact-sec-appendix"');
-    expect(html.match(/<details class="fold" /g)).toHaveLength(4);
+    expect(html.match(/<details class="fold" /g)).toHaveLength(5);
     expect(html).toContain('data-fold="open"');
     expect(html).toContain('data-fold="close"');
     expect(html).toContain('class="artifact-to-top"');
-    expect(html).toContain('id="artifact-sec-executive"');
+    expect(html).toContain('id="artifact-sec-context"');
   });
 
   it("uses GEO-only customer language and exposes no customer PDF surface or external-platform attribution",()=>{
     const visible=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:combinedV3ArtifactFixture()})).replace(/<[^>]+>/g," ");
-    expect(visible).toContain("Open GEO generated answer");
+    expect(visible).toContain("Open GEO paid deep report");
     expect(visible).not.toMatch(/\bSEO\b|ChatGPT|Gemini|Kimi|Doubao|豆包|\.pdf\b|download pdf|print report|PDF 下载|打印报告/i);
   });
 
@@ -132,7 +154,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
     const model=combinedV3ArtifactFixture();
     model.locale="zh";
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
-    expect(html).toContain("Open GEO 生成式答案");
+    expect(html).toContain("Open GEO 付费深度报告");
     expect(html).toContain("完整技术分析");
   });
 
@@ -208,5 +230,19 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).toContain("同次回答没有可安全展示的公开来源");
     expect(html).toContain("该请求涉及受限制的高风险操作。");
     expect(html).not.toContain("当前可核验正文仍不足");
+  });
+
+  it("renders the paid GEO article and its rationale after the unified action plan",()=>{
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:articleModel()}));
+    const actionsAt=html.indexOf("data-unified-actions");
+    const articleAt=html.indexOf("data-geo-article-generation-mode=\"model\"");
+    const appendixAt=html.indexOf("data-methodology-appendix");
+    expect(actionsAt).toBeGreaterThan(0);
+    expect(actionsAt).toBeLessThan(articleAt);
+    expect(articleAt).toBeLessThan(appendixAt);
+    for(const value of ["目标品牌跨境物流选择指南","先确认服务范围","为什么这样写","先建立网站事实","采购前先核对什么？"]){
+      expect(html).toContain(value);
+    }
+    expect(html.match(/data-open-geo-answer-card="true"/g)).toHaveLength(3);
   });
 });

@@ -147,6 +147,7 @@ import {
   slimOriginalTextPlaceholder
 } from "./paid-v3-compact-review-input";
 import { buildPaidV3DirectSemantics } from "./paid-v3-direct-semantics";
+import { generateGeoArticleExample } from "./geo-article-example";
 import { createPaidV3DirectDebugTrace, tracePaidV3DirectStep, type PaidV3DirectDebugTrace, type PaidV3DirectDebugTraceDetails } from "./paid-v3-direct-debug-trace";
 
 interface StoredPageEvidence {
@@ -702,7 +703,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     let normalized = normalizeJobError(error, {
       jobId: job.id, phase, phaseAttempt: currentJob?.phaseAttempt ?? job.phaseAttempt ?? 0,
       resumeGeneration: currentJob?.resumeGeneration ?? job.resumeGeneration ?? 0,
-      configuredSecrets: [process.env.OGC_AI_API_KEY ?? "", process.env.OGC_PUBLIC_SEARCH_MIMO_API_KEY ?? ""]
+      configuredSecrets: [
+        process.env.OGC_AI_API_KEY ?? "",
+        process.env.OGC_PUBLIC_SEARCH_MIMO_API_KEY ?? "",
+        process.env.OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY ?? ""
+      ]
     });
     directTrace?.emit("job_failed", "terminal_failure", {
       phase,
@@ -1919,6 +1924,18 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         signal: input.signal,
         trace: input.trace
       });
+      const geoArticleExample = await tracePaidV3DirectStep(input.trace, "geo_article_example", {
+        phase: "artifact_verification"
+      }, () => generateGeoArticleExample({
+        client,
+        targetUrl: input.targetUrl,
+        locale: runtime.authority.surface.locale,
+        questionSet: businessQuestionSet,
+        answerCards: answerResult.answerCards,
+        aiReport: input.websiteFoundation,
+        technicalReport: input.technicalReport,
+        signal: input.signal
+      }));
       const ready = await tracePaidV3DirectStep(input.trace, "combined_artifact_readiness", {
         phase: "artifact_verification"
       }, () => buildReadyCombinedArtifactV3({
@@ -1939,6 +1956,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         publicSourceForensics: forensicResult.report,
         providerDiscovery: providerResult.providerDiscovery,
         directSemantics,
+        geoArticleExample,
         onReportPrepared: async (report) => {
           const next = { ...checkpoint, answerFirstV3: answerResult.checkpoint, pendingArtifactVerification: { report, commercialSnapshotRefs: snapshotRefs } };
           const updated = await input.checkpointJob({ stage: "synthesizing", phase: "artifact_verification", progress: 99, checkpoint: next as JobCheckpoint, ...input.coverage });

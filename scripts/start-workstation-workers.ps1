@@ -88,7 +88,7 @@ function Write-RuntimeEnv {
       }
     }
   }
-  if ($Environment -eq "staging" -and $values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true") {
+  if ($Environment -eq "staging" -and $values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true" -and $values["OGC_PUBLIC_SEARCH_ADAPTER"] -eq "mimo") {
     $publicSearchMiMoFallbacks = @{
       "OGC_PUBLIC_SEARCH_MIMO_BASE_URL" = "OGC_AI_BASE_URL"
       "OGC_PUBLIC_SEARCH_MIMO_API_KEY" = "OGC_AI_API_KEY"
@@ -113,7 +113,14 @@ function Write-RuntimeEnv {
   if ($Environment -eq "staging") {
     Require-Values $values @("OGC_EVIDENCE_STORAGE", "BLOB_READ_WRITE_TOKEN", "OGC_REPORT_V4_MODEL_PROFILE_ID", "OGC_REPORT_V4_MIMO_BASE_URL", "OGC_REPORT_V4_MIMO_API_KEY", "OGC_TOKEN_HASH_SECRET") "Staging Worker"
     if ($values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true") {
-      Require-Values $values @("OGC_PUBLIC_SEARCH_ADAPTER", "OGC_PUBLIC_SEARCH_MIMO_BASE_URL", "OGC_PUBLIC_SEARCH_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_MODEL", "OGC_PUBLIC_SEARCH_LOCALE", "OGC_PUBLIC_SEARCH_REGION") "Staging public-search runtime"
+      Require-Values $values @("OGC_PUBLIC_SEARCH_ADAPTER", "OGC_PUBLIC_SEARCH_LOCALE", "OGC_PUBLIC_SEARCH_REGION") "Staging public-search runtime"
+      if ($values["OGC_PUBLIC_SEARCH_ADAPTER"] -eq "mimo") {
+        Require-Values $values @("OGC_PUBLIC_SEARCH_MIMO_BASE_URL", "OGC_PUBLIC_SEARCH_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_MODEL") "Staging MiMo public-search runtime"
+      } elseif ($values["OGC_PUBLIC_SEARCH_ADAPTER"] -eq "anysearch") {
+        Require-Values $values @("OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL", "OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY") "Staging AnySearch public-search runtime"
+      } else {
+        throw "Staging public-search adapter is unsupported: $($values["OGC_PUBLIC_SEARCH_ADAPTER"])"
+      }
     }
   }
   if ($Environment -eq "production") {

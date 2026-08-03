@@ -4693,3 +4693,68 @@ allowlist; external actions remain zero; no deploy.
 - This archived record grants no authority to overwrite that concurrent
   deployment, retry external actions, or claim the report delivery/latency
   incident fixed in Staging or Production.
+
+---
+
+## 2026-08-03 - Paid report read-mode presentation committed locally
+
+- The approved five-file page scope retained the existing Paid V3 read-mode
+  navigation and folding, aligned V3/V4 report metadata presentation, updated
+  the shared artifact styling, and admitted the exact CSP hash required by the
+  committed inline read-mode script.
+- The focused Paid V3 component test passed 11/11, scoped lint passed, the full
+  workspace build passed, and the final diff contained only the five approved
+  page files plus the scope records.
+- The retained local commit is
+  `40e7bc108db8cf53c97abd485f9e766304261c67` on
+  `codex/delivery-root-fix`.
+- `apps/web/.tmp-preview/` remains untracked and untouched. No push, merge,
+  deployment, report generation, payment, email, Production action, or cleanup
+  was performed.
+- This scope is closed. It grants no authority for the new Free/Paid
+  information architecture or GEO article generation work.
+
+---
+
+## 2026-08-03 - Free/Paid report progression and GEO article implemented locally
+
+- The approved report scope reordered the existing Free V4 teaser and Paid V3
+  HTML into a progressive website-context -> buyer-question -> source/gap ->
+  diagnosis/action reading flow, while preserving the same report lineage and
+  existing technical evidence.
+- Free retains all three question titles but exposes only Q1, its first three
+  sources and one core gap. Paid retains Q1-Q3, full sources, technical
+  evidence, actions and a Paid-only GEO article example with writing rationale.
+- The article path makes one bounded model attempt and falls back to a
+  deterministic evidence-grounded article without changing fulfillment.
+- Focused tests passed 48/48, the selected disposable PostgreSQL Paid V3
+  linear-flow test passed 1/1 with zero skips, scoped lint and the full build
+  passed, and `git diff --check` passed. Full lint remains blocked only by the
+  pre-existing excluded `apps/web/.tmp-preview/debug-readiness.ts` file.
+- These changes remain uncommitted in the worktree because the user asked to
+  switch away from the expired MiMo model before the already authorized commit
+  and Protected Staging deployment. This archived record is context only and
+  does not authorize model/runtime edits or external calls.
+
+---
+
+## 2026-08-03 - SenseNova Token Plan compatibility admission completed with search gap
+
+- The user approved one authenticated model-list request, one structured JSON
+  probe and one native-search/source probe, with the supplied credential stored
+  only in the existing ignored local/Staging configuration.
+- The account returned four model IDs: `deepseek-v4-flash`, `glm-5.2`,
+  `sensenova-6.7-flash-lite` and `sensenova-u1-fast`. The approved priority
+  selected `deepseek-v4-flash`; all three ignored generic `OGC_AI_*`
+  configurations now use the SenseNova Token Plan endpoint and that model.
+- The structured JSON probe returned HTTP 200 with the standard OpenAI
+  `choices[0].message.content` envelope, `finish_reason=stop`, valid JSON and
+  the exact requested object.
+- The single MiMo-compatible native `web_search` probe returned HTTP 400 and no
+  provider URL annotations. No retry or alternate-model probe was performed.
+- The candidate is admitted for report analysis/writing but cannot replace the
+  MiMo public-search/source surface by itself. MiMo-specific search and Report
+  V4 rollback variables, running Workers, database authority and deployed
+  services were unchanged.
+- This admission is closed. It authorizes no production-source edit, provider
+  authority mutation, Git action or deployment.

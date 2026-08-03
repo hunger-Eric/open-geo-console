@@ -291,6 +291,25 @@ function rewriteExactStrings<T>(value: T, replacements: ReadonlyMap<string, stri
   return value;
 }
 
+function geoArticleFor(input: PrepareCombinedGeoReportV3Input): NonNullable<PrepareCombinedGeoReportV3Input["geoArticleExample"]> {
+  return {
+    version: "geo_article_example_v1",
+    generationMode: "deterministic_fallback",
+    targetQuestionIds: input.answerCards.map(({ questionId }) => questionId),
+    title: "客户企业跨境货运选择与核验指南",
+    introduction: "这篇示例根据网站事实和三个买家问题组织内容。",
+    sections: [
+      { id: "facts", heading: "先确认服务范围", paragraphs: ["说明公开服务、客户与覆盖区域。"] },
+      { id: "proof", heading: "连接可核验的公开证据", paragraphs: ["让重要结论可以回到公开页面复核。"] }
+    ],
+    faq: [{ question: "采购前先核对什么？", answer: "先核对服务范围、限制与公开证据。" }],
+    rationale: [
+      { sectionId: "facts", reason: "先建立网站事实，避免结论脱离真实业务。", evidenceRefs: [`question:${input.answerCards[0]!.questionId}`] },
+      { sectionId: "proof", reason: "解释答案为什么成立并提供复核入口。", evidenceRefs: [`question:${input.answerCards[1]!.questionId}`] }
+    ]
+  };
+}
+
 describe("combined artifact canonical rendering",()=>{
   it("wraps the exact shared HTML component used by the report route and PDF readiness",()=>{
     const model=combinedArtifactFixture();
@@ -369,6 +388,18 @@ describe("combined artifact canonical rendering",()=>{
     expect(readinessSideEffects.storage.put).not.toHaveBeenCalled();
     expect(readinessSideEffects.exportPdf).not.toHaveBeenCalled();
     expect(readinessGuardHarness.run).not.toHaveBeenCalled();
+    expect(omitted).not.toHaveProperty("geoArticleExample");
+  });
+
+  it("retains and renders the optional GEO article while historical V3 remains compatible", () => {
+    const input = v3PreparationInput();
+    input.geoArticleExample = geoArticleFor(input);
+    const report = prepareCombinedGeoReportV3(input);
+    expect(report.geoArticleExample).toEqual(input.geoArticleExample);
+    const model = { ...combinedV3ArtifactFixture(), locale: "zh" as const, combinedReport: report };
+    const html = renderCanonicalCombinedArtifactHtml(model);
+    expect(html).toContain('data-geo-article-generation-mode="deterministic_fallback"');
+    expect(() => assertCombinedV3HtmlCompleteness(report, html)).not.toThrow();
   });
 
   it("assembles a pure V3 semantic draft without legacy diagnosis parsing or artifact side effects", () => {

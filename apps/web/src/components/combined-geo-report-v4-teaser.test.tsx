@@ -88,27 +88,30 @@ function teaserModel(): FreeTeaserModel {
 }
 
 describe("free V4 teaser renderer", () => {
-  it("renders the four teaser hooks, full Q1, and server-locked Q2/Q3 and remediation", () => {
+  it("progresses from homepage facts to the locked questions, Q1, three sources, and one gap", () => {
     const model = teaserModel();
     const html = renderToStaticMarkup(createElement(CombinedGeoReportV4Teaser, { model }));
 
     expect(html).toContain('data-report-version="4-teaser"');
-    expect(html).toContain('data-ai-absence="true"');
-    expect(html).toContain('data-issue-preview="true"');
+    expect(html).toContain('data-website-snapshot="true"');
+    expect(html).toContain('data-buyer-question-map="true"');
+    expect(html).toContain('data-core-gap="true"');
     expect(html).toContain('data-teaser-cta="true"');
-    expect(html.match(/data-locked-question="true"/g)).toHaveLength(2);
-    expect(html).toContain("Across 3 buyer questions, your brand appeared 1 time(s) while competitors appeared 3 time(s).");
     for (const question of model.questionSet.questions) expect(html).toContain(question.neutralPublicText);
 
+    const websiteAt = html.indexOf('data-website-snapshot="true"');
+    const questionsAt = html.indexOf('data-buyer-question-map="true"');
     const answerAt = html.indexOf("The <strong>complete teaser answer</strong>");
     const sourceAt = html.indexOf("https://source.example/route");
-    const diagnosisAt = html.indexOf("The source supplies a concrete fact for this buyer question.");
-    expect(answerAt).toBeGreaterThan(0);
+    const gapAt = html.indexOf("The target page omits the same route detail.");
+    expect(websiteAt).toBeGreaterThan(0);
+    expect(websiteAt).toBeLessThan(questionsAt);
+    expect(questionsAt).toBeLessThan(answerAt);
     expect(answerAt).toBeLessThan(sourceAt);
-    expect(sourceAt).toBeLessThan(diagnosisAt);
+    expect(sourceAt).toBeLessThan(gapAt);
 
     for (const finding of model.technicalReport.findings) {
-      expect(html).toContain(finding.title);
+      expect(html).not.toContain(finding.title);
       expect(html).not.toContain(finding.description);
       expect(html).not.toContain(finding.recommendation);
     }
@@ -116,30 +119,29 @@ describe("free V4 teaser renderer", () => {
     expect(html).not.toContain("Q3 paid answer secret");
   });
 
-  it("uses a teaser-owned source layout and keeps every source behind bounded progressive disclosure", () => {
+  it("shows only the first three Q1 sources in provider order", () => {
     const model = teaserModel();
     const html = renderToStaticMarkup(createElement(CombinedGeoReportV4Teaser, { model }));
 
-    expect(html.match(/class="teaser-source-card"/g)).toHaveLength(8);
+    expect(html.match(/class="teaser-source-card"/g)).toHaveLength(3);
     expect(html).not.toContain('class="source-card"');
-    expect(html).toContain('data-collapsed-source-count="3"');
-    expect(html).toContain("View 3 more sources");
-    expect(html).toContain(".teaser-more-sources:not([open])>.teaser-source-grid{display:none}");
-    for (let index = 1; index <= 8; index += 1) {
+    expect(html).not.toContain("View 5 more sources");
+    for (let index = 1; index <= 3; index += 1) {
       expect(html).toContain(`data-answer-source="teaser-source-${index}"`);
       expect(html).toContain(`The public page states route capability ${index}.`);
     }
+    for (let index = 4; index <= 8; index += 1) expect(html).not.toContain(`data-answer-source="teaser-source-${index}"`);
   });
 
-  it("renders safe answer structure, distinct diagnosis blocks, and early plus final conversion actions", () => {
+  it("renders safe Q1 structure without the paid diagnosis and actions", () => {
     const html = renderToStaticMarkup(createElement(CombinedGeoReportV4Teaser, { model: teaserModel() }));
 
     expect(html).toContain("<h4>Route capability</h4>");
     expect(html).toContain("The <strong>complete teaser answer</strong> names a verifiable route capability.");
     expect(html).toContain("<li>Direct route evidence</li>");
     expect(html).not.toContain("**complete teaser answer**");
-    expect(html).toContain('data-observable-factor-count="3"');
-    expect(html).toContain('data-prioritized-action-count="3"');
+    expect(html).not.toContain("The source supplies a concrete fact for this buyer question.");
+    expect(html).not.toContain("Publish the route detail on the service page.");
     expect(html).toContain('data-teaser-cta-position="early"');
     expect(html).toContain('data-teaser-cta-position="final"');
   });
@@ -160,9 +162,9 @@ describe("free V4 teaser renderer", () => {
       }
     };
     const html = renderToStaticMarkup(createElement(CombinedGeoReportV4Teaser, { model }));
-    expect(html).toContain('data-direct-analysis-status="completed"');
     expect(html).toContain("The answer did not address the buyer question.");
-    expect(html).toContain("One natural observation.");
+    expect(html).not.toContain("One natural observation.");
+    expect(html).toContain('data-core-gap="true"');
     expect(html).toContain('data-generative-answer="public-question-1"');
     expect(html).not.toContain("Across 3 buyer questions");
     expect(html).toContain('data-teaser-cta-position="early"');
@@ -180,8 +182,8 @@ describe("free V4 teaser renderer", () => {
       directAnalysisStatus: "incomplete",
       directAnalysis: null
     } }));
-    expect(html).toContain('data-direct-analysis-status="incomplete"');
-    expect(html).toContain("Analysis unavailable");
+    expect(html).toContain("The Q1 answer and its sources completed successfully, but the separate analysis did not complete for this run.");
+    expect(html).toContain('data-core-gap="true"');
     expect(html).toContain('data-generative-answer="public-question-1"');
     expect(html).not.toContain('href="#checkout"');
   });
