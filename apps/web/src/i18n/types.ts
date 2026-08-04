@@ -34,7 +34,9 @@ export interface Dictionary {
     | "switchToEnglish"
     | "switchToChinese"
     | "backToScanner"
-    | "importLogs",
+    | "importLogs"
+    | "downloadHtml"
+    | "downloadHtmlHint",
     string
   >;
   scanner: {

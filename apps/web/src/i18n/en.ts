@@ -20,7 +20,9 @@ export const en = {
     switchToEnglish: "English",
     switchToChinese: "中文",
     backToScanner: "Back to scanner",
-    importLogs: "Import log file"
+    importLogs: "Import log file",
+    downloadHtml: "Download HTML",
+    downloadHtmlHint: "Open the downloaded file in your web browser."
   },
   scanner: {
     title: "Analyze your company website",

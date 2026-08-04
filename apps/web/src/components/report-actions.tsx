@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Share2 } from "lucide-react";
+import { Download, FileText, Share2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import type { Dictionary } from "@/i18n";
@@ -34,6 +34,11 @@ export function ReportActions({
           <FileText aria-hidden="true" className="size-4" />
           HTML
         </Link> : null}
+      {htmlEnabled ? <Link href={`${htmlHref}/download`} className="button-secondary">
+          <Download aria-hidden="true" className="size-4" />
+          {dictionary.actions.downloadHtml}
+        </Link> : null}
+      {htmlEnabled ? <p className="w-full text-xs text-[var(--muted)]">{dictionary.actions.downloadHtmlHint}</p> : null}
     </div>
   );
 }

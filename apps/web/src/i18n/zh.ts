@@ -20,7 +20,9 @@ export const zh = {
     switchToEnglish: "English",
     switchToChinese: "中文",
     backToScanner: "返回体检入口",
-    importLogs: "导入日志文件"
+    importLogs: "导入日志文件",
+    downloadHtml: "下载 HTML",
+    downloadHtmlHint: "下载后请用浏览器打开该 HTML 文件。"
   },
   scanner: {
     title: "分析你的企业官网",
