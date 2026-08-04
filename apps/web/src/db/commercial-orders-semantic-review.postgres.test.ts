@@ -13,6 +13,7 @@ import {
 } from "./commercial-orders";
 import { closeDatabase, getSqlClient, initializeDatabaseEnvironment } from "./index";
 import { checkpointScanJob, claimExactScanJob, failScanJob } from "./jobs";
+import { recordPaidJobOutcome } from "./commercial-refunds";
 import {
   createPostgresReportV4AdmissionJobRepository,
   enqueueReportV4PreAdmissionAfterPreview
@@ -56,26 +57,51 @@ describeDisposablePostgres("Paid V3 semantic-review checkpoint carrier", () => {
       SELECT checkpoint,max_attempts FROM scan_jobs WHERE id=${first.jobId}
     `).resolves.toEqual([{ checkpoint: {
       freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION
-    }, max_attempts: 1 }]);
+    }, max_attempts: 3 }]);
   }, 120_000);
 
-  it("terminalizes a transient Direct Paid failure after its single authorized Worker attempt", async () => {
-    const fixture = await seedPaidV3Fixture("direct-one-attempt", "direct");
-    const created = await applyPaidPaymentEvent(eventInput(fixture.orderId, "direct-one-attempt"));
-    const claimed = await claimExactScanJob("direct-worker", {
-      jobId: created.jobId!, reportId: fixture.reportId, tier: "deep"
-    });
-    expect(claimed).toMatchObject({ executionState: "running", phaseAttempt: 1, maxAttempts: 1 });
-
-    const failed = await failScanJob(created.jobId!, "direct-worker", {
+  it("retries a transient Direct Paid failure, then terminalizes with exactly one refund after the attempt budget", async () => {
+    const fixture = await seedPaidV3Fixture("direct-retry", "direct");
+    const created = await applyPaidPaymentEvent(eventInput(fixture.orderId, "direct-retry"));
+    const failure = {
       code: "direct_provider_unavailable",
       publicMessage: "The Direct provider is unavailable.",
       retryable: true
+    };
+    const claimed = await claimExactScanJob("direct-worker", {
+      jobId: created.jobId!, reportId: fixture.reportId, tier: "deep"
     });
-    expect(failed).toMatchObject({ stage: "failed", executionState: "failed", maxAttempts: 1 });
+    expect(claimed).toMatchObject({ executionState: "running", phaseAttempt: 1, maxAttempts: 3 });
+
+    const retried = await failScanJob(created.jobId!, "direct-worker", failure);
+    expect(retried).toMatchObject({ executionState: "retry_wait", phaseAttempt: 1, maxAttempts: 3 });
+    expect(retried.retryNotBefore).not.toBeNull();
+    await expect(getSqlClient()<Array<{ count: number }>>`
+      SELECT count(*)::int count FROM payment_refunds WHERE order_id=${fixture.orderId}
+    `).resolves.toEqual([{ count: 0 }]);
+
+    await getSqlClient()`UPDATE scan_jobs SET retry_not_before=now()-interval '1 second' WHERE id=${created.jobId!}`;
     expect(await claimExactScanJob("second-worker", {
       jobId: created.jobId!, reportId: fixture.reportId, tier: "deep"
+    })).toMatchObject({ executionState: "running", phaseAttempt: 2 });
+    expect(await failScanJob(created.jobId!, "second-worker", failure))
+      .toMatchObject({ executionState: "retry_wait", phaseAttempt: 2 });
+
+    await getSqlClient()`UPDATE scan_jobs SET retry_not_before=now()-interval '1 second' WHERE id=${created.jobId!}`;
+    expect(await claimExactScanJob("third-worker", {
+      jobId: created.jobId!, reportId: fixture.reportId, tier: "deep"
+    })).toMatchObject({ executionState: "running", phaseAttempt: 3 });
+    const terminal = await failScanJob(created.jobId!, "third-worker", failure);
+    expect(terminal).toMatchObject({ stage: "failed", executionState: "failed", maxAttempts: 3 });
+    expect(await claimExactScanJob("fourth-worker", {
+      jobId: created.jobId!, reportId: fixture.reportId, tier: "deep"
     })).toBeNull();
+
+    expect((await recordPaidJobOutcome({ jobId: created.jobId!, outcome: "failed" }))?.refundId).not.toBeNull();
+    await recordPaidJobOutcome({ jobId: created.jobId!, outcome: "failed" });
+    await expect(getSqlClient()<Array<{ count: number }>>`
+      SELECT count(*)::int count FROM payment_refunds WHERE order_id=${fixture.orderId}
+    `).resolves.toEqual([{ count: 1 }]);
   }, 120_000);
 
   it("creates the Free carrier atomically and never retrofits an exactly-once row", async () => {

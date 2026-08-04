@@ -848,7 +848,7 @@ async function applyPaidPaymentEventInternal(
           (${jobId}, ${order.report_id}, ${expectedContract === "report_v4" ? order.site_snapshot_id : null}, 'deep', ${productContractForCode(order.product_code)}, ${order.fulfillment_methodology}, ${order.recommendation_report_version},
            ${order.product_code === "recommendation_forensics_v1" && order.business_question_set_id ? combinedReportContract : productContractForCode(order.product_code)}, ${order.business_question_set_id},
             ${order.report_locale}, 'standard', 'queued', ${reservation.id}, ${initialCheckpoint}::jsonb,
-            ${semanticReviewContractVersion === "free-v4-direct-semantics-v1" ? 1 : 3})
+            ${3})
       `;
     }
     if (expectedContract !== "report_v4" && combinedReportContract === "combined_geo_report_v3") {

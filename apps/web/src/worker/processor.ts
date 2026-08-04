@@ -731,7 +731,10 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       resumeGeneration: currentJob?.resumeGeneration ?? job.resumeGeneration ?? 0
     }, () => failScanJob(job.id, workerId, {
       code: normalized.code, publicMessage: "The analysis is temporarily unavailable.",
-      retryable: !directPaidOneShot && normalized.classification === "transient",
+      // A paid free-direct deep job tolerates transient failures through the
+      // normal retry_wait path within max_attempts; the v4_pre_admission
+      // one-shot guard and permanent/contract classifications stay terminal.
+      retryable: normalized.classification === "transient" && (!directPaidOneShot || job.reason !== "v4_pre_admission"),
       classification: directPaidOneShot ? undefined : normalized.classification === "operator_repairable" ? "operator_repairable" : normalized.classification === "target_limitation" ? "target_limitation" : undefined,
       internalError: normalized, phase, ...(deferPhaseAttempt ? { defer: true as const } : {})
     }));

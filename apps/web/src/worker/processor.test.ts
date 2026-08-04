@@ -382,6 +382,30 @@ describe("strict Report V4 processor routing", () => {
     }
   });
 
+  it("routes a transient failure on a paid free-direct deep job into retry_wait", async () => {
+    const job = v4Job({
+      reason: "standard",
+      checkpoint: { freeDirectSemanticsVersion: "free-v4-direct-semantics-v1" },
+      maxAttempts: 3
+    });
+    const outage = new PublicSourceSnapshotUnavailableError("search_execution");
+    boundaryMocks.getScanJob.mockResolvedValueOnce(job);
+    boundaryMocks.failScanJob.mockResolvedValueOnce({ ...job, executionState: "retry_wait" });
+    try {
+      await processScanJob(job, "worker-1", {
+        reportV4CoreRunner: vi.fn(async () => { throw outage; })
+      });
+
+      expect(boundaryMocks.failScanJob).toHaveBeenCalledWith(job.id, "worker-1", expect.objectContaining({
+        retryable: true,
+        internalError: expect.objectContaining({ classification: "transient", code: "public_source_snapshot_search_execution" })
+      }));
+      expect(boundaryMocks.failScanJob.mock.calls[0]?.[2]).not.toHaveProperty("defer");
+    } finally {
+      vi.clearAllMocks();
+    }
+  });
+
   it("still fails fast on a recurrent deterministic public-source failure instead of deferring", async () => {
     const job = legacyFullRerunJob();
     const previousAi = configureTestAi();

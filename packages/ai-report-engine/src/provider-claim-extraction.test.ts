@@ -31,6 +31,16 @@ describe("provider claim extraction", () => {
     expect(completeJson).toHaveBeenCalledTimes(3);
   });
 
+  it("retries a transport network failure and succeeds on a later attempt", async () => {
+    const completeJson = vi.fn()
+      .mockRejectedValueOnce(new AiClientError("AI request failed.", { code: "network" }))
+      .mockResolvedValueOnce({ value: { claims: [claim()] }, modelId: "fixture-model", rawContent: "{}" });
+    const client: JsonCompletionClient = { configuredModel: "fixture", completeJson };
+    const result = await extractProviderClaimCandidates(client, extractionInput(), { delay: async () => undefined });
+    expect(result.candidates).toEqual([claim()]);
+    expect(completeJson).toHaveBeenCalledTimes(2);
+  });
+
   it("does not retry authentication failures", async () => {
     const completeJson = vi.fn().mockRejectedValue(new AiClientError("unauthorized", { status: 401 }));
     await expect(extractProviderClaimCandidates({ configuredModel: "fixture", completeJson }, extractionInput())).rejects.toThrow(/unauthorized/i);
