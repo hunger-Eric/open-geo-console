@@ -6027,3 +6027,49 @@ revised scope.
 - Disk: E: 51G free before and after; no Docker cleanup, no prune.
 - Terminal status: **deployed to Protected Staging; user manual acceptance
   and remote-main publication pending.**
+
+---
+
+## 2026-08-04 - Release receipt: candidate 8048f04 to Protected Staging
+
+- Candidate `8048f04fc4fbcbf025e0666b478581958d9c7d23` (parent `6cf83d83`,
+  subject `fix: derive service category from real products and unblock
+  terminal-incomplete checkout`) committed and pushed to `origin/main`
+  (`4af464b..8048f04`) under the user's explicit 提交/推送/部署 instruction.
+- Web: ONE manual Preview `dpl_2ogns8cva4RZ9hyBWhgKGJCZYT5a`
+  (host `open-geo-console-flgp4cpto-itheheda-6857s-projects.vercel.app`)
+  READY, preview target, exact project `prj_WVpdlJfsEp0YyWM2W54w8oBy985S`,
+  ogcGitSha independently read back via `vercel api` = candidate
+  (`gitCommitSha` absent under the documented `link=null` mode). Fixed
+  Protected Staging alias moved once (previous/rollback Web:
+  `dpl_8t79n7HX69GJLpgZXY5QidK7VqkD`); post-move alias readback confirms
+  `dpl_2ogns8cva4RZ9hyBWhgKGJCZYT5a`.
+- Worker: ONE thin source-overlay image
+  `open-geo-console:staging-8048f04-checkout-category-overlay-v1`
+  (`sha256:6b8657f2108db0cb5d6f5623eb139afe37781b707ce5e2cf6191d63deaa331fc`,
+  revision label = full candidate SHA) built FROM the accepted current image
+  `open-geo-console:staging-84d8173-report-boundaries-overlay-v1`
+  (`sha256:a33d5e1e73bf...`) via local tag. Rollback Worker image
+  `sha256:002fc0877e32...` (`staging-4af464b-free-checkout-overlay-v1`)
+  retained untouched.
+- Runtime env: original bytes backed up (`.tmp/staging.env.bak-8048f04`);
+  byte-comparison proves only `OGC_DEPLOYMENT_VERSION` changed to the
+  candidate. Exactly the two named Worker services recreated once
+  (`--no-deps --no-build --force-recreate`); Commerce and Production
+  untouched.
+- Readiness (60s boundary, 2s poll): both workers ready in 1s with the
+  tier-specific ready log, exact candidate image ID, correct free/deep tier,
+  `staging`/`preview`/`test` markers, `OGC_DEPLOYMENT_VERSION` = candidate,
+  restart count zero. Zero claimable/running/expired-recoverable/
+  exhausted-terminalizable jobs before and after recreation (only the five
+  pre-existing historical `repair_wait` rows, untouched).
+- Smoke on the fixed URL: alias API readback = candidate deployment; `/zh`
+  and `/api/commerce/catalog` both 302 to Vercel SSO and anonymous
+  `POST /api/scan` rejected by deployment protection (302). Authenticated
+  catalog (`mode=test`) and browser checks left to user acceptance; Vercel
+  SSO blocks automation, recorded as the explicit boundary.
+- Disk: E: 51G free before and after; overlay added ~1.9 MB over shared
+  layers; no Docker cleanup, no prune, no older-image removal.
+- Terminal status: **Protected Staging deployment completed; real flow not
+  yet accepted.** Gate 4 (one wholly new report and one Sandbox payment)
+  requires a separate FROZEN scope and explicit authorization.
