@@ -5614,3 +5614,64 @@ revised scope.
   was refunded through S3 only.
 - Terminal status: **implemented, verified, and deployed to Protected
   Staging; user browser acceptance and the `v0.3.0` tag remain pending.**
+
+---
+
+## 2026-08-04 - Trusted-country pricing and Airwallex HPP country
+
+- User approved the frozen allowlist with
+  `批准此范围并归档旧范围`. The implementation stayed on `main` at baseline
+  `c0f18fc5d650a697dfc2a41e3649dba4096dd34c`; no Git mutation occurred.
+- New checkout offers are server-authoritative: trusted `CN` receives
+  CNY 299.00; every other valid ISO alpha-2 country and every missing,
+  invalid, or untrusted country receives USD 99.00. HKD remains readable for
+  historical orders but is not offered to new checkout.
+- Vercel country is trusted only under the existing Vercel trust gate;
+  Cloudflare country is trusted only under the explicit proxy gate. A complete
+  ISO alpha-2 allowlist rejects `XX`, `ZZ`, and malformed values.
+- The catalog returns one price. The UI has no currency state or selector and
+  sends no currency in the checkout body. Checkout independently derives the
+  price and ignores conflicting browser currency input.
+- The checkout response carries the same validated country and the browser
+  passes it to Airwallex HPP as `country_code`; unknown/invalid country omits
+  the option. Existing active orders retain their persisted currency and
+  amount during provider recovery or legacy migration.
+- The test price catalog is CNY 29900 / USD 9900 with catalog version
+  `2026-08-04.v2`. Live readiness now requires those two offered price
+  variables and no longer requires a new-order HKD price.
+- Verification: 49 focused Vitest tests across six files passed; scoped ESLint
+  passed; `npm run build --workspace apps/web` completed with TypeScript and
+  all 18 static pages; `git diff --check` passed. Production additions stayed
+  within 190 lines, tests within 260, and config/operations docs within 35.
+- Independent browser QA loaded the real current `CommercialCheckout` source
+  in a loopback-only intercepted harness. CN, HK, MO, TW, US, and unknown all
+  showed the expected single price, rendered zero currency selectors, sent no
+  browser currency, and produced the expected HPP currency/country options.
+  The temporary `127.0.0.1:56356` listener was stopped and confirmed released.
+- Independent code review found one invalid-`ZZ` country issue; the ISO
+  allowlist fix and three regression paths were then reviewed again, and the
+  reviewer confirmed no remaining blocker.
+- No VPN switch, database write, real order, PaymentIntent, payment, refund,
+  email, provider call, Docker action, deployment, or Git operation occurred.
+  Browser evidence is local deterministic acceptance, not deployed Vercel
+  geolocation or merchant payment-method availability acceptance.
+- Terminal status: **implemented, independently reviewed, and locally verified;
+  not deployed.**
+
+---
+
+## 2026-08-04 - Download bar on the standalone report HTML page
+
+- `report.html/page.tsx` now renders a small download bar above the artifact
+  (anchor to `/reports/[id]/report.html/download` + the existing browser-open
+  hint, reusing `actions.downloadHtml`/`downloadHtmlHint`, interface locale
+  resolved via `x-ogc-interface-locale`, `print:hidden`). Commit `a4d4813`
+  (production +14/−2, test +18).
+- Verified: `report.html` page suite 10/10 (new assertion: authorized access
+  renders the `/download` href; anonymous still 404s); web build passed.
+- Preview `dpl_DuvzZ4ytt8D8NHF5bap98h5uhzju` (ogcGitSha `a4d4813`) READY,
+  fixed Protected Staging alias moved, anonymous `/` 302→SSO intact.
+  Rollback: re-alias `dpl_8Wm9kkWCDUd1jwVtN5qYjmWNH8Wt`.
+- No worker/commerce/Docker/database changes.
+- Terminal status: **implemented, verified, and deployed to Protected
+  Staging; user browser acceptance and the `v0.3.0` tag remain pending.**
