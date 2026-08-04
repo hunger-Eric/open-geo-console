@@ -41,7 +41,7 @@ Staging and production must use different databases and every secret family in t
 - `FULFILLMENT_MODE=batch_24h`: workstation drains and exits.
 - `FULFILLMENT_MODE=realtime`: a persistent Worker uses Cloudflare/local hints or bounded PostgreSQL polling.
 
-Live mode also requires explicit server-side `OGC_PRICE_CNY_MINOR`, `OGC_PRICE_USD_MINOR`, and `OGC_PRICE_HKD_MINOR` values. Browser requests never supply an authoritative amount.
+Live mode requires explicit server-side `OGC_PRICE_CNY_MINOR` and `OGC_PRICE_USD_MINOR` values. New checkout currency is selected from the trusted request country (`CN` uses CNY; every other or unknown country uses USD), and browser requests never supply an authoritative currency or amount. `OGC_PRICE_HKD_MINOR` remains historical compatibility only and is not offered to new checkouts.
 
 ## Hosted checkout and return
 

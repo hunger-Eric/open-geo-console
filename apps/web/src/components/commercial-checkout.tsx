@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { Dictionary, Locale } from "@/i18n";
 import {
+  buildCheckoutRequestBody,
+  buildHostedPaymentPageOptions,
   getPaymentConfirmationReturnUrl,
   readCheckoutPayload,
   type CheckoutPayload
@@ -41,7 +43,6 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
   const returnContext = useMemo(() => getPaymentReturnContext(searchParams), [searchParams]);
   const [returnResult, setReturnResult] = useState<{ orderId: string; status: PublicOrderStatus } | null>(null);
   const [catalog, setCatalog] = useState<CatalogPayload | null>(null);
-  const [currency, setCurrency] = useState<Currency>(locale === "zh" ? "CNY" : "USD");
   const [email, setEmail] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
   const [verifying, setVerifying] = useState(false);
@@ -73,7 +74,6 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
       .then((value) => {
         if (!value) return;
         setCatalog(value);
-        setCurrency((current) => value.prices.some((price) => price.currency === current) ? current : value.prices[0]?.currency ?? current);
       })
       .catch(() => undefined);
     return () => controller.abort();
@@ -95,7 +95,7 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
     return () => controller.abort();
   }, [reportId]);
 
-  const price = useMemo(() => catalog?.prices.find((item) => item.currency === currency), [catalog, currency]);
+  const price = catalog?.prices[0];
   const returnStatus = returnResult && returnContext && returnResult.orderId === returnContext.orderId ? returnResult.status : null;
   const hidePurchaseControls = shouldHidePurchaseControls(returnContext, returnStatus);
   if (!catalog?.enabled) return null;
@@ -123,7 +123,7 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
       const response = await fetch(`/api/reports/${reportId}/checkout`, {
         method: "POST",
         headers: { "content-type": "application/json", "idempotency-key": checkoutIdempotencyKey.current },
-        body: JSON.stringify({ email, currency, locale, turnstileToken: token, questionSetId })
+        body: JSON.stringify(buildCheckoutRequestBody({ email, locale, turnstileToken: token, questionSetId }))
       });
       const payload = await readCheckoutPayload(response);
       const confirmationReturnUrl = getPaymentConfirmationReturnUrl(payload, window.location.href);
@@ -144,13 +144,7 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
         locale
       });
       if (!payments) throw new Error(dictionary.commerce.checkoutFailed);
-      const hppOptions = {
-        intent_id: payload.hpp.intentId,
-        client_secret: payload.hpp.clientSecret,
-        currency: payload.hpp.currency,
-        successUrl: urls.successUrl,
-        cancelUrl: urls.cancelUrl
-      };
+      const hppOptions = buildHostedPaymentPageOptions(payload.hpp, urls);
       payments.redirectToCheckout(hppOptions);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : dictionary.commerce.checkoutFailed);
@@ -199,7 +193,7 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
           </li>)}
         </ol>
       </div>
-      {!hidePurchaseControls ? <form onSubmit={checkout} className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,1fr)_140px]">
+      {!hidePurchaseControls ? <form onSubmit={checkout} className="mt-5 grid gap-4">
         <label className="text-sm font-semibold">
           {dictionary.commerce.emailLabel}
           <input className="input-control mt-2 w-full" type="email" required autoComplete="email" value={email} onChange={(event) => {
@@ -207,17 +201,8 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
             checkoutIdempotencyKey.current = "";
           }} />
         </label>
-        <label className="text-sm font-semibold">
-          {dictionary.commerce.currencyLabel}
-          <select className="input-control mt-2 w-full" value={currency} onChange={(event) => {
-            setCurrency(event.target.value as Currency);
-            checkoutIdempotencyKey.current = "";
-          }}>
-            {catalog.prices.map((item) => <option key={item.currency} value={item.currency}>{item.currency} {(item.amountMinor / 100).toFixed(2)}</option>)}
-          </select>
-        </label>
         {catalog.turnstileSiteKey ? (
-          <div className="sm:col-span-2">
+          <div>
             <TurnstileWidget
               ref={turnstileRef}
               siteKey={catalog.turnstileSiteKey}
@@ -226,7 +211,7 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
             />
           </div>
         ) : null}
-        <div className="flex flex-col gap-3 sm:col-span-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm font-semibold text-[var(--foreground)]">{dictionary.commerce.deliveryPromise}</p>
           <button className="button-primary min-h-12 shrink-0" disabled={submitting || verifying || !email || !price || questions.length !== 3} type="submit">
             {submitting || verifying ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <LockKeyhole aria-hidden="true" className="size-4" />}
@@ -234,7 +219,7 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
               ? dictionary.commerce.verifying
               : submitting
                 ? dictionary.commerce.redirecting
-                : `${dictionary.commerce.buyAction} · ${currency} ${price ? (price.amountMinor / 100).toFixed(2) : ""}`}
+                : `${dictionary.commerce.buyAction} · ${price?.currency ?? ""} ${price ? (price.amountMinor / 100).toFixed(2) : ""}`}
           </button>
         </div>
       </form> : null}
@@ -245,11 +230,12 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
 }
 
 function isHppPayload(payload: CheckoutPayload): payload is Required<Pick<CheckoutPayload, "orderId">> & {
-  hpp: { intentId: string; clientSecret: string; currency: Currency; environment: "demo" | "prod" };
+  hpp: { intentId: string; clientSecret: string; currency: Currency; countryCode?: string | null; environment: "demo" | "prod" };
 } {
   return typeof payload.orderId === "string"
     && typeof payload.hpp?.intentId === "string"
     && typeof payload.hpp.clientSecret === "string"
     && (payload.hpp.currency === "CNY" || payload.hpp.currency === "USD" || payload.hpp.currency === "HKD")
+    && (payload.hpp.countryCode == null || /^[A-Z]{2}$/.test(payload.hpp.countryCode))
     && (payload.hpp.environment === "demo" || payload.hpp.environment === "prod");
 }

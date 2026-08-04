@@ -43,7 +43,12 @@ describe("commercial checkout route", () => {
     mocks.getGeoReport.mockResolvedValue({ id: "report-1", url: "https://example.com", siteKey: "example.com", reportLocale: "en" });
     mocks.getActivePaymentOrderForReport.mockResolvedValue(null);
     mocks.verifyTurnstile.mockResolvedValue({ success: true, errorCodes: [] });
-    mocks.createPaymentOrder.mockResolvedValue({ id: "order-1", providerCheckoutId: null });
+    mocks.createPaymentOrder.mockImplementation(async (input: { currency: string; amountMinor: number }) => ({
+      id: "order-1",
+      providerCheckoutId: null,
+      currency: input.currency,
+      amountMinor: input.amountMinor
+    }));
     mocks.findHostedCheckoutByReference.mockResolvedValue(null);
     mocks.deactivateLegacyHostedCheckout.mockResolvedValue("deactivated");
     mocks.assertRecommendationProductAvailable.mockResolvedValue(undefined);
@@ -53,9 +58,17 @@ describe("commercial checkout route", () => {
   });
 
   it("creates only a server-selected Paid V3 order and ignores browser contract and price overrides", async () => {
+    process.env.OGC_TRUST_VERCEL_HEADERS = "true";
+    mocks.createHostedCheckout.mockResolvedValue({
+      providerCheckoutId: "int_1", clientSecret: "secret_1", currency: "CNY", environment: "demo"
+    });
     const response = await POST(new Request("https://example.test/api/reports/report-1/checkout", {
       method: "POST",
-      headers: { "content-type": "application/json", "idempotency-key": "request-123" },
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "request-123",
+        "x-vercel-ip-country": "CN"
+      },
       body: JSON.stringify({
         email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human", amountMinor: 1,
         siteSnapshotId: "attacker-snapshot", fulfillmentMethodology: "public_search_source_forensics_v1", recommendationReportVersion: 2,
@@ -64,7 +77,8 @@ describe("commercial checkout route", () => {
     }), { params: Promise.resolve({ id: "report-1" }) });
     expect(response.status).toBe(201);
     expect(mocks.createPaymentOrder).toHaveBeenCalledWith(expect.objectContaining({
-      amountMinor: 2900,
+      currency: "CNY",
+      amountMinor: 29_900,
       productCode: "recommendation_forensics_v1",
       businessQuestionSetId: "teaser-questions-1"
     }));
@@ -72,11 +86,41 @@ describe("commercial checkout route", () => {
       siteSnapshotId: expect.anything()
     }));
     expect(mocks.createHostedCheckout).toHaveBeenCalledOnce();
+    expect(mocks.createHostedCheckout).toHaveBeenCalledWith(expect.objectContaining({
+      currency: "CNY",
+      amountMinor: 29_900
+    }));
+    await expect(response.clone().json()).resolves.toMatchObject({
+      hpp: { currency: "CNY", countryCode: "CN" }
+    });
     const returnCookie = response.headers.get("set-cookie") ?? "";
     expect(returnCookie).toMatch(/^ogc_payment_return_report-1=/i);
     expect(returnCookie).toMatch(/; Secure/i);
     expect(returnCookie).toMatch(/; HttpOnly/i);
     expect(returnCookie).toMatch(/; SameSite=Lax/i);
+  });
+
+  it("defaults invalid trusted country information to the USD offer", async () => {
+    process.env.OGC_TRUST_VERCEL_HEADERS = "true";
+    const response = await POST(new Request("https://example.test/api/reports/report-1/checkout", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "request-usd",
+        "x-vercel-ip-country": "ZZ"
+      },
+      body: JSON.stringify({
+        email: "buyer@example.com", currency: "CNY", locale: "en", turnstileToken: "human",
+        questionSetId: "teaser-questions-1"
+      })
+    }), { params: Promise.resolve({ id: "report-1" }) });
+
+    expect(response.status).toBe(201);
+    expect(mocks.createPaymentOrder).toHaveBeenCalledWith(expect.objectContaining({
+      currency: "USD",
+      amountMinor: 9_900
+    }));
+    await expect(response.json()).resolves.toMatchObject({ hpp: { countryCode: null } });
   });
 
   it("stops before looking up or recovering any legacy checkout while the product is unavailable", async () => {
@@ -111,24 +155,35 @@ describe("commercial checkout route", () => {
   });
 
   it("recovers an unpaid legacy Payment Link only after product availability succeeds", async () => {
+    process.env.OGC_TRUST_VERCEL_HEADERS = "true";
     mocks.getActivePaymentOrderForReport.mockResolvedValue({
       id: "order-1",
       providerCheckoutId: "6fc2d9c0-2580-4ad3-a33d-72500ec93bda",
       checkoutIdempotencyHmac: "another-checkout",
       businessQuestionSetId: "teaser-questions-1",
-      customerEmailHmac: protectCustomerEmail("buyer@example.com").lookupHmac
+      customerEmailHmac: protectCustomerEmail("buyer@example.com").lookupHmac,
+      currency: "USD",
+      amountMinor: 2_900
     });
     mocks.createHostedCheckout.mockResolvedValue({
       providerCheckoutId: "int_migrated", clientSecret: "secret_migrated", currency: "USD", environment: "demo"
     });
     const response = await POST(new Request("https://example.test/api/reports/report-1/checkout", {
       method: "POST",
-      headers: { "content-type": "application/json", "idempotency-key": "request-123" },
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "request-123",
+        "x-vercel-ip-country": "CN"
+      },
       body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human", questionSetId: "teaser-questions-1" })
     }), { params: Promise.resolve({ id: "report-1" }) });
     expect(response.status).toBe(200);
     expect(mocks.deactivateLegacyHostedCheckout).toHaveBeenCalledOnce();
     expect(mocks.replaceLegacyHostedCheckout).toHaveBeenCalledOnce();
+    expect(mocks.createHostedCheckout).toHaveBeenCalledWith(expect.objectContaining({
+      currency: "USD",
+      amountMinor: 2_900
+    }));
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
@@ -139,7 +194,9 @@ describe("commercial checkout route", () => {
       checkoutIdempotencyHmac: "another-checkout",
       businessQuestionSetId: "teaser-questions-1",
       customerEmailHmac: protectCustomerEmail("buyer@example.com").lookupHmac,
-      paymentStatus: "paid"
+      paymentStatus: "paid",
+      currency: "USD",
+      amountMinor: 2_900
     });
     mocks.getHostedCheckout.mockResolvedValue({
       providerCheckoutId: "int_existing", clientSecret: "secret_existing", currency: "USD", environment: "demo"
@@ -160,7 +217,9 @@ describe("commercial checkout route", () => {
       providerCheckoutId: "6fc2d9c0-2580-4ad3-a33d-72500ec93bda",
       checkoutIdempotencyHmac: "another-checkout",
       businessQuestionSetId: "teaser-questions-1",
-      customerEmailHmac: protectCustomerEmail("buyer@example.com").lookupHmac
+      customerEmailHmac: protectCustomerEmail("buyer@example.com").lookupHmac,
+      currency: "USD",
+      amountMinor: 2_900
     });
     mocks.deactivateLegacyHostedCheckout.mockResolvedValue("paid");
     const response = await POST(new Request("https://example.test/api/reports/report-1/checkout", {

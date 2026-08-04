@@ -1,6 +1,6 @@
 import { createSiteKey } from "@open-geo-console/site-crawler";
 import { NextResponse } from "next/server";
-import { assertCommerceEnabled, getPriceSnapshot, parseSupportedCurrency } from "@/commerce/config";
+import { assertCommerceEnabled, getOfferedCurrency, getPriceSnapshot } from "@/commerce/config";
 import { normalizeCustomerEmail, protectCustomerEmail } from "@/commerce/customer-email";
 import { checkoutIdempotencyHmac } from "@/commerce/idempotency";
 import { assertCommerceReady } from "@/commerce/readiness";
@@ -12,7 +12,7 @@ import {
 } from "@/db/commercial-orders";
 import { getGeoReport } from "@/db/reports";
 import { AirwallexGateway, isAirwallexPaymentIntentId } from "@/payments/airwallex";
-import { getTrustedClientIp } from "@/security/client-ip";
+import { getTrustedClientCountry, getTrustedClientIp } from "@/security/client-ip";
 import { verifyTurnstile } from "@/security/turnstile";
 import { parseReportLocale } from "@/server/report-locale";
 import { assertRecommendationProductAvailable } from "@/recommendation-forensics/product-availability";
@@ -32,16 +32,16 @@ export async function POST(request: Request, context: RouteContext) {
     await assertCommerceReady();
     await assertRecommendationProductAvailable();
     const { id } = await context.params;
-    const body = await request.json() as { email?: unknown; currency?: unknown; locale?: unknown; turnstileToken?: unknown; questionSetId?: unknown };
-    const currency = parseSupportedCurrency(body.currency);
+    const body = await request.json() as { email?: unknown; locale?: unknown; turnstileToken?: unknown; questionSetId?: unknown };
     const locale = parseReportLocale(body.locale);
-    if (!currency || !locale) return NextResponse.json({ error: "A supported currency and report locale are required." }, { status: 400 });
+    if (!locale) return NextResponse.json({ error: "A supported report locale is required." }, { status: 400 });
     const report = await getGeoReport(id);
     if (!report) return NextResponse.json({ error: "Report not found." }, { status: 404 });
     if (!report.reportLocale || report.reportLocale !== locale) {
       return NextResponse.json({ error: "The checkout locale must match the persisted report language." }, { status: 409 });
     }
     const ipAddress = getTrustedClientIp(request);
+    const countryCode = getTrustedClientCountry(request);
     const challenge = await verifyTurnstile({
       token: typeof body.turnstileToken === "string" ? body.turnstileToken : "",
       remoteIp: ipAddress
@@ -50,7 +50,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     const normalizedEmail = normalizeCustomerEmail(body.email);
     const protectedEmail = protectCustomerEmail(normalizedEmail);
-    const price = getPriceSnapshot(currency);
+    const price = getPriceSnapshot(getOfferedCurrency(countryCode));
     const rawIdempotencyKey = request.headers.get("idempotency-key") ?? "";
     const checkoutHmac = checkoutIdempotencyHmac({ rawKey: rawIdempotencyKey, reportId: id });
     const siteKey = report.siteKey ?? createSiteKey(report.url);
@@ -74,7 +74,11 @@ export async function POST(request: Request, context: RouteContext) {
       if (active.customerEmailHmac !== protectedEmail.lookupHmac) {
         return NextResponse.json({ error: "This report already has an active checkout." }, { status: 409 });
       }
-      return checkoutResponse(request, active.id, active.providerCheckoutId, checkoutInput, false);
+      return checkoutResponse(request, active.id, active.providerCheckoutId, {
+        ...checkoutInput,
+        currency: active.currency,
+        amountMinor: active.amountMinor
+      }, countryCode, false);
     }
 
     const order = await createPaymentOrder({
@@ -94,7 +98,11 @@ export async function POST(request: Request, context: RouteContext) {
       currency: price.currency,
       amountMinor: price.amountMinor
     });
-    return checkoutResponse(request, order.id, order.providerCheckoutId, checkoutInput, true);
+    return checkoutResponse(request, order.id, order.providerCheckoutId, {
+      ...checkoutInput,
+      currency: order.currency,
+      amountMinor: order.amountMinor
+    }, countryCode, true);
   } catch (error) {
     if (process.env.NODE_ENV !== "production") console.error(error);
     return NextResponse.json({ error: publicError(error) }, { status: 400 });
@@ -106,6 +114,7 @@ async function checkoutResponse(
   orderId: string,
   providerCheckoutId: string | null,
   createInput: { reportId: string; siteKey: string; locale: "en" | "zh"; currency: "CNY" | "USD" | "HKD"; amountMinor: number },
+  countryCode: string | null,
   issueReturnCapability: boolean
 ) {
   const gateway = new AirwallexGateway();
@@ -156,6 +165,7 @@ async function checkoutResponse(
       intentId: checkout.providerCheckoutId,
       clientSecret: checkout.clientSecret,
       currency: checkout.currency,
+      countryCode,
       environment: checkout.environment
     }
   }, { status: providerCheckoutId ? 200 : 201 });

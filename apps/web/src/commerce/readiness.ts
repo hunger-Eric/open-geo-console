@@ -53,7 +53,7 @@ export async function assertCommerceReady(environment: NodeJS.ProcessEnv = proce
 
 function hasLiveConfiguration(environment: NodeJS.ProcessEnv): boolean {
   return [
-    "OGC_PRICE_CNY_MINOR", "OGC_PRICE_USD_MINOR", "OGC_PRICE_HKD_MINOR",
+    "OGC_PRICE_CNY_MINOR", "OGC_PRICE_USD_MINOR",
     "OGC_PAYMENT_IDEMPOTENCY_SECRET", "OGC_EMAIL_ENCRYPTION_SECRET", "OGC_EMAIL_LOOKUP_SECRET",
     "TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY", "TURNSTILE_EXPECTED_HOSTNAME",
     "AIRWALLEX_CLIENT_ID", "AIRWALLEX_API_KEY", "AIRWALLEX_WEBHOOK_SECRET",

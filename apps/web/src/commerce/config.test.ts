@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { amountMinorToMajor, getCommerceMode, getFulfillmentMode, getPriceSnapshot, parseSupportedCurrency } from "./config";
+import { amountMinorToMajor, getCommerceMode, getFulfillmentMode, getOfferedCurrency, getPriceSnapshot, parseSupportedCurrency } from "./config";
 
 describe("commerce configuration", () => {
   it("fails closed by default and uses batch fulfillment", () => {
@@ -9,9 +9,10 @@ describe("commerce configuration", () => {
 
   it("uses test-only defaults without accepting a browser amount", () => {
     expect(getPriceSnapshot("USD", { COMMERCE_MODE: "test" })).toMatchObject({
-      productCode: "recommendation_forensics_v1", amountMinor: 2_900
+      productCode: "recommendation_forensics_v1", catalogVersion: "2026-08-04.v2", amountMinor: 9_900
     });
-    expect(amountMinorToMajor(2_900)).toBe(29);
+    expect(getPriceSnapshot("CNY", { COMMERCE_MODE: "test" }).amountMinor).toBe(29_900);
+    expect(amountMinorToMajor(9_900)).toBe(99);
   });
 
   it("requires every live price to be explicitly configured server-side", () => {
@@ -22,5 +23,20 @@ describe("commerce configuration", () => {
   it("accepts only catalog currencies", () => {
     expect(parseSupportedCurrency("CNY")).toBe("CNY");
     expect(parseSupportedCurrency("EUR")).toBeNull();
+  });
+
+  it.each([
+    ["CN", "CNY", 29_900],
+    ["HK", "USD", 9_900],
+    ["MO", "USD", 9_900],
+    ["TW", "USD", 9_900],
+    ["US", "USD", 9_900],
+    ["JP", "USD", 9_900],
+    ["DE", "USD", 9_900],
+    [null, "USD", 9_900]
+  ] as const)("maps country %s to the single offered price", (countryCode, currency, amountMinor) => {
+    const offeredCurrency = getOfferedCurrency(countryCode);
+    expect(offeredCurrency).toBe(currency);
+    expect(getPriceSnapshot(offeredCurrency, { COMMERCE_MODE: "test" }).amountMinor).toBe(amountMinor);
   });
 });

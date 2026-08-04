@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getPaymentConfirmationReturnUrl, readCheckoutPayload } from "./checkout-response";
+import {
+  buildCheckoutRequestBody,
+  buildHostedPaymentPageOptions,
+  getPaymentConfirmationReturnUrl,
+  readCheckoutPayload
+} from "./checkout-response";
 import { buildHppReturnUrls } from "./payment-return";
 
 describe("HPP return URLs", () => {
@@ -14,6 +19,33 @@ describe("HPP return URLs", () => {
 });
 
 describe("checkout response parsing", () => {
+  it("builds checkout input without a browser-selected currency", () => {
+    expect(buildCheckoutRequestBody({
+      email: "buyer@example.test",
+      locale: "zh",
+      turnstileToken: "token",
+      questionSetId: "questions-1"
+    })).toEqual({
+      email: "buyer@example.test",
+      locale: "zh",
+      turnstileToken: "token",
+      questionSetId: "questions-1"
+    });
+  });
+
+  it("passes the server country to HPP and omits it when unavailable", () => {
+    const urls = { successUrl: "https://example.test/success", cancelUrl: "https://example.test/cancel" };
+    expect(buildHostedPaymentPageOptions({
+      intentId: "int_cn", clientSecret: "secret", currency: "CNY", countryCode: "CN"
+    }, urls)).toMatchObject({ currency: "CNY", country_code: "CN" });
+    expect(buildHostedPaymentPageOptions({
+      intentId: "int_unknown", clientSecret: "secret", currency: "USD", countryCode: null
+    }, urls)).not.toHaveProperty("country_code");
+    expect(buildHostedPaymentPageOptions({
+      intentId: "int_invalid", clientSecret: "secret", currency: "USD", countryCode: "ZZ"
+    }, urls)).not.toHaveProperty("country_code");
+  });
+
   it("turns an empty gateway response into a safe empty payload", async () => {
     await expect(readCheckoutPayload(new Response(null, { status: 500 }))).resolves.toEqual({});
   });

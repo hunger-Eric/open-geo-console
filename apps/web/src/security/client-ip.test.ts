@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTrustedClientIdentity, getTrustedClientIp } from "./client-ip";
+import { getTrustedClientCountry, getTrustedClientIdentity, getTrustedClientIp } from "./client-ip";
 
 describe("getTrustedClientIp", () => {
   it("uses Vercel's anti-spoofing client IP header on Vercel", () => {
@@ -54,5 +54,29 @@ describe("getTrustedClientIp", () => {
 
     expect(getTrustedClientIp(request, {})).toBe("untrusted-direct-client");
     expect(getTrustedClientIdentity(request, {}).source).toBe("fallback");
+  });
+
+  it("normalizes Vercel's trusted country code", () => {
+    const request = new Request("https://example.test", {
+      headers: { "x-vercel-ip-country": " tw " }
+    });
+
+    expect(getTrustedClientCountry(request, { VERCEL: "1" })).toBe("TW");
+  });
+
+  it("uses Cloudflare country only behind the explicit trusted-proxy gate", () => {
+    const request = new Request("https://example.test", {
+      headers: { "cf-ipcountry": "HK" }
+    });
+
+    expect(getTrustedClientCountry(request, {})).toBeNull();
+    expect(getTrustedClientCountry(request, { TRUST_PROXY_HEADERS: "true" })).toBe("HK");
+  });
+
+  it("rejects missing, malformed, and unknown platform country values", () => {
+    for (const country of [null, "", "USA", "1A", "XX", "ZZ"]) {
+      const headers = country == null ? undefined : { "x-vercel-ip-country": country };
+      expect(getTrustedClientCountry(new Request("https://example.test", { headers }), { VERCEL: "1" })).toBeNull();
+    }
   });
 });

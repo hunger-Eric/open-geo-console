@@ -1,6 +1,7 @@
 export type CommerceMode = "disabled" | "test" | "live";
 export type FulfillmentMode = "batch_24h" | "realtime";
 export type SupportedCurrency = "CNY" | "USD" | "HKD";
+export type OfferedCurrency = Extract<SupportedCurrency, "CNY" | "USD">;
 
 export interface PriceSnapshot {
   productCode: "recommendation_forensics_v1";
@@ -14,8 +15,8 @@ export interface PriceSnapshot {
 }
 
 const TEST_PRICES: Record<SupportedCurrency, number> = {
-  CNY: 19_900,
-  USD: 2_900,
+  CNY: 29_900,
+  USD: 9_900,
   HKD: 22_900
 };
 
@@ -42,6 +43,10 @@ export function parseSupportedCurrency(value: unknown): SupportedCurrency | null
   return value === "CNY" || value === "USD" || value === "HKD" ? value : null;
 }
 
+export function getOfferedCurrency(countryCode: string | null): OfferedCurrency {
+  return countryCode === "CN" ? "CNY" : "USD";
+}
+
 export function getPriceSnapshot(
   currency: SupportedCurrency,
   environment: NodeJS.ProcessEnv = process.env
@@ -55,7 +60,7 @@ export function getPriceSnapshot(
   const amountMinor = hasConfiguredPrice ? configured : TEST_PRICES[currency];
   return {
     productCode: "recommendation_forensics_v1",
-    catalogVersion: environment.OGC_PRICE_CATALOG_VERSION?.trim() || "2026-07-10.v1",
+    catalogVersion: environment.OGC_PRICE_CATALOG_VERSION?.trim() || "2026-08-04.v2",
     currency,
     amountMinor,
     reportTier: "deep",
