@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseCombinedGeoReportV4 } from "@open-geo-console/ai-report-engine";
 
-const mocks=vi.hoisted(()=>({cookies:vi.fn(),notFound:vi.fn(),loadPrivateReportArtifact:vi.fn(),tokenGrantsReportAccess:vi.fn()}));
-vi.mock("next/headers",()=>({cookies:mocks.cookies}));
+const mocks=vi.hoisted(()=>({cookies:vi.fn(),headers:vi.fn(),notFound:vi.fn(),loadPrivateReportArtifact:vi.fn(),tokenGrantsReportAccess:vi.fn()}));
+vi.mock("next/headers",()=>({cookies:mocks.cookies,headers:mocks.headers}));
 vi.mock("next/navigation",()=>({notFound:mocks.notFound}));
 vi.mock("@/report/artifact-model",()=>({loadPrivateReportArtifact:mocks.loadPrivateReportArtifact}));
 vi.mock("@/server/report-access",()=>({reportAccessCookieName:(id:string,scope:string)=>`${id}/${scope}`,tokenGrantsReportAccess:mocks.tokenGrantsReportAccess}));
@@ -17,6 +17,7 @@ describe("private canonical HTML report page",()=>{
   beforeEach(()=>{
     vi.clearAllMocks();
     mocks.cookies.mockResolvedValue({get:vi.fn(()=>undefined)});
+    mocks.headers.mockResolvedValue({get:vi.fn(()=>null)});
     mocks.tokenGrantsReportAccess.mockResolvedValue(false);
     mocks.notFound.mockImplementation(()=>{throw new Error("APP_404");});
   });
@@ -61,6 +62,24 @@ describe("private canonical HTML report page",()=>{
     expect(html).toContain('data-report-version="4"');
     expect(html).toContain("V4 customer answer one.");
     expect(customerSurface).not.toMatch(/\.pdf\b|<button|download(?:=| pdf)|print report|pdf download/i);
+  });
+
+  it("renders the download bar with the /download href for authorized access", async () => {
+    mocks.headers.mockResolvedValue({ get: vi.fn((name: string) => name === "x-ogc-interface-locale" ? "en" : null) });
+    mocks.cookies.mockResolvedValue({ get: vi.fn((name: string) => ({
+      value: name.endsWith("combined_geo_report_v4") ? "v4-token" : "older-token"
+    })) });
+    mocks.tokenGrantsReportAccess.mockImplementation(async (token: string | undefined, _id: string, scope: string) =>
+      token === "v4-token" && scope === "combined_geo_report_v4");
+    mocks.loadPrivateReportArtifact.mockResolvedValue({
+      productContract: "combined_geo_report_v4",
+      combinedReport: v4Report()
+    });
+
+    const page = await PrivateHtmlReportPage({ params: Promise.resolve({ id: "report-v4" }) });
+    const html = renderToStaticMarkup(page);
+    expect(html).toContain('href="/reports/report-v4/report.html/download"');
+    expect(html).toContain("Download HTML");
   });
 
   it("fails closed when a V3 token appears only in the V4 cookie", async () => {
