@@ -5486,3 +5486,131 @@ revised scope.
   the fixed Protected Staging site still serves the `ac3fe3c` Preview (web
   process needed none of these worker-only fixes).
 - Terminal status: **complete and accepted.**
+
+---
+
+## 2026-08-04 - Staging commerce operations and HTML download delivery
+
+- W1 started the existing Staging commerce consumer; new eligible email
+  deliveries were claimed successfully. Four pre-activation queued rows and
+  historical failed rows remained untouched.
+- W2 ran the single authorized Staging commerce reconciliation. The command
+  found 12 pending Sandbox refunds rather than the two anticipated by the
+  scope; it submitted all 12 in that one run and all succeeded. No order or
+  report was created.
+- W3 added the authorized standalone HTML report download and browser-open
+  hint in commit `aac357d1fd9bc863ae7026b2ca38c60344a02529`. Focused tests and
+  the web production build passed. Preview
+  `dpl_HUPxAFtg9sWTjyYViiogu7EW146v` reached READY and the fixed Protected
+  Staging alias was moved to it.
+- User browser acceptance and the related version tag remained pending when
+  the user explicitly approved archiving this scope in favor of the report
+  progress-status repair.
+- Terminal status: **implemented and deployed; superseded with browser
+  acceptance still pending.**
+
+---
+
+## 2026-08-04 - Continuous report progress and automatic status refresh
+
+- The V4 free-report status now exposes one public lifecycle: the base job is
+  capped at 65 percent and the pre-admission/free-preview job maps from 65 to
+  99 percent. The handoff no longer resets the visible bar to zero. Legacy
+  single-stage free reports and paid deep reports retain raw progress.
+- `AiReportStatus` now self-schedules status checks until a terminal response,
+  tolerates a transient failed check, pauses while the document is hidden, and
+  resumes when visible. The payment-return banner no longer stops after two
+  minutes; it continues with a bounded 15-second maximum interval.
+- The manual refresh button and its obsolete test were removed. Both visible
+  progress bars now use the persisted job-stage description rather than a
+  repeated generic generation sentence.
+- Verification: 45 focused Vitest tests passed across five files; scoped
+  ESLint passed; `npm run build --workspace apps/web` completed with TypeScript
+  and all 18 static pages successful; `git diff --check` passed. Production
+  changed-line count stayed within 180 and tests stayed within 220.
+- No Worker, database, queue, payment/refund state-machine, deployment, Docker,
+  live report, Git history, or external provider action occurred.
+- Terminal status: **implemented and locally verified; not deployed.**
+
+---
+
+## 2026-08-04 - Local real-browser acceptance for report progress UI
+
+- The local PostgreSQL endpoint at `localhost:55432` was unavailable, so no
+  database-backed report route, report creation, or live generation was used.
+  A first loopback Next route attempt was also blocked by a pre-existing 308
+  language-route loop (`/zh/reports/...` and `/reports/...`), recorded but not
+  repaired because route work was outside this verification scope.
+- Independent browser QA then used an in-memory esbuild bundle (`write:false`)
+  of the current-worktree `AiReportStatus`, `PaymentReturnBanner`,
+  `payment-return`, and `ai-report-status-copy` sources. A loopback-only HTTP
+  server supplied the bundle; no fixture, screenshot, report artifact, or
+  repository file was created.
+- Actual browser DOM/timer evidence: free progress rendered
+  `analyzing 65% -> queued 65% -> discovering 67%`; at least three status
+  requests occurred without click or reload; the visible stage text matched
+  the persisted stage; no manual refresh button or paused-refresh instruction
+  was present.
+- With accelerated monotonic browser time, payment polling remained active
+  beyond the former 120-second boundary. The authoritative terminal response
+  arrived on status request 12 at virtual 144000ms
+  (`paymentStatus=paid`, `fulfillmentStatus=completed`,
+  `refundStatus=not_required`, `progress=null`). No later status request
+  occurred after waiting more than two accelerated 15-second maximum
+  intervals. AI polling likewise stopped after its terminal job response.
+- A preliminary extra-request observation was rejected as harness error: the
+  temporary completion-access substitute returned an invalid 204 JSON shape.
+  The final run used stable module-level Next hook substitutes, no React
+  StrictMode, a parseable completion response, and separate status-endpoint
+  counting.
+- Boundary: this is real-browser rendering and timer acceptance of the current
+  component sources, backed by the existing API/unit/build checks. It is not a
+  database-backed Next-route E2E, live report-generation test, deployment, or
+  deployed-site acceptance.
+- Both loopback servers were stopped. No code, test, database, Docker,
+  environment, Git, payment, report, provider, or external state was changed.
+- Terminal status: **local component-browser acceptance passed; not deployed.**
+
+---
+
+## 2026-08-04 - Local browser acceptance of progress/auto-refresh UI (coordination note)
+
+- This note was appended mid-flight by the S1-S4 staging scope while the
+  parallel browser-acceptance scope was still active; at that moment the user
+  had redirected acceptance to staging. The parallel session subsequently ran
+  its browser pass to completion — see the entry "Local real-browser
+  acceptance for report progress UI" above, which is the authoritative record
+  (acceptance passed).
+- The UI changes were then committed as `aa46efe` under the S1-S4 scope (S1)
+  and will reach Protected Staging in that scope's integrated deployment,
+  where the user performs final acceptance.
+
+---
+
+## 2026-08-04 - Integrated staging: progress UI, transient-failure retry, refund automation
+
+- S1: the parallel session's completed progress/auto-refresh UI changes were
+  verified (43 focused tests + web build) and committed as `aa46efe`.
+- S2: transient-failure fault tolerance for the paid deep free-direct flow,
+  committed as `8e11203` (+7/−3 production): `processor.ts` lets transient
+  failures take `retry_wait` (v4_pre_admission one-shot guard untouched),
+  `commercial-orders.ts` raises that lineage to `max_attempts=3`,
+  `provider-claim-extraction.ts` retries network/timeout AiClientError.
+  Verified: 80 focused tests, disposable-postgres 6/6 (receipt
+  `pg-20260804041950-3477b986`), broader sweep 1214 passed, web build.
+- S3: `compose.yaml` `staging-commerce-reconcile` loop service (commit
+  `a7ce1af`) running with `staging.env` + `staging-commerce.env` (deviation
+  from the written single env_file: Airwallex credentials required).
+  First loop submitted the one pending staging TEST refund (order
+  `4a3869e3`, Airwallex `rfd_sgpv7jqpthl0oxer5me_xg6f8u`, CNY 199.00) and
+  drained the last 4 queued emails; queue now zero; db audit passed.
+- S4: Preview `dpl_8Wm9kkWCDUd1jwVtN5qYjmWNH8Wt` (ogcGitSha `a7ce1af`)
+  READY, fixed Protected Staging alias moved, SSO intact. Thin worker
+  overlay `staging-a7ce1af-retry-overlay-v1` (`1a82ee00f646`) built FROM
+  `staging-0dd8206-output-cap-overlay-v1`; only the two staging workers
+  recreated, healthy; rollback `ab4f795c9bf7` retained; E: 51 GiB free
+  before and after; no Docker cleanup.
+- Historical failed job `51c0c553` was not repaired or replayed; its order
+  was refunded through S3 only.
+- Terminal status: **implemented, verified, and deployed to Protected
+  Staging; user browser acceptance and the `v0.3.0` tag remain pending.**
