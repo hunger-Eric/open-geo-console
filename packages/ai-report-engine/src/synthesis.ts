@@ -66,6 +66,8 @@ export function buildSynthesisPrompt(
     rules: [
       languageInstruction,
       "Use only supplied evidence and analyses.",
+      "Use reportAsOf as the authoritative time reference. Never describe an observed date on or before reportAsOf as future-dated.",
+      "Distinguish publication dates from other page dates. If a date's meaning is ambiguous, state that uncertainty instead of inferring that it is in the future.",
       "Every finding must cite an exact supplied URL and a verbatim quote.",
       "Do not claim external domain ownership verification; ownershipVerification must be not-performed.",
       "Scores are semantic AI assessments and must not alter any separate deterministic technical GEO score.",
@@ -73,6 +75,7 @@ export function buildSynthesisPrompt(
     ],
     ...(correctionRequired.length ? { correctionRequired } : {}),
     targetUrl: input.targetUrl,
+    reportAsOf: input.generatedAt ?? null,
     tier: input.tier,
     locale: input.locale,
     organizationHints: input.organizationHints ?? [],
@@ -151,6 +154,8 @@ export async function synthesizeWebsiteReport(
   correctionRequired: readonly string[] = [],
   semanticValidation: "legacy" | "deferred" | "free_direct" = "legacy"
 ): Promise<SynthesizeReportResult> {
+  const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const datedInput = input.generatedAt ? input : { ...input, generatedAt };
   const languageInstruction = semanticValidation !== "legacy"
     ? naturalLanguageInstruction(input.locale)
     : reportLanguageInstruction(input.locale);
@@ -164,11 +169,10 @@ export async function synthesizeWebsiteReport(
         content:
           `You are a senior GEO and website intelligence analyst. Produce a decision-useful JSON report grounded exclusively in supplied website evidence. JSON only. ${languageInstruction}`
       },
-      { role: "user", content: buildSynthesisPrompt(input, correctionRequired, semanticValidation) }
+      { role: "user", content: buildSynthesisPrompt(datedInput, correctionRequired, semanticValidation) }
     ]
   });
 
-  const generatedAt = input.generatedAt ?? new Date().toISOString();
   const contentHash = await sha256Hex(
     JSON.stringify(input.pages.map((page) => ({ url: page.url, text: page.text })))
   );
@@ -236,12 +240,13 @@ export async function synthesizeWebsiteReportWithRecovery(
   } = {}
 ): Promise<SynthesizeReportResult> {
   const maxAttempts = Math.max(1, options.maxAttempts ?? 3);
+  const datedInput = input.generatedAt ? input : { ...input, generatedAt: new Date().toISOString() };
   const delay = options.delay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     options.signal?.throwIfAborted();
     try {
-      return await synthesizeWebsiteReport(client, input, options.signal, [], options.semanticValidation);
+      return await synthesizeWebsiteReport(client, datedInput, options.signal, [], options.semanticValidation);
     } catch (error) {
       lastError = error;
       if (options.semanticValidation === "free_direct") {
@@ -252,7 +257,7 @@ export async function synthesizeWebsiteReportWithRecovery(
       if (error instanceof WebsiteReportLanguageValidationError) {
         if (attempt >= maxAttempts) throw error;
         await delayWithSignal(delay, Math.min(2_000, 250 * (2 ** (attempt - 1))), options.signal);
-        return correctWebsiteReportLanguage(client, input, error, options.signal);
+        return correctWebsiteReportLanguage(client, datedInput, error, options.signal);
       }
       if (attempt < maxAttempts) await delayWithSignal(delay, Math.min(2_000, 250 * (2 ** (attempt - 1))), options.signal);
     }

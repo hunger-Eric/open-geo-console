@@ -5803,3 +5803,32 @@ revised scope.
   `dpl_EiRKJGKAy2TSMYExcYVQ3iBKhYNP`.
 - Terminal status: **implemented, verified, and deployed to Protected
   Staging; user second-click acceptance pending.**
+
+---
+
+## 2026-08-04 - Paid V3 decision layout and date-reference repair
+
+- User approved four issues: give future website synthesis an authoritative
+  report-as-of timestamp; localize technical-dimension labels; remove the
+  customer-visible per-source verification column while retaining aggregate
+  audit counts; and replace the dense three-column roadmap with a numbered
+  three-phase why-to-how action chain.
+- Changed only the Paid V3 component, its scoped CSS/test, website-synthesis
+  prompt/test, prompt-version constant, and the active scope. Prompt provenance
+  advanced to `ai-website-report-v3`; no schema, payment, commerce, access,
+  report persistence, or historical artifact was changed.
+- Verified 50 focused tests, scoped lint, AI report engine type build, and the
+  complete workspace/Next.js production build. Full tests retained the same 15
+  unrelated failures: 13 stale schema-44 expectations and two Windows
+  PowerShell timeouts. Full lint retained the same 17 errors in the ignored
+  `.tmp-preview/debug-readiness.ts`; changed files passed scoped lint.
+- Read-only real-report rerender retained source SHA-256
+  `b48e18945421eec339b3d501996ebb46c86fab8c6ba9dfc724826c28abe25c15`,
+  all 3 answers, 26 source rows, 10 roadmap actions, and 22 evidence images.
+  Independent browser acceptance passed desktop/narrow layout, mouse/keyboard
+  disclosure, print expansion, no overflow, and zero console errors. The
+  historical erroneous date conclusion was deliberately not rewritten.
+- No model call, report generation, database mutation, deployment, Docker
+  action, payment, email, or Git mutation occurred under this scope.
+- Terminal status: **implemented and locally accepted; release pending a
+  separately frozen Git phase followed by an exact-SHA Staging phase.**

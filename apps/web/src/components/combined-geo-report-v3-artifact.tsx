@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- protected evidence images must remain printable in canonical HTML */
 import React, { type ReactNode } from "react";
 import type {
+  DimensionKey,
   GenerativeSearchAnswerCardV3,
   LegacyEvidenceBoundAnswerCardV3,
   OpenGeoAnswerOwnershipCategoryV3,
@@ -9,6 +10,19 @@ import type {
 } from "@open-geo-console/ai-report-engine";
 import type { CombinedPrivateReportArtifactModelV3 } from "@/report/artifact-model";
 import { SourceSelectionDiagnosisSection } from "./source-selection-diagnosis-section";
+
+type PaidAnswerCard=CombinedPrivateReportArtifactModelV3["combinedReport"]["answerCards"][number];
+type EvidenceSummary={verified:number;searchOnly:number;inaccessible:number;total:number};
+
+const DECISION_COPY={
+  zh:{overallVerdict:"决策结论",primaryAction:"第一优先行动",keyMetrics:"关键决策指标",completeAnswers:"完整回答",verifiedEvidence:"已独立核验",totalEvidence:"回答来源",questionSnapshot:"三个买家问题速览",questionConclusion:"本题判断",questionAction:"建议动作",searchOnly:"仅搜索来源",inaccessible:"当前不可访问",answerDetail:"查看完整回答与诊断",evidenceDetail:"查看完整来源与摘录",diagnosisDetail:"查看本题差距与行动",sourceLandscapeDetail:"查看来源选择诊断",technicalDetail:"查看完整技术发现、页面与截图",actionCount:"项行动",why:"为什么要做",how:"具体怎么做"},
+  en:{overallVerdict:"Decision verdict",primaryAction:"First priority",keyMetrics:"Key decision metrics",completeAnswers:"Complete answers",verifiedEvidence:"Independently verified",totalEvidence:"Answer sources",questionSnapshot:"Three buyer questions at a glance",questionConclusion:"Question verdict",questionAction:"Recommended action",searchOnly:"Search source only",inaccessible:"Currently inaccessible",answerDetail:"View the complete answer and diagnosis",evidenceDetail:"View all sources and excerpts",diagnosisDetail:"View this question's gaps and actions",sourceLandscapeDetail:"View source-selection diagnosis",technicalDetail:"View all technical findings, pages, and screenshots",actionCount:"actions",why:"Why this matters",how:"What to do"}
+} as const;
+
+const DIMENSION_LABELS:Record<"en"|"zh",Record<DimensionKey,string>>={
+  en:{organizationClarity:"Organization clarity",informationArchitecture:"Information architecture",contentCitability:"Content and citability",trustEvidence:"Trust evidence",entityConsistency:"Entity consistency",geoUnderstandability:"GEO understandability"},
+  zh:{organizationClarity:"企业表达清晰度",informationArchitecture:"信息架构",contentCitability:"内容与可引用性",trustEvidence:"信任与权威证据",entityConsistency:"实体一致性",geoUnderstandability:"GEO 可理解性"}
+};
 
 export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateReportArtifactModelV3 }) {
   const { combinedReport: report } = model;
@@ -23,6 +37,8 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
   const profile=report.technicalFoundation.aiReport.organizationProfile;
   const coverage=report.technicalFoundation.aiReport.coverage;
   const conclusion=reportConclusion(report,model.locale);
+  const decisionCopy=DECISION_COPY[model.locale];
+  const evidenceTotals=report.answerCards.reduce((total,card)=>addEvidenceSummary(total,evidenceSummary(card)),emptyEvidenceSummary());
   return <main className="report-shell answer-first-report paid-report-template" data-artifact-revision={report.artifactRevisionId}>
     <div className="paid-report-frame">
       <aside className="paid-report-rail">
@@ -44,7 +60,21 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
     <header className="report-section report-guide" id="artifact-sec-guide" data-report-guide="true">
       <div className="guide-kicker"><span>{copy.kicker}</span><time dateTime={report.generatedAt}>{formatTimestamp(report.generatedAt,model.locale)}</time></div>
       <p className="section-index">00</p><h1>{content.guide}</h1>
-      <dl className="guide-metadata"><Meta label={copy.target}>{report.targetUrl}</Meta><Meta label={copy.generated}>{formatTimestamp(report.generatedAt,model.locale)}</Meta><Meta label={content.conclusion}>{conclusion.summary}</Meta>{conclusion.priority?<Meta label={content.priorityAction}>{conclusion.priority}</Meta>:null}</dl>
+      <div className="decision-verdict" data-decision-summary="true">
+        <p className="decision-eyebrow">{decisionCopy.overallVerdict}</p>
+        <h2>{conclusion.summary}</h2>
+        {conclusion.priority?<p className="decision-priority"><strong>{decisionCopy.primaryAction}</strong><span>{conclusion.priority}</span></p>:null}
+      </div>
+      <dl className="decision-metrics" aria-label={decisionCopy.keyMetrics}>
+        <Meta label={decisionCopy.completeAnswers}>{answered}/{report.answerCards.length}</Meta>
+        <Meta label={copy.technicalScore}>{report.technicalFoundation.technicalReport.score}/100</Meta>
+        <Meta label={decisionCopy.verifiedEvidence}>{evidenceTotals.verified}</Meta>
+        <Meta label={decisionCopy.totalEvidence}>{evidenceTotals.total}</Meta>
+      </dl>
+      <div className="decision-question-grid" aria-label={decisionCopy.questionSnapshot}>
+        {report.answerCards.map((card,cardIndex)=><QuestionSnapshot card={card} cardIndex={cardIndex} locale={model.locale} direct={directByQuestion.get(card.questionId)} key={card.questionId}/>) }
+      </div>
+      <dl className="guide-metadata decision-metadata"><Meta label={copy.target}>{report.targetUrl}</Meta><Meta label={copy.generated}>{formatTimestamp(report.generatedAt,model.locale)}</Meta></dl>
     </header>
 
     <section className="report-section website-context" id="artifact-sec-context" data-website-context="true">
@@ -58,11 +88,7 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
       </div>
       <h3>{copy.executive}</h3>
       <p className="summary-copy">{report.technicalFoundation.aiReport.executiveSummary.overview}</p>
-      <dl className="answer-metric-grid website-context-metrics">
-        <Meta label={copy.analyzedPages}>{coverage.analyzedPages ?? report.technicalFoundation.technicalReport.pages.length}</Meta>
-        <Meta label={copy.technicalScore}>{report.technicalFoundation.technicalReport.score}</Meta>
-        <Meta label={copy.answered}>{answered}/3</Meta><Meta label={copy.limited}>{limited}/3</Meta>{mentioned === null ? null : <Meta label={copy.mentioned}>{mentioned}/3</Meta>}
-      </dl>
+      <dl className="answer-metric-grid website-context-metrics"><Meta label={copy.analyzedPages}>{coverage.analyzedPages ?? report.technicalFoundation.technicalReport.pages.length}</Meta><Meta label={copy.answered}>{answered}/{report.answerCards.length}</Meta><Meta label={copy.limited}>{limited}/{report.answerCards.length}</Meta>{mentioned === null ? null : <Meta label={copy.mentioned}>{mentioned}/{report.answerCards.length}</Meta>}</dl>
     </section>
 
     <section className="report-section report-analysis-flow" data-progressive-analysis="true">
@@ -80,12 +106,7 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
         <p className="section-index">03</p><h2>{copy.answerEvidence}</h2>
       </div>
       {report.sourceSelectionDiagnosis
-        ? <div className="analysis-global-evidence"><SourceSelectionDiagnosisSection
-            diagnosis={report.sourceSelectionDiagnosis}
-            locale={model.locale}
-            targetUrl={report.targetUrl}
-            questions={report.answerCards.map(({questionId,exactQuestion})=>({id:questionId,text:exactQuestion}))}
-          /></div>
+        ? <details className="analysis-global-evidence report-detail" data-source-diagnosis-detail="true"><summary>{decisionCopy.sourceLandscapeDetail}</summary><div className="report-detail-body"><SourceSelectionDiagnosisSection diagnosis={report.sourceSelectionDiagnosis} locale={model.locale} targetUrl={report.targetUrl} questions={report.answerCards.map(({questionId,exactQuestion})=>({id:questionId,text:exactQuestion}))}/></div></details>
         : null}
       <div className="analysis-stage-heading analysis-stage-absence" id="artifact-sec-absence" data-target-absence-section="true">
         <p className="section-index">04</p><h2>{copy.absenceReasons}</h2>
@@ -95,26 +116,23 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
 
       <section className="report-section" id="artifact-sec-technical" data-technical-analysis="true">
       <p className="section-index">05</p><h2>{copy.technical}</h2>
-      <h3>{copy.technicalFindings}</h3>
-      <div className="finding-list">{report.technicalFoundation.technicalReport.findings.map((finding) => <article className="finding-card" key={finding.id}><h4>{finding.title}</h4><p>{finding.description}</p><p className="recommendation">{finding.recommendation}</p></article>)}</div>
-      <h3>{copy.pageAnalysis}</h3>
-      <div className="table-wrap"><table><thead><tr><th>URL</th><th>{copy.pageTitle}</th><th>H1</th><th>Canonical</th><th>{copy.body}</th></tr></thead><tbody>
-        {report.technicalFoundation.technicalReport.pages.map((page) => <tr key={page.url}><td>{page.url}</td><td>{page.title ?? "—"}</td><td>{page.h1.join(" · ") || "—"}</td><td>{page.canonical ?? "—"}</td><td>{page.metaDescription ?? "—"}</td></tr>)}
-      </tbody></table></div>
       <h3>{copy.dimensionScores}</h3>
-      <div className="technical-score-list">{report.technicalFoundation.aiReport.dimensionScores.map((score)=><article key={score.dimension}><strong>{score.score}</strong><div><h4>{score.dimension}</h4><p>{score.explanation}</p></div></article>)}</div>
-      <h3>{content.technicalAnalysis}</h3>
-      <div className="finding-list">{report.technicalFoundation.aiReport.findings.map((finding) => <article className="finding-card" key={finding.id}><h4>{finding.title}</h4><p>{finding.impact}</p><p className="recommendation">{finding.recommendation}</p>{finding.evidence.map((evidence, index) => {
-        const assets=model.evidenceAssets.filter((asset)=>asset.findingId===finding.id&&asset.citationIndex===index&&asset.status==="ready");
-        return <figure className="evidence-card technical-evidence-card" key={`${finding.id}-${index}`}><figcaption><p className="technical-evidence-label">{content.evidenceSnapshot}</p><blockquote>{evidence.quote}</blockquote><a href={evidence.url}>{evidence.url}</a></figcaption>{assets.map((asset)=><img data-evidence-asset={asset.id} key={asset.id} src={`/api/reports/${model.reportId}/evidence/${asset.id}`} alt={`${finding.title} evidence`}/>)}</figure>;
-      })}</article>)}</div>
-      <h3>{copy.pageTypes}</h3>
-      {report.technicalFoundation.aiReport.pageTypeAnalyses.map((analysis,index)=><article className="technical-analysis-row" key={`${analysis.pageType}-${index}`}><h4>{analysis.pageType}</h4><p>{analysis.sampledUrls.join(" · ")}</p><List label={copy.strengths} items={analysis.strengths}/><List label={copy.issues} items={analysis.commonIssues}/><List label={copy.recommendations} items={analysis.recommendations}/></article>)}
+      <TechnicalScoreSummary scores={report.technicalFoundation.aiReport.dimensionScores} locale={model.locale}/>
+      <details className="report-detail technical-detail" data-technical-detail="true"><summary>{decisionCopy.technicalDetail}</summary><div className="report-detail-body">
+        <h3>{copy.technicalFindings}</h3>
+        <div className="finding-list">{report.technicalFoundation.technicalReport.findings.map((finding) => <article className="finding-card" key={finding.id}><h4>{finding.title}</h4><p>{finding.description}</p><p className="recommendation">{finding.recommendation}</p></article>)}</div>
+        <h3>{copy.pageAnalysis}</h3>
+        <div className="table-wrap"><table><thead><tr><th>URL</th><th>{copy.pageTitle}</th><th>H1</th><th>Canonical</th><th>{copy.body}</th></tr></thead><tbody>{report.technicalFoundation.technicalReport.pages.map((page) => <tr key={page.url}><td>{page.url}</td><td>{page.title ?? "—"}</td><td>{page.h1.join(" · ") || "—"}</td><td>{page.canonical ?? "—"}</td><td>{page.metaDescription ?? "—"}</td></tr>)}</tbody></table></div>
+        <h3>{content.technicalAnalysis}</h3>
+        <div className="finding-list">{report.technicalFoundation.aiReport.findings.map((finding) => <article className="finding-card" key={finding.id}><h4>{finding.title}</h4><p>{finding.impact}</p><p className="recommendation">{finding.recommendation}</p>{finding.evidence.map((evidence,index)=>{const assets=model.evidenceAssets.filter((asset)=>asset.findingId===finding.id&&asset.citationIndex===index&&asset.status==="ready");return <figure className="evidence-card technical-evidence-card" key={`${finding.id}-${index}`}><figcaption><p className="technical-evidence-label">{content.evidenceSnapshot}</p><blockquote>{evidence.quote}</blockquote><a href={evidence.url}>{evidence.url}</a></figcaption>{assets.map((asset)=><img data-evidence-asset={asset.id} key={asset.id} src={`/api/reports/${model.reportId}/evidence/${asset.id}`} alt={`${finding.title} evidence`}/>)}</figure>;})}</article>)}</div>
+        <h3>{copy.pageTypes}</h3>
+        {report.technicalFoundation.aiReport.pageTypeAnalyses.map((analysis,index)=><article className="technical-analysis-row" key={`${analysis.pageType}-${index}`}><h4>{analysis.pageType}</h4><p>{analysis.sampledUrls.join(" · ")}</p><List label={copy.strengths} items={analysis.strengths}/><List label={copy.issues} items={analysis.commonIssues}/><List label={copy.recommendations} items={analysis.recommendations}/></article>)}
+      </div></details>
     </section>
 
       <section className="report-section unified-actions" id="artifact-sec-actions" data-unified-actions="true">
         <p className="section-index">06</p><h2>{copy.actions}</h2>
-        <div className="technical-roadmap">{(["immediate","nextPhase","ongoing"] as const).map((phase)=><section key={phase}><h4>{roadmapLabel(phase,zh)}</h4>{report.technicalFoundation.aiReport.roadmap[phase].map((item,index)=><article key={`${phase}-${index}`}><h5>{item.title}</h5><p>{item.rationale}</p><ul>{item.actions.map((action)=><li key={action}>{action}</li>)}</ul></article>)}</section>)}</div>
+        <div className="technical-roadmap" data-roadmap-flow="true">{(["immediate","nextPhase","ongoing"] as const).map((phase,phaseIndex)=><details className="roadmap-phase" data-roadmap-phase={phase} open={phaseIndex===0} key={phase}><summary><span>{phaseIndex+1}</span><div><h4>{roadmapLabel(phase,zh)}</h4><small>{report.technicalFoundation.aiReport.roadmap[phase].length} {decisionCopy.actionCount}</small></div></summary><div className="roadmap-phase-body">{report.technicalFoundation.aiReport.roadmap[phase].map((item,index)=><article data-roadmap-action={`${phaseIndex+1}.${index+1}`} data-primary-action={phase==="immediate"&&index===0?"true":undefined} key={`${phase}-${index}`}><header><span>{phaseIndex+1}.{index+1}</span><h5>{item.title}</h5></header><div className="roadmap-analysis-chain"><section><h6>{decisionCopy.why}</h6><p>{item.rationale}</p></section><section><h6>{decisionCopy.how}</h6><ol>{item.actions.map((action)=><li key={action}>{action}</li>)}</ol></section></div></article>)}</div></details>)}</div>
       </section>
       {report.geoArticleExample ? <div id="artifact-sec-article">
         <GeoArticleSection article={report.geoArticleExample} locale={model.locale}/>
@@ -134,6 +152,40 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
     </div>
     <a className="artifact-to-top" href="#artifact-sec-guide">{copy.backToTop}</a>
   </main>;
+}
+
+function emptyEvidenceSummary():EvidenceSummary{return {verified:0,searchOnly:0,inaccessible:0,total:0};}
+function addEvidenceSummary(left:EvidenceSummary,right:EvidenceSummary):EvidenceSummary{return {verified:left.verified+right.verified,searchOnly:left.searchOnly+right.searchOnly,inaccessible:left.inaccessible+right.inaccessible,total:left.total+right.total};}
+function evidenceSummary(card:PaidAnswerCard):EvidenceSummary{
+  if(card.answerMode!=="generative_search_v1")return {verified:card.sourceEvidence.length,searchOnly:0,inaccessible:0,total:card.sourceEvidence.length};
+  return {verified:card.audit.verifiedBodyCount,searchOnly:card.audit.searchSourceOnlyCount,inaccessible:card.audit.inaccessibleCount,total:card.sources.length};
+}
+function questionConclusion(card:PaidAnswerCard,direct?:PaidV3DirectQuestionSemantics):string{
+  if(direct?.analysisStatus==="completed"&&direct.analysis)return direct.analysis.summary;
+  if(card.diagnosis)return card.diagnosis.selectionSummary;
+  if(card.answerMode==="generative_search_v1")return displayGenerativeAnswer(card);
+  return card.sentences.find(({text})=>text.trim().length>0)?.text??card.exactQuestion;
+}
+function questionAction(card:PaidAnswerCard,direct?:PaidV3DirectQuestionSemantics):string|null{
+  if(direct?.analysisStatus==="completed"&&direct.analysis)return direct.analysis.recommendations[0]??null;
+  return card.diagnosis?.recommendedActions[0]?.action??null;
+}
+function DecisionText({text}:{text:string}){
+  const split=Math.max(1,Math.min(text.length-1,Math.ceil(text.length/2)));
+  return text.length<2?<>{text}</>:<>{text.slice(0,split)}<wbr/>{text.slice(split)}</>;
+}
+function QuestionSnapshot({card,cardIndex,locale,direct}:{card:PaidAnswerCard;cardIndex:number;locale:"en"|"zh";direct?:PaidV3DirectQuestionSemantics}){
+  const labels=DECISION_COPY[locale],counts=evidenceSummary(card),action=questionAction(card,direct);
+  return <article className="decision-question" data-question-summary={card.questionId}>
+    <header><span>Q{cardIndex+1}</span><strong className={`answer-status answer-status-${card.status}`}>{statusLabel(card.status,locale==="zh")}</strong></header>
+    <h3><DecisionText text={card.exactQuestion}/></h3>
+    <p className="decision-question-conclusion"><span>{labels.questionConclusion}</span><DecisionText text={questionConclusion(card,direct)}/></p>
+    {action?<p className="decision-question-action"><span>{labels.questionAction}</span><DecisionText text={action}/></p>:null}
+    <dl className="question-evidence-summary"><Meta label={labels.verifiedEvidence}>{counts.verified}</Meta><Meta label={labels.searchOnly}>{counts.searchOnly}</Meta><Meta label={labels.inaccessible}>{counts.inaccessible}</Meta></dl>
+  </article>;
+}
+function TechnicalScoreSummary({scores,locale}:{scores:readonly {dimension:DimensionKey;score:number;explanation:string}[];locale:"en"|"zh"}){
+  return <div className="technical-score-summary">{scores.map((score)=><article key={score.dimension}><header><h4>{DIMENSION_LABELS[locale][score.dimension]}</h4><strong>{score.score}/100</strong></header><meter min={0} max={100} value={score.score}>{score.score}/100</meter><p>{score.explanation}</p></article>)}</div>;
 }
 
 function Meta({label,children}:{label:string;children:ReactNode}){return <div><dt>{label}</dt><dd>{children}</dd></div>;}
@@ -184,10 +236,11 @@ function LegacyCrossQuestionDiagnosis({report,locale}:{report:CombinedPrivateRep
 
 function AnswerCardShell({cardIndex,status,question,locale,flowOrder,children}:{cardIndex:number;status:string;question:string;locale:"en"|"zh";flowOrder:number;children:ReactNode}){
   const copy=locale==="zh"?ZH:EN;
-  return <article className="answer-card" data-open-geo-answer-card="true" style={{order:flowOrder}}>
-    <header className="answer-card-heading"><div><p className="eyebrow">{copy.question} {cardIndex+1}</p><h3>{question}</h3></div><p className={`answer-status answer-status-${status}`}>{statusLabel(status,locale==="zh")}</p></header>
-    {children}
-  </article>;
+  const decisionCopy=DECISION_COPY[locale];
+  return <details className="answer-card answer-detail" data-open-geo-answer-card="true" style={{order:flowOrder}}>
+    <summary className="answer-card-heading"><div><p className="eyebrow">{copy.question} {cardIndex+1}</p><h3>{question}</h3><small>{decisionCopy.answerDetail}</small></div><p className={`answer-status answer-status-${status}`}>{statusLabel(status,locale==="zh")}</p></summary>
+    <div className="answer-detail-body">{children}</div>
+  </details>;
 }
 
 function GenerativeSearchAnswerCard({card,cardIndex,locale,flowOrder}:{card:GenerativeSearchAnswerCardV3;cardIndex:number;locale:"en"|"zh";flowOrder:number}){
@@ -226,22 +279,24 @@ function LegacyEvidenceBoundAnswerCard({card,cardIndex,locale,ordinals,flowOrder
   </AnswerCardShell>;
 }
 
-type PaidAnswerCard=CombinedPrivateReportArtifactModelV3["combinedReport"]["answerCards"][number];
 function QuestionEvidence({card,cardIndex,locale,ordinals,flowOrder}:{card:PaidAnswerCard;cardIndex:number;locale:"en"|"zh";ordinals:Map<string,number>;flowOrder:number}){
   const zh=locale==="zh",copy=zh?ZH:EN;
+  const decisionCopy=DECISION_COPY[locale],counts=evidenceSummary(card);
   const rows=card.answerMode==="generative_search_v1"
-    ? card.sources.map((source,index)=>({id:source.sourceId,ordinal:index+1,title:source.title,url:source.canonicalUrl,domain:source.registrableDomain,type:sourceTypeLabel(source.ownershipCategory,zh),audit:retrievalStatusLabel(source.retrievalStatus,zh),excerpt:source.citedText||copy.none,sentence:undefined}))
-    : card.sourceEvidence.map((source)=>({id:source.evidenceId,ordinal:ordinals.get(source.evidenceId)!,title:source.title,url:source.canonicalUrl,domain:source.registrableDomain,type:sourceTypeLabel(source.ownershipCategory,zh),audit:formatTimestamp(source.observedAt,locale),excerpt:source.exactExcerpt,sentence:card.sentences.find((item)=>item.evidenceIds.includes(source.evidenceId))?.sentenceId}));
+    ? card.sources.map((source,index)=>({id:source.sourceId,ordinal:index+1,title:source.title,url:source.canonicalUrl,domain:source.registrableDomain,type:sourceTypeLabel(source.ownershipCategory,zh),excerpt:source.citedText||copy.none,sentence:undefined}))
+    : card.sourceEvidence.map((source)=>({id:source.evidenceId,ordinal:ordinals.get(source.evidenceId)!,title:source.title,url:source.canonicalUrl,domain:source.registrableDomain,type:sourceTypeLabel(source.ownershipCategory,zh),excerpt:source.exactExcerpt,sentence:card.sentences.find((item)=>item.evidenceIds.includes(source.evidenceId))?.sentenceId}));
   return <article className="question-evidence" data-question-evidence={card.questionId} style={{order:flowOrder}}>
     <h3><span>Q{cardIndex+1}</span>{card.exactQuestion}</h3>
-    {rows.length?<div className="table-wrap"><table className="source-evidence-table" data-generative-sources={card.answerMode==="generative_search_v1"?card.questionId:undefined}><thead><tr><th>#</th><th>{copy.source}</th><th>{copy.contribution}</th><th>{copy.audit}</th></tr></thead><tbody>{rows.map((source)=><tr data-answer-source={source.id} data-citation-ordinal={source.ordinal} data-supported-sentence={source.sentence} key={source.id}><td>[{source.ordinal}]</td><td><strong><a href={source.url}>{source.title}</a></strong><small>{source.domain} · {source.type}</small><a className="source-url" href={source.url}>{source.url}</a></td><td>{source.excerpt}</td><td>{source.audit}</td></tr>)}</tbody></table></div>:<p className="source-limitation">{copy.sourceLimited}</p>}
-    {card.answerMode==="generative_search_v1"?<dl className="answer-provenance"><Meta label={copy.model}>{card.provenance.model}</Meta><Meta label={copy.searchMode}>{card.provenance.searchMode}</Meta><Meta label={copy.searched}>{card.provenance.searchedAt}</Meta></dl>:null}
+    <details className="evidence-detail" data-evidence-detail={card.questionId}><summary><span>{decisionCopy.evidenceDetail}</span><dl><Meta label={decisionCopy.verifiedEvidence}>{counts.verified}</Meta><Meta label={decisionCopy.searchOnly}>{counts.searchOnly}</Meta><Meta label={decisionCopy.inaccessible}>{counts.inaccessible}</Meta></dl></summary><div className="report-detail-body">
+      {rows.length?<div className="table-wrap"><table className="source-evidence-table" data-generative-sources={card.answerMode==="generative_search_v1"?card.questionId:undefined}><thead><tr><th>#</th><th>{copy.source}</th><th>{copy.contribution}</th></tr></thead><tbody>{rows.map((source)=><tr data-answer-source={source.id} data-citation-ordinal={source.ordinal} data-supported-sentence={source.sentence} key={source.id}><td>[{source.ordinal}]</td><td><strong><a href={source.url}>{source.title}</a></strong><small>{source.domain} · {source.type}</small><a className="source-url" href={source.url}>{source.url}</a></td><td>{source.excerpt}</td></tr>)}</tbody></table></div>:<p className="source-limitation">{copy.sourceLimited}</p>}
+      {card.answerMode==="generative_search_v1"?<dl className="answer-provenance"><Meta label={copy.model}>{card.provenance.model}</Meta><Meta label={copy.searchMode}>{card.provenance.searchMode}</Meta><Meta label={copy.searched}>{card.provenance.searchedAt}</Meta></dl>:null}
+    </div></details>
   </article>;
 }
 
 function QuestionAbsence({card,cardIndex,locale,direct,flowOrder}:{card:PaidAnswerCard;cardIndex:number;locale:"en"|"zh";direct?:PaidV3DirectQuestionSemantics;flowOrder:number}){
   const copy=locale==="zh"?ZH:EN;
-  return <article className="question-absence" data-question-absence={card.questionId} style={{order:flowOrder}}><h3><span>Q{cardIndex+1}</span>{card.exactQuestion}</h3>{direct?<DirectAnalysis result={direct} locale={locale}/>:card.diagnosis?<DiagnosisSummary diagnosis={card.diagnosis} locale={locale}/>:<GeoDiagnosis card={card} locale={locale}/>}<p className="absence-conclusion"><strong>{copy.absenceConclusion}</strong>{card.geoDiagnosis.targetMentioned?copy.targetPresent:copy.targetAbsent}</p></article>;
+  return <details className="question-absence diagnosis-detail" data-question-absence={card.questionId} style={{order:flowOrder}}><summary><span>Q{cardIndex+1}</span><strong>{card.exactQuestion}</strong><small>{DECISION_COPY[locale].diagnosisDetail}</small></summary><div className="report-detail-body">{direct?<DirectAnalysis result={direct} locale={locale}/>:card.diagnosis?<DiagnosisSummary diagnosis={card.diagnosis} locale={locale}/>:<GeoDiagnosis card={card} locale={locale}/>}<p className="absence-conclusion"><strong>{copy.absenceConclusion}</strong>{card.geoDiagnosis.targetMentioned?copy.targetPresent:copy.targetAbsent}</p></div></details>;
 }
 
 function displayGenerativeAnswer(card:GenerativeSearchAnswerCardV3):string{
@@ -289,5 +344,4 @@ const ZH = { brandLine:"帮你决策的报告",kicker:"EXECUTIVE DECISION BRIEF 
 const EN = { brandLine:"Decision-ready reporting",kicker:"EXECUTIVE DECISION BRIEF",guide:"Report guide",purpose:"Report purpose",oneLine:"Report in one line",oneLineValue:"Reconstruct the website facts first, then test whether those facts can enter a buyer's AI answer.",contextBridge:"Using the public website facts above, the report now tests whether AI can understand, select, and cite the target for real buyer questions.",answerEvidence:"Answer evidence",answerEvidenceIntro:"These answers are not generated in isolation. Each row shows the public source, the exact contribution, and its verification state.",absenceReasons:"Why the target did not appear",absenceIntro:"Target absence is explained question by question from the answer and its sources, not reduced to a generic insufficient-evidence warning.",source:"Source",contribution:"Contribution to the answer",audit:"Verification",absenceConclusion:"Question conclusion:",targetPresent:"The target appears in the answer; its role and independent support still need review.",targetAbsent:"The target does not appear in the answer; the gaps below show which public evidence is still missing.",title:"From website facts to GEO action",scope:"The report establishes website facts first, then follows the same three buyer questions through answers, sources, target-site gaps, and actions.",target:"Target website",generated:"Report date",revision:"Report revision",websiteContext:"Website status: what we found",services:"Products and services",audiences:"Target audiences",regions:"Service regions",analyzedPages:"Pages analyzed",technicalScore:"Technical score",executive:"Website overview",answered:"Complete answers",limited:"Limited answers",mentioned:"Target mentioned",answers:"Buyer questions and core answers",answerMethod:"Start with the complete AI answer to each buyer question; the source reasoning and target-site gaps follow in the next sections.",question:"Buyer question",insufficient:"Insufficient evidence: the available public evidence cannot support a reliable answer.",plannedQueries:"Planned queries",completedQueries:"Completed queries",returnedResults:"Search results returned",attemptedRetrievals:"Retrieval attempts",safelyRetrievedPages:"Safely retrieved",eligibleDirectEvidence:"Eligible direct evidence",sources:"Sources for this sentence",answerSources:"Sources returned with this answer",domain:"Domain",sourceType:"Source type",observed:"Observed",excerpt:"Source excerpt",providerExcerpt:"Provider-returned cited text",diagnosis:"GEO diagnosis",questionDiagnosis:"Question diagnosis",targetMention:"Target brand mentioned",firstPosition:"First sentence position",targetRoles:"Target roles",competitors:"Competitors",sourceStructure:"Citation-source structure",missing:"Missing evidence",retest:"Retest question:",yes:"Yes",no:"No",notPresent:"Not present",none:"None",crossQuestion:"Cross-question GEO summary",technical:"Website visibility and technical diagnosis",technicalFindings:"Deterministic technical findings",pageAnalysis:"Page-level analysis",pageTitle:"Page title",body:"Page description",dimensionScores:"Technical dimension scores",aiAnalysis:"Model technical analysis and recommendations",pageTypes:"Page-type analysis",strengths:"Strengths",issues:"Issues",recommendations:"Recommendations",roadmap:"Implementation roadmap",actions:"Unified priority actions",actionsIntro:"This roadmap combines website, technical, content, and answer evidence in an executable order.",geoArticle:"GEO article example",articleRationale:"Why this section is written this way",articleFaq:"Buyer FAQ",generationMode:"Article generation",modelGenerated:"AI-generated and validated against the evidence contract",fallbackGenerated:"Deterministic evidence-grounded fallback",evidenceRefs:"Evidence",appendix:"Sources and methodology",searchSurface:"Public-search surface",searched:"Searched",cutoff:"Evidence cutoff",model:"Synthesis model",searchMode:"Search mode",queryPlan:"Query plan",passage:"Passage selector",coverage:"Coverage and limitations",sourceLimited:"The answer was generated, but the same operation returned no public source that can be displayed safely.",verifiedBody:"Body independently verified",searchSourceOnly:"Model search source only",inaccessible:"Currently inaccessible",observableFactors:"Observable factors",targetGap:"Target website gap",recommendedActions:"Recommended actions",toc:"Contents",backToTop:"Back to top",sourceDiagnosis:"Source selection diagnosis" };
 function statusLabel(status:string,zh:boolean){return zh?({answered:"已回答",source_limited:"答案已生成，来源有限",refused:"模型拒绝回答",limited:"有限证据",observed:"仅搜索观察",unresolved:"尚无法核验",insufficient:"证据不足"}[status]??status):({answered:"Answered",source_limited:"Answered, sources limited",refused:"Provider refusal",limited:"Limited evidence",observed:"Search observation only",unresolved:"Not yet verifiable",insufficient:"Insufficient evidence"}[status]??status);}
 function sourceTypeLabel(value:OpenGeoAnswerOwnershipCategoryV3,zh:boolean){const labels:Record<OpenGeoAnswerOwnershipCategoryV3,[string,string]>={target_owned:["目标品牌自有","Target-owned"],competitor_owned:["竞争品牌自有","Competitor-owned"],third_party_editorial:["第三方编辑来源","Third-party editorial"],directory:["目录","Directory"],government:["政府","Government"],other:["其他","Other"],institution:["机构","Institution"],community:["社区","Community"],social:["社交平台","Social"],unknown:["未分类","Unknown"]};return labels[value][zh?0:1];}
-function retrievalStatusLabel(value:GenerativeSearchAnswerCardV3["sources"][number]["retrievalStatus"],zh:boolean){return zh?({verified_body:"正文已独立核验",search_source_only:"仅模型搜索来源",inaccessible:"当前无法访问"}[value]):({verified_body:"Body independently verified",search_source_only:"Model search source only",inaccessible:"Currently inaccessible"}[value]);}
 function roadmapLabel(value:"immediate"|"nextPhase"|"ongoing",zh:boolean){return zh?({immediate:"立即执行",nextPhase:"下一阶段",ongoing:"持续执行"}[value]):({immediate:"Immediate",nextPhase:"Next phase",ongoing:"Ongoing"}[value]);}

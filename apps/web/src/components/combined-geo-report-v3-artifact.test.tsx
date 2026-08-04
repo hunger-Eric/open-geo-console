@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { buildSourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
+import { ARTIFACT_CSS } from "@/report/artifact-styles";
 import { combinedV3ArtifactFixture } from "./combined-artifact-fixtures";
 import { CombinedGeoReportV3Artifact } from "./combined-geo-report-v3-artifact";
 
@@ -117,7 +118,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).toContain("https://example.com/second-technical-proof");
   });
 
-  it("renders the 00-08 report rail and always-visible progressive sections without fold controls",()=>{
+  it("renders the 00-08 report rail with native progressive disclosure",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:articleModel()}));
     expect(html).toContain('class="artifact-toc"');
     expect(html).toContain('href="#artifact-sec-context"');
@@ -128,7 +129,12 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).toContain('href="#artifact-sec-appendix"');
     const sections=["artifact-sec-guide","artifact-sec-context","artifact-sec-answers","artifact-sec-evidence","artifact-sec-absence","artifact-sec-technical","artifact-sec-actions","artifact-sec-article","artifact-sec-appendix"].map((id)=>html.indexOf(`id="${id}"`));
     expect(sections).toEqual([...sections].sort((a,b)=>a-b));
-    expect(html).not.toContain("<details");
+    expect(html.match(/data-question-summary=/g)).toHaveLength(3);
+    expect(html.match(/<details class="answer-card answer-detail"/g)).toHaveLength(3);
+    expect(html.match(/data-evidence-detail=/g)).toHaveLength(3);
+    expect(html.match(/data-question-absence=/g)).toHaveLength(3);
+    expect(html).toContain('data-source-diagnosis-detail="true"');
+    expect(html).toContain('data-technical-detail="true"');
     expect(html).not.toContain('data-fold="open"');
     expect(html).not.toContain('data-fold="close"');
     expect(html).toContain('class="artifact-to-top"');
@@ -137,7 +143,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
 
   it("leads with persisted conclusions and removes fixed reading instructions from the main report",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:articleModel()}));
-    for(const value of ["核心结论","当前结论","首要行动","网站当前技术得分"]){
+    for(const value of ["核心结论","决策结论","第一优先行动","关键决策指标","技术得分"]){
       expect(html).toContain(value);
     }
     for(const value of ["报告目的","报告一句话","基于以上网站公开信息","先看 AI 对每个买家问题","答案不是凭空生成的","必须沿着答案和来源逐题解释","以下路线图汇总"]){
@@ -168,7 +174,8 @@ describe("CombinedGeoReportV3Artifact",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
     expect(html.match(/data-open-geo-answer-card="true"/g)).toHaveLength(3);
     expect(html.match(/data-answer-sentence="unresolved-/g)).toHaveLength(3);
-    expect(html.match(/Not yet verifiable/g)).toHaveLength(3);
+    expect(html.match(/Not yet verifiable/g)).toHaveLength(6);
+    expect(html.match(/data-question-summary=/g)).toHaveLength(3);
     for(let index=1;index<=3;index+=1)expect(html).toContain(`Search returned results for question ${index}`);
   });
 
@@ -195,15 +202,48 @@ describe("CombinedGeoReportV3Artifact",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:generativeModel()}));
     expect(html.match(/data-question-diagnosis="true"/g)).toHaveLength(3);
     for(let index=1;index<=3;index+=1){
-      const answerAt=html.indexOf(`服务商甲提供跨境海运方案 ${index}`);
-      const sourceAt=html.indexOf(`provider.example/services/${index}`);
-      const diagnosisAt=html.indexOf(`本题来源与目标页诊断摘要 ${index}`);
+      const questionId=`public-question-${index}`;
+      const answerAt=html.indexOf(`data-generative-answer="${questionId}"`);
+      const sourceAt=html.indexOf(`data-generative-sources="${questionId}"`);
+      const diagnosisAt=html.indexOf(`data-question-absence="${questionId}"`);
       expect(answerAt).toBeGreaterThan(0);
       expect(answerAt).toBeLessThan(sourceAt);
       expect(sourceAt).toBeLessThan(diagnosisAt);
       for(const value of [`本题因素 A${index}`,`本题因素 B${index}`,`本题因素 C${index}`,`目标官网差距 ${index}`,`本题行动一 ${index}`,`本题行动二 ${index}`,`本题行动三 ${index}`]) expect(html).toContain(value);
     }
     expect(html.indexOf("data-source-selection-diagnosis")).toBeGreaterThan(html.indexOf("本题来源与目标页诊断摘要 3"));
+  });
+
+  it("derives a decision layer, labeled evidence coverage, semantic scores, and print-safe disclosure",()=>{
+    const model=generativeModel();
+    model.combinedReport.technicalFoundation.aiReport.dimensionScores=[{dimension:"organizationClarity",score:42,explanation:"Persisted score explanation"}];
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    expect(html.indexOf('data-decision-summary="true"')).toBeLessThan(html.indexOf('data-website-context="true"'));
+    expect(html.match(/data-question-summary=/g)).toHaveLength(3);
+    expect(html).toContain('<dd>1</dd><\/div><div><dt>回答来源<\/dt><dd>3</dd>');
+    expect(html).toContain('<meter min="0" max="100" value="42">42/100</meter>');
+    expect(html).toContain("企业表达清晰度");
+    expect(html).not.toContain("<h4>organizationClarity</h4>");
+    expect(html).not.toContain("<th>核验状态</th>");
+    for(const value of ["已独立核验","仅搜索来源","当前不可访问"])expect(html).toContain(value);
+    expect(ARTIFACT_CSS).not.toContain('.paid-report-template .artifact-toc a:first-child');
+    expect(ARTIFACT_CSS).toContain('.paid-report-template .answer-detail:not([open])');
+    expect(ARTIFACT_CSS).toContain('.paid-report-template .technical-score-summary meter');
+    expect(ARTIFACT_CSS).toContain('.paid-report-template .roadmap-phase:not([open])>.roadmap-phase-body');
+  });
+
+  it("presents the roadmap as one numbered why-to-how analysis chain",()=>{
+    const model=generativeModel();
+    model.combinedReport.technicalFoundation.aiReport.roadmap.immediate=[{title:"先统一事实",rationale:"先消除相互矛盾的信息。",actions:["统一页面数据"],relatedFindingIds:[]}];
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    expect(html.match(/class="roadmap-phase"/g)).toHaveLength(3);
+    expect(html.match(/class="roadmap-phase"[^>]* open=""/g)).toHaveLength(1);
+    expect(html).toContain('data-roadmap-flow="true"');
+    expect(html).toContain('data-roadmap-action="1.1"');
+    expect(html).toContain("为什么要做");
+    expect(html).toContain("具体怎么做");
+    expect(html.indexOf('data-roadmap-phase="immediate"')).toBeLessThan(html.indexOf('data-roadmap-phase="nextPhase"'));
+    expect(html.indexOf('data-roadmap-phase="nextPhase"')).toBeLessThan(html.indexOf('data-roadmap-phase="ongoing"'));
   });
   it("replaces the legacy counters with the source-centric diagnosis for prospective V3 reports",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:generativeModel()}));
@@ -221,6 +261,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
   it("renders Direct analyses while preserving the complete technical report and screenshots",()=>{
     const model=generativeModel();
     model.locale="en";
+    model.combinedReport.technicalFoundation.aiReport.dimensionScores=[{dimension:"organizationClarity",score:42,explanation:"Persisted score explanation"}];
     model.combinedReport.directSemantics={
       version:"free-v4-direct-semantics-v1",
       questions:model.combinedReport.answerCards.map((card,index)=>index===2
@@ -240,6 +281,9 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).toContain("/api/reports/report/evidence/asset-2");
     expect(html.match(/data-evidence-asset=/g)).toHaveLength(2);
     expect(html).not.toContain("Target mentioned");
+    expect(html).toContain("Organization clarity");
+    expect(html).not.toContain("<h4>organizationClarity</h4>");
+    expect(html).not.toContain("<th>Verification</th>");
   });
 
   it("renders source-limited answers and typed refusals without turning audit failures into answer copy",()=>{

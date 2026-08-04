@@ -83,6 +83,13 @@ function clientReturning(value: unknown, requests: JsonCompletionRequest[] = [])
 }
 
 describe("website synthesis semantic-validation seam", () => {
+  it("anchors date reasoning to the persisted report timestamp", () => {
+    const prompt = JSON.parse(buildSynthesisPrompt(input())) as { reportAsOf: string; rules: string[] };
+    expect(prompt.reportAsOf).toBe("2026-07-23T00:00:00.000Z");
+    expect(prompt.rules).toContain("Use reportAsOf as the authoritative time reference. Never describe an observed date on or before reportAsOf as future-dated.");
+    expect(prompt.rules).toContain("Distinguish publication dates from other page dates. If a date's meaning is ambiguous, state that uncertainty instead of inferring that it is in the future.");
+  });
+
   it("keeps omitted and explicit legacy prompts and failures identical", async () => {
     const omittedRequests: JsonCompletionRequest[] = [];
     const explicitRequests: JsonCompletionRequest[] = [];
@@ -114,6 +121,8 @@ describe("website synthesis semantic-validation seam", () => {
 
   it("recovers Direct website synthesis from one transient invalid-JSON response", async () => {
     const requests: JsonCompletionRequest[] = [];
+    const undatedInput = input();
+    delete undatedInput.generatedAt;
     const client: JsonCompletionClient = {
       configuredModel: "mock-model",
       completeJson: vi.fn(async (request) => {
@@ -126,13 +135,15 @@ describe("website synthesis semantic-validation seam", () => {
       })
     };
 
-    const result = await synthesizeWebsiteReportWithRecovery(client, input(), {
+    const result = await synthesizeWebsiteReportWithRecovery(client, undatedInput, {
       maxAttempts: 3, semanticValidation: "free_direct", delay: async () => undefined
     });
 
     expect(result.report.organizationProfile.organizationName).toBe("Target Brand");
     expect(client.completeJson).toHaveBeenCalledTimes(2);
     expect(requests[1]).toEqual(requests[0]);
+    const prompt = JSON.parse(requests[0]!.messages[1]!.content) as { reportAsOf: string };
+    expect(prompt.reportAsOf).toBe(result.report.provenance.generatedAt);
   });
 
   it("stops Direct website synthesis after three transient failures", async () => {
