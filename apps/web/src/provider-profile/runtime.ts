@@ -265,14 +265,14 @@ function createSenseNovaRuntime(
       return resolveAnySearchGenerativeSearchAnswerProvider(
         environment,
         { locale, region },
-        { ...dependencies, client: generalClient }
+        { ...dependencies, client: generalClient, maxOutputTokens: modelRuntime.modelProfile.operations.questionAnswer.maxOutputTokens }
       ) as ReportV4QuestionAnswerProvider & GenerativeSearchAnswerProvider;
     },
     createDiagnosisProvider: (value) => createReportV4SenseNovaDiagnosisProvider({
       environment, runtime: locked(value), fetch: dependencies.fetch
     })
   };
-  resolveAnySearchGenerativeSearchAnswerProvider(environment, { locale, region }, { ...dependencies, client: generalClient });
+  resolveAnySearchGenerativeSearchAnswerProvider(environment, { locale, region }, { ...dependencies, client: generalClient, maxOutputTokens: modelRuntime.modelProfile.operations.questionAnswer.maxOutputTokens });
   return Object.freeze(runtime);
 }
 

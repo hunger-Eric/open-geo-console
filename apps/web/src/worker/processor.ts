@@ -1586,6 +1586,7 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
     evidenceCutoffAt,
     extractionClient: client,
     extractionModel: client.configuredModel,
+    extractionMaxTokens: getPreparedProviderProfileRuntime().modelRuntime.modelProfile.operations.sourceDiagnosis.maxOutputTokens,
     trace: input.trace,
     forceSnapshotRefreshAfter: input.forceSnapshotRefreshAfter,
     getCheckpoint: async () => checkpoint.providerDiscovery ?? null,

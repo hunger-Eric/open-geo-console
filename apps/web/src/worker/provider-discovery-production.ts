@@ -63,6 +63,7 @@ export interface ProductionProviderDiscoveryInput {
   evidenceCutoffAt: string;
   extractionClient: JsonCompletionClient;
   extractionModel: string;
+  extractionMaxTokens?: number;
   trace?: PaidV3DirectDebugTrace;
   forceSnapshotRefreshAfter?: string;
   getCheckpoint(): Promise<ProviderDiscoveryCheckpointV1 | null>;
@@ -126,6 +127,7 @@ export function createProductionProviderDiscoveryContext(input: ProductionProvid
     verificationBundle ??= await requireSnapshotBundle(verificationSnapshotId);
     claims = await extractClaims({
       client: input.extractionClient,
+      maxTokens: input.extractionMaxTokens,
       locale: question.locale,
       question: question.normalizedText,
       policy,
@@ -417,7 +419,7 @@ function selectPassagesForFact(fact: { normalizedText?: string }, sourceEvidence
     serviceTerms: language, controlTerms, capabilityTerms, selectorVersion: PROVIDER_PASSAGE_SELECTOR_VERSION });
 }
 
-async function extractClaims(input: { client: JsonCompletionClient; locale: string; question: string; policy: ProviderQualificationPolicy; candidates: readonly ProviderCandidateQueryIdentity[]; passages: ProviderEvidencePassage[]; bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>; trace?: PaidV3DirectDebugTrace; signal?: AbortSignal }): Promise<ProviderClaim[]> {
+async function extractClaims(input: { client: JsonCompletionClient; maxTokens?: number; locale: string; question: string; policy: ProviderQualificationPolicy; candidates: readonly ProviderCandidateQueryIdentity[]; passages: ProviderEvidencePassage[]; bundle: NonNullable<Awaited<ReturnType<typeof getMarketSnapshotBundle>>>; trace?: PaidV3DirectDebugTrace; signal?: AbortSignal }): Promise<ProviderClaim[]> {
   const accepted: ProviderClaim[] = [];
   let rejectedCount = 0;
   let skippedCount = 0;
@@ -429,7 +431,8 @@ async function extractClaims(input: { client: JsonCompletionClient; locale: stri
       let extracted: Awaited<ReturnType<typeof extractProviderClaimCandidates>>;
       try {
         const extract = () => extractProviderClaimCandidates(input.client, { locale: input.locale, question: input.question, policy: input.policy, candidate,
-          source: { sourceEvidenceId: source.id, canonicalUrl: source.canonicalUrl, title: observation?.title ?? source.registrableDomain, registrableDomain: source.registrableDomain }, passages: sourcePassages, signal: input.signal });
+          source: { sourceEvidenceId: source.id, canonicalUrl: source.canonicalUrl, title: observation?.title ?? source.registrableDomain, registrableDomain: source.registrableDomain }, passages: sourcePassages, signal: input.signal },
+          { maxTokens: input.maxTokens });
         extracted = input.trace
           ? await input.trace.span("provider_claim_extraction", {
               phase: "provider_claim_extraction",

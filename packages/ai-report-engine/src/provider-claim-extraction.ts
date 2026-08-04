@@ -32,10 +32,11 @@ export interface ProviderClaimExtractionResult {
 export async function extractProviderClaimCandidates(
   client: JsonCompletionClient,
   input: ProviderClaimExtractionInput,
-  options: { maxAttempts?: number; delay?: (milliseconds: number) => Promise<void> } = {}
+  options: { maxAttempts?: number; maxTokens?: number; delay?: (milliseconds: number) => Promise<void> } = {}
 ): Promise<ProviderClaimExtractionResult> {
   validateInput(input);
   const maxAttempts = Math.min(3, Math.max(1, Math.trunc(options.maxAttempts ?? 3)));
+  const maxTokens = boundedMaxTokens(options.maxTokens, 2_500);
   const delay = options.delay ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -44,7 +45,7 @@ export async function extractProviderClaimCandidates(
       const completion = await client.completeJson({
         signal: input.signal,
         temperature: 0.1,
-        maxTokens: 2_500,
+        maxTokens,
         messages: [
           {
             role: "system",
@@ -164,4 +165,5 @@ function nonempty(value: unknown, path: string, max: number): string { if (typeo
 function enumeration<T extends string>(value: unknown, path: string, allowed: readonly T[]): T { const text = nonempty(value, path, 100); if (!allowed.includes(text as T)) throw new TypeError(`${path} is unsupported.`); return text as T; }
 function normalize(value: string): string { return value.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim(); }
 function isRetryableContractError(error: unknown): boolean { return error instanceof TypeError || (error instanceof AiClientError && error.status !== 401 && error.status !== 403 && /invalid json|non-json|response envelope/i.test(error.message)); }
+function boundedMaxTokens(value: number | undefined, fallback: number): number { return typeof value === "number" && Number.isFinite(value) ? Math.min(32_768, Math.max(256, Math.trunc(value))) : fallback; }
 async function delayWithAbort(delay: (milliseconds: number) => Promise<void>, milliseconds: number, signal?: AbortSignal): Promise<void> { signal?.throwIfAborted(); await delay(milliseconds); signal?.throwIfAborted(); }

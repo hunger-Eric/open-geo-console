@@ -24,10 +24,12 @@ interface SynthesizedAnswer {
 export function createAnySearchGenerativeSearchAnswerProvider(input: {
   searchConfig: AnySearchPublicSearchConfig;
   client: JsonCompletionClient;
+  maxOutputTokens?: number;
   fetch?: typeof fetch;
   now?: () => Date;
 }): GenerativeSearchAnswerProvider {
   const now = input.now ?? (() => new Date());
+  const maxTokens = boundedMaxOutputTokens(input.maxOutputTokens, 2_500);
   return {
     providerId: "anysearch+sensenova",
     model: input.client.configuredModel,
@@ -62,7 +64,7 @@ export function createAnySearchGenerativeSearchAnswerProvider(input: {
           }
         ],
         temperature: 0.1,
-        maxTokens: 2_500,
+        maxTokens,
         signal: request.signal
       });
       const synthesized = parseSynthesizedAnswer(completion.value, results.length);
@@ -97,7 +99,7 @@ export function createAnySearchGenerativeSearchAnswerProvider(input: {
 export function resolveAnySearchGenerativeSearchAnswerProvider(
   environment: NodeJS.ProcessEnv,
   input: { locale: string; region: string },
-  dependencies: { fetch?: typeof fetch; now?: () => Date; client?: JsonCompletionClient } = {}
+  dependencies: { fetch?: typeof fetch; now?: () => Date; client?: JsonCompletionClient; maxOutputTokens?: number } = {}
 ): GenerativeSearchAnswerProvider {
   const baseUrl = required(environment.OGC_AI_BASE_URL, "OGC_AI_BASE_URL");
   const apiKey = required(environment.OGC_AI_API_KEY, "OGC_AI_API_KEY");
@@ -112,9 +114,14 @@ export function resolveAnySearchGenerativeSearchAnswerProvider(
   return createAnySearchGenerativeSearchAnswerProvider({
     searchConfig: readAnySearchPublicSearchConfig(environment, input.locale, input.region),
     client,
+    maxOutputTokens: dependencies.maxOutputTokens,
     fetch: dependencies.fetch,
     now: dependencies.now
   });
+}
+
+function boundedMaxOutputTokens(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.min(32_768, Math.max(256, Math.trunc(value))) : fallback;
 }
 
 function parseSynthesizedAnswer(value: unknown, sourceCount: number): SynthesizedAnswer {

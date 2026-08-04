@@ -52,6 +52,16 @@ describe("AnySearch grounded SenseNova answer provider", () => {
     await expect(provider.answerWithSources(request)).rejects.toMatchObject({ name: "AiClientError", code: "authentication" });
   });
 
+  it("sends the configured output cap and keeps the 2500 default", async () => {
+    const value = { answerText: "甲提供国际物流服务。", refusal: null, usedSourceIndexes: [0] };
+    const capped = client(value);
+    await createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: capped, maxOutputTokens: 8_192, fetch: search }).answerWithSources(request);
+    expect(vi.mocked(capped.completeJson).mock.calls[0]![0].maxTokens).toBe(8_192);
+    const defaulted = client(value);
+    await createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: defaulted, fetch: search }).answerWithSources(request);
+    expect(vi.mocked(defaulted.completeJson).mock.calls[0]![0].maxTokens).toBe(2_500);
+  });
+
   it("resolves dedicated search and generic model configuration", () => {
     expect(resolveAnySearchGenerativeSearchAnswerProvider({
       OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL: searchConfig.endpoint,
