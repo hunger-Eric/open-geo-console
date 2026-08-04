@@ -1,26 +1,11 @@
 "use client";
 
-import { CircleAlert, CircleCheck, Loader2, RefreshCw } from "lucide-react";
+import { CircleAlert, CircleCheck, Loader2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dictionary } from "@/i18n";
-import { attemptPaymentCompletionHandoff, fetchPaymentReturnStatus, getPaymentReturnContext, getPaymentReturnView, isTerminalPaymentReturn, type PublicOrderStatus } from "./payment-return";
-
-export function PaymentRefreshButton({ label, loading, onClick }: { label: string; loading: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      className="button-secondary min-h-10 shrink-0"
-      disabled={loading}
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-    >
-      <RefreshCw aria-hidden="true" className={`size-4 ${loading ? "animate-spin" : ""}`} />
-      <span className="hidden sm:inline">{label}</span>
-    </button>
-  );
-}
+import { getProgressStageDescription } from "./ai-report-status-copy";
+import { attemptPaymentCompletionHandoff, fetchPaymentReturnStatus, getPaymentReturnContext, getPaymentReturnView, isTerminalPaymentReturn, paymentPollDelay, type PublicOrderStatus } from "./payment-return";
 
 export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dictionary; reportId: string }) {
   const searchParams = useSearchParams();
@@ -28,7 +13,6 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
   const [status, setStatus] = useState<PublicOrderStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
-  const [pollingStopped, setPollingStopped] = useState(false);
   const accessAttemptedFor = useRef<string | null>(null);
 
   const loadStatus = useCallback(async (signal?: AbortSignal) => {
@@ -69,7 +53,6 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
   useEffect(() => {
     if (!context) return;
     const controller = new AbortController();
-    const startedAt = Date.now();
     let attempt = 0;
     let timer: number | undefined;
 
@@ -81,17 +64,12 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
     };
     const poll = async () => {
       if (document.hidden) {
-        schedule(1_000);
         return;
       }
       const next = await loadStatus(controller.signal);
       if (controller.signal.aborted || (next && isTerminalPaymentReturn(next))) return;
-      if (Date.now() - startedAt >= 120_000) {
-        setPollingStopped(true);
-        return;
-      }
       attempt += 1;
-      schedule(Math.min(1_000 * 2 ** Math.min(attempt, 4), 15_000));
+      schedule(paymentPollDelay(attempt));
     };
     const resume = () => {
       if (!document.hidden && timer === undefined) schedule(0);
@@ -109,9 +87,11 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
   if (!context) return null;
   const view = getPaymentReturnView(status, context.hint, dictionary);
   const Icon = view.kind === "success" ? CircleCheck : view.kind === "warning" ? CircleAlert : Loader2;
-  const progress = status?.progress && !["queued", "completed", "completed_limited", "failed"].includes(status.progress.stage)
-    ? Math.max(0, Math.min(99, status.progress.progress))
+  const activeProgress = status?.progress
+    && !["queued", "completed", "completed_limited", "failed"].includes(status.progress.stage)
+    ? status.progress
     : null;
+  const progress = activeProgress ? Math.max(0, Math.min(99, activeProgress.progress)) : 0;
 
   return (
     <section className="workspace-surface mt-6 p-5 sm:p-6" aria-busy={loading} aria-live="polite">
@@ -122,11 +102,10 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
           <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
             {unavailable ? dictionary.commerce.paymentStatusUnavailable : view.message}
           </p>
-          {pollingStopped ? <p className="mt-2 text-xs text-[var(--muted)]">{dictionary.commerce.paymentRefreshStopped}</p> : null}
-          {progress !== null ? (
+          {activeProgress ? (
             <div className="mt-3">
               <div className="flex justify-between text-xs text-[var(--muted)]">
-                <span>{dictionary.commerce.paymentGenerating}</span>
+                <span>{getProgressStageDescription(activeProgress.stage, dictionary)}</span>
                 <span>{progress}%</span>
               </div>
               <div className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--subtle)]" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
@@ -135,14 +114,6 @@ export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dict
             </div>
           ) : null}
         </div>
-        <PaymentRefreshButton
-          label={dictionary.commerce.paymentRefresh}
-          loading={loading}
-          onClick={() => {
-            setPollingStopped(false);
-            void loadStatus();
-          }}
-        />
       </div>
     </section>
   );

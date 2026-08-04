@@ -15,6 +15,11 @@ export interface PublicOrderStatus {
 
 export const PAYMENT_STATUS_REQUEST_TIMEOUT_MS = 12_000;
 
+export function paymentPollDelay(attempt: number): number {
+  const safeAttempt = Math.max(0, Math.trunc(attempt));
+  return Math.min(1_000 * 2 ** Math.min(safeAttempt, 4), 15_000);
+}
+
 export function getPaymentReturnContext(searchParams: Pick<URLSearchParams, "get">): PaymentReturnContext | null {
   const orderId = searchParams.get("order") ?? "";
   const hint = searchParams.get("payment_return");

@@ -20,3 +20,15 @@ export function publicProgressForStage(stage: string, progress: number): number 
   const numeric = Number.isFinite(progress) ? progress : 0;
   return Math.max(0, Math.min(99, Math.trunc(numeric)));
 }
+
+export function publicTwoStageFreeProgress(
+  stage: string,
+  progress: number,
+  segment: "base" | "preview"
+): number | null {
+  const publicProgress = publicProgressForStage(stage, progress);
+  if (publicProgress === null) return null;
+  if (segment === "base") return Math.min(65, publicProgress);
+  if (publicProgress === 100) return 100;
+  return 65 + Math.round((publicProgress / 99) * 34);
+}

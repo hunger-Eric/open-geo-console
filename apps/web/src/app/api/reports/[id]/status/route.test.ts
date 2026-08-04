@@ -130,6 +130,72 @@ describe("report status artifact scopes", () => {
     });
   });
 
+  it("keeps V4 free-report progress monotonic across the pre-admission handoff", async () => {
+    mocks.resolveRequestArtifactScope.mockResolvedValue(null);
+    const freeJob = {
+      ...deepJob,
+      id: "free-job",
+      tier: "free",
+      stage: "synthesizing",
+      executionState: "running",
+      progress: 85,
+      fulfillmentMethodology: "two_stage_geo_report_v4",
+      recommendationReportVersion: 4
+    };
+    mocks.getLatestScanJob.mockImplementation(async (_id: string, tier: string) => tier === "free" ? freeJob : null);
+
+    const beforeHandoff = await GET(new Request("https://example.test/api/reports/report-1/status"), {
+      params: Promise.resolve({ id: "report-1" })
+    });
+    expect(await beforeHandoff.json()).toMatchObject({ job: { stage: "synthesizing", progress: 65 } });
+
+    mocks.getReportV4PreAdmissionJob.mockResolvedValue({
+      ...deepJob,
+      id: "teaser-job",
+      reason: "v4_pre_admission",
+      stage: "queued",
+      executionState: "queued",
+      progress: 0,
+      checkpoint: {}
+    });
+    const atHandoff = await GET(new Request("https://example.test/api/reports/report-1/status"), {
+      params: Promise.resolve({ id: "report-1" })
+    });
+    expect(await atHandoff.json()).toMatchObject({ job: { stage: "queued", progress: 65 } });
+
+    mocks.getReportV4PreAdmissionJob.mockResolvedValue({
+      ...deepJob,
+      id: "teaser-job",
+      reason: "v4_pre_admission",
+      stage: "discovering",
+      executionState: "running",
+      progress: 5,
+      checkpoint: {}
+    });
+    const afterHandoff = await GET(new Request("https://example.test/api/reports/report-1/status"), {
+      params: Promise.resolve({ id: "report-1" })
+    });
+    expect(await afterHandoff.json()).toMatchObject({ job: { stage: "discovering", progress: 67 } });
+  });
+
+  it("keeps raw progress for a legacy single-stage free report", async () => {
+    mocks.resolveRequestArtifactScope.mockResolvedValue(null);
+    mocks.getLatestScanJob.mockImplementation(async (_id: string, tier: string) => tier === "free" ? {
+      ...deepJob,
+      id: "legacy-free-job",
+      tier: "free",
+      stage: "synthesizing",
+      executionState: "running",
+      progress: 85,
+      fulfillmentMethodology: null,
+      recommendationReportVersion: null
+    } : null);
+    const response = await GET(new Request("https://example.test/api/reports/report-1/status"), {
+      params: Promise.resolve({ id: "report-1" })
+    });
+    expect(await response.json()).toMatchObject({ job: { progress: 85 } });
+  });
+
   it("keeps a completed homepage preview pending while its teaser checkpoint is incomplete", async () => {
     mocks.resolveRequestArtifactScope.mockResolvedValue(null);
     mocks.getAiReport.mockResolvedValue({ locale: "zh", payload: { tier: "free" } });
@@ -147,7 +213,7 @@ describe("report status artifact scopes", () => {
     });
     expect(await response.json()).toMatchObject({
       hasAiReport: false,
-      job: { stage: "synthesizing", state: "generating", progress: 96 }
+      job: { stage: "synthesizing", state: "generating", progress: 98 }
     });
   });
 

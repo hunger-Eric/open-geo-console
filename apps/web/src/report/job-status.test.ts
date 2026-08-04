@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { publicProgressForStage, publicStateForStage } from "./job-status";
+import { publicProgressForStage, publicStateForStage, publicTwoStageFreeProgress } from "./job-status";
 
 describe("publicStateForStage", () => {
   it.each(["queued", "discovering", "planning", "fetching", "analyzing", "synthesizing"])(
@@ -37,5 +37,21 @@ describe("publicProgressForStage", () => {
     expect(publicProgressForStage("synthesizing", 100)).toBe(99);
     expect(publicProgressForStage("analyzing", -3)).toBe(0);
     expect(publicProgressForStage("queued", 12.9)).toBe(12);
+  });
+});
+
+describe("publicTwoStageFreeProgress", () => {
+  it("keeps the V4 handoff monotonic at 65 percent", () => {
+    expect(publicTwoStageFreeProgress("analyzing", 65, "base")).toBe(65);
+    expect(publicTwoStageFreeProgress("synthesizing", 85, "base")).toBe(65);
+    expect(publicTwoStageFreeProgress("completed", 100, "base")).toBe(65);
+    expect(publicTwoStageFreeProgress("queued", 0, "preview")).toBe(65);
+    expect(publicTwoStageFreeProgress("discovering", 5, "preview")).toBe(67);
+    expect(publicTwoStageFreeProgress("synthesizing", 96, "preview")).toBe(98);
+  });
+
+  it("preserves terminal semantics for the preview segment", () => {
+    expect(publicTwoStageFreeProgress("completed", 99, "preview")).toBe(100);
+    expect(publicTwoStageFreeProgress("failed", 96, "preview")).toBeNull();
   });
 });

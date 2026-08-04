@@ -6,7 +6,7 @@ import { getGeoReport } from "@/db/reports";
 import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
 import { readFreeDirectSemanticsVersion, readSemanticReviewContractVersion } from "@/db/report-semantic-review-activation";
 import { freeTeaserCheckpointFromJobCheckpoint, parseReadyFreeTeaserCheckpoint } from "@/worker/report-v4-free-teaser";
-import { publicProgressForStage, publicStateForStage } from "@/report/job-status";
+import { publicProgressForStage, publicStateForStage, publicTwoStageFreeProgress } from "@/report/job-status";
 import { resolveRequestArtifactScope } from "@/server/report-access";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -37,6 +37,16 @@ export async function GET(request: Request, context: RouteContext) {
     readsV4Artifact ? getActiveCombinedGeoReport(id, "combined_geo_report_v4") : Promise.resolve(null)
   ]);
   const job = deepJob ?? preAdmissionJob ?? freeJob;
+  const isV4FreeBase = !hasDeepAccess
+    && freeJob?.fulfillmentMethodology === "two_stage_geo_report_v4"
+    && freeJob.recommendationReportVersion === 4;
+  const publicProgress = job
+    ? preAdmissionJob && job.id === preAdmissionJob.id
+      ? publicTwoStageFreeProgress(job.stage, job.progress, "preview")
+      : isV4FreeBase && job.id === freeJob?.id
+        ? publicTwoStageFreeProgress(job.stage, job.progress, "base")
+        : publicProgressForStage(job.stage, job.progress)
+    : null;
   const freeTeaserStatus = readFreeTeaserStatus(preAdmissionJob?.checkpoint);
   const aiReport = deepAiReport ?? freeAiReport;
   const queue = job ? await getScanJobQueueStatus(job.id) : null;
@@ -61,7 +71,7 @@ export async function GET(request: Request, context: RouteContext) {
         stage: job.stage,
         state: publicStateForStage(job.stage),
         executionState: job.executionState,
-        progress: publicProgressForStage(job.stage, job.progress),
+        progress: publicProgress,
         plannedPages: job.plannedPages,
         successfulPages: job.successfulPages,
         failedPages: job.failedPages,

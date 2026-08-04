@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { interpolate, localizePath, type Dictionary, type Locale } from "@/i18n";
-import { getUnavailableDescriptionKey } from "./ai-report-status-copy";
+import { getProgressStageDescription, getUnavailableDescriptionKey } from "./ai-report-status-copy";
 import { CommercialCheckout } from "./commercial-checkout";
 
 type WaitReason = "jobs_ahead" | "active_jobs_in_pool" | "awaiting_claim";
@@ -101,12 +101,29 @@ export function AiReportStatus({
   useEffect(() => {
     if (!isGenerating) return;
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      void loadStatus(controller.signal).catch(() => undefined);
-    }, payload?.job?.waitReason ? 5000 : 2500);
+    let timer: number | undefined;
+    const schedule = (delay: number) => {
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        void poll();
+      }, delay);
+    };
+    const poll = async () => {
+      if (document.hidden) return;
+      const next = await loadStatus(controller.signal).catch(() => null);
+      if (controller.signal.aborted || (next?.job && next.job.state !== "generating")) return;
+      schedule(next?.job?.waitReason || !next ? 5000 : 2500);
+    };
+    const resume = () => {
+      if (!document.hidden && timer === undefined) schedule(0);
+    };
+
+    if (!document.hidden) schedule(payload?.job?.waitReason ? 5000 : 2500);
+    document.addEventListener("visibilitychange", resume);
     return () => {
-      window.clearTimeout(timer);
       controller.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", resume);
     };
   }, [isGenerating, loadStatus, payload?.job?.waitReason]);
 
@@ -197,7 +214,7 @@ export function AiReportStatus({
       {isGenerating ? (
         <div className="mt-6">
           <div className="flex items-center justify-between gap-4 text-sm">
-            <span className="font-semibold">{dictionary.aiReport.waitingDescription}</span>
+            <span className="font-semibold">{job ? getProgressStageDescription(job.stage, dictionary) : dictionary.aiReport.waitingDescription}</span>
             <span className="text-[var(--muted)]" aria-hidden="true">{progress}%</span>
           </div>
           <div

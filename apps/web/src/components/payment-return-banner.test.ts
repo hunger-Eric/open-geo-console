@@ -7,6 +7,7 @@ import {
   getPaymentReturnContext,
   getPaymentReturnView,
   isTerminalPaymentReturn,
+  paymentPollDelay,
   shouldHidePurchaseControls,
   shouldAttemptCompletionAccess,
   type PublicOrderStatus
@@ -69,6 +70,15 @@ describe("payment return presentation", () => {
     expect(shouldAttemptCompletionAccess({ ...base, paymentStatus: "paid", fulfillmentStatus: "completed_limited" })).toBe(true);
     expect(shouldAttemptCompletionAccess({ ...base, paymentStatus: "pending", fulfillmentStatus: "completed" })).toBe(false);
     expect(shouldAttemptCompletionAccess({ ...base, paymentStatus: "paid", fulfillmentStatus: "failed" })).toBe(false);
+  });
+});
+
+describe("payment return automatic polling", () => {
+  it("backs off to a bounded interval without a terminal timeout", () => {
+    expect(paymentPollDelay(0)).toBe(1_000);
+    expect(paymentPollDelay(1)).toBe(2_000);
+    expect(paymentPollDelay(4)).toBe(15_000);
+    expect(paymentPollDelay(20)).toBe(15_000);
   });
 });
 
