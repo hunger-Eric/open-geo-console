@@ -5760,3 +5760,19 @@ revised scope.
 - After: 54 images / 30.38GB; E: drive 51G free. Net image footprint
   −1.93GB (overlay tags shared base layers, so tagged size ≠ freed bytes).
 - Terminal status: **complete.**
+
+---
+
+## 2026-08-04 - v0.3.0 release tag
+
+- User confirmed browser acceptance of the downloaded report HTML (offline
+  evidence screenshots) on Protected Staging and approved the tag scope.
+- Annotated tag `v0.3.0` created on `main` HEAD `d197f1d1124f92087c88d8d0fc7e1095cbc6cd9e`
+  (tag object `c324d7e02e86c75043b839601a99320aea18bcd5`) and pushed to
+  `origin`; `git ls-remote --tags origin v0.3.0` verified.
+- The tag covers the delivered line: trusted-country pricing + Airwallex HPP
+  country, fulfillment retry hardening, commerce refund/email reconciliation,
+  and the self-contained downloadable report HTML (top-right action,
+  locale-route 404 fix, inline evidence images).
+- No code, deployment, branch, Docker, database, worker, or commerce changes.
+- Terminal status: **complete.**

@@ -2,11 +2,8 @@
 
 Status: `NONE`
 
-No active executable scope. The 2026-08-04 download-inline-images scope and
-the Docker stale-image cleanup scope completed and were archived to
+No active executable scope. `v0.3.0` was tagged on `d197f1d` and pushed after
+user acceptance; the tag scope is archived in
 `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`.
 
-Pending outside any scope: user browser acceptance of the downloaded report
-HTML (offline evidence screenshots) on Protected Staging; the `v0.3.0` tag
-after acceptance. Any new work requires a fresh FROZEN scope and explicit
-user approval.
+Any new work requires a fresh FROZEN scope and explicit user approval.
