@@ -2,6 +2,53 @@
 
 This runbook is the operator contract for the protected Vercel Preview and the public production deployment. PostgreSQL environment markers and deployment profiles are fail-closed; never work around them with request headers, cookies, query parameters, or a shared secret.
 
+## Canonical Vercel release mode - read before every deployment
+
+The current Open GEO Console Web release path is a manual Vercel Preview from
+the exact candidate checkout. It is not a Git-triggered Vercel deployment.
+Keep Git publication and Vercel deployment as two separately authorized
+actions: pushing a branch does not create a Preview for this project.
+
+Do not confuse the two Vercel links:
+
+- `.vercel/project.json` proves only that the local directory is linked to the
+  intended Vercel project and team.
+- A Vercel Git-provider integration is a separate project-level `link`. Read
+  the live project `link` and the latest deployment `gitSource` before choosing
+  any Git-specific command.
+- Under the current `link=null` / `gitSource=null` mode, Git branch-scoped
+  environment variables are unavailable. Do not use a Git branch argument for
+  `vercel env`, and do not infer that a push will deploy.
+- `link=null` does not mean that the project has never been deployed. It means
+  only that current Git-specific Vercel operations are unavailable; manual CLI
+  Preview deployments remain valid.
+
+Unless an active scope explicitly authorizes a different topology, deploy from
+the clean canonical worktree at the exact candidate SHA. References later in
+this runbook to a clean detached worktree mean an exact clean candidate
+checkout; they do not authorize creating or using another worktree when the
+active scope requires the canonical worktree only.
+
+After the active release scope has prepared and verified the complete
+deployment environment, the proven manual command shape is:
+
+```powershell
+vercel deploy --yes --meta ogcGitSha=<candidate-full-sha>
+```
+
+Run it at most once when the approved release budget allows one new Preview.
+Do not replace it with branch-scoped variables, a Git-triggered Preview, or a
+project Git connect/disconnect operation as an inferred repair. Connecting or
+disconnecting Git is a persistent platform change and requires a separately
+approved scope.
+
+Upload success and `READY` are transport evidence only. Before accepting the
+unique Preview, independently inspect it and require both `gitCommitSha` and
+`ogcGitSha` to equal the full candidate SHA. Then follow the gates below:
+Web, Free Worker, and Deep Worker must share that SHA before moving the fixed
+Protected Staging alias. A manual metadata value is identity evidence only and
+never substitutes for the independent checks or a real-flow acceptance.
+
 ## Environment matrix
 
 | Boundary | Protected staging Preview | Production |

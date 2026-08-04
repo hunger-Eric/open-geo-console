@@ -5273,3 +5273,216 @@ revised scope.
 - Terminal status: **candidate committed locally; release blocked before push
   by the branch-scoped Vercel environment-variable write path. A new FROZEN
   recovery scope is required before any retry or alternative configuration.**
+
+---
+
+## 2026-08-03 - Unified provider profile recovery stopped before push
+
+- Recovery candidate `ac3fe3c5a99e3e1e2b4983e1f60d5e9485564f4b` passed its
+  read-only gates: clean canonical worktree, absent remote task branch, empty
+  target Preview-variable set, Staging marker, schema 45, safe queue counts,
+  and complete `sensenova_anysearch` runtime configuration.
+- The mandatory first Vercel write, limited to the target Preview branch and
+  `OGC_PUBLIC_SEARCH_ADAPTER=anysearch`, failed once with exit code 1:
+  `Project open-geo-console does not have a connected Git repository.`
+- One name/target-only follow-up confirmed the target branch still had zero
+  Preview variables. No signing secret, provider call, certification artifact,
+  authority row, push, Preview, Docker action, database write or business data
+  action occurred.
+- The secret-free terminal ledger is retained only in ignored local storage at
+  `.data/protected-staging-release-ledger/ac3fe3c5a99e3e1e2b4983e1f60d5e9485564f4b.json`.
+- Terminal status: **blocked before push. Connecting the Vercel project to Git
+  or choosing a non-Git Preview path requires a new FROZEN scope.**
+
+---
+
+## 2026-08-03 - Canonical manual Vercel deployment mode documented
+
+- The user explicitly requested a durable operator note after repeated
+  deployment-path confusion and approved a documentation-only FROZEN.
+- `docs/PROTECTED-STAGING-OPERATIONS.md` now states at the top that the current
+  Web release mode is one manual Vercel Preview from the exact canonical
+  candidate checkout, using the proven command skeleton
+  `vercel deploy --yes --meta ogcGitSha=<candidate-full-sha>`.
+- The runbook distinguishes `.vercel/project.json` local project linkage from
+  a Vercel Git-provider `link`, requires live `link` / `gitSource` inspection,
+  and forbids inferring branch-scoped variables, Git-triggered Preview, or a
+  Git connect/disconnect action under the current manual mode.
+- It records Git push and Vercel deployment as separately authorized actions,
+  requires exact `gitCommitSha` / `ogcGitSha` and Web/Free/Deep SHA agreement
+  before alias movement, and clarifies that `link=null` does not mean the
+  project has never been deployed.
+- Reader-facing change measured `+47/-0`, within the approved `+70/-0` budget.
+  The section was reread, required invariants were found, `git diff --check`
+  passed, and no runtime, Git, Vercel, Docker, database, provider, report, or
+  other external action occurred.
+- Terminal status: **deployment-mode lesson recorded locally in the mandatory
+  runbook; documentation remains uncommitted and unpushed.**
+
+---
+
+## 2026-08-03 - Unified provider profile Staging release rolled back at Gate 2
+
+- Approved scope executed in gate order for candidate
+  `ac3fe3c5a99e3e1e2b4983e1f60d5e9485564f4b` on branch
+  `codex/delivery-root-fix`: Gate 1 preflight passed (staging marker,
+  schema 45, zero claimable/running jobs, disk 52 GiB, rollback identities
+  recorded); the branch was pushed once, non-force, creating
+  `origin/codex/delivery-root-fix` at the candidate SHA.
+- Readiness checks: `eslint src` 0 errors (full lint is blocked only by the
+  forbidden `apps/web/.tmp-preview` leftover); 13 stale schema-version-chain
+  test failures proven pre-existing on deployed baseline `95e7fb2`; 2
+  PowerShell-parser tests passed 22/22 in isolation after full-suite load
+  timeouts; monorepo build passed.
+- Exactly one manual Preview was created:
+  `dpl_52H7ciEE5UjybEHrJWmJRWpWRweK`
+  (`https://open-geo-console-mcnrorp7g-itheheda-6857s-projects.vercel.app`),
+  READY, target preview, project/team verified, `ogcGitSha` and
+  `githubCommitSha` both equal the full candidate SHA (`gitDirty=1` reflects
+  the disclosed uncommitted documentation).
+- Gate 2 built the approved thin source-overlay image
+  `open-geo-console:staging-ac3fe3c-provider-profile-overlay-v1`
+  (`sha256:ae9dca41f2dc72bd61ade5c32022e419b7c91d88916160278e2398e70af9b6c1`,
+  revision label = candidate SHA, key source files hash-verified against the
+  canonical worktree) and recreated only the two Staging Workers.
+- Both recreated Workers fail-closed at startup readiness:
+  `getActivePublicSearchSurfaceAuthority` found no active AnySearch
+  authority for environment/surface/version/`zh-CN`/`CN`. The AnySearch
+  Staging authority installation was explicitly outside this scope, so the
+  recorded rollback restored both Workers to
+  `sha256:95a62dcdfc1f91ff834e67d642609c682e79d9a550660073a6ef374bcfb4e83e`.
+- The rollback image also fails-closed under the current merged Staging
+  environment: its `95e7fb2` code rejects
+  `OGC_REPORT_V4_MODEL_PROFILE_ID=report-v4-sensenova-deepseek-v4-flash-v1`,
+  which the environment now selects. Both Workers were therefore left
+  stopped on the rollback image identity. The previously running Workers
+  had survived only because their container environment was frozen before
+  the `sensenova_anysearch` selection was written.
+- The fixed Protected Staging alias was never moved; the fixed site still
+  serves rollback Web deployment `dpl_J71XhBtERHciEMEd8DjWNc8SWPYM`.
+  No report, crawl, model call, order, payment, refund, email, database
+  write, authority change, or production action occurred. Docker delta:
+  +1 overlay image, images 32.19 GB -> 32.2 GB, E: free space unchanged at
+  52 GiB.
+- Terminal status: **rolled back at Gate 2; deployment blocked. Staging now
+  has no runnable Worker under the current merged environment: the candidate
+  requires an installed and active AnySearch Staging authority, and the
+  rollback image requires the pre-`sensenova_anysearch` environment. A new
+  FROZEN scope must choose between installing the AnySearch Staging
+  authority (candidate path) or reverting the Staging environment to the
+  MiMo profile (rollback path).**
+
+---
+
+## 2026-08-03 - Checkout entry restored on fixed Protected Staging (Preview env repair)
+
+- Root cause established read-only: the candidate's
+  `getRecommendationProductAvailability` requires `OGC_PROVIDER_PROFILE`
+  and a resolvable AnySearch runtime; the Vercel Preview environment lacked
+  `OGC_PROVIDER_PROFILE`, `OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL`, and
+  `OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY`, so `/api/commerce/catalog` returned
+  `enabled=false`, the checkout form never rendered, and the
+  `href="#checkout"` "Unlock full report" anchors appeared dead.
+- Exactly three Preview-scoped environment writes were made via the Vercel
+  API (upsert, encrypted, values copied from the local merged staging
+  environment; no Production variables, no deletions, no branch scoping).
+- One new manual Preview of the unchanged candidate:
+  `dpl_EetcWT3cUjcwa9yqr2fCuKR3RX9j`
+  (`https://open-geo-console-lo19gsn1j-itheheda-6857s-projects.vercel.app`),
+  READY, preview target, `ogcGitSha` and `githubCommitSha` equal to
+  `ac3fe3c5a99e3e1e2b4983e1f60d5e9485564f4b`.
+- The fixed Protected Staging alias was moved once to
+  `dpl_EetcWT3cUjcwa9yqr2fCuKR3RX9j` (API-verified). Anonymous `/zh` and
+  `/api/commerce/catalog` still return 302 SSO protection. Both Staging
+  Workers remained untouched on candidate image `sha256:ae9dca41...`,
+  restart count zero.
+- The interactive `vercel env add` path was attempted first and aborted at
+  its TTY Git-branch prompt without creating any variable; the writes were
+  completed via the project env API instead.
+- No payment, order, refund, email, report submission, crawl, model call,
+  database write, Git mutation, Worker action, or Production change
+  occurred. The authenticated catalog confirmation and checkout retry are
+  the user's browser-side verification.
+- Terminal status: **fixed-site checkout entry repair deployed; awaiting
+  the user's authenticated confirmation that the payment form renders.
+  Sandbox payment (Gate 4) remains separately scoped.**
+
+---
+
+## 2026-08-04 - Provider timeout recovery and unapproved A1 superseded
+
+- The approved Provider Profile timeout repair was implemented in commit
+  `5c27ab4348e0585f8fd19f3e935d8eba3fe6d7ec`, pushed, built as the approved
+  thin Staging Worker overlay, and installed on both named Staging Workers.
+- A new Paid V3 run advanced through page analysis and website synthesis,
+  establishing that the earlier roughly 65-second client-timeout regression
+  no longer reproduced. It later terminalized in grounded answer synthesis
+  with `ai_client_output_truncated` after the AnySearch answer path applied
+  its 2500-token cap.
+- A FROZEN amendment proposed threading the locked profile's question-answer
+  output cap into the AnySearch answer provider. That amendment was never
+  approved or implemented. The failed run and both pending refunds remain
+  untouched.
+- The user then supplied the paid/generating UI screenshot and explicitly
+  approved replacing and archiving the old scope in favor of the bounded
+  payment-state UI change.
+- Terminal status: **superseded at the user's direction; timeout repair
+  acceptance established through website synthesis, later paid-run failure
+  retained as historical evidence, and the proposed A1 remained unapproved.**
+
+---
+
+## 2026-08-04 - Payment-return purchase-control visibility (parallel session)
+
+- Objective: on a report payment-return page, hide purchase controls once the
+  return represents payment success/confirmation or the authoritative order
+  status is `paid`; show them again for cancelled, failed, or refunded states.
+- Implemented per its approved scope: shared `order` + `payment_return`
+  parser and pure visibility rule in `apps/web/src/components/payment-return.ts`;
+  conditional form/Suspense handling in `commercial-checkout.tsx` and
+  `payment-return-banner.tsx`; 16/16 focused Vitest tests passed; scoped
+  ESLint and `git diff --check` passed. Local browser verification was
+  blocked by platform policy and is not claimed.
+- Its scope authorized no Git mutation, so the resulting source/test changes
+  remain UNCOMMITTED in the canonical working tree at this archive time,
+  alongside `apps/web/next-env.d.ts` (auto-regenerated) and the pre-existing
+  `docs/PROTECTED-STAGING-OPERATIONS.md` edits. Ownership of those dirty
+  files stays with the user; no later task may commit, revert, or clean them.
+- Terminal status: **implemented and locally test-verified; not committed,
+  not deployed; archived at the user's direction to make way for the A1
+  truncation-cap scope.**
+
+---
+
+## 2026-08-04 - A1 unified output-cap fix ACCEPTED
+
+- Objective: eliminate the two hardcoded `maxTokens: 2_500` caps on the
+  combined_geo_report_v3 SenseNova path (AnySearch grounded answers and
+  provider claim extraction) by threading the locked profile's 8192
+  `maxOutputTokens` to both call sites. Cap-only; no retry/degrade/contract
+  semantics changed.
+- Implemented in commit `0dd82061c8d1e7ec556006a9f20e707c4d96e271` (pushed;
+  exactly the 7 allowlisted files; production 29 changed lines, tests 19).
+  Focused tests all green: claim extraction 6/6, generative-answer 6/6,
+  runtime 8/8, processor 80/80, provider-discovery 30/30.
+- Deployed as thin overlay
+  `open-geo-console:staging-0dd8206-output-cap-overlay-v1`
+  (`sha256:ab4f795c9bf7...`) built from a `git archive` export of the exact
+  commit (dirty working tree excluded by construction) on base
+  `sha256:ab9df490...`; both Staging Workers recreated, restartCount=0,
+  healthy. Rollback line: current `sha256:ab4f795c...`, one rollback
+  `sha256:ab9df490...`.
+- Acceptance (user Sandbox order `2cba6a0b-a11b-4a83-9d89-0d374cb648f4`,
+  report `6f067d45-18bd-4129-9352-9e1e03cd6198`, job
+  `8141b78f-863f-4f60-bb7d-ea2593bd0739`): completed end-to-end in 12m34s,
+  attempts=1, no `ai_client_timeout`, no `ai_client_output_truncated`;
+  answer calls 9.4s/21.2s under the 8192 cap, one claim-extraction call
+  67.7s (old 60s timeout would have killed it), one claim TypeError degraded
+  via the designed contract-skip path. Order `fulfillment_status=completed`,
+  `refund_status=not_required`.
+- Remaining open items outside this scope: two pending refunds
+  (`6eaff177-...`, `c0a1df43-...`) await separate submission authorization;
+  the UI task's uncommitted component changes remain user-owned dirty files;
+  the fixed Protected Staging site still serves the `ac3fe3c` Preview (web
+  process needed none of these worker-only fixes).
+- Terminal status: **complete and accepted.**
