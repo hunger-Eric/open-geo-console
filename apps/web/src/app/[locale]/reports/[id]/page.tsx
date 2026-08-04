@@ -124,7 +124,6 @@ export default async function ReportPage({
         carrierOptions
       );
       const dictionary = getDictionary(locale);
-      const checkoutEligible = !freeDirectSemanticsVersion || ready.directAnalysisStatus === "completed";
       return <>
         <CombinedGeoReportV4Teaser model={{
           reportId: id,
@@ -148,12 +147,12 @@ export default async function ReportPage({
                 competitorMentionCount: ready.metrics!.competitorMentionCount
               })
         }}/>
-        {checkoutEligible ? <div id="checkout" className="mx-auto w-full max-w-[1120px] px-5 pb-12">
+        <div id="checkout" className="mx-auto w-full max-w-[1120px] px-5 pb-12">
           <Suspense fallback={null}>
             <PaymentReturnBanner dictionary={dictionary} reportId={id} />
           </Suspense>
           <CommercialCheckout dictionary={dictionary} locale={reportLocale} reportId={id} />
-        </div> : null}
+        </div>
       </>;
     }
   }

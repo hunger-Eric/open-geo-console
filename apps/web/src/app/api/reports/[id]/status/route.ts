@@ -120,7 +120,7 @@ function readFreeTeaserStatus(checkpoint: Parameters<typeof freeTeaserCheckpoint
         ready: true,
         coreReady: true,
         analysisStatus: ready.directAnalysisStatus!,
-        checkoutEligible: ready.directAnalysisStatus === "completed"
+        checkoutEligible: true
       };
     } else if (semanticReviewContractVersion !== null) {
       // Marker-present: reviewed-ready parse with root marker only.

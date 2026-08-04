@@ -185,6 +185,8 @@ describe("free V4 teaser renderer", () => {
     expect(html).toContain("The Q1 answer and its sources completed successfully, but the separate analysis did not complete for this run.");
     expect(html).toContain('data-core-gap="true"');
     expect(html).toContain('data-generative-answer="public-question-1"');
-    expect(html).not.toContain('href="#checkout"');
+    expect(html).toContain('data-teaser-cta-position="early"');
+    expect(html).toContain('data-teaser-cta-position="final"');
+    expect(html).toContain('href="#checkout"');
   });
 });

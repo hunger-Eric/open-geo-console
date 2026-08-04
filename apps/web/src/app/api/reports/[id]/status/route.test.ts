@@ -23,12 +23,16 @@ vi.mock("@/db/report-v4-admission-jobs", () => ({ getReportV4PreAdmissionJob: mo
 vi.mock("@/worker/report-v4-free-teaser", () => ({
   freeTeaserCheckpointFromJobCheckpoint: (checkpoint: { freeTeaser?: unknown } | null | undefined) => checkpoint?.freeTeaser ?? null,
   parseReadyFreeTeaserCheckpoint: (
-    checkpoint: { stage?: string; semanticReview?: unknown; reviewedFoundation?: unknown },
-    options?: { semanticReviewContractVersion?: string | null }
+    checkpoint: { stage?: string; semanticReview?: unknown; reviewedFoundation?: unknown; directAnalysisStatus?: unknown },
+    options?: { semanticReviewContractVersion?: string | null; freeDirectSemanticsVersion?: string | null }
   ) => {
     if (checkpoint.stage !== "ready") throw new TypeError("not ready");
     // Marker-absent path: options omitted (undefined) — legacy ready is stage-only.
     if (options === undefined) return checkpoint;
+    if (options.freeDirectSemanticsVersion === "free-v4-direct-semantics-v1") {
+      if (checkpoint.directAnalysisStatus !== "completed" && checkpoint.directAnalysisStatus !== "incomplete") throw new TypeError("missing Direct analysis status");
+      return checkpoint;
+    }
     const markerPresent = options.semanticReviewContractVersion === "report-semantic-review-v1";
     if (!markerPresent) throw new TypeError("unsupported contract");
     if (!checkpoint.semanticReview) throw new TypeError("root semantic-review lineage");
@@ -259,6 +263,28 @@ describe("report status artifact scopes", () => {
     expect(await response.json()).toMatchObject({
       hasAiReport: true,
       job: { stage: "completed", progress: 100 }
+    });
+  });
+
+  it("keeps checkout eligible when a ready Direct teaser has incomplete analysis", async () => {
+    mocks.resolveRequestArtifactScope.mockResolvedValue(null);
+    mocks.getAiReport.mockResolvedValue({ locale: "zh", payload: { tier: "free" } });
+    mocks.getReportV4PreAdmissionJob.mockResolvedValue({
+      ...deepJob,
+      id: "teaser-job",
+      reason: "v4_pre_admission",
+      checkpoint: {
+        freeDirectSemanticsVersion: "free-v4-direct-semantics-v1",
+        freeTeaser: { stage: "ready", directAnalysisStatus: "incomplete" }
+      }
+    });
+
+    const response = await GET(new Request("https://example.test/api/reports/report-1/status"), {
+      params: Promise.resolve({ id: "report-1" })
+    });
+    expect(await response.json()).toMatchObject({
+      hasAiReport: true,
+      freeTeaser: { ready: true, coreReady: true, analysisStatus: "incomplete", checkoutEligible: true }
     });
   });
 

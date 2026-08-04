@@ -92,8 +92,6 @@ export type FreeTeaserModel = FreeTeaserModelBase & ({
 export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTeaserModel }) {
   const copy = model.locale === "zh" ? ZH : EN;
   const questions = model.questionSet.questions;
-  const isDirect = model.directAnalysisStatus !== undefined;
-  const checkoutEligible = !isDirect || model.directAnalysisStatus === "completed";
   return <>
   <style dangerouslySetInnerHTML={{ __html: ARTIFACT_CSS + TEASER_EXTRA_CSS }} />
   <main className="report-shell report-v4-teaser" data-report-version="4-teaser" data-artifact-revision="free-teaser">
@@ -101,10 +99,10 @@ export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTease
       <p className="eyebrow">{copy.kicker}</p>
       <h1>{copy.title}</h1>
       <p className="lede">{copy.introduction}</p>
-      {checkoutEligible ? <div className="hero-actions">
+      <div className="hero-actions">
         <a className="cta-button" data-teaser-cta-position="early" href="#checkout">{copy.ctaButton}</a>
         <p className="hero-assurance">{copy.ctaAssurance}</p>
-      </div> : null}
+      </div>
       <dl className="metadata-grid">
         <Meta label={copy.target}>{model.targetUrl}</Meta>
         <Meta label={copy.generated}><time dateTime={model.generatedAt}>{formatGeneratedAt(model.generatedAt, model.locale)}</time></Meta>
@@ -138,7 +136,7 @@ export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTease
       <p className="section-index">03</p><h2>{copy.firstAnswer}</h2>
       {model.q1AnswerCard
         ? <TeaserQ1Card card={model.q1AnswerCard} question={questions[0]!.neutralPublicText} locale={model.locale} copy={copy}/>
-        : <TeaserLockedCard question={questions[0]!.neutralPublicText} questionOrder={1} copy={copy} showCta={checkoutEligible}/>
+        : <TeaserLockedCard question={questions[0]!.neutralPublicText} questionOrder={1} copy={copy} showCta={true}/>
       }
     </section>
 
@@ -147,12 +145,12 @@ export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTease
       <div className="diagnosis-gap"><strong>{copy.targetGap}</strong><p>{coreGapText(model, copy)}</p></div>
     </section>
 
-    {checkoutEligible ? <section className="report-section teaser-cta-section" data-teaser-cta="true">
+    <section className="report-section teaser-cta-section" data-teaser-cta="true">
       <p className="section-index">05</p>
       <h2>{copy.ctaTitle}</h2>
       <p>{copy.ctaBody}</p>
       <a className="cta-button" data-teaser-cta-position="final" href="#checkout">{copy.ctaButton}</a>
-    </section> : null}
+    </section>
   </main>
   </>;
 }

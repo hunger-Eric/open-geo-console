@@ -81,6 +81,24 @@ describe("business question contracts", () => {
     expect(set.questions[1].generatedText.match(/台湾海快/g)).toBeNull();
   });
 
+  it("does not turn an AI automation service into logistics because its summary mentions a freight case", () => {
+    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
+      ...profile,
+      businessModel: "服务交付（定制化AI自动化系统设计与实施）",
+      productsAndServices: ["AI自动化系统设计与交付", "流程诊断", "多来源信息汇总"],
+      capabilities: ["流程诊断", "数据抽取", "字段标准化"],
+      targetAudiences: ["企业运营人员"],
+      marketsAndRegions: ["未明确指定，但暗示面向中国企业"],
+      summary: "提供企业AI自动化系统设计与交付，包含一个货运线索处理案例。",
+      confidence: "low",
+      evidence: []
+    } });
+
+    const texts = set.questions.map(({ generatedText }) => generatedText).join(" ");
+    expect(texts).toContain("AI自动化系统设计与交付");
+    expect(texts).not.toContain("跨境物流服务");
+  });
+
   it("drops noisy inferred audiences and keeps all three questions concise and website-specific", () => {
     const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
       ...profile,

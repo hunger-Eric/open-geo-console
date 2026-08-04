@@ -303,7 +303,7 @@ function splitServiceExamples(value: string): string[] {
 }
 
 function compactServiceCategory(profile: BusinessQuestionProfile, service: string, locale: string): string {
-  const logistics = `${profile.businessModel ?? ""} ${profile.summary} ${service}`;
+  const logistics = `${profile.businessModel ?? ""} ${service}`;
   if (/物流|货运|海运|空运|专线|\b(?:logistics|freight|shipping)\b/iu.test(logistics)) {
     return localized(locale, "cross-border logistics services", "跨境物流服务");
   }
