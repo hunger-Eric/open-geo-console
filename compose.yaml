@@ -114,6 +114,20 @@ services:
       - path: ./.data/workstation-docker/staging-commerce.env
         format: raw
 
+  staging-commerce-reconcile:
+    image: "${OGC_APP_IMAGE:-open-geo-console:local}"
+    profiles: ["workstation"]
+    working_dir: /app/apps/web
+    command: ["sh", "-c", "while true; do node --import tsx src/scripts/staging-commercial-operations.ts all; sleep $${OGC_STAGING_COMMERCE_INTERVAL_SECONDS:-900}; done"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    env_file:
+      - path: ./.data/workstation-docker/staging.env
+        format: raw
+      - path: ./.data/workstation-docker/staging-commerce.env
+        format: raw
+
   production-worker-free:
     image: "${OGC_APP_IMAGE:-open-geo-console:local}"
     profiles: ["workstation"]
