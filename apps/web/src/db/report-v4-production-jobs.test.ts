@@ -50,6 +50,7 @@ describe("V4 production core and diagnosis-enhancement job lineage", () => {
     aggregate.orders[0]!.fulfillmentStatus = "completed_limited";
     aggregate.orders[0]!.refundStatus = "pending";
     aggregate.credits[0]!.status = "refunded";
+    aggregate.activeAccessTokenCount = 0;
 
     await expect(repository(aggregate).loadPaidCoreContext({ coreJobId: "core-job" }))
       .resolves.toMatchObject({

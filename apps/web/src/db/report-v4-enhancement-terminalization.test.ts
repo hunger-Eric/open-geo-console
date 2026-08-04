@@ -57,6 +57,12 @@ describe("report v4 enhancement terminalization", () => {
     expect(fake.state).toMatchObject({ stage: "completed", executionState: "completed", updates: 1 });
   });
 
+  it("terminalizes an enhancement on a limited refunded core with no customer access token", async () => {
+    const fake = executor({ outcome: "completed", limitedCore: true });
+    await terminalizeReportV4EnhancementJob(input("completed"), fake);
+    expect(fake.state).toMatchObject({ stage: "completed", executionState: "completed", updates: 1 });
+  });
+
   it("rejects omission of an answered source-core question", async () => {
     const fake = executor({ outcome: "completed", unavailableQuestion: 3 });
     await expect(terminalizeReportV4EnhancementJob({
@@ -88,6 +94,7 @@ function executor(options: {
   revisionStatus?: "pending" | "ready" | "active" | "failed" | null;
   terminal?: boolean;
   unavailableQuestion?: 1 | 2 | 3;
+  limitedCore?: boolean;
 }): ReportV4EnhancementTerminalizationExecutor & {
   state: { stage: string; executionState: string; updates: number; updateSql: string; updateValues: readonly unknown[] };
 } {
@@ -120,14 +127,14 @@ function executor(options: {
       id: "core-v4", report_id: "report-v4", site_snapshot_id: "snapshot-v4",
       product_contract: "recommendation_forensics_v1", fulfillment_methodology: "two_stage_geo_report_v4",
       recommendation_report_version: 4, artifact_contract: "combined_geo_report_v4",
-      business_question_set_id: "questions-v4", locale: "en", reason: "standard", stage: "completed",
+      business_question_set_id: "questions-v4", locale: "en", reason: "standard", stage: options.limitedCore ? "completed_limited" : "completed",
       execution_state: "completed", credit_reservation_id: "credit-v4",
       order_id: "order-v4", order_report_id: "report-v4", order_fulfillment_job_id: "core-v4",
       order_site_snapshot_id: "snapshot-v4", order_question_set_id: "questions-v4",
       order_product_code: "recommendation_forensics_v1", order_methodology: "two_stage_geo_report_v4",
-      order_version: 4, order_locale: "en", payment_status: "paid", fulfillment_status: "completed",
-      refund_status: "not_required", credit_id: "credit-v4", credit_report_id: "report-v4",
-      credit_job_id: "core-v4", credit_order_id: "order-v4", credit_status: "settled",
+      order_version: 4, order_locale: "en", payment_status: "paid", fulfillment_status: options.limitedCore ? "completed_limited" : "completed",
+      refund_status: options.limitedCore ? "pending" : "not_required", credit_id: "credit-v4", credit_report_id: "report-v4",
+      credit_job_id: "core-v4", credit_order_id: "order-v4", credit_status: options.limitedCore ? "refunded" : "settled",
       source_id: "core-artifact-v4", source_report_id: "report-v4", source_order_id: "order-v4",
       source_job_id: "core-v4", source_config_snapshot_id: "config-v4", source_revision_kind: "generation",
       source_artifact_contract: "combined_geo_report_v4", source_status: sourceStatus,
@@ -138,7 +145,7 @@ function executor(options: {
       active_job_id: activeEnhancement ? "enhancement-v4" : "core-v4", active_config_snapshot_id: "config-v4",
       active_revision_kind: activeEnhancement ? "diagnosis_enhancement" : "generation",
       active_source_artifact_revision_id: activeEnhancement ? "core-artifact-v4" : null,
-      active_artifact_contract: "combined_geo_report_v4", active_status: "active", access_count: 1,
+      active_artifact_contract: "combined_geo_report_v4", active_status: "active", access_count: options.limitedCore ? 0 : 1,
       source_payload: sourceCorePayload(options.unavailableQuestion)
     }];
     if (query.includes("FROM report_business_questions")) return [

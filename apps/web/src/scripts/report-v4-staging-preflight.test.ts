@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { DATABASE_SCHEMA_VERSION as CURRENT_SCHEMA_VERSION } from "../db";
 import {
   runReportV4StagingPreflight,
@@ -83,6 +83,41 @@ describe("exact-commit staging-only Worker launcher", () => {
     fileURLToPath(new URL("../../../../.dockerignore", import.meta.url)),
     "utf8"
   );
+  let powershellProbe: ReturnType<typeof spawnSync> | undefined;
+
+  beforeAll(() => {
+    if (process.platform !== "win32") return;
+    const command = [
+      "$tokens = $null",
+      "$parseErrors = $null",
+      "$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:OGC_PARSE_TARGET, [ref]$tokens, [ref]$parseErrors)",
+      "$functionAst = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Read-ContainerEnvironment' }, $true)",
+      "$environmentDecoded = $false",
+      "if ($null -ne $functionAst) { Invoke-Expression $functionAst.Extent.Text; function Assert-LastExitCode { param([string]$Message) }; function docker { $global:LASTEXITCODE = 0; return '[\"FIRST=one\",\"SECOND=two=with-equals\",\"THIRD=three\"]' }; $result = Read-ContainerEnvironment 'test-container'; $environmentDecoded = $result.Count -eq 3 -and $result['FIRST'] -eq 'one' -and $result['SECOND'] -eq 'two=with-equals' -and $result['THIRD'] -eq 'three' }",
+      "[pscustomobject]@{ parsed = $parseErrors.Count -eq 0; parseErrors = @($parseErrors | ForEach-Object { $_.Message }); functionFound = $null -ne $functionAst; environmentDecoded = $environmentDecoded } | ConvertTo-Json -Compress"
+    ].join("; ");
+    powershellProbe = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], {
+      encoding: "utf8",
+      env: { ...process.env, OGC_PARSE_TARGET: launcherPath }
+    });
+  });
+
+  const readPowershellProbe = () => {
+    if (!powershellProbe) throw new Error("Windows PowerShell launcher probe did not run.");
+    if (powershellProbe.status !== 0) {
+      throw new Error(`Windows PowerShell launcher probe failed:\n${powershellProbe.stderr}`);
+    }
+    try {
+      return JSON.parse(powershellProbe.stdout) as {
+        parsed: boolean;
+        parseErrors: string[];
+        functionFound: boolean;
+        environmentDecoded: boolean;
+      };
+    } catch {
+      throw new Error(`Windows PowerShell launcher probe returned malformed JSON:\n${powershellProbe.stdout}`);
+    }
+  };
 
   it("allows only the collapsed untracked assets directory and protected V3 plan while rejecting every other entry", () => {
     const protectedPath = "docs/superpowers/plans/2026-07-15-v3-paid-acceptance-remediation.md";
@@ -109,17 +144,8 @@ describe("exact-commit staging-only Worker launcher", () => {
   });
 
   (process.platform === "win32" ? it : it.skip)("parses with the Windows PowerShell language parser", () => {
-    const command = [
-      "$tokens = $null",
-      "$parseErrors = $null",
-      "[System.Management.Automation.Language.Parser]::ParseFile($env:OGC_PARSE_TARGET, [ref]$tokens, [ref]$parseErrors) | Out-Null",
-      "if ($parseErrors.Count -gt 0) { $parseErrors | ForEach-Object { [Console]::Error.WriteLine($_.Message) }; exit 1 }"
-    ].join("; ");
-    const parsed = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], {
-      encoding: "utf8",
-      env: { ...process.env, OGC_PARSE_TARGET: launcherPath }
-    });
-    if (parsed.status !== 0) throw new Error(`PowerShell parser rejected the staging launcher:\n${parsed.stderr}`);
+    const probe = readPowershellProbe();
+    expect(probe.parsed, probe.parseErrors.join("\n")).toBe(true);
   });
 
   it("decodes the container environment array without piping it through Windows PowerShell", () => {
@@ -129,23 +155,9 @@ describe("exact-commit staging-only Worker launcher", () => {
   });
 
   (process.platform === "win32" ? it : it.skip)("returns every key from a multi-entry container environment array", () => {
-    const command = [
-      "$tokens = $null",
-      "$parseErrors = $null",
-      "$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:OGC_PARSE_TARGET, [ref]$tokens, [ref]$parseErrors)",
-      "$functionAst = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Read-ContainerEnvironment' }, $true)",
-      "if ($null -eq $functionAst) { [Console]::Error.WriteLine('Read-ContainerEnvironment was not found.'); exit 1 }",
-      "Invoke-Expression $functionAst.Extent.Text",
-      "function Assert-LastExitCode { param([string]$Message) }",
-      "function docker { $global:LASTEXITCODE = 0; return '[\"FIRST=one\",\"SECOND=two=with-equals\",\"THIRD=three\"]' }",
-      "$result = Read-ContainerEnvironment 'test-container'",
-      "if ($result.Count -ne 3 -or $result['FIRST'] -ne 'one' -or $result['SECOND'] -ne 'two=with-equals' -or $result['THIRD'] -ne 'three') { [Console]::Error.WriteLine('Container environment array was not fully decoded.'); exit 1 }"
-    ].join("; ");
-    const decoded = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], {
-      encoding: "utf8",
-      env: { ...process.env, OGC_PARSE_TARGET: launcherPath }
-    });
-    if (decoded.status !== 0) throw new Error(`Windows PowerShell did not decode every environment entry:\n${decoded.stderr}`);
+    const probe = readPowershellProbe();
+    expect(probe.functionFound).toBe(true);
+    expect(probe.environmentDecoded).toBe(true);
   });
 
   it("binds build, image label, and deployment version to full HEAD", () => {

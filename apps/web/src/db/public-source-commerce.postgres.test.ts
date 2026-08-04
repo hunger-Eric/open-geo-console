@@ -130,11 +130,11 @@ describePostgres("paid public-source atomic terminalization",()=>{
     expect(await readV4CommerceState(getSqlClient(),ids)).toMatchObject({stage:"synthesizing",credit_status:"reserved",
       refunds:0,emails:0,tokens:0,enhancements:0,artifact_status:"ready",active_artifact_revision_id:null});
     const first=await terminalizePaidReportV4Core({report:core,workerId:ids.workerId});
-    expect(first).toMatchObject({outcome:"completed_limited",orderId:ids.orderId,refundId:expect.any(String)});
+    expect(first).toMatchObject({outcome:"completed_limited",orderId:ids.orderId,refundId:expect.any(String),accessTokenId:null});
     const terminal=await readV4CommerceState(getSqlClient(),ids);
     expect(terminal).toMatchObject({stage:"completed_limited",execution_state:"completed",fulfillment_status:"completed_limited",
       refund_status:"pending",credit_status:"refunded",credits_remaining:1,refunds:1,refund_reason:"completed_limited",
-      emails:1,tokens:1,transitions:1,token_scope:"combined_geo_report_v4",enhancements:0});
+      emails:1,tokens:0,transitions:1,token_scope:null,enhancements:0});
     expect(await terminalizePaidReportV4Core({report:core,workerId:ids.workerId})).toMatchObject({
       refundId:first.refundId,accessTokenId:first.accessTokenId,emailDeliveryId:first.emailDeliveryId
     });
@@ -161,7 +161,7 @@ describePostgres("paid public-source atomic terminalization",()=>{
     expect(await readV4CommerceState(sql,ids)).toMatchObject({
       stage:"completed_limited",execution_state:"completed",fulfillment_status:"completed_limited",
       refund_status:"pending",credit_status:"refunded",credits_remaining:1,refunds:1,
-      refund_reason:"completed_limited",emails:1,tokens:1,enhancements:0,transitions:2,
+      refund_reason:"completed_limited",emails:1,tokens:0,enhancements:0,transitions:2,
       artifact_status:"active",active_artifact_revision_id:ids.artifactRevisionId
     });
   },120_000);

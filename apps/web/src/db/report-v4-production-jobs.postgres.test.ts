@@ -97,6 +97,28 @@ describeDisposablePostgres("V4 production job lineage PostgreSQL repository", ()
     }
   });
 
+  it("loads a completed-limited refunded core only when it has no active paid token", async () => {
+    const sql = getSqlClient();
+    try {
+      await sql`UPDATE scan_jobs SET stage='completed_limited' WHERE id=${ids.coreJob}`;
+      await sql`UPDATE payment_orders SET fulfillment_status='completed_limited',refund_status='pending' WHERE id=${ids.order}`;
+      await sql`UPDATE credit_ledger SET status='refunded',settled_at=NULL,refunded_at=now() WHERE id=${ids.credit}`;
+      await sql`UPDATE access_keys SET status='active',credits_remaining=1 WHERE id=${ids.accessKey}`;
+      await sql`DELETE FROM report_access_tokens WHERE report_id=${ids.report}`;
+
+      await expect(createReportV4ProductionJobRepository().loadPaidCoreContext({ coreJobId: ids.coreJob }))
+        .resolves.toMatchObject({ commercePhase: "settled", activeCoreArtifact: { id: ids.artifact } });
+    } finally {
+      await sql`UPDATE scan_jobs SET stage='completed' WHERE id=${ids.coreJob}`;
+      await sql`UPDATE payment_orders SET fulfillment_status='completed',refund_status='not_required' WHERE id=${ids.order}`;
+      await sql`UPDATE credit_ledger SET status='settled',settled_at=now(),refunded_at=NULL WHERE id=${ids.credit}`;
+      await sql`UPDATE access_keys SET status='exhausted',credits_remaining=0 WHERE id=${ids.accessKey}`;
+      await sql`DELETE FROM report_access_tokens WHERE report_id=${ids.report}`;
+      await sql`INSERT INTO report_access_tokens(id,report_id,token_prefix,token_hmac,artifact_scope,expires_at)
+        VALUES(${`token-limited-restore-${suffix}`},${ids.report},'ogc_report_fixture',${sha(`token-limited-restore-${suffix}`)},'combined_geo_report_v4',now()+interval '30 days')`;
+    }
+  });
+
   it("derives claimed enhancement lineage with PostgreSQL lease time", async () => {
     const sql = getSqlClient();
     try {

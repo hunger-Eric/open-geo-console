@@ -67,7 +67,8 @@ describe("payment return presentation", () => {
 
   it("attempts completion access only for paid deliverable states", () => {
     expect(shouldAttemptCompletionAccess({ ...base, paymentStatus: "paid", fulfillmentStatus: "completed" })).toBe(true);
-    expect(shouldAttemptCompletionAccess({ ...base, paymentStatus: "paid", fulfillmentStatus: "completed_limited" })).toBe(true);
+    expect(shouldAttemptCompletionAccess({ ...base, paymentStatus: "paid", fulfillmentStatus: "completed_limited", refundStatus: "pending" })).toBe(false);
+    expect(shouldAttemptCompletionAccess({ ...base, paymentStatus: "paid", fulfillmentStatus: "completed", refundStatus: "refunded" })).toBe(false);
     expect(shouldAttemptCompletionAccess({ ...base, paymentStatus: "pending", fulfillmentStatus: "completed" })).toBe(false);
     expect(shouldAttemptCompletionAccess({ ...base, paymentStatus: "paid", fulfillmentStatus: "failed" })).toBe(false);
   });

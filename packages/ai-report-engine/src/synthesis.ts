@@ -210,6 +210,7 @@ export async function synthesizeWebsiteReport(
         .slice(0, 1)
     : verified.report.findings;
   const finalReport = { ...verified.report, findings: tierFindings };
+  assertTemporalConsistency(finalReport, generatedAt);
   const result = {
     report: finalReport,
     modelId: completion.modelId,
@@ -249,6 +250,7 @@ export async function synthesizeWebsiteReportWithRecovery(
       return await synthesizeWebsiteReport(client, datedInput, options.signal, [], options.semanticValidation);
     } catch (error) {
       lastError = error;
+      if (error instanceof WebsiteReportTemporalValidationError) throw error;
       if (options.semanticValidation === "free_direct") {
         if (!isRetryableAiClientError(error) || attempt >= maxAttempts) throw error;
         await delayWithSignal(delay, Math.min(2_000, 250 * (2 ** (attempt - 1))), options.signal);
@@ -321,6 +323,7 @@ async function correctWebsiteReportLanguage(
   const deliverable = corrected ?? omitInvalidOptionalWebsiteReportProse(error.draft.report, error);
   if (!deliverable) throw error;
   assertWebsiteReportLanguage(deliverable, input);
+  assertTemporalConsistency(deliverable, input.generatedAt ?? deliverable.provenance.generatedAt);
   return { ...error.draft, report: deliverable };
 }
 
@@ -413,6 +416,58 @@ function assertWebsiteReportLanguage(report: AiWebsiteReportV1, input: ReportSyn
   const fields = websiteReportLanguageFields(report);
   assertReportLanguage(fields, input.locale, collectSourceGroundedAllowedTerms(input));
   assertGeoTerminology(fields, GEO_TERMINOLOGY_POLICY);
+}
+
+export class WebsiteReportTemporalValidationError extends Error {
+  constructor(
+    readonly path: string,
+    readonly referencedDate: string,
+    readonly asOf: string,
+    readonly relation: "past_described_as_future" | "future_described_as_past"
+  ) {
+    super(`Report temporal validation failed at ${path}: ${referencedDate} is ${relation} relative to ${asOf}.`);
+    this.name = "WebsiteReportTemporalValidationError";
+  }
+}
+
+function assertTemporalConsistency(report: AiWebsiteReportV1, asOf: string): void {
+  const baseline = new Date(asOf);
+  if (!Number.isFinite(baseline.getTime())) throw new TypeError("Report generatedAt must be a valid date-time.");
+  const baselineDay = Date.UTC(baseline.getUTCFullYear(), baseline.getUTCMonth(), baseline.getUTCDate());
+  const datePattern = /(?:(?<year>\d{4})(?:年|[-/])(?<month>\d{1,2})(?:月|[-/])(?<day>\d{1,2})日?)|(?:(?<monthName>January|February|March|April|May|June|July|August|September|October|November|December)\s+(?<namedDay>\d{1,2})(?:st|nd|rd|th)?[,]?\s+(?<namedYear>\d{4}))/giu;
+  const futureLanguage = /(?:未来时间|属于未来|尚未发生|尚未到来|将于|未来日期|\b(?:future|future-dated|upcoming)\b)/iu;
+  const pastLanguage = /(?:过去时间|属于过去|已经发生|已发生|此前|过往|\b(?:past|past-dated|already occurred|previously)\b)/iu;
+  const referentialContinuation = /^\s*(?:(?:该|此|上述)(?:日期|时间|事件)|(?:this|that|the|which)\s+(?:date|time|event))/iu;
+  const monthNumbers = new Map([
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december"
+  ].map((name, index) => [name, index + 1]));
+
+  for (const field of websiteReportLanguageFields(report)) {
+    const boundaries = [...field.text.matchAll(/[。！？!?；;，,\n]/gu)].map(({ index }) => index);
+    for (const match of field.text.matchAll(datePattern)) {
+      const matchStart = match.index;
+      const matchEnd = matchStart + match[0].length;
+      const clauseStart = boundaries.filter((index) => index < matchStart).at(-1) ?? -1;
+      const clauseEnd = boundaries.find((index) => index >= matchEnd) ?? field.text.length;
+      const nextEnd = boundaries.find((index) => index > clauseEnd) ?? field.text.length;
+      const clause = field.text.slice(clauseStart + 1, Math.min(clauseEnd + 1, field.text.length));
+      const continuation = field.text.slice(clauseEnd + 1, Math.min(nextEnd + 1, field.text.length));
+      const context = referentialContinuation.test(continuation) ? `${clause}${continuation}` : clause;
+      const year = Number(match.groups?.year ?? match.groups?.namedYear);
+      const month = Number(match.groups?.month ?? monthNumbers.get(match.groups?.monthName?.toLowerCase() ?? ""));
+      const day = Number(match.groups?.day ?? match.groups?.namedDay);
+      const referencedDay = Date.UTC(year, month - 1, day);
+      const parsed = new Date(referencedDay);
+      if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) continue;
+      if (referencedDay <= baselineDay && futureLanguage.test(context)) {
+        throw new WebsiteReportTemporalValidationError(field.path, match[0], asOf, "past_described_as_future");
+      }
+      if (referencedDay > baselineDay && pastLanguage.test(context)) {
+        throw new WebsiteReportTemporalValidationError(field.path, match[0], asOf, "future_described_as_past");
+      }
+    }
+  }
 }
 
 function websiteReportLanguageFields(report: AiWebsiteReportV1): Array<{ path: string; text: string }> {

@@ -111,7 +111,7 @@ export async function terminalizePaidReportV4Core(input: {
   outcome: "completed" | "completed_limited";
   orderId: string;
   refundId: string | null;
-  accessTokenId: string;
+  accessTokenId: string | null;
   emailDeliveryId: string;
 }> {
   if (["pdfSha256", "pdfStorageKey", "pageCount"].some((field) => Object.hasOwn(input, field))) {
@@ -271,19 +271,23 @@ export async function terminalizePaidReportV4Core(input: {
     const refundId = await requireV4RefundTruth(tx, order, outcome);
     const template = outcome === "completed" ? "report_ready" : "limited_report_refund";
     const businessKey = `${template}/${report.artifactRevisionId}/v1`;
-    const token = deterministicReportAccessToken(report.reportId, businessKey, tokenSecret);
-    const tokenId = randomUUID();
-    await tx`INSERT INTO report_access_tokens(id,report_id,token_prefix,token_hmac,artifact_scope,expires_at)
-      VALUES(${tokenId},${report.reportId},${token.displayPrefix},${hmacSecret(token.raw, tokenSecret)},'combined_geo_report_v4',now()+interval '30 days')
-      ON CONFLICT(token_hmac) DO NOTHING`;
-    const access = (await tx<Array<{ id: string; report_id: string; artifact_scope: string }>>`
-      SELECT id,report_id,artifact_scope FROM report_access_tokens
-      WHERE token_hmac=${hmacSecret(token.raw, tokenSecret)} FOR UPDATE
-    `)[0];
-    if (!access || access.report_id !== report.reportId || access.artifact_scope !== "combined_geo_report_v4") {
-      throw new Error("The V4 report access token identity conflicts with the core artifact.");
+    let accessTokenId: string | null = null;
+    if (outcome === "completed") {
+      const token = deterministicReportAccessToken(report.reportId, businessKey, tokenSecret);
+      const tokenId = randomUUID();
+      await tx`INSERT INTO report_access_tokens(id,report_id,token_prefix,token_hmac,artifact_scope,expires_at)
+        VALUES(${tokenId},${report.reportId},${token.displayPrefix},${hmacSecret(token.raw, tokenSecret)},'combined_geo_report_v4',now()+interval '30 days')
+        ON CONFLICT(token_hmac) DO NOTHING`;
+      const access = (await tx<Array<{ id: string; report_id: string; artifact_scope: string }>>`
+        SELECT id,report_id,artifact_scope FROM report_access_tokens
+        WHERE token_hmac=${hmacSecret(token.raw, tokenSecret)} FOR UPDATE
+      `)[0];
+      if (!access || access.report_id !== report.reportId || access.artifact_scope !== "combined_geo_report_v4") {
+        throw new Error("The V4 report access token identity conflicts with the core artifact.");
+      }
+      accessTokenId = access.id;
+      fault(input.faultAfter, "access");
     }
-    fault(input.faultAfter, "access");
 
     const emailId = randomUUID();
     await tx`INSERT INTO email_deliveries(id,order_id,report_id,template_type,template_version,locale,recipient_ref,provider,business_idempotency_key,state)
@@ -298,7 +302,7 @@ export async function terminalizePaidReportV4Core(input: {
     }
     fault(input.faultAfter, "email");
     return {
-      report, outcome, orderId: order.id, refundId, accessTokenId: access.id,
+      report, outcome, orderId: order.id, refundId, accessTokenId,
       emailDeliveryId: email.id
     };
   });

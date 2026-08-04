@@ -69,7 +69,13 @@ async function sendDelivery(delivery: EmailDeliveryRow, owner: string, gateway: 
   ]);
   if (!recipient || !order || recipient.emailKeyVersion !== "v1") throw new Error("commercial_email_recipient_unavailable");
   let reportUrl: string | undefined;
-  if (delivery.templateType === "report_ready" || delivery.templateType === "limited_report_refund" || delivery.templateType === "link_reissue" || delivery.templateType === "corrected_report_ready" || delivery.templateType === "replacement_report_ready") {
+  const requiresReportAccess = delivery.templateType === "report_ready" || delivery.templateType === "link_reissue"
+    || delivery.templateType === "corrected_report_ready" || delivery.templateType === "replacement_report_ready";
+  if (requiresReportAccess && (order.paymentStatus !== "paid" || order.fulfillmentStatus !== "completed"
+      || order.refundStatus !== "not_required")) {
+    throw new Error("commercial_email_report_access_unavailable");
+  }
+  if (requiresReportAccess) {
     const activeV4 = await getActiveCombinedGeoReport(delivery.reportId, "combined_geo_report_v4");
     const activeCombined = activeV4 ?? await getActiveCombinedGeoReport(delivery.reportId);
     const artifactScope = activeCombined?.report.artifactContract ?? productContractForCode(order.productCode);
@@ -78,6 +84,7 @@ async function sendDelivery(delivery: EmailDeliveryRow, owner: string, gateway: 
     }
     const access = await issueReportAccessToken({
       reportId: delivery.reportId,
+      orderId: order.id,
       ttlDays: 30,
       idempotencyKey: `${delivery.businessIdempotencyKey}/${artifactScope}`,
       artifactScope

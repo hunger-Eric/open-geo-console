@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V43_DATABASE_MIGRATIONS, V44_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V43_DATABASE_MIGRATIONS, V44_DATABASE_MIGRATIONS, V45_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 import { createPostgresReportV4AcceptanceLedgerStore, createReportV4AcceptanceLedgerRepository } from "./report-v4-acceptance-ledger";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
@@ -32,7 +32,7 @@ suite("schema V43 prohibited-operation manifest convergence", () => {
   beforeAll(async () => {
     await admin.unsafe(`CREATE DATABASE ${quote(databaseName)}`);
     sql = postgres(withDb(adminUrl!, databaseName), { max: 1, prepare: false });
-    const throughV42 = DATABASE_MIGRATIONS.slice(0, -V43_DATABASE_MIGRATIONS.length);
+    const throughV42 = DATABASE_MIGRATIONS.slice(0, -databaseMigrationsAfter(42).length);
     await sql.begin(async (tx) => { for (const statement of throughV42) await tx.unsafe(statement); });
     await sql`INSERT INTO deployment_environment(singleton,profile) VALUES(true,'staging')`;
   }, 120_000);
@@ -44,10 +44,11 @@ suite("schema V43 prohibited-operation manifest convergence", () => {
   }, 120_000);
 
   it("preserves a legal V42 fifteen-counter row and admits only current ten-counter V43 runs", async () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(44);
-    expect(databaseMigrationsAfter(42)).toEqual([...V43_DATABASE_MIGRATIONS, ...V44_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(43)).toEqual([...V44_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(44)).toEqual([]);
+    expect(DATABASE_SCHEMA_VERSION).toBe(45);
+    expect(databaseMigrationsAfter(42)).toEqual([...V43_DATABASE_MIGRATIONS, ...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(43)).toEqual([...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(44)).toEqual([...V45_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(45)).toEqual([]);
     const historical = await seedLineage(sql, "historical");
     const historicalRunId = runId(historical, legacyHash);
     await insertRun(sql, historical, historicalRunId, legacyHash, legacyPairs);

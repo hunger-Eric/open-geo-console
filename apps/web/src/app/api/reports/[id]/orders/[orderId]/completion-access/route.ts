@@ -23,8 +23,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
       getGeoReport(id),
       getAnyActiveCombinedGeoReport(id)
     ]);
-    const deliverable = order?.fulfillmentStatus === "completed"
-      || order?.fulfillmentStatus === "completed_limited";
+    const deliverable = order?.fulfillmentStatus === "completed" && order.refundStatus === "not_required";
     if (!order || order.paymentStatus !== "paid" || !deliverable
       || !report?.activeArtifactRevisionId || !active
       || active.artifactRevisionId !== report.activeArtifactRevisionId) return denied();
@@ -37,6 +36,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
     const artifactScope = active.report.artifactContract;
     const access = await issueReportAccessToken({
       reportId: id,
+      orderId: order.id,
       ttlDays: 30,
       idempotencyKey: `payment-return/${order.id}/${artifactScope}`,
       artifactScope

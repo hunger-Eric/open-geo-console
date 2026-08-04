@@ -69,7 +69,8 @@ export async function fetchPaymentReturnStatus(
 
 export function shouldAttemptCompletionAccess(status: PublicOrderStatus): boolean {
   return status.paymentStatus === "paid"
-    && (status.fulfillmentStatus === "completed" || status.fulfillmentStatus === "completed_limited");
+    && status.fulfillmentStatus === "completed"
+    && status.refundStatus === "not_required";
 }
 
 export async function fetchPaymentCompletionAccess(

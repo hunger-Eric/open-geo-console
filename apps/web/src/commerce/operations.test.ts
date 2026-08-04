@@ -79,7 +79,11 @@ describe("commercial provider failure persistence", () => {
     process.env.OGC_TEST_EMAIL_RECIPIENT = "operator@example.test";
     mocks.revealCustomerEmail.mockImplementation(() => "buyer@example.com");
     mocks.getEncryptedEmailRecipient.mockResolvedValue({ emailKeyVersion: "v1", customerEmailEncrypted: "encrypted" });
-    mocks.getPaymentOrder.mockResolvedValue({ id: "order-1", reportId: "report-1", siteKey: "example.com", reportLocale: "en", productCode: "recommendation_forensics_v1", provider: "airwallex", providerPaymentId: "int_1" });
+    mocks.getPaymentOrder.mockResolvedValue({
+      id: "order-1", reportId: "report-1", siteKey: "example.com", reportLocale: "en",
+      productCode: "recommendation_forensics_v1", provider: "airwallex", providerPaymentId: "int_1",
+      paymentStatus: "paid", fulfillmentStatus: "completed", refundStatus: "not_required"
+    });
     mocks.markEmailSent.mockResolvedValue(true);
   });
 
@@ -182,6 +186,7 @@ describe("commercial provider failure persistence", () => {
     expect(mocks.issueReportAccessToken).toHaveBeenCalledTimes(1);
     expect(mocks.issueReportAccessToken).toHaveBeenCalledWith({
       reportId: "report-1",
+      orderId: "order-1",
       ttlDays: 30,
       idempotencyKey: `${businessIdempotencyKey}/combined_geo_report_v4`,
       artifactScope: "combined_geo_report_v4"
@@ -189,6 +194,36 @@ describe("commercial provider failure persistence", () => {
     const email = mocks.sendEmail.mock.calls[0]![0];
     expect(email.reportUrl).toContain("/api/reports/report-1/access?token=v4-secret");
     expect(email.reportUrl).not.toMatch(/pdf/i);
+  });
+
+  it("sends a limited refund notice without issuing or including report access", async () => {
+    mocks.claimEmailDeliveries.mockResolvedValue([{
+      id: "email-limited", orderId: "order-1", reportId: "report-1", templateType: "limited_report_refund",
+      locale: "en", businessIdempotencyKey: "limited_report_refund/core-artifact-v4/v1", attempts: 1
+    }]);
+    mocks.sendEmail.mockResolvedValue({ providerEmailId: "resend-limited" });
+
+    await expect(processQueuedCommercialEmails()).resolves.toEqual({ claimed: 1, succeeded: 1, retried: 0, failed: 0 });
+    expect(mocks.getActiveCombinedGeoReport).not.toHaveBeenCalled();
+    expect(mocks.issueReportAccessToken).not.toHaveBeenCalled();
+    expect(mocks.sendEmail.mock.calls[0]![0]).toMatchObject({ template: "limited_report_refund", reportUrl: undefined });
+  });
+
+  it("does not issue or send a queued access email after the order enters a refund state", async () => {
+    mocks.claimEmailDeliveries.mockResolvedValue([{
+      id: "email-stale", orderId: "order-1", reportId: "report-1", templateType: "report_ready",
+      locale: "en", businessIdempotencyKey: "report_ready/core-artifact-v4/v1", attempts: 1
+    }]);
+    mocks.getPaymentOrder.mockResolvedValue({
+      id: "order-1", reportId: "report-1", siteKey: "example.com", productCode: "recommendation_forensics_v1",
+      paymentStatus: "paid", fulfillmentStatus: "completed_limited", refundStatus: "pending"
+    });
+
+    await expect(processQueuedCommercialEmails()).resolves.toEqual({ claimed: 1, succeeded: 0, retried: 1, failed: 0 });
+    expect(mocks.getActiveCombinedGeoReport).not.toHaveBeenCalled();
+    expect(mocks.issueReportAccessToken).not.toHaveBeenCalled();
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+    expect(mocks.scheduleEmailRetry).toHaveBeenCalledWith(expect.objectContaining({ id: "email-stale" }));
   });
 
   // @requirement GEO-V4-LEGACY-01

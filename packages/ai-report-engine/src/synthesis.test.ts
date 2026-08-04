@@ -90,6 +90,90 @@ describe("website synthesis semantic-validation seam", () => {
     expect(prompt.rules).toContain("Distinguish publication dates from other page dates. If a date's meaning is ambiguous, state that uncertainty instead of inferring that it is in the future.");
   });
 
+  it("rejects model prose that calls a date before reportAsOf future", async () => {
+    const output = modelOutput();
+    (output.executiveSummary as { overview: string }).overview = "页面中的 2026-05-26 属于未来时间，发布日期存在异常。";
+    const dated = input();
+    dated.generatedAt = "2026-08-04T00:00:00.000Z";
+
+    await expect(synthesizeWebsiteReport(clientReturning(output), dated, undefined, [], "deferred"))
+      .rejects.toThrow(/temporal|2026-05-26|future|未来/i);
+  });
+
+  it("rejects model prose that calls a date after reportAsOf already past", async () => {
+    const output = modelOutput();
+    (output.executiveSummary as { overview: string }).overview = "页面中的 2026-08-05 已经发生，属于过去时间。";
+    const dated = input();
+    dated.generatedAt = "2026-08-04T00:00:00.000Z";
+
+    await expect(synthesizeWebsiteReport(clientReturning(output), dated, undefined, [], "deferred"))
+      .rejects.toThrow(/temporal|2026-08-05|past|过去/i);
+  });
+
+  it("does not retry a deterministic temporal contradiction", async () => {
+    const output = modelOutput();
+    (output.executiveSummary as { overview: string }).overview = "页面中的 2026-05-26 属于未来时间。";
+    const dated = input();
+    dated.generatedAt = "2026-08-04T00:00:00.000Z";
+    const client = clientReturning(output);
+
+    await expect(synthesizeWebsiteReportWithRecovery(client, dated, {
+      maxAttempts: 3, semanticValidation: "deferred", delay: async () => undefined
+    })).rejects.toThrow(/temporal/i);
+    expect(client.completeJson).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a referential contradiction in the following sentence", async () => {
+    const output = modelOutput();
+    (output.executiveSummary as { overview: string }).overview = "页面日期为 2026-05-26。该日期属于未来时间。";
+    const dated = input();
+    dated.generatedAt = "2026-08-04T00:00:00.000Z";
+    await expect(synthesizeWebsiteReport(clientReturning(output), dated, undefined, [], "deferred"))
+      .rejects.toThrow(/temporal|2026-05-26/i);
+  });
+
+  it("handles English dates without assigning another clause's future relation to the as-of date", async () => {
+    const output = modelOutput();
+    (output.executiveSummary as { overview: string }).overview = "As of August 4, 2026, August 5, 2026 is upcoming.";
+    const dated = input();
+    dated.locale = "en";
+    dated.generatedAt = "2026-08-04T00:00:00.000Z";
+    await expect(synthesizeWebsiteReport(clientReturning(output), dated, undefined, [], "deferred"))
+      .resolves.toMatchObject({ report: { executiveSummary: { overview: expect.stringContaining("August 5, 2026") } } });
+
+    (output.executiveSummary as { overview: string }).overview = "May 26, 2026 is future-dated.";
+    await expect(synthesizeWebsiteReport(clientReturning(output), dated, undefined, [], "deferred"))
+      .rejects.toThrow(/temporal|May 26, 2026/i);
+  });
+
+  it("revalidates temporal truth after model-authored language correction", async () => {
+    const output = modelOutput();
+    Object.assign(output.organizationProfile as Record<string, unknown>, {
+      organizationName: null, brandNames: [], summary: "提供头程服务。", businessModel: "企业物流",
+      productsAndServices: ["头程服务"], capabilities: ["系统集成"]
+    });
+    Object.assign(output.executiveSummary as Record<string, unknown>, {
+      overview: "This sentence contains unsupported English prose that must be corrected instead of returned.",
+      strengths: ["服务信息清晰。"]
+    });
+    const client: JsonCompletionClient = {
+      configuredModel: "mock-model",
+      completeJson: vi.fn()
+        .mockResolvedValueOnce({ value: output, modelId: "mock-model", rawContent: JSON.stringify(output) })
+        .mockResolvedValueOnce({
+          value: { corrections: [{ path: "executiveSummary.overview", text: "页面中的 2026-05-26 属于未来时间。" }] },
+          modelId: "mock-model", rawContent: "{}"
+        })
+    };
+    const dated = input();
+    dated.generatedAt = "2026-08-04T00:00:00.000Z";
+
+    await expect(synthesizeWebsiteReportWithRecovery(client, dated, {
+      maxAttempts: 3, semanticValidation: "legacy", delay: async () => undefined
+    })).rejects.toThrow(/temporal|2026-05-26/i);
+    expect(client.completeJson).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps omitted and explicit legacy prompts and failures identical", async () => {
     const omittedRequests: JsonCompletionRequest[] = [];
     const explicitRequests: JsonCompletionRequest[] = [];

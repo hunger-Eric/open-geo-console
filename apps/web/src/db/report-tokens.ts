@@ -9,6 +9,7 @@ export async function issueReportAccessToken(input: {
   ttlDays?: number;
   idempotencyKey?: string;
   artifactScope?: ReportArtifactScope;
+  orderId?: string;
 }): Promise<{ id: string; rawToken: string; expiresAt: Date }> {
   await ensureDatabase();
   const tokenSecret = requireSecret("OGC_TOKEN_HASH_SECRET");
@@ -21,20 +22,49 @@ export async function issueReportAccessToken(input: {
   if (expiresAt <= new Date()) {
     throw new Error("Report access token expiry must be in the future.");
   }
-  await getSqlClient()`
-    INSERT INTO report_access_tokens (id, report_id, token_prefix, token_hmac, artifact_scope, expires_at)
-    VALUES (
-      ${id}, ${input.reportId}, ${generated.displayPrefix},
-      ${hmacSecret(generated.raw, tokenSecret)}, ${artifactScope}, ${expiresAt.toISOString()}
-    )
-    ON CONFLICT (token_hmac) DO NOTHING
-  `;
-  const existing = await getSqlClient()<{ id: string; report_id: string; artifact_scope: ReportArtifactScope; expires_at: string | Date }[]>`
-    SELECT id, report_id, artifact_scope, expires_at FROM report_access_tokens
-    WHERE token_hmac = ${hmacSecret(generated.raw, tokenSecret)} LIMIT 1
-  `;
-  if (!existing[0] || existing[0].report_id !== input.reportId || existing[0].artifact_scope !== artifactScope) throw new Error("Report access token idempotency conflict.");
-  return { id: existing[0].id, rawToken: generated.raw, expiresAt: new Date(existing[0].expires_at) };
+  return getSqlClient().begin(async (tx) => {
+    if (artifactScope !== "legacy_website_audit_v1") {
+      const paidOrders = await tx<Array<{ id: string; fulfillment_status: string; refund_status: string }>>`
+        SELECT id,fulfillment_status,refund_status FROM payment_orders
+        WHERE report_id=${input.reportId} AND payment_status='paid' FOR SHARE
+      `;
+      if (paidOrders.length > 0) {
+        if (!input.orderId && paidOrders.some((order) => order.fulfillment_status !== "completed" || order.refund_status !== "not_required")) {
+          throw new Error("Paid report access token issuance requires current exact order entitlement.");
+        }
+        const entitled = await tx<Array<{ id: string }>>`
+          SELECT orders.id
+          FROM scan_reports report
+          JOIN report_artifact_revisions artifact ON artifact.id=report.active_artifact_revision_id
+          JOIN payment_orders orders ON orders.id=artifact.order_id AND orders.report_id=report.id
+          WHERE report.id=${input.reportId}
+            AND (${input.orderId ?? null}::text IS NULL OR orders.id=${input.orderId ?? null})
+            AND artifact.report_id=report.id AND artifact.status='active'
+            AND artifact.artifact_contract=${artifactScope}
+            AND orders.payment_status='paid' AND orders.fulfillment_status='completed'
+            AND orders.refund_status='not_required'
+          FOR SHARE OF report,artifact,orders
+        `;
+        if (entitled.length !== 1) {
+          throw new Error("Paid report access token issuance requires current exact order entitlement.");
+        }
+      }
+    }
+    await tx`
+      INSERT INTO report_access_tokens (id, report_id, token_prefix, token_hmac, artifact_scope, expires_at)
+      VALUES (
+        ${id}, ${input.reportId}, ${generated.displayPrefix},
+        ${hmacSecret(generated.raw, tokenSecret)}, ${artifactScope}, ${expiresAt.toISOString()}
+      )
+      ON CONFLICT (token_hmac) DO NOTHING
+    `;
+    const existing = await tx<Array<{ id: string; report_id: string; artifact_scope: ReportArtifactScope; expires_at: string | Date }>>`
+      SELECT id, report_id, artifact_scope, expires_at FROM report_access_tokens
+      WHERE token_hmac = ${hmacSecret(generated.raw, tokenSecret)} LIMIT 1
+    `;
+    if (!existing[0] || existing[0].report_id !== input.reportId || existing[0].artifact_scope !== artifactScope) throw new Error("Report access token idempotency conflict.");
+    return { id: existing[0].id, rawToken: generated.raw, expiresAt: new Date(existing[0].expires_at) };
+  });
 }
 
 function deterministicToken(reportId: string, artifactScope: ReportArtifactScope, idempotencyKey: string, secret: string) {
@@ -101,11 +131,30 @@ export async function verifyReportAccessToken(rawToken: string): Promise<{ repor
   await ensureDatabase();
   const tokenHmac = hmacSecret(rawToken, requireSecret("OGC_TOKEN_HASH_SECRET"));
   const rows = await getSqlClient()<{ report_id: string; artifact_scope: ReportArtifactScope; expires_at: string | Date }[]>`
-    SELECT report_id, artifact_scope, expires_at
-    FROM report_access_tokens
-    WHERE token_hmac = ${tokenHmac}
-      AND revoked_at IS NULL
-      AND expires_at > now()
+    SELECT token.report_id, token.artifact_scope, token.expires_at
+    FROM report_access_tokens token
+    WHERE token.token_hmac = ${tokenHmac}
+      AND token.revoked_at IS NULL
+      AND token.expires_at > now()
+      AND (token.artifact_scope = 'legacy_website_audit_v1'
+        OR NOT EXISTS (SELECT 1 FROM payment_orders paid WHERE paid.report_id=token.report_id AND paid.payment_status='paid')
+        OR (
+          NOT EXISTS (
+            SELECT 1 FROM payment_orders ineligible
+            WHERE ineligible.report_id=token.report_id AND ineligible.payment_status='paid'
+              AND (ineligible.fulfillment_status<>'completed' OR ineligible.refund_status<>'not_required')
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM scan_reports report
+            JOIN report_artifact_revisions artifact ON artifact.id=report.active_artifact_revision_id
+            JOIN payment_orders orders ON orders.id=artifact.order_id AND orders.report_id=report.id
+            WHERE report.id=token.report_id AND artifact.report_id=token.report_id
+              AND artifact.status='active' AND artifact.artifact_contract=token.artifact_scope
+              AND orders.payment_status='paid' AND orders.fulfillment_status='completed'
+              AND orders.refund_status='not_required'
+          )
+        ))
     LIMIT 1
   `;
   return rows[0] ? { reportId: rows[0].report_id, artifactScope: rows[0].artifact_scope, expiresAt: new Date(rows[0].expires_at) } : null;

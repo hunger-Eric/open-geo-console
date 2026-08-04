@@ -111,17 +111,19 @@ export async function requestReportLinkReissue(input: {
       email_matches: boolean;
       payment_status: string;
       fulfillment_status: string;
+      refund_status: string;
     }>>`
       SELECT id, report_id, report_locale,
              customer_email_hmac = ${input.customerEmailHmac} AS email_matches,
-             payment_status, fulfillment_status
+             payment_status, fulfillment_status, refund_status
       FROM payment_orders WHERE id = ${input.orderId} FOR UPDATE
     `;
     const order = orders[0];
     if (!order
       || !order.email_matches
       || order.payment_status !== "paid"
-      || !["completed", "completed_limited"].includes(order.fulfillment_status)) {
+      || order.fulfillment_status !== "completed"
+      || order.refund_status !== "not_required") {
       return { accepted: false };
     }
     const recent = await tx<{ exists: boolean }[]>`

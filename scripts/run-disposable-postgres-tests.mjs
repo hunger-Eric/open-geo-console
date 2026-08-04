@@ -151,8 +151,8 @@ export async function discoverPostgresTests(root = REPO_ROOT) {
     .sort();
 }
 
-export async function selectTestFiles(requested, root = REPO_ROOT) {
-  const discovered = await discoverPostgresTests(root);
+export async function selectTestFiles(requested, root = REPO_ROOT, discoveredTests) {
+  const discovered = discoveredTests ?? await discoverPostgresTests(root);
   const inventory = validatePostgresInventory(discovered);
   const requestedNormalized = requested.map(normalizeRepoPath);
   const candidates = requestedNormalized.length > 0
@@ -269,8 +269,9 @@ async function main(argv = process.argv.slice(2)) {
     process.stdout.write(`${HELP}\n`);
     return 0;
   }
-  const selectedFiles = await selectTestFiles(cli.files);
-  const postgresInventory = validatePostgresInventory(await discoverPostgresTests());
+  const discoveredTests = await discoverPostgresTests();
+  const postgresInventory = validatePostgresInventory(discoveredTests);
+  const selectedFiles = await selectTestFiles(cli.files, REPO_ROOT, discoveredTests);
   if (cli.dryRun) {
     process.stdout.write(`${JSON.stringify({
       mode: "dry-run",

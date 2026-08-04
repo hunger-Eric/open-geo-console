@@ -297,7 +297,12 @@ function validateCoreAggregate(value: ReportV4ProductionCoreAggregate, allowedAc
     if (!coreIsActive && !exactEnhancementIsActive) {
       throw new Error("The V4 source core is neither active nor legitimately superseded by this exact active enhancement.");
     }
-    if (value.activeAccessTokenCount < 1) throw new Error("The settled V4 core requires an active paid access token.");
+    if (completedSettled && value.activeAccessTokenCount < 1) {
+      throw new Error("The settled completed V4 core requires an active paid access token.");
+    }
+    if (completedLimitedRefunded && value.activeAccessTokenCount !== 0) {
+      throw new Error("The settled completed-limited V4 core must not retain an active paid access token.");
+    }
   }
   return { report: value.report, targetUrl, order, coreJob: job, siteSnapshot: snapshot, questionSet, questions,
     config, credit, activeCoreArtifact, commercePhase: settled ? "settled" : reservedActive ? "reserved_active" : "reserved" };

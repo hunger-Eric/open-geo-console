@@ -22,7 +22,7 @@ describe("payment completion access route", () => {
     vi.clearAllMocks();
     process.env.OGC_TOKEN_HASH_SECRET = "completion-access-test-secret-at-least-32-characters";
     mocks.getPaymentOrderForReport.mockResolvedValue({
-      id: "order-1", reportId: "report-1", paymentStatus: "paid", fulfillmentStatus: "completed"
+      id: "order-1", reportId: "report-1", paymentStatus: "paid", fulfillmentStatus: "completed", refundStatus: "not_required"
     });
     mocks.getGeoReport.mockResolvedValue({ id: "report-1", activeArtifactRevisionId: "artifact-1" });
     mocks.getAnyActiveCombinedGeoReport.mockResolvedValue({
@@ -40,6 +40,7 @@ describe("payment completion access route", () => {
     await expect(response.json()).resolves.toEqual({ destination: "/reports/report-1/report.html" });
     expect(mocks.issueReportAccessToken).toHaveBeenCalledWith({
       reportId: "report-1",
+      orderId: "order-1",
       ttlDays: 30,
       idempotencyKey: "payment-return/order-1/combined_geo_report_v3",
       artifactScope: "combined_geo_report_v3"
@@ -67,6 +68,8 @@ describe("payment completion access route", () => {
   it.each([
     ["unpaid", { paymentStatus: "pending", fulfillmentStatus: "completed" }, { activeArtifactRevisionId: "artifact-1" }, { artifactRevisionId: "artifact-1", report: { artifactContract: "combined_geo_report_v3" } }],
     ["unfinished", { paymentStatus: "paid", fulfillmentStatus: "processing" }, { activeArtifactRevisionId: "artifact-1" }, { artifactRevisionId: "artifact-1", report: { artifactContract: "combined_geo_report_v3" } }],
+    ["completed limited", { paymentStatus: "paid", fulfillmentStatus: "completed_limited", refundStatus: "pending" }, { activeArtifactRevisionId: "artifact-1" }, { artifactRevisionId: "artifact-1", report: { artifactContract: "combined_geo_report_v3" } }],
+    ["refunded", { paymentStatus: "paid", fulfillmentStatus: "completed", refundStatus: "refunded" }, { activeArtifactRevisionId: "artifact-1" }, { artifactRevisionId: "artifact-1", report: { artifactContract: "combined_geo_report_v3" } }],
     ["missing artifact", { paymentStatus: "paid", fulfillmentStatus: "completed" }, { activeArtifactRevisionId: null }, null],
     ["mismatched artifact", { paymentStatus: "paid", fulfillmentStatus: "completed" }, { activeArtifactRevisionId: "artifact-2" }, { artifactRevisionId: "artifact-1", report: { artifactContract: "combined_geo_report_v3" } }]
   ])("denies %s state with the same safe response", async (_name, orderState, reportState, activeState) => {

@@ -255,7 +255,8 @@ function assertCoreLineage(
     core.source_report_id === core.report_id && core.source_order_id === core.order_id && core.source_job_id === core.id &&
     core.source_config_snapshot_id !== null && core.source_revision_kind === "generation" &&
     core.source_artifact_contract === "combined_geo_report_v4" && core.config_report_id === core.report_id &&
-    core.config_order_id === core.order_id && core.config_core_job_id === core.id && core.access_count >= 1 &&
+    core.config_order_id === core.order_id && core.config_core_job_id === core.id &&
+    ((completedSettled && core.access_count >= 1) || (completedLimitedRefunded && core.access_count === 0)) &&
     enhancement.business_question_set_id === core.business_question_set_id && enhancement.locale === core.locale;
   if (!common) throw new Error("The settled paid V4 core lineage is invalid.");
 

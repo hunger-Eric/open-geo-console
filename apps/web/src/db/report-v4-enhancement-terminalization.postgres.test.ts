@@ -265,9 +265,11 @@ async function seedLineage(
     VALUES(${fixture.coreArtifactId},${fixture.reportId},${fixture.orderId},${fixture.coreJobId},${fixture.questionSetId},
       ${JSON.stringify(sourceCorePayload(fixture, options.unavailableQuestion, options.limitedCore))}::jsonb)`;
   await sql`UPDATE scan_reports SET active_artifact_revision_id=${fixture.coreArtifactId} WHERE id=${fixture.reportId}`;
-  await sql`INSERT INTO report_access_tokens(id,report_id,token_prefix,token_hmac,artifact_scope,expires_at)
-    VALUES(${fixture.accessTokenId},${fixture.reportId},'ogc_report_fixture',${sha(`token-${suffix}`)},
-      'combined_geo_report_v4',now()+interval '30 days')`;
+  if (!options.limitedCore) {
+    await sql`INSERT INTO report_access_tokens(id,report_id,token_prefix,token_hmac,artifact_scope,expires_at)
+      VALUES(${fixture.accessTokenId},${fixture.reportId},'ogc_report_fixture',${sha(`token-${suffix}`)},
+        'combined_geo_report_v4',now()+interval '30 days')`;
+  }
 
   const leaseOwner = options.leaseOwner ?? fixture.workerId;
   const leaseExpiry = options.leaseExpiry === "expired" ? "-1 minute" : "10 minutes";

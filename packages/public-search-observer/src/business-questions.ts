@@ -59,6 +59,7 @@ interface BusinessQuestionFocus {
   audience: string;
   marketRegion: string;
   purchaseCriteria: readonly string[];
+  confidenceReady: boolean;
 }
 
 export interface ConfirmedBusinessQuestion extends BusinessQuestionCandidate {
@@ -86,7 +87,7 @@ export function generateBusinessQuestionCandidates(input: {
   const revision = input.revision ?? 1;
   if (!Number.isSafeInteger(revision) || revision < 1) throw new TypeError("revision must be a positive integer.");
   const profile = input.profile;
-  const focus = deriveBusinessQuestionFocus(profile, locale, region);
+  const focus = deriveBusinessQuestionFocus(profile, locale);
   const evidenceUrls = [...new Set(profile.evidence.map(({ url }) => bounded(url, "evidence.url", 2_000)))];
   const zh = locale.toLowerCase().startsWith("zh");
   const examples = focus.serviceExamples.length > 0
@@ -119,8 +120,7 @@ export function generateBusinessQuestionCandidates(input: {
     audience: focus.audience,
     marketRegion: focus.marketRegion
   })) as unknown as BusinessQuestionCandidateSet["questions"];
-  const confidence = profile.confidence === "high" && profile.productsAndServices.length > 0
-    && profile.targetAudiences.length > 0 && profile.marketsAndRegions.length > 0 ? "high" : "low";
+  const confidence = profile.confidence === "high" && focus.confidenceReady ? "high" : "low";
   const profileEvidenceIdentity = deterministicId("business-profile", [JSON.stringify({
     businessModel: profile.businessModel,
     productsAndServices: profile.productsAndServices,
@@ -247,20 +247,22 @@ function strongest(values: readonly string[], profile: BusinessQuestionProfile, 
   return supported.sort((left, right) => right.score - left.score || left.index - right.index)[0]?.value ?? fallback;
 }
 
-function deriveBusinessQuestionFocus(profile: BusinessQuestionProfile, locale: string, region: string): BusinessQuestionFocus {
+function deriveBusinessQuestionFocus(profile: BusinessQuestionProfile, locale: string): BusinessQuestionFocus {
+  const services = usableProfileSignals(
+    profile.productsAndServices.flatMap((value) => splitServiceExamples(marketCategory(value, locale))), locale, "service"
+  );
   const rawService = strongest(
-    profile.productsAndServices,
+    services,
     profile,
     profile.businessModel || localized(locale, "business services", "企业服务")
   );
   const normalizedService = marketCategory(rawService, locale);
   const serviceCategory = compactServiceCategory(profile, normalizedService, locale);
-  const marketFallback = region === "global" ? localized(locale, "the target market", "目标市场") : region;
+  const marketFallback = localized(locale, "the target market", "目标市场");
   const markets = usableProfileSignals(profile.marketsAndRegions, locale, "market").slice(0, 2);
   const audiences = usableProfileSignals(profile.targetAudiences, locale, "audience");
-  const discoveredServiceExamples = usableProfileSignals(
-    profile.productsAndServices.flatMap((value) => splitServiceExamples(marketCategory(value, locale))), locale, "service"
-  ).filter((value) => normalizeComparable(value) !== normalizeComparable(serviceCategory));
+  const discoveredServiceExamples = services
+    .filter((value) => normalizeComparable(value) !== normalizeComparable(serviceCategory));
   const supportedServiceExamples = discoveredServiceExamples.filter((value) => profileSupports(value, profile));
   return {
     serviceCategory,
@@ -269,7 +271,8 @@ function deriveBusinessQuestionFocus(profile: BusinessQuestionProfile, locale: s
     marketRegion: markets.length > 0
       ? markets.join(locale.toLowerCase().startsWith("zh") ? "、" : ", ")
       : marketFallback,
-    purchaseCriteria: usableProfileSignals(profile.capabilities, locale, "capability").slice(0, 3)
+    purchaseCriteria: usableProfileSignals(profile.capabilities, locale, "capability").slice(0, 3),
+    confidenceReady: services.length > 0 && audiences.length > 0 && markets.length > 0
   };
 }
 
@@ -279,13 +282,13 @@ function usableProfileSignals(
   kind: "service" | "audience" | "market" | "capability"
 ): string[] {
   const zh = locale.toLowerCase().startsWith("zh");
-  const maximum = zh ? 24 : 80;
-  const noisyAudience = /(?:网站|页面|语言|推测|未明确|重复录入|整理问题|可能|疑似)/u;
+  const maximum = zh ? (kind === "audience" ? 48 : 24) : 80;
+  const inferredOrUnknown = /(?:网站|页面|语言|推测|未明确|未指定|未知|假定|重复录入|整理问题|可能|疑似|预计面向|\b(?:unspecified|unknown|inferred|assumed|likely)\b)/iu;
   const noisyCapability = /(?:自营|直营|自有|网点|运营|客户|员工|仓储面积|\d)/u;
   return [...new Set(values.map((raw) => marketCategory(bounded(raw, "profile signal", 500), locale)))]
     .filter((value) => value.length <= maximum)
     .filter((value) => zh ? /\p{Script=Han}/u.test(value) : /[A-Za-z]/u.test(value) && !/\p{Script=Han}/u.test(value))
-    .filter((value) => kind !== "audience" || !noisyAudience.test(value))
+    .filter((value) => !["service", "audience", "market"].includes(kind) || !inferredOrUnknown.test(value))
     .filter((value) => kind !== "capability" || !noisyCapability.test(value));
 }
 

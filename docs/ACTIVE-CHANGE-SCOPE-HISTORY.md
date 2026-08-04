@@ -5928,3 +5928,68 @@ revised scope.
   or customer-data action occurred under the implementation scope.
 - Terminal status: **implemented and locally verified; Git publication and
   Protected Staging release authorized under the next exact scope.**
+
+---
+
+## 2026-08-04 - Buyer-question, temporal-truth, and limited-entitlement repair
+
+- The user approved a bounded local repair for three confirmed boundaries:
+  inferred or unspecified market noise entering buyer questions, model prose
+  contradicting the authoritative report date, and refunded
+  `completed_limited` orders retaining paid full-report access.
+- Implementation remained within the approved production and test allowlists.
+  Focused non-PostgreSQL verification passed 97 tests across eight files; the
+  canonical disposable PostgreSQL run passed 24 tests across three selected
+  files, and supplemental affected PostgreSQL checks passed 16 plus five tests.
+  Scoped lint, build, diff checks, and independent review passed.
+- Repository-wide acceptance did not pass: the final complete `npm test` had
+  3,188 passed, 16 failed, and 210 skipped tests across 15 failing files. The
+  failures were 13 stale schema/migration-chain assertions ending at schema 44,
+  one disposable PostgreSQL inventory timeout, and two Windows PowerShell
+  Staging-preflight timeouts.
+- The 23 modified implementation/test paths are retained unchanged as the
+  baseline for the next frozen scope. No deployment, Docker image, live data,
+  report, model/search, payment, refund, email, Git, or customer-data action
+  occurred.
+- Terminal status: **the three bounded repairs are implemented and their
+  focused checks passed, but repository-wide acceptance failed; the timeout and
+  schema-test failures remain unresolved under a new scope.**
+
+---
+
+## 2026-08-04 - Schema V45 migration-chain and test-timeout repair
+
+- The user approved a frozen local scope covering schema version 45 versus
+  historical version-44 test expectations, the disposable PostgreSQL inventory
+  timeout, two Windows PowerShell Staging-preflight timeouts, and a complete
+  `npm test` zero-failure acceptance gate.
+- Root causes were confirmed independently: historical schema constants and
+  fixture cutoffs stopped at V44; the inventory test repeated recursive
+  repository discovery for each selection assertion; and the two preflight
+  assertions each paid a 2.5-to-3.5-second Windows PowerShell startup cost,
+  which crossed the five-second per-test boundary under full-suite contention.
+- The repair advanced test-only migration chains and historical fixture cutoffs
+  through V45 without changing schema or migration semantics, reused one
+  discovered PostgreSQL inventory, and shared one real Windows PowerShell probe
+  across the two launcher assertions. The Staging launcher itself was not
+  changed.
+- Focused verification passed: 24 schema/migration files had 17 runnable
+  assertions pass with database-backed suites environment-gated; inventory was
+  10/10 and Staging preflight was 22/22. Both timeout groups then passed five
+  consecutive runs.
+- Canonical disposable PostgreSQL receipt
+  `.data/test-runs/postgres-disposable/pg-20260804131610-ef972571/receipt.json`
+  selected all 23 requested schema files and passed 43/43 with zero failures,
+  zero skips, and successful container cleanup.
+- Scoped Web ESLint, runner syntax check, workspace build, and `git diff
+  --check` passed. One complete final `npm test` exited zero: 320 test files
+  passed, 50 were environment-gated; 3,204 tests passed, 210 were skipped, and
+  zero failed. No timeout or unhandled error was reported.
+- Scope audit matched all 27 implementation paths with no missing or extra
+  path. The preceding 23-path retained baseline remained byte-identical at
+  aggregate SHA-256
+  `3c03460ade046420980ea51a8d443ad386ff55920eda9cafcbe371b281b524a4`.
+- No Git, deployment, Docker image build, Staging/Production mutation, report,
+  model/search, commerce, email, or customer-data action occurred.
+- Terminal status: **completed; full local automated acceptance passed with
+  zero failed tests.**

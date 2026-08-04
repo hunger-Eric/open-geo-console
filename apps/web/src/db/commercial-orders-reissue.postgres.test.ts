@@ -6,6 +6,7 @@ import {
   createPaymentOrder,
   type CreatePaymentOrderInput
 } from "./commercial-orders";
+import { requestReportLinkReissue } from "./commercial-delivery";
 import { closeDatabase, getSqlClient, initializeDatabaseEnvironment } from "./index";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
@@ -87,6 +88,19 @@ describeDisposablePostgres("Refunded paid question-set reissue at checkout", () 
     await expect(getSqlClient()<Array<{ count: number }>>`
       SELECT count(*)::int count FROM report_business_question_sets WHERE report_id=${fixture.reportId}
     `).resolves.toEqual([{ count: 1 }]);
+  }, 120_000);
+
+  it("does not queue a link reissue for a completed-limited refunded order", async () => {
+    const fixture = await seedLockedFixture("limited-link", "paid", "pending");
+    await getSqlClient()`UPDATE payment_orders SET fulfillment_status='completed_limited' WHERE id=${fixture.priorOrderId}`;
+
+    await expect(requestReportLinkReissue({
+      orderId: fixture.priorOrderId,
+      customerEmailHmac: "email-limited-link"
+    })).resolves.toEqual({ accepted: false });
+    await expect(getSqlClient()<Array<{ count: number }>>`
+      SELECT count(*)::int count FROM email_deliveries WHERE order_id=${fixture.priorOrderId}
+    `).resolves.toEqual([{ count: 0 }]);
   }, 120_000);
 });
 

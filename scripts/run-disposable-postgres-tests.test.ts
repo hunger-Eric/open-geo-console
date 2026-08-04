@@ -3,10 +3,12 @@ import {
   CANONICAL_POSTGRES_TESTS,
   POSTGRES_DATA_TMPFS,
   POSTGRES_17_TESTS,
+  REPO_ROOT,
   RUN_LABEL,
   STAGING_PROFILE_POSTGRES_TESTS,
   allocateFreePort,
   buildDockerRunArgs,
+  discoverPostgresTests,
   executePhasedLifecycle,
   parseCliArgs,
   selectTestFiles,
@@ -66,13 +68,15 @@ describe("disposable PostgreSQL test runner", () => {
   });
 
   it("selects inventoried focused tests and rejects arbitrary or escaping paths", async () => {
-    await expect(selectTestFiles(["apps/web/src/db/recovery-state.postgres.test.ts"]))
+    const discovered = await discoverPostgresTests();
+    const select = (files: string[]) => selectTestFiles(files, REPO_ROOT, discovered);
+    await expect(select(["apps/web/src/db/recovery-state.postgres.test.ts"]))
       .resolves.toEqual(["apps/web/src/db/recovery-state.postgres.test.ts"]);
-    await expect(selectTestFiles(["apps/web/src/worker/paid-v3-direct-linear-flow.postgres.test.ts"]))
+    await expect(select(["apps/web/src/worker/paid-v3-direct-linear-flow.postgres.test.ts"]))
       .resolves.toEqual(["apps/web/src/worker/paid-v3-direct-linear-flow.postgres.test.ts"]);
-    await expect(selectTestFiles(["scripts/run-disposable-postgres-tests.test.ts"]))
+    await expect(select(["scripts/run-disposable-postgres-tests.test.ts"]))
       .rejects.toThrow(/canonical PG16|semantic-contract/i);
-    await expect(selectTestFiles(["../outside.test.ts"]))
+    await expect(select(["../outside.test.ts"]))
       .rejects.toThrow(/escapes/i);
   });
 
@@ -93,8 +97,10 @@ describe("disposable PostgreSQL test runner", () => {
   });
 
   it("refuses Staging-profile and PostgreSQL 17 files before starting Docker", async () => {
-    await expect(selectTestFiles([STAGING_PROFILE_POSTGRES_TESTS[0]!])).rejects.toThrow(/Staging profile/i);
-    await expect(selectTestFiles([POSTGRES_17_TESTS[0]!])).rejects.toThrow(/PostgreSQL 17/i);
+    const discovered = await discoverPostgresTests();
+    const select = (files: string[]) => selectTestFiles(files, REPO_ROOT, discovered);
+    await expect(select([STAGING_PROFILE_POSTGRES_TESTS[0]!])).rejects.toThrow(/Staging profile/i);
+    await expect(select([POSTGRES_17_TESTS[0]!])).rejects.toThrow(/PostgreSQL 17/i);
   });
 
   it("accepts only complete zero-skip Vitest JSON containing every selected file", () => {

@@ -101,6 +101,41 @@ describe("business question contracts", () => {
     expect(texts.every((text) => text.length <= 80)).toBe(true);
   });
 
+  it("drops inferred markets, does not substitute the search region, and lowers confidence", () => {
+    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
+      ...profile,
+      businessModel: "跨境物流服务商",
+      productsAndServices: ["跨境物流服务"],
+      capabilities: ["门到门交付"],
+      targetAudiences: ["跨境卖家"],
+      marketsAndRegions: ["未指定、推测为中国市场"],
+      summary: "为跨境卖家提供跨境物流服务和门到门交付。",
+      evidence: [{ url: "https://shun-express.com/service", quote: "为跨境卖家提供跨境物流服务和门到门交付。" }]
+    } });
+
+    expect(set.questions[1].generatedText).toContain("目标市场");
+    expect(set.questions[1].generatedText).not.toMatch(/未指定|推测|中国市场|\bCN\b/u);
+    expect(set.questions[1].marketRegion).toBe("目标市场");
+    expect(set.confidence).toBe("low");
+    expect(set.requiresAcknowledgement).toBe(true);
+  });
+
+  it("does not treat a non-empty inferred service array as admitted confidence evidence", () => {
+    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
+      ...profile,
+      businessModel: "企业服务",
+      productsAndServices: ["未指定、推测为物流服务"],
+      targetAudiences: ["跨境卖家"],
+      marketsAndRegions: ["英国"],
+      summary: "网站未明确说明具体服务。",
+      evidence: []
+    } });
+
+    expect(set.confidence).toBe("low");
+    expect(set.requiresAcknowledgement).toBe(true);
+    expect(set.questions.map(({ generatedText }) => generatedText).join(" ")).not.toMatch(/未指定|推测/u);
+  });
+
   it("requires acknowledgement before confirming a low-confidence set", () => {
     const candidates = generateBusinessQuestionCandidates({ locale: "en", region: "global", profile: {
       ...profile, confidence: "low", productsAndServices: [], targetAudiences: [], marketsAndRegions: [], evidence: []

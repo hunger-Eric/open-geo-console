@@ -99,7 +99,7 @@ describe("V4 core commercial terminalization admission", () => {
       creditStatus: "refunded",
       creditsRemaining: 1,
       refunds: 1,
-      tokens: 1,
+      tokens: 0,
       emails: 1,
       transitions: 1,
       artifactStatus: "active",
@@ -107,9 +107,9 @@ describe("V4 core commercial terminalization admission", () => {
     });
     const reentry = await terminalizePaidReportV4Core({ report: report("completed_limited"), workerId: "worker-v4" });
     expect(reentry).toMatchObject({
-      refundId: "refund-v4", accessTokenId: "token-v4", emailDeliveryId: "email-v4"
+      refundId: "refund-v4", accessTokenId: null, emailDeliveryId: "email-v4"
     });
-    expect(fake.state).toMatchObject({ creditsRemaining: 1, refunds: 1, tokens: 1, emails: 1, transitions: 1 });
+    expect(fake.state).toMatchObject({ creditsRemaining: 1, refunds: 1, tokens: 0, emails: 1, transitions: 1 });
   });
 
   // @requirement GEO-V4-DELIVERY-01
