@@ -5776,3 +5776,30 @@ revised scope.
   locale-route 404 fix, inline evidence images).
 - No code, deployment, branch, Docker, database, worker, or commerce changes.
 - Terminal status: **complete.**
+
+---
+
+## 2026-08-04 - Reusable emailed report access link (option B)
+
+- User reported the emailed "open report" link dies after one click and chose
+  option B: the link stays reusable for the token's 30-day lifetime (paid
+  customers keep opening their report; forwarding risk accepted as product
+  design).
+- `apps/web/src/app/api/reports/[id]/access/route.ts`: GET and POST now verify
+  via the pre-existing `verifyReportAccessToken` (revocation + expiry only —
+  the same check the cookie path trusts) instead of the one-shot
+  inspect/redeem pair. Each POST re-sets the device cookie; the 7-day link
+  TTL no longer applies to the emailed link. Confirm-page copy (zh/en) now
+  states the link stays reusable until access expires; the POST error dropped
+  "or already used". No change to `db/report-tokens.ts`, token issuance,
+  cookie attributes, revocation, or `link_reissue` (still the post-expiry
+  remedy).
+- Verified: 9 access-route tests passed incl. a new second-open-redeems case;
+  `npm run build --workspace apps/web` passed.
+- Commit `fd8205e8b6cb550e951f53a2bec42b352929ca59` on `main`, pushed
+  (production ~+6/−6 lines, tests +30/−20; within budget).
+- Preview `dpl_CdYNPdRc4VJDzuYNstbe97i3u1xL` (ogcGitSha `fd8205e`) READY,
+  fixed Protected Staging alias moved, SSO intact. Rollback: re-alias
+  `dpl_EiRKJGKAy2TSMYExcYVQ3iBKhYNP`.
+- Terminal status: **implemented, verified, and deployed to Protected
+  Staging; user second-click acceptance pending.**
