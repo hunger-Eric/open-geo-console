@@ -80,6 +80,8 @@ describe("private canonical HTML report page",()=>{
     const html = renderToStaticMarkup(page);
     expect(html).toContain('href="/reports/report-v4/report.html/download"');
     expect(html).toContain("Download HTML");
+    expect(html).toContain('class="artifact-actions"');
+    expect(html).toContain('class="primary"');
   });
 
   it("fails closed when a V3 token appears only in the V4 cookie", async () => {

@@ -6,7 +6,7 @@ export type LocaleRoutingAction =
   | { kind: "rewrite"; locale: Locale; pathname: string };
 
 const NON_LOCALIZED_PREFIXES = ["/api", "/_next"];
-const PUBLIC_FILE_PATTERN = /\/[^/]+\.[^/]+$/;
+const PUBLIC_FILE_PATTERN = /\/[^/]+\.[^/]+/;
 
 export const INTERFACE_LOCALE_HEADER = "x-ogc-interface-locale";
 

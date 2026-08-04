@@ -68,6 +68,8 @@ describe("i18n architecture", () => {
     expect(getLocaleRoutingAction("/api/scan")).toEqual({ kind: "next" });
     expect(getLocaleRoutingAction("/_next/static/chunk.js")).toEqual({ kind: "next" });
     expect(getLocaleRoutingAction("/reports/abc/report.html")).toEqual({ kind: "next" });
+    expect(getLocaleRoutingAction("/reports/abc/report.html/download")).toEqual({ kind: "next" });
+    expect(getLocaleRoutingAction("/zh/reports/abc/report.html/download")).toEqual({ kind: "next" });
     expect(getLocaleRoutingAction("/zh/reports/abc")).toEqual({
       kind: "redirect",
       pathname: "/reports/abc"

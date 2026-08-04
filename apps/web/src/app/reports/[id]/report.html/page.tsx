@@ -15,12 +15,14 @@ export default async function PrivateHtmlReportPage({ params }: { params: Promis
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: ARTIFACT_CSS }} />
-      <div className="flex flex-wrap items-center gap-2 px-4 py-3 print:hidden">
-        <a className="button-secondary" href={`/reports/${id}/report.html/download`}>
-          <Download aria-hidden="true" className="size-4" />
-          {dictionary.actions.downloadHtml}
-        </a>
-        <span className="text-xs text-[var(--muted)]">{dictionary.actions.downloadHtmlHint}</span>
+      <div className="no-print mx-auto max-w-[1120px] px-8 pt-6">
+        <nav className="artifact-actions" aria-label="Report download" style={{ marginBottom: 0 }}>
+          <a className="primary" href={`/reports/${id}/report.html/download`}>
+            <Download aria-hidden="true" className="mr-1 inline size-4 align-[-2px]" />
+            {dictionary.actions.downloadHtml}
+          </a>
+        </nav>
+        <p className="mt-2 text-right text-xs text-[var(--muted)]">{dictionary.actions.downloadHtmlHint}</p>
       </div>
       <PrivateReportArtifactView model={model} />
     </>
