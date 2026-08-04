@@ -100,6 +100,21 @@ vi.mock("./report-v4-diagnosis-enhancer", async (importOriginal) => ({
 vi.mock("@/report-v4/prohibited-operation-guard-runtime", () => ({
   runReportV4GuardedOperation: rerunGuardHarness.run
 }));
+vi.mock("@/provider-profile/runtime", () => ({
+  getPreparedProviderProfileRuntime: () => ({
+    profileId: "mimo_native",
+    generalClient: { configuredModel: "fixture-model", completeJson: vi.fn() },
+    modelRuntime: { modelProfile: { operations: { pageAnalysis: { model: "fixture-model" }, websiteSynthesis: { model: "fixture-model" } } } },
+    publicSearchRuntime: {
+      adapter: {},
+      authority: { authorityId: "authority-1", surface: { locale: "zh-CN", region: "CN" } },
+      identity: { adapterId: "mimo" }
+    },
+    createQuestionAnswerProvider: vi.fn(),
+    createDiagnosisProvider: vi.fn(),
+    createStructuredInvoker: vi.fn()
+  })
+}));
 import {
   deferredPageAnalysisAuthority,
   dispatchReportV4ProductionJob,

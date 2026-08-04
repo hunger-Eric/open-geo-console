@@ -4647,92 +4647,842 @@ allowlist; external actions remain zero; no deploy.
 
 ---
 
-## 2026-08-03 - Free report teaser page presentation refinement and Protected Staging redeployment
+## 2026-08-03 - Paid report browser/email delivery repair implemented locally; live acceptance superseded
 
-- The approved teaser scope refined the free report funnel page
-  (`combined-geo-report-v4-teaser.tsx`): localized generation-time formatting,
-  humanized dimension keys, single-score layout when dimension scores are
-  absent, and structured list/ordered-list typography in the semantic outcome
-  block. No data, copy, or business behavior changes. Teaser component tests
-  (5/5), the four artifact test files (17/17), lint, and diff checks passed;
-  desktop and mobile renders of a real Staging teaser report were reviewed.
-- Candidate `2dc9278fe807c5812542df03cfcf334d0ca97855` was committed locally,
-  deployed as Vercel Preview
-  `https://open-geo-console-3g37b4xuq-itheheda-6857s-projects.vercel.app`, and
-  the fixed Protected Staging alias `open-geo-console-staging-itheheda.vercel.app`
-  was reassigned to it. Anonymous smoke: `/zh` -> SSO 302, `/api/scan` -> 401.
-- Thin-overlay Staging free/deep Workers were rebuilt as
-  `open-geo-console:staging-2dc9278-style-overlay-v1` (image id `d6a730bc9d35`,
-  parent `staging-12670b3-style-overlay-v1`) and recreated; both containers run
-  with `OGC_DEPLOYMENT_VERSION=2dc9278fe807c5812542df03cfcf334d0ca97855`.
-  Rollback image `open-geo-console:staging-12670b3-style-overlay-v1`
-  (`901be8795886`) remains available.
-- Post-deploy `docker system df`: Images 32.17GB (8.091GB reclaimable), Build
-  Cache 21.1GB; drive free space C: 4.4GB, E: 53GB. Production was untouched.
+- The approved delivery scope implemented secure same-browser completion
+  access and a future-only Protected Staging email consumer. The retained local
+  candidate is commit `8d903b349985b8e08879c95eb9f25cce621bf192` on
+  `codex/delivery-root-fix`.
+- Focused local verification, lint, build, compose validation, and the bounded
+  disposable PostgreSQL commerce test passed before the external sequence.
+- The sole authorized Vercel upload did not produce a usable new candidate, so
+  no fixed-alias move, matching Worker/Commerce replacement, incident email
+  pass, fresh report, Sandbox payment, or live usability acceptance followed.
+- The user then requested a root-cause latency audit. Durable Staging job,
+  transition, snapshot, query, and attempt evidence confirmed that two recent
+  Paid V3 jobs both took about 14 minutes and repeatedly executed the same
+  first three public-search query identities before a six-query refresh was
+  cancelled by non-concurrency-aware per-query deadlines.
+- This record is context only. It grants no authority to retry the prior
+  deployment, send historical email, create a report or payment, modify report
+  generation, or perform Git/Production actions. The next active scope must
+  explicitly combine any retained delivery behavior with the separately
+  approved minimal search optimization and one fresh acceptance path.
 
 ---
 
-## 2026-08-03 - Paid HTML report hero and timestamp presentation fix
+## 2026-08-03 - Paid V3 public-search duplication optimization implemented locally; Staging acceptance blocked
 
-- User review of the generated deep report found the standalone HTML hero
-  metadata column wrapping the URL mid-token, showing raw ISO timestamps, and
-  wrapping the full revision UUID across five lines; appendix provenance
-  timestamps were also raw ISO. The user approved fixing both within a
-  concurrent addendum scope.
-- Fix: `.answer-first-hero>.metadata-grid` now stacks vertically
-  (`artifact-styles.ts`, shared by V3+V4 artifacts); V3 artifact formats hero
-  generated time, appendix searched/cutoff times, and source observation times
-  by report locale, and shows a shortened revision id with the full id in the
-  tooltip; V4 artifact hero generated time is formatted likewise. V3 test
-  expectation updated to the locale-formatted value. 17/17 artifact tests and
-  15/15 related report tests passed; lint clean; the real Staging deep report
-  (`c9acc3f9`) hero and appendix were screenshot-verified before and after.
-- Candidate `2be0677772ee034e99182cdaf4d75c2c3bdd65e4` was committed locally,
-  deployed as Vercel Preview
-  `https://open-geo-console-75i5zt9g9-itheheda-6857s-projects.vercel.app`, and
-  the fixed Protected Staging alias was reassigned to it. Anonymous smoke:
-  `/zh` -> SSO 302, `/api/scan` -> 401. Thin-overlay Staging free/deep Workers
-  were rebuilt as `open-geo-console:staging-2be0677-style-overlay-v1` (image id
-  `5cb3a2b3a929`, parent `staging-2dc9278-style-overlay-v1`) and recreated;
-  rollback image `open-geo-console:staging-2dc9278-style-overlay-v1`
-  (`d6a730bc9d35`) remains available. Post-deploy `docker system df`: Images
-  32.17GB (8.091GB reclaimable); drive free space C: 4.4GB, E: 53GB.
-  Production was untouched.
+- The approved four-runtime-file optimization made Provider Q2/Q3 produce the
+  complete six-query public-search fanout once, aligned the canonical timeout
+  at 60 seconds, divided the 180-second search budget by concurrency waves, and
+  added an overall search deadline.
+- Resume now verifies the two standard snapshot identities before reuse. An
+  older three-query checkpoint fails closed before any new adapter call rather
+  than silently repeating its first three queries.
+- Focused tests passed 63/63, the disposable PostgreSQL linear-flow test passed
+  1/1 with zero skips, lint had zero errors, the full build passed, and an
+  independent review found no blocking issue.
+- The retained local candidate is
+  `ae3f43664f62510a72da74b11519bb9b2a0e8136` on
+  `codex/delivery-root-fix`.
+- No Preview, Worker overlay, alias move, report, payment or email acceptance
+  was performed. Release preflight stopped when Staging Workers and the fixed
+  alias changed concurrently under an unattributed external deployment, so
+  live acceptance of this candidate remains unproven.
+- This archived record grants no authority to overwrite that concurrent
+  deployment, retry external actions, or claim the report delivery/latency
+  incident fixed in Staging or Production.
 
-## 2026-08-03 — paid HTML report reading mode (TOC + progressive disclosure)
+---
 
-- Candidate `2f6cde0b070fe806bbdda3fca1f3c8c575aa635e` adds a reading-mode
-  layer to the paid standalone HTML report (v3 artifact only): sticky section
-  TOC with scroll highlighting (desktop sidebar; mobile horizontal bar with
-  non-shrinking items), sections 02-05 collapsed by default in `<details>`
-  folds with expand-all/collapse-all controls, TOC clicks open the target
-  fold and set the active item immediately (fixes collapsed-anchor jumps
-  missing the IntersectionObserver band), a back-to-top button, and print
-  CSS that forces all folds open. No report wording or data changes. The
-  inline interaction script is allowlisted in the artifact route CSP by
-  exact SHA-256 hash (`script-src 'self' 'sha256-TT/VSgv49sgdqIhnNDgQ5eXr0Qd4fFzK13gJRefZ/js='`);
-  no `unsafe-inline`. Evidence observation time is now wrapped in
-  `<time datetime>` — this repairs a regression from `2be0677` where the
-  locale-formatted timestamp removed the raw ISO value from the HTML and
-  broke the canonical `assertCombinedV3HtmlCompleteness` production gate
-  for future paid V3 artifact builds.
-- Verification: 145/145 tests across components/report/app report routes
-  (including the readiness gate suite 20/20), eslint clean, `git diff
-  --check` clean. Local real-render (staging DB, report `c9acc3f9`)
-  confirmed: 5 TOC links, active state follows TOC jumps to appendix and
-  diagnosis sections, expand-all opens 4 folds, desktop and mobile
-  screenshots reviewed.
-- Deployed as Vercel Preview
-  `https://open-geo-console-j9u71ivm1-itheheda-6857s-projects.vercel.app`
-  and the fixed Protected Staging alias was reassigned to it. Anonymous
-  smoke: `/zh` -> SSO 302, `/api/scan` -> 401. Thin-overlay Staging
-  free/deep Workers rebuilt as
-  `open-geo-console:staging-2f6cde0-style-overlay-v2` (parent
-  `staging-2be0677-style-overlay-v1`) and recreated; rollback image
-  `open-geo-console:staging-2be0677-style-overlay-v1` (`5cb3a2b3a929`)
-  remains available. Production was untouched; no remote refs pushed.
-- Operational note: an earlier Preview (`44018omoo`) and overlay `-v1` were
-  built from `.data/candidate-worktree` after a concurrent agent checked
-  out `ae3f436` there mid-deploy; both were rebuilt from a clean detached
-  worktree at `2f6cde0` (`.data/deploy-worktree-readmode`) and the alias
-  and Workers above point only at the corrected artifacts.
+## 2026-08-03 - Paid report read-mode presentation committed locally
+
+- The approved five-file page scope retained the existing Paid V3 read-mode
+  navigation and folding, aligned V3/V4 report metadata presentation, updated
+  the shared artifact styling, and admitted the exact CSP hash required by the
+  committed inline read-mode script.
+- The focused Paid V3 component test passed 11/11, scoped lint passed, the full
+  workspace build passed, and the final diff contained only the five approved
+  page files plus the scope records.
+- The retained local commit is
+  `40e7bc108db8cf53c97abd485f9e766304261c67` on
+  `codex/delivery-root-fix`.
+- `apps/web/.tmp-preview/` remains untracked and untouched. No push, merge,
+  deployment, report generation, payment, email, Production action, or cleanup
+  was performed.
+- This scope is closed. It grants no authority for the new Free/Paid
+  information architecture or GEO article generation work.
+
+---
+
+## 2026-08-03 - Free/Paid report progression and GEO article implemented locally
+
+- The approved report scope reordered the existing Free V4 teaser and Paid V3
+  HTML into a progressive website-context -> buyer-question -> source/gap ->
+  diagnosis/action reading flow, while preserving the same report lineage and
+  existing technical evidence.
+- Free retains all three question titles but exposes only Q1, its first three
+  sources and one core gap. Paid retains Q1-Q3, full sources, technical
+  evidence, actions and a Paid-only GEO article example with writing rationale.
+- The article path makes one bounded model attempt and falls back to a
+  deterministic evidence-grounded article without changing fulfillment.
+- Focused tests passed 48/48, the selected disposable PostgreSQL Paid V3
+  linear-flow test passed 1/1 with zero skips, scoped lint and the full build
+  passed, and `git diff --check` passed. Full lint remains blocked only by the
+  pre-existing excluded `apps/web/.tmp-preview/debug-readiness.ts` file.
+- These changes remain uncommitted in the worktree because the user asked to
+  switch away from the expired MiMo model before the already authorized commit
+  and Protected Staging deployment. This archived record is context only and
+  does not authorize model/runtime edits or external calls.
+
+---
+
+## 2026-08-03 - SenseNova Token Plan compatibility admission completed with search gap
+
+- The user approved one authenticated model-list request, one structured JSON
+  probe and one native-search/source probe, with the supplied credential stored
+  only in the existing ignored local/Staging configuration.
+- The account returned four model IDs: `deepseek-v4-flash`, `glm-5.2`,
+  `sensenova-6.7-flash-lite` and `sensenova-u1-fast`. The approved priority
+  selected `deepseek-v4-flash`; all three ignored generic `OGC_AI_*`
+  configurations now use the SenseNova Token Plan endpoint and that model.
+- The structured JSON probe returned HTTP 200 with the standard OpenAI
+  `choices[0].message.content` envelope, `finish_reason=stop`, valid JSON and
+  the exact requested object.
+- The single MiMo-compatible native `web_search` probe returned HTTP 400 and no
+  provider URL annotations. No retry or alternate-model probe was performed.
+- The candidate is admitted for report analysis/writing but cannot replace the
+  MiMo public-search/source surface by itself. MiMo-specific search and Report
+  V4 rollback variables, running Workers, database authority and deployed
+  services were unchanged.
+- This admission is closed. It authorizes no production-source edit, provider
+  authority mutation, Git action or deployment.
+
+---
+
+## 2026-08-03 - AnySearch grounding implemented locally; deployment stopped at rights evidence
+
+- Commit `be3c032e0a73b6a13b80b6901617a4203e7881c6` added the approved
+  AnySearch REST adapter, AnySearch-grounded SenseNova answer provider,
+  compile-time runtime/certification wiring, launcher validation and secret
+  redaction together with the previously approved report redesign and GEO
+  article presentation.
+- Focused AnySearch tests passed 25/25, the full workspace build passed, and
+  the disposable Paid V3 Direct PostgreSQL regression passed 1/1 with no skip.
+  The existing article-project AnySearch key was copied only into ignored
+  Open GEO Console runtime configuration and was not committed or disclosed.
+- The authenticated certification, authority activation and deployment were
+  not executed. AnySearch's current public Terms/Privacy views did not return
+  legal text and their public legal endpoints returned HTTP 404, so commercial
+  storage/display rights for URL/title/snippet remained ambiguous under the
+  approved stop condition.
+- The local commit was not pushed because a branch push could trigger an
+  uncertified Preview deployment. `apps/web/.tmp-preview/` remained untracked
+  and untouched. This archived scope grants no new external-call, Git,
+  deployment or authority permission.
+
+---
+
+## 2026-08-03 - One-pass local AnySearch/SenseNova report diagnostic completed
+
+- The user approved one fault-first local diagnostic at commit
+  `be3c032e0a73b6a13b80b6901617a4203e7881c6`: three fixed neutral buyer
+  questions, exactly three AnySearch calls, up to five SenseNova calls, no
+  retry, no database, crawl, deployment, certification or customer mutation.
+- Run `68327506cf574956b344c7e92f307e0e` completed with three AnySearch HTTP
+  200 responses and four successful SenseNova operations (three grounded
+  answers plus one GEO article). Ranked result counts were 10/9/10; selected
+  source counts were 2/3/9. Every selected URL belonged to its same-call
+  AnySearch result set and no invented URL was detected.
+- DSV appeared in none of the three selected source sets or answers. Q3
+  selected nine sources, heavily concentrated on one domain, and generated
+  inline numbered-source prose including a zero-based `来源0`, exposing source
+  diversity and customer-readable citation-mapping problems.
+- The existing Paid V3 combined resolver could not accept the three already
+  generated answers without a validated production checkpoint and would have
+  redispatched provider calls. The diagnostic stopped that branch rather than
+  retrying or inventing a parallel production schema.
+- A local fixture-bannered Paid V3 preview was rendered. Browser QA produced
+  desktop (1440 viewport) and mobile (390 viewport) screenshots with no
+  non-file browser requests. High-impact findings: TOC anchors target closed
+  `details` sections without opening them, so the main report remains unreadable;
+  and the DSV target URL is visually combined with Example/Overview/V3 fixture
+  content in the body, which remains easy to misread despite the banner.
+- Mobile TOC width overflow, hidden target-absence explanation, Q3's nine-card
+  source density and unloaded file-mode technical evidence image were retained
+  as medium visual risks. Desktop document width itself did not overflow, the
+  banner was prominent, and the intended section order remained visible.
+- Redacted artifacts are retained only under ignored directory
+  `.data/local-diagnostics/anysearch-sensenova-report-68327506cf574956b344c7e92f307e0e/`.
+  Secret/content scans passed. No fix, retry, push, deployment or external
+  action followed; this scope is exhausted and grants no repair authority.
+
+---
+
+## 2026-08-03 - Paid V3 editorial template restored locally
+
+- The approved two-file production scope recomposed the prospective Paid V3
+  HTML into the retained deep-green-rail and warm-paper editorial template,
+  with visible `00-08` progression from website facts through answers,
+  evidence, target absence, technical diagnosis, actions, GEO article and
+  methodology.
+- All paid technical evidence and GEO article rationale remain present. The
+  customer-visible source ordinal display now maps zero-based provider
+  references to one-based displayed rows without rewriting persisted answers.
+- The existing canonical readiness contract remains unchanged. The component
+  preserves each question's source-order evidence chain in HTML while CSS
+  presents the intended `02 answers -> 03 evidence -> 04 absence` progression.
+- Focused tests passed 34/34, scoped lint passed, the full workspace build
+  passed, and `git diff --check` passed.
+- Independent in-app-browser QA passed on desktop and 390px mobile after one
+  scoped wrapping repair: 9/9 TOC links worked, no horizontal overflow,
+  `<details>` dependency or console error remained, and final P0/P1/P2/P3
+  findings were none.
+- Local preview evidence is retained only under ignored directory
+  `.data/local-diagnostics/template-restoration-20260803/` and records zero
+  model, search, crawl, database and payment calls. No Git operation,
+  deployment or customer-data mutation occurred. This scope is closed.
+
+# 2026-08-03 — Superseded renderer-only content-focus scope
+
+- Status: superseded before approval; no production implementation was
+  authorized under that scope.
+- Reason: read-only first-principles tracing confirmed that the active Direct
+  source-analysis prompt and GEO-article prompt also inject task/rubric voice
+  into customer-visible prose. The replacement FROZEN scope includes those two
+  prompt surfaces and makes full technical/screenshot preservation explicit.
+- The current template-restoration working-tree baseline remains unchanged.
+
+
+# 2026-08-03 — Completed Paid V3 content focus and technical-evidence preservation
+
+## Approved scope record
+
+Status: `APPROVED`
+
+Approved by the user on 2026-08-03 for the exact allowlist and behavior below.
+
+## Objective
+
+Remove prompt-shaped, teacher-like and report-production narration from the
+prospective Paid V3 customer report while preserving the complete report chain,
+all website/technical diagnosis, and every ready visual-evidence screenshot.
+
+The customer reading order remains:
+
+`website facts -> buyer answer -> source contribution -> target absence/gap ->
+website and technical diagnosis -> actions -> publish-ready GEO article ->
+method appendix`.
+
+The change must address both confirmed sources of the problem:
+
+1. fixed renderer copy currently explains how the report should be read; and
+2. the active Direct analysis and GEO-article prompts currently instruct the
+   model to explain the analysis/writing task, allowing that rubric voice to
+   become customer-visible prose.
+
+Production edits are authorized only within this exact allowlist and behavior.
+
+## Root-cause baseline
+
+- Repository: `E:/project/open-geo-console`.
+- Branch / HEAD: `codex/delivery-root-fix` at
+  `be3c032e0a73b6a13b80b6901617a4203e7881c6`.
+- The immediately preceding approved Paid V3 template restoration remains
+  uncommitted and is the visual/behavioral baseline for this scope.
+- Existing modified baseline files that must be preserved:
+  - `apps/web/src/components/combined-geo-report-v3-artifact.tsx`
+  - `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx`
+  - `apps/web/src/report/artifact-styles.ts`
+  - `design-qa.md`
+  - `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`
+  - this scope file.
+- User-owned untracked `apps/web/.tmp-preview/` is excluded and must remain
+  untouched.
+- Confirmed first divergence in the active AnySearch/SenseNova Direct path:
+  - `invokeFreeV4DirectAnalysis` asks the model to `Analyze` and `Explain why`;
+    its `summary`, `observations` and `recommendations` are rendered directly.
+  - `generateGeoArticleExample` asks for an article and an explanation of why
+    every section is written that way; its fallback also describes itself as an
+    example and says what an article should do.
+  - the renderer adds further report-guide, reading-order and method narration.
+- Eliminated cause: the current template-restoration diff did not delete the
+  technical findings, page table, dimension scores, model findings, page-type
+  analysis, evidence quotations, evidence URLs, or ready evidence-image loop.
+- The current fixture-only `file://` preview contains one ready screenshot tag,
+  but its `/api/reports/.../evidence/...` URL cannot resolve from a local file.
+  That preview is not evidence that production screenshots were deleted.
+- Literal hidden-prompt leakage is not confirmed. Existing customer-prose
+  checks already reject internal phrases such as system prompt, raw provider
+  JSON and tool-call arguments. The confirmed defect is prompt/rubric voice in
+  otherwise valid customer prose.
+
+## Exact production allowlist
+
+- `apps/web/src/worker/report-v4-free-teaser.ts`
+  - Change only the shared Direct source-analysis system text used by Free Q1
+    and reused for Paid Q2/Q3.
+  - Require customer-visible fields to state the business conclusion directly:
+    what the sources establish, what role each source played, whether the
+    target appeared, the target's concrete gap, and the next action.
+  - Prohibit task/method narration such as describing the analysis, the report,
+    the supplied payload, the prompt, the evidence contract, or what the reader
+    will see next.
+  - Preserve the exact JSON shape, evidence-handle rules, target identity,
+    one-call behavior, failure-to-incomplete behavior and receipts.
+- `apps/web/src/worker/geo-article-example.ts`
+  - Make the model-owned title, introduction, sections and FAQ a publish-ready
+    customer article, with no self-description as an example/report and no
+    narration about how an article should be written.
+  - Keep `rationale` as a separate structured field that explains the evidence
+    and business reason for each section; it must not leak into article prose.
+  - Apply the same separation to the deterministic fallback.
+  - Preserve the one-call limit, timeout, fallback, output schema, evidence-ref
+    validation, locked buyer questions and all factual bounds.
+- `apps/web/src/components/combined-geo-report-v3-artifact.tsx`
+  - Replace Section 00 reading instructions with a compact conclusion selected
+    only from already persisted answer, diagnosis, action and technical fields.
+  - Remove fixed procedural narration from Sections 01-04 and 06; each section
+    must enter its actual customer findings directly.
+  - Keep the complete GEO article uninterrupted, followed by one consolidated
+    writing-strategy block containing every existing rationale/evidence ref.
+  - Move generation mode, limitations, provenance and method statements into
+    Section 08.
+  - Preserve all three buyer questions, complete answers, source evidence,
+    target gaps, actions, article content and methodology.
+  - Preserve the complete Section 05 technical surface: every deterministic
+    finding, page row, dimension score, model finding and recommendation,
+    evidence quotation, evidence URL, ready evidence image, and page-type
+    analysis. Do not slice, summarize, hide or drop these values.
+- `apps/web/src/components/source-selection-diagnosis-section.tsx`
+  - Keep customer-substantive source reasoning in Section 03: dominant pattern,
+    target position, priority breakthrough, per-source contribution, observable
+    factors, target comparisons and target actions.
+  - Remove visible purpose/method preambles and move limitation/trust copy to
+    Section 08 without changing diagnosis data, source order or claims.
+- `apps/web/src/report/artifact-styles.ts`
+  - Style the conclusion, consolidated writing strategy and methodology notes
+    within the restored Paid V3 visual system.
+  - Keep technical evidence cards and screenshots clearly visible, captioned
+    and responsive rather than visually burying them in the long section.
+  - Preserve the deep-green rail, warm-paper document, 00-08 structure and all
+    Free/other artifact styles.
+
+No other production/runtime file is allowed.
+
+## Exact test, fixture and evidence allowlist
+
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+  - Assert the Direct analysis prompt requests direct customer conclusions and
+    contains no instruction to narrate the analysis/report process.
+  - Preserve the exact call count, handle binding and incomplete fallback tests.
+- `apps/web/src/worker/geo-article-example.test.ts`
+  - Assert the prompt separates publish-ready article prose from rationale.
+  - Assert model and fallback article bodies contain no example/report/writing-
+    instruction narration while rationale remains complete.
+- `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx`
+  - Prove conclusion-first copy, no fixed procedural narration, complete article
+    before writing strategy, and method content only in Section 08.
+  - Prove every technical value and every ready evidence image is still present.
+- `apps/web/src/components/source-selection-diagnosis-section.test.tsx`
+  - Prove substantive source reasoning remains and method boilerplate is absent.
+- `apps/web/src/report/combined-artifact-readiness.test.tsx`
+  - Prove all existing required values and ready evidence assets remain in the
+    canonical HTML and the readiness contract still passes.
+- `apps/web/src/components/combined-artifact-fixtures.ts`
+  - Fixture-only additions if needed to represent multiple technical findings,
+    source quotations and ready screenshot assets in deterministic QA.
+- `design-qa.md`
+  - Append a separated content-and-technical-preservation QA result; preserve
+    all earlier history.
+- Ignored evidence only under
+  `.data/local-diagnostics/paid-report-content-focus-*`:
+  - fixture-only HTML and desktop/mobile screenshots;
+  - evidence images must be locally resolvable in the QA capture rather than
+    broken `file://` API URLs;
+  - zero model, search, crawl, database, payment or email calls.
+- Scope authority/history only:
+  - `docs/ACTIVE-CHANGE-SCOPE.md`
+  - `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`
+
+No new production component, abstraction, dependency, route, schema, config,
+tracked screenshot or report contract is allowed.
+
+## Required customer behavior
+
+1. Model-owned customer prose starts with the finding, not the task. It must not
+   say that it is analyzing, explaining, demonstrating, generating, following a
+   prompt, using supplied input, or teaching the reader how the report works.
+2. Direct analysis follows `conclusion -> source contribution -> target gap ->
+   action`. Honest uncertainty remains allowed, but it must describe the
+   observed business limitation rather than the analysis process.
+3. The GEO article title, introduction, body and FAQ read as a page the customer
+   could publish after review. Only the separate post-article writing-strategy
+   block explains why sections were written that way.
+4. Section 00 leads with an evidence-derived conclusion. Section 01 starts with
+   website facts, Section 02 with the first buyer answer, Section 03 with source
+   evidence, and Section 04 with the target conclusion/gap.
+5. Section 05 remains a full website visibility and technical diagnosis. It
+   retains all technical arrays and text, and renders every ready evidence asset
+   associated with each finding/citation. No `slice`, collapsed omission or
+   single-image cap may be introduced.
+6. Evidence screenshots have a visible caption/source and fit desktop/mobile
+   width without clipping. A deterministic QA preview must display at least one
+   real fixture image successfully; a broken image icon is a failed check.
+7. Section 06 retains the full roadmap. Section 07 retains the complete article,
+   FAQ and all rationale. Section 08 retains provenance, search/model metadata,
+   coverage, limitations, generation mode and non-causality boundaries.
+8. The visible and semantic 00-08 order, all 9 TOC anchors, mobile reflow and
+   no-horizontal-overflow guarantee remain unchanged.
+9. Stored reports, source ordering, access, readiness, locale, model selection,
+   fulfillment and all commercial behavior remain unchanged.
+
+## Forbidden behavior
+
+- No change to AnySearch retrieval, SenseNova transport/model selection, answer
+  source selection, call counts, retries, timeouts, evidence handles, receipts,
+  checkpoints, Worker orchestration, crawler, database, schema or report shape.
+- No change to the inactive deferred semantic-review path or its large final
+  synthesis contract; the scoped prompt fix is limited to the currently selected
+  AnySearch/SenseNova Direct path plus its GEO-article call.
+- No new validator that could reject a structurally valid provider response and
+  turn a completed analysis/report into an incomplete or failed one.
+- No removal, summarization or relocation out of Section 05 of technical facts,
+  screenshots, quotations, URLs, page rows, findings or page-type analyses.
+- No new model call and no renderer-authored unsupported business claim.
+- No change to payment, order, Webhook, entitlement, credit, refund, email,
+  redirect, access control, customer PDF or historical reports.
+- No deployment, Docker, Vercel, Staging, Production, Git commit/push/merge or
+  branch/worktree operation.
+- No edits or cleanup under `apps/web/.tmp-preview/`.
+- No visual redesign beyond the already approved restored template.
+
+## Incremental diff budget
+
+Measured from the working-tree snapshot at creation of this revised FROZEN
+scope:
+
+- Direct analysis prompt: at most 24 changed production lines.
+- GEO article prompt and deterministic fallback: at most 90 changed production
+  lines.
+- Paid V3 artifact component: at most 220 changed production lines.
+- Source-selection diagnosis component: at most 100 changed production lines.
+- Paid V3 scoped styles: at most 110 changed production lines.
+- Aggregate production diff for this scope: at most 544 changed lines.
+- Tests and deterministic fixture: at most 320 changed lines total.
+- `design-qa.md` plus scope/history closeout: at most 200 changed lines total.
+
+Exceeding a production limit is a stop-and-report condition.
+
+## Acceptance checks
+
+1. Focused Direct analysis, GEO article, Paid V3 component, source-selection and
+   combined-readiness tests pass with no skip.
+2. Tests capture the exact outbound prompt text and prove customer fields are
+   requested as direct findings while rationale remains a separate field.
+3. Static rendered-HTML assertions prove every fixture technical value and every
+   ready evidence asset remains present, and article prose precedes rationale.
+4. Scoped lint passes for all changed production/test files.
+5. The full workspace production build passes.
+6. `git diff --check` passes; the incremental diff stays inside this allowlist
+   and budget; the preceding template-restoration work remains intact.
+7. A zero-external-call fixture preview is inspected at desktop and 390px mobile:
+   - Sections 00-07 contain findings/content rather than task instructions;
+   - Section 05 visibly contains the complete technical groups and at least one
+     successfully loaded evidence screenshot with source/caption;
+   - the full article is uninterrupted and writing strategy follows it;
+   - method/trust/limitation content appears in Section 08;
+   - 9/9 TOC links work, no horizontal overflow and no console errors.
+8. `design-qa.md` may say `final result: passed` only when no P0/P1/P2 content,
+   technical-preservation, broken-image or responsive finding remains.
+
+## Stop conditions
+
+- A required conclusion is not already present in persisted Paid V3 data.
+- Correcting the customer tone requires a report schema/validator/version change
+  or any additional provider call.
+- A required fix needs a production file outside the five-file allowlist.
+- A ready production evidence asset is missing before rendering, which would be
+  a generation/storage issue rather than this presentation scope.
+- A required customer-facing prompt fix is found only in the inactive deferred
+  semantic-review path; that is a separate approval decision.
+- Browser QA cannot obtain a fresh fixture capture or finds an unresolved P0/P1/
+  P2 within budget.
+- Any step would require an external provider call, database mutation,
+  deployment, Git action or historical-data mutation.
+
+Implementation is authorized under the user's explicit approval of this exact
+revised scope.
+## Closeout result
+
+- Customer-visible Direct analysis and GEO-article prompts now request findings
+  and publish-ready prose instead of task or writing-process narration.
+- The Paid V3 renderer now leads with a persisted-data conclusion, keeps the
+  complete article before one consolidated writing-strategy block, and moves
+  method, limitations, provenance and generation mode into Section 08.
+- Section 05 still renders every deterministic finding, page row, dimension
+  score, model finding, recommendation, evidence quotation, source URL, ready
+  evidence image and page-type analysis. The deterministic fixture proves two
+  ready evidence assets render together.
+- Focused tests passed 54/54; scoped lint passed with no output; the full
+  workspace build compiled successfully and generated 18/18 static pages;
+  `git diff --check` passed.
+- Independent Codex in-app-browser QA passed at 1440x1024 and 390x844 with
+  9/9 TOC anchors, two nontrivial loaded evidence images, no horizontal
+  overflow, no console errors and no P0/P1/P2 findings.
+- Evidence is retained under
+  `.data/local-diagnostics/paid-report-content-focus-20260803/` with a receipt
+  recording zero model, search, crawl, database, payment and email calls.
+- No Git operation, deployment, Docker action or customer-data mutation
+  occurred. This scope is closed.
+
+---
+
+## 2026-08-03 - Paid report presentation commit completed locally
+
+- The approved local-commit-only scope created exactly one commit,
+  `95e7fb296f6a308b92e4279f9d076a745e22b888`, with parent
+  `be3c032e0a73b6a13b80b6901617a4203e7881c6` and message
+  `feat: restore paid report template and content focus`.
+- The commit contains exactly the 14 approved tracked paths. Cached diff and
+  whitespace checks passed; the only remaining canonical-worktree status is
+  the preserved user-owned untracked `apps/web/.tmp-preview/`.
+- No push, merge, rebase, branch/worktree mutation, Docker action, deployment,
+  report, payment or email occurred under the Git scope.
+- That scope is closed. Protected Staging deployment is governed only by the
+  new active FROZEN scope.
+
+---
+
+## 2026-08-03 - Paid report candidate deployed to Protected Staging Gates 1-3
+
+- The user approved the exact deployment-only scope for candidate
+  `95e7fb296f6a308b92e4279f9d076a745e22b888`.
+- One Vercel Preview was created: `dpl_J71XhBtERHciEMEd8DjWNc8SWPYM`.
+  Independent metadata inspection proved READY Preview identity and exact
+  `gitCommitSha` / `ogcGitSha` equality with the candidate.
+- One thin source-overlay Worker image was built:
+  `open-geo-console:staging-95e7fb2-paid-report-overlay-v1`, image
+  `sha256:95a62dcdfc1f91ff834e67d642609c682e79d9a550660073a6ef374bcfb4e83e`.
+  No dependency, browser or operating-system rebuild occurred.
+- Only the Staging Free and Deep Workers were recreated. Both run the candidate
+  SHA with the Staging profile, correct realtime tier and restart count zero.
+  Queue counts were zero before and after replacement.
+- The fixed Protected Staging alias was moved once to the candidate Preview.
+  Authenticated browser QA rendered the Chinese landing page with no page
+  console errors; an authenticated catalog read returned HTTP 200,
+  `enabled=true`, `mode=test` and CNY/USD/HKD prices.
+- Thirteen bounded database counts for reports, jobs, crawl/model/search rows,
+  orders, payments, refunds, emails and artifacts were identical before and
+  after Gate 3. No report, crawl, model/search operation, order, payment,
+  refund, email or customer artifact was created by deployment smoke testing.
+- E: free space changed from 55,110,230,016 to 55,096,504,320 bytes. The prior
+  accepted Web deployment and Worker image remain available as rollback; no
+  cleanup was performed.
+- Production, the Commerce service, historical data, Git remotes/main,
+  `apps/web/.tmp-preview/**` and the read-mode worktree were untouched.
+- Independent read-only review accepted Gates 1-3. Terminal status:
+  **Protected Staging deployment completed; real flow not yet accepted.**
+- A fresh manually submitted report/payment/email path is Gate 4 and was not
+  authorized or performed by this scope.
+
+---
+
+## 2026-08-03 - Unified provider profile design completed
+
+- The user approved a single canonical `OGC_PROVIDER_PROFILE` selector with
+  two initial complete capability bundles: `mimo_native` and
+  `sensenova_anysearch`.
+- The design maps general analysis, V4 structured operations, public search,
+  grounded buyer answers, source diagnosis and GEO article generation through
+  one immutable startup-resolved bundle. Secrets remain separate data inputs
+  and cannot independently select a route.
+- Missing/incompatible configuration, conflicting legacy routing variables or
+  an inactive search authority fails Worker startup before job claim. Runtime
+  capability probes and automatic provider fallback are prohibited.
+- Existing MiMo, SenseNova and AnySearch clients, prompts, report contracts,
+  persistence, orchestration, payment and historical reports remain outside
+  the change. Existing/in-flight jobs keep their immutable provider/model
+  snapshots.
+- The design is recorded at
+  `docs/superpowers/specs/2026-08-03-unified-provider-profile-design.md`.
+  Implementation, runtime activation, deployment and a fresh report remain
+  separately scoped work.
+
+---
+
+## 2026-08-03 - Unified provider profile implemented locally
+
+- The user approved the final audited FROZEN allowlist. Local implementation
+  completed on branch `codex/delivery-root-fix` at unchanged baseline HEAD
+  `24a2619d0e56450bae0305a889b1fd72aa95224d`; no Git state change was made.
+- `OGC_PROVIDER_PROFILE` is the only routing selector. `mimo_native` keeps MiMo
+  native search, while `sensenova_anysearch` binds SenseNova
+  `deepseek-v4-flash` to AnySearch without runtime fallback.
+- Worker startup now validates the complete selected profile before database
+  preparation, resolves the exact active public-search authority after
+  connectivity, and publishes one immutable provider bundle before presence,
+  batch drain or claim.
+- Existing clients, prompts, report contracts, persistence and orchestration
+  were retained. No schema, task-state, payment, email or UI behavior changed.
+- Measured change was 929 production/configuration lines, 47 locked-profile
+  JSON lines, 502 test lines and 78 reader-projection lines beyond the scope
+  refresh, all within the approved budgets. All 45 changed paths matched the
+  allowlist and the non-test secret-pattern scan was clean.
+- Deterministic verification passed: 20 files / 266 tests, scoped ESLint with
+  zero errors, `git diff --check`, and the complete workspace/Next.js build.
+  Full ESLint remained blocked only by 17 pre-existing errors in excluded
+  `apps/web/.tmp-preview/debug-readiness.ts`; that directory was untouched.
+- PostgreSQL fixture tests, real provider/search/database calls, Docker,
+  deployment, Git writes and report generation were not run or performed.
+  Terminal status: **local implementation and automated verification complete;
+  Git and Protected Staging acceptance pending separate authorization, with
+  acceptance requiring exactly one fresh report.**
+
+---
+
+## 2026-08-03 - Unified provider profile release stopped before push
+
+- The user approved the complete Git-and-Protected-Staging scope and explicitly
+  accepted the documented Staging-only AnySearch legal risk.
+- Git candidate packaging succeeded locally: one exact 46-path commit
+  `62352e8bb0397e8edd7d3e00fdcc54456c9874f4`, parent
+  `24a2619d0e56450bae0305a889b1fd72aa95224d`, message
+  `feat: unify provider profile routing`. Cached whitespace and secret checks
+  passed. The commit was not pushed.
+- Read-only Staging preflight passed at schema 45 with zero claimable,
+  expired-recoverable and exhausted-terminalizable jobs. No AnySearch authority
+  existed; the exact active MiMo rollback authority remained intact.
+- Ignored Staging source configuration was switched to
+  `sensenova_anysearch` and generated once with the approved PrepareOnly path.
+  The merged runtime contained SenseNova/AnySearch data, no nonblank stale MiMo
+  V4 routing, and no provider variables in the commerce projection. Existing
+  running Free/Deep containers were not recreated and remained healthy on
+  rollback image `95a62dcd...`, restart count zero.
+- The first branch-scoped Vercel Preview variable upsert failed with exit code
+  1 while saving `OGC_PUBLIC_SEARCH_ADAPTER`; Vercel CLI 56.4.1 returned no
+  attributable platform error. The required single read-only follow-up listed
+  zero variables for Preview branch `codex/delivery-root-fix`, proving no
+  partial remote configuration was retained.
+- The release stopped immediately. No signing secret was generated; no
+  AnySearch/SenseNova call, certification artifact, authority install/activate,
+  push, Preview, Docker build/recreation, alias move, report, job, order,
+  payment, refund or email occurred. Production and all historical data were
+  untouched.
+- Terminal status: **candidate committed locally; release blocked before push
+  by the branch-scoped Vercel environment-variable write path. A new FROZEN
+  recovery scope is required before any retry or alternative configuration.**
+
+---
+
+## 2026-08-03 - Unified provider profile recovery stopped before push
+
+- Recovery candidate `ac3fe3c5a99e3e1e2b4983e1f60d5e9485564f4b` passed its
+  read-only gates: clean canonical worktree, absent remote task branch, empty
+  target Preview-variable set, Staging marker, schema 45, safe queue counts,
+  and complete `sensenova_anysearch` runtime configuration.
+- The mandatory first Vercel write, limited to the target Preview branch and
+  `OGC_PUBLIC_SEARCH_ADAPTER=anysearch`, failed once with exit code 1:
+  `Project open-geo-console does not have a connected Git repository.`
+- One name/target-only follow-up confirmed the target branch still had zero
+  Preview variables. No signing secret, provider call, certification artifact,
+  authority row, push, Preview, Docker action, database write or business data
+  action occurred.
+- The secret-free terminal ledger is retained only in ignored local storage at
+  `.data/protected-staging-release-ledger/ac3fe3c5a99e3e1e2b4983e1f60d5e9485564f4b.json`.
+- Terminal status: **blocked before push. Connecting the Vercel project to Git
+  or choosing a non-Git Preview path requires a new FROZEN scope.**
+
+---
+
+## 2026-08-03 - Canonical manual Vercel deployment mode documented
+
+- The user explicitly requested a durable operator note after repeated
+  deployment-path confusion and approved a documentation-only FROZEN.
+- `docs/PROTECTED-STAGING-OPERATIONS.md` now states at the top that the current
+  Web release mode is one manual Vercel Preview from the exact canonical
+  candidate checkout, using the proven command skeleton
+  `vercel deploy --yes --meta ogcGitSha=<candidate-full-sha>`.
+- The runbook distinguishes `.vercel/project.json` local project linkage from
+  a Vercel Git-provider `link`, requires live `link` / `gitSource` inspection,
+  and forbids inferring branch-scoped variables, Git-triggered Preview, or a
+  Git connect/disconnect action under the current manual mode.
+- It records Git push and Vercel deployment as separately authorized actions,
+  requires exact `gitCommitSha` / `ogcGitSha` and Web/Free/Deep SHA agreement
+  before alias movement, and clarifies that `link=null` does not mean the
+  project has never been deployed.
+- Reader-facing change measured `+47/-0`, within the approved `+70/-0` budget.
+  The section was reread, required invariants were found, `git diff --check`
+  passed, and no runtime, Git, Vercel, Docker, database, provider, report, or
+  other external action occurred.
+- Terminal status: **deployment-mode lesson recorded locally in the mandatory
+  runbook; documentation remains uncommitted and unpushed.**
+
+---
+
+## 2026-08-03 - Unified provider profile Staging release rolled back at Gate 2
+
+- Approved scope executed in gate order for candidate
+  `ac3fe3c5a99e3e1e2b4983e1f60d5e9485564f4b` on branch
+  `codex/delivery-root-fix`: Gate 1 preflight passed (staging marker,
+  schema 45, zero claimable/running jobs, disk 52 GiB, rollback identities
+  recorded); the branch was pushed once, non-force, creating
+  `origin/codex/delivery-root-fix` at the candidate SHA.
+- Readiness checks: `eslint src` 0 errors (full lint is blocked only by the
+  forbidden `apps/web/.tmp-preview` leftover); 13 stale schema-version-chain
+  test failures proven pre-existing on deployed baseline `95e7fb2`; 2
+  PowerShell-parser tests passed 22/22 in isolation after full-suite load
+  timeouts; monorepo build passed.
+- Exactly one manual Preview was created:
+  `dpl_52H7ciEE5UjybEHrJWmJRWpWRweK`
+  (`https://open-geo-console-mcnrorp7g-itheheda-6857s-projects.vercel.app`),
+  READY, target preview, project/team verified, `ogcGitSha` and
+  `githubCommitSha` both equal the full candidate SHA (`gitDirty=1` reflects
+  the disclosed uncommitted documentation).
+- Gate 2 built the approved thin source-overlay image
+  `open-geo-console:staging-ac3fe3c-provider-profile-overlay-v1`
+  (`sha256:ae9dca41f2dc72bd61ade5c32022e419b7c91d88916160278e2398e70af9b6c1`,
+  revision label = candidate SHA, key source files hash-verified against the
+  canonical worktree) and recreated only the two Staging Workers.
+- Both recreated Workers fail-closed at startup readiness:
+  `getActivePublicSearchSurfaceAuthority` found no active AnySearch
+  authority for environment/surface/version/`zh-CN`/`CN`. The AnySearch
+  Staging authority installation was explicitly outside this scope, so the
+  recorded rollback restored both Workers to
+  `sha256:95a62dcdfc1f91ff834e67d642609c682e79d9a550660073a6ef374bcfb4e83e`.
+- The rollback image also fails-closed under the current merged Staging
+  environment: its `95e7fb2` code rejects
+  `OGC_REPORT_V4_MODEL_PROFILE_ID=report-v4-sensenova-deepseek-v4-flash-v1`,
+  which the environment now selects. Both Workers were therefore left
+  stopped on the rollback image identity. The previously running Workers
+  had survived only because their container environment was frozen before
+  the `sensenova_anysearch` selection was written.
+- The fixed Protected Staging alias was never moved; the fixed site still
+  serves rollback Web deployment `dpl_J71XhBtERHciEMEd8DjWNc8SWPYM`.
+  No report, crawl, model call, order, payment, refund, email, database
+  write, authority change, or production action occurred. Docker delta:
+  +1 overlay image, images 32.19 GB -> 32.2 GB, E: free space unchanged at
+  52 GiB.
+- Terminal status: **rolled back at Gate 2; deployment blocked. Staging now
+  has no runnable Worker under the current merged environment: the candidate
+  requires an installed and active AnySearch Staging authority, and the
+  rollback image requires the pre-`sensenova_anysearch` environment. A new
+  FROZEN scope must choose between installing the AnySearch Staging
+  authority (candidate path) or reverting the Staging environment to the
+  MiMo profile (rollback path).**
+
+---
+
+## 2026-08-03 - Checkout entry restored on fixed Protected Staging (Preview env repair)
+
+- Root cause established read-only: the candidate's
+  `getRecommendationProductAvailability` requires `OGC_PROVIDER_PROFILE`
+  and a resolvable AnySearch runtime; the Vercel Preview environment lacked
+  `OGC_PROVIDER_PROFILE`, `OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL`, and
+  `OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY`, so `/api/commerce/catalog` returned
+  `enabled=false`, the checkout form never rendered, and the
+  `href="#checkout"` "Unlock full report" anchors appeared dead.
+- Exactly three Preview-scoped environment writes were made via the Vercel
+  API (upsert, encrypted, values copied from the local merged staging
+  environment; no Production variables, no deletions, no branch scoping).
+- One new manual Preview of the unchanged candidate:
+  `dpl_EetcWT3cUjcwa9yqr2fCuKR3RX9j`
+  (`https://open-geo-console-lo19gsn1j-itheheda-6857s-projects.vercel.app`),
+  READY, preview target, `ogcGitSha` and `githubCommitSha` equal to
+  `ac3fe3c5a99e3e1e2b4983e1f60d5e9485564f4b`.
+- The fixed Protected Staging alias was moved once to
+  `dpl_EetcWT3cUjcwa9yqr2fCuKR3RX9j` (API-verified). Anonymous `/zh` and
+  `/api/commerce/catalog` still return 302 SSO protection. Both Staging
+  Workers remained untouched on candidate image `sha256:ae9dca41...`,
+  restart count zero.
+- The interactive `vercel env add` path was attempted first and aborted at
+  its TTY Git-branch prompt without creating any variable; the writes were
+  completed via the project env API instead.
+- No payment, order, refund, email, report submission, crawl, model call,
+  database write, Git mutation, Worker action, or Production change
+  occurred. The authenticated catalog confirmation and checkout retry are
+  the user's browser-side verification.
+- Terminal status: **fixed-site checkout entry repair deployed; awaiting
+  the user's authenticated confirmation that the payment form renders.
+  Sandbox payment (Gate 4) remains separately scoped.**
+
+---
+
+## 2026-08-04 - Provider timeout recovery and unapproved A1 superseded
+
+- The approved Provider Profile timeout repair was implemented in commit
+  `5c27ab4348e0585f8fd19f3e935d8eba3fe6d7ec`, pushed, built as the approved
+  thin Staging Worker overlay, and installed on both named Staging Workers.
+- A new Paid V3 run advanced through page analysis and website synthesis,
+  establishing that the earlier roughly 65-second client-timeout regression
+  no longer reproduced. It later terminalized in grounded answer synthesis
+  with `ai_client_output_truncated` after the AnySearch answer path applied
+  its 2500-token cap.
+- A FROZEN amendment proposed threading the locked profile's question-answer
+  output cap into the AnySearch answer provider. That amendment was never
+  approved or implemented. The failed run and both pending refunds remain
+  untouched.
+- The user then supplied the paid/generating UI screenshot and explicitly
+  approved replacing and archiving the old scope in favor of the bounded
+  payment-state UI change.
+- Terminal status: **superseded at the user's direction; timeout repair
+  acceptance established through website synthesis, later paid-run failure
+  retained as historical evidence, and the proposed A1 remained unapproved.**
+
+---
+
+## 2026-08-04 - Payment-return purchase-control visibility (parallel session)
+
+- Objective: on a report payment-return page, hide purchase controls once the
+  return represents payment success/confirmation or the authoritative order
+  status is `paid`; show them again for cancelled, failed, or refunded states.
+- Implemented per its approved scope: shared `order` + `payment_return`
+  parser and pure visibility rule in `apps/web/src/components/payment-return.ts`;
+  conditional form/Suspense handling in `commercial-checkout.tsx` and
+  `payment-return-banner.tsx`; 16/16 focused Vitest tests passed; scoped
+  ESLint and `git diff --check` passed. Local browser verification was
+  blocked by platform policy and is not claimed.
+- Its scope authorized no Git mutation, so the resulting source/test changes
+  remain UNCOMMITTED in the canonical working tree at this archive time,
+  alongside `apps/web/next-env.d.ts` (auto-regenerated) and the pre-existing
+  `docs/PROTECTED-STAGING-OPERATIONS.md` edits. Ownership of those dirty
+  files stays with the user; no later task may commit, revert, or clean them.
+- Terminal status: **implemented and locally test-verified; not committed,
+  not deployed; archived at the user's direction to make way for the A1
+  truncation-cap scope.**
+
+---
+
+## 2026-08-04 - A1 unified output-cap fix ACCEPTED
+
+- Objective: eliminate the two hardcoded `maxTokens: 2_500` caps on the
+  combined_geo_report_v3 SenseNova path (AnySearch grounded answers and
+  provider claim extraction) by threading the locked profile's 8192
+  `maxOutputTokens` to both call sites. Cap-only; no retry/degrade/contract
+  semantics changed.
+- Implemented in commit `0dd82061c8d1e7ec556006a9f20e707c4d96e271` (pushed;
+  exactly the 7 allowlisted files; production 29 changed lines, tests 19).
+  Focused tests all green: claim extraction 6/6, generative-answer 6/6,
+  runtime 8/8, processor 80/80, provider-discovery 30/30.
+- Deployed as thin overlay
+  `open-geo-console:staging-0dd8206-output-cap-overlay-v1`
+  (`sha256:ab4f795c9bf7...`) built from a `git archive` export of the exact
+  commit (dirty working tree excluded by construction) on base
+  `sha256:ab9df490...`; both Staging Workers recreated, restartCount=0,
+  healthy. Rollback line: current `sha256:ab4f795c...`, one rollback
+  `sha256:ab9df490...`.
+- Acceptance (user Sandbox order `2cba6a0b-a11b-4a83-9d89-0d374cb648f4`,
+  report `6f067d45-18bd-4129-9352-9e1e03cd6198`, job
+  `8141b78f-863f-4f60-bb7d-ea2593bd0739`): completed end-to-end in 12m34s,
+  attempts=1, no `ai_client_timeout`, no `ai_client_output_truncated`;
+  answer calls 9.4s/21.2s under the 8192 cap, one claim-extraction call
+  67.7s (old 60s timeout would have killed it), one claim TypeError degraded
+  via the designed contract-skip path. Order `fulfillment_status=completed`,
+  `refund_status=not_required`.
+- Remaining open items outside this scope: two pending refunds
+  (`6eaff177-...`, `c0a1df43-...`) await separate submission authorization;
+  the UI task's uncommitted component changes remain user-owned dirty files;
+  the fixed Protected Staging site still serves the `ac3fe3c` Preview (web
+  process needed none of these worker-only fixes).
+- Terminal status: **complete and accepted.**

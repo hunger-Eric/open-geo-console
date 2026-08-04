@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type PaidV3DirectSemantics, type PaidV3SemanticAnswerCardDraft, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GeoArticleExampleV1, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type PaidV3DirectSemantics, type PaidV3SemanticAnswerCardDraft, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -327,6 +327,7 @@ export interface PrepareCombinedGeoReportV3Input {
   publicSourceForensics: RecommendationForensicReportV2;
   providerDiscovery: ProviderDiscoveryV1;
   directSemantics?: PaidV3DirectSemantics;
+  geoArticleExample?: GeoArticleExampleV1;
   languageValidationScope?: CombinedReportLanguageScope;
 }
 
@@ -440,6 +441,7 @@ function assembleCombinedGeoReportV3(input: Omit<PrepareCombinedGeoReportV3Input
     answerCards: input.answerCards,
     ...(input.sourceSelectionDiagnosis ? { sourceSelectionDiagnosis: input.sourceSelectionDiagnosis } : {}),
     ...(input.directSemantics ? { directSemantics: input.directSemantics } : {}),
+    ...(input.geoArticleExample ? { geoArticleExample: input.geoArticleExample } : {}),
     engineProvenance: input.engineProvenance,
     providerDiscovery: input.providerDiscovery,
     publicSourceForensics: forensic,
@@ -551,6 +553,13 @@ export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, ht
       ...report.sourceSelectionDiagnosis.sharedPatterns.map(({ summary }) => summary),
       ...report.sourceSelectionDiagnosis.targetActions.flatMap(({ title, rationale }) => [title, rationale]),
       ...report.sourceSelectionDiagnosis.limitations.map(({ message }) => message)
+    ] : []),
+    ...(report.geoArticleExample ? [
+      report.geoArticleExample.title,
+      report.geoArticleExample.introduction,
+      ...report.geoArticleExample.sections.flatMap(({ heading, paragraphs }) => [heading, ...paragraphs]),
+      ...report.geoArticleExample.faq.flatMap(({ question, answer }) => [question, answer]),
+      ...report.geoArticleExample.rationale.flatMap(({ reason, evidenceRefs }) => [reason, ...evidenceRefs])
     ] : []),
     ...report.technicalFoundation.technicalReport.findings.flatMap(({ title, description, recommendation }) => [title, description, recommendation]),
     ...report.technicalFoundation.technicalReport.pages.flatMap(({ url, title, canonical, metaDescription, h1 }) => [url, title ?? "", canonical ?? "", metaDescription ?? "", ...h1]),

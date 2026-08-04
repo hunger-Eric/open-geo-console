@@ -1,20 +1,30 @@
 import type { PublicSearchSurfaceAdapter, PublicSearchSurfaceAuthority } from "@open-geo-console/public-search-observer";
-import { createApprovedPublicSearchAdapterRegistry, selectApprovedPublicSearchAdapterFactory } from "@/public-search-adapters/registry";
+import { createApprovedPublicSearchAdapterRegistry } from "@/public-search-adapters/registry";
 import { createMiMoPublicSearchAdapterFactory } from "@/public-search-adapters/mimo/adapter";
+import { createAnySearchPublicSearchAdapterFactory } from "@/public-search-adapters/anysearch/adapter";
 import type { PublicSearchAdapterFactory, PublicSearchAdapterIdentity } from "@/public-search-adapters/types";
 import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import type { PublicSearchSurfaceAuthorityRow } from "@/db/schema";
 import type { PublicSourceForensicsDependencies } from "@/worker/public-source-forensics";
 import { PublicSourceRuntimeError } from "@/worker/job-errors";
-import { resolveMiMoGenerativeSearchAnswerProvider } from "@/public-search-adapters/mimo/generative-answer";
 import type { GenerativeSearchAnswerProvider } from "@open-geo-console/ai-report-engine";
+import {
+  publicSearchAdapterIdForProviderProfile,
+  resolveProfileGenerativeAnswerProvider,
+  resolveProviderProfileId,
+  resolveProviderProfileRuntime
+} from "@/provider-profile/runtime";
 
-export const APPROVED_FACTORIES = createApprovedPublicSearchAdapterRegistry([createMiMoPublicSearchAdapterFactory()]);
+export const APPROVED_FACTORIES = createApprovedPublicSearchAdapterRegistry([
+  createMiMoPublicSearchAdapterFactory(),
+  createAnySearchPublicSearchAdapterFactory()
+]);
 
 export function resolveGenerativeSearchAnswerProvider(environment: NodeJS.ProcessEnv, input: { locale: string; region: string }, dependencies: { fetch?: typeof fetch; now?: () => Date } = {}): GenerativeSearchAnswerProvider {
-  const adapter = environment.OGC_PUBLIC_SEARCH_ADAPTER ?? "mimo";
-  if (adapter !== "mimo") throw new PublicSourceRuntimeError("Generative-search answer provider is unavailable.", "public_source_runtime_unsupported");
-  return resolveMiMoGenerativeSearchAnswerProvider(environment, input, dependencies);
+  return resolveProfileGenerativeAnswerProvider({
+    runtime: resolveProviderProfileRuntime(environment, dependencies),
+    ...input
+  });
 }
 
 export interface ProductionPublicSourceForensicsRuntimeOptions {
@@ -32,7 +42,9 @@ export async function resolveProductionPublicSearchRuntime(input:{environment:No
   const profile=environment.OGC_DEPLOYMENT_PROFILE;
   if(profile!=="staging"&&profile!=="production") throw new PublicSourceRuntimeError("Public-search runtime environment is invalid.", "public_source_runtime_environment_invalid");
   const locale=required(environment.OGC_PUBLIC_SEARCH_LOCALE,"OGC_PUBLIC_SEARCH_LOCALE"),region=required(environment.OGC_PUBLIC_SEARCH_REGION,"OGC_PUBLIC_SEARCH_REGION");
-  const factory=selectApprovedPublicSearchAdapterFactory({environment,registry:input.registry??APPROVED_FACTORIES});
+  const adapterId=publicSearchAdapterIdForProviderProfile(resolveProviderProfileId(environment));
+  const factory=(input.registry??APPROVED_FACTORIES).get(adapterId);
+  if(!factory)throw new PublicSourceRuntimeError("Public-search profile adapter is unavailable.", "public_source_runtime_unsupported");
   const identity=factory.resolveIdentity({environment,locale,region});
   const row=await input.getAuthority({environment:profile,adapterId:identity.adapterId,providerId:identity.providerId,productId:identity.productId,modelId:identity.modelId,adapterVersion:identity.adapterVersion,surfaceId:identity.surface.surfaceId,surfaceVersion:identity.surface.surfaceVersion,locale,region,authorityVersion:environment.OGC_PUBLIC_SEARCH_AUTHORITY_VERSION});
   assertRow(row,identity,profile,locale,region);

@@ -4,6 +4,7 @@ import {
   createMarketSnapshotIdentity,
   createSearchQueryFanout,
   type CanonicalBuyerQuestion,
+  type CanonicalBuyerQuestionSet,
   type PublicSearchSurface,
   type PublicSearchSurfaceAdapter,
   type PublicSearchSurfaceAuthority
@@ -15,6 +16,7 @@ import { getMarketProviderEvidenceBundle } from "@/db/provider-evidence";
 import { PROVIDER_PASSAGE_SELECTOR_VERSION, selectProviderPassages } from "@open-geo-console/citation-intelligence";
 import { PublicSourceSnapshotAuthorityMismatchError, PublicSourceSnapshotUnavailableError, isDeferrablePublicSourceOutage, resolvePublicSourceSnapshot } from "./public-source-snapshot-resolver";
 import { createConcurrencyGate } from "./bounded-scheduler";
+import { createPublicSourceQuestionFanouts } from "./public-source-forensics";
 
 const surface: PublicSearchSurface = {
   surfaceId: "fixture-public-search", providerId: "fixture-provider", productId: "fixture-search",
@@ -137,6 +139,63 @@ describe("public-source snapshot resolver", () => {
       return observationPayload("complete");
     });
     await resolvePublicSourceSnapshot({ authority, adapter: fixtureAdapter(authority, search), question, fanout, evidenceCutoffAt: "2030-01-04T00:00:00.000Z", leaseOwner: "worker-concurrency" });
+    expect(peak).toBe(2);
+  });
+
+  it("reuses the provider-standard full fanout for the later forensic resolution without another adapter call", async () => {
+    const authority = await installAuthority("review-provider-forensic-reuse");
+    const questions: CanonicalBuyerQuestionSet = { questionSetVersion: question.questionSetVersion, locale: question.locale, region: question.region, confidence: "high", questions: [question], limitations: [] };
+    const providerFanout = createPublicSourceQuestionFanouts({ questions, authority, excludedIdentities: [] })[0]!;
+    const forensicFanout = createPublicSourceQuestionFanouts({ questions, authority, excludedIdentities: [] })[0]!;
+    expect(createMarketSnapshotIdentity({ question, surface, fanout: providerFanout }).id)
+      .toBe(createMarketSnapshotIdentity({ question, surface, fanout: forensicFanout }).id);
+    const search = vi.fn(async () => observationPayload("complete"));
+    const common = { authority, adapter: fixtureAdapter(authority, search), question, evidenceCutoffAt: "2030-01-04T00:00:00.000Z" };
+
+    const provider = await resolvePublicSourceSnapshot({ ...common, fanout: providerFanout, leaseOwner: "worker-provider-standard" });
+    const callsAfterProvider = search.mock.calls.length;
+    const forensic = await resolvePublicSourceSnapshot({ ...common, fanout: forensicFanout, leaseOwner: "worker-forensic" });
+
+    expect(providerFanout.queries).toHaveLength(6);
+    expect(callsAfterProvider).toBe(6);
+    expect(search).toHaveBeenCalledTimes(callsAfterProvider);
+    expect(forensic).toMatchObject({ snapshotId: provider.snapshotId, collectedForThisRun: false, actualCostMicros: 0 });
+  });
+
+  it("allocates a search deadline per concurrency wave instead of per raw query", async () => {
+    const authority = await installAuthority("review-concurrency-wave-budget");
+    const baseFanout = createSearchQueryFanout({ question, surface, excludedIdentities: [] });
+    const fanout = { ...baseFanout, budget: { ...baseFanout.budget, timeoutMs: 60_000 } };
+    let active = 0;
+    let peak = 0;
+    const search = vi.fn(async ({ signal }: Parameters<PublicSearchSurfaceAdapter["search"]>[0]) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 70);
+          signal.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(signal.reason);
+          }, { once: true });
+        });
+        return observationPayload("complete");
+      } finally {
+        active -= 1;
+      }
+    });
+
+    await expect(resolvePublicSourceSnapshot({
+      authority,
+      adapter: fixtureAdapter(authority, search),
+      question,
+      fanout,
+      evidenceCutoffAt: "2030-01-04T00:00:00.000Z",
+      leaseOwner: "worker-concurrency-wave-budget",
+      executionBudget: { searchMs: 300, retrievalMs: 60_000 }
+    })).resolves.toMatchObject({ collectedForThisRun: true, refreshFailed: false });
+    expect(fanout.queries).toHaveLength(6);
+    expect(search).toHaveBeenCalledTimes(6);
     expect(peak).toBe(2);
   });
 

@@ -2,11 +2,12 @@ import {chmod, writeFile} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import path from "node:path";
 import {finalizeMiMoPublicSearchCertification, runMiMoPublicSearchProbe} from "@/public-search-adapters/mimo/certification";
+import {finalizeAnySearchPublicSearchCertification, runAnySearchPublicSearchProbe} from "@/public-search-adapters/anysearch/certification";
 import {assertPrivatePublicSearchCertificationArtifact, ensurePrivatePublicSearchCertificationDirectory, privatePublicSearchCertificationPath} from "@/public-search/certification-path";
 import {readPublicSearchCertificationSigningConfig} from "@/public-search/certification-artifact";
 
 export interface PublicSearchCertificationCommandOptions {
-  adapterId: "mimo";
+  adapterId: "mimo" | "anysearch";
   locale: string;
   region: string;
   output: string;
@@ -20,7 +21,8 @@ export interface ApprovedPublicSearchCertificationAdapter {
 }
 
 export const approvedPublicSearchCertificationAdapters: ReadonlyMap<string, ApprovedPublicSearchCertificationAdapter> = new Map([
-  ["mimo", {certify: certifyMiMoPublicSearchSurface}]
+  ["mimo", {certify: certifyMiMoPublicSearchSurface}],
+  ["anysearch", {certify: certifyAnySearchPublicSearchSurface}]
 ]);
 
 export function parsePublicSearchCertificationCommand(args: string[]): PublicSearchCertificationCommandOptions {
@@ -33,7 +35,7 @@ export function parsePublicSearchCertificationCommand(args: string[]): PublicSea
   const termsReviewReference = values.get("terms-review-reference")?.trim();
   const commercialUseReviewReference = values.get("commercial-use-review-reference")?.trim();
   const storageDisplayReviewReference = values.get("storage-display-review-reference")?.trim();
-  if (adapterId !== "mimo") throw new Error("No approved public-search certification adapter is installed; network certification remains fail-closed.");
+  if (adapterId !== "mimo" && adapterId !== "anysearch") throw new Error("No approved public-search certification adapter is installed; network certification remains fail-closed.");
   if (!locale || !region || !output || !reviewedBy || !termsReviewReference || !commercialUseReviewReference || !storageDisplayReviewReference) {
     throw new Error("--adapter, --locale, --region, --output, --reviewed-by, and all three --*-review-reference arguments are required.");
   }
@@ -71,6 +73,33 @@ async function certifyMiMoPublicSearchSurface(input: PublicSearchCertificationCo
   await chmod(input.output, 0o600);
   await assertPrivatePublicSearchCertificationArtifact(input.output);
   console.log(JSON.stringify({adapterId: artifact.adapterId, mode: artifact.mode, installable: artifact.installable, artifactHash: artifact.artifactHash, output: input.output}));
+}
+
+async function certifyAnySearchPublicSearchSurface(input: PublicSearchCertificationCommandOptions & {environment: NodeJS.ProcessEnv}): Promise<void> {
+  if (input.environment.OGC_DEPLOYMENT_PROFILE !== "staging") throw new Error("AnySearch public-search certification is restricted to protected staging.");
+  const probe = await runAnySearchPublicSearchProbe({environment: input.environment, locale: input.locale, region: input.region});
+  const artifact = finalizeAnySearchPublicSearchCertification({
+    probe,
+    locale: input.locale,
+    region: input.region,
+    reviewedBy: input.reviewedBy,
+    reviewedAt: new Date().toISOString(),
+    review: {
+      termsReviewReference: input.termsReviewReference,
+      commercialUseReviewReference: input.commercialUseReviewReference,
+      storageDisplayReviewReference: input.storageDisplayReviewReference
+    },
+    signing: readPublicSearchCertificationSigningConfig(input.environment)
+  });
+  await persistCertificationArtifact(input.output, artifact);
+}
+
+async function persistCertificationArtifact(output: string, artifact: ReturnType<typeof finalizeAnySearchPublicSearchCertification>): Promise<void> {
+  await ensurePrivatePublicSearchCertificationDirectory();
+  await writeFile(output, `${JSON.stringify(artifact, null, 2)}\n`, {encoding: "utf8", flag: "wx", mode: 0o600});
+  await chmod(output, 0o600);
+  await assertPrivatePublicSearchCertificationArtifact(output);
+  console.log(JSON.stringify({adapterId: artifact.adapterId, mode: artifact.mode, installable: artifact.installable, artifactHash: artifact.artifactHash, output}));
 }
 
 function pairs(args: string[]): Map<string, string> {

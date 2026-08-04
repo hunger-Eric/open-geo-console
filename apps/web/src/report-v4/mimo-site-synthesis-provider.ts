@@ -10,7 +10,8 @@ import {
   buildReportV4MimoStructuredTokenBudget,
   createReportV4MimoStructuredInvoker,
   type ProviderDependencies,
-  type ReportV4MimoStructuredInvokeInput
+  type ReportV4MimoStructuredInvokeInput,
+  type ReportV4StructuredInvoker
 } from "./mimo-provider";
 import { type ReportV4ModelRuntimeConfig } from "./model-runtime-config";
 
@@ -53,6 +54,13 @@ export function createReportV4MimoSiteSynthesisProvider(
   dependencies: ProviderDependencies
 ): ReportV4MimoSiteSynthesisProvider {
   const invoker = createReportV4MimoStructuredInvoker(dependencies);
+  return createReportV4SiteSynthesisProvider(invoker, "MiMo");
+}
+
+export function createReportV4SiteSynthesisProvider(
+  invoker: ReportV4StructuredInvoker,
+  providerLabel: string
+): ReportV4MimoSiteSynthesisProvider {
   return Object.freeze({
     async analyzePage(input: ReportV4MimoPageAnalysisInput, signal: AbortSignal) {
       const canonical = canonicalPageInput(input);
@@ -62,7 +70,7 @@ export function createReportV4MimoSiteSynthesisProvider(
       } catch (error) {
         signal.throwIfAborted();
         throw new ReportV4MimoSiteSynthesisOutputError(
-          "MiMo returned an invalid V4 page-analysis contract.",
+          `${providerLabel} returned an invalid V4 page-analysis contract.`,
           { cause: error }
         );
       }

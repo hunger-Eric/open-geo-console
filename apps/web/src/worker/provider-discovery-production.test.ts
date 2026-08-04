@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConfirmedBusinessQuestionSet, PublicSearchSurfaceAuthority } from "@open-geo-console/public-search-observer";
+import { createMarketSnapshotIdentity, toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet, type PublicSearchSurfaceAuthority } from "@open-geo-console/public-search-observer";
 import {
   bindQuestionScopedDirectEvidence,
   createProductionProviderDiscoveryContext,
@@ -8,6 +8,7 @@ import {
   sanitizePreVerificationCheckpoint
 } from "./provider-discovery-production";
 import { runProviderDiscoveryPipeline } from "./provider-discovery-pipeline";
+import { createPublicSourceQuestionFanouts } from "./public-source-forensics";
 import { PAID_V3_DIRECT_DEBUG_TRACE_PREFIX, createPaidV3DirectDebugTrace, type PaidV3DirectDebugTrace } from "./paid-v3-direct-debug-trace";
 
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), providerBundle: vi.fn(), snapshotBundle: vi.fn(), appendClaims: vi.fn() }));
@@ -228,7 +229,7 @@ describe("production provider discovery composition", () => {
     expect([...domains.values()]).toEqual(["winner.example"]);
   });
 
-  it("resolves paid Q2 and Q3 sequentially with the proven bounded search model", async () => {
+  it("resolves complete paid Q2 and Q3 fanouts sequentially with bounded default query concurrency", async () => {
     mocks.resolve.mockReset();
     let releaseQ2!: () => void;
     const q2Gate = new Promise<void>((resolve) => { releaseQ2 = resolve; });
@@ -253,9 +254,9 @@ describe("production provider discovery composition", () => {
     const standardRequests = mocks.resolve.mock.calls.map(([request]) => request);
     expect(standardRequests).toHaveLength(2);
     for (const request of standardRequests) {
-      expect(request.fanout.queries).toHaveLength(3);
+      expect(request.fanout.queries).toHaveLength(6);
       expect(request.fanout.budget.timeoutMs).toBe(60_000);
-      expect(request.searchConcurrency).toBe(1);
+      expect(request.searchConcurrency).toBeUndefined();
       expect(request.maxSourceRetrievals).toBe(6);
       expect(request.maxAvailableSources).toBe(3);
       expect(request.maxSourcesPerDomain).toBe(2);
@@ -308,6 +309,8 @@ describe("production provider discovery composition", () => {
 
   it("reuses discovery, verification and two standard question snapshots", async () => {
     let checkpoint = null;
+    mocks.resolve.mockReset();
+    mocks.snapshotBundle.mockReset();
     mocks.resolve.mockImplementation(async (input: { question: { kind: string }; snapshotMetadata?: { snapshotKind: string }; fanout: { queries: unknown[] } }) => {
       const kind = input.snapshotMetadata?.snapshotKind ?? input.question.kind;
       const snapshotId = kind === "provider_discovery" ? "snapshot-discovery" : kind === "candidate_verification" ? "snapshot-verification" : kind === "capability_fit" ? "snapshot-q2" : "snapshot-q3";
@@ -319,8 +322,11 @@ describe("production provider discovery composition", () => {
     const passage = { id: "passage-alpha", sourceEvidenceId: "source-alpha", passageOrder: 0, exactExcerpt: "Alpha Logistics provides self operated freight with an owned fleet.", excerptHash: "a".repeat(64), relevanceScore: 100,
       matchedEntityTerms: ["Alpha Logistics"], matchedServiceTerms: ["freight"], matchedControlTerms: ["self operated", "owned"], matchedCapabilityTerms: ["fleet"], selectorVersion: "provider-passage-selector-v1", createdAt: new Date() };
     mocks.providerBundle.mockResolvedValue({ snapshotIds: ["snapshot-verification"], passages: [passage], claims: [] });
-    mocks.snapshotBundle.mockResolvedValue({ snapshot: { id: "snapshot-verification", status: "completed", cacheIdentity: "verification-cache" }, attempts: [], queries: [],
-      observations: [{ id: "observation-alpha", title: "Alpha Logistics" }], sources: [{ id: "source-alpha", observationId: "observation-alpha", canonicalUrl: "https://alpha.example/logistics", registrableDomain: "alpha.example", sourceCategory: "company_owned", retrievalState: "available", retrievedAt: new Date("2030-01-01T00:00:00.000Z") }] });
+    const standardCacheIdentities = expectedStandardCacheIdentities();
+    mocks.snapshotBundle.mockImplementation(async (snapshotId: string) => snapshotId === "snapshot-verification"
+      ? { snapshot: { id: snapshotId, status: "completed", cacheIdentity: "verification-cache" }, attempts: [], queries: [],
+          observations: [{ id: "observation-alpha", title: "Alpha Logistics" }], sources: [{ id: "source-alpha", observationId: "observation-alpha", canonicalUrl: "https://alpha.example/logistics", registrableDomain: "alpha.example", sourceCategory: "company_owned", retrievalState: "available", retrievedAt: new Date("2030-01-01T00:00:00.000Z") }] }
+      : { snapshot: { id: snapshotId, status: "completed", cacheIdentity: standardCacheIdentities.get(snapshotId) }, attempts: [], queries: [], observations: [], sources: [] });
     mocks.appendClaims.mockResolvedValue([]);
     const runtime = { adapter: { id: "fixture", surface, authority, search: vi.fn() }, authority, identity: { adapterId: "fixture", providerId: "fixture", productId: "search", modelId: "fixture", adapterVersion: "v1", surface } };
     const context = createProductionProviderDiscoveryContext({ runtime, questionSet: questions(), artifactContract: "combined_geo_report_v3", websiteCategories: ["logistics"], websiteFoundationHash: "f".repeat(64), workerId: "worker", evidenceCutoffAt: "2030-01-01T00:00:00.000Z",
@@ -437,6 +443,14 @@ describe("production provider discovery composition", () => {
     });
     expect(mocks.snapshotBundle).toHaveBeenCalledWith("snapshot-verification");
     expect(mocks.snapshotBundle).not.toHaveBeenCalledWith("");
+
+    mocks.snapshotBundle.mockResolvedValueOnce({ snapshot: { id: "snapshot-q2", status: "completed", cacheIdentity: "legacy-prefix-cache" }, attempts: [], queries: [], observations: [], sources: [] });
+    const staleContext = createProductionProviderDiscoveryContext({
+      runtime, questionSet: questions(), artifactContract: "combined_geo_report_v3", websiteCategories: ["logistics"], websiteFoundationHash: "f".repeat(64), workerId: "worker",
+      evidenceCutoffAt: "2030-01-01T00:00:00.000Z", extractionModel: "fixture-model", extractionClient: { configuredModel: "fixture-model", completeJson: vi.fn() },
+      getCheckpoint: async () => resumedCheckpoint, saveCheckpoint: async () => undefined
+    });
+    await expect(staleContext.dependencies.getCheckpoint()).rejects.toThrow(/snapshot identity changed/i);
   });
 });
 
@@ -533,6 +547,12 @@ function questions(): ConfirmedBusinessQuestionSet { const base = { generatedTex
   { ...base, purpose: "customer_region_fit", service: "logistics", audience: "buyers", marketRegion: "US", neutralPublicText: "Which logistics services fit buyers in the target region?", privateText: "Which logistics services fit buyers in the target region?", neutralContentHash: "q2" },
   { ...base, purpose: "purchase_delivery_risk", service: "logistics", audience: "buyers", marketRegion: "US", neutralPublicText: "What logistics delivery conditions and risks should buyers compare?", privateText: "What logistics delivery conditions and risks should buyers compare?", neutralContentHash: "q3" }
 ] } as ConfirmedBusinessQuestionSet; }
+
+function expectedStandardCacheIdentities(): Map<string, string> {
+  const canonical = toCanonicalBuyerQuestionSet(questions());
+  const fanouts = createPublicSourceQuestionFanouts({ questions: canonical, authority, excludedIdentities: [], ordinals: [1, 2] });
+  return new Map(fanouts.map((fanout, index) => [`snapshot-q${index + 2}`, createMarketSnapshotIdentity({ question: canonical.questions[index + 1]!, surface, fanout }).id]));
+}
 
 function resolvedSnapshot(snapshotId: string) {
   return {

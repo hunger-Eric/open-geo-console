@@ -1,32 +1,37 @@
 import {fileURLToPath} from "node:url";
 import path from "node:path";
 import {runMiMoPublicSearchProbe, type MiMoPublicSearchProbeSummary} from "@/public-search-adapters/mimo/certification";
+import {runAnySearchPublicSearchProbe, type AnySearchPublicSearchProbeSummary} from "@/public-search-adapters/anysearch/certification";
 
-export interface PublicSearchProbeCommandOptions {adapter: "mimo"; locale: string; region: string;}
+export type PublicSearchProbeSummary = MiMoPublicSearchProbeSummary | AnySearchPublicSearchProbeSummary;
+export interface PublicSearchProbeCommandOptions {adapter: "mimo" | "anysearch"; locale: string; region: string;}
 
 export function parsePublicSearchProbeCommand(args: string[]): PublicSearchProbeCommandOptions {
   const values = pairs(args);
   const adapter = values.get("adapter")?.trim();
   const locale = values.get("locale")?.trim();
   const region = values.get("region")?.trim();
-  if (adapter !== "mimo") throw new Error("--adapter must name the compile-time MiMo adapter.");
+  if (adapter !== "mimo" && adapter !== "anysearch") throw new Error("--adapter must name the approved MiMo or AnySearch adapter.");
   if (!locale || !region) throw new Error("--locale and --region are required.");
   return {adapter, locale, region};
 }
 
 export async function runPublicSearchProbeCommand(
   args: string[],
-  dependencies: {environment?: NodeJS.ProcessEnv; runProbe?: typeof runMiMoPublicSearchProbe} = {}
-): Promise<MiMoPublicSearchProbeSummary> {
+  dependencies: {environment?: NodeJS.ProcessEnv; runProbe?: (input: Parameters<typeof runMiMoPublicSearchProbe>[0]) => Promise<PublicSearchProbeSummary>} = {}
+): Promise<PublicSearchProbeSummary> {
   const options = parsePublicSearchProbeCommand(args);
-  return (dependencies.runProbe ?? runMiMoPublicSearchProbe)({
+  const runProbe = dependencies.runProbe ?? (options.adapter === "mimo"
+    ? runMiMoPublicSearchProbe
+    : runAnySearchPublicSearchProbe);
+  return runProbe({
     environment: dependencies.environment ?? process.env,
     locale: options.locale,
     region: options.region
   });
 }
 
-export function formatPublicSearchProbeSummary(summary: MiMoPublicSearchProbeSummary): string {
+export function formatPublicSearchProbeSummary(summary: PublicSearchProbeSummary): string {
   return JSON.stringify({
     adapterId: summary.adapterId,
     surface: {
@@ -47,7 +52,7 @@ export function formatPublicSearchProbeSummary(summary: MiMoPublicSearchProbeSum
   });
 }
 
-export function assertPublicSearchProbeReadiness(summary: MiMoPublicSearchProbeSummary): void {
+export function assertPublicSearchProbeReadiness(summary: PublicSearchProbeSummary): void {
   if (summary.cases.length !== 3 || summary.cases.some(({passed}) => passed !== true)) {
     throw new Error("Public-search quality readiness did not pass every required case.");
   }

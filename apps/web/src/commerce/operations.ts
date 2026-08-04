@@ -35,7 +35,10 @@ export interface CommercialOperationResult {
   failed: number;
 }
 
-export async function processQueuedCommercialEmails(limit = 25, options: { orderId?: string } = {}): Promise<CommercialOperationResult> {
+export async function processQueuedCommercialEmails(
+  limit = 25,
+  options: { orderId?: string; createdAtOrAfter?: Date } = {}
+): Promise<CommercialOperationResult> {
   const owner = `email-${randomUUID()}`;
   const deliveries = await claimEmailDeliveries({ owner, limit, leaseSeconds: 120, ...options });
   const result = emptyResult(deliveries.length);

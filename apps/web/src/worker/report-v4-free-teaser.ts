@@ -53,13 +53,11 @@ import {
   getConfirmedBusinessQuestionSet,
   prepareBusinessQuestionCandidates
 } from "@/db/business-questions";
-import { getActivePublicSearchSurfaceAuthority } from "@/db/public-search-authority";
 import type { JobCheckpoint } from "@/db/schema";
 import { getMarketSnapshotBundle } from "@/db/market-snapshots";
 import type { ReportV4SiteSnapshotBundle } from "@/db/report-v4-site-snapshots";
-import { resolveGenerativeSearchAnswerProvider, resolveProductionPublicSearchRuntime } from "@/public-source-forensics/production-runtime";
-import { buildReportV4MimoDiagnosisTokenBudget, createReportV4MimoDiagnosisProvider, createReportV4MimoStructuredInvoker, type ReportV4MimoStructuredInvoker } from "@/report-v4/mimo-provider";
-import { loadReportV4ModelRuntimeConfig } from "@/report-v4/model-runtime-config";
+import { buildReportV4MimoDiagnosisTokenBudget, type ReportV4StructuredInvoker } from "@/report-v4/mimo-provider";
+import { getPreparedProviderProfileRuntime, type ProviderProfilePublicSearchRuntime } from "@/provider-profile/runtime";
 import { createConcurrencyGate } from "./bounded-scheduler";
 import { JobError, OrchestrationInvariantError, type JobFailureClassification } from "./job-errors";
 import {
@@ -208,7 +206,7 @@ export async function generateFreeTeaser(input: {
   saveCheckpoint: FreeTeaserCheckpointWriter;
   onSemanticReviewBatchEvidence?: (evidence: FreeV4SemanticReviewBatchEvidence) => void;
   signal?: AbortSignal;
-  structuredInvoker?: ReportV4MimoStructuredInvoker;
+  structuredInvoker?: ReportV4StructuredInvoker;
 }): Promise<FreeTeaserResult> {
   input.signal?.throwIfAborted();
   assertTerminalAdmission(input.admission, input.reportId);
@@ -222,10 +220,8 @@ export async function generateFreeTeaser(input: {
     throw new Error("Unsupported Free direct-semantics contract.");
   }
 
-  const runtime = await resolveProductionPublicSearchRuntime({
-    environment: process.env,
-    getAuthority: getActivePublicSearchSurfaceAuthority
-  });
+  const providerRuntime = getPreparedProviderProfileRuntime();
+  const runtime = providerRuntime.publicSearchRuntime;
   const foundationHash = hashFreeTeaserFoundation(input.foundation);
   const admissionContentIdentityHash = input.admission.snapshot.contentIdentityHash!;
   const identityCore = {
@@ -420,9 +416,9 @@ export async function generateFreeTeaser(input: {
       question,
       locale: runtime.authority.surface.locale,
       targetPages,
-      provider: createReportV4MimoDiagnosisProvider({ environment: process.env }),
+      provider: providerRuntime.createDiagnosisProvider(),
       getTokenBudget: (request) => buildReportV4MimoDiagnosisTokenBudget({
-        runtime: loadReportV4ModelRuntimeConfig(process.env),
+        runtime: providerRuntime.modelRuntime,
         request
       }),
       signal: input.signal,
@@ -493,19 +489,17 @@ export async function generateFreeTeaser(input: {
 export async function invokeFreeV4DirectAnalysis(input: {
   payload: unknown;
   signal?: AbortSignal;
-  structuredInvoker?: ReportV4MimoStructuredInvoker;
+  structuredInvoker?: ReportV4StructuredInvoker;
 }): Promise<unknown> {
   const signal = input.signal ?? new AbortController().signal;
   signal.throwIfAborted();
-  const structured = input.structuredInvoker ?? createReportV4MimoStructuredInvoker({
-    environment: process.env,
-    lockedRuntime: loadReportV4ModelRuntimeConfig(process.env)
-  });
+  const structured = input.structuredInvoker ?? getPreparedProviderProfileRuntime().createStructuredInvoker();
   const output = await structured.invoke({
     operation: "sourceDiagnosis",
     systemText: [
-      "Analyze the supplied native-search answer and its actual source annotations.",
-      "Explain why those sources support the answer, whether the submitted site appears, what gaps remain, and what should be improved.",
+      "Write customer-visible GEO findings for the native-search answer and its actual source annotations.",
+      "Lead summary with the concrete answer-and-source conclusion, then state whether the submitted site appears and its specific gap. Write observations as facts contributed by the returned sources, and recommendations as direct actions for the submitted site.",
+      "Do not narrate the analysis task, report structure, supplied payload, instructions, evidence contract, or writing process. Do not tell the reader what this section will explain.",
       "targetIdentity is authoritative. When naming the submitted target, use targetIdentity.canonicalName exactly; do not translate, abbreviate, or invent another target name. Its aliases and domain identify the same target.",
       "The S and T handles are the only evidence handles you may cite. T pages are unassessed candidates, not proof of relevance.",
       "List every S/T handle actually relied on by the summary, observations, or recommendations. Do not recommend adding the submitted target merely because a T page exists.",
@@ -907,7 +901,7 @@ async function observeTeaserQuestions(input: {
   foundation: AiWebsiteReportV1;
   questionSet: ConfirmedBusinessQuestionSet;
   evidenceCutoffAt: string;
-  runtime: Awaited<ReturnType<typeof resolveProductionPublicSearchRuntime>>;
+  runtime: ProviderProfilePublicSearchRuntime;
   semanticReviewEnabled: boolean;
   signal?: AbortSignal;
 }): Promise<{ snapshotIds: readonly [string, string, string]; metrics?: FreeTeaserMetrics }> {
@@ -950,7 +944,7 @@ function createFreeTeaserFanouts(
   questionSet: ConfirmedBusinessQuestionSet,
   targetUrl: string,
   foundation: AiWebsiteReportV1,
-  runtime: Awaited<ReturnType<typeof resolveProductionPublicSearchRuntime>>
+  runtime: ProviderProfilePublicSearchRuntime
 ): readonly SearchQueryFanout[] {
   const exclusions: CustomerIdentityExclusion[] = [
     { kind: "customer_domain", value: new URL(targetUrl).hostname },
@@ -972,7 +966,7 @@ export async function loadVerifiedFreeTeaserSnapshotBundles(input: {
   targetUrl: string;
   foundation: AiWebsiteReportV1;
   questionSet: ConfirmedBusinessQuestionSet;
-  runtime: Awaited<ReturnType<typeof resolveProductionPublicSearchRuntime>>;
+  runtime: ProviderProfilePublicSearchRuntime;
 }): Promise<VerifiedFreeTeaserSnapshotBundles> {
   const canonicalQuestions = toCanonicalBuyerQuestionSet(input.questionSet).questions;
   const fanouts = createFreeTeaserFanouts(input.questionSet, input.targetUrl, input.foundation, input.runtime);
@@ -995,7 +989,7 @@ function verifyFreeTeaserSnapshotBundle(input: {
   snapshotId: string;
   question: ReturnType<typeof toCanonicalBuyerQuestionSet>["questions"][number];
   fanout: SearchQueryFanout;
-  authority: Awaited<ReturnType<typeof resolveProductionPublicSearchRuntime>>["authority"];
+  authority: ProviderProfilePublicSearchRuntime["authority"];
 }): void {
   const { bundle, snapshotId, question, fanout, authority } = input;
   const snapshot = bundle.snapshot;
@@ -1052,7 +1046,7 @@ async function answerTeaserQuestionOne(input: {
   signal?: AbortSignal;
   semanticMode: "legacy" | "deferred" | "free_direct";
 }): Promise<{ answerResult: GenerativeSearchAnswerResult; draft: FreeTeaserQ1Core; card?: GenerativeSearchAnswerCardV3 }> {
-  const provider: GenerativeSearchAnswerProvider = resolveGenerativeSearchAnswerProvider(process.env, {
+  const provider: GenerativeSearchAnswerProvider = getPreparedProviderProfileRuntime().createQuestionAnswerProvider({
     locale: input.locale,
     region: input.region
   });
@@ -1241,7 +1235,7 @@ async function reviewFreeTeaser(input: {
   admission: ReportV4SiteSnapshotBundle;
   checkpoint: FreeTeaserCheckpointV1;
   questionSet: ConfirmedBusinessQuestionSet;
-  runtime: Awaited<ReturnType<typeof resolveProductionPublicSearchRuntime>>;
+  runtime: ProviderProfilePublicSearchRuntime;
   bundles: VerifiedFreeTeaserSnapshotBundles;
   onSemanticReviewBatchEvidence?: (evidence: FreeV4SemanticReviewBatchEvidence) => void;
   signal?: AbortSignal;
@@ -1251,9 +1245,9 @@ async function reviewFreeTeaser(input: {
   const diagnosis = checkpoint.q1DiagnosisDraft;
   const snapshotIds = checkpoint.observationSnapshotIds;
   if (!draft || !diagnosis || !snapshotIds) throw new Error("Marked Free teaser review inputs are incomplete.");
-  const runtime = loadReportV4ModelRuntimeConfig(process.env);
+  const runtime = getPreparedProviderProfileRuntime().modelRuntime;
   const reviewInput = buildFreeTeaserSemanticReviewInput({ ...input, card: draft, diagnosis, modelId: runtime.modelProfile.operations.websiteSynthesis.model });
-  const structured = createReportV4MimoStructuredInvoker({ environment: process.env, lockedRuntime: runtime });
+  const structured = getPreparedProviderProfileRuntime().createStructuredInvoker(runtime);
   const signal = input.signal ?? new AbortController().signal;
   const reviewed = await runOfflineReportSemanticReviewBatched(
     reviewInput,
@@ -1306,7 +1300,7 @@ function buildFreeTeaserSemanticReviewInput(input: {
   admission: ReportV4SiteSnapshotBundle;
   checkpoint: FreeTeaserCheckpointV1;
   questionSet: ConfirmedBusinessQuestionSet;
-  runtime: Awaited<ReturnType<typeof resolveProductionPublicSearchRuntime>>;
+  runtime: ProviderProfilePublicSearchRuntime;
   bundles: VerifiedFreeTeaserSnapshotBundles;
   card: FreeTeaserQ1Core | GenerativeSearchAnswerCardV3;
   diagnosis: NonNullable<GenerativeSearchAnswerCardV3["diagnosis"]>;
@@ -1393,14 +1387,14 @@ function verifyReadyFreeTeaserExternalProjection(input: {
   foundation: AiWebsiteReportV1;
   admission: ReportV4SiteSnapshotBundle;
   questionSet: ConfirmedBusinessQuestionSet;
-  runtime: Awaited<ReturnType<typeof resolveProductionPublicSearchRuntime>>;
+  runtime: ProviderProfilePublicSearchRuntime;
   bundles: VerifiedFreeTeaserSnapshotBundles;
 }): void {
   const { checkpoint } = input;
   if (!checkpoint.semanticReview || !checkpoint.q1AnswerCard?.diagnosis) throw new Error("Marked Free teaser ready review authority is incomplete.");
   verifyFreeTeaserSemanticProjection(checkpoint);
   const originalTextByPath = new Map(checkpoint.semanticReview.input.fields.map((field) => [field.path, field.originalText]));
-  const modelRuntime = loadReportV4ModelRuntimeConfig(process.env);
+  const modelRuntime = getPreparedProviderProfileRuntime().modelRuntime;
   const expectedInput = buildFreeTeaserSemanticReviewInput({
     ...input,
     reportId: checkpoint.reportId,

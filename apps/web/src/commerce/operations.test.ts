@@ -150,13 +150,14 @@ describe("commercial provider failure persistence", () => {
 
   it("passes an exact order filter only to the lease boundaries", async () => {
     const orderId = "4286cb73-6349-467a-8aaf-9b196624da92";
+    const createdAtOrAfter = new Date("2026-08-03T00:00:00.000Z");
     mocks.claimEmailDeliveries.mockResolvedValue([]);
     mocks.claimPendingRefunds.mockResolvedValue([]);
 
-    await expect(processQueuedCommercialEmails(2, { orderId })).resolves.toEqual({ claimed: 0, succeeded: 0, retried: 0, failed: 0 });
+    await expect(processQueuedCommercialEmails(2, { orderId, createdAtOrAfter })).resolves.toEqual({ claimed: 0, succeeded: 0, retried: 0, failed: 0 });
     await expect(processPendingCommercialRefunds(1, { orderId })).resolves.toEqual({ claimed: 0, succeeded: 0, retried: 0, failed: 0 });
 
-    expect(mocks.claimEmailDeliveries).toHaveBeenCalledWith(expect.objectContaining({ orderId, limit: 2, leaseSeconds: 120 }));
+    expect(mocks.claimEmailDeliveries).toHaveBeenCalledWith(expect.objectContaining({ orderId, createdAtOrAfter, limit: 2, leaseSeconds: 120 }));
     expect(mocks.claimPendingRefunds).toHaveBeenCalledWith(expect.objectContaining({ orderId, limit: 1, leaseSeconds: 120 }));
   });
 

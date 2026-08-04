@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApprovedPublicSearchAdapterRegistry } from "@/public-search-adapters/registry";
 import { createMiMoPublicSearchAdapterFactory } from "@/public-search-adapters/mimo/adapter";
+import { createAnySearchPublicSearchAdapterFactory } from "@/public-search-adapters/anysearch/adapter";
 import type { PublicSourceForensicsDependencies } from "@/worker/public-source-forensics";
 import {
   createProductionPublicSourceForensicsDependencies,
@@ -8,7 +9,7 @@ import {
   type ProductionPublicSourceForensicsRuntimeOptions
 } from "./production-runtime";
 
-const environment = { OGC_PUBLIC_SEARCH_RUNTIME_ENABLED: "true", OGC_DEPLOYMENT_PROFILE: "staging", OGC_PUBLIC_SEARCH_ADAPTER: "mimo", OGC_PUBLIC_SEARCH_LOCALE: "zh-CN", OGC_PUBLIC_SEARCH_REGION: "CN", OGC_PUBLIC_SEARCH_MIMO_BASE_URL: "https://example.test/v1", OGC_PUBLIC_SEARCH_MIMO_API_KEY: "search-key", OGC_PUBLIC_SEARCH_MIMO_MODEL: "mimo-v2.5-pro" };
+const environment = { NODE_ENV: "test", OGC_PROVIDER_PROFILE: "mimo_native", OGC_PUBLIC_SEARCH_RUNTIME_ENABLED: "true", OGC_DEPLOYMENT_PROFILE: "staging", OGC_PUBLIC_SEARCH_ADAPTER: "mimo", OGC_PUBLIC_SEARCH_LOCALE: "zh-CN", OGC_PUBLIC_SEARCH_REGION: "CN", OGC_PUBLIC_SEARCH_MIMO_BASE_URL: "https://example.test/v1", OGC_PUBLIC_SEARCH_MIMO_API_KEY: "search-key", OGC_PUBLIC_SEARCH_MIMO_MODEL: "mimo-v2.5-pro" };
 describe("production public-search runtime", () => {
   it("fails closed for disabled runtime, missing search configuration, and identity drift", async () => {
     const registry=createApprovedPublicSearchAdapterRegistry([createMiMoPublicSearchAdapterFactory()]);
@@ -20,6 +21,22 @@ describe("production public-search runtime", () => {
   it("constructs only an exact registered runtime", async () => {
     const runtime=await resolveProductionPublicSearchRuntime({environment,registry:createApprovedPublicSearchAdapterRegistry([createMiMoPublicSearchAdapterFactory()]),getAuthority:async()=>authority()});
     expect(runtime.identity).toMatchObject({adapterId:"mimo",providerId:"xiaomi-mimo",modelId:"mimo-v2.5-pro"});
+  });
+
+  it("constructs the exact AnySearch runtime without MiMo configuration", async () => {
+    const anySearchEnvironment = {
+      ...environment,
+      OGC_PROVIDER_PROFILE: "sensenova_anysearch",
+      OGC_PUBLIC_SEARCH_ADAPTER: "anysearch",
+      OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL: "https://api.anysearch.com/v1/search",
+      OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY: "anysearch-key"
+    };
+    const runtime = await resolveProductionPublicSearchRuntime({
+      environment: anySearchEnvironment,
+      registry: createApprovedPublicSearchAdapterRegistry([createAnySearchPublicSearchAdapterFactory()]),
+      getAuthority: async () => ({ ...authority(), adapterId: "anysearch", providerId: "anysearch", productId: "unified-search", modelId: "anysearch-unified-search-v1", adapterVersion: "anysearch-rest-adapter-v1", surfaceId: "anysearch-unified-search", surfaceVersion: "anysearch-unified-search-v1" })
+    });
+    expect(runtime.identity).toMatchObject({ adapterId: "anysearch", providerId: "anysearch", modelId: "anysearch-unified-search-v1" });
   });
 
   it("constructs injectable snapshot and persistence dependencies only after exact runtime resolution", async () => {

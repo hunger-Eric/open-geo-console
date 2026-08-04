@@ -30,8 +30,7 @@ export function SourceSelectionDiagnosisSection({ diagnosis, locale, targetUrl, 
 
   return <section className="report-section source-selection-diagnosis" data-source-selection-diagnosis={diagnosis.version} data-diagnosis-status={diagnosis.status}>
     <header className="source-diagnosis-heading">
-      <div><p className="section-index">03</p><h2>{copy.title}</h2><p>{copy.purpose}</p></div>
-      <p className="source-diagnosis-method">{copy.method}</p>
+      <h2>{copy.title}</h2>
     </header>
 
     {diagnosis.status === "unavailable" && diagnosis.sourceProfiles.length === 0
@@ -64,16 +63,7 @@ export function SourceSelectionDiagnosisSection({ diagnosis, locale, targetUrl, 
               : <p>{copy.noAction}</p>}
           </article>
         </div>
-
-        {diagnosis.limitations.some(({ code }) => code !== "no_cross_question_pattern")
-          ? <aside className="source-diagnosis-limitations"><h3>{copy.limitations}</h3><ul>{diagnosis.limitations.filter(({ code }) => code !== "no_cross_question_pattern").map((item, index) => <li key={`${item.code}-${index}`}>{item.message}</li>)}</ul></aside>
-          : null}
       </>}
-
-    <footer className="source-diagnosis-trust">
-      <p><strong>{copy.canConfirm}</strong>{copy.confirmed}</p>
-      <p><strong>{copy.cannotAssert}</strong>{copy.notCausal}</p>
-    </footer>
   </section>;
 }
 
@@ -146,18 +136,16 @@ function auditLabel(value: SourceSelectionProfileV1["auditStatus"], zh: boolean)
 function priorityLabel(value: "high" | "medium" | "low", zh: boolean): string { return ({ high: zh ? "高优先级" : "High priority", medium: zh ? "中优先级" : "Medium priority", low: zh ? "低优先级" : "Low priority" })[value]; }
 
 const ZH = {
-  title: "来源选择诊断", purpose: "解释这些答案为什么采用当前来源、来源分别贡献了什么，以及目标网站要补齐哪些条件，才更可能进入下一次生成式答案。",
-  method: "可验证采用解释 · 非内部排名推测", dominant: "主导来源模式", targetPosition: "目标站当前位置", breakthrough: "优先突破口",
+  title: "来源选择诊断", dominant: "主导来源模式", targetPosition: "目标站当前位置", breakthrough: "优先突破口",
   targetUsed: (count: number) => `目标网站在 ${count} 处答案来源中被采用`, targetAbsent: "三个问题中均未成为引用来源", noPattern: "本次未形成跨问题重复来源模式", noAction: "当前证据不足以形成可靠行动",
   returnedSources: "反复或重要的回答来源", sharedPattern: "跨来源共同规律", whatRecurs: "哪些来源特征反复出现", targetPath: "目标站差距", targetPathTitle: "目标网站进入答案的优先路径",
   contribution: "为答案贡献了什么", factors: "可观察入选因素", targetGap: "与目标网站的对应差距", question: "问题", traceableExcerpt: "可回查片段", unconfirmed: "贡献关系当前无法确认。",
-  limitations: "分析局限", canConfirm: "可以确认：", confirmed: "来源由同次回答返回，展示的引用片段和页面特征可以回查。", cannotAssert: "不能断言：", notCausal: "这些因素是模型内部排名权重，或调整某项因素就必然获得引用。", unavailable: "来源选择分析暂不可用"
+  unavailable: "来源选择分析暂不可用"
 };
 const EN = {
-  title: "Source selection diagnosis", purpose: "Explain what each returned source contributed, which observable characteristics made it useful, and what the target should improve to become a more usable source in a future answer.",
-  method: "Traceable adoption explanation · not hidden-ranking speculation", dominant: "Dominant source pattern", targetPosition: "Target position", breakthrough: "Priority breakthrough",
+  title: "Source selection diagnosis", dominant: "Dominant source pattern", targetPosition: "Target position", breakthrough: "Priority breakthrough",
   targetUsed: (count: number) => `The target was used in ${count} answer-source position${count === 1 ? "" : "s"}`, targetAbsent: "The target was not cited across the three questions", noPattern: "No source domain recurred across questions", noAction: "Current evidence does not support a reliable action",
   returnedSources: "Recurring or important answer sources", sharedPattern: "Cross-source pattern", whatRecurs: "Which source characteristics recur", targetPath: "Target gap", targetPathTitle: "Priority path for entering future answers",
   contribution: "What this source contributed", factors: "Observable selection factors", targetGap: "Corresponding target gap", question: "Question", traceableExcerpt: "Traceable excerpt", unconfirmed: "The contribution relationship cannot currently be confirmed.",
-  limitations: "Analysis limitations", canConfirm: "Can confirm: ", confirmed: "the source was returned by the same answer operation, and displayed excerpts or page characteristics are traceable.", cannotAssert: "Cannot assert: ", notCausal: "these factors are hidden ranking weights or that changing one guarantees future citation.", unavailable: "Source selection analysis is unavailable"
+  unavailable: "Source selection analysis is unavailable"
 };

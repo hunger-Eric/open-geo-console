@@ -191,15 +191,18 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
     } else {
       failureStage = "search_execution";
       await appendMarketSnapshotQueries({ snapshotId: currentSnapshotId, token: claim.token, queries });
-      const perQuerySearchMs = input.executionBudget ? splitPublicSourceSubBudgetMs(input.executionBudget.searchMs, input.fanout.queries.length) : null;
+      const perQuerySearchMs = input.executionBudget
+        ? splitPublicSourceSubBudgetMs(input.executionBudget.searchMs, input.fanout.queries.length, searchConcurrency)
+        : null;
+      const searchDeadlineSignal = unitDeadlineSignal(input.signal, input.executionBudget?.searchMs ?? null);
       const queryResults = await mapWithConcurrency(input.fanout.queries, searchConcurrency, async (query, queryOrder) => {
-        input.signal?.throwIfAborted();
+        searchDeadlineSignal.throwIfAborted();
         const storedQuery = queries[queryOrder]!;
         const attempt = await beginMarketSearchAttempt({
           snapshotId: currentSnapshotId, queryId: storedQuery.id, token: claim.token,
           idempotencyReference: deterministicId("public-search-attempt", [currentSnapshotId, storedQuery.id]), configuredCostMicros: input.fanout.budget.maxCostMicros
         });
-        const observed = await observePublicSearch({ adapter: input.adapter, query, budget: input.fanout.budget, signal: unitDeadlineSignal(input.signal, perQuerySearchMs) });
+        const observed = await observePublicSearch({ adapter: input.adapter, query, budget: input.fanout.budget, signal: unitDeadlineSignal(searchDeadlineSignal, perQuerySearchMs) });
         // Provider observation identifiers are not guaranteed to be unique
         // across fanout queries. The persisted attempt is the authoritative,
         // snapshot-scoped observation identity used by retrieval provenance.
@@ -211,7 +214,7 @@ export async function resolvePublicSourceSnapshot(input: ResolvePublicSourceSnap
           costUncertain: observation.usage.costUncertain ?? providerCostMicros === null, sanitizedError: observation.sanitizedError ?? null
         });
         return { observation, attemptId: attempt.id, storedQueryId: storedQuery.id, successful: requestStatus === "succeeded" || requestStatus === "partial" };
-      }, input.signal);
+      }, searchDeadlineSignal);
       observations = queryResults.map(({ observation }) => observation);
       successful = queryResults.filter(({ successful: value }) => value).map(({ observation, attemptId, storedQueryId }) => ({ observation, attemptId, storedQueryId }));
     }

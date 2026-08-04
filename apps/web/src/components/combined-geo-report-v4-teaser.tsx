@@ -22,6 +22,8 @@ const TEASER_EXTRA_CSS = `
 .cta-button:hover{background:var(--teal-strong,#0b635d);transform:translateY(-1px)}
 .teaser-overview-grid{align-items:start;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:20px}
 .teaser-overview-grid .report-section{padding:clamp(24px,3vw,34px)}
+.website-snapshot-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(260px,.65fr);gap:24px;margin-top:20px}.website-snapshot-copy{display:grid;gap:14px}.website-snapshot-copy p{color:var(--muted,#687570);line-height:1.75;margin:0}.website-facts{display:grid;gap:9px;list-style:none;margin:0;padding:0}.website-facts li{background:var(--teaser-soft);border-radius:10px;color:var(--forest,#173f37);font-size:13px;line-height:1.55;padding:12px 14px}.homepage-scope{color:var(--teal,#0c7a6d);font-size:12px;font-weight:800;letter-spacing:.04em;margin:0;text-transform:uppercase}
+.question-map{counter-reset:buyer-question;display:grid;gap:10px;list-style:none;margin:20px 0 0;padding:0}.question-map li{align-items:start;background:#fff;border:1px solid var(--line,#d9d8cf);border-radius:12px;counter-increment:buyer-question;display:grid;gap:12px;grid-template-columns:34px minmax(0,1fr) auto;padding:16px}.question-map li:before{align-items:center;background:var(--teal,#0c7a6d);border-radius:999px;color:#fff;content:counter(buyer-question,decimal-leading-zero);display:flex;font-family:ui-monospace,monospace;font-size:11px;font-weight:800;height:30px;justify-content:center;width:30px}.question-map p{color:var(--forest,#173f37);font-size:15px;font-weight:700;line-height:1.55;margin:3px 0 0}.question-map span{background:var(--teaser-soft);border-radius:999px;color:var(--teal,#0c7a6d);font-size:10px;font-weight:800;padding:6px 9px;white-space:nowrap}.question-map .locked-question{background:var(--paper,#f4f1e8);color:var(--muted,#687570)}
 .technical-score-layout{align-items:center;display:grid;grid-template-columns:150px minmax(0,1fr);gap:28px;margin-top:18px}
 .technical-score-hero{align-items:baseline;display:flex;gap:6px;margin:0}
 .score-big{font-size:64px;font-weight:800;line-height:1;color:var(--teal,#0c7a6d)}
@@ -39,7 +41,6 @@ const TEASER_EXTRA_CSS = `
 .semantic-outcome{background:var(--teaser-soft);border-radius:12px;display:grid;gap:10px;margin-top:20px;padding:20px}.semantic-outcome strong{color:var(--forest,#173f37);font-size:20px}.semantic-outcome p{color:var(--muted,#687570);line-height:1.65;margin:0}.semantic-outcome dl{display:grid;gap:8px;margin:0}.semantic-outcome dt{color:var(--muted,#687570);font-size:11px;font-weight:750}.semantic-outcome dd{color:var(--forest,#173f37);margin:0}
 .technical-score-layout--solo{grid-template-columns:minmax(0,1fr);justify-items:start}
 .semantic-outcome p{max-width:75ch}.semantic-outcome ul,.semantic-outcome ol{display:grid;gap:10px;list-style:none;margin:6px 0 0;max-width:88ch;padding:0}.semantic-outcome li{color:var(--muted,#687570);font-size:14px;line-height:1.7;padding-left:20px;position:relative}.semantic-outcome ul>li:before{background:var(--teal,#0c7a6d);border-radius:999px;content:"";height:6px;left:2px;position:absolute;top:9px;width:6px}.semantic-outcome ol{counter-reset:semantic-rec}.semantic-outcome ol>li{counter-increment:semantic-rec;padding-left:36px}.semantic-outcome ol>li:before{align-items:center;background:var(--teal,#0c7a6d);border-radius:999px;color:#fff;content:counter(semantic-rec,decimal-leading-zero);display:flex;font-family:ui-monospace,monospace;font-size:10px;font-weight:800;height:22px;justify-content:center;left:0;position:absolute;top:1px;width:22px}
-.report-v4-teaser .executive-summary{position:sticky;top:20px}
 .teaser-proof-section>h2{max-width:800px}
 .teaser-q1-card{background:#fff;border:1px solid var(--line,#d9d8cf);border-top:5px solid var(--teal,#0c7a6d);border-radius:14px;padding:clamp(22px,4vw,38px);box-shadow:none}
 .formatted-answer{color:#293b35;display:grid;font-size:16px;gap:14px;line-height:1.78;margin-top:4px}
@@ -61,8 +62,8 @@ const TEASER_EXTRA_CSS = `
 .locked-question-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:22px}.teaser-locked-card{background:#fff;border:1px solid var(--line,#d9d8cf);border-top:4px solid #b7c3be;border-radius:12px;padding:22px}.teaser-locked-card .answer-card-heading h3{font-size:18px;margin-bottom:8px}.locked-content-placeholder{align-items:center;border-top:1px solid var(--line,#d9d8cf);color:var(--muted,#687570);display:grid;gap:8px;grid-template-columns:auto minmax(0,1fr);margin-top:10px;padding-top:16px}.locked-content-placeholder p{font-size:13px;margin:0}.lock-icon{font-size:20px}.cta-inline{color:var(--teal,#0c7a6d);font-size:12px;font-weight:750;text-decoration:underline;text-underline-offset:3px}
 .issue-title-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:18px 0 0;padding:0;list-style:none}.issue-title-list li{background:#fff;border:1px solid var(--line,#d9d8cf);border-radius:10px;padding:15px}.issue-title-list strong{color:var(--forest,#173f37);font-size:14px}.locked-remediation{color:var(--muted,#687570);font-size:11px;margin:8px 0 0}
 .teaser-cta-section{background:linear-gradient(135deg,#f4eee1,#e5f0ea)!important;text-align:center;display:grid;place-items:center;gap:12px}.teaser-cta-section p{color:var(--muted,#687570);max-width:620px;margin:0}
-@media(max-width:900px){.teaser-overview-grid,.technical-score-layout{grid-template-columns:minmax(0,1fr)}.report-v4-teaser .answer-first-hero{column-gap:28px}.diagnosis-factor-grid{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:760px){.report-shell{padding:12px;gap:12px}.report-v4-teaser .report-hero,.report-v4-teaser .report-section{border-radius:14px;padding:22px}.report-v4-teaser .answer-first-hero{grid-template-columns:minmax(0,1fr)}.report-v4-teaser .answer-first-hero>.metadata-grid{grid-column:1;grid-row:auto;margin-top:18px}.hero-actions{grid-column:1}.score-big{font-size:50px}.dimension-score-list,.teaser-source-grid,.locked-question-grid,.issue-title-list{grid-template-columns:minmax(0,1fr)}.teaser-source-card{padding:14px}.teaser-sources-heading{align-items:start;display:grid}.answer-card-heading{gap:8px}.formatted-answer{font-size:15px}.absence-figure strong{font-size:32px}}
+@media(max-width:900px){.teaser-overview-grid,.technical-score-layout,.website-snapshot-grid{grid-template-columns:minmax(0,1fr)}.report-v4-teaser .answer-first-hero{column-gap:28px}.diagnosis-factor-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:760px){.report-shell{padding:12px;gap:12px}.report-v4-teaser .report-hero,.report-v4-teaser .report-section{border-radius:14px;padding:22px}.report-v4-teaser .answer-first-hero{grid-template-columns:minmax(0,1fr)}.report-v4-teaser .answer-first-hero>.metadata-grid{grid-column:1;grid-row:auto;margin-top:18px}.hero-actions{grid-column:1}.score-big{font-size:50px}.dimension-score-list,.teaser-source-grid,.locked-question-grid,.issue-title-list{grid-template-columns:minmax(0,1fr)}.question-map li{grid-template-columns:32px minmax(0,1fr)}.question-map span{grid-column:2;justify-self:start}.teaser-source-card{padding:14px}.teaser-sources-heading{align-items:start;display:grid}.answer-card-heading{gap:8px}.formatted-answer{font-size:15px}.absence-figure strong{font-size:32px}}
 `;
 
 interface FreeTeaserModelBase {
@@ -110,54 +111,44 @@ export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTease
       </dl>
     </header>
 
-    <div className="teaser-overview-grid">
-      <section className="report-section executive-summary" data-executive-summary="true">
-        <p className="section-index">01</p><h2>{copy.techScore}</h2>
-        <div className={`technical-score-layout${model.aiReport.dimensionScores.length === 0 ? " technical-score-layout--solo" : ""}`}>
-          <div className="technical-score-hero">
-            <span className="score-big">{model.technicalReport.score}</span>
-            <span className="score-label">/100</span>
-          </div>
-          {model.aiReport.dimensionScores.length > 0 ? <div className="dimension-score-list">
-            {model.aiReport.dimensionScores.map((score) => <article key={score.dimension} className="dimension-row">
-              <strong>{score.score}</strong><div><h4>{humanizeDimension(score.dimension)}</h4></div>
-            </article>)}
-          </div> : null}
+    <section className="report-section executive-summary" data-website-snapshot="true">
+      <p className="section-index">01</p><h2>{copy.websiteSnapshot}</h2>
+      <p className="homepage-scope">{copy.homepageScope}</p>
+      <div className="website-snapshot-grid">
+        <div className="website-snapshot-copy">
+          <p>{model.aiReport.organizationProfile.summary}</p>
+          <ul className="website-facts">
+            {(model.aiReport.organizationProfile.productsAndServices ?? []).slice(0, 3).map((item) => <li key={item}>{item}</li>)}
+            {(model.aiReport.organizationProfile.targetAudiences ?? []).slice(0, 2).map((item) => <li key={item}>{item}</li>)}
+          </ul>
         </div>
-      </section>
+        <div className="technical-score-hero"><span className="score-big">{model.technicalReport.score}</span><span className="score-label">/100</span></div>
+      </div>
+    </section>
 
-      <section className="report-section" data-ai-absence="true">
-        <p className="section-index">02</p><h2>{isDirect ? copy.q1SemanticOutcome : copy.aiAbsence}</h2>
-        {isDirect ? <DirectAnalysis status={model.directAnalysisStatus} analysis={model.directAnalysis} copy={copy}/> : <>
-          <div className="absence-figures" aria-label={copy.aiAbsence}>
-            <div className="absence-figure"><strong>{model.brandMentionCount}</strong><span>{copy.brandMentions}</span></div>
-            <div className="absence-figure competitor"><strong>{model.competitorMentionCount}</strong><span>{copy.competitorMentions}</span></div>
-          </div>
-          <p className="absence-summary">{copy.absenceSummary(model.brandMentionCount, model.competitorMentionCount)}</p>
-        </>}
-      </section>
-    </div>
+    <section className="report-section" data-buyer-question-map="true">
+      <p className="section-index">02</p><h2>{copy.customerQuestions}</h2>
+      <p>{copy.questionContinuity}</p>
+      <ol className="question-map">{questions.map((question, index) => <li className={index === 0 ? "" : "locked-question"} key={question.neutralPublicText}>
+        <p>{question.neutralPublicText}</p><span>{index === 0 ? copy.freeAnswer : copy.paidAnswer}</span>
+      </li>)}</ol>
+    </section>
 
     <section className="report-section teaser-proof-section" data-answer-first-section="true">
-      <p className="section-index">03</p><h2>{copy.customerQuestions}</h2>
+      <p className="section-index">03</p><h2>{copy.firstAnswer}</h2>
       {model.q1AnswerCard
         ? <TeaserQ1Card card={model.q1AnswerCard} question={questions[0]!.neutralPublicText} locale={model.locale} copy={copy}/>
         : <TeaserLockedCard question={questions[0]!.neutralPublicText} questionOrder={1} copy={copy} showCta={checkoutEligible}/>
       }
-      <div className="locked-question-grid">
-        {questions.slice(1).map((question, index) => <TeaserLockedCard key={question.neutralPublicText} question={question.neutralPublicText} questionOrder={index + 2} copy={copy} showCta={checkoutEligible}/>)}
-      </div>
     </section>
 
-    <section className="report-section" data-issue-preview="true">
-      <p className="section-index">04</p><h2>{copy.issuePreview}</h2>
-      <ul className="issue-title-list">{model.technicalReport.findings.map((finding) => <li key={finding.id}>
-        <strong>{finding.title}</strong>
-        <p className="locked-remediation" data-locked-remediation="true">&#x1F512; {copy.remediationLocked}</p>
-      </li>)}</ul>
+    <section className="report-section" data-core-gap="true">
+      <p className="section-index">04</p><h2>{copy.coreGap}</h2>
+      <div className="diagnosis-gap"><strong>{copy.targetGap}</strong><p>{coreGapText(model, copy)}</p></div>
     </section>
 
     {checkoutEligible ? <section className="report-section teaser-cta-section" data-teaser-cta="true">
+      <p className="section-index">05</p>
       <h2>{copy.ctaTitle}</h2>
       <p>{copy.ctaBody}</p>
       <a className="cta-button" data-teaser-cta-position="final" href="#checkout">{copy.ctaButton}</a>
@@ -166,29 +157,13 @@ export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTease
   </>;
 }
 
-function DirectAnalysis({ status, analysis, copy }: {
-  readonly status: "completed" | "incomplete";
-  readonly analysis: FreeV4DirectAnalysis | null;
-  readonly copy: Copy;
-}) {
-  if (status === "incomplete" || !analysis) {
-    return <div className="semantic-outcome" data-direct-analysis-status="incomplete">
-      <strong>{copy.analysisUnavailable}</strong><p>{copy.analysisUnavailableBody}</p>
-    </div>;
-  }
-  return <div className="semantic-outcome" data-direct-analysis-status="completed">
-    <strong>{copy.analysisComplete}</strong>
-    <p>{analysis.summary}</p>
-    {analysis.observations.length > 0 && <ul data-direct-observation-count={analysis.observations.length}>
-      {analysis.observations.map((observation, index) => <li key={index}>{observation}</li>)}
-    </ul>}
-    {analysis.recommendations.length > 0 && <ol data-direct-recommendation-count={analysis.recommendations.length}>
-      {analysis.recommendations.map((recommendation, index) => <li key={index}>{recommendation}</li>)}
-    </ol>}
-  </div>;
-}
-
 type DirectQ1Core = Omit<Extract<OpenGeoAnswerCardV3, { readonly answerMode: "generative_search_v1" }>, "geoDiagnosis" | "diagnosis">;
+
+function coreGapText(model: FreeTeaserModel, copy: Copy): string {
+  if (model.directAnalysisStatus !== undefined) return model.directAnalysis?.summary ?? copy.analysisUnavailableBody;
+  if (model.q1AnswerCard && "diagnosis" in model.q1AnswerCard && model.q1AnswerCard.diagnosis) return model.q1AnswerCard.diagnosis.targetGap;
+  return copy.analysisUnavailableBody;
+}
 
 function TeaserQ1Card({ card, question, locale, copy }: { card: OpenGeoAnswerCardV3 | DirectQ1Core; question: string; locale: "en" | "zh"; copy: Copy }) {
   return <article className="answer-card teaser-q1-card" data-open-geo-answer-card="true" data-question-order="1">
@@ -204,35 +179,18 @@ function TeaserQ1Card({ card, question, locale, copy }: { card: OpenGeoAnswerCar
           }
         </>
       : <div className="answer-prose">{card.sentences.filter((sentence) => sentence.kind !== "scope_note").map((sentence) => <p className="business-question-answer" key={sentence.sentenceId}>{sentence.text}</p>)}</div>}
-    {"diagnosis" in card && card.diagnosis && <section className="teaser-diagnosis" data-question-diagnosis="true">
-      <p className="diagnosis-kicker">{copy.questionDiagnosis}</p>
-      <h4>{copy.diagnosisSummary}</h4>
-      <p className="teaser-diagnosis-summary">{card.diagnosis.selectionSummary}</p>
-      <div className="diagnosis-factor-grid" data-observable-factor-count={card.diagnosis.observableFactors.length}>
-        {card.diagnosis.observableFactors.map((factor, index) => <article className="diagnosis-factor" key={index}><span>0{index + 1}</span><p>{factor.observation}</p></article>)}
-      </div>
-      <div className="diagnosis-gap"><strong>{copy.targetGap}</strong><p>{card.diagnosis.targetGap}</p></div>
-      <div className="diagnosis-actions" data-prioritized-action-count={card.diagnosis.recommendedActions.length}>
-        {card.diagnosis.recommendedActions.map((action) => <article className="diagnosis-action" key={action.priority}><span className="action-priority">{action.priority}</span><p>{action.action}</p></article>)}
-      </div>
-    </section>}
   </article>;
 }
 
 type GenerativeCard = Extract<OpenGeoAnswerCardV3, { readonly answerMode: "generative_search_v1" }> | DirectQ1Core;
 type TeaserSource = GenerativeCard["sources"][number];
-const FEATURED_SOURCE_COUNT = 5;
+const FEATURED_SOURCE_COUNT = 3;
 
 function TeaserSources({ card, locale, copy }: { card: GenerativeCard; locale: "en" | "zh"; copy: Copy }) {
   const featured = card.sources.slice(0, FEATURED_SOURCE_COUNT);
-  const remaining = card.sources.slice(FEATURED_SOURCE_COUNT);
   return <section className="teaser-sources generative-answer-sources" data-generative-sources={card.questionId}>
     <header className="teaser-sources-heading"><h4>{copy.sources}</h4><p>{copy.sourceCount(card.sources.length)}</p></header>
     <div className="teaser-source-grid">{featured.map((source, index) => <TeaserSourceCard key={source.sourceId} source={source} order={index + 1} locale={locale}/>)}</div>
-    {remaining.length > 0 && <details className="teaser-more-sources" data-collapsed-source-count={remaining.length}>
-      <summary>{copy.moreSources(remaining.length)}</summary>
-      <div className="teaser-source-grid">{remaining.map((source, index) => <TeaserSourceCard key={source.sourceId} source={source} order={index + FEATURED_SOURCE_COUNT + 1} locale={locale}/>)}</div>
-    </details>}
   </section>;
 }
 
@@ -296,16 +254,13 @@ function formatGeneratedAt(value: string, locale: "en" | "zh"): string {
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-function humanizeDimension(value: string): string {
-  return value.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
-}
-
 interface Copy {
   kicker: string; title: string; introduction: string; target: string; generated: string;
   techScore: string; aiAbsence: string; absenceSummary: (brand: number, competitor: number) => string;
-  brandMentions: string; competitorMentions: string;
+  brandMentions: string; competitorMentions: string; websiteSnapshot: string; homepageScope: string;
   q1SemanticOutcome: string; analysisComplete: string; analysisUnavailable: string; analysisUnavailableBody: string;
   issuePreview: string; remediationLocked: string; customerQuestions: string; question: string; locked: string; lockedBody: string; ctaInline: string;
+  questionContinuity: string; freeAnswer: string; paidAnswer: string; firstAnswer: string; coreGap: string;
   ctaTitle: string; ctaBody: string; ctaButton: string; ctaAssurance: string;
   sources: string; sourceCount: (count: number) => string; moreSources: (count: number) => string;
   questionDiagnosis: string; diagnosisSummary: string; targetGap: string;
@@ -317,10 +272,12 @@ const EN: Copy = {
   techScore: "Technical score", aiAbsence: "AI answer presence",
   absenceSummary: (brand, competitor) => `Across 3 buyer questions, your brand appeared ${brand} time(s) while competitors appeared ${competitor} time(s).`,
   brandMentions: "Your brand", competitorMentions: "Competitors",
+  websiteSnapshot: "What we learned from your website", homepageScope: "Free scope · homepage only",
   q1SemanticOutcome: "Q1 analysis", analysisComplete: "Analysis complete", analysisUnavailable: "Analysis unavailable",
   analysisUnavailableBody: "The Q1 answer and its sources completed successfully, but the separate analysis did not complete for this run.",
   issuePreview: "Issue preview", remediationLocked: "Remediation is included in the full report.",
   customerQuestions: "Buyer questions", question: "Question", locked: "Locked", lockedBody: "Unlock the full answer with sources and diagnosis.", ctaInline: "Unlock full report",
+  questionContinuity: "The paid report keeps these same three questions and continues the same evidence chain.", freeAnswer: "Answered below", paidAnswer: "Paid report", firstAnswer: "Your first real answer", coreGap: "The single most important gap",
   ctaTitle: "Get the complete analysis", ctaBody: "Unlock all 3 answers with sources, per-question diagnosis, and prioritized GEO actions.", ctaButton: "Unlock full report", ctaAssurance: "One-time payment · report-specific access",
   sources: "Sources", sourceCount: (count) => `${count} sources checked`, moreSources: (count) => `View ${count} more sources`,
   questionDiagnosis: "Question diagnosis", diagnosisSummary: "What the evidence means", targetGap: "Target website gap"
@@ -334,8 +291,10 @@ const ZH: Copy = {
   techScore: "技术评分", aiAbsence: "AI 答案存在感",
   absenceSummary: (brand, competitor) => `在 3 个买家问题中，你的品牌出现了 ${brand} 次，竞品出现了 ${competitor} 次。`,
   brandMentions: "你的品牌", competitorMentions: "竞品",
+  websiteSnapshot: "我们从网站看到了什么", homepageScope: "免费范围 · 仅分析首页",
   issuePreview: "问题清单预览", remediationLocked: "修复建议包含在完整报告中。",
   customerQuestions: "买家问题", question: "问题", locked: "已锁定", lockedBody: "解锁完整答案、来源和诊断。", ctaInline: "解锁完整报告",
+  questionContinuity: "付费报告将沿用这三个问题，继续完成同一条证据链。", freeAnswer: "下方已回答", paidAnswer: "付费解锁", firstAnswer: "第一个真实答案", coreGap: "当前最核心的一个差距",
   ctaTitle: "获取完整分析", ctaBody: "解锁全部 3 个问题的答案、来源、逐题诊断和优先 GEO 行动。", ctaButton: "解锁完整报告", ctaAssurance: "一次性付款 · 报告专属访问",
   sources: "本题来源", sourceCount: (count) => `已核对 ${count} 个来源`, moreSources: (count) => `查看其余 ${count} 个来源`,
   questionDiagnosis: "本题诊断", diagnosisSummary: "这些证据说明什么", targetGap: "目标官网差距"

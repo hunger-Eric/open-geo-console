@@ -2,6 +2,53 @@
 
 This runbook is the operator contract for the protected Vercel Preview and the public production deployment. PostgreSQL environment markers and deployment profiles are fail-closed; never work around them with request headers, cookies, query parameters, or a shared secret.
 
+## Canonical Vercel release mode - read before every deployment
+
+The current Open GEO Console Web release path is a manual Vercel Preview from
+the exact candidate checkout. It is not a Git-triggered Vercel deployment.
+Keep Git publication and Vercel deployment as two separately authorized
+actions: pushing a branch does not create a Preview for this project.
+
+Do not confuse the two Vercel links:
+
+- `.vercel/project.json` proves only that the local directory is linked to the
+  intended Vercel project and team.
+- A Vercel Git-provider integration is a separate project-level `link`. Read
+  the live project `link` and the latest deployment `gitSource` before choosing
+  any Git-specific command.
+- Under the current `link=null` / `gitSource=null` mode, Git branch-scoped
+  environment variables are unavailable. Do not use a Git branch argument for
+  `vercel env`, and do not infer that a push will deploy.
+- `link=null` does not mean that the project has never been deployed. It means
+  only that current Git-specific Vercel operations are unavailable; manual CLI
+  Preview deployments remain valid.
+
+Unless an active scope explicitly authorizes a different topology, deploy from
+the clean canonical worktree at the exact candidate SHA. References later in
+this runbook to a clean detached worktree mean an exact clean candidate
+checkout; they do not authorize creating or using another worktree when the
+active scope requires the canonical worktree only.
+
+After the active release scope has prepared and verified the complete
+deployment environment, the proven manual command shape is:
+
+```powershell
+vercel deploy --yes --meta ogcGitSha=<candidate-full-sha>
+```
+
+Run it at most once when the approved release budget allows one new Preview.
+Do not replace it with branch-scoped variables, a Git-triggered Preview, or a
+project Git connect/disconnect operation as an inferred repair. Connecting or
+disconnecting Git is a persistent platform change and requires a separately
+approved scope.
+
+Upload success and `READY` are transport evidence only. Before accepting the
+unique Preview, independently inspect it and require both `gitCommitSha` and
+`ogcGitSha` to equal the full candidate SHA. Then follow the gates below:
+Web, Free Worker, and Deep Worker must share that SHA before moving the fixed
+Protected Staging alias. A manual metadata value is identity evidence only and
+never substitutes for the independent checks or a real-flow acceptance.
+
 ## Environment matrix
 
 | Boundary | Protected staging Preview | Production |
@@ -39,16 +86,32 @@ npm run commerce:staging:all
 
 These commands do not fall back to `.env.local`; they refuse a non-staging profile, a production database marker, or live commerce. Both Worker lanes must be scheduled in production, but must never share model, Queue, HMAC, payment, or email credentials with staging.
 
+The workstation launcher additionally starts `staging-commerce`, a persistent
+email-only consumer. Its ignored `.data/workstation-docker/staging-commerce.env`
+contains an allowlisted secret set and a stable
+`OGC_STAGING_EMAIL_ACTIVATION_AT`. On the first authorized installation only,
+prepare with `-InitializeStagingEmailActivation`; all later prepares omit that
+switch and fail if both activation authorities are lost. Prepare twice before first start and verify
+the timestamp is unchanged in both the runtime file and the separate activation
+authority; an invalid/disagreeing timestamp or required Staging email setting
+fails closed. Only the named test-email fields from the merged Staging Worker
+runtime are projected into the consumer file, and `[SENSITIVE]` placeholders
+are rejected. The SQL claim boundary excludes every earlier row, so this
+service must not be used to repair or replay historical email.
+
 Protected staging uses `OGC_EVIDENCE_STORAGE=vercel-blob` and the Preview-only `open-geo-console-staging-evidence` Private Blob store. Vercel Web Functions use the project connection's rotating OIDC; before a workstation deep-Worker drill, run `npx vercel pull --yes --environment=preview` so `.vercel/.env.preview.local` contains the store's external-worker token. `npm run worker:staging:deep` loads only that ignored file plus `apps/web/.env.staging.local`; required Sensitive model/Queue values still need their existing explicit process-only overrides. Production may use a separate Private Blob or S3-compatible adapter. Filesystem storage remains local-development-only and is rejected for staging/production. Customer reads always pass through the report-authorized evidence route.
 
 Vercel Sensitive values are intentionally not decryptable through `vercel env pull`; the generated file contains empty placeholders for those names. For a local Worker drill, explicitly override each required empty placeholder with the separately held staging value in only that process. Merely loading another env file does not replace variables that already exist as empty placeholders. Never weaken the database marker guard, print values, or copy production secrets into `.env.staging.local`.
 
 ### Public-search provider probe environment
 
-Run the protected-staging MiMo capability gate only after the staging Worker runtime environment has been generated:
+Run the protected-staging capability gate only after the staging Worker runtime environment has been generated. The explicit adapter must match the canonical profile:
 
 ```powershell
+# OGC_PROVIDER_PROFILE=mimo_native
 npm run public-search:probe -- --adapter mimo --locale zh-CN --region CN
+# OGC_PROVIDER_PROFILE=sensenova_anysearch
+npm run public-search:probe -- --adapter anysearch --locale zh-CN --region CN
 ```
 
 For the V3 generative-answer mainline, also run the secret-safe same-operation answer/citation probe:
@@ -59,7 +122,7 @@ npm run generative-answer:staging:probe
 
 The probe must report a nonblank answer and normalized source domains. It reads the merged staging Worker environment, prints no answer prose, credentials, authorization headers, or raw provider response, and does not create a report, order, credit, refund, or email.
 
-The probe intentionally reads `.data/workstation-docker/staging.env`, which is the merged environment consumed by `staging-worker-free` and `staging-worker-deep`. Source files such as `apps/web/.env.staging.local`, `.vercel/.env.preview.local`, and `apps/web/.env.public-search.staging.local` may contain empty Sensitive-value placeholders even when the merged Worker runtime has valid MiMo values. Therefore, inspecting a source placeholder file alone is not evidence that `OGC_PUBLIC_SEARCH_MIMO_BASE_URL`, its API key, or model is missing. Verify the merged file by variable name/non-empty status without printing values, then require the real bounded probe to pass. Never substitute a production env file or copy secrets into tracked files.
+The probe intentionally reads `.data/workstation-docker/staging.env`, which is the merged environment consumed by `staging-worker-free` and `staging-worker-deep`. Source files may contain empty Sensitive-value placeholders even when the merged Worker runtime has valid selected-profile values. Inspecting a source placeholder alone is therefore not evidence that MiMo, SenseNova or AnySearch data is missing. Verify `OGC_PROVIDER_PROFILE` and only its required variable names/non-empty status without printing values, then require the matching bounded probe to pass. Never substitute a production env file or copy secrets into tracked files.
 
 If a workstation proxy uses the reserved `198.18.0.0/15` Fake-IP DNS range, the crawler will and must reject the target as an SSRF risk. Do not allowlist the range or disable URL safety. Set `OGC_PUBLIC_DNS_DOH_URL=https://cloudflare-dns.com/dns-query` for that Worker process; both crawl and screenshot-browser validation then use the fixed public resolver while retaining blocked-address checks and safe-fetch IP pinning.
 
@@ -332,6 +395,11 @@ npm run test:postgres:staging-security
 ```
 
 Browser acceptance must prove anonymous denial, authenticated access, more than two distinct staging sites, same-site reuse, forced-new report identity, duplicate-click idempotency, and separation from production data. Provider acceptance additionally requires a real CodingPlan staging call, an Airwallex Sandbox signed Webhook, and a redirected Resend message. Production acceptance must prove the third distinct site returns `429` and staging variables do not change that result.
+
+Paid-return acceptance must also prove that the same browser automatically
+lands on `/reports/{reportId}/report.html` only after the exact paid,
+deliverable, active-artifact state exists; a fresh redirected report-ready
+email leaves `queued`; and an anonymous request to that HTML remains denied.
 
 For an authenticated operator preview of an exact paid staging order, open `/en/reports/{reportId}/staging-access?order={orderId}` (Chinese is the unprefixed canonical interface, so `/zh` redirects). The route issues a one-day cookie only when the persisted order/report pair is paid and either the original fulfillment is deliverable (`completed`/`completed_limited`) or an audited replacement is completed with an active artifact. It redirects to the exact scoped HTML artifact and remains `404` outside protected staging test mode. It does not create a customer PDF or bypass normal emailed access in production.
 

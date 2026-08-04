@@ -36,6 +36,15 @@ describe("provider claim extraction", () => {
     await expect(extractProviderClaimCandidates({ configuredModel: "fixture", completeJson }, extractionInput())).rejects.toThrow(/unauthorized/i);
     expect(completeJson).toHaveBeenCalledTimes(1);
   });
+
+  it("sends the configured output cap and keeps the 2500 default", async () => {
+    const capped = fixtureClient([{ claims: [claim()] }]);
+    await extractProviderClaimCandidates(capped, extractionInput(), { maxTokens: 8_192 });
+    expect(vi.mocked(capped.completeJson).mock.calls[0]![0].maxTokens).toBe(8_192);
+    const defaulted = fixtureClient([{ claims: [claim()] }]);
+    await extractProviderClaimCandidates(defaulted, extractionInput(), {});
+    expect(vi.mocked(defaulted.completeJson).mock.calls[0]![0].maxTokens).toBe(2_500);
+  });
 });
 
 function fixtureClient(values: unknown[]): JsonCompletionClient {

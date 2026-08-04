@@ -1,6 +1,7 @@
 import type { Dictionary } from "@/i18n";
 
 export type ReturnHint = "success" | "cancel";
+export interface PaymentReturnContext { orderId: string; hint: ReturnHint }
 export interface PublicOrderStatus {
   orderId: string;
   paymentStatus: "created" | "pending" | "paid" | "failed" | "cancelled";
@@ -13,6 +14,26 @@ export interface PublicOrderStatus {
 }
 
 export const PAYMENT_STATUS_REQUEST_TIMEOUT_MS = 12_000;
+
+export function getPaymentReturnContext(searchParams: Pick<URLSearchParams, "get">): PaymentReturnContext | null {
+  const orderId = searchParams.get("order") ?? "";
+  const hint = searchParams.get("payment_return");
+  return /^[a-zA-Z0-9_-]{1,128}$/.test(orderId) && (hint === "success" || hint === "cancel")
+    ? { orderId, hint }
+    : null;
+}
+
+export function shouldHidePurchaseControls(
+  context: PaymentReturnContext | null,
+  status: PublicOrderStatus | null
+): boolean {
+  if (!context) return false;
+  if (!status || status.orderId !== context.orderId) return context.hint === "success";
+  if (status.paymentStatus === "failed" || status.paymentStatus === "cancelled" || status.refundStatus === "refunded") {
+    return false;
+  }
+  return status.paymentStatus === "paid" || context.hint === "success";
+}
 
 export async function fetchPaymentReturnStatus(
   url: string,
@@ -39,6 +60,47 @@ export async function fetchPaymentReturnStatus(
     clearTimeout(timeout);
     options.signal?.removeEventListener("abort", abortFromCaller);
   }
+}
+
+export function shouldAttemptCompletionAccess(status: PublicOrderStatus): boolean {
+  return status.paymentStatus === "paid"
+    && (status.fulfillmentStatus === "completed" || status.fulfillmentStatus === "completed_limited");
+}
+
+export async function fetchPaymentCompletionAccess(
+  url: string,
+  expectedDestination: string,
+  options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {}
+): Promise<string | null> {
+  const response = await (options.fetchImpl ?? fetch)(url, {
+    method: "POST",
+    cache: "no-store",
+    signal: options.signal
+  });
+  if (!response.ok) return null;
+  const payload = await response.json() as { destination?: unknown };
+  return payload.destination === expectedDestination ? expectedDestination : null;
+}
+
+export async function attemptPaymentCompletionHandoff(input: {
+  status: PublicOrderStatus;
+  orderId: string;
+  attemptedFor: string | null;
+  completionUrl: string;
+  expectedDestination: string;
+  markAttempted: (orderId: string) => void;
+  fetchAccess?: typeof fetchPaymentCompletionAccess;
+  navigate?: (destination: string) => void;
+  signal?: AbortSignal;
+}): Promise<void> {
+  if (!shouldAttemptCompletionAccess(input.status) || input.attemptedFor === input.orderId) return;
+  input.markAttempted(input.orderId);
+  const destination = await (input.fetchAccess ?? fetchPaymentCompletionAccess)(
+    input.completionUrl,
+    input.expectedDestination,
+    { signal: input.signal }
+  );
+  if (destination) (input.navigate ?? ((value) => window.location.replace(value)))(destination);
 }
 
 export function buildHppReturnUrls(currentUrl: string, orderId: string) {

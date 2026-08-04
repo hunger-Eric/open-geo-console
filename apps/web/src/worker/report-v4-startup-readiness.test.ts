@@ -4,26 +4,45 @@ import {
   REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
   type ReportV4ModelRuntimeConfig
 } from "../report-v4/model-runtime-config";
+import type { ProviderProfileRuntime } from "../provider-profile/runtime";
 import {
   assertReportV4WorkerStartupReadiness,
   prepareWorkerStartup
 } from "./report-v4-startup-readiness";
 
 describe("Report V4 Worker startup readiness", () => {
-  it("fails closed on every missing V4 runtime variable before database startup or claiming", async () => {
+  it("fails closed on every missing selected-profile variable before database startup or claiming", async () => {
     for (const missing of [
-      "OGC_REPORT_V4_MODEL_PROFILE_ID",
+      "OGC_PROVIDER_PROFILE",
       "OGC_REPORT_V4_MIMO_BASE_URL",
       "OGC_REPORT_V4_MIMO_API_KEY",
+      "OGC_PUBLIC_SEARCH_MIMO_BASE_URL",
+      "OGC_PUBLIC_SEARCH_MIMO_API_KEY",
+      "OGC_PUBLIC_SEARCH_MIMO_MODEL",
       "OGC_TOKEN_HASH_SECRET"
     ] as const) {
       const environment = validEnvironment();
       delete environment[missing];
       const ensureDatabase = vi.fn();
-
       await expect(prepareWorkerStartup({ environment, ensureDatabase }))
-        .rejects.toThrow(/Report V4|OGC_REPORT_V4|MiMo|profile|key/i);
+        .rejects.toThrow(/profile|OGC_|MiMo|key|incomplete/i);
       expect(ensureDatabase, missing).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects the observed half-switch and secret errors before database startup", async () => {
+    const secret = "must-not-appear";
+    for (const environment of [
+      { ...validEnvironment(), OGC_PROVIDER_PROFILE: "sensenova_anysearch" },
+      { ...validEnvironment(), OGC_PUBLIC_SEARCH_ADAPTER: "anysearch" },
+      { ...validEnvironment(), OGC_REPORT_V4_MIMO_BASE_URL: "https://other.example/v1", OGC_REPORT_V4_MIMO_API_KEY: secret }
+    ]) {
+      const ensureDatabase = vi.fn();
+      let thrown: unknown;
+      try { await prepareWorkerStartup({ environment, ensureDatabase }); } catch (error) { thrown = error; }
+      expect(thrown).toBeInstanceOf(Error);
+      expect(String(thrown)).not.toContain(secret);
+      expect(ensureDatabase).not.toHaveBeenCalled();
     }
   });
 
@@ -38,50 +57,36 @@ describe("Report V4 Worker startup readiness", () => {
     }
   });
 
-  it("rejects a non-approved MiMo endpoint without exposing the configured key", () => {
-    const secret = "must-not-appear";
-    const environment = {
-      ...validEnvironment(),
-      OGC_REPORT_V4_MIMO_BASE_URL: "https://other.example/v1",
-      OGC_REPORT_V4_MIMO_API_KEY: secret
-    };
-
-    expect(() => assertReportV4WorkerStartupReadiness(environment)).toThrowError(
-      expect.not.stringContaining(secret)
-    );
-  });
-
-  it("rejects drifted structured-output, public-search, context, and output-budget capabilities", () => {
+  it("rejects drifted structured-output, context and output-budget capabilities", () => {
     const runtime = loadReportV4ModelRuntimeConfig(validEnvironment());
     const questionAnswer = runtime.resolvedProfile.operations.questionAnswer;
-    const candidates = [
+    for (const candidate of [
       runtimeWith(runtime, { structuredOutput: false }),
-      runtimeWith(runtime, { nativeWebSearch: false }),
       runtimeWith(runtime, { maxInputTokens: questionAnswer.contextWindowTokens }),
       runtimeWith(runtime, { maxOutputTokens: 0 })
-    ];
-
-    for (const candidate of candidates) {
+    ]) {
       expect(() => assertReportV4WorkerStartupReadiness(validEnvironment(), {
-        loadModelRuntime: () => candidate,
-        readMimoProviderConfig: () => ({ baseUrl: "https://api.xiaomimimo.com/v1", apiKey: "secret" })
-      })).toThrow(/capability|structured|search|context|budget|output/i);
+        resolveProfileRuntime: () => ({ modelRuntime: candidate }) as ProviderProfileRuntime
+      })).toThrow(/capability|structured|context|budget|output/i);
     }
   });
 
-  it("admits the approved locked profile and MiMo configuration before database startup", async () => {
+  it("prepares exact authority after database connectivity and publishes before returning", async () => {
     const calls: string[] = [];
-    const ensureDatabase = vi.fn(async () => { calls.push("database"); });
-
-    await expect(prepareWorkerStartup({
+    const publishRuntime = vi.fn(() => { calls.push("publish"); });
+    const prepared = await prepareWorkerStartup({
       environment: validEnvironment(),
-      ensureDatabase,
-      validateReportV4Readiness: () => { calls.push("v4-readiness"); }
-    })).resolves.toBeUndefined();
-    expect(calls).toEqual(["v4-readiness", "database"]);
+      ensureDatabase: async () => { calls.push("database"); },
+      validateReportV4Readiness: () => { calls.push("profile"); },
+      resolvePublicSearchRuntime: async () => { calls.push("authority"); return publicRuntime(); },
+      publishRuntime
+    });
+    expect(prepared.profileId).toBe("mimo_native");
+    expect(calls).toEqual(["profile", "database", "authority", "publish"]);
+    expect(publishRuntime).toHaveBeenCalledWith(prepared);
   });
 
-  it("retries a nested transient database cause once, then succeeds", async () => {
+  it("retries a nested transient database cause once, then resolves authority", async () => {
     const calls: string[] = [];
     let attempt = 0;
     const ensureDatabase = vi.fn(async () => {
@@ -90,23 +95,29 @@ describe("Report V4 Worker startup readiness", () => {
     });
     await prepareWorkerStartup({
       environment: validEnvironment(), ensureDatabase,
-      validateReportV4Readiness: () => { calls.push("model"); },
+      validateReportV4Readiness: () => { calls.push("profile"); },
+      resolvePublicSearchRuntime: async () => { calls.push("authority"); return publicRuntime(); },
+      publishRuntime: () => { calls.push("publish"); },
       delay: async (milliseconds) => { calls.push(`delay:${milliseconds}`); }
     });
-    expect(calls).toEqual(["model", "database", "delay:1000", "database"]);
-    expect(ensureDatabase).toHaveBeenCalledTimes(2);
+    expect(calls).toEqual(["profile", "database", "delay:1000", "database", "authority", "publish"]);
   });
 
-  it("uses all five attempts and exponential delays before rethrowing the last transient error", async () => {
+  it("uses all five attempts and never resolves authority before rethrowing the last transient error", async () => {
     const failure = { code: "CONNECT_TIMEOUT" };
     const ensureDatabase = vi.fn().mockRejectedValue(failure);
     const delays: number[] = [];
-    await expect(prepareWorkerStartup({ environment: validEnvironment(), ensureDatabase, delay: async (milliseconds) => { delays.push(milliseconds); } })).rejects.toBe(failure);
+    const resolvePublicSearchRuntime = vi.fn(async () => publicRuntime());
+    await expect(prepareWorkerStartup({
+      environment: validEnvironment(), ensureDatabase, resolvePublicSearchRuntime,
+      delay: async (milliseconds) => { delays.push(milliseconds); }
+    })).rejects.toBe(failure);
     expect(ensureDatabase).toHaveBeenCalledTimes(5);
     expect(delays).toEqual([1000, 2000, 4000, 8000]);
+    expect(resolvePublicSearchRuntime).not.toHaveBeenCalled();
   });
 
-  it("fails fast for auth, profile, schema, and message-only errors", async () => {
+  it("fails fast for non-transient database errors and profile errors", async () => {
     for (const failure of [{ code: "28P01" }, { code: "PROFILE_MISMATCH" }, { code: "42P01" }, { message: "CONNECT_TIMEOUT" }]) {
       const ensureDatabase = vi.fn().mockRejectedValue(failure);
       const delay = vi.fn(async () => undefined);
@@ -114,27 +125,40 @@ describe("Report V4 Worker startup readiness", () => {
       expect(ensureDatabase).toHaveBeenCalledTimes(1);
       expect(delay).not.toHaveBeenCalled();
     }
-  });
-
-  it("runs model readiness once before database attempts or delays", async () => {
     const ensureDatabase = vi.fn();
-    const delay = vi.fn(async () => undefined);
     await expect(prepareWorkerStartup({
-      environment: validEnvironment(), ensureDatabase, delay,
-      validateReportV4Readiness: () => { throw new Error("model readiness failed"); }
-    })).rejects.toThrow("model readiness failed");
+      environment: validEnvironment(), ensureDatabase,
+      validateReportV4Readiness: () => { throw new Error("profile readiness failed"); }
+    })).rejects.toThrow("profile readiness failed");
     expect(ensureDatabase).not.toHaveBeenCalled();
-    expect(delay).not.toHaveBeenCalled();
   });
 });
 
 function validEnvironment(): NodeJS.ProcessEnv {
   return {
+    NODE_ENV: "test",
+    OGC_DEPLOYMENT_PROFILE: "staging",
+    OGC_PROVIDER_PROFILE: "mimo_native",
     OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
     OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
     OGC_REPORT_V4_MIMO_API_KEY: "v4-secret",
+    OGC_PUBLIC_SEARCH_RUNTIME_ENABLED: "true",
+    OGC_PUBLIC_SEARCH_ADAPTER: "mimo",
+    OGC_PUBLIC_SEARCH_LOCALE: "zh-CN",
+    OGC_PUBLIC_SEARCH_REGION: "CN",
+    OGC_PUBLIC_SEARCH_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
+    OGC_PUBLIC_SEARCH_MIMO_API_KEY: "search-secret",
+    OGC_PUBLIC_SEARCH_MIMO_MODEL: "mimo-v2.5-pro",
     OGC_TOKEN_HASH_SECRET: "v4-commercial-token-secret-at-least-32-characters"
   };
+}
+
+function publicRuntime() {
+  return {
+    adapter: {},
+    authority: { active: true },
+    identity: { adapterId: "mimo" }
+  } as never;
 }
 
 function runtimeWith(

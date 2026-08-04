@@ -3,6 +3,7 @@ param(
   [switch]$SkipBuild,
   [switch]$PrepareOnly,
   [switch]$PrepareStagingOnly,
+  [switch]$InitializeStagingEmailActivation,
   [string]$RuntimeInputRoot
 )
 
@@ -64,43 +65,16 @@ function Write-RuntimeEnv {
     if (-not $values.ContainsKey("COMMERCE_MODE")) { $values["COMMERCE_MODE"] = "disabled" }
   }
 
-  $providerNames = @("OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL", "OGC_AI_TIMEOUT_MS", "OGC_AI_JSON_RESPONSE_FORMAT")
+  $providerNames = @(
+    "OGC_PROVIDER_PROFILE", "OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL",
+    "OGC_AI_TIMEOUT_MS", "OGC_AI_JSON_RESPONSE_FORMAT", "OGC_REPORT_V4_MODEL_PROFILE_ID",
+    "OGC_REPORT_V4_MIMO_BASE_URL", "OGC_REPORT_V4_MIMO_API_KEY", "OGC_TOKEN_HASH_SECRET",
+    "OGC_PUBLIC_SEARCH_RUNTIME_ENABLED", "OGC_PUBLIC_SEARCH_ADAPTER", "OGC_PUBLIC_SEARCH_LOCALE",
+    "OGC_PUBLIC_SEARCH_REGION", "OGC_PUBLIC_SEARCH_AUTHORITY_VERSION", "OGC_PUBLIC_SEARCH_MIMO_BASE_URL",
+    "OGC_PUBLIC_SEARCH_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_MODEL",
+    "OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL", "OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY"
+  )
   Merge-EnvFile $values (Join-Path $webRoot ".env.local") -AllowedNames $providerNames -OnlyIfMissing
-  if ($Environment -eq "staging") {
-    $stagingV4Names = @(
-      "OGC_REPORT_V4_MODEL_PROFILE_ID",
-      "OGC_REPORT_V4_MIMO_BASE_URL",
-      "OGC_REPORT_V4_MIMO_API_KEY",
-      "OGC_TOKEN_HASH_SECRET"
-    )
-    Merge-EnvFile $values (Join-Path $webRoot ".env.local") -AllowedNames $stagingV4Names -OnlyIfMissing
-    if (-not $values.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -or [string]::IsNullOrWhiteSpace($values["OGC_REPORT_V4_MODEL_PROFILE_ID"])) {
-      $values["OGC_REPORT_V4_MODEL_PROFILE_ID"] = "report-v4-mimo-v2.5-pro-v1"
-    }
-    foreach ($binding in @{
-      "OGC_REPORT_V4_MIMO_BASE_URL" = "OGC_AI_BASE_URL"
-      "OGC_REPORT_V4_MIMO_API_KEY" = "OGC_AI_API_KEY"
-    }.GetEnumerator()) {
-      if ((-not $values.ContainsKey($binding.Key) -or [string]::IsNullOrWhiteSpace($values[$binding.Key])) -and
-          $values.ContainsKey($binding.Value) -and -not [string]::IsNullOrWhiteSpace($values[$binding.Value])) {
-        $values[$binding.Key] = $values[$binding.Value]
-      }
-    }
-  }
-  if ($Environment -eq "staging" -and $values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true") {
-    $publicSearchMiMoFallbacks = @{
-      "OGC_PUBLIC_SEARCH_MIMO_BASE_URL" = "OGC_AI_BASE_URL"
-      "OGC_PUBLIC_SEARCH_MIMO_API_KEY" = "OGC_AI_API_KEY"
-      "OGC_PUBLIC_SEARCH_MIMO_MODEL" = "OGC_AI_MODEL"
-    }
-    foreach ($target in $publicSearchMiMoFallbacks.Keys) {
-      $source = $publicSearchMiMoFallbacks[$target]
-      if ((-not $values.ContainsKey($target) -or [string]::IsNullOrWhiteSpace($values[$target])) -and
-          $values.ContainsKey($source) -and -not [string]::IsNullOrWhiteSpace($values[$source])) {
-        $values[$target] = $values[$source]
-      }
-    }
-  }
   $values["FULFILLMENT_MODE"] = "realtime"
   $values["OGC_JOB_QUEUE_PROVIDER"] = "postgres"
   $values["OGC_WORKER_POLL_MS"] = "5000"
@@ -108,12 +82,23 @@ function Write-RuntimeEnv {
   $values["OGC_DEPLOYMENT_VERSION"] = "docker-desktop-$Environment"
   $values["NODE_ENV"] = "production"
 
-  Require-Values $values @("DATABASE_URL", "OGC_DEPLOYMENT_PROFILE", "OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL") "$Environment Worker"
+  Require-Values $values @("DATABASE_URL", "OGC_DEPLOYMENT_PROFILE", "OGC_PROVIDER_PROFILE", "OGC_TOKEN_HASH_SECRET", "OGC_PUBLIC_SEARCH_RUNTIME_ENABLED", "OGC_PUBLIC_SEARCH_LOCALE", "OGC_PUBLIC_SEARCH_REGION") "$Environment Worker"
+  if ($values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -ne "true") { throw "$Environment Worker requires OGC_PUBLIC_SEARCH_RUNTIME_ENABLED=true." }
+  $profile = $values["OGC_PROVIDER_PROFILE"]
+  if ($profile -eq "mimo_native") {
+    Require-Values $values @("OGC_REPORT_V4_MIMO_BASE_URL", "OGC_REPORT_V4_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_BASE_URL", "OGC_PUBLIC_SEARCH_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_MODEL") "$Environment MiMo provider profile"
+    if ($values.ContainsKey("OGC_PUBLIC_SEARCH_ADAPTER") -and $values["OGC_PUBLIC_SEARCH_ADAPTER"] -ne "mimo") { throw "OGC_PUBLIC_SEARCH_ADAPTER conflicts with mimo_native." }
+    if ($values.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -and $values["OGC_REPORT_V4_MODEL_PROFILE_ID"] -ne "report-v4-mimo-v2.5-pro-v1") { throw "OGC_REPORT_V4_MODEL_PROFILE_ID conflicts with mimo_native." }
+  } elseif ($profile -eq "sensenova_anysearch") {
+    Require-Values $values @("OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL", "OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL", "OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY") "$Environment SenseNova and AnySearch provider profile"
+    if (($values.ContainsKey("OGC_REPORT_V4_MIMO_BASE_URL") -and -not [string]::IsNullOrWhiteSpace($values["OGC_REPORT_V4_MIMO_BASE_URL"])) -or ($values.ContainsKey("OGC_REPORT_V4_MIMO_API_KEY") -and -not [string]::IsNullOrWhiteSpace($values["OGC_REPORT_V4_MIMO_API_KEY"]))) { throw "Stale MiMo V4 routing values conflict with sensenova_anysearch." }
+    if ($values.ContainsKey("OGC_PUBLIC_SEARCH_ADAPTER") -and $values["OGC_PUBLIC_SEARCH_ADAPTER"] -ne "anysearch") { throw "OGC_PUBLIC_SEARCH_ADAPTER conflicts with sensenova_anysearch." }
+    if ($values.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -and $values["OGC_REPORT_V4_MODEL_PROFILE_ID"] -ne "report-v4-sensenova-deepseek-v4-flash-v1") { throw "OGC_REPORT_V4_MODEL_PROFILE_ID conflicts with sensenova_anysearch." }
+  } else {
+    throw "OGC_PROVIDER_PROFILE is unsupported: $profile"
+  }
   if ($Environment -eq "staging") {
-    Require-Values $values @("OGC_EVIDENCE_STORAGE", "BLOB_READ_WRITE_TOKEN", "OGC_REPORT_V4_MODEL_PROFILE_ID", "OGC_REPORT_V4_MIMO_BASE_URL", "OGC_REPORT_V4_MIMO_API_KEY", "OGC_TOKEN_HASH_SECRET") "Staging Worker"
-    if ($values["OGC_PUBLIC_SEARCH_RUNTIME_ENABLED"] -eq "true") {
-      Require-Values $values @("OGC_PUBLIC_SEARCH_ADAPTER", "OGC_PUBLIC_SEARCH_MIMO_BASE_URL", "OGC_PUBLIC_SEARCH_MIMO_API_KEY", "OGC_PUBLIC_SEARCH_MIMO_MODEL", "OGC_PUBLIC_SEARCH_LOCALE", "OGC_PUBLIC_SEARCH_REGION") "Staging public-search runtime"
-    }
+    Require-Values $values @("OGC_EVIDENCE_STORAGE", "BLOB_READ_WRITE_TOKEN") "Staging Worker"
   }
   if ($Environment -eq "production") {
     if ($values["OGC_EVIDENCE_STORAGE"] -eq "vercel-blob") {
@@ -142,8 +127,81 @@ function Write-RuntimeEnv {
   if ($LASTEXITCODE -ne 0) { throw "Could not restrict permissions on $path." }
 }
 
+function Write-StagingCommerceEnv {
+  $values = @{}
+  $commerceSourceNames = @(
+    "DATABASE_URL", "COMMERCE_MODE", "OGC_TEST_EMAIL_RECIPIENT", "RESEND_API_KEY",
+    "RESEND_FROM_EMAIL", "OGC_REPLY_TO_EMAIL", "OGC_TOKEN_HASH_SECRET", "OGC_DATABASE_POOL_SIZE"
+  )
+  Merge-EnvFile $values (Join-Path $repoRoot ".vercel\.env.preview.local") -AllowedNames $commerceSourceNames
+  Merge-EnvFile $values (Join-Path $webRoot ".env.staging.local") -AllowedNames $commerceSourceNames
+  Merge-EnvFile $values (Join-Path $runtimeDirectory "staging.env") -AllowedNames $commerceSourceNames
+  $values["OGC_DEPLOYMENT_PROFILE"] = "staging"
+  $values["VERCEL_ENV"] = "preview"
+  $values["NODE_ENV"] = "production"
+  $values["OGC_STAGING_EMAIL_INTERVAL_MS"] = "5000"
+  $values["OGC_REPORT_BASE_URL"] = "https://open-geo-console-staging-itheheda.vercel.app"
+  if ($values["COMMERCE_MODE"] -ne "test") { throw "Staging email delivery requires COMMERCE_MODE=test." }
+
+  $path = Join-Path $runtimeDirectory "staging-commerce.env"
+  $activationPath = Join-Path $runtimeDirectory "staging-commerce.activation"
+  $activation = $null
+  if (Test-Path -LiteralPath $path) {
+    foreach ($line in Get-Content -LiteralPath $path) {
+      if ($line -match '^OGC_STAGING_EMAIL_ACTIVATION_AT=(.*)$') { $activation = Convert-EnvValue $matches[1] }
+    }
+  }
+  $persistedActivation = if (Test-Path -LiteralPath $activationPath) {
+    (Get-Content -LiteralPath $activationPath -Raw).Trim()
+  } else { $null }
+  if (-not [string]::IsNullOrWhiteSpace($activation) -and
+      -not [string]::IsNullOrWhiteSpace($persistedActivation) -and
+      $activation -ne $persistedActivation) {
+    throw "The Staging email activation authorities disagree."
+  }
+  if ($InitializeStagingEmailActivation -and
+      (-not [string]::IsNullOrWhiteSpace($activation) -or
+       -not [string]::IsNullOrWhiteSpace($persistedActivation))) {
+    throw "Staging email activation is already initialized."
+  }
+  if ([string]::IsNullOrWhiteSpace($activation)) { $activation = $persistedActivation }
+  if ([string]::IsNullOrWhiteSpace($activation)) {
+    if (-not $InitializeStagingEmailActivation) {
+      throw "Staging email activation is absent; initialize it explicitly once."
+    }
+    $activation = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", [Globalization.CultureInfo]::InvariantCulture)
+  }
+  $parsedActivation = [DateTime]::MinValue
+  if (-not [DateTime]::TryParseExact($activation, "yyyy-MM-ddTHH:mm:ss.fffZ",
+      [Globalization.CultureInfo]::InvariantCulture,
+      [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal,
+      [ref]$parsedActivation) -or $parsedActivation.Kind -ne [DateTimeKind]::Utc) {
+    throw "The Staging email activation timestamp is invalid."
+  }
+  $values["OGC_STAGING_EMAIL_ACTIVATION_AT"] = $activation
+
+  $required = @(
+    "DATABASE_URL", "OGC_DEPLOYMENT_PROFILE", "VERCEL_ENV", "COMMERCE_MODE",
+    "OGC_TEST_EMAIL_RECIPIENT", "RESEND_API_KEY", "RESEND_FROM_EMAIL",
+    "OGC_REPLY_TO_EMAIL", "OGC_REPORT_BASE_URL", "OGC_TOKEN_HASH_SECRET",
+    "OGC_STAGING_EMAIL_ACTIVATION_AT"
+  )
+  Require-Values $values $required "Staging email delivery"
+  $placeholders = @($required | Where-Object { $values[$_] -eq "[SENSITIVE]" })
+  if ($placeholders.Count -gt 0) { throw "Staging email delivery has unresolved Sensitive placeholders: $($placeholders -join ', ')." }
+  $allowed = @($required + @("NODE_ENV", "OGC_DATABASE_POOL_SIZE", "OGC_STAGING_EMAIL_INTERVAL_MS"))
+  $lines = @($allowed | Sort-Object -Unique | ForEach-Object { "$_=$($values[$_])" })
+  [System.IO.File]::WriteAllLines($path, $lines, [System.Text.UTF8Encoding]::new($false))
+  [System.IO.File]::WriteAllText($activationPath, $activation, [System.Text.UTF8Encoding]::new($false))
+  & icacls.exe $path /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not restrict permissions on the Staging email runtime file." }
+  & icacls.exe $activationPath /inheritance:r /grant:r "${env:USERNAME}:(R,W)" | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not restrict permissions on the Staging email activation file." }
+}
+
 $repoRoot = (Resolve-Path -LiteralPath $RuntimeInputRoot).Path; $webRoot = Join-Path $repoRoot "apps\web"
 Write-RuntimeEnv "staging"
+Write-StagingCommerceEnv
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path; $webRoot = Join-Path $repoRoot "apps\web"
 if ($PrepareStagingOnly) {
   if (-not $PrepareOnly) { throw "-PrepareStagingOnly requires -PrepareOnly." }
@@ -162,6 +220,21 @@ $commerceExcluded = @(
   "OGC_AI_JSON_RESPONSE_FORMAT",
   "OGC_AI_MODEL",
   "OGC_AI_TIMEOUT_MS",
+  "OGC_PROVIDER_PROFILE",
+  "OGC_REPORT_V4_MODEL_PROFILE_ID",
+  "OGC_REPORT_V4_MIMO_BASE_URL",
+  "OGC_REPORT_V4_MIMO_API_KEY",
+  "OGC_TOKEN_HASH_SECRET",
+  "OGC_PUBLIC_SEARCH_RUNTIME_ENABLED",
+  "OGC_PUBLIC_SEARCH_ADAPTER",
+  "OGC_PUBLIC_SEARCH_LOCALE",
+  "OGC_PUBLIC_SEARCH_REGION",
+  "OGC_PUBLIC_SEARCH_AUTHORITY_VERSION",
+  "OGC_PUBLIC_SEARCH_MIMO_BASE_URL",
+  "OGC_PUBLIC_SEARCH_MIMO_API_KEY",
+  "OGC_PUBLIC_SEARCH_MIMO_MODEL",
+  "OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL",
+  "OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY",
   "OGC_DEPLOYMENT_VERSION",
   "OGC_EVIDENCE_STORAGE",
   "OGC_JOB_QUEUE_PROVIDER",
@@ -185,7 +258,7 @@ Push-Location $repoRoot
 try {
   if (-not $SkipBuild) { docker compose build staging-worker-free }
   if ($LASTEXITCODE -ne 0) { throw "Worker image build failed." }
-  $services = @("staging-worker-free", "staging-worker-deep", "production-worker-free", "production-commerce")
+  $services = @("staging-worker-free", "staging-worker-deep", "staging-commerce", "production-worker-free", "production-commerce")
   if ($script:ProductionDeepReady) { $services += "production-worker-deep" }
   docker compose --profile workstation --profile workstation-production-deep up -d @services
   if ($LASTEXITCODE -ne 0) { throw "Worker containers did not start." }

@@ -39,6 +39,7 @@ describe("commercial checkout route", () => {
     process.env.OGC_EMAIL_ENCRYPTION_SECRET = "encryption-secret-with-at-least-32-characters";
     process.env.OGC_EMAIL_LOOKUP_SECRET = "lookup-secret-with-at-least-32-characters";
     process.env.OGC_PAYMENT_IDEMPOTENCY_SECRET = "payment-idempotency-secret-at-least-32-chars";
+    process.env.OGC_TOKEN_HASH_SECRET = "return-capability-secret-at-least-32-characters";
     mocks.getGeoReport.mockResolvedValue({ id: "report-1", url: "https://example.com", siteKey: "example.com", reportLocale: "en" });
     mocks.getActivePaymentOrderForReport.mockResolvedValue(null);
     mocks.verifyTurnstile.mockResolvedValue({ success: true, errorCodes: [] });
@@ -71,6 +72,11 @@ describe("commercial checkout route", () => {
       siteSnapshotId: expect.anything()
     }));
     expect(mocks.createHostedCheckout).toHaveBeenCalledOnce();
+    const returnCookie = response.headers.get("set-cookie") ?? "";
+    expect(returnCookie).toMatch(/^ogc_payment_return_report-1=/i);
+    expect(returnCookie).toMatch(/; Secure/i);
+    expect(returnCookie).toMatch(/; HttpOnly/i);
+    expect(returnCookie).toMatch(/; SameSite=Lax/i);
   });
 
   it("stops before looking up or recovering any legacy checkout while the product is unavailable", async () => {
@@ -123,6 +129,29 @@ describe("commercial checkout route", () => {
     expect(response.status).toBe(200);
     expect(mocks.deactivateLegacyHostedCheckout).toHaveBeenCalledOnce();
     expect(mocks.replaceLegacyHostedCheckout).toHaveBeenCalledOnce();
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("never mints return access when recovering an existing paid checkout by email", async () => {
+    mocks.getActivePaymentOrderForReport.mockResolvedValue({
+      id: "order-1",
+      providerCheckoutId: "int_existing",
+      checkoutIdempotencyHmac: "another-checkout",
+      businessQuestionSetId: "teaser-questions-1",
+      customerEmailHmac: protectCustomerEmail("buyer@example.com").lookupHmac,
+      paymentStatus: "paid"
+    });
+    mocks.getHostedCheckout.mockResolvedValue({
+      providerCheckoutId: "int_existing", clientSecret: "secret_existing", currency: "USD", environment: "demo"
+    });
+    const response = await POST(new Request("https://example.test/api/reports/report-1/checkout", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "request-123" },
+      body: JSON.stringify({ email: "buyer@example.com", currency: "USD", locale: "en", turnstileToken: "human", questionSetId: "teaser-questions-1" })
+    }), { params: Promise.resolve({ id: "report-1" }) });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("does not replace an already-paid legacy Payment Link", async () => {

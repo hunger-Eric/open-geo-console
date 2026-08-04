@@ -33,13 +33,11 @@ import {
   enqueuePaidReportV4DiagnosisEnhancement
 } from "../db/public-source-commerce";
 import {
-  buildReportV4MimoQuestionTokenBudget,
-  createReportV4MimoQuestionAnswerProvider
+  buildReportV4MimoQuestionTokenBudget
 } from "../report-v4/mimo-provider";
 import {
   buildReportV4MimoPageAnalysisTokenBudget,
-  buildReportV4MimoWebsiteSynthesisTokenBudget,
-  createReportV4MimoSiteSynthesisProvider
+  buildReportV4MimoWebsiteSynthesisTokenBudget
 } from "../report-v4/mimo-site-synthesis-provider";
 import {
   resolveReportV4LockedModelRuntime,
@@ -50,6 +48,7 @@ import {
   type ReportV4ReportRuntimeConfig
 } from "../report-v4/report-runtime-config";
 import { renderReportV4Html } from "../report/report-v4-html";
+import { getPreparedProviderProfileRuntime } from "../provider-profile/runtime";
 import {
   createReportV4ProductionPageAnalysis
 } from "./report-v4-page-analysis-production";
@@ -298,6 +297,7 @@ export function createReportV4CoreProductionWithDependencies(
 }
 
 function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreProductionDependencies {
+  const providerRuntime = getPreparedProviderProfileRuntime();
   const configSnapshots = createReportV4ConfigSnapshotRepository();
   const revisions = createPostgresReportV4ArtifactRevisionExecutor();
   const artifacts = createPostgresReportV4ArtifactPersistenceStore();
@@ -317,6 +317,7 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
         || reportRuntime.reportProfile.profileId !== configSnapshot.reportProfileId
         || hashStable(reportRuntime.reportProfile) !== configSnapshot.reportProfileHash
         || stableJson(reportRuntime.reportProfile) !== stableJson(configSnapshot.reportProfile)
+        || modelRuntime !== providerRuntime.modelRuntime
         || context.config.modelProfileId !== modelRuntime.modelProfile.profileId
         || context.config.reportProfileId !== reportRuntime.reportProfile.profileId) {
         throw new Error("The locked Report V4 model or report runtime has drifted from the paid configuration snapshot.");
@@ -377,7 +378,7 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
         async synthesizeWebsite({ snapshot, signal }) {
           const activeSignal = signal ?? execution.input.signal;
           activeSignal.throwIfAborted();
-          const basePageProvider = createReportV4MimoSiteSynthesisProvider(providerDependencies(options, execution.modelRuntime));
+          const basePageProvider = providerRuntime.createSiteSynthesisProvider(execution.modelRuntime);
           const provider = withReportV4CoreAcceptancePageProvider({
             provider: basePageProvider,
             runtime: acceptanceRuntime,
@@ -416,7 +417,7 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
             locale: execution.input.locale,
             pages
           };
-          let acceptanceWebsiteProvider;
+          let websiteProvider = providerRuntime.createSiteSynthesisProvider(execution.modelRuntime);
           if (acceptanceRuntime) {
             const websiteBudget = buildReportV4MimoWebsiteSynthesisTokenBudget(
               execution.modelRuntime,
@@ -427,8 +428,8 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
               unitId: REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID,
               tokenBudget: websiteBudget
             });
-            acceptanceWebsiteProvider = withReportV4CoreAcceptanceWebsiteProvider({
-              provider: createReportV4MimoSiteSynthesisProvider(providerDependencies(options, execution.modelRuntime)),
+            websiteProvider = withReportV4CoreAcceptanceWebsiteProvider({
+              provider: websiteProvider,
               runtime: acceptanceRuntime,
               tokenBudget: (providerInput) => buildReportV4MimoWebsiteSynthesisTokenBudget(
                 execution.modelRuntime,
@@ -441,7 +442,7 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
             lockedModelProfile: execution.configSnapshot.modelProfile,
             repository: websiteCheckpoints,
             ...(options.fetch ? { fetch: options.fetch } : {}),
-            ...(acceptanceWebsiteProvider ? { provider: acceptanceWebsiteProvider } : {})
+            provider: websiteProvider
           });
           const synthesis = await synthesize({
             reportId: execution.input.reportId,
@@ -467,7 +468,11 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
           const activeSignal = signal ?? execution.input.signal;
           activeSignal.throwIfAborted();
           const baseProvider = withReportV4QuestionFailureDrill({
-            provider: createReportV4MimoQuestionAnswerProvider(providerDependencies(options, execution.modelRuntime)),
+            provider: providerRuntime.createQuestionAnswerProvider({
+              locale: execution.input.locale,
+              region: execution.context.questionSet.region,
+              lockedRuntime: execution.modelRuntime
+            }),
             coreJobId: execution.input.coreJobId,
             liveDrill: options.liveDrill
           });
@@ -614,18 +619,6 @@ function liveQuestionCheckpointExecutor(): ReportV4QuestionCheckpointSqlExecutor
     await ensureDatabase();
     const execute = getSqlClient() as unknown as ReportV4QuestionCheckpointSqlExecutor;
     return execute<T>(strings, ...values);
-  };
-}
-
-function providerDependencies(
-  options: ReportV4CoreProductionOptions,
-  modelRuntime: ReportV4ModelRuntimeConfig
-) {
-  return {
-    environment: options.environment,
-    lockedRuntime: modelRuntime,
-    ...(options.fetch ? { fetch: options.fetch } : {}),
-    ...(options.now ? { now: options.now } : {})
   };
 }
 

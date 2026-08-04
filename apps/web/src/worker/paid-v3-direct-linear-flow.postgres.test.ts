@@ -14,9 +14,10 @@ import { toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet } from "
 import { closeDatabase, ensureDatabase, getSqlClient } from "@/db";
 import { terminalizePaidCombinedReport } from "@/db/combined-correction-terminalization";
 import { createTestSourceForensicReport } from "@/public-source-forensics/testing";
-import { prepareCombinedGeoReportV3, type PrepareCombinedGeoReportV3Input } from "@/report/combined-artifact-readiness";
+import { prepareCombinedGeoReportV3, renderCanonicalCombinedArtifactHtml, type PrepareCombinedGeoReportV3Input } from "@/report/combined-artifact-readiness";
 import { resolveGenerativeAnswerFirstV3 } from "./answer-first-v3";
 import { buildPaidV3DirectSemantics } from "./paid-v3-direct-semantics";
+import { generateGeoArticleExample } from "./geo-article-example";
 import { createPublicSourceAttemptBudget } from "./public-source-execution-budget";
 import { buildVisualEvidenceRequests, captureReportVisualEvidence, visualEvidenceHash } from "./visual-evidence";
 
@@ -220,6 +221,14 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
     analysisReleases.splice(0).forEach((release) => release());
     const directSemantics = await directPending;
     expect(directSemantics.questions.map(({ analysisStatus }) => analysisStatus)).toEqual(["completed", "completed", "completed"]);
+    const articleCompleteJson = vi.fn(async () => { throw new Error("article provider unavailable"); });
+    const geoArticleExample = await generateGeoArticleExample({
+      client: { configuredModel: "fixture-model", completeJson: articleCompleteJson },
+      targetUrl, locale: forensic.locale, questionSet, answerCards: cards,
+      aiReport: synthesis.report, technicalReport: technicalReport(targetUrl)
+    });
+    expect(articleCompleteJson).toHaveBeenCalledOnce();
+    expect(geoArticleExample.generationMode).toBe("deterministic_fallback");
 
     const visualReport = { ...synthesis.report, findings: Array.from({ length: 11 }, (_, index) => ({
       id: `visual-${index}`, title: `Finding ${index}`, severity: "opportunity" as const,
@@ -253,8 +262,15 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
       aiReport: synthesis.report, evidenceAssets, businessQuestionSet: questionSet, answerCards: cards,
       sourceSelectionDiagnosis: answerResult.checkpoint.sourceSelectionDiagnosis!,
       engineProvenance: answerResult.checkpoint.engineProvenance,
-      publicSourceForensics: forensic, providerDiscovery: providerDiscovery(), directSemantics
+      publicSourceForensics: forensic, providerDiscovery: providerDiscovery(), directSemantics, geoArticleExample
     }, { semanticValidation: "free_direct" });
+    const html = renderCanonicalCombinedArtifactHtml({
+      productContract: "combined_geo_report_v3", reportId: ids.report, locale: "zh",
+      artifactRevisionId: ids.artifact, pdfStorageKey: "pending", evidenceAssets,
+      technicalReport: report.technicalFoundation.technicalReport, combinedReport: report
+    } as never);
+    expect(html).toContain('data-geo-article-generation-mode="deterministic_fallback"');
+    expect(html).toContain(geoArticleExample.title);
     await getSqlClient()`UPDATE scan_jobs SET checkpoint=${JSON.stringify({
       freeDirectSemanticsVersion: "free-v4-direct-semantics-v1",
       answerFirstV3: { identityHash: answerResult.checkpoint.identityHash }

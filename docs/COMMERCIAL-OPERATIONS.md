@@ -19,7 +19,9 @@ Customer promise: a paid report is delivered by email within 24 hours of confirm
 | System | Variables |
 | --- | --- |
 | Neon | `DATABASE_URL`, `OGC_DATABASE_POOL_SIZE` |
-| Model provider | `OGC_AI_BASE_URL`, `OGC_AI_API_KEY`, `OGC_AI_MODEL` |
+| Worker provider route | `OGC_PROVIDER_PROFILE` (`mimo_native` or `sensenova_anysearch`) |
+| MiMo profile data | `OGC_REPORT_V4_MIMO_BASE_URL`, `OGC_REPORT_V4_MIMO_API_KEY`, `OGC_PUBLIC_SEARCH_MIMO_BASE_URL`, `OGC_PUBLIC_SEARCH_MIMO_API_KEY`, `OGC_PUBLIC_SEARCH_MIMO_MODEL` |
+| SenseNova + AnySearch profile data | `OGC_AI_BASE_URL`, `OGC_AI_API_KEY`, `OGC_AI_MODEL`, `OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL`, `OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY` |
 | Application HMAC | `OGC_TOKEN_HASH_SECRET`, `OGC_IP_HASH_SECRET`, `OGC_PAYMENT_IDEMPOTENCY_SECRET` |
 | Customer email protection | `OGC_EMAIL_ENCRYPTION_SECRET`, `OGC_EMAIL_LOOKUP_SECRET` |
 | Cloudflare Turnstile | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `TURNSTILE_EXPECTED_HOSTNAME` |
@@ -46,6 +48,12 @@ Live mode also requires explicit server-side `OGC_PRICE_CNY_MINOR`, `OGC_PRICE_U
 - New checkout creates an Airwallex PaymentIntent and launches the official Hosted Payment Page SDK. Payment Link IDs created before the migration remain legacy records and are never sent to PaymentIntent retrieval APIs.
 - HPP success and cancel navigation return to the originating localized report with an opaque order ID. The report-bound status API reads PostgreSQL only.
 - A success return displays `confirming` until a valid signed `payment_intent.succeeded` Webhook updates the order. A cancel return means only that the shopper left checkout; it is not a trusted provider cancellation.
+- Successful checkout also places a short-lived Secure, HttpOnly, SameSite=Lax
+  capability in that browser. After PostgreSQL confirms the exact order is paid
+  and deliverable with an active artifact, the return page exchanges it for the
+  normal artifact-scoped report cookie and navigates to the canonical HTML.
+  Query parameters and the public status response never grant report access;
+  email remains the independent fallback.
 - The PaymentIntent client secret is temporary browser session material. Never log, persist, copy into monitoring, or expose it through the status API.
 - When investigating a return issue, verify the report/order binding, the signed provider event, and the PostgreSQL order state separately. Do not repair fulfillment from query parameters or a browser screenshot.
 - Retire pre-migration unpaid provider resources only through `npm run commerce:retire-legacy`. The command requires `OGC_DEPLOYMENT_PROFILE=staging|production`, `COMMERCE_MODE=test|live`, `OGC_LEGACY_RETIREMENT_ENABLED=true`, and an explicit ISO `OGC_LEGACY_RETIREMENT_CUTOFF_AT`; it rechecks provider state and does not retire a checkout that is already paid. Review the printed inspected/retired/paid counts and provider state before disabling the gate again.
@@ -59,7 +67,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-workstation-
 docker compose --profile workstation ps
 ```
 
-The launcher writes merged runtime environment files only under ignored `.data/workstation-docker/`, removes inherited ACLs, and grants the current Windows user read/write access. It never prints or copies secrets into the image. The active services are staging free/deep, production free/deep, and production commerce. Production deep is auto-detected from independent private-storage credentials and otherwise fails closed; `-EnableProductionDeep` remains a strict preflight assertion. Staging commerce still requires locally available staging-only Airwallex/Resend secrets.
+The launcher writes merged runtime environment files only under ignored `.data/workstation-docker/`, removes inherited ACLs, and grants the current Windows user read/write access. It never prints or copies secrets into the image. The active services are staging free/deep/email, production free/deep, and production commerce. The Staging email service reads a separately allowlisted environment file and claims only deliveries created at or after its persisted activation timestamp; restarts retain that timestamp in the runtime file and a separate activation authority. First initialization requires the explicit one-time `-InitializeStagingEmailActivation` switch; later use of that switch or loss/disagreement of the activation authorities fails closed. It never runs SLA, refund, payment, report, or reconciliation operations. Production deep is auto-detected from independent private-storage credentials and otherwise fails closed; `-EnableProductionDeep` remains a strict preflight assertion. Staging email requires locally available staging-only Resend, redirected-recipient, database, and token settings and uses the fixed Protected Staging origin for report links.
 
 ## Manual batch fallback
 

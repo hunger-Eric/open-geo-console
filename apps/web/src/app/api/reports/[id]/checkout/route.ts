@@ -16,6 +16,11 @@ import { getTrustedClientIp } from "@/security/client-ip";
 import { verifyTurnstile } from "@/security/turnstile";
 import { parseReportLocale } from "@/server/report-locale";
 import { assertRecommendationProductAvailable } from "@/recommendation-forensics/product-availability";
+import {
+  issuePaymentReturnAccessCapability,
+  paymentReturnAccessCookieName,
+  paymentReturnAccessCookieOptions
+} from "@/server/payment-return-access";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
@@ -69,7 +74,7 @@ export async function POST(request: Request, context: RouteContext) {
       if (active.customerEmailHmac !== protectedEmail.lookupHmac) {
         return NextResponse.json({ error: "This report already has an active checkout." }, { status: 409 });
       }
-      return checkoutResponse(request, active.id, active.providerCheckoutId, checkoutInput);
+      return checkoutResponse(request, active.id, active.providerCheckoutId, checkoutInput, false);
     }
 
     const order = await createPaymentOrder({
@@ -89,7 +94,7 @@ export async function POST(request: Request, context: RouteContext) {
       currency: price.currency,
       amountMinor: price.amountMinor
     });
-    return checkoutResponse(request, order.id, order.providerCheckoutId, checkoutInput);
+    return checkoutResponse(request, order.id, order.providerCheckoutId, checkoutInput, true);
   } catch (error) {
     if (process.env.NODE_ENV !== "production") console.error(error);
     return NextResponse.json({ error: publicError(error) }, { status: 400 });
@@ -100,7 +105,8 @@ async function checkoutResponse(
   request: Request,
   orderId: string,
   providerCheckoutId: string | null,
-  createInput?: { reportId: string; siteKey: string; locale: "en" | "zh"; currency: "CNY" | "USD" | "HKD"; amountMinor: number }
+  createInput: { reportId: string; siteKey: string; locale: "en" | "zh"; currency: "CNY" | "USD" | "HKD"; amountMinor: number },
+  issueReturnCapability: boolean
 ) {
   const gateway = new AirwallexGateway();
   let effectiveProviderCheckoutId = providerCheckoutId;
@@ -116,12 +122,12 @@ async function checkoutResponse(
     }
     const migrated = await gateway.findHostedCheckoutByReference(orderId) ?? await gateway.createHostedCheckout({
       orderId,
-      reportId: createInput!.reportId,
-      siteKey: createInput!.siteKey,
-      locale: createInput!.locale,
-      currency: createInput!.currency,
-      amountMinor: createInput!.amountMinor,
-      returnUrl: new URL(`/${createInput!.locale}/reports/${encodeURIComponent(createInput!.reportId)}`, request.url).href
+      reportId: createInput.reportId,
+      siteKey: createInput.siteKey,
+      locale: createInput.locale,
+      currency: createInput.currency,
+      amountMinor: createInput.amountMinor,
+      returnUrl: new URL(`/${createInput.locale}/reports/${encodeURIComponent(createInput.reportId)}`, request.url).href
     });
     await replaceLegacyHostedCheckout({
       orderId,
@@ -136,15 +142,15 @@ async function checkoutResponse(
     ? await gateway.getHostedCheckout(effectiveProviderCheckoutId, orderId)
     : recovered ?? await gateway.createHostedCheckout({
         orderId,
-        reportId: createInput!.reportId,
-        siteKey: createInput!.siteKey,
-        locale: createInput!.locale,
-        currency: createInput!.currency,
-        amountMinor: createInput!.amountMinor,
-        returnUrl: new URL(`/${createInput!.locale}/reports/${encodeURIComponent(createInput!.reportId)}`, request.url).href
+        reportId: createInput.reportId,
+        siteKey: createInput.siteKey,
+        locale: createInput.locale,
+        currency: createInput.currency,
+        amountMinor: createInput.amountMinor,
+        returnUrl: new URL(`/${createInput.locale}/reports/${encodeURIComponent(createInput.reportId)}`, request.url).href
       }));
   if (!effectiveProviderCheckoutId) await attachHostedCheckout({ orderId, providerCheckoutId: checkout.providerCheckoutId });
-  return NextResponse.json({
+  const response = NextResponse.json({
     orderId,
     hpp: {
       intentId: checkout.providerCheckoutId,
@@ -153,6 +159,15 @@ async function checkoutResponse(
       environment: checkout.environment
     }
   }, { status: providerCheckoutId ? 200 : 201 });
+  if (issueReturnCapability) {
+    const capability = issuePaymentReturnAccessCapability({ reportId: createInput.reportId, orderId });
+    response.cookies.set(
+      paymentReturnAccessCookieName(createInput.reportId),
+      capability.raw,
+      paymentReturnAccessCookieOptions(capability.expiresAt)
+    );
+  }
+  return response;
 }
 
 function assertSmallRequest(request: Request) {

@@ -150,12 +150,11 @@ function assertCapabilities(
   if (!requested.structuredOutput) {
     throw new TypeError(`${operation} structuredOutput is required by the V4 model operation contract.`);
   }
-  const requiresNativeWebSearch = operation === "questionAnswer";
-  if (requested.nativeWebSearch !== requiresNativeWebSearch) {
-    throw new TypeError(`${operation} nativeWebSearch must be ${String(requiresNativeWebSearch)} for the V4 model operation contract.`);
+  if (operation !== "questionAnswer" && requested.nativeWebSearch) {
+    throw new TypeError(`${operation} nativeWebSearch must be false for the V4 model operation contract.`);
   }
-  if (requested.nativeWebSearch && !supported.nativeWebSearch) {
-    throw new TypeError(`${operation} nativeWebSearch capability is unsupported by the configured adapter endpoint.`);
+  if (requested.nativeWebSearch !== supported.nativeWebSearch) {
+    throw new TypeError(`${operation} nativeWebSearch must exactly match the configured adapter endpoint capability.`);
   }
   if (requested.structuredOutput && !supported.structuredOutput) {
     throw new TypeError(`${operation} structuredOutput capability is unsupported by the configured adapter endpoint.`);

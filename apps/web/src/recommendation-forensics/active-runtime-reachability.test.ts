@@ -6,6 +6,12 @@ const active=["apps/web/src/worker/processor.ts","apps/web/src/public-source-for
 describe("active V2 runtime reachability",()=>{
   it("has no active V1 provider adapter, credential, certification CLI, or admission flag",()=>{const source=active.map((file)=>readFileSync(resolve(root,file),"utf8")).join("\n");for(const term of ["createProductionRecommendationDependencies","adapters/openai-web-search","adapters/perplexity-sonar","OGC_ANSWER_OPENAI","OGC_ANSWER_PERPLEXITY","OGC_RECOMMENDATION_PUBLIC_ENABLED","recommendation:certify","recommendation:authority:install"])expect(source).not.toContain(term);});
   it("keeps crawler identity packages independent of fulfillment retirement",()=>{const source=readFileSync(resolve(root,"packages/crawler-rules/src/index.ts"),"utf8");expect(source).toMatch(/OpenAI|GPTBot/i);});
+  it("routes paid V4 website synthesis through the prepared provider profile",()=>{
+    const source=readFileSync(resolve(root,"apps/web/src/worker/report-v4-core-production.ts"),"utf8");
+    expect(source).toContain("let websiteProvider = providerRuntime.createSiteSynthesisProvider(execution.modelRuntime)");
+    expect(source).toContain("provider: websiteProvider");
+    expect(source).not.toContain("...(acceptanceWebsiteProvider ? { provider:");
+  });
   it("uses the compile-time public-search registry and MiMo adapter without dynamic vendor loading",()=>{
     const sourceRoots=[
       "apps/web/src/public-search-adapters/registry.ts",
@@ -15,6 +21,9 @@ describe("active V2 runtime reachability",()=>{
     const source=sourceRoots.map((file)=>readFileSync(resolve(root,file),"utf8")).join("\n");
     expect(source).toContain("createApprovedPublicSearchAdapterRegistry");
     expect(source).toContain("createMiMoPublicSearchAdapterFactory");
+    expect(source).toContain("resolveProviderProfileId");
+    expect(readFileSync(resolve(root,"apps/web/src/public-source-forensics/production-runtime.ts"),"utf8"))
+      .not.toContain("environment.OGC_PUBLIC_SEARCH_ADAPTER");
     for(const term of [
       "adapters/openai-web-search",
       "adapters/perplexity-sonar",

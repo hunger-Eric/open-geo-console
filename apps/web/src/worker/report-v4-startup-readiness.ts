@@ -1,21 +1,23 @@
 import { MODEL_PROFILE_OPERATIONS, type ModelProfileOperation } from "@open-geo-console/ai-report-engine";
 import {
-  loadReportV4ModelRuntimeConfig,
   type ReportV4ModelRuntimeConfig
 } from "../report-v4/model-runtime-config";
 import {
-  readReportV4MimoProviderConfig,
-  type ReportV4MimoProviderConfig
-} from "../report-v4/mimo-provider";
+  prepareProviderProfileRuntime,
+  publishPreparedProviderProfileRuntime,
+  resolveProviderProfileRuntime,
+  type PreparedProviderProfileRuntime,
+  type ProviderProfileRuntime
+} from "../provider-profile/runtime";
+import { resolveProductionPublicSearchRuntime } from "../public-source-forensics/production-runtime";
+import { getActivePublicSearchSurfaceAuthority } from "../db/public-search-authority";
 
 export interface ReportV4WorkerStartupReadinessDependencies {
-  readonly loadModelRuntime: (environment: NodeJS.ProcessEnv) => ReportV4ModelRuntimeConfig;
-  readonly readMimoProviderConfig: (environment: NodeJS.ProcessEnv) => ReportV4MimoProviderConfig;
+  readonly resolveProfileRuntime: (environment: NodeJS.ProcessEnv) => ProviderProfileRuntime;
 }
 
 const liveDependencies: ReportV4WorkerStartupReadinessDependencies = {
-  loadModelRuntime: loadReportV4ModelRuntimeConfig,
-  readMimoProviderConfig: readReportV4MimoProviderConfig
+  resolveProfileRuntime: resolveProviderProfileRuntime
 };
 
 /**
@@ -26,9 +28,8 @@ export function assertReportV4WorkerStartupReadiness(
   environment: NodeJS.ProcessEnv = process.env,
   dependencies: ReportV4WorkerStartupReadinessDependencies = liveDependencies
 ): void {
-  const runtime = dependencies.loadModelRuntime(environment);
-  assertLockedCapabilities(runtime);
-  dependencies.readMimoProviderConfig(environment);
+  const runtime = dependencies.resolveProfileRuntime(environment);
+  assertLockedCapabilities(runtime.modelRuntime);
   assertCommercialTokenSecret(environment);
 }
 
@@ -36,23 +37,39 @@ export async function prepareWorkerStartup(input: {
   readonly environment?: NodeJS.ProcessEnv;
   readonly ensureDatabase: () => Promise<void>;
   readonly validateReportV4Readiness?: (environment: NodeJS.ProcessEnv) => void;
+  readonly resolveProfileRuntime?: (environment: NodeJS.ProcessEnv) => ProviderProfileRuntime;
+  readonly resolvePublicSearchRuntime?: typeof resolveProductionPublicSearchRuntime;
+  readonly publishRuntime?: (runtime: PreparedProviderProfileRuntime) => void;
   readonly delay?: (milliseconds: number) => Promise<void>;
-}): Promise<void> {
+}): Promise<PreparedProviderProfileRuntime> {
   const environment = input.environment ?? process.env;
-  (input.validateReportV4Readiness ?? assertReportV4WorkerStartupReadiness)(environment);
+  const profileRuntime = (input.resolveProfileRuntime ?? resolveProviderProfileRuntime)(environment);
+  (input.validateReportV4Readiness ?? ((value) => {
+    assertLockedCapabilities(profileRuntime.modelRuntime);
+    assertCommercialTokenSecret(value);
+  }))(environment);
   const delay = input.delay ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let lastError: unknown;
+  let databasePrepared = false;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       await input.ensureDatabase();
-      return;
+      databasePrepared = true;
+      break;
     } catch (error) {
       lastError = error;
       if (!isTransientStartupDatabaseError(error)) throw error;
       if (attempt < 4) await delay(1000 * 2 ** attempt);
     }
   }
-  throw lastError;
+  if (!databasePrepared) throw lastError;
+  const publicSearchRuntime = await (input.resolvePublicSearchRuntime ?? resolveProductionPublicSearchRuntime)({
+    environment,
+    getAuthority: getActivePublicSearchSurfaceAuthority
+  });
+  const prepared = prepareProviderProfileRuntime(profileRuntime, publicSearchRuntime);
+  (input.publishRuntime ?? publishPreparedProviderProfileRuntime)(prepared);
+  return prepared;
 }
 
 const TRANSIENT_STARTUP_DATABASE_CODES = new Set(["CONNECT_TIMEOUT", "ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EPIPE"]);
@@ -89,8 +106,7 @@ function assertOperation(runtime: ReportV4ModelRuntimeConfig, operation: ModelPr
   if (!locked || !resolved || resolved.structuredOutput !== true || !resolved.endpointCapability?.trim()) {
     throw new Error(`The locked Report V4 ${operation} structured-output capability is unavailable.`);
   }
-  const requiresPublicSearch = operation === "questionAnswer";
-  if (resolved.nativeWebSearch !== requiresPublicSearch) {
+  if (operation !== "questionAnswer" && resolved.nativeWebSearch) {
     throw new Error(`The locked Report V4 ${operation} public-search capability has drifted.`);
   }
   const budgets = [resolved.contextWindowTokens, resolved.maxInputTokens, resolved.maxOutputTokens];
