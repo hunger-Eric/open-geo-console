@@ -96,7 +96,7 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
   }, [reportId]);
 
   const price = useMemo(() => catalog?.prices.find((item) => item.currency === currency), [catalog, currency]);
-  const returnStatus = returnResult?.orderId === returnContext?.orderId ? returnResult.status : null;
+  const returnStatus = returnResult && returnContext && returnResult.orderId === returnContext.orderId ? returnResult.status : null;
   const hidePurchaseControls = shouldHidePurchaseControls(returnContext, returnStatus);
   if (!catalog?.enabled) return null;
 
