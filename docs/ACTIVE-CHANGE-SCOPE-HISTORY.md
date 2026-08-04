@@ -5675,3 +5675,33 @@ revised scope.
 - No worker/commerce/Docker/database changes.
 - Terminal status: **implemented, verified, and deployed to Protected
   Staging; user browser acceptance and the `v0.3.0` tag remain pending.**
+
+---
+
+## 2026-08-04 - Download-route 404 fix and top-right download placement
+
+- Root cause verified by user acceptance: `/reports/<id>/report.html/download`
+  returned 404 because `apps/web/src/i18n/routes.ts`
+  `PUBLIC_FILE_PATTERN = /\/[^/]+\.[^/]+$/` only exempted paths whose LAST
+  segment contains a dot; the locale proxy 308-rewrote the download path to
+  `/zh/...`, which has no route. The pattern now exempts any dotted segment
+  (`/\/[^/]+\.[^/]+/`). No proxy.ts, download route, artifact, dictionary, or
+  worker/commerce/Docker/database change.
+- Per user directive the download affordance on
+  `report.html/page.tsx` moved from the full-width top bar into the artifact's
+  existing top-right actions styling (`artifact-actions` + `primary`, centered
+  on the 1120px report column, right-aligned hint, `no-print`); same anchor
+  and `actions.downloadHtml`/`downloadHtmlHint` texts.
+- Verified: 21 focused tests passed (i18n routes incl. two new
+  `/report.html/download` cases returning `next`; report.html page suite with
+  new `artifact-actions`/`primary` assertions); `npm run build --workspace
+  apps/web` passed (route table still lists `ƒ /reports/[id]/report.html/download`).
+- Commit `ee25de12aca4d609904284ab5fc3c7522e20b6fb` on `main`, pushed.
+  Production diff: routes.ts +1/−1, page.tsx +9/−5; tests +4 lines; within the
+  20/25 budget. Unrelated dirty files (commerce, client-ip, .env.example,
+  COMMERCIAL-OPERATIONS.md) were left untouched and uncommitted.
+- Preview `dpl_BaEQNVbv2GtaSd7GTzHsVYBKZXaN` (ogcGitSha `ee25de1`) READY,
+  fixed Protected Staging alias moved, anonymous download URL 302→SSO intact.
+  Rollback: re-alias `dpl_DuvzZ4ytt8D8NHF5bap98h5uhzju`.
+- Terminal status: **implemented, verified, and deployed to Protected
+  Staging; user browser acceptance and the `v0.3.0` tag remain pending.**
