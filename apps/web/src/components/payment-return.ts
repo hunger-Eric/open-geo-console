@@ -1,6 +1,7 @@
 import type { Dictionary } from "@/i18n";
 
 export type ReturnHint = "success" | "cancel";
+export interface PaymentReturnContext { orderId: string; hint: ReturnHint }
 export interface PublicOrderStatus {
   orderId: string;
   paymentStatus: "created" | "pending" | "paid" | "failed" | "cancelled";
@@ -13,6 +14,26 @@ export interface PublicOrderStatus {
 }
 
 export const PAYMENT_STATUS_REQUEST_TIMEOUT_MS = 12_000;
+
+export function getPaymentReturnContext(searchParams: Pick<URLSearchParams, "get">): PaymentReturnContext | null {
+  const orderId = searchParams.get("order") ?? "";
+  const hint = searchParams.get("payment_return");
+  return /^[a-zA-Z0-9_-]{1,128}$/.test(orderId) && (hint === "success" || hint === "cancel")
+    ? { orderId, hint }
+    : null;
+}
+
+export function shouldHidePurchaseControls(
+  context: PaymentReturnContext | null,
+  status: PublicOrderStatus | null
+): boolean {
+  if (!context) return false;
+  if (!status || status.orderId !== context.orderId) return context.hint === "success";
+  if (status.paymentStatus === "failed" || status.paymentStatus === "cancelled" || status.refundStatus === "refunded") {
+    return false;
+  }
+  return status.paymentStatus === "paid" || context.hint === "success";
+}
 
 export async function fetchPaymentReturnStatus(
   url: string,

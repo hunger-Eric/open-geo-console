@@ -4,9 +4,7 @@ import { CircleAlert, CircleCheck, Loader2, RefreshCw } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dictionary } from "@/i18n";
-import { attemptPaymentCompletionHandoff, fetchPaymentReturnStatus, getPaymentReturnView, isTerminalPaymentReturn, type PublicOrderStatus, type ReturnHint } from "./payment-return";
-
-interface ReturnContext { orderId: string; hint: ReturnHint }
+import { attemptPaymentCompletionHandoff, fetchPaymentReturnStatus, getPaymentReturnContext, getPaymentReturnView, isTerminalPaymentReturn, type PublicOrderStatus } from "./payment-return";
 
 export function PaymentRefreshButton({ label, loading, onClick }: { label: string; loading: boolean; onClick: () => void }) {
   return (
@@ -26,13 +24,7 @@ export function PaymentRefreshButton({ label, loading, onClick }: { label: strin
 
 export function PaymentReturnBanner({ dictionary, reportId }: { dictionary: Dictionary; reportId: string }) {
   const searchParams = useSearchParams();
-  const context = useMemo<ReturnContext | null>(() => {
-    const orderId = searchParams.get("order") ?? "";
-    const hint = searchParams.get("payment_return");
-    return /^[a-zA-Z0-9_-]{1,128}$/.test(orderId) && (hint === "success" || hint === "cancel")
-      ? { orderId, hint }
-      : null;
-  }, [searchParams]);
+  const context = useMemo(() => getPaymentReturnContext(searchParams), [searchParams]);
   const [status, setStatus] = useState<PublicOrderStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);

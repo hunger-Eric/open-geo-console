@@ -1,14 +1,21 @@
 "use client";
 
 import { Check, Loader2, LockKeyhole } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { Dictionary, Locale } from "@/i18n";
 import {
   getPaymentConfirmationReturnUrl,
   readCheckoutPayload,
   type CheckoutPayload
 } from "./checkout-response";
-import { buildHppReturnUrls } from "./payment-return";
+import {
+  buildHppReturnUrls,
+  fetchPaymentReturnStatus,
+  getPaymentReturnContext,
+  shouldHidePurchaseControls,
+  type PublicOrderStatus
+} from "./payment-return";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "./turnstile-widget";
 
 type Currency = "CNY" | "USD" | "HKD";
@@ -24,6 +31,15 @@ interface BusinessQuestionPayload {
 }
 
 export function CommercialCheckout({ dictionary, locale, reportId }: { dictionary: Dictionary; locale: Locale; reportId: string }) {
+  return <Suspense fallback={null}>
+    <CommercialCheckoutContent dictionary={dictionary} locale={locale} reportId={reportId} />
+  </Suspense>;
+}
+
+function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionary: Dictionary; locale: Locale; reportId: string }) {
+  const searchParams = useSearchParams();
+  const returnContext = useMemo(() => getPaymentReturnContext(searchParams), [searchParams]);
+  const [returnResult, setReturnResult] = useState<{ orderId: string; status: PublicOrderStatus } | null>(null);
   const [catalog, setCatalog] = useState<CatalogPayload | null>(null);
   const [currency, setCurrency] = useState<Currency>(locale === "zh" ? "CNY" : "USD");
   const [email, setEmail] = useState("");
@@ -36,6 +52,19 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
   const turnstileRef = useRef<TurnstileWidgetHandle>(null);
   const pendingCheckout = useRef(false);
   const checkoutIdempotencyKey = useRef("");
+
+  useEffect(() => {
+    if (!returnContext) return;
+    const controller = new AbortController();
+    void fetchPaymentReturnStatus(
+      `/api/reports/${encodeURIComponent(reportId)}/orders/${encodeURIComponent(returnContext.orderId)}/status`,
+      { signal: controller.signal }
+    )
+      .then(async (response) => response.ok ? response.json() as Promise<PublicOrderStatus> : null)
+      .then((status) => { if (status) setReturnResult({ orderId: returnContext.orderId, status }); })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [reportId, returnContext]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,6 +96,8 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
   }, [reportId]);
 
   const price = useMemo(() => catalog?.prices.find((item) => item.currency === currency), [catalog, currency]);
+  const returnStatus = returnResult?.orderId === returnContext?.orderId ? returnResult.status : null;
+  const hidePurchaseControls = shouldHidePurchaseControls(returnContext, returnStatus);
   if (!catalog?.enabled) return null;
 
   async function checkout(event: React.FormEvent<HTMLFormElement>) {
@@ -168,7 +199,7 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
           </li>)}
         </ol>
       </div>
-      <form onSubmit={checkout} className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,1fr)_140px]">
+      {!hidePurchaseControls ? <form onSubmit={checkout} className="mt-5 grid gap-4 sm:grid-cols-[minmax(0,1fr)_140px]">
         <label className="text-sm font-semibold">
           {dictionary.commerce.emailLabel}
           <input className="input-control mt-2 w-full" type="email" required autoComplete="email" value={email} onChange={(event) => {
@@ -206,8 +237,8 @@ export function CommercialCheckout({ dictionary, locale, reportId }: { dictionar
                 : `${dictionary.commerce.buyAction} · ${currency} ${price ? (price.amountMinor / 100).toFixed(2) : ""}`}
           </button>
         </div>
-      </form>
-      {catalog.mode === "test" ? <p className="mt-3 text-xs text-[var(--muted)]">Sandbox / test mode</p> : null}
+      </form> : null}
+      {!hidePurchaseControls && catalog.mode === "test" ? <p className="mt-3 text-xs text-[var(--muted)]">Sandbox / test mode</p> : null}
       {error ? <p className="mt-3 text-sm text-[var(--red)]" role="alert">{error}</p> : null}
     </section>
   );

@@ -4,8 +4,10 @@ import {
   attemptPaymentCompletionHandoff,
   fetchPaymentCompletionAccess,
   fetchPaymentReturnStatus,
+  getPaymentReturnContext,
   getPaymentReturnView,
   isTerminalPaymentReturn,
+  shouldHidePurchaseControls,
   shouldAttemptCompletionAccess,
   type PublicOrderStatus
 } from "./payment-return";
@@ -90,6 +92,36 @@ describe("payment return status request", () => {
     caller.abort(new DOMException("Unmounted.", "AbortError"));
 
     await expect(request).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("payment return purchase controls", () => {
+  const context = (query: string) => getPaymentReturnContext(new URLSearchParams(query));
+
+  it("accepts only a complete return context with an opaque order id", () => {
+    expect(context("order=order_1-abc&payment_return=success"))
+      .toEqual({ orderId: "order_1-abc", hint: "success" });
+    expect(context("payment_return=success")).toBeNull();
+    expect(context("order=not%20opaque&payment_return=success")).toBeNull();
+    expect(context(`order=${"a".repeat(129)}&payment_return=success`)).toBeNull();
+  });
+
+  it("hides controls during a valid success confirmation and after paid state", () => {
+    const success = context("order=order-1&payment_return=success");
+    const cancel = context("order=order-1&payment_return=cancel");
+    expect(shouldHidePurchaseControls(success, null)).toBe(true);
+    expect(shouldHidePurchaseControls(success, base)).toBe(true);
+    expect(shouldHidePurchaseControls(cancel, { ...base, paymentStatus: "paid" })).toBe(true);
+  });
+
+  it("shows controls without a return or after cancel, failure, or refund", () => {
+    const cancel = context("order=order-1&payment_return=cancel");
+    const success = context("order=order-1&payment_return=success");
+    expect(shouldHidePurchaseControls(null, null)).toBe(false);
+    expect(shouldHidePurchaseControls(cancel, base)).toBe(false);
+    expect(shouldHidePurchaseControls(success, { ...base, paymentStatus: "failed" })).toBe(false);
+    expect(shouldHidePurchaseControls(success, { ...base, paymentStatus: "cancelled" })).toBe(false);
+    expect(shouldHidePurchaseControls(success, { ...base, paymentStatus: "paid", refundStatus: "refunded" })).toBe(false);
   });
 });
 
