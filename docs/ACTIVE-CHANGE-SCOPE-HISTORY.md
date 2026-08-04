@@ -5705,3 +5705,58 @@ revised scope.
   Rollback: re-alias `dpl_DuvzZ4ytt8D8NHF5bap98h5uhzju`.
 - Terminal status: **implemented, verified, and deployed to Protected
   Staging; user browser acceptance and the `v0.3.0` tag remain pending.**
+
+---
+
+## 2026-08-04 - Inline evidence images into the downloaded report HTML
+
+- User acceptance found the downloaded standalone HTML lost all evidence
+  screenshots: artifact components render them as site-relative
+  `/api/reports/<id>/evidence/<assetId>` (and `/evidence/recommendation/<id>`)
+  URLs, which resolve to `file://` in the saved file.
+- `report-scope.tsx` gained `inlineEvidenceImages()`: for ready assets with a
+  `storageKey`, bytes are read via the existing `EvidenceStorage.get()` and
+  both API src patterns are replaced with `data:<contentType>;base64,...`.
+  Not-ready, keyless, missing, or unreadable assets keep their API src and
+  never fail the download. The download route calls it (V4 has no evidence
+  assets; narrowed with `"evidenceAssets" in model`). Online page, artifact
+  components, evidence API routes, and the storage layer unchanged.
+- Verified: 13 focused tests passed (5 helper cases incl. both src patterns,
+  base64 content, and all passthrough paths); web build passed.
+- Commit `d116b90da6a51073ae55ea48110e26b561e6895e` on `main`, pushed
+  (production +28, tests +53; within budget). Housekeeping commit `79d02de`
+  on the same push carried the previously reviewed trusted-country pricing
+  batch (14 files, 46 focused tests green before commit).
+- Preview `dpl_EiRKJGKAy2TSMYExcYVQ3iBKhYNP` (ogcGitSha `d116b90`) READY,
+  fixed Protected Staging alias moved, anonymous download URL 302→SSO intact.
+  Rollback: re-alias `dpl_BaEQNVbv2GtaSd7GTzHsVYBKZXaN`.
+- Terminal status: **implemented, verified, and deployed to Protected
+  Staging; user browser acceptance (offline screenshots in the downloaded
+  file) and the `v0.3.0` tag remain pending.**
+
+---
+
+## 2026-08-04 - Docker stale image cleanup
+
+- User directed cleanup of old project images, keeping only the latest. The
+  frozen scope listed 25 exact image IDs; the user approved it.
+- Before: 77 images / 32.31GB (`docker system df`), E: drive 51G free.
+- Removed 23 of 25 with plain `docker rmi` (no `--force`): all 19 listed
+  unreferenced staging overlay/full images (`5ef0fecd18b5`, `901be8795886`,
+  `26bb8f778d05`, `5cb3a2b3a929`, `d6a730bc9d35`, `23c9cb696e0f`,
+  `b08ea493fc2a`, `748e2675f280`, `ab9df490fb21`, `0b62fd4561c2`,
+  `ea1d552f5d97`, `7b08c1e1a477`, `3f436e73870a`, `95a62dcdfc1f`,
+  `ae9dca41f2dc`, `02b474693b25`, `8a62a930f5a5`, `4a28445023a7`,
+  `1cdc060d597c`) and 4 dangling images (`dab66c879b81`, `498795247e31`,
+  `2e8c58d6fa0e`, `75fd8eb23b77`).
+- Stopped instead of forcing on 2 listed dangling images that turned out to
+  be referenced by RUNNING containers of another project: `b5f4c57c96d9`
+  (redis:7-alpine layer, `freight_lead_agent-redis-1`) and `0e5e5e1396de`
+  (postgres:16-alpine layer, `freight_lead_agent-postgres-1`). Both retained.
+- Retained as scoped: current staging worker `1a82ee00f646`, staging
+  commerce + rollback `ab4f795c9bf7`, production `ed17c0fe9e15`. All four
+  open-geo staging containers still running; no other project's image,
+  container, volume, or build cache touched; no prune commands used.
+- After: 54 images / 30.38GB; E: drive 51G free. Net image footprint
+  −1.93GB (overlay tags shared base layers, so tagged size ≠ freed bytes).
+- Terminal status: **complete.**
