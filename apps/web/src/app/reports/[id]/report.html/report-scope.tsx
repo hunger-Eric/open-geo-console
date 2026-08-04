@@ -8,6 +8,8 @@ import { CombinedGeoReportV3Artifact } from "@/components/combined-geo-report-v3
 import { CombinedGeoReportV4Artifact } from "@/components/combined-geo-report-v4-artifact";
 import { loadPrivateReportArtifact, type PrivateReportArtifactModel } from "@/report/artifact-model";
 import { ARTIFACT_CSS } from "@/report/artifact-styles";
+import type { ReportEvidenceAssetRow } from "@/db/schema";
+import type { EvidenceStorage } from "@/evidence/storage";
 import { reportAccessCookieName, tokenGrantsReportAccess } from "@/server/report-access";
 
 export async function resolvePrivateReportArtifact(id: string): Promise<PrivateReportArtifactModel | null> {
@@ -43,6 +45,32 @@ export function PrivateReportArtifactView({ model }: { model: PrivateReportArtif
 
 export function buildStandaloneReportDocument(artifactMarkup: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><style>${ARTIFACT_CSS}</style></head><body>${artifactMarkup}</body></html>`;
+}
+
+export async function inlineEvidenceImages(
+  markup: string,
+  reportId: string,
+  assets: ReportEvidenceAssetRow[],
+  storage: EvidenceStorage
+): Promise<string> {
+  let inlined = markup;
+  for (const asset of assets) {
+    if (asset.status !== "ready" || !asset.storageKey) continue;
+    const sources = [
+      `/api/reports/${reportId}/evidence/${asset.id}`,
+      `/api/reports/${reportId}/evidence/recommendation/${asset.id}`
+    ];
+    if (!sources.some((src) => inlined.includes(`src="${src}"`))) continue;
+    try {
+      const object = await storage.get(asset.storageKey);
+      if (!object) continue;
+      const dataUrl = `data:${object.contentType};base64,${Buffer.from(object.body).toString("base64")}`;
+      for (const src of sources) inlined = inlined.split(`src="${src}"`).join(`src="${dataUrl}"`);
+    } catch {
+      // Keep the API src for this asset; a missing image must not fail the download.
+    }
+  }
+  return inlined;
 }
 
 export function reportDownloadDisposition(id: string): string {
