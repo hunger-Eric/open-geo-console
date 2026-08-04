@@ -5993,3 +5993,37 @@ revised scope.
   model/search, commerce, email, or customer-data action occurred.
 - Terminal status: **completed; full local automated acceptance passed with
   zero failed tests.**
+
+---
+
+## 2026-08-04 - Release receipt: candidate 84d8173 to Protected Staging
+
+- Candidate `84d817366f875fd59179474ebae257886f6b22af` (parent `4af464b8`,
+  subject `fix: enforce report access boundaries and stabilize verification`)
+  verified on local `main`; clean detached deployment checkout at
+  `.data/deploy-worktree-readmode`. Push remains unauthorized; remote
+  publication pending.
+- Web: ONE manual Preview `dpl_8t79n7HX69GJLpgZXY5QidK7VqkD`
+  (host `open-geo-console-imgn5p3d5-itheheda-6857s-projects.vercel.app`)
+  READY, exact project `prj_WVpdlJfsEp0YyWM2W54w8oBy985S`, ogcGitSha =
+  candidate. Fixed Protected Staging alias moved once (previous:
+  `dpl_BfsqUMEESJDFvVS9maaAECQq9r49`; rollback Web: `dpl_A53XPfWHjkS5oCesn6mJQqLEGmJG`).
+- Worker: ONE thin source-overlay image
+  `open-geo-console:staging-84d8173-report-boundaries-overlay-v1`
+  (`sha256:a33d5e1e73bf6201a0866c2d4922e14d7f8f5336f4ed7208062f6c22763287b7`,
+  revision `84d8173`) built FROM the accepted current image
+  `sha256:002fc0877e...` via local tag (first attempt with a bare
+  `FROM sha256:` failed on registry resolution; no extra image produced).
+  Rollback Worker image `sha256:a707736c7a9c...` retained untouched.
+- Runtime env: original bytes backed up (`.tmp/staging.env.bak-84d8173`);
+  only `OGC_DEPLOYMENT_VERSION` changed to the candidate. Exactly the two
+  named Worker services recreated once (`--no-deps --no-build
+  --force-recreate`); Commerce and Production untouched.
+- Readiness (60s): both workers report exact candidate revision, correct
+  free/deep tier identity, restart count zero, clean ready logs, zero
+  workflow effects.
+- Smoke on the fixed URL: `/zh` and catalog both 302→SSO (protection
+  intact); authenticated catalog/browser checks left to user acceptance.
+- Disk: E: 51G free before and after; no Docker cleanup, no prune.
+- Terminal status: **deployed to Protected Staging; user manual acceptance
+  and remote-main publication pending.**
