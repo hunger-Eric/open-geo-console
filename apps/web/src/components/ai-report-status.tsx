@@ -42,6 +42,14 @@ interface StatusPayload {
   localeCorrectionInProgress: boolean;
 }
 
+export function shouldShowCommercialCheckout(
+  payload: Pick<StatusPayload, "hasAiReport" | "hasDeepAccess" | "job"> | null,
+  showCommerce: boolean
+): boolean {
+  if (!showCommerce || !payload?.hasAiReport || payload.hasDeepAccess) return false;
+  return payload.job?.state !== "generating" && payload.job?.state !== "unavailable";
+}
+
 export function AiReportStatus({
   dictionary,
   hasTechnicalReport = true,
@@ -253,7 +261,7 @@ export function AiReportStatus({
         </button>
       ) : null}
 
-      {showCommerce && !payload?.hasDeepAccess ? (
+      {shouldShowCommercialCheckout(payload, showCommerce) ? (
         <div className="mt-7 border-t border-[var(--border)] pt-6">
           <CommercialCheckout dictionary={dictionary} locale={reportLocale} reportId={reportId} />
           <details className="mt-5">

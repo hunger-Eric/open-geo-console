@@ -49,6 +49,90 @@ Web, Free Worker, and Deep Worker must share that SHA before moving the fixed
 Protected Staging alias. A manual metadata value is identity evidence only and
 never substitutes for the independent checks or a real-flow acceptance.
 
+## Proven source-only Protected Staging release path
+
+Use this sequence for source-only Web/Worker releases. It was executed
+successfully end to end on 2026-08-04. Do not replace individual steps with a
+new operator-designed sequence.
+
+1. Freeze the candidate SHA, current Web/Worker identities, one rollback line,
+   external-action counts, and the fixed URL in the approved active scope.
+   Create or select one clean exact-SHA checkout and verify `HEAD` plus clean
+   status. Existing unrelated worktrees remain untouched.
+2. In that exact checkout, verify Vercel authentication with both output and
+   exit code:
+
+   ```powershell
+   npx vercel whoami --debug
+   if ($LASTEXITCODE -ne 0) { throw "Vercel authentication is unavailable." }
+   ```
+
+   A wrapper that suppresses structured output is not evidence of logout. Do
+   not ask the user to log in when the exact-checkout command returns their
+   account, `Valid access token`, and exit code zero.
+3. Bind the known project/team and create at most one manual Preview:
+
+   ```powershell
+   $env:VERCEL_ORG_ID = 'team_PbYYV2K2zBjTeThfavXStTOI'
+   $env:VERCEL_PROJECT_ID = 'prj_WVpdlJfsEp0YyWM2W54w8oBy985S'
+   npx vercel deploy --yes --meta ogcGitSha=<candidate-full-sha>
+   ```
+
+   Independently require `READY`, Preview target, exact project/team, and
+   `gitCommitSha = ogcGitSha = <candidate-full-sha>` before continuing.
+4. When dependency/base inputs are unchanged, build exactly one thin overlay
+   from the accepted current Worker image. The transient Dockerfile shape is:
+
+   ```dockerfile
+   # syntax=docker/dockerfile:1
+   FROM <current-exact-worker-image>
+   ARG OGC_REVISION
+   LABEL org.opencontainers.image.revision=$OGC_REVISION
+   COPY --from=source apps /app/apps
+   COPY --from=source packages /app/packages
+   ```
+
+   Build with the clean checkout as the named `source` context, the full SHA as
+   both build argument and OCI revision label, and the approved candidate tag.
+   Never run `npm ci`, reinstall browsers/system packages, or perform a full
+   Worker build for a source-only change.
+5. Preserve the original bytes of `.data/workstation-docker/staging.env`.
+   Require exactly one `OGC_DEPLOYMENT_VERSION` line and replace only its value
+   with the full candidate SHA without printing environment values. Create a
+   transient Compose overlay containing only the `free` and `deep` tier values,
+   set `OGC_APP_IMAGE` to the candidate tag, then run:
+
+   ```powershell
+   docker compose -f compose.yaml -f <candidate-compose-overlay> `
+     --profile workstation up -d --no-deps --no-build --force-recreate `
+     staging-worker-free staging-worker-deep
+   ```
+
+6. Use `Wait-WorkerReadiness` from
+   `scripts/start-report-v4-staging-workers.ps1` unchanged. Its authoritative
+   boundary is 60 seconds, polled every two seconds, with the tier-specific
+   `Open GEO Console <tier> worker .+ is ready\.` log plus running/health
+   checks. Never substitute an ad hoc shorter timeout. Also require exact image
+   ID/revision, correct tier, Staging/Preview identity, restart count zero, and
+   zero claimable/running/recoverable/terminalizable work for both Workers.
+7. Only after Web/Free/Deep full-SHA equality, move the fixed alias once:
+
+   ```powershell
+   npx vercel alias set <candidate-preview-host> `
+     open-geo-console-staging-itheheda.vercel.app `
+     --scope team_PbYYV2K2zBjTeThfavXStTOI
+   ```
+
+8. On the fixed URL, verify `/zh`, catalog HTTP 200 with `mode=test`, final
+   Web/Worker identities, restart counts, and zero workflow effects. Human
+   confirmation of the protected page may supply the browser-facing check when
+   automation is blocked by Vercel SSO; record that boundary explicitly.
+
+On failure, restore the original runtime-env bytes, recreate only Free/Deep on
+the recorded current image, restore the fixed alias to the recorded Web host if
+it moved, verify the rollback, and stop. Rollback never authorizes another
+Preview, image build, or retry.
+
 ## Environment matrix
 
 | Boundary | Protected staging Preview | Production |

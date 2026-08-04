@@ -58,6 +58,7 @@ interface BusinessQuestionFocus {
   serviceExamples: readonly string[];
   audience: string;
   marketRegion: string;
+  purchaseCriteria: readonly string[];
 }
 
 export interface ConfirmedBusinessQuestion extends BusinessQuestionCandidate {
@@ -88,19 +89,22 @@ export function generateBusinessQuestionCandidates(input: {
   const focus = deriveBusinessQuestionFocus(profile, locale, region);
   const evidenceUrls = [...new Set(profile.evidence.map(({ url }) => bounded(url, "evidence.url", 2_000)))];
   const zh = locale.toLowerCase().startsWith("zh");
-  const examples = focus.serviceExamples.length > 1
+  const examples = focus.serviceExamples.length > 0
     ? zh
       ? `（如${focus.serviceExamples.join("、")}等）`
       : ` (such as ${focus.serviceExamples.join(", ")})`
     : "";
+  const criteria = focus.purchaseCriteria.length > 0
+    ? focus.purchaseCriteria.join(zh ? "、" : ", ")
+    : localized(locale, "service scope and delivery conditions", "服务范围与交付条件");
   const texts: [string, string, string] = zh ? [
     `哪些服务商公开提供${focus.serviceCategory}${examples}？`,
     `哪些${focus.serviceCategory}方案适合${focus.audience}进入${focus.marketRegion.replace(/市场$/u, "")}市场，分别适用于哪些使用场景、交付条件与约束？`,
-    `采购${focus.serviceCategory}时，应核验哪些服务范围、交付条件、限制与风险？`
+    `采购${focus.serviceCategory}时，应重点核验${criteria}，以及交付限制与风险？`
   ] : [
     `Which providers publicly offer ${focus.serviceCategory}${examples}?`,
     `Which ${focus.serviceCategory} options fit ${focus.audience} entering ${focus.marketRegion}, and for which use cases, delivery conditions, and constraints?`,
-    `When buying ${focus.serviceCategory}, which service scope, delivery conditions, limitations, and material risks should be verified?`
+    `When buying ${focus.serviceCategory}, how should buyers verify ${criteria}, delivery constraints, and material risks?`
   ];
   const purposes: [BusinessQuestionPurpose, BusinessQuestionPurpose, BusinessQuestionPurpose] = [
     "core_service_discovery", "customer_region_fit", "purchase_delivery_risk"
@@ -216,11 +220,12 @@ function publicSearchSubject(purpose:BusinessQuestionPurpose,text:string,locale:
   if(purpose!=="purchase_delivery_risk")return text;
   if(locale.toLowerCase().startsWith("zh")){
     const service=/采购(.+?)时/.exec(text)?.[1]?.trim();
-    const capability=/比较(.+?)[、，,]交付条件/.exec(text)?.[1]?.trim();
+    const capability=/核验(.+?)[，,]以及交付限制/.exec(text)?.[1]?.trim();
     if(service&&capability)return `${service} ${capability}`;
     if(capability)return capability;
   }else{
-    const subject=/compare (.+?)(?:,| and )\s*delivery conditions/i.exec(text)?.[1]?.trim();
+    const subject=(/verify (.+?), delivery constraints/i.exec(text)
+      ?? /compare (.+?)(?:,| and )\s*delivery conditions/i.exec(text))?.[1]?.trim();
     if(subject)return subject;
   }
   return text;
@@ -249,16 +254,45 @@ function deriveBusinessQuestionFocus(profile: BusinessQuestionProfile, locale: s
     profile.businessModel || localized(locale, "business services", "企业服务")
   );
   const normalizedService = marketCategory(rawService, locale);
+  const serviceCategory = compactServiceCategory(profile, normalizedService, locale);
   const marketFallback = region === "global" ? localized(locale, "the target market", "目标市场") : region;
-  const markets = profile.marketsAndRegions.slice(0, 3).map((value) => bounded(value, "profile signal", 500));
+  const markets = usableProfileSignals(profile.marketsAndRegions, locale, "market").slice(0, 2);
+  const audiences = usableProfileSignals(profile.targetAudiences, locale, "audience");
+  const discoveredServiceExamples = usableProfileSignals(
+    profile.productsAndServices.flatMap((value) => splitServiceExamples(marketCategory(value, locale))), locale, "service"
+  ).filter((value) => normalizeComparable(value) !== normalizeComparable(serviceCategory));
+  const supportedServiceExamples = discoveredServiceExamples.filter((value) => profileSupports(value, profile));
   return {
-    serviceCategory: compactServiceCategory(profile, normalizedService, locale),
-    serviceExamples: splitServiceExamples(normalizedService).slice(0, 3),
-    audience: strongest(profile.targetAudiences, profile, localized(locale, "business buyers", "企业采购方")),
+    serviceCategory,
+    serviceExamples: (supportedServiceExamples.length > 0 ? supportedServiceExamples : discoveredServiceExamples).slice(0, 3),
+    audience: strongest(audiences, profile, localized(locale, "business buyers", "企业采购方")),
     marketRegion: markets.length > 0
       ? markets.join(locale.toLowerCase().startsWith("zh") ? "、" : ", ")
-      : marketFallback
+      : marketFallback,
+    purchaseCriteria: usableProfileSignals(profile.capabilities, locale, "capability").slice(0, 3)
   };
+}
+
+function usableProfileSignals(
+  values: readonly string[],
+  locale: string,
+  kind: "service" | "audience" | "market" | "capability"
+): string[] {
+  const zh = locale.toLowerCase().startsWith("zh");
+  const maximum = zh ? 24 : 80;
+  const noisyAudience = /(?:网站|页面|语言|推测|未明确|重复录入|整理问题|可能|疑似)/u;
+  const noisyCapability = /(?:自营|直营|自有|网点|运营|客户|员工|仓储面积|\d)/u;
+  return [...new Set(values.map((raw) => marketCategory(bounded(raw, "profile signal", 500), locale)))]
+    .filter((value) => value.length <= maximum)
+    .filter((value) => zh ? /\p{Script=Han}/u.test(value) : /[A-Za-z]/u.test(value) && !/\p{Script=Han}/u.test(value))
+    .filter((value) => kind !== "audience" || !noisyAudience.test(value))
+    .filter((value) => kind !== "capability" || !noisyCapability.test(value));
+}
+
+function profileSupports(value: string, profile: BusinessQuestionProfile): boolean {
+  const needle = normalizeComparable(value);
+  return occurrences(normalizeComparable(profile.summary), needle) > 0
+    || profile.evidence.some(({ quote }) => occurrences(normalizeComparable(quote), needle) > 0);
 }
 
 function splitServiceExamples(value: string): string[] {
@@ -267,7 +301,7 @@ function splitServiceExamples(value: string): string[] {
 
 function compactServiceCategory(profile: BusinessQuestionProfile, service: string, locale: string): string {
   const logistics = `${profile.businessModel ?? ""} ${profile.summary} ${service}`;
-  if (/物流|货运|海运|空运|专线/u.test(logistics)) {
+  if (/物流|货运|海运|空运|专线|\b(?:logistics|freight|shipping)\b/iu.test(logistics)) {
     return localized(locale, "cross-border logistics services", "跨境物流服务");
   }
   return marketCategory(service, locale);

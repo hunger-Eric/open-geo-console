@@ -65,6 +65,7 @@ describe("business question contracts", () => {
       ...profile,
       businessModel: "跨境物流服务商",
       productsAndServices: [service],
+      capabilities: ["报关清关", "门到门交付"],
       targetAudiences: ["外贸企业"],
       marketsAndRegions: ["台湾", "菲律宾", "中东"],
       summary: `面向外贸企业提供${service}等跨境物流服务。`,
@@ -73,11 +74,31 @@ describe("business question contracts", () => {
 
     expect(set.questions.map(({ generatedText }) => generatedText)).toEqual([
       "哪些服务商公开提供跨境物流服务（如台湾海快、海运、空运专线等）？",
-      "哪些跨境物流服务方案适合外贸企业进入台湾、菲律宾、中东市场，分别适用于哪些使用场景、交付条件与约束？",
-      "采购跨境物流服务时，应核验哪些服务范围、交付条件、限制与风险？"
+      "哪些跨境物流服务方案适合外贸企业进入台湾、菲律宾市场，分别适用于哪些使用场景、交付条件与约束？",
+      "采购跨境物流服务时，应重点核验报关清关、门到门交付，以及交付限制与风险？"
     ]);
     expect(set.questions[1].generatedText).not.toContain("面向台湾的台湾海快");
     expect(set.questions[1].generatedText.match(/台湾海快/g)).toBeNull();
+  });
+
+  it("drops noisy inferred audiences and keeps all three questions concise and website-specific", () => {
+    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
+      ...profile,
+      businessModel: "跨境物流服务商",
+      productsAndServices: ["台湾海快", "菲律宾专线"],
+      capabilities: ["双清包税", "门到门交付"],
+      targetAudiences: ["面临重复录入与整理问题的企业，网站语言为中文，推测主要面向中文市场"],
+      marketsAndRegions: ["台湾", "菲律宾"],
+      summary: "提供台湾海快、菲律宾专线、双清包税和门到门交付服务。",
+      evidence: [{ url: "https://shun-express.com/service", quote: "台湾海快、菲律宾专线支持双清包税和门到门交付。" }]
+    } });
+
+    const texts = set.questions.map(({ generatedText }) => generatedText);
+    expect(texts.join(" ")).not.toMatch(/重复录入|网站语言|推测|未明确/);
+    expect(texts[0]).toMatch(/台湾海快.*菲律宾专线/);
+    expect(texts[1]).toContain("企业采购方");
+    expect(texts[2]).toMatch(/双清包税.*门到门交付/);
+    expect(texts.every((text) => text.length <= 80)).toBe(true);
   });
 
   it("requires acknowledgement before confirming a low-confidence set", () => {

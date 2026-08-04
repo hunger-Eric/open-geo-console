@@ -5832,3 +5832,99 @@ revised scope.
   action, payment, email, or Git mutation occurred under this scope.
 - Terminal status: **implemented and locally accepted; release pending a
   separately frozen Git phase followed by an exact-SHA Staging phase.**
+
+---
+
+## 2026-08-04 - Paid V3 Phase 1 Git publication
+
+- User explicitly approved the Phase 1 Git allowlist.
+- Reverified 50 focused tests, scoped lint, full workspace build, and
+  `git diff --check`; all Phase 1 gates passed.
+- Staged exactly the eight approved paths and created commit
+  `d8c938511682b3dcb12ca4b66adaeaeb25d08e6e`, direct parent
+  `3ab11f0b1219873579a366617957413a206e6815`, with message
+  `feat: improve paid report decision flow and date context`.
+- Pushed `main` to `origin` once without force. Post-push local `main` and
+  `origin/main` both equal the full candidate SHA; canonical worktree was
+  clean and existing detached worktrees were unchanged.
+- No Vercel, Docker, Staging/Production runtime, database, report, model,
+  payment, refund, email, or customer-data action occurred.
+- Terminal status: **Phase 1 complete; Phase 2 Protected Staging scope written
+  separately and frozen pending explicit approval.**
+
+---
+
+## 2026-08-04 - Paid V3 Phase 2 first cutover attempt
+
+- User explicitly approved the exact-SHA Protected Staging release.
+- Preflight passed for candidate identity, approximately 50.6 GiB free disk,
+  Staging database marker, zero claimable/running/recoverable/terminalizable
+  jobs, and current/rollback identities.
+- Created exactly one READY Preview
+  `dpl_A53XPfWHjkS5oCesn6mJQqLEGmJG`; `gitCommitSha` and `ogcGitSha` both equal
+  candidate `d8c938511682b3dcb12ca4b66adaeaeb25d08e6e`.
+- Built exactly one thin overlay image
+  `sha256:a707736c7a9c3024283ee270e89bd107a218f50e2636e41bf2dfcc32b109705c`
+  with the exact candidate OCI revision label.
+- Candidate Free and Deep containers were started, but a temporary cutover
+  check waited only 8 seconds for the Free readiness log. Free remained
+  running with restart count zero and no application error was captured, but
+  the short predicate timed out before retaining a matching log.
+- Automatic rollback restored the original Staging runtime-env bytes and both
+  Workers to image `sha256:1a82ee00f646...22289f`, version `a7ce1af...`, with
+  restart count zero. The fixed alias was never moved and remains on
+  `dpl_CdYNPdRc4VJDzuYNstbe97i3u1xL`.
+- Repository evidence confirms the authoritative `Wait-WorkerReadiness`
+  contract defaults to 60 seconds and current Workers emit the expected log.
+  The failure is a cutover-check timeout, not a proven runtime failure.
+- No Production, commerce, report/model/search, payment, email, delivery,
+  artifact, or customer-data action occurred.
+- Terminal status: **rolled back safely; bounded reuse-only recovery frozen
+  pending explicit approval.**
+
+---
+
+## 2026-08-04 - Paid V3 reuse-only recovery deployment
+
+- User explicitly approved reusing the existing candidate Preview and Worker
+  image; no second Preview or image build was created.
+- Recreated only Staging Free/Deep using candidate image
+  `sha256:a707736c7a9c3024283ee270e89bd107a218f50e2636e41bf2dfcc32b109705c`.
+  The repository's unchanged 60-second readiness contract passed for both;
+  tiers and Staging/Preview identity were exact, restart counts were zero, and
+  claimable/running/recoverable/terminalizable counts remained zero.
+- Moved the fixed alias once to READY Preview
+  `dpl_A53XPfWHjkS5oCesn6mJQqLEGmJG`; Web, Free, and Deep all identify
+  `d8c938511682b3dcb12ca4b66adaeaeb25d08e6e`.
+- Catalog returned HTTP 200 with `mode=test`. Automated `/zh` rendering was
+  blocked by Vercel SSO/browser-control timeout; the user then opened the fixed
+  Protected Staging URL and explicitly confirmed the page was normal.
+- No Production, commerce, report, crawl, model/search, order, payment, refund,
+  email, delivery, artifact, or customer-data action occurred.
+- The exact proven path and the prohibition on ad hoc short readiness checks
+  are now recorded in `docs/PROTECTED-STAGING-OPERATIONS.md`.
+- Terminal status: **Protected Staging deployment completed; real flow not yet
+  accepted.**
+
+---
+
+## 2026-08-04 - Free checkout gating and website-derived buyer questions
+
+- While a free report is missing, generating, or unavailable, the status view
+  no longer mounts the paid checkout, report-email field, price/action, operator
+  key form, or the checkout-owned buyer-question request. The existing upgrade
+  entry remains available only after a free AI report is ready and deep access
+  is absent.
+- New question sets retain the three stable buyer intents but now use bounded
+  website-profile signals for concrete services/routes, audiences/markets, and
+  purchase capabilities. Noisy inferred audience prose, language-mismatched
+  values, and promotional operating metrics are excluded; neutralization and
+  exactly-three-question contracts remain unchanged.
+- Existing and historical reports/question sets were not rewritten or replayed.
+- Verification passed: 16 focused tests, scoped Web lint, full workspace build,
+  and `git diff --check`. Full lint retained the unrelated 17 errors in the
+  ignored `.tmp-preview/debug-readiness.ts`.
+- No Git, deployment, Docker, database, report, model, commerce, payment, email,
+  or customer-data action occurred under the implementation scope.
+- Terminal status: **implemented and locally verified; Git publication and
+  Protected Staging release authorized under the next exact scope.**
