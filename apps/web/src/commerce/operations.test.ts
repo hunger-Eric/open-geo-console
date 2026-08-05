@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   revealCustomerEmail: vi.fn(() => "buyer@example.com"),
   sendEmail: vi.fn(),
   requestRefund: vi.fn(),
+  stripeRequestRefund: vi.fn(),
   getActiveCombinedGeoReport: vi.fn()
 }));
 
@@ -58,6 +59,9 @@ vi.mock("@/email/resend", async (importOriginal) => {
 });
 vi.mock("@/payments/airwallex", () => ({
   AirwallexGateway: vi.fn(function AirwallexGateway() { return { requestRefund: mocks.requestRefund }; })
+}));
+vi.mock("@/payments/stripe", () => ({
+  StripeGateway: vi.fn(function StripeGateway() { return { requestRefund: mocks.stripeRequestRefund }; })
 }));
 vi.mock("@/db/combined-reports", () => ({ getActiveCombinedGeoReport: mocks.getActiveCombinedGeoReport }));
 
@@ -150,6 +154,46 @@ describe("commercial provider failure persistence", () => {
     await expect(processPendingCommercialRefunds()).resolves.toEqual({ claimed: 1, succeeded: 0, retried: 0, failed: 1 });
     expect(mocks.markRefundFailed).toHaveBeenCalledWith(expect.objectContaining({ errorCode: "airwallex_refund_http_401" }));
     expect(mocks.queueCommercialEmail).toHaveBeenCalledWith(expect.objectContaining({ templateType: "refund_assistance" }));
+  });
+
+  it("submits a stripe-provider refund through the Stripe gateway", async () => {
+    mocks.getPaymentOrder.mockResolvedValue({
+      id: "order-1", reportId: "report-1", siteKey: "example.com", reportLocale: "en",
+      productCode: "recommendation_forensics_v1", provider: "stripe", providerPaymentId: "pi_1",
+      paymentStatus: "paid", fulfillmentStatus: "failed", refundStatus: "pending"
+    });
+    mocks.claimPendingRefunds.mockResolvedValue([{ id: "refund-1", orderId: "order-1", attempts: 1, amountMinor: 9_900, currency: "USD", reason: "report_failed", idempotencyKey: "full_refund/order-1" }]);
+    mocks.markRefundSubmitted.mockResolvedValue(true);
+    mocks.stripeRequestRefund.mockResolvedValue({ providerRefundId: "re_1", status: "succeeded" });
+
+    await expect(processPendingCommercialRefunds()).resolves.toEqual({ claimed: 1, succeeded: 1, retried: 0, failed: 0 });
+
+    expect(mocks.stripeRequestRefund).toHaveBeenCalledWith({
+      orderId: "order-1",
+      paymentIntentId: "pi_1",
+      amountMinor: 9_900,
+      currency: "USD",
+      reason: "report_failed",
+      idempotencyKey: "full_refund/order-1"
+    });
+    expect(mocks.requestRefund).not.toHaveBeenCalled();
+    expect(mocks.markRefundSubmitted).toHaveBeenCalledWith(expect.objectContaining({ id: "refund-1", providerRefundId: "re_1" }));
+    expect(mocks.markRefundSucceeded).toHaveBeenCalledWith({ id: "refund-1", providerRefundId: "re_1" });
+  });
+
+  it("still rejects a refund whose order provider has no gateway", async () => {
+    mocks.getPaymentOrder.mockResolvedValue({
+      id: "order-1", reportId: "report-1", siteKey: "example.com", reportLocale: "en",
+      productCode: "recommendation_forensics_v1", provider: "paypal", providerPaymentId: "pay_1",
+      paymentStatus: "paid", fulfillmentStatus: "failed", refundStatus: "pending"
+    });
+    mocks.claimPendingRefunds.mockResolvedValue([{ id: "refund-1", orderId: "order-1", attempts: 1, amountMinor: 9_900, currency: "USD", reason: "report_failed", idempotencyKey: "full_refund/order-1" }]);
+
+    await expect(processPendingCommercialRefunds()).resolves.toEqual({ claimed: 1, succeeded: 0, retried: 1, failed: 0 });
+
+    expect(mocks.requestRefund).not.toHaveBeenCalled();
+    expect(mocks.stripeRequestRefund).not.toHaveBeenCalled();
+    expect(mocks.scheduleRefundRetry).toHaveBeenCalledWith(expect.objectContaining({ id: "refund-1", errorCode: "unknown_error" }));
   });
 
   it("passes an exact order filter only to the lease boundaries", async () => {

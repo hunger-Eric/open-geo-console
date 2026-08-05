@@ -25,6 +25,8 @@ import { revealCustomerEmail } from "./customer-email";
 import { ResendEmailGateway, resolveEnvelopeRecipient } from "@/email/resend";
 import type { EmailTemplate } from "@/email/gateway";
 import { AirwallexGateway } from "@/payments/airwallex";
+import { StripeGateway } from "@/payments/stripe";
+import type { PaymentGateway } from "@/payments/gateway";
 import { getActiveCombinedGeoReport } from "@/db/combined-reports";
 import { isPermanentCommerceProviderError, safeCommerceFailureCode } from "./provider-error";
 
@@ -112,10 +114,9 @@ export async function processPendingCommercialRefunds(limit = 25, options: { ord
   const owner = `refund-${randomUUID()}`;
   const refunds = await claimPendingRefunds({ owner, limit, leaseSeconds: 120, ...options });
   const result = emptyResult(refunds.length);
-  const gateway = new AirwallexGateway();
   for (const refund of refunds) {
     try {
-      await submitRefund(refund, owner, gateway);
+      await submitRefund(refund, owner);
       result.succeeded += 1;
     } catch (error) {
       if (isPermanentCommerceProviderError(error) || refund.attempts >= 5) {
@@ -131,9 +132,10 @@ export async function processPendingCommercialRefunds(limit = 25, options: { ord
   return result;
 }
 
-async function submitRefund(refund: PaymentRefundRow, owner: string, gateway: AirwallexGateway): Promise<void> {
+async function submitRefund(refund: PaymentRefundRow, owner: string): Promise<void> {
   const order = await getPaymentOrder(refund.orderId);
-  if (!order?.providerPaymentId || order.provider !== "airwallex") throw new Error("commercial_refund_payment_unavailable");
+  if (!order?.providerPaymentId) throw new Error("commercial_refund_payment_unavailable");
+  const gateway = refundGateway(order.provider);
   const submitted = await gateway.requestRefund({
     orderId: order.id,
     paymentIntentId: order.providerPaymentId,
@@ -147,6 +149,12 @@ async function submitRefund(refund: PaymentRefundRow, owner: string, gateway: Ai
     throw new Error("commercial_refund_lease_lost");
   }
   if (submitted.status === "succeeded") await markRefundSucceeded({ id: refund.id, providerRefundId: submitted.providerRefundId });
+}
+
+function refundGateway(provider: string): PaymentGateway {
+  if (provider === "airwallex") return new AirwallexGateway();
+  if (provider === "stripe") return new StripeGateway();
+  throw new Error("commercial_refund_payment_unavailable");
 }
 
 async function queueRefundAssistance(refund: PaymentRefundRow): Promise<void> {

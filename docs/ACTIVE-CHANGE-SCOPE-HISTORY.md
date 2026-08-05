@@ -6557,3 +6557,54 @@ revised scope.
   Sandbox acceptance.
 - Terminal status: **Stripe Sandbox Checkout is locally acceptable and ready to
   commit, but remains uncommitted pending explicit Git authorization.**
+
+---
+
+## 2026-08-04 - Release receipt: candidate 6bf7f12 (Stripe sandbox checkout) to Protected Staging
+
+- Candidate `6bf7f12749a0ed625e72f8beaf9bed6d98d99fd9`
+  (`feat: add Stripe sandbox checkout`, branch
+  `codex/stripe-sandbox-checkout`, NOT merged to `main`) deployed under a
+  user-approved FROZEN scope. No merge, push, branch, or worktree deletion.
+- Pre-deploy platform setup (user-approved): one Stripe-specific Vercel
+  protection-bypass token (note `stripe-sandbox-webhook`); one Stripe Sandbox
+  webhook endpoint `we_1U10CaRsPpQ6QFI3r2Zo95Ma` for
+  `checkout.session.completed` / `async_payment_succeeded` /
+  `async_payment_failed` / `expired` pointing at the fixed staging URL with
+  the bypass parameter; `STRIPE_SECRET_KEY` (user-supplied `sk_test_`) and
+  the endpoint's fresh `STRIPE_WEBHOOK_SECRET` (`whsec_`) written as
+  Sensitive Preview env vars via the Vercel API. No value was printed, logged,
+  or committed; local working copies remain only in ignored `.tmp/`.
+- Web: ONE manual Preview `dpl_BhCQDqW4nUypHhBmiLrUvftvDunJ`
+  (host `open-geo-console-psr11a73g-itheheda-6857s-projects.vercel.app`)
+  READY, preview target, exact project, ogcGitSha readback = candidate,
+  deployed from clean exact-SHA checkout `.data/deploy-worktree-readmode`.
+  Fixed alias moved once (previous/rollback Web
+  `dpl_2ogns8cva4RZ9hyBWhgKGJCZYT5a`); post-move alias readback = candidate.
+- Worker: ONE full image build (reason: `package-lock.json` dependency
+  change; thin overlay forbidden) tagged
+  `open-geo-console:staging-6bf7f12-stripe-sandbox-v1`
+  (`sha256:cdced559306cafbc2ee8cc3c972e5e0c76d631c4256a73164781fc088d8d04fb`,
+  revision label = full candidate SHA). Current previous image
+  `sha256:6b8657f2108d...` is the retained rollback line; older images
+  untouched, no cleanup.
+- Runtime env: original bytes backed up (`.tmp/staging.env.bak-6bf7f12`);
+  byte-comparison proves only `OGC_DEPLOYMENT_VERSION` changed. Exactly the
+  two named Worker services recreated once; Commerce and Production
+  untouched.
+- Readiness (60s boundary): both workers ready in 1s, exact candidate image
+  ID, correct free/deep tiers, staging/preview/test markers, restart count
+  zero. Zero claimable/running/recoverable/exhausted work before and after
+  (only the five pre-existing historical `repair_wait` rows).
+- Smoke on the fixed URL: alias readback = candidate; anonymous `/zh`,
+  catalog, `POST /api/scan`, and unsigned `POST /api/webhooks/stripe` all
+  302 to Vercel SSO; the bypass webhook URL reaches the app and rejects a
+  bad signature with 400 (signature verification fail-closed). Zero reports,
+  orders, payments, or emails created by deployment smoke.
+- Disk: E: 51 GiB free before, 46 GiB after the full build (one new ~1.2 GB
+  compressed image plus cache), still above the 20 GiB floor; no prune.
+- Terminal status: **Protected Staging deployment completed; the Stripe
+  Sandbox real test is the user's pending manual step.** Merge of
+  `codex/stripe-sandbox-checkout` to `main`, branch cleanup, and any
+  production Stripe work require separate authority. Docs closeout
+  (committing this receipt) is pending user authorization.

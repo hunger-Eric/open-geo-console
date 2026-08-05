@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import Stripe from "stripe";
-import { assertCommerceEnabled, parseSupportedCurrency } from "@/commerce/config";
+import { getCommerceMode, parseSupportedCurrency } from "@/commerce/config";
 import { CommerceProviderError, type CommerceProviderOperation } from "@/commerce/provider-error";
 import type {
   HostedCheckoutInput,
   HostedCheckoutExpectation,
   HostedCheckoutResult,
   PaymentGateway,
+  RefundInput,
   RefundResult,
   VerifiedPaymentEvent
 } from "./gateway";
@@ -25,6 +26,12 @@ interface StripeClient {
       ): Promise<Stripe.Checkout.Session>;
       retrieve(id: string): Promise<Stripe.Checkout.Session>;
     };
+  };
+  refunds: {
+    create(
+      params: Stripe.RefundCreateParams,
+      options: Stripe.RequestOptions
+    ): Promise<Stripe.Refund>;
   };
   webhooks: {
     constructEvent(payload: string | Buffer, signature: string, secret: string): Stripe.Event;
@@ -128,8 +135,21 @@ export class StripeGateway implements PaymentGateway {
     };
   }
 
-  async requestRefund(): Promise<RefundResult> {
-    throw new CommerceProviderError("stripe", "refund", "invalid_configuration");
+  async requestRefund(input: RefundInput): Promise<RefundResult> {
+    try {
+      const refund = await this.client().refunds.create({
+        payment_intent: input.paymentIntentId,
+        amount: input.amountMinor,
+        reason: "requested_by_customer",
+        metadata: { ogc_order_id: input.orderId }
+      }, { idempotencyKey: input.idempotencyKey });
+      if (typeof refund.id !== "string" || !refund.id) {
+        throw new CommerceProviderError("stripe", "refund", "invalid_response");
+      }
+      return { providerRefundId: refund.id, status: stripeRefundStatus(refund.status) };
+    } catch (error) {
+      throw normalizeStripeError(error, "refund");
+    }
   }
 
   private client(): StripeClient {
@@ -245,7 +265,7 @@ function buildStripeReturnUrls(returnUrl: string, orderId: string): { successUrl
 }
 
 function requiredStripeTestKey(environment: NodeJS.ProcessEnv): string {
-  if (assertCommerceEnabled(environment) !== "test") {
+  if (getCommerceMode(environment) !== "test") {
     throw new CommerceProviderError("stripe", "configuration", "invalid_configuration");
   }
   const key = environment.STRIPE_SECRET_KEY?.trim();
@@ -288,6 +308,16 @@ function normalizeStripeError(error: unknown, operation: CommerceProviderOperati
     status,
     { cause: error }
   );
+}
+
+function stripeRefundStatus(status: Stripe.Refund["status"]): RefundResult["status"] {
+  switch (status) {
+    case "succeeded": return "succeeded";
+    case "pending": return "submitted";
+    case "failed":
+    case "canceled": return "failed";
+    default: return "pending";
+  }
 }
 
 function stripeStatusCode(error: unknown): number | undefined {

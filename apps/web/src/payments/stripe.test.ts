@@ -22,6 +22,7 @@ const checkoutInput = {
 describe("StripeGateway", () => {
   const create = vi.fn();
   const retrieve = vi.fn();
+  const refundCreate = vi.fn();
   const constructEvent = vi.fn();
 
   beforeEach(() => {
@@ -191,17 +192,84 @@ describe("StripeGateway", () => {
     expect(event.outcome).toBe("ignored");
   });
 
-  it("fails closed for Stripe refunds in this sandbox-only scope", async () => {
+  it("creates a refund for the order PaymentIntent with the persisted idempotency key", async () => {
+    refundCreate.mockResolvedValue({ id: "re_1", status: "succeeded" });
     await expect(gatewayWithClient().requestRefund({
       orderId: "order-1",
       paymentIntentId: "pi_1",
       amountMinor: 9_900,
       currency: "USD",
-      reason: "operator_approved",
-      idempotencyKey: "refund/order-1"
+      reason: "report_failed",
+      idempotencyKey: "full_refund/order-1"
+    })).resolves.toEqual({ providerRefundId: "re_1", status: "succeeded" });
+
+    expect(refundCreate).toHaveBeenCalledWith({
+      payment_intent: "pi_1",
+      amount: 9_900,
+      reason: "requested_by_customer",
+      metadata: { ogc_order_id: "order-1" }
+    }, { idempotencyKey: "full_refund/order-1" });
+  });
+
+  it.each([
+    ["pending", "submitted"],
+    ["failed", "failed"],
+    ["canceled", "failed"],
+    ["requires_action", "pending"],
+    [null, "pending"]
+  ])("maps Stripe refund status %s to %s", async (stripeStatus, expected) => {
+    refundCreate.mockResolvedValue({ id: "re_2", status: stripeStatus });
+    await expect(gatewayWithClient().requestRefund({
+      orderId: "order-1",
+      paymentIntentId: "pi_1",
+      amountMinor: 9_900,
+      currency: "USD",
+      reason: "report_failed",
+      idempotencyKey: "full_refund/order-1"
+    })).resolves.toEqual({ providerRefundId: "re_2", status: expected });
+  });
+
+  it("fails closed on a refund response without a refund id", async () => {
+    refundCreate.mockResolvedValue({ status: "succeeded" });
+    await expect(gatewayWithClient().requestRefund({
+      orderId: "order-1",
+      paymentIntentId: "pi_1",
+      amountMinor: 9_900,
+      currency: "USD",
+      reason: "report_failed",
+      idempotencyKey: "full_refund/order-1"
+    })).rejects.toMatchObject({ provider: "stripe", operation: "refund", category: "invalid_response" });
+  });
+
+  it("normalizes Stripe SDK refund HTTP errors with their status", async () => {
+    refundCreate.mockRejectedValue(Object.assign(new Error("declined"), { statusCode: 402 }));
+    await expect(gatewayWithClient().requestRefund({
+      orderId: "order-1",
+      paymentIntentId: "pi_1",
+      amountMinor: 9_900,
+      currency: "USD",
+      reason: "report_failed",
+      idempotencyKey: "full_refund/order-1"
+    })).rejects.toMatchObject({ provider: "stripe", operation: "refund", category: "http", status: 402 });
+  });
+
+  it.each([
+    [{ COMMERCE_MODE: "disabled" }],
+    [{ COMMERCE_MODE: "live", STRIPE_SECRET_KEY: "sk_test_example" }],
+    [{ COMMERCE_MODE: "test", STRIPE_SECRET_KEY: "sk_live_example" }],
+    [{ COMMERCE_MODE: "test" }]
+  ])("still fails closed for refunds without Sandbox test configuration: %o", async (env) => {
+    await expect(new StripeGateway({ environment: env }).requestRefund({
+      orderId: "order-1",
+      paymentIntentId: "pi_1",
+      amountMinor: 9_900,
+      currency: "USD",
+      reason: "report_failed",
+      idempotencyKey: "full_refund/order-1"
     })).rejects.toMatchObject({
-      provider: "stripe", operation: "refund", category: "invalid_configuration"
+      provider: "stripe", operation: "configuration", category: "invalid_configuration"
     });
+    expect(refundCreate).not.toHaveBeenCalled();
   });
 
   function gatewayWithClient() {
@@ -209,6 +277,7 @@ describe("StripeGateway", () => {
       environment,
       client: {
         checkout: { sessions: { create, retrieve } },
+        refunds: { create: refundCreate },
         webhooks: { constructEvent }
       }
     });
