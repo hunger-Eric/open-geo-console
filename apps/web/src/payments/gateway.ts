@@ -10,13 +10,24 @@ export interface HostedCheckoutInput {
   returnUrl: string;
 }
 
-export interface HostedCheckoutResult {
+export interface HostedCheckoutExpectation {
+  amountMinor: number;
+  currency: SupportedCurrency;
+}
+
+export type HostedCheckoutResult = {
   provider: "airwallex";
   providerCheckoutId: string;
   clientSecret: string;
   currency: SupportedCurrency;
   environment: "demo" | "prod";
-}
+} | {
+  provider: "stripe";
+  providerCheckoutId: string;
+  checkoutUrl: string;
+  currency: SupportedCurrency;
+  environment: "test";
+};
 
 export interface RefundInput {
   orderId: string;
@@ -33,11 +44,12 @@ export interface RefundResult {
 }
 
 export interface VerifiedPaymentEvent {
-  provider: "airwallex";
+  provider: "airwallex" | "stripe";
   eventId: string;
   eventType: string;
   createdAt: Date;
   orderId: string | null;
+  providerCheckoutId?: string | null;
   paymentLinkId: string | null;
   paymentIntentId: string | null;
   providerRefundId: string | null;
@@ -50,7 +62,11 @@ export interface VerifiedPaymentEvent {
 
 export interface PaymentGateway {
   createHostedCheckout(input: HostedCheckoutInput): Promise<HostedCheckoutResult>;
-  getHostedCheckout(providerCheckoutId: string, orderId: string): Promise<HostedCheckoutResult>;
+  getHostedCheckout(
+    providerCheckoutId: string,
+    orderId: string,
+    expected?: HostedCheckoutExpectation
+  ): Promise<HostedCheckoutResult>;
   findHostedCheckoutByReference(orderId: string): Promise<HostedCheckoutResult | null>;
   verifyAndParseWebhook(rawBody: string, headers: Headers): VerifiedPaymentEvent;
   requestRefund(input: RefundInput): Promise<RefundResult>;

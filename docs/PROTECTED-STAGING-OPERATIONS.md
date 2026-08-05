@@ -140,7 +140,7 @@ Preview, image build, or retry.
 | Deployment identity | `VERCEL_ENV=preview`, `OGC_DEPLOYMENT_PROFILE=staging` | `VERCEL_ENV=production`, `OGC_DEPLOYMENT_PROFILE=production` |
 | PostgreSQL | Independent Neon staging database marked `staging` | Independent production database marked `production` |
 | Anonymous site limit | `OGC_STAGING_FREE_SITE_LIMIT`, integer 1-100, default 100 | Always 2 distinct sites per rolling 24 hours |
-| Commerce | `COMMERCE_MODE=test`, fixed Airwallex Sandbox host | `disabled` until live gates pass, then `live` |
+| Commerce | `COMMERCE_MODE=test`, Stripe Sandbox Checkout with `sk_test_...` only | `disabled` until a separately approved live-provider gate passes |
 | Email | All envelopes redirected to `OGC_TEST_EMAIL_RECIPIENT`; missing recipient fails before Resend | Actual order recipient; test recipient must be absent |
 | Model, HMAC, Queue, payment, email, bypass | Independent staging values; current model key reuse is a documented temporary exception | Independent production values |
 | Visual evidence storage | Preview-only Vercel Private Blob store in `sin1`, shared only by staging Web/deep Worker | Separate private production object store and credentials |
@@ -406,7 +406,7 @@ replace this evidence.
 - Keep Vercel Standard Authentication enabled for Preview deployments.
   Anonymous page requests must redirect to Vercel login, and anonymous
   `POST /api/scan` must be rejected by deployment protection.
-- Keep Airwallex Sandbox and Resend Webhook signature verification enabled in
+- Keep Stripe Sandbox and Resend Webhook signature verification enabled in
   the application. Vercel protection is an outer gate, not a substitute for
   provider signatures or event idempotency.
 - Pass the current automation bypass only in the provider Webhook URL or another
@@ -416,7 +416,7 @@ replace this evidence.
   providers securely. Do not disable Preview authentication to repair delivery.
 - Current production URL: `https://geo.itheheda.online`. Current protected
   staging URL: `https://open-geo-console-staging-itheheda.vercel.app`.
-- The staging Airwallex and Resend Webhooks use separate provider-specific
+- The staging Stripe and Resend Webhooks use separate provider-specific
   protection-bypass values. Do not reuse the general automation bypass.
 
 ## Specialized acceptance and maintenance references
@@ -478,7 +478,7 @@ npm run db:audit
 npm run test:postgres:staging-security
 ```
 
-Browser acceptance must prove anonymous denial, authenticated access, more than two distinct staging sites, same-site reuse, forced-new report identity, duplicate-click idempotency, and separation from production data. Provider acceptance additionally requires a real CodingPlan staging call, an Airwallex Sandbox signed Webhook, and a redirected Resend message. Production acceptance must prove the third distinct site returns `429` and staging variables do not change that result.
+Browser acceptance must prove anonymous denial, authenticated access, more than two distinct staging sites, same-site reuse, forced-new report identity, duplicate-click idempotency, and separation from production data. Provider acceptance additionally requires a real CodingPlan staging call, a Stripe Sandbox Checkout payment with a signed Webhook, and a redirected Resend message. Production acceptance must prove the third distinct site returns `429` and staging variables do not change that result.
 
 Paid-return acceptance must also prove that the same browser automatically
 lands on `/reports/{reportId}/report.html` only after the exact paid,

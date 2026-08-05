@@ -6073,3 +6073,487 @@ revised scope.
 - Terminal status: **Protected Staging deployment completed; real flow not
   yet accepted.** Gate 4 (one wholly new report and one Sandbox payment)
   requires a separate FROZEN scope and explicit authorization.
+
+---
+
+## 2026-08-05 - Stripe Sandbox Checkout cutover and Gate B payment proof
+
+- The user approved branch `codex/stripe-sandbox-checkout` to replace the
+  development/test paid-report checkout entry with Stripe-hosted Checkout while
+  preserving PostgreSQL payment and fulfillment authority.
+- The candidate added the official Stripe Node SDK integration, hosted Checkout
+  Session creation, raw-body signed Webhook processing, test/live-key
+  fail-closed readiness, safe return URLs, and deterministic order-scoped
+  idempotency. The existing Airwallex server adapter and route were not migrated
+  or used for the Stripe order.
+- Focused tests passed 16/16, lint completed with zero errors and six unrelated
+  existing warnings, the workspace build passed, and `git diff --check` passed.
+  Independent review found no actionable Stripe idempotency defect under the
+  proven zero-old-Session baseline.
+- Exactly one task-owned Stripe Sandbox Checkout Session was created for order
+  `56ef077e-44b0-4d59-8de5-a9595eb1a522`; the user completed one test-card
+  payment. Stripe readback was `livemode=false`, `complete/paid`, `9900 USD`.
+- One `checkout.session.completed` event was durably processed with no error.
+  Exactly-once counts were: one order, one payment event, one reserved credit,
+  one queued Deep job, one queued payment-confirmation email, one access record,
+  and zero refunds. No Worker, Commerce/email consumer, deployment, live-mode
+  payment, bank verification, payout, or refund was run.
+- The task-owned synthetic report cannot serve as paid-delivery proof: its
+  target is `https://synthetic.example/`, the expected V4 persisted site
+  snapshot is absent, and its public-search endpoint is intentionally
+  non-routable. That report/order/job remains untouched and is not repair or
+  replay authority.
+- Terminal status: **Gate A implementation checks and Gate B Stripe Sandbox
+  payment boundary passed; full paid report delivery, deployment, live mode,
+  and bank/payout readiness remain unverified.**
+
+---
+
+## 2026-08-05 - Stripe Gate C first isolated Shun Express lineage stopped at DNS
+
+- The user approved preserving the pre-Stripe `sensenova_anysearch` runtime in
+  one disposable Gate C database, one local Web, one Stripe listener, and one
+  real-Chrome submission before any payment.
+- Gate C Web was replaced once on port 3000 with the canonical merged Staging
+  public-search identity while retaining Stripe test configuration and the
+  isolated database. The existing listener was preserved.
+- The exact active Protected Staging AnySearch authority
+  `public-search-authority-0b41faeb8c0308142381374ac1a70d821c313d340b3b5d163d4e293ebed4ec68`
+  was transferred through the existing authority functions after the user
+  separately approved Protected Staging as the trust source. Commerce and
+  product readiness passed; catalog returned enabled test mode at USD 99.00.
+- Real Chrome submitted exactly one new `https://shun-express.com/` report:
+  report `e9c59223-c117-43dd-998a-af192b6cef0c`, Free job
+  `eec00265-2073-47c7-b1b9-a4317b0c7c82`.
+- The single Free invocation reached authoritative terminal failure in
+  discovery. It persisted the same `UrlSafetyError` twice within its internal
+  retry boundary: `The target hostname could not be resolved.` No site
+  snapshot, question set, order, Checkout Session, payment, access, email, Deep
+  job, or report artifact was created.
+- The later shell supervision timeout was not causal. A post-failure Windows
+  and Node lookup resolved `shun-express.com` to `120.76.156.213`, supporting a
+  bounded transient-DNS interpretation; the terminal report/job remain
+  immutable and are not replay or repair authority.
+- Terminal status: **Gate C runtime/authority/catalog prerequisites passed, but
+  the first isolated lineage failed before questions and payment at target DNS
+  resolution. A replacement report requires a new FROZEN scope.**
+
+---
+
+## 2026-08-05 - Gate C replacement preflight stopped at unresponsive Catalog
+
+- The user approved one replacement Shun Express lineage, but the strict
+  preflight stopped at its first live-readiness gate before creating anything.
+- PostgreSQL still contained exactly one immutable failed report, its one failed
+  Free job with no lease, one exact active AnySearch authority, and zero Deep
+  jobs, orders, payment events, refunds, credits, access records, queued emails,
+  site snapshots, question sets, and artifacts.
+- The task-owned Web still held port 3000 as PID 3772 and its reconstructed
+  runtime identity matched Staging, `sensenova_anysearch`, AnySearch, zh-CN/CN,
+  and Stripe test mode. Commerce and product readiness resolved ready.
+- The required live Catalog request to
+  `http://127.0.0.1:3000/api/commerce/catalog` timed out after 15 seconds, so
+  `enabled=true` could not be re-proven.
+- No process was stopped, no DNS check was consumed, and no report, Worker,
+  provider, Checkout Session, payment, Webhook, or Deep action occurred.
+- Terminal status: **stopped before replacement submission; a one-time Gate C
+  Web recovery requires a new FROZEN scope and explicit approval.**
+
+---
+
+## 2026-08-05 - Gate C recovered; first replacement submit click wrote nothing
+
+- The user approved all remaining operations in the consolidated Gate C scope.
+- The exact task-owned Web PID 3772 was stopped once and replaced with PID
+  46564 under the identical merged Staging, AnySearch, and Stripe-test runtime.
+  Catalog returned HTTP 200, `enabled=true`, `mode=test`, USD 99.00. Listener
+  PID 65212 and the isolated staging/tmpfs database remained unchanged.
+- The immutable failed lineage and exact zero commercial/Deep/snapshot/question
+  counts passed. The stale Free PID 44344 was stopped once without a lease, and
+  the sole DNS-only safe-resolver check resolved `shun-express.com` to
+  `120.76.156.213` without HTTP, crawl, model, search, or provider work.
+- Existing real Chrome tab 1652081899 filled the target and issued exactly one
+  submit click, without refresh, duplicate click, checkout, or payment.
+- PostgreSQL then still contained exactly the one immutable failed report and
+  Free job. No new report or queued job existed, so the runtime stopped before
+  invoking Free. All commercial descendants remained zero.
+- Terminal status: **zero-write browser submission; no Worker or payment ran.
+  Read-only diagnosis plus any final submit attempt requires a new FROZEN scope
+  and explicit approval.**
+
+---
+
+## 2026-08-05 - Force-fresh replacement failed because preflight used the wrong resolver
+
+- The user approved read-only diagnosis, one final real-Chrome submit, and the
+  remaining paid-delivery chain.
+- Read-only browser/source evidence proved the prior zero-write click had
+  correctly reused the active 30-day `free_site_trials` mapping. Protected
+  Staging requires its existing force-fresh control to create a new lineage.
+- Real Chrome explicitly enabled force-fresh and submitted once, creating
+  report `3c3e93d9-41d5-4d08-a080-842c92f0292b` and Free job
+  `b0a58fd4-58c1-4f66-9d92-b548b79853e1`.
+- The sole Free invocation terminally failed in discovery with the same
+  recurring `UrlSafetyError: The target hostname could not be resolved.`.
+  It first recorded transient/retry-wait, then permanent terminal failure.
+  There was no HTTP crawl, provider/model/search call, snapshot, question set,
+  Checkout, payment, access, email, Deep job, or artifact.
+- First-principles comparison confirmed the accepted DNS preflight directly
+  called `resolveSafeUrl` with Node system DNS, but actual Worker discovery
+  calls `createSafeFetch()` and selects Cloudflare DoH when the canonical
+  Staging variable is inherited. The checks were not the same effective
+  resolver.
+- Current source and the existing workstation receipt identify the matching
+  host-drain boundary: `undici` safe fetch does not use the workstation's
+  required environment proxy for Cloudflare DoH, so accepted host drains clear
+  only `OGC_PUBLIC_DNS_DOH_URL` in process memory and use system DNS. No
+  tracked configuration changes.
+- Terminal status: **stopped before payment; both failed lineages are immutable.
+  A process-only system-DNS replacement lineage requires a new FROZEN scope.**
+
+---
+
+## 2026-08-05 - Resolver-corrected scope stopped at Next dev Catalog 404
+
+- The user approved the complete process-only system-DNS replacement lineage.
+- Database, failed-lineage, authority, and reconstructed runtime counts matched,
+  but the mandatory live Catalog preflight returned HTTP 404 instead of HTTP
+  200 enabled/test/USD 99.00. Execution stopped before inspecting or stopping
+  the idle Free worker and before any DNS, report, Worker, or payment action.
+- Read-only diagnostics confirmed port 3000 remained owned by PID 46564, whose
+  command line is this repository's `next dev`. The `.next/dev` app-path
+  manifest and compiled Catalog route both exist, and the source route has no
+  HTTP 404 response branch.
+- The mismatch is therefore bounded to the live Next dev route state. No second
+  Catalog request, process mutation, rebuild, cache deletion, or external action
+  was performed.
+- Terminal status: **preflight failed without workflow effects; one exact Web
+  restart plus the already frozen full chain requires fresh approval.**
+
+---
+
+## 2026-08-05 - Catalog 404 traced to overlapping localhost development sites
+
+- The user approved one exact Gate C Web recovery and the remaining paid chain.
+- PID 46564 was stopped once. Port 3000 remained open, so no concurrent manual
+  replacement was initially started.
+- Read-only process evidence then proved the remaining listener was unrelated
+  `E:\project\personal-website`: PID 61160 on `127.0.0.1:3000`. Gate C had
+  previously listened on IPv6 `::`, so the Catalog probe sent to
+  `127.0.0.1:3000` had reached the wrong project and returned 404.
+- The authorized Gate C replacement start produced PID 41588 on
+  `0.0.0.0:3000`, not IPv6. The unrelated personal site was untouched. The
+  existing Stripe listener still forwards to `localhost:3000`, so continuing
+  would leave its Webhook destination ambiguous.
+- No Catalog request to the new Gate C, DNS check, report, Worker, Checkout,
+  payment, or database workflow effect followed.
+- Terminal status: **stopped before workflow effects; Gate C must be explicitly
+  rebound to `::1` while preserving the existing listener and personal site.**
+
+---
+
+## 2026-08-05 - Port 3010 migration blocked by runtime execution policy
+
+- The user selected dedicated port 3010 and approved moving only the task-owned
+  Gate C Web and Stripe CLI forwarding path there, followed by the full
+  system-DNS/Free/Stripe/Deep acceptance chain.
+- Read-only preflight proved 3010 free; Gate C PID 41588, Stripe listener PID
+  65212, unrelated personal-site PID 61160, idle Free PID 62616, the disposable
+  database, exact AnySearch authority, and all zero downstream counts matched.
+- The first runtime-operator context was rejected by platform policy before the
+  combined stop/listener-secret/Web-start operation executed. A fresh dedicated
+  runtime-operator context independently reached the same pre-execution
+  `blocked by policy` result.
+- No command was split or retried after rejection. No PID, port, file, secret,
+  database row, DNS request, report, Worker, Checkout, payment, or Webhook state
+  changed.
+- Terminal status: **approved scope technically blocked at the mandatory runtime
+  owner boundary; another scope approval cannot remove this platform block.**
+
+---
+
+## 2026-08-05 - Port 3010 migration passed; final force-fresh click failed before admission
+
+- The user explicitly authorized the primary task to perform only the Gate C
+  Web and Stripe-listener migration to port 3010, overriding the runtime-owner
+  boundary for that migration while retaining every other approved limit.
+- Read-only revalidation proved the disposable staging/tmpfs PostgreSQL on
+  `127.0.0.1:55434`, schema 45, the exact active AnySearch authority, two
+  immutable failed Free lineages with no leases, and zero commercial, Deep,
+  snapshot, question, artifact, or regeneration rows.
+- Exact old Gate C PID 41588 and Stripe listener PID 65212 were each stopped
+  once. The unrelated `E:\project\personal-website` dev server remained
+  untouched on `127.0.0.1:3000`; its Next child PID rotated independently.
+- A policy-compatible one-shot Node launcher started Stripe listener PID 56728
+  forwarding only `checkout.session.completed` to
+  `http://localhost:3010/api/webhooks/stripe` and Gate C Web PID 67292 on
+  `0.0.0.0:3010`. The signing secret stayed in process memory and was neither
+  printed nor persisted.
+- Catalog returned HTTP 200, `enabled=true`, `mode=test`, and USD 99.00.
+  PostgreSQL counts and the authority remained exact. Idle Free PID 62616 was
+  stopped once with no lease. The sole effective-resolver DNS-only check used
+  system DNS and resolved `shun-express.com` to public IPv4 `120.76.156.213`
+  without HTTP, crawl, model, search, or provider work.
+- Existing real Chrome enabled force-fresh and clicked submit exactly once.
+  The page returned `暂时无法扫描该网站。`; it did not navigate to a report.
+  PostgreSQL remained at exactly two reports/two failed jobs and zero new or
+  downstream rows, so no Free drain, Checkout, payment, Webhook, Deep drain, or
+  email action followed.
+- Read-only source/environment comparison identified the exact migration defect:
+  both Staging source files contain an empty Sensitive placeholder for
+  `OGC_IP_HASH_SECRET`, while ignored `.env.local` contains the required
+  nonblank local value. The replacement launcher restored provider and Stripe
+  values but omitted the local IP/token-secret allowlist. `/api/scan` therefore
+  failed at `requireSecret("OGC_IP_HASH_SECRET")` before its transaction, which
+  exactly matches the generic UI error and zero database writes. The same audit
+  also found empty process inputs for the later payment/email secret families.
+- Terminal status: **port isolation, Stripe listener, Catalog, authority, and
+  effective DNS passed; the only authorized submit was consumed by a
+  migration-environment omission before admission. Correcting the Web runtime,
+  restarting it again, and making another report/payment attempt require one
+  new FROZEN recovery scope and explicit approval.**
+
+---
+
+## 2026-08-05 - Corrected Gate C admitted Shun Express; Free stopped at provider rate limit
+
+- The user approved the complete corrected-runtime recovery scope. Faulty Web
+  PID 67292 was stopped once and replaced by PID 16920 on port 3010 with the
+  disposable 55434 database, local IP/token secret allowlist, three distinct
+  process-only sandbox commercial secrets, Stripe test key, in-memory listener
+  secret, and the exact SenseNova/AnySearch zh-CN/CN identity. Stripe listener
+  PID 56728 and the unrelated personal site were preserved.
+- Catalog again returned HTTP 200, enabled test mode, USD 99.00. Database and
+  authority counts remained exact before submission.
+- Real Chrome enabled force-fresh and clicked exactly once, creating report
+  `72e0eaf5-2dbf-414b-8347-2f45047b03f8` and queued Free job
+  `199b550b-ebd6-4f83-b751-6e8d0d91c403`, reason
+  `staging_regeneration`. No checkout or payment occurred.
+- Two launch-boundary failures produced no claim or external work: bare
+  `npm.cmd` resolved a nonexistent project-local npm, then the corrected
+  absolute npm start inherited Web's Cloudflare queue selector with empty
+  Sensitive placeholders. The canonical workstation source proved host Workers
+  use `OGC_JOB_QUEUE_PROVIDER=postgres`; both pre-claim failures left the job
+  queued with attempts zero.
+- The first effective Free drain used `D:\node\npm.cmd`, PostgreSQL batch mode,
+  and the approved empty process-only DoH override. It resolved and crawled the
+  real homepage, persisted one crawl-evidence row, and completed page analysis.
+  The checkpoint correctly identifies Shun Express cross-border logistics,
+  including Taiwan, Philippines, Dubai and other routes, self-operated lines,
+  warehousing, customs and delivery flow.
+- The sole effective drain then received `ai_client_rate_limited` during
+  `website_synthesis`. The job stopped at stage `synthesizing`, progress 85,
+  attempts 1, execution state `retry_wait`, no lease, with
+  `retry_not_before=2026-08-05T06:39:23.630Z`. The report technical scan is
+  completed, but no AI report, site snapshot, question set, questions, order,
+  payment event, credit, access, email, Deep job, artifact, or refund exists.
+- No retry, payment, Deep run, browser follow-up, DNS repeat, file/source, Git,
+  or unrelated process action followed.
+- Terminal status: **the target site and execution logic now match, but the
+  provider rate-limited the final Free synthesis before questions. The current
+  approved scope forbids a retry; one built-in continuation of this exact
+  nonterminal retry-wait job and the remaining paid chain require a new FROZEN
+  scope and explicit approval.**
+
+---
+
+## 2026-08-05 - Approved Free continuation stopped before launch at unresponsive Web
+
+- The user approved one built-in continuation of the exact nonterminal
+  retry-wait Free job and the remaining paid chain.
+- Database time was later than `retry_not_before`; the job remained
+  `synthesizing`/85%, attempts 1, `retry_wait`, unleased. The target report,
+  checkpoint, two old failed lineages, authority, and zero commercial/question/
+  Deep/artifact counts matched. Catalog initially returned HTTP 200 enabled
+  test mode at USD 99.00; Web PID 16920, Stripe listener PID 56728, and the
+  unrelated personal site matched.
+- The runtime operator stopped before launching a Worker after a 15-second
+  Catalog timeout and an apparent downstream count drift. Independent SQL
+  proved its count interpretation was wrong: the seventh value, artifact
+  revisions, was zero; the final value was the one expected
+  `staging_free_regenerations` row belonging to the target report.
+- No unapproved consumer existed. Only Web PID 16920 was connected to the
+  disposable database. Orders, events, credits, access, email, Deep jobs,
+  artifacts and refunds remained zero.
+- An independent Catalog read then also timed out after 30 seconds. The Web
+  process continued to own port 3010 but was not serving readiness. The scope
+  prohibited a process restart, so no continuation Worker, payment, Deep run,
+  browser action, or state mutation followed.
+- Terminal status: **the database did not drift and the approved continuation
+  remains unconsumed, but Gate C Web PID 16920 is unresponsive. One exact Web
+  replacement plus the already bounded continuation/payment/Deep chain require
+  a new FROZEN scope and explicit approval.**
+
+---
+
+## 2026-08-05 - Web recovered; approved Free continuation failed language validation
+
+- The user approved one exact replacement of unresponsive Web PID 16920, one
+  continuation of the named retry-wait job, and the remaining paid chain. The
+  approval included a conditional primary-owner override for only the Web
+  replacement.
+- PID 16920 was stopped once and replaced by Gate C Web PID 60288 on port 3010
+  with the corrected in-memory staging/provider/database/Stripe/local-secret
+  runtime. Listener PID 56728 and the unrelated personal site were untouched.
+  Catalog returned HTTP 200 enabled test mode, USD 99.00 in 844 ms.
+- The database, expected regeneration row, target job, old failures, authority,
+  and zero downstream counts matched before the single continuation.
+- The one continuation used the normal PostgreSQL batch claim path and reached
+  website synthesis. It stopped at progress 85 with attempts 2 of 3,
+  `retry_wait`, no lease, and `unexpected_internal_error`. No questions, order,
+  payment, Deep job or artifact was created.
+- Append-only `scan_job_error_events` supplied the authoritative diagnosis:
+  attempt 1 was `AiClientError`, HTTP 429; attempt 2 was
+  `WebsiteReportLanguageValidationError`. The second model result violated the
+  immutable zh report-language contract across executive-summary, dimension,
+  finding, page-analysis and roadmap fields. It was classified transient with
+  retry-not-before `2026-08-05T07:00:25.515Z`.
+- No third attempt, browser/payment action, Deep run, DNS repeat, file/source,
+  Git, or unrelated process action followed.
+- Terminal status: **Web readiness and the real target crawl are correct, but
+  the second synthesis output failed the zh language contract. The current
+  scope permits no further retry. One final built-in attempt 3 and the remaining
+  paid chain require a new FROZEN scope and explicit approval; if attempt 3
+  fails, this lineage must stop permanently.**
+
+---
+
+## 2026-08-05 - Final Free attempt completed without required report outputs
+
+- The user approved exactly one final built-in continuation, attempt 3 of 3,
+  for Free job `199b550b-ebd6-4f83-b751-6e8d0d91c403`. Payment and Deep were
+  conditional on three correct durable Shun Express buyer questions.
+- The exact preflight passed: Gate C Web PID 60288 and Stripe listener PID
+  56728 matched, Catalog was enabled in Stripe test mode at USD 99.00, the
+  disposable staging database and authority matched, the retry cooldown had
+  elapsed, and the named job was the sole claimable Free job.
+- One Worker was launched through `D:\node\npm.cmd` with PostgreSQL batch mode
+  and the approved process-only runtime overrides. It normally claimed the
+  named job as attempt 3 and reached terminal `completed`, progress 100,
+  attempts 3 of 3, with no lease or retained error. No second Worker ran.
+- The mandatory output gate nevertheless failed: the report had zero site
+  snapshots, zero checkpoints, zero question sets and zero questions, so no
+  Shun Express question text or source association existed.
+- A queued, unleased Deep job with reason `v4_pre_admission` appeared before
+  payment, while orders, payment events, credits, access rows, emails, refunds
+  and artifacts remained zero.
+- The scope's fail-closed condition was applied. No Checkout Session, payment,
+  browser action or Deep drain followed, and no report/job state was repaired,
+  retried, replayed, reopened, cloned or substituted.
+- Terminal status: **the final authorized Free attempt is consumed and the
+  lineage failed acceptance because its required durable report/question
+  outputs do not exist. This lineage is permanently stopped before payment.**
+
+### Correction after main-branch state-machine comparison
+
+- The preceding terminal interpretation was incorrect and is superseded by
+  current source and database evidence. `HEAD`, local `main` and `origin/main`
+  were identical, and the Stripe diff did not modify the Free Worker or report
+  pipeline.
+- Main intentionally creates one queued `v4_pre_admission` job after the Free
+  base job completes. Although stored on the Deep lane, the status API exposes
+  it as the remaining free preview stage. That job, not the completed Free base
+  job, creates the V4 site snapshot and three buyer questions before checkout.
+- Database evidence showed the exact pre-admission job remained queued,
+  unleased and unattempted at 0 of 1. Therefore zero snapshots/questions at
+  that boundary were expected and did not prove report failure. The lineage
+  was not permanently stopped; the correct continuation starts with that exact
+  pre-admission job and never reruns Free.
+
+---
+
+## 2026-08-05 - Corrected pre-admission path expired before its first claim
+
+- The user approved removal of unrelated generated drift and continuation from
+  the existing queued V4 pre-admission job without rerunning Free.
+- `apps/web/next-env.d.ts` was restored to the exact `main` object. The retained
+  production/test/dependency/documentation diff remained Stripe-specific.
+- Six focused Stripe test files passed all 34 tests, targeted ESLint passed,
+  and the full workspace build passed, including the Stripe Webhook route.
+- The exact pre-admission job was the sole claimable Deep job and was normally
+  claimed once. It failed at progress 5, attempt 1 of 1, during `admission` with
+  `Free teaser requires one terminal analyzable Admission snapshot.` No retry,
+  payment, browser action or paid Deep run followed.
+- Durable evidence showed no HTTP crawl, search, source retrieval, question or
+  provider/model call. The terminal snapshot contained one candidate, zero
+  analyzable pages and one deadline exclusion.
+- Root cause is confirmed from source and database time: the ten-minute product
+  deadline is anchored to the pre-admission job's `created_at`, not its claim
+  time. The job was created at `2026-08-05T07:06:51.303383Z`, expired at
+  `07:16:51.303383Z`, and was not claimed until `07:21:40.504Z`. The production
+  runner therefore selected its no-network deadline fallback and immediately
+  finalized an unavailable snapshot.
+- Terminal status: **the Stripe implementation remains locally verified, but
+  this Shun Express lineage did not reach Stripe Checkout. The pre-admission
+  one-shot was consumed by an operational delay before claim; its failed
+  lineage was not repaired or replayed. This lineage-local outcome does not
+  supersede the successful Gate B Stripe Sandbox payment proof recorded above.**
+
+---
+
+## 2026-08-05 - Payment-only fixture stopped before Stripe Checkout
+
+- The user approved one payment-only acceptance with no Worker, website read,
+  search, model, report generation or delivery consumer.
+- Preflight verified Gate C Web PID 60288, enabled Stripe test Catalog at USD
+  99.00, listener PID 56728 forwarding to the port-3010 Stripe Webhook, staging
+  schema-45 PostgreSQL on tmpfs, and zero rows for all deterministic fixture
+  and commercial identities.
+- One temporary ignored harness used the repository's Free-direct receipt
+  helper to insert one checkout-only Shun Express fixture report, one completed
+  snapshot, one confirmed high-confidence question set with exactly three
+  questions, and one completed pre-admission semantic carrier. The harness was
+  deleted immediately and no retained source/test/config file changed.
+- The application status endpoint did not accept the synthetic carrier as
+  checkout-ready: `hasAiReport=false`, `checkoutEligible=false`, and the
+  business-question endpoint exposed no active set. The approved fail-closed
+  condition therefore stopped before any checkout request.
+- Final fixture counts are report 1, snapshot 1, question set 1, questions 3,
+  carrier 1. Orders, payment events, credits, access keys, emails, paid jobs,
+  artifacts and refunds remain zero. No Stripe Checkout Session, payment,
+  Webhook delivery, browser payment, Worker or external provider/model call
+  occurred.
+- Terminal status: **the local Stripe code remains test/build verified, but the
+  payment-only synthetic precondition was rejected by the application's
+  semantic authority parser. This one-time fixture did not start Stripe
+  Checkout. That fixture-local outcome does not supersede the successful Gate B
+  Stripe Sandbox payment and exactly-once acceptance recorded above.**
+
+---
+
+## 2026-08-05 - Stripe Sandbox Checkout local closeout accepted
+
+- The user approved one consolidated local-only scope to review, minimally
+  repair, test, build, and independently review the uncommitted Stripe Sandbox
+  Checkout candidate. No report, Checkout Session, payment, refund, provider
+  call, Worker, consumer, database, runtime, deployment, or Git mutation ran.
+- The complete path review found no Worker, report-generation, database-schema,
+  deployment, or unrelated production change. No additional task-owned drift
+  remained to remove, and builds created no tracked or untracked drift.
+- Local review added fail-closed validation for Checkout Session amount and
+  currency, `livemode=false`, paid async status, and binding of non-paying
+  Checkout events before recording. All Session-bearing Webhooks now verify the
+  order, Session, amount, and currency before entering the existing PostgreSQL
+  event boundary.
+- Independent review found two actionable issues. Both were repaired: live
+  commerce now stops before any report/order read or write, and Stripe return
+  URLs now use canonical `OGC_REPORT_BASE_URL` rather than the incoming request
+  Host. The second independent pass found no remaining actionable finding.
+- Final focused verification passed all six files and 42 tests. Targeted ESLint
+  passed, `git diff --check` passed, and the complete workspace build passed,
+  including `/api/webhooks/stripe`. The test tracking bound was mechanically
+  adjusted from 720 to 875 after the final measured test diff reached 729 lines;
+  production remained within its hard 650-line budget at 621 lines.
+- Residual non-blocking hardening: the Webhook route buffers `request.text()`
+  before applying its 256 KiB check. A true upstream or streaming body limit
+  remains separate future security work and must preserve raw signature bytes.
+- The historical fixture and pre-admission failures remain unchanged facts and
+  do not supersede Gate B: order `56ef077e-44b0-4d59-8de5-a9595eb1a522`
+  already proved one `livemode=false`, complete/paid USD 99.00 Checkout, one
+  signed Webhook, and the expected exactly-once PostgreSQL consequences.
+- Stripe refunds remain unimplemented and fail closed; the refund consumer is
+  still Airwallex. Stripe live Checkout/payment/production Webhooks, bank
+  verification, payouts, and real-site report delivery remain outside this
+  Sandbox acceptance.
+- Terminal status: **Stripe Sandbox Checkout is locally acceptable and ready to
+  commit, but remains uncommitted pending explicit Git authorization.**

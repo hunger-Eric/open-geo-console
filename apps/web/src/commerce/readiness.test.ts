@@ -6,15 +6,35 @@ describe("commerce readiness", () => {
     expect(await getCommerceReadiness({ COMMERCE_MODE: "disabled" })).toEqual({ ready: false, code: "disabled" });
   });
 
-  it("requires a valid reply mailbox before sandbox commerce is ready", async () => {
+  it("requires Stripe Sandbox credentials and a valid reply mailbox before test commerce is ready", async () => {
     expect(await getCommerceReadiness({ COMMERCE_MODE: "test" })).toEqual({ ready: false, code: "configuration" });
     expect(await getCommerceReadiness({
       COMMERCE_MODE: "test",
-      OGC_REPLY_TO_EMAIL: "support@itheheda.online"
+      OGC_REPLY_TO_EMAIL: "support@itheheda.online",
+      STRIPE_SECRET_KEY: "sk_test_example",
+      STRIPE_WEBHOOK_SECRET: "whsec_example",
+      OGC_REPORT_BASE_URL: "https://geo.example.test"
     })).toEqual({ ready: true, code: "ready" });
     expect(await getCommerceReadiness({
       COMMERCE_MODE: "test",
-      OGC_REPLY_TO_EMAIL: "invalid"
+      OGC_REPLY_TO_EMAIL: "invalid",
+      STRIPE_SECRET_KEY: "sk_test_example",
+      STRIPE_WEBHOOK_SECRET: "whsec_example",
+      OGC_REPORT_BASE_URL: "https://geo.example.test"
+    })).toEqual({ ready: false, code: "configuration" });
+    expect(await getCommerceReadiness({
+      COMMERCE_MODE: "test",
+      OGC_REPLY_TO_EMAIL: "support@itheheda.online",
+      STRIPE_SECRET_KEY: "sk_live_forbidden",
+      STRIPE_WEBHOOK_SECRET: "whsec_example",
+      OGC_REPORT_BASE_URL: "https://geo.example.test"
+    })).toEqual({ ready: false, code: "configuration" });
+    expect(await getCommerceReadiness({
+      COMMERCE_MODE: "test",
+      OGC_REPLY_TO_EMAIL: "support@itheheda.online",
+      STRIPE_SECRET_KEY: "sk_test_example",
+      STRIPE_WEBHOOK_SECRET: "whsec_example",
+      OGC_REPORT_BASE_URL: "http://attacker.example"
     })).toEqual({ ready: false, code: "configuration" });
   });
 

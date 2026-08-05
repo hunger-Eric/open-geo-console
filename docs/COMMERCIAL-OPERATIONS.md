@@ -26,18 +26,20 @@ Customer promise: a paid report is delivered by email within 24 hours of confirm
 | Customer email protection | `OGC_EMAIL_ENCRYPTION_SECRET`, `OGC_EMAIL_LOOKUP_SECRET` |
 | Cloudflare Turnstile | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, `TURNSTILE_EXPECTED_HOSTNAME` |
 | Cloudflare Queue | `CLOUDFLARE_ACCOUNT_ID`, Queue names, Queue API token |
-| Airwallex | `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY`, `AIRWALLEX_WEBHOOK_SECRET` |
+| Stripe Sandbox checkout | `STRIPE_SECRET_KEY` (`sk_test_...`), `STRIPE_WEBHOOK_SECRET` (`whsec_...`), canonical `OGC_REPORT_BASE_URL` |
+| Airwallex legacy/server compatibility | `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_API_KEY`, `AIRWALLEX_WEBHOOK_SECRET` |
 | Resend | `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `RESEND_WEBHOOK_SECRET`, `OGC_REPLY_TO_EMAIL` |
 
 Use distinct random values for every secret family. The email-encryption secret must remain available for as long as its key version is used by retained orders.
 
-Staging and production must use different databases and every secret family in this table. `COMMERCE_MODE=test` is fixed to Airwallex Sandbox, and test-mode Resend envelopes are redirected to the required staging recipient. Protected Preview setup, environment markers, explicit staging Worker commands, bypass rotation, and production Cloudflare gates are documented in [Protected Staging and Production Operations](PROTECTED-STAGING-OPERATIONS.md).
+Staging and production must use different databases and every applicable secret family in this table. `COMMERCE_MODE=test` is fixed to Stripe Sandbox Checkout, rejects live Stripe keys, and redirects test-mode Resend envelopes to the required staging recipient. Protected Preview setup, environment markers, explicit staging Worker commands, bypass rotation, and production Cloudflare gates are documented in [Protected Staging and Production Operations](PROTECTED-STAGING-OPERATIONS.md).
 
 ## Safe launch modes
 
 - `COMMERCE_MODE=disabled`: default; checkout fails closed.
-- `COMMERCE_MODE=test`: Airwallex Sandbox and non-live email testing.
-- `COMMERCE_MODE=live`: accepts real orders only when all live checks pass.
+- `COMMERCE_MODE=test`: Stripe Sandbox Checkout and non-live email testing.
+- `COMMERCE_MODE=live`: retains the legacy live-readiness boundary, but new
+  Stripe Checkout is not implemented for live commerce and fails closed.
 - `FULFILLMENT_MODE=batch_24h`: workstation drains and exits.
 - `FULFILLMENT_MODE=realtime`: a persistent Worker uses Cloudflare/local hints or bounded PostgreSQL polling.
 
@@ -45,16 +47,28 @@ Live mode requires explicit server-side `OGC_PRICE_CNY_MINOR` and `OGC_PRICE_USD
 
 ## Hosted checkout and return
 
-- New checkout creates an Airwallex PaymentIntent and launches the official Hosted Payment Page SDK. Payment Link IDs created before the migration remain legacy records and are never sent to PaymentIntent retrieval APIs.
-- HPP success and cancel navigation return to the originating localized report with an opaque order ID. The report-bound status API reads PostgreSQL only.
-- A success return displays `confirming` until a valid signed `payment_intent.succeeded` Webhook updates the order. A cancel return means only that the shopper left checkout; it is not a trusted provider cancellation.
+- New test checkout creates a Stripe Checkout Session in `payment` mode and redirects only to the validated Stripe-hosted URL. Existing Airwallex records remain legacy context and are never migrated by checkout.
+- Stripe success and cancel URLs are anchored to `OGC_REPORT_BASE_URL`, not the
+  incoming request Host. It must be an HTTPS origin outside local development;
+  only loopback localhost origins may use HTTP.
+- Stripe Checkout success and cancel navigation return to the originating localized report with an opaque order ID. The report-bound status API reads PostgreSQL only.
+- A success return displays `confirming` until a valid signed `checkout.session.completed` or `checkout.session.async_payment_succeeded` Webhook updates the order. A cancel return means only that the shopper left checkout; it is not a trusted provider cancellation.
 - Successful checkout also places a short-lived Secure, HttpOnly, SameSite=Lax
   capability in that browser. After PostgreSQL confirms the exact order is paid
   and deliverable with an active artifact, the return page exchanges it for the
   normal artifact-scoped report cookie and navigates to the canonical HTML.
   Query parameters and the public status response never grant report access;
   email remains the independent fallback.
-- The PaymentIntent client secret is temporary browser session material. Never log, persist, copy into monitoring, or expose it through the status API.
+- The Stripe secret key and Webhook signing secret remain server-only. Never log, persist in application tables, return to the browser, copy into monitoring, or commit them.
+- This cutover is Sandbox Checkout only. `StripeGateway.requestRefund` is not
+  implemented and fails closed, while the Commerce refund consumer still uses
+  the Airwallex Gateway. Do not run that consumer as a Stripe refund path.
+- Stripe live Checkout, real payments, production Stripe Webhooks, bank
+  verification, and payouts are not implemented by this cutover. They require
+  separate design, scope, implementation, and acceptance.
+- The completed synthetic Sandbox payment proves the Stripe payment and
+  PostgreSQL exactly-once boundary; it does not prove real-site report
+  generation or customer report delivery.
 - When investigating a return issue, verify the report/order binding, the signed provider event, and the PostgreSQL order state separately. Do not repair fulfillment from query parameters or a browser screenshot.
 - Retire pre-migration unpaid provider resources only through `npm run commerce:retire-legacy`. The command requires `OGC_DEPLOYMENT_PROFILE=staging|production`, `COMMERCE_MODE=test|live`, `OGC_LEGACY_RETIREMENT_ENABLED=true`, and an explicit ISO `OGC_LEGACY_RETIREMENT_CUTOFF_AT`; it rechecks provider state and does not retire a checkout that is already paid. Review the printed inspected/retired/paid counts and provider state before disabling the gate again.
 

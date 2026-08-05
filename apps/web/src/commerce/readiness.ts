@@ -13,7 +13,7 @@ export async function getCommerceReadiness(environment: NodeJS.ProcessEnv = proc
   const mode = getCommerceMode(environment);
   if (mode === "disabled") return { ready: false, code: "disabled" };
   if (mode === "test") {
-    return isMailbox(environment.OGC_REPLY_TO_EMAIL)
+    return isMailbox(environment.OGC_REPLY_TO_EMAIL) && hasStripeSandboxConfiguration(environment)
       ? { ready: true, code: "ready" }
       : { ready: false, code: "configuration" };
   }
@@ -49,6 +49,24 @@ export async function getCommerceReadiness(environment: NodeJS.ProcessEnv = proc
 export async function assertCommerceReady(environment: NodeJS.ProcessEnv = process.env): Promise<void> {
   const readiness = await getCommerceReadiness(environment);
   if (!readiness.ready) throw new Error("Commerce is temporarily unavailable.");
+}
+
+function hasStripeSandboxConfiguration(environment: NodeJS.ProcessEnv): boolean {
+  return Boolean(
+    environment.STRIPE_SECRET_KEY?.trim().startsWith("sk_test_")
+    && environment.STRIPE_WEBHOOK_SECRET?.trim().startsWith("whsec_")
+    && hasSafeReportBaseUrl(environment.OGC_REPORT_BASE_URL)
+  );
+}
+
+function hasSafeReportBaseUrl(value: string | undefined): boolean {
+  try {
+    const url = new URL(value?.trim() ?? "");
+    const localHttp = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    return (url.protocol === "https:" || localHttp) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
 }
 
 function hasLiveConfiguration(environment: NodeJS.ProcessEnv): boolean {

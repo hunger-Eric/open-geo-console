@@ -56,7 +56,6 @@
     "db:migrate:sqlite": "node --env-file-if-exists=.env.local --import tsx src/scripts/migrate-sqlite.ts"
   },
   "dependencies": {
-    "@airwallex/components-sdk": "^1.32.0",
     "@aws-sdk/client-s3": "^3.1085.0",
     "@fontsource/noto-sans-sc": "^5.2.9",
     "@open-geo-console/ai-report-engine": "*",
@@ -78,6 +77,7 @@
     "postgres": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "stripe": "^22.4.0",
     "undici": "latest"
   },
   "devDependencies": {

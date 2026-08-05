@@ -1,4 +1,4 @@
-export type CommerceProvider = "airwallex" | "resend";
+export type CommerceProvider = "airwallex" | "stripe" | "resend";
 export type CommerceProviderOperation = "authentication" | "checkout" | "retrieve" | "refund" | "configuration" | "send";
 export type CommerceFailureCategory = "http" | "timeout" | "network" | "invalid_response" | "invalid_configuration" | "provider_rejected";
 

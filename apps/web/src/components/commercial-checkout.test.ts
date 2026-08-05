@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCheckoutRequestBody,
-  buildHostedPaymentPageOptions,
   getPaymentConfirmationReturnUrl,
+  getStripeCheckoutRedirect,
   readCheckoutPayload
 } from "./checkout-response";
 import { buildHppReturnUrls } from "./payment-return";
@@ -33,17 +33,18 @@ describe("checkout response parsing", () => {
     });
   });
 
-  it("passes the server country to HPP and omits it when unavailable", () => {
-    const urls = { successUrl: "https://example.test/success", cancelUrl: "https://example.test/cancel" };
-    expect(buildHostedPaymentPageOptions({
-      intentId: "int_cn", clientSecret: "secret", currency: "CNY", countryCode: "CN"
-    }, urls)).toMatchObject({ currency: "CNY", country_code: "CN" });
-    expect(buildHostedPaymentPageOptions({
-      intentId: "int_unknown", clientSecret: "secret", currency: "USD", countryCode: null
-    }, urls)).not.toHaveProperty("country_code");
-    expect(buildHostedPaymentPageOptions({
-      intentId: "int_invalid", clientSecret: "secret", currency: "USD", countryCode: "ZZ"
-    }, urls)).not.toHaveProperty("country_code");
+  it("accepts only a Stripe-hosted checkout URL bound to a local order", () => {
+    expect(getStripeCheckoutRedirect({
+      orderId: "order-1",
+      checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_valid"
+    })).toBe("https://checkout.stripe.com/c/pay/cs_test_valid");
+    expect(getStripeCheckoutRedirect({
+      orderId: "order-1",
+      checkoutUrl: "https://attacker.example/c/pay/cs_test_valid"
+    })).toBeNull();
+    expect(getStripeCheckoutRedirect({
+      checkoutUrl: "https://checkout.stripe.com/c/pay/cs_test_unbound"
+    })).toBeNull();
   });
 
   it("turns an empty gateway response into a safe empty payload", async () => {

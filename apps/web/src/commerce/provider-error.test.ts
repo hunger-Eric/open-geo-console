@@ -11,6 +11,8 @@ describe("commerce provider errors", () => {
       .toBe("airwallex_refund_http_401");
     expect(safeCommerceFailureCode(new CommerceProviderError("resend", "send", "timeout")))
       .toBe("resend_send_timeout");
+    expect(safeCommerceFailureCode(new CommerceProviderError("stripe", "checkout", "http", 401)))
+      .toBe("stripe_checkout_http_401");
     expect(safeCommerceFailureCode(new Error("raw provider body must not persist")))
       .toBe("unknown_error");
   });

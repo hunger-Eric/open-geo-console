@@ -6,13 +6,11 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { Dictionary, Locale } from "@/i18n";
 import {
   buildCheckoutRequestBody,
-  buildHostedPaymentPageOptions,
   getPaymentConfirmationReturnUrl,
+  getStripeCheckoutRedirect,
   readCheckoutPayload,
-  type CheckoutPayload
 } from "./checkout-response";
 import {
-  buildHppReturnUrls,
   fetchPaymentReturnStatus,
   getPaymentReturnContext,
   shouldHidePurchaseControls,
@@ -131,21 +129,13 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
         window.location.assign(confirmationReturnUrl);
         return;
       }
-      if (!response.ok || !isHppPayload(payload)) {
+      const checkoutUrl = getStripeCheckoutRedirect(payload);
+      if (!response.ok || !checkoutUrl) {
         throw new Error(payload.code === "payment_confirmation_pending"
           ? dictionary.commerce.paymentConfirming
           : payload.error ?? dictionary.commerce.checkoutFailed);
       }
-      const urls = buildHppReturnUrls(window.location.href, payload.orderId);
-      const { init } = await import("@airwallex/components-sdk");
-      const { payments } = await init({
-        env: payload.hpp.environment,
-        enabledElements: ["payments"],
-        locale
-      });
-      if (!payments) throw new Error(dictionary.commerce.checkoutFailed);
-      const hppOptions = buildHostedPaymentPageOptions(payload.hpp, urls);
-      payments.redirectToCheckout(hppOptions);
+      window.location.assign(checkoutUrl);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : dictionary.commerce.checkoutFailed);
       setSubmitting(false);
@@ -227,15 +217,4 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
       {error ? <p className="mt-3 text-sm text-[var(--red)]" role="alert">{error}</p> : null}
     </section>
   );
-}
-
-function isHppPayload(payload: CheckoutPayload): payload is Required<Pick<CheckoutPayload, "orderId">> & {
-  hpp: { intentId: string; clientSecret: string; currency: Currency; countryCode?: string | null; environment: "demo" | "prod" };
-} {
-  return typeof payload.orderId === "string"
-    && typeof payload.hpp?.intentId === "string"
-    && typeof payload.hpp.clientSecret === "string"
-    && (payload.hpp.currency === "CNY" || payload.hpp.currency === "USD" || payload.hpp.currency === "HKD")
-    && (payload.hpp.countryCode == null || /^[A-Z]{2}$/.test(payload.hpp.countryCode))
-    && (payload.hpp.environment === "demo" || payload.hpp.environment === "prod");
 }

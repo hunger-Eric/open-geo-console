@@ -7,11 +7,10 @@ import { assertCommerceReady } from "@/commerce/readiness";
 import {
   attachHostedCheckout,
   createPaymentOrder,
-  getActivePaymentOrderForReport,
-  replaceLegacyHostedCheckout
+  getActivePaymentOrderForReport
 } from "@/db/commercial-orders";
 import { getGeoReport } from "@/db/reports";
-import { AirwallexGateway, isAirwallexPaymentIntentId } from "@/payments/airwallex";
+import { StripeGateway } from "@/payments/stripe";
 import { getTrustedClientCountry, getTrustedClientIp } from "@/security/client-ip";
 import { verifyTurnstile } from "@/security/turnstile";
 import { parseReportLocale } from "@/server/report-locale";
@@ -28,7 +27,10 @@ type RouteContext = { params: Promise<{ id: string }> };
 export async function POST(request: Request, context: RouteContext) {
   try {
     assertSmallRequest(request);
-    assertCommerceEnabled();
+    if (assertCommerceEnabled() !== "test") {
+      throw new Error("Stripe Checkout is available only in Sandbox commerce.");
+    }
+    const reportOrigin = requiredReportOrigin();
     await assertCommerceReady();
     await assertRecommendationProductAvailable();
     const { id } = await context.params;
@@ -74,16 +76,16 @@ export async function POST(request: Request, context: RouteContext) {
       if (active.customerEmailHmac !== protectedEmail.lookupHmac) {
         return NextResponse.json({ error: "This report already has an active checkout." }, { status: 409 });
       }
-      return checkoutResponse(request, active.id, active.providerCheckoutId, {
+      return checkoutResponse(request, reportOrigin, active.id, active.provider, active.providerCheckoutId, {
         ...checkoutInput,
         currency: active.currency,
         amountMinor: active.amountMinor
-      }, countryCode, false);
+      }, !active.providerCheckoutId);
     }
 
     const order = await createPaymentOrder({
       checkoutIdempotencyHmac: checkoutHmac,
-      provider: "airwallex",
+      provider: "stripe",
       reportId: id,
       siteKey,
       customerEmailEncrypted: protectedEmail.encrypted,
@@ -98,11 +100,11 @@ export async function POST(request: Request, context: RouteContext) {
       currency: price.currency,
       amountMinor: price.amountMinor
     });
-    return checkoutResponse(request, order.id, order.providerCheckoutId, {
+    return checkoutResponse(request, reportOrigin, order.id, order.provider, order.providerCheckoutId, {
       ...checkoutInput,
       currency: order.currency,
       amountMinor: order.amountMinor
-    }, countryCode, true);
+    }, true);
   } catch (error) {
     if (process.env.NODE_ENV !== "production") console.error(error);
     return NextResponse.json({ error: publicError(error) }, { status: 400 });
@@ -111,63 +113,36 @@ export async function POST(request: Request, context: RouteContext) {
 
 async function checkoutResponse(
   request: Request,
+  reportOrigin: URL,
   orderId: string,
+  provider: "airwallex" | "stripe",
   providerCheckoutId: string | null,
   createInput: { reportId: string; siteKey: string; locale: "en" | "zh"; currency: "CNY" | "USD" | "HKD"; amountMinor: number },
-  countryCode: string | null,
   issueReturnCapability: boolean
 ) {
-  const gateway = new AirwallexGateway();
-  let effectiveProviderCheckoutId = providerCheckoutId;
-  let migratedCheckout: Awaited<ReturnType<AirwallexGateway["createHostedCheckout"]>> | null = null;
-  if (providerCheckoutId && !isAirwallexPaymentIntentId(providerCheckoutId)) {
-    const legacyState = await gateway.deactivateLegacyHostedCheckout(providerCheckoutId, orderId);
-    if (legacyState === "paid") {
-      return NextResponse.json({
-        code: "payment_confirmation_pending",
-        error: "Payment was already received and is awaiting verified confirmation.",
-        orderId
-      }, { status: 409 });
-    }
-    const migrated = await gateway.findHostedCheckoutByReference(orderId) ?? await gateway.createHostedCheckout({
-      orderId,
-      reportId: createInput.reportId,
-      siteKey: createInput.siteKey,
-      locale: createInput.locale,
-      currency: createInput.currency,
-      amountMinor: createInput.amountMinor,
-      returnUrl: new URL(`/${createInput.locale}/reports/${encodeURIComponent(createInput.reportId)}`, request.url).href
-    });
-    await replaceLegacyHostedCheckout({
-      orderId,
-      expectedProviderCheckoutId: providerCheckoutId,
-      providerCheckoutId: migrated.providerCheckoutId
-    });
-    effectiveProviderCheckoutId = migrated.providerCheckoutId;
-    migratedCheckout = migrated;
+  if (provider !== "stripe") {
+    return NextResponse.json({ error: "This report already has an active checkout from another payment provider." }, { status: 409 });
   }
-  const recovered = effectiveProviderCheckoutId ? null : await gateway.findHostedCheckoutByReference(orderId);
-  const checkout = migratedCheckout ?? (effectiveProviderCheckoutId
-    ? await gateway.getHostedCheckout(effectiveProviderCheckoutId, orderId)
-    : recovered ?? await gateway.createHostedCheckout({
+  const gateway = new StripeGateway();
+  const checkout = providerCheckoutId
+    ? await gateway.getHostedCheckout(providerCheckoutId, orderId, {
+        currency: createInput.currency,
+        amountMinor: createInput.amountMinor
+      })
+    : await gateway.createHostedCheckout({
         orderId,
         reportId: createInput.reportId,
         siteKey: createInput.siteKey,
         locale: createInput.locale,
         currency: createInput.currency,
         amountMinor: createInput.amountMinor,
-        returnUrl: new URL(`/${createInput.locale}/reports/${encodeURIComponent(createInput.reportId)}`, request.url).href
-      }));
-  if (!effectiveProviderCheckoutId) await attachHostedCheckout({ orderId, providerCheckoutId: checkout.providerCheckoutId });
+        returnUrl: resolveReportReturnUrl(request, reportOrigin, createInput.reportId, createInput.locale)
+      });
+  if (checkout.provider !== "stripe") throw new Error("Stripe checkout returned another provider identity.");
+  if (!providerCheckoutId) await attachHostedCheckout({ orderId, providerCheckoutId: checkout.providerCheckoutId });
   const response = NextResponse.json({
     orderId,
-    hpp: {
-      intentId: checkout.providerCheckoutId,
-      clientSecret: checkout.clientSecret,
-      currency: checkout.currency,
-      countryCode,
-      environment: checkout.environment
-    }
+    checkoutUrl: checkout.checkoutUrl
   }, { status: providerCheckoutId ? 200 : 201 });
   if (issueReturnCapability) {
     const capability = issuePaymentReturnAccessCapability({ reportId: createInput.reportId, orderId });
@@ -178,6 +153,39 @@ async function checkoutResponse(
     );
   }
   return response;
+}
+
+function resolveReportReturnUrl(
+  request: Request,
+  reportOrigin: URL,
+  reportId: string,
+  locale: "en" | "zh"
+): string {
+  const expected = new URL(`/${locale}/reports/${encodeURIComponent(reportId)}`, reportOrigin);
+  const referer = request.headers.get("referer");
+  if (!referer) return expected.href;
+  try {
+    const candidate = new URL(referer);
+    return candidate.origin === expected.origin && candidate.pathname === expected.pathname
+      ? candidate.href
+      : expected.href;
+  } catch {
+    return expected.href;
+  }
+}
+
+function requiredReportOrigin(environment: NodeJS.ProcessEnv = process.env): URL {
+  const raw = environment.OGC_REPORT_BASE_URL?.trim();
+  if (!raw) throw new Error("A canonical report origin is required for Stripe Checkout.");
+  const url = new URL(raw);
+  const localHttp = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if ((url.protocol !== "https:" && !localHttp) || url.username || url.password) {
+    throw new Error("The canonical report origin is invalid for Stripe Checkout.");
+  }
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  return url;
 }
 
 function assertSmallRequest(request: Request) {
