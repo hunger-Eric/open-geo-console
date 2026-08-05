@@ -6608,3 +6608,83 @@ revised scope.
   `codex/stripe-sandbox-checkout` to `main`, branch cleanup, and any
   production Stripe work require separate authority. Docs closeout
   (committing this receipt) is pending user authorization.
+
+---
+
+## 2026-08-05 - Release receipt: candidate 9cd3ab6 (Stripe refund dispatch) to Protected Staging
+
+- Candidate `9cd3ab65d18c3c91e2f9962aebc24ba2df789d21`
+  (`feat: submit Stripe sandbox refunds through provider dispatch`)
+  committed on `codex/stripe-sandbox-checkout`; `main` fast-forwarded and
+  both refs pushed (`6bf7f12..9cd3ab6`) under the user's explicit
+  提交+部署 instruction.
+- Web: ONE manual Preview `dpl_Bf9sihzP3K6E6zX3zbx7W7oifpj8`
+  (host `open-geo-console-qqg6rht7x-itheheda-6857s-projects.vercel.app`)
+  READY, preview target, exact project, ogcGitSha readback = candidate.
+  Fixed alias moved once (previous/rollback Web
+  `dpl_BhCQDqW4nUypHhBmiLrUvftvDunJ`); post-move alias readback = candidate.
+- Worker: ONE thin source-overlay image
+  `open-geo-console:staging-9cd3ab6-stripe-refund-overlay-v1`
+  (`sha256:52094df505464f87bf66cf371fef94a6509d5593b5266ceeb1653846ac9cd87a`,
+  revision label = full candidate SHA) built FROM the accepted current image
+  `open-geo-console:staging-6bf7f12-stripe-sandbox-v1`
+  (`sha256:cdced559306c...`, retained as the rollback line). Older images
+  untouched, no cleanup.
+- Runtime env: original bytes backed up (`.tmp/staging.env.bak-9cd3ab6`);
+  byte-comparison proves only `OGC_DEPLOYMENT_VERSION` changed plus exactly
+  one appended `STRIPE_SECRET_KEY` (user-supplied Sandbox key, never printed
+  or committed). staging-commerce.env projection untouched.
+- Recreated exactly `staging-worker-free`, `staging-worker-deep`, and
+  `staging-commerce-reconcile` (first authorized commerce-consumer rebuild)
+  on the candidate image: ready in 2s, restart count zero, exact image ID,
+  correct tiers/markers, reconcile container verified to hold
+  `STRIPE_SECRET_KEY` (existence only). Email-only `staging-commerce`,
+  Production services untouched. Zero claimable/running work before and
+  after (five historical `repair_wait` rows only).
+- Smoke: alias readback = candidate; anonymous `/zh` and `POST /api/scan`
+  302 to Vercel SSO (protection intact); zero workflow effects.
+- Refund-row finding (not a deployment defect): the pre-existing pending
+  Stripe refund `69202f81-...` exhausted its five retry attempts on the OLD
+  image's `commercial_refund_payment_unavailable` and was terminally marked
+  `failed` (failure_code `unknown_error`) at 10:09:54, seconds before the
+  new consumer container's first cycle; its `refund_assistance` email was
+  queued and delivered to the redirected test recipient. Stripe API readback
+  confirms ZERO refund objects on `pi_3U10coRsPpQ6QFI30qFhE8Nh`, so nothing
+  was ever submitted provider-side. Requeuing that terminal row is a
+  historical-data mutation and was NOT performed; it requires a separate
+  explicit scope. The deployed dispatch path is unit-tested but has not yet
+  been proven by a live Sandbox refund submission.
+- Disk: no material change (thin overlay over shared layers); no prune.
+- Terminal status: **Protected Staging deployment completed; Stripe refund
+  dispatch live but unproven end-to-end; the terminal refund row awaits a
+  user decision (scoped requeue, manual provider refund plus scoped sync, or
+  leave as-is).**
+
+---
+
+## 2026-08-05 - Receipt: single-row Stripe refund requeue (scope-approved)
+
+- Guarded correction on staging refund row `69202f81-e7cb-4d2b-a5c6-89ef44a3318a`
+  (order `7234ce15-...`): pre-checks verified staging marker, row `failed`/
+  unsubmitted, and ZERO Stripe refund objects on `pi_3U10coRsPpQ6QFI30qFhE8Nh`;
+  the conditional update matched exactly one row (`state=pending`,
+  `attempts=0`, lease/failure fields cleared). The order's `refund_status`
+  was `failed` and was restored to `pending` per the scope's conditional.
+  No other row, the failed report/job, or the delivered assistance email was
+  touched.
+- The deployed `staging-commerce-reconcile` consumer submitted the refund on
+  its next cycle (no agent Stripe call): row `succeeded` at
+  2026-08-05T10:58:45Z with `provider_refund_id=re_3U10coRsPpQ6QFI30bHZXawh`,
+  `submitted_at`/`succeeded_at` set, one attempt.
+- Stripe API readback: exactly ONE refund object `re_3U10coRsPpQ6QFI30bHZXawh`,
+  status `succeeded`, amount 9900 USD minor, created 10:58:44Z. This is the
+  first live proof of the Stripe refund dispatch path deployed in `9cd3ab6`.
+- Order converged to `refund_status=refunded`; `payment_status=paid`,
+  `fulfillment_status=failed`, and `delivery_status=delivered` unchanged.
+- Idempotency: the row is terminal (`succeeded`) and the consumer claims only
+  `pending` rows; a full later consumer cycle left Stripe-side count at
+  exactly one (`re_3U10coRsPpQ6QFI30bHZXawh` only) and the row unchanged
+  (`succeeded`, one attempt). No double refund.
+- Terminal status: **Stripe Sandbox refund path verified end to end; the
+  customer's stuck refund is now truthfully refunded (Sandbox, no real
+  funds).**
