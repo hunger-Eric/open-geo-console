@@ -6876,3 +6876,28 @@ revised scope.
   real-model article quality and end-to-end paid report acceptance were not
   part of this release scope.**
 
+
+---
+
+## 2026-08-06 - Receipt: Staging redeploy OpenCode Go AI allowlist (`94f787f`)
+
+- User required a full redeploy after China Flash opt-in, not only Worker env.
+- Candidate `94f787f74373e6b88d17fef59ff9f7be7ecbc00b`
+  (`fix: allow OpenCode Go as approved AI base URL`) pushed to `origin/main`.
+- Manual Vercel Preview: `dpl_Aes8Z9eXWY5xSirjwvZLRHTC5PGh`,
+  `https://open-geo-console-di1fffxkw-itheheda-6857s-projects.vercel.app`,
+  READY, CLI target preview; REST `ogcGitSha` and `githubCommitSha` both equal
+  the full candidate.
+- Thin Worker overlay `open-geo-console:staging-94f787f-opencode-overlay-v1`
+  (`sha256:5288b4f69b974cc20f46da4712ffdf427a32ae561b6e722445b59375eedf0285`)
+  from base `staging-2657a9c-geo-article-overlay-v1`; free/deep recreated with
+  revision and `OGC_DEPLOYMENT_VERSION` = candidate; AI base
+  `https://opencode.ai/zen/go/v1`, model `deepseek-v4-flash` (secrets not
+  committed).
+- Fixed alias moved once:
+  `open-geo-console-staging-itheheda.vercel.app` → candidate Preview.
+- Flash probe after redeploy: HTTP 200, `responseModel=deepseek-v4-flash`.
+- Production untouched. No historical job replay. No secrets in Git.
+- Terminal status: **Protected Staging redeploy completed for `94f787f` with
+  OpenCode Go Flash operational.**
+
