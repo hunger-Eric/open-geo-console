@@ -58,19 +58,44 @@ function generativeModel() {
 function articleModel() {
   const model=generativeModel();
   model.combinedReport.geoArticleExample={
-    version:"geo_article_example_v1",
-    generationMode:"model",
-    targetQuestionIds:model.combinedReport.answerCards.map(({questionId})=>questionId),
-    title:"目标品牌跨境物流选择指南",
-    introduction:"目标品牌公开了跨境物流服务范围、适用客户与采购核验信息。",
-    sections:[
-      {id:"facts",heading:"先确认服务范围",paragraphs:["说明公开服务、客户与覆盖区域。"]},
-      {id:"proof",heading:"再连接可核验证据",paragraphs:["把关键结论连接到服务页、案例和流程。"]}
-    ],
-    faq:[{question:"采购前先核对什么？",answer:"先核对服务范围、限制与公开证据。"}],
-    rationale:[
-      {sectionId:"facts",reason:"先建立网站事实，避免结论脱离实际业务。",evidenceRefs:[`question:${model.combinedReport.answerCards[0]!.questionId}`]},
-      {sectionId:"proof",reason:"解释答案为什么成立以及如何复核。",evidenceRefs:[`question:${model.combinedReport.answerCards[1]!.questionId}`]}
+    version:"geo_article_deliverable_v2",kind:"article",primaryQuestionId:model.combinedReport.answerCards[0]!.questionId,
+    article:{title:"企业选择跨境物流服务时应核对哪些能力",introduction:{text:"先确认运输范围、异常处理和交付边界，再用公开材料核对每项承诺。",evidenceRefs:["source:generated-source-1"]},sections:[
+      {id:"scenario",heading:"从实际运输场景开始",paragraphs:[{text:"明确货类、路线与时效要求，才能判断方案是否适用。",evidenceRefs:[`question:${model.combinedReport.answerCards[0]!.questionId}`]}]},
+      {id:"criteria",heading:"把服务能力变成判断标准",paragraphs:[{text:"逐项比较服务范围、异常响应和人工复核边界。",evidenceRefs:["source:generated-source-1"]}]},
+      {id:"verification",heading:"最后核对公开证据",paragraphs:[{text:"重要结论应当能够回到公开服务页、流程或案例复核。",evidenceRefs:["source:generated-source-1"]}]}
+    ],faq:[
+      {question:"采购前先核对什么？",answer:{text:"先核对服务范围、限制与公开证据。",evidenceRefs:["source:generated-source-1"]}},
+      {question:"哪些异常需要人工处理？",answer:{text:"应在签约前确认异常升级路径和人工复核责任。",evidenceRefs:[`question:${model.combinedReport.answerCards[0]!.questionId}`]}}
+    ]},
+    explanation:[
+      {elementId:"title",heading:"标题设计",reason:"直接对应买家的选择问题。",geoFunction:"锁定单一搜索意图。",evidenceRefs:[`question:${model.combinedReport.answerCards[0]!.questionId}`]},
+      {elementId:"introduction",heading:"答案前置",reason:"先给出可执行判断。",geoFunction:"便于提取核心答案。",evidenceRefs:["source:generated-source-1"]},
+      {elementId:"section:scenario",heading:"业务场景",reason:"先确定适用条件。",geoFunction:"建立语义上下文。",evidenceRefs:[`question:${model.combinedReport.answerCards[0]!.questionId}`]},
+      {elementId:"section:criteria",heading:"判断标准",reason:"把选择拆成可比较维度。",geoFunction:"形成明确决策实体。",evidenceRefs:["source:generated-source-1"]},
+      {elementId:"section:verification",heading:"证据核验",reason:"连接结论与公开材料。",geoFunction:"提高可验证性。",evidenceRefs:["source:generated-source-1"]},
+      {elementId:"faq",heading:"相关问题",reason:"补充相邻采购意图。",geoFunction:"扩展相关问法。",evidenceRefs:[`question:${model.combinedReport.answerCards[0]!.questionId}`]}
+    ]
+  };
+  return model;
+}
+
+function outlineModel() {
+  const model=generativeModel();
+  const questionId=model.combinedReport.answerCards[0]!.questionId;
+  model.combinedReport.geoArticleExample={
+    version:"geo_article_deliverable_v2",kind:"outline",primaryQuestionId:questionId,fallbackReason:"provider_error",
+    outline:{workingTitle:"企业选择跨境物流服务时应核对哪些能力",readerQuestion:"如何选择适合的跨境物流服务？",directAnswer:"当前只能形成初步判断，仍需核对服务边界和公开证据。",plannedSections:[
+      {id:"scenario",heading:"先说明业务场景",purpose:"明确货类、路线和时效要求。",evidenceRefs:[`question:${questionId}`]},
+      {id:"criteria",heading:"再列出判断标准",purpose:"比较服务范围、异常处理和交付边界。",evidenceRefs:["source:generated-source-1"]},
+      {id:"verification",heading:"最后给出核验清单",purpose:"连接可访问的服务页、流程和案例。",evidenceRefs:["source:generated-source-1"]}
+    ],evidenceToAdd:["补充公开案例与适用限制。"],faqAngles:["采购前先核对什么？","哪些异常需要人工复核？"]},
+    explanation:[
+      {elementId:"title",heading:"标题设计",reason:"围绕买家问题。",geoFunction:"锁定核心意图。",evidenceRefs:[`question:${questionId}`]},
+      {elementId:"introduction",heading:"答案前置",reason:"先说明当前判断边界。",geoFunction:"方便提取直接回答。",evidenceRefs:[`question:${questionId}`]},
+      {elementId:"section:scenario",heading:"业务场景",reason:"确认适用条件。",geoFunction:"建立语义上下文。",evidenceRefs:[`question:${questionId}`]},
+      {elementId:"section:criteria",heading:"判断标准",reason:"形成比较维度。",geoFunction:"明确决策实体。",evidenceRefs:["source:generated-source-1"]},
+      {elementId:"section:verification",heading:"证据核验",reason:"标记待补材料。",geoFunction:"保留可验证边界。",evidenceRefs:["source:generated-source-1"]},
+      {elementId:"faq",heading:"相关问题",reason:"规划相邻意图。",geoFunction:"扩展相关问法。",evidenceRefs:[`question:${questionId}`]}
     ]
   };
   return model;
@@ -313,7 +338,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(first.answerText).toContain("来源0");
   });
 
-  it("renders the paid GEO article and its rationale after the unified action plan",()=>{
+  it("renders a complete paid GEO article before its separate structure explanation",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:articleModel()}));
     const actionsAt=html.indexOf("data-unified-actions");
     const articleAt=html.indexOf("data-geo-article-generation-mode=\"model\"");
@@ -325,10 +350,44 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(articleAt).toBeLessThan(faqAt);
     expect(faqAt).toBeLessThan(strategyAt);
     expect(strategyAt).toBeLessThan(appendixAt);
-    for(const value of ["目标品牌跨境物流选择指南","先确认服务范围","写作策略与证据依据","先建立网站事实","采购前先核对什么？"]){
+    for(const value of ["可发布文章示例","企业选择跨境物流服务时应核对哪些能力","从实际运输场景开始","这份内容为什么这样组织","直接对应买家的选择问题","采购前先核对什么？","[1] 服务商甲来源 1"]){
       expect(html).toContain(value);
     }
+    expect(html).toContain('data-geo-article-kind="article"');
+    expect(html).not.toContain("source:generated-source-1");
+    expect(html).not.toContain("来源0");
     expect(html.indexOf("文章生成方式")).toBeGreaterThan(appendixAt);
     expect(html.match(/data-open-geo-answer-card="true"/g)).toHaveLength(3);
+  });
+
+  it("labels deterministic fallback as an outline and never as an article example",()=>{
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:outlineModel()}));
+    const outlineAt=html.indexOf('data-geo-article-kind="outline"');
+    const explanationAt=html.indexOf("这份内容为什么这样组织");
+    expect(outlineAt).toBeGreaterThan(0);
+    expect(outlineAt).toBeLessThan(explanationAt);
+    for(const value of ["GEO 内容提纲","这是一份待补充证据后再成文的内容提纲，不是范文。","建议正文结构","成文前还需补充","可延展的常见问题"]){
+      expect(html).toContain(value);
+    }
+    expect(html).not.toContain("可发布文章示例");
+    expect(html).not.toContain("source:generated-source-1");
+  });
+
+  it("keeps historical V1 fallback readable as an outline and normalizes provider ordinals",()=>{
+    const model=generativeModel(),questionIds=model.combinedReport.answerCards.map(({questionId})=>questionId);
+    model.combinedReport.geoArticleExample={version:"geo_article_example_v1",generationMode:"deterministic_fallback",targetQuestionIds:questionIds,
+      title:"历史内容提纲",introduction:"当前判断来自来源0，仍需补充材料。",sections:[
+        {id:"facts",heading:"确认范围",paragraphs:["核对公开服务与限制。"]},
+        {id:"proof",heading:"补充证据",paragraphs:["连接案例与流程。"]}
+      ],faq:[{question:"先核对什么？",answer:"核对范围与证据。"}],rationale:[
+        {sectionId:"facts",reason:"先建立事实。",evidenceRefs:[`question:${questionIds[0]}`]},
+        {sectionId:"proof",reason:"再解释边界。",evidenceRefs:[`question:${questionIds[1]}`]}
+      ]};
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    expect(html).toContain('data-geo-article-kind="outline"');
+    expect(html).toContain("GEO 内容提纲");
+    expect(html).toContain("当前判断来自[1]");
+    expect(html).not.toContain("来源0");
+    expect(html).not.toContain("可发布文章示例");
   });
 });

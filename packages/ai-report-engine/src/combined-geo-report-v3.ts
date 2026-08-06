@@ -32,6 +32,7 @@ import {
 export const COMBINED_GEO_REPORT_V3_VERSION = 3 as const;
 export const COMBINED_GEO_REPORT_V3_CONTRACT = "combined_geo_report_v3" as const;
 export const GEO_ARTICLE_EXAMPLE_VERSION = "geo_article_example_v1" as const;
+export const GEO_ARTICLE_DELIVERABLE_VERSION = "geo_article_deliverable_v2" as const;
 
 export interface GeoArticleExampleV1 {
   readonly version: typeof GEO_ARTICLE_EXAMPLE_VERSION;
@@ -44,6 +45,45 @@ export interface GeoArticleExampleV1 {
   readonly rationale: readonly { readonly sectionId: string; readonly reason: string; readonly evidenceRefs: readonly string[] }[];
 }
 
+export type GeoArticleFallbackReason = "provider_error" | "timeout" | "invalid_output" | "contract_rejected" | "quality_rejected";
+export interface GeoArticleEvidenceTextV2 { readonly text: string; readonly evidenceRefs: readonly string[]; }
+export interface GeoArticleExplanationV2 {
+  readonly elementId: string;
+  readonly heading: string;
+  readonly reason: string;
+  readonly geoFunction: string;
+  readonly evidenceRefs: readonly string[];
+}
+export type GeoArticleDeliverableV2 =
+  | {
+      readonly version: typeof GEO_ARTICLE_DELIVERABLE_VERSION;
+      readonly kind: "article";
+      readonly primaryQuestionId: string;
+      readonly article: {
+        readonly title: string;
+        readonly introduction: GeoArticleEvidenceTextV2;
+        readonly sections: readonly { readonly id: string; readonly heading: string; readonly paragraphs: readonly GeoArticleEvidenceTextV2[] }[];
+        readonly faq: readonly { readonly question: string; readonly answer: GeoArticleEvidenceTextV2 }[];
+      };
+      readonly explanation: readonly GeoArticleExplanationV2[];
+    }
+  | {
+      readonly version: typeof GEO_ARTICLE_DELIVERABLE_VERSION;
+      readonly kind: "outline";
+      readonly primaryQuestionId: string;
+      readonly outline: {
+        readonly workingTitle: string;
+        readonly readerQuestion: string;
+        readonly directAnswer: string;
+        readonly plannedSections: readonly { readonly id: string; readonly heading: string; readonly purpose: string; readonly evidenceRefs: readonly string[] }[];
+        readonly evidenceToAdd: readonly string[];
+        readonly faqAngles: readonly string[];
+      };
+      readonly explanation: readonly GeoArticleExplanationV2[];
+      readonly fallbackReason: GeoArticleFallbackReason;
+    };
+export type GeoArticleDeliverable = GeoArticleExampleV1 | GeoArticleDeliverableV2;
+
 export interface CombinedGeoReportV3 extends Omit<CombinedGeoReportV2, "version" | "artifactContract" | "businessQuestionAnswers"> {
   version: typeof COMBINED_GEO_REPORT_V3_VERSION;
   artifactContract: typeof COMBINED_GEO_REPORT_V3_CONTRACT;
@@ -52,7 +92,7 @@ export interface CombinedGeoReportV3 extends Omit<CombinedGeoReportV2, "version"
   sourceSelectionDiagnosis?: SourceSelectionDiagnosisV1;
   semanticReviewReceipt?: PaidV3ReportSemanticReviewReceipt;
   directSemantics?: PaidV3DirectSemantics;
-  geoArticleExample?: GeoArticleExampleV1;
+  geoArticleExample?: GeoArticleDeliverable;
 }
 
 export function parseCombinedGeoReportV3(
@@ -131,7 +171,7 @@ export function parseCombinedGeoReportV3(
   });
   const geoArticleExample = root.geoArticleExample === undefined
     ? undefined
-    : parseGeoArticleExampleV1(root.geoArticleExample, {
+    : parseGeoArticleDeliverable(root.geoArticleExample, {
         locale: base.locale,
         questionIds: publicQuestionIds,
         evidenceRefs: geoArticleEvidenceRefs(base, answerCards)
@@ -214,6 +254,112 @@ export function parseGeoArticleExampleV1(value: unknown, authority: {
   };
   assertArticleLanguage(result, authority.locale);
   return result;
+}
+
+export function parseGeoArticleDeliverable(value: unknown, authority: {
+  readonly locale: string;
+  readonly questionIds: readonly string[];
+  readonly evidenceRefs: readonly string[];
+}): GeoArticleDeliverable {
+  const row = object(value, "$geoArticleExample");
+  return row.version === GEO_ARTICLE_EXAMPLE_VERSION
+    ? parseGeoArticleExampleV1(value, authority)
+    : parseGeoArticleDeliverableV2(value, authority);
+}
+
+function parseGeoArticleDeliverableV2(value: unknown, authority: {
+  readonly locale: string;
+  readonly questionIds: readonly string[];
+  readonly evidenceRefs: readonly string[];
+}): GeoArticleDeliverableV2 {
+  if (JSON.stringify(value).length > 75_000) throw new TypeError("$geoArticleExample exceeds the retained size bound.");
+  const row = object(value, "$geoArticleExample");
+  exact(row.version, GEO_ARTICLE_DELIVERABLE_VERSION, "$geoArticleExample.version");
+  const primaryQuestionId = v2Text(row.primaryQuestionId, "$geoArticleExample.primaryQuestionId", 500);
+  if (!authority.questionIds.length || primaryQuestionId !== authority.questionIds[0]) {
+    throw new TypeError("$geoArticleExample.primaryQuestionId must equal the primary buyer question.");
+  }
+  const knownRefs = new Set(authority.evidenceRefs);
+  const kind = row.kind;
+  if (kind === "article") {
+    if ("outline" in row || "fallbackReason" in row) throw new TypeError("$geoArticleExample article must not contain outline fallback fields.");
+    const articleRow = object(row.article, "$geoArticleExample.article");
+    const title = v2Text(articleRow.title, "$geoArticleExample.article.title", 300);
+    const introduction = parseEvidenceText(articleRow.introduction, "$geoArticleExample.article.introduction", knownRefs);
+    const sections = array(articleRow.sections, "$geoArticleExample.article.sections");
+    if (sections.length < 3 || sections.length > 5) throw new TypeError("$geoArticleExample.article.sections must contain 3-5 sections.");
+    const parsedSections = sections.map((item, index) => {
+      const section = object(item, `$geoArticleExample.article.sections[${index}]`);
+      const paragraphs = array(section.paragraphs, `$geoArticleExample.article.sections[${index}].paragraphs`).map((paragraph, paragraphIndex) =>
+        parseEvidenceText(paragraph, `$geoArticleExample.article.sections[${index}].paragraphs[${paragraphIndex}]`, knownRefs));
+      if (paragraphs.length === 0 || paragraphs.length > 6) throw new TypeError(`$geoArticleExample.article.sections[${index}].paragraphs must contain 1-6 items.`);
+      return {
+        id: v2Text(section.id, `$geoArticleExample.article.sections[${index}].id`, 80),
+        heading: v2Text(section.heading, `$geoArticleExample.article.sections[${index}].heading`, 300),
+        paragraphs
+      };
+    });
+    const sectionIds = new Set(parsedSections.map(({ id }) => id));
+    if (sectionIds.size !== parsedSections.length) throw new TypeError("$geoArticleExample.article.sections contains duplicate IDs.");
+    const faq = array(articleRow.faq, "$geoArticleExample.article.faq").map((item, index) => {
+      const entry = object(item, `$geoArticleExample.article.faq[${index}]`);
+      return {
+        question: v2Text(entry.question, `$geoArticleExample.article.faq[${index}].question`, 500),
+        answer: parseEvidenceText(entry.answer, `$geoArticleExample.article.faq[${index}].answer`, knownRefs)
+      };
+    });
+    if (faq.length < 2 || faq.length > 3) throw new TypeError("$geoArticleExample.article.faq must contain 2-3 items.");
+    assertUniqueCustomerProse([introduction.text, ...parsedSections.flatMap(({ paragraphs }) => paragraphs.map(({ text }) => text)), ...faq.map(({ answer }) => answer.text)]);
+    const explanation = parseExplanation(row.explanation, ["title", "introduction", ...parsedSections.map(({ id }) => `section:${id}`), "faq"], knownRefs);
+    const result: GeoArticleDeliverableV2 = {
+      version: GEO_ARTICLE_DELIVERABLE_VERSION,
+      kind: "article",
+      primaryQuestionId,
+      article: { title, introduction, sections: parsedSections, faq },
+      explanation
+    };
+    assertV2Language(result, authority.locale);
+    return result;
+  }
+  if (kind === "outline") {
+    if ("article" in row) throw new TypeError("$geoArticleExample outline must not contain article fields.");
+    const outlineRow = object(row.outline, "$geoArticleExample.outline");
+    const plannedSections = array(outlineRow.plannedSections, "$geoArticleExample.outline.plannedSections").map((item, index) => {
+      const section = object(item, `$geoArticleExample.outline.plannedSections[${index}]`);
+      return {
+        id: v2Text(section.id, `$geoArticleExample.outline.plannedSections[${index}].id`, 80),
+        heading: v2Text(section.heading, `$geoArticleExample.outline.plannedSections[${index}].heading`, 300),
+        purpose: v2Text(section.purpose, `$geoArticleExample.outline.plannedSections[${index}].purpose`, 2_000),
+        evidenceRefs: parseEvidenceRefs(section.evidenceRefs, `$geoArticleExample.outline.plannedSections[${index}].evidenceRefs`, knownRefs)
+      };
+    });
+    if (plannedSections.length < 3 || plannedSections.length > 5) throw new TypeError("$geoArticleExample.outline.plannedSections must contain 3-5 items.");
+    if (new Set(plannedSections.map(({ id }) => id)).size !== plannedSections.length) throw new TypeError("$geoArticleExample.outline.plannedSections contains duplicate IDs.");
+    const fallbackReason = row.fallbackReason;
+    if (!(["provider_error", "timeout", "invalid_output", "contract_rejected", "quality_rejected"] as unknown[]).includes(fallbackReason)) {
+      throw new TypeError("$geoArticleExample.fallbackReason is invalid.");
+    }
+    const outline = {
+      workingTitle: v2Text(outlineRow.workingTitle, "$geoArticleExample.outline.workingTitle", 300),
+      readerQuestion: v2Text(outlineRow.readerQuestion, "$geoArticleExample.outline.readerQuestion", 1_000),
+      directAnswer: v2Text(outlineRow.directAnswer, "$geoArticleExample.outline.directAnswer", 3_000),
+      plannedSections,
+      evidenceToAdd: v2TextArray(outlineRow.evidenceToAdd, "$geoArticleExample.outline.evidenceToAdd", 8, 1_000, 1),
+      faqAngles: v2TextArray(outlineRow.faqAngles, "$geoArticleExample.outline.faqAngles", 3, 1_000, 2)
+    };
+    const explanation = parseExplanation(row.explanation, ["title", "introduction", ...plannedSections.map(({ id }) => `section:${id}`), "faq"], knownRefs);
+    const result: GeoArticleDeliverableV2 = {
+      version: GEO_ARTICLE_DELIVERABLE_VERSION,
+      kind: "outline",
+      primaryQuestionId,
+      outline,
+      explanation,
+      fallbackReason: fallbackReason as GeoArticleFallbackReason
+    };
+    assertV2Language(result, authority.locale);
+    return result;
+  }
+  throw new TypeError("$geoArticleExample.kind must equal article or outline.");
 }
 
 export function assertPaidV3DirectAnswerCardBindings(input: {
@@ -329,6 +475,64 @@ function articleText(value: unknown, path: string, maxLength: number): string {
   if (/<\/?[a-z][^>]*>/iu.test(result)) throw new TypeError(`${path} must not contain raw HTML.`);
   if (/^(?:#{1,6}\s|```)|\*\*|__|\[[^\]]+\]\([^\s)]+\)/mu.test(result)) throw new TypeError(`${path} must contain structured plain text, not Markdown.`);
   return result;
+}
+function v2Text(value: unknown, path: string, maxLength: number): string {
+  const result = articleText(value, path, maxLength);
+  if (/来源\s*\d+/iu.test(result)) throw new TypeError(`${path} must not contain provider source ordinals.`);
+  if (/(?:source|question|finding|technical):[\p{L}\p{N}_-]+/iu.test(result)) throw new TypeError(`${path} must not expose internal evidence handles.`);
+  return result;
+}
+function v2TextArray(value: unknown, path: string, maxItems: number, maxLength: number, minItems = 0): string[] {
+  const result = array(value, path).map((item, index) => v2Text(item, `${path}[${index}]`, maxLength));
+  if (result.length < minItems || result.length > maxItems || new Set(result.map(normalize)).size !== result.length) {
+    throw new TypeError(`${path} exceeds its item bound or contains duplicates.`);
+  }
+  return result;
+}
+function parseEvidenceRefs(value: unknown, path: string, knownRefs: ReadonlySet<string>): string[] {
+  const result = uniqueArticleTextArray(value, path, 8, 500);
+  if (result.length === 0 || result.some((ref) => !knownRefs.has(ref))) throw new TypeError(`${path} must bind known evidence.`);
+  return result;
+}
+function parseEvidenceText(value: unknown, path: string, knownRefs: ReadonlySet<string>): GeoArticleEvidenceTextV2 {
+  const row = object(value, path);
+  return {
+    text: v2Text(row.text, `${path}.text`, 4_000),
+    evidenceRefs: parseEvidenceRefs(row.evidenceRefs, `${path}.evidenceRefs`, knownRefs)
+  };
+}
+function parseExplanation(value: unknown, requiredElementIds: readonly string[], knownRefs: ReadonlySet<string>): GeoArticleExplanationV2[] {
+  const result = array(value, "$geoArticleExample.explanation").map((item, index) => {
+    const row = object(item, `$geoArticleExample.explanation[${index}]`);
+    return {
+      elementId: articleText(row.elementId, `$geoArticleExample.explanation[${index}].elementId`, 100),
+      heading: v2Text(row.heading, `$geoArticleExample.explanation[${index}].heading`, 300),
+      reason: v2Text(row.reason, `$geoArticleExample.explanation[${index}].reason`, 2_000),
+      geoFunction: v2Text(row.geoFunction, `$geoArticleExample.explanation[${index}].geoFunction`, 2_000),
+      evidenceRefs: parseEvidenceRefs(row.evidenceRefs, `$geoArticleExample.explanation[${index}].evidenceRefs`, knownRefs)
+    };
+  });
+  const ids = result.map(({ elementId }) => elementId);
+  if (ids.length !== requiredElementIds.length || new Set(ids).size !== ids.length || requiredElementIds.some((id) => !ids.includes(id))) {
+    throw new TypeError("$geoArticleExample.explanation must explain every required element exactly once.");
+  }
+  return result;
+}
+function assertUniqueCustomerProse(values: readonly string[]): void {
+  const normalized = values.map(normalize);
+  if (new Set(normalized).size !== normalized.length) throw new TypeError("$geoArticleExample contains duplicate customer prose.");
+}
+function assertV2Language(deliverable: GeoArticleDeliverableV2, locale: string): void {
+  if (!locale.toLowerCase().startsWith("zh")) return;
+  const content = deliverable.kind === "article"
+    ? [deliverable.article.title, deliverable.article.introduction.text,
+        ...deliverable.article.sections.flatMap(({ heading, paragraphs }) => [heading, ...paragraphs.map(({ text }) => text)]),
+        ...deliverable.article.faq.flatMap(({ question, answer }) => [question, answer.text])]
+    : [deliverable.outline.workingTitle, deliverable.outline.readerQuestion, deliverable.outline.directAnswer,
+        ...deliverable.outline.plannedSections.flatMap(({ heading, purpose }) => [heading, purpose]),
+        ...deliverable.outline.evidenceToAdd, ...deliverable.outline.faqAngles];
+  const prose = [...content, ...deliverable.explanation.flatMap(({ heading, reason, geoFunction }) => [heading, reason, geoFunction])].join("\n");
+  if ((prose.match(/[\p{Script=Han}]/gu)?.length ?? 0) < 24) throw new TypeError("$geoArticleExample must contain substantive Simplified Chinese prose.");
 }
 function uniqueArticleTextArray(value: unknown, path: string, maxItems: number, maxLength: number): string[] {
   const result = array(value, path).map((item, index) => articleText(item, `${path}[${index}]`, maxLength));

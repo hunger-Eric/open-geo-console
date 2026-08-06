@@ -310,6 +310,35 @@ function geoArticleFor(input: PrepareCombinedGeoReportV3Input): NonNullable<Prep
   };
 }
 
+function geoArticleV2For(input: PrepareCombinedGeoReportV3Input, kind: "article" | "outline"): NonNullable<PrepareCombinedGeoReportV3Input["geoArticleExample"]> {
+  const questionId=input.answerCards[0]!.questionId,questionRef=`question:${questionId}`;
+  const explanation=[
+    {elementId:"title",heading:"标题设计",reason:"围绕买家问题。",geoFunction:"锁定核心意图。",evidenceRefs:[questionRef]},
+    {elementId:"introduction",heading:"答案前置",reason:"先给出判断边界。",geoFunction:"方便提取直接回答。",evidenceRefs:[questionRef]},
+    {elementId:"section:scenario",heading:"业务场景",reason:"确认适用条件。",geoFunction:"建立语义上下文。",evidenceRefs:[questionRef]},
+    {elementId:"section:criteria",heading:"判断标准",reason:"形成比较维度。",geoFunction:"明确决策实体。",evidenceRefs:[questionRef]},
+    {elementId:"section:verification",heading:"证据核验",reason:"标记证据边界。",geoFunction:"提高可验证性。",evidenceRefs:[questionRef]},
+    {elementId:"faq",heading:"相关问题",reason:"补充相邻意图。",geoFunction:"扩展相关问法。",evidenceRefs:[questionRef]}
+  ];
+  if(kind==="article")return {version:"geo_article_deliverable_v2",kind,primaryQuestionId:questionId,article:{
+    title:"企业选择服务时应核对哪些能力",introduction:{text:"先确认服务边界，再核对公开证据。",evidenceRefs:[questionRef]},
+    sections:[
+      {id:"scenario",heading:"先确认业务场景",paragraphs:[{text:"明确实际流程与适用条件。",evidenceRefs:[questionRef]}]},
+      {id:"criteria",heading:"再比较判断标准",paragraphs:[{text:"比较服务范围和异常处理。",evidenceRefs:[questionRef]}]},
+      {id:"verification",heading:"最后核对公开材料",paragraphs:[{text:"让重要结论能够被公开复核。",evidenceRefs:[questionRef]}]}
+    ],faq:[
+      {question:"采购前核对什么？",answer:{text:"核对范围、限制和公开证据。",evidenceRefs:[questionRef]}},
+      {question:"异常如何处理？",answer:{text:"确认人工复核与升级路径。",evidenceRefs:[questionRef]}}
+    ]},explanation};
+  return {version:"geo_article_deliverable_v2",kind,primaryQuestionId:questionId,fallbackReason:"provider_error",outline:{
+    workingTitle:"企业选择服务时应核对哪些能力",readerQuestion:"如何选择适合的服务？",directAnswer:"当前只能形成初步判断。",
+    plannedSections:[
+      {id:"scenario",heading:"先确认业务场景",purpose:"明确流程与适用条件。",evidenceRefs:[questionRef]},
+      {id:"criteria",heading:"再比较判断标准",purpose:"比较范围和异常处理。",evidenceRefs:[questionRef]},
+      {id:"verification",heading:"最后核对公开材料",purpose:"连接可访问的证据。",evidenceRefs:[questionRef]}
+    ],evidenceToAdd:["补充公开案例。"],faqAngles:["采购前核对什么？","异常如何处理？"]},explanation};
+}
+
 describe("combined artifact canonical rendering",()=>{
   it("wraps the exact shared HTML component used by the report route and PDF readiness",()=>{
     const model=combinedArtifactFixture();
@@ -397,7 +426,7 @@ describe("combined artifact canonical rendering",()=>{
     expect(omitted).not.toHaveProperty("geoArticleExample");
   });
 
-  it("retains and renders the optional GEO article while historical V3 remains compatible", () => {
+  it("retains and renders a historical V1 GEO deliverable", () => {
     const input = v3PreparationInput();
     input.geoArticleExample = geoArticleFor(input);
     const report = prepareCombinedGeoReportV3(input);
@@ -406,6 +435,18 @@ describe("combined artifact canonical rendering",()=>{
     const html = renderCanonicalCombinedArtifactHtml(model);
     expect(html).toContain('data-geo-article-generation-mode="deterministic_fallback"');
     expect(() => assertCombinedV3HtmlCompleteness(report, html)).not.toThrow();
+  });
+
+  it.each(["article","outline"] as const)("retains and checks every visible V2 %s string",(kind)=>{
+    const input=v3PreparationInput();
+    input.geoArticleExample=geoArticleV2For(input,kind);
+    const report=prepareCombinedGeoReportV3(input);
+    const model={...combinedV3ArtifactFixture(),locale:"zh" as const,combinedReport:report};
+    const html=renderCanonicalCombinedArtifactHtml(model);
+    expect(report.geoArticleExample).toEqual(input.geoArticleExample);
+    expect(html).toContain(`data-geo-article-kind="${kind}"`);
+    expect(()=>assertCombinedV3HtmlCompleteness(report,html)).not.toThrow();
+    expect(()=>assertCombinedV3HtmlCompleteness(report,html.replace(kind==="article"?"明确实际流程与适用条件。":"补充公开案例。",""))).toThrow(/completeness/);
   });
 
   it("assembles a pure V3 semantic draft without legacy diagnosis parsing or artifact side effects", () => {

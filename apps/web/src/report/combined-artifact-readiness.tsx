@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GeoArticleExampleV1, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type PaidV3DirectSemantics, type PaidV3SemanticAnswerCardDraft, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GeoArticleDeliverable, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type PaidV3DirectSemantics, type PaidV3SemanticAnswerCardDraft, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -327,7 +327,7 @@ export interface PrepareCombinedGeoReportV3Input {
   publicSourceForensics: RecommendationForensicReportV2;
   providerDiscovery: ProviderDiscoveryV1;
   directSemantics?: PaidV3DirectSemantics;
-  geoArticleExample?: GeoArticleExampleV1;
+  geoArticleExample?: GeoArticleDeliverable;
   languageValidationScope?: CombinedReportLanguageScope;
 }
 
@@ -554,13 +554,7 @@ export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, ht
       ...report.sourceSelectionDiagnosis.targetActions.flatMap(({ title, rationale }) => [title, rationale]),
       ...report.sourceSelectionDiagnosis.limitations.map(({ message }) => message)
     ] : []),
-    ...(report.geoArticleExample ? [
-      report.geoArticleExample.title,
-      report.geoArticleExample.introduction,
-      ...report.geoArticleExample.sections.flatMap(({ heading, paragraphs }) => [heading, ...paragraphs]),
-      ...report.geoArticleExample.faq.flatMap(({ question, answer }) => [question, answer]),
-      ...report.geoArticleExample.rationale.flatMap(({ reason, evidenceRefs }) => [reason, ...evidenceRefs])
-    ] : []),
+    ...(report.geoArticleExample ? geoArticleVisibleText(report.geoArticleExample) : []),
     ...report.technicalFoundation.technicalReport.findings.flatMap(({ title, description, recommendation }) => [title, description, recommendation]),
     ...report.technicalFoundation.technicalReport.pages.flatMap(({ url, title, canonical, metaDescription, h1 }) => [url, title ?? "", canonical ?? "", metaDescription ?? "", ...h1]),
     ...report.technicalFoundation.aiReport.findings.flatMap(({ title, impact, recommendation }) => [title, impact, recommendation])
@@ -609,6 +603,37 @@ export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, ht
       }
     }
   }
+}
+
+function geoArticleVisibleText(deliverable: GeoArticleDeliverable): string[] {
+  if (deliverable.version === "geo_article_example_v1") return [
+    deliverable.title,
+    deliverable.introduction,
+    ...deliverable.sections.flatMap(({ heading, paragraphs }) => [heading, ...paragraphs]),
+    ...deliverable.faq.flatMap(({ question, answer }) => [question, answer]),
+    ...deliverable.rationale.map(({ reason }) => reason)
+  ].map(normalizeLegacyGeoArticleText);
+  const explanation = deliverable.explanation.flatMap(({ heading, reason, geoFunction }) => [heading, reason, geoFunction]);
+  if (deliverable.kind === "article") return [
+    deliverable.article.title,
+    deliverable.article.introduction.text,
+    ...deliverable.article.sections.flatMap(({ heading, paragraphs }) => [heading, ...paragraphs.map(({ text }) => text)]),
+    ...deliverable.article.faq.flatMap(({ question, answer }) => [question, answer.text]),
+    ...explanation
+  ];
+  return [
+    deliverable.outline.workingTitle,
+    deliverable.outline.readerQuestion,
+    deliverable.outline.directAnswer,
+    ...deliverable.outline.plannedSections.flatMap(({ heading, purpose }) => [heading, purpose]),
+    ...deliverable.outline.evidenceToAdd,
+    ...deliverable.outline.faqAngles,
+    ...explanation
+  ];
+}
+
+function normalizeLegacyGeoArticleText(value: string): string {
+  return value.replace(/(?:来源|source)\s*([0-9]+)/giu, (_match, ordinal: string) => `[${Number(ordinal) + 1}]`);
 }
 
 function renderedHtmlIndexOf(html: string, value: string, fromIndex = 0): number {

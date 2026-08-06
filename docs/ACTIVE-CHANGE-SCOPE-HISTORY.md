@@ -6738,3 +6738,104 @@ revised scope.
   but candidate identity and user-visible Preview acceptance remain unverified.**
   A new explicit scope is required for any bounded metadata recovery or
   browser QA.
+
+---
+
+## 2026-08-06 - Preview metadata recovery stopped at REST target semantics
+
+- Authorized action: exactly one authenticated read-only Vercel deployment
+  GET for `dpl_AHXiNtFmkmSfeLyLKcakBt2v3JS3`, followed by browser QA only if
+  every recorded identity assertion passed.
+- The single GET succeeded and returned the exact deployment URL, project
+  `prj_WVpdlJfsEp0YyWM2W54w8oBy985S`, team/owner
+  `team_PbYYV2K2zBjTeThfavXStTOI`, and `READY` state.
+- `meta.ogcGitSha` and `meta.githubCommitSha` both exactly matched candidate
+  `258db0b886d0cd68dc6e7908cc94380c878b1595`.
+- The REST response returned `target: null`, not the scope's required literal
+  `target: preview`. The fail-closed stop condition therefore applied before
+  any browser action.
+- No second API call, deployment, alias movement, production/fixed-Staging
+  mutation, browser QA, form input, scan/report, model/provider call, Worker,
+  Docker, database/data, payment, refund, email, environment, or Git action
+  occurred.
+- Terminal result: **candidate SHA identity is independently recovered and
+  matches exactly; Preview target classification and user-visible QA remain
+  unaccepted under the literal scope assertion.**
+
+---
+
+## 2026-08-06 - Combined-identity Preview QA stopped during mobile evidence
+
+- The user approved combining the exact REST candidate identity
+  (`ogcGitSha` and `githubCommitSha` both
+  `258db0b886d0cd68dc6e7908cc94380c878b1595`, deployment `READY`) with the
+  existing CLI classification of the same deployment as target `preview`.
+- Unique Preview under test:
+  `https://open-geo-console-kjq3ptext-itheheda-6857s-projects.vercel.app`.
+- Desktop Chinese and English rendered the application rather than an auth or
+  error page. Both locales showed the expected localized H1, provider nav and
+  in-page relationship links to `https://me.itheheda.online`, relationship
+  copy, three usage steps, two public-input/result boundaries, and the original
+  scanner input/generate button.
+- English desktop measured `scrollWidth=1265` and `clientWidth=1265`, with zero
+  console errors. The Chinese desktop screenshot was visually inspected with
+  no viewport clipping, overlap, or readability defect.
+- Browser transport repeatedly timed out while collecting Chinese-mobile DOM
+  and width evidence. The read was terminated without retry. Mobile checks,
+  the mobile screenshot, Chinese desktop width/console capture, and therefore
+  full Preview acceptance remain incomplete.
+- A browser-runtime reset briefly created a duplicate temporary QA tab; it was
+  immediately closed, the retained temporary tab was finalized as the last
+  browser action, and no user-owned tab or external/product state was changed.
+- No form entry/submission, external-link click, API/CLI/Vercel call,
+  deployment, alias/production/fixed-Staging mutation, scan/report,
+  model/provider call, Worker/Docker action, database/data operation, payment,
+  refund, email, environment change, or Git action occurred.
+- Terminal result: **candidate identity and desktop surface are supported by
+  evidence; mobile and full Preview acceptance are not established.**
+
+---
+
+## 2026-08-06 - Reader-first GEO article deliverable completed locally
+
+- User-approved outcome: terminate Preview QA writing and restore the GEO
+  article task with budgets of 800 production, 520 test, and 900 document
+  changed lines; allow at most two disposable PostgreSQL runs and one local
+  fixture browser acceptance while keeping every external and Git action
+  forbidden.
+- Added the versioned `geo_article_deliverable_v2` contract. A successful
+  result is one buyer-facing article for canonical Q1 with 3-5 sections and
+  2-3 FAQs; model failure or contract/quality rejection is a typed outline.
+  The article or outline is always separate from the following GEO structure
+  explanation, and historical V1 reports remain readable without migration.
+- Preserved the existing single article-model call and zero retries. Added
+  deterministic checks for mixed branches, wrong primary question, invalid
+  evidence, repeated prose, provider ordinals, answer reuse, weak structure,
+  and explanation coverage.
+- The report now labels valid output `可发布文章示例` and fallback output
+  `GEO 内容提纲`, explicitly says the outline is not a sample article, resolves
+  structured evidence to customer-visible ordinals/titles/links, and does not
+  expose internal handles or `来源0`. Historical V1 model output is presented
+  as an article; historical deterministic output is presented as an outline.
+- Final focused Vitest run: 4 files, 55 tests passed, 0 failed. Repository lint
+  passed with 0 errors and 6 warnings in untouched files. The full workspace
+  build passed, including Next.js compilation and TypeScript checking.
+- Disposable PostgreSQL run `pg-20260806032634-ba1a54a3` passed on its first
+  invocation: 1 selected file, 1 passed, 0 failed, 0 skipped. Receipt:
+  `.data/test-runs/postgres-disposable/pg-20260806032634-ba1a54a3/receipt.json`.
+  The second authorized invocation was not used.
+- The single local fixture browser acceptance passed for article and outline at
+  1440px and 390px. Both kept content before the explanation, exposed known
+  source links without clicking them, had no internal handles, `来源0`, or
+  horizontal overflow, and made no external request. The temporary loopback
+  server and browser were closed.
+- Final production and test changed-line totals were 610/800 and 370/520;
+  documentation remained below 900. `git diff --check` passed and every dirty
+  path remained in the approved allowlist, including the preserved Preview
+  receipts and the GEO design/plan.
+- No real model/search/crawl/report run, business-data mutation, Docker build
+  or pull, deployment, Preview continuation, external write, or Git action was
+  performed. Real-model content quality and deployed behavior remain
+  intentionally unverified.
+- Terminal result: **implementation and authorized local verification are
+  complete; external, deployed, and real-model acceptance were not performed.**

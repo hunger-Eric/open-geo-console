@@ -228,7 +228,9 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
       aiReport: synthesis.report, technicalReport: technicalReport(targetUrl)
     });
     expect(articleCompleteJson).toHaveBeenCalledOnce();
-    expect(geoArticleExample.generationMode).toBe("deterministic_fallback");
+    expect(geoArticleExample.kind).toBe("outline");
+    if(geoArticleExample.kind!=="outline")throw new TypeError("Expected deterministic GEO outline fixture.");
+    expect(geoArticleExample.fallbackReason).toBe("provider_error");
 
     const visualReport = { ...synthesis.report, findings: Array.from({ length: 11 }, (_, index) => ({
       id: `visual-${index}`, title: `Finding ${index}`, severity: "opportunity" as const,
@@ -270,7 +272,10 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
       technicalReport: report.technicalFoundation.technicalReport, combinedReport: report
     } as never);
     expect(html).toContain('data-geo-article-generation-mode="deterministic_fallback"');
-    expect(html).toContain(geoArticleExample.title);
+    expect(html).toContain('data-geo-article-kind="outline"');
+    expect(html).toContain("GEO 内容提纲");
+    expect(html).toContain(geoArticleExample.outline.workingTitle);
+    expect(html).not.toContain("来源0");
     await getSqlClient()`UPDATE scan_jobs SET checkpoint=${JSON.stringify({
       freeDirectSemanticsVersion: "free-v4-direct-semantics-v1",
       answerFirstV3: { identityHash: answerResult.checkpoint.identityHash }

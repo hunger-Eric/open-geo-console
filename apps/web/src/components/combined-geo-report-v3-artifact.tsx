@@ -12,6 +12,7 @@ import type { CombinedPrivateReportArtifactModelV3 } from "@/report/artifact-mod
 import { SourceSelectionDiagnosisSection } from "./source-selection-diagnosis-section";
 
 type PaidAnswerCard=CombinedPrivateReportArtifactModelV3["combinedReport"]["answerCards"][number];
+type PaidReport=CombinedPrivateReportArtifactModelV3["combinedReport"];
 type EvidenceSummary={verified:number;searchOnly:number;inaccessible:number;total:number};
 
 const DECISION_COPY={
@@ -51,7 +52,7 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
           <a href="#artifact-sec-absence"><span>04</span>{copy.absenceReasons}</a>
           <a href="#artifact-sec-technical"><span>05</span>{copy.technical}</a>
           <a href="#artifact-sec-actions"><span>06</span>{copy.actions}</a>
-          {report.geoArticleExample ? <a href="#artifact-sec-article"><span>07</span>{copy.geoArticle}</a> : null}
+          {report.geoArticleExample ? <a href="#artifact-sec-article"><span>07</span>{geoArticleHeading(report.geoArticleExample,model.locale)}</a> : null}
           <a href="#artifact-sec-appendix"><span>08</span>{copy.appendix}</a>
         </nav>
         <dl className="rail-metadata"><Meta label={copy.target}>{report.targetUrl}</Meta><Meta label={copy.generated}>{formatTimestamp(report.generatedAt,model.locale)}</Meta><Meta label={copy.revision}><span title={report.artifactRevisionId}>{shortRevisionId(report.artifactRevisionId)}</span></Meta></dl>
@@ -135,13 +136,13 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
         <div className="technical-roadmap" data-roadmap-flow="true">{(["immediate","nextPhase","ongoing"] as const).map((phase,phaseIndex)=><details className="roadmap-phase" data-roadmap-phase={phase} open={phaseIndex===0} key={phase}><summary><span>{phaseIndex+1}</span><div><h4>{roadmapLabel(phase,zh)}</h4><small>{report.technicalFoundation.aiReport.roadmap[phase].length} {decisionCopy.actionCount}</small></div></summary><div className="roadmap-phase-body">{report.technicalFoundation.aiReport.roadmap[phase].map((item,index)=><article data-roadmap-action={`${phaseIndex+1}.${index+1}`} data-primary-action={phase==="immediate"&&index===0?"true":undefined} key={`${phase}-${index}`}><header><span>{phaseIndex+1}.{index+1}</span><h5>{item.title}</h5></header><div className="roadmap-analysis-chain"><section><h6>{decisionCopy.why}</h6><p>{item.rationale}</p></section><section><h6>{decisionCopy.how}</h6><ol>{item.actions.map((action)=><li key={action}>{action}</li>)}</ol></section></div></article>)}</div></details>)}</div>
       </section>
       {report.geoArticleExample ? <div id="artifact-sec-article">
-        <GeoArticleSection article={report.geoArticleExample} locale={model.locale}/>
+        <GeoArticleSection deliverable={report.geoArticleExample} report={report} locale={model.locale}/>
       </div> : null}
       <section className="report-section methodology-appendix" id="artifact-sec-appendix" data-methodology-appendix="true">
       <p className="section-index">08</p><h2>{copy.appendix}</h2>
       <h3>{content.method}</h3><p>{content.methodSummary}</p>
       <dl className="provenance-grid"><Meta label={copy.searchSurface}>{report.engineProvenance.searchSurface}</Meta><Meta label={copy.searched}>{formatTimestamp(report.engineProvenance.searchedAt,model.locale)}</Meta><Meta label={copy.cutoff}>{formatTimestamp(report.engineProvenance.evidenceCutoffAt,model.locale)}</Meta><Meta label={copy.model}>{report.engineProvenance.synthesisModel}</Meta><Meta label={copy.queryPlan}>{report.engineProvenance.queryPlanVersion}</Meta><Meta label={copy.passage}>{report.engineProvenance.passageSelectorVersion}</Meta></dl>
-      {report.geoArticleExample?<dl className="article-generation-note"><Meta label={copy.generationMode}>{report.geoArticleExample.generationMode==="model"?copy.modelGenerated:copy.fallbackGenerated}</Meta></dl>:null}
+      {report.geoArticleExample?<dl className="article-generation-note"><Meta label={copy.generationMode}>{geoArticleGenerationLabel(report.geoArticleExample,model.locale)}</Meta></dl>:null}
       {report.sourceSelectionDiagnosis?<div className="source-method-notes"><p><strong>{content.sourceBoundary}</strong>{content.sourceBoundaryText}</p><p><strong>{content.nonCausal}</strong>{content.nonCausalText}</p>{report.sourceSelectionDiagnosis.limitations.length?<><h3>{content.sourceLimitations}</h3><ul>{report.sourceSelectionDiagnosis.limitations.map((item,index)=><li key={`${item.code}-${index}`}>{item.message}</li>)}</ul></>:null}</div>:null}
       <h3>{copy.coverage}</h3><ul>{report.methodology.limitations.map((item)=><li key={item}>{item}</li>)}</ul>
       <div className="answer-audit-list">{report.answerCards.map((card) => card.answerMode === "generative_search_v1"
@@ -209,17 +210,97 @@ function reportConclusion(report:CombinedPrivateReportArtifactModelV3["combinedR
   return {summary,priority};
 }
 
-function GeoArticleSection({article,locale}:{article:NonNullable<CombinedPrivateReportArtifactModelV3["combinedReport"]["geoArticleExample"]>;locale:"en"|"zh"}){
-  const copy=locale==="zh"?ZH:EN;
-  const content=locale==="zh"?ZH_CONTENT:EN_CONTENT;
-  return <section className="report-section geo-article-example" data-geo-article-generation-mode={article.generationMode}>
-    <p className="section-index">07</p><h2>{copy.geoArticle}</h2>
-    <article className="geo-article-body"><h3>{article.title}</h3><p className="geo-article-introduction">{article.introduction}</p>
-      {article.sections.map((section)=><section className="geo-article-section" key={section.id}><h4>{section.heading}</h4>{section.paragraphs.map((paragraph,index)=><p key={index}>{paragraph}</p>)}</section>)}
-      <section className="geo-article-faq"><h4>{copy.articleFaq}</h4>{article.faq.map((entry,index)=><article key={index}><h5>{entry.question}</h5><p>{entry.answer}</p></article>)}</section>
+function GeoArticleSection({deliverable,report,locale}:{deliverable:NonNullable<PaidReport["geoArticleExample"]>;report:PaidReport;locale:"en"|"zh"}){
+  const zh=locale==="zh";
+  const labels=zh?{
+    outlineNotice:"这是一份待补充证据后再成文的内容提纲，不是范文。",readerQuestion:"文章要回答的问题",directAnswer:"当前可支持的直接回答",plannedSections:"建议正文结构",evidenceToAdd:"成文前还需补充",faqAngles:"可延展的常见问题",explanation:"这份内容为什么这样组织",geoFunction:"GEO 作用",faq:"买家常见问题"
+  }:{
+    outlineNotice:"This is a content outline to complete after adding evidence; it is not a sample article.",readerQuestion:"Question the article must answer",directAnswer:"Direct answer supported now",plannedSections:"Recommended article structure",evidenceToAdd:"Evidence to add before drafting",faqAngles:"Related FAQ angles",explanation:"Why this content is structured this way",geoFunction:"GEO function",faq:"Buyer FAQ"
+  };
+  const mode=geoArticleGenerationMode(deliverable);
+  if(deliverable.version==="geo_article_example_v1"){
+    const isArticle=deliverable.generationMode==="model";
+    return <section className="report-section geo-article-example" data-geo-article-kind={isArticle?"article":"outline"} data-geo-article-generation-mode={mode}>
+      <p className="section-index">07</p><h2>{geoArticleHeading(deliverable,locale)}</h2>
+      {!isArticle?<p className="geo-outline-notice">{labels.outlineNotice}</p>:null}
+      <article className={isArticle?"geo-article-body":"geo-outline-body"}><h3>{displayLegacyGeoArticleText(deliverable.title)}</h3><p className="geo-article-introduction">{displayLegacyGeoArticleText(deliverable.introduction)}</p>
+        {deliverable.sections.map((section)=><section className="geo-article-section" key={section.id}><h4>{displayLegacyGeoArticleText(section.heading)}</h4>{section.paragraphs.map((paragraph,index)=><p key={index}>{displayLegacyGeoArticleText(paragraph)}</p>)}</section>)}
+        <section className="geo-article-faq"><h4>{labels.faq}</h4>{deliverable.faq.map((entry,index)=><article key={index}><h5>{displayLegacyGeoArticleText(entry.question)}</h5><p>{displayLegacyGeoArticleText(entry.answer)}</p></article>)}</section>
+      </article>
+      <ArticleExplanation entries={deliverable.rationale.map((entry)=>({elementId:entry.sectionId,heading:displayLegacyGeoArticleText(deliverable.sections.find(({id})=>id===entry.sectionId)?.heading??entry.sectionId),reason:displayLegacyGeoArticleText(entry.reason),geoFunction:zh?"帮助读者与 AI 理解本节在完整回答中的作用。":"Helps readers and AI understand this section's role in the complete answer.",evidenceRefs:entry.evidenceRefs}))} report={report} locale={locale} heading={labels.explanation}/>
+    </section>;
+  }
+  if(deliverable.kind==="outline")return <section className="report-section geo-article-example geo-article-outline" data-geo-article-kind="outline" data-geo-article-generation-mode={mode}>
+    <p className="section-index">07</p><h2>{geoArticleHeading(deliverable,locale)}</h2><p className="geo-outline-notice">{labels.outlineNotice}</p>
+    <article className="geo-outline-body"><h3>{deliverable.outline.workingTitle}</h3>
+      <dl className="geo-outline-summary"><Meta label={labels.readerQuestion}>{deliverable.outline.readerQuestion}</Meta><Meta label={labels.directAnswer}>{deliverable.outline.directAnswer}</Meta></dl>
+      <h4>{labels.plannedSections}</h4><ol className="geo-outline-sections">{deliverable.outline.plannedSections.map((section)=><li key={section.id}><h5>{section.heading}</h5><p>{section.purpose}</p><ArticleEvidenceRefs refs={section.evidenceRefs} report={report} locale={locale}/></li>)}</ol>
+      <div className="geo-outline-followup"><List label={labels.evidenceToAdd} items={deliverable.outline.evidenceToAdd}/><List label={labels.faqAngles} items={deliverable.outline.faqAngles}/></div>
     </article>
-    <aside className="article-writing-strategy" data-article-writing-strategy="true"><h3>{content.articleStrategy}</h3><ol>{article.rationale.map((entry)=><li key={entry.sectionId}><strong>{article.sections.find(({id})=>id===entry.sectionId)?.heading??entry.sectionId}</strong><p>{entry.reason}</p><small>{copy.evidenceRefs}：{entry.evidenceRefs.join(" · ")}</small></li>)}</ol></aside>
+    <ArticleExplanation entries={deliverable.explanation} report={report} locale={locale} heading={labels.explanation}/>
   </section>;
+  return <section className="report-section geo-article-example" data-geo-article-kind="article" data-geo-article-generation-mode={mode}>
+    <p className="section-index">07</p><h2>{geoArticleHeading(deliverable,locale)}</h2>
+    <article className="geo-article-body"><h3>{deliverable.article.title}</h3><div className="geo-article-introduction"><p>{deliverable.article.introduction.text}</p><ArticleEvidenceRefs refs={deliverable.article.introduction.evidenceRefs} report={report} locale={locale}/></div>
+      {deliverable.article.sections.map((section)=><section className="geo-article-section" key={section.id}><h4>{section.heading}</h4>{section.paragraphs.map((paragraph,index)=><div className="geo-article-paragraph" key={index}><p>{paragraph.text}</p><ArticleEvidenceRefs refs={paragraph.evidenceRefs} report={report} locale={locale}/></div>)}</section>)}
+      <section className="geo-article-faq"><h4>{labels.faq}</h4>{deliverable.article.faq.map((entry,index)=><article key={index}><h5>{entry.question}</h5><p>{entry.answer.text}</p><ArticleEvidenceRefs refs={entry.answer.evidenceRefs} report={report} locale={locale}/></article>)}</section>
+    </article>
+    <ArticleExplanation entries={deliverable.explanation} report={report} locale={locale} heading={labels.explanation}/>
+  </section>;
+}
+
+function ArticleExplanation({entries,report,locale,heading}:{entries:readonly {elementId:string;heading:string;reason:string;geoFunction:string;evidenceRefs:readonly string[]}[];report:PaidReport;locale:"en"|"zh";heading:string}){
+  const functionLabel=locale==="zh"?"GEO 作用":"GEO function";
+  return <aside className="article-writing-strategy" data-article-writing-strategy="true"><h3>{heading}</h3><ol>{entries.map((entry)=><li key={entry.elementId}><strong>{entry.heading}</strong><p>{entry.reason}</p><p className="geo-function"><b>{functionLabel}：</b>{entry.geoFunction}</p><ArticleEvidenceRefs refs={entry.evidenceRefs} report={report} locale={locale}/></li>)}</ol></aside>;
+}
+
+function ArticleEvidenceRefs({refs,report,locale}:{refs:readonly string[];report:PaidReport;locale:"en"|"zh"}){
+  const citations=refs.map((ref)=>resolveArticleEvidence(ref,report)).filter((item):item is {key:string;label:string;url?:string}=>Boolean(item));
+  if(!citations.length)return null;
+  return <small className="geo-article-citations"><span>{locale==="zh"?"依据":"Evidence"}：</span>{citations.map((citation,index)=><React.Fragment key={citation.key}>{index>0?" · ":null}{citation.url?<a href={citation.url}>{citation.label}</a>:citation.label}</React.Fragment>)}</small>;
+}
+
+function resolveArticleEvidence(ref:string,report:PaidReport):{key:string;label:string;url?:string}|null{
+  const separator=ref.indexOf(":");
+  const kind=separator<0?ref:ref.slice(0,separator),id=separator<0?"":ref.slice(separator+1);
+  if(!id)return null;
+  if(kind==="question"){
+    const index=report.answerCards.findIndex((card)=>card.questionId===id);
+    return index<0?null:{key:ref,label:`Q${index+1}`};
+  }
+  if(kind==="source")for(let cardIndex=0;cardIndex<report.answerCards.length;cardIndex+=1){
+    const card=report.answerCards[cardIndex]!;
+    const source=card.answerMode==="generative_search_v1"?card.sources.find((item)=>item.sourceId===id):card.sourceEvidence.find((item)=>item.evidenceId===id);
+    if(source){
+      const ordered=report.answerCards.flatMap((item)=>item.answerMode==="generative_search_v1"?item.sources.map((entry)=>entry.sourceId):item.sourceEvidence.map((entry)=>entry.evidenceId));
+      return {key:ref,label:`[${ordered.indexOf(id)+1}] ${source.title}`,url:source.canonicalUrl};
+    }
+  }
+  if(kind==="finding"){
+    const finding=report.technicalFoundation.aiReport.findings.find((item)=>item.id===id);
+    return finding?{key:ref,label:finding.title}:null;
+  }
+  if(kind==="technical"){
+    const finding=report.technicalFoundation.technicalReport.findings.find((item)=>item.id===id);
+    return finding?{key:ref,label:finding.title}:null;
+  }
+  return null;
+}
+
+function displayLegacyGeoArticleText(value:string):string{
+  return value.replace(/(?:来源|source)\s*([0-9]+)/giu,(_match,ordinal:string)=>`[${Number(ordinal)+1}]`);
+}
+
+function geoArticleGenerationMode(deliverable:NonNullable<PaidReport["geoArticleExample"]>):"model"|"deterministic_fallback"{
+  return deliverable.version==="geo_article_example_v1"?deliverable.generationMode:deliverable.kind==="article"?"model":"deterministic_fallback";
+}
+function geoArticleHeading(deliverable:NonNullable<PaidReport["geoArticleExample"]>,locale:"en"|"zh"):string{
+  const article=deliverable.version==="geo_article_example_v1"?deliverable.generationMode==="model":deliverable.kind==="article";
+  return locale==="zh"?(article?"可发布文章示例":"GEO 内容提纲"):(article?"Publishable article example":"GEO content outline");
+}
+function geoArticleGenerationLabel(deliverable:NonNullable<PaidReport["geoArticleExample"]>,locale:"en"|"zh"):string{
+  const mode=geoArticleGenerationMode(deliverable);
+  return locale==="zh"?(mode==="model"?"单次 AI 生成并通过文章契约与质量校验":"文章模型结果未采用；当前显示确定性内容提纲"):(mode==="model"?"Generated in one AI call and passed article contract and quality checks":"The model article was not used; a deterministic content outline is shown");
 }
 
 function LegacyCrossQuestionDiagnosis({report,locale}:{report:CombinedPrivateReportArtifactModelV3["combinedReport"];locale:"en"|"zh"}){

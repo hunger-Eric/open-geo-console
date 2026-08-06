@@ -1,8 +1,9 @@
 import {
-  GEO_ARTICLE_EXAMPLE_VERSION,
-  parseGeoArticleExampleV1,
+  GEO_ARTICLE_DELIVERABLE_VERSION,
+  parseGeoArticleDeliverable,
   type AiWebsiteReportV1,
-  type GeoArticleExampleV1,
+  type GeoArticleDeliverableV2,
+  type GeoArticleFallbackReason,
   type JsonCompletionClient,
   type OpenGeoAnswerCardV3
 } from "@open-geo-console/ai-report-engine";
@@ -21,12 +22,16 @@ export interface GeoArticleExampleInput {
   readonly timeoutMs?: number;
 }
 
-export async function generateGeoArticleExample(input: GeoArticleExampleInput): Promise<GeoArticleExampleV1> {
+export async function generateGeoArticleExample(input: GeoArticleExampleInput): Promise<GeoArticleDeliverableV2> {
   const authority = articleAuthority(input);
   const controller = new AbortController();
   const abort = () => controller.abort(input.signal?.reason);
   input.signal?.addEventListener("abort", abort, { once: true });
-  const timer = setTimeout(() => controller.abort(new Error("GEO article generation timed out.")), input.timeoutMs ?? 30_000);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new Error("GEO article generation timed out."));
+  }, input.timeoutMs ?? 30_000);
   try {
     const result = await input.client.completeJson({
       temperature: 0.2,
@@ -38,91 +43,114 @@ export async function generateGeoArticleExample(input: GeoArticleExampleInput): 
       ]
     });
     const value = objectOrEmpty(result.value);
-    return parseGeoArticleExampleV1({
+    assertModelArticleQuality(value, input);
+    const parsed = parseGeoArticleDeliverable({
       ...value,
-      version: GEO_ARTICLE_EXAMPLE_VERSION,
-      generationMode: "model"
+      version: GEO_ARTICLE_DELIVERABLE_VERSION,
+      kind: "article"
     }, authority);
-  } catch {
-    return buildGeoArticleFallback(input);
+    if (parsed.version !== GEO_ARTICLE_DELIVERABLE_VERSION) throw new TypeError("GEO article generator returned a legacy value.");
+    return parsed;
+  } catch (error) {
+    return buildGeoArticleFallback(input, classifyFallback(error, timedOut));
   } finally {
     clearTimeout(timer);
     input.signal?.removeEventListener("abort", abort);
   }
 }
 
-export function buildGeoArticleFallback(input: Omit<GeoArticleExampleInput, "client">): GeoArticleExampleV1 {
+export function buildGeoArticleFallback(
+  input: Omit<GeoArticleExampleInput, "client">,
+  fallbackReason: GeoArticleFallbackReason
+): GeoArticleDeliverableV2 {
   const zh = input.locale.toLowerCase().startsWith("zh");
   const authority = articleAuthority(input);
   const profile = input.aiReport.organizationProfile;
   const organization = bounded(safeText(profile.organizationName?.trim() || new URL(input.targetUrl).hostname), 120);
   const services = (profile.productsAndServices ?? []).slice(0, 4);
   const audiences = (profile.targetAudiences ?? []).slice(0, 3);
-  const regions = (profile.marketsAndRegions ?? []).slice(0, 3);
-  const questions = articleQuestions(input);
-  const questionRefs = questions.map(({ id }) => `question:${id}`);
-  const findingRef = authority.evidenceRefs.find((ref) => ref.startsWith("finding:")) ?? questionRefs[0]!;
-  const sections = zh ? [
+  const primary = articleQuestions(input)[0]!;
+  const questionRef = `question:${primary.id}`;
+  const findingRef = authority.evidenceRefs.find((ref) => ref.startsWith("finding:")) ?? questionRef;
+  const directAnswer = cleanProviderReferences(answerText(input.answerCards[0], zh
+    ? "现有公开信息只能支持初步判断；采购前仍需核对服务范围、适用条件和公开证据。"
+    : "The public information supports an initial assessment only; buyers should still verify scope, operating conditions, and public proof."));
+  const plannedSections = zh ? [
     {
-      id: "website-facts",
-      heading: "服务范围与适用对象",
-      paragraphs: [
-        safeText(`${organization}在官网公开的服务包括${services.length ? services.join("、") : "相关专业服务"}。${audiences.length ? `主要服务对象包括${audiences.join("、")}。` : "采购前需要确认具体适用对象。"}`),
-        safeText(regions.length ? `公开的市场或服务区域包括${regions.join("、")}，具体覆盖范围仍以对应服务页面和项目条件为准。` : "官网尚未清楚列出完整服务区域，采购前需要核对目的地、时效和限制条件。")
-      ]
+      id: "scenario",
+      heading: "先说明买家面对的业务场景",
+      purpose: safeText(`围绕“${primary.text}”说明需要解决的实际流程，而不是从${organization}的服务清单开始。`),
+      evidenceRefs: [questionRef]
     },
     {
-      id: "buyer-decision",
-      heading: "买家最关心的选择问题",
-      paragraphs: [safeText(answerText(input.answerCards[0], "现有公开信息表明，采购判断需要同时核对服务能力、适用条件和明确限制。"))]
+      id: "criteria",
+      heading: "再给出能够执行的判断标准",
+      purpose: safeText(`把选择条件拆成服务范围、适用对象、异常处理和交付边界。当前公开服务包括${services.length ? services.join("、") : "相关专业服务"}${audiences.length ? `，主要面向${audiences.join("、")}` : ""}。`),
+      evidenceRefs: [findingRef]
     },
     {
       id: "verification",
-      heading: "采购前需要核验的公开依据",
-      paragraphs: ["重要服务结论需要对应到可访问的服务页、流程、案例、资质或其他公开材料，并同时说明适用条件和限制。买家可以据此核对服务是否匹配实际需求。"]
+      heading: "最后连接公开证据与核验清单",
+      purpose: "逐项连接可访问的服务页、流程、案例或资质，并明确尚不能确认的条件。",
+      evidenceRefs: [questionRef]
     }
   ] : [
     {
-      id: "website-facts",
-      heading: "Service scope and intended buyers",
-      paragraphs: [
-        safeText(`${organization} describes ${services.length ? services.join(", ") : "its professional services"} on its website.${audiences.length ? ` The stated audiences include ${audiences.join(", ")}.` : " Buyers should confirm the exact audience and operating conditions."}`),
-        safeText(regions.length ? `The stated markets or service regions include ${regions.join(", ")}. Buyers should verify the exact coverage and constraints on the relevant service page.` : "The website does not clearly enumerate complete service regions, so buyers should verify destinations, timing, and constraints before purchase.")
-      ]
+      id: "scenario",
+      heading: "Start with the buyer's operating scenario",
+      purpose: safeText(`Frame the workflow behind “${primary.text}” instead of opening with ${organization}'s service catalogue.`),
+      evidenceRefs: [questionRef]
     },
     {
-      id: "buyer-decision",
-      heading: "The buyer's primary decision question",
-      paragraphs: [safeText(answerText(input.answerCards[0], "The public information supports a purchase decision only when capabilities, conditions, and limits are stated specifically."))]
+      id: "criteria",
+      heading: "Turn the decision into practical criteria",
+      purpose: safeText(`Compare scope, intended users, exception handling, and delivery boundaries. The current public profile describes ${services.length ? services.join(", ") : "professional services"}${audiences.length ? ` for ${audiences.join(", ")}` : ""}.`),
+      evidenceRefs: [findingRef]
     },
     {
       id: "verification",
-      heading: "Public proof to verify before purchase",
-      paragraphs: ["Important service claims need a corresponding service page, process, case study, credential, or other accessible proof, together with relevant conditions and limitations. Buyers can use those materials to verify whether the offer fits their needs."]
+      heading: "Connect public proof to a verification checklist",
+      purpose: "Bind each important claim to an accessible service page, process, case, or credential and state what remains unverified.",
+      evidenceRefs: [questionRef]
     }
   ];
-  const article = {
-    version: GEO_ARTICLE_EXAMPLE_VERSION,
-    generationMode: "deterministic_fallback" as const,
-    targetQuestionIds: questions.map(({ id }) => id),
-    title: zh ? `${organization}服务选择与采购核验指南` : `${organization} service selection and purchase verification guide`,
-    introduction: zh
-      ? `${organization}的公开信息可以帮助买家初步判断服务范围、适用对象和采购条件。以下内容汇总当前可核验事实，并列出采购前需要进一步确认的依据。`
-      : `${organization}'s public information helps buyers assess service scope, intended users, and purchase conditions. The following sections summarize the currently verifiable facts and the proof buyers should confirm before purchase.`,
-    sections,
-    faq: questions.map((question, index) => ({
-      question: safeText(question.text),
-      answer: safeText(answerText(input.answerCards[index]!, zh ? "现有公开信息不足以形成更具体的答案，采购前需要向服务方核实。" : "The available public information does not support a more specific answer; buyers should confirm it with the provider."))
-    })),
-    rationale: sections.map((section, index) => ({
-      sectionId: section.id,
-      reason: zh
-        ? ["先建立网站公开事实，避免正文脱离真实业务。", "直接回应买家问题，让内容承担明确的采购决策任务。", "连接证据和限制，避免只有宣传性结论。"][index]!
-        : ["Establish public website facts before making any recommendation.", "Answer the buyer question directly so the article has a clear retrieval and decision purpose.", "Explain evidence and limitations instead of relying on promotional claims."][index]!,
-      evidenceRefs: [index === 0 ? findingRef : questionRefs[Math.min(index - 1, questionRefs.length - 1)]!]
-    }))
+  const explanationEntries = zh ? [
+    buildExplanation("title", "标题设计", "标题围绕买家问题，而不是企业名称。", "明确文章的核心搜索意图。", questionRef),
+    buildExplanation("introduction", "答案前置", "先给出当前能够支持的采购判断。", "帮助读者和 AI 快速提取核心答案。", questionRef),
+    buildExplanation("section:scenario", "业务场景", "先让读者确认文章与自己的流程有关。", "建立问题的语义上下文。", questionRef),
+    buildExplanation("section:criteria", "判断标准", "把抽象选择转成可以比较的维度。", "形成清晰、可提取的决策实体。", findingRef),
+    buildExplanation("section:verification", "证据核验", "区分已确认事实和仍需补充的材料。", "提高结论的可验证性。", questionRef),
+    buildExplanation("faq", "相关问题", "FAQ 只覆盖相邻意图，不重复正文。", "扩展相关问法而不稀释主题。", questionRef)
+  ] : [
+    buildExplanation("title", "Title design", "The title centers the buyer problem rather than the organization.", "Clarifies the primary search intent.", questionRef),
+    buildExplanation("introduction", "Answer first", "The opening states the decision supported by current evidence.", "Makes the core answer easy to extract.", questionRef),
+    buildExplanation("section:scenario", "Operating scenario", "The first section helps readers identify their workflow.", "Builds semantic context.", questionRef),
+    buildExplanation("section:criteria", "Decision criteria", "The second section turns selection into comparable dimensions.", "Creates explicit decision entities.", findingRef),
+    buildExplanation("section:verification", "Evidence check", "The final section separates confirmed facts from missing proof.", "Improves verifiability.", questionRef),
+    buildExplanation("faq", "Related questions", "The FAQ covers adjacent intent without repeating the body.", "Extends relevant query coverage.", questionRef)
+  ];
+  const value = {
+    version: GEO_ARTICLE_DELIVERABLE_VERSION,
+    kind: "outline" as const,
+    primaryQuestionId: primary.id,
+    outline: {
+      workingTitle: zh ? "企业选择业务自动化方案时应核对哪些能力" : "What should buyers verify when choosing a workflow automation service?",
+      readerQuestion: safeText(primary.text),
+      directAnswer: safeText(directAnswer),
+      plannedSections,
+      evidenceToAdd: zh
+        ? ["补充可公开访问的服务流程、交付案例或适用限制。"]
+        : ["Add an accessible service process, delivery case, or operating limitation."],
+      faqAngles: zh
+        ? ["采购前应优先核对哪些公开材料？", "哪些异常情况需要保留人工复核？"]
+        : ["Which public materials should buyers verify first?", "Which exceptions still require human review?"]
+    },
+    explanation: explanationEntries,
+    fallbackReason
   };
-  return parseGeoArticleExampleV1(article, authority);
+  const parsed = parseGeoArticleDeliverable(value, authority);
+  if (parsed.version !== GEO_ARTICLE_DELIVERABLE_VERSION) throw new TypeError("GEO article fallback returned a legacy value.");
+  return parsed;
 }
 
 function articleAuthority(input: Omit<GeoArticleExampleInput, "client">): { locale: string; questionIds: string[]; evidenceRefs: string[] } {
@@ -144,9 +172,22 @@ function articleAuthority(input: Omit<GeoArticleExampleInput, "client">): { loca
 function compactArticleInput(input: GeoArticleExampleInput, evidenceRefs: readonly string[]): Record<string, unknown> {
   const profile = input.aiReport.organizationProfile;
   const questions = articleQuestions(input);
+  const primary = questions[0]!;
+  const primaryCard = input.answerCards[0];
   return {
-    task: "Produce one evidence-grounded, publish-ready GEO article plus a separate rationale for each section.",
-    constraints: ["Return JSON only.", "Use only supplied facts.", "Keep title, introduction, sections, and FAQ free of report, example, prompt, input, generation, or writing-process narration.", "Put writing reasons only in rationale.", "Do not promise rankings, recommendations, or future citations.", "Use only the supplied evidenceRefs."],
+    task: "Produce one evidence-grounded, publish-ready GEO article for the primary buyer question plus a separate explanation of its structure.",
+    constraints: [
+      "Return JSON only.",
+      "Use only supplied facts and the primary buyer question.",
+      "Write for a prospective buyer, not a GEO practitioner.",
+      "Use 3-5 progressive body sections and 2-3 non-duplicative FAQ entries.",
+      "Keep evidenceRefs structured and out of prose.",
+      "Keep article prose free of report, example, prompt, input, search, source ordinal, generation, or writing-process narration.",
+      "Put writing reasons only in explanation.",
+      "Do not copy a complete supplied answer into a paragraph or FAQ.",
+      "Do not promise rankings, recommendations, or future citations.",
+      "Use only the supplied evidenceRefs."
+    ],
     locale: input.locale,
     targetUrl: input.targetUrl,
     evidenceRefs,
@@ -157,22 +198,25 @@ function compactArticleInput(input: GeoArticleExampleInput, evidenceRefs: readon
       targetAudiences: (profile.targetAudiences ?? []).slice(0, 6),
       marketsAndRegions: (profile.marketsAndRegions ?? []).slice(0, 6)
     },
-    questions: questions.map((question, index) => ({
-      id: question.id,
-      text: question.text,
-      answer: bounded(answerText(input.answerCards[index]!, ""), 4_000),
-      sources: input.answerCards[index]!.answerMode === "generative_search_v1"
-        ? input.answerCards[index]!.sources.slice(0, 5).map(({ sourceId, title, citedText }) => ({ evidenceRef: `source:${sourceId}`, title, citedText: bounded(citedText ?? "", 1_200) }))
-        : input.answerCards[index]!.sourceEvidence.slice(0, 5).map(({ evidenceId, title, exactExcerpt }) => ({ evidenceRef: `source:${evidenceId}`, title, citedText: bounded(exactExcerpt, 1_200) }))
-    })),
+    primaryQuestion: {
+      id: primary.id,
+      text: primary.text,
+      answer: bounded(answerText(primaryCard, ""), 4_000),
+      sources: primaryCard.answerMode === "generative_search_v1"
+        ? primaryCard.sources.slice(0, 5).map(({ sourceId, title, citedText }) => ({ evidenceRef: `source:${sourceId}`, title, citedText: bounded(citedText ?? "", 1_200) }))
+        : primaryCard.sourceEvidence.slice(0, 5).map(({ evidenceId, title, exactExcerpt }) => ({ evidenceRef: `source:${evidenceId}`, title, citedText: bounded(exactExcerpt, 1_200) }))
+    },
+    adjacentQuestionTexts: questions.slice(1).map(({ text }) => text),
     findings: (input.aiReport.findings ?? []).slice(0, 8).map(({ id, title, impact, recommendation }) => ({ evidenceRef: `finding:${id}`, title, impact: bounded(impact, 1_500), recommendation: bounded(recommendation, 1_500) })),
     outputShape: {
-      targetQuestionIds: ["locked question ID"],
-      title: "string",
-      introduction: "string",
-      sections: [{ id: "stable-section-id", heading: "string", paragraphs: ["string"] }],
-      faq: [{ question: "string", answer: "string" }],
-      rationale: [{ sectionId: "stable-section-id", reason: "string", evidenceRefs: ["supplied evidenceRef"] }]
+      primaryQuestionId: primary.id,
+      article: {
+        title: "reader problem or decision scenario",
+        introduction: { text: "direct answer", evidenceRefs: ["supplied evidenceRef"] },
+        sections: [{ id: "stable-section-id", heading: "reader-facing heading", paragraphs: [{ text: "substantive prose", evidenceRefs: ["supplied evidenceRef"] }] }],
+        faq: [{ question: "adjacent intent", answer: { text: "distinct answer", evidenceRefs: ["supplied evidenceRef"] } }]
+      },
+      explanation: [{ elementId: "title | introduction | section:<id> | faq", heading: "label", reason: "business reason", geoFunction: "understanding or extraction role", evidenceRefs: ["supplied evidenceRef"] }]
     }
   };
 }
@@ -187,13 +231,66 @@ function articleQuestions(input: Omit<GeoArticleExampleInput, "client">): { id: 
 
 function articleSystemPrompt(locale: string): string {
   return locale.toLowerCase().startsWith("zh")
-    ? "你是GEO内容编辑。只输出JSON。title、introduction、sections和faq必须组成一篇客户审核后可直接发布的中文文章，直接陈述业务事实、买家答案和可核验依据，不得提到报告、示例、提示词、输入材料、生成过程或写作方法。rationale必须与文章正文分开，仅解释各节的证据依据和商业目的。不得补充输入之外的事实，不得承诺排名、推荐或未来引用。"
-    : "You are a GEO content editor. Return JSON only. title, introduction, sections, and faq must form a publish-ready customer article that directly states business facts, buyer answers, and verifiable proof without mentioning a report, example, prompt, supplied input, generation process, or writing method. Keep rationale separate from the article and use it only for each section's evidence basis and business purpose. Do not add facts or promise ranking, recommendation, or future citation outcomes.";
+    ? "你是面向企业买家的内容编辑。只输出JSON。只围绕primaryQuestion写一篇客户审核后可直接发布的中文文章：先回答买家问题，再用3至5个递进小节提供业务场景、判断标准、公开证据边界和执行清单，并用2至3个不重复的FAQ补充相邻意图。不得把企业服务清单、完整搜索答案或来源编号拼成正文。证据引用只能放在evidenceRefs，不得写入正文。explanation必须与article分开，按标题、导语、每个小节和FAQ解释商业目的与GEO作用。不得补充输入之外的事实，不得提及报告、示例、提示词、输入、搜索或生成过程，不得承诺排名、推荐或未来引用。"
+    : "You are a buyer-facing content editor. Return JSON only. Write one customer-reviewable, publish-ready article for primaryQuestion: answer the buyer first, then use 3-5 progressive sections for the operating scenario, decision criteria, public-evidence boundary, and action checklist, followed by 2-3 non-duplicative FAQ items. Do not assemble a service catalogue, complete search answer, or provider source ordinals into the body. Keep citations only in evidenceRefs. Keep explanation separate and cover the title, introduction, every section, and FAQ with its business purpose and GEO function. Do not add facts, mention a report/example/prompt/input/search/generation process, or promise ranking, recommendation, or future citation outcomes.";
 }
 
+function assertModelArticleQuality(value: Record<string, unknown>, input: GeoArticleExampleInput): void {
+  const article = objectOrEmpty(value.article);
+  const title = typeof article.title === "string" ? article.title.trim() : "";
+  const profileName = input.aiReport.organizationProfile.organizationName?.trim() || new URL(input.targetUrl).hostname;
+  if (normalize(title).includes(normalize(profileName)) && /(?:service\s+selection|purchase\s+verification|服务选择|采购核验).*(?:guide|指南)?/iu.test(title)) {
+    throw new GeoArticleQualityError("generic_target_title");
+  }
+  const prose = modelCustomerProse(article);
+  if (prose.some((text) => /(?:来源|source)\s*\d+/iu.test(text))) throw new GeoArticleQualityError("provider_ordinal");
+  const normalized = prose.map(normalize).filter(Boolean);
+  if (new Set(normalized).size !== normalized.length) throw new GeoArticleQualityError("duplicate_prose");
+  const completeAnswers = input.answerCards.map((card) => normalize(answerText(card, ""))).filter(Boolean);
+  if (normalized.some((text) => completeAnswers.includes(text))) throw new GeoArticleQualityError("complete_answer_reuse");
+}
+
+function modelCustomerProse(article: Record<string, unknown>): string[] {
+  const values: string[] = [];
+  if (typeof article.title === "string") values.push(article.title);
+  const introduction = objectOrEmpty(article.introduction);
+  if (typeof introduction.text === "string") values.push(introduction.text);
+  if (Array.isArray(article.sections)) for (const sectionValue of article.sections) {
+    const section = objectOrEmpty(sectionValue);
+    if (Array.isArray(section.paragraphs)) for (const paragraphValue of section.paragraphs) {
+      const paragraph = objectOrEmpty(paragraphValue);
+      if (typeof paragraph.text === "string") values.push(paragraph.text);
+    }
+  }
+  if (Array.isArray(article.faq)) for (const faqValue of article.faq) {
+    const faq = objectOrEmpty(faqValue);
+    const answer = objectOrEmpty(faq.answer);
+    if (typeof answer.text === "string") values.push(answer.text);
+  }
+  return values;
+}
+
+function classifyFallback(error: unknown, timedOut: boolean): GeoArticleFallbackReason {
+  if (timedOut) return "timeout";
+  if (error instanceof GeoArticleQualityError) return "quality_rejected";
+  if (error instanceof SyntaxError) return "invalid_output";
+  if (error instanceof TypeError) return "contract_rejected";
+  return "provider_error";
+}
+
+class GeoArticleQualityError extends Error {}
+
+function buildExplanation(elementId: string, heading: string, reason: string, geoFunction: string, evidenceRef: string) {
+  return { elementId, heading, reason, geoFunction, evidenceRefs: [evidenceRef] };
+}
 function answerText(card: OpenGeoAnswerCardV3, fallback: string): string {
   if (card.answerMode === "generative_search_v1") return card.refusal?.reason || card.answerText || fallback;
   return card.sentences.filter(({ kind }) => kind !== "scope_note").map(({ text }) => text).join(" ") || fallback;
+}
+function cleanProviderReferences(value: string): string {
+  return safeText(value
+    .replace(/来源\s*\d+(?:\s*[、,，]\s*\d+)*/gu, "")
+    .replace(/source\s*\d+(?:\s*[,，]\s*\d+)*/giu, ""));
 }
 function safeText(value: string): string {
   return bounded(value
@@ -201,5 +298,6 @@ function safeText(value: string): string {
     .replace(/\[([^\]]+)\]\([^\s)]+\)/gu, "$1")
     .replace(/[*_`#]/gu, ""), 4_000) || "—";
 }
+function normalize(value: string): string { return value.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
 function bounded(value: string, max: number): string { return value.trim().slice(0, max); }
 function objectOrEmpty(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }

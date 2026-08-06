@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   COMBINED_GEO_REPORT_V3_CONTRACT,
   COMBINED_GEO_REPORT_V3_VERSION,
+  GEO_ARTICLE_DELIVERABLE_VERSION,
   GEO_ARTICLE_EXAMPLE_VERSION,
   hashCombinedGeoReportV3ReceiptExcludedProjection,
   parseCombinedGeoReportV3,
+  parseGeoArticleDeliverable,
   parseGeoArticleExampleV1
 } from "./combined-geo-report-v3";
 import { hashReportSemanticReviewValue } from "./report-semantic-review";
@@ -106,4 +108,94 @@ describe("combined GEO report V3 contract", () => {
     expect(() => parseGeoArticleExampleV1({ ...base, title: "<strong>标题</strong>" }, authority)).toThrow(/raw HTML/iu);
     expect(() => parseGeoArticleExampleV1({ ...base, title: "## 中文采购指南" }, authority)).toThrow(/Markdown/iu);
   });
+
+  it("parses mutually exclusive V2 article and outline deliverables for Q1", () => {
+    const authority = { locale: "zh-CN", questionIds: ["q1", "q2", "q3"], evidenceRefs: ["question:q1", "finding:f1"] };
+    const article = v2Article();
+    expect(parseGeoArticleDeliverable(article, authority)).toEqual(article);
+    const outline = {
+      version: GEO_ARTICLE_DELIVERABLE_VERSION,
+      kind: "outline",
+      primaryQuestionId: "q1",
+      outline: {
+        workingTitle: "企业选择数据集成方案时应核对哪些能力",
+        readerQuestion: "多个业务系统的数据应该怎样可靠打通？",
+        directAnswer: "先确认数据范围、异常恢复、人工复核和交付边界。",
+        plannedSections: [
+          { id: "scenario", heading: "先明确业务场景", purpose: "界定需要打通的系统和流程。", evidenceRefs: ["question:q1"] },
+          { id: "criteria", heading: "比较关键能力", purpose: "比较连接、清洗和异常处理能力。", evidenceRefs: ["finding:f1"] },
+          { id: "checklist", heading: "形成核验清单", purpose: "把采购判断转成可执行步骤。", evidenceRefs: ["question:q1"] }
+        ],
+        evidenceToAdd: ["补充可公开访问的交付案例。"],
+        faqAngles: ["如何确认异常恢复能力？", "哪些数据需要人工复核？"]
+      },
+      explanation: explanation(),
+      fallbackReason: "quality_rejected"
+    };
+    expect(parseGeoArticleDeliverable(outline, authority)).toEqual(outline);
+    expect(() => parseGeoArticleDeliverable({ ...article, primaryQuestionId: "q2" }, authority)).toThrow(/primary buyer question/iu);
+    expect(() => parseGeoArticleDeliverable({ ...article, outline: outline.outline }, authority)).toThrow(/must not contain outline/iu);
+  });
+
+  it("rejects V2 provider ordinals, duplicate prose, incomplete explanation and unknown evidence", () => {
+    const authority = { locale: "zh-CN", questionIds: ["q1", "q2", "q3"], evidenceRefs: ["question:q1", "finding:f1"] };
+    const base = v2Article();
+    expect(() => parseGeoArticleDeliverable({ ...base, article: { ...base.article, introduction: { ...base.article.introduction, text: "根据来源0整理选择标准。" } } }, authority)).toThrow(/provider source ordinals/iu);
+    expect(() => parseGeoArticleDeliverable({ ...base, article: { ...base.article, faq: [{ ...base.article.faq[0], answer: base.article.sections[0].paragraphs[0] }, base.article.faq[1]] } }, authority)).toThrow(/duplicate customer prose/iu);
+    expect(() => parseGeoArticleDeliverable({ ...base, explanation: base.explanation.slice(1) }, authority)).toThrow(/explain every required element/iu);
+    expect(() => parseGeoArticleDeliverable({ ...base, article: { ...base.article, introduction: { ...base.article.introduction, evidenceRefs: ["source:unknown"] } } }, authority)).toThrow(/known evidence/iu);
+    expect(parseGeoArticleDeliverable({ ...legacyArticle(), generationMode: "deterministic_fallback" }, authority)).toMatchObject({ version: GEO_ARTICLE_EXAMPLE_VERSION, generationMode: "deterministic_fallback" });
+  });
 });
+
+function legacyArticle() {
+  return {
+    version: GEO_ARTICLE_EXAMPLE_VERSION,
+    generationMode: "model",
+    targetQuestionIds: ["q1"],
+    title: "如何选择可靠的企业数据集成服务",
+    introduction: "选择方案时需要确认服务范围、交付条件和可核验依据。",
+    sections: [
+      { id: "service", heading: "先确认服务范围", paragraphs: ["官网需要清楚说明能够连接的数据系统和适用流程。"] },
+      { id: "proof", heading: "再核对公开证据", paragraphs: ["采购方还需要检查案例、流程和可验证的交付信息。"] }
+    ],
+    faq: [{ question: "采购前最需要确认什么？", answer: "先确认服务范围、限制条件和公开依据。" }],
+    rationale: [
+      { sectionId: "service", reason: "先回答服务匹配问题。", evidenceRefs: ["question:q1"] },
+      { sectionId: "proof", reason: "再补充公开证据。", evidenceRefs: ["finding:f1"] }
+    ]
+  };
+}
+
+function explanation() {
+  return [
+    { elementId: "title", heading: "标题设计", reason: "用买家问题建立主题。", geoFunction: "明确搜索意图。", evidenceRefs: ["question:q1"] },
+    { elementId: "introduction", heading: "答案前置", reason: "先给出核心判断。", geoFunction: "帮助快速提取答案。", evidenceRefs: ["question:q1"] },
+    { elementId: "section:scenario", heading: "业务场景", reason: "先界定问题。", geoFunction: "建立语义上下文。", evidenceRefs: ["question:q1"] },
+    { elementId: "section:criteria", heading: "判断标准", reason: "给出比较维度。", geoFunction: "形成可提取要点。", evidenceRefs: ["finding:f1"] },
+    { elementId: "section:checklist", heading: "执行清单", reason: "提供下一步。", geoFunction: "连接问题与行动。", evidenceRefs: ["question:q1"] },
+    { elementId: "faq", heading: "相关问题", reason: "补充相邻意图。", geoFunction: "覆盖相关问法。", evidenceRefs: ["question:q1"] }
+  ];
+}
+
+function v2Article() {
+  return {
+    version: GEO_ARTICLE_DELIVERABLE_VERSION,
+    kind: "article" as const,
+    primaryQuestionId: "q1",
+    article: {
+      title: "企业选择数据集成方案时应核对哪些能力",
+      introduction: { text: "先确认数据范围、异常恢复、人工复核和交付边界。", evidenceRefs: ["question:q1"] },
+      sections: [
+        { id: "scenario", heading: "先明确业务场景", paragraphs: [{ text: "列出需要连接的系统、数据类型和重复流程。", evidenceRefs: ["question:q1"] }] },
+        { id: "criteria", heading: "比较关键能力", paragraphs: [{ text: "比较连接、清洗、编排和异常处理是否有公开依据。", evidenceRefs: ["finding:f1"] }] },
+        { id: "checklist", heading: "形成核验清单", paragraphs: [{ text: "要求服务方说明适用条件、人工复核和交付限制。", evidenceRefs: ["question:q1"] }] }
+      ],
+      faq: [
+        { question: "如何确认异常恢复能力？", answer: { text: "核对失败重试、告警和人工接管流程。", evidenceRefs: ["finding:f1"] } },
+        { question: "哪些数据需要人工复核？", answer: { text: "高风险凭证和异常业务数据应保留人工确认。", evidenceRefs: ["question:q1"] } }
+      ]
+    },
+    explanation: explanation()
+  };
+}
