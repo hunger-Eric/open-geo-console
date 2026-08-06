@@ -2,11 +2,11 @@
 
 Status: `NONE`
 
-The 2026-08-06 reader-first GEO article deliverable is implemented and its
-authorized local verification is complete. The terminal receipt is archived in
-`docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`.
+The 2026-08-06 reader-first GEO article deliverable was published and deployed
+to Protected Staging as candidate
+`2657a9c0261ce64fa3c4f8e9d2cd675920b7f8da`. The terminal release receipt is
+archived in `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`.
 
-No real model/search/crawl/report run, external write, deployment, Preview,
-Staging, Production, Docker build/pull, or Git action was authorized or
-performed. Any such action, or any further production/test/document change,
-requires a new `FROZEN` scope and explicit user approval.
+No further Git mutation, Preview, alias move, Worker rebuild, Production
+action, live report/order/payment/refund/email, or Docker prune is authorized
+without a new `FROZEN` scope and explicit user approval.

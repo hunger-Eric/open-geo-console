@@ -6839,3 +6839,40 @@ revised scope.
   intentionally unverified.
 - Terminal result: **implementation and authorized local verification are
   complete; external, deployed, and real-model acceptance were not performed.**
+
+---
+
+## 2026-08-06 - Receipt: Protected Staging release of GEO article deliverable (`2657a9c`)
+
+- User authorized commit, push, and deploy of the completed reader-first GEO
+  article deliverable.
+- Candidate commit `2657a9c0261ce64fa3c4f8e9d2cd675920b7f8da`
+  (`feat: add reader-first GEO article deliverable`) was created on `main` and
+  pushed once. Local `main` and `origin/main` matched exactly after push.
+- Exactly one manual Vercel Preview:
+  - Deployment `dpl_E8qX1MR8pM74b4UF7u7R7vHZ9poH`
+  - Host `https://open-geo-console-ci6ad2x9o-itheheda-6857s-projects.vercel.app`
+  - CLI: `READY`, target `preview`, project `open-geo-console`
+  - REST: `readyState=READY`, `projectId=prj_WVpdlJfsEp0YyWM2W54w8oBy985S`,
+    `ownerId=team_PbYYV2K2zBjTeThfavXStTOI`, `target=null`
+  - `meta.ogcGitSha` and `meta.githubCommitSha` both equal the full candidate
+- Exactly one thin Worker overlay from current
+  `open-geo-console:staging-9cd3ab6-stripe-refund-overlay-v1` (`52094df50546`):
+  - Tag `open-geo-console:staging-2657a9c-geo-article-overlay-v1`
+  - Image ID `sha256:f40c445871d65565ceb590d3a835d958ee5ffa9dc0a4c008ad88d02712eece10`
+  - Label revision = candidate full SHA
+- Staging free/deep Workers recreated once on the candidate image; both ready,
+  restart count 0, `OGC_DEPLOYMENT_PROFILE=staging`, `VERCEL_ENV=preview`,
+  `COMMERCE_MODE=test`, `OGC_DEPLOYMENT_VERSION` = candidate.
+- Fixed alias moved once:
+  `open-geo-console-staging-itheheda.vercel.app` → candidate Preview host.
+  Anonymous `/zh` and catalog returned HTTP 302 (Vercel protection intact).
+- Rollback retained: previous Worker image
+  `staging-9cd3ab6-stripe-refund-overlay-v1` (`52094df50546`).
+- Production untouched. No live report/order/payment/refund/email/model run.
+  No Docker prune. Disk delta: thin overlay only (~90MB image accounting).
+- Ephemeral evidence: `.data/staging-release-2657a9c/**` (not committed).
+- Terminal status: **Protected Staging deployment completed for `2657a9c`;
+  real-model article quality and end-to-end paid report acceptance were not
+  part of this release scope.**
+
