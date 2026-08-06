@@ -33,6 +33,29 @@ function clientReturning(value: unknown, requests: JsonCompletionRequest[] = [])
 }
 
 describe("analyzePageBatch semantic-validation seam", () => {
+  it("uses the caller's locked page-analysis output budget", async () => {
+    const requests: JsonCompletionRequest[] = [];
+    await analyzePageBatch(clientReturning(mixedLanguageAnalysis, requests), {
+      pages: [page], locale: "zh-CN", maxAttempts: 1,
+      semanticValidation: "deferred", maxOutputTokens: 4_096
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.maxTokens).toBe(4_096);
+  });
+
+  it("rejects page-analysis prose and collections outside the retained bounds", async () => {
+    const overlong = {
+      analyses: [{
+        ...mixedLanguageAnalysis.analyses[0],
+        summary: "x".repeat(601),
+        organizationSignals: ["one", "two", "three", "four"]
+      }]
+    };
+    await expect(analyzePageBatch(clientReturning(overlong), {
+      pages: [page], locale: "en", maxAttempts: 1, semanticValidation: "deferred"
+    })).rejects.toThrow(/required page analyses|retained bound/u);
+  });
+
   it("keeps omitted and explicit legacy prompts and failures identical", async () => {
     const omittedRequests: JsonCompletionRequest[] = [];
     const explicitRequests: JsonCompletionRequest[] = [];

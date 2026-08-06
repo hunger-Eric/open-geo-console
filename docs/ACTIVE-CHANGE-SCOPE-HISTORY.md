@@ -6923,3 +6923,163 @@ revised scope.
 - Production untouched. No historical job replay.
 - Terminal status: **Staging redeployed on DeepSeek V4 Pro.**
 
+
+---
+
+## 2026-08-06 - Receipt: Local repair for recent OpenCode Go report failures
+
+- Approved objective: repair the two recently observed route-sensitive
+  failures without replaying historical reports or calling the live route.
+- Paid V3 page analysis now sends exactly one page per provider call, uses the
+  locked `pageAnalysis.maxOutputTokens`, and validates explicit output
+  collection/text bounds. Existing invalid-evidence findings continue to be
+  filtered individually.
+- AnySearch now exposes and parses typed `insufficient_evidence`. Answer prose
+  with zero selected sources is discarded locally into that outcome; no source
+  is invented and no retry is added. Existing grounded answers, refusal types,
+  invalid-index failures, and provider failures retain their contracts.
+- Verification:
+  - 11 relevant test files passed, 251 tests total.
+  - `npm run lint` passed with 0 errors and 6 pre-existing warnings.
+  - `npm run build` passed for all workspaces and the Next.js application.
+  - `git diff --check` passed before scope close.
+- Final changed-line totals before scope close were 143 production and 59
+  verification lines, within the approved 260/380 budgets. All source/test
+  paths were allowlisted; no dependency, lockfile, schema, environment, or
+  generated file changed.
+- No Docker, deployment, Git, live model/search/report/payment, historical
+  repair, or external write was performed. Real Staging route compatibility
+  remains unverified and requires separate authorization.
+- Terminal result: **implementation and authorized local verification are
+  complete; deployment and real-route acceptance were not performed.**
+
+
+---
+
+## 2026-08-06 - Receipt: Exact-input four-page route probe stopped before call
+
+- Approved target: exactly one four-page page-analysis request using the exact
+  first batch from report `deef17d8-8128-4487-951e-056b4a4bb7e0`, job
+  `11161470-0f68-46f1-a126-6c67c0f401bb`.
+- Staging identity verified read-only: Worker image
+  `sha256:0dc9fe26194d16cd8306fa15d6b40426d0d92ec515c9c4027cc0064c9db61875`,
+  revision `ec1fff6e4ce46ae68ee7773a8033e6bc984ca9c4`, OpenCode Go base
+  `https://opencode.ai/zen/go/v1`, model `deepseek-v4-pro`, and locked
+  page-analysis budget `8192` tokens.
+- The authority retained matching normalized content and hashes for four URLs:
+  `/`, `/services`, `/projects`, and `/about` on `me.itheheda.online`.
+- Exact-input recovery failed closed: the deployed prompt also used each
+  `ExtractedPage` title, description, and metadata, but the latter three pages'
+  original values were not persisted in checkpoint or crawl evidence.
+- Per the approved stop condition, no replacement crawl or inferred fields
+  were used. Model request count was **0**. No database/file application write,
+  report replay, retry, container change, deployment, or Git action occurred.
+- Terminal result: **probe stopped before the external call because the exact
+  historical four-page prompt payload was not recoverable.**
+
+
+---
+
+## 2026-08-06 - Receipt: OpenCode page-analysis output budget raised locally
+
+- Approved change: in the locked SenseNova/OpenCode model profile, changed
+  only `operations.pageAnalysis.maxOutputTokens` from `8192` to `32768`.
+- The page-analysis limit tuple is now exactly context `65536`, input `32768`,
+  output `32768`; the profile parser's context-window invariant remains valid.
+- Added an exact regression assertion for that tuple in the existing model
+  runtime configuration test.
+- Red/green evidence: the new assertion first failed with received `8192`, then
+  passed after the one-field profile change.
+- Verification: 6 relevant test files passed with 132 tests; `npm run lint`
+  passed with 0 errors and 6 unrelated existing warnings; `npm run build` and
+  `git diff --check` passed.
+- Scope diff: one profile line replaced and five verification lines added,
+  within budget. No other operation budget, runtime source, dependency,
+  lockfile, schema, environment, or generated file changed in this scope.
+- No model/search/report call, deployment, Docker, database/historical-state
+  mutation, external write, or Git action occurred. Deployed behavior remains
+  unverified.
+- Terminal result: **the 32768 page-analysis budget is implemented and locally
+  verified; it is not deployed.**
+
+
+---
+
+## 2026-08-06 - Receipt: Local four-page OpenCode page-analysis probe passed
+
+- Approved action: exactly one local `analyzePageBatch` request containing the
+  four retained `me.itheheda.online` pages `/`, `/services`, `/projects`, and
+  `/about`; no Worker or historical-report continuation.
+- All four normalized bodies were read from Staging authority and their stored
+  SHA-256 hashes matched. Optional historical title, description, and metadata
+  were omitted rather than inferred.
+- Runtime identity: profile `sensenova_anysearch`, OpenCode Go base
+  `https://opencode.ai/zen/go/v1`, model `deepseek-v4-pro`, context/input/output
+  limits `65536/32768/32768`.
+- Request parameters: `batchSize=4`, `maxAttempts=1`, deferred semantic
+  validation, 30000 characters per page, locale `zh-CN`, output budget 32768.
+- Result: request count 1, HTTP 200, response model `deepseek-v4-pro`,
+  `finish_reason=stop`, 7505 completion tokens including 4519 reasoning tokens,
+  8855 message characters, and 123206 ms elapsed.
+- Envelope JSON parsing passed. The local AI client JSON parser passed.
+  `analyzePageBatch` contract parsing passed with exactly 4/4 analyses.
+- No retry, fallback, language-correction call, new crawl, DB/application write,
+  report replay, Docker/deployment action, or Git action occurred.
+- Terminal result: **the local current-code four-page batch completed through
+  the output and contract stages under the 32768 budget; it is not deployed.**
+
+
+---
+
+## 2026-08-06 - Receipt: DeepSeek V4 Flash four-page A/B probe passed
+
+- Approved action: exactly one local four-page `analyzePageBatch` request with
+  `deepseek-v4-flash`, holding the successful Pro probe's retained inputs,
+  prompt path, `batchSize=4`, no-retry/deferred semantics, and 32768 output
+  budget constant.
+- The same four `me.itheheda.online` normalized bodies (`/`, `/services`,
+  `/projects`, `/about`) were read-only loaded and all stored SHA-256 hashes
+  matched before the request.
+- Flash result: request count 1, HTTP 200, response model
+  `deepseek-v4-flash`, `finish_reason=stop`, 10802 completion tokens, 10334
+  message characters, and 81152 ms elapsed. The provider did not return a
+  separate reasoning-token field.
+- Envelope JSON parsing, local client JSON parsing, and `analyzePageBatch`
+  contract parsing all passed with exactly 4/4 analyses.
+- Frozen Pro comparison: HTTP 200/stop, 7505 completion tokens including 4519
+  reasoning tokens, 8855 message characters, 123206 ms, JSON/contract pass,
+  4/4 analyses. Flash used 3297 more completion tokens and 1479 more message
+  characters, while finishing 42054 ms faster.
+- No retry, correction, fallback, second probe, crawl, Worker, DB/application
+  write, report continuation, Docker/deployment action, production-profile
+  change, or Git action occurred.
+- Terminal result: **Flash also completed the four-page output and contract
+  stages under 32768; the production profile remains Pro and is not deployed.**
+
+
+---
+
+## 2026-08-06 - Receipt: Formal unified profile switched back to Flash locally
+
+- Approved objective: switch the formal unified SenseNova/OpenCode profile
+  from `deepseek-v4-pro` to `deepseek-v4-flash`, based on the successful
+  same-input four-page Flash probe.
+- All four locked operation model IDs and the exact runtime model allowlist now
+  use `deepseek-v4-flash`. Existing provider/runtime test environments and
+  request expectations were updated to the same identity.
+- The validated page-analysis context/input/output tuple remains
+  `65536/32768/32768`. No other operation budget, endpoint, tokenizer, timeout,
+  prompt, parser, retry, or error-classification behavior changed.
+- Red/green evidence: the Flash expectations first produced 6 failures against
+  the Pro runtime, all from exact model conflicts; after the scoped switch the
+  two core files passed 11/11 tests.
+- Combined verification passed: 7 relevant test files, 135 tests; `npm run
+  lint` passed with 0 errors and 6 unrelated existing warnings; full workspace
+  `npm run build` and `git diff --check` passed.
+- Scope diff stayed within budget: production/config 12 changed lines and
+  verification 10 changed lines. No batch-size change was included.
+- No model/search/report call in this change scope, deployment, Docker,
+  database/historical-state mutation, external write, or Git action occurred.
+- Terminal result: **the formal local profile is Flash with a 32768
+  page-analysis budget; it is not deployed.**
+

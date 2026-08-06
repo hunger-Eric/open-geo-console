@@ -3,13 +3,13 @@ import { canonicalizePublicSourceUrl, getPublicSourceDomainIdentity } from "@ope
 import { isBlockedHostname, parseHttpUrl } from "@open-geo-console/site-crawler";
 import { assertReportLanguage, normalizeReportLanguage, ReportLanguageValidationError } from "./report-language";
 
-export type GenerativeSearchRefusalCode = "safety_refusal" | "policy_refusal" | "high_risk_refusal";
+export type GenerativeSearchRefusalCode = "safety_refusal" | "policy_refusal" | "high_risk_refusal" | "insufficient_evidence";
 export interface GenerativeSearchRefusal { code: GenerativeSearchRefusalCode; reason: string; }
 export interface GenerativeSearchSource { sourceId: string; title: string; canonicalUrl: string; registrableDomain: string; citedText: string | null; providerResultOrder: number; }
 export interface GenerativeSearchAnswerResult { questionId: string; answerText: string; sources: GenerativeSearchSource[]; refusal: GenerativeSearchRefusal | null; searchedAt: string; completedAt: string; providerResponseId: string | null; }
 export interface GenerativeSearchAnswerProvider { readonly providerId: string; readonly model: string; readonly searchMode: string; answerWithSources(input: { questionId: string; question: string; locale: string; region: string; signal: AbortSignal; semanticValidation?: "legacy" | "deferred" | "free_direct" }): Promise<GenerativeSearchAnswerResult>; }
 
-const refusalCodes = new Set<GenerativeSearchRefusalCode>(["safety_refusal", "policy_refusal", "high_risk_refusal"]);
+const refusalCodes = new Set<GenerativeSearchRefusalCode>(["safety_refusal", "policy_refusal", "high_risk_refusal", "insufficient_evidence"]);
 const text = (value: unknown, name: string, max: number) => { if (typeof value !== "string") throw new TypeError(`${name} must be a string.`); const v = value.trim(); if (v.length > max) throw new TypeError(`${name} exceeds the retained bound.`); return v; };
 const timestamp = (value: unknown, name: string) => { if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw new TypeError(`${name} must be an ISO timestamp.`); return value; };
 

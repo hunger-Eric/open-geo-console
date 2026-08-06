@@ -4,17 +4,17 @@
   "adapterId": "sensenova-openai-compatible-json-v1",
   "operations": {
     "pageAnalysis": {
-      "model": "deepseek-v4-pro",
+      "model": "deepseek-v4-flash",
       "contextWindowTokens": 65536,
       "maxInputTokens": 32768,
-      "maxOutputTokens": 8192,
+      "maxOutputTokens": 32768,
       "timeoutMs": 120000,
       "nativeWebSearch": false,
       "structuredOutput": true,
       "tokenizer": "deepseek-v4-flash-utf8-conservative-v1"
     },
     "websiteSynthesis": {
-      "model": "deepseek-v4-pro",
+      "model": "deepseek-v4-flash",
       "contextWindowTokens": 65536,
       "maxInputTokens": 49152,
       "maxOutputTokens": 12288,
@@ -24,7 +24,7 @@
       "tokenizer": "deepseek-v4-flash-utf8-conservative-v1"
     },
     "questionAnswer": {
-      "model": "deepseek-v4-pro",
+      "model": "deepseek-v4-flash",
       "contextWindowTokens": 65536,
       "maxInputTokens": 32768,
       "maxOutputTokens": 8192,
@@ -34,7 +34,7 @@
       "tokenizer": "deepseek-v4-flash-utf8-conservative-v1"
     },
     "sourceDiagnosis": {
-      "model": "deepseek-v4-pro",
+      "model": "deepseek-v4-flash",
       "contextWindowTokens": 65536,
       "maxInputTokens": 32768,
       "maxOutputTokens": 8192,

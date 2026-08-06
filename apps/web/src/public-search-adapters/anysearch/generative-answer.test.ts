@@ -36,15 +36,23 @@ describe("AnySearch grounded SenseNova answer provider", () => {
     expect(JSON.stringify(result)).not.toContain("invented.example");
   });
 
-  it("rejects ungrounded answers and invalid source indexes without retry", async () => {
-    for (const value of [
-      { answerText: "无来源答案", refusal: null, usedSourceIndexes: [] },
-      { answerText: "错误索引", refusal: null, usedSourceIndexes: [9] }
-    ]) {
-      const model = client(value);
-      await expect(createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: model, fetch: search }).answerWithSources(request)).rejects.toMatchObject({ code: "invalid_response" });
-      expect(model.completeJson).toHaveBeenCalledTimes(1);
-    }
+  it("discards an ungrounded answer into typed insufficient evidence without retry", async () => {
+    const model = client({ answerText: "无来源答案", refusal: null, usedSourceIndexes: [] });
+    await expect(createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: model, fetch: search }).answerWithSources(request)).resolves.toMatchObject({
+      answerText: "", sources: [], refusal: { code: "insufficient_evidence" }
+    });
+    expect(model.completeJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts an explicit insufficient-evidence outcome and still rejects an invalid source index", async () => {
+    const insufficient = client({ answerText: "", refusal: { code: "insufficient_evidence", reason: "当前来源不足。" }, usedSourceIndexes: [] });
+    await expect(createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: insufficient, fetch: search }).answerWithSources(request)).resolves.toMatchObject({
+      answerText: "", sources: [], refusal: { code: "insufficient_evidence", reason: "当前来源不足。" }
+    });
+    const invalid = client({ answerText: "错误索引", refusal: null, usedSourceIndexes: [9] });
+    await expect(createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: invalid, fetch: search }).answerWithSources(request)).rejects.toMatchObject({ code: "invalid_response" });
+    expect(insufficient.completeJson).toHaveBeenCalledOnce();
+    expect(invalid.completeJson).toHaveBeenCalledOnce();
   });
 
   it("maps search failures into sanitized AI client failures", async () => {

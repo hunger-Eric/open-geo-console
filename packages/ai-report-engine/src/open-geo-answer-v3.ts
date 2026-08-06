@@ -249,7 +249,7 @@ function parseGenerativeSource(value:unknown,path:string):GenerativeSearchAnswer
   catch { throw new TypeError(`${path}.canonicalUrl must be a public HTTP(S) URL.`); }
   return {sourceId:boundedText(row.sourceId,`${path}.sourceId`,500),title:boundedText(row.title,`${path}.title`,500),canonicalUrl,registrableDomain,citedText:row.citedText==null?null:boundedText(row.citedText,`${path}.citedText`,2_000),providerResultOrder:nonnegative(row.providerResultOrder,`${path}.providerResultOrder`),retrievalStatus:oneOf(row.retrievalStatus,["verified_body","search_source_only","inaccessible"] as const,`${path}.retrievalStatus`),ownershipCategory:oneOf(row.ownershipCategory,OWNERSHIP_CATEGORIES,`${path}.ownershipCategory`)};
 }
-function parseRefusal(value:unknown,path:string):GenerativeSearchRefusal { const row=record(value,path); const code=oneOf(row.code,["safety_refusal","policy_refusal","high_risk_refusal"] as const,`${path}.code`); return {code,reason:boundedText(row.reason,`${path}.reason`,500)}; }
+function parseRefusal(value:unknown,path:string):GenerativeSearchRefusal { const row=record(value,path); const code=oneOf(row.code,["safety_refusal","policy_refusal","high_risk_refusal","insufficient_evidence"] as const,`${path}.code`); return {code,reason:boundedText(row.reason,`${path}.reason`,500)}; }
 function hash(value: unknown, path: string): string { const result = text(value, path); if (!/^[a-f0-9]{64}$/u.test(result)) throw new TypeError(`${path} must be a SHA-256 hash.`); return result; }
 
 export async function synthesizeOpenGeoAnswerCardsV3(

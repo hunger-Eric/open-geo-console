@@ -510,7 +510,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     try {
       const analysisClient = directTrace?.wrapJsonClient("page_analysis_provider_call", client, 1) ?? client;
       analyzed = await tracePaidV3DirectStep(directTrace, "page_analysis", {
-        phase: "page_analysis", pageCount: crawl.pages.length, batchCount: Math.ceil(crawl.pages.length / 4)
+        phase: "page_analysis", pageCount: crawl.pages.length, batchCount: crawl.pages.length
       }, () => analyzePageBatch(analysisClient, {
         pages: crawl.pages.map(({ page }) => page),
         locale: job.locale,
@@ -519,8 +519,9 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
           : {}),
         ...(paidV3Direct ? { maxAttempts: 1 } :
           websiteAnalysisSemanticValidation === "free_direct" ? { maxAttempts: 3 } : {}),
-        batchSize: 4,
+        batchSize: 1,
         maxCharactersPerPage: 30_000,
+        maxOutputTokens: getPreparedProviderProfileRuntime().modelRuntime.modelProfile.operations.pageAnalysis.maxOutputTokens,
         signal: execution.controller.signal,
         completedAnalyses: (checkpoint.completedPageAnalyses ?? []).map(({ analysis }) => analysis),
         onBatchComplete: async (batch) => {

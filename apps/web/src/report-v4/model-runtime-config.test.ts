@@ -118,6 +118,11 @@ describe("Report V4 production model runtime configuration", () => {
       provider: "sensenova",
       adapterId: "sensenova-openai-compatible-json-v1"
     });
+    expect(runtime.modelProfile.operations.pageAnalysis).toMatchObject({
+      contextWindowTokens: 65_536,
+      maxInputTokens: 32_768,
+      maxOutputTokens: 32_768
+    });
     expect(runtime.resolvedProfile.operations.questionAnswer).toMatchObject({
       nativeWebSearch: false,
       structuredOutput: true,

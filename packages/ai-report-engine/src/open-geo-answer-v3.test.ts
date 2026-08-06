@@ -254,6 +254,7 @@ describe("Open GEO answer V3 contract", () => {
     expect(()=>parseOpenGeoAnswerCardsV3([{...value[0],answerText:""},value[1],value[2]],context)).toThrow(/answered requires/i);
     expect(()=>parseOpenGeoAnswerCardsV3([{...value[0],status:"source_limited",sources:[]},value[1],value[2]],context)).not.toThrow();
     expect(()=>parseOpenGeoAnswerCardsV3([{...value[0],status:"refused",answerText:"",sources:[],refusal:null},value[1],value[2]],context)).toThrow(/typed refusal/i);
+    expect(()=>parseOpenGeoAnswerCardsV3([{...value[0],status:"refused",answerText:"",sources:[],refusal:{code:"insufficient_evidence",reason:"Current public evidence is insufficient."}},value[1],value[2]],context)).not.toThrow();
   });
 
   it("rejects unsafe sources and ignores supplied registrable domains", () => {

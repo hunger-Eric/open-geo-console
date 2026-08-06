@@ -25,6 +25,7 @@ export interface AnalyzePagesInput {
   semanticValidation?: "legacy" | "deferred" | "free_direct";
   batchSize?: number;
   maxCharactersPerPage?: number;
+  maxOutputTokens?: number;
   signal?: AbortSignal;
   maxAttempts?: number;
   retryDelay?: (milliseconds: number) => Promise<void>;
@@ -44,11 +45,31 @@ export class PageAnalysisBatchError extends Error {
 
 const confidences = new Set<Confidence>(["low", "medium", "high"]);
 const severities = new Set<FindingSeverity>(["critical", "warning", "opportunity"]);
+const PAGE_ANALYSIS_LIMITS = Object.freeze({
+  summaryCharacters: 600,
+  collectionItems: 3,
+  collectionItemCharacters: 160,
+  findings: 3,
+  evidenceItems: 2,
+  titleCharacters: 120,
+  impactCharacters: 280,
+  quoteCharacters: 240,
+  pageElementCharacters: 100,
+  recommendationCharacters: 320,
+  rewriteExampleCharacters: 320
+});
 
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-    : [];
+function boundedText(value: unknown, maxCharacters: number): string | null {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= maxCharacters
+    ? value
+    : null;
+}
+
+function boundedTextArray(value: unknown): string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > PAGE_ANALYSIS_LIMITS.collectionItems) return null;
+  const parsed = value.map((item) => boundedText(item, PAGE_ANALYSIS_LIMITS.collectionItemCharacters));
+  return parsed.some((item) => item === null) ? null : parsed as string[];
 }
 
 function canonicalUrl(value: string): string | null {
@@ -61,27 +82,35 @@ function canonicalUrl(value: string): string | null {
   }
 }
 
-function parseEvidence(value: unknown): Array<{ url: string; quote: string; pageElement?: string }> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
+function parseEvidence(value: unknown): Array<{ url: string; quote: string; pageElement?: string }> | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > PAGE_ANALYSIS_LIMITS.evidenceItems) return null;
+  const parsed = value.map((item) => {
+    if (!item || typeof item !== "object") return null;
     const record = item as Record<string, unknown>;
-    if (typeof record.url !== "string" || typeof record.quote !== "string") return [];
-    return [{
-      url: record.url,
-      quote: record.quote,
-      ...(typeof record.pageElement === "string" ? { pageElement: record.pageElement } : {})
-    }];
+    const url = boundedText(record.url, 2_000);
+    const quote = boundedText(record.quote, PAGE_ANALYSIS_LIMITS.quoteCharacters);
+    const pageElement = record.pageElement === undefined
+      ? undefined
+      : boundedText(record.pageElement, PAGE_ANALYSIS_LIMITS.pageElementCharacters);
+    if (!url || !quote || pageElement === null) return null;
+    return { url, quote, ...(pageElement ? { pageElement } : {}) };
   });
+  return parsed.some((item) => item === null)
+    ? null
+    : parsed as Array<{ url: string; quote: string; pageElement?: string }>;
 }
 
 function parseFinding(value: unknown, pages: readonly ExtractedPage[]): PageAnalysisFinding | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
+  const title = boundedText(record.title, PAGE_ANALYSIS_LIMITS.titleCharacters);
+  const impact = boundedText(record.impact, PAGE_ANALYSIS_LIMITS.impactCharacters);
+  const recommendation = boundedText(record.recommendation, PAGE_ANALYSIS_LIMITS.recommendationCharacters);
+  const rewriteExample = record.rewriteExample === undefined
+    ? undefined
+    : boundedText(record.rewriteExample, PAGE_ANALYSIS_LIMITS.rewriteExampleCharacters);
   if (
-    typeof record.title !== "string" ||
-    typeof record.impact !== "string" ||
-    typeof record.recommendation !== "string" ||
+    !title || !impact || !recommendation || rewriteExample === null ||
     typeof record.severity !== "string" ||
     !severities.has(record.severity as FindingSeverity) ||
     typeof record.confidence !== "string" ||
@@ -91,18 +120,18 @@ function parseFinding(value: unknown, pages: readonly ExtractedPage[]): PageAnal
   }
   const evidence = parseEvidence(record.evidence);
   if (
-    evidence.length === 0 ||
+    !evidence ||
     evidence.some((citation) => !validateEvidenceCitation(citation, pages).valid)
   ) {
     return null;
   }
   return {
-    title: record.title,
+    title,
     severity: record.severity as FindingSeverity,
-    impact: record.impact,
+    impact,
     evidence,
-    recommendation: record.recommendation,
-    ...(typeof record.rewriteExample === "string" ? { rewriteExample: record.rewriteExample } : {}),
+    recommendation,
+    ...(rewriteExample ? { rewriteExample } : {}),
     confidence: record.confidence as Confidence
   };
 }
@@ -120,11 +149,16 @@ function parseBatch(value: unknown, pages: readonly ExtractedPage[]): PageAnalys
   for (const item of rawAnalyses) {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
-    if (typeof record.url !== "string" || typeof record.summary !== "string") continue;
+    if (typeof record.url !== "string") continue;
     const url = canonicalUrl(record.url);
     const page = url ? pagesByUrl.get(url) : undefined;
     if (!url || !page || seen.has(url)) continue;
+    const summary = boundedText(record.summary, PAGE_ANALYSIS_LIMITS.summaryCharacters);
+    const organizationSignals = boundedTextArray(record.organizationSignals);
+    const strengths = boundedTextArray(record.strengths);
+    if (!summary || !organizationSignals || !strengths) continue;
     seen.add(url);
+    if (record.findings !== undefined && (!Array.isArray(record.findings) || record.findings.length > PAGE_ANALYSIS_LIMITS.findings)) continue;
     const findings = Array.isArray(record.findings)
       ? record.findings
           .map((finding) => parseFinding(finding, pages))
@@ -133,9 +167,9 @@ function parseBatch(value: unknown, pages: readonly ExtractedPage[]): PageAnalys
     analyses.push({
       url: page.url,
       pageType: page.pageType,
-      summary: record.summary,
-      organizationSignals: stringArray(record.organizationSignals),
-      strengths: stringArray(record.strengths),
+      summary,
+      organizationSignals,
+      strengths,
       findings
     });
   }
@@ -174,12 +208,22 @@ function parsePageLanguageCorrections(value: unknown, expectedPaths: readonly st
       seen.has(record.path) ||
       typeof record.text !== "string" ||
       record.text.trim().length === 0 ||
-      record.text.length > 4_000
+      record.text.length > pageAnalysisFieldMaxCharacters(record.path)
     ) return null;
     seen.add(record.path);
     corrections.push({ path: record.path, text: record.text.trim() });
   }
   return seen.size === expected.size ? corrections : null;
+}
+
+function pageAnalysisFieldMaxCharacters(path: string): number {
+  if (/\.summary$/u.test(path)) return PAGE_ANALYSIS_LIMITS.summaryCharacters;
+  if (/\.(?:organizationSignals|strengths)\[\d+\]$/u.test(path)) return PAGE_ANALYSIS_LIMITS.collectionItemCharacters;
+  if (/\.title$/u.test(path)) return PAGE_ANALYSIS_LIMITS.titleCharacters;
+  if (/\.impact$/u.test(path)) return PAGE_ANALYSIS_LIMITS.impactCharacters;
+  if (/\.recommendation$/u.test(path)) return PAGE_ANALYSIS_LIMITS.recommendationCharacters;
+  if (/\.rewriteExample$/u.test(path)) return PAGE_ANALYSIS_LIMITS.rewriteExampleCharacters;
+  return 0;
 }
 
 function applyPageLanguageCorrections(
@@ -276,6 +320,10 @@ export async function analyzePageBatch(
   const semanticDeferred = input.semanticValidation === "deferred" || semanticDirect;
   const batchSize = Math.max(1, Math.min(input.batchSize ?? 4, 10));
   const maxCharacters = Math.max(1_000, Math.min(input.maxCharactersPerPage ?? 30_000, 100_000));
+  const maxOutputTokens = input.maxOutputTokens ?? 8_000;
+  if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 256) {
+    throw new TypeError("maxOutputTokens must be a positive bounded token budget.");
+  }
   const analyses: PageAnalysis[] = [...(input.completedAnalyses ?? [])];
   const completedUrls = new Set(analyses.map(({ url }) => canonicalUrl(url)));
   const pendingPages = input.pages.filter((page) => !completedUrls.has(canonicalUrl(page.url)));
@@ -323,7 +371,7 @@ export async function analyzePageBatch(
         const completion = await client.completeJson({
       signal: input.signal,
       temperature: 0.1,
-      maxTokens: 8_000,
+      maxTokens: maxOutputTokens,
       messages: [
         {
           role: "system",
@@ -354,9 +402,11 @@ export async function analyzePageBatch(
             task: "Analyze each website page for organization clarity, information architecture, content citability, trust evidence, entity consistency and GEO understandability.",
             rules: [
               languageInstruction,
-              "Keep evidence quotes verbatim in their source language."
+              "Keep evidence quotes verbatim in their source language.",
+              "Observe every supplied output limit exactly; omit optional content instead of exceeding a limit."
             ],
             locale: input.locale,
+            outputLimits: PAGE_ANALYSIS_LIMITS,
             outputShape,
             pages: pages.map((page) => pageForPrompt(page, maxCharacters))
           })

@@ -104,7 +104,10 @@ vi.mock("@/provider-profile/runtime", () => ({
   getPreparedProviderProfileRuntime: () => ({
     profileId: "mimo_native",
     generalClient: { configuredModel: "fixture-model", completeJson: vi.fn() },
-    modelRuntime: { modelProfile: { operations: { pageAnalysis: { model: "fixture-model" }, websiteSynthesis: { model: "fixture-model" } } } },
+    modelRuntime: { modelProfile: { operations: {
+      pageAnalysis: { model: "fixture-model", maxOutputTokens: 8_192 },
+      websiteSynthesis: { model: "fixture-model" }
+    } } },
     publicSearchRuntime: {
       adapter: {},
       authority: { authorityId: "authority-1", surface: { locale: "zh-CN", region: "CN" } },
@@ -1029,7 +1032,8 @@ describe("marker-present page analysis authority and resume identity", () => {
       expect(boundaryMocks.failScanJob).toHaveBeenCalledTimes(1);
       expect(job.maxAttempts).toBe(1);
       expect(boundaryMocks.analyzePageBatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-        semanticValidation: "free_direct", maxAttempts: 1
+        semanticValidation: "free_direct", maxAttempts: 1,
+        batchSize: 1, maxOutputTokens: 8_192
       }));
       expect(boundaryMocks.synthesizeWebsiteReportWithRecovery).toHaveBeenCalledWith(
         expect.anything(), expect.anything(), expect.objectContaining({ semanticValidation: "free_direct", maxAttempts: 1 })
