@@ -43,6 +43,42 @@ export class PageAnalysisBatchError extends Error {
   }
 }
 
+export const PAGE_ANALYSIS_CONTRACT_INVALID_CODE = "page_analysis_contract_invalid" as const;
+
+export type PageAnalysisContractReason =
+  | "analyses_missing_or_invalid"
+  | "analysis_count_mismatch"
+  | "analysis_not_object"
+  | "url_missing_or_invalid"
+  | "url_not_owned"
+  | "url_duplicate"
+  | "summary_invalid"
+  | "organization_signals_invalid"
+  | "strengths_invalid"
+  | "findings_invalid";
+
+export interface PageAnalysisContractIssue {
+  readonly path: string;
+  readonly reason: PageAnalysisContractReason;
+}
+
+export class PageAnalysisContractError extends Error {
+  readonly code = PAGE_ANALYSIS_CONTRACT_INVALID_CODE;
+  readonly expectedCount: number;
+  readonly acceptedCount: number;
+  readonly issues: readonly PageAnalysisContractIssue[];
+
+  constructor(expectedCount: number, acceptedCount: number, issues: readonly PageAnalysisContractIssue[]) {
+    const retained = issues.slice(0, 24).map(({ path, reason }) => Object.freeze({ path, reason }));
+    const summary = retained.map(({ path, reason }) => `${path}:${reason}`).join(", ");
+    super(`Page analysis contract accepted ${acceptedCount} of ${expectedCount} required page analyses; ${summary}.`);
+    this.name = "PageAnalysisContractError";
+    this.expectedCount = expectedCount;
+    this.acceptedCount = acceptedCount;
+    this.issues = Object.freeze(retained);
+  }
+}
+
 const confidences = new Set<Confidence>(["low", "medium", "high"]);
 const severities = new Set<FindingSeverity>(["critical", "warning", "opportunity"]);
 const PAGE_ANALYSIS_LIMITS = Object.freeze({
@@ -136,29 +172,69 @@ function parseFinding(value: unknown, pages: readonly ExtractedPage[]): PageAnal
   };
 }
 
-function parseBatch(value: unknown, pages: readonly ExtractedPage[]): PageAnalysis[] {
-  if (!value || typeof value !== "object") return [];
+function parseBatch(value: unknown, pages: readonly ExtractedPage[]): {
+  analyses: PageAnalysis[];
+  issues: PageAnalysisContractIssue[];
+} {
+  if (!value || typeof value !== "object") {
+    return { analyses: [], issues: [{ path: "$.analyses", reason: "analyses_missing_or_invalid" }] };
+  }
   const rawAnalyses = (value as Record<string, unknown>).analyses;
-  if (!Array.isArray(rawAnalyses)) return [];
+  if (!Array.isArray(rawAnalyses)) {
+    return { analyses: [], issues: [{ path: "$.analyses", reason: "analyses_missing_or_invalid" }] };
+  }
   const pagesByUrl = new Map(
     pages.map((page) => [canonicalUrl(page.url), page] as const).filter((item) => item[0] !== null)
   );
   const seen = new Set<string>();
   const analyses: PageAnalysis[] = [];
+  const issues: PageAnalysisContractIssue[] = [];
 
-  for (const item of rawAnalyses) {
-    if (!item || typeof item !== "object") continue;
+  for (const [index, item] of rawAnalyses.entries()) {
+    const path = `$.analyses[${index}]`;
+    if (!item || typeof item !== "object") {
+      issues.push({ path, reason: "analysis_not_object" });
+      continue;
+    }
     const record = item as Record<string, unknown>;
-    if (typeof record.url !== "string") continue;
+    if (typeof record.url !== "string") {
+      issues.push({ path: `${path}.url`, reason: "url_missing_or_invalid" });
+      continue;
+    }
     const url = canonicalUrl(record.url);
     const page = url ? pagesByUrl.get(url) : undefined;
-    if (!url || !page || seen.has(url)) continue;
+    if (!url) {
+      issues.push({ path: `${path}.url`, reason: "url_missing_or_invalid" });
+      continue;
+    }
+    if (!page) {
+      issues.push({ path: `${path}.url`, reason: "url_not_owned" });
+      continue;
+    }
+    if (seen.has(url)) {
+      issues.push({ path: `${path}.url`, reason: "url_duplicate" });
+      continue;
+    }
     const summary = boundedText(record.summary, PAGE_ANALYSIS_LIMITS.summaryCharacters);
     const organizationSignals = boundedTextArray(record.organizationSignals);
     const strengths = boundedTextArray(record.strengths);
-    if (!summary || !organizationSignals || !strengths) continue;
+    if (!summary) {
+      issues.push({ path: `${path}.summary`, reason: "summary_invalid" });
+      continue;
+    }
+    if (!organizationSignals) {
+      issues.push({ path: `${path}.organizationSignals`, reason: "organization_signals_invalid" });
+      continue;
+    }
+    if (!strengths) {
+      issues.push({ path: `${path}.strengths`, reason: "strengths_invalid" });
+      continue;
+    }
     seen.add(url);
-    if (record.findings !== undefined && (!Array.isArray(record.findings) || record.findings.length > PAGE_ANALYSIS_LIMITS.findings)) continue;
+    if (record.findings !== undefined && (!Array.isArray(record.findings) || record.findings.length > PAGE_ANALYSIS_LIMITS.findings)) {
+      issues.push({ path: `${path}.findings`, reason: "findings_invalid" });
+      continue;
+    }
     const findings = Array.isArray(record.findings)
       ? record.findings
           .map((finding) => parseFinding(finding, pages))
@@ -173,7 +249,10 @@ function parseBatch(value: unknown, pages: readonly ExtractedPage[]): PageAnalys
       findings
     });
   }
-  return analyses;
+  if (analyses.length !== pages.length && issues.length === 0) {
+    issues.push({ path: "$.analyses", reason: "analysis_count_mismatch" });
+  }
+  return { analyses, issues };
 }
 
 function pageForPrompt(page: ExtractedPage, maxCharacters: number): Record<string, unknown> {
@@ -414,6 +493,7 @@ export async function analyzePageBatch(
       ]
         });
         modelId = completion.modelId;
+        let contractIssues: PageAnalysisContractIssue[] = [];
         const candidate = isLanguageCorrectionCall
           ? (() => {
               const corrections = parsePageLanguageCorrections(completion.value, fieldsToCorrect.map(({ path }) => path));
@@ -425,9 +505,16 @@ export async function analyzePageBatch(
                 ? applyPageLanguageCorrections(languageCorrectionDraft, normalized)
                 : null;
             })()
-          : parseBatch(completion.value, pages);
+          : (() => {
+              const parsedBatch = parseBatch(completion.value, pages);
+              contractIssues = parsedBatch.issues;
+              return parsedBatch.analyses;
+            })();
         if (!candidate || candidate.length !== pages.length) {
           if (isLanguageCorrectionCall && languageCorrectionError) throw languageCorrectionError;
+          if (!isLanguageCorrectionCall) {
+            throw new PageAnalysisContractError(pages.length, candidate?.length ?? 0, contractIssues);
+          }
           throw new Error(`The model returned ${candidate?.length ?? 0} of ${pages.length} required page analyses.`);
         }
         languageCorrectionDraft = candidate;

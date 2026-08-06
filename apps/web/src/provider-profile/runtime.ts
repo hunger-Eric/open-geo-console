@@ -28,7 +28,7 @@ import {
 } from "@/report-v4/openai-compatible-provider";
 import {
   REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
-  REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID,
+  REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID,
   loadReportV4ModelRuntimeConfig,
   resolveReportV4LockedModelRuntime,
   type ReportV4ModelRuntimeConfig
@@ -232,7 +232,7 @@ function createSenseNovaRuntime(
   region: string,
   dependencies: ResolveProviderProfileRuntimeDependencies
 ): ProviderProfileRuntime {
-  if (modelRuntime.modelProfile.profileId !== REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID) {
+  if (modelRuntime.modelProfile.profileId !== REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID) {
     throw new ProviderProfileRuntimeError("provider_profile_conflict", "The SenseNova profile resolved an incompatible V4 model profile.");
   }
   const config = readSenseNovaConfig(environment);

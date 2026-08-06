@@ -10,13 +10,16 @@ import {
 } from "@open-geo-console/ai-report-engine";
 import profilePayload from "../../../../config/model-profiles/report-v4-mimo-v2.5-pro.json";
 import sensenovaProfilePayload from "../../../../config/model-profiles/report-v4-sensenova-deepseek-v4-flash-v1.json";
+import sensenovaMimoProfilePayload from "../../../../config/model-profiles/report-v4-sensenova-mimo-v2.5-pro-v1.json";
 
 export const REPORT_V4_MIMO_V25_PRO_PROFILE_ID = "report-v4-mimo-v2.5-pro-v1" as const;
 export const REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID = "report-v4-sensenova-deepseek-v4-flash-v1" as const;
+export const REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID = "report-v4-sensenova-mimo-v2.5-pro-v1" as const;
 
 export const REPORT_V4_MODEL_PROFILE_IDS = Object.freeze([
   REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
-  REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID
+  REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID,
+  REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID
 ] as const);
 export type ReportV4ModelProfileId = (typeof REPORT_V4_MODEL_PROFILE_IDS)[number];
 
@@ -112,8 +115,9 @@ const providerCapabilities = createModelProviderCapabilityRegistry([{
 
 const modelProfile = parseModelProfile(profilePayload);
 const sensenovaModelProfile = parseModelProfile(sensenovaProfilePayload);
+const sensenovaMimoModelProfile = parseModelProfile(sensenovaMimoProfilePayload);
 const profileRegistry = createModelProfileRegistry({
-  profiles: [modelProfile, sensenovaModelProfile],
+  profiles: [modelProfile, sensenovaModelProfile, sensenovaMimoModelProfile],
   providers: providerCapabilities,
   estimators: tokenEstimators
 });
@@ -123,6 +127,7 @@ const profileRegistry = createModelProfileRegistry({
 // ModelProfile shape; endpoint and estimator resolution are admission checks.
 const resolvedProfile = profileRegistry.load(REPORT_V4_MIMO_V25_PRO_PROFILE_ID);
 const sensenovaResolvedProfile = profileRegistry.load(REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID);
+const sensenovaMimoResolvedProfile = profileRegistry.load(REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID);
 
 const runtime = Object.freeze({
   modelProfile,
@@ -136,11 +141,18 @@ const sensenovaRuntime = Object.freeze({
   tokenEstimator: tokenEstimators.resolve(SENSENOVA_TOKENIZER_ID),
   tokenEstimators
 });
+const sensenovaMimoRuntime = Object.freeze({
+  modelProfile: sensenovaMimoModelProfile,
+  resolvedProfile: sensenovaMimoResolvedProfile,
+  tokenEstimator: tokenEstimators.resolve(TOKENIZER_ID),
+  tokenEstimators
+});
 
 const APPROVED_RUNTIMES: Readonly<Record<ReportV4ModelProfileId, ReportV4ModelRuntimeConfig>> =
   Object.freeze({
     [REPORT_V4_MIMO_V25_PRO_PROFILE_ID]: runtime,
-    [REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID]: sensenovaRuntime
+    [REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID]: sensenovaRuntime,
+    [REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID]: sensenovaMimoRuntime
   });
 
 export function loadReportV4ModelRuntimeConfig(
@@ -177,7 +189,7 @@ export function resolveReportV4LockedModelRuntime(value: unknown): ReportV4Model
 
 export function modelProfileIdForProviderProfile(value: string | undefined): ReportV4ModelProfileId {
   if (value === "mimo_native") return REPORT_V4_MIMO_V25_PRO_PROFILE_ID;
-  if (value === "sensenova_anysearch") return REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID;
+  if (value === "sensenova_anysearch") return REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID;
   throw new Error("OGC_PROVIDER_PROFILE must be exactly mimo_native or sensenova_anysearch; no default is allowed.");
 }
 

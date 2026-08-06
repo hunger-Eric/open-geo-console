@@ -11,7 +11,7 @@ import {
 } from "./mimo-provider";
 import { createReportV4SiteSynthesisProvider } from "./mimo-site-synthesis-provider";
 import {
-  REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID,
+  REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID,
   resolveReportV4LockedModelRuntime,
   type ReportV4ModelRuntimeConfig
 } from "./model-runtime-config";
@@ -23,7 +23,7 @@ import {
 const SENSENOVA_BASE_URL = "https://token.sensenova.cn/v1";
 const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1";
 const APPROVED_AI_BASE_URLS = new Set([SENSENOVA_BASE_URL, OPENCODE_GO_BASE_URL]);
-const SENSENOVA_MODEL = "deepseek-v4-flash";
+const SENSENOVA_MODEL = "mimo-v2.5-pro";
 
 export interface ReportV4OpenAiCompatibleProviderDependencies {
   readonly environment: NodeJS.ProcessEnv;
@@ -120,7 +120,7 @@ function normalizeAiBaseUrl(value: string | undefined): string | null {
 function requireSenseNovaRuntime(runtime: ReportV4ModelRuntimeConfig): ReportV4ModelRuntimeConfig {
   const approved = resolveReportV4LockedModelRuntime(runtime.modelProfile);
   if (approved !== runtime
-      || runtime.modelProfile.profileId !== REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID
+      || runtime.modelProfile.profileId !== REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID
       || Object.values(runtime.modelProfile.operations).some(({ model }) => model !== SENSENOVA_MODEL)) {
     throw new AiClientError("The locked Report V4 runtime conflicts with the SenseNova profile.", { code: "configuration" });
   }

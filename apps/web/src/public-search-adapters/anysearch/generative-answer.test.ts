@@ -9,7 +9,7 @@ const searchPayload = { code: 0, data: { results: [
   { title: "乙服务说明", url: "https://b.example/services", snippet: "乙提供国内运输服务", content: "discard this too" }
 ] } };
 const request = { questionId: "question-1", question: "谁提供国际物流服务？", locale: "zh-CN", region: "CN", signal: new AbortController().signal, semanticValidation: "free_direct" as const };
-const client = (value: unknown): JsonCompletionClient => ({ configuredModel: "deepseek-v4-flash", completeJson: vi.fn(async () => ({ value, modelId: "deepseek-v4-flash", rawContent: JSON.stringify(value), requestId: "model-request" })) });
+const client = (value: unknown): JsonCompletionClient => ({ configuredModel: "mimo-v2.5-pro", completeJson: vi.fn(async () => ({ value, modelId: "mimo-v2.5-pro", rawContent: JSON.stringify(value), requestId: "model-request" })) });
 const search = vi.fn(async () => new Response(JSON.stringify(searchPayload), { status: 200 }));
 
 describe("AnySearch grounded SenseNova answer provider", () => {
@@ -76,8 +76,8 @@ describe("AnySearch grounded SenseNova answer provider", () => {
       OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY: searchConfig.apiKey,
       OGC_AI_BASE_URL: "https://model.example/v1",
       OGC_AI_API_KEY: "model-key",
-      OGC_AI_MODEL: "deepseek-v4-flash"
-    }, { locale: "zh-CN", region: "CN" }, { client: client({}) })).toMatchObject({ providerId: "anysearch+sensenova", model: "deepseek-v4-flash", searchMode: "anysearch_rest" });
+      OGC_AI_MODEL: "mimo-v2.5-pro"
+    }, { locale: "zh-CN", region: "CN" }, { client: client({}) })).toMatchObject({ providerId: "anysearch+sensenova", model: "mimo-v2.5-pro", searchMode: "anysearch_rest" });
     expect(() => resolveAnySearchGenerativeSearchAnswerProvider({ OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL: searchConfig.endpoint, OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY: searchConfig.apiKey }, { locale: "zh-CN", region: "CN" }, { client: client({}) })).toThrow(AiClientError);
   });
 });

@@ -93,7 +93,8 @@ function Write-RuntimeEnv {
     Require-Values $values @("OGC_AI_BASE_URL", "OGC_AI_API_KEY", "OGC_AI_MODEL", "OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL", "OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY") "$Environment SenseNova and AnySearch provider profile"
     if (($values.ContainsKey("OGC_REPORT_V4_MIMO_BASE_URL") -and -not [string]::IsNullOrWhiteSpace($values["OGC_REPORT_V4_MIMO_BASE_URL"])) -or ($values.ContainsKey("OGC_REPORT_V4_MIMO_API_KEY") -and -not [string]::IsNullOrWhiteSpace($values["OGC_REPORT_V4_MIMO_API_KEY"]))) { throw "Stale MiMo V4 routing values conflict with sensenova_anysearch." }
     if ($values.ContainsKey("OGC_PUBLIC_SEARCH_ADAPTER") -and $values["OGC_PUBLIC_SEARCH_ADAPTER"] -ne "anysearch") { throw "OGC_PUBLIC_SEARCH_ADAPTER conflicts with sensenova_anysearch." }
-    if ($values.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -and $values["OGC_REPORT_V4_MODEL_PROFILE_ID"] -ne "report-v4-sensenova-deepseek-v4-flash-v1") { throw "OGC_REPORT_V4_MODEL_PROFILE_ID conflicts with sensenova_anysearch." }
+    if ($values["OGC_AI_MODEL"] -ne "mimo-v2.5-pro") { throw "OGC_AI_MODEL conflicts with sensenova_anysearch." }
+    if ($values.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -and $values["OGC_REPORT_V4_MODEL_PROFILE_ID"] -ne "report-v4-sensenova-mimo-v2.5-pro-v1") { throw "OGC_REPORT_V4_MODEL_PROFILE_ID conflicts with sensenova_anysearch." }
   } else {
     throw "OGC_PROVIDER_PROFILE is unsupported: $profile"
   }

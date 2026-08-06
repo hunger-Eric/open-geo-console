@@ -172,7 +172,8 @@ try {
     $probeAdapter = "anysearch"
     if (($runtime.ContainsKey("OGC_REPORT_V4_MIMO_BASE_URL") -and -not [string]::IsNullOrWhiteSpace($runtime["OGC_REPORT_V4_MIMO_BASE_URL"])) -or ($runtime.ContainsKey("OGC_REPORT_V4_MIMO_API_KEY") -and -not [string]::IsNullOrWhiteSpace($runtime["OGC_REPORT_V4_MIMO_API_KEY"]))) { throw "Stale MiMo V4 routing values conflict with sensenova_anysearch." }
     if ($runtime.ContainsKey("OGC_PUBLIC_SEARCH_ADAPTER") -and $runtime["OGC_PUBLIC_SEARCH_ADAPTER"] -ne "anysearch") { throw "OGC_PUBLIC_SEARCH_ADAPTER conflicts with sensenova_anysearch." }
-    if ($runtime.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -and $runtime["OGC_REPORT_V4_MODEL_PROFILE_ID"] -ne "report-v4-sensenova-deepseek-v4-flash-v1") { throw "OGC_REPORT_V4_MODEL_PROFILE_ID conflicts with sensenova_anysearch." }
+    if ($runtime["OGC_AI_MODEL"] -ne "mimo-v2.5-pro") { throw "OGC_AI_MODEL conflicts with sensenova_anysearch." }
+    if ($runtime.ContainsKey("OGC_REPORT_V4_MODEL_PROFILE_ID") -and $runtime["OGC_REPORT_V4_MODEL_PROFILE_ID"] -ne "report-v4-sensenova-mimo-v2.5-pro-v1") { throw "OGC_REPORT_V4_MODEL_PROFILE_ID conflicts with sensenova_anysearch." }
   } else {
     throw "OGC_PROVIDER_PROFILE is unsupported."
   }

@@ -6,10 +6,12 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import profilePayload from "../../../../config/model-profiles/report-v4-mimo-v2.5-pro.json";
 import sensenovaProfilePayload from "../../../../config/model-profiles/report-v4-sensenova-deepseek-v4-flash-v1.json";
+import sensenovaMimoProfilePayload from "../../../../config/model-profiles/report-v4-sensenova-mimo-v2.5-pro-v1.json";
 import {
   REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
   REPORT_V4_MODEL_CAPABILITY_EVIDENCE,
   REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID,
+  REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID,
   loadReportV4ModelRuntimeConfig,
   resolveReportV4LockedModelRuntime
 } from "./model-runtime-config";
@@ -110,25 +112,42 @@ describe("Report V4 production model runtime configuration", () => {
     expect(REPORT_V4_MODEL_CAPABILITY_EVIDENCE.every(Object.isFrozen)).toBe(true);
   });
 
-  it("loads the conservative SenseNova profile with externally grounded question answering", () => {
+  it("loads the conservative OpenCode MiMo profile with externally grounded question answering", () => {
     const runtime = loadReportV4ModelRuntimeConfig(sensenovaEnvironment());
-    expect(runtime.modelProfile).toEqual(parseModelProfile(sensenovaProfilePayload));
+    expect(runtime.modelProfile).toEqual(parseModelProfile(sensenovaMimoProfilePayload));
     expect(runtime.modelProfile).toMatchObject({
-      profileId: REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID,
+      profileId: REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID,
       provider: "sensenova",
       adapterId: "sensenova-openai-compatible-json-v1"
     });
-    expect(runtime.modelProfile.operations.pageAnalysis).toMatchObject({
-      contextWindowTokens: 65_536,
-      maxInputTokens: 32_768,
-      maxOutputTokens: 32_768
+    expect(Object.values(runtime.modelProfile.operations).every(({ model }) => model === "mimo-v2.5-pro")).toBe(true);
+    expect(Object.values(runtime.modelProfile.operations).every(({ tokenizer }) => tokenizer === "mimo-v2.5-pro-utf8-conservative-v1")).toBe(true);
+    expect(runtime.modelProfile.operations).toMatchObject({
+      pageAnalysis: {
+        contextWindowTokens: 262_144, maxInputTokens: 65_536, maxOutputTokens: 32_768,
+        timeoutMs: 120_000, nativeWebSearch: false
+      },
+      websiteSynthesis: {
+        contextWindowTokens: 262_144, maxInputTokens: 131_072, maxOutputTokens: 16_384,
+        timeoutMs: 180_000, nativeWebSearch: false
+      },
+      questionAnswer: {
+        contextWindowTokens: 262_144, maxInputTokens: 65_536, maxOutputTokens: 16_384,
+        timeoutMs: 180_000, nativeWebSearch: false
+      },
+      sourceDiagnosis: {
+        contextWindowTokens: 262_144, maxInputTokens: 65_536, maxOutputTokens: 8_192,
+        timeoutMs: 120_000, nativeWebSearch: false
+      }
     });
     expect(runtime.resolvedProfile.operations.questionAnswer).toMatchObject({
       nativeWebSearch: false,
       structuredOutput: true,
       endpointCapability: "external-search-grounded-structured-output"
     });
-    expect(resolveReportV4LockedModelRuntime(structuredClone(sensenovaProfilePayload))).toBe(runtime);
+    expect(resolveReportV4LockedModelRuntime(structuredClone(sensenovaMimoProfilePayload))).toBe(runtime);
+    expect(resolveReportV4LockedModelRuntime(structuredClone(sensenovaProfilePayload)).modelProfile.profileId)
+      .toBe(REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID);
   });
 
   it("returns a deeply frozen snapshot-ready profile and deterministic UTF-8 estimator", () => {
@@ -273,7 +292,7 @@ function mimoEnvironment(): NodeJS.ProcessEnv {
 }
 
 function sensenovaEnvironment(): NodeJS.ProcessEnv {
-  return { NODE_ENV: "test", OGC_PROVIDER_PROFILE: "sensenova_anysearch", OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID };
+  return { NODE_ENV: "test", OGC_PROVIDER_PROFILE: "sensenova_anysearch", OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID };
 }
 
 function operation(profile: Record<string, unknown>, name: string): Record<string, unknown> {

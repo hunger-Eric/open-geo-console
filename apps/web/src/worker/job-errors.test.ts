@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   AiClientError,
   ModelTokenBudgetError,
+  PageAnalysisBatchError,
+  PageAnalysisContractError,
   ReportLanguageValidationError,
   ReportSemanticReviewEvidenceMissingError,
   SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE
@@ -78,6 +80,28 @@ describe("job error normalization", () => {
 
     expect(normalizeJobError(batch, { ...context, phase: "page_analysis" })).toMatchObject({
       code: "ai_client_invalid_response", classification: "transient", type: "PageAnalysisBatchError"
+    });
+  });
+
+  it("normalizes a typed page-analysis contract rejection without retaining model content", () => {
+    const contract = new PageAnalysisContractError(1, 0, [
+      { path: "$.analyses[0].summary", reason: "summary_invalid" }
+    ]);
+    const batch = new PageAnalysisBatchError(contract.message, [], { cause: contract });
+    const normalized = normalizeJobError(batch, { ...context, phase: "page_analysis" });
+
+    expect(normalized).toMatchObject({
+      code: "page_analysis_contract_invalid",
+      classification: "transient",
+      type: "PageAnalysisBatchError"
+    });
+    expect(normalized.message).toContain("$.analyses[0].summary:summary_invalid");
+    expect(normalized.retryableAt).toBeInstanceOf(Date);
+    expect(JSON.stringify(normalized)).not.toContain("model response body");
+    expect(escalateFingerprintRecurrence(normalized)).toMatchObject({
+      code: "page_analysis_contract_invalid",
+      classification: "permanent",
+      retryableAt: null
     });
   });
 

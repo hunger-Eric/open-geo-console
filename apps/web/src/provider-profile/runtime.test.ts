@@ -8,7 +8,7 @@ import {
 describe("unified Worker provider profile runtime", () => {
   it.each([
     ["mimo_native", mimoEnvironment(), "mimo", "xiaomi-mimo", "mimo-v2.5-pro"],
-    ["sensenova_anysearch", sensenovaEnvironment(), "anysearch", "sensenova", "deepseek-v4-flash"]
+    ["sensenova_anysearch", sensenovaEnvironment(), "anysearch", "sensenova", "mimo-v2.5-pro"]
   ] as const)("resolves one immutable complete %s bundle", (_id, environment, adapterId, providerId, modelId) => {
     const runtime = resolveProviderProfileRuntime(environment);
     expect(runtime).toMatchObject({ profileId: _id, publicSearchAdapterId: adapterId });
@@ -85,7 +85,7 @@ describe("unified Worker provider profile runtime", () => {
       OGC_REPORT_V4_MIMO_API_KEY: undefined,
       OGC_AI_BASE_URL: "https://token.sensenova.cn/v1",
       OGC_AI_API_KEY: "sense-key",
-      OGC_AI_MODEL: "deepseek-v4-flash"
+      OGC_AI_MODEL: "mimo-v2.5-pro"
     })).toThrow(/incomplete|profile/i);
     expect(() => resolveProviderProfileRuntime({
       ...sensenovaEnvironment(),
@@ -133,10 +133,10 @@ function sensenovaEnvironment(): NodeJS.ProcessEnv {
   return {
     ...baseEnvironment(),
     OGC_PROVIDER_PROFILE: "sensenova_anysearch",
-    OGC_REPORT_V4_MODEL_PROFILE_ID: "report-v4-sensenova-deepseek-v4-flash-v1",
+    OGC_REPORT_V4_MODEL_PROFILE_ID: "report-v4-sensenova-mimo-v2.5-pro-v1",
     OGC_AI_BASE_URL: "https://token.sensenova.cn/v1",
     OGC_AI_API_KEY: "sense-key",
-    OGC_AI_MODEL: "deepseek-v4-flash",
+    OGC_AI_MODEL: "mimo-v2.5-pro",
     OGC_AI_JSON_RESPONSE_FORMAT: "true",
     OGC_PUBLIC_SEARCH_ADAPTER: "anysearch",
     OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL: "https://api.anysearch.com/v1/search",

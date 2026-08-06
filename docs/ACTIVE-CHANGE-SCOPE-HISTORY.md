@@ -7106,3 +7106,170 @@ revised scope.
 - Production untouched. Secrets not committed.
 - Terminal status: **Staging ready for user retest on `255ba9a9`.**
 
+# 2026-08-06 - Superseded before execution: dedicated Staging key only
+
+- The user approved replacing only the local Protected Staging
+  `OGC_AI_API_KEY`, but then requested `MiMo-V2.5` before the operator performed
+  any probe, env edit, container recreation, or external model call.
+- Read-only verification confirmed that the env file and both running Workers
+  still used the prior key identity and `deepseek-v4-flash`; container start
+  times and image IDs were unchanged.
+- The key-only scope was therefore superseded with zero runtime mutation. The
+  combined key-and-model request requires a new scope and approval.
+
+---
+
+# 2026-08-06 - MiMo-V2.5 OpenCode cutover stopped at authentication
+
+- Approved local implementation added an independent exact `MiMo-V2.5`
+  OpenCode-compatible model profile while keeping the historical DeepSeek
+  profile immutable and loadable. Existing operation budgets, timeouts,
+  AnySearch behavior, retry rules, prompts, parsers, and fail-closed semantics
+  were preserved.
+- Verification passed: four focused files with 35 tests, lint with zero errors
+  and six pre-existing warnings, full workspace build, and diff check.
+- The final no-retry page-analysis probe used a clipboard credential whose
+  bounded `sk-` shape, expected suffix, and distinct non-reversible fingerprint
+  all matched the approved input checks. The exact `MiMo-V2.5` request was
+  prepared with the 32,768-token page-analysis budget.
+- OpenCode returned HTTP 401 `authentication` before JSON, language, or output
+  contract validation. The permitted call was not retried.
+- No Staging env value, image, container, report, job, crawl, historical row,
+  database-business state, Vercel, Production, commerce, or Git state changed.
+  Both Staging Workers remain on the prior Flash image/config.
+- Terminal result: **local MiMo implementation is verified but the cutover is
+  stopped; the supplied key is not authorized for the current OpenCode route.**
+
+---
+
+# 2026-08-06 - Corrected lowercase MiMo probe reached model but failed Chinese acceptance
+
+- Approved local correction changed the OpenCode API model identity from the
+  display-style `MiMo-V2.5` to the exact runtime ID `mimo-v2.5`; the endpoint
+  remained `https://opencode.ai/zen/go/v1/chat/completions` and the existing
+  OpenAI-compatible transport was preserved.
+- Local verification passed: four focused files with 35 tests, lint with zero
+  errors and six pre-existing warnings, full workspace build, and diff check.
+- The single permitted no-retry page-analysis probe reached OpenCode and
+  returned HTTP 200 in about 8.2 seconds. The response model was `mimo-v2.5`,
+  `finish_reason=stop`, and usage was 435 prompt, 71 completion, 506 total
+  tokens.
+- JSON parsing and the strict page-analysis schema passed, including page ID,
+  URL, content hash, readability, source length, nonempty chunks, and
+  chunk/source-location constraints.
+- Chinese detection over the returned chunk summaries failed: no character in
+  the configured `U+3400-U+9FFF` range was present. The response body was not
+  retained, so no additional content diagnosis is claimed.
+- Per the approved stop condition, there was no retry and no Staging env,
+  image, container, report, job, crawl, database, Production, Vercel, commerce,
+  or Git mutation.
+- Terminal result: **the key, endpoint, and lowercase model route are valid,
+  but this one output did not meet the Chinese acceptance contract; Staging
+  remains on Flash and was not rebuilt.**
+
+---
+
+# 2026-08-06 - OpenCode MiMo V2.5 Pro probe and three-service Staging rebuild
+
+- The OpenCode/AnySearch profile was changed to exact API model ID
+  `mimo-v2.5-pro` and independent profile ID
+  `report-v4-sensenova-mimo-v2.5-pro-v1`. The original `mimo_native` Pro and
+  DeepSeek Flash profiles remain independently loadable and unchanged.
+- Pro capacity settings were synchronized from the original project profile:
+  262,144 context, operation input/output budgets of
+  `65536/32768`, `131072/16384`, `65536/16384`, and `65536/8192`, with the
+  existing Pro conservative tokenizer/estimator. AnySearch ownership was
+  preserved with `nativeWebSearch=false` for all four operations.
+- Local verification passed: four focused files with 35 tests, lint with zero
+  errors and six pre-existing warnings, full workspace build, exact profile
+  inspection, and `git diff --check`.
+- The single no-retry page-analysis probe used the current clipboard key
+  without exposing it. It returned HTTP 200 in 7.97 seconds with response model
+  `mimo-v2.5-pro`, `finish_reason=stop`, and usage 435 prompt / 220 completion /
+  655 total tokens. JSON, strict schema, exact context bindings, nonempty
+  chunks, and Chinese summaries all passed.
+- Docker preflight passed with 43.63 GiB free on E:. Dependency/base inputs were
+  unchanged, so a thin source-overlay was built from the exact accepted Flash
+  image rather than a full Worker build.
+- Candidate image
+  `sha256:5bcdbe0a9a8efe42b7716e3689d719c0da7743d3580a78a1e6883d7c9ebc655f`
+  (`open-geo-console:staging-f4172b5-mimo-pro-overlay-v1`) has revision label
+  `f4172b591e82a690ec7eb31aa9783329cf830c01`. Rollback Flash image
+  `sha256:4ac17075ed24427bb7fc5bef639ba044a66e738a6e554ccdc6933b3823222e47`
+  was retained. Post-run E: free space was 43.48 GiB.
+- Exactly `staging-worker-free`, `staging-worker-deep`, and `staging-commerce`
+  were recreated. All three run the candidate image; free/deep use
+  `sensenova_anysearch`, `mimo-v2.5-pro`, and the new route-specific profile.
+  Free/deep emitted ready markers, commerce emitted
+  `staging_email_consumer_ready`, and no provider/config or generic error
+  marker appeared from container start through 2026-08-06T10:29:12Z.
+- Independent read-only review accepted this exact three-service replacement.
+  The separate, out-of-scope `staging-commerce-reconcile` container remains on
+  an older Flash image/profile, so no claim is made that every commerce-related
+  Staging container is on Pro. Production container start metadata predates the
+  candidate and no Production action occurred.
+- No report, job, crawl, browser/payment flow, database-business mutation,
+  Vercel action, Production deployment, provider retry, or Git action occurred.
+- Terminal result: **the exact OpenCode MiMo V2.5 Pro route passed its single
+  structured Chinese page-analysis probe and the three named Protected Staging
+  services are healthy on the same verified candidate image.**
+
+---
+
+# 2026-08-06 - Page-analysis contract diagnostics and real four-page probe
+
+- The page-analysis parser retains its existing strict URL, required-field,
+  collection, length, evidence, and language behavior, but whole-item
+  rejections now carry bounded reason codes and schema paths without raw model
+  output or page text.
+- Worker error normalization maps the typed cause to
+  `page_analysis_contract_invalid` instead of `unexpected_internal_error`.
+  The first occurrence remains transient and the existing identical-fingerprint
+  recurrence rule remains the fail-closed permanent backstop.
+- The existing `ai:probe` now runs four bounded local page fixtures through the
+  same `analyzePageBatch` boundary as the Worker, with batch size 1, the locked
+  page-analysis output budget, and no automatic retry.
+- Focused verification passed: 3 files and 83 tests. Lint passed with zero
+  errors and six pre-existing warnings; the full workspace build and diff
+  checks passed. Production/runtime diff stayed within its 220-line budget.
+- Two authorized real probe runs used the current Protected Staging model route.
+  Both returned `mimo-v2.5-pro`, accepted 4 of 4 pages, used batch size 1 and
+  max attempts 1; eight sequential provider calls passed in total.
+- No raw provider response, credential, page text, crawl, database write,
+  report/order/payment, historical mutation, Docker/Worker replacement,
+  Staging deployment, Production/Vercel action, or Git action occurred.
+- Terminal result: **the local diagnostic boundary and exact four-page probe are
+  verified; deployment remains a separate unapproved action.**
+
+---
+
+# 2026-08-06 - Contract-diagnostics Worker overlay failed closed and rolled back
+
+- Preflight passed with 46,749,499,392 bytes free on E:, unchanged dependency
+  inputs, both target Workers on the exact current image with restart count 0,
+  and zero claimable/running/recoverable/terminalizable Staging free/deep work.
+- Exactly one thin overlay was built from the current MiMo Pro Worker image,
+  copying only `apps/` and `packages/`. Candidate image
+  `sha256:b259ea5163cd3a79920be154b9472cd1b74bb48edd5a1497f55311a745526a1b`
+  is 1,266,847,765 bytes and carries exact OCI revision
+  `f4172b591e82a690ec7eb31aa9783329cf830c01`.
+- Exactly `staging-worker-free` and `staging-worker-deep` were recreated. The
+  candidate free Worker emitted its ready marker, but the required identity
+  check found inherited `OGC_DEPLOYMENT_VERSION=docker-desktop-staging` rather
+  than the full revision. The approved scope forbade env-file edits, so the
+  deployment failed closed without continuing acceptance.
+- Both named Workers were immediately recreated on rollback image
+  `sha256:5bcdbe0a9a8efe42b7716e3689d719c0da7743d3580a78a1e6883d7c9ebc655f`.
+  Independent reread confirmed both ready, restart count 0, correct tier,
+  Staging/Preview markers, `sensenova_anysearch`, `mimo-v2.5-pro`, and the Pro
+  profile. Commerce and reconcile identities/start times were unchanged.
+- Candidate and rollback images are retained. E: free space after rollback is
+  46,679,183,360 bytes, about 67.1 MiB below preflight; image count is 67 versus
+  66 before. No image/cache cleanup was attempted.
+- No source/env/secret file, database, report/job, model call, commerce,
+  Vercel/Production, or Git state was mutated by the deployment operation;
+  `git diff --check` passed.
+- Terminal result: **the diagnostic code is not deployed; Staging is healthy on
+  the prior image and a retry requires new deployment-version edit authority.**
+
+---

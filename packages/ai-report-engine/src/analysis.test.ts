@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { PageAnalysisBatchError, analyzePageBatch } from "./analysis";
+import { PageAnalysisBatchError, PageAnalysisContractError, analyzePageBatch } from "./analysis";
 import { AiClientError, type AiClientErrorCode, type JsonCompletionClient, type JsonCompletionRequest } from "./client";
 import type { ExtractedPage } from "./types";
 
@@ -54,6 +54,36 @@ describe("analyzePageBatch semantic-validation seam", () => {
     await expect(analyzePageBatch(clientReturning(overlong), {
       pages: [page], locale: "en", maxAttempts: 1, semanticValidation: "deferred"
     })).rejects.toThrow(/required page analyses|retained bound/u);
+  });
+
+  it.each([
+    [{ analysis: mixedLanguageAnalysis.analyses }, "$.analyses", "analyses_missing_or_invalid"],
+    [{ analyses: [{ ...mixedLanguageAnalysis.analyses[0], url: "https://unowned.example/private-value" }] }, "$.analyses[0].url", "url_not_owned"],
+    [{ analyses: [{ ...mixedLanguageAnalysis.analyses[0], summary: `private-value-${"x".repeat(601)}` }] }, "$.analyses[0].summary", "summary_invalid"],
+    [{ analyses: [{ ...mixedLanguageAnalysis.analyses[0], organizationSignals: ["one", "two", "three", "private-value"] }] }, "$.analyses[0].organizationSignals", "organization_signals_invalid"],
+    [{ analyses: [{ ...mixedLanguageAnalysis.analyses[0], strengths: { value: "private-value" } }] }, "$.analyses[0].strengths", "strengths_invalid"],
+    [{ analyses: [{ ...mixedLanguageAnalysis.analyses[0], findings: { value: "private-value" } }] }, "$.analyses[0].findings", "findings_invalid"]
+  ] as const)("retains only the bounded rejection reason %s", async (value, path, reason) => {
+    let rejected: unknown;
+    try {
+      await analyzePageBatch(clientReturning(value), {
+        pages: [page], locale: "zh-CN", maxAttempts: 1, semanticValidation: "deferred"
+      });
+    } catch (error) {
+      rejected = error;
+    }
+
+    expect(rejected).toBeInstanceOf(PageAnalysisBatchError);
+    const contract = (rejected as Error & { cause?: unknown }).cause;
+    expect(contract).toBeInstanceOf(PageAnalysisContractError);
+    expect(contract).toMatchObject({
+      code: "page_analysis_contract_invalid",
+      expectedCount: 1,
+      acceptedCount: 0,
+      issues: [{ path, reason }]
+    });
+    expect((contract as Error).message).not.toContain("private-value");
+    expect((contract as Error).message.length).toBeLessThan(1_000);
   });
 
   it("keeps omitted and explicit legacy prompts and failures identical", async () => {

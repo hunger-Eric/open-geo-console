@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import {
   AiClientError,
   ModelTokenBudgetError,
+  PAGE_ANALYSIS_CONTRACT_INVALID_CODE,
+  PageAnalysisContractError,
   ReportSemanticReviewEvidenceMissingError,
   SEMANTIC_REVIEW_EVIDENCE_MISSING_CODE
 } from "@open-geo-console/ai-report-engine";
@@ -204,6 +206,9 @@ function resolveTypedBoundaryError(
   if (error instanceof ModelTokenBudgetError) {
     return { code: "model_token_budget_rejected", classification: "permanent" };
   }
+  if (error instanceof PageAnalysisContractError) {
+    return { code: PAGE_ANALYSIS_CONTRACT_INVALID_CODE, classification: "transient" };
+  }
   if (error instanceof ProviderDiscoveryResumeIdentityMismatchError) {
     return { code: "provider_discovery_resume_identity_mismatch", classification: "permanent" };
   }
@@ -232,6 +237,9 @@ function resolveTypedBoundaryError(
     }
     if (row.name === "ModelTokenBudgetError") {
       return { code: "model_token_budget_rejected", classification: "permanent" };
+    }
+    if (row.name === "PageAnalysisContractError" || row.code === PAGE_ANALYSIS_CONTRACT_INVALID_CODE) {
+      return { code: PAGE_ANALYSIS_CONTRACT_INVALID_CODE, classification: "transient" };
     }
     // Duck-typed AiClient / discovery names for cross-bundle rethrows without shared class identity.
     if (row.name === "AiClientError") {
