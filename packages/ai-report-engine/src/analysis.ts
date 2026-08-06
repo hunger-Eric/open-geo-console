@@ -101,11 +101,21 @@ function boundedText(value: unknown, maxCharacters: number): string | null {
     : null;
 }
 
-function boundedTextArray(value: unknown): string[] | null {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > PAGE_ANALYSIS_LIMITS.collectionItems) return null;
-  const parsed = value.map((item) => boundedText(item, PAGE_ANALYSIS_LIMITS.collectionItemCharacters));
-  return parsed.some((item) => item === null) ? null : parsed as string[];
+function cappedRequiredText(value: unknown, maxCharacters: number): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.slice(0, maxCharacters)
+    : null;
+}
+
+function normalizedTextArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const parsed: string[] = [];
+  for (const item of value) {
+    const text = boundedText(item, PAGE_ANALYSIS_LIMITS.collectionItemCharacters);
+    if (text) parsed.push(text);
+    if (parsed.length === PAGE_ANALYSIS_LIMITS.collectionItems) break;
+  }
+  return parsed;
 }
 
 function canonicalUrl(value: string): string | null {
@@ -215,30 +225,19 @@ function parseBatch(value: unknown, pages: readonly ExtractedPage[]): {
       issues.push({ path: `${path}.url`, reason: "url_duplicate" });
       continue;
     }
-    const summary = boundedText(record.summary, PAGE_ANALYSIS_LIMITS.summaryCharacters);
-    const organizationSignals = boundedTextArray(record.organizationSignals);
-    const strengths = boundedTextArray(record.strengths);
+    const summary = cappedRequiredText(record.summary, PAGE_ANALYSIS_LIMITS.summaryCharacters);
+    const organizationSignals = normalizedTextArray(record.organizationSignals);
+    const strengths = normalizedTextArray(record.strengths);
     if (!summary) {
       issues.push({ path: `${path}.summary`, reason: "summary_invalid" });
       continue;
     }
-    if (!organizationSignals) {
-      issues.push({ path: `${path}.organizationSignals`, reason: "organization_signals_invalid" });
-      continue;
-    }
-    if (!strengths) {
-      issues.push({ path: `${path}.strengths`, reason: "strengths_invalid" });
-      continue;
-    }
     seen.add(url);
-    if (record.findings !== undefined && (!Array.isArray(record.findings) || record.findings.length > PAGE_ANALYSIS_LIMITS.findings)) {
-      issues.push({ path: `${path}.findings`, reason: "findings_invalid" });
-      continue;
-    }
     const findings = Array.isArray(record.findings)
       ? record.findings
           .map((finding) => parseFinding(finding, pages))
           .filter((finding): finding is PageAnalysisFinding => finding !== null)
+          .slice(0, PAGE_ANALYSIS_LIMITS.findings)
       : [];
     analyses.push({
       url: page.url,

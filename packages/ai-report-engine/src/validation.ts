@@ -182,15 +182,10 @@ export function validateAiWebsiteReportV1(value: unknown): ValidationIssue[] {
         .map((item) => item.dimension)
         .filter((item): item is string => typeof item === "string")
     );
-    for (const key of dimensionKeys) {
-      if (!present.has(key)) {
-        issues.push({ path: "$.dimensionScores", message: `Missing dimension ${key}.` });
-      }
-    }
-    if (report.dimensionScores.length !== dimensionKeys.length || present.size !== dimensionKeys.length) {
+    if (present.size !== report.dimensionScores.length) {
       issues.push({
         path: "$.dimensionScores",
-        message: "Expected each report dimension exactly once."
+        message: "Expected each supplied report dimension at most once."
       });
     }
   }

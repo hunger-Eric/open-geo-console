@@ -7298,3 +7298,42 @@ revised scope.
 - Production untouched. Secrets not committed.
 - Terminal status: **Staging ready for user retest on `0374ce79`.**
 
+---
+
+# 2026-08-06 - Optional page-array normalization scope superseded before approval
+
+- The unapproved `FROZEN` scope limited production behavior to normalizing
+  `organizationSignals` and `strengths` in page analysis.
+- No production or test code was changed under that scope.
+- A read-only audit found the same model-output/fatality boundary also affects
+  website synthesis and Paid semantic review. The user directed the work to
+  prioritize all three main-path boundaries.
+- The single-field scope was therefore superseded by a new `FROZEN`
+  three-phase scope; this history entry is context only and grants no authority.
+
+---
+
+# 2026-08-06 - Three-phase main-path model-output compatibility repair
+
+- User approved the exact page-analysis, website-synthesis, and Paid semantic-
+  review allowlist. No prompt, provider, model/profile, crawler, database, UI,
+  commerce, dependency, deployment, or Git behavior changed.
+- Page analysis now keeps the page identity and required summary strict while
+  capping the summary and filtering/capping optional text arrays and findings.
+- Website synthesis now defaults or filters optional presentation containers,
+  accepts a unique valid dimension subset without inventing missing scores, and
+  keeps core prose plus evidence verification mandatory.
+- Paid global/catalog semantic review now uses program-owned envelope values,
+  canonicalizes the reviewed source-selection hash, ignores surplus top-level
+  presentation keys, and reorders exact owned identities before strict parsing.
+  Missing, duplicate, or foreign identities and all evidence/receipt boundaries
+  remain fatal; blocked Paid fields still retain their original prose.
+- Red-before/green-after focused tests passed. Final AI-engine result: 27 files,
+  474 tests passed. Full `npm run lint` completed with 0 errors and 6 pre-existing
+  warnings outside the allowlist; full `npm run build` passed; `git diff --check`
+  passed.
+- Production changed-line budgets: page analysis 39/45, synthesis plus
+  validation 119/120, Paid semantic review 91/120. Tests: 156/360.
+- Terminal result: **implementation and local regression verification complete;
+  deployment and a real report remain unperformed and unapproved.**
+

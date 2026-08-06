@@ -191,16 +191,48 @@ describe("website synthesis semantic-validation seam", () => {
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
-  it("keeps Direct website-synthesis contract failures to one call", async () => {
-    const invalid = modelOutput();
-    (invalid.dimensionScores as unknown[]).pop();
-    const client = clientReturning(invalid);
-    await expect(synthesizeWebsiteReportWithRecovery(client, input(), {
+  it("accepts a valid subset of dimensions in one Direct model call", async () => {
+    const partial = modelOutput();
+    (partial.dimensionScores as unknown[]).pop();
+    const client = clientReturning(partial);
+    const result = await synthesizeWebsiteReportWithRecovery(client, input(), {
       maxAttempts: 3,
       semanticValidation: "free_direct",
       delay: async () => undefined
-    })).rejects.toThrow();
+    });
+    expect(result.report.dimensionScores).toHaveLength(5);
     expect(client.completeJson).toHaveBeenCalledOnce();
+  });
+
+  it("normalizes missing optional containers and discards malformed optional rows", async () => {
+    const drifted = modelOutput();
+    Object.assign(drifted.organizationProfile as Record<string, unknown>, {
+      brandNames: undefined, productsAndServices: undefined, capabilities: undefined,
+      targetAudiences: undefined, marketsAndRegions: undefined, evidence: undefined
+    });
+    Object.assign(drifted.executiveSummary as Record<string, unknown>, {
+      strengths: undefined, keyRisks: undefined, topPriorities: undefined
+    });
+    drifted.dimensionScores = [
+      (modelOutput().dimensionScores as unknown[])[0],
+      { dimension: "organizationClarity", score: "bad" },
+      { dimension: "unknown", score: 80 }
+    ];
+    drifted.pageTypeAnalyses = [{ pageType: "unknown", sampledUrls: "bad" }, null];
+    drifted.findings = [{ title: "missing required finding fields" }];
+    delete drifted.roadmap;
+
+    const result = await synthesizeWebsiteReport(clientReturning(drifted), input(), undefined, [], "deferred");
+    expect(result.report).toMatchObject({
+      organizationProfile: {
+        brandNames: [], productsAndServices: [], capabilities: [],
+        targetAudiences: [], marketsAndRegions: [], evidence: []
+      },
+      executiveSummary: { strengths: [], keyRisks: [], topPriorities: [] },
+      pageTypeAnalyses: [], findings: [],
+      roadmap: { immediate: [], nextPhase: [], ongoing: [] }
+    });
+    expect(result.report.dimensionScores.map(({ dimension }) => dimension)).toEqual(["organizationClarity"]);
   });
 
   it("recovers Direct website synthesis from one transient invalid-JSON response", async () => {
@@ -255,10 +287,16 @@ describe("website synthesis semantic-validation seam", () => {
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
-  it("still rejects malformed deferred structure and unbound evidence", async () => {
-    const invalid = modelOutput();
-    (invalid.dimensionScores as unknown[]).pop();
-    await expect(synthesizeWebsiteReport(clientReturning(invalid), input(), undefined, [], "deferred"))
+  it("still requires core prose and filters unbound evidence", async () => {
+    for (const field of ["summary", "identityConsistency"] as const) {
+      const invalid = modelOutput();
+      delete (invalid.organizationProfile as Record<string, unknown>)[field];
+      await expect(synthesizeWebsiteReport(clientReturning(invalid), input(), undefined, [], "deferred"))
+        .rejects.toThrow();
+    }
+    const missingOverview = modelOutput();
+    delete (missingOverview.executiveSummary as Record<string, unknown>).overview;
+    await expect(synthesizeWebsiteReport(clientReturning(missingOverview), input(), undefined, [], "deferred"))
       .rejects.toThrow();
 
     const unbound = modelOutput();

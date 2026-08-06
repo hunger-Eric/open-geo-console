@@ -7,7 +7,7 @@ import {
   type AiWebsiteReportV1,
   type ReportSynthesisInput
 } from "./types";
-import { parseAiWebsiteReportV1 } from "./validation";
+import { AI_REPORT_DIMENSIONS, AI_REPORT_PAGE_TYPES, parseAiWebsiteReportV1 } from "./validation";
 import {
   GEO_TERMINOLOGY_POLICY,
   ReportLanguageValidationError,
@@ -552,23 +552,99 @@ async function delayWithSignal(delay: (milliseconds: number) => Promise<void>, m
 
 function normalizeModelOutput(value: Record<string, unknown>): Record<string, unknown> {
   const normalized = stripNullOptionalStrings(value) as Record<string, unknown>;
-  if (!Array.isArray(normalized.findings)) return normalized;
-
+  const profile = objectOrEmpty(normalized.organizationProfile);
+  const executive = objectOrEmpty(normalized.executiveSummary);
+  const roadmap = objectOrEmpty(normalized.roadmap);
+  const dimensions = new Set<string>();
   const usedIds = new Set<string>();
-  normalized.findings = normalized.findings.map((finding, index) => {
-    if (!finding || typeof finding !== "object" || Array.isArray(finding)) return finding;
-    const record = { ...(finding as Record<string, unknown>) };
-    const baseId = typeof record.id === "string" && record.id.trim()
-      ? record.id.trim()
-      : `finding-${index + 1}`;
-    let uniqueId = baseId;
-    let suffix = 2;
-    while (usedIds.has(uniqueId)) uniqueId = `${baseId}-${suffix++}`;
-    usedIds.add(uniqueId);
-    record.id = uniqueId;
-    return record;
-  });
-  return normalized;
+  return {
+    ...normalized,
+    organizationProfile: {
+      ...profile,
+      organizationName: nullableText(profile.organizationName),
+      brandNames: textArray(profile.brandNames),
+      businessModel: nullableText(profile.businessModel),
+      productsAndServices: textArray(profile.productsAndServices),
+      capabilities: textArray(profile.capabilities),
+      targetAudiences: textArray(profile.targetAudiences),
+      marketsAndRegions: textArray(profile.marketsAndRegions),
+      legalEntity: nullableText(profile.legalEntity),
+      confidence: isOneOf(profile.confidence, ["low", "medium", "high"]) ? profile.confidence : "low",
+      evidence: normalizeEvidence(profile.evidence)
+    },
+    executiveSummary: {
+      ...executive,
+      strengths: textArray(executive.strengths),
+      keyRisks: textArray(executive.keyRisks),
+      topPriorities: textArray(executive.topPriorities)
+    },
+    dimensionScores: objectArray(normalized.dimensionScores).flatMap((row) => {
+      const dimension = row.dimension;
+      if (!isOneOf(dimension, AI_REPORT_DIMENSIONS) || dimensions.has(dimension) ||
+          typeof row.score !== "number" || !Number.isFinite(row.score) || row.score < 0 || row.score > 100 ||
+          !nonblank(row.explanation) || !isOneOf(row.confidence, ["low", "medium", "high"])) return [];
+      dimensions.add(dimension);
+      return [{ ...row, evidence: normalizeEvidence(row.evidence) }];
+    }),
+    pageTypeAnalyses: objectArray(normalized.pageTypeAnalyses).flatMap((row) =>
+      isOneOf(row.pageType, AI_REPORT_PAGE_TYPES) ? [{
+        ...row,
+        sampledUrls: textArray(row.sampledUrls),
+        strengths: textArray(row.strengths),
+        commonIssues: textArray(row.commonIssues),
+        recommendations: textArray(row.recommendations),
+        evidence: normalizeEvidence(row.evidence)
+      }] : []),
+    findings: objectArray(normalized.findings).flatMap((row, index) => {
+      if (!nonblank(row.title) || !isOneOf(row.severity, ["critical", "warning", "opportunity"]) ||
+          !nonblank(row.impact) || !nonblank(row.recommendation) ||
+          !isOneOf(row.confidence, ["low", "medium", "high"])) return [];
+      const baseId = nonblank(row.id) ? row.id.trim() : `finding-${index + 1}`;
+      let id = baseId;
+      for (let suffix = 2; usedIds.has(id); suffix += 1) id = `${baseId}-${suffix}`;
+      usedIds.add(id);
+      return [{ ...row, id, evidence: normalizeEvidence(row.evidence) }];
+    }),
+    roadmap: {
+      immediate: normalizeRoadmapItems(roadmap.immediate),
+      nextPhase: normalizeRoadmapItems(roadmap.nextPhase),
+      ongoing: normalizeRoadmapItems(roadmap.ongoing)
+    }
+  };
+}
+
+function objectOrEmpty(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
+
+function objectArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.map(objectOrEmpty).filter((row) => Object.keys(row).length > 0) : [];
+}
+
+function nonblank(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function nullableText(value: unknown): string | null {
+  return nonblank(value) ? value : null;
+}
+
+function textArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter(nonblank) : [];
+}
+
+function isOneOf<T>(value: unknown, allowed: readonly T[]): value is T {
+  return allowed.includes(value as T);
+}
+
+function normalizeEvidence(value: unknown): Record<string, unknown>[] {
+  return objectArray(value).flatMap((row) => nonblank(row.url) && nonblank(row.quote)
+    ? [{ url: row.url, quote: row.quote, ...(nonblank(row.pageElement) ? { pageElement: row.pageElement } : {}) }]
+    : []);
+}
+
+function normalizeRoadmapItems(value: unknown): Record<string, unknown>[] {
+  return objectArray(value).flatMap((row) => nonblank(row.title) && nonblank(row.rationale) ? [{
+    ...row, actions: textArray(row.actions), relatedFindingIds: textArray(row.relatedFindingIds)
+  }] : []);
 }
 
 function stripNullOptionalStrings(value: unknown): unknown {

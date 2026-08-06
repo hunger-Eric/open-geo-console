@@ -762,7 +762,12 @@ export function parseReportSemanticReviewOutput(
   rawInput: unknown
 ): ReportSemanticReviewOutput {
   const input = parseReportSemanticReviewInput(rawInput);
-  const record = strictRecord(value, "$reviewOutput", OUTPUT_KEYS);
+  const normalizePaid = input.lifecycle === "paid_v3"
+    && (input.evidencePolicy === "report_global_v1" || input.sourceSelectionCatalog !== undefined);
+  const normalizedValue = normalizePaid
+    ? normalizePaidReviewOutput(value, input)
+    : value;
+  const record = strictRecord(normalizedValue, "$reviewOutput", OUTPUT_KEYS);
   requireExact(record.version, REPORT_SEMANTIC_REVIEW_CONTRACT, "$reviewOutput.version");
   requireExact(record.inputHash, input.inputHash, "$reviewOutput.inputHash");
   const providerId = requireBoundedText(record.providerId, "$reviewOutput.providerId", MAX_ID_CHARS);
@@ -788,7 +793,9 @@ export function parseReportSemanticReviewOutput(
     throw new TypeError("$reviewOutput source-selection draft fields are allowed only for a catalog-bound Paid V3 review.");
   }
   const sourceSelectionDraftHash = sourceSelectionDraft
-    ? requireHash(record.sourceSelectionDraftHash, "$reviewOutput.sourceSelectionDraftHash")
+    ? normalizePaid
+      ? hashReportSemanticReviewValue(sourceSelectionDraft)
+      : requireHash(record.sourceSelectionDraftHash, "$reviewOutput.sourceSelectionDraftHash")
     : undefined;
   if (sourceSelectionDraft && sourceSelectionDraftHash !== hashReportSemanticReviewValue(sourceSelectionDraft)) {
     throw new TypeError("$reviewOutput.sourceSelectionDraftHash does not match the canonical reviewed draft.");
@@ -811,6 +818,85 @@ export function parseReportSemanticReviewOutput(
       : {}),
     overallDecision
   };
+}
+
+function normalizePaidReviewOutput(
+  value: unknown,
+  input: ReportSemanticReviewInput
+): Record<string, unknown> {
+  const source = requireRecord(value, "$reviewOutput");
+  const normalized: Record<string, unknown> = {};
+  for (const key of OUTPUT_KEYS) {
+    if (source[key] !== undefined) normalized[key] = source[key];
+  }
+  normalized.version = REPORT_SEMANTIC_REVIEW_CONTRACT;
+  normalized.inputHash = input.inputHash;
+  normalized.providerId = input.expectedModel.providerId;
+  normalized.modelId = input.expectedModel.modelId;
+  normalized.fields = reorderPaidRows(
+    source.fields,
+    input.fields.map(({ path }) => path),
+    ["path"],
+    "$reviewOutput.fields"
+  );
+
+  const annotations = requireRecord(source.annotations, "$reviewOutput.annotations");
+  normalized.annotations = {
+    ...annotations,
+    observationResults: reorderPaidRows(
+      annotations.observationResults,
+      input.observationResults.map(({ observationId, resultId }) => `${observationId}\u0000${resultId}`),
+      ["observationId", "resultId"],
+      "$reviewOutput.annotations.observationResults"
+    ),
+    answers: reorderPaidRows(
+      annotations.answers,
+      input.answerSubjects.map(({ questionId }) => questionId),
+      ["questionId"],
+      "$reviewOutput.annotations.answers"
+    ),
+    evidenceUse: reorderPaidRows(
+      annotations.evidenceUse,
+      input.fields.map(({ path }) => path),
+      ["path"],
+      "$reviewOutput.annotations.evidenceUse"
+    ),
+    ...(input.sourceSelectionCatalog
+      ? {
+          sourceSelection: reorderPaidRows(
+            annotations.sourceSelection,
+            input.sourceSelectionCatalog.map(({ annotationId, itemId }) => `${annotationId}\u0000${itemId}`),
+            ["annotationId", "itemId"],
+            "$reviewOutput.annotations.sourceSelection"
+          )
+        }
+      : {})
+  };
+  return normalized;
+}
+
+function reorderPaidRows(
+  value: unknown,
+  expectedKeys: readonly string[],
+  identityFields: readonly string[],
+  path: string
+): unknown[] {
+  const rows = requireArray(value, path, MAX_CATALOG_ROWS);
+  if (rows.length !== expectedKeys.length) {
+    throw new TypeError(`${path} must cover every input-owned identity exactly once.`);
+  }
+  const expected = new Set(expectedKeys);
+  const byIdentity = new Map<string, unknown>();
+  for (const [index, value] of rows.entries()) {
+    const row = requireRecord(value, `${path}[${index}]`);
+    const identity = identityFields.map((field) =>
+      requireBoundedText(row[field], `${path}[${index}].${field}`, MAX_PATH_CHARS)
+    ).join("\u0000");
+    if (!expected.has(identity)) throw new TypeError(`${path}[${index}] has a foreign ${identityFields.join("/")} identity.`);
+    if (byIdentity.has(identity)) throw new TypeError(`${path} contains a duplicate identity.`);
+    byIdentity.set(identity, value);
+  }
+  return expectedKeys.map((identity) => byIdentity.get(identity)!);
 }
 
 export function applyReportSemanticReview(

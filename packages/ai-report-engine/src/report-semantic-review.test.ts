@@ -673,6 +673,41 @@ describe("ReportSemanticReview model output", () => {
     expect(verifyReportSemanticReviewReceipt(applied.receipt, input, review, applied.fields)).toEqual(applied.receipt);
   });
 
+  it("normalizes Paid-owned envelope echoes and row order while ignoring surplus top-level keys", () => {
+    const input = paidGlobalInput();
+    const review = globalReview(input);
+    review.version = "model-owned-version";
+    review.inputHash = "model-owned-input-hash";
+    review.providerId = "model-owned-provider";
+    review.modelId = "model-owned-model";
+    review.presentation = { note: "surplus model presentation" };
+    reviewFields(review).reverse();
+    const annotations = review.annotations as { evidenceUse: Array<Record<string, unknown>> };
+    annotations.evidenceUse.reverse();
+
+    const parsed = parseReportSemanticReviewOutput(review, input);
+    expect(parsed).toMatchObject({
+      version: REPORT_SEMANTIC_REVIEW_CONTRACT,
+      inputHash: input.inputHash,
+      providerId: input.expectedModel.providerId,
+      modelId: input.expectedModel.modelId
+    });
+    expect(parsed.fields.map(({ path }) => path)).toEqual(input.fields.map(({ path }) => path));
+    expect(parsed.annotations.evidenceUse.map(({ path }) => path)).toEqual(input.fields.map(({ path }) => path));
+    expect(parsed).not.toHaveProperty("presentation");
+  });
+
+  it.each([
+    ["missing", (fields: Array<Record<string, unknown>>) => { fields.pop(); }],
+    ["duplicate", (fields: Array<Record<string, unknown>>) => { fields[1] = structuredClone(fields[0]!); }],
+    ["foreign", (fields: Array<Record<string, unknown>>) => { fields[0]!.path = "foreign.path"; }]
+  ])("keeps Paid %s field identities fatal", (_name, mutate) => {
+    const input = paidGlobalInput();
+    const review = globalReview(input);
+    mutate(reviewFields(review));
+    expect(() => parseReportSemanticReviewOutput(review, input)).toThrow(/cover|duplicate|foreign|identity|path/u);
+  });
+
   it.each([
     ["missing", (fields: Array<Record<string, unknown>>) => { fields.pop(); }],
     ["extra", (fields: Array<Record<string, unknown>>) => { fields.push(structuredClone(fields[0]!)); }],

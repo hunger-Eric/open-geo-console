@@ -43,26 +43,41 @@ describe("analyzePageBatch semantic-validation seam", () => {
     expect(requests[0]!.maxTokens).toBe(4_096);
   });
 
-  it("rejects page-analysis prose and collections outside the retained bounds", async () => {
-    const overlong = {
+  it("normalizes presentation-only page fields without another model call", async () => {
+    const validFinding = {
+      title: "Grounded finding",
+      severity: "opportunity",
+      impact: "The page states a concrete service.",
+      evidence: [{ url: page.url, quote: page.text.slice(0, 20) }],
+      recommendation: "Keep the service statement easy to cite.",
+      confidence: "medium"
+    };
+    const drifted = {
       analyses: [{
         ...mixedLanguageAnalysis.analyses[0],
         summary: "x".repeat(601),
-        organizationSignals: ["one", "two", "three", "four"]
+        organizationSignals: { value: "not-an-array" },
+        strengths: ["one", "", 2, "x".repeat(161), "two", "three", "four"],
+        findings: [validFinding, { ...validFinding, evidence: [{ url: page.url, quote: "not on the page" }] }]
       }]
     };
-    await expect(analyzePageBatch(clientReturning(overlong), {
+    const client = clientReturning(drifted);
+    const result = await analyzePageBatch(client, {
       pages: [page], locale: "en", maxAttempts: 1, semanticValidation: "deferred"
-    })).rejects.toThrow(/required page analyses|retained bound/u);
+    });
+    expect(result.analyses[0]).toMatchObject({
+      summary: "x".repeat(600),
+      organizationSignals: [],
+      strengths: ["one", "two", "three"],
+      findings: [expect.objectContaining({ title: "Grounded finding" })]
+    });
+    expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
   it.each([
     [{ analysis: mixedLanguageAnalysis.analyses }, "$.analyses", "analyses_missing_or_invalid"],
     [{ analyses: [{ ...mixedLanguageAnalysis.analyses[0], url: "https://unowned.example/private-value" }] }, "$.analyses[0].url", "url_not_owned"],
-    [{ analyses: [{ ...mixedLanguageAnalysis.analyses[0], summary: `private-value-${"x".repeat(601)}` }] }, "$.analyses[0].summary", "summary_invalid"],
-    [{ analyses: [{ ...mixedLanguageAnalysis.analyses[0], organizationSignals: ["one", "two", "three", "private-value"] }] }, "$.analyses[0].organizationSignals", "organization_signals_invalid"],
-    [{ analyses: [{ ...mixedLanguageAnalysis.analyses[0], strengths: { value: "private-value" } }] }, "$.analyses[0].strengths", "strengths_invalid"],
-    [{ analyses: [{ ...mixedLanguageAnalysis.analyses[0], findings: { value: "private-value" } }] }, "$.analyses[0].findings", "findings_invalid"]
+    [{ analyses: [{ ...mixedLanguageAnalysis.analyses[0], summary: "" }] }, "$.analyses[0].summary", "summary_invalid"]
   ] as const)("retains only the bounded rejection reason %s", async (value, path, reason) => {
     let rejected: unknown;
     try {
