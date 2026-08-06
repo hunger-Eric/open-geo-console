@@ -7083,3 +7083,26 @@ revised scope.
 - Terminal result: **the formal local profile is Flash with a 32768
   page-analysis budget; it is not deployed.**
 
+
+---
+
+## 2026-08-06 - Receipt: Staging Flash + analysis/grounded fixes (`255ba9a9`)
+
+- User-owned local changes committed and pushed as
+  `255ba9a96a73c41b949ca94af51b39719aa9b6e6`
+  (`fix: restore Flash profile with safer grounded answers and page analysis`).
+- Profile/model: `deepseek-v4-flash` on OpenCode Go; pageAnalysis
+  `maxOutputTokens=32768`; worker page batch size 1; ungrounded free-preview
+  answers map to `insufficient_evidence` instead of hard fail.
+- Focused tests: 7 files, 142 passed.
+- Vercel Preview `dpl_GCrt3LjxnHP92t6voRDZzrfdSWB6`,
+  `https://open-geo-console-bheqemb57-itheheda-6857s-projects.vercel.app`,
+  READY; `ogcGitSha`/`githubCommitSha` = candidate.
+- Worker overlay `open-geo-console:staging-255ba9a-flash-analysis-overlay-v1`
+  (`sha256:4ac17075ed24427bb7fc5bef639ba044a66e738a6e554ccdc6933b3823222e47`);
+  free/deep ready with matching revision and deployment version.
+- Fixed alias → candidate Preview.
+- Flash probe: HTTP 200.
+- Production untouched. Secrets not committed.
+- Terminal status: **Staging ready for user retest on `255ba9a9`.**
+
