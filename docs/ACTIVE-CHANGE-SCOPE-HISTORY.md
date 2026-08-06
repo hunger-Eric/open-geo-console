@@ -6918,7 +6918,7 @@ revised scope.
 - Worker overlay `open-geo-console:staging-ec1fff6-pro-overlay-v1`
   (`sha256:0dc9fe26194d16cd8306fa15d6b40426d0d92ec515c9c4027cc0064c9db61875`);
   free/deep ready with matching revision and `OGC_DEPLOYMENT_VERSION`.
-- Fixed alias → candidate Preview.
+- Fixed alias -> candidate Preview.
 - Pro probe: HTTP 200, `responseModel=deepseek-v4-pro`.
 - Production untouched. No historical job replay.
 - Terminal status: **Staging redeployed on DeepSeek V4 Pro.**
@@ -7101,7 +7101,7 @@ revised scope.
 - Worker overlay `open-geo-console:staging-255ba9a-flash-analysis-overlay-v1`
   (`sha256:4ac17075ed24427bb7fc5bef639ba044a66e738a6e554ccdc6933b3823222e47`);
   free/deep ready with matching revision and deployment version.
-- Fixed alias → candidate Preview.
+- Fixed alias -> candidate Preview.
 - Flash probe: HTTP 200.
 - Production untouched. Secrets not committed.
 - Terminal status: **Staging ready for user retest on `255ba9a9`.**
@@ -7293,7 +7293,7 @@ revised scope.
 - Worker overlay `open-geo-console:staging-0374ce7-mimo-pro-overlay-v1`
   (`sha256:4b59d80f6ee04672a6323d4382974d251be96be8201be5e1b2e6f79cf7fcb2a5`);
   free/deep ready with matching revision.
-- Fixed alias → candidate Preview.
+- Fixed alias -> candidate Preview.
 - Model probe: HTTP 200, `responseModel=mimo-v2.5-pro`.
 - Production untouched. Secrets not committed.
 - Terminal status: **Staging ready for user retest on `0374ce79`.**
@@ -7336,4 +7336,32 @@ revised scope.
   validation 119/120, Paid semantic review 91/120. Tests: 156/360.
 - Terminal result: **implementation and local regression verification complete;
   deployment and a real report remain unperformed and unapproved.**
+
+
+---
+
+## 2026-08-06 - Receipt: Staging main-path model-output compatibility (`8c58ae4f`)
+
+- User-owned local changes committed and pushed as
+  `8c58ae4f2800703b922f6658ad754681924b3acd`
+  (`fix: tolerate main-path model output shape drift`).
+- Analysis/synthesis optional arrays capped and normalized; synthesis
+  presentation defaults filled; paid semantic review reorders/normalizes owned
+  envelope fields before strict parse. Focused AI-engine tests: 113 passed in
+  the deploy gate (package suite previously green).
+- Staging env: model `mimo-v2.5-pro`, OpenCode Go, profile
+  `report-v4-sensenova-mimo-v2.5-pro-v1`,
+  `OGC_DEPLOYMENT_VERSION=8c58ae4f2800703b922f6658ad754681924b3acd`.
+- Neon staging DB writable (`default_transaction_read_only=off`).
+- Vercel Preview `dpl_CZnZEBbLe5S7kaZhCZbekEp4c5pQ`,
+  `https://open-geo-console-cy1p9ummw-itheheda-6857s-projects.vercel.app`,
+  READY; `ogcGitSha`/`githubCommitSha` = candidate.
+- Worker overlay `open-geo-console:staging-8c58ae4-compat-overlay-v1`
+  (`sha256:914069ffd1fa05ad2fc795d45edb97df32a2bf82bb345dfbff95dee88c2c6943`);
+  free/deep ready with matching revision.
+- Fixed alias -> candidate Preview
+  (`https://open-geo-console-staging-itheheda.vercel.app`).
+- Model probe: HTTP 200, `responseModel=mimo-v2.5-pro`.
+- Production untouched. Secrets not committed.
+- Terminal status: **Staging ready for user retest on `8c58ae4f`.**
 
