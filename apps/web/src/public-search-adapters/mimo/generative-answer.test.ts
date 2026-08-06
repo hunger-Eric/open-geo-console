@@ -82,12 +82,16 @@ describe("MiMo generative answer adapter", () => {
       ok: true, status: 200,
       json: async () => ({ choices: [{ message: {
         content: JSON.stringify({ answerText: mixedLanguage.answerText, refusal: null }),
-        annotations: [{ type: "url_citation", url: "http://127.0.0.1/private", title: "Unsafe" }]
+        annotations: [
+          { type: "url_citation", url: "http://127.0.0.1/private", title: "Unsafe" },
+          { type: "url_citation", url: "https://authority.example/safe", title: "Safe" }
+        ]
       } }] })
     } as Response));
-    await expect(createMiMoGenerativeSearchAnswerProvider({ config, fetch: unsafeAnnotation })
-      .answerWithSources({ ...input, semanticValidation: "free_direct" }))
-      .rejects.toMatchObject({ errorClass: "malformed" });
+    const filtered = await createMiMoGenerativeSearchAnswerProvider({ config, fetch: unsafeAnnotation })
+      .answerWithSources({ ...input, semanticValidation: "free_direct" });
+    expect(filtered.answerText).toBe(mixedLanguage.answerText);
+    expect(filtered.sources).toEqual([expect.objectContaining({ canonicalUrl: "https://authority.example/safe" })]);
     expect(unsafeAnnotation).toHaveBeenCalledTimes(1);
   });
 

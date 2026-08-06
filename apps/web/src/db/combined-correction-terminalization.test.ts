@@ -83,7 +83,7 @@ describe("combined V3 commercial outcome", () => {
     [[generative("answered"), generative("answered"), generative("answered")], "completed"],
     [[generative("answered"), generative("source_limited"), generative("answered")], "completed_limited"],
     [[generative("answered"), generative("refused"), generative("answered")], "completed_limited"],
-    [[generative("source_limited"), generative("source_limited"), generative("source_limited")], "failed"],
+    [[generative("source_limited"), generative("source_limited"), generative("source_limited")], "completed_limited"],
   ] as const)("maps generative cards to %s", (cards, expected) => {
     expect(combinedV3CommercialOutcome(cards)).toBe(expected);
   });

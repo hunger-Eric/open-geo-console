@@ -14,7 +14,7 @@ import { toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet } from "
 import { closeDatabase, ensureDatabase, getSqlClient } from "@/db";
 import { terminalizePaidCombinedReport } from "@/db/combined-correction-terminalization";
 import { createTestSourceForensicReport } from "@/public-source-forensics/testing";
-import { prepareCombinedGeoReportV3, renderCanonicalCombinedArtifactHtml, type PrepareCombinedGeoReportV3Input } from "@/report/combined-artifact-readiness";
+import { materializePreparedCombinedArtifactV3, prepareCombinedGeoReportV3, renderCanonicalCombinedArtifactHtml, type PrepareCombinedGeoReportV3Input } from "@/report/combined-artifact-readiness";
 import { resolveGenerativeAnswerFirstV3 } from "./answer-first-v3";
 import { buildPaidV3DirectSemantics } from "./paid-v3-direct-semantics";
 import { generateGeoArticleExample } from "./geo-article-example";
@@ -276,6 +276,12 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
     expect(html).toContain("GEO 内容提纲");
     expect(html).toContain(geoArticleExample.outline.workingTitle);
     expect(html).not.toContain("来源0");
+    const ready = await materializePreparedCombinedArtifactV3(report, [], { semanticValidation: "free_direct" });
+    expect(ready.htmlSha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(ready).not.toHaveProperty("pdf");
+    expect(ready).not.toHaveProperty("pdfSha256");
+    expect(ready).not.toHaveProperty("pdfStorageKey");
+    expect(ready).not.toHaveProperty("pageCount");
     await getSqlClient()`UPDATE scan_jobs SET checkpoint=${JSON.stringify({
       freeDirectSemanticsVersion: "free-v4-direct-semantics-v1",
       answerFirstV3: { identityHash: answerResult.checkpoint.identityHash }
@@ -285,18 +291,21 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
       snapshotRefs: snapshots.map((snapshot) => ({
         snapshotId: snapshot.id, cacheIdentity: snapshot.cacheIdentity, freshnessState: "fresh",
         actualCostMicros: 0, allocatedCostMicros: 0, avoidedCostMicros: 0
-      })), htmlSha256: "a".repeat(64), pdfSha256: "b".repeat(64),
-      pdfStorageKey: `private/${ids.artifact}.pdf`, pageCount: 5, semanticValidation: "free_direct"
+      })), htmlSha256: ready.htmlSha256, semanticValidation: "free_direct"
     });
     expect(result).toMatchObject({ outcome: "completed", refundId: null });
-    const state = (await getSqlClient()<Array<{ artifact_status: string; stage: string; fulfillment: string; refund_status: string; refs: number; refunds: number }>>`
+    const state = (await getSqlClient()<Array<{ artifact_status: string; pdf_sha256: string | null; pdf_storage_key: string | null; readiness: Record<string, unknown>; stage: string; fulfillment: string; refund_status: string; refs: number; refunds: number }>>`
       SELECT (SELECT status FROM report_artifact_revisions WHERE id=${ids.artifact}) artifact_status,
+        (SELECT pdf_sha256 FROM report_artifact_revisions WHERE id=${ids.artifact}) pdf_sha256,
+        (SELECT pdf_storage_key FROM report_artifact_revisions WHERE id=${ids.artifact}) pdf_storage_key,
+        (SELECT readiness FROM report_artifact_revisions WHERE id=${ids.artifact}) readiness,
         (SELECT stage FROM scan_jobs WHERE id=${ids.job}) stage,
         (SELECT fulfillment_status FROM payment_orders WHERE id=${ids.order}) fulfillment,
         (SELECT refund_status FROM payment_orders WHERE id=${ids.order}) refund_status,
         (SELECT count(*)::int FROM report_market_snapshot_refs WHERE job_id=${ids.job}) refs,
         (SELECT count(*)::int FROM payment_refunds WHERE order_id=${ids.order}) refunds`)[0]!;
-    expect(state).toEqual({ artifact_status: "active", stage: "completed", fulfillment: "completed", refund_status: "not_required", refs: 4, refunds: 0 });
+    expect(state).toEqual({ artifact_status: "active", pdf_sha256: null, pdf_storage_key: null,
+      readiness: { htmlCanonical: true }, stage: "completed", fulfillment: "completed", refund_status: "not_required", refs: 4, refunds: 0 });
   }, 120_000);
 });
 

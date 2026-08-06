@@ -36,8 +36,14 @@ export interface ReadyCombinedArtifact {
 export interface ReadyCombinedArtifactV2 extends Omit<ReadyCombinedArtifact, "report"> {
   report: CombinedGeoReportV2;
 }
-export interface ReadyCombinedArtifactV3 extends Omit<ReadyCombinedArtifact, "report"> {
+export interface ReadyCombinedArtifactV3 {
   report: CombinedGeoReportV3;
+  html: string;
+  htmlSha256: string;
+  pdf?: Buffer;
+  pdfSha256?: string;
+  pdfStorageKey?: string;
+  pageCount?: number;
 }
 
 export function combinedArtifactSystemCopy(locale: string, input: {
@@ -481,9 +487,13 @@ export async function materializePreparedCombinedArtifactV3(
   };
   const html = traceArtifactGate(options.trace, "combined_html_render", { phase: "artifact_verification" }, () => {
     const rendered = renderCanonicalCombinedArtifactHtml(model);
-    assertCombinedV3HtmlCompleteness(report, rendered);
+    if (!rendered.trim()) throw new Error("Combined V3 HTML artifact is empty.");
+    if (options.semanticValidation !== "free_direct") assertCombinedV3HtmlCompleteness(report, rendered);
     return rendered;
   });
+  if (options.semanticValidation === "free_direct") {
+    return { report, html, htmlSha256: sha(html) };
+  }
   return materializeReadyArtifact(report, model, html, options.trace);
 }
 

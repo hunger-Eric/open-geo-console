@@ -125,6 +125,7 @@ import {
   createPaidV3DiagnosisIncompleteError,
   enhanceV3AnswerCardsWithDiagnosis,
   hashSynthesisInput,
+  hasCompletedPaidV3DirectAnswers,
   isTerminalScanJob,
   mergeCompletedAnalyses,
   paidV3SemanticSourceCatalogEligibility,
@@ -158,6 +159,44 @@ beforeEach(() => {
   rerunGuardHarness.state.delegatedSites.length = 0;
   rerunGuardHarness.run.mockClear();
   boundaryMocks.hasPriorJobErrorFingerprint.mockReset().mockResolvedValue(false);
+});
+
+describe("Paid V3 Direct post-generation boundary", () => {
+  const answer = (questionId: string) => ({
+    questionId,
+    answerText: `Answer for ${questionId}.`,
+    sources: [],
+    refusal: null,
+    searchedAt: "2030-01-01T00:00:00.000Z",
+    completedAt: "2030-01-01T00:00:01.000Z",
+    providerResponseId: null
+  });
+  const job = (answerResults: unknown[]) => ({
+    checkpoint: {
+      freeDirectSemanticsVersion: "free-v4-direct-semantics-v1",
+      answerFirstV3: {
+        version: "answer-first-v3-checkpoint-v2",
+        stage: "answers_collected",
+        identityHash: "identity-1",
+        questionSetIdentity: "questions-1",
+        locale: "en-US",
+        answerResults
+      }
+    }
+  } as unknown as ScanJobRow);
+
+  it("recognizes only three structurally valid checkpointed Direct answers", () => {
+    expect(hasCompletedPaidV3DirectAnswers(job([answer("q1"), answer("q2"), answer("q3")]))).toBe(true);
+    expect(hasCompletedPaidV3DirectAnswers(job([answer("q1"), answer("q2")]))).toBe(false);
+    expect(hasCompletedPaidV3DirectAnswers(job([answer("q1"), answer("q1"), answer("q3")]))).toBe(false);
+    expect(hasCompletedPaidV3DirectAnswers(job([answer("q1"), answer("q2"), { ...answer("q3"), answerText: "" }]))).toBe(false);
+  });
+
+  it("routes a completed-answer late exception to repair_wait rather than failed commerce", () => {
+    expect(processorSource).toContain("answersAlreadyGenerated\n        ? \"The report answers were generated, but final preparation needs operator repair.\"");
+    expect(processorSource).toContain("answersAlreadyGenerated\n        ? \"operator_repairable\"");
+    expect(processorSource).toContain("!answersAlreadyGenerated && normalized.classification === \"transient\"");
+  });
 });
 
 describe("strict Report V4 processor routing", () => {

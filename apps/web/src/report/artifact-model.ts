@@ -23,9 +23,10 @@ export interface CombinedPrivateReportArtifactModelV2 extends Omit<CombinedPriva
   productContract: "combined_geo_report_v2";
   combinedReport: CombinedGeoReportV2;
 }
-export interface CombinedPrivateReportArtifactModelV3 extends Omit<CombinedPrivateReportArtifactModelV1, "productContract" | "combinedReport"> {
+export interface CombinedPrivateReportArtifactModelV3 extends Omit<CombinedPrivateReportArtifactModelV1, "productContract" | "combinedReport" | "pdfStorageKey"> {
   productContract: "combined_geo_report_v3";
   combinedReport: CombinedGeoReportV3;
+  pdfStorageKey?: string;
 }
 export interface CombinedPrivateReportArtifactModelV4 {
   productContract: "combined_geo_report_v4";
@@ -94,9 +95,10 @@ export async function loadPrivateReportArtifact(
     const active = await getActiveCombinedGeoReport(reportId, productContract);
     if (!active) return null;
     if (active.artifactContract !== productContract || active.report.artifactContract !== productContract) return null;
-    if (typeof active.artifactRevisionId !== "string" || !active.artifactRevisionId.trim()
-      || typeof active.pdfStorageKey !== "string" || !active.pdfStorageKey.trim()
-      || typeof active.pdfSha256 !== "string" || !active.pdfSha256.trim()) return null;
+    if (typeof active.artifactRevisionId !== "string" || !active.artifactRevisionId.trim()) return null;
+    if (productContract !== "combined_geo_report_v3" &&
+      (typeof active.pdfStorageKey !== "string" || !active.pdfStorageKey.trim()
+        || typeof active.pdfSha256 !== "string" || !active.pdfSha256.trim())) return null;
     const language = localeLanguage(active.report.locale);
     if (!language || language !== active.reportLocale) return null;
     const locale: ReportLocale = language;
@@ -109,14 +111,13 @@ export async function loadPrivateReportArtifact(
       locale,
       technicalReport: active.report.technicalFoundation.technicalReport,
       evidenceAssets,
-      artifactRevisionId: active.artifactRevisionId,
-      pdfStorageKey: active.pdfStorageKey
+      artifactRevisionId: active.artifactRevisionId
     };
     return productContract === "combined_geo_report_v3"
-      ? { ...common, productContract, combinedReport: active.report as CombinedGeoReportV3 }
+      ? { ...common, ...(active.pdfStorageKey ? { pdfStorageKey: active.pdfStorageKey } : {}), productContract, combinedReport: active.report as CombinedGeoReportV3 }
       : productContract === "combined_geo_report_v2"
-        ? { ...common, productContract, combinedReport: active.report as CombinedGeoReportV2 }
-        : { ...common, productContract, combinedReport: active.report as CombinedGeoReportV1 };
+        ? { ...common, pdfStorageKey: active.pdfStorageKey!, productContract, combinedReport: active.report as CombinedGeoReportV2 }
+        : { ...common, pdfStorageKey: active.pdfStorageKey!, productContract, combinedReport: active.report as CombinedGeoReportV1 };
   }
   if (productContract === "recommendation_forensics_v1") {
     const [report, v1, v2, foundation] = await Promise.all([

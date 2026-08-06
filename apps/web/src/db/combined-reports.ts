@@ -33,8 +33,8 @@ export type ActiveCombinedGeoReportV2 = ActiveCombinedGeoReportBase<"combined_ge
   pdfSha256: string;
 };
 export type ActiveCombinedGeoReportV3 = ActiveCombinedGeoReportBase<"combined_geo_report_v3", CombinedGeoReportV3> & {
-  pdfStorageKey: string;
-  pdfSha256: string;
+  pdfStorageKey: string | null;
+  pdfSha256: string | null;
 };
 export type ActiveCombinedGeoReportV4 = ActiveCombinedGeoReportBase<"combined_geo_report_v4", CombinedGeoReportV4> & {
   pdfStorageKey: null;
@@ -98,24 +98,27 @@ export async function getActiveCombinedGeoReport(
       return null;
     }
   }
-  if (!row.pdf_storage_key?.trim() || !row.pdf_sha256?.trim()) return null;
-  const legacyArtifact = {
+  const artifactIdentity = {
     artifactRevisionId: row.artifact_revision_id,
     revision: row.revision,
     reportLocale: row.report_locale,
-    htmlSha256: row.html_sha256,
-    pdfStorageKey: row.pdf_storage_key,
-    pdfSha256: row.pdf_sha256
+    htmlSha256: row.html_sha256
   };
   try {
     if (row.artifact_contract === "combined_geo_report_v3") {
       if (row.free_direct_semantics_version !== null && row.free_direct_semantics_version !== FREE_V4_DIRECT_SEMANTICS_VERSION) return null;
+      const direct = row.free_direct_semantics_version === FREE_V4_DIRECT_SEMANTICS_VERSION;
+      const hasPdfPair = Boolean(row.pdf_storage_key?.trim() && row.pdf_sha256?.trim());
+      const hasNoPdf = row.pdf_storage_key === null && row.pdf_sha256 === null;
+      if ((!direct && !hasPdfPair) || (direct && !hasPdfPair && !hasNoPdf)) return null;
       const report = parseCombinedGeoReportV3(row.payload, row.free_direct_semantics_version === FREE_V4_DIRECT_SEMANTICS_VERSION
         ? { semanticValidation: "free_direct" }
         : {});
       if (!matchesArtifactIdentity(report, row, reportId) || report.artifactRevision !== row.revision) return null;
-      return { ...legacyArtifact, artifactContract: row.artifact_contract, report };
+      return { ...artifactIdentity, artifactContract: row.artifact_contract, pdfStorageKey: row.pdf_storage_key, pdfSha256: row.pdf_sha256, report };
     }
+    if (!row.pdf_storage_key?.trim() || !row.pdf_sha256?.trim()) return null;
+    const legacyArtifact = { ...artifactIdentity, pdfStorageKey: row.pdf_storage_key, pdfSha256: row.pdf_sha256 };
     if (row.artifact_contract === "combined_geo_report_v2") {
       const report = parseCombinedGeoReportV2(row.payload);
       if (!matchesArtifactIdentity(report, row, reportId) || report.artifactRevision !== row.revision) return null;

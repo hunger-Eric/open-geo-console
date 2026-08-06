@@ -10,17 +10,22 @@ type PaidV3SemanticValidationMode = "legacy" | "deferred" | "free_direct";
 
 export async function terminalizePaidCombinedReport(input: {
   report: unknown; workerId: string; checkpointIdentityHash: string; snapshotRefs: readonly PaidPublicSourceSnapshotRef[];
-  htmlSha256:string;pdfSha256:string;pdfStorageKey:string;pageCount:number;
+  htmlSha256:string;pdfSha256?:string;pdfStorageKey?:string;pageCount?:number;
   semanticValidation?: PaidV3SemanticValidationMode;
   trace?: PaidV3DirectDebugTrace;
   faultAfter?:"report"|"refs"|"job"|"credit"|"order"|"email";
 }):Promise<{report:CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3;outcome:"completed"|"completed_limited"|"failed";refundId:string|null;emailDeliveryId:string}>{
   const semanticValidation=input.semanticValidation??"legacy";
-  const { report, outcome } = traceTerminalGate(input.trace, "terminal_preflight", { phase: "terminalization", pageCount: input.pageCount }, () => {
+  const { report, outcome, htmlOnly } = traceTerminalGate(input.trace, "terminal_preflight", { phase: "terminalization", pageCount: input.pageCount }, () => {
     const ready=readyCombined(input.report,semanticValidation);
     const commercialOutcome=ready.artifactContract==="combined_geo_report_v3"?combinedV3CommercialOutcome(ready.answerCards):ready.publicSourceForensics.commercialOutcome;
-    if((ready.artifactContract!=="combined_geo_report_v3"&&commercialOutcome!=="completed")||input.pageCount<5)throw new Error("Only a ready combined report may terminalize a paid order.");
-    return { report: ready, outcome: commercialOutcome };
+    const directHtmlOnly=ready.artifactContract==="combined_geo_report_v3"&&semanticValidation==="free_direct";
+    if(directHtmlOnly){
+      if(input.pdfSha256!==undefined||input.pdfStorageKey!==undefined||input.pageCount!==undefined)throw new Error("Direct Paid V3 terminalization is HTML-only.");
+    }else if((ready.artifactContract!=="combined_geo_report_v3"&&commercialOutcome!=="completed")||!input.pdfSha256?.trim()||!input.pdfStorageKey?.trim()||!input.pageCount||input.pageCount<5){
+      throw new Error("Only a ready combined report may terminalize a paid order.");
+    }
+    return { report: ready, outcome: commercialOutcome, htmlOnly: directHtmlOnly };
   });
   await traceTerminalStep(input.trace, "terminal_database_ready", { phase: "terminalization", outcome }, () => ensureDatabase());
   return getSqlClient().begin(async(tx)=>{
@@ -59,7 +64,7 @@ export async function terminalizePaidCombinedReport(input: {
     fault(input.faultAfter,"report");
     });
     await traceTerminalStep(input.trace,"terminal_artifact_activation",{phase:"terminalization",outcome,artifactState:"ready"},async()=>{
-    await tx`UPDATE report_artifact_revisions SET status='ready',html_sha256=${input.htmlSha256},pdf_sha256=${input.pdfSha256},pdf_storage_key=${input.pdfStorageKey},payload_identity_hash=${sha([JSON.stringify(report)])},readiness=${JSON.stringify({htmlCanonical:true,pageCount:input.pageCount,privateEvidenceReady:true})}::jsonb,ready_at=now() WHERE id=${report.artifactRevisionId} AND job_id=${report.jobId} AND status='pending'`;
+    await tx`UPDATE report_artifact_revisions SET status='ready',html_sha256=${input.htmlSha256},pdf_sha256=${htmlOnly?null:input.pdfSha256!},pdf_storage_key=${htmlOnly?null:input.pdfStorageKey!},payload_identity_hash=${sha([JSON.stringify(report)])},readiness=${JSON.stringify(htmlOnly?{htmlCanonical:true}:{htmlCanonical:true,pageCount:input.pageCount,privateEvidenceReady:true})}::jsonb,ready_at=now() WHERE id=${report.artifactRevisionId} AND job_id=${report.jobId} AND status='pending'`;
     if(outcome!=="failed"){
       await tx`UPDATE report_artifact_revisions SET status='ready',activated_at=NULL WHERE report_id=${report.reportId} AND status='active' AND id<>${report.artifactRevisionId}`;
       const active=await tx<{id:string}[]>`UPDATE report_artifact_revisions SET status='active',activated_at=now() WHERE id=${report.artifactRevisionId} AND status='ready' RETURNING id`;if(active.length!==1)throw new Error("The paid combined artifact could not activate.");
@@ -118,7 +123,7 @@ export function combinedV3CommercialOutcome(cards: readonly OpenGeoAnswerCardV3[
     const generative = cards;
     if (generative.every((card) => card.status === "answered")) return "completed";
     if (generative.some((card) => card.status === "refused" && card.refusal === null)) return "failed";
-    return generative.some((card) => card.status === "answered") ? "completed_limited" : "failed";
+    return "completed_limited";
   }
   const legacyCards = cards.filter((card): card is LegacyEvidenceBoundAnswerCardV3 => card.answerMode !== "generative_search_v1");
   if (legacyCards.length !== cards.length) throw new TypeError("V3 commercial outcome rejects mixed answer modes.");

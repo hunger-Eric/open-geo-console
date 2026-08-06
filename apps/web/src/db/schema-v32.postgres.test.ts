@@ -19,6 +19,8 @@ import {
   V43_DATABASE_MIGRATIONS,
   V44_DATABASE_MIGRATIONS,
   V45_DATABASE_MIGRATIONS,
+  V46_DATABASE_MIGRATIONS,
+  V47_DATABASE_MIGRATIONS,
   databaseMigrationsAfter
 } from "./migrations";
 
@@ -35,7 +37,7 @@ const chunks = [{
 // @requirement GEO-V4-TOKEN-02
 describe("schema v32 terminal V4 page-summary binding", () => {
   it("registers V32 trigger hardening in the forward steps after V31", () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(45);
+    expect(DATABASE_SCHEMA_VERSION).toBe(47);
     expect(databaseMigrationsAfter(31)).toEqual([
       ...V32_DATABASE_MIGRATIONS,
       ...V33_DATABASE_MIGRATIONS,
@@ -50,7 +52,9 @@ describe("schema v32 terminal V4 page-summary binding", () => {
       ...V42_DATABASE_MIGRATIONS,
       ...V43_DATABASE_MIGRATIONS,
       ...V44_DATABASE_MIGRATIONS,
-      ...V45_DATABASE_MIGRATIONS
+      ...V45_DATABASE_MIGRATIONS,
+      ...V46_DATABASE_MIGRATIONS,
+      ...V47_DATABASE_MIGRATIONS
     ]);
     const sql = V32_DATABASE_MIGRATIONS.join("\n");
     expect(sql).toContain("ogc_js_source_location_length");

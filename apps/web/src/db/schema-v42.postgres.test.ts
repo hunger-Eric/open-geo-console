@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V42_DATABASE_MIGRATIONS, V43_DATABASE_MIGRATIONS, V44_DATABASE_MIGRATIONS, V45_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V42_DATABASE_MIGRATIONS, V43_DATABASE_MIGRATIONS, V44_DATABASE_MIGRATIONS, V45_DATABASE_MIGRATIONS, V46_DATABASE_MIGRATIONS as V46_BASE_DATABASE_MIGRATIONS, V47_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+const V46_DATABASE_MIGRATIONS = [...V46_BASE_DATABASE_MIGRATIONS, ...V47_DATABASE_MIGRATIONS];
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const suite = adminUrl ? describe : describe.skip;
@@ -47,12 +48,14 @@ suite("schema V42 shared-market content identity guard", () => {
   }, 120_000);
 
   it("registers one replay-safe V42 forward migration on the exact seven trigger tables", async () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(45);
-    expect(databaseMigrationsAfter(41)).toEqual([...V42_DATABASE_MIGRATIONS, ...V43_DATABASE_MIGRATIONS, ...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(42)).toEqual([...V43_DATABASE_MIGRATIONS, ...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(43)).toEqual([...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(44)).toEqual([...V45_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(45)).toEqual([]);
+    expect(DATABASE_SCHEMA_VERSION).toBe(47);
+    expect(databaseMigrationsAfter(41)).toEqual([...V42_DATABASE_MIGRATIONS, ...V43_DATABASE_MIGRATIONS, ...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS, ...V46_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(42)).toEqual([...V43_DATABASE_MIGRATIONS, ...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS, ...V46_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(43)).toEqual([...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS, ...V46_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(44)).toEqual([...V45_DATABASE_MIGRATIONS, ...V46_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(45)).toEqual([...V46_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(46)).toEqual([...V47_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(47)).toEqual([]);
     await sql.begin(async (tx) => { for (const statement of V42_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
     const triggers = await sql<Array<{ table_name: string }>>`
       SELECT c.relname AS table_name

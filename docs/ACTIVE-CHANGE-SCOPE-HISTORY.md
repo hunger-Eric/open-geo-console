@@ -3,6 +3,19 @@
 This file preserves completed and failed scope records for context only. It is
 never executable authority; `docs/ACTIVE-CHANGE-SCOPE.md` is the sole current lock.
 
+---
+
+## 2026-08-07: Paid V3 Direct HTML-only / answer-preserving (APPROVED — local complete; deploy separate)
+
+Status at archive: local implementation + unit/lint/build verification done; disposable PostgreSQL engine was off so V47 E2E not live-verified; **no** commit/push/deploy/migration/model/report under that implementation scope.
+
+Objective (closed): prospective `combined_geo_report_v3` / `free_direct` HTML-only delivery; individual unsafe citation discard; three `source_limited` cards -> `completed_limited`; Direct V3 readiness without PDF/page-count/exact-string gates; post-answer preparation errors -> `repair_wait`; V47 constraint for V3 HTML-only or historical PDF pair.
+
+Baseline HEAD: `3eb4f9cf05834f087c2159426d85c464a19b0ed8`. Dirty worktree retained the approved production/test/doc edits.
+
+Forbidden under that scope included Staging/Production deploy and migration; those are handled by the subsequent Staging Gates 0–3 deploy scope.
+
+
 Archived source: the exact pre-migration working-tree snapshot, 4,239 lines and
 239,873 UTF-8 bytes before this header. It intentionally contains uncommitted
 scope history beyond the older 4,068-line HEAD version; do not replace it from

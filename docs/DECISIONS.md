@@ -245,6 +245,12 @@ Prospective V3 reports persist `source_selection_diagnosis_v1` only after the sa
 
 The diagnosis is checkpointed as a nonblocking sidecar so a target-foundation change may rebuild it without repeating provider answer calls. New V3 readiness requires the diagnosis and all of its customer-visible prose in canonical HTML. Historical V3 payloads remain readable without reparsing or mutation and continue to render the prior cross-question summary.
 
+## 2026-08-06: Direct Paid V3 is HTML-only and preserves generated answers
+
+Prospective `free_direct` V3 revisions activate from canonical HTML without Chromium PDF export, PDF storage, signature inspection, or a page-count threshold. Historical V1/V2 and pre-change V3 PDF records remain readable and are not rewritten. Direct readiness validates report identity, three structurally valid answer cards, canonical render success, nonblank HTML, and its hash; it does not require every persisted string to occur at an exact HTML substring or position.
+
+Provider URL annotations are admitted independently: malformed or unsafe items are discarded while the answer and other safe citations survive. Three nonblank `source_limited` answers are a truthful `completed_limited` delivery, not failed fulfillment. After three valid Direct answers are durably checkpointed, a later sidecar or artifact-preparation exception enters operator repair without being relabelled as model-generation failure or immediately creating failed-report commerce effects. URL/SSRF safety, identity, leases, payment and credit authority, snapshot bindings, structural parsing, and atomic activation remain fail-closed.
+
 ## 2026-07-16: Two-stage report behavior uses a separately gated V4 contract
 
 The approved crawl, three-question answer, core-HTML and question-level diagnosis simplification is prospective `combined_geo_report_v4`. V1, V2 and V3 remain historical contracts and keep their existing parsers, renderers, records and stored PDF compatibility. V4 must not import their private-PDF readiness, provider-claim qualification, cross-question diagnosis or replacement fulfillment as execution requirements.

@@ -106,8 +106,10 @@ describePostgres("paid combined V3 atomic terminalization",()=>{
       answerCards:statuses.map((status,index)=>({status,sentences:status==="insufficient"?[]:[{kind:"grounded_claim",evidenceIds:[`evidence-${index}`]}]})),
       publicSourceForensics:{commercialOutcome:"completed"},
       ...(row.outcome==="completed"?{directSemantics:{version:"free-v4-direct-semantics-v1"}}:{})};
-    return {report,workerId,checkpointIdentityHash,snapshotRefs:[],htmlSha256:"a".repeat(64),pdfSha256:"b".repeat(64),pdfStorageKey:`private/${row.artifactRevisionId}.pdf`,pageCount:5,faultAfter,
-      semanticValidation:row.outcome==="completed"?"free_direct" as const:"legacy" as const};
+    const base={report,workerId,checkpointIdentityHash,snapshotRefs:[],htmlSha256:"a".repeat(64),faultAfter};
+    return row.outcome==="completed"
+      ? {...base,semanticValidation:"free_direct" as const}
+      : {...base,pdfSha256:"b".repeat(64),pdfStorageKey:`private/${row.artifactRevisionId}.pdf`,pageCount:5,semanticValidation:"legacy" as const};
   }
   async function state(row:typeof records[number]){return (await getSqlClient()<Array<{reports:number;emails:number;refunds:number;stage:string;credit:string;fulfillment:string;active:number}>>`
     SELECT (SELECT count(*)::int FROM combined_geo_reports WHERE job_id=${row.jobId}) reports,

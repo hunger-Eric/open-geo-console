@@ -22,7 +22,7 @@ AI findings must cite URLs from the current crawl and quote text present in reta
 - Versioned `RecommendationForensicReportV2` with canonical buyer questions/fanout, immutable public-search snapshots, public-source evidence graphs, exact freshness/cost provenance, three executive priorities, and a separate vendor task package.
 - Fail-closed public-search authority/registry matching, path-confined signed certification artifacts, deterministic cache reuse, completed/limited/failed commercial coverage and atomic settlement/refund/delivery intent.
 - HTTP crawling with DNS-pinned SSRF protection and Playwright fallback for JavaScript-rendered pages.
-- HTML-only private deep reports with Worker-captured visual evidence; the Worker exports the same canonical HTML to privately stored PDF only as an internal readiness gate.
+- HTML-only private deep reports with Worker-captured visual evidence. Prospective Direct V3 and V4 reports activate from canonical HTML without an internal PDF gate; historical private PDF records remain non-customer compatibility data.
 - Progressive report jobs with PostgreSQL leases, page-level recovery, resumable checkpoints and seven-day source-evidence retention.
 - Thirty-day free preview deduplication per registrable site, two distinct free sites per HMAC client IP in a rolling 24-hour window, Turnstile, and a configurable global AI-preview budget with technical-only fallback.
 - HMAC-only report-credit keys, idempotent credit reservation/settlement/refund, and private report links using HttpOnly cookies.

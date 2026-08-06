@@ -2,15 +2,15 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DATABASE_SCHEMA_VERSION } from "./index";
-import { DATABASE_MIGRATIONS, V43_DATABASE_MIGRATIONS, V44_DATABASE_MIGRATIONS, V45_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
+import { DATABASE_MIGRATIONS, V43_DATABASE_MIGRATIONS, V44_DATABASE_MIGRATIONS, V45_DATABASE_MIGRATIONS, V46_DATABASE_MIGRATIONS, V47_DATABASE_MIGRATIONS, databaseMigrationsAfter } from "./migrations";
 
 const adminUrl = process.env.OGC_TEST_DATABASE_ADMIN_URL?.trim();
 const suite = adminUrl ? describe : describe.skip;
-const databaseName = `ogc_v44_shared_content_${randomUUID().replaceAll("-", "")}`;
+const databaseName = `ogc_v46_shared_content_${randomUUID().replaceAll("-", "")}`;
 const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
 const withDb = (url: string, database: string) => url.replace(/\/[^/]+$/, `/${database}`);
 
-suite("schema V44 shared-market result-side identity guard", () => {
+suite("schema V46 current-run shared-market identity guard", () => {
   const admin = postgres(adminUrl!, { max: 1, prepare: false });
   let sql: ReturnType<typeof postgres>;
 
@@ -28,6 +28,13 @@ suite("schema V44 shared-market result-side identity guard", () => {
       'historical-questions','historical-report',1,'en','US','candidate','high','v1','v1','profile',
       '{"identityExclusions":["MiMo","shun-express.com"]}'::jsonb
     )`;
+    await sql`INSERT INTO report_business_questions(
+      id,question_set_id,ordinal,purpose,generated_text,private_text,neutral_public_text,neutral_content_hash
+    ) VALUES(
+      'historical-private-question','historical-questions',1,'core_service_discovery',
+      'private-customer-term logistics question','private-customer-term logistics question',
+      'generic logistics question','neutral-hash'
+    )`;
     await sql`INSERT INTO public_search_surface_authorities(
       authority_version,adapter_id,provider_id,product_id,model_id,adapter_version,
       surface_id,surface_version,environment,locale_capabilities,region_capabilities,
@@ -38,6 +45,8 @@ suite("schema V44 shared-market result-side identity guard", () => {
       now(),'["evidence"]',true,now()
     )`;
     await sql.begin(async (tx) => { for (const statement of V44_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
+    await sql.begin(async (tx) => { for (const statement of V46_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
+    await sql.begin(async (tx) => { for (const statement of V47_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
   }, 120_000);
 
   afterAll(async () => {
@@ -46,13 +55,15 @@ suite("schema V44 shared-market result-side identity guard", () => {
     await admin.end({ timeout: 5 });
   }, 120_000);
 
-  it("registers replay-safe V44 and keeps the seven trigger tables", async () => {
-    expect(DATABASE_SCHEMA_VERSION).toBe(45);
-    expect(databaseMigrationsAfter(43)).toEqual([...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(42)).toEqual([...V43_DATABASE_MIGRATIONS, ...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(44)).toEqual([...V45_DATABASE_MIGRATIONS]);
-    expect(databaseMigrationsAfter(45)).toEqual([]);
-    await sql.begin(async (tx) => { for (const statement of V44_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
+  it("registers replay-safe V46 and keeps the seven trigger tables", async () => {
+    expect(DATABASE_SCHEMA_VERSION).toBe(47);
+    expect(databaseMigrationsAfter(43)).toEqual([...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS, ...V46_DATABASE_MIGRATIONS, ...V47_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(42)).toEqual([...V43_DATABASE_MIGRATIONS, ...V44_DATABASE_MIGRATIONS, ...V45_DATABASE_MIGRATIONS, ...V46_DATABASE_MIGRATIONS, ...V47_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(44)).toEqual([...V45_DATABASE_MIGRATIONS, ...V46_DATABASE_MIGRATIONS, ...V47_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(45)).toEqual([...V46_DATABASE_MIGRATIONS, ...V47_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(46)).toEqual([...V47_DATABASE_MIGRATIONS]);
+    expect(databaseMigrationsAfter(47)).toEqual([]);
+    await sql.begin(async (tx) => { for (const statement of V46_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
     const triggers = await sql<Array<{ table_name: string }>>`
       SELECT c.relname AS table_name
       FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_proc p ON p.oid=t.tgfoid
@@ -65,14 +76,31 @@ suite("schema V44 shared-market result-side identity guard", () => {
     ]);
   });
 
-  it("still rejects brand exclusions on query-side rows", async () => {
+  it("registers replay-safe V47 HTML-only Direct V3 readiness without rewriting rows", async () => {
+    const before = await sql<Array<{ count: number }>>`SELECT count(*)::int AS count FROM report_artifact_revisions`;
+    await sql.begin(async (tx) => { for (const statement of V47_DATABASE_MIGRATIONS) await tx.unsafe(statement); });
+    const after = await sql<Array<{ count: number }>>`SELECT count(*)::int AS count FROM report_artifact_revisions`;
+    const constraints = await sql<Array<{ definition: string }>>`
+      SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+      WHERE conname='report_artifact_revisions_ready_check'`;
+    expect(after).toEqual(before);
+    expect(constraints).toHaveLength(1);
+    expect(constraints[0]!.definition).toContain("combined_geo_report_v3");
+    expect(constraints[0]!.definition).toMatch(/pdf_sha256 IS NULL.*pdf_storage_key IS NULL/su);
+    expect(constraints[0]!.definition).toMatch(/pdf_sha256 IS NOT NULL.*pdf_storage_key IS NOT NULL/su);
+  });
+
+  it("does not promote historical model brand exclusions into a permanent query-side blacklist", async () => {
     await expect(sql`INSERT INTO market_snapshot_questions(
       id,cache_identity,normalized_question,question_hash,locale,region,surface_authority_version,
       surface_id,surface_version,fanout_version,completion_version,snapshot_kind,query_plan_version
     ) VALUES(
-      'snapshot-bad','cache-bad','MiMo logistics question','bad-hash','en','US','authority-v1',
+      'snapshot-historical','cache-historical','MiMo logistics question','historical-hash','en','US','authority-v1',
       'mimo-native-web-search','mimo-native-web-search-v1','fanout-v1',1,'standard_question','plan-v1'
-    )`).rejects.toThrow(/private customer identity/i);
+    )`).resolves.toBeDefined();
+    await expect(sql`INSERT INTO market_snapshot_queries(id,snapshot_id,query_order,query_text,query_hash,derivation_rule)
+      VALUES('query-historical','snapshot-historical',0,'shun-express.com logistics query','historical-query-hash','rule')`)
+      .resolves.toBeDefined();
 
     await sql`INSERT INTO market_snapshot_questions(
       id,cache_identity,normalized_question,question_hash,locale,region,surface_authority_version,
@@ -81,8 +109,13 @@ suite("schema V44 shared-market result-side identity guard", () => {
       'snapshot-safe','cache-safe','generic logistics question','question-hash','en','US','authority-v1',
       'mimo-native-web-search','mimo-native-web-search-v1','fanout-v1',1,'standard_question','plan-v1'
     )`;
+    const privateRows = await sql<Array<{ differs: boolean; matches: boolean }>>`
+      SELECT private_text<>neutral_public_text AS differs,
+        position(lower(private_text) in lower('private-customer-term logistics question'))>0 AS matches
+      FROM report_business_questions WHERE id='historical-private-question'`;
+    expect(privateRows).toEqual([{ differs: true, matches: true }]);
     await expect(sql`INSERT INTO market_snapshot_queries(id,snapshot_id,query_order,query_text,query_hash,derivation_rule)
-      VALUES('query-bad','snapshot-safe',0,'MiMo logistics query','query-bad-hash','rule')`)
+      VALUES('query-private','snapshot-safe',0,'private-customer-term logistics question','private-query-hash','rule')`)
       .rejects.toThrow(/private customer identity/i);
     await sql`INSERT INTO market_snapshot_queries(id,snapshot_id,query_order,query_text,query_hash,derivation_rule)
       VALUES('query-safe','snapshot-safe',0,'generic logistics query','query-hash','rule')`;

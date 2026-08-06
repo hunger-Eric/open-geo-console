@@ -101,11 +101,21 @@ describe("active combined report loader", () => {
   it("selects the Direct parser only from the immutable Paid root carrier", async () => {
     const payload = { ...legacyPayload(), directSemantics: { version: "free-v4-direct-semantics-v1" } };
     mocks.state.rows = [row({ artifact_contract: "combined_geo_report_v3", artifact_revision_id: "revision-v3", revision: 3,
-      pdf_storage_key: "private/report.pdf", pdf_sha256: "p".repeat(64), payload,
+      pdf_storage_key: null, pdf_sha256: null, payload,
       free_direct_semantics_version: "free-v4-direct-semantics-v1" })];
 
-    await expect(getActiveCombinedGeoReport("report-1", "combined_geo_report_v3")).resolves.toMatchObject({ report: payload });
+    await expect(getActiveCombinedGeoReport("report-1", "combined_geo_report_v3")).resolves.toMatchObject({
+      report: payload, pdfStorageKey: null, pdfSha256: null
+    });
     expect(mocks.parseV3).toHaveBeenCalledWith(payload, { semanticValidation: "free_direct" });
+
+    vi.clearAllMocks();
+    mocks.state.rows = [row({ artifact_contract: "combined_geo_report_v3", artifact_revision_id: "revision-v3", revision: 3,
+      pdf_storage_key: "private/report.pdf", pdf_sha256: "p".repeat(64), payload,
+      free_direct_semantics_version: "free-v4-direct-semantics-v1" })];
+    await expect(getActiveCombinedGeoReport("report-1", "combined_geo_report_v3")).resolves.toMatchObject({
+      report: payload, pdfStorageKey: "private/report.pdf", pdfSha256: "p".repeat(64)
+    });
 
     vi.clearAllMocks();
     mocks.state.rows = [row({ artifact_contract: "combined_geo_report_v3", artifact_revision_id: "revision-v3", revision: 3,

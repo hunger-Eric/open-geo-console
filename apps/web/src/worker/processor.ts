@@ -10,6 +10,7 @@ import {
   planPagesWithRecovery,
   preparePlanningCandidates,
   parseCombinedBusinessQuestionAnswers,
+  parseGenerativeSearchAnswerResult,
   parseReportV4DiagnosisOutputForQuestion,
   reportSemanticTextHash,
   SOURCE_SELECTION_CONTRIBUTION_ANALYZER_VERSION,
@@ -721,6 +722,7 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     const deferPhaseAttempt = readFreeDirectSemanticsVersion(job.checkpoint) === null &&
       normalized.classification === "transient" && isDeferrablePublicSourceOutage(error);
     const directPaidOneShot = job.tier === "deep" && readFreeDirectSemanticsVersion(job.checkpoint) !== null;
+    const answersAlreadyGenerated = job.tier === "deep" && hasCompletedPaidV3DirectAnswers(currentJob);
     if (!deferPhaseAttempt && normalized.classification === "transient" && await hasPriorJobErrorFingerprint(job.id, normalized.fingerprint)) {
       normalized = escalateFingerprintRecurrence(normalized);
     }
@@ -731,12 +733,17 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       phase, errorCode: normalized.code, failureClassification: normalized.classification,
       resumeGeneration: currentJob?.resumeGeneration ?? job.resumeGeneration ?? 0
     }, () => failScanJob(job.id, workerId, {
-      code: normalized.code, publicMessage: "The analysis is temporarily unavailable.",
+      code: normalized.code,
+      publicMessage: answersAlreadyGenerated
+        ? "The report answers were generated, but final preparation needs operator repair."
+        : "The analysis is temporarily unavailable.",
       // A paid free-direct deep job tolerates transient failures through the
       // normal retry_wait path within max_attempts; the v4_pre_admission
       // one-shot guard and permanent/contract classifications stay terminal.
-      retryable: normalized.classification === "transient" && (!directPaidOneShot || job.reason !== "v4_pre_admission"),
-      classification: directPaidOneShot ? undefined : normalized.classification === "operator_repairable" ? "operator_repairable" : normalized.classification === "target_limitation" ? "target_limitation" : undefined,
+      retryable: !answersAlreadyGenerated && normalized.classification === "transient" && (!directPaidOneShot || job.reason !== "v4_pre_admission"),
+      classification: answersAlreadyGenerated
+        ? "operator_repairable"
+        : directPaidOneShot ? undefined : normalized.classification === "operator_repairable" ? "operator_repairable" : normalized.classification === "target_limitation" ? "target_limitation" : undefined,
       internalError: normalized, phase, ...(deferPhaseAttempt ? { defer: true as const } : {})
     }));
     if (job.tier === "free" && failedJob.stage === "failed") {
@@ -2078,10 +2085,30 @@ async function terminalizeReadyCombinedArtifact(
   snapshotRefs: PublicSourceCommercialSnapshotRef[],
   semanticValidation: "legacy" | "deferred" | "free_direct"
 ): Promise<void> {
-  const terminalInput = { report: ready.report, workerId: input.workerId, checkpointIdentityHash, snapshotRefs,
-    htmlSha256: ready.htmlSha256, pdfSha256: ready.pdfSha256, pdfStorageKey: ready.pdfStorageKey, pageCount: ready.pageCount,
-    semanticValidation, trace: input.trace };
+  const base = { report: ready.report, workerId: input.workerId, checkpointIdentityHash, snapshotRefs,
+    htmlSha256: ready.htmlSha256, semanticValidation, trace: input.trace };
+  const terminalInput = semanticValidation === "free_direct"
+    ? base
+    : { ...base, pdfSha256: ready.pdfSha256, pdfStorageKey: ready.pdfStorageKey, pageCount: ready.pageCount };
   await terminalizePaidCombinedReport(terminalInput);
+}
+
+export function hasCompletedPaidV3DirectAnswers(job: ScanJobRow | null | undefined): boolean {
+  if (!job || readFreeDirectSemanticsVersion(job.checkpoint) === null) return false;
+  const answer = (job.checkpoint as WorkerCheckpoint).answerFirstV3;
+  if (!answer || answer.version !== "answer-first-v3-checkpoint-v2" ||
+      !answer.identityHash.trim() || !answer.questionSetIdentity.trim() ||
+      !Array.isArray(answer.answerResults) || answer.answerResults.length !== 3) return false;
+  try {
+    const parsed = answer.answerResults.map((result) => parseGenerativeSearchAnswerResult(result, {
+      expectedQuestionId: result.questionId,
+      locale: answer.locale,
+      semanticValidation: "free_direct"
+    }));
+    return new Set(parsed.map(({ questionId }) => questionId)).size === 3;
+  } catch {
+    return false;
+  }
 }
 
 function isCombinedGeoReportV3(value: RecommendationForensicReportV2 | CombinedGeoReportV3 | undefined): value is CombinedGeoReportV3 {

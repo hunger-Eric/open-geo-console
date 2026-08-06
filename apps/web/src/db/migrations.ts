@@ -4058,6 +4058,85 @@ export const V45_DATABASE_MIGRATIONS = [
    END $$`
 ] as const;
 
+/**
+ * V46: model-generated identity exclusions are report-local input guards, not
+ * permanent cross-run authority over the shared market cache. Database guards
+ * continue to reject persisted private question text and commercial IDs.
+ */
+export const V46_DATABASE_MIGRATIONS = [
+  `CREATE OR REPLACE FUNCTION ogc_reject_private_identity_in_shared_market_data() RETURNS trigger LANGUAGE plpgsql AS $$
+   DECLARE row_payload jsonb := to_jsonb(NEW); shared_payload text; identity text;
+   BEGIN
+     CASE TG_TABLE_NAME
+       WHEN 'market_snapshot_questions' THEN
+         shared_payload := lower(jsonb_build_object('normalized_question',row_payload->'normalized_question')::text);
+       WHEN 'market_snapshot_queries' THEN
+         shared_payload := lower(jsonb_build_object('query_text',row_payload->'query_text')::text);
+       WHEN 'market_search_attempts' THEN
+         shared_payload := lower(jsonb_build_object('sanitized_error',row_payload->'sanitized_error')::text);
+       WHEN 'market_search_observations' THEN
+         shared_payload := lower(jsonb_build_object(
+           'result_url',row_payload->'result_url','canonical_url',row_payload->'canonical_url',
+           'title',row_payload->'title','snippet',row_payload->'snippet','result_metadata',row_payload->'result_metadata'
+         )::text);
+       WHEN 'market_source_evidence' THEN
+         shared_payload := lower(jsonb_build_object(
+           'canonical_url',row_payload->'canonical_url','registrable_domain',row_payload->'registrable_domain',
+           'excerpt',row_payload->'excerpt','entities',row_payload->'entities','claims',row_payload->'claims',
+           'contradictions',row_payload->'contradictions'
+         )::text);
+       WHEN 'market_source_passages' THEN
+         shared_payload := lower(jsonb_build_object(
+           'exact_excerpt',row_payload->'exact_excerpt','matched_entity_terms',row_payload->'matched_entity_terms',
+           'matched_service_terms',row_payload->'matched_service_terms','matched_control_terms',row_payload->'matched_control_terms',
+           'matched_capability_terms',row_payload->'matched_capability_terms'
+         )::text);
+       WHEN 'market_provider_claims' THEN
+         shared_payload := lower(jsonb_build_object(
+           'canonical_name',row_payload->'canonical_name','generic_role',row_payload->'generic_role',
+           'policy_role',row_payload->'policy_role','capability',row_payload->'capability',
+           'operating_mode',row_payload->'operating_mode','service_scope',row_payload->'service_scope',
+           'route_scope',row_payload->'route_scope','exact_excerpt',row_payload->'exact_excerpt',
+           'rejection_reason',row_payload->'rejection_reason'
+         )::text);
+       ELSE
+         RAISE EXCEPTION 'Unsupported shared market data identity guard table.';
+     END CASE;
+     FOR identity IN
+       SELECT value FROM (
+         SELECT sets.order_id AS value FROM report_business_question_sets sets WHERE sets.order_id IS NOT NULL
+         UNION ALL SELECT sets.report_id FROM report_business_question_sets sets
+         UNION ALL SELECT questions.private_text FROM report_business_questions questions
+           WHERE questions.private_text IS NOT NULL AND questions.private_text <> questions.neutral_public_text
+       ) forbidden WHERE value IS NOT NULL AND length(btrim(value)) >= 4
+     LOOP
+       IF position(lower(identity) in shared_payload) > 0 THEN
+         RAISE EXCEPTION 'Shared market data contains private customer identity.';
+       END IF;
+     END LOOP;
+     RETURN NEW;
+   END $$`
+] as const;
+
+/**
+ * V47: prospective Direct Paid V3 artifacts are HTML-only. Historical V3 PDF
+ * pairs remain valid, while partial PDF metadata is rejected for every state.
+ */
+export const V47_DATABASE_MIGRATIONS = [
+  `ALTER TABLE report_artifact_revisions DROP CONSTRAINT IF EXISTS report_artifact_revisions_ready_check`,
+  `ALTER TABLE report_artifact_revisions ADD CONSTRAINT report_artifact_revisions_ready_check CHECK (
+     status NOT IN ('ready','active')
+     OR (ready_at IS NOT NULL AND html_sha256 IS NOT NULL AND (
+       (artifact_contract='combined_geo_report_v4' AND pdf_sha256 IS NULL AND pdf_storage_key IS NULL)
+       OR (artifact_contract IN ('combined_geo_report_v1','combined_geo_report_v2') AND pdf_sha256 IS NOT NULL AND pdf_storage_key IS NOT NULL)
+       OR (artifact_contract='combined_geo_report_v3' AND (
+         (pdf_sha256 IS NULL AND pdf_storage_key IS NULL)
+         OR (pdf_sha256 IS NOT NULL AND pdf_storage_key IS NOT NULL)
+       ))
+     ))
+   )`
+] as const;
+
 const DATABASE_MIGRATION_STEPS = [
   { version: 9, migrations: V9_DATABASE_MIGRATIONS },
   { version: 10, migrations: V10_DATABASE_MIGRATIONS },
@@ -4095,7 +4174,9 @@ const DATABASE_MIGRATION_STEPS = [
   { version: 42, migrations: V42_DATABASE_MIGRATIONS },
   { version: 43, migrations: V43_DATABASE_MIGRATIONS },
   { version: 44, migrations: V44_DATABASE_MIGRATIONS },
-  { version: 45, migrations: V45_DATABASE_MIGRATIONS }
+  { version: 45, migrations: V45_DATABASE_MIGRATIONS },
+  { version: 46, migrations: V46_DATABASE_MIGRATIONS },
+  { version: 47, migrations: V47_DATABASE_MIGRATIONS }
 ] as const;
 
 export function databaseMigrationsAfter(currentVersion: number | undefined): string[] {

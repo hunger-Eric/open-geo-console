@@ -57,10 +57,12 @@ describe("private artifact model product isolation", () => {
     await expect(loadPrivateReportArtifact("report-1","combined_geo_report_v2")).resolves.toBeNull();
   });
 
-  it("does not expose an active combined artifact without its private PDF storage identity",async()=>{
+  it("loads a Direct V3 HTML-only artifact without private PDF metadata",async()=>{
     const report={artifactContract:"combined_geo_report_v3",locale:"zh-CN",technicalFoundation:{technicalReport:{url:"https://example.com"},evidenceAssets:[]}};
     mocks.getActiveCombined.mockResolvedValue({artifactContract:"combined_geo_report_v3",artifactRevisionId:"revision-v3",reportLocale:"zh",htmlSha256:"h",pdfSha256:null,pdfStorageKey:null,report});
-    await expect(loadPrivateReportArtifact("report-1","combined_geo_report_v3")).resolves.toBeNull();
+    await expect(loadPrivateReportArtifact("report-1","combined_geo_report_v3")).resolves.toMatchObject({
+      productContract:"combined_geo_report_v3",artifactRevisionId:"revision-v3"
+    });
   });
 
   it("returns a V4 HTML-only private model without PDF, technical foundation, or evidence assets", async () => {
