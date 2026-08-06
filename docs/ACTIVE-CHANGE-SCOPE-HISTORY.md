@@ -6901,3 +6901,25 @@ revised scope.
 - Terminal status: **Protected Staging redeploy completed for `94f787f` with
   OpenCode Go Flash operational.**
 
+
+---
+
+## 2026-08-06 - Receipt: Staging switch to DeepSeek V4 Pro (`ec1fff6e`)
+
+- User requested model switch from Flash to Pro after paid deep
+  `ai_client_output_truncated` failures under OpenCode Flash.
+- Candidate `ec1fff6e4ce46ae68ee7773a8033e6bc984ca9c4`
+  (`fix: pin SenseNova profile operations to DeepSeek V4 Pro`) pushed.
+- Profile operations and env check now use `deepseek-v4-pro`; OpenCode Go base
+  URL unchanged; API key remains gitignored only.
+- Vercel Preview `dpl_889hxXjR8nTonUxA63oUTq89WM6Q`,
+  `https://open-geo-console-gvwmnuiwd-itheheda-6857s-projects.vercel.app`,
+  READY; `ogcGitSha`/`githubCommitSha` = candidate.
+- Worker overlay `open-geo-console:staging-ec1fff6-pro-overlay-v1`
+  (`sha256:0dc9fe26194d16cd8306fa15d6b40426d0d92ec515c9c4027cc0064c9db61875`);
+  free/deep ready with matching revision and `OGC_DEPLOYMENT_VERSION`.
+- Fixed alias → candidate Preview.
+- Pro probe: HTTP 200, `responseModel=deepseek-v4-pro`.
+- Production untouched. No historical job replay.
+- Terminal status: **Staging redeployed on DeepSeek V4 Pro.**
+
