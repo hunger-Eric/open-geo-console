@@ -8,7 +8,8 @@ export const en = {
   },
   nav: {
     scanner: "Website analysis",
-    logs: "Advanced log tool"
+    logs: "Advanced log tool",
+    provider: "Shijie Intelligence"
   },
   actions: {
     generateReport: "Generate GEO report",
@@ -40,6 +41,23 @@ export const en = {
     nextTitle: "Already have server access logs?",
     nextDescription:
       "Verify whether identifiable AI crawlers visited the site."
+  },
+  publicUse: {
+    providerLabel: "Product relationship",
+    providerDescription:
+      "Open GEO Console is a GEO visibility diagnostic product from Shijie Intelligence, which designs and delivers enterprise AI systems.",
+    providerLinkLabel: "About Shijie Intelligence",
+    usageTitle: "How to use it",
+    usageSteps: [
+      "Enter a public company website URL that does not require sign-in.",
+      "The free check reads the homepage and standard public files such as robots.txt, sitemap.xml, and llms.txt.",
+      "Use the evidence-backed issues and priority fixes to update the site, then verify the changes with a new report."
+    ],
+    boundaryTitle: "Public-input and result boundaries",
+    boundaries: [
+      "Do not submit URLs that require sign-in, contain access tokens, or expose other sensitive information.",
+      "The diagnosis describes GEO visibility of public pages; it is not legal or compliance advice and does not guarantee a business outcome."
+    ]
   },
   capabilities: {
     freeHomepage: {

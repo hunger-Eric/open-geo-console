@@ -1,4 +1,4 @@
-import { FileSearch, Upload } from "lucide-react";
+import { ExternalLink, FileSearch, ListChecks, ShieldCheck, Upload } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -63,6 +63,39 @@ export default async function HomePage({
               </article>
             );
           })}
+        </div>
+      </section>
+
+      <section className="workspace-surface p-6 sm:p-9" aria-labelledby="public-use-title">
+        <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+          <div>
+            <p className="eyebrow">{dictionary.publicUse.providerLabel}</p>
+            <h2 id="public-use-title" className="mt-2 text-xl font-semibold">Open GEO Console × {dictionary.nav.provider}</h2>
+            <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{dictionary.publicUse.providerDescription}</p>
+            <a
+              href="https://me.itheheda.online"
+              className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[var(--teal)] hover:underline"
+            >
+              {dictionary.publicUse.providerLinkLabel}
+              <ExternalLink aria-hidden="true" className="size-4" />
+            </a>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-2">
+            <article className="border-t border-[var(--border)] pt-5">
+              <ListChecks aria-hidden="true" className="size-5 text-[var(--teal)]" />
+              <h3 className="mt-3 text-sm font-semibold">{dictionary.publicUse.usageTitle}</h3>
+              <ol className="mt-3 space-y-2 text-sm leading-6 text-[var(--muted)]">
+                {dictionary.publicUse.usageSteps.map((step, index) => <li key={step}>{index + 1}. {step}</li>)}
+              </ol>
+            </article>
+            <article className="border-t border-[var(--border)] pt-5">
+              <ShieldCheck aria-hidden="true" className="size-5 text-[var(--teal)]" />
+              <h3 className="mt-3 text-sm font-semibold">{dictionary.publicUse.boundaryTitle}</h3>
+              <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--muted)]">
+                {dictionary.publicUse.boundaries.map((boundary) => <li key={boundary}>• {boundary}</li>)}
+              </ul>
+            </article>
+          </div>
         </div>
       </section>
 

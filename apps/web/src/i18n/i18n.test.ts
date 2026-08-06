@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { dictionaries, getDictionary } from ".";
 import { formatDateTime, formatNumber, formatPercent } from "./format";
 import { defaultLocale, isLocale, locales } from "./locales";
+import { navItems } from "@/product/config";
 import {
   getLocaleFromPathname,
   getLocaleAlternates,
@@ -38,6 +39,13 @@ describe("i18n architecture", () => {
     expect(getDictionary("en").metadata.title).toBe("Open GEO Console");
     expect(getDictionary("en").aiReport.queueJobsAhead).toContain("{count}");
     expect(getDictionary("zh").report.findingAggregation.affectedPages).toContain("{count}");
+    expect(getDictionary("zh").publicUse.usageSteps).toHaveLength(3);
+    expect(getDictionary("en").publicUse.boundaries.join(" ")).toContain("does not guarantee");
+    expect(navItems.at(-1)).toEqual({
+      key: "provider",
+      href: "https://me.itheheda.online",
+      external: true
+    });
   });
 
   it("extracts and strips route locales", () => {

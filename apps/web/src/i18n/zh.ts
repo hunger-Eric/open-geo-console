@@ -8,7 +8,8 @@ export const zh = {
   },
   nav: {
     scanner: "网站分析",
-    logs: "高级日志工具"
+    logs: "高级日志工具",
+    provider: "实解智能"
   },
   actions: {
     generateReport: "生成 GEO 报告",
@@ -39,6 +40,23 @@ export const zh = {
     scanProgressExtended: "服务接收请求较慢，请保持页面打开；重新尝试也会恢复同一个请求。",
     nextTitle: "已经有服务器访问日志？",
     nextDescription: "验证可识别的 AI 爬虫是否真实访问过该站点。"
+  },
+  publicUse: {
+    providerLabel: "产品关系",
+    providerDescription:
+      "Open GEO Console 是实解智能提供的 GEO 可见性诊断产品；实解智能负责企业 AI 系统设计与交付。",
+    providerLinkLabel: "了解实解智能",
+    usageTitle: "如何使用",
+    usageSteps: [
+      "输入无需登录即可访问的企业官网 URL。",
+      "免费检查读取首页与 robots.txt、sitemap.xml、llms.txt 等标准公开文件。",
+      "根据报告中的证据问题和优先修复项更新网站，再用新报告复核。"
+    ],
+    boundaryTitle: "公开输入与结果边界",
+    boundaries: [
+      "请勿提交需要登录、包含访问令牌或其他敏感信息的地址。",
+      "诊断描述公开页面的 GEO 可见性，不构成法律、合规或业务结果保证。"
+    ]
   },
   capabilities: {
     freeHomepage: {

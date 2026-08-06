@@ -2,7 +2,8 @@ import { FileCheck2, FileText, Globe2, Languages, Share2, Sparkles, Upload } fro
 
 export const navItems = [
   { key: "scanner", href: "/", external: false },
-  { key: "logs", href: "/logs", external: false }
+  { key: "logs", href: "/logs", external: false },
+  { key: "provider", href: "https://me.itheheda.online", external: true }
 ] as const;
 
 export const scannerCapabilities = [

@@ -6688,3 +6688,25 @@ revised scope.
 - Terminal status: **Stripe Sandbox refund path verified end to end; the
   customer's stuck refund is now truthfully refunded (Sandbox, no real
   funds).**
+
+---
+
+## 2026-08-06 - Open GEO public relationship and usage-boundary repair
+
+- Objective: make the public homepage identify Open GEO Console as an
+  实解智能 product, explain the public homepage-check flow, and state the
+  public-input and diagnostic-result boundaries in Chinese and English.
+- Production files: `apps/web/src/product/config.ts`, the localized dictionary
+  types and Chinese/English dictionaries, and the localized homepage.
+- Verification file: `apps/web/src/i18n/i18n.test.ts`.
+- Completion: localized tests passed 7/7; Web lint completed with zero errors
+  and six pre-existing out-of-scope warnings; the Next.js production build
+  passed including its TypeScript validation; desktop and mobile Chinese and
+  English browser checks passed without submitting the scanner form or
+  observing horizontal overflow.
+- The standalone TypeScript command remained blocked by the pre-existing
+  TypeScript 6 `baseUrl` deprecation in `apps/web/tsconfig.json`; no
+  out-of-scope configuration change was made.
+- No scan, provider/model call, report, database write, payment, email,
+  deployment, upload, commit, push, merge, or branch action was performed
+  under that implementation scope.

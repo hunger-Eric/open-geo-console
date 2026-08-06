@@ -23,7 +23,7 @@ export interface Dictionary {
     title: string;
     description: string;
   };
-  nav: Record<"scanner" | "logs", string>;
+  nav: Record<"scanner" | "logs" | "provider", string>;
   actions: Record<
     | "generateReport"
     | "openSampleLogReport"
@@ -53,6 +53,15 @@ export interface Dictionary {
     scanProgressExtended: string;
     nextTitle: string;
     nextDescription: string;
+  };
+  publicUse: {
+    providerLabel: string;
+    providerDescription: string;
+    providerLinkLabel: string;
+    usageTitle: string;
+    usageSteps: string[];
+    boundaryTitle: string;
+    boundaries: string[];
   };
   capabilities: Record<"freeHomepage" | "evidenceAi" | "privateDeep", { title: string; text: string }>;
   report: {
