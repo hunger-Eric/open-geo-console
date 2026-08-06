@@ -63,8 +63,20 @@ describe("SenseNova Report V4 OpenAI-compatible provider", () => {
       { OGC_AI_API_KEY: "" },
       { OGC_AI_JSON_RESPONSE_FORMAT: "false" }
     ]) {
-      expect(() => readSenseNovaConfig({ ...environment, ...drift })).toThrow(/SenseNova|OGC_AI|profile/i);
+      expect(() => readSenseNovaConfig({ ...environment, ...drift })).toThrow(/SenseNova|OGC_AI|profile|endpoint|API key/i);
     }
+  });
+
+  it("accepts the approved OpenCode Go endpoint with trailing-slash normalization", () => {
+    const environment = {
+      ...env(),
+      OGC_AI_BASE_URL: "https://opencode.ai/zen/go/v1/",
+      OGC_AI_API_KEY: "opencode-key"
+    };
+    expect(readSenseNovaConfig(environment)).toEqual({
+      baseUrl: "https://opencode.ai/zen/go/v1",
+      apiKey: "opencode-key"
+    });
   });
 });
 

@@ -21,6 +21,8 @@ import {
 } from "../worker/report-v4-diagnosis-enhancer";
 
 const SENSENOVA_BASE_URL = "https://token.sensenova.cn/v1";
+const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1";
+const APPROVED_AI_BASE_URLS = new Set([SENSENOVA_BASE_URL, OPENCODE_GO_BASE_URL]);
 const SENSENOVA_MODEL = "deepseek-v4-flash";
 
 export interface ReportV4OpenAiCompatibleProviderDependencies {
@@ -91,8 +93,9 @@ export function readSenseNovaConfig(environment: NodeJS.ProcessEnv): {
   readonly baseUrl: string;
   readonly apiKey: string;
 } {
-  if (environment.OGC_AI_BASE_URL !== SENSENOVA_BASE_URL) {
-    throw new AiClientError("OGC_AI_BASE_URL must use the approved SenseNova endpoint.", { code: "configuration" });
+  const baseUrl = normalizeAiBaseUrl(environment.OGC_AI_BASE_URL);
+  if (!baseUrl || !APPROVED_AI_BASE_URLS.has(baseUrl)) {
+    throw new AiClientError("OGC_AI_BASE_URL must use an approved OpenAI-compatible endpoint.", { code: "configuration" });
   }
   if (environment.OGC_AI_MODEL !== SENSENOVA_MODEL) {
     throw new AiClientError("OGC_AI_MODEL conflicts with the selected SenseNova profile.", { code: "configuration" });
@@ -103,9 +106,15 @@ export function readSenseNovaConfig(environment: NodeJS.ProcessEnv): {
   }
   const apiKey = environment.OGC_AI_API_KEY;
   if (!apiKey?.trim() || apiKey !== apiKey.trim() || apiKey.length > 4_096) {
-    throw new AiClientError("OGC_AI_API_KEY must contain a bounded SenseNova key.", { code: "configuration" });
+    throw new AiClientError("OGC_AI_API_KEY must contain a bounded API key.", { code: "configuration" });
   }
-  return Object.freeze({ baseUrl: SENSENOVA_BASE_URL, apiKey });
+  return Object.freeze({ baseUrl, apiKey });
+}
+
+function normalizeAiBaseUrl(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\/+$/, "");
 }
 
 function requireSenseNovaRuntime(runtime: ReportV4ModelRuntimeConfig): ReportV4ModelRuntimeConfig {
