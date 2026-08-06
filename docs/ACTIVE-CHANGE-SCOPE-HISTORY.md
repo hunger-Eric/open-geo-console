@@ -6710,3 +6710,31 @@ revised scope.
 - No scan, provider/model call, report, database write, payment, email,
   deployment, upload, commit, push, merge, or branch action was performed
   under that implementation scope.
+
+---
+
+## 2026-08-06 - Preview publication stopped at independent SHA verification
+
+- User-approved release mode: publish the completed homepage repair to
+  `origin/main`, create exactly one isolated manual Vercel Preview, and move no
+  production or fixed-Staging alias.
+- Candidate commit `258db0b886d0cd68dc6e7908cc94380c878b1595`
+  (`feat: clarify Open GEO product relationship`) was created on `main` and
+  pushed once. Local `main` and `origin/main` matched exactly and the canonical
+  checkout was clean.
+- Exactly one manual Preview was created:
+  `dpl_AHXiNtFmkmSfeLyLKcakBt2v3JS3`,
+  `https://open-geo-console-kjq3ptext-itheheda-6857s-projects.vercel.app`.
+  The deploy command completed successfully in about 110 seconds and CLI
+  inspection reported `READY`, target `preview`, and the intended project.
+- Independent identity acceptance did not complete: the CLI inspection exposed
+  no `ogcGitSha` or Git SHA fields. A following read-only `npx vercel api
+  --help` usage command returned exit code 1. The approved stop condition was
+  therefore reached before browser QA.
+- No retry, second deployment, alias movement, promotion, production action,
+  Vercel environment change, Worker/Docker action, database/data operation,
+  scan, report, provider/model call, payment, refund, or email occurred.
+- Terminal result: **Git publication succeeded and one READY Preview exists,
+  but candidate identity and user-visible Preview acceptance remain unverified.**
+  A new explicit scope is required for any bounded metadata recovery or
+  browser QA.
