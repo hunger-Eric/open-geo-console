@@ -10,7 +10,7 @@ describe("SenseNova Report V4 OpenAI-compatible provider", () => {
     const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
       expect(body).toMatchObject({
-        model: "deepseek-v4-flash",
+        model: "deepseek-v4-pro",
         temperature: 0.1,
         max_tokens: 8192,
         response_format: { type: "json_object" },
@@ -22,7 +22,7 @@ describe("SenseNova Report V4 OpenAI-compatible provider", () => {
       expect(body).not.toHaveProperty("tools");
       return new Response(JSON.stringify({
         id: "sense-response",
-        model: "deepseek-v4-flash",
+        model: "deepseek-v4-pro",
         choices: [{ finish_reason: "stop", message: { content: "{\"ok\":true}" } }]
       }), { status: 200, headers: { "content-type": "application/json" } });
     });
@@ -87,7 +87,7 @@ function env(): NodeJS.ProcessEnv {
     OGC_REPORT_V4_MODEL_PROFILE_ID: "report-v4-sensenova-deepseek-v4-flash-v1",
     OGC_AI_BASE_URL: "https://token.sensenova.cn/v1",
     OGC_AI_API_KEY: "sense-key",
-    OGC_AI_MODEL: "deepseek-v4-flash",
+    OGC_AI_MODEL: "deepseek-v4-pro",
     OGC_AI_JSON_RESPONSE_FORMAT: "true"
   };
 }

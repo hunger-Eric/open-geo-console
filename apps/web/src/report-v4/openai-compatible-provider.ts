@@ -23,7 +23,7 @@ import {
 const SENSENOVA_BASE_URL = "https://token.sensenova.cn/v1";
 const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1";
 const APPROVED_AI_BASE_URLS = new Set([SENSENOVA_BASE_URL, OPENCODE_GO_BASE_URL]);
-const SENSENOVA_MODEL = "deepseek-v4-flash";
+const SENSENOVA_MODEL = "deepseek-v4-pro";
 
 export interface ReportV4OpenAiCompatibleProviderDependencies {
   readonly environment: NodeJS.ProcessEnv;
