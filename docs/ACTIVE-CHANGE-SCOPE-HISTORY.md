@@ -7273,3 +7273,28 @@ revised scope.
   the prior image and a retry requires new deployment-version edit authority.**
 
 ---
+
+---
+
+## 2026-08-06 - Receipt: Staging MiMo V2.5 Pro via OpenCode (`0374ce79`)
+
+- User-owned local changes committed and pushed as
+  `0374ce79441df862e2d7debe1ba89d203082e8eb`
+  (`feat: route sensenova_anysearch through OpenCode MiMo V2.5 Pro`).
+- Adds locked profile `report-v4-sensenova-mimo-v2.5-pro-v1`, page-analysis
+  contract diagnostics, and AI probe improvements. Focused tests 7 files /
+  118 passed.
+- Staging env aligned: model `mimo-v2.5-pro`, OpenCode Go base URL,
+  `OGC_DEPLOYMENT_VERSION` = full candidate SHA (not docker-desktop placeholder).
+- Neon staging DB writable (`default_transaction_read_only=off`).
+- Vercel Preview `dpl_FQoyn6EgixSmqQH7R1tnpunqB2bJ`,
+  `https://open-geo-console-5ub6sthnn-itheheda-6857s-projects.vercel.app`,
+  READY; SHA meta match.
+- Worker overlay `open-geo-console:staging-0374ce7-mimo-pro-overlay-v1`
+  (`sha256:4b59d80f6ee04672a6323d4382974d251be96be8201be5e1b2e6f79cf7fcb2a5`);
+  free/deep ready with matching revision.
+- Fixed alias → candidate Preview.
+- Model probe: HTTP 200, `responseModel=mimo-v2.5-pro`.
+- Production untouched. Secrets not committed.
+- Terminal status: **Staging ready for user retest on `0374ce79`.**
+
