@@ -7378,3 +7378,59 @@ revised scope.
 - Production untouched. Secrets not committed.
 - Terminal status: **Staging ready for user retest on `8c58ae4f`.**
 
+---
+
+## 2026-08-07 - Receipt: Direct V3 HTML-only Protected Staging (`0b58f667`)
+
+- The user approved one local candidate commit and one Protected Staging
+  source-overlay deployment for the already-implemented Direct V3 HTML-only
+  and answer-preserving work. Push was not authorized.
+- Candidate commit: `0b58f66748ff4efb423f7320abcb09e3c21a82d6` on local
+  `main`; local `main` remains one commit ahead of `origin/main`.
+- Vercel Preview `dpl_8s8pfD8nWuAGyXkKChNZfoC4ZTGo` was READY and its
+  `gitCommitSha` / `ogcGitSha` matched the candidate. The fixed Protected
+  Staging alias was moved to that Preview.
+- Staging free/deep Workers use
+  `open-geo-console:staging-0b58f667-direct-v3-overlay-v1` /
+  `sha256:8b2d14d4a585c1f56f945637ce3d0fb34c53501afc3b350fd03587d99f88e502`,
+  with matching revision, restart count 0, and readiness evidence.
+- Production, agent-driven reports, payments, model calls, refunds, email, and
+  Git push remained untouched. The user retained manual report testing.
+- A helper invocation accidentally started the forbidden full Worker build
+  path; it was terminated and no full-build image was promoted.
+- Terminal status: **Protected Staging ready for user manual testing on
+  `0b58f667`; deployment scope completed.**
+
+---
+
+## 2026-08-07 - Paid V3 report decision-narrative presentation repair
+
+- The user approved a presentation-only Paid V3 change. Model prompts and
+  output, report contracts, database state, Workers, commerce, historical
+  reports, V1/V2/V4 presentation, deployment, and Git effects were forbidden.
+- The report opening now presents one continuous sequence: observable verdict,
+  answer/source-adoption metrics, meaning, persisted source-selection reasons,
+  and one persisted report-wide primary action.
+- The duplicate three-question opening grid was removed. One bridge now
+  explains why the detailed Q1-Q3 sequence follows the website context.
+- Actual target mention and target-domain source adoption are counted
+  independently. Direct-analysis prose cannot override those observable
+  metrics; a content-fit statement therefore cannot masquerade as actual
+  citation or selection.
+- The later roadmap is labelled as quick fixes and ongoing tasks so its first
+  technical item does not silently replace the report-wide source-selection
+  priority.
+- Changed production surface stayed inside
+  `combined-geo-report-v3-artifact.tsx` and Paid V3-scoped rules in
+  `artifact-styles.ts`; focused tests stayed in the approved test file.
+- Verification: 56/56 focused and adjacent rendering/readiness/route tests
+  passed; Web lint passed with 0 errors and 6 pre-existing warnings outside
+  the allowlist; the Next.js production build passed; `git diff --check`
+  passed; CodeGraph was synced and reports the index up to date.
+- A standalone `tsc` invocation was blocked before source checking by the
+  repository's existing TypeScript 6 `baseUrl` deprecation configuration; the
+  official Next.js build completed its TypeScript phase successfully.
+- No real report, model call, database write, Docker/Vercel action, deployment,
+  commit, push, or other external effect occurred.
+- Terminal status: **local implementation and automated validation complete;
+  real rendered-report visual usability remains unverified.**

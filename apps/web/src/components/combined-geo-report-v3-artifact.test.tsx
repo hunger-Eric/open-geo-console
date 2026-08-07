@@ -154,7 +154,8 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).toContain('href="#artifact-sec-appendix"');
     const sections=["artifact-sec-guide","artifact-sec-context","artifact-sec-answers","artifact-sec-evidence","artifact-sec-absence","artifact-sec-technical","artifact-sec-actions","artifact-sec-article","artifact-sec-appendix"].map((id)=>html.indexOf(`id="${id}"`));
     expect(sections).toEqual([...sections].sort((a,b)=>a-b));
-    expect(html.match(/data-question-summary=/g)).toHaveLength(3);
+    expect(html).not.toContain("data-question-summary");
+    expect(html).toContain('data-question-evidence-bridge="true"');
     expect(html.match(/<details class="answer-card answer-detail"/g)).toHaveLength(3);
     expect(html.match(/data-evidence-detail=/g)).toHaveLength(3);
     expect(html.match(/data-question-absence=/g)).toHaveLength(3);
@@ -168,7 +169,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
 
   it("leads with persisted conclusions and removes fixed reading instructions from the main report",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:articleModel()}));
-    for(const value of ["核心结论","决策结论","第一优先行动","关键决策指标","技术得分"]){
+    for(const value of ["核心结论","核心诊断","本次真实结果","这意味着什么","主要差距与行动依据","第一优先行动","三个买家问题如何验证这个结论"]){
       expect(html).toContain(value);
     }
     for(const value of ["报告目的","报告一句话","基于以上网站公开信息","先看 AI 对每个买家问题","答案不是凭空生成的","必须沿着答案和来源逐题解释","以下路线图汇总"]){
@@ -199,8 +200,8 @@ describe("CombinedGeoReportV3Artifact",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
     expect(html.match(/data-open-geo-answer-card="true"/g)).toHaveLength(3);
     expect(html.match(/data-answer-sentence="unresolved-/g)).toHaveLength(3);
-    expect(html.match(/Not yet verifiable/g)).toHaveLength(6);
-    expect(html.match(/data-question-summary=/g)).toHaveLength(3);
+    expect(html.match(/Not yet verifiable/g)).toHaveLength(3);
+    expect(html).not.toContain("data-question-summary");
     for(let index=1;index<=3;index+=1)expect(html).toContain(`Search returned results for question ${index}`);
   });
 
@@ -239,13 +240,16 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html.indexOf("data-source-selection-diagnosis")).toBeGreaterThan(html.indexOf("本题来源与目标页诊断摘要 3"));
   });
 
-  it("derives a decision layer, labeled evidence coverage, semantic scores, and print-safe disclosure",()=>{
+  it("derives one truthful decision narrative before context and the detailed questions",()=>{
     const model=generativeModel();
     model.combinedReport.technicalFoundation.aiReport.dimensionScores=[{dimension:"organizationClarity",score:42,explanation:"Persisted score explanation"}];
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
-    expect(html.indexOf('data-decision-summary="true"')).toBeLessThan(html.indexOf('data-website-context="true"'));
-    expect(html.match(/data-question-summary=/g)).toHaveLength(3);
-    expect(html).toContain('<dd>1</dd><\/div><div><dt>回答来源<\/dt><dd>3</dd>');
+    const order=["data-decision-summary","data-decision-meaning","data-decision-reasons","data-primary-business-action","data-website-context","data-question-evidence-bridge","data-answer-first-section"].map((marker)=>html.indexOf(marker));
+    expect(order).toEqual([...order].sort((a,b)=>a-b));
+    expect(html).not.toContain("data-question-summary");
+    expect(html).toContain('<dt>形成答案</dt><dd>3/3</dd>');
+    expect(html).toContain('<dt>品牌进入答案</dt><dd>3/3</dd>');
+    expect(html).toContain('<dt>官网成为来源</dt><dd>0/3</dd>');
     expect(html).toContain('<meter min="0" max="100" value="42">42/100</meter>');
     expect(html).toContain("企业表达清晰度");
     expect(html).not.toContain("<h4>organizationClarity</h4>");
@@ -255,6 +259,44 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(ARTIFACT_CSS).toContain('.paid-report-template .answer-detail:not([open])');
     expect(ARTIFACT_CSS).toContain('.paid-report-template .technical-score-summary meter');
     expect(ARTIFACT_CSS).toContain('.paid-report-template .roadmap-phase:not([open])>.roadmap-phase-body');
+  });
+
+  it("keeps content alignment separate from actual answer and source adoption",()=>{
+    const model=generativeModel();
+    model.locale="en";
+    model.combinedReport.answerCards=model.combinedReport.answerCards.map((card)=>({
+      ...card,
+      geoDiagnosis:{...card.geoDiagnosis,targetMentioned:false,targetRoles:[]}
+    })) as typeof model.combinedReport.answerCards;
+    model.combinedReport.directSemantics={
+      version:"free-v4-direct-semantics-v1",
+      questions:model.combinedReport.answerCards.map((card,index)=>({
+        questionId:card.questionId,answerCardHash:"a".repeat(64),answerCardReceipt:{} as never,analysisStatus:"completed" as const,coreReceipt:{} as never,
+        analysis:{summary:index===2?"The target is an authoritative answerer.":`Content alignment ${index+1}`,observations:[],recommendations:[],evidenceHandles:[]},
+        handleBindings:[],analysisReceipt:{} as never
+      })) as never
+    };
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    const opening=html.slice(0,html.indexOf('data-website-context="true"'));
+    expect(opening).toContain('<dt>Target entered answers</dt><dd>0/3</dd>');
+    expect(opening).toContain('<dt>Target site used as source</dt><dd>0/3</dd>');
+    expect(opening).toContain("does not yet recommend or cite the target");
+    expect(opening).not.toContain("authoritative answerer");
+    expect(html).toContain("The target is an authoritative answerer.");
+  });
+
+  it("counts target answer mentions and target-owned sources independently",()=>{
+    const model=generativeModel();
+    model.locale="en";
+    model.combinedReport.answerCards=model.combinedReport.answerCards.map((card,index)=>{
+      if(card.answerMode!=="generative_search_v1")return card;
+      return {...card,geoDiagnosis:{...card.geoDiagnosis,targetMentioned:index===0,targetRoles:index===0?["provider"]:[]},sources:card.sources.map((source)=>index===1?{...source,canonicalUrl:"https://www.example.com/services",registrableDomain:"example.com"}:source)};
+    }) as typeof model.combinedReport.answerCards;
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    const opening=html.slice(0,html.indexOf('data-website-context="true"'));
+    expect(opening).toContain('<dt>Target entered answers</dt><dd>1/3</dd>');
+    expect(opening).toContain('<dt>Target site used as source</dt><dd>1/3</dd>');
+    expect(opening).toContain("entering an answer (1/3) and sourcing it (1/3) remain separate outcomes");
   });
 
   it("presents the roadmap as one numbered why-to-how analysis chain",()=>{
