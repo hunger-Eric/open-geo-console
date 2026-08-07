@@ -219,7 +219,6 @@ export async function synthesizeWebsiteReport(
         .slice(0, 1)
     : verified.report.findings;
   const finalReport = { ...verified.report, findings: tierFindings };
-  assertTemporalConsistency(finalReport, generatedAt);
   const result = {
     report: finalReport,
     modelId: completion.modelId,
@@ -259,7 +258,6 @@ export async function synthesizeWebsiteReportWithRecovery(
       return await synthesizeWebsiteReport(client, datedInput, options.signal, [], options.semanticValidation);
     } catch (error) {
       lastError = error;
-      if (error instanceof WebsiteReportTemporalValidationError) throw error;
       if (options.semanticValidation === "free_direct") {
         if (!isRetryableAiClientError(error) || attempt >= maxAttempts) throw error;
         await delayWithSignal(delay, Math.min(2_000, 250 * (2 ** (attempt - 1))), options.signal);
@@ -332,7 +330,6 @@ async function correctWebsiteReportLanguage(
   const deliverable = corrected ?? omitInvalidOptionalWebsiteReportProse(error.draft.report, error);
   if (!deliverable) throw error;
   assertWebsiteReportLanguage(deliverable, input);
-  assertTemporalConsistency(deliverable, input.generatedAt ?? deliverable.provenance.generatedAt);
   return { ...error.draft, report: deliverable };
 }
 

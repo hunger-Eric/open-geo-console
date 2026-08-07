@@ -107,27 +107,27 @@ describe("website synthesis semantic-validation seam", () => {
     expect(prompt.rules).toContain("A score of 90 or above requires comprehensive, consistent evidence across multiple relevant supplied pages; never use 100 for sampled website evidence.");
   });
 
-  it("rejects model prose that calls a date before reportAsOf future", async () => {
+  it("delivers model prose even when date language is inconsistent", async () => {
     const output = modelOutput();
     (output.executiveSummary as { overview: string }).overview = "页面中的 2026-05-26 属于未来时间，发布日期存在异常。";
     const dated = input();
     dated.generatedAt = "2026-08-04T00:00:00.000Z";
 
     await expect(synthesizeWebsiteReport(clientReturning(output), dated, undefined, [], "deferred"))
-      .rejects.toThrow(/temporal|2026-05-26|future|未来/i);
+      .resolves.toMatchObject({ report: { executiveSummary: { overview: expect.stringContaining("2026-05-26") } } });
   });
 
-  it("rejects model prose that calls a date after reportAsOf already past", async () => {
+  it("delivers model prose that calls a future date already past", async () => {
     const output = modelOutput();
     (output.executiveSummary as { overview: string }).overview = "页面中的 2026-08-05 已经发生，属于过去时间。";
     const dated = input();
     dated.generatedAt = "2026-08-04T00:00:00.000Z";
 
     await expect(synthesizeWebsiteReport(clientReturning(output), dated, undefined, [], "deferred"))
-      .rejects.toThrow(/temporal|2026-08-05|past|过去/i);
+      .resolves.toMatchObject({ report: { executiveSummary: { overview: expect.stringContaining("2026-08-05") } } });
   });
 
-  it("does not retry a deterministic temporal contradiction", async () => {
+  it("does not retry a parseable temporal contradiction", async () => {
     const output = modelOutput();
     (output.executiveSummary as { overview: string }).overview = "页面中的 2026-05-26 属于未来时间。";
     const dated = input();
@@ -136,17 +136,17 @@ describe("website synthesis semantic-validation seam", () => {
 
     await expect(synthesizeWebsiteReportWithRecovery(client, dated, {
       maxAttempts: 3, semanticValidation: "deferred", delay: async () => undefined
-    })).rejects.toThrow(/temporal/i);
+    })).resolves.toMatchObject({ report: { executiveSummary: { overview: expect.stringContaining("2026-05-26") } } });
     expect(client.completeJson).toHaveBeenCalledOnce();
   });
 
-  it("rejects a referential contradiction in the following sentence", async () => {
+  it("delivers a referential temporal contradiction in the following sentence", async () => {
     const output = modelOutput();
     (output.executiveSummary as { overview: string }).overview = "页面日期为 2026-05-26。该日期属于未来时间。";
     const dated = input();
     dated.generatedAt = "2026-08-04T00:00:00.000Z";
     await expect(synthesizeWebsiteReport(clientReturning(output), dated, undefined, [], "deferred"))
-      .rejects.toThrow(/temporal|2026-05-26/i);
+      .resolves.toMatchObject({ report: { executiveSummary: { overview: expect.stringContaining("2026-05-26") } } });
   });
 
   it("handles English dates without assigning another clause's future relation to the as-of date", async () => {
@@ -160,10 +160,10 @@ describe("website synthesis semantic-validation seam", () => {
 
     (output.executiveSummary as { overview: string }).overview = "May 26, 2026 is future-dated.";
     await expect(synthesizeWebsiteReport(clientReturning(output), dated, undefined, [], "deferred"))
-      .rejects.toThrow(/temporal|May 26, 2026/i);
+      .resolves.toMatchObject({ report: { executiveSummary: { overview: expect.stringContaining("May 26, 2026") } } });
   });
 
-  it("revalidates temporal truth after model-authored language correction", async () => {
+  it("keeps a language-corrected report even when its date language is inconsistent", async () => {
     const output = modelOutput();
     Object.assign(output.organizationProfile as Record<string, unknown>, {
       organizationName: null, brandNames: [], summary: "提供头程服务。", businessModel: "企业物流",
@@ -187,7 +187,7 @@ describe("website synthesis semantic-validation seam", () => {
 
     await expect(synthesizeWebsiteReportWithRecovery(client, dated, {
       maxAttempts: 3, semanticValidation: "legacy", delay: async () => undefined
-    })).rejects.toThrow(/temporal|2026-05-26/i);
+    })).resolves.toMatchObject({ report: { executiveSummary: { overview: expect.stringContaining("2026-05-26") } } });
     expect(client.completeJson).toHaveBeenCalledTimes(2);
   });
 

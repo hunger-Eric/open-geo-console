@@ -1,7 +1,12 @@
 /* eslint-disable @next/next/no-img-element -- protected evidence images must remain printable in canonical HTML */
 import React, { type ReactNode } from "react";
+import {
+  isCombinedGeoReportV3CrawlDiagnostic
+} from "@open-geo-console/ai-report-engine";
 import type {
   DimensionKey,
+  CombinedGeoReportV3,
+  CombinedGeoReportV3CrawlDiagnostic,
   GenerativeSearchAnswerCardV3,
   LegacyEvidenceBoundAnswerCardV3,
   OpenGeoAnswerOwnershipCategoryV3,
@@ -11,8 +16,8 @@ import type {
 import type { CombinedPrivateReportArtifactModelV3 } from "@/report/artifact-model";
 import { SourceSelectionDiagnosisSection } from "./source-selection-diagnosis-section";
 
-type PaidAnswerCard=CombinedPrivateReportArtifactModelV3["combinedReport"]["answerCards"][number];
-type PaidReport=CombinedPrivateReportArtifactModelV3["combinedReport"];
+type PaidAnswerCard=CombinedGeoReportV3["answerCards"][number];
+type PaidReport=CombinedGeoReportV3;
 type EvidenceSummary={verified:number;searchOnly:number;inaccessible:number;total:number};
 
 const DECISION_COPY={
@@ -27,6 +32,7 @@ const DIMENSION_LABELS:Record<"en"|"zh",Record<DimensionKey,string>>={
 
 export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateReportArtifactModelV3 }) {
   const { combinedReport: report } = model;
+  if (isCombinedGeoReportV3CrawlDiagnostic(report)) return <CrawlDiagnosticArtifact report={report} locale={model.locale}/>;
   const zh = model.locale === "zh";
   const copy = zh ? ZH : EN;
   const content = zh ? ZH_CONTENT : EN_CONTENT;
@@ -168,6 +174,29 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
   </main>;
 }
 
+function CrawlDiagnosticArtifact({ report, locale }: { report: CombinedGeoReportV3CrawlDiagnostic; locale: "en" | "zh" }) {
+  const zh = locale === "zh";
+  return <main className="report-shell paid-report-template" data-artifact-revision={report.artifactRevisionId} data-crawl-diagnostic="true">
+    <article className="paid-report-document">
+      <header className="report-section report-guide">
+        <p className="section-index">00</p>
+        <h1>{zh ? "网站抓取诊断报告" : "Website crawl diagnostic"}</h1>
+        <p>{zh ? "本次未获得可读取的网站页面内容。以下是抓取过程实际观察到的结果；这不是对网站内容或公开搜索表现的推断。" : "No readable page content was obtained. The observations below describe the actual crawl process; they are not claims about site content or public-search performance."}</p>
+        <dl className="guide-metadata"><Meta label={zh ? "目标网站" : "Target"}>{report.targetUrl}</Meta><Meta label={zh ? "生成时间" : "Generated"}>{formatTimestamp(report.generatedAt, locale)}</Meta></dl>
+      </header>
+      <section className="report-section">
+        <p className="section-index">01</p><h2>{zh ? "抓取观察" : "Crawl observations"}</h2>
+        <ul>{report.crawlObservations.map((observation, index) => <li key={`${observation.attemptedUrl}-${index}`}><strong>{observation.category}</strong><br/>{observation.attemptedUrl}<br/>{observation.detail}</li>)}</ul>
+      </section>
+      <section className="report-section">
+        <p className="section-index">02</p><h2>{zh ? "GEO 影响与范围" : "GEO impact and scope"}</h2>
+        <p>{zh ? "由于目标网站未提供可读取内容，本报告不能评价内容可引用性、实体表达、技术评分或买家问题答案。修复上述访问或可读取性问题后，再次抓取才能形成这些结论。" : "Without readable target-site content, this report cannot assess citability, entity clarity, technical scores, or buyer-question answers. Those conclusions require a later crawl after the access or readability issue is resolved."}</p>
+        <ul>{report.limitations.map((limitation, index) => <li key={index}>{limitation}</li>)}</ul>
+      </section>
+    </article>
+  </main>;
+}
+
 function evidenceSummary(card:PaidAnswerCard):EvidenceSummary{
   if(card.answerMode!=="generative_search_v1")return {verified:card.sourceEvidence.length,searchOnly:0,inaccessible:0,total:card.sourceEvidence.length};
   return {verified:card.audit.verifiedBodyCount,searchOnly:card.audit.searchSourceOnlyCount,inaccessible:card.audit.inaccessibleCount,total:card.sources.length};
@@ -194,8 +223,8 @@ function Meta({label,children}:{label:string;children:ReactNode}){return <div><d
 function formatTimestamp(value:string,locale:"en"|"zh"){const date=new Date(value);if(Number.isNaN(date.getTime()))return value;return new Intl.DateTimeFormat(locale==="zh"?"zh-CN":"en-US",{dateStyle:"medium",timeStyle:"short"}).format(date);}
 function shortRevisionId(value:string){return value.length>12?`${value.slice(0,8)}…`:value;}
 function List({label,items}:{label:string;items:readonly string[]}){return items.length?<div><strong>{label}</strong><ul>{items.map((item)=><li key={item}>{item}</li>)}</ul></div>:null;}
-function citationOrdinals(cards:CombinedPrivateReportArtifactModelV3["combinedReport"]["answerCards"]){const result=new Map<string,number>();for(const card of cards){if(card.answerMode === "generative_search_v1")continue;for(const sentence of card.sentences)for(const id of sentence.evidenceIds)if(!result.has(id))result.set(id,result.size+1);}return result;}
-function reportConclusion(report:CombinedPrivateReportArtifactModelV3["combinedReport"],locale:"en"|"zh"){
+function citationOrdinals(cards:PaidReport["answerCards"]){const result=new Map<string,number>();for(const card of cards){if(card.answerMode === "generative_search_v1")continue;for(const sentence of card.sentences)for(const id of sentence.evidenceIds)if(!result.has(id))result.set(id,result.size+1);}return result;}
+function reportConclusion(report:PaidReport,locale:"en"|"zh"){
   const complete=report.answerCards.filter(({status})=>status==="answered").length;
   const mentioned=report.answerCards.filter(({geoDiagnosis})=>geoDiagnosis.targetMentioned).length;
   const total=report.answerCards.length;
@@ -350,7 +379,7 @@ function geoArticleGenerationLabel(deliverable:NonNullable<PaidReport["geoArticl
   return mode==="model_researched"?"Completed with focused research and AI drafting":mode==="model_existing_evidence"?"Focused search was unavailable; AI completed the article from existing evidence":mode==="deterministic_evidence_fallback"?"Completed deterministically from validated evidence":mode==="model"?"AI-generated and validated against the article contract":"Historical deterministic content outline";
 }
 
-function LegacyCrossQuestionDiagnosis({report,locale}:{report:CombinedPrivateReportArtifactModelV3["combinedReport"];locale:"en"|"zh"}){
+function LegacyCrossQuestionDiagnosis({report,locale}:{report:PaidReport;locale:"en"|"zh"}){
   const copy=locale==="zh"?ZH:EN;
   const answered=report.answerCards.filter(({status})=>status==="answered").length;
   const limited=report.answerCards.filter(({status})=>status!=="answered").length;

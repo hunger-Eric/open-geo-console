@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedReportLanguageScope, type GeoArticleDeliverable, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type PaidV3DirectSemantics, type PaidV3SemanticAnswerCardDraft, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
+import { assertCombinedGeoReportLanguage, GEO_TERMINOLOGY_POLICY, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, requireReadyCombinedGeoReportV3CrawlDiagnostic, restoreAllowedDomainTerms, type CombinedBusinessQuestionAnswers, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedGeoReportV3CrawlDiagnostic, type CombinedReportLanguageScope, type GeoArticleDeliverable, type GroundedAnswerEvidence, type GroundedBusinessQuestionAnswersV2, type OpenGeoAnswerCardV3, type OpenGeoEngineProvenanceV3, type PaidV3DirectSemantics, type PaidV3SemanticAnswerCardDraft, type ProviderDiscoveryV1, type RecommendationForensicReportV2, type SourceSelectionDiagnosisV1 } from "@open-geo-console/ai-report-engine";
 import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
@@ -44,6 +44,58 @@ export interface ReadyCombinedArtifactV3 {
   pdfSha256?: string;
   pdfStorageKey?: string;
   pageCount?: number;
+}
+
+export interface ReadyCombinedArtifactV3CrawlDiagnostic {
+  report: CombinedGeoReportV3CrawlDiagnostic;
+  html: string;
+  htmlSha256: string;
+}
+
+export function buildReadyCombinedArtifactV3CrawlDiagnostic(input: {
+  artifactRevisionId: string;
+  artifactRevision: number;
+  reportId: string;
+  orderId: string;
+  jobId: string;
+  originalPaidJobId: string;
+  targetUrl: string;
+  locale: string;
+  questionSetIdentity: string;
+  crawlObservations: readonly { attemptedUrl: string; category: "dns" | "http" | "robots" | "redirect" | "browser" | "unreadable" | "unknown"; detail: string }[];
+  limitations: readonly string[];
+  generatedAt?: string;
+}): ReadyCombinedArtifactV3CrawlDiagnostic {
+  const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const report = requireReadyCombinedGeoReportV3CrawlDiagnostic({
+    version: 3,
+    artifactContract: "combined_geo_report_v3",
+    deliveryKind: "crawl_diagnostic",
+    productCode: "recommendation_forensics_v1",
+    artifactRevisionId: input.artifactRevisionId,
+    artifactRevision: input.artifactRevision,
+    reportId: input.reportId,
+    orderId: input.orderId,
+    jobId: input.jobId,
+    originalPaidJobId: input.originalPaidJobId,
+    targetUrl: input.targetUrl,
+    locale: input.locale,
+    generatedAt,
+    evidenceCutoffAt: generatedAt,
+    questionSetIdentity: input.questionSetIdentity,
+    crawlObservations: input.crawlObservations,
+    limitations: input.limitations
+  });
+  const locale = report.locale.toLowerCase().startsWith("zh") ? "zh" : "en";
+  const model: CombinedPrivateReportArtifactModelV3 = {
+    productContract: "combined_geo_report_v3", reportId: report.reportId, locale,
+    combinedReport: report, evidenceAssets: [], artifactRevisionId: report.artifactRevisionId
+  };
+  const html = renderCanonicalCombinedArtifactHtml(model);
+  if (!html.trim() || !html.includes(report.artifactRevisionId) || !html.includes(report.crawlObservations[0]!.attemptedUrl)) {
+    throw new Error("Combined V3 crawl-diagnostic HTML artifact is empty or incomplete.");
+  }
+  return { report, html, htmlSha256: sha(html) };
 }
 
 export function combinedArtifactSystemCopy(locale: string, input: {

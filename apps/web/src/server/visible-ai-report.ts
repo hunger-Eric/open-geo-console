@@ -1,5 +1,6 @@
 import "server-only";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
+import { isCombinedGeoReportV3CrawlDiagnostic } from "@open-geo-console/ai-report-engine";
 import { cookies } from "next/headers";
 import { getAiReport } from "@/db/ai-reports";
 import { buildVisibleReportBundle, type VisibleReportBundle } from "@/report/visibility";
@@ -18,6 +19,14 @@ export async function getVisibleReportBundle(
   const hasCombinedAccess = combinedScope ? await tokenGrantsReportAccess(combinedToken, reportId, combinedScope) : false;
   if (hasCombinedAccess) {
     if (!active) throw new Error("The active combined report artifact is unavailable.");
+    if (isCombinedGeoReportV3CrawlDiagnostic(active.report)) {
+      return {
+        tier: "deep",
+        canAccessHtmlArtifact: true,
+        technicalReport: publicTechnicalReport,
+        aiReport: null
+      };
+    }
     return {
       tier: "deep",
       canAccessHtmlArtifact: true,

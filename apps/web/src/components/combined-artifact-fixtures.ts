@@ -1,4 +1,5 @@
 import type { CombinedPrivateReportArtifactModel, CombinedPrivateReportArtifactModelV3 } from "@/report/artifact-model";
+import type { CombinedGeoReportV3 } from "@open-geo-console/ai-report-engine";
 
 export function combinedArtifactFixture(): CombinedPrivateReportArtifactModel {
   const purposes = ["core_service_discovery", "customer_region_fit", "purchase_delivery_risk"] as const;
@@ -57,7 +58,7 @@ export function combinedV3ArtifactFixture(): CombinedPrivateReportArtifactModelV
 
 export function combinedV3ArticleArtifactFixture(): CombinedPrivateReportArtifactModelV3 {
   const model={...combinedV3ArtifactFixture(),locale:"zh" as const};
-  const report=model.combinedReport,questionId=report.answerCards[0]!.questionId,sourceRef="source:v3-evidence-1",questionRef=`question:${questionId}`;
+  const report=model.combinedReport as CombinedGeoReportV3,questionId=report.answerCards[0]!.questionId,sourceRef="source:v3-evidence-1",questionRef=`question:${questionId}`;
   report.geoArticleExample={version:"geo_article_deliverable_v2",kind:"article",primaryQuestionId:questionId,article:{
     title:"企业选择跨境物流服务时应核对哪些能力",
     introduction:{text:"先确认运输范围、异常处理和交付边界，再用公开材料核对每项承诺。",evidenceRefs:[sourceRef]},
@@ -74,7 +75,7 @@ export function combinedV3ArticleArtifactFixture(): CombinedPrivateReportArtifac
 
 export function combinedV3OutlineArtifactFixture(): CombinedPrivateReportArtifactModelV3 {
   const model={...combinedV3ArtifactFixture(),locale:"zh" as const};
-  const report=model.combinedReport,questionId=report.answerCards[0]!.questionId,sourceRef="source:v3-evidence-1",questionRef=`question:${questionId}`;
+  const report=model.combinedReport as CombinedGeoReportV3,questionId=report.answerCards[0]!.questionId,sourceRef="source:v3-evidence-1",questionRef=`question:${questionId}`;
   report.geoArticleExample={version:"geo_article_deliverable_v2",kind:"outline",primaryQuestionId:questionId,fallbackReason:"provider_error",outline:{
     workingTitle:"企业选择跨境物流服务时应核对哪些能力",readerQuestion:"如何选择适合的跨境物流服务？",directAnswer:"当前只能形成初步判断，仍需核对服务边界和公开证据。",
     plannedSections:[

@@ -3,35 +3,30 @@
 Status: `APPROVED`
 
 Prepared on 2026-08-07 after the user asked to deploy local code for manual
-testing. The dirty tree is the already-completed **Clean Paid V3 article and
-explainable score presentation** scope (archived in
-`docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`). User approved this exact Staging Gates
-0–3 allowlist on 2026-08-07 and explicitly included `git push origin main`
+testing. The dirty tree is the already-implemented **test-only prospective
+report behavior reset** (target-site crawl as authority; crawl-diagnostic
+HTML; content-quality limitations non-fatal). User approved this exact Staging
+Gates 0–3 allowlist on 2026-08-07 and explicitly included `git push origin main`
 (cap 1).
 
 ## Objective
 
 Package the dirty working tree as **one** candidate commit on top of current
-`main` (`597b9daf…`), then deploy **Protected Staging only** through Gates 0–3
-so the fixed Staging URL and Staging free/deep Workers serve:
+`main` (`81f19587…`), then deploy **Protected Staging only** through Gates 0–3
+so the fixed Staging URL and Staging free/deep Workers serve the candidate.
+The user performs manual browser testing of new prospective reports.
 
-- clean Paid V3 article reading surface (title vs research query; supporting
-  notes collapsed after the article)
-- reconstructable `technical_checklist_v2` scoring presentation
-- synthesis score-band rubric for semantic dimensions
-
-The user performs manual browser testing. Agent does **not** run Gate 4, model
-calls, payments, refunds, or email.
+Out of scope for the agent: Gate 4 automated free/paid lineage, report
+submission, payment, refund, email, model call, Production anything.
 
 ## Confirmed baseline
 
 | Item | Value |
 |---|---|
 | Repository | `E:\project\open-geo-console` |
-| Branch | `main` tracking `origin/main` (clean remote identity at `597b9daf…`) |
-| Pre-commit HEAD | `597b9daf801ae75463e5ce598b7c32939eb94a43` |
-| Dirty surface | 11 paths, ~+305/-261 at FROZEN write |
-| Current Staging Workers | `open-geo-console:staging-597b9daf-recovery-article-overlay-v1`, `OGC_DEPLOYMENT_VERSION=597b9daf…` |
+| Branch | `main` tracking `origin/main` at `81f195876eb4a26a3cd246075f00f21c70777c8b` |
+| Dirty surface | 15 paths, ~+486/-191 at FROZEN write (implementation + this deploy scope) |
+| Current Staging Workers | `open-geo-console:staging-81f19587-score-article-overlay-v1` (`47566c7a0b8a`), `OGC_DEPLOYMENT_VERSION=81f19587…` |
 | package-lock / Dockerfile.worker | unchanged → thin overlay only |
 | Full Worker rebuild | **forbidden** |
 
@@ -40,14 +35,14 @@ calls, payments, refunds, or email.
 ### Gate 0 — candidate package
 
 1. Commit **only** the allowlisted dirty paths. One commit on `main`.
-2. Record full candidate SHA. `git push origin main` only if approval explicitly
-   includes push (default **0**).
+2. Record full candidate SHA. `git push origin main` only if approval
+   explicitly includes push (default **0**).
 3. Clean exact-SHA checkout under `.data/staging-release-<short>/`.
 
 ### Gate 1 — preflight
 
 1. Confirm Docker engine, disk free, idle Staging free/deep (wait/drain only).
-2. Record rollback: fixed-alias host, Worker image tag/ID, version `597b9daf…`.
+2. Record rollback: fixed-alias host, Worker image tag/ID, version `81f19587…`.
 3. Confirm thin-overlay path.
 4. `npx vercel whoami` from the clean checkout.
 
@@ -61,9 +56,9 @@ calls, payments, refunds, or email.
    ```
 2. Require `READY` and `gitCommitSha = ogcGitSha = <candidate-full-sha>`.
 3. Build **exactly one** thin overlay:
-   - `FROM open-geo-console:staging-597b9daf-recovery-article-overlay-v1`
+   - `FROM open-geo-console:staging-81f19587-score-article-overlay-v1`
    - `COPY` only `apps/` and `packages/`; OCI revision = full candidate SHA
-   - tag: `open-geo-console:staging-<short>-score-article-overlay-v1`
+   - tag: `open-geo-console:staging-<short>-crawl-diagnostic-overlay-v1`
 4. Preserve `staging.env` bytes; replace **only** `OGC_DEPLOYMENT_VERSION`.
 5. Recreate **only** `staging-worker-free` and `staging-worker-deep`
    (`--no-deps --no-build --force-recreate`).
@@ -79,25 +74,31 @@ calls, payments, refunds, or email.
 
 ### Manual testing (user only)
 
-- Paid V3 article: main body first; supporting notes collapsed after.
-- Technical score: reconstructable checklist vs legacy label.
-- Semantic dimensions: separate from technical score; band presentation.
+User validates, for example:
+
+- Target crawl failure → crawl-diagnostic HTML report, not failed job
+- Parseable model draft with quality defects → HTML with limitations
+- Public-search / answer / visual enrichment failures do not block activation
 
 ## File allowlist
 
-### Commit surface
+### Commit surface (package existing dirty tree only)
 
 | Path | Role |
 |---|---|
-| `packages/geo-auditor/src/index.ts` | `technical_checklist_v2` score breakdown |
-| `packages/geo-auditor/src/index.test.ts` | Score arithmetic tests |
-| `packages/ai-report-engine/src/synthesis.ts` | Score-band rubric in synthesis prompt |
-| `packages/ai-report-engine/src/synthesis.test.ts` | Rubric presence tests |
-| `apps/web/src/worker/geo-article-example.ts` | Editorial title vs research query |
-| `apps/web/src/worker/geo-article-example.test.ts` | Article generation tests |
-| `apps/web/src/components/combined-geo-report-v3-artifact.tsx` | Article surface + score presentation |
+| `apps/web/src/worker/processor.ts` | Crawl-diagnostic terminalization path |
+| `apps/web/src/db/combined-correction-terminalization.ts` | Terminal boundary for diagnostic |
+| `apps/web/src/db/combined-reports.ts` | Report persistence compatibility |
+| `apps/web/src/report/artifact-model.ts` | V3 crawl-diagnostic view model |
+| `apps/web/src/report/combined-artifact-readiness.tsx` | Ready HTML for crawl diagnostic |
+| `apps/web/src/server/visible-ai-report.ts` | Visible reader for diagnostic payload |
+| `apps/web/src/components/combined-geo-report-v3-artifact.tsx` | Diagnostic rendering |
 | `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx` | Render tests |
-| `apps/web/src/report/artifact-styles.ts` | Checklist / supporting-notes styles |
+| `apps/web/src/components/combined-artifact-fixtures.ts` | Fixture type narrowing only |
+| `packages/ai-report-engine/src/combined-geo-report-v3.ts` | Crawl-diagnostic contract |
+| `packages/ai-report-engine/src/combined-geo-report-v3.test.ts` | Contract tests |
+| `packages/ai-report-engine/src/synthesis.ts` | Quality-check non-fatal adjustments |
+| `packages/ai-report-engine/src/synthesis.test.ts` | Synthesis tests |
 | `docs/ACTIVE-CHANGE-SCOPE.md` | This scope / receipts |
 | `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md` | Archive only if already dirty |
 
@@ -113,15 +114,16 @@ calls, payments, refunds, or email.
 
 - Production anything.
 - Full Worker rebuild; Docker mass prune.
-- Historical report recalculation or mutation.
+- Historical report/job/order mutation, replay, clone.
 - Agent Gate 4 / model / payment / refund / email.
 - Second Preview/overlay/alias without a new scope after failure.
-- Expanding source beyond the allowlisted dirty set.
+- Expanding source beyond the allowlisted dirty set at commit time.
+- Schema migration or new dependency (not present in dirty tree).
 
 ## Diff budget
 
 - Application production/test: **0 new lines** in this scope (package existing
-  dirty tree only; ~+305/-261 at FROZEN write).
+  dirty tree only; ~+486/-191 at FROZEN write).
 - Scope/history docs for status and receipts only.
 
 ## Expensive external actions (hard caps)
@@ -148,7 +150,8 @@ calls, payments, refunds, or email.
 
 1. Restore prior `OGC_DEPLOYMENT_VERSION` / `staging.env` bytes.
 2. Recreate free+deep on
-   `open-geo-console:staging-597b9daf-recovery-article-overlay-v1`.
+   `open-geo-console:staging-81f19587-score-article-overlay-v1`
+   (`sha256:47566c7a0b8a`).
 3. Restore prior Web host if alias moved.
 4. Verify and **stop**.
 

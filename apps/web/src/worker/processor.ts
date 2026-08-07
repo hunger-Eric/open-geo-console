@@ -64,7 +64,7 @@ import { getMarketSnapshotBundle } from "@/db/market-snapshots";
 import { listEvidenceAssets } from "@/db/evidence-assets";
 import { terminalizePaidCombinedReport } from "@/db/combined-correction-terminalization";
 import { getPendingPaidCombinedContext } from "@/db/combined-reports";
-import { buildReadyCombinedArtifact, buildReadyCombinedArtifactV2, buildReadyCombinedArtifactV3, materializePreparedCombinedArtifactV3, prepareCombinedGeoReportV3SemanticDraft } from "@/report/combined-artifact-readiness";
+import { buildReadyCombinedArtifact, buildReadyCombinedArtifactV2, buildReadyCombinedArtifactV3, buildReadyCombinedArtifactV3CrawlDiagnostic, materializePreparedCombinedArtifactV3, prepareCombinedGeoReportV3SemanticDraft } from "@/report/combined-artifact-readiness";
 import { createEvidenceStorage } from "@/evidence/storage";
 import {
   getCrawlEvidence,
@@ -186,6 +186,7 @@ interface WorkerCheckpoint extends RecoveryCheckpoint {
     commercialSnapshotRefs: PublicSourceCommercialSnapshotRef[];
     semanticReview?: PaidV3SemanticReviewCheckpointProjection;
   };
+  crawlDiagnostic?: { identityHash: string };
   providerDiscovery?: ProviderDiscoveryCheckpointV1;
   answerFirstV3?: AnswerFirstV3Checkpoint;
   paidV3Review?: {
@@ -389,7 +390,15 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     if (resumeStage === "discovering" || !discovery) {
       await checkpointJob({ stage: "discovering", progress: 10 });
       const discovered = await tracePaidV3DirectStep(directTrace, "discovery", { phase: "discovery" },
-        () => discoverSite(storedReport.url, job.tier, createSafeFetch(), execution.controller.signal));
+        () => discoverSite(storedReport.url, job.tier, createSafeFetch(), execution.controller.signal)).catch(async (error) => {
+          if (job.artifactContract !== "combined_geo_report_v3" || fulfillmentTarget === "legacy") throw error;
+          await terminalizePaidV3CrawlDiagnostic({
+            job, workerId, checkpoint, checkpointJob, targetUrl: storedReport.url, error,
+            trace: directTrace ?? undefined
+          });
+          return null;
+        });
+      if (!discovered) return;
       discovery = snapshotDiscovery(discovered);
       const rankedCandidates = rankCandidates(discovered.candidates, []);
       checkpoint = {
@@ -470,7 +479,16 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       const planned = checkpoint.rankedCandidates?.find((candidate) => candidate.url === url);
       await saveFailedEvidence(job, url, planned?.pageType ?? "other");
     }
-    if (crawl.pages.length === 0) throw new Error("No planned page returned readable evidence.");
+    if (crawl.pages.length === 0) {
+      if (job.artifactContract === "combined_geo_report_v3" && fulfillmentTarget !== "legacy") {
+        await terminalizePaidV3CrawlDiagnostic({
+          job, workerId, checkpoint, checkpointJob, targetUrl: discovery.targetUrl,
+          error: new Error("No planned page returned readable evidence."), trace: directTrace ?? undefined
+        });
+        return;
+      }
+      throw new Error("No planned page returned readable evidence.");
+    }
 
     const technicalReport = job.tier === "deep"
       ? await tracePaidV3DirectStep(directTrace, "technical_audit", {
@@ -2095,6 +2113,76 @@ async function terminalizeReadyCombinedArtifact(
     ? base
     : { ...base, pdfSha256: ready.pdfSha256, pdfStorageKey: ready.pdfStorageKey, pageCount: ready.pageCount };
   await terminalizePaidCombinedReport(terminalInput);
+}
+
+async function terminalizePaidV3CrawlDiagnostic(input: {
+  job: ScanJobRow;
+  workerId: string;
+  checkpoint: WorkerCheckpoint;
+  checkpointJob: (input: CheckpointScanJobInput) => Promise<ScanJobRow>;
+  targetUrl: string;
+  error: unknown;
+  trace?: PaidV3DirectDebugTrace;
+}): Promise<void> {
+  const [pending, questions] = await Promise.all([
+    getPendingPaidCombinedContext(input.job.id),
+    input.job.businessQuestionSetId ? getConfirmedBusinessQuestionSet(input.job.reportId, input.job.businessQuestionSetId) : Promise.resolve(null)
+  ]);
+  if (!pending || !questions) throw new Error("The crawl-diagnostic report requires the pending paid artifact identity and locked question set.");
+  const observation = crawlDiagnosticObservation(input.targetUrl, input.error);
+  const identityHash = stableJsonHash({
+    kind: "crawl_diagnostic", jobId: input.job.id, reportId: input.job.reportId,
+    questionSetIdentity: questions.id, observation
+  });
+  const ready = buildReadyCombinedArtifactV3CrawlDiagnostic({
+    artifactRevisionId: pending.artifactRevisionId,
+    artifactRevision: pending.artifactRevision,
+    reportId: input.job.reportId,
+    orderId: pending.orderId,
+    jobId: input.job.id,
+    originalPaidJobId: input.job.id,
+    targetUrl: input.targetUrl,
+    locale: input.job.locale,
+    questionSetIdentity: questions.id,
+    crawlObservations: [observation],
+    limitations: [
+      "No readable target-site content was obtained during this crawl.",
+      "Public-search, answer-card, citation, visual-evidence, and model-content conclusions are unavailable because the target-site crawl did not yield source material."
+    ]
+  });
+  await input.checkpointJob({
+    stage: "synthesizing", phase: "artifact_verification", progress: 99,
+    checkpoint: { ...input.checkpoint, crawlDiagnostic: { identityHash } } as JobCheckpoint,
+    plannedPages: input.job.plannedPages,
+    successfulPages: input.job.successfulPages,
+    failedPages: Math.max(1, input.job.failedPages)
+  });
+  await terminalizePaidCombinedReport({
+    report: ready.report,
+    workerId: input.workerId,
+    checkpointIdentityHash: identityHash,
+    snapshotRefs: [],
+    htmlSha256: ready.htmlSha256,
+    semanticValidation: "crawl_diagnostic",
+    trace: input.trace
+  });
+}
+
+function crawlDiagnosticObservation(targetUrl: string, error: unknown): {
+  attemptedUrl: string;
+  category: "dns" | "http" | "robots" | "redirect" | "browser" | "unreadable" | "unknown";
+  detail: string;
+} {
+  const detail = error instanceof Error && error.message.trim() ? error.message.trim() : "The crawler could not obtain a readable document.";
+  const normalized = detail.toLowerCase();
+  const category = normalized.includes("robots") ? "robots"
+    : normalized.includes("http") || normalized.includes("status") ? "http"
+      : normalized.includes("redirect") ? "redirect"
+        : normalized.includes("browser") || normalized.includes("javascript") ? "browser"
+          : normalized.includes("readable") || normalized.includes("decode") || normalized.includes("content") ? "unreadable"
+            : normalized.includes("dns") || normalized.includes("enotfound") || normalized.includes("network") || normalized.includes("fetch") ? "dns"
+              : "unknown";
+  return { attemptedUrl: targetUrl, category, detail };
 }
 
 export function hasCompletedPaidV3DirectAnswers(job: ScanJobRow | null | undefined): boolean {

@@ -7,6 +7,7 @@ import {
   GEO_ARTICLE_EXAMPLE_VERSION,
   hashCombinedGeoReportV3ReceiptExcludedProjection,
   parseCombinedGeoReportV3,
+  requireReadyCombinedGeoReportV3CrawlDiagnostic,
   parseGeoArticleDeliverable,
   parseGeoArticleExampleV1
 } from "./combined-geo-report-v3";
@@ -108,6 +109,21 @@ describe("combined GEO report V3 contract", () => {
     expect(() => parseGeoArticleExampleV1(base, authority)).toThrow(/Simplified Chinese/iu);
     expect(() => parseGeoArticleExampleV1({ ...base, title: "<strong>标题</strong>" }, authority)).toThrow(/raw HTML/iu);
     expect(() => parseGeoArticleExampleV1({ ...base, title: "## 中文采购指南" }, authority)).toThrow(/Markdown/iu);
+  });
+
+  it("accepts a factual crawl diagnostic without manufacturing answer-card or public-search data", () => {
+    const report = requireReadyCombinedGeoReportV3CrawlDiagnostic({
+      version: 3, artifactContract: "combined_geo_report_v3", deliveryKind: "crawl_diagnostic",
+      productCode: "recommendation_forensics_v1", artifactRevisionId: "artifact-1", artifactRevision: 1,
+      reportId: "report-1", orderId: "order-1", jobId: "job-1", originalPaidJobId: "job-1",
+      targetUrl: "https://example.com/", locale: "en", generatedAt: "2030-01-01T00:00:00.000Z",
+      evidenceCutoffAt: "2030-01-01T00:00:00.000Z", questionSetIdentity: "questions-1",
+      crawlObservations: [{ attemptedUrl: "https://example.com/", category: "robots", detail: "robots.txt disallows the homepage." }],
+      limitations: ["No readable target-site content was obtained."]
+    });
+    expect(report.deliveryKind).toBe("crawl_diagnostic");
+    expect("answerCards" in report).toBe(false);
+    expect(() => requireReadyCombinedGeoReportV3CrawlDiagnostic({ ...report, crawlObservations: [] })).toThrow(/must not be empty/iu);
   });
 
   it("parses mutually exclusive V2 article and outline deliverables for Q1", () => {

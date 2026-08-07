@@ -1,5 +1,5 @@
 import "server-only";
-import type { AiWebsiteReportV1, CombinedGeoReportV1, CombinedGeoReportV2, CombinedGeoReportV3, CombinedGeoReportV4, RecommendationForensicReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import type { AiWebsiteReportV1, CombinedGeoReportV1, CombinedGeoReportV2, CombinedGeoReportV3, CombinedGeoReportV3CrawlDiagnostic, CombinedGeoReportV4, RecommendationForensicReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import { getAiReport } from "@/db/ai-reports";
 import { listEvidenceAssets } from "@/db/evidence-assets";
@@ -23,9 +23,10 @@ export interface CombinedPrivateReportArtifactModelV2 extends Omit<CombinedPriva
   productContract: "combined_geo_report_v2";
   combinedReport: CombinedGeoReportV2;
 }
-export interface CombinedPrivateReportArtifactModelV3 extends Omit<CombinedPrivateReportArtifactModelV1, "productContract" | "combinedReport" | "pdfStorageKey"> {
+export interface CombinedPrivateReportArtifactModelV3 extends Omit<CombinedPrivateReportArtifactModelV1, "productContract" | "combinedReport" | "pdfStorageKey" | "technicalReport"> {
   productContract: "combined_geo_report_v3";
-  combinedReport: CombinedGeoReportV3;
+  combinedReport: CombinedGeoReportV3 | CombinedGeoReportV3CrawlDiagnostic;
+  technicalReport?: GeoAuditReport;
   pdfStorageKey?: string;
 }
 export interface CombinedPrivateReportArtifactModelV4 {
@@ -102,22 +103,22 @@ export async function loadPrivateReportArtifact(
     const language = localeLanguage(active.report.locale);
     if (!language || language !== active.reportLocale) return null;
     const locale: ReportLocale = language;
-    const evidenceJobIds = [...new Set(active.report.technicalFoundation.evidenceAssets.map((asset) => asset.jobId))];
-    const referencedAssetIds = new Set(active.report.technicalFoundation.evidenceAssets.map((asset) => asset.assetId));
+    const foundation = "technicalFoundation" in active.report ? active.report.technicalFoundation : null;
+    const evidenceJobIds = [...new Set(foundation?.evidenceAssets.map((asset) => asset.jobId) ?? [])];
+    const referencedAssetIds = new Set(foundation?.evidenceAssets.map((asset) => asset.assetId) ?? []);
     const evidenceAssets = (await Promise.all(evidenceJobIds.map((jobId) => listEvidenceAssets(reportId, jobId))))
       .flat().filter((asset) => referencedAssetIds.has(asset.id));
     const common = {
       reportId,
       locale,
-      technicalReport: active.report.technicalFoundation.technicalReport,
       evidenceAssets,
       artifactRevisionId: active.artifactRevisionId
     };
     return productContract === "combined_geo_report_v3"
-      ? { ...common, ...(active.pdfStorageKey ? { pdfStorageKey: active.pdfStorageKey } : {}), productContract, combinedReport: active.report as CombinedGeoReportV3 }
+      ? { ...common, ...(foundation ? { technicalReport: foundation.technicalReport } : {}), ...(active.pdfStorageKey ? { pdfStorageKey: active.pdfStorageKey } : {}), productContract, combinedReport: active.report as CombinedGeoReportV3 | CombinedGeoReportV3CrawlDiagnostic }
       : productContract === "combined_geo_report_v2"
-        ? { ...common, pdfStorageKey: active.pdfStorageKey!, productContract, combinedReport: active.report as CombinedGeoReportV2 }
-        : { ...common, pdfStorageKey: active.pdfStorageKey!, productContract, combinedReport: active.report as CombinedGeoReportV1 };
+        ? { ...common, technicalReport: (active.report as CombinedGeoReportV2).technicalFoundation.technicalReport, pdfStorageKey: active.pdfStorageKey!, productContract, combinedReport: active.report as CombinedGeoReportV2 }
+        : { ...common, technicalReport: (active.report as CombinedGeoReportV1).technicalFoundation.technicalReport, pdfStorageKey: active.pdfStorageKey!, productContract, combinedReport: active.report as CombinedGeoReportV1 };
   }
   if (productContract === "recommendation_forensics_v1") {
     const [report, v1, v2, foundation] = await Promise.all([

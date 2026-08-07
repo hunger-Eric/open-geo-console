@@ -113,6 +113,25 @@ function articleV3Model() {
 }
 
 describe("CombinedGeoReportV3Artifact",()=>{
+  it("renders crawl facts without answer cards or invented evidence",()=>{
+    const model={
+      productContract:"combined_geo_report_v3" as const, reportId:"report-diagnostic", locale:"en" as const,
+      artifactRevisionId:"artifact-diagnostic", evidenceAssets:[],
+      combinedReport:{
+        version:3 as const, artifactContract:"combined_geo_report_v3" as const, deliveryKind:"crawl_diagnostic" as const,
+        productCode:"recommendation_forensics_v1" as const, artifactRevisionId:"artifact-diagnostic", artifactRevision:1,
+        reportId:"report-diagnostic", orderId:"order-diagnostic", jobId:"job-diagnostic", originalPaidJobId:"job-diagnostic",
+        targetUrl:"https://blocked.example/", locale:"en", generatedAt:"2030-01-01T00:00:00.000Z", evidenceCutoffAt:"2030-01-01T00:00:00.000Z",
+        questionSetIdentity:"questions-diagnostic", crawlObservations:[{attemptedUrl:"https://blocked.example/",category:"robots" as const,detail:"robots.txt disallows the homepage."}],
+        limitations:["No readable target-site content was obtained."]
+      }
+    };
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    expect(html).toContain("Website crawl diagnostic");
+    expect(html).toContain("robots.txt disallows the homepage.");
+    expect(html).not.toContain("data-open-geo-answer-card");
+  });
+
   it("renders website context before answers, diagnosis, technical evidence, actions, and methodology",()=>{
     const model=combinedV3ArtifactFixture();
     const first=model.combinedReport.answerCards[0];

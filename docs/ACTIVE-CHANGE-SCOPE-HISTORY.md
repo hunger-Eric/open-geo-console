@@ -7591,3 +7591,14 @@ revised scope.
 - Terminal status: **local implementation and focused/build verification
   complete; live generated-report editorial calibration and browser visual
   acceptance remain unverified.**
+
+---
+
+## 2026-08-07 - Protected Staging score/article cutover
+
+- Candidate `81f195876eb4a26a3cd246075f00f21c70777c8b` was pushed to `main`,
+  deployed once to Protected Staging, and its fixed Staging alias and free/deep
+  Workers were verified at that same revision.
+- The agent did not run a report, crawl, model call, payment, refund, or email.
+  The scope is complete and must not authorize the new crawl-first test-report
+  behavior reset.

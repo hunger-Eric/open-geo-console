@@ -130,6 +130,88 @@ export interface CombinedGeoReportV3 extends Omit<CombinedGeoReportV2, "version"
   geoArticleExample?: GeoArticleDeliverable;
 }
 
+/**
+ * A factual delivery fallback for a target that could not yield readable page
+ * content. It deliberately has no public-search, answer-card, citation, or
+ * model-evidence fields: none were obtained and the report must not imply
+ * otherwise. It remains a `combined_geo_report_v3` payload so the existing
+ * artifact store and HTML route can deliver it.
+ */
+export interface CombinedGeoReportV3CrawlDiagnostic {
+  readonly version: typeof COMBINED_GEO_REPORT_V3_VERSION;
+  readonly artifactContract: typeof COMBINED_GEO_REPORT_V3_CONTRACT;
+  readonly deliveryKind: "crawl_diagnostic";
+  readonly productCode: "recommendation_forensics_v1";
+  readonly artifactRevisionId: string;
+  readonly artifactRevision: number;
+  readonly reportId: string;
+  readonly orderId: string;
+  readonly jobId: string;
+  readonly originalPaidJobId: string;
+  readonly targetUrl: string;
+  readonly locale: string;
+  readonly generatedAt: string;
+  readonly evidenceCutoffAt: string;
+  readonly questionSetIdentity: string;
+  readonly crawlObservations: readonly {
+    readonly attemptedUrl: string;
+    readonly category: "dns" | "http" | "robots" | "redirect" | "browser" | "unreadable" | "unknown";
+    readonly detail: string;
+  }[];
+  readonly limitations: readonly string[];
+}
+
+export function isCombinedGeoReportV3CrawlDiagnostic(value: unknown): value is CombinedGeoReportV3CrawlDiagnostic {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)
+    && (value as { artifactContract?: unknown }).artifactContract === COMBINED_GEO_REPORT_V3_CONTRACT
+    && (value as { deliveryKind?: unknown }).deliveryKind === "crawl_diagnostic");
+}
+
+export function requireReadyCombinedGeoReportV3CrawlDiagnostic(value: unknown): CombinedGeoReportV3CrawlDiagnostic {
+  const root = object(value, "$combined");
+  exact(root.artifactContract, COMBINED_GEO_REPORT_V3_CONTRACT, "$combined.artifactContract");
+  exact(root.version, COMBINED_GEO_REPORT_V3_VERSION, "$combined.version");
+  exact(root.deliveryKind, "crawl_diagnostic", "$combined.deliveryKind");
+  exact(root.productCode, "recommendation_forensics_v1", "$combined.productCode");
+  const targetUrl = text(root.targetUrl, "$combined.targetUrl");
+  try { new URL(targetUrl); } catch { throw new TypeError("$combined.targetUrl must be a URL."); }
+  type CrawlDiagnosticCategory = CombinedGeoReportV3CrawlDiagnostic["crawlObservations"][number]["category"];
+  const observations = array(root.crawlObservations, "$combined.crawlObservations").map((item, index) => {
+    const observation = object(item, `$combined.crawlObservations[${index}]`);
+    const category = observation.category as CrawlDiagnosticCategory;
+    if (!(category === "dns" || category === "http" || category === "robots" || category === "redirect" || category === "browser" || category === "unreadable" || category === "unknown")) {
+      throw new TypeError(`$combined.crawlObservations[${index}].category is invalid.`);
+    }
+    const attemptedUrl = text(observation.attemptedUrl, `$combined.crawlObservations[${index}].attemptedUrl`);
+    try { new URL(attemptedUrl); } catch { throw new TypeError(`$combined.crawlObservations[${index}].attemptedUrl must be a URL.`); }
+    return { attemptedUrl, category, detail: text(observation.detail, `$combined.crawlObservations[${index}].detail`) };
+  });
+  if (!observations.length) throw new TypeError("$combined.crawlObservations must not be empty.");
+  const limitations = array(root.limitations, "$combined.limitations").map((item, index) => text(item, `$combined.limitations[${index}]`));
+  if (!limitations.length) throw new TypeError("$combined.limitations must not be empty.");
+  const artifactRevision = root.artifactRevision;
+  if (typeof artifactRevision !== "number" || !Number.isInteger(artifactRevision) || artifactRevision < 1) throw new TypeError("$combined.artifactRevision must be a positive integer.");
+  return {
+    version: COMBINED_GEO_REPORT_V3_VERSION,
+    artifactContract: COMBINED_GEO_REPORT_V3_CONTRACT,
+    deliveryKind: "crawl_diagnostic",
+    productCode: "recommendation_forensics_v1",
+    artifactRevisionId: text(root.artifactRevisionId, "$combined.artifactRevisionId"),
+    artifactRevision,
+    reportId: text(root.reportId, "$combined.reportId"),
+    orderId: text(root.orderId, "$combined.orderId"),
+    jobId: text(root.jobId, "$combined.jobId"),
+    originalPaidJobId: text(root.originalPaidJobId, "$combined.originalPaidJobId"),
+    targetUrl,
+    locale: text(root.locale, "$combined.locale"),
+    generatedAt: timestamp(root.generatedAt, "$combined.generatedAt"),
+    evidenceCutoffAt: timestamp(root.evidenceCutoffAt, "$combined.evidenceCutoffAt"),
+    questionSetIdentity: text(root.questionSetIdentity, "$combined.questionSetIdentity"),
+    crawlObservations: observations,
+    limitations
+  };
+}
+
 export function parseCombinedGeoReportV3(
   value: unknown,
   options: { semanticValidation?: "legacy" | "deferred" | "free_direct" } = {}

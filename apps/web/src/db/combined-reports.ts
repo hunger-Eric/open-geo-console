@@ -2,11 +2,14 @@ import {
   parseCombinedGeoReportV1,
   parseCombinedGeoReportV2,
   parseCombinedGeoReportV3,
+  isCombinedGeoReportV3CrawlDiagnostic,
+  requireReadyCombinedGeoReportV3CrawlDiagnostic,
   parseCombinedGeoReportV4,
   FREE_V4_DIRECT_SEMANTICS_VERSION,
   type CombinedGeoReportV1,
   type CombinedGeoReportV2,
   type CombinedGeoReportV3,
+  type CombinedGeoReportV3CrawlDiagnostic,
   type CombinedGeoReportV4
 } from "@open-geo-console/ai-report-engine";
 import { ensureDatabase, getSqlClient } from "./index";
@@ -32,7 +35,7 @@ export type ActiveCombinedGeoReportV2 = ActiveCombinedGeoReportBase<"combined_ge
   pdfStorageKey: string;
   pdfSha256: string;
 };
-export type ActiveCombinedGeoReportV3 = ActiveCombinedGeoReportBase<"combined_geo_report_v3", CombinedGeoReportV3> & {
+export type ActiveCombinedGeoReportV3 = ActiveCombinedGeoReportBase<"combined_geo_report_v3", CombinedGeoReportV3 | CombinedGeoReportV3CrawlDiagnostic> & {
   pdfStorageKey: string | null;
   pdfSha256: string | null;
 };
@@ -107,13 +110,16 @@ export async function getActiveCombinedGeoReport(
   try {
     if (row.artifact_contract === "combined_geo_report_v3") {
       if (row.free_direct_semantics_version !== null && row.free_direct_semantics_version !== FREE_V4_DIRECT_SEMANTICS_VERSION) return null;
+      const diagnostic = isCombinedGeoReportV3CrawlDiagnostic(row.payload);
       const direct = row.free_direct_semantics_version === FREE_V4_DIRECT_SEMANTICS_VERSION;
       const hasPdfPair = Boolean(row.pdf_storage_key?.trim() && row.pdf_sha256?.trim());
       const hasNoPdf = row.pdf_storage_key === null && row.pdf_sha256 === null;
-      if ((!direct && !hasPdfPair) || (direct && !hasPdfPair && !hasNoPdf)) return null;
-      const report = parseCombinedGeoReportV3(row.payload, row.free_direct_semantics_version === FREE_V4_DIRECT_SEMANTICS_VERSION
-        ? { semanticValidation: "free_direct" }
-        : {});
+      if ((!direct && !diagnostic && !hasPdfPair) || ((direct || diagnostic) && !hasPdfPair && !hasNoPdf)) return null;
+      const report = diagnostic
+        ? requireReadyCombinedGeoReportV3CrawlDiagnostic(row.payload)
+        : parseCombinedGeoReportV3(row.payload, row.free_direct_semantics_version === FREE_V4_DIRECT_SEMANTICS_VERSION
+          ? { semanticValidation: "free_direct" }
+          : {});
       if (!matchesArtifactIdentity(report, row, reportId) || report.artifactRevision !== row.revision) return null;
       return { ...artifactIdentity, artifactContract: row.artifact_contract, pdfStorageKey: row.pdf_storage_key, pdfSha256: row.pdf_sha256, report };
     }
@@ -138,7 +144,7 @@ export async function getAnyActiveCombinedGeoReport(reportId: string): Promise<A
 }
 
 function matchesArtifactIdentity(
-  report: CombinedGeoReportV1 | CombinedGeoReportV2 | CombinedGeoReportV3 | CombinedGeoReportV4,
+  report: CombinedGeoReportV1 | CombinedGeoReportV2 | CombinedGeoReportV3 | CombinedGeoReportV3CrawlDiagnostic | CombinedGeoReportV4,
   row: { artifact_contract: string; artifact_revision_id: string; report_locale: string | null },
   reportId: string
 ): boolean {

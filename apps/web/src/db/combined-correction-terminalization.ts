@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type LegacyEvidenceBoundAnswerCardV3, type OpenGeoAnswerCardV3 } from "@open-geo-console/ai-report-engine";
+import { isCombinedGeoReportV3CrawlDiagnostic, requireReadyCombinedGeoReport, requireReadyCombinedGeoReportV2, requireReadyCombinedGeoReportV3, requireReadyCombinedGeoReportV3CrawlDiagnostic, type CombinedGeoReportV1, type CombinedGeoReportV2, type CombinedGeoReportV3, type CombinedGeoReportV3CrawlDiagnostic, type LegacyEvidenceBoundAnswerCardV3, type OpenGeoAnswerCardV3 } from "@open-geo-console/ai-report-engine";
 import { ensureDatabase, getSqlClient } from "./index";
 import type { PaidPublicSourceSnapshotRef } from "./public-source-commerce";
 import { JobTransitionService } from "@/worker/job-transition-service";
 import { readFreeDirectSemanticsVersion } from "./report-semantic-review-activation";
 import type { PaidV3DirectDebugTrace, PaidV3DirectDebugTraceDetails } from "@/worker/paid-v3-direct-debug-trace";
 
-type PaidV3SemanticValidationMode = "legacy" | "deferred" | "free_direct";
+type PaidV3SemanticValidationMode = "legacy" | "deferred" | "free_direct" | "crawl_diagnostic";
 
 export async function terminalizePaidCombinedReport(input: {
   report: unknown; workerId: string; checkpointIdentityHash: string; snapshotRefs: readonly PaidPublicSourceSnapshotRef[];
@@ -14,12 +14,13 @@ export async function terminalizePaidCombinedReport(input: {
   semanticValidation?: PaidV3SemanticValidationMode;
   trace?: PaidV3DirectDebugTrace;
   faultAfter?:"report"|"refs"|"job"|"credit"|"order"|"email";
-}):Promise<{report:CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3;outcome:"completed"|"completed_limited"|"failed";refundId:string|null;emailDeliveryId:string}>{
+}):Promise<{report:CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3|CombinedGeoReportV3CrawlDiagnostic;outcome:"completed"|"completed_limited"|"failed";refundId:string|null;emailDeliveryId:string}>{
   const semanticValidation=input.semanticValidation??"legacy";
   const { report, outcome, htmlOnly } = traceTerminalGate(input.trace, "terminal_preflight", { phase: "terminalization", pageCount: input.pageCount }, () => {
     const ready=readyCombined(input.report,semanticValidation);
-    const commercialOutcome=ready.artifactContract==="combined_geo_report_v3"?combinedV3CommercialOutcome(ready.answerCards):ready.publicSourceForensics.commercialOutcome;
-    const directHtmlOnly=ready.artifactContract==="combined_geo_report_v3"&&semanticValidation==="free_direct";
+    const crawlDiagnostic=isCombinedGeoReportV3CrawlDiagnostic(ready);
+    const commercialOutcome=crawlDiagnostic ? "completed" : ready.artifactContract==="combined_geo_report_v3" ? combinedV3CommercialOutcome(ready.answerCards) : ready.publicSourceForensics.commercialOutcome;
+    const directHtmlOnly=(ready.artifactContract==="combined_geo_report_v3"&&semanticValidation==="free_direct")||crawlDiagnostic;
     if(directHtmlOnly){
       if(input.pdfSha256!==undefined||input.pdfStorageKey!==undefined||input.pageCount!==undefined)throw new Error("Direct Paid V3 terminalization is HTML-only.");
     }else if((ready.artifactContract!=="combined_geo_report_v3"&&commercialOutcome!=="completed")||!input.pdfSha256?.trim()||!input.pdfStorageKey?.trim()||!input.pageCount||input.pageCount<5){
@@ -33,7 +34,7 @@ export async function terminalizePaidCombinedReport(input: {
       const value=(await tx<Array<{execution_state:string;checkpoint_revision:number;lease_owner:string|null;lease_expires_at:string|null;credit_reservation_id:string|null;checkpoint:Record<string,unknown>;business_question_set_id:string|null;artifact_contract:string|null}>>`
         SELECT execution_state,checkpoint_revision,lease_owner,lease_expires_at,credit_reservation_id,checkpoint,business_question_set_id,artifact_contract FROM scan_jobs WHERE id=${report.jobId} AND report_id=${report.reportId} FOR UPDATE`)[0];
       const directVersion=readFreeDirectSemanticsVersion(value?.checkpoint??{});
-      if((semanticValidation==="free_direct")!==(directVersion!==null))throw new Error("Paid combined terminalization semantic mode does not match its immutable root carrier.");
+      if(semanticValidation==="crawl_diagnostic" ? directVersion!==null : (semanticValidation==="free_direct")!==(directVersion!==null))throw new Error("Paid combined terminalization semantic mode does not match its immutable root carrier.");
       const checkpoint=combinedCheckpoint(value?.checkpoint,report.artifactContract);
       if(!value||value.execution_state!=="running"||value.lease_owner!==input.workerId||!value.lease_expires_at||Date.parse(value.lease_expires_at)<=Date.now()||!value.credit_reservation_id||value.business_question_set_id!==report.questionSetIdentity||value.artifact_contract!==report.artifactContract||checkpoint?.identityHash!==input.checkpointIdentityHash)throw new Error("Paid combined activation requires its exact leased job and reservation.");
       return value;
@@ -131,9 +132,11 @@ export function combinedV3CommercialOutcome(cards: readonly OpenGeoAnswerCardV3[
   if(legacyCards.every(({status})=>status!=="insufficient"))return "completed_limited";
   return legacyCards.some(({sentences})=>sentences.some(({kind,evidenceIds})=>kind==="grounded_claim"&&evidenceIds.length>0))?"completed_limited":"failed";
 }
-function readyCombined(value:unknown,semanticValidation:PaidV3SemanticValidationMode):CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3{
+function readyCombined(value:unknown,semanticValidation:PaidV3SemanticValidationMode):CombinedGeoReportV1|CombinedGeoReportV2|CombinedGeoReportV3|CombinedGeoReportV3CrawlDiagnostic{
   const contract=value&&typeof value==="object"&&!Array.isArray(value)?(value as {artifactContract?:unknown}).artifactContract:null;
-  if(contract==="combined_geo_report_v3")return requireReadyCombinedGeoReportV3(value,{semanticValidation});
+  if(contract==="combined_geo_report_v3")return isCombinedGeoReportV3CrawlDiagnostic(value)
+    ? semanticValidation==="crawl_diagnostic" ? requireReadyCombinedGeoReportV3CrawlDiagnostic(value) : (()=>{throw new TypeError("Crawl diagnostics require the crawl-diagnostic terminalization mode.");})()
+    : requireReadyCombinedGeoReportV3(value,{semanticValidation: semanticValidation === "crawl_diagnostic" ? "legacy" : semanticValidation});
   if(semanticValidation!=="legacy")throw new TypeError("Only Paid V3 supports a non-legacy semantic-validation mode.");
   if(contract==="combined_geo_report_v2")return requireReadyCombinedGeoReportV2(value);
   if(contract==="combined_geo_report_v1")return requireReadyCombinedGeoReport(value);
@@ -141,6 +144,6 @@ function readyCombined(value:unknown,semanticValidation:PaidV3SemanticValidation
 }
 function combinedCheckpoint(checkpoint:Record<string,unknown>|undefined,contract:string):{identityHash?:unknown}|null{
   if(!checkpoint)return null;
-  return (contract==="combined_geo_report_v3"?checkpoint.answerFirstV3:contract==="combined_geo_report_v2"?checkpoint.providerDiscovery:checkpoint.publicSourceForensics) as {identityHash?:unknown}|null;
+  return (contract==="combined_geo_report_v3" ? (checkpoint.crawlDiagnostic ?? checkpoint.answerFirstV3) : contract==="combined_geo_report_v2"?checkpoint.providerDiscovery:checkpoint.publicSourceForensics) as {identityHash?:unknown}|null;
 }
 function fault(actual:string|undefined,expected:string):void{if(actual===expected)throw new Error(`Injected fault after ${expected}.`);}
