@@ -2,200 +2,220 @@
 
 Status: `APPROVED`
 
-Prepared on 2026-08-07 after the user asked to deploy local code for manual
-testing. The dirty tree packages the already-implemented work present on disk
-(semantic-substitution removal, OpenAI-compatible model-profile hard switch,
-provider/runtime updates, Free/Direct probe and related tests/docs). User
-approved this exact Staging Gates 0–3 allowlist on 2026-08-07 and explicitly
-included `git push origin main` (cap 1).
+Prepared on 2026-08-07 after manual testing of fresh Protected Staging report
+`45f09dbf-d293-4edc-9158-83acf9f70b6d` exposed two prospective-flow defects:
+
+1. a model-authored question was tailored to the submitted business but read
+   like internal implementation discovery rather than a question a real buyer
+   would independently ask; and
+2. both "Unlock full report" links targeted `#checkout`, while the checkout
+   component rendered no content when its catalog was unavailable.
+
+The user approved preparation of this exact local repair scope, then explicitly
+approved this written allowlist and model/code boundary on 2026-08-08. Local
+implementation and tests may proceed within this file surface only.
 
 ## Objective
 
-Package the full dirty working tree as **one** candidate commit on top of
-current `main` (`54720d40…`), then deploy **Protected Staging only** through
-Gates 0–3 so the fixed Staging URL and Staging free/deep Workers serve the
-candidate. The user performs manual browser testing.
+Repair only the prospective Free/V4 path so that:
 
-Out of scope for the agent: Gate 4 automated free/paid lineage, report
-submission, payment, refund, email, model call by the agent, Production.
+1. the model remains the sole semantic author and reviewer of three buyer
+   questions, and emits explicit buyer-intent review evidence before code may
+   confirm the question set; and
+2. `#checkout` always contains a visible loading, unavailable, or ready state,
+   while the existing checkout POST remains reachable only from the ready
+   purchase form.
+
+The repair is prospective only. It must not change, replace, replay, reopen, or
+clone the observed report or any other persisted report/question set.
 
 ## Confirmed baseline
 
 | Item | Value |
 |---|---|
 | Repository | `E:\project\open-geo-console` |
-| Branch | `main` at `54720d40dbaca07d51ab885338932f0fb9e59634` |
-| Dirty surface | ~45 paths + 2 new model-profile JSON files; ~+1666/-665 tracked |
-| Current Staging Workers | `open-geo-console:staging-54720d40-model-buyer-q-overlay-v1`, `OGC_DEPLOYMENT_VERSION=54720d40…` |
-| package-lock / Dockerfile.worker | unchanged → **no full Worker rebuild** |
-| Config note | Candidate renames/replaces model-profile JSON under `config/`; thin overlay **must** also `COPY config` (apps+packages alone is insufficient for tsx JSON imports) |
+| Branch / HEAD | `main` / `45ff1696b559e11b9523f1f973f8e70e0eaca87e` |
+| Remote identity | `main...origin/main` at the same SHA |
+| Existing dirty state | Scope receipt only in `docs/ACTIVE-CHANGE-SCOPE.md`; archived in history while preparing this scope |
+| Question symptom | Q1 asks which concrete data sources or external platform APIs are integrated into the freight-lead system |
+| Question mechanism | One model output is automatically confirmed after shape, lane, distinctness, and neutralization checks; there is no persisted buyer-intent review evidence |
+| Checkout symptom | Two `href="#checkout"` links; current `#checkout` exists but has empty HTML and no input/button |
+| Checkout mechanism | `CommercialCheckoutContent` returns `null` when the catalog is absent, failed, or disabled |
+| Current report authority | Confirmed question set is immutable and out of scope |
 
-## Allowed actions (only after APPROVED)
+CodeGraph was current at scope preparation. Recheck it before implementation
+and sync it after source changes.
 
-### Gate 0 — candidate package
+## Approved model/code boundary
 
-1. Commit **only** the allowlisted dirty paths (including new profile JSON and
-   deleted SenseNova-named profile JSON). One commit on `main`.
-2. Record full candidate SHA. `git push origin main` only if approval includes
-   push (default **0**).
-3. Clean exact-SHA checkout under `.data/staging-release-<short>/`.
+| Critical node | Observable outcome | Executor | Code may do | Failure behavior | Required evidence |
+|---|---|---|---|---|---|
+| Read website foundation | Stable evidence-bound input | Code | Load and serialize persisted foundation | Stop on missing foundation | Foundation identity already used by the run |
+| Generate three buyer questions | Three locale-correct questions covering the persisted lanes | Model | Supply foundation, locale, region, and output schema | Stop on provider/schema failure | Model operation plus prompt-contract version |
+| Review buyer intent | For every question: buyer role, purchase decision, and why a real buyer would ask it | Model, in the same bounded structured generation response | Require the review fields and accepted decision; never judge meaning with keywords/templates | Typed rejection before confirmation; no code-authored fallback or retry | Persisted review identity/hash bound to the question-set checkpoint |
+| Confirm question identity | Exactly three reviewed, distinct, safe questions | Code | Shape, length, lane, distinctness, neutralization, hashes, persistence | Stop on any mismatch | Confirmed question-set and review identities |
+| Render checkout state | Loading, unavailable, or ready panel at `#checkout` | Code | Fetch catalog/questions and render deterministic state | Visible unavailable state; no POST | Component state and focused UI tests |
+| Create checkout | Existing secure hosted-checkout path | Code/provider | Preserve email, Turnstile, idempotency, server price, safe redirect | Existing typed error; no alternate provider | Existing checkout contract tests |
 
-### Gate 1 — preflight
+The single buyer-question model request may contain two model-owned stages
+(draft and buyer-intent review) in one structured response. This scope does not
+authorize an extra provider request, retry, correction request, model-profile
+operation, or deterministic semantic fallback. If implementation proves that a
+separate model call or new model-profile operation is necessary, stop and
+request a revised scope.
 
-1. Confirm Docker engine, disk free, idle Staging free/deep (wait/drain only).
-2. Record rollback: fixed-alias host, Worker image tag/ID, version `54720d40…`.
-3. Confirm thin-overlay path (no package-lock / Dockerfile.worker change).
-4. `npx vercel whoami` from the clean checkout.
-5. Do **not** print secret env values. Optionally record only whether
-   `OGC_PROVIDER_PROFILE` / `OGC_REPORT_V4_MODEL_PROFILE_ID` names already match
-   the candidate profile IDs (names only). If names still point at deleted
-   SenseNova profile IDs, **stop** and report — do not invent secret values.
+## Allowed files
 
-### Gate 2 — Staging deploy (source-only)
+### Production
 
-1. **One** manual Preview:
-   ```powershell
-   $env:VERCEL_ORG_ID = 'team_PbYYV2K2zBjTeThfavXStTOI'
-   $env:VERCEL_PROJECT_ID = 'prj_WVpdlJfsEp0YyWM2W54w8oBy985S'
-   npx vercel deploy --yes --meta ogcGitSha=<candidate-full-sha>
-   ```
-2. Require `READY` and `gitCommitSha = ogcGitSha = <candidate-full-sha>`.
-3. Build **exactly one** thin overlay:
-   - `FROM open-geo-console:staging-54720d40-model-buyer-q-overlay-v1`
-   - `COPY --from=source` **apps**, **packages**, and **config**
-   - OCI revision = full candidate SHA
-   - tag: `open-geo-console:staging-<short>-semantic-provider-overlay-v1`
-4. Preserve `staging.env` bytes; replace **only** `OGC_DEPLOYMENT_VERSION`
-   unless Gate 1 already confirmed profile name alignment. No secret mutation.
-5. Recreate **only** `staging-worker-free` and `staging-worker-deep`
-   (`--no-deps --no-build --force-recreate`).
-6. Inline 60s / 2s readiness wait — **do not** source the full body of
-   `scripts/start-report-v4-staging-workers.ps1`.
-7. Move fixed alias **once** to the candidate Preview for
-   `open-geo-console-staging-itheheda.vercel.app`.
-
-### Gate 3 — protection smoke (agent)
-
-- Fixed `/zh` protection (SSO 302 OK), Web/Worker SHA equality, restart 0.
-- No report/crawl/model/order/payment/refund/email.
-
-### Manual testing (user only)
-
-- Direct: no alias-substring target/competitor diagnosis
-- Free: invalid semantic review does not fabricate target present
-- Legacy Free unmarked generation fails closed for new runs
-- OpenAI-compatible profile selection works with Staging env names
-
-## File allowlist (commit surface = current dirty tree)
-
-### Production / runtime / config
-
-- `.env.example`
-- `AGENTS.md`
-- `README.md`
-- `apps/web/src/components/combined-geo-report-v3-artifact.tsx`
-- `apps/web/src/provider-profile/runtime.ts`
-- `apps/web/src/public-search-adapters/anysearch/adapter.ts`
-- `apps/web/src/public-search-adapters/anysearch/generative-answer.ts`
-- `apps/web/src/report-v4/mimo-provider.ts`
-- `apps/web/src/report-v4/model-runtime-config.ts`
-- `apps/web/src/report-v4/openai-compatible-provider.ts`
-- `apps/web/src/report/combined-artifact-readiness.tsx`
-- `apps/web/src/scripts/probe-free-v4-direct-semantics.ts`
-- `apps/web/src/worker/answer-first-v3.ts`
-- `apps/web/src/worker/paid-v3-semantic-review.ts`
 - `apps/web/src/worker/report-v4-free-teaser.ts`
-- `config/model-profiles/report-v4-openai-compatible-deepseek-v4-flash-v1.json` (new)
-- `config/model-profiles/report-v4-openai-compatible-mimo-v2.5-pro-v1.json` (new)
-- `config/model-profiles/report-v4-sensenova-deepseek-v4-flash-v1.json` (delete)
-- `config/model-profiles/report-v4-sensenova-mimo-v2.5-pro-v1.json` (delete)
-- `packages/ai-report-engine/src/generative-search-answer.ts`
-- `packages/ai-report-engine/src/open-geo-answer-v3.ts`
-- `packages/ai-report-engine/src/report-semantic-review.ts`
-- `scripts/start-report-v4-staging-workers.ps1`
-- `scripts/start-workstation-workers.ps1`
+- `apps/web/src/components/commercial-checkout.tsx`
 
 ### Tests
 
-- All corresponding dirty `*.test.ts` / `*.test.tsx` files listed in current
-  `git status` (including probe, preflight, startup-readiness, anysearch,
-  mimo/openai-compatible provider, production-runtime, free-teaser, answer-first,
-  paid semantic review, generative-search-answer, open-geo-answer-v3,
-  report-semantic-review manifests/tests).
+- `apps/web/src/worker/report-v4-free-teaser.test.ts`
+- `apps/web/src/components/commercial-checkout.test.ts`
+- `apps/web/src/components/commercial-checkout.test.tsx` (new only if the
+  existing test file cannot exercise client rendering without weakening the
+  acceptance gate)
 
-### Docs
+### Scope records
 
 - `docs/ACTIVE-CHANGE-SCOPE.md`
 - `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`
-- `docs/COMMERCIAL-OPERATIONS.md`
-- `docs/DECISIONS.md`
-- `docs/PROTECTED-STAGING-OPERATIONS.md`
-- `docs/operations/public-search-surface-certification.md`
 
-### Deploy-only paths
+No other source, test, fixture, configuration, dependency, schema, migration,
+script, or documentation file is allowlisted.
 
-| Path | Purpose |
-|---|---|
-| `.data/staging-release-<short>/**` | Clean checkout + Dockerfile.overlay |
-| `.data/workstation-docker/staging.env` | `OGC_DEPLOYMENT_VERSION` only (unless Gate 1 stop) |
-| `.data/workstation-docker/staging-*.override.yaml` | free/deep image tag only |
+## Required behavior
+
+### Buyer-question contract
+
+1. The structured model response must contain exactly the three existing lane
+   identities and, for each final question, nonblank model-authored buyer role,
+   purchase decision, and buyer-reason fields.
+2. The model contract must reject internal implementation inventory, bespoke
+   solution-discovery questions, and target-company interrogation unless the
+   model judges the detail to be a genuine buyer-facing purchase criterion
+   supported by the foundation.
+3. Code validates only structure, bounded text, lane coverage, distinctness,
+   identity, and safety. It must not decide buyer plausibility through keywords,
+   templates, industry maps, scores, or local prose.
+4. A rejected, missing, or malformed buyer-intent review stops before question
+   confirmation, search, Q1 answering, or checkpoint promotion. There is no
+   fallback or second model request.
+5. The accepted review identity is bound to the prospective checkpoint so a
+   ready checkpoint cannot substitute another review or question set.
+
+### Checkout presentation
+
+1. The checkout component must not return an empty render while catalog state
+   is loading, failed, or disabled.
+2. Loading renders visible non-purchase status at `#checkout`.
+3. Catalog failure or `enabled=false` renders the existing localized
+   `dictionary.commerce.unavailable` message and no form/POST control.
+4. An enabled catalog with a valid price preserves the existing three-question,
+   email, Turnstile, idempotency, hosted-checkout, and redirect behavior.
+5. No unavailable/loading interaction may call the checkout POST endpoint.
 
 ## Explicitly forbidden
 
-- Production anything.
-- Full Worker rebuild (`npm ci`, Playwright, OS packages).
-- Docker mass prune.
-- Historical report/job/order mutation, replay, clone.
-- Agent Gate 4 / model / payment / refund / email.
-- Second Preview/overlay/alias without a new scope after failure.
-- Expanding source beyond the allowlisted dirty set at commit time.
-- Printing or inventing secrets / API keys.
+- Editing or regenerating report `45f09dbf-d293-4edc-9158-83acf9f70b6d`.
+- Any historical report, job, question-set, order, payment, entitlement,
+  artifact, credit, refund, email, or database mutation.
+- Code-authored buyer questions, buyer-intent keyword rules, templates, industry
+  maps, heuristic scores, cached prose, or silent fallback.
+- A second model request, correction request, retry, or new model-profile
+  operation.
+- Changes to catalog API behavior, commerce readiness, payment providers,
+  prices, Turnstile, schemas, migrations, dependencies, model profiles, or
+  provider adapters.
+- Vercel environment writes, secret changes, Preview deployment, Worker image
+  build/recreate, alias movement, Production action, real report/model/search/
+  crawl, checkout/order/payment/refund/email action.
+- Commit, push, merge, tag, branch, or worktree changes.
+
+
+
+### Deployment amendment — user approved 2026-08-08
+
+The user explicitly approved Protected Staging Gates 0–3 deployment of this
+already-implemented dirty tree and git push origin main (cap 1). This
+amendment authorizes:
+
+- one candidate commit of the allowlisted dirty files only;
+- one Staging Preview with ogcGitSha;
+- one thin source-overlay Worker image (FROM current Staging Worker image,
+  COPY apps + packages only; package-lock/Dockerfile.worker unchanged);
+- recreate only staging-worker-free/deep; set OGC_DEPLOYMENT_VERSION only;
+- one fixed-alias move to the candidate Preview;
+- one git push origin main.
+
+Still forbidden: Production, Gate 4 / agent model-report-payment-refund-email,
+historical mutation, second Preview/overlay/alias after failure without a new
+scope, secret changes.
 
 ## Diff budget
 
-- Application production/test: **0 new lines** in this scope (package existing
-  dirty tree only).
-- Scope/history docs for status and receipts only.
+Measured as additions across the complete working-tree diff against `HEAD`:
 
-## Expensive external actions (hard caps)
+| Surface | Maximum additions |
+|---|---:|
+| Production files | 180 lines |
+| Test files | 260 lines |
+| Scope/history records | Tracking only |
 
-| Action | Max |
-|---|---|
-| Candidate commit on `main` | 1 |
-| `git push origin main` | 0 unless approval includes push; then 1 |
-| Staging Preview deploy | 1 |
-| Thin overlay Docker build (apps+packages+config) | 1 |
-| Staging free+deep recreate | 1 pair |
-| Fixed alias move | 1 |
-| Agent report / payment / model / refund / email | **0** |
+Deletion is allowed only when directly replacing the defective behavior. Any
+production-source overrun or newly required file is a stop-and-report condition.
 
 ## Acceptance checks
 
-1. Candidate full SHA equals Web meta and both Workers’ revision / version.
-2. Fixed alias points at the candidate Preview.
-3. Free and deep running, restart 0, readiness present.
-4. Worker image contains new `config/model-profiles/report-v4-openai-compatible-*.json`.
-5. Gate 3 smoke or SSO boundary recorded.
-6. Rollback identities recorded before cutover.
-
-## Rollback
-
-1. Restore prior `OGC_DEPLOYMENT_VERSION` / `staging.env` bytes.
-2. Recreate free+deep on
-   `open-geo-console:staging-54720d40-model-buyer-q-overlay-v1`.
-3. Restore prior Web host if alias moved.
-4. Verify and **stop**.
+1. A valid fixture proves one structured model response owns both question
+   generation and explicit buyer-intent review, then preserves the same three
+   final texts through confirmation.
+2. Rejected/malformed review fixtures fail before downstream question
+   confirmation, Q1 answer, analysis, or retry; structured invocation count
+   remains exactly one.
+3. Tests prove no deterministic semantic question or buyer-likelihood fallback
+   exists.
+4. Checkout component tests cover loading, unavailable/failed catalog, and
+   enabled catalog states. The first two are visible and have no purchase form;
+   the ready state preserves the existing purchase form.
+5. Existing checkout response/idempotency/redirect tests remain green.
+6. Run the focused affected tests, `npm run lint`, `npm run build`,
+   `git diff --check`, and `codegraph sync` / `codegraph status`.
+7. Automated acceptance is local only. No real model-call or protected-Staging
+   availability claim may be made under this scope.
 
 ## Stop conditions
 
-- Dirty tree outside allowlist at commit time.
-- package-lock / Dockerfile.worker change → full rebuild required.
-- Staging env still requires deleted SenseNova profile IDs and cannot be
-  aligned without secret mutation.
-- SHA mismatch, readiness failure, or Production path required.
+- Buyer-intent acceptance cannot be represented in the existing single model
+  response without a second provider call or model-profile/config change.
+- Correct checkout behavior requires catalog-route, readiness, provider,
+  environment, or payment changes rather than the allowlisted presentation fix.
+- A required dependency or test harness is absent.
+- Any acceptance check requires a real report, model/search/crawl, order,
+  payment, deployment, database mutation, or historical repair.
+- The baseline HEAD/branch changes or a non-scope dirty file appears.
 
----
+## Approval receipt
 
-**Awaiting explicit user approval of this exact allowlist.**  
-Reply with approval (and whether to include `git push origin main`) to set
-Status `APPROVED` and execute Gates 0–3 only.
+On 2026-08-08 the user explicitly replied: "批准这个 FROZEN Scope，执行本地代码修改和测试。"
+This authorizes the local implementation and tests only. It does not authorize
+Vercel configuration, deployment, a new report, a model call, checkout,
+payment, or Git operation.
+
+## Local implementation receipt
+
+Completed on 2026-08-08 within the approved allowlist:
+
+- focused Vitest: 3 files / 23 tests passed;
+- lint: passed with 9 pre-existing warnings and no errors;
+- build: passed after one local TypeScript narrowing correction;
+- `git diff --check`: passed (line-ending conversion warnings only);
+- production additions: 148 / 180; test additions: 107 / 260;
+- CodeGraph synced 3 changed source files and reports the index up to date.
+
+No real model/search/crawl, report mutation, checkout/payment, deployment,
+Vercel configuration, database mutation, commit, push, branch, or worktree
+operation was performed.

@@ -7693,3 +7693,30 @@ revised scope.
   replay, deployment, Git, or external-call authority.
 
 ---
+
+## 2026-08-07 - Semantic-provider overlay Protected Staging deployment completed
+
+- The approved deployment scope packaged the existing dirty implementation as
+  candidate `45ff1696b559e11b9523f1f973f8e70e0eaca87e`, pushed it to
+  `origin/main`, created one manual Preview, built one source-only Worker
+  overlay, recreated only the Staging free/deep Workers, and moved the fixed
+  Protected Staging alias once.
+- The accepted Web Preview was
+  `open-geo-console-is2et68xo-itheheda-6857s-projects.vercel.app`; the fixed
+  alias became `open-geo-console-staging-itheheda.vercel.app`. Both Workers used
+  `open-geo-console:staging-45ff1696-semantic-provider-overlay-v1` with image
+  ID `sha256:2aeb900bf4ec1677b452e7a6dd176213a4e225a7f1da29d60d93317198496f0b`,
+  remained ready, and had restart count zero.
+- The overlay contained `apps`, `packages`, and `config`; Staging selected the
+  `external_search_synthesis` provider profile and the OpenAI-compatible MiMo
+  V4 model profile. The prior `54720d40` Worker image remained the rollback.
+- The agent performed no report, crawl, search/model call, order, payment,
+  refund, or email action. Gate 3 recorded only the protected fixed-site/SSO
+  boundary; the user retained all manual report and checkout testing.
+- Manual testing of fresh report
+  `45f09dbf-d293-4edc-9158-83acf9f70b6d` then exposed a buyer-intent quality
+  defect and a checkout empty-state defect. Those defects require a separate
+  scope and do not reopen this completed deployment authority.
+- Terminal status: **deployment completed; real free/paid flow not accepted.**
+
+---

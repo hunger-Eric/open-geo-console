@@ -68,6 +68,36 @@ import { createPublicSourceQuestionFanouts } from "./public-source-forensics";
 import { resolvePublicSourceSnapshot } from "./public-source-snapshot-resolver";
 
 export const FREE_TEASER_CHECKPOINT_VERSION = "free-teaser-checkpoint-v1" as const;
+export const FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT = "free-v4-buyer-question-review-v1" as const;
+
+type BuyerQuestionPurpose = "core_service_discovery" | "customer_region_fit" | "purchase_delivery_risk";
+
+export interface FreeV4BuyerQuestionReviewQuestion {
+  readonly purpose: BuyerQuestionPurpose;
+  readonly text: string;
+  readonly buyerRole: string;
+  readonly purchaseDecision: string;
+  readonly buyerReason: string;
+}
+
+export interface FreeV4BuyerQuestionReview {
+  readonly version: typeof FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT;
+  readonly decision: "accepted";
+  readonly questions: readonly [
+    FreeV4BuyerQuestionReviewQuestion,
+    FreeV4BuyerQuestionReviewQuestion,
+    FreeV4BuyerQuestionReviewQuestion
+  ];
+  readonly identityHash: string;
+}
+
+/** Model-owned buyer-intent review rejected or failed its structured contract. */
+export class FreeTeaserBuyerQuestionReviewError extends JobError {
+  constructor(message = "Free teaser buyer questions failed model-owned buyer-intent review.") {
+    super(message, "free_teaser_buyer_question_review_rejected", "permanent");
+    this.name = "FreeTeaserBuyerQuestionReviewError";
+  }
+}
 
 /** Durable free-teaser Q1 diagnosis failure (avoids unexpected_internal_error). */
 export class FreeTeaserDiagnosisFailedError extends JobError {
@@ -153,6 +183,7 @@ export interface FreeTeaserCheckpointV1 {
   readonly evidenceCutoffAt: string;
   readonly questionSetId?: string;
   readonly questionSetIdentity?: string;
+  readonly buyerQuestionReview?: FreeV4BuyerQuestionReview;
   readonly observationSnapshotIds?: readonly [string, string, string];
   readonly metrics?: FreeTeaserMetrics;
   readonly q1AnswerResult?: GenerativeSearchAnswerResult;
@@ -250,6 +281,7 @@ export async function generateFreeTeaser(input: {
   const evidenceCutoffAt = checkpoint?.evidenceCutoffAt ?? new Date().toISOString();
 
   let questionSet: ConfirmedBusinessQuestionSet;
+  let buyerQuestionReview = checkpoint?.buyerQuestionReview;
   if ((semanticReviewEnabled || freeDirectEnabled) && checkpoint?.stage === "ready") {
     if (!checkpoint.questionSetId || !checkpoint.questionSetIdentity) throw new Error("Marked Free teaser ready checkpoint has no question-set authority.");
     const persistedQuestionSet = await getConfirmedBusinessQuestionSet(input.reportId, checkpoint.questionSetId);
@@ -257,8 +289,9 @@ export async function generateFreeTeaser(input: {
       throw new Error("Marked Free teaser question-set authority is unavailable.");
     }
     questionSet = persistedQuestionSet;
+    if (buyerQuestionReview) assertBuyerQuestionReviewMatchesQuestionSet(buyerQuestionReview, questionSet);
   } else {
-    const modelOutput = await invokeFreeV4BuyerQuestionGeneration({
+    buyerQuestionReview = await invokeFreeV4BuyerQuestionGeneration({
       foundation: input.foundation,
       locale: runtime.authority.surface.locale,
       region: runtime.authority.surface.region,
@@ -270,7 +303,7 @@ export async function generateFreeTeaser(input: {
       locale: runtime.authority.surface.locale,
       region: runtime.authority.surface.region,
       foundation: input.foundation,
-      modelOutput
+      modelOutput: buyerQuestionModelOutput(buyerQuestionReview)
     });
     questionSet = await confirmBusinessQuestions({
       reportId: input.reportId,
@@ -290,6 +323,7 @@ export async function generateFreeTeaser(input: {
       evidenceCutoffAt,
       questionSetId: questionSet.id,
       questionSetIdentity: questionSet.contentHash,
+      buyerQuestionReview,
       ...(freeDirectEnabled
         ? { directQuestionTexts: questionSet.questions.map(({ neutralPublicText }) => neutralPublicText) as [string, string, string] }
         : {})
@@ -530,7 +564,7 @@ export async function invokeFreeV4BuyerQuestionGeneration(input: {
   region: string;
   signal?: AbortSignal;
   structuredInvoker?: ReportV4StructuredInvoker;
-}): Promise<unknown> {
+}): Promise<FreeV4BuyerQuestionReview> {
   const signal = input.signal ?? new AbortController().signal;
   signal.throwIfAborted();
   const structured = input.structuredInvoker ?? getPreparedProviderProfileRuntime().createStructuredInvoker();
@@ -539,10 +573,14 @@ export async function invokeFreeV4BuyerQuestionGeneration(input: {
     systemText: [
       "You are the sole author of buyer questions for a GEO report.",
       "Read the supplied website foundation and decide for yourself what this website actually offers and what a real potential buyer should ask.",
-      "Write exactly three concrete, useful buyer questions in the requested locale. Do not follow, infer, or repeat any industry, service, audience, market, purchase-criteria, keyword, or question template from application code; those decisions are yours.",
+      "Draft exactly three concrete, useful buyer questions in the requested locale, then review every draft as a real buyer before returning it.",
+      "For every final question, identify the buyer role, the purchase decision it helps make, and why that buyer would independently ask it before purchase.",
+      "Reject internal implementation inventories, bespoke solution-discovery interviews, and interrogation of the target company unless you judge the requested detail to be a genuine buyer-facing purchase criterion supported by the foundation.",
+      "Do not follow, infer, or repeat any industry, service, audience, market, purchase-criteria, keyword, or question template from application code; all semantic decisions and review prose are yours.",
       "Use each persisted search lane exactly once: core_service_discovery, customer_region_fit, and purchase_delivery_risk. The lane names are storage labels only, not question templates.",
       "Do not invent facts, contact details, credentials, order identifiers, or claims not supported by the foundation.",
-      "Return only this JSON object: {\"questions\":[{\"purpose\":\"core_service_discovery\",\"text\":\"...\"},{\"purpose\":\"customer_region_fit\",\"text\":\"...\"},{\"purpose\":\"purchase_delivery_risk\",\"text\":\"...\"}]}."
+      "Return an accepted response only when all three questions pass your buyer-intent review: {\"version\":\"free-v4-buyer-question-review-v1\",\"decision\":\"accepted\",\"questions\":[{\"purpose\":\"core_service_discovery\",\"text\":\"...\",\"buyerRole\":\"...\",\"purchaseDecision\":\"...\",\"buyerReason\":\"...\"},{\"purpose\":\"customer_region_fit\",\"text\":\"...\",\"buyerRole\":\"...\",\"purchaseDecision\":\"...\",\"buyerReason\":\"...\"},{\"purpose\":\"purchase_delivery_risk\",\"text\":\"...\",\"buyerRole\":\"...\",\"purchaseDecision\":\"...\",\"buyerReason\":\"...\"}]}.",
+      "If you cannot produce three defensible buyer questions, return only {\"version\":\"free-v4-buyer-question-review-v1\",\"decision\":\"rejected\",\"reason\":\"...\"}."
     ].join("\n"),
     inputText: JSON.stringify({
       locale: input.locale,
@@ -552,7 +590,59 @@ export async function invokeFreeV4BuyerQuestionGeneration(input: {
     signal
   });
   signal.throwIfAborted();
-  return output;
+  return parseFreeV4BuyerQuestionReview(output);
+}
+
+export function parseFreeV4BuyerQuestionReview(value: unknown): FreeV4BuyerQuestionReview {
+  try {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Review must be an object.");
+    const root = value as Record<string, unknown>;
+    if (root.version !== FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT) throw new TypeError("Review version is invalid.");
+    if (root.decision !== "accepted") throw new TypeError("The model rejected the buyer questions.");
+    if (!Array.isArray(root.questions) || root.questions.length !== 3) throw new TypeError("Review must contain exactly three questions.");
+    const purposes: readonly BuyerQuestionPurpose[] = ["core_service_discovery", "customer_region_fit", "purchase_delivery_risk"];
+    const questions = root.questions.map((candidate, index) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new TypeError(`questions[${index}] must be an object.`);
+      const row = candidate as Record<string, unknown>;
+      if (row.purpose !== purposes[index]) throw new TypeError(`questions[${index}].purpose is invalid.`);
+      return {
+        purpose: row.purpose,
+        text: boundedBuyerReviewText(row.text, `questions[${index}].text`, 500),
+        buyerRole: boundedBuyerReviewText(row.buyerRole, `questions[${index}].buyerRole`, 300),
+        purchaseDecision: boundedBuyerReviewText(row.purchaseDecision, `questions[${index}].purchaseDecision`, 500),
+        buyerReason: boundedBuyerReviewText(row.buyerReason, `questions[${index}].buyerReason`, 500)
+      };
+    }) as unknown as FreeV4BuyerQuestionReview["questions"];
+    if (new Set(questions.map(({ text }) => text.normalize("NFKC").toLocaleLowerCase())).size !== 3) {
+      throw new TypeError("Reviewed buyer questions must be distinct.");
+    }
+    const review = { version: FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT, decision: "accepted" as const, questions };
+    return { ...review, identityHash: sha(review) };
+  } catch (error) {
+    if (error instanceof FreeTeaserBuyerQuestionReviewError) throw error;
+    throw new FreeTeaserBuyerQuestionReviewError(error instanceof Error ? error.message : undefined);
+  }
+}
+
+function buyerQuestionModelOutput(review: FreeV4BuyerQuestionReview) {
+  return { questions: review.questions.map(({ purpose, text }) => ({ purpose, text })) };
+}
+
+function boundedBuyerReviewText(value: unknown, label: string, max: number): string {
+  if (typeof value !== "string" || !value.trim() || value.length > max) throw new TypeError(`${label} is invalid.`);
+  return value.trim().normalize("NFC");
+}
+
+function verifyBuyerQuestionReview(review: FreeV4BuyerQuestionReview): void {
+  const parsed = parseFreeV4BuyerQuestionReview(review);
+  if (parsed.identityHash !== review.identityHash) throw new TypeError("Buyer-question review identity is invalid.");
+}
+
+function assertBuyerQuestionReviewMatchesQuestionSet(review: FreeV4BuyerQuestionReview, questionSet: ConfirmedBusinessQuestionSet): void {
+  verifyBuyerQuestionReview(review);
+  if (review.questions.some((question, index) => question.text !== questionSet.questions[index]?.generatedText)) {
+    throw new TypeError("Buyer-question review does not match the confirmed question set.");
+  }
 }
 
 export function freeTeaserCheckpointFromJobCheckpoint(value: JobCheckpoint | null | undefined): FreeTeaserCheckpointV1 | null {
@@ -582,6 +672,7 @@ export function parseReadyFreeTeaserCheckpoint(
       !checkpoint.q1AnswerResult || !checkpoint.readyAt) {
     throw new TypeError("Free teaser checkpoint is incomplete.");
   }
+  if (checkpoint.buyerQuestionReview) verifyBuyerQuestionReview(checkpoint.buyerQuestionReview);
   const semanticReviewEnabled = options?.semanticReviewContractVersion === REPORT_SEMANTIC_REVIEW_CONTRACT;
   const freeDirectEnabled = options?.freeDirectSemanticsVersion === FREE_V4_DIRECT_SEMANTICS_VERSION;
   if (semanticReviewEnabled && freeDirectEnabled) throw new TypeError("Free teaser cannot verify two semantic carriers.");
@@ -606,6 +697,10 @@ export function parseReadyFreeTeaserCheckpoint(
     if (checkpoint.directQuestionTexts[0] !== checkpoint.q1AnswerDraft.exactQuestion ||
         checkpoint.q1AnswerDraft.questionId !== checkpoint.q1AnswerResult.questionId) {
       throw new TypeError("Free direct Q1 prose does not match the final question set.");
+    }
+    if (checkpoint.buyerQuestionReview && checkpoint.buyerQuestionReview.questions.some((question, index) =>
+      question.text !== checkpoint.directQuestionTexts?.[index])) {
+      throw new TypeError("Free direct questions do not match their buyer-intent review.");
     }
     verifyDirectQ1CoreProjection(checkpoint);
     verifyFreeV4DirectCoreReceipt(checkpoint.directCoreReceipt, freeDirectCoreReceiptInput(checkpoint));
@@ -1626,5 +1721,6 @@ export async function loadConfirmedFreeTeaserQuestionSet(
   if (!questionSet || questionSet.contentHash !== ready.questionSetIdentity) {
     throw new Error("Free teaser question-set authority is unavailable.");
   }
+  if (ready.buyerQuestionReview) assertBuyerQuestionReviewMatchesQuestionSet(ready.buyerQuestionReview, questionSet);
   return questionSet;
 }

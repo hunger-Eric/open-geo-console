@@ -2,7 +2,7 @@
 
 import { Check, Loader2, LockKeyhole } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Dictionary, Locale } from "@/i18n";
 import {
   buildCheckoutRequestBody,
@@ -19,7 +19,7 @@ import {
 import { TurnstileWidget, type TurnstileWidgetHandle } from "./turnstile-widget";
 
 type Currency = "CNY" | "USD" | "HKD";
-interface CatalogPayload {
+export interface CatalogPayload {
   enabled: boolean;
   mode: "disabled" | "test" | "live";
   prices: Array<{ currency: Currency; amountMinor: number }>;
@@ -41,6 +41,7 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
   const returnContext = useMemo(() => getPaymentReturnContext(searchParams), [searchParams]);
   const [returnResult, setReturnResult] = useState<{ orderId: string; status: PublicOrderStatus } | null>(null);
   const [catalog, setCatalog] = useState<CatalogPayload | null>(null);
+  const [catalogSettled, setCatalogSettled] = useState(false);
   const [email, setEmail] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
   const [verifying, setVerifying] = useState(false);
@@ -70,10 +71,10 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
     void fetch("/api/commerce/catalog", { cache: "no-store", signal: controller.signal })
       .then(async (response) => response.ok ? response.json() as Promise<CatalogPayload> : null)
       .then((value) => {
-        if (!value) return;
-        setCatalog(value);
+        if (value) setCatalog(value);
+        setCatalogSettled(true);
       })
-      .catch(() => undefined);
+      .catch(() => { if (!controller.signal.aborted) setCatalogSettled(true); });
     return () => controller.abort();
   }, []);
 
@@ -96,7 +97,10 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
   const price = catalog?.prices[0];
   const returnStatus = returnResult && returnContext && returnResult.orderId === returnContext.orderId ? returnResult.status : null;
   const hidePurchaseControls = shouldHidePurchaseControls(returnContext, returnStatus);
-  if (!catalog?.enabled) return null;
+  const catalogPhase = resolveCheckoutCatalogPhase(catalog, catalogSettled);
+  if (catalogPhase !== "ready" || !catalog) {
+    return <CheckoutCatalogBoundary dictionary={dictionary} phase={catalogPhase} />;
+  }
 
   async function checkout(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -215,6 +219,42 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
       </form> : null}
       {!hidePurchaseControls && catalog.mode === "test" ? <p className="mt-3 text-xs text-[var(--muted)]">Sandbox / test mode</p> : null}
       {error ? <p className="mt-3 text-sm text-[var(--red)]" role="alert">{error}</p> : null}
+    </section>
+  );
+}
+export type CheckoutCatalogPhase = "loading" | "unavailable" | "ready";
+
+export function resolveCheckoutCatalogPhase(
+  catalog: Pick<CatalogPayload, "enabled" | "prices"> | null,
+  settled: boolean
+): CheckoutCatalogPhase {
+  if (!settled) return "loading";
+  return catalog?.enabled && catalog.prices.length > 0 ? "ready" : "unavailable";
+}
+
+export function CheckoutCatalogBoundary({
+  children,
+  dictionary,
+  phase
+}: {
+  children?: ReactNode;
+  dictionary: Dictionary;
+  phase: CheckoutCatalogPhase;
+}) {
+  if (phase === "ready") return <>{children}</>;
+  return (
+    <section aria-live="polite" className="mt-7 rounded-[1.5rem] border border-[var(--line)] bg-[var(--surface)] p-5 sm:p-6">
+      <div className="flex items-start gap-3">
+        {phase === "loading"
+          ? <Loader2 aria-hidden="true" className="mt-0.5 size-5 shrink-0 animate-spin" />
+          : <LockKeyhole aria-hidden="true" className="mt-0.5 size-5 shrink-0" />}
+        <div>
+          <h3 className="font-display text-xl font-black tracking-[-0.03em]">{dictionary.commerce.offerTitle}</h3>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            {phase === "loading" ? dictionary.commerce.verifying : dictionary.commerce.unavailable}
+          </p>
+        </div>
+      </div>
     </section>
   );
 }

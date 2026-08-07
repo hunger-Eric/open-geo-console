@@ -68,6 +68,8 @@ vi.mock("./public-source-snapshot-resolver", () => ({ resolvePublicSourceSnapsho
 
 import {
   buildFreeTeaserDiagnosisTargetPages,
+  FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT,
+  FreeTeaserBuyerQuestionReviewError,
   generateFreeTeaser,
   parseReadyFreeTeaserCheckpoint,
   type FreeTeaserCheckpointV1
@@ -80,6 +82,20 @@ const finalQuestionTexts = [
 ] as const;
 
 function modelQuestionOutput() {
+  return {
+    version: FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT,
+    decision: "accepted",
+    questions: finalQuestionTexts.map((text, index) => ({
+      purpose: ["core_service_discovery", "customer_region_fit", "purchase_delivery_risk"][index],
+      text,
+      buyerRole: ["Operations buyer", "Regional buyer", "Risk reviewer"][index],
+      purchaseDecision: ["Select a capable provider", "Verify market fit", "Compare delivery risk"][index],
+      buyerReason: ["Needs a shortlist", "Needs service coverage", "Needs delivery confidence"][index]
+    }))
+  };
+}
+
+function candidateModelOutput() {
   return {
     questions: finalQuestionTexts.map((text, index) => ({
       purpose: ["core_service_discovery", "customer_region_fit", "purchase_delivery_risk"][index],
@@ -151,7 +167,7 @@ describe("Free V4 direct teaser orchestration", () => {
     expect(JSON.parse(mocks.structuredInvoke.mock.calls[0]![0].inputText)).toMatchObject({
       locale: "en-US", region: "US", websiteFoundation: { organizationProfile: { organizationName: "Target Co" } }
     });
-    expect(mocks.prepare.mock.calls[0]![0].modelOutput).toEqual(modelQuestionOutput());
+    expect(mocks.prepare.mock.calls[0]![0].modelOutput).toEqual(candidateModelOutput());
     expect(mocks.structuredInvoke.mock.calls[1]![0]).toMatchObject({ operation: "sourceDiagnosis" });
     expect(mocks.structuredInvoke.mock.calls[1]![0].inputText).toContain('"handle":"S1"');
     expect(JSON.parse(mocks.structuredInvoke.mock.calls[1]![0].inputText)).toMatchObject({
@@ -170,6 +186,12 @@ describe("Free V4 direct teaser orchestration", () => {
     expect(result.q1AnswerCore.answerText).toContain("Provider A");
     expect(result.checkpoint.directAnalysis?.observations).toHaveLength(1);
     expect(result.checkpoint.directAnalysisReceipt).toBeDefined();
+    expect(result.checkpoint.buyerQuestionReview).toMatchObject({
+      version: FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT,
+      decision: "accepted",
+      questions: expect.arrayContaining([expect.objectContaining({ buyerRole: "Operations buyer" })])
+    });
+    expect(result.checkpoint.buyerQuestionReview?.identityHash).toMatch(/^[a-f0-9]{64}$/u);
     expect(saved.map(({ stage }) => stage)).toEqual(["questions_ready", "q1_answer_ready", "ready"]);
     expect(saved[1]!.directCoreReceipt).toBeDefined();
     expect(saved[1]!.directAnalysisStatus).toBeUndefined();
@@ -212,6 +234,32 @@ describe("Free V4 direct teaser orchestration", () => {
     expect(result.q1AnswerCore.refusal?.code).toBe("provider_refusal");
     expect(result.checkpoint.directAnalysisStatus).toBe("completed");
     expect(result.checkpoint.directCoreReceipt).toBeDefined();
+  });
+
+  it.each([
+    ["model rejection", {
+      version: FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT,
+      decision: "rejected",
+      reason: "The drafts are implementation-discovery questions."
+    }],
+    ["missing buyer role", {
+      ...modelQuestionOutput(),
+      questions: modelQuestionOutput().questions.map((question, index) => index === 0
+        ? { ...question, buyerRole: "" }
+        : question)
+    }]
+  ])("fails closed before confirmation when buyer-intent review has %s", async (_label, output) => {
+    mocks.structuredInvoke.mockResolvedValueOnce(output);
+    const saveCheckpoint = vi.fn();
+
+    await expect(generateFreeTeaser({ ...baseInput(), saveCheckpoint })).rejects.toBeInstanceOf(
+      FreeTeaserBuyerQuestionReviewError
+    );
+    expect(mocks.structuredInvoke).toHaveBeenCalledTimes(1);
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.answerWithSources).not.toHaveBeenCalled();
+    expect(saveCheckpoint).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -278,6 +326,15 @@ describe("Free V4 direct teaser orchestration", () => {
       ...result.checkpoint,
       directAnalysis: { ...result.checkpoint.directAnalysis!, summary: "TAMPERED" }
     }, { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION })).toThrow();
+    expect(() => parseReadyFreeTeaserCheckpoint({
+      ...result.checkpoint,
+      buyerQuestionReview: {
+        ...result.checkpoint.buyerQuestionReview!,
+        questions: result.checkpoint.buyerQuestionReview!.questions.map((question, index) => index === 0
+          ? { ...question, buyerReason: "TAMPERED" }
+          : question) as never
+      }
+    }, { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION })).toThrow(/review identity/iu);
   });
 
   it("rejects new unreviewed legacy Free generation before any semantic or provider work", async () => {
