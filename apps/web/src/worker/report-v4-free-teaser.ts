@@ -254,18 +254,25 @@ export async function generateFreeTeaser(input: {
     }
     questionSet = persistedQuestionSet;
   } else {
+    const modelOutput = await invokeFreeV4BuyerQuestionGeneration({
+      foundation: input.foundation,
+      locale: runtime.authority.surface.locale,
+      region: runtime.authority.surface.region,
+      signal: input.signal,
+      structuredInvoker: input.structuredInvoker
+    });
     const candidates = await prepareBusinessQuestionCandidates({
       reportId: input.reportId,
       locale: runtime.authority.surface.locale,
       region: runtime.authority.surface.region,
-      foundation: input.foundation
+      foundation: input.foundation,
+      modelOutput
     });
     questionSet = await confirmBusinessQuestions({
       reportId: input.reportId,
       questionSetId: candidates.id,
-      finalTexts: candidates.questions.map(({ neutralPublicText }) => neutralPublicText),
-      acknowledgedLowConfidence: candidates.confidence === "low",
-      deferSemanticDistinctness: semanticReviewEnabled
+      finalTexts: candidates.questions.map(({ generatedText }) => generatedText),
+      acknowledgedLowConfidence: candidates.confidence === "low"
     });
   }
   if (checkpoint?.questionSetIdentity && checkpoint.questionSetIdentity !== questionSet.contentHash) {
@@ -508,6 +515,37 @@ export async function invokeFreeV4DirectAnalysis(input: {
       "observations, recommendations, and evidenceHandles are arrays of any appropriate length, including zero. Extra fields are ignored."
     ].join("\n"),
     inputText: JSON.stringify(input.payload),
+    signal
+  });
+  signal.throwIfAborted();
+  return output;
+}
+
+export async function invokeFreeV4BuyerQuestionGeneration(input: {
+  foundation: AiWebsiteReportV1;
+  locale: string;
+  region: string;
+  signal?: AbortSignal;
+  structuredInvoker?: ReportV4StructuredInvoker;
+}): Promise<unknown> {
+  const signal = input.signal ?? new AbortController().signal;
+  signal.throwIfAborted();
+  const structured = input.structuredInvoker ?? getPreparedProviderProfileRuntime().createStructuredInvoker();
+  const output = await structured.invoke({
+    operation: "websiteSynthesis",
+    systemText: [
+      "You are the sole author of buyer questions for a GEO report.",
+      "Read the supplied website foundation and decide for yourself what this website actually offers and what a real potential buyer should ask.",
+      "Write exactly three concrete, useful buyer questions in the requested locale. Do not follow, infer, or repeat any industry, service, audience, market, purchase-criteria, keyword, or question template from application code; those decisions are yours.",
+      "Use each persisted search lane exactly once: core_service_discovery, customer_region_fit, and purchase_delivery_risk. The lane names are storage labels only, not question templates.",
+      "Do not invent facts, contact details, credentials, order identifiers, or claims not supported by the foundation.",
+      "Return only this JSON object: {\"questions\":[{\"purpose\":\"core_service_discovery\",\"text\":\"...\"},{\"purpose\":\"customer_region_fit\",\"text\":\"...\"},{\"purpose\":\"purchase_delivery_risk\",\"text\":\"...\"}]}."
+    ].join("\n"),
+    inputText: JSON.stringify({
+      locale: input.locale,
+      region: input.region,
+      websiteFoundation: input.foundation
+    }),
     signal
   });
   signal.throwIfAborted();

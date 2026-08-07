@@ -14,7 +14,7 @@ import {
 } from "@open-geo-console/ai-report-engine";
 import {
   confirmBusinessQuestionSet,
-  generateBusinessQuestionCandidates,
+  createModelBusinessQuestionCandidates,
   toCanonicalBuyerQuestionSet
 } from "@open-geo-console/public-search-observer";
 import {
@@ -39,6 +39,14 @@ const PROFILE = {
   confidence: "high" as const,
   evidence: [{ url: "https://shun-express.com/", quote: "提供全球化便捷式跨境物流仓配一体化的海外综合服务平台。" }]
 };
+
+const MODEL_QUESTION_OUTPUT = {
+  questions: [
+    { purpose: "core_service_discovery", text: "哪些服务商提供跨境物流、国际集运和海外末端派送服务？" },
+    { purpose: "customer_region_fit", text: "哪些跨境物流方案适合需要从中国发往台湾、菲律宾和中东市场的买家？" },
+    { purpose: "purchase_delivery_risk", text: "采购跨境物流服务前，买家应核验哪些清关、交付和货运追踪风险？" }
+  ]
+} as const;
 
 export interface FreeV4DirectProbeDependencies {
   environment?: NodeJS.ProcessEnv;
@@ -75,7 +83,12 @@ export async function runFreeV4DirectSemanticsProbe(input: {
   await persist({ version: FREE_V4_DIRECT_SEMANTICS_VERSION, status: "running", generatedAt: now().toISOString(), callSequence: CALL_SEQUENCE, completedStages });
 
   try {
-    const candidates = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: PROFILE });
+    const candidates = createModelBusinessQuestionCandidates({
+      locale: "zh-CN",
+      region: "CN",
+      profile: PROFILE,
+      modelOutput: MODEL_QUESTION_OUTPUT
+    });
     const confirmed = confirmBusinessQuestionSet({
       candidates,
       finalTexts: candidates.questions.map(({ neutralPublicText }) => neutralPublicText),

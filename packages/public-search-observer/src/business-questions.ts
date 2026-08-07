@@ -35,9 +35,6 @@ export interface BusinessQuestionCandidate {
   generatedText: string;
   neutralPublicText: string;
   evidenceUrls: readonly string[];
-  service: string;
-  audience: string;
-  marketRegion: string;
 }
 
 export interface BusinessQuestionCandidateSet {
@@ -51,15 +48,6 @@ export interface BusinessQuestionCandidateSet {
   profileEvidenceIdentity: string;
   identityExclusions: readonly string[];
   questions: readonly [BusinessQuestionCandidate, BusinessQuestionCandidate, BusinessQuestionCandidate];
-}
-
-interface BusinessQuestionFocus {
-  serviceCategory: string;
-  serviceExamples: readonly string[];
-  audience: string;
-  marketRegion: string;
-  purchaseCriteria: readonly string[];
-  confidenceReady: boolean;
 }
 
 export interface ConfirmedBusinessQuestion extends BusinessQuestionCandidate {
@@ -76,62 +64,50 @@ export interface ConfirmedBusinessQuestionSet extends Omit<BusinessQuestionCandi
   questions: readonly [ConfirmedBusinessQuestion, ConfirmedBusinessQuestion, ConfirmedBusinessQuestion];
 }
 
-export function generateBusinessQuestionCandidates(input: {
+/**
+ * Converts a Worker-owned model response into the persisted public-search
+ * contract. It deliberately makes no business, industry, or question-content
+ * decision: the model owns every question and its search lane.
+ */
+export function createModelBusinessQuestionCandidates(input: {
   locale: string;
   region: string;
   revision?: number;
   profile: BusinessQuestionProfile;
+  modelOutput: unknown;
 }): BusinessQuestionCandidateSet {
   const locale = bounded(input.locale, "locale", 35);
   const region = bounded(input.region, "region", 35);
   const revision = input.revision ?? 1;
   if (!Number.isSafeInteger(revision) || revision < 1) throw new TypeError("revision must be a positive integer.");
-  const profile = input.profile;
-  const focus = deriveBusinessQuestionFocus(profile, locale);
-  const evidenceUrls = [...new Set(profile.evidence.map(({ url }) => bounded(url, "evidence.url", 2_000)))];
-  const zh = locale.toLowerCase().startsWith("zh");
-  const examples = focus.serviceExamples.length > 0
-    ? zh
-      ? `（如${focus.serviceExamples.join("、")}等）`
-      : ` (such as ${focus.serviceExamples.join(", ")})`
-    : "";
-  const criteria = focus.purchaseCriteria.length > 0
-    ? focus.purchaseCriteria.join(zh ? "、" : ", ")
-    : localized(locale, "service scope and delivery conditions", "服务范围与交付条件");
-  const texts: [string, string, string] = zh ? [
-    `哪些服务商公开提供${focus.serviceCategory}${examples}？`,
-    `哪些${focus.serviceCategory}方案适合${focus.audience}进入${focus.marketRegion.replace(/市场$/u, "")}市场，分别适用于哪些使用场景、交付条件与约束？`,
-    `采购${focus.serviceCategory}时，应重点核验${criteria}，以及交付限制与风险？`
-  ] : [
-    `Which providers publicly offer ${focus.serviceCategory}${examples}?`,
-    `Which ${focus.serviceCategory} options fit ${focus.audience} entering ${focus.marketRegion}, and for which use cases, delivery conditions, and constraints?`,
-    `When buying ${focus.serviceCategory}, how should buyers verify ${criteria}, delivery constraints, and material risks?`
-  ];
-  const purposes: [BusinessQuestionPurpose, BusinessQuestionPurpose, BusinessQuestionPurpose] = [
-    "core_service_discovery", "customer_region_fit", "purchase_delivery_risk"
-  ];
-  const identityExclusions = exclusions(profile);
-  const questions = purposes.map((purpose, index) => ({
-    purpose,
-    generatedText: texts[index]!,
-    neutralPublicText: neutralize(texts[index]!, identityExclusions),
-    evidenceUrls,
-    service: focus.serviceCategory,
-    audience: focus.audience,
-    marketRegion: focus.marketRegion
-  })) as unknown as BusinessQuestionCandidateSet["questions"];
-  const confidence = profile.confidence === "high" && focus.confidenceReady ? "high" : "low";
+  const modelQuestions = parseModelQuestions(input.modelOutput);
   const profileEvidenceIdentity = deterministicId("business-profile", [JSON.stringify({
-    businessModel: profile.businessModel,
-    productsAndServices: profile.productsAndServices,
-    capabilities: profile.capabilities,
-    targetAudiences: profile.targetAudiences,
-    marketsAndRegions: profile.marketsAndRegions,
-    summary: profile.summary,
-    evidence: profile.evidence
+    businessModel: input.profile.businessModel,
+    productsAndServices: input.profile.productsAndServices,
+    capabilities: input.profile.capabilities,
+    targetAudiences: input.profile.targetAudiences,
+    marketsAndRegions: input.profile.marketsAndRegions,
+    summary: input.profile.summary,
+    evidence: input.profile.evidence
   })]);
+  const identityExclusions = exclusions(input.profile);
+  const evidenceUrls = [...new Set(input.profile.evidence.map(({ url }) => bounded(url, "evidence.url", 2_000)))];
+  const questions = modelQuestions.map(({ purpose, text }) => ({
+    purpose,
+    generatedText: text,
+    neutralPublicText: neutralize(text, identityExclusions),
+    evidenceUrls
+  })) as unknown as BusinessQuestionCandidateSet["questions"];
+  const confidence = input.profile.confidence === "high" ? "high" : "low";
   return {
-    id: deterministicId("business-question-set", [BUSINESS_QUESTION_SET_VERSION, locale, region, String(revision), profileEvidenceIdentity]),
+    id: deterministicId("business-question-set", [
+      BUSINESS_QUESTION_SET_VERSION,
+      locale,
+      region,
+      String(revision),
+      profileEvidenceIdentity,
+      JSON.stringify(modelQuestions)
+    ]),
     revision,
     version: BUSINESS_QUESTION_SET_VERSION,
     locale,
@@ -149,7 +125,6 @@ export function confirmBusinessQuestionSet(input: {
   finalTexts: readonly string[];
   acknowledgedLowConfidence: boolean;
   confirmedAt: string;
-  deferSemanticDistinctness?: boolean;
 }): ConfirmedBusinessQuestionSet {
   if (input.finalTexts.length !== 3) throw new TypeError("Exactly three business questions are required.");
   if (input.candidates.requiresAcknowledgement && !input.acknowledgedLowConfidence) {
@@ -158,8 +133,9 @@ export function confirmBusinessQuestionSet(input: {
   const confirmedAt = bounded(input.confirmedAt, "confirmedAt", 64);
   if (!Number.isFinite(Date.parse(confirmedAt))) throw new TypeError("confirmedAt must be an ISO timestamp.");
   const privateTexts = input.finalTexts.map((value, index) => validatePrivateQuestion(value, index));
-  const normalized = privateTexts.map(normalizeComparable);
-  if (!input.deferSemanticDistinctness && new Set(normalized).size !== 3) throw new TypeError("The three business questions must be semantically distinct.");
+  if (new Set(privateTexts.map(normalizeComparable)).size !== 3) {
+    throw new TypeError("The three business questions must be distinct.");
+  }
   const questions = input.candidates.questions.map((candidate, index) => {
     const privateText = privateTexts[index]!;
     const neutralPublicText = neutralize(privateText, input.candidates.identityExclusions);
@@ -175,7 +151,6 @@ export function confirmBusinessQuestionSet(input: {
   const contentHash = deterministicId("confirmed-business-question-set", questions.flatMap(({ purpose, privateText, neutralPublicText }) => [purpose, privateText, neutralPublicText]));
   return {
     ...input.candidates,
-    revision: input.candidates.revision,
     acknowledgedLowConfidence: input.acknowledgedLowConfidence,
     confirmedAt,
     contentHash,
@@ -205,10 +180,9 @@ export function toCanonicalBuyerQuestionSet(set: ConfirmedBusinessQuestionSet): 
       exactText: question.neutralPublicText,
       normalizedText: question.neutralPublicText.normalize("NFKC").replace(/\s+/g, " ").trim(),
       derivation: {
-        ruleId: `confirmed-${question.purpose}-v1`,
+        ruleId: `model-authored-${question.purpose}-v1`,
         evidenceSourceIds: [`profile-evidence:${set.profileEvidenceIdentity}`],
-        subject: publicSearchSubject(question.purpose, question.neutralPublicText, set.locale),
-        supportingTerm: question.purpose === "customer_region_fit" ? question.neutralPublicText : undefined,
+        subject: question.neutralPublicText,
         broadened: set.confidence === "low"
       }
     })),
@@ -216,111 +190,26 @@ export function toCanonicalBuyerQuestionSet(set: ConfirmedBusinessQuestionSet): 
   });
 }
 
-function publicSearchSubject(purpose:BusinessQuestionPurpose,text:string,locale:string):string{
-  if(purpose!=="purchase_delivery_risk")return text;
-  if(locale.toLowerCase().startsWith("zh")){
-    const service=/采购(.+?)时/.exec(text)?.[1]?.trim();
-    const capability=/核验(.+?)[，,]以及交付限制/.exec(text)?.[1]?.trim();
-    if(service&&capability)return `${service} ${capability}`;
-    if(capability)return capability;
-  }else{
-    const subject=(/verify (.+?), delivery constraints/i.exec(text)
-      ?? /compare (.+?)(?:,| and )\s*delivery conditions/i.exec(text))?.[1]?.trim();
-    if(subject)return subject;
+function parseModelQuestions(value: unknown): readonly [{ purpose: BusinessQuestionPurpose; text: string }, { purpose: BusinessQuestionPurpose; text: string }, { purpose: BusinessQuestionPurpose; text: string }] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Model buyer-question output must be an object.");
+  const root = value as Record<string, unknown>;
+  if (!Array.isArray(root.questions) || root.questions.length !== 3) {
+    throw new TypeError("Model buyer-question output must contain exactly three questions.");
   }
-  return text;
-}
-
-function strongest(values: readonly string[], profile: BusinessQuestionProfile, fallback: string): string {
-  const supported = values.map((raw, index) => {
-    const value = bounded(raw, "profile signal", 500);
-    const needle = normalizeComparable(value);
-    const quoteMatches = profile.evidence.reduce((count, evidence) => count + occurrences(normalizeComparable(evidence.quote), needle), 0);
-    const summaryMatches = occurrences(normalizeComparable(profile.summary), needle);
-    return {
-      value,
-      index,
-      score: (quoteMatches > 0 ? 100 : 0) + (summaryMatches > 0 ? 10 : 0)
-        + (profile.confidence === "high" ? 3 : profile.confidence === "medium" ? 2 : 1)
-    };
+  const questions = root.questions.map((value, index) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`questions[${index}] must be an object.`);
+    const row = value as Record<string, unknown>;
+    if (!("purpose" in row) || !("text" in row)) throw new TypeError(`questions[${index}] has an invalid shape.`);
+    const purpose = row.purpose;
+    if (purpose !== "core_service_discovery" && purpose !== "customer_region_fit" && purpose !== "purchase_delivery_risk") {
+      throw new TypeError(`questions[${index}].purpose is unsupported.`);
+    }
+    return { purpose, text: validatePrivateQuestion(row.text, index) };
   });
-  return supported.sort((left, right) => right.score - left.score || left.index - right.index)[0]?.value ?? fallback;
-}
-
-function deriveBusinessQuestionFocus(profile: BusinessQuestionProfile, locale: string): BusinessQuestionFocus {
-  const services = usableProfileSignals(
-    profile.productsAndServices.flatMap((value) => splitServiceExamples(marketCategory(value, locale))), locale, "service"
-  );
-  const rawService = strongest(
-    services,
-    profile,
-    profile.businessModel || localized(locale, "business services", "企业服务")
-  );
-  const normalizedService = marketCategory(rawService, locale);
-  const serviceCategory = compactServiceCategory(profile, normalizedService, locale);
-  const marketFallback = localized(locale, "the target market", "目标市场");
-  const markets = usableProfileSignals(profile.marketsAndRegions, locale, "market").slice(0, 2);
-  const audiences = usableProfileSignals(profile.targetAudiences, locale, "audience");
-  const discoveredServiceExamples = services
-    .filter((value) => normalizeComparable(value) !== normalizeComparable(serviceCategory));
-  const supportedServiceExamples = discoveredServiceExamples.filter((value) => profileSupports(value, profile));
-  return {
-    serviceCategory,
-    serviceExamples: (supportedServiceExamples.length > 0 ? supportedServiceExamples : discoveredServiceExamples).slice(0, 3),
-    audience: strongest(audiences, profile, localized(locale, "business buyers", "企业采购方")),
-    marketRegion: markets.length > 0
-      ? markets.join(locale.toLowerCase().startsWith("zh") ? "、" : ", ")
-      : marketFallback,
-    purchaseCriteria: usableProfileSignals(profile.capabilities, locale, "capability").slice(0, 3),
-    confidenceReady: services.length > 0 && audiences.length > 0 && markets.length > 0
-  };
-}
-
-function usableProfileSignals(
-  values: readonly string[],
-  locale: string,
-  kind: "service" | "audience" | "market" | "capability"
-): string[] {
-  const zh = locale.toLowerCase().startsWith("zh");
-  const maximum = zh ? (kind === "audience" ? 48 : 24) : 80;
-  const inferredOrUnknown = /(?:网站|页面|语言|推测|未明确|未指定|未知|假定|重复录入|整理问题|可能|疑似|预计面向|\b(?:unspecified|unknown|inferred|assumed|likely)\b)/iu;
-  const noisyCapability = /(?:自营|直营|自有|网点|运营|客户|员工|仓储面积|\d)/u;
-  return [...new Set(values.map((raw) => marketCategory(bounded(raw, "profile signal", 500), locale)))]
-    .filter((value) => value.length <= maximum)
-    .filter((value) => zh ? /\p{Script=Han}/u.test(value) : /[A-Za-z]/u.test(value) && !/\p{Script=Han}/u.test(value))
-    .filter((value) => !["service", "audience", "market"].includes(kind) || !inferredOrUnknown.test(value))
-    .filter((value) => kind !== "capability" || !noisyCapability.test(value));
-}
-
-function profileSupports(value: string, profile: BusinessQuestionProfile): boolean {
-  const needle = normalizeComparable(value);
-  return occurrences(normalizeComparable(profile.summary), needle) > 0
-    || profile.evidence.some(({ quote }) => occurrences(normalizeComparable(quote), needle) > 0);
-}
-
-function splitServiceExamples(value: string): string[] {
-  return [...new Set(value.normalize("NFKC").split(/[、，,;/]/u).map((part) => part.trim()).filter(Boolean))];
-}
-
-function compactServiceCategory(profile: BusinessQuestionProfile, service: string, locale: string): string {
-  const logistics = `${profile.businessModel ?? ""} ${service}`;
-  if (/物流|货运|海运|空运|专线|\b(?:logistics|freight|shipping)\b/iu.test(logistics)) {
-    return localized(locale, "cross-border logistics services", "跨境物流服务");
+  if (new Set(questions.map(({ purpose }) => purpose)).size !== 3 || new Set(questions.map(({ text }) => normalizeComparable(text))).size !== 3) {
+    throw new TypeError("Model buyer questions must be distinct and cover the persisted search lanes.");
   }
-  return marketCategory(service, locale);
-}
-
-function marketCategory(value: string, locale: string): string {
-  const normalized = value.normalize("NFKC").trim();
-  if (locale.toLowerCase().startsWith("zh")) {
-    const withoutOwnership = normalized.replace(/(?:自营|直营|自有|自主运营|自建)/gu, "").trim();
-    const parenthetical = /[（(]([^）)]+)[）)]/u.exec(withoutOwnership)?.[1]?.trim();
-    const category = parenthetical && /[/、，,]/u.test(parenthetical) ? parenthetical : withoutOwnership;
-    return category.replace(/[（(][^）)]*[）)]/gu, "").replace(/\s*[/，,]\s*/gu, "、").replace(/、+/gu, "、").trim();
-  }
-  return normalized
-    .replace(/\b(?:self[- ]operated|direct[- ]operated|company[- ]owned|owned|in[- ]house)\b/giu, "")
-    .replace(/\s+/gu, " ").replace(/^[-–—,:;\s]+|[-–—,:;\s]+$/gu, "").trim();
+  return questions as unknown as readonly [{ purpose: BusinessQuestionPurpose; text: string }, { purpose: BusinessQuestionPurpose; text: string }, { purpose: BusinessQuestionPurpose; text: string }];
 }
 
 function exclusions(profile: BusinessQuestionProfile): string[] {
@@ -347,7 +236,7 @@ function neutralize(value: string, identityExclusions: readonly string[]): strin
   return neutral;
 }
 
-function validatePrivateQuestion(value: string, index: number): string {
+function validatePrivateQuestion(value: unknown, index: number): string {
   const text = bounded(value, `questions[${index}]`, 500);
   if (/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/u.test(text) || /(?:api[_ -]?key|bearer\s+|password|access[_ -]?token)/iu.test(text)) {
     throw new TypeError(`questions[${index}] contains contact details or secret material.`);
@@ -364,18 +253,6 @@ function normalizeComparable(value: string): string {
   return value.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
-function occurrences(haystack: string, needle: string): number {
-  if (!needle) return 0;
-  let count = 0;
-  let position = 0;
-  while ((position = haystack.indexOf(needle, position)) >= 0) { count += 1; position += needle.length; }
-  return count;
-}
-
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function localized(locale: string, en: string, zh: string): string {
-  return locale.toLowerCase().startsWith("zh") ? zh : en;
 }

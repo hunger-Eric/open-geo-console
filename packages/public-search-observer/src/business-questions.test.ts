@@ -1,223 +1,118 @@
 import { describe, expect, it } from "vitest";
-import { confirmBusinessQuestionSet, generateBusinessQuestionCandidates, toCanonicalBuyerQuestionSet } from "./business-questions";
+import {
+  confirmBusinessQuestionSet,
+  createModelBusinessQuestionCandidates,
+  toCanonicalBuyerQuestionSet
+} from "./business-questions";
 
 const profile = {
-  organizationName: "Shun Express",
-  brandNames: ["Shun Express", "顺速物流"],
-  legalEntity: "Shun Express Limited",
-  domain: "shun-express.com",
-  businessModel: "cross-border logistics provider",
-  productsAndServices: ["Air freight", "China to UK door-to-door logistics"],
-  capabilities: ["customs clearance", "door-to-door delivery"],
-  targetAudiences: ["UK importers", "Chinese exporters"],
-  marketsAndRegions: ["United Kingdom", "China"],
-  summary: "Door-to-door China to the United Kingdom logistics for UK importers with customs clearance.",
+  organizationName: "Target Co",
+  brandNames: ["Target Co"],
+  legalEntity: null,
+  domain: "target.example",
+  businessModel: "Enterprise AI system design and delivery",
+  productsAndServices: ["Enterprise AI system design", "Freight Lead Agent case study"],
+  capabilities: ["Workflow discovery", "System delivery"],
+  targetAudiences: ["Business operations teams"],
+  marketsAndRegions: ["China"],
+  summary: "Enterprise AI system design and delivery. The portfolio includes a Freight Lead Agent case study.",
   confidence: "high" as const,
-  evidence: [
-    { url: "https://shun-express.com/service", quote: "China to UK door-to-door logistics and customs clearance for UK importers." },
-    { url: "https://shun-express.com/about", quote: "Door-to-door delivery between China and the United Kingdom." }
+  evidence: [{ url: "https://target.example/services", quote: "Enterprise AI system design and delivery." }]
+};
+
+const enterpriseAiOutput = {
+  questions: [
+    { purpose: "core_service_discovery", text: "Which providers design and deliver enterprise AI systems for operational teams?" },
+    { purpose: "customer_region_fit", text: "Which enterprise AI implementation options fit operations teams that need workflow automation in China?" },
+    { purpose: "purchase_delivery_risk", text: "What delivery scope, data constraints, and implementation risks should a buyer assess before commissioning an enterprise AI system?" }
   ]
 };
 
-describe("business question contracts", () => {
-  it("always generates exactly three fixed-purpose questions from service, audience, and region evidence", () => {
-    const set = generateBusinessQuestionCandidates({ locale: "en", region: "global", profile });
-    expect(set.questions.map(({ purpose }) => purpose)).toEqual([
+function candidates(modelOutput: unknown = enterpriseAiOutput) {
+  return createModelBusinessQuestionCandidates({ locale: "en", region: "global", profile, modelOutput });
+}
+
+describe("model-authored business question contracts", () => {
+  it("preserves enterprise-AI questions authored by the model even when the profile contains a Freight Lead Agent case", () => {
+    const set = candidates();
+    const text = set.questions.map(({ generatedText }) => generatedText).join(" ");
+    expect(text).toContain("enterprise AI");
+    expect(text).not.toMatch(/logistics|freight/i);
+    expect(set.questions.map(({ purpose }) => purpose).sort()).toEqual([
       "core_service_discovery", "customer_region_fit", "purchase_delivery_risk"
     ]);
-    expect(set.questions).toHaveLength(3);
-    expect(set.questions[0].generatedText).toContain("China to UK door-to-door logistics");
-    expect(set.questions[1].generatedText).toMatch(/UK importers.*United Kingdom/i);
   });
 
-  it("uses evidence strength and discovery order instead of lexical order", () => {
-    const set = generateBusinessQuestionCandidates({ locale: "en", region: "global", profile: {
-      ...profile,
-      productsAndServices: ["AAA generic freight", "China to UK door-to-door logistics"],
-      evidence: [{ url: "https://shun-express.com/service", quote: "China to UK door-to-door logistics China to UK door-to-door logistics for UK importers." }]
-    } });
-    expect(set.questions[0].generatedText).toContain("China to UK door-to-door logistics");
-    expect(set.questions[0].generatedText).not.toContain("AAA generic freight");
-  });
-
-  it("keeps target-owned operating claims out of neutral market questions", () => {
-    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
-      ...profile,
-      productsAndServices: ["自营专线（台湾海快/海运/空运专线）"],
-      capabilities: ["全球17个网点运营"],
-      targetAudiences: ["外贸企业"],
-      marketsAndRegions: ["台湾"],
-      summary: "该公司声明自营台湾海快、海运和空运专线，并运营全球17个网点。",
-      evidence: [{ url: "https://shun-express.com/service", quote: "自营台湾海快、海运和空运专线，全球17个网点运营。" }]
-    } });
-
-    expect(set.questions.map(({ purpose }) => purpose)).toEqual([
-      "core_service_discovery", "customer_region_fit", "purchase_delivery_risk"
-    ]);
-    expect(set.questions.map(({ generatedText }) => generatedText).join(" ")).not.toMatch(/自营|直营|自有|17个网点/);
-    expect(set.questions[0].generatedText).toMatch(/台湾.*海快.*海运.*空运/);
-    expect(set.questions[2].generatedText).toMatch(/服务范围.*交付条件.*限制.*风险/);
-  });
-
-  it("compacts long Chinese route lists into a source-driven service focus", () => {
-    const service = "台湾海快、海运、空运专线、菲律宾专线、阿联酋专线、沙特专线";
-    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
-      ...profile,
-      businessModel: "跨境物流服务商",
-      productsAndServices: [service],
-      capabilities: ["报关清关", "门到门交付"],
-      targetAudiences: ["外贸企业"],
-      marketsAndRegions: ["台湾", "菲律宾", "中东"],
-      summary: `面向外贸企业提供${service}等跨境物流服务。`,
-      evidence: [{ url: "https://shun-express.com/service", quote: `公开提供${service}。` }]
-    } });
-
-    expect(set.questions.map(({ generatedText }) => generatedText)).toEqual([
-      "哪些服务商公开提供跨境物流服务（如台湾海快、海运、空运专线等）？",
-      "哪些跨境物流服务方案适合外贸企业进入台湾、菲律宾市场，分别适用于哪些使用场景、交付条件与约束？",
-      "采购跨境物流服务时，应重点核验报关清关、门到门交付，以及交付限制与风险？"
-    ]);
-    expect(set.questions[1].generatedText).not.toContain("面向台湾的台湾海快");
-    expect(set.questions[1].generatedText.match(/台湾海快/g)).toBeNull();
-  });
-
-  it("does not turn an AI automation service into logistics because its summary mentions a freight case", () => {
-    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
-      ...profile,
-      businessModel: "服务交付（定制化AI自动化系统设计与实施）",
-      productsAndServices: ["AI自动化系统设计与交付", "流程诊断", "多来源信息汇总"],
-      capabilities: ["流程诊断", "数据抽取", "字段标准化"],
-      targetAudiences: ["企业运营人员"],
-      marketsAndRegions: ["未明确指定，但暗示面向中国企业"],
-      summary: "提供企业AI自动化系统设计与交付，包含一个货运线索处理案例。",
-      confidence: "low",
-      evidence: []
-    } });
-
-    const texts = set.questions.map(({ generatedText }) => generatedText).join(" ");
-    expect(texts).toContain("AI自动化系统设计与交付");
-    expect(texts).not.toContain("跨境物流服务");
-  });
-
-  it("drops noisy inferred audiences and keeps all three questions concise and website-specific", () => {
-    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
-      ...profile,
-      businessModel: "跨境物流服务商",
-      productsAndServices: ["台湾海快", "菲律宾专线"],
-      capabilities: ["双清包税", "门到门交付"],
-      targetAudiences: ["面临重复录入与整理问题的企业，网站语言为中文，推测主要面向中文市场"],
-      marketsAndRegions: ["台湾", "菲律宾"],
-      summary: "提供台湾海快、菲律宾专线、双清包税和门到门交付服务。",
-      evidence: [{ url: "https://shun-express.com/service", quote: "台湾海快、菲律宾专线支持双清包税和门到门交付。" }]
-    } });
-
-    const texts = set.questions.map(({ generatedText }) => generatedText);
-    expect(texts.join(" ")).not.toMatch(/重复录入|网站语言|推测|未明确/);
-    expect(texts[0]).toMatch(/台湾海快.*菲律宾专线/);
-    expect(texts[1]).toContain("企业采购方");
-    expect(texts[2]).toMatch(/双清包税.*门到门交付/);
-    expect(texts.every((text) => text.length <= 80)).toBe(true);
-  });
-
-  it("drops inferred markets, does not substitute the search region, and lowers confidence", () => {
-    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
-      ...profile,
-      businessModel: "跨境物流服务商",
-      productsAndServices: ["跨境物流服务"],
-      capabilities: ["门到门交付"],
-      targetAudiences: ["跨境卖家"],
-      marketsAndRegions: ["未指定、推测为中国市场"],
-      summary: "为跨境卖家提供跨境物流服务和门到门交付。",
-      evidence: [{ url: "https://shun-express.com/service", quote: "为跨境卖家提供跨境物流服务和门到门交付。" }]
-    } });
-
-    expect(set.questions[1].generatedText).toContain("目标市场");
-    expect(set.questions[1].generatedText).not.toMatch(/未指定|推测|中国市场|\bCN\b/u);
-    expect(set.questions[1].marketRegion).toBe("目标市场");
-    expect(set.confidence).toBe("low");
-    expect(set.requiresAcknowledgement).toBe(true);
-  });
-
-  it("does not treat a non-empty inferred service array as admitted confidence evidence", () => {
-    const set = generateBusinessQuestionCandidates({ locale: "zh-CN", region: "CN", profile: {
-      ...profile,
-      businessModel: "企业服务",
-      productsAndServices: ["未指定、推测为物流服务"],
-      targetAudiences: ["跨境卖家"],
-      marketsAndRegions: ["英国"],
-      summary: "网站未明确说明具体服务。",
-      evidence: []
-    } });
-
-    expect(set.confidence).toBe("low");
-    expect(set.requiresAcknowledgement).toBe(true);
-    expect(set.questions.map(({ generatedText }) => generatedText).join(" ")).not.toMatch(/未指定|推测/u);
-  });
-
-  it("requires acknowledgement before confirming a low-confidence set", () => {
-    const candidates = generateBusinessQuestionCandidates({ locale: "en", region: "global", profile: {
-      ...profile, confidence: "low", productsAndServices: [], targetAudiences: [], marketsAndRegions: [], evidence: []
-    } });
-    expect(candidates.confidence).toBe("low");
-    expect(() => confirmBusinessQuestionSet({ candidates, finalTexts: candidates.questions.map(({ generatedText }) => generatedText), acknowledgedLowConfidence: false, confirmedAt: "2026-07-14T00:00:00.000Z" })).toThrow(/acknowledgement/i);
-  });
-
-  it("keeps private brand wording but produces identity-neutral public variants", () => {
-    const candidates = generateBusinessQuestionCandidates({ locale: "en", region: "global", profile });
-    const confirmed = confirmBusinessQuestionSet({
-      candidates,
-      finalTexts: [
-        "Which providers can replace Shun Express for China to UK door-to-door logistics?",
-        "Which providers fit Shun Express customers who are UK importers in the United Kingdom?",
-        "How should Shun Express compare customs, delivery conditions, and risk?"
-      ],
-      acknowledgedLowConfidence: true,
-      confirmedAt: "2026-07-14T00:00:00.000Z"
+  it("accepts model-authored logistics questions without a logistics classifier", () => {
+    const set = candidates({
+      questions: [
+        { purpose: "core_service_discovery", text: "Which providers offer cross-border logistics services between China and the United Kingdom?" },
+        { purpose: "customer_region_fit", text: "Which logistics options fit United Kingdom importers needing customs clearance and door-to-door delivery?" },
+        { purpose: "purchase_delivery_risk", text: "Which customs, delivery, and liability risks should buyers assess before selecting a logistics provider?" }
+      ]
     });
-    expect(confirmed.questions.map(({ privateText }) => privateText).join(" ")).toContain("Shun Express");
-    expect(confirmed.questions.map(({ neutralPublicText }) => neutralPublicText).join(" ")).not.toMatch(/Shun Express|顺速物流|shun-express/i);
-    expect(confirmed.questions).toHaveLength(3);
+    expect(set.questions.map(({ generatedText }) => generatedText).join(" ")).toMatch(/logistics/i);
   });
 
-  it("rejects duplicate, empty, contact-bearing, and unneutralizable question sets", () => {
-    const candidates = generateBusinessQuestionCandidates({ locale: "en", region: "global", profile });
-    const base = candidates.questions.map(({ generatedText }) => generatedText) as [string, string, string];
-    expect(() => confirmBusinessQuestionSet({ candidates, finalTexts: [base[0], base[0], base[2]], acknowledgedLowConfidence: true, confirmedAt: "2026-07-14T00:00:00.000Z" })).toThrow(/distinct/i);
-    expect(() => confirmBusinessQuestionSet({ candidates, finalTexts: ["", base[1], base[2]], acknowledgedLowConfidence: true, confirmedAt: "2026-07-14T00:00:00.000Z" })).toThrow();
-    expect(() => confirmBusinessQuestionSet({ candidates, finalTexts: ["Contact buyer@example.com about freight", base[1], base[2]], acknowledgedLowConfidence: true, confirmedAt: "2026-07-14T00:00:00.000Z" })).toThrow(/contact/i);
+  it("rejects malformed, duplicate, or missing model output rather than generating fallback questions", () => {
+    expect(() => candidates({ questions: enterpriseAiOutput.questions.slice(0, 2) })).toThrow(/exactly three/i);
+    expect(() => candidates({ questions: [
+      enterpriseAiOutput.questions[0], enterpriseAiOutput.questions[0], enterpriseAiOutput.questions[2]
+    ] })).toThrow(/distinct/i);
+    expect(() => candidates({ questions: [
+      { purpose: "core_service_discovery", text: enterpriseAiOutput.questions[0].text },
+      { purpose: "customer_region_fit", text: enterpriseAiOutput.questions[1].text },
+      { purpose: "unknown", text: enterpriseAiOutput.questions[2].text }
+    ] })).toThrow(/unsupported/i);
   });
 
-  it("defers only semantic distinctness for a marked unified review", () => {
-    const candidates = generateBusinessQuestionCandidates({ locale: "en", region: "global", profile });
-    const base = candidates.questions.map(({ generatedText }) => generatedText) as [string, string, string];
-    const confirmed = confirmBusinessQuestionSet({
-      candidates,
-      finalTexts: [base[0], base[0], base[2]],
-      acknowledgedLowConfidence: true,
-      confirmedAt: "2026-07-14T00:00:00.000Z",
-      deferSemanticDistinctness: true
+  it("ignores additional model fields instead of rejecting otherwise usable questions", () => {
+    const set = candidates({
+      ...enterpriseAiOutput,
+      optionalModelRationale: "Extra model detail is not part of the persisted contract.",
+      questions: enterpriseAiOutput.questions.map((question) => ({ ...question, optionalDetail: "ignored" }))
     });
-    expect(confirmed.questions).toHaveLength(3);
+    expect(set.questions.map(({ generatedText }) => generatedText)).toEqual(enterpriseAiOutput.questions.map(({ text }) => text));
+  });
+
+  it("keeps structural acknowledgement and identity-neutrality safeguards", () => {
+    const lowConfidence = createModelBusinessQuestionCandidates({
+      locale: "en",
+      region: "global",
+      profile: { ...profile, confidence: "low" },
+      modelOutput: {
+        questions: [
+          { purpose: "core_service_discovery", text: "Which providers offer services comparable to Target Co's enterprise AI delivery?" },
+          { purpose: "customer_region_fit", text: "Which enterprise AI delivery options fit Target Co customers with operational automation needs?" },
+          { purpose: "purchase_delivery_risk", text: "How should a buyer compare delivery scope and implementation risks for Target Co alternatives?" }
+        ]
+      }
+    });
     expect(() => confirmBusinessQuestionSet({
-      candidates,
-      finalTexts: ["", base[1], base[2]],
+      candidates: lowConfidence,
+      finalTexts: lowConfidence.questions.map(({ generatedText }) => generatedText),
+      acknowledgedLowConfidence: false,
+      confirmedAt: "2026-08-07T00:00:00.000Z"
+    })).toThrow(/acknowledgement/i);
+    const confirmed = confirmBusinessQuestionSet({
+      candidates: lowConfidence,
+      finalTexts: lowConfidence.questions.map(({ generatedText }) => generatedText),
       acknowledgedLowConfidence: true,
-      confirmedAt: "2026-07-14T00:00:00.000Z",
-      deferSemanticDistinctness: true
-    })).toThrow();
+      confirmedAt: "2026-08-07T00:00:00.000Z"
+    });
+    expect(JSON.stringify(confirmed.questions.map(({ neutralPublicText }) => neutralPublicText))).not.toContain("Target Co");
   });
 
-  it("converts only the three neutral variants into the shared public-search contract", () => {
-    const candidates=generateBusinessQuestionCandidates({locale:"en",region:"global",profile});
-    const confirmed=confirmBusinessQuestionSet({candidates,finalTexts:[
-      "Which providers can replace Shun Express for China to UK door-to-door logistics?",
-      "Which providers fit Shun Express customers who are UK importers in the United Kingdom?",
-      "How should Shun Express compare customs, delivery conditions, and risk?"
-    ],acknowledgedLowConfidence:true,confirmedAt:"2026-07-14T00:00:00.000Z"});
-    const publicSet=toCanonicalBuyerQuestionSet(confirmed);
-    expect(publicSet.questions).toHaveLength(3);
-    expect(JSON.stringify(publicSet)).not.toMatch(/Shun Express|shun-express\.com/i);
-    expect(publicSet.questions.map(({normalizedText})=>normalizedText)).toEqual(confirmed.questions.map(({neutralPublicText})=>neutralPublicText));
-    expect(publicSet.questions[2]!.derivation.subject.length).toBeLessThan(publicSet.questions[2]!.normalizedText.length);
+  it("projects model text to public search without parsing question semantics in code", () => {
+    const set = candidates();
+    const confirmed = confirmBusinessQuestionSet({
+      candidates: set,
+      finalTexts: set.questions.map(({ generatedText }) => generatedText),
+      acknowledgedLowConfidence: false,
+      confirmedAt: "2026-08-07T00:00:00.000Z"
+    });
+    const publicSet = toCanonicalBuyerQuestionSet(confirmed);
+    expect(publicSet.questions.map(({ exactText }) => exactText)).toEqual(confirmed.questions.map(({ neutralPublicText }) => neutralPublicText));
+    expect(publicSet.questions.map(({ derivation }) => derivation.subject)).toEqual(confirmed.questions.map(({ neutralPublicText }) => neutralPublicText));
   });
 });

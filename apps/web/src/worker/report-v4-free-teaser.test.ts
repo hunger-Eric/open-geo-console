@@ -79,6 +79,26 @@ const finalQuestionTexts = [
   "Which delivery risks should a buyer verify?"
 ] as const;
 
+function modelQuestionOutput() {
+  return {
+    questions: finalQuestionTexts.map((text, index) => ({
+      purpose: ["core_service_discovery", "customer_region_fit", "purchase_delivery_risk"][index],
+      text
+    }))
+  };
+}
+
+function defaultAnalysisOutput() {
+  return {
+    summary: "The source supports the service claim, while the submitted site is not named in the answer.",
+    observations: ["The answer names Provider A."],
+    recommendations: ["Clarify the submitted site's service proof."],
+    evidenceHandles: ["S1", "T1"],
+    checkoutEligible: true,
+    harmlessExtra: { naturalModelDetail: true }
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   let persisted = confirmedQuestionSet();
@@ -96,28 +116,23 @@ beforeEach(() => {
     adapter: { id: "adapter-1" }
   });
   mocks.answerWithSources.mockImplementation(async (request: { questionId: string }) => answerResult(request.questionId));
-  mocks.structuredInvoke.mockResolvedValue({
-    summary: "The source supports the service claim, while the submitted site is not named in the answer.",
-    observations: ["The answer names Provider A."],
-    recommendations: ["Clarify the submitted site's service proof."],
-    evidenceHandles: ["S1", "T1"],
-    checkoutEligible: true,
-    harmlessExtra: { naturalModelDetail: true }
-  });
+  mocks.structuredInvoke.mockImplementation(async (request: { operation: string }) => request.operation === "websiteSynthesis"
+    ? modelQuestionOutput()
+    : defaultAnalysisOutput());
 });
 
 describe("Free V4 direct teaser orchestration", () => {
-  it("makes exactly Q1 answer then analysis, with no editor or observation search", async () => {
+  it("asks the model for buyer questions before Q1 answer and analysis, with no code-authored fallback", async () => {
     const events: string[] = [];
+    const questionGeneration = mocks.structuredInvoke.getMockImplementation()!;
+    mocks.structuredInvoke.mockImplementation(async (request) => {
+      events.push(request.operation === "websiteSynthesis" ? "question_generation" : "analysis");
+      return questionGeneration(request);
+    });
     const answer = mocks.answerWithSources.getMockImplementation()!;
     mocks.answerWithSources.mockImplementation(async (request) => {
       events.push("q1_answer");
       return answer(request);
-    });
-    const analysis = mocks.structuredInvoke.getMockImplementation()!;
-    mocks.structuredInvoke.mockImplementation(async (request) => {
-      events.push("analysis");
-      return analysis(request);
     });
     const saved: FreeTeaserCheckpointV1[] = [];
     const result = await generateFreeTeaser({
@@ -125,27 +140,33 @@ describe("Free V4 direct teaser orchestration", () => {
       saveCheckpoint: async (checkpoint) => { saved.push(checkpoint); }
     });
 
-    expect(events).toEqual(["q1_answer", "analysis"]);
+    expect(events).toEqual(["question_generation", "q1_answer", "analysis"]);
     expect(mocks.answerWithSources).toHaveBeenCalledTimes(1);
-    expect(mocks.structuredInvoke).toHaveBeenCalledTimes(1);
+    expect(mocks.structuredInvoke).toHaveBeenCalledTimes(2);
     expect(mocks.confirm.mock.calls[0]![0].finalTexts).toEqual(finalQuestionTexts);
     expect(mocks.confirm.mock.calls[0]![0]).not.toHaveProperty("requireIdentityNeutralFinalTexts");
     expect(mocks.answerWithSources.mock.calls[0]![0]).toMatchObject({ semanticValidation: "free_direct" });
-    expect(mocks.structuredInvoke.mock.calls[0]![0]).toMatchObject({ operation: "sourceDiagnosis" });
-    expect(mocks.structuredInvoke.mock.calls[0]![0].inputText).toContain('"handle":"S1"');
+    expect(mocks.structuredInvoke.mock.calls[0]![0]).toMatchObject({ operation: "websiteSynthesis" });
+    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("sole author of buyer questions");
     expect(JSON.parse(mocks.structuredInvoke.mock.calls[0]![0].inputText)).toMatchObject({
+      locale: "en-US", region: "US", websiteFoundation: { organizationProfile: { organizationName: "Target Co" } }
+    });
+    expect(mocks.prepare.mock.calls[0]![0].modelOutput).toEqual(modelQuestionOutput());
+    expect(mocks.structuredInvoke.mock.calls[1]![0]).toMatchObject({ operation: "sourceDiagnosis" });
+    expect(mocks.structuredInvoke.mock.calls[1]![0].inputText).toContain('"handle":"S1"');
+    expect(JSON.parse(mocks.structuredInvoke.mock.calls[1]![0].inputText)).toMatchObject({
       targetIdentity: {
         canonicalName: "Target Co",
         aliases: ["Target Co"],
         domain: "target.example"
       }
     });
-    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("targetIdentity");
-    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("customer-visible GEO findings");
-    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("concrete answer-and-source conclusion");
-    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("Do not narrate the analysis task");
-    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).not.toContain("Analyze the supplied");
-    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).not.toContain("Explain why those sources");
+    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).toContain("targetIdentity");
+    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).toContain("customer-visible GEO findings");
+    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).toContain("concrete answer-and-source conclusion");
+    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).toContain("Do not narrate the analysis task");
+    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).not.toContain("Analyze the supplied");
+    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).not.toContain("Explain why those sources");
     expect(result.q1AnswerCore.answerText).toContain("Provider A");
     expect(result.checkpoint.directAnalysis?.observations).toHaveLength(1);
     expect(result.checkpoint.directAnalysisReceipt).toBeDefined();
@@ -160,11 +181,13 @@ describe("Free V4 direct teaser orchestration", () => {
       answerText: "A complete answer without provider annotations.",
       sources: []
     }));
-    mocks.structuredInvoke.mockResolvedValueOnce({
+    mocks.structuredInvoke.mockImplementation(async (request: { operation: string }) => request.operation === "websiteSynthesis"
+      ? modelQuestionOutput()
+      : {
       summary: "No annotated source was returned, so the source basis is limited.",
       observations: [], recommendations: [], evidenceHandles: [], checkoutEligible: false,
       extraNarrative: "ignored"
-    });
+      });
     const result = await generateFreeTeaser(baseInput());
     expect(result.q1AnswerCore.sources).toEqual([]);
     expect(result.checkpoint.directAnalysisStatus).toBe("completed");
@@ -177,10 +200,12 @@ describe("Free V4 direct teaser orchestration", () => {
       answerText: "",
       refusal: { code: "policy_refusal", reason: "The provider declined this request." }
     }));
-    mocks.structuredInvoke.mockResolvedValueOnce({
+    mocks.structuredInvoke.mockImplementation(async (request: { operation: string }) => request.operation === "websiteSynthesis"
+      ? modelQuestionOutput()
+      : {
       summary: "The provider returned a refusal; no target judgment is available.",
       observations: [], recommendations: [], evidenceHandles: ["S1"], checkoutEligible: false
-    });
+      });
     const result = await generateFreeTeaser(baseInput());
     expect(result.q1AnswerCore.status).toBe("refused");
     expect(result.q1AnswerCore.sources).toHaveLength(1);
@@ -195,7 +220,7 @@ describe("Free V4 direct teaser orchestration", () => {
       summary: "Analysis.", observations: [], recommendations: [], checkoutEligible: true
     }]
   ])("keeps the receipt-verified Q1 core when analysis has %s", async (_label, rawAnalysis) => {
-    mocks.structuredInvoke.mockResolvedValueOnce(rawAnalysis);
+    mocks.structuredInvoke.mockImplementation(async (request: { operation: string }) => request.operation === "websiteSynthesis" ? modelQuestionOutput() : rawAnalysis);
     const result = await generateFreeTeaser(baseInput());
     expect(result.q1AnswerCore.answerText).toContain("Provider A");
     expect(result.checkpoint.directCoreReceipt).toBeDefined();
@@ -205,12 +230,12 @@ describe("Free V4 direct teaser orchestration", () => {
   });
 
   it("turns one analysis transport failure into a terminal limited projection without retry", async () => {
-    mocks.structuredInvoke.mockRejectedValueOnce(new Error("provider unavailable"));
+    mocks.structuredInvoke.mockImplementation(async (request: { operation: string }) => request.operation === "websiteSynthesis" ? modelQuestionOutput() : Promise.reject(new Error("provider unavailable")));
     const result = await generateFreeTeaser(baseInput());
     expect(result.checkpoint.stage).toBe("ready");
     expect(result.checkpoint.directAnalysisStatus).toBe("incomplete");
     expect(mocks.answerWithSources).toHaveBeenCalledTimes(1);
-    expect(mocks.structuredInvoke).toHaveBeenCalledTimes(1);
+    expect(mocks.structuredInvoke).toHaveBeenCalledTimes(2);
   });
 
   it("does not reissue a model request from a nonterminal persisted Direct checkpoint", async () => {

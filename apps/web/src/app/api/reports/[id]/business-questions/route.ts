@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { confirmBusinessQuestions, getLatestBusinessQuestionSet, prepareBusinessQuestionCandidates } from "@/db/business-questions";
+import { confirmBusinessQuestions, getLatestBusinessQuestionSet } from "@/db/business-questions";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
@@ -7,7 +7,10 @@ type RouteContext = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const questions = await getLatestBusinessQuestionSet(id) ?? await prepareBusinessQuestionCandidates({ reportId: id });
+    const questions = await getLatestBusinessQuestionSet(id);
+    if (!questions) {
+      return NextResponse.json({ error: "Business questions are awaiting Worker generation." }, { status: 409 });
+    }
     return NextResponse.json(questions, { headers: { "cache-control": "no-store, private" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to prepare business questions.";

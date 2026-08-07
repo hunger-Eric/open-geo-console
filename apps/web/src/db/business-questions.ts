@@ -3,7 +3,7 @@ import {
   BUSINESS_QUESTION_NEUTRALIZATION_VERSION,
   BUSINESS_QUESTION_SET_VERSION,
   confirmBusinessQuestionSet,
-  generateBusinessQuestionCandidates,
+  createModelBusinessQuestionCandidates,
   type BusinessQuestionCandidateSet,
   type ConfirmedBusinessQuestionSet
 } from "@open-geo-console/public-search-observer";
@@ -20,6 +20,7 @@ export async function prepareBusinessQuestionCandidates(input: {
   region?: string;
   revision?: number;
   foundation?: AiWebsiteReportV1;
+  modelOutput: unknown;
 }): Promise<BusinessQuestionCandidateSet> {
   await ensureDatabase();
   const report = await getGeoReport(input.reportId);
@@ -34,10 +35,11 @@ export async function prepareBusinessQuestionCandidates(input: {
   const profile = foundation.organizationProfile;
   const region = input.region?.trim() || process.env.OGC_PUBLIC_SEARCH_REGION?.trim() || "global";
   const revision = input.revision ?? ((existing?.revision ?? 0) + 1);
-  const candidates = generateBusinessQuestionCandidates({
+  const candidates = createModelBusinessQuestionCandidates({
     locale,
     region,
     revision,
+    modelOutput: input.modelOutput,
     profile: {
       organizationName: profile.organizationName,
       brandNames: profile.brandNames,
@@ -79,9 +81,7 @@ export async function prepareBusinessQuestionCandidates(input: {
       neutralContentHash: sha(question.neutralPublicText),
       derivation: {
         evidenceUrls: question.evidenceUrls,
-        service: question.service,
-        audience: question.audience,
-        marketRegion: question.marketRegion
+        source: "model"
       }
     }))).onConflictDoNothing();
   });
@@ -93,7 +93,6 @@ export async function confirmBusinessQuestions(input: {
   questionSetId: string;
   finalTexts: readonly string[];
   acknowledgedLowConfidence: boolean;
-  deferSemanticDistinctness?: boolean;
 }): Promise<ConfirmedBusinessQuestionSet> {
   await ensureDatabase();
   const outcome = await getSqlClient().begin(async (tx) => {
@@ -116,8 +115,7 @@ export async function confirmBusinessQuestions(input: {
         candidates: row.payload as BusinessQuestionCandidateSet,
         finalTexts: input.finalTexts,
         acknowledgedLowConfidence: input.acknowledgedLowConfidence,
-        confirmedAt: new Date().toISOString(),
-        deferSemanticDistinctness: input.deferSemanticDistinctness
+        confirmedAt: new Date().toISOString()
       });
     } catch (error) {
       if (error instanceof TypeError && error.message.includes("neutralized")) {

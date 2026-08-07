@@ -7602,3 +7602,32 @@ revised scope.
 - The agent did not run a report, crawl, model call, payment, refund, or email.
   The scope is complete and must not authorize the new crawl-first test-report
   behavior reset.
+# 2026-08-07 — Prospective V3 crawl-diagnostic reset (partial; superseded)
+
+- The scope removed model temporal-prose rejection and introduced an HTML-only
+  V3 crawl-diagnostic fallback for unreadable target sites.
+- Local focused tests passed; the final Web build was deliberately left to the
+  user after the visible-report reader branch was added. No deployment, real
+  report run, payment, refund, email, or historical-data mutation occurred.
+
+# 2026-08-07 — Deterministic buyer-question classification correction (superseded)
+
+- No production or test source was changed under this scope.
+- The user rejected code-selected service categories and question templates;
+  the next scope must make buyer-question semantics model-generated instead.
+
+# 2026-08-07 — Model-authored buyer-question generation (complete)
+
+- Removed deterministic industry/service selection, logistics keyword mapping,
+  language templates, semantic question parsing, and semantic-distinctness
+  bypasses from the prospective Free/V4 buyer-question path.
+- The Worker now calls the existing `websiteSynthesis` model operation to
+  author three buyer questions and their persisted search lanes. Code only
+  validates transport shape, bounded/distinct text, safety neutralization, and
+  persistence; the Web route only reads a saved result.
+- Updated the existing direct-semantics harness to use a model-output fixture,
+  not the removed generator.
+- Verification passed: `npm test -- --run packages/public-search-observer/src/business-questions.test.ts apps/web/src/worker/report-v4-free-teaser.test.ts apps/web/src/db/business-questions.test.ts apps/web/src/scripts/probe-free-v4-direct-semantics.test.ts`
+  (4 files, 21 tests), `git diff --check`, and `codegraph sync`.
+- No build, deployment, real model call, report run, payment, refund, email,
+  Git operation, or historical-data mutation occurred.
