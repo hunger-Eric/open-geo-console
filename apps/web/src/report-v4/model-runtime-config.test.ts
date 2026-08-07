@@ -5,13 +5,13 @@ import {
 } from "@open-geo-console/ai-report-engine";
 import { describe, expect, it, vi } from "vitest";
 import profilePayload from "../../../../config/model-profiles/report-v4-mimo-v2.5-pro.json";
-import sensenovaProfilePayload from "../../../../config/model-profiles/report-v4-sensenova-deepseek-v4-flash-v1.json";
-import sensenovaMimoProfilePayload from "../../../../config/model-profiles/report-v4-sensenova-mimo-v2.5-pro-v1.json";
+import openAiCompatibleDeepseekProfilePayload from "../../../../config/model-profiles/report-v4-openai-compatible-deepseek-v4-flash-v1.json";
+import openAiCompatibleMimoProfilePayload from "../../../../config/model-profiles/report-v4-openai-compatible-mimo-v2.5-pro-v1.json";
 import {
   REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
   REPORT_V4_MODEL_CAPABILITY_EVIDENCE,
-  REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID,
-  REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID,
+  REPORT_V4_OPENAI_COMPATIBLE_DEEPSEEK_V4_FLASH_PROFILE_ID,
+  REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID,
   loadReportV4ModelRuntimeConfig,
   resolveReportV4LockedModelRuntime
 } from "./model-runtime-config";
@@ -26,8 +26,9 @@ describe("Report V4 production model runtime configuration", () => {
       { NODE_ENV: "test" },
       { NODE_ENV: "test", OGC_PROVIDER_PROFILE: "" },
       { NODE_ENV: "test", OGC_PROVIDER_PROFILE: " mimo_native" },
+      { NODE_ENV: "test", OGC_PROVIDER_PROFILE: "sensenova_anysearch" },
       { NODE_ENV: "test", OGC_PROVIDER_PROFILE: "unknown-profile", OGC_AI_MODEL: "mimo-v2.5-pro" },
-      { ...mimoEnvironment(), OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID }
+      { ...mimoEnvironment(), OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_OPENAI_COMPATIBLE_DEEPSEEK_V4_FLASH_PROFILE_ID }
     ]) {
       expect(() => loadReportV4ModelRuntimeConfig(environment as NodeJS.ProcessEnv)).toThrow(/OGC_PROVIDER_PROFILE|profile|conflict/i);
     }
@@ -112,13 +113,13 @@ describe("Report V4 production model runtime configuration", () => {
     expect(REPORT_V4_MODEL_CAPABILITY_EVIDENCE.every(Object.isFrozen)).toBe(true);
   });
 
-  it("loads the conservative OpenCode MiMo profile with externally grounded question answering", () => {
-    const runtime = loadReportV4ModelRuntimeConfig(sensenovaEnvironment());
-    expect(runtime.modelProfile).toEqual(parseModelProfile(sensenovaMimoProfilePayload));
+  it("loads the conservative OpenAI-compatible MiMo profile with externally grounded question answering", () => {
+    const runtime = loadReportV4ModelRuntimeConfig(externalSearchEnvironment());
+    expect(runtime.modelProfile).toEqual(parseModelProfile(openAiCompatibleMimoProfilePayload));
     expect(runtime.modelProfile).toMatchObject({
-      profileId: REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID,
-      provider: "sensenova",
-      adapterId: "sensenova-openai-compatible-json-v1"
+      profileId: REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID,
+      provider: "openai-compatible",
+      adapterId: "openai-compatible-json-v1"
     });
     expect(Object.values(runtime.modelProfile.operations).every(({ model }) => model === "mimo-v2.5-pro")).toBe(true);
     expect(Object.values(runtime.modelProfile.operations).every(({ tokenizer }) => tokenizer === "mimo-v2.5-pro-utf8-conservative-v1")).toBe(true);
@@ -145,9 +146,24 @@ describe("Report V4 production model runtime configuration", () => {
       structuredOutput: true,
       endpointCapability: "external-search-grounded-structured-output"
     });
-    expect(resolveReportV4LockedModelRuntime(structuredClone(sensenovaMimoProfilePayload))).toBe(runtime);
-    expect(resolveReportV4LockedModelRuntime(structuredClone(sensenovaProfilePayload)).modelProfile.profileId)
-      .toBe(REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID);
+    expect(resolveReportV4LockedModelRuntime(structuredClone(openAiCompatibleMimoProfilePayload))).toBe(runtime);
+    expect(resolveReportV4LockedModelRuntime(structuredClone(openAiCompatibleDeepseekProfilePayload)).modelProfile.profileId)
+      .toBe(REPORT_V4_OPENAI_COMPATIBLE_DEEPSEEK_V4_FLASH_PROFILE_ID);
+  });
+
+  it("keeps both generic model replacements registered while rejecting obsolete profile IDs", () => {
+    expect(resolveReportV4LockedModelRuntime(structuredClone(openAiCompatibleMimoProfilePayload)).modelProfile.profileId)
+      .toBe(REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID);
+    expect(resolveReportV4LockedModelRuntime(structuredClone(openAiCompatibleDeepseekProfilePayload)).modelProfile.profileId)
+      .toBe(REPORT_V4_OPENAI_COMPATIBLE_DEEPSEEK_V4_FLASH_PROFILE_ID);
+    for (const obsoleteProfileId of [
+      "report-v4-sensenova-mimo-v2.5-pro-v1",
+      "report-v4-sensenova-deepseek-v4-flash-v1"
+    ]) {
+      const obsolete = structuredClone(openAiCompatibleMimoProfilePayload) as Record<string, unknown>;
+      obsolete.profileId = obsoleteProfileId;
+      expect(() => resolveReportV4LockedModelRuntime(obsolete)).toThrow(/locked|approved|profile|drift/i);
+    }
   });
 
   it("returns a deeply frozen snapshot-ready profile and deterministic UTF-8 estimator", () => {
@@ -291,8 +307,8 @@ function mimoEnvironment(): NodeJS.ProcessEnv {
   return { NODE_ENV: "test", OGC_PROVIDER_PROFILE: "mimo_native", OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_MIMO_V25_PRO_PROFILE_ID };
 }
 
-function sensenovaEnvironment(): NodeJS.ProcessEnv {
-  return { NODE_ENV: "test", OGC_PROVIDER_PROFILE: "sensenova_anysearch", OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID };
+function externalSearchEnvironment(): NodeJS.ProcessEnv {
+  return { NODE_ENV: "test", OGC_PROVIDER_PROFILE: "external_search_synthesis", OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID };
 }
 
 function operation(profile: Record<string, unknown>, name: string): Record<string, unknown> {

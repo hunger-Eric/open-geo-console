@@ -21,14 +21,14 @@ import {
 } from "@/report-v4/mimo-provider";
 import { createReportV4MimoSiteSynthesisProvider } from "@/report-v4/mimo-site-synthesis-provider";
 import {
+  createReportV4OpenAiCompatibleDiagnosisProvider,
+  createReportV4OpenAiCompatibleSiteSynthesisProvider,
   createReportV4OpenAiCompatibleStructuredInvoker,
-  createReportV4SenseNovaDiagnosisProvider,
-  createReportV4SenseNovaSiteSynthesisProvider,
-  readSenseNovaConfig
+  readOpenAiCompatibleConfig
 } from "@/report-v4/openai-compatible-provider";
 import {
   REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
-  REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID,
+  REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID,
   loadReportV4ModelRuntimeConfig,
   resolveReportV4LockedModelRuntime,
   type ReportV4ModelRuntimeConfig
@@ -37,7 +37,7 @@ import type { ReportV4MimoSiteSynthesisProvider } from "@/report-v4/mimo-site-sy
 import type { ReportV4DiagnosisProvider } from "@/worker/report-v4-diagnosis-enhancer";
 import type { ReportV4QuestionAnswerProvider } from "@/worker/report-v4-question-answerer";
 
-export const PROVIDER_PROFILE_IDS = Object.freeze(["mimo_native", "sensenova_anysearch"] as const);
+export const PROVIDER_PROFILE_IDS = Object.freeze(["mimo_native", "external_search_synthesis"] as const);
 export type ProviderProfileId = (typeof PROVIDER_PROFILE_IDS)[number];
 export type ProviderProfileAdapterId = "mimo" | "anysearch";
 
@@ -101,7 +101,7 @@ export function resolveProviderProfileId(environment: NodeJS.ProcessEnv): Provid
   if (!value) {
     throw new ProviderProfileRuntimeError("provider_profile_missing", "OGC_PROVIDER_PROFILE is required; no default is allowed.");
   }
-  if (value !== "mimo_native" && value !== "sensenova_anysearch") {
+  if (value !== "mimo_native" && value !== "external_search_synthesis") {
     throw new ProviderProfileRuntimeError("provider_profile_unsupported", "OGC_PROVIDER_PROFILE is unsupported; no fallback is allowed.");
   }
   return value;
@@ -117,7 +117,7 @@ export function resolveProviderProfileRuntime(
 ): ProviderProfileRuntime {
   try {
     const profileId = resolveProviderProfileId(environment);
-    assertLegacyCompatibility(environment, profileId);
+    assertRoutingAssertions(environment, profileId);
     const modelRuntime = loadReportV4ModelRuntimeConfig(environment);
     const locale = required(environment.OGC_PUBLIC_SEARCH_LOCALE, "OGC_PUBLIC_SEARCH_LOCALE");
     const region = required(environment.OGC_PUBLIC_SEARCH_REGION, "OGC_PUBLIC_SEARCH_REGION");
@@ -126,7 +126,7 @@ export function resolveProviderProfileRuntime(
     }
     return profileId === "mimo_native"
       ? createMiMoRuntime(environment, modelRuntime, locale, region, dependencies)
-      : createSenseNovaRuntime(environment, modelRuntime, locale, region, dependencies);
+      : createExternalSearchSynthesisRuntime(environment, modelRuntime, locale, region, dependencies);
   } catch (error) {
     if (error instanceof ProviderProfileRuntimeError) throw error;
     throw new ProviderProfileRuntimeError(
@@ -225,17 +225,17 @@ function createMiMoRuntime(
   return Object.freeze(runtime);
 }
 
-function createSenseNovaRuntime(
+function createExternalSearchSynthesisRuntime(
   environment: NodeJS.ProcessEnv,
   modelRuntime: ReportV4ModelRuntimeConfig,
   locale: string,
   region: string,
   dependencies: ResolveProviderProfileRuntimeDependencies
 ): ProviderProfileRuntime {
-  if (modelRuntime.modelProfile.profileId !== REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID) {
-    throw new ProviderProfileRuntimeError("provider_profile_conflict", "The SenseNova profile resolved an incompatible V4 model profile.");
+  if (modelRuntime.modelProfile.profileId !== REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID) {
+    throw new ProviderProfileRuntimeError("provider_profile_conflict", "The external-search synthesis profile resolved an incompatible V4 model profile.");
   }
-  const config = readSenseNovaConfig(environment);
+  const config = readOpenAiCompatibleConfig(environment);
   readAnySearchPublicSearchConfig(environment, locale, region);
   const generalClient = createOpenAiCompatibleClient({
     ...config,
@@ -246,21 +246,21 @@ function createSenseNovaRuntime(
   });
   const locked = (value?: ReportV4ModelRuntimeConfig) => assertLockedRuntime(modelRuntime, value);
   const runtime: ProviderProfileRuntime = {
-    profileId: "sensenova_anysearch",
+    profileId: "external_search_synthesis",
     modelRuntime,
     generalClient,
     publicSearchAdapterId: "anysearch",
-    summary: summary("sensenova_anysearch", modelRuntime, "anysearch"),
+    summary: summary("external_search_synthesis", modelRuntime, "anysearch"),
     createStructuredInvoker: (value) => createReportV4OpenAiCompatibleStructuredInvoker({
       environment, runtime: locked(value), fetch: dependencies.fetch
     }),
-    createSiteSynthesisProvider: (value) => createReportV4SenseNovaSiteSynthesisProvider({
+    createSiteSynthesisProvider: (value) => createReportV4OpenAiCompatibleSiteSynthesisProvider({
       environment, runtime: locked(value), fetch: dependencies.fetch
     }),
     createQuestionAnswerProvider: ({ locale: requestedLocale, region: requestedRegion, lockedRuntime }) => {
       locked(lockedRuntime);
       if (requestedLocale !== locale || requestedRegion !== region) {
-        throw new ProviderProfileRuntimeError("provider_profile_conflict", "The question locale or region conflicts with the prepared SenseNova profile.");
+        throw new ProviderProfileRuntimeError("provider_profile_conflict", "The question locale or region conflicts with the prepared external-search synthesis profile.");
       }
       return resolveAnySearchGenerativeSearchAnswerProvider(
         environment,
@@ -268,7 +268,7 @@ function createSenseNovaRuntime(
         { ...dependencies, client: generalClient, maxOutputTokens: modelRuntime.modelProfile.operations.questionAnswer.maxOutputTokens }
       ) as ReportV4QuestionAnswerProvider & GenerativeSearchAnswerProvider;
     },
-    createDiagnosisProvider: (value) => createReportV4SenseNovaDiagnosisProvider({
+    createDiagnosisProvider: (value) => createReportV4OpenAiCompatibleDiagnosisProvider({
       environment, runtime: locked(value), fetch: dependencies.fetch
     })
   };
@@ -293,13 +293,13 @@ function assertLockedRuntime(
   return runtime;
 }
 
-function assertLegacyCompatibility(environment: NodeJS.ProcessEnv, profileId: ProviderProfileId): void {
+function assertRoutingAssertions(environment: NodeJS.ProcessEnv, profileId: ProviderProfileId): void {
   const expectedAdapter = publicSearchAdapterIdForProviderProfile(profileId);
-  const legacyAdapter = environment.OGC_PUBLIC_SEARCH_ADAPTER;
-  if (legacyAdapter !== undefined && legacyAdapter !== expectedAdapter) {
+  const assertedAdapter = environment.OGC_PUBLIC_SEARCH_ADAPTER;
+  if (assertedAdapter !== undefined && assertedAdapter !== expectedAdapter) {
     throw new ProviderProfileRuntimeError("provider_profile_conflict", "OGC_PUBLIC_SEARCH_ADAPTER conflicts with OGC_PROVIDER_PROFILE.");
   }
-  if (profileId === "sensenova_anysearch"
+  if (profileId === "external_search_synthesis"
       && (environment.OGC_REPORT_V4_MIMO_BASE_URL?.trim() || environment.OGC_REPORT_V4_MIMO_API_KEY?.trim())) {
     throw new ProviderProfileRuntimeError("provider_profile_conflict", "Stale MiMo V4 routing values conflict with OGC_PROVIDER_PROFILE.");
   }

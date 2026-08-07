@@ -926,7 +926,19 @@ describe("ReportSemanticReview receipt integrity", () => {
     const zeroSentence = validReview(input);
     (zeroSentence.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!.targetFirstSentence = 0;
     expect(parseReportSemanticReviewOutput(zeroSentence, input).annotations.answers[0])
-      .toMatchObject({ targetPresence: "present", targetFirstSentence: 1, reason: "degraded: contract violation", degraded: true });
+      .toEqual({
+        questionId: "question-1",
+        relevance: "blocked",
+        entityRole: "ambiguous",
+        degraded: true,
+        targetPresence: "ambiguous",
+        targetFirstSentence: null,
+        targetRoles: [],
+        competitorEntityIds: [],
+        evidenceIds: [],
+        sourceIds: [],
+        reason: "degraded: contract violation"
+      });
 
     const absentWithRole = validReview(input);
     Object.assign((absentWithRole.annotations as { answers: Array<Record<string, unknown>> }).answers[0]!, {
@@ -935,7 +947,11 @@ describe("ReportSemanticReview receipt integrity", () => {
       targetRoles: ["subject"]
     });
     expect(parseReportSemanticReviewOutput(absentWithRole, input).annotations.answers[0])
-      .toMatchObject({ targetPresence: "present", targetFirstSentence: 1, reason: "degraded: contract violation", degraded: true });
+      .toMatchObject({
+        relevance: "blocked", entityRole: "ambiguous", targetPresence: "ambiguous",
+        targetFirstSentence: null, targetRoles: [], competitorEntityIds: [],
+        evidenceIds: [], sourceIds: [], reason: "degraded: contract violation", degraded: true
+      });
   });
 
   it("exposes a structured degradation marker that survives re-parse and never crosses the Paid boundary", () => {

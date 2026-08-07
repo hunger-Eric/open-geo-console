@@ -194,11 +194,11 @@ describe("Free V4 direct teaser orchestration", () => {
     expect(result.checkpoint.directAnalysis).toMatchObject({ observations: [], recommendations: [] });
   });
 
-  it("retains same-response annotations on a typed refusal as a valid core outcome", async () => {
+  it("retains same-response annotations on a normalized provider refusal through checkpoint receipts", async () => {
     mocks.answerWithSources.mockImplementationOnce(async (request: { questionId: string }) => ({
       ...answerResult(request.questionId),
       answerText: "",
-      refusal: { code: "policy_refusal", reason: "The provider declined this request." }
+      refusal: { code: "provider_refusal", reason: "The provider returned a nonstandard refusal." }
     }));
     mocks.structuredInvoke.mockImplementation(async (request: { operation: string }) => request.operation === "websiteSynthesis"
       ? modelQuestionOutput()
@@ -209,7 +209,9 @@ describe("Free V4 direct teaser orchestration", () => {
     const result = await generateFreeTeaser(baseInput());
     expect(result.q1AnswerCore.status).toBe("refused");
     expect(result.q1AnswerCore.sources).toHaveLength(1);
+    expect(result.q1AnswerCore.refusal?.code).toBe("provider_refusal");
     expect(result.checkpoint.directAnalysisStatus).toBe("completed");
+    expect(result.checkpoint.directCoreReceipt).toBeDefined();
   });
 
   it.each([
@@ -276,6 +278,17 @@ describe("Free V4 direct teaser orchestration", () => {
       ...result.checkpoint,
       directAnalysis: { ...result.checkpoint.directAnalysis!, summary: "TAMPERED" }
     }, { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION })).toThrow();
+  });
+
+  it("rejects new unreviewed legacy Free generation before any semantic or provider work", async () => {
+    const { freeDirectSemanticsVersion: _directVersion, ...legacyInput } = baseInput();
+    await expect(generateFreeTeaser(legacyInput)).rejects.toThrow(
+      /legacy Free generation requires model-owned semantic review/i
+    );
+    expect(mocks.structuredInvoke).not.toHaveBeenCalled();
+    expect(mocks.answerWithSources).not.toHaveBeenCalled();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(legacyInput.saveCheckpoint).not.toHaveBeenCalled();
   });
 
   it("binds target evidence locations to the containing question", () => {

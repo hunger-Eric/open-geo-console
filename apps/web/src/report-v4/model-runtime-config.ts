@@ -9,17 +9,17 @@ import {
   type ResolvedModelProfile
 } from "@open-geo-console/ai-report-engine";
 import profilePayload from "../../../../config/model-profiles/report-v4-mimo-v2.5-pro.json";
-import sensenovaProfilePayload from "../../../../config/model-profiles/report-v4-sensenova-deepseek-v4-flash-v1.json";
-import sensenovaMimoProfilePayload from "../../../../config/model-profiles/report-v4-sensenova-mimo-v2.5-pro-v1.json";
+import openAiCompatibleDeepseekProfilePayload from "../../../../config/model-profiles/report-v4-openai-compatible-deepseek-v4-flash-v1.json";
+import openAiCompatibleMimoProfilePayload from "../../../../config/model-profiles/report-v4-openai-compatible-mimo-v2.5-pro-v1.json";
 
 export const REPORT_V4_MIMO_V25_PRO_PROFILE_ID = "report-v4-mimo-v2.5-pro-v1" as const;
-export const REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID = "report-v4-sensenova-deepseek-v4-flash-v1" as const;
-export const REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID = "report-v4-sensenova-mimo-v2.5-pro-v1" as const;
+export const REPORT_V4_OPENAI_COMPATIBLE_DEEPSEEK_V4_FLASH_PROFILE_ID = "report-v4-openai-compatible-deepseek-v4-flash-v1" as const;
+export const REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID = "report-v4-openai-compatible-mimo-v2.5-pro-v1" as const;
 
 export const REPORT_V4_MODEL_PROFILE_IDS = Object.freeze([
   REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
-  REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID,
-  REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID
+  REPORT_V4_OPENAI_COMPATIBLE_DEEPSEEK_V4_FLASH_PROFILE_ID,
+  REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID
 ] as const);
 export type ReportV4ModelProfileId = (typeof REPORT_V4_MODEL_PROFILE_IDS)[number];
 
@@ -67,8 +67,8 @@ export const REPORT_V4_MODEL_CAPABILITY_EVIDENCE: readonly ReportV4ModelCapabili
 // version moves with the calibration.
 const TOKENIZER_ID = "mimo-v2.5-pro-utf8-conservative-v1";
 const ESTIMATOR_ID = "mimo-v2.5-pro-calibrated-conservative-v2";
-const SENSENOVA_TOKENIZER_ID = "deepseek-v4-flash-utf8-conservative-v1";
-const SENSENOVA_ESTIMATOR_ID = "deepseek-v4-flash-utf8-conservative-v1";
+const DEEPSEEK_TOKENIZER_ID = "deepseek-v4-flash-utf8-conservative-v1";
+const DEEPSEEK_ESTIMATOR_ID = "deepseek-v4-flash-utf8-conservative-v1";
 
 const tokenEstimators = createModelTokenEstimatorRegistry([{
   estimatorId: ESTIMATOR_ID,
@@ -88,8 +88,8 @@ const tokenEstimators = createModelTokenEstimatorRegistry([{
     return Math.ceil(ascii / 4) + nonAscii;
   }
 }, {
-  estimatorId: SENSENOVA_ESTIMATOR_ID,
-  tokenizer: SENSENOVA_TOKENIZER_ID,
+  estimatorId: DEEPSEEK_ESTIMATOR_ID,
+  tokenizer: DEEPSEEK_TOKENIZER_ID,
   estimateTokens: conservativeUtf8Estimate
 }]);
 
@@ -103,8 +103,8 @@ const providerCapabilities = createModelProviderCapabilityRegistry([{
     operationCapability("sourceDiagnosis", "openai-chat-completions-structured-output", false)
   ]
 }, {
-  provider: "sensenova",
-  adapterId: "sensenova-openai-compatible-json-v1",
+  provider: "openai-compatible",
+  adapterId: "openai-compatible-json-v1",
   operations: [
     operationCapability("pageAnalysis", "openai-chat-completions-structured-output", false),
     operationCapability("websiteSynthesis", "openai-chat-completions-structured-output", false),
@@ -114,10 +114,10 @@ const providerCapabilities = createModelProviderCapabilityRegistry([{
 }]);
 
 const modelProfile = parseModelProfile(profilePayload);
-const sensenovaModelProfile = parseModelProfile(sensenovaProfilePayload);
-const sensenovaMimoModelProfile = parseModelProfile(sensenovaMimoProfilePayload);
+const openAiCompatibleDeepseekModelProfile = parseModelProfile(openAiCompatibleDeepseekProfilePayload);
+const openAiCompatibleMimoModelProfile = parseModelProfile(openAiCompatibleMimoProfilePayload);
 const profileRegistry = createModelProfileRegistry({
-  profiles: [modelProfile, sensenovaModelProfile, sensenovaMimoModelProfile],
+  profiles: [modelProfile, openAiCompatibleDeepseekModelProfile, openAiCompatibleMimoModelProfile],
   providers: providerCapabilities,
   estimators: tokenEstimators
 });
@@ -126,8 +126,8 @@ const profileRegistry = createModelProfileRegistry({
 // any report is admitted. The snapshot-safe profile remains the strict public
 // ModelProfile shape; endpoint and estimator resolution are admission checks.
 const resolvedProfile = profileRegistry.load(REPORT_V4_MIMO_V25_PRO_PROFILE_ID);
-const sensenovaResolvedProfile = profileRegistry.load(REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID);
-const sensenovaMimoResolvedProfile = profileRegistry.load(REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID);
+const openAiCompatibleDeepseekResolvedProfile = profileRegistry.load(REPORT_V4_OPENAI_COMPATIBLE_DEEPSEEK_V4_FLASH_PROFILE_ID);
+const openAiCompatibleMimoResolvedProfile = profileRegistry.load(REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID);
 
 const runtime = Object.freeze({
   modelProfile,
@@ -135,15 +135,15 @@ const runtime = Object.freeze({
   tokenEstimator: tokenEstimators.resolve(TOKENIZER_ID),
   tokenEstimators
 });
-const sensenovaRuntime = Object.freeze({
-  modelProfile: sensenovaModelProfile,
-  resolvedProfile: sensenovaResolvedProfile,
-  tokenEstimator: tokenEstimators.resolve(SENSENOVA_TOKENIZER_ID),
+const openAiCompatibleDeepseekRuntime = Object.freeze({
+  modelProfile: openAiCompatibleDeepseekModelProfile,
+  resolvedProfile: openAiCompatibleDeepseekResolvedProfile,
+  tokenEstimator: tokenEstimators.resolve(DEEPSEEK_TOKENIZER_ID),
   tokenEstimators
 });
-const sensenovaMimoRuntime = Object.freeze({
-  modelProfile: sensenovaMimoModelProfile,
-  resolvedProfile: sensenovaMimoResolvedProfile,
+const openAiCompatibleMimoRuntime = Object.freeze({
+  modelProfile: openAiCompatibleMimoModelProfile,
+  resolvedProfile: openAiCompatibleMimoResolvedProfile,
   tokenEstimator: tokenEstimators.resolve(TOKENIZER_ID),
   tokenEstimators
 });
@@ -151,8 +151,8 @@ const sensenovaMimoRuntime = Object.freeze({
 const APPROVED_RUNTIMES: Readonly<Record<ReportV4ModelProfileId, ReportV4ModelRuntimeConfig>> =
   Object.freeze({
     [REPORT_V4_MIMO_V25_PRO_PROFILE_ID]: runtime,
-    [REPORT_V4_SENSENOVA_DEEPSEEK_V4_FLASH_PROFILE_ID]: sensenovaRuntime,
-    [REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID]: sensenovaMimoRuntime
+    [REPORT_V4_OPENAI_COMPATIBLE_DEEPSEEK_V4_FLASH_PROFILE_ID]: openAiCompatibleDeepseekRuntime,
+    [REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID]: openAiCompatibleMimoRuntime
   });
 
 export function loadReportV4ModelRuntimeConfig(
@@ -189,8 +189,8 @@ export function resolveReportV4LockedModelRuntime(value: unknown): ReportV4Model
 
 export function modelProfileIdForProviderProfile(value: string | undefined): ReportV4ModelProfileId {
   if (value === "mimo_native") return REPORT_V4_MIMO_V25_PRO_PROFILE_ID;
-  if (value === "sensenova_anysearch") return REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID;
-  throw new Error("OGC_PROVIDER_PROFILE must be exactly mimo_native or sensenova_anysearch; no default is allowed.");
+  if (value === "external_search_synthesis") return REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID;
+  throw new Error("OGC_PROVIDER_PROFILE must be exactly mimo_native or external_search_synthesis; no default is allowed.");
 }
 
 function operationCapability(

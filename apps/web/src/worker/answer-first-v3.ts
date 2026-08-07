@@ -618,19 +618,21 @@ function materializeLegacyGenerativeCards(
   input: ResolveGenerativeAnswerFirstV3Input,
   drafts: GenerativeAnswerCardDraftTuple
 ): GenerativeAnswerCardTuple {
-  const cards = drafts.map((draft): GenerativeSearchAnswerCardV3 => ({
-    ...draft,
-    geoDiagnosis: diagnoseGenerativeSearchAnswerCardV3(
-      { answerText: draft.answerText, sources: draft.sources },
-      {
-        exactQuestion: draft.exactQuestion,
-        locale: input.locale,
-        targetAliases: input.targetAliases ?? [],
-        competitors: input.competitors ?? [],
-        missingEvidenceFamilies: []
-      }
-    )
-  })) as GenerativeAnswerCardTuple;
+  const cards = drafts.map((draft): GenerativeSearchAnswerCardV3 => input.semanticValidation === "free_direct"
+    ? draft
+    : {
+        ...draft,
+        geoDiagnosis: diagnoseGenerativeSearchAnswerCardV3(
+          { answerText: draft.answerText, sources: draft.sources },
+          {
+            exactQuestion: draft.exactQuestion,
+            locale: input.locale,
+            targetAliases: input.targetAliases ?? [],
+            competitors: input.competitors ?? [],
+            missingEvidenceFamilies: []
+          }
+        )
+      }) as GenerativeAnswerCardTuple;
   return parseGenerativeSearchAnswerCardsV3(cards, {
     questionSet: input.questionSet,
     locale: input.locale,

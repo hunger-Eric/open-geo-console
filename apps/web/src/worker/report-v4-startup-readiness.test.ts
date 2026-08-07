@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   loadReportV4ModelRuntimeConfig,
   REPORT_V4_MIMO_V25_PRO_PROFILE_ID,
+  REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID,
   type ReportV4ModelRuntimeConfig
 } from "../report-v4/model-runtime-config";
 import type { ProviderProfileRuntime } from "../provider-profile/runtime";
@@ -86,6 +87,27 @@ describe("Report V4 Worker startup readiness", () => {
     expect(publishRuntime).toHaveBeenCalledWith(prepared);
   });
 
+  it("prepares the canonical external-search synthesis route without a vendor-named alias", async () => {
+    const publishRuntime = vi.fn();
+    const prepared = await prepareWorkerStartup({
+      environment: externalSearchEnvironment(),
+      ensureDatabase: vi.fn(),
+      resolvePublicSearchRuntime: async () => publicRuntime("anysearch"),
+      publishRuntime
+    });
+    expect(prepared).toMatchObject({
+      profileId: "external_search_synthesis",
+      publicSearchAdapterId: "anysearch",
+      summary: {
+        profileId: "external_search_synthesis",
+        modelProfileId: REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID,
+        providerId: "openai-compatible",
+        modelId: "mimo-v2.5-pro"
+      }
+    });
+    expect(publishRuntime).toHaveBeenCalledWith(prepared);
+  });
+
   it("retries a nested transient database cause once, then resolves authority", async () => {
     const calls: string[] = [];
     let attempt = 0;
@@ -153,11 +175,31 @@ function validEnvironment(): NodeJS.ProcessEnv {
   };
 }
 
-function publicRuntime() {
+function externalSearchEnvironment(): NodeJS.ProcessEnv {
+  return {
+    NODE_ENV: "test",
+    OGC_DEPLOYMENT_PROFILE: "staging",
+    OGC_PROVIDER_PROFILE: "external_search_synthesis",
+    OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID,
+    OGC_AI_BASE_URL: "https://opencode.ai/zen/go/v1",
+    OGC_AI_API_KEY: "openai-compatible-secret",
+    OGC_AI_MODEL: "mimo-v2.5-pro",
+    OGC_AI_JSON_RESPONSE_FORMAT: "true",
+    OGC_PUBLIC_SEARCH_RUNTIME_ENABLED: "true",
+    OGC_PUBLIC_SEARCH_ADAPTER: "anysearch",
+    OGC_PUBLIC_SEARCH_LOCALE: "zh-CN",
+    OGC_PUBLIC_SEARCH_REGION: "CN",
+    OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL: "https://api.anysearch.com/v1/search",
+    OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY: "anysearch-secret",
+    OGC_TOKEN_HASH_SECRET: "v4-commercial-token-secret-at-least-32-characters"
+  };
+}
+
+function publicRuntime(adapterId: "mimo" | "anysearch" = "mimo") {
   return {
     adapter: {},
     authority: { active: true },
-    identity: { adapterId: "mimo" }
+    identity: { adapterId }
   } as never;
 }
 

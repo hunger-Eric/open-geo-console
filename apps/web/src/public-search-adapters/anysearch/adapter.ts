@@ -130,7 +130,7 @@ export async function fetchAnySearchResults(input: {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${input.config.apiKey}` },
       body: JSON.stringify({
         query: input.query,
-        max_results: Math.max(1, Math.min(input.maxResults, 20)),
+        max_results: Math.max(1, Math.min(input.maxResults, 10)),
         zone: input.config.zone,
         language: input.config.locale,
         format: "json"
@@ -159,15 +159,18 @@ export function parseAnySearchResults(payload: unknown, maximum: number): AnySea
   for (const value of data.results) {
     const row = record(value);
     if (!row || typeof row.title !== "string" || typeof row.url !== "string" || typeof row.snippet !== "string") {
-      throw new AnySearchPublicSearchAdapterError("malformed", "AnySearch returned an invalid result.");
+      continue;
     }
     const title = boundedText(row.title, 500);
     const snippet = boundedText(row.snippet, 2_000);
     const url = publicUrl(row.url);
-    if (!title || !snippet || !url) throw new AnySearchPublicSearchAdapterError("malformed", "AnySearch returned an unsafe or invalid result.");
+    if (!title || !snippet || !url) continue;
     if (seen.has(url)) continue;
     seen.add(url);
-    if (results.length < Math.max(1, Math.min(maximum, 20))) results.push({ title, url, snippet });
+    if (results.length < Math.max(1, Math.min(maximum, 10))) results.push({ title, url, snippet });
+  }
+  if (data.results.length > 0 && results.length === 0) {
+    throw new AnySearchPublicSearchAdapterError("malformed", "AnySearch returned only unsafe or invalid results.");
   }
   return results;
 }

@@ -1,7 +1,7 @@
 {
-  "profileId": "report-v4-sensenova-mimo-v2.5-pro-v1",
-  "provider": "sensenova",
-  "adapterId": "sensenova-openai-compatible-json-v1",
+  "profileId": "report-v4-openai-compatible-mimo-v2.5-pro-v1",
+  "provider": "openai-compatible",
+  "adapterId": "openai-compatible-json-v1",
   "operations": {
     "pageAnalysis": {
       "model": "mimo-v2.5-pro",

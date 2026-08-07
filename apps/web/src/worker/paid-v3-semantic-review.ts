@@ -286,9 +286,9 @@ function persistedSourceSelectionContext(report: CombinedGeoReportV3): PaidV3Sem
       }))
     })),
     missingEvidenceFamiliesByQuestion: [
-      cards[0].geoDiagnosis.missingEvidenceFamilies,
-      cards[1].geoDiagnosis.missingEvidenceFamilies,
-      cards[2].geoDiagnosis.missingEvidenceFamilies
+      cards[0].geoDiagnosis!.missingEvidenceFamilies,
+      cards[1].geoDiagnosis!.missingEvidenceFamilies,
+      cards[2].geoDiagnosis!.missingEvidenceFamilies
     ],
     finalSourceSelectionInputIdentity: report.sourceSelectionDiagnosis.inputIdentity,
     allowPersistedIndependentExcerpts: true

@@ -40,10 +40,10 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
   const ordinals=citationOrdinals(report.answerCards);
   const answered=report.answerCards.filter(({status})=>status==="answered").length;
   const limited=report.answerCards.filter(({status})=>status!=="answered").length;
-  const mentioned=report.directSemantics ? null : report.answerCards.filter(({geoDiagnosis})=>geoDiagnosis.targetMentioned).length;
+  const mentioned=report.directSemantics ? null : report.answerCards.filter((card)=>requireLegacyDiagnosis(card).targetMentioned).length;
   const profile=report.technicalFoundation.aiReport.organizationProfile;
   const coverage=report.technicalFoundation.aiReport.coverage;
-  const conclusion=reportConclusion(report,model.locale);
+  const conclusion=report.directSemantics ? null : reportConclusion(report,model.locale);
   const decisionCopy=DECISION_COPY[model.locale];
   const targetActions=report.sourceSelectionDiagnosis?.targetActions.slice(0,3)??[];
   return <main className="report-shell answer-first-report paid-report-template" data-artifact-revision={report.artifactRevisionId}>
@@ -67,17 +67,17 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
     <header className="report-section report-guide" id="artifact-sec-guide" data-report-guide="true">
       <div className="guide-kicker"><span>{copy.kicker}</span><time dateTime={report.generatedAt}>{formatTimestamp(report.generatedAt,model.locale)}</time></div>
       <p className="section-index">00</p><h1>{content.guide}</h1>
-      <div className="decision-verdict" data-decision-summary="true">
+      {conclusion?<div className="decision-verdict" data-decision-summary="true">
         <p className="decision-eyebrow">{decisionCopy.overallVerdict}</p>
         <h2>{conclusion.summary}</h2>
-      </div>
+      </div>:null}
       <dl className="decision-metrics" aria-label={decisionCopy.keyMetrics}>
-        <Meta label={decisionCopy.completeAnswers}>{conclusion.complete}/{conclusion.total}</Meta>
-        <Meta label={decisionCopy.targetEntered}>{conclusion.mentioned}/{conclusion.total}</Meta>
-        <Meta label={decisionCopy.targetSourced}>{conclusion.sourced}/{conclusion.total}</Meta>
+        <Meta label={decisionCopy.completeAnswers}>{answered}/{report.answerCards.length}</Meta>
+        {conclusion?<><Meta label={decisionCopy.targetEntered}>{conclusion.mentioned}/{conclusion.total}</Meta>
+        <Meta label={decisionCopy.targetSourced}>{conclusion.sourced}/{conclusion.total}</Meta></>:null}
         <Meta label={report.technicalFoundation.technicalReport.scoreBreakdown?(zh?"可复算技术检查":"Reconstructable technical check"):(zh?"历史技术分":"Legacy technical score")}>{report.technicalFoundation.technicalReport.score}/100</Meta>
       </dl>
-      <section className="decision-meaning" data-decision-meaning="true">
+      {conclusion?<><section className="decision-meaning" data-decision-meaning="true">
         <h2>{decisionCopy.whatItMeans}</h2><p>{conclusion.meaning}</p>
       </section>
       <section className="decision-reasons" data-decision-reasons="true">
@@ -86,7 +86,7 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
       </section>
       {conclusion.priority?<section className="decision-primary-action" data-primary-business-action="true">
         <p>{decisionCopy.primaryAction}</p><h2>{conclusion.priority.title}</h2><span>{conclusion.priority.rationale}</span>
-      </section>:null}
+      </section>:null}</>:null}
       <dl className="guide-metadata decision-metadata"><Meta label={copy.target}>{report.targetUrl}</Meta><Meta label={copy.generated}>{formatTimestamp(report.generatedAt,model.locale)}</Meta></dl>
     </header>
 
@@ -127,7 +127,7 @@ export function CombinedGeoReportV3Artifact({ model }: { model: CombinedPrivateR
       <div className="analysis-stage-heading analysis-stage-absence" id="artifact-sec-absence" data-target-absence-section="true">
         <p className="section-index">04</p><h2>{copy.absenceReasons}</h2>
       </div>
-      {report.sourceSelectionDiagnosis ? null : <div className="analysis-global-absence"><LegacyCrossQuestionDiagnosis report={report} locale={model.locale}/></div>}
+      {report.sourceSelectionDiagnosis || report.directSemantics ? null : <div className="analysis-global-absence"><LegacyCrossQuestionDiagnosis report={report} locale={model.locale}/></div>}
     </section>
 
       <section className="report-section" id="artifact-sec-technical" data-technical-analysis="true">
@@ -226,7 +226,7 @@ function List({label,items}:{label:string;items:readonly string[]}){return items
 function citationOrdinals(cards:PaidReport["answerCards"]){const result=new Map<string,number>();for(const card of cards){if(card.answerMode === "generative_search_v1")continue;for(const sentence of card.sentences)for(const id of sentence.evidenceIds)if(!result.has(id))result.set(id,result.size+1);}return result;}
 function reportConclusion(report:PaidReport,locale:"en"|"zh"){
   const complete=report.answerCards.filter(({status})=>status==="answered").length;
-  const mentioned=report.answerCards.filter(({geoDiagnosis})=>geoDiagnosis.targetMentioned).length;
+  const mentioned=report.answerCards.filter((card)=>requireLegacyDiagnosis(card).targetMentioned).length;
   const total=report.answerCards.length;
   const targetDomain=hostname(report.targetUrl);
   const sourced=report.answerCards.filter((card)=>answerSourceDomains(card).some((domain)=>sameSite(domain,targetDomain))).length;
@@ -256,6 +256,10 @@ function reportConclusion(report:PaidReport,locale:"en"|"zh"){
 
 function answerSourceDomains(card:PaidAnswerCard):string[]{
   return card.answerMode==="generative_search_v1"?card.sources.map(({registrableDomain})=>registrableDomain):card.sourceEvidence.map(({registrableDomain})=>registrableDomain);
+}
+function requireLegacyDiagnosis(card:PaidAnswerCard){
+  if(!card.geoDiagnosis)throw new TypeError("Non-Direct Paid V3 answer cards require a legacy GEO diagnosis.");
+  return card.geoDiagnosis;
 }
 function hostname(value:string):string{try{return new URL(value).hostname.toLowerCase().replace(/^www\./u,"");}catch{return "";}}
 function sameSite(left:string,right:string):boolean{const a=left.toLowerCase().replace(/^www\./u,""),b=right.toLowerCase().replace(/^www\./u,"");return Boolean(a&&b&&(a===b||a.endsWith(`.${b}`)||b.endsWith(`.${a}`)));}
@@ -383,11 +387,12 @@ function LegacyCrossQuestionDiagnosis({report,locale}:{report:PaidReport;locale:
   const copy=locale==="zh"?ZH:EN;
   const answered=report.answerCards.filter(({status})=>status==="answered").length;
   const limited=report.answerCards.filter(({status})=>status!=="answered").length;
-  const mentioned=report.answerCards.filter(({geoDiagnosis})=>geoDiagnosis.targetMentioned).length;
+  const diagnoses=report.answerCards.map(requireLegacyDiagnosis);
+  const mentioned=diagnoses.filter(({targetMentioned})=>targetMentioned).length;
   return <section className="cross-question-diagnosis" data-cross-question-diagnosis="true">
     <h3>{copy.crossQuestion}</h3>
     <dl className="answer-metric-grid"><Meta label={copy.answered}>{answered}/3</Meta><Meta label={copy.limited}>{limited}/3</Meta><Meta label={copy.mentioned}>{mentioned}/3</Meta></dl>
-    <div className="cross-question-grid"><div><h3>{copy.competitors}</h3><p>{[...new Set(report.answerCards.flatMap(({geoDiagnosis})=>geoDiagnosis.competitorEntityIds))].join(", ")||copy.none}</p></div><div><h3>{copy.missing}</h3><ul>{[...new Set(report.answerCards.flatMap(({geoDiagnosis})=>geoDiagnosis.missingEvidenceFamilies))].map((item)=><li key={item}>{item}</li>)}</ul></div></div>
+    <div className="cross-question-grid"><div><h3>{copy.competitors}</h3><p>{[...new Set(diagnoses.flatMap(({competitorEntityIds})=>competitorEntityIds))].join(", ")||copy.none}</p></div><div><h3>{copy.missing}</h3><ul>{[...new Set(diagnoses.flatMap(({missingEvidenceFamilies})=>missingEvidenceFamilies))].map((item)=><li key={item}>{item}</li>)}</ul></div></div>
   </section>;
 }
 
@@ -432,7 +437,7 @@ function LegacyEvidenceBoundAnswerCard({card,cardIndex,locale,ordinals,flowOrder
       <p className="business-question-answer">{sentence.text}{sentence.kind!=="scope_note"&&<span className="sentence-citations">{sentence.evidenceIds.map((id)=><sup data-citation-ordinal={ordinals.get(id)} key={id}>[{ordinals.get(id)}]</sup>)}</span>}</p>
       {sentence.evidenceIds.length?<div className="legacy-sentence-sources">{sentence.evidenceIds.map((id)=>{const source=card.sourceEvidence.find((item)=>item.evidenceId===id);return source?<article data-answer-source={source.evidenceId} data-citation-ordinal={ordinals.get(id)} data-supported-sentence={sentence.sentenceId} data-source-ownership={source.ownershipCategory} data-source-observed={source.observedAt} key={id}><strong>[{ordinals.get(id)}] <a href={source.canonicalUrl}>{source.title}</a></strong><p>{source.exactExcerpt}</p><small>{source.registrableDomain} · {sourceTypeLabel(source.ownershipCategory,locale==="zh")} · {formatTimestamp(source.observedAt,locale)}</small></article>:null;})}</div>:null}
     </div>)}</div>
-    {card.diagnosis?<DiagnosisSummary diagnosis={card.diagnosis} locale={locale}/>:<GeoDiagnosis card={card} locale={locale}/>}
+    {card.diagnosis?<DiagnosisSummary diagnosis={card.diagnosis} locale={locale}/>:<GeoDiagnosis diagnosis={card.geoDiagnosis} locale={locale}/>}
   </AnswerCardShell>;
 }
 
@@ -453,7 +458,7 @@ function QuestionEvidence({card,cardIndex,locale,ordinals,flowOrder}:{card:PaidA
 
 function QuestionAbsence({card,cardIndex,locale,direct,flowOrder}:{card:PaidAnswerCard;cardIndex:number;locale:"en"|"zh";direct?:PaidV3DirectQuestionSemantics;flowOrder:number}){
   const copy=locale==="zh"?ZH:EN;
-  return <details className="question-absence diagnosis-detail" data-question-absence={card.questionId} style={{order:flowOrder}}><summary><span>Q{cardIndex+1}</span><strong>{card.exactQuestion}</strong><small>{DECISION_COPY[locale].diagnosisDetail}</small></summary><div className="report-detail-body">{direct?<DirectAnalysis result={direct} locale={locale}/>:card.diagnosis?<DiagnosisSummary diagnosis={card.diagnosis} locale={locale}/>:<GeoDiagnosis card={card} locale={locale}/>}<p className="absence-conclusion"><strong>{copy.absenceConclusion}</strong>{card.geoDiagnosis.targetMentioned?copy.targetPresent:copy.targetAbsent}</p></div></details>;
+  return <details className="question-absence diagnosis-detail" data-question-absence={card.questionId} style={{order:flowOrder}}><summary><span>Q{cardIndex+1}</span><strong>{card.exactQuestion}</strong><small>{DECISION_COPY[locale].diagnosisDetail}</small></summary><div className="report-detail-body">{direct?<DirectAnalysis result={direct} locale={locale}/>:card.diagnosis?<DiagnosisSummary diagnosis={card.diagnosis} locale={locale}/>:card.geoDiagnosis?<GeoDiagnosis diagnosis={card.geoDiagnosis} locale={locale}/>:null}{!direct&&card.geoDiagnosis?<p className="absence-conclusion"><strong>{copy.absenceConclusion}</strong>{card.geoDiagnosis.targetMentioned?copy.targetPresent:copy.targetAbsent}</p>:null}</div></details>;
 }
 
 function displayGenerativeAnswer(card:GenerativeSearchAnswerCardV3):string{
@@ -465,9 +470,9 @@ function displayGenerativeAnswer(card:GenerativeSearchAnswerCardV3):string{
   }).join(" "));
 }
 
-function GeoDiagnosis({card,locale}:{card:GenerativeSearchAnswerCardV3|LegacyEvidenceBoundAnswerCardV3;locale:"en"|"zh"}){
+function GeoDiagnosis({diagnosis,locale}:{diagnosis:NonNullable<PaidAnswerCard["geoDiagnosis"]>;locale:"en"|"zh"}){
   const zh=locale==="zh",copy=zh?ZH:EN;
-  return <section className="geo-diagnosis"><h4>{copy.diagnosis}</h4><dl className="diagnosis-grid"><Meta label={copy.targetMention}>{card.geoDiagnosis.targetMentioned?copy.yes:copy.no}</Meta><Meta label={copy.firstPosition}>{card.geoDiagnosis.targetFirstSentence??copy.notPresent}</Meta><Meta label={copy.targetRoles}>{card.geoDiagnosis.targetRoles.join(" · ")||copy.none}</Meta><Meta label={copy.competitors}>{card.geoDiagnosis.competitorEntityIds.join(", ")||copy.none}</Meta><Meta label={copy.sourceStructure}>{Object.entries(card.geoDiagnosis.citedOwnership).filter(([,count])=>count>0).map(([type,count])=>`${sourceTypeLabel(type as OpenGeoAnswerOwnershipCategoryV3,zh)} ${count}`).join(" · ")||copy.none}</Meta></dl><div className="diagnosis-followup"><div><h5>{copy.missing}</h5><ul>{card.geoDiagnosis.missingEvidenceFamilies.map((item)=><li key={item}>{item}</li>)}</ul></div><p><strong>{copy.retest}</strong><br/>{card.geoDiagnosis.retestQuestion}</p></div></section>;
+  return <section className="geo-diagnosis"><h4>{copy.diagnosis}</h4><dl className="diagnosis-grid"><Meta label={copy.targetMention}>{diagnosis.targetMentioned?copy.yes:copy.no}</Meta><Meta label={copy.firstPosition}>{diagnosis.targetFirstSentence??copy.notPresent}</Meta><Meta label={copy.targetRoles}>{diagnosis.targetRoles.join(" · ")||copy.none}</Meta><Meta label={copy.competitors}>{diagnosis.competitorEntityIds.join(", ")||copy.none}</Meta><Meta label={copy.sourceStructure}>{Object.entries(diagnosis.citedOwnership).filter(([,count])=>count>0).map(([type,count])=>`${sourceTypeLabel(type as OpenGeoAnswerOwnershipCategoryV3,zh)} ${count}`).join(" · ")||copy.none}</Meta></dl><div className="diagnosis-followup"><div><h5>{copy.missing}</h5><ul>{diagnosis.missingEvidenceFamilies.map((item)=><li key={item}>{item}</li>)}</ul></div><p><strong>{copy.retest}</strong><br/>{diagnosis.retestQuestion}</p></div></section>;
 }
 
 function DiagnosisSummary({diagnosis,locale}:{diagnosis:ReportV4DiagnosisOutput;locale:"en"|"zh"}){

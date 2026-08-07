@@ -9,6 +9,7 @@ import {
   type GenerativeSearchAnswerCardV3,
   type LegacyEvidenceBoundAnswerCardV3,
   type OpenGeoAnswerCardV3,
+  type OpenGeoAnswerDiagnosisV3,
   type OpenGeoAnswerEvidenceV3
 } from "./open-geo-answer-v3";
 import { ReportLanguageValidationError } from "./report-language";
@@ -210,8 +211,8 @@ describe("Open GEO answer V3 contract", () => {
     const value = generativeCards(context);
     const parsed = parseOpenGeoAnswerCardsV3(value, context);
     expect(parsed[0]!.answerMode).toBe("generative_search_v1");
-    expect(parsed[0]!.geoDiagnosis.targetMentioned).toBe(true);
-    expect(parsed[0]!.geoDiagnosis.citedOwnership.unknown).toBe(1);
+    expect(parsed[0]!.geoDiagnosis!.targetMentioned).toBe(true);
+    expect(parsed[0]!.geoDiagnosis!.citedOwnership.unknown).toBe(1);
   });
 
   it("accepts optional question-local diagnosis and rejects cross-question references", () => {
@@ -245,7 +246,7 @@ describe("Open GEO answer V3 contract", () => {
   it("preserves historical cards with no answerMode", () => {
     const context=fixtureContext(); const parsed=parseOpenGeoAnswerCardsV3(cards(context),context);
     expect(parsed[0]!.answerMode).toBeUndefined(); expect("sentences" in parsed[0]!).toBe(true);
-    expect(parsed[0]!.geoDiagnosis.citedOwnership.unknown).toBe(0);
+    expect(parsed[0]!.geoDiagnosis!.citedOwnership.unknown).toBe(0);
   });
 
   it("enforces generative mode status and legacy-field invariants", () => {
@@ -255,6 +256,10 @@ describe("Open GEO answer V3 contract", () => {
     expect(()=>parseOpenGeoAnswerCardsV3([{...value[0],status:"source_limited",sources:[]},value[1],value[2]],context)).not.toThrow();
     expect(()=>parseOpenGeoAnswerCardsV3([{...value[0],status:"refused",answerText:"",sources:[],refusal:null},value[1],value[2]],context)).toThrow(/typed refusal/i);
     expect(()=>parseOpenGeoAnswerCardsV3([{...value[0],status:"refused",answerText:"",sources:[],refusal:{code:"insufficient_evidence",reason:"Current public evidence is insufficient."}},value[1],value[2]],context)).not.toThrow();
+    const providerRefusal={...value[0],status:"refused",answerText:"",refusal:{code:"provider_refusal",reason:"The provider returned a nonstandard refusal."}};
+    const parsed=parseOpenGeoAnswerCardsV3([providerRefusal,value[1],value[2]],context);
+    expect((parsed[0] as GenerativeSearchAnswerCardV3).sources).toHaveLength(1);
+    expect((parsed[0] as GenerativeSearchAnswerCardV3).refusal?.code).toBe("provider_refusal");
   });
 
   it("rejects unsafe sources and ignores supplied registrable domains", () => {
@@ -284,11 +289,11 @@ describe("Open GEO answer V3 contract", () => {
     const explicit = parseOpenGeoAnswerCardsV3(value, { ...context, semanticValidation: "legacy" });
     const deferred = parseOpenGeoAnswerCardsV3(value, { ...context, semanticValidation: "deferred" });
     expect(explicit).toEqual(omitted);
-    expect((omitted[0] as GenerativeSearchAnswerCardV3).geoDiagnosis.targetMentioned).toBe(true);
-    expect((deferred[0] as GenerativeSearchAnswerCardV3).geoDiagnosis.targetMentioned).toBe(false);
+    expect((omitted[0] as GenerativeSearchAnswerCardV3).geoDiagnosis!.targetMentioned).toBe(true);
+    expect((deferred[0] as GenerativeSearchAnswerCardV3).geoDiagnosis!.targetMentioned).toBe(false);
   });
 
-  it("does not require or accept legacy question diagnosis fields in Direct mode", () => {
+  it("omits and rejects legacy question diagnosis fields in Direct mode", () => {
     const context = {
       ...fixtureContext(),
       locale: "en",
@@ -298,7 +303,7 @@ describe("Open GEO answer V3 contract", () => {
     };
     const withoutLegacyDiagnosis = generativeCards(context).map(({ geoDiagnosis: _geoDiagnosis, ...card }) => card);
     const parsed = parseOpenGeoAnswerCardsV3(withoutLegacyDiagnosis, context);
-    expect(parsed[0]!.geoDiagnosis.targetMentioned).toBe(true);
+    expect(parsed.every((card) => !("geoDiagnosis" in card))).toBe(true);
     expect(() => parseOpenGeoAnswerCardsV3([
       { ...withoutLegacyDiagnosis[0]!, diagnosis: questionDiagnosis(withoutLegacyDiagnosis[0]!.questionId, withoutLegacyDiagnosis[0]!.sources[0]!.sourceId) },
       withoutLegacyDiagnosis[1]!, withoutLegacyDiagnosis[2]!
@@ -386,7 +391,7 @@ function evidenceFor(questionId: string, index: number): OpenGeoAnswerEvidenceV3
   }));
 }
 
-function emptyDiagnosis(retestQuestion: string): OpenGeoAnswerCardV3["geoDiagnosis"] {
+function emptyDiagnosis(retestQuestion: string): OpenGeoAnswerDiagnosisV3 {
   return {
     targetMentioned: false,
     targetFirstSentence: null,

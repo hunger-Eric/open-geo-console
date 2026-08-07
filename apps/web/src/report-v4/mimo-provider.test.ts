@@ -710,16 +710,48 @@ describe("Report V4 dedicated MiMo provider", () => {
     });
   });
 
-  it("maps an invalid structured question result to one retryable outer contract failure", async () => {
+  it("degrades an invalid answer/refusal pair to the current question only", async () => {
     const provider = createReportV4MimoQuestionAnswerProvider({
       environment: environment(),
       fetch: vi.fn(async () => response({ answerText: { invalid: true }, refusal: null }))
     });
 
-    await expect(provider.answerWithSources(questionInput())).rejects.toMatchObject({
-      name: "ReportV4QuestionProviderError",
-      code: "contract",
-      retryable: true
+    await expect(provider.answerWithSources(questionInput())).resolves.toMatchObject({
+      questionId: "question-local-1",
+      answerText: "",
+      refusal: { code: "provider_refusal" }
+    });
+  });
+
+  it("retains annotations on refusals and normalizes unknown refusal codes", async () => {
+    const provider = createReportV4MimoQuestionAnswerProvider({
+      environment: environment(),
+      fetch: vi.fn(async () => response({
+        answerText: "",
+        refusal: { code: "copyright_refusal", reason: "Provider declined this content." }
+      }, 200, [annotation("https://one.example/evidence", "One")]))
+    });
+
+    await expect(provider.answerWithSources(questionInput())).resolves.toMatchObject({
+      answerText: "",
+      refusal: { code: "provider_refusal", reason: "Provider declined this content." },
+      sources: [{ canonicalUrl: "https://one.example/evidence" }]
+    });
+  });
+
+  it("degrades simultaneous answer/refusal and discards an overlong optional response ID", async () => {
+    const provider = createReportV4MimoQuestionAnswerProvider({
+      environment: environment(),
+      fetch: vi.fn(async () => response({
+        answerText: "Conflicting answer.",
+        refusal: { code: "policy_refusal", reason: "Provider declined." }
+      }, 200, [], "r".repeat(501)))
+    });
+
+    await expect(provider.answerWithSources(questionInput())).resolves.toMatchObject({
+      answerText: "",
+      refusal: { code: "provider_refusal" },
+      providerResponseId: null
     });
   });
 
@@ -1088,9 +1120,9 @@ function annotation(url: string, title: string) {
   return { type: "url_citation", url, title, summary: `${title} summary` };
 }
 
-function response(value: unknown, status = 200, annotations: unknown[] = []): Response {
+function response(value: unknown, status = 200, annotations: unknown[] = [], id = "response-1"): Response {
   return new Response(JSON.stringify({
-    id: "response-1",
+    id,
     choices: [{ message: { content: JSON.stringify(value), annotations } }]
   }), { status, headers: { "Content-Type": "application/json" } });
 }

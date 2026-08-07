@@ -44,7 +44,6 @@ import {
   toCanonicalBuyerQuestionSet,
   type ConfirmedBusinessQuestionSet,
   type CustomerIdentityExclusion,
-  type MarketSearchObservation,
   type SearchQueryFanout
 } from "@open-geo-console/public-search-observer";
 import { createSiteKey } from "@open-geo-console/site-crawler";
@@ -219,6 +218,11 @@ export async function generateFreeTeaser(input: {
   if (input.freeDirectSemanticsVersion !== null && input.freeDirectSemanticsVersion !== undefined && !freeDirectEnabled) {
     throw new Error("Unsupported Free direct-semantics contract.");
   }
+  if (!semanticReviewEnabled && !freeDirectEnabled && input.checkpoint?.stage !== "ready") {
+    throw new Error(
+      "Legacy Free generation requires model-owned semantic review; code-authored presence metrics are disabled."
+    );
+  }
 
   const providerRuntime = getPreparedProviderProfileRuntime();
   const runtime = providerRuntime.publicSearchRuntime;
@@ -302,7 +306,6 @@ export async function generateFreeTeaser(input: {
       questionSet,
       evidenceCutoffAt,
       runtime,
-      semanticReviewEnabled: semanticReviewEnabled || freeDirectEnabled,
       signal: input.signal
     });
     checkpoint = {
@@ -813,14 +816,16 @@ function verifyFreeTeaserSemanticProjection(checkpoint: FreeTeaserCheckpointV1):
     if (actual.has(field.path) && actual.get(field.path) !== field.appliedText) throw new TypeError(`Free teaser semantic field ${field.path} does not match the checkpoint.`);
   }
   const annotation = output.annotations.answers[0];
+  const geoDiagnosis = checkpoint.q1AnswerCard!.geoDiagnosis;
+  if (!geoDiagnosis) throw new TypeError("Reviewed Free teaser Q1 requires a model-owned GEO diagnosis.");
   if (!annotation || annotation.targetPresence === undefined || annotation.competitorEntityIds === undefined ||
-      checkpoint.q1AnswerCard!.geoDiagnosis.targetMentioned !== (annotation.targetPresence === "present") ||
-      checkpoint.q1AnswerCard!.geoDiagnosis.targetFirstSentence !== (annotation.targetPresence === "present" ? annotation.targetFirstSentence : null) ||
-      sha(checkpoint.q1AnswerCard!.geoDiagnosis.targetRoles) !== sha(annotation.targetRoles) ||
-      sha(checkpoint.q1AnswerCard!.geoDiagnosis.competitorEntityIds) !== sha(annotation.competitorEntityIds) ||
-      hashReportSemanticReviewValue(checkpoint.q1AnswerCard!.geoDiagnosis.citedOwnership) !== hashReportSemanticReviewValue(ownershipCountsFromSources(checkpoint.q1AnswerCard!.sources)) ||
-      checkpoint.q1AnswerCard!.geoDiagnosis.missingEvidenceFamilies.length !== 0 ||
-      checkpoint.q1AnswerCard!.geoDiagnosis.retestQuestion !== checkpoint.q1AnswerCard!.exactQuestion) {
+      geoDiagnosis.targetMentioned !== (annotation.targetPresence === "present") ||
+      geoDiagnosis.targetFirstSentence !== (annotation.targetPresence === "present" ? annotation.targetFirstSentence : null) ||
+      sha(geoDiagnosis.targetRoles) !== sha(annotation.targetRoles) ||
+      sha(geoDiagnosis.competitorEntityIds) !== sha(annotation.competitorEntityIds) ||
+      hashReportSemanticReviewValue(geoDiagnosis.citedOwnership) !== hashReportSemanticReviewValue(ownershipCountsFromSources(checkpoint.q1AnswerCard!.sources)) ||
+      geoDiagnosis.missingEvidenceFamilies.length !== 0 ||
+      geoDiagnosis.retestQuestion !== checkpoint.q1AnswerCard!.exactQuestion) {
     throw new TypeError("Free teaser semantic Q1 diagnosis does not match its verified annotations.");
   }
   if (checkpoint.q1AnswerResult!.answerText !== checkpoint.q1AnswerCard!.answerText) {
@@ -940,7 +945,6 @@ async function observeTeaserQuestions(input: {
   questionSet: ConfirmedBusinessQuestionSet;
   evidenceCutoffAt: string;
   runtime: ProviderProfilePublicSearchRuntime;
-  semanticReviewEnabled: boolean;
   signal?: AbortSignal;
 }): Promise<{ snapshotIds: readonly [string, string, string]; metrics?: FreeTeaserMetrics }> {
   const questions = toCanonicalBuyerQuestionSet(input.questionSet);
@@ -968,14 +972,7 @@ async function observeTeaserQuestions(input: {
     }));
   }
   const snapshotIds = snapshots.map(({ snapshotId }) => snapshotId) as [string, string, string];
-  return {
-    snapshotIds,
-    ...(input.semanticReviewEnabled ? {} : { metrics: measurePresence(
-      input.targetUrl,
-      input.foundation,
-      snapshots.map(({ observations }) => observations)
-    ) })
-  };
+  return { snapshotIds };
 }
 
 function createFreeTeaserFanouts(
@@ -1493,41 +1490,12 @@ function canonicalAnswerSourceHash(sources: readonly GenerativeSearchAnswerResul
   return sha(JSON.stringify(ordered));
 }
 
-function ownershipCountsFromSources(sources: readonly GenerativeSearchAnswerCardV3["sources"][number][]): GenerativeSearchAnswerCardV3["geoDiagnosis"]["citedOwnership"] {
+function ownershipCountsFromSources(sources: readonly GenerativeSearchAnswerCardV3["sources"][number][]): NonNullable<GenerativeSearchAnswerCardV3["geoDiagnosis"]>["citedOwnership"] {
   const counts = { target_owned: 0, competitor_owned: 0, third_party_editorial: 0, directory: 0, government: 0, other: 0, institution: 0, community: 0, social: 0, unknown: 0 };
   for (const source of sources) counts[source.ownershipCategory] += 1;
   return counts;
 }
 
-function measurePresence(
-  targetUrl: string,
-  foundation: AiWebsiteReportV1,
-  observationGroups: readonly (readonly MarketSearchObservation[])[]
-): FreeTeaserMetrics {
-  const targetHost = new URL(targetUrl).hostname.replace(/^www\./u, "").toLocaleLowerCase();
-  const aliases = [
-    targetHost,
-    foundation.organizationProfile.organizationName,
-    foundation.organizationProfile.legalEntity,
-    ...(foundation.organizationProfile.brandNames ?? [])
-  ].filter((value): value is string => Boolean(value?.trim())).map(normalize);
-  let brandMentionCount = 0;
-  let competitorMentionCount = 0;
-  for (const observations of observationGroups) {
-    const results = observations.flatMap(({ results }) => results);
-    const mentionsTarget = results.some((result) => {
-      const haystack = normalize([result.displayedHost, result.title, result.snippet].join(" "));
-      return aliases.some((alias) => alias.length >= 3 && haystack.includes(alias));
-    });
-    const mentionsOther = results.some((result) => {
-      const haystack = normalize([result.displayedHost, result.title, result.snippet].join(" "));
-      return !aliases.some((alias) => alias.length >= 3 && haystack.includes(alias));
-    });
-    if (mentionsTarget) brandMentionCount += 1;
-    if (mentionsOther) competitorMentionCount += 1;
-  }
-  return { questionCount: 3, brandMentionCount, competitorMentionCount };
-}
 function assertTerminalAdmission(bundle: ReportV4SiteSnapshotBundle, reportId: string): void {
   if (bundle.snapshot.reportId !== reportId ||
       !["completed", "completed_limited"].includes(bundle.snapshot.status) ||
@@ -1626,10 +1594,6 @@ function assertSemanticReviewCheckpointMode(
 
 function compareStableText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function normalize(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 function sha(value: unknown): string {

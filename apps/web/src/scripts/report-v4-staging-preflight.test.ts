@@ -186,7 +186,7 @@ describe("exact-commit staging-only Worker launcher", () => {
   it("fails closed on live public-search quality or malformed probe evidence before runtime mutation", () => {
     expect(source).toMatch(/probe-public-search\.ts --adapter \$probeAdapter --locale zh-CN --region CN/u);
     expect(source).toMatch(/mimo_native[\s\S]*\$probeAdapter = "mimo"/u);
-    expect(source).toMatch(/sensenova_anysearch[\s\S]*\$probeAdapter = "anysearch"/u);
+    expect(source).toMatch(/external_search_synthesis[\s\S]*\$probeAdapter = "anysearch"/u);
     expect(source).toMatch(/Assert-LastExitCode "The protected-Staging public-search quality probe failed\."/u);
     expect(source).toMatch(/ConvertFrom-Json[\s\S]*malformed evidence/u);
     expect(source).toMatch(/qualityCases\.Count -ne 3[\s\S]*failedQualityCases\.Count -gt 0/u);
@@ -215,8 +215,9 @@ describe("exact-commit staging-only Worker launcher", () => {
 
   it("validates both complete profiles without launcher-derived routing defaults", () => {
     expect(workstationLauncherSource).toMatch(/\$profile -eq "mimo_native"[\s\S]*OGC_REPORT_V4_MIMO_BASE_URL[\s\S]*OGC_PUBLIC_SEARCH_MIMO_MODEL/u);
-    expect(workstationLauncherSource).toMatch(/\$profile -eq "sensenova_anysearch"[\s\S]*OGC_AI_BASE_URL[\s\S]*OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY/u);
-    expect(workstationLauncherSource).toContain("Stale MiMo V4 routing values conflict with sensenova_anysearch");
+    expect(workstationLauncherSource).toMatch(/\$profile -eq "external_search_synthesis"[\s\S]*OGC_AI_BASE_URL[\s\S]*OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY/u);
+    expect(workstationLauncherSource).toContain("Stale MiMo V4 routing values conflict with external_search_synthesis");
+    expect(workstationLauncherSource).not.toContain("sensenova_anysearch");
     expect(workstationLauncherSource).not.toMatch(/OGC_REPORT_V4_MODEL_PROFILE_ID"\]\s*=\s*"report-v4/u);
     expect(workstationLauncherSource).not.toMatch(/OGC_REPORT_V4_MIMO_BASE_URL"\s*=\s*"OGC_AI_BASE_URL/u);
   });

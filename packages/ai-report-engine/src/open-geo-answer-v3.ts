@@ -82,7 +82,7 @@ export interface GenerativeSearchAnswerProvenanceV3 { providerId:string; model:s
 export interface GenerativeSearchAnswerCardV3 {
   answerMode:"generative_search_v1"; questionId:string; exactQuestion:string;
   status:"answered"|"source_limited"|"refused"; answerText:string; sources:GenerativeSearchAnswerSourceV3[];
-  provenance:GenerativeSearchAnswerProvenanceV3; refusal:GenerativeSearchRefusal|null; geoDiagnosis:OpenGeoAnswerDiagnosisV3;
+  provenance:GenerativeSearchAnswerProvenanceV3; refusal:GenerativeSearchRefusal|null; geoDiagnosis?:OpenGeoAnswerDiagnosisV3;
   audit:{verifiedBodyCount:number;searchSourceOnlyCount:number;inaccessibleCount:number};
   diagnosis?: ReportV4DiagnosisOutput;
 }
@@ -146,7 +146,13 @@ export function parseOpenGeoAnswerCardsV3(
     ];
   });
   const generatedFields = parsed.flatMap((card, cardIndex) => {
-    if (card.answerMode === "generative_search_v1") { const generated = card as GenerativeSearchAnswerCardV3; return [...generated.geoDiagnosis.targetRoles.map((text, index) => ({ path: `answerCards[${cardIndex}].geoDiagnosis.targetRoles[${index}]`, text })), ...generated.geoDiagnosis.missingEvidenceFamilies.map((text,index)=>({path:`answerCards[${cardIndex}].geoDiagnosis.missingEvidenceFamilies[${index}]`,text}))]; }
+    if (card.answerMode === "generative_search_v1") {
+      const diagnosis = (card as GenerativeSearchAnswerCardV3).geoDiagnosis;
+      return diagnosis ? [
+        ...diagnosis.targetRoles.map((text, index) => ({ path: `answerCards[${cardIndex}].geoDiagnosis.targetRoles[${index}]`, text })),
+        ...diagnosis.missingEvidenceFamilies.map((text,index)=>({path:`answerCards[${cardIndex}].geoDiagnosis.missingEvidenceFamilies[${index}]`,text}))
+      ] : [];
+    }
     const legacy = card as LegacyEvidenceBoundAnswerCardV3;
     return [
       ...legacy.sentences.map((sentence, sentenceIndex) => ({ path: `answerCards[${cardIndex}].sentences[${sentenceIndex}].text`, text: sentence.text })),
@@ -174,7 +180,7 @@ export function diagnoseOpenGeoAnswerCardV3(
     competitors: readonly { entityId: string; aliases: readonly string[] }[];
     missingEvidenceFamilies: readonly string[];
   }
-): OpenGeoAnswerCardV3["geoDiagnosis"] {
+): OpenGeoAnswerDiagnosisV3 {
   const claims = card.sentences.filter(({ kind }) => kind === "grounded_claim");
   const targetFirstIndex = claims.findIndex(({ text }) => includesAlias(text, input.targetAliases));
   const competitorEntityIds = input.competitors
@@ -223,15 +229,20 @@ function parseGenerativeCard(value: unknown, cardIndex:number, canonical:{id:str
   const refusal = row.refusal == null ? null : parseRefusal(row.refusal,`${path}.refusal`);
   if (status === "answered" && (!answerText || !sources.length || refusal)) throw new TypeError(`${path} answered requires answerText and a source.`);
   if (status === "source_limited" && (!answerText || sources.length || refusal)) throw new TypeError(`${path} source_limited requires answerText and zero sources.`);
-  if (status === "refused" && (answerText || sources.length || !refusal)) throw new TypeError(`${path} refused requires typed refusal and no answer.`);
+  if (status === "refused" && (answerText || !refusal)) throw new TypeError(`${path} refused requires typed refusal and no answer.`);
   const p = record(row.provenance,`${path}.provenance`);
   const provenance: GenerativeSearchAnswerProvenanceV3 = { providerId:text(p.providerId,`${path}.provenance.providerId`), model:text(p.model,`${path}.provenance.model`), searchMode:text(p.searchMode,`${path}.provenance.searchMode`), promptVersion:oneOf(p.promptVersion,["generative-search-answer-v1"] as const,`${path}.provenance.promptVersion`), searchedAt:timestamp(p.searchedAt,`${path}.provenance.searchedAt`), completedAt:timestamp(p.completedAt,`${path}.provenance.completedAt`), answerHash:hash(p.answerHash,`${path}.provenance.answerHash`), sourceHash:hash(p.sourceHash,`${path}.provenance.sourceHash`) };
   if (Date.parse(provenance.completedAt) < Date.parse(provenance.searchedAt)) throw new TypeError(`${path}.provenance.completedAt must follow searchedAt.`);
   const audit = record(row.audit,`${path}.audit`); const parsedAudit = {verifiedBodyCount:nonnegative(audit.verifiedBodyCount,`${path}.audit.verifiedBodyCount`),searchSourceOnlyCount:nonnegative(audit.searchSourceOnlyCount,`${path}.audit.searchSourceOnlyCount`),inaccessibleCount:nonnegative(audit.inaccessibleCount,`${path}.audit.inaccessibleCount`)};
+  if (context.semanticValidation === "free_direct" && row.geoDiagnosis !== undefined) {
+    throw new TypeError(`${path}.geoDiagnosis is not allowed for Direct semantics.`);
+  }
   if (context.semanticValidation !== "free_direct") parseDiagnosis(row.geoDiagnosis, `${path}.geoDiagnosis`);
-  const geoDiagnosis = context.semanticValidation === "deferred"
-    ? row.geoDiagnosis as OpenGeoAnswerDiagnosisV3
-    : diagnoseGenerativeSearchAnswerCardV3({answerText,sources},{exactQuestion:canonical.exactQuestion,locale:context.locale,targetAliases:context.targetAliases??[],competitors:context.competitors??[],missingEvidenceFamilies:context.missingEvidenceFamiliesByQuestion?.[cardIndex]??[]});
+  const geoDiagnosis = context.semanticValidation === "free_direct"
+    ? undefined
+    : context.semanticValidation === "deferred"
+      ? row.geoDiagnosis as OpenGeoAnswerDiagnosisV3
+      : diagnoseGenerativeSearchAnswerCardV3({answerText,sources},{exactQuestion:canonical.exactQuestion,locale:context.locale,targetAliases:context.targetAliases??[],competitors:context.competitors??[],missingEvidenceFamilies:context.missingEvidenceFamiliesByQuestion?.[cardIndex]??[]});
   if (context.semanticValidation === "free_direct" && row.diagnosis !== undefined) {
     throw new TypeError(`${path}.diagnosis is not allowed for Direct semantics.`);
   }
@@ -240,7 +251,7 @@ function parseGenerativeCard(value: unknown, cardIndex:number, canonical:{id:str
     { questionId: canonical.id, sourceEvidenceIds: sources.map(({ sourceId }) => sourceId) },
     { semanticValidation: context.semanticValidation === "free_direct" ? "deferred" : context.semanticValidation }
   );
-  return {answerMode:"generative_search_v1",questionId:canonical.id,exactQuestion:canonical.exactQuestion,status,answerText,sources,provenance,refusal,geoDiagnosis,audit:parsedAudit,...(diagnosis ? { diagnosis } : {})};
+  return {answerMode:"generative_search_v1",questionId:canonical.id,exactQuestion:canonical.exactQuestion,status,answerText,sources,provenance,refusal,...(geoDiagnosis ? { geoDiagnosis } : {}),audit:parsedAudit,...(diagnosis ? { diagnosis } : {})};
 }
 
 function parseGenerativeSource(value:unknown,path:string):GenerativeSearchAnswerSourceV3 {
@@ -249,7 +260,7 @@ function parseGenerativeSource(value:unknown,path:string):GenerativeSearchAnswer
   catch { throw new TypeError(`${path}.canonicalUrl must be a public HTTP(S) URL.`); }
   return {sourceId:boundedText(row.sourceId,`${path}.sourceId`,500),title:boundedText(row.title,`${path}.title`,500),canonicalUrl,registrableDomain,citedText:row.citedText==null?null:boundedText(row.citedText,`${path}.citedText`,2_000),providerResultOrder:nonnegative(row.providerResultOrder,`${path}.providerResultOrder`),retrievalStatus:oneOf(row.retrievalStatus,["verified_body","search_source_only","inaccessible"] as const,`${path}.retrievalStatus`),ownershipCategory:oneOf(row.ownershipCategory,OWNERSHIP_CATEGORIES,`${path}.ownershipCategory`)};
 }
-function parseRefusal(value:unknown,path:string):GenerativeSearchRefusal { const row=record(value,path); const code=oneOf(row.code,["safety_refusal","policy_refusal","high_risk_refusal","insufficient_evidence"] as const,`${path}.code`); return {code,reason:boundedText(row.reason,`${path}.reason`,500)}; }
+function parseRefusal(value:unknown,path:string):GenerativeSearchRefusal { const row=record(value,path); const code=oneOf(row.code,["safety_refusal","policy_refusal","high_risk_refusal","insufficient_evidence","provider_refusal"] as const,`${path}.code`); return {code,reason:boundedText(row.reason,`${path}.reason`,500)}; }
 function hash(value: unknown, path: string): string { const result = text(value, path); if (!/^[a-f0-9]{64}$/u.test(result)) throw new TypeError(`${path} must be a SHA-256 hash.`); return result; }
 
 export async function synthesizeOpenGeoAnswerCardsV3(

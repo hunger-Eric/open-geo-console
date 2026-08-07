@@ -11,7 +11,7 @@ import {
 } from "./mimo-provider";
 import { createReportV4SiteSynthesisProvider } from "./mimo-site-synthesis-provider";
 import {
-  REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID,
+  REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID,
   resolveReportV4LockedModelRuntime,
   type ReportV4ModelRuntimeConfig
 } from "./model-runtime-config";
@@ -20,10 +20,10 @@ import {
   type ReportV4DiagnosisProvider
 } from "../worker/report-v4-diagnosis-enhancer";
 
-const SENSENOVA_BASE_URL = "https://token.sensenova.cn/v1";
+const TOKEN_API_BASE_URL = "https://token.sensenova.cn/v1";
 const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1";
-const APPROVED_AI_BASE_URLS = new Set([SENSENOVA_BASE_URL, OPENCODE_GO_BASE_URL]);
-const SENSENOVA_MODEL = "mimo-v2.5-pro";
+const APPROVED_OPENAI_COMPATIBLE_BASE_URLS = new Set([TOKEN_API_BASE_URL, OPENCODE_GO_BASE_URL]);
+const EXTERNAL_SEARCH_SYNTHESIS_MODEL = "mimo-v2.5-pro";
 
 export interface ReportV4OpenAiCompatibleProviderDependencies {
   readonly environment: NodeJS.ProcessEnv;
@@ -34,13 +34,13 @@ export interface ReportV4OpenAiCompatibleProviderDependencies {
 export function createReportV4OpenAiCompatibleStructuredInvoker(
   input: ReportV4OpenAiCompatibleProviderDependencies
 ): ReportV4StructuredInvoker {
-  const config = readSenseNovaConfig(input.environment);
-  const runtime = requireSenseNovaRuntime(input.runtime);
+  const config = readOpenAiCompatibleConfig(input.environment);
+  const runtime = requireExternalSearchSynthesisRuntime(input.runtime);
   return Object.freeze({
     async invoke(request: Parameters<ReportV4StructuredInvoker["invoke"]>[0]) {
       request.signal.throwIfAborted();
       if (request.webSearchLocation) {
-        throw new AiClientError("SenseNova structured operations do not provide native web search.", { code: "configuration" });
+        throw new AiClientError("External-search synthesis structured operations do not provide native web search.", { code: "configuration" });
       }
       const operation = runtime.modelProfile.operations[request.operation];
       const client = createOpenAiCompatibleClient({
@@ -66,43 +66,43 @@ export function createReportV4OpenAiCompatibleStructuredInvoker(
   });
 }
 
-export function createReportV4SenseNovaSiteSynthesisProvider(
+export function createReportV4OpenAiCompatibleSiteSynthesisProvider(
   input: ReportV4OpenAiCompatibleProviderDependencies
 ) {
   return createReportV4SiteSynthesisProvider(
     createReportV4OpenAiCompatibleStructuredInvoker(input),
-    "SenseNova"
+    "OpenAI-compatible model"
   );
 }
 
-export function createReportV4SenseNovaDiagnosisProvider(
+export function createReportV4OpenAiCompatibleDiagnosisProvider(
   input: ReportV4OpenAiCompatibleProviderDependencies
 ): ReportV4DiagnosisProvider {
   const invoker = createReportV4OpenAiCompatibleStructuredInvoker(input);
   return createReportV4DiagnosisProvider(invoker, mapDiagnosisError);
 }
 
-export function assertReportV4SenseNovaDiagnosisInput(
+export function assertReportV4OpenAiCompatibleDiagnosisInput(
   runtime: ReportV4ModelRuntimeConfig,
   request: Parameters<typeof buildReportV4DiagnosisInvocation>[0]
 ): void {
   buildReportV4StructuredTokenBudget(runtime, buildReportV4DiagnosisInvocation(request));
 }
 
-export function readSenseNovaConfig(environment: NodeJS.ProcessEnv): {
+export function readOpenAiCompatibleConfig(environment: NodeJS.ProcessEnv): {
   readonly baseUrl: string;
   readonly apiKey: string;
 } {
   const baseUrl = normalizeAiBaseUrl(environment.OGC_AI_BASE_URL);
-  if (!baseUrl || !APPROVED_AI_BASE_URLS.has(baseUrl)) {
+  if (!baseUrl || !APPROVED_OPENAI_COMPATIBLE_BASE_URLS.has(baseUrl)) {
     throw new AiClientError("OGC_AI_BASE_URL must use an approved OpenAI-compatible endpoint.", { code: "configuration" });
   }
-  if (environment.OGC_AI_MODEL !== SENSENOVA_MODEL) {
-    throw new AiClientError("OGC_AI_MODEL conflicts with the selected SenseNova profile.", { code: "configuration" });
+  if (environment.OGC_AI_MODEL !== EXTERNAL_SEARCH_SYNTHESIS_MODEL) {
+    throw new AiClientError("OGC_AI_MODEL conflicts with the selected external-search synthesis profile.", { code: "configuration" });
   }
   if (environment.OGC_AI_JSON_RESPONSE_FORMAT !== undefined
       && environment.OGC_AI_JSON_RESPONSE_FORMAT !== "true") {
-    throw new AiClientError("OGC_AI_JSON_RESPONSE_FORMAT must be true for the SenseNova profile.", { code: "configuration" });
+    throw new AiClientError("OGC_AI_JSON_RESPONSE_FORMAT must be true for the external-search synthesis profile.", { code: "configuration" });
   }
   const apiKey = environment.OGC_AI_API_KEY;
   if (!apiKey?.trim() || apiKey !== apiKey.trim() || apiKey.length > 4_096) {
@@ -117,12 +117,12 @@ function normalizeAiBaseUrl(value: string | undefined): string | null {
   return trimmed.replace(/\/+$/, "");
 }
 
-function requireSenseNovaRuntime(runtime: ReportV4ModelRuntimeConfig): ReportV4ModelRuntimeConfig {
+function requireExternalSearchSynthesisRuntime(runtime: ReportV4ModelRuntimeConfig): ReportV4ModelRuntimeConfig {
   const approved = resolveReportV4LockedModelRuntime(runtime.modelProfile);
   if (approved !== runtime
-      || runtime.modelProfile.profileId !== REPORT_V4_SENSENOVA_MIMO_V25_PRO_PROFILE_ID
-      || Object.values(runtime.modelProfile.operations).some(({ model }) => model !== SENSENOVA_MODEL)) {
-    throw new AiClientError("The locked Report V4 runtime conflicts with the SenseNova profile.", { code: "configuration" });
+      || runtime.modelProfile.profileId !== REPORT_V4_OPENAI_COMPATIBLE_MIMO_V25_PRO_PROFILE_ID
+      || Object.values(runtime.modelProfile.operations).some(({ model }) => model !== EXTERNAL_SEARCH_SYNTHESIS_MODEL)) {
+    throw new AiClientError("The locked Report V4 runtime conflicts with the external-search synthesis profile.", { code: "configuration" });
   }
   return runtime;
 }

@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { loadReportV4ModelRuntimeConfig } from "./model-runtime-config";
 import {
   createReportV4OpenAiCompatibleStructuredInvoker,
-  readSenseNovaConfig
+  readOpenAiCompatibleConfig
 } from "./openai-compatible-provider";
 
-describe("SenseNova Report V4 OpenAI-compatible provider", () => {
+describe("external-search Report V4 OpenAI-compatible provider", () => {
   it("reuses the existing JSON client with the locked operation model and no native-search tool", async () => {
     const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
@@ -21,7 +21,7 @@ describe("SenseNova Report V4 OpenAI-compatible provider", () => {
       });
       expect(body).not.toHaveProperty("tools");
       return new Response(JSON.stringify({
-        id: "sense-response",
+        id: "openai-compatible-response",
         model: "mimo-v2.5-pro",
         choices: [{ finish_reason: "stop", message: { content: "{\"ok\":true}" } }]
       }), { status: 200, headers: { "content-type": "application/json" } });
@@ -63,7 +63,7 @@ describe("SenseNova Report V4 OpenAI-compatible provider", () => {
       { OGC_AI_API_KEY: "" },
       { OGC_AI_JSON_RESPONSE_FORMAT: "false" }
     ]) {
-      expect(() => readSenseNovaConfig({ ...environment, ...drift })).toThrow(/SenseNova|OGC_AI|profile|endpoint|API key/i);
+      expect(() => readOpenAiCompatibleConfig({ ...environment, ...drift })).toThrow(/external-search|OGC_AI|profile|endpoint|API key/i);
     }
   });
 
@@ -73,7 +73,7 @@ describe("SenseNova Report V4 OpenAI-compatible provider", () => {
       OGC_AI_BASE_URL: "https://opencode.ai/zen/go/v1/",
       OGC_AI_API_KEY: "opencode-key"
     };
-    expect(readSenseNovaConfig(environment)).toEqual({
+    expect(readOpenAiCompatibleConfig(environment)).toEqual({
       baseUrl: "https://opencode.ai/zen/go/v1",
       apiKey: "opencode-key"
     });
@@ -83,8 +83,8 @@ describe("SenseNova Report V4 OpenAI-compatible provider", () => {
 function env(): NodeJS.ProcessEnv {
   return {
     NODE_ENV: "test",
-    OGC_PROVIDER_PROFILE: "sensenova_anysearch",
-    OGC_REPORT_V4_MODEL_PROFILE_ID: "report-v4-sensenova-mimo-v2.5-pro-v1",
+    OGC_PROVIDER_PROFILE: "external_search_synthesis",
+    OGC_REPORT_V4_MODEL_PROFILE_ID: "report-v4-openai-compatible-mimo-v2.5-pro-v1",
     OGC_AI_BASE_URL: "https://token.sensenova.cn/v1",
     OGC_AI_API_KEY: "sense-key",
     OGC_AI_MODEL: "mimo-v2.5-pro",

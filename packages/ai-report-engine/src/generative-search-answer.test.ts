@@ -11,6 +11,16 @@ describe("parseGenerativeSearchAnswerResult", () => {
   it("rejects private URLs", () => { expect(() => parseGenerativeSearchAnswerResult({ ...valid, sources: [{ ...valid.sources[0], canonicalUrl: "http://127.0.0.1/private" }] }, { expectedQuestionId: "question-1", locale: "zh-CN" })).toThrow(/public HTTP/i); });
   it("accepts typed refusals", () => { const parsed = parseGenerativeSearchAnswerResult({ ...valid, answerText: "", sources: [], refusal: { code: "safety_refusal", reason: "服务商安全拒绝。" } }, { expectedQuestionId: "question-1", locale: "zh-CN" }); expect(parsed.refusal?.code).toBe("safety_refusal"); });
   it("accepts typed insufficient evidence", () => { const parsed = parseGenerativeSearchAnswerResult({ ...valid, answerText: "", sources: [], refusal: { code: "insufficient_evidence", reason: "当前公开来源不足。" } }, { expectedQuestionId: "question-1", locale: "zh-CN" }); expect(parsed.refusal?.code).toBe("insufficient_evidence"); });
+  it("accepts normalized provider refusals with retained sources", () => { const parsed = parseGenerativeSearchAnswerResult({ ...valid, answerText: "", refusal: { code: "provider_refusal", reason: "供应商返回了非标准拒绝。" } }, { expectedQuestionId: "question-1", locale: "zh-CN", semanticValidation: "free_direct" }); expect(parsed.refusal?.code).toBe("provider_refusal"); expect(parsed.sources).toHaveLength(1); });
+  it("retains and hashes only the first ten supplied sources instead of rejecting the result", async () => {
+    const sources = Array.from({ length: 12 }, (_, index) => ({ ...valid.sources[0], sourceId: `source-${index}`, title: `Source ${index}`, canonicalUrl: `https://provider-${index}.example/evidence`, providerResultOrder: index }));
+    const parsed = parseGenerativeSearchAnswerResult({ ...valid, sources }, { expectedQuestionId: "question-1", locale: "zh-CN", semanticValidation: "free_direct", sourceOverflow: "truncate" });
+    expect(parsed.sources).toHaveLength(10);
+    expect(parsed.sources.at(-1)?.sourceId).toBe("source-9");
+    expect(() => parseGenerativeSearchAnswerResult({ ...valid, sources }, { expectedQuestionId: "question-1", locale: "zh-CN", semanticValidation: "free_direct" })).toThrow(/internal retained explanation budget/i);
+    await expect(generativeSearchAnswerHash(parsed, { locale: "zh-CN", semanticValidation: "free_direct" })).resolves.toMatch(/^[a-f0-9]{64}$/);
+  });
+  it("discards an overlong optional provider response ID", () => { const parsed = parseGenerativeSearchAnswerResult({ ...valid, providerResponseId: "r".repeat(501) }, { expectedQuestionId: "question-1", locale: "zh-CN" }); expect(parsed.providerResponseId).toBeNull(); });
   it("keeps Direct zero-source answers and refusal annotations as valid core outcomes", () => {
     expect(parseGenerativeSearchAnswerResult({ ...valid, sources: [], harmlessExtra: true }, { expectedQuestionId: "question-1", locale: "zh-CN", semanticValidation: "free_direct" }).sources).toEqual([]);
     const refused = parseGenerativeSearchAnswerResult({ ...valid, answerText: "", refusal: { code: "policy_refusal", reason: "服务商政策拒绝。" } }, { expectedQuestionId: "question-1", locale: "zh-CN", semanticValidation: "free_direct" });

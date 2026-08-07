@@ -33,6 +33,27 @@ describe("AnySearch public-search adapter", () => {
     expect(() => parseAnySearchResults({ code: 0, data: { results: [{ title: "x", url: "https://example.com", snippet: 1 }] } }, 3)).toThrow(/invalid/i);
   });
 
+  it("admits validated rows when the provider batch also contains malformed rows", () => {
+    expect(parseAnySearchResults({ code: 0, data: { results: [
+      payload.data.results[0],
+      { title: "incomplete", url: "https://incomplete.example/", snippet: null },
+      { title: "private", url: "http://127.0.0.1/", snippet: "private" }
+    ] } }, 3)).toEqual([{
+      title: payload.data.results[0].title, url: "https://provider.example/services", snippet: payload.data.results[0].snippet
+    }]);
+  });
+
+  it("retains only the first ten valid provider results", () => {
+    const results = Array.from({ length: 12 }, (_, index) => ({
+      title: `Result ${index + 1}`,
+      url: `https://provider-${index + 1}.example/evidence`,
+      snippet: `Evidence ${index + 1}`
+    }));
+    const admitted = parseAnySearchResults({ code: 0, data: { results } }, 50);
+    expect(admitted).toHaveLength(10);
+    expect(admitted.map(({ title }) => title)).toEqual(results.slice(0, 10).map(({ title }) => title));
+  });
+
   it.each([[401, "authentication"], [429, "rate_limited"], [400, "unsupported"], [503, "unavailable"]])("classifies HTTP %i as %s", async (status, errorClass) => {
     const adapter = createAnySearchPublicSearchAdapter({ config, authority, fetch: async () => response({}, status) });
     await expect(adapter.search({ surface, query, budget: { maxRequests: 1, maxResults: 3, timeoutMs: 100, maxCostMicros: 1_000 }, signal: new AbortController().signal })).rejects.toMatchObject({ errorClass });

@@ -604,6 +604,9 @@ export function assertCombinedV3HtmlCompleteness(report: CombinedGeoReportV3, ht
           ...card.diagnosis.recommendedActions.map(({ action }) => action)
         ];
       }
+      if (!card.geoDiagnosis) {
+        throw new TypeError("Non-Direct Paid V3 answer cards require a legacy GEO diagnosis.");
+      }
       return [
         ...answerContent,
         ...card.geoDiagnosis.targetRoles,

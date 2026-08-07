@@ -189,11 +189,11 @@ export function createReportV4MimoQuestionAnswerProvider(
       }
 
       try {
-        const value = record(envelope.value);
+        const normalized = normalizeQuestionAnswer(envelope.value, input.locale);
         return Object.freeze({
           questionId: boundedText(input.questionId, "questionId", 500),
-          answerText: boundedTextAllowEmpty(value.answerText, "answerText", 12_000),
-          refusal: parseRefusal(value.refusal),
+          answerText: normalized.answerText,
+          refusal: normalized.refusal,
           sources: parseAnnotations(envelope.annotations),
           searchedAt: envelope.searchedAt,
           completedAt: envelope.completedAt,
@@ -411,12 +411,7 @@ function parseProviderPayload(payload: unknown): {
     throw mimoInvalidResponse("The MiMo provider response content is not valid JSON.");
   }
   const annotations = Array.isArray(message.annotations) ? message.annotations : [];
-  let providerResponseId: string | null;
-  try {
-    providerResponseId = root.id == null ? null : boundedText(root.id, "provider response id", 500);
-  } catch {
-    throw mimoInvalidResponse("The MiMo provider returned an invalid response.");
-  }
+  const providerResponseId = optionalProviderResponseId(root.id);
   return { value, annotations, providerResponseId };
 }
 
@@ -548,14 +543,55 @@ function parseAnnotations(annotations: readonly unknown[]) {
   return Object.freeze(sources);
 }
 
-function parseRefusal(value: unknown): unknown {
-  if (value == null) return null;
-  const row = record(value);
-  const code = boundedText(row.code, "refusal code", 100);
-  if (code !== "safety_refusal" && code !== "policy_refusal" && code !== "high_risk_refusal") {
-    throw new TypeError("refusal code is invalid.");
+function normalizeQuestionAnswer(value: unknown, locale: string): {
+  readonly answerText: string;
+  readonly refusal: ReturnType<typeof parseRefusal>;
+} {
+  let row: Record<string, unknown> | undefined;
+  try { row = record(value); } catch { row = undefined; }
+  const answerText = typeof row?.answerText === "string"
+    ? boundedTextAllowEmpty(row.answerText, "answerText", 12_000)
+    : "";
+  const refusal = parseRefusal(row?.refusal, locale);
+  if (answerText && refusal) {
+    return Object.freeze({ answerText: "", refusal: providerRefusal(locale, "conflicting_answer_and_refusal") });
   }
-  return Object.freeze({ code, reason: boundedText(row.reason, "refusal reason", 500) });
+  if (!answerText && !refusal) {
+    return Object.freeze({ answerText: "", refusal: providerRefusal(locale, "missing_answer_and_refusal") });
+  }
+  return Object.freeze({ answerText, refusal });
+}
+
+function parseRefusal(value: unknown, locale: string): null | Readonly<{
+  code: "safety_refusal" | "policy_refusal" | "high_risk_refusal" | "insufficient_evidence" | "provider_refusal";
+  reason: string;
+}> {
+  if (value == null) return null;
+  let row: Record<string, unknown> | undefined;
+  try { row = record(value); } catch { row = undefined; }
+  const reason = typeof row?.reason === "string" ? row.reason.trim() : "";
+  const hasBoundedReason = Boolean(reason) && reason.length <= 500;
+  if (row && (row.code === "safety_refusal" || row.code === "policy_refusal" || row.code === "high_risk_refusal" || row.code === "insufficient_evidence") && hasBoundedReason) {
+    return Object.freeze({ code: row.code, reason });
+  }
+  return providerRefusal(locale, "invalid_refusal", hasBoundedReason ? reason : undefined);
+}
+
+function providerRefusal(locale: string, kind: "conflicting_answer_and_refusal" | "missing_answer_and_refusal" | "invalid_refusal", retainedReason?: string) {
+  if (retainedReason) return Object.freeze({ code: "provider_refusal" as const, reason: retainedReason });
+  const zh = locale.toLowerCase().startsWith("zh");
+  const reason = kind === "conflicting_answer_and_refusal"
+    ? (zh ? "供应商同时返回了回答和拒绝，本问题已降级处理。" : "The provider returned both an answer and a refusal, so this question was degraded.")
+    : kind === "missing_answer_and_refusal"
+      ? (zh ? "供应商未返回可用回答或拒绝，本问题已降级处理。" : "The provider returned neither a usable answer nor refusal, so this question was degraded.")
+      : (zh ? "供应商返回了无法识别的拒绝结果，本问题已降级处理。" : "The provider returned an unrecognized refusal, so this question was degraded.");
+  return Object.freeze({ code: "provider_refusal" as const, reason });
+}
+
+function optionalProviderResponseId(value: unknown): string | null {
+  if (value == null || typeof value !== "string") return null;
+  const retained = value.trim();
+  return retained.length <= 500 ? retained : null;
 }
 
 function questionInvocation(input: ReportV4QuestionProviderInput): ReportV4MimoStructuredInvokeInput {

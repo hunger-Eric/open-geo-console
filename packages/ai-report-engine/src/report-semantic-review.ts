@@ -1840,10 +1840,13 @@ function sanitizeFreeAnswerAnnotation(row: unknown, subject: ReportSemanticAnswe
         reason: requireBoundedText(item.reason, `${path}.reason`, 5_000)
       };
     },
-    // Synthesized fallback mirrors the pre-review draft state: the system's own Q1 answer card presents the target at its first sentence.
+    // Contract failure is not semantic evidence. Preserve only an explicit
+    // degraded state and never replace the model-owned judgment with a
+    // plausible target/competitor conclusion or mounted references.
     () => ({
-      questionId, relevance: "responsive", entityRole: "target", degraded: true as const, targetPresence: "present", targetFirstSentence: 1, targetRoles: ["answer subject"], competitorEntityIds: [],
-      evidenceIds: refs.evidenceIds, sourceIds: refs.sourceIds, reason: FREE_V4_SEMANTIC_REVIEW_DEGRADED_REASON
+      questionId, relevance: "blocked", entityRole: "ambiguous", degraded: true as const,
+      targetPresence: "ambiguous", targetFirstSentence: null, targetRoles: [], competitorEntityIds: [],
+      evidenceIds: [], sourceIds: [], reason: FREE_V4_SEMANTIC_REVIEW_DEGRADED_REASON
     })
   );
 }

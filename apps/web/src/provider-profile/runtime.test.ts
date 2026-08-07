@@ -8,7 +8,7 @@ import {
 describe("unified Worker provider profile runtime", () => {
   it.each([
     ["mimo_native", mimoEnvironment(), "mimo", "xiaomi-mimo", "mimo-v2.5-pro"],
-    ["sensenova_anysearch", sensenovaEnvironment(), "anysearch", "sensenova", "mimo-v2.5-pro"]
+    ["external_search_synthesis", externalSearchEnvironment(), "anysearch", "openai-compatible", "mimo-v2.5-pro"]
   ] as const)("resolves one immutable complete %s bundle", (_id, environment, adapterId, providerId, modelId) => {
     const runtime = resolveProviderProfileRuntime(environment);
     expect(runtime).toMatchObject({ profileId: _id, publicSearchAdapterId: adapterId });
@@ -26,7 +26,7 @@ describe("unified Worker provider profile runtime", () => {
 
   it.each([
     ["mimo_native", mimoEnvironment()],
-    ["sensenova_anysearch", sensenovaEnvironment()]
+    ["external_search_synthesis", externalSearchEnvironment()]
   ] as const)("derives the %s general client timeout from the locked model profile", async (_id, environment) => {
     vi.useFakeTimers();
     try {
@@ -57,9 +57,10 @@ describe("unified Worker provider profile runtime", () => {
     for (const environment of [
       { NODE_ENV: "test" },
       { NODE_ENV: "test", OGC_PROVIDER_PROFILE: "unknown" },
-      { ...sensenovaEnvironment(), OGC_AI_API_KEY: "" },
-      { ...sensenovaEnvironment(), OGC_PUBLIC_SEARCH_ADAPTER: "mimo" },
-      { ...sensenovaEnvironment(), OGC_REPORT_V4_MIMO_API_KEY: secret },
+      { ...externalSearchEnvironment(), OGC_PROVIDER_PROFILE: "sensenova_anysearch" },
+      { ...externalSearchEnvironment(), OGC_AI_API_KEY: "" },
+      { ...externalSearchEnvironment(), OGC_PUBLIC_SEARCH_ADAPTER: "mimo" },
+      { ...externalSearchEnvironment(), OGC_REPORT_V4_MIMO_API_KEY: secret },
       { ...mimoEnvironment(), OGC_PUBLIC_SEARCH_ADAPTER: "anysearch" }
     ]) {
       let thrown: unknown;
@@ -88,7 +89,7 @@ describe("unified Worker provider profile runtime", () => {
       OGC_AI_MODEL: "mimo-v2.5-pro"
     })).toThrow(/incomplete|profile/i);
     expect(() => resolveProviderProfileRuntime({
-      ...sensenovaEnvironment(),
+      ...externalSearchEnvironment(),
       OGC_AI_BASE_URL: undefined,
       OGC_AI_API_KEY: undefined,
       OGC_AI_MODEL: undefined,
@@ -99,9 +100,9 @@ describe("unified Worker provider profile runtime", () => {
 
   it("rejects an incompatible locked snapshot instead of reinterpreting it", () => {
     const mimo = resolveProviderProfileRuntime(mimoEnvironment());
-    const sense = resolveProviderProfileRuntime(sensenovaEnvironment());
-    expect(() => mimo.createDiagnosisProvider(sense.modelRuntime)).toThrow(/locked|conflict/i);
-    expect(() => sense.createStructuredInvoker(mimo.modelRuntime)).toThrow(/locked|conflict/i);
+    const external = resolveProviderProfileRuntime(externalSearchEnvironment());
+    expect(() => mimo.createDiagnosisProvider(external.modelRuntime)).toThrow(/locked|conflict/i);
+    expect(() => external.createStructuredInvoker(mimo.modelRuntime)).toThrow(/locked|conflict/i);
   });
 });
 
@@ -129,11 +130,11 @@ function mimoEnvironment(): NodeJS.ProcessEnv {
   };
 }
 
-function sensenovaEnvironment(): NodeJS.ProcessEnv {
+function externalSearchEnvironment(): NodeJS.ProcessEnv {
   return {
     ...baseEnvironment(),
-    OGC_PROVIDER_PROFILE: "sensenova_anysearch",
-    OGC_REPORT_V4_MODEL_PROFILE_ID: "report-v4-sensenova-mimo-v2.5-pro-v1",
+    OGC_PROVIDER_PROFILE: "external_search_synthesis",
+    OGC_REPORT_V4_MODEL_PROFILE_ID: "report-v4-openai-compatible-mimo-v2.5-pro-v1",
     OGC_AI_BASE_URL: "https://token.sensenova.cn/v1",
     OGC_AI_API_KEY: "sense-key",
     OGC_AI_MODEL: "mimo-v2.5-pro",

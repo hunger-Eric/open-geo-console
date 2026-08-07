@@ -9,10 +9,10 @@ const searchPayload = { code: 0, data: { results: [
   { title: "乙服务说明", url: "https://b.example/services", snippet: "乙提供国内运输服务", content: "discard this too" }
 ] } };
 const request = { questionId: "question-1", question: "谁提供国际物流服务？", locale: "zh-CN", region: "CN", signal: new AbortController().signal, semanticValidation: "free_direct" as const };
-const client = (value: unknown): JsonCompletionClient => ({ configuredModel: "mimo-v2.5-pro", completeJson: vi.fn(async () => ({ value, modelId: "mimo-v2.5-pro", rawContent: JSON.stringify(value), requestId: "model-request" })) });
+const client = (value: unknown, requestId = "model-request"): JsonCompletionClient => ({ configuredModel: "mimo-v2.5-pro", completeJson: vi.fn(async () => ({ value, modelId: "mimo-v2.5-pro", rawContent: JSON.stringify(value), requestId })) });
 const search = vi.fn(async () => new Response(JSON.stringify(searchPayload), { status: 200 }));
 
-describe("AnySearch grounded SenseNova answer provider", () => {
+describe("AnySearch grounded OpenAI-compatible answer provider", () => {
   it("uses one search and one synthesis call, then constructs sources locally", async () => {
     const model = client({ answerText: "甲提供国际物流服务。", refusal: null, usedSourceIndexes: [0] });
     const provider = createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: model, fetch: search, now: () => new Date("2030-01-01T00:00:00.000Z") });
@@ -55,6 +55,35 @@ describe("AnySearch grounded SenseNova answer provider", () => {
     expect(invalid.completeJson).toHaveBeenCalledOnce();
   });
 
+  it("retains real sources on refusals and normalizes unknown refusal codes", async () => {
+    const known = client({ answerText: "", refusal: { code: "policy_refusal", reason: "供应商政策拒绝。" }, usedSourceIndexes: [0] });
+    await expect(createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: known, fetch: search }).answerWithSources(request)).resolves.toMatchObject({
+      answerText: "", refusal: { code: "policy_refusal" }, sources: [{ canonicalUrl: "https://a.example/services" }]
+    });
+    const unknown = client({ answerText: "", refusal: { code: "copyright_refusal", reason: "供应商拒绝提供该内容。" }, usedSourceIndexes: [1] });
+    await expect(createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: unknown, fetch: search }).answerWithSources(request)).resolves.toMatchObject({
+      answerText: "", refusal: { code: "provider_refusal", reason: "供应商拒绝提供该内容。" }, sources: [{ canonicalUrl: "https://b.example/services" }]
+    });
+  });
+
+  it("degrades conflicting or missing answer/refusal pairs without terminating Q1", async () => {
+    const conflicting = client({ answerText: "有冲突的回答。", refusal: { code: "policy_refusal", reason: "供应商拒绝。" }, usedSourceIndexes: [0] });
+    await expect(createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: conflicting, fetch: search }).answerWithSources(request)).resolves.toMatchObject({
+      answerText: "", refusal: { code: "provider_refusal" }, sources: [{ canonicalUrl: "https://a.example/services" }]
+    });
+    const missing = client({ answerText: "", refusal: null, usedSourceIndexes: [1] });
+    await expect(createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: missing, fetch: search }).answerWithSources(request)).resolves.toMatchObject({
+      answerText: "", refusal: { code: "provider_refusal" }, sources: [{ canonicalUrl: "https://b.example/services" }]
+    });
+  });
+
+  it("discards an overlong optional provider response ID", async () => {
+    const model = client({ answerText: "甲提供国际物流服务。", refusal: null, usedSourceIndexes: [0] }, "r".repeat(501));
+    await expect(createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: model, fetch: search }).answerWithSources(request)).resolves.toMatchObject({
+      providerResponseId: null
+    });
+  });
+
   it("maps search failures into sanitized AI client failures", async () => {
     const provider = createAnySearchGenerativeSearchAnswerProvider({ searchConfig, client: client({}), fetch: async () => new Response("secret", { status: 401 }) });
     await expect(provider.answerWithSources(request)).rejects.toMatchObject({ name: "AiClientError", code: "authentication" });
@@ -77,7 +106,7 @@ describe("AnySearch grounded SenseNova answer provider", () => {
       OGC_AI_BASE_URL: "https://model.example/v1",
       OGC_AI_API_KEY: "model-key",
       OGC_AI_MODEL: "mimo-v2.5-pro"
-    }, { locale: "zh-CN", region: "CN" }, { client: client({}) })).toMatchObject({ providerId: "anysearch+sensenova", model: "mimo-v2.5-pro", searchMode: "anysearch_rest" });
+    }, { locale: "zh-CN", region: "CN" }, { client: client({}) })).toMatchObject({ providerId: "anysearch+openai-compatible", model: "mimo-v2.5-pro", searchMode: "anysearch_rest" });
     expect(() => resolveAnySearchGenerativeSearchAnswerProvider({ OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL: searchConfig.endpoint, OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY: searchConfig.apiKey }, { locale: "zh-CN", region: "CN" }, { client: client({}) })).toThrow(AiClientError);
   });
 });

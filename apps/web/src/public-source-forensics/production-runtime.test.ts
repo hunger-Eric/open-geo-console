@@ -26,7 +26,7 @@ describe("production public-search runtime", () => {
   it("constructs the exact AnySearch runtime without MiMo configuration", async () => {
     const anySearchEnvironment = {
       ...environment,
-      OGC_PROVIDER_PROFILE: "sensenova_anysearch",
+      OGC_PROVIDER_PROFILE: "external_search_synthesis",
       OGC_PUBLIC_SEARCH_ADAPTER: "anysearch",
       OGC_PUBLIC_SEARCH_ANYSEARCH_BASE_URL: "https://api.anysearch.com/v1/search",
       OGC_PUBLIC_SEARCH_ANYSEARCH_API_KEY: "anysearch-key"

@@ -13,12 +13,13 @@ Answer the buyer question directly from the supplied search-result titles and sn
 Do not claim facts that are absent from those results. Do not discuss evidence scarcity or the research process.
 Choose only the source indexes actually supporting the answer. Never emit URLs or source metadata.
 Use exactly this shape: {"answerText":"complete answer","refusal":null,"usedSourceIndexes":[0]}.
-If the supplied results do not support a grounded answer, return an empty answerText, an empty usedSourceIndexes array, and refusal {"code":"insufficient_evidence","reason":"localized reason"}.
-For a genuine safety, policy, or high-risk refusal, use the same empty answer/index shape and refusal {"code":"safety_refusal|policy_refusal|high_risk_refusal","reason":"localized reason"}.`;
+If the supplied results do not support a grounded answer, return an empty answerText and refusal {"code":"insufficient_evidence","reason":"localized reason"}.
+For a genuine safety, policy, or high-risk refusal, return an empty answerText and refusal {"code":"safety_refusal|policy_refusal|high_risk_refusal","reason":"localized reason"}.
+A refusal may retain usedSourceIndexes when those supplied results genuinely explain or support the refusal; otherwise use an empty array.`;
 
 interface SynthesizedAnswer {
   answerText: string;
-  refusal: null | { code: "safety_refusal" | "policy_refusal" | "high_risk_refusal" | "insufficient_evidence"; reason: string };
+  refusal: null | { code: "safety_refusal" | "policy_refusal" | "high_risk_refusal" | "insufficient_evidence" | "provider_refusal"; reason: string };
   usedSourceIndexes: number[];
 }
 
@@ -32,7 +33,7 @@ export function createAnySearchGenerativeSearchAnswerProvider(input: {
   const now = input.now ?? (() => new Date());
   const maxTokens = boundedMaxOutputTokens(input.maxOutputTokens, 2_500);
   return {
-    providerId: "anysearch+sensenova",
+    providerId: "anysearch+openai-compatible",
     model: input.client.configuredModel,
     searchMode: "anysearch_rest",
     async answerWithSources(request) {
@@ -88,10 +89,11 @@ export function createAnySearchGenerativeSearchAnswerProvider(input: {
         return parseGenerativeSearchAnswerResult(raw, {
           expectedQuestionId: request.questionId,
           locale: request.locale,
-          semanticValidation: request.semanticValidation
+          semanticValidation: request.semanticValidation,
+          sourceOverflow: "truncate"
         });
       } catch (error) {
-        throw new AiClientError(error instanceof Error ? error.message : "SenseNova answer failed validation.", { code: "invalid_response", cause: error });
+        throw new AiClientError(error instanceof Error ? error.message : "OpenAI-compatible answer failed validation.", { code: "invalid_response", cause: error });
       }
     }
   };
@@ -127,17 +129,23 @@ function boundedMaxOutputTokens(value: number | undefined, fallback: number): nu
 
 function parseSynthesizedAnswer(value: unknown, sourceCount: number, locale: string): SynthesizedAnswer {
   const row = record(value);
-  if (!row || typeof row.answerText !== "string" || !Array.isArray(row.usedSourceIndexes)) {
-    throw new AiClientError("SenseNova returned an invalid grounded-answer contract.", { code: "invalid_response" });
+  if (row?.usedSourceIndexes !== undefined && !Array.isArray(row.usedSourceIndexes)) {
+    throw new AiClientError("The OpenAI-compatible model returned an invalid grounded-answer contract.", { code: "invalid_response" });
   }
-  const answerText = row.answerText.trim();
-  const refusal = parseRefusal(row.refusal);
-  const indexes = row.usedSourceIndexes;
+  const indexes = row?.usedSourceIndexes ?? [];
   if (!indexes.every((index): index is number => Number.isSafeInteger(index) && index >= 0 && index < sourceCount)) {
-    throw new AiClientError("SenseNova selected an invalid source index.", { code: "invalid_response" });
+    throw new AiClientError("The OpenAI-compatible model selected an invalid source index.", { code: "invalid_response" });
   }
   const usedSourceIndexes = [...new Set(indexes)];
-  if (answerText && refusal) throw new AiClientError("SenseNova returned both an answer and refusal.", { code: "invalid_response" });
+  const answerText = typeof row?.answerText === "string" ? row.answerText.trim() : "";
+  const refusal = parseRefusal(row?.refusal, locale);
+  if (answerText && refusal) {
+    return {
+      answerText: "",
+      refusal: providerRefusal(locale, "conflicting_answer_and_refusal"),
+      usedSourceIndexes
+    };
+  }
   if (answerText && !usedSourceIndexes.length) {
     return {
       answerText: "",
@@ -150,18 +158,37 @@ function parseSynthesizedAnswer(value: unknown, sourceCount: number, locale: str
       usedSourceIndexes: []
     };
   }
-  if (!answerText && !refusal) throw new AiClientError("SenseNova returned neither an answer nor typed refusal.", { code: "invalid_response" });
-  if (refusal && usedSourceIndexes.length) throw new AiClientError("SenseNova refusal must not retain sources.", { code: "invalid_response" });
+  if (!answerText && refusal) return { answerText, refusal, usedSourceIndexes };
+  if (!answerText) {
+    return {
+      answerText: "",
+      refusal: providerRefusal(locale, "missing_answer_and_refusal"),
+      usedSourceIndexes
+    };
+  }
   return { answerText, refusal, usedSourceIndexes };
 }
 
-function parseRefusal(value: unknown): SynthesizedAnswer["refusal"] {
+function parseRefusal(value: unknown, locale: string): SynthesizedAnswer["refusal"] {
   if (value == null) return null;
   const row = record(value);
-  if (!row || (row.code !== "safety_refusal" && row.code !== "policy_refusal" && row.code !== "high_risk_refusal" && row.code !== "insufficient_evidence") || typeof row.reason !== "string" || !row.reason.trim()) {
-    throw new AiClientError("SenseNova returned an invalid refusal.", { code: "invalid_response" });
+  const reason = typeof row?.reason === "string" ? row.reason.trim() : "";
+  const hasBoundedReason = Boolean(reason) && reason.length <= 500;
+  if (row && (row.code === "safety_refusal" || row.code === "policy_refusal" || row.code === "high_risk_refusal" || row.code === "insufficient_evidence") && hasBoundedReason) {
+    return { code: row.code, reason };
   }
-  return { code: row.code, reason: row.reason.trim() };
+  return providerRefusal(locale, "invalid_refusal", hasBoundedReason ? reason : undefined);
+}
+
+function providerRefusal(locale: string, kind: "conflicting_answer_and_refusal" | "missing_answer_and_refusal" | "invalid_refusal", retainedReason?: string): NonNullable<SynthesizedAnswer["refusal"]> {
+  if (retainedReason) return { code: "provider_refusal", reason: retainedReason };
+  const zh = locale.toLowerCase().startsWith("zh");
+  const reason = kind === "conflicting_answer_and_refusal"
+    ? (zh ? "供应商同时返回了回答和拒绝，本问题已降级处理。" : "The provider returned both an answer and a refusal, so this question was degraded.")
+    : kind === "missing_answer_and_refusal"
+      ? (zh ? "供应商未返回可用回答或拒绝，本问题已降级处理。" : "The provider returned neither a usable answer nor refusal, so this question was degraded.")
+      : (zh ? "供应商返回了无法识别的拒绝结果，本问题已降级处理。" : "The provider returned an unrecognized refusal, so this question was degraded.");
+  return { code: "provider_refusal", reason };
 }
 
 function asAiClientError(error: unknown): AiClientError {

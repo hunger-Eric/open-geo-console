@@ -10,7 +10,7 @@ The protected-staging capability probe on 2026-07-13 used the configured `mimo-v
 
 The independent certification HMAC secret and key ID are stored as sensitive protected-Preview values. They are not committed or retained in a local env file. A previously ephemeral signed artifact is not an activation candidate.
 
-Worker runtime selection is owned only by `OGC_PROVIDER_PROFILE`: `mimo_native` selects the MiMo surface, while `sensenova_anysearch` selects the AnySearch surface and SenseNova grounded-answer synthesis. Explicit probe/certification commands still name one adapter because their artifact identity is adapter-specific. `OGC_PUBLIC_SEARCH_ADAPTER`, when retained during migration, is only a compatibility assertion and cannot select a Worker route. Credential namespaces remain independent with no inheritance or fallback.
+Worker runtime selection is owned only by `OGC_PROVIDER_PROFILE`: `mimo_native` selects the MiMo surface, while `external_search_synthesis` selects AnySearch retrieval plus OpenAI-compatible grounded-answer synthesis. Explicit probe/certification commands still name one adapter because their artifact identity is adapter-specific. `OGC_PUBLIC_SEARCH_ADAPTER`, when present, is only a consistency assertion and cannot select a Worker route. Credential namespaces remain independent with no inheritance or fallback.
 
 ## Framework boundary
 

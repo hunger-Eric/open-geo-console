@@ -5,6 +5,54 @@ never executable authority; `docs/ACTIVE-CHANGE-SCOPE.md` is the sole current lo
 
 ---
 
+## 2026-08-07 - Generative Q1 recovery and ten-source explanation budget completed locally
+
+- AnySearch requests and admits at most ten valid results in provider order;
+  additional results are not treated as a model semantic failure.
+- AnySearch and MiMo now normalize unknown/malformed refusals and conflicting
+  or absent answer/refusal pairs to `provider_refusal` for the current Q1.
+  Valid same-response refusal sources are retained, while invalid/out-of-range
+  source indexes remain fatal evidence-ownership failures.
+- Overlong optional provider response IDs are discarded. Question identity,
+  public URL, source identity, timestamp, hash, receipt, target identity, and
+  checkpoint validation remain strict. Persisted source overflow remains an
+  internal invariant error so post-persistence additions cannot disappear
+  behind normalization.
+- Final focused and adjacent verification passed: 12 test files, 226/226 tests.
+  Web lint passed with 0 errors and 6 existing warnings; `git diff --check`
+  passed; CodeGraph is up to date.
+- Full `npm test` recorded 3281 passing, 211 skipped, and 4 failures in three
+  out-of-scope Paid/DB test files. Isolated rerun reproduced those four failures.
+  No source in those subsystems was changed, and this scope did not attempt to
+  repair or claim the unrelated full-suite baseline.
+- Production change size was 162 changed lines against a budget of 180; test
+  change size was 118 lines against a budget of 320. All changed paths were in
+  the approved allowlist.
+- No external provider call, registration, report, historical repair, commit,
+  push, Docker action, deployment, payment, refund, or email occurred.
+
+---
+
+## 2026-08-07 - AnySearch mixed-result defensive admission repair completed locally
+
+- Persisted Staging evidence confirmed that Free technical generation completed
+  but V4 pre-admission job `4ba81e01-c049-4fd0-9635-794bbcad85b6` failed after
+  question persistence when AnySearch reported one structurally invalid result.
+- The one authorized real AnySearch check did not reproduce the failure: HTTP
+  200, valid envelope, and 8/8 fully typed public-HTTPS rows. This is current
+  provider evidence, not a live red-to-green reproduction.
+- A controlled regression was red on the old implementation because one
+  malformed row rejected a batch containing a valid row. The adapter now drops
+  malformed/unsafe rows individually, admits only validated public rows, and
+  still rejects a non-empty batch when zero rows are admissible.
+- Green verification: focused adapter test 8/8; five adjacent AnySearch,
+  provider-profile, and Free/V4 test files 35/35; lint 0 errors with 6 pre-existing
+  warnings; `git diff --check`; CodeGraph up to date.
+- No report, retry, model call beyond the one AnySearch search request, history
+  mutation, commit, push, build, Docker action, or deployment occurred.
+
+---
+
 ## 2026-08-07: Paid V3 Direct HTML-only / answer-preserving (APPROVED — local complete; deploy separate)
 
 Status at archive: local implementation + unit/lint/build verification done; disposable PostgreSQL engine was off so V47 E2E not live-verified; **no** commit/push/deploy/migration/model/report under that implementation scope.
@@ -7631,3 +7679,17 @@ revised scope.
   (4 files, 21 tests), `git diff --check`, and `codegraph sync`.
 - No build, deployment, real model call, report run, payment, refund, email,
   Git operation, or historical-data mutation occurred.
+## 2026-08-07 - Model-authored Free/V4 buyer-question Staging deployment completed
+
+- Candidate `54720d40dbaca07d51ab885338932f0fb9e59634` was committed and pushed to
+  `origin/main`, then deployed to Protected Staging Web plus Free/Deep Workers.
+- Fixed alias `open-geo-console-staging-itheheda.vercel.app` points to Preview
+  `dpl_FEsMGb1Lds5xYeUrmmaZ6GyMKjEk`; both Workers use
+  `open-geo-console:staging-54720d40-model-buyer-q-overlay-v1`
+  (`sha256:c0004e104f5407907949d3839a490fafa3dab5bbdc7a97e25a93474623569f76`).
+- Gate 3 protection smoke passed; the agent created no report, model call,
+  payment, refund, or email. The user then manually submitted a fresh report.
+- This completed deployment record is context-only and grants no repair,
+  replay, deployment, Git, or external-call authority.
+
+---

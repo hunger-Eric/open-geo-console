@@ -1,7 +1,7 @@
 {
-  "profileId": "report-v4-sensenova-deepseek-v4-flash-v1",
-  "provider": "sensenova",
-  "adapterId": "sensenova-openai-compatible-json-v1",
+  "profileId": "report-v4-openai-compatible-deepseek-v4-flash-v1",
+  "provider": "openai-compatible",
+  "adapterId": "openai-compatible-json-v1",
   "operations": {
     "pageAnalysis": {
       "model": "deepseek-v4-flash",

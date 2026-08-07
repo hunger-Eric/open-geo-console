@@ -3,17 +3,18 @@ import { canonicalizePublicSourceUrl, getPublicSourceDomainIdentity } from "@ope
 import { isBlockedHostname, parseHttpUrl } from "@open-geo-console/site-crawler";
 import { assertReportLanguage, normalizeReportLanguage, ReportLanguageValidationError } from "./report-language";
 
-export type GenerativeSearchRefusalCode = "safety_refusal" | "policy_refusal" | "high_risk_refusal" | "insufficient_evidence";
+export type GenerativeSearchRefusalCode = "safety_refusal" | "policy_refusal" | "high_risk_refusal" | "insufficient_evidence" | "provider_refusal";
 export interface GenerativeSearchRefusal { code: GenerativeSearchRefusalCode; reason: string; }
 export interface GenerativeSearchSource { sourceId: string; title: string; canonicalUrl: string; registrableDomain: string; citedText: string | null; providerResultOrder: number; }
 export interface GenerativeSearchAnswerResult { questionId: string; answerText: string; sources: GenerativeSearchSource[]; refusal: GenerativeSearchRefusal | null; searchedAt: string; completedAt: string; providerResponseId: string | null; }
 export interface GenerativeSearchAnswerProvider { readonly providerId: string; readonly model: string; readonly searchMode: string; answerWithSources(input: { questionId: string; question: string; locale: string; region: string; signal: AbortSignal; semanticValidation?: "legacy" | "deferred" | "free_direct" }): Promise<GenerativeSearchAnswerResult>; }
 
-const refusalCodes = new Set<GenerativeSearchRefusalCode>(["safety_refusal", "policy_refusal", "high_risk_refusal", "insufficient_evidence"]);
+const MAX_RETAINED_EXPLANATION_SOURCES = 10;
+const refusalCodes = new Set<GenerativeSearchRefusalCode>(["safety_refusal", "policy_refusal", "high_risk_refusal", "insufficient_evidence", "provider_refusal"]);
 const text = (value: unknown, name: string, max: number) => { if (typeof value !== "string") throw new TypeError(`${name} must be a string.`); const v = value.trim(); if (v.length > max) throw new TypeError(`${name} exceeds the retained bound.`); return v; };
 const timestamp = (value: unknown, name: string) => { if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw new TypeError(`${name} must be an ISO timestamp.`); return value; };
 
-export function parseGenerativeSearchAnswerResult(value: unknown, options: { expectedQuestionId: string; locale: string; semanticValidation?: "legacy" | "deferred" | "free_direct" }): GenerativeSearchAnswerResult {
+export function parseGenerativeSearchAnswerResult(value: unknown, options: { expectedQuestionId: string; locale: string; semanticValidation?: "legacy" | "deferred" | "free_direct"; sourceOverflow?: "truncate" }): GenerativeSearchAnswerResult {
   if (!value || typeof value !== "object") throw new TypeError("Generative search answer must be an object.");
   const row = value as Record<string, unknown>;
   const questionId = text(row.questionId, "questionId", 500);
@@ -33,9 +34,12 @@ export function parseGenerativeSearchAnswerResult(value: unknown, options: { exp
     ...(answerText ? [{ path: "answerText", text: answerText }] : []),
     ...(refusal ? [{ path: "refusal.reason", text: refusal.reason }] : [])
   ], options.locale);
-  if (!Array.isArray(row.sources) || row.sources.length > 20) throw new TypeError("sources must contain at most 20 items.");
+  if (!Array.isArray(row.sources)) throw new TypeError("sources must be an array.");
+  if (row.sources.length > MAX_RETAINED_EXPLANATION_SOURCES && options.sourceOverflow !== "truncate") {
+    throw new TypeError("sources exceed the internal retained explanation budget.");
+  }
   const byUrl = new Map<string, GenerativeSearchSource>();
-  row.sources.forEach((item, index) => {
+  row.sources.slice(0, MAX_RETAINED_EXPLANATION_SOURCES).forEach((item, index) => {
     if (!item || typeof item !== "object") throw new TypeError(`sources[${index}] must be an object.`);
     const source = item as Record<string, unknown>;
     const rawUrl = text(source.canonicalUrl, `sources[${index}].canonicalUrl`, 2_000);
@@ -47,7 +51,13 @@ export function parseGenerativeSearchAnswerResult(value: unknown, options: { exp
   });
   const searchedAt = timestamp(row.searchedAt, "searchedAt"); const completedAt = timestamp(row.completedAt, "completedAt");
   if (Date.parse(completedAt) < Date.parse(searchedAt)) throw new TypeError("completedAt must be greater than or equal to searchedAt.");
-  return { questionId, answerText, sources: [...byUrl.values()].sort((a,b) => a.providerResultOrder - b.providerResultOrder || a.canonicalUrl.localeCompare(b.canonicalUrl)), refusal, searchedAt, completedAt, providerResponseId: row.providerResponseId == null ? null : text(row.providerResponseId, "providerResponseId", 500) };
+  return { questionId, answerText, sources: [...byUrl.values()].sort((a,b) => a.providerResultOrder - b.providerResultOrder || a.canonicalUrl.localeCompare(b.canonicalUrl)), refusal, searchedAt, completedAt, providerResponseId: optionalProviderResponseId(row.providerResponseId) };
+}
+
+function optionalProviderResponseId(value: unknown): string | null {
+  if (value == null || typeof value !== "string") return null;
+  const retained = value.trim();
+  return retained.length <= 500 ? retained : null;
 }
 
 export function assertGenerativeSearchAnswerLanguage(

@@ -293,16 +293,17 @@ Earlier language-gate decisions remain legacy runtime history. They neither desc
 ## 2026-08-03: Worker provider routing has one canonical profile selector
 
 `OGC_PROVIDER_PROFILE` supersedes independent runtime selection by report model,
-V4 MiMo configuration or `OGC_PUBLIC_SEARCH_ADAPTER`. The initial complete
-profiles are `mimo_native` and `sensenova_anysearch`. Each binds general model
+V4 MiMo configuration or `OGC_PUBLIC_SEARCH_ADAPTER`. The complete profiles
+are `mimo_native` and `external_search_synthesis`. Each binds general model
 transport, V4 structured operations, buyer answers, public retrieval, source
 diagnosis, GEO writing and exact active search authority as one immutable
 startup-resolved bundle.
 
-Legacy adapter/model-profile variables may remain for one migration release
-only as compatibility assertions. Missing, incomplete or conflicting profile
-data fails both Worker entry paths before presence, batch creation or job claim.
+Adapter/model-profile variables may remain only as consistency assertions.
+Missing, incomplete or conflicting profile data fails both Worker entry paths
+before presence, batch creation or job claim.
 There is no model-name inference, runtime capability probe, supplier fallback,
 historical replay or reinterpretation of an incompatible locked snapshot.
 Adapter-specific certification commands remain explicit evidence tools and do
-not select the Worker runtime.
+not select the Worker runtime. Vendor-named route and profile identities are
+not admitted as aliases.

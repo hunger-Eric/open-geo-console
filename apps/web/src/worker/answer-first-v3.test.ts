@@ -565,6 +565,7 @@ describe("generative answer-first V3 Worker service", () => {
     expect(provider.answerWithSources).toHaveBeenCalledTimes(2);
     expect(provider.answerWithSources.mock.calls.every(([request]) => request.semanticValidation === "free_direct")).toBe(true);
     expect(result.answerCards.map(({ status }) => status)).toEqual(["answered", "source_limited", "refused"]);
+    expect(result.answerCards.every((card) => !("geoDiagnosis" in card))).toBe(true);
     expect(result.checkpoint.sourceSelectionDiagnosis).toBeDefined();
     const events = traceLines.map((line) => JSON.parse(line.slice(PAID_V3_DIRECT_DEBUG_TRACE_PREFIX.length + 1)) as { kind: string; step: string; questionOrdinal?: number });
     expect(events.filter(({ kind, step }) => kind === "step_started" && step === "answer_question_resolution")

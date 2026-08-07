@@ -367,7 +367,7 @@ describe("semantic review manifests", () => {
       missingEvidenceFamilies: ["regional_fit"],
       retestQuestion: "q2"
     });
-    expect(applied.report.answerCards[2].geoDiagnosis.citedOwnership.third_party_editorial).toBe(1);
+    expect(applied.report.answerCards[2].geoDiagnosis!.citedOwnership.third_party_editorial).toBe(1);
     expect(applied.report.sourceSelectionDiagnosis.inputIdentity)
       .toEqual(sourceSelectionContext.finalSourceSelectionInputIdentity);
     expect(applied.receipt.sourceSelectionDraftHash).toBe(review.sourceSelectionDraftHash);
@@ -391,7 +391,7 @@ describe("semantic review manifests", () => {
     ).receipt).toEqual(bound.receipt);
 
     const tampered = structuredClone(bound.report);
-    tampered.answerCards[1].geoDiagnosis.targetMentioned = false;
+    tampered.answerCards[1].geoDiagnosis!.targetMentioned = false;
     expect(() => verifyPaidV3SemanticReviewApplication(
       tampered,
       input,

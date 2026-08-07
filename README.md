@@ -70,14 +70,14 @@ The launcher creates ACL-restricted, ignored runtime env files from the target V
 Required production variables:
 
 - `DATABASE_URL`
-- `OGC_PROVIDER_PROFILE` (`mimo_native` or `sensenova_anysearch`; no default)
-- the selected profile's data: dedicated MiMo V4 and MiMo-search variables, or SenseNova `OGC_AI_*` plus AnySearch variables
+- `OGC_PROVIDER_PROFILE` (`mimo_native` or `external_search_synthesis`; no default)
+- the selected profile's data: dedicated MiMo V4 and MiMo-search variables, or provider-neutral OpenAI-compatible `OGC_AI_*` plus AnySearch variables
 - `OGC_TOKEN_HASH_SECRET`
 - `OGC_IP_HASH_SECRET`
 - `OGC_DEPLOYMENT_PROFILE` (`staging` or `production`, matching the database marker)
 - `OGC_EVIDENCE_STORAGE=vercel-blob` with a connected Vercel Private Blob store, or `s3` plus a private S3-compatible endpoint, region, bucket and credentials; Web and deep Worker processes must share the same store
 
-`OGC_PROVIDER_PROFILE` is the only Worker routing selector. `mimo_native` keeps MiMo native search; `sensenova_anysearch` combines the existing SenseNova OpenAI-compatible client with AnySearch retrieval. Credentials remain in separate namespaces and never select or fall back to another route. During the bounded migration release, `OGC_PUBLIC_SEARCH_ADAPTER` and `OGC_REPORT_V4_MODEL_PROFILE_ID` are optional compatibility assertions and must match the canonical profile. A missing, incomplete or half-switched profile stops both Worker entry paths before presence, batch creation or job claim. The redacted per-adapter probe/certification boundary is documented in [Public-search Surface Certification](docs/operations/public-search-surface-certification.md). Keep `OGC_PUBLIC_SEARCH_RUNTIME_ENABLED=false` until the selected adapter has separately passed certification and authority activation gates. [Historical V1 certification](docs/operations/recommendation-provider-certification.md) is read-only context.
+`OGC_PROVIDER_PROFILE` is the only Worker routing selector. `mimo_native` keeps MiMo native search; `external_search_synthesis` combines an OpenAI-compatible configured model with AnySearch retrieval. Credentials remain in separate namespaces and never select or fall back to another route. `OGC_PUBLIC_SEARCH_ADAPTER` and `OGC_REPORT_V4_MODEL_PROFILE_ID` are optional consistency assertions and must match the canonical profile. The obsolete vendor-named route and profile IDs are rejected without aliases. A missing, incomplete or half-switched profile stops both Worker entry paths before presence, batch creation or job claim. The redacted per-adapter probe/certification boundary is documented in [Public-search Surface Certification](docs/operations/public-search-surface-certification.md). Keep `OGC_PUBLIC_SEARCH_RUNTIME_ENABLED=false` until the selected adapter has separately passed certification and authority activation gates. [Historical V1 certification](docs/operations/recommendation-provider-certification.md) is read-only context.
 
 The low-cost commercial target is Vercel/Netlify plus Neon, Cloudflare Turnstile/Queue, Airwallex, Resend, and persistent Docker Desktop Workers. This avoids mandatory server rent at low order volume while keeping every task durable in PostgreSQL. The workstation still must remain online; hosted Workers can later use the same leases and state machines without a rewrite.
 

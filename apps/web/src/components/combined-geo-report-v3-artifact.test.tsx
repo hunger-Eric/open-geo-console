@@ -291,13 +291,10 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(ARTIFACT_CSS).toContain('.paid-report-template .roadmap-phase:not([open])>.roadmap-phase-body');
   });
 
-  it("keeps content alignment separate from actual answer and source adoption",()=>{
+  it("does not synthesize an executive target diagnosis for Direct reports",()=>{
     const model=generativeModel();
     model.locale="en";
-    model.combinedReport.answerCards=model.combinedReport.answerCards.map((card)=>({
-      ...card,
-      geoDiagnosis:{...card.geoDiagnosis,targetMentioned:false,targetRoles:[]}
-    })) as typeof model.combinedReport.answerCards;
+    model.combinedReport.answerCards=model.combinedReport.answerCards.map(({geoDiagnosis:_geoDiagnosis,...card})=>card) as typeof model.combinedReport.answerCards;
     model.combinedReport.directSemantics={
       version:"free-v4-direct-semantics-v1",
       questions:model.combinedReport.answerCards.map((card,index)=>({
@@ -308,9 +305,11 @@ describe("CombinedGeoReportV3Artifact",()=>{
     };
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
     const opening=html.slice(0,html.indexOf('data-website-context="true"'));
-    expect(opening).toContain('<dt>Target entered answers</dt><dd>0/3</dd>');
-    expect(opening).toContain('<dt>Target site used as source</dt><dd>0/3</dd>');
-    expect(opening).toContain("does not yet recommend or cite the target");
+    expect(opening).not.toContain("Target entered answers");
+    expect(opening).not.toContain("Target site used as source");
+    expect(opening).not.toContain("does not yet recommend or cite the target");
+    expect(opening).not.toContain("data-decision-summary");
+    expect(opening).not.toContain("data-decision-meaning");
     expect(opening).not.toContain("authoritative answerer");
     expect(html).toContain("The target is an authoritative answerer.");
   });
@@ -320,7 +319,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
     model.locale="en";
     model.combinedReport.answerCards=model.combinedReport.answerCards.map((card,index)=>{
       if(card.answerMode!=="generative_search_v1")return card;
-      return {...card,geoDiagnosis:{...card.geoDiagnosis,targetMentioned:index===0,targetRoles:index===0?["provider"]:[]},sources:card.sources.map((source)=>index===1?{...source,canonicalUrl:"https://www.example.com/services",registrableDomain:"example.com"}:source)};
+      return {...card,geoDiagnosis:{...card.geoDiagnosis!,targetMentioned:index===0,targetRoles:index===0?["provider"]:[]},sources:card.sources.map((source)=>index===1?{...source,canonicalUrl:"https://www.example.com/services",registrableDomain:"example.com"}:source)};
     }) as typeof model.combinedReport.answerCards;
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
     const opening=html.slice(0,html.indexOf('data-website-context="true"'));
@@ -358,6 +357,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
   it("renders Direct analyses while preserving the complete technical report and screenshots",()=>{
     const model=generativeModel();
     model.locale="en";
+    model.combinedReport.answerCards=model.combinedReport.answerCards.map(({geoDiagnosis:_geoDiagnosis,...card})=>card) as typeof model.combinedReport.answerCards;
     model.combinedReport.technicalFoundation.aiReport.dimensionScores=[{dimension:"organizationClarity",score:42,explanation:"Persisted score explanation",confidence:"medium",evidence:[]}];
     model.combinedReport.directSemantics={
       version:"free-v4-direct-semantics-v1",
