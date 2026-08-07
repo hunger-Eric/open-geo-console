@@ -222,15 +222,20 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
     const directSemantics = await directPending;
     expect(directSemantics.questions.map(({ analysisStatus }) => analysisStatus)).toEqual(["completed", "completed", "completed"]);
     const articleCompleteJson = vi.fn(async () => { throw new Error("article provider unavailable"); });
+    const articleResearchProvider = {
+      providerId: "fixture", model: "fixture-model", searchMode: "native_web_search",
+      answerWithSources: vi.fn(async ({ questionId }: { questionId: string }) => answer(questionId, 4))
+    } satisfies GenerativeSearchAnswerProvider;
     const geoArticleExample = await generateGeoArticleExample({
       client: { configuredModel: "fixture-model", completeJson: articleCompleteJson },
+      researchProvider: articleResearchProvider,
       targetUrl, locale: forensic.locale, questionSet, answerCards: cards,
       aiReport: synthesis.report, technicalReport: technicalReport(targetUrl)
     });
+    expect(articleResearchProvider.answerWithSources).toHaveBeenCalledOnce();
     expect(articleCompleteJson).toHaveBeenCalledOnce();
-    expect(geoArticleExample.kind).toBe("outline");
-    if(geoArticleExample.kind!=="outline")throw new TypeError("Expected deterministic GEO outline fixture.");
-    expect(geoArticleExample.fallbackReason).toBe("provider_error");
+    expect(geoArticleExample).toMatchObject({version:"geo_article_deliverable_v3",kind:"article",generationMode:"deterministic_evidence_fallback",research:{outcome:"usable"}});
+    expect(geoArticleExample.article.sections).toHaveLength(3);
 
     const visualReport = { ...synthesis.report, findings: Array.from({ length: 11 }, (_, index) => ({
       id: `visual-${index}`, title: `Finding ${index}`, severity: "opportunity" as const,
@@ -271,12 +276,16 @@ describePostgres("Paid V3 Direct linear combined regression", () => {
       artifactRevisionId: ids.artifact, pdfStorageKey: "pending", evidenceAssets,
       technicalReport: report.technicalFoundation.technicalReport, combinedReport: report
     } as never);
-    expect(html).toContain('data-geo-article-generation-mode="deterministic_fallback"');
-    expect(html).toContain('data-geo-article-kind="outline"');
-    expect(html).toContain("GEO 内容提纲");
-    expect(html).toContain(geoArticleExample.outline.workingTitle);
+    expect(html).toContain('data-geo-article-generation-mode="deterministic_evidence_fallback"');
+    expect(html).toContain('data-geo-article-kind="article"');
+    expect(html).toContain("GEO 完整文章");
+    expect(html).toContain(geoArticleExample.article.title);
     expect(html).not.toContain("来源0");
-    const ready = await materializePreparedCombinedArtifactV3(report, [], { semanticValidation: "free_direct" });
+    const deploymentProfile = process.env.OGC_DEPLOYMENT_PROFILE;
+    delete process.env.OGC_DEPLOYMENT_PROFILE;
+    const ready = await (async()=>{try{return await materializePreparedCombinedArtifactV3(report, [], { semanticValidation: "free_direct" });}finally{
+      if(deploymentProfile===undefined)delete process.env.OGC_DEPLOYMENT_PROFILE;else process.env.OGC_DEPLOYMENT_PROFILE=deploymentProfile;
+    }})();
     expect(ready.htmlSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(ready).not.toHaveProperty("pdf");
     expect(ready).not.toHaveProperty("pdfSha256");

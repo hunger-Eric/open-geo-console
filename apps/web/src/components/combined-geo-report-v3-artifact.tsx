@@ -217,9 +217,9 @@ function sameSite(left:string,right:string):boolean{const a=left.toLowerCase().r
 function GeoArticleSection({deliverable,report,locale}:{deliverable:NonNullable<PaidReport["geoArticleExample"]>;report:PaidReport;locale:"en"|"zh"}){
   const zh=locale==="zh";
   const labels=zh?{
-    outlineNotice:"这是一份待补充证据后再成文的内容提纲，不是范文。",readerQuestion:"文章要回答的问题",directAnswer:"当前可支持的直接回答",plannedSections:"建议正文结构",evidenceToAdd:"成文前还需补充",faqAngles:"可延展的常见问题",explanation:"这份内容为什么这样组织",geoFunction:"GEO 作用",faq:"买家常见问题"
+    outlineNotice:"这是一份历史内容提纲，不是完整文章。",readerQuestion:"文章要回答的问题",directAnswer:"当前可支持的直接回答",plannedSections:"建议正文结构",evidenceToAdd:"成文前还需补充",faqAngles:"可延展的常见问题",explanation:"为什么这样组织这篇文章",faq:"买家常见问题",research:"专题公开研究",researchUnavailable:"专题搜索未返回可用公开来源；文章已使用网站事实和现有报告证据完成。",query:"研究主题",provider:"研究来源"
   }:{
-    outlineNotice:"This is a content outline to complete after adding evidence; it is not a sample article.",readerQuestion:"Question the article must answer",directAnswer:"Direct answer supported now",plannedSections:"Recommended article structure",evidenceToAdd:"Evidence to add before drafting",faqAngles:"Related FAQ angles",explanation:"Why this content is structured this way",geoFunction:"GEO function",faq:"Buyer FAQ"
+    outlineNotice:"This is a historical content outline, not a complete article.",readerQuestion:"Question the article must answer",directAnswer:"Direct answer supported now",plannedSections:"Recommended article structure",evidenceToAdd:"Evidence to add before drafting",faqAngles:"Related FAQ angles",explanation:"Why this article is structured this way",faq:"Buyer FAQ",research:"Focused public research",researchUnavailable:"Focused search returned no usable public source; the article was completed from website facts and existing report evidence.",query:"Research topic",provider:"Research source"
   };
   const mode=geoArticleGenerationMode(deliverable);
   if(deliverable.version==="geo_article_example_v1"){
@@ -245,12 +245,21 @@ function GeoArticleSection({deliverable,report,locale}:{deliverable:NonNullable<
   </section>;
   return <section className="report-section geo-article-example" data-geo-article-kind="article" data-geo-article-generation-mode={mode}>
     <p className="section-index">07</p><h2>{geoArticleHeading(deliverable,locale)}</h2>
+    {deliverable.version==="geo_article_deliverable_v3"?<ArticleResearch deliverable={deliverable} locale={locale} labels={labels}/>:null}
     <article className="geo-article-body"><h3>{deliverable.article.title}</h3><div className="geo-article-introduction"><p>{deliverable.article.introduction.text}</p><ArticleEvidenceRefs refs={deliverable.article.introduction.evidenceRefs} report={report} locale={locale}/></div>
       {deliverable.article.sections.map((section)=><section className="geo-article-section" key={section.id}><h4>{section.heading}</h4>{section.paragraphs.map((paragraph,index)=><div className="geo-article-paragraph" key={index}><p>{paragraph.text}</p><ArticleEvidenceRefs refs={paragraph.evidenceRefs} report={report} locale={locale}/></div>)}</section>)}
       <section className="geo-article-faq"><h4>{labels.faq}</h4>{deliverable.article.faq.map((entry,index)=><article key={index}><h5>{entry.question}</h5><p>{entry.answer.text}</p><ArticleEvidenceRefs refs={entry.answer.evidenceRefs} report={report} locale={locale}/></article>)}</section>
     </article>
     <ArticleExplanation entries={deliverable.explanation} report={report} locale={locale} heading={labels.explanation}/>
   </section>;
+}
+
+function ArticleResearch({deliverable,locale,labels}:{deliverable:Extract<NonNullable<PaidReport["geoArticleExample"]>,{version:"geo_article_deliverable_v3"}>;locale:"en"|"zh";labels:{research:string;researchUnavailable:string;query:string;provider:string}}){
+  const research=deliverable.research;
+  return <aside className="geo-article-research" data-geo-article-research={research.outcome}>
+    <h3>{labels.research}</h3><dl><Meta label={labels.query}>{research.query}</Meta><Meta label={labels.provider}>{research.providerId} · {research.model} · {research.searchMode}</Meta></dl>
+    {research.outcome==="usable"?<ul>{research.result.sources.filter(({citedText})=>Boolean(citedText)).map((source)=><li key={source.sourceId}><a href={source.canonicalUrl}>{source.title}</a><p>{source.citedText}</p><small>{source.registrableDomain} · {formatTimestamp(research.result.searchedAt,locale)}</small></li>)}</ul>:<p>{labels.researchUnavailable}</p>}
+  </aside>;
 }
 
 function ArticleExplanation({entries,report,locale,heading}:{entries:readonly {elementId:string;heading:string;reason:string;geoFunction:string;evidenceRefs:readonly string[]}[];report:PaidReport;locale:"en"|"zh";heading:string}){
@@ -288,6 +297,19 @@ function resolveArticleEvidence(ref:string,report:PaidReport):{key:string;label:
     const finding=report.technicalFoundation.technicalReport.findings.find((item)=>item.id===id);
     return finding?{key:ref,label:finding.title}:null;
   }
+  if(kind==="research"){
+    const article=report.geoArticleExample;
+    if(article?.version!=="geo_article_deliverable_v3"||article.research.outcome!=="usable")return null;
+    const source=article.research.result.sources.find((item)=>item.sourceId===id);
+    return source?{key:ref,label:source.title,url:source.canonicalUrl}:null;
+  }
+  if(kind==="website"){
+    const profile=report.technicalFoundation.aiReport.organizationProfile;
+    const [field,indexText]=id.split(":");
+    const index=Number(indexText);
+    const value=field==="organization"?profile.organizationName:field==="summary"?profile.summary:field==="service"?profile.productsAndServices?.[index]:field==="audience"?profile.targetAudiences?.[index]:field==="region"?profile.marketsAndRegions?.[index]:undefined;
+    return value?{key:ref,label:value}:null;
+  }
   return null;
 }
 
@@ -295,16 +317,19 @@ function displayLegacyGeoArticleText(value:string):string{
   return value.replace(/(?:来源|source)\s*([0-9]+)/giu,(_match,ordinal:string)=>`[${Number(ordinal)+1}]`);
 }
 
-function geoArticleGenerationMode(deliverable:NonNullable<PaidReport["geoArticleExample"]>):"model"|"deterministic_fallback"{
+function geoArticleGenerationMode(deliverable:NonNullable<PaidReport["geoArticleExample"]>):string{
+  if(deliverable.version==="geo_article_deliverable_v3")return deliverable.generationMode;
   return deliverable.version==="geo_article_example_v1"?deliverable.generationMode:deliverable.kind==="article"?"model":"deterministic_fallback";
 }
 function geoArticleHeading(deliverable:NonNullable<PaidReport["geoArticleExample"]>,locale:"en"|"zh"):string{
+  if(deliverable.version==="geo_article_deliverable_v3")return locale==="zh"?"GEO 完整文章":"Complete GEO article";
   const article=deliverable.version==="geo_article_example_v1"?deliverable.generationMode==="model":deliverable.kind==="article";
   return locale==="zh"?(article?"可发布文章示例":"GEO 内容提纲"):(article?"Publishable article example":"GEO content outline");
 }
 function geoArticleGenerationLabel(deliverable:NonNullable<PaidReport["geoArticleExample"]>,locale:"en"|"zh"):string{
   const mode=geoArticleGenerationMode(deliverable);
-  return locale==="zh"?(mode==="model"?"单次 AI 生成并通过文章契约与质量校验":"文章模型结果未采用；当前显示确定性内容提纲"):(mode==="model"?"Generated in one AI call and passed article contract and quality checks":"The model article was not used; a deterministic content outline is shown");
+  if(locale==="zh")return mode==="model_researched"?"专题搜索与 AI 成文均完成":mode==="model_existing_evidence"?"专题搜索不可用，AI 使用现有证据完成文章":mode==="deterministic_evidence_fallback"?"使用已验证证据确定性完成文章":mode==="model"?"AI 生成并通过文章契约与质量校验":"历史确定性内容提纲";
+  return mode==="model_researched"?"Completed with focused research and AI drafting":mode==="model_existing_evidence"?"Focused search was unavailable; AI completed the article from existing evidence":mode==="deterministic_evidence_fallback"?"Completed deterministically from validated evidence":mode==="model"?"AI-generated and validated against the article contract":"Historical deterministic content outline";
 }
 
 function LegacyCrossQuestionDiagnosis({report,locale}:{report:CombinedPrivateReportArtifactModelV3["combinedReport"];locale:"en"|"zh"}){

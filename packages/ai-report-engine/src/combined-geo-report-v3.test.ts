@@ -3,6 +3,7 @@ import {
   COMBINED_GEO_REPORT_V3_CONTRACT,
   COMBINED_GEO_REPORT_V3_VERSION,
   GEO_ARTICLE_DELIVERABLE_VERSION,
+  GEO_ARTICLE_DELIVERABLE_V3_VERSION,
   GEO_ARTICLE_EXAMPLE_VERSION,
   hashCombinedGeoReportV3ReceiptExcludedProjection,
   parseCombinedGeoReportV3,
@@ -145,6 +146,29 @@ describe("combined GEO report V3 contract", () => {
     expect(() => parseGeoArticleDeliverable({ ...base, explanation: base.explanation.slice(1) }, authority)).toThrow(/explain every required element/iu);
     expect(() => parseGeoArticleDeliverable({ ...base, article: { ...base.article, introduction: { ...base.article.introduction, evidenceRefs: ["source:unknown"] } } }, authority)).toThrow(/known evidence/iu);
     expect(parseGeoArticleDeliverable({ ...legacyArticle(), generationMode: "deterministic_fallback" }, authority)).toMatchObject({ version: GEO_ARTICLE_EXAMPLE_VERSION, generationMode: "deterministic_fallback" });
+  });
+
+  it("parses article-only V3 research lineage while preserving V1 and V2 readability", () => {
+    const authority = { locale: "zh-CN", questionIds: ["q1", "q2", "q3"], evidenceRefs: ["question:q1", "finding:f1", "website:service:0", "website:audience:0"] };
+    const article = v2Article();
+    const researched = {
+      ...article,
+      version: GEO_ARTICLE_DELIVERABLE_V3_VERSION,
+      generationMode: "model_researched",
+      research: {
+        outcome: "usable", query: "企业采用数据集成服务时如何核对交付边界", providerId: "fixture", model: "fixture-model", searchMode: "native_web_search",
+        result: { questionId: "geo-article-research:q1", answerText: "公开资料说明数据集成项目需要明确异常恢复和人工复核边界。", sources: [{ sourceId: "research-1", title: "数据集成实施指南", canonicalUrl: "https://research.example/guide", registrableDomain: "research.example", citedText: "项目需要明确异常恢复和人工复核边界。", providerResultOrder: 0 }], refusal: null, searchedAt: "2030-01-01T00:00:00.000Z", completedAt: "2030-01-01T00:00:01.000Z", providerResponseId: "response-1" }
+      },
+      article: { ...article.article, introduction: { ...article.article.introduction, evidenceRefs: ["question:q1", "website:service:0", "website:audience:0"] }, sections: article.article.sections.map((section, index) => index === 2 ? { ...section, paragraphs: [{ ...section.paragraphs[0], evidenceRefs: ["research:research-1", "website:service:0"] }] } : section) },
+      explanation: article.explanation.map((entry, index) => index === 4 ? { ...entry, evidenceRefs: ["research:research-1"] } : entry)
+    };
+    expect(parseGeoArticleDeliverable(researched, authority)).toMatchObject({ version: GEO_ARTICLE_DELIVERABLE_V3_VERSION, kind: "article", generationMode: "model_researched", research: { outcome: "usable" } });
+    const unavailable = { ...researched, generationMode: "deterministic_evidence_fallback", research: { outcome: "unavailable", queryId: "geo-article-research:q1", query: researched.research.query, providerId: "fixture", model: "fixture-model", searchMode: "native_web_search", attemptedAt: "2030-01-01T00:00:00.000Z", completedAt: "2030-01-01T00:00:01.000Z" }, article: article.article, explanation: article.explanation };
+    expect(parseGeoArticleDeliverable(unavailable, authority)).toMatchObject({ generationMode: "deterministic_evidence_fallback", research: { outcome: "unavailable" } });
+    expect(parseGeoArticleDeliverable(article, authority)).toEqual(article);
+    expect(parseGeoArticleDeliverable(legacyArticle(), authority)).toMatchObject({ version: GEO_ARTICLE_EXAMPLE_VERSION });
+    expect(() => parseGeoArticleDeliverable({ ...researched, kind: "outline" }, authority)).toThrow(/must equal article/iu);
+    expect(() => parseGeoArticleDeliverable({ ...unavailable, generationMode: "model_researched" }, authority)).toThrow(/do not agree/iu);
   });
 });
 

@@ -44,6 +44,7 @@ import { combinedArtifactFixture, combinedV3ArtifactFixture } from "@/components
 import { createTestSourceForensicReport } from "@/public-source-forensics/testing";
 import {
   assertCombinedV3HtmlCompleteness,
+  assertProspectiveGeoArticleV3,
   buildReadyCombinedArtifactV3,
   combinedArtifactSystemCopy,
   localizedProviderDiscoveryLimitation,
@@ -447,6 +448,18 @@ describe("combined artifact canonical rendering",()=>{
     expect(html).toContain(`data-geo-article-kind="${kind}"`);
     expect(()=>assertCombinedV3HtmlCompleteness(report,html)).not.toThrow();
     expect(()=>assertCombinedV3HtmlCompleteness(report,html.replace(kind==="article"?"明确实际流程与适用条件。":"补充公开案例。",""))).toThrow(/completeness/);
+  });
+
+  it("requires an article-only V3 deliverable for prospective Direct readiness while preserving historical parsing",()=>{
+    const input=v3PreparationInput();
+    expect(()=>assertProspectiveGeoArticleV3(undefined)).toThrow(/complete geo_article_deliverable_v3 article/iu);
+    expect(()=>assertProspectiveGeoArticleV3(geoArticleFor(input))).toThrow(/complete geo_article_deliverable_v3 article/iu);
+    expect(()=>assertProspectiveGeoArticleV3(geoArticleV2For(input,"article"))).toThrow(/complete geo_article_deliverable_v3 article/iu);
+    expect(()=>assertProspectiveGeoArticleV3(geoArticleV2For(input,"outline"))).toThrow(/complete geo_article_deliverable_v3 article/iu);
+    const prior=geoArticleV2For(input,"article");
+    if(prior.version!=="geo_article_deliverable_v2"||prior.kind!=="article")throw new TypeError("Expected V2 article fixture.");
+    const complete={...prior,version:"geo_article_deliverable_v3",generationMode:"deterministic_evidence_fallback",research:{outcome:"unavailable",queryId:"geo-article-research:q1",query:"企业如何核对服务交付边界",providerId:"fixture",model:"fixture",searchMode:"native_web_search",attemptedAt:"2030-01-01T00:00:00.000Z",completedAt:"2030-01-01T00:00:01.000Z"}} as const;
+    expect(()=>assertProspectiveGeoArticleV3(complete)).not.toThrow();
   });
 
   it("assembles a pure V3 semantic draft without legacy diagnosis parsing or artifact side effects", () => {

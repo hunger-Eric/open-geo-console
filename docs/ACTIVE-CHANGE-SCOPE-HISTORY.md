@@ -7434,3 +7434,102 @@ revised scope.
   commit, push, or other external effect occurred.
 - Terminal status: **local implementation and automated validation complete;
   real rendered-report visual usability remains unverified.**
+
+---
+
+## 2026-08-07 - Receipt: Paid V3 decision-narrative Protected Staging (`c0deea7e`)
+
+- The user approved packaging the already-completed presentation repair as one
+  local commit and deploying it through Protected Staging Gates 0-3. Push and
+  agent-driven report generation remained forbidden.
+- Candidate commit: `c0deea7eee89daef9d8adf2e8ff6e3e6a19ebcc9` on local
+  `main`, which remains one commit ahead of `origin/main`.
+- Vercel Preview `dpl_AZTSSe5Tw6neHY7rRCooXnMqUuGh` was READY and its
+  `gitCommitSha` / `ogcGitSha` matched the candidate. The fixed Protected
+  Staging alias was moved to that Preview.
+- Staging free/deep Workers use
+  `open-geo-console:staging-c0deea7e-decision-narrative-overlay-v1` /
+  `sha256:0a39b26309fc86215eea3f0b3a7eea7027311f399ac980e73ce93008ee651f60`,
+  with matching revision, restart count 0, and readiness evidence.
+- The prior `0b58f667` Web/Worker identities were retained as rollback.
+  Production, Gate 4, reports, payments, model calls, refunds, email, and Git
+  push remained untouched.
+- Terminal status: **Protected Staging ready for user manual testing on
+  `c0deea7e`; deployment scope completed.**
+
+---
+
+## 2026-08-07 - Browser-scoped unfinished-report recovery entry
+
+- The user approved one optional home-page recovery card for the most recently
+  accepted report task in the same browser. The implementation uses a signed,
+  HttpOnly, SameSite cookie containing only report ID, compact locale, and
+  bounded timestamps; it does not use IP matching or grant report access.
+- First/no-marker, invalid, tampered, expired, missing, completed, and
+  completed-limited states render the unchanged scanner without a recovery
+  card. Generating tasks offer `continue viewing progress`; failed tasks offer
+  a distinct status-view action that does not retry the report.
+- A successful created, reused, or active-regeneration admission replaces the
+  single recent-task marker. Admission failures do not overwrite it. The home
+  page re-reads authoritative report and free/preview job state before showing
+  the card.
+- Completed reports, email delivery, Paid/private access, scan admission,
+  queues, Workers, report generation, database schema, and commerce were not
+  changed.
+- Verification: 6 focused/adjacent files and 34 tests passed; Web lint passed
+  with 0 errors and 6 pre-existing warnings outside the allowlist; the Next.js
+  production build and TypeScript phase passed; `git diff --check` passed;
+  CodeGraph is up to date.
+- Production additions stayed within budget at 239 lines; tests stayed within
+  budget at 132 lines. No live browser/real-report acceptance, commit, push,
+  deployment, Docker mutation, or external workflow occurred.
+- Terminal status: **local implementation and automated validation complete;
+  real browser recovery against a live generating task remains unverified.**
+
+---
+
+## 2026-08-07 - Business-specific, GEO-native Paid V3 article delivery
+
+- The user approved an article-only `geo_article_deliverable_v3` contract for
+  prospective Direct Paid V3 reports. Historical V1/V2 articles and outlines
+  remain readable, but an outline can no longer satisfy prospective Direct
+  readiness.
+- The article title is fixed from the primary buyer intent plus verified target
+  business facts. The Worker then makes at most one focused call through the
+  configured generative-search provider and one article-model call.
+- A usable focused search produces `model_researched`; an unavailable search
+  continues with website and existing report evidence as
+  `model_existing_evidence`; article-model or quality failure produces a
+  complete `deterministic_evidence_fallback` article. Article-only provider
+  failure does not introduce a refund path.
+- The article contract requires an answer-first introduction, 3-5 independent
+  decision sections, 2-3 non-duplicative FAQ entries, explicit website and
+  evidence bindings, at least two verified business facts, one substantive
+  business-scenario connection, and a separate structural/GEO explanation.
+  Generic summaries, provider lists, service catalogues, advertising claims,
+  vague answer blocks, unsupported certainty, keyword stuffing, and ranking or
+  citation guarantees are rejected.
+- The report labels V3 output as a complete GEO article, shows retained focused
+  research or its unavailability, resolves website/research citations, and
+  preserves historical outline presentation without accepting it as a new
+  deliverable.
+- Verification: 75/75 focused contract, generation, readiness, rendering, and
+  processor tests passed; Web lint passed with 0 errors and 6 pre-existing
+  warnings outside this change; the Next.js production build and TypeScript
+  phase passed; targeted disposable PostgreSQL Direct Paid V3 acceptance passed
+  1/1 with completed fulfillment and no refund (receipt
+  `pg-20260807035356-661af0b7`); `git diff --check` passed; CodeGraph is up to
+  date.
+- The first full disposable PostgreSQL run recorded 273/282 passing tests. Its
+  current-task Direct failure was fixed and independently reverified; remaining
+  failures were in unrelated migration, semantic-review, and unprepared V4
+  provider-profile tests outside this scope (receipt
+  `pg-20260807034920-f2cc048f`).
+- Production additions were 504 lines and test additions were 205 lines, both
+  within the approved 520-line budgets. Existing browser-recovery work remained
+  untouched.
+- No real public search, model call, report, payment, refund, email, deployment,
+  commit, or push occurred.
+- Terminal status: **local implementation and automated Direct delivery
+  validation complete; real generated-report editorial quality remains
+  unverified until a separately authorized real run.**

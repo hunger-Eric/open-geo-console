@@ -1937,6 +1937,10 @@ async function finalizeProviderDiscoveryCombinedJob(input: {
         phase: "artifact_verification"
       }, () => generateGeoArticleExample({
         client,
+        researchProvider: traceGenerativeAnswerProvider(getPreparedProviderProfileRuntime().createQuestionAnswerProvider({
+          locale: runtime.authority.surface.locale,
+          region: runtime.authority.surface.region
+        }), input.trace, "geo_article_search_provider_call"),
         targetUrl: input.targetUrl,
         locale: runtime.authority.surface.locale,
         questionSet: businessQuestionSet,

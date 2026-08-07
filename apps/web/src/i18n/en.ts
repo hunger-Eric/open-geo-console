@@ -38,6 +38,17 @@ export const en = {
     scanProgressStarting: "Creating a secure report workspace. The website analysis will continue after it opens.",
     scanProgressSlow: "Admission is taking longer than expected. Your request is still protected against duplicate submission.",
     scanProgressExtended: "The service is slow to accept this request. Keep this page open; retrying is safe and will recover the same request.",
+    recentTask: {
+      generatingLabel: "Recent task",
+      generatingTitle: "Your report is still being generated",
+      generatingDescription: "Closing the page does not stop the task. Return to the report page to keep viewing its progress.",
+      generatingAction: "Continue viewing progress",
+      failedLabel: "Recent task needs attention",
+      failedTitle: "The last report did not finish",
+      failedDescription: "Return to the task page to review its current status. This does not create or retry a report.",
+      failedAction: "View task status",
+      scanAnotherAction: "Analyze another website"
+    },
     nextTitle: "Already have server access logs?",
     nextDescription:
       "Verify whether identifiable AI crawlers visited the site."

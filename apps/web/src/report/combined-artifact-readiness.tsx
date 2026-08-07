@@ -389,6 +389,7 @@ function prepareCombinedGeoReportV3Core(
   input: PrepareCombinedGeoReportV3Input,
   options: { semanticValidation?: "legacy" | "deferred" | "free_direct" }
 ): CombinedGeoReportV3 {
+  if (options.semanticValidation === "free_direct") assertProspectiveGeoArticleV3(input.geoArticleExample);
   const assembled = assembleCombinedGeoReportV3(input);
   const report = requireReadyCombinedGeoReportV3(assembled, { semanticValidation: options.semanticValidation ?? "legacy" });
   if ((options.semanticValidation ?? "legacy") === "legacy") {
@@ -495,6 +496,12 @@ export async function materializePreparedCombinedArtifactV3(
     return { report, html, htmlSha256: sha(html) };
   }
   return materializeReadyArtifact(report, model, html, options.trace);
+}
+
+export function assertProspectiveGeoArticleV3(deliverable: GeoArticleDeliverable | undefined): void {
+  if (deliverable?.version !== "geo_article_deliverable_v3" || deliverable.kind !== "article") {
+    throw new TypeError("Direct Paid V3 requires a complete geo_article_deliverable_v3 article before readiness.");
+  }
 }
 
 function traceArtifactStep<T>(trace: PaidV3DirectDebugTrace | undefined, step: string,

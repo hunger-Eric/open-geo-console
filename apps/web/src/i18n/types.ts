@@ -51,6 +51,17 @@ export interface Dictionary {
     scanProgressStarting: string;
     scanProgressSlow: string;
     scanProgressExtended: string;
+    recentTask: {
+      generatingLabel: string;
+      generatingTitle: string;
+      generatingDescription: string;
+      generatingAction: string;
+      failedLabel: string;
+      failedTitle: string;
+      failedDescription: string;
+      failedAction: string;
+      scanAnotherAction: string;
+    };
     nextTitle: string;
     nextDescription: string;
   };

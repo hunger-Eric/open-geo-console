@@ -10,6 +10,12 @@ import {
   freeDistinctSiteLimit,
   isProtectedStagingPreview
 } from "@/security/deployment-policy";
+import {
+  issueRecentReportResumeMarker,
+  RECENT_REPORT_RESUME_COOKIE,
+  recentReportResumeCookieOptions
+} from "@/server/recent-report-resume";
+import type { ReportLocale } from "@/db/schema";
 
 export const runtime = "nodejs";
 
@@ -70,29 +76,29 @@ export async function POST(request: Request) {
       );
     }
     if (admission.outcome === "reused") {
-      return NextResponse.json({
+      return scanAdmissionResponse({
         reportId: admission.reportId,
         jobId: admission.jobId,
         tier: "free",
         status: "reused"
-      });
+      }, locale, admission.reportId, 200);
     }
     if (admission.outcome === "active_regeneration") {
-      return NextResponse.json({
+      return scanAdmissionResponse({
         reportId: admission.reportId,
         activeReportId: admission.activeReportId,
         jobId: admission.jobId,
         tier: "free",
         status: "regenerating"
-      }, { status: 202 });
+      }, locale, admission.reportId, 202);
     }
-    return NextResponse.json({
+    return scanAdmissionResponse({
       reportId: admission.reportId,
       jobId: admission.jobId,
       tier: "free",
       status: "queued",
       aiPreview: { granted: admission.aiEnabled }
-    }, { status: 202 });
+    }, locale, admission.reportId, 202);
   } catch (error) {
     if (process.env.NODE_ENV !== "production") console.error(error);
     if (error instanceof ScanJobCapacityError) {
@@ -115,6 +121,22 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+}
+
+function scanAdmissionResponse(
+  payload: Record<string, unknown>,
+  locale: ReportLocale,
+  reportId: string,
+  status: number
+) {
+  const response = NextResponse.json(payload, { status });
+  const marker = issueRecentReportResumeMarker({ reportId, locale });
+  response.cookies.set(
+    RECENT_REPORT_RESUME_COOKIE,
+    marker.raw,
+    recentReportResumeCookieOptions(marker.expiresAt)
+  );
+  return response;
 }
 
 function freeAiDailyLimit(): number {

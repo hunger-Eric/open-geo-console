@@ -28,11 +28,13 @@ import {
   parsePaidV3DirectSemantics,
   type PaidV3DirectSemantics
 } from "./free-v4-direct-semantics";
+import { parseGenerativeSearchAnswerResult, type GenerativeSearchAnswerResult } from "./generative-search-answer";
 
 export const COMBINED_GEO_REPORT_V3_VERSION = 3 as const;
 export const COMBINED_GEO_REPORT_V3_CONTRACT = "combined_geo_report_v3" as const;
 export const GEO_ARTICLE_EXAMPLE_VERSION = "geo_article_example_v1" as const;
 export const GEO_ARTICLE_DELIVERABLE_VERSION = "geo_article_deliverable_v2" as const;
+export const GEO_ARTICLE_DELIVERABLE_V3_VERSION = "geo_article_deliverable_v3" as const;
 
 export interface GeoArticleExampleV1 {
   readonly version: typeof GEO_ARTICLE_EXAMPLE_VERSION;
@@ -82,7 +84,40 @@ export type GeoArticleDeliverableV2 =
       readonly explanation: readonly GeoArticleExplanationV2[];
       readonly fallbackReason: GeoArticleFallbackReason;
     };
-export type GeoArticleDeliverable = GeoArticleExampleV1 | GeoArticleDeliverableV2;
+export type GeoArticleResearchV3 =
+  | {
+      readonly outcome: "usable";
+      readonly query: string;
+      readonly providerId: string;
+      readonly model: string;
+      readonly searchMode: string;
+      readonly result: GenerativeSearchAnswerResult;
+    }
+  | {
+      readonly outcome: "unavailable";
+      readonly queryId: string;
+      readonly query: string;
+      readonly providerId: string;
+      readonly model: string;
+      readonly searchMode: string;
+      readonly attemptedAt: string;
+      readonly completedAt: string;
+    };
+export interface GeoArticleDeliverableV3 {
+  readonly version: typeof GEO_ARTICLE_DELIVERABLE_V3_VERSION;
+  readonly kind: "article";
+  readonly generationMode: "model_researched" | "model_existing_evidence" | "deterministic_evidence_fallback";
+  readonly primaryQuestionId: string;
+  readonly research: GeoArticleResearchV3;
+  readonly article: {
+    readonly title: string;
+    readonly introduction: GeoArticleEvidenceTextV2;
+    readonly sections: readonly { readonly id: string; readonly heading: string; readonly paragraphs: readonly GeoArticleEvidenceTextV2[] }[];
+    readonly faq: readonly { readonly question: string; readonly answer: GeoArticleEvidenceTextV2 }[];
+  };
+  readonly explanation: readonly GeoArticleExplanationV2[];
+}
+export type GeoArticleDeliverable = GeoArticleExampleV1 | GeoArticleDeliverableV2 | GeoArticleDeliverableV3;
 
 export interface CombinedGeoReportV3 extends Omit<CombinedGeoReportV2, "version" | "artifactContract" | "businessQuestionAnswers"> {
   version: typeof COMBINED_GEO_REPORT_V3_VERSION;
@@ -264,7 +299,78 @@ export function parseGeoArticleDeliverable(value: unknown, authority: {
   const row = object(value, "$geoArticleExample");
   return row.version === GEO_ARTICLE_EXAMPLE_VERSION
     ? parseGeoArticleExampleV1(value, authority)
-    : parseGeoArticleDeliverableV2(value, authority);
+    : row.version === GEO_ARTICLE_DELIVERABLE_V3_VERSION
+      ? parseGeoArticleDeliverableV3(value, authority)
+      : parseGeoArticleDeliverableV2(value, authority);
+}
+
+function parseGeoArticleDeliverableV3(value: unknown, authority: {
+  readonly locale: string;
+  readonly questionIds: readonly string[];
+  readonly evidenceRefs: readonly string[];
+}): GeoArticleDeliverableV3 {
+  if (JSON.stringify(value).length > 100_000) throw new TypeError("$geoArticleExample exceeds the retained size bound.");
+  const row = object(value, "$geoArticleExample");
+  exact(row.version, GEO_ARTICLE_DELIVERABLE_V3_VERSION, "$geoArticleExample.version");
+  exact(row.kind, "article", "$geoArticleExample.kind");
+  const generationMode = row.generationMode;
+  if (!(generationMode === "model_researched" || generationMode === "model_existing_evidence" || generationMode === "deterministic_evidence_fallback")) {
+    throw new TypeError("$geoArticleExample.generationMode is invalid.");
+  }
+  const researchRow = object(row.research, "$geoArticleExample.research");
+  const outcome = researchRow.outcome;
+  const query = v2Text(researchRow.query, "$geoArticleExample.research.query", 500);
+  const providerId = articleText(researchRow.providerId, "$geoArticleExample.research.providerId", 200);
+  const model = articleText(researchRow.model, "$geoArticleExample.research.model", 300);
+  const searchMode = articleText(researchRow.searchMode, "$geoArticleExample.research.searchMode", 200);
+  let research: GeoArticleResearchV3;
+  const researchRefs: string[] = [];
+  if (outcome === "usable") {
+    const resultRow = object(researchRow.result, "$geoArticleExample.research.result");
+    const expectedQuestionId = articleText(resultRow.questionId, "$geoArticleExample.research.result.questionId", 500);
+    const result = parseGenerativeSearchAnswerResult(resultRow, { expectedQuestionId, locale: authority.locale });
+    if (!result.answerText || result.refusal || !result.sources.some(({ citedText }) => Boolean(citedText?.trim()))) {
+      throw new TypeError("$geoArticleExample.research usable outcome requires an answer and cited public sources.");
+    }
+    researchRefs.push(...result.sources.map(({ sourceId }) => `research:${sourceId}`));
+    research = { outcome, query, providerId, model, searchMode, result };
+  } else if (outcome === "unavailable") {
+    if ("result" in researchRow) throw new TypeError("$geoArticleExample.research unavailable outcome must not retain a result.");
+    research = {
+      outcome,
+      queryId: articleText(researchRow.queryId, "$geoArticleExample.research.queryId", 500),
+      query,
+      providerId,
+      model,
+      searchMode,
+      attemptedAt: timestamp(researchRow.attemptedAt, "$geoArticleExample.research.attemptedAt"),
+      completedAt: timestamp(researchRow.completedAt, "$geoArticleExample.research.completedAt")
+    };
+    if (Date.parse(research.completedAt) < Date.parse(research.attemptedAt)) throw new TypeError("$geoArticleExample.research completion precedes its attempt.");
+  } else {
+    throw new TypeError("$geoArticleExample.research.outcome is invalid.");
+  }
+  if ((generationMode === "model_researched" && research.outcome !== "usable") ||
+      (generationMode === "model_existing_evidence" && research.outcome !== "unavailable")) {
+    throw new TypeError("$geoArticleExample generation mode and research outcome do not agree.");
+  }
+  const parsedV2 = parseGeoArticleDeliverableV2({
+    version: GEO_ARTICLE_DELIVERABLE_VERSION,
+    kind: "article",
+    primaryQuestionId: row.primaryQuestionId,
+    article: row.article,
+    explanation: row.explanation
+  }, { ...authority, evidenceRefs: [...authority.evidenceRefs, ...researchRefs] });
+  if (parsedV2.kind !== "article") throw new TypeError("$geoArticleExample V3 must contain an article.");
+  return {
+    version: GEO_ARTICLE_DELIVERABLE_V3_VERSION,
+    kind: "article",
+    generationMode,
+    primaryQuestionId: parsedV2.primaryQuestionId,
+    research,
+    article: parsedV2.article,
+    explanation: parsedV2.explanation
+  };
 }
 
 function parseGeoArticleDeliverableV2(value: unknown, authority: {
@@ -432,7 +538,12 @@ export function requireReadyCombinedGeoReportV3(
   value: unknown,
   options: { semanticValidation?: "legacy" | "deferred" | "free_direct" } = {}
 ): CombinedGeoReportV3 {
-  return parseCombinedGeoReportV3(value, options);
+  const report = parseCombinedGeoReportV3(value, options);
+  if (options.semanticValidation === "free_direct" &&
+      (report.geoArticleExample?.version !== GEO_ARTICLE_DELIVERABLE_V3_VERSION || report.geoArticleExample.kind !== "article")) {
+    throw new TypeError("Direct Paid V3 requires a complete geo_article_deliverable_v3 article.");
+  }
+  return report;
 }
 
 function parseEngineProvenance(value: unknown): OpenGeoEngineProvenanceV3 {
@@ -460,13 +571,19 @@ function limitedCopy(locale: string): string {
   return locale.toLowerCase().startsWith("zh") ? "当前结论尚缺少两个独立域名的交叉验证。" : "This claim lacks verification from two independent domains.";
 }
 function geoArticleEvidenceRefs(base: CombinedGeoReportV2, cards: readonly OpenGeoAnswerCardV3[]): string[] {
+  const profile = base.technicalFoundation.aiReport.organizationProfile;
   return [...new Set([
     ...toCanonicalBuyerQuestionSet(base.businessQuestionSet).questions.map(({ id }) => `question:${id}`),
     ...base.technicalFoundation.technicalReport.findings.map(({ id }) => `technical:${id}`),
     ...base.technicalFoundation.aiReport.findings.map(({ id }) => `finding:${id}`),
     ...cards.flatMap((card) => card.answerMode === "generative_search_v1"
       ? card.sources.map(({ sourceId }) => `source:${sourceId}`)
-      : card.sourceEvidence.map(({ evidenceId }) => `source:${evidenceId}`))
+      : card.sourceEvidence.map(({ evidenceId }) => `source:${evidenceId}`)),
+    ...(profile.organizationName?.trim() ? ["website:organization"] : []),
+    ...(profile.summary?.trim() ? ["website:summary"] : []),
+    ...(profile.productsAndServices ?? []).map((_value, index) => `website:service:${index}`),
+    ...(profile.targetAudiences ?? []).map((_value, index) => `website:audience:${index}`),
+    ...(profile.marketsAndRegions ?? []).map((_value, index) => `website:region:${index}`)
   ])];
 }
 function articleText(value: unknown, path: string, maxLength: number): string {
@@ -479,7 +596,7 @@ function articleText(value: unknown, path: string, maxLength: number): string {
 function v2Text(value: unknown, path: string, maxLength: number): string {
   const result = articleText(value, path, maxLength);
   if (/来源\s*\d+/iu.test(result)) throw new TypeError(`${path} must not contain provider source ordinals.`);
-  if (/(?:source|question|finding|technical):[\p{L}\p{N}_-]+/iu.test(result)) throw new TypeError(`${path} must not expose internal evidence handles.`);
+  if (/(?:source|question|finding|technical|research|website):[\p{L}\p{N}_:-]+/iu.test(result)) throw new TypeError(`${path} must not expose internal evidence handles.`);
   return result;
 }
 function v2TextArray(value: unknown, path: string, maxItems: number, maxLength: number, minItems = 0): string[] {

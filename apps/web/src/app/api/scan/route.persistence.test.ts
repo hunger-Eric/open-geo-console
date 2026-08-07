@@ -32,6 +32,7 @@ describe("scan API durable admission", () => {
     delete process.env.OGC_STAGING_FREE_SITE_LIMIT;
     delete process.env.COMMERCE_MODE;
     process.env.OGC_IP_HASH_SECRET = "ip-hash-secret-with-at-least-32-characters";
+    process.env.OGC_TOKEN_HASH_SECRET = "token-hash-secret-with-at-least-32-characters";
     mocks.verifyTurnstile.mockResolvedValue({ success: true, errorCodes: [] });
     mocks.admitFreeScan.mockResolvedValue({
       outcome: "created", reportId: "report-1", jobId: "job-1", aiEnabled: true
@@ -43,6 +44,11 @@ describe("scan API durable admission", () => {
 
     expect(response.status).toBe(202);
     expect(await response.json()).toMatchObject({ reportId: "report-1", jobId: "job-1", status: "queued" });
+    expect(response.headers.get("set-cookie")).toContain("ogc_recent_report_task=");
+    expect(response.headers.get("set-cookie")).toContain("HttpOnly");
+    expect(response.headers.get("set-cookie")).toContain("SameSite=lax");
+    expect(response.headers.get("set-cookie")).toContain("Secure");
+    expect(response.headers.get("set-cookie")).toContain("Path=/");
     expect(mocks.admitFreeScan).toHaveBeenCalledWith(expect.objectContaining({
       url: "https://example.com/",
       siteKey: "example.com",
@@ -59,6 +65,7 @@ describe("scan API durable admission", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ reportId: "report-old", jobId: "job-old", status: "reused" });
+    expect(response.headers.get("set-cookie")).toContain("ogc_recent_report_task=");
   });
 
   it("returns the active staging regeneration on a duplicate click", async () => {
@@ -108,6 +115,7 @@ describe("scan API durable admission", () => {
 
     expect(response.status).toBe(429);
     expect(response.headers.get("x-ogc-client-ip-source")).toBe("fallback");
+    expect(response.headers.get("set-cookie")).toBeNull();
     expect(await response.json()).toMatchObject({
       errorKey: "freePreviewLimitReached",
       retryAfter: "2026-07-11T10:00:00.000Z"

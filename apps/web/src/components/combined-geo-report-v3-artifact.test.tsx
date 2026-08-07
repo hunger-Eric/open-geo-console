@@ -101,6 +101,17 @@ function outlineModel() {
   return model;
 }
 
+function articleV3Model() {
+  const model=articleModel();
+  const prior=model.combinedReport.geoArticleExample;
+  if(!prior||prior.version!=="geo_article_deliverable_v2"||prior.kind!=="article")throw new TypeError("Expected V2 article fixture.");
+  model.combinedReport.geoArticleExample={
+    ...prior,version:"geo_article_deliverable_v3",generationMode:"model_researched",
+    research:{outcome:"usable",query:"企业采用跨境物流服务时如何核对交付边界",providerId:"fixture-search",model:"fixture-search-model",searchMode:"native_web_search",result:{questionId:"geo-article-research:q1",answerText:"公开资料说明跨境物流需要明确异常处理和责任边界。",sources:[{sourceId:"article-research-1",title:"跨境物流实施指南",canonicalUrl:"https://research.example/logistics",registrableDomain:"research.example",citedText:"跨境物流需要明确异常处理和责任边界。",providerResultOrder:0}],refusal:null,searchedAt:"2030-01-01T00:00:00.000Z",completedAt:"2030-01-01T00:00:01.000Z",providerResponseId:"research-response"}}
+  };
+  return model;
+}
+
 describe("CombinedGeoReportV3Artifact",()=>{
   it("renders website context before answers, diagnosis, technical evidence, actions, and methodology",()=>{
     const model=combinedV3ArtifactFixture();
@@ -392,7 +403,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(articleAt).toBeLessThan(faqAt);
     expect(faqAt).toBeLessThan(strategyAt);
     expect(strategyAt).toBeLessThan(appendixAt);
-    for(const value of ["可发布文章示例","企业选择跨境物流服务时应核对哪些能力","从实际运输场景开始","这份内容为什么这样组织","直接对应买家的选择问题","采购前先核对什么？","[1] 服务商甲来源 1"]){
+    for(const value of ["可发布文章示例","企业选择跨境物流服务时应核对哪些能力","从实际运输场景开始","为什么这样组织这篇文章","直接对应买家的选择问题","采购前先核对什么？","[1] 服务商甲来源 1"]){
       expect(html).toContain(value);
     }
     expect(html).toContain('data-geo-article-kind="article"');
@@ -405,14 +416,25 @@ describe("CombinedGeoReportV3Artifact",()=>{
   it("labels deterministic fallback as an outline and never as an article example",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:outlineModel()}));
     const outlineAt=html.indexOf('data-geo-article-kind="outline"');
-    const explanationAt=html.indexOf("这份内容为什么这样组织");
+    const explanationAt=html.indexOf("为什么这样组织这篇文章");
     expect(outlineAt).toBeGreaterThan(0);
     expect(outlineAt).toBeLessThan(explanationAt);
-    for(const value of ["GEO 内容提纲","这是一份待补充证据后再成文的内容提纲，不是范文。","建议正文结构","成文前还需补充","可延展的常见问题"]){
+    for(const value of ["GEO 内容提纲","这是一份历史内容提纲，不是完整文章。","建议正文结构","成文前还需补充","可延展的常见问题"]){
       expect(html).toContain(value);
     }
     expect(html).not.toContain("可发布文章示例");
     expect(html).not.toContain("source:generated-source-1");
+  });
+
+  it("renders the delivered V3 article, retained focused research, and separate GEO explanation without an outline label",()=>{
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:articleV3Model()}));
+    for(const value of ["GEO 完整文章","专题公开研究","企业采用跨境物流服务时如何核对交付边界","跨境物流实施指南","跨境物流需要明确异常处理和责任边界。","为什么这样组织这篇文章","专题搜索与 AI 成文均完成"]){
+      expect(html).toContain(value);
+    }
+    expect(html).toContain('data-geo-article-kind="article"');
+    expect(html).toContain('data-geo-article-generation-mode="model_researched"');
+    expect(html).toContain('data-geo-article-research="usable"');
+    expect(html).not.toContain("待补充证据后再成文");
   });
 
   it("keeps historical V1 fallback readable as an outline and normalizes provider ordinals",()=>{

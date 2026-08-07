@@ -1,11 +1,14 @@
 import { ExternalLink, FileSearch, ListChecks, ShieldCheck, Upload } from "lucide-react";
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { RecentReportResumeCard } from "@/components/recent-report-resume-card";
 import { ScannerForm } from "@/components/scanner-form";
 import { getDictionary, getLocaleAlternates, isLocale, localizePath, type Locale } from "@/i18n";
 import { scannerCapabilities } from "@/product/config";
 import { isProtectedStagingPreview } from "@/security/deployment-policy";
+import { RECENT_REPORT_RESUME_COOKIE, resolveRecentReportResume } from "@/server/recent-report-resume";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +32,8 @@ export default async function HomePage({
   }
   const locale: Locale = rawLocale;
   const dictionary = getDictionary(locale);
+  const recentMarker = (await cookies()).get(RECENT_REPORT_RESUME_COOKIE)?.value;
+  const recentReport = await resolveRecentReportResume(recentMarker);
   return (
     <main className="mx-auto w-full max-w-6xl space-y-6 px-5 py-8 sm:px-8 sm:py-12">
       <section className="workspace-surface p-6 sm:p-9">
@@ -43,12 +48,21 @@ export default async function HomePage({
           </div>
         </div>
         <div className="mt-8">
-          <ScannerForm
-            locale={locale}
-            dictionary={dictionary}
-            turnstileSiteKey={process.env.TURNSTILE_SITE_KEY?.trim()}
-            allowForceFresh={isProtectedStagingPreview()}
-          />
+          {recentReport ? (
+            <RecentReportResumeCard
+              dictionary={dictionary}
+              href={localizePath(recentReport.locale, `/reports/${recentReport.reportId}`)}
+              resume={recentReport}
+            />
+          ) : null}
+          <div id="website-scanner">
+            <ScannerForm
+              locale={locale}
+              dictionary={dictionary}
+              turnstileSiteKey={process.env.TURNSTILE_SITE_KEY?.trim()}
+              allowForceFresh={isProtectedStagingPreview()}
+            />
+          </div>
         </div>
 
         <div className="mt-8 grid border-t border-[var(--border)] md:grid-cols-3 md:divide-x md:divide-[var(--border)]">

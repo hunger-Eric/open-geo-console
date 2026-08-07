@@ -38,6 +38,17 @@ export const zh = {
     scanProgressStarting: "正在创建安全的报告工作区；打开后，网站分析会继续在后台运行。",
     scanProgressSlow: "接单速度比预期慢，请求仍受重复提交保护。",
     scanProgressExtended: "服务接收请求较慢，请保持页面打开；重新尝试也会恢复同一个请求。",
+    recentTask: {
+      generatingLabel: "刚刚提交的任务",
+      generatingTitle: "你的报告仍在生成",
+      generatingDescription: "关闭页面不会中断任务，你可以返回报告页面继续查看生成进度。",
+      generatingAction: "继续查看生成进度",
+      failedLabel: "上次任务需要处理",
+      failedTitle: "上次报告未能完成",
+      failedDescription: "返回任务页面查看当前状态；这个操作不会重新生成或重试报告。",
+      failedAction: "查看任务状态",
+      scanAnotherAction: "检测其他网站"
+    },
     nextTitle: "已经有服务器访问日志？",
     nextDescription: "验证可识别的 AI 爬虫是否真实访问过该站点。"
   },

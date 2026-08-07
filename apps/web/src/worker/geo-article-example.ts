@@ -1,9 +1,12 @@
 import {
-  GEO_ARTICLE_DELIVERABLE_VERSION,
+  GEO_ARTICLE_DELIVERABLE_V3_VERSION,
+  parseGenerativeSearchAnswerResult,
   parseGeoArticleDeliverable,
   type AiWebsiteReportV1,
-  type GeoArticleDeliverableV2,
+  type GenerativeSearchAnswerProvider,
+  type GeoArticleDeliverableV3,
   type GeoArticleFallbackReason,
+  type GeoArticleResearchV3,
   type JsonCompletionClient,
   type OpenGeoAnswerCardV3
 } from "@open-geo-console/ai-report-engine";
@@ -12,6 +15,7 @@ import { toCanonicalBuyerQuestionSet, type ConfirmedBusinessQuestionSet } from "
 
 export interface GeoArticleExampleInput {
   readonly client: JsonCompletionClient;
+  readonly researchProvider: GenerativeSearchAnswerProvider;
   readonly targetUrl: string;
   readonly locale: string;
   readonly questionSet: ConfirmedBusinessQuestionSet;
@@ -19,11 +23,17 @@ export interface GeoArticleExampleInput {
   readonly aiReport: AiWebsiteReportV1;
   readonly technicalReport: GeoAuditReport;
   readonly signal?: AbortSignal;
+  readonly searchTimeoutMs?: number;
   readonly timeoutMs?: number;
+  readonly now?: () => Date;
 }
 
-export async function generateGeoArticleExample(input: GeoArticleExampleInput): Promise<GeoArticleDeliverableV2> {
-  const authority = articleAuthority(input);
+type FallbackInput = Omit<GeoArticleExampleInput, "client" | "researchProvider">;
+
+export async function generateGeoArticleExample(input: GeoArticleExampleInput): Promise<GeoArticleDeliverableV3> {
+  const title = workingTitle(input);
+  const research = await focusedResearch(input, title);
+  const authority = articleAuthority(input, research);
   const controller = new AbortController();
   const abort = () => controller.abort(input.signal?.reason);
   input.signal?.addEventListener("abort", abort, { once: true });
@@ -39,20 +49,26 @@ export async function generateGeoArticleExample(input: GeoArticleExampleInput): 
       signal: controller.signal,
       messages: [
         { role: "system", content: articleSystemPrompt(input.locale) },
-        { role: "user", content: JSON.stringify(compactArticleInput(input, authority.evidenceRefs)) }
+        { role: "user", content: JSON.stringify(compactArticleInput(input, title, research, authority.evidenceRefs)) }
       ]
     });
-    const value = objectOrEmpty(result.value);
-    assertModelArticleQuality(value, input);
+    const raw = objectOrEmpty(result.value);
     const parsed = parseGeoArticleDeliverable({
-      ...value,
-      version: GEO_ARTICLE_DELIVERABLE_VERSION,
-      kind: "article"
+      ...raw,
+      version: GEO_ARTICLE_DELIVERABLE_V3_VERSION,
+      kind: "article",
+      generationMode: research.outcome === "usable" ? "model_researched" : "model_existing_evidence",
+      primaryQuestionId: articleQuestions(input)[0]!.id,
+      research,
+      article: { ...objectOrEmpty(raw.article), title }
     }, authority);
-    if (parsed.version !== GEO_ARTICLE_DELIVERABLE_VERSION) throw new TypeError("GEO article generator returned a legacy value.");
+    if (parsed.version !== GEO_ARTICLE_DELIVERABLE_V3_VERSION) throw new TypeError("GEO article generator returned a legacy value.");
+    assertArticleQuality(parsed, input);
     return parsed;
   } catch (error) {
-    return buildGeoArticleFallback(input, classifyFallback(error, timedOut));
+    const { client: _client, researchProvider: _researchProvider, ...fallbackInput } = input;
+    void _client; void _researchProvider;
+    return buildGeoArticleFallback(fallbackInput, classifyFallback(error, timedOut), research);
   } finally {
     clearTimeout(timer);
     input.signal?.removeEventListener("abort", abort);
@@ -60,168 +76,333 @@ export async function generateGeoArticleExample(input: GeoArticleExampleInput): 
 }
 
 export function buildGeoArticleFallback(
-  input: Omit<GeoArticleExampleInput, "client">,
-  fallbackReason: GeoArticleFallbackReason
-): GeoArticleDeliverableV2 {
-  const zh = input.locale.toLowerCase().startsWith("zh");
-  const authority = articleAuthority(input);
-  const profile = input.aiReport.organizationProfile;
-  const organization = bounded(safeText(profile.organizationName?.trim() || new URL(input.targetUrl).hostname), 120);
-  const services = (profile.productsAndServices ?? []).slice(0, 4);
-  const audiences = (profile.targetAudiences ?? []).slice(0, 3);
+  input: FallbackInput,
+  _fallbackReason: GeoArticleFallbackReason,
+  retainedResearch?: GeoArticleResearchV3
+): GeoArticleDeliverableV3 {
+  const zh = isChinese(input.locale);
+  const now = (input.now ?? (() => new Date()))().toISOString();
+  const title = workingTitle(input);
   const primary = articleQuestions(input)[0]!;
+  const facts = websiteFacts(input);
+  if (facts.length < 2) throw new TypeError("A complete GEO article requires at least two verified website business facts.");
+  const organization = factValue(facts, "website:organization") ?? new URL(input.targetUrl).hostname;
+  const serviceFact = facts.find(({ ref }) => ref.startsWith("website:service:")) ?? facts.find(({ ref }) => ref === "website:summary") ?? facts[0]!;
+  const audienceFact = facts.find(({ ref }) => ref.startsWith("website:audience:")) ?? facts.find(({ ref }) => ref !== serviceFact.ref) ?? facts[1]!;
   const questionRef = `question:${primary.id}`;
-  const findingRef = authority.evidenceRefs.find((ref) => ref.startsWith("finding:")) ?? questionRef;
-  const directAnswer = cleanProviderReferences(answerText(input.answerCards[0], zh
-    ? "现有公开信息只能支持初步判断；采购前仍需核对服务范围、适用条件和公开证据。"
-    : "The public information supports an initial assessment only; buyers should still verify scope, operating conditions, and public proof."));
-  const plannedSections = zh ? [
-    {
-      id: "scenario",
-      heading: "先说明买家面对的业务场景",
-      purpose: safeText(`围绕“${primary.text}”说明需要解决的实际流程，而不是从${organization}的服务清单开始。`),
-      evidenceRefs: [questionRef]
-    },
-    {
-      id: "criteria",
-      heading: "再给出能够执行的判断标准",
-      purpose: safeText(`把选择条件拆成服务范围、适用对象、异常处理和交付边界。当前公开服务包括${services.length ? services.join("、") : "相关专业服务"}${audiences.length ? `，主要面向${audiences.join("、")}` : ""}。`),
-      evidenceRefs: [findingRef]
-    },
-    {
-      id: "verification",
-      heading: "最后连接公开证据与核验清单",
-      purpose: "逐项连接可访问的服务页、流程、案例或资质，并明确尚不能确认的条件。",
-      evidenceRefs: [questionRef]
-    }
-  ] : [
-    {
-      id: "scenario",
-      heading: "Start with the buyer's operating scenario",
-      purpose: safeText(`Frame the workflow behind “${primary.text}” instead of opening with ${organization}'s service catalogue.`),
-      evidenceRefs: [questionRef]
-    },
-    {
-      id: "criteria",
-      heading: "Turn the decision into practical criteria",
-      purpose: safeText(`Compare scope, intended users, exception handling, and delivery boundaries. The current public profile describes ${services.length ? services.join(", ") : "professional services"}${audiences.length ? ` for ${audiences.join(", ")}` : ""}.`),
-      evidenceRefs: [findingRef]
-    },
-    {
-      id: "verification",
-      heading: "Connect public proof to a verification checklist",
-      purpose: "Bind each important claim to an accessible service page, process, case, or credential and state what remains unverified.",
-      evidenceRefs: [questionRef]
-    }
-  ];
-  const explanationEntries = zh ? [
-    buildExplanation("title", "标题设计", "标题围绕买家问题，而不是企业名称。", "明确文章的核心搜索意图。", questionRef),
-    buildExplanation("introduction", "答案前置", "先给出当前能够支持的采购判断。", "帮助读者和 AI 快速提取核心答案。", questionRef),
-    buildExplanation("section:scenario", "业务场景", "先让读者确认文章与自己的流程有关。", "建立问题的语义上下文。", questionRef),
-    buildExplanation("section:criteria", "判断标准", "把抽象选择转成可以比较的维度。", "形成清晰、可提取的决策实体。", findingRef),
-    buildExplanation("section:verification", "证据核验", "区分已确认事实和仍需补充的材料。", "提高结论的可验证性。", questionRef),
-    buildExplanation("faq", "相关问题", "FAQ 只覆盖相邻意图，不重复正文。", "扩展相关问法而不稀释主题。", questionRef)
-  ] : [
-    buildExplanation("title", "Title design", "The title centers the buyer problem rather than the organization.", "Clarifies the primary search intent.", questionRef),
-    buildExplanation("introduction", "Answer first", "The opening states the decision supported by current evidence.", "Makes the core answer easy to extract.", questionRef),
-    buildExplanation("section:scenario", "Operating scenario", "The first section helps readers identify their workflow.", "Builds semantic context.", questionRef),
-    buildExplanation("section:criteria", "Decision criteria", "The second section turns selection into comparable dimensions.", "Creates explicit decision entities.", findingRef),
-    buildExplanation("section:verification", "Evidence check", "The final section separates confirmed facts from missing proof.", "Improves verifiability.", questionRef),
-    buildExplanation("faq", "Related questions", "The FAQ covers adjacent intent without repeating the body.", "Extends relevant query coverage.", questionRef)
-  ];
-  const value = {
-    version: GEO_ARTICLE_DELIVERABLE_VERSION,
-    kind: "outline" as const,
-    primaryQuestionId: primary.id,
-    outline: {
-      workingTitle: zh ? "企业选择业务自动化方案时应核对哪些能力" : "What should buyers verify when choosing a workflow automation service?",
-      readerQuestion: safeText(primary.text),
-      directAnswer: safeText(directAnswer),
-      plannedSections,
-      evidenceToAdd: zh
-        ? ["补充可公开访问的服务流程、交付案例或适用限制。"]
-        : ["Add an accessible service process, delivery case, or operating limitation."],
-      faqAngles: zh
-        ? ["采购前应优先核对哪些公开材料？", "哪些异常情况需要保留人工复核？"]
-        : ["Which public materials should buyers verify first?", "Which exceptions still require human review?"]
-    },
-    explanation: explanationEntries,
-    fallbackReason
+  const research = retainedResearch ?? {
+    outcome: "unavailable",
+    queryId: researchQuestionId(primary.id),
+    query: title,
+    providerId: "not_attempted",
+    model: "not_attempted",
+    searchMode: "not_attempted",
+    attemptedAt: now,
+    completedAt: now
   };
-  const parsed = parseGeoArticleDeliverable(value, authority);
-  if (parsed.version !== GEO_ARTICLE_DELIVERABLE_VERSION) throw new TypeError("GEO article fallback returned a legacy value.");
+  const external = externalEvidence(input, research);
+  const article = zh ? {
+    title,
+    introduction: evidenceText(
+      `对于正在评估${serviceFact.value}的${audienceFact.value}，更可靠的做法是先明确业务流程、交付边界和核验依据，再判断方案是否适用。${organization}公开说明的${serviceFact.value}及其面向的${audienceFact.value}，可以作为这项判断的业务起点，但不能替代对实施条件的逐项确认。`,
+      [questionRef, serviceFact.ref, audienceFact.ref]
+    ),
+    sections: [
+      {
+        id: "business-scenario",
+        heading: `先把${serviceFact.value}放进实际业务流程`,
+        paragraphs: [evidenceText(
+          `讨论“${safeText(primary.text)}”时，首先要确认需求发生在哪个流程、由谁使用、需要连接哪些环节，以及哪些异常必须由人工处理。${organization}的公开业务信息表明其提供${serviceFact.value}；买方应据此继续核对该能力与自身流程的对应关系。`,
+          [questionRef, "website:organization", serviceFact.ref]
+        )]
+      },
+      {
+        id: "delivery-boundary",
+        heading: "用交付边界判断方案能否真正落地",
+        paragraphs: [evidenceText(
+          `对${audienceFact.value}而言，功能名称不是充分依据。更有用的核对顺序是：适用对象、输入与输出、系统或人员交接、异常处置、验收方式以及持续维护责任。只有这些边界能够被公开说明或在采购阶段确认，${serviceFact.value}才具备可执行的评估基础。`,
+          [audienceFact.ref, serviceFact.ref, questionRef]
+        )]
+      },
+      {
+        id: "evidence-checklist",
+        heading: "把公开事实转化为可验证的决策清单",
+        paragraphs: [evidenceText(external.text, external.refs)]
+      }
+    ],
+    faq: fallbackFaq(input, true, serviceFact, audienceFact)
+  } : {
+    title,
+    introduction: evidenceText(
+      `For ${audienceFact.value} evaluating ${serviceFact.value}, the reliable starting point is to define the operating workflow, delivery boundaries, and verifiable proof before deciding whether a solution fits. ${organization}'s published ${serviceFact.value} and stated audience provide a business-specific starting point, but buyers still need to confirm the implementation conditions.`,
+      [questionRef, serviceFact.ref, audienceFact.ref]
+    ),
+    sections: [
+      {
+        id: "business-scenario",
+        heading: `Put ${serviceFact.value} into the real operating workflow first`,
+        paragraphs: [evidenceText(
+          `The question “${safeText(primary.text)}” becomes actionable only after the buyer identifies where the need occurs, who uses the service, which handoffs are involved, and which exceptions require human control. ${organization} publicly describes ${serviceFact.value}; the next step is to map that capability to the buyer's actual workflow.`,
+          [questionRef, "website:organization", serviceFact.ref]
+        )]
+      },
+      {
+        id: "delivery-boundary",
+        heading: "Use delivery boundaries to test whether the solution can operate",
+        paragraphs: [evidenceText(
+          `For ${audienceFact.value}, a feature name is not enough. Review intended users, inputs and outputs, system and human handoffs, exception handling, acceptance criteria, and ongoing ownership. ${serviceFact.value} becomes decision-ready only when those boundaries are public or can be confirmed during evaluation.`,
+          [audienceFact.ref, serviceFact.ref, questionRef]
+        )]
+      },
+      {
+        id: "evidence-checklist",
+        heading: "Turn public facts into a verification checklist",
+        paragraphs: [evidenceText(external.text, external.refs)]
+      }
+    ],
+    faq: fallbackFaq(input, false, serviceFact, audienceFact)
+  };
+  const explanation = zh ? [
+    explanationEntry("title", "标题对应真实决策", "标题同时限定目标客户、业务能力与判断任务，避免写成宽泛行业话题。", "让答案引擎识别单一搜索意图和明确实体关系。", [questionRef, serviceFact.ref, audienceFact.ref]),
+    explanationEntry("introduction", "答案前置", "导语先给出决策方法，再说明企业业务事实的适用边界。", "形成可以独立抽取的直接答案。", [questionRef, serviceFact.ref, audienceFact.ref]),
+    explanationEntry("section:business-scenario", "业务场景", "本节把企业能力放回买方的真实流程，而不是罗列服务。", "建立企业、能力、客户和场景之间的语义关系。", [questionRef, serviceFact.ref]),
+    explanationEntry("section:delivery-boundary", "交付边界", "本节把抽象能力转换为可执行的核对维度。", "提供结构清楚、可复用的决策答案块。", [questionRef, audienceFact.ref]),
+    explanationEntry("section:evidence-checklist", "证据清单", "本节区分已经公开的事实与仍需核对的条件。", "提升事实的可验证性和引用边界。", external.refs),
+    explanationEntry("faq", "相邻问题", "FAQ 只补充正文尚未回答的采购意图。", "扩展相关查询覆盖，同时避免重复正文。", [questionRef, serviceFact.ref])
+  ] : [
+    explanationEntry("title", "A real decision in the title", "The title names the audience, capability, and decision task instead of a broad industry topic.", "Makes one search intent and the entity relationships explicit.", [questionRef, serviceFact.ref, audienceFact.ref]),
+    explanationEntry("introduction", "Answer first", "The opening gives the decision method before qualifying the company facts.", "Creates a self-contained extractable answer.", [questionRef, serviceFact.ref, audienceFact.ref]),
+    explanationEntry("section:business-scenario", "Operating scenario", "This section connects the capability to the buyer's workflow instead of listing services.", "Links the company, capability, audience, and scenario.", [questionRef, serviceFact.ref]),
+    explanationEntry("section:delivery-boundary", "Delivery boundary", "This section turns an abstract capability into executable review criteria.", "Provides a structured decision block that can stand alone.", [questionRef, audienceFact.ref]),
+    explanationEntry("section:evidence-checklist", "Evidence checklist", "This section separates published facts from conditions that still require confirmation.", "Improves verifiability and citation boundaries.", external.refs),
+    explanationEntry("faq", "Adjacent intent", "The FAQ addresses buyer questions not already answered in the body.", "Extends related query coverage without duplication.", [questionRef, serviceFact.ref])
+  ];
+  const parsed = parseGeoArticleDeliverable({
+    version: GEO_ARTICLE_DELIVERABLE_V3_VERSION,
+    kind: "article",
+    generationMode: "deterministic_evidence_fallback",
+    primaryQuestionId: primary.id,
+    research,
+    article,
+    explanation
+  }, articleAuthority(input, research));
+  if (parsed.version !== GEO_ARTICLE_DELIVERABLE_V3_VERSION) throw new TypeError("GEO article fallback returned a legacy value.");
+  assertArticleQuality(parsed, input);
   return parsed;
 }
 
-function articleAuthority(input: Omit<GeoArticleExampleInput, "client">): { locale: string; questionIds: string[]; evidenceRefs: string[] } {
+async function focusedResearch(input: GeoArticleExampleInput, query: string): Promise<GeoArticleResearchV3> {
+  const primary = articleQuestions(input)[0]!;
+  const queryId = researchQuestionId(primary.id);
+  const now = input.now ?? (() => new Date());
+  const attemptedAt = now().toISOString();
+  const controller = new AbortController();
+  const abort = () => controller.abort(input.signal?.reason);
+  input.signal?.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(() => controller.abort(new Error("GEO article research timed out.")), input.searchTimeoutMs ?? 20_000);
+  try {
+    const raw = await input.researchProvider.answerWithSources({
+      questionId: queryId,
+      question: query,
+      locale: input.locale,
+      region: input.questionSet.region,
+      signal: controller.signal
+    });
+    const result = parseGenerativeSearchAnswerResult(raw, { expectedQuestionId: queryId, locale: input.locale });
+    if (!result.answerText || result.refusal || !result.sources.some(({ citedText }) => Boolean(citedText?.trim()))) throw new TypeError("Focused article research returned no usable cited fact.");
+    return { outcome: "usable", query, providerId: input.researchProvider.providerId, model: input.researchProvider.model, searchMode: input.researchProvider.searchMode, result };
+  } catch {
+    return {
+      outcome: "unavailable", queryId, query,
+      providerId: input.researchProvider.providerId, model: input.researchProvider.model, searchMode: input.researchProvider.searchMode,
+      attemptedAt, completedAt: now().toISOString()
+    };
+  } finally {
+    clearTimeout(timer);
+    input.signal?.removeEventListener("abort", abort);
+  }
+}
+
+function compactArticleInput(input: GeoArticleExampleInput, title: string, research: GeoArticleResearchV3, evidenceRefs: readonly string[]): Record<string, unknown> {
+  const facts = websiteFacts(input);
+  return {
+    task: "Write one publish-ready, business-specific GEO article for the target company's own website, plus a separate structural explanation.",
+    exactTitle: title,
+    constraints: [
+      "Use the exactTitle unchanged and answer the primary buyer intent in the introduction before background.",
+      "Make the target business, intended customer, capability, and operating scenario the organizing center.",
+      "Use at least two supplied website facts and include one complete section connecting a capability to the buyer scenario.",
+      "Give each section one decision job and make its heading plus first paragraph independently understandable.",
+      "Keep one principal claim or decision point per paragraph; use a checklist or sequence where it improves extraction.",
+      "Use focused research only as context or verification support, never as the article's organizing center.",
+      "Distinguish company-published facts from external facts and preserve limitations; never invent a case, result, rank, guarantee, or superiority claim.",
+      "Do not write a provider roundup, generic definition, search recap, service catalogue, sales CTA, or keyword-stuffed article.",
+      "Keep evidenceRefs structured and out of prose, use only supplied evidenceRefs, and keep explanation separate from article prose.",
+      "Use 3-5 progressive body sections and 2-3 direct, self-contained, non-duplicative FAQ entries."
+    ],
+    locale: input.locale,
+    targetUrl: input.targetUrl,
+    evidenceRefs,
+    websiteFacts: facts,
+    primaryQuestion: articleQuestionEvidence(input, 0),
+    adjacentQuestions: [articleQuestionEvidence(input, 1), articleQuestionEvidence(input, 2)],
+    focusedResearch: research.outcome === "usable" ? {
+      query: research.query,
+      answer: bounded(research.result.answerText, 4_000),
+      sources: research.result.sources.filter(({ citedText }) => Boolean(citedText?.trim())).slice(0, 5).map(({ sourceId, title: sourceTitle, canonicalUrl, citedText }) => ({
+        evidenceRef: `research:${sourceId}`, title: sourceTitle, canonicalUrl, citedText: bounded(citedText ?? "", 1_200)
+      }))
+    } : { unavailable: true },
+    findings: (input.aiReport.findings ?? []).slice(0, 8).map(({ id, title: findingTitle, impact, recommendation }) => ({ evidenceRef: `finding:${id}`, title: findingTitle, impact: bounded(impact, 1_500), recommendation: bounded(recommendation, 1_500) })),
+    outputShape: {
+      article: {
+        title: "exactTitle",
+        introduction: { text: "direct, qualified answer", evidenceRefs: ["question and website facts"] },
+        sections: [{ id: "stable-section-id", heading: "self-contained decision heading", paragraphs: [{ text: "one substantive claim or decision", evidenceRefs: ["supplied evidenceRefs"] }] }],
+        faq: [{ question: "adjacent buyer intent", answer: { text: "direct standalone answer", evidenceRefs: ["supplied evidenceRefs"] } }]
+      },
+      explanation: [{ elementId: "title | introduction | section:<id> | faq", heading: "label", reason: "business reason", geoFunction: "understanding, extraction, or verification role", evidenceRefs: ["supplied evidenceRefs"] }]
+    }
+  };
+}
+
+function articleAuthority(input: FallbackInput | GeoArticleExampleInput, research: GeoArticleResearchV3): { locale: string; questionIds: string[]; evidenceRefs: string[] } {
   const questionIds = articleQuestions(input).map(({ id }) => id);
   return {
     locale: input.locale,
     questionIds,
     evidenceRefs: [...new Set([
       ...questionIds.map((id) => `question:${id}`),
+      ...websiteFacts(input).map(({ ref }) => ref),
       ...(input.technicalReport.findings ?? []).map(({ id }) => `technical:${id}`),
       ...(input.aiReport.findings ?? []).map(({ id }) => `finding:${id}`),
       ...input.answerCards.flatMap((card) => card.answerMode === "generative_search_v1"
         ? card.sources.map(({ sourceId }) => `source:${sourceId}`)
-        : card.sourceEvidence.map(({ evidenceId }) => `source:${evidenceId}`))
+        : card.sourceEvidence.map(({ evidenceId }) => `source:${evidenceId}`)),
+      ...(research.outcome === "usable" ? research.result.sources.map(({ sourceId }) => `research:${sourceId}`) : [])
     ])]
   };
 }
 
-function compactArticleInput(input: GeoArticleExampleInput, evidenceRefs: readonly string[]): Record<string, unknown> {
+function websiteFacts(input: FallbackInput | GeoArticleExampleInput): Array<{ ref: string; label: string; value: string }> {
   const profile = input.aiReport.organizationProfile;
-  const questions = articleQuestions(input);
-  const primary = questions[0]!;
-  const primaryCard = input.answerCards[0];
+  return [
+    ...(profile.organizationName?.trim() ? [{ ref: "website:organization", label: "organization", value: profile.organizationName.trim() }] : []),
+    ...(profile.summary?.trim() ? [{ ref: "website:summary", label: "business summary", value: bounded(profile.summary, 1_000) }] : []),
+    ...(profile.productsAndServices ?? []).slice(0, 8).map((value, index) => ({ ref: `website:service:${index}`, label: "service", value: safeText(value) })),
+    ...(profile.targetAudiences ?? []).slice(0, 6).map((value, index) => ({ ref: `website:audience:${index}`, label: "audience", value: safeText(value) })),
+    ...(profile.marketsAndRegions ?? []).slice(0, 6).map((value, index) => ({ ref: `website:region:${index}`, label: "region", value: safeText(value) }))
+  ].filter(({ value }) => Boolean(value));
+}
+
+function articleQuestionEvidence(input: GeoArticleExampleInput, index: number): Record<string, unknown> {
+  const question = articleQuestions(input)[index]!;
+  const card = input.answerCards[index]!;
   return {
-    task: "Produce one evidence-grounded, publish-ready GEO article for the primary buyer question plus a separate explanation of its structure.",
-    constraints: [
-      "Return JSON only.",
-      "Use only supplied facts and the primary buyer question.",
-      "Write for a prospective buyer, not a GEO practitioner.",
-      "Use 3-5 progressive body sections and 2-3 non-duplicative FAQ entries.",
-      "Keep evidenceRefs structured and out of prose.",
-      "Keep article prose free of report, example, prompt, input, search, source ordinal, generation, or writing-process narration.",
-      "Put writing reasons only in explanation.",
-      "Do not copy a complete supplied answer into a paragraph or FAQ.",
-      "Do not promise rankings, recommendations, or future citations.",
-      "Use only the supplied evidenceRefs."
-    ],
-    locale: input.locale,
-    targetUrl: input.targetUrl,
-    evidenceRefs,
-    website: {
-      organizationName: profile.organizationName,
-      summary: bounded(profile.summary ?? "", 3_000),
-      productsAndServices: (profile.productsAndServices ?? []).slice(0, 8),
-      targetAudiences: (profile.targetAudiences ?? []).slice(0, 6),
-      marketsAndRegions: (profile.marketsAndRegions ?? []).slice(0, 6)
-    },
-    primaryQuestion: {
-      id: primary.id,
-      text: primary.text,
-      answer: bounded(answerText(primaryCard, ""), 4_000),
-      sources: primaryCard.answerMode === "generative_search_v1"
-        ? primaryCard.sources.slice(0, 5).map(({ sourceId, title, citedText }) => ({ evidenceRef: `source:${sourceId}`, title, citedText: bounded(citedText ?? "", 1_200) }))
-        : primaryCard.sourceEvidence.slice(0, 5).map(({ evidenceId, title, exactExcerpt }) => ({ evidenceRef: `source:${evidenceId}`, title, citedText: bounded(exactExcerpt, 1_200) }))
-    },
-    adjacentQuestionTexts: questions.slice(1).map(({ text }) => text),
-    findings: (input.aiReport.findings ?? []).slice(0, 8).map(({ id, title, impact, recommendation }) => ({ evidenceRef: `finding:${id}`, title, impact: bounded(impact, 1_500), recommendation: bounded(recommendation, 1_500) })),
-    outputShape: {
-      primaryQuestionId: primary.id,
-      article: {
-        title: "reader problem or decision scenario",
-        introduction: { text: "direct answer", evidenceRefs: ["supplied evidenceRef"] },
-        sections: [{ id: "stable-section-id", heading: "reader-facing heading", paragraphs: [{ text: "substantive prose", evidenceRefs: ["supplied evidenceRef"] }] }],
-        faq: [{ question: "adjacent intent", answer: { text: "distinct answer", evidenceRefs: ["supplied evidenceRef"] } }]
-      },
-      explanation: [{ elementId: "title | introduction | section:<id> | faq", heading: "label", reason: "business reason", geoFunction: "understanding or extraction role", evidenceRefs: ["supplied evidenceRef"] }]
-    }
+    id: question.id,
+    text: question.text,
+    answer: bounded(answerText(card, ""), 4_000),
+    sources: card.answerMode === "generative_search_v1"
+      ? card.sources.slice(0, 5).map(({ sourceId, title, citedText }) => ({ evidenceRef: `source:${sourceId}`, title, citedText: bounded(citedText ?? "", 1_200) }))
+      : card.sourceEvidence.slice(0, 5).map(({ evidenceId, title, exactExcerpt }) => ({ evidenceRef: `source:${evidenceId}`, title, citedText: bounded(exactExcerpt, 1_200) }))
   };
 }
 
-function articleQuestions(input: Omit<GeoArticleExampleInput, "client">): { id: string; text: string }[] {
+function workingTitle(input: FallbackInput | GeoArticleExampleInput): string {
+  const zh = isChinese(input.locale);
+  const facts = websiteFacts(input);
+  const service = facts.find(({ ref }) => ref.startsWith("website:service:"))?.value ?? (zh ? "这项业务能力" : "this business capability");
+  const audience = facts.find(({ ref }) => ref.startsWith("website:audience:"))?.value ?? (zh ? "企业买方" : "business buyers");
+  return bounded(zh
+    ? `${audience}采用${service}时，如何核对业务场景、交付边界与公开证据`
+    : `How ${audience} should evaluate ${service}: operating fit, delivery boundaries, and public proof`, 300);
+}
+
+function fallbackFaq(input: FallbackInput, zh: boolean, service: { ref: string; value: string }, audience: { ref: string; value: string }) {
+  const questions = articleQuestions(input);
+  return zh ? [
+    { question: safeText(questions[1]?.text || `评估${service.value}时应先核对什么？`), answer: evidenceText(`先核对${service.value}面向的对象、适用流程、输入输出和异常处理，再比较功能或供应商。这样可以避免把能力名称误当成可交付结果。`, [`question:${questions[1]?.id ?? questions[0]!.id}`, service.ref]) },
+    { question: safeText(questions[2]?.text || "哪些条件仍需要在采购阶段确认？"), answer: evidenceText(`面向${audience.value}的公开信息可以说明业务方向，但具体集成条件、责任边界、验收标准和持续维护方式仍应逐项确认。`, [`question:${questions[2]?.id ?? questions[0]!.id}`, audience.ref]) }
+  ] : [
+    { question: safeText(questions[1]?.text || `What should buyers verify first when evaluating ${service.value}?`), answer: evidenceText(`Verify the intended users, operating workflow, inputs and outputs, and exception handling before comparing features or providers. This prevents a capability label from being mistaken for a delivered outcome.`, [`question:${questions[1]?.id ?? questions[0]!.id}`, service.ref]) },
+    { question: safeText(questions[2]?.text || "Which conditions still need confirmation during procurement?"), answer: evidenceText(`Published information for ${audience.value} can establish the business direction, while integration conditions, ownership boundaries, acceptance criteria, and ongoing maintenance still require explicit confirmation.`, [`question:${questions[2]?.id ?? questions[0]!.id}`, audience.ref]) }
+  ];
+}
+
+function externalEvidence(input: FallbackInput, research: GeoArticleResearchV3): { text: string; refs: string[] } {
+  const zh = isChinese(input.locale);
+  if (research.outcome === "usable") {
+    const source = research.result.sources.find(({ citedText }) => Boolean(citedText?.trim()))!;
+    const excerpt = cleanProviderReferences(source.citedText ?? "");
+    return {
+      text: zh
+        ? `公开资料可核对到：“${excerpt}”。这项外部事实适合用于补充判断标准；最终决策仍应回到目标企业公开的服务范围、适用对象和交付边界，并逐项记录已经确认与仍待确认的内容。`
+        : `A public source states: “${excerpt}”. This external fact can inform the evaluation criteria, while the final decision should still return to the target company's published scope, intended users, and delivery boundaries and record what is confirmed or still unknown.`,
+      refs: [`research:${source.sourceId}`, "website:organization"]
+    };
+  }
+  const card = input.answerCards[0];
+  if (card.answerMode === "generative_search_v1") {
+    const source = card.sources.find(({ citedText }) => Boolean(citedText?.trim()));
+    if (!source) return websiteEvidenceOnly(input, zh);
+    return {
+      text: zh
+        ? `现有公开依据可核对到：“${cleanProviderReferences(source.citedText ?? source.title)}”。买方可以据此建立核验清单：事实是否来自可访问页面、是否说明适用范围、是否给出交付边界，以及哪些条件仍需进一步确认。`
+        : `The retained public evidence states: “${cleanProviderReferences(source.citedText ?? source.title)}”. Buyers can turn that into a checklist: whether the fact appears on an accessible page, whether its scope is clear, whether delivery boundaries are stated, and which conditions still require confirmation.`,
+      refs: [`source:${source.sourceId}`, `question:${articleQuestions(input)[0]!.id}`]
+    };
+  }
+  const source = card.sourceEvidence[0];
+  if (source) return {
+    text: zh
+      ? `现有公开依据可核对到：“${safeText(source.exactExcerpt)}”。买方可以据此建立核验清单：事实是否来自可访问页面、是否说明适用范围、是否给出交付边界，以及哪些条件仍需进一步确认。`
+      : `The retained public evidence states: “${safeText(source.exactExcerpt)}”. Buyers can turn that into a checklist: whether the fact appears on an accessible page, whether its scope is clear, whether delivery boundaries are stated, and which conditions still require confirmation.`,
+    refs: [`source:${source.evidenceId}`, `question:${articleQuestions(input)[0]!.id}`]
+  };
+  return websiteEvidenceOnly(input, zh);
+}
+
+function websiteEvidenceOnly(input: FallbackInput, zh: boolean): { text: string; refs: string[] } {
+  return {
+    text: zh
+      ? "当前可确认的内容仅限于目标企业已经公开的业务事实。核验时应分别记录适用对象、服务范围、交付条件和仍未公开的信息，避免把缺少证据误写成确定结论。"
+      : "The confirmed basis is limited to the target company's published business facts. The verification checklist should separately record intended users, service scope, delivery conditions, and missing public information instead of turning an evidence gap into a firm conclusion.",
+    refs: ["website:organization", `question:${articleQuestions(input)[0]!.id}`]
+  };
+}
+
+function assertArticleQuality(deliverable: GeoArticleDeliverableV3, input: FallbackInput | GeoArticleExampleInput): void {
+  if (deliverable.article.title !== workingTitle(input)) throw new GeoArticleQualityError("title_changed");
+  const blocks = [deliverable.article.introduction, ...deliverable.article.sections.flatMap(({ paragraphs }) => paragraphs), ...deliverable.article.faq.map(({ answer }) => answer)];
+  if (isChinese(input.locale) && (hanCount(deliverable.article.introduction.text) < 12 ||
+      deliverable.article.sections.some(({ paragraphs }) => hanCount(paragraphs[0]!.text) < 8) ||
+      deliverable.article.faq.some(({ answer }) => hanCount(answer.text) < 6))) {
+    throw new GeoArticleQualityError("wrong_language");
+  }
+  const websiteRefs = new Set(blocks.flatMap(({ evidenceRefs }) => evidenceRefs.filter((ref) => ref.startsWith("website:"))));
+  if (websiteRefs.size < 2) throw new GeoArticleQualityError("business_facts_missing");
+  const primaryRef = `question:${deliverable.primaryQuestionId}`;
+  if (!deliverable.article.sections.some(({ paragraphs }) => {
+    const refs = paragraphs.flatMap(({ evidenceRefs }) => evidenceRefs);
+    return refs.includes(primaryRef) && refs.some((ref) => ref.startsWith("website:"));
+  })) throw new GeoArticleQualityError("business_scenario_missing");
+  if (deliverable.generationMode === "model_researched" && !blocks.some(({ evidenceRefs }) => evidenceRefs.some((ref) => ref.startsWith("research:")))) {
+    throw new GeoArticleQualityError("research_not_used");
+  }
+  const prose = [deliverable.article.title, ...blocks.map(({ text }) => text), ...deliverable.article.faq.map(({ question }) => question)];
+  if (prose.some((text) => /(?:source|来源)\s*\d+/iu.test(text))) throw new GeoArticleQualityError("provider_ordinal");
+  if (prose.some((text) => /(?:best|leading|one[- ]stop|guarantee(?:d)?|contact us|立即联系|马上咨询|行业领先|一站式|保证(?:效果|排名|收录|引用)|排名第一)/iu.test(text))) throw new GeoArticleQualityError("advertising_claim");
+  if (deliverable.article.sections.some(({ paragraphs }) => /^(?:this|that|these|those|it|上述|以上|这(?:个|些|种|项))/iu.test(paragraphs[0]!.text.trim()))) {
+    throw new GeoArticleQualityError("vague_answer_block");
+  }
+  const completeAnswers = input.answerCards.map((card) => normalize(answerText(card, ""))).filter(Boolean);
+  if (prose.map(normalize).some((text) => completeAnswers.includes(text))) throw new GeoArticleQualityError("complete_answer_reuse");
+  const facts = websiteFacts(input).filter(({ ref }) => websiteRefs.has(ref));
+  const normalizedProse = normalize(prose.join(" "));
+  if (facts.filter(({ value }) => normalizedProse.includes(normalize(value))).length < 2) throw new GeoArticleQualityError("business_facts_not_expressed");
+}
+
+function articleQuestions(input: FallbackInput | GeoArticleExampleInput): { id: string; text: string }[] {
   const canonical = toCanonicalBuyerQuestionSet(input.questionSet).questions;
   return canonical.map((question, index) => ({
     id: question.id,
@@ -230,46 +411,17 @@ function articleQuestions(input: Omit<GeoArticleExampleInput, "client">): { id: 
 }
 
 function articleSystemPrompt(locale: string): string {
-  return locale.toLowerCase().startsWith("zh")
-    ? "你是面向企业买家的内容编辑。只输出JSON。只围绕primaryQuestion写一篇客户审核后可直接发布的中文文章：先回答买家问题，再用3至5个递进小节提供业务场景、判断标准、公开证据边界和执行清单，并用2至3个不重复的FAQ补充相邻意图。不得把企业服务清单、完整搜索答案或来源编号拼成正文。证据引用只能放在evidenceRefs，不得写入正文。explanation必须与article分开，按标题、导语、每个小节和FAQ解释商业目的与GEO作用。不得补充输入之外的事实，不得提及报告、示例、提示词、输入、搜索或生成过程，不得承诺排名、推荐或未来引用。"
-    : "You are a buyer-facing content editor. Return JSON only. Write one customer-reviewable, publish-ready article for primaryQuestion: answer the buyer first, then use 3-5 progressive sections for the operating scenario, decision criteria, public-evidence boundary, and action checklist, followed by 2-3 non-duplicative FAQ items. Do not assemble a service catalogue, complete search answer, or provider source ordinals into the body. Keep citations only in evidenceRefs. Keep explanation separate and cover the title, introduction, every section, and FAQ with its business purpose and GEO function. Do not add facts, mention a report/example/prompt/input/search/generation process, or promise ranking, recommendation, or future citation outcomes.";
+  return isChinese(locale)
+    ? "你是面向企业买家的资深内容编辑。只输出 JSON。文章用于目标企业自己的官网，必须以已提供的真实业务、目标客户、能力和应用场景为主轴，使用 exactTitle 并在导语先直接回答买家意图。每节只承担一个决策任务，标题和首段必须能够独立理解；关键事实绑定 evidenceRefs，外部研究只用于背景或核验，不得主导全文。正文必须自然、专业、有方法和边界，不能写成通用科普、搜索摘要、服务清单、供应商盘点或广告软文。不得虚构案例、结果、优势、排名、保证或销售行动号召。FAQ 只回答正文未覆盖的相邻意图。explanation 与 article 分开，逐项说明商业目的及理解、抽取或验证方面的 GEO 作用。"
+    : "You are a senior buyer-facing content editor. Return JSON only. The article is for the target company's own website: organize it around supplied business facts, intended customers, capabilities, and operating scenarios. Use exactTitle and answer the buyer intent first. Give each section one decision job and make its heading plus opening paragraph independently understandable. Bind factual blocks to evidenceRefs; external research may support context or verification but must not organize the article. Write natural expert prose with a practical method and clear boundaries, not a generic explainer, search recap, service catalogue, provider roundup, or advertisement. Never invent cases, results, superiority, rankings, guarantees, or sales calls to action. Use FAQ only for adjacent intent not covered in the body. Keep explanation separate and explain each element's business purpose and GEO role in understanding, extraction, or verification.";
 }
 
-function assertModelArticleQuality(value: Record<string, unknown>, input: GeoArticleExampleInput): void {
-  const article = objectOrEmpty(value.article);
-  const title = typeof article.title === "string" ? article.title.trim() : "";
-  const profileName = input.aiReport.organizationProfile.organizationName?.trim() || new URL(input.targetUrl).hostname;
-  if (normalize(title).includes(normalize(profileName)) && /(?:service\s+selection|purchase\s+verification|服务选择|采购核验).*(?:guide|指南)?/iu.test(title)) {
-    throw new GeoArticleQualityError("generic_target_title");
-  }
-  const prose = modelCustomerProse(article);
-  if (prose.some((text) => /(?:来源|source)\s*\d+/iu.test(text))) throw new GeoArticleQualityError("provider_ordinal");
-  const normalized = prose.map(normalize).filter(Boolean);
-  if (new Set(normalized).size !== normalized.length) throw new GeoArticleQualityError("duplicate_prose");
-  const completeAnswers = input.answerCards.map((card) => normalize(answerText(card, ""))).filter(Boolean);
-  if (normalized.some((text) => completeAnswers.includes(text))) throw new GeoArticleQualityError("complete_answer_reuse");
+function explanationEntry(elementId: string, heading: string, reason: string, geoFunction: string, evidenceRefs: string[]) {
+  return { elementId, heading, reason, geoFunction, evidenceRefs };
 }
-
-function modelCustomerProse(article: Record<string, unknown>): string[] {
-  const values: string[] = [];
-  if (typeof article.title === "string") values.push(article.title);
-  const introduction = objectOrEmpty(article.introduction);
-  if (typeof introduction.text === "string") values.push(introduction.text);
-  if (Array.isArray(article.sections)) for (const sectionValue of article.sections) {
-    const section = objectOrEmpty(sectionValue);
-    if (Array.isArray(section.paragraphs)) for (const paragraphValue of section.paragraphs) {
-      const paragraph = objectOrEmpty(paragraphValue);
-      if (typeof paragraph.text === "string") values.push(paragraph.text);
-    }
-  }
-  if (Array.isArray(article.faq)) for (const faqValue of article.faq) {
-    const faq = objectOrEmpty(faqValue);
-    const answer = objectOrEmpty(faq.answer);
-    if (typeof answer.text === "string") values.push(answer.text);
-  }
-  return values;
-}
-
+function evidenceText(text: string, evidenceRefs: string[]) { return { text: safeText(text), evidenceRefs: [...new Set(evidenceRefs)] }; }
+function factValue(facts: ReturnType<typeof websiteFacts>, ref: string): string | undefined { return facts.find((fact) => fact.ref === ref)?.value; }
+function researchQuestionId(primaryId: string): string { return bounded(`geo-article-research:${primaryId}`, 500); }
 function classifyFallback(error: unknown, timedOut: boolean): GeoArticleFallbackReason {
   if (timedOut) return "timeout";
   if (error instanceof GeoArticleQualityError) return "quality_rejected";
@@ -277,27 +429,19 @@ function classifyFallback(error: unknown, timedOut: boolean): GeoArticleFallback
   if (error instanceof TypeError) return "contract_rejected";
   return "provider_error";
 }
-
 class GeoArticleQualityError extends Error {}
-
-function buildExplanation(elementId: string, heading: string, reason: string, geoFunction: string, evidenceRef: string) {
-  return { elementId, heading, reason, geoFunction, evidenceRefs: [evidenceRef] };
-}
 function answerText(card: OpenGeoAnswerCardV3, fallback: string): string {
   if (card.answerMode === "generative_search_v1") return card.refusal?.reason || card.answerText || fallback;
   return card.sentences.filter(({ kind }) => kind !== "scope_note").map(({ text }) => text).join(" ") || fallback;
 }
-function cleanProviderReferences(value: string): string {
-  return safeText(value
-    .replace(/来源\s*\d+(?:\s*[、,，]\s*\d+)*/gu, "")
-    .replace(/source\s*\d+(?:\s*[,，]\s*\d+)*/giu, ""));
-}
 function safeText(value: string): string {
-  return bounded(value
-    .replace(/<\/?[a-z][^>]*>/giu, "")
-    .replace(/\[([^\]]+)\]\([^\s)]+\)/gu, "$1")
-    .replace(/[*_`#]/gu, ""), 4_000) || "—";
+  return bounded(value.replace(/<\/?[a-z][^>]*>/giu, "").replace(/\[([^\]]+)\]\([^\s)]+\)/gu, "$1").replace(/[*_`#]/gu, ""), 4_000);
 }
+function cleanProviderReferences(value: string): string {
+  return safeText(value.replace(/(?:source|来源)\s*\d+/giu, "公开资料").replace(/\s{2,}/gu, " "));
+}
+function isChinese(locale: string): boolean { return locale.toLowerCase().startsWith("zh"); }
+function hanCount(value: string): number { return value.match(/[\p{Script=Han}]/gu)?.length ?? 0; }
 function normalize(value: string): string { return value.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ""); }
 function bounded(value: string, max: number): string { return value.trim().slice(0, max); }
 function objectOrEmpty(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
