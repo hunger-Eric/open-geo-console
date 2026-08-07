@@ -253,7 +253,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
 
   it("derives one truthful decision narrative before context and the detailed questions",()=>{
     const model=generativeModel();
-    model.combinedReport.technicalFoundation.aiReport.dimensionScores=[{dimension:"organizationClarity",score:42,explanation:"Persisted score explanation"}];
+    model.combinedReport.technicalFoundation.aiReport.dimensionScores=[{dimension:"organizationClarity",score:42,explanation:"Persisted score explanation",confidence:"medium",evidence:[]}];
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
     const order=["data-decision-summary","data-decision-meaning","data-decision-reasons","data-primary-business-action","data-website-context","data-question-evidence-bridge","data-answer-first-section"].map((marker)=>html.indexOf(marker));
     expect(order).toEqual([...order].sort((a,b)=>a-b));
@@ -339,7 +339,7 @@ describe("CombinedGeoReportV3Artifact",()=>{
   it("renders Direct analyses while preserving the complete technical report and screenshots",()=>{
     const model=generativeModel();
     model.locale="en";
-    model.combinedReport.technicalFoundation.aiReport.dimensionScores=[{dimension:"organizationClarity",score:42,explanation:"Persisted score explanation"}];
+    model.combinedReport.technicalFoundation.aiReport.dimensionScores=[{dimension:"organizationClarity",score:42,explanation:"Persisted score explanation",confidence:"medium",evidence:[]}];
     model.combinedReport.directSemantics={
       version:"free-v4-direct-semantics-v1",
       questions:model.combinedReport.answerCards.map((card,index)=>index===2
@@ -426,15 +426,53 @@ describe("CombinedGeoReportV3Artifact",()=>{
     expect(html).not.toContain("source:generated-source-1");
   });
 
-  it("renders the delivered V3 article, retained focused research, and separate GEO explanation without an outline label",()=>{
+  it("renders a clean V3 article before one collapsed sources and writing disclosure",()=>{
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model:articleV3Model()}));
-    for(const value of ["GEO 完整文章","专题公开研究","企业采用跨境物流服务时如何核对交付边界","跨境物流实施指南","跨境物流需要明确异常处理和责任边界。","为什么这样组织这篇文章","专题搜索与 AI 成文均完成"]){
+    for(const value of ["GEO 完整文章","资料来源与写作说明","参考资料","企业采用跨境物流服务时如何核对交付边界","跨境物流实施指南","跨境物流需要明确异常处理和责任边界。","为什么这样组织这篇文章","专题搜索与 AI 成文均完成"]){
       expect(html).toContain(value);
     }
+    const articleAt=html.indexOf('<article class="geo-article-body">');
+    const titleAt=html.indexOf("企业选择跨境物流服务时应核对哪些能力",articleAt);
+    const notesAt=html.indexOf('data-article-supporting-notes="true"');
+    const researchAt=html.indexOf('data-geo-article-research="usable"');
+    expect(articleAt).toBeGreaterThan(0);
+    expect(titleAt).toBeGreaterThan(articleAt);
+    expect(notesAt).toBeGreaterThan(titleAt);
+    expect(researchAt).toBeGreaterThan(notesAt);
+    expect(html.slice(articleAt,notesAt)).not.toContain("依据");
+    expect(html.slice(articleAt,notesAt)).not.toContain("Q1");
+    expect(html.slice(articleAt,notesAt)).not.toContain("fixture-search-model");
     expect(html).toContain('data-geo-article-kind="article"');
     expect(html).toContain('data-geo-article-generation-mode="model_researched"');
     expect(html).toContain('data-geo-article-research="usable"');
     expect(html).not.toContain("待补充证据后再成文");
+  });
+
+  it("separates reconstructable technical arithmetic from model-assisted dimensions",()=>{
+    const model=generativeModel();
+    model.combinedReport.technicalFoundation.technicalReport.score=88;
+    model.combinedReport.technicalFoundation.technicalReport.scoreBreakdown={
+      version:"technical_checklist_v2",startingScore:100,finalScore:88,checkedPages:4,evaluatedRules:13,
+      deductions:[{rule:"page.missingJsonLd",affectedCount:2,pointsPerOccurrence:6,maximumDeduction:18,deducted:12,findingIds:["v3-tech"],representativeUrls:["https://example.com/page"]}]
+    };
+    model.combinedReport.technicalFoundation.aiReport.dimensionScores=[{dimension:"organizationClarity",score:78,explanation:"Evidence-bound semantic assessment.",confidence:"medium",evidence:[{url:"https://example.com/page",quote:"V3 Page H1"}]}];
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    expect(html).toContain('data-technical-score-method="technical_checklist_v2"');
+    expect(html).toContain("100 − 12 = 88");
+    expect(html).toContain("模型辅助的内容与 GEO 表达评估");
+    expect(html).toContain("以下六项是模型依据已抓取网页证据给出的内容与 GEO 表达评估，不是上方技术检查的分项，也不参与技术分计算。");
+    expect(html).toContain("较强");
+    expect(html).toContain("置信度：中");
+    expect(html).toContain("查看 1 条评分依据");
+  });
+
+  it("marks historical technical scores as non-reconstructable",()=>{
+    const model=generativeModel();
+    delete model.combinedReport.technicalFoundation.technicalReport.scoreBreakdown;
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    expect(html).toContain('data-technical-score-method="legacy"');
+    expect(html).toContain("该版本没有保存逐项算式，因此不能从当前报告精确复算");
+    expect(html).toContain("历史技术分");
   });
 
   it("keeps historical V1 fallback readable as an outline and normalizes provider ordinals",()=>{

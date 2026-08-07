@@ -71,6 +71,8 @@ export function buildSynthesisPrompt(
       "Every finding must cite an exact supplied URL and a verbatim quote.",
       "Do not claim external domain ownership verification; ownershipVerification must be not-performed.",
       "Scores are semantic AI assessments and must not alter any separate deterministic technical GEO score.",
+      "Score each semantic dimension against scoreBandRubric. Do not reward page count, visual polish, or unsupported inference. Use the lowest band whose evidence requirements are fully met.",
+      "A score of 90 or above requires comprehensive, consistent evidence across multiple relevant supplied pages; never use 100 for sampled website evidence.",
       "Clearly state uncertainty and sampling limitations."
     ],
     ...(correctionRequired.length ? { correctionRequired } : {}),
@@ -87,6 +89,13 @@ export function buildSynthesisPrompt(
       "trustEvidence",
       "entityConsistency",
       "geoUnderstandability"
+    ],
+    scoreBandRubric: [
+      { range: "0-39", band: "insufficient", anchor: "The supplied evidence is absent, contradictory, or too weak to support this dimension." },
+      { range: "40-59", band: "weak", anchor: "Some relevant evidence exists, but major elements are missing or inconsistent." },
+      { range: "60-74", band: "adequate", anchor: "The core requirement is supported, with material gaps or limited coverage." },
+      { range: "75-89", band: "strong", anchor: "Clear and consistent evidence supports most of the dimension across relevant sampled pages." },
+      { range: "90-99", band: "exceptional", anchor: "Comprehensive, specific, and consistent evidence supports the dimension across multiple relevant supplied pages." }
     ],
     requiredShape: {
       organizationProfile: {

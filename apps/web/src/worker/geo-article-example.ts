@@ -31,8 +31,8 @@ export interface GeoArticleExampleInput {
 type FallbackInput = Omit<GeoArticleExampleInput, "client" | "researchProvider">;
 
 export async function generateGeoArticleExample(input: GeoArticleExampleInput): Promise<GeoArticleDeliverableV3> {
-  const title = workingTitle(input);
-  const research = await focusedResearch(input, title);
+  const title = editorialTitle(input);
+  const research = await focusedResearch(input, researchQuery(input));
   const authority = articleAuthority(input, research);
   const controller = new AbortController();
   const abort = () => controller.abort(input.signal?.reason);
@@ -82,7 +82,7 @@ export function buildGeoArticleFallback(
 ): GeoArticleDeliverableV3 {
   const zh = isChinese(input.locale);
   const now = (input.now ?? (() => new Date()))().toISOString();
-  const title = workingTitle(input);
+  const title = editorialTitle(input);
   const primary = articleQuestions(input)[0]!;
   const facts = websiteFacts(input);
   if (facts.length < 2) throw new TypeError("A complete GEO article requires at least two verified website business facts.");
@@ -93,7 +93,7 @@ export function buildGeoArticleFallback(
   const research = retainedResearch ?? {
     outcome: "unavailable",
     queryId: researchQuestionId(primary.id),
-    query: title,
+    query: researchQuery(input),
     providerId: "not_attempted",
     model: "not_attempted",
     searchMode: "not_attempted",
@@ -308,7 +308,17 @@ function articleQuestionEvidence(input: GeoArticleExampleInput, index: number): 
   };
 }
 
-function workingTitle(input: FallbackInput | GeoArticleExampleInput): string {
+function editorialTitle(input: FallbackInput | GeoArticleExampleInput): string {
+  const zh = isChinese(input.locale);
+  const facts = websiteFacts(input);
+  const service = facts.find(({ ref }) => ref.startsWith("website:service:"))?.value ?? (zh ? "这项业务能力" : "this business capability");
+  const subject = conciseBusinessSubject(service, zh);
+  return zh
+    ? `${subject}落地：先核对业务场景与交付边界`
+    : bounded(`${subject}: verify operating fit and delivery boundaries`, 110);
+}
+
+function researchQuery(input: FallbackInput | GeoArticleExampleInput): string {
   const zh = isChinese(input.locale);
   const facts = websiteFacts(input);
   const service = facts.find(({ ref }) => ref.startsWith("website:service:"))?.value ?? (zh ? "这项业务能力" : "this business capability");
@@ -316,6 +326,15 @@ function workingTitle(input: FallbackInput | GeoArticleExampleInput): string {
   return bounded(zh
     ? `${audience}采用${service}时，如何核对业务场景、交付边界与公开证据`
     : `How ${audience} should evaluate ${service}: operating fit, delivery boundaries, and public proof`, 300);
+}
+
+function conciseBusinessSubject(value: string, zh: boolean): string {
+  const clean = safeText(value).replace(/[（(][^）)]*[）)]/gu, "").split(/[，,；;：:]/u)[0]!.trim();
+  if (!zh) return bounded(clean.replace(/\b(?:services?|solutions?)\b$/iu, "").trim() || "Business capability", 54);
+  if (/AI.{0,8}工作流/iu.test(clean)) return "企业 AI 工作流";
+  if (/业务流程自动化/iu.test(clean)) return "业务流程自动化";
+  const withoutGenericEnding = clean.replace(/(?:解决方案|设计与交付服务|交付服务|服务)$/u, "").trim();
+  return bounded(withoutGenericEnding || "企业业务能力", 16);
 }
 
 function fallbackFaq(input: FallbackInput, zh: boolean, service: { ref: string; value: string }, audience: { ref: string; value: string }) {
@@ -372,7 +391,8 @@ function websiteEvidenceOnly(input: FallbackInput, zh: boolean): { text: string;
 }
 
 function assertArticleQuality(deliverable: GeoArticleDeliverableV3, input: FallbackInput | GeoArticleExampleInput): void {
-  if (deliverable.article.title !== workingTitle(input)) throw new GeoArticleQualityError("title_changed");
+  if (deliverable.article.title !== editorialTitle(input)) throw new GeoArticleQualityError("title_changed");
+  if (isChinese(input.locale) && deliverable.article.title.length > 36) throw new GeoArticleQualityError("title_too_long");
   const blocks = [deliverable.article.introduction, ...deliverable.article.sections.flatMap(({ paragraphs }) => paragraphs), ...deliverable.article.faq.map(({ answer }) => answer)];
   if (isChinese(input.locale) && (hanCount(deliverable.article.introduction.text) < 12 ||
       deliverable.article.sections.some(({ paragraphs }) => hanCount(paragraphs[0]!.text) < 8) ||

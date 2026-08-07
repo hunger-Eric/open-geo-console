@@ -7533,3 +7533,61 @@ revised scope.
 - Terminal status: **local implementation and automated Direct delivery
   validation complete; real generated-report editorial quality remains
   unverified until a separately authorized real run.**
+
+---
+
+## 2026-08-07 - Protected Staging packaging for recovery and GEO article
+
+- Packaged the previously approved browser-recovery and Paid V3 GEO-article
+  changes as candidate `597b9daf801ae75463e5ce598b7c32939eb94a43` and pushed
+  `main` to the same SHA.
+- Deployed one source-only Preview and one thin Staging Worker overlay, moved
+  only the fixed Protected Staging alias, and verified Web/free/deep revision
+  equality with Worker restart counts at zero.
+- The agent performed no report submission, crawl, model call, payment, refund,
+  email, Production deployment, or historical replay. Manual testing remained
+  the user's Gate 4.
+- Manual testing then exposed two presentation/trust defects: the retained
+  research audit displaced the publishable article reading flow, and the
+  deterministic technical score was presented beside model-semantic dimension
+  scores without explaining that they used different methods.
+- Terminal status: **deployment scope completed; the two newly observed defects
+  require a separate scope and do not reopen this deployment authority.**
+
+---
+
+## 2026-08-07 - Clean Paid V3 article and explainable score presentation
+
+- The user approved a prospective-report-only repair after manual testing
+  showed that research metadata displaced the article and that two unrelated
+  score methods appeared to be one system.
+- Paid V3 now separates a concise editorial title from the full internal
+  research query. Its main reading surface contains only the complete article;
+  research sources, generation details, evidence bindings, and the retained
+  GEO-writing explanation are grouped after the article in one collapsed
+  disclosure. Historical article and outline rendering remains unchanged.
+- New technical audits now store `technical_checklist_v2`: 100 starting points,
+  fixed per-rule deductions and caps, checked-page/rule coverage, finding IDs,
+  representative URLs, and an exactly reconstructable final score. Page count
+  alone no longer adds points. Historical scores remain readable and are
+  labelled as non-reconstructable instead of being silently recalculated.
+- The six semantic dimensions remain model-assisted rather than deterministic.
+  The synthesis prompt now supplies five evidence bands, prevents page-count or
+  visual-polish rewards, and reserves 90+ for comprehensive multi-page evidence.
+  The report labels these separately and shows band, numeric value, confidence,
+  explanation, and retained evidence.
+- Verification: 59/59 focused tests passed; Web lint passed with 0 errors and 6
+  existing warnings outside this scope; all workspace builds and the Next.js
+  production build/TypeScript passed; `git diff --check` passed; CodeGraph is up
+  to date. Production additions were 144 lines (budget 420) and test additions
+  were 97 lines (budget 360).
+- Full `npm test` recorded 3278 passing, 211 skipped, and 2 failures in
+  `combined-replacement-terminalization.test.ts` and
+  `paid-v3-semantic-review.test.ts`. Those paths and behaviors were outside the
+  approved allowlist and were not changed; this run does not establish whether
+  they predated the scope.
+- No real crawl, search, model call, report, payment, refund, email, historical
+  mutation, commit, push, Docker action, deployment, or alias movement occurred.
+- Terminal status: **local implementation and focused/build verification
+  complete; live generated-report editorial calibration and browser visual
+  acceptance remain unverified.**

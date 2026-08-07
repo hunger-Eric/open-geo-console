@@ -90,6 +90,23 @@ describe("website synthesis semantic-validation seam", () => {
     expect(prompt.rules).toContain("Distinguish publication dates from other page dates. If a date's meaning is ambiguous, state that uncertainty instead of inferring that it is in the future.");
   });
 
+  it("anchors model-assisted dimension scores to explicit evidence bands", () => {
+    const prompt = JSON.parse(buildSynthesisPrompt(input(), [], "deferred")) as {
+      rules: string[];
+      scoreBandRubric: Array<{ range: string; band: string; anchor: string }>;
+    };
+
+    expect(prompt.scoreBandRubric.map(({ range, band }) => ({ range, band }))).toEqual([
+      { range: "0-39", band: "insufficient" },
+      { range: "40-59", band: "weak" },
+      { range: "60-74", band: "adequate" },
+      { range: "75-89", band: "strong" },
+      { range: "90-99", band: "exceptional" }
+    ]);
+    expect(prompt.rules).toContain("Score each semantic dimension against scoreBandRubric. Do not reward page count, visual polish, or unsupported inference. Use the lowest band whose evidence requirements are fully met.");
+    expect(prompt.rules).toContain("A score of 90 or above requires comprehensive, consistent evidence across multiple relevant supplied pages; never use 100 for sampled website evidence.");
+  });
+
   it("rejects model prose that calls a date before reportAsOf future", async () => {
     const output = modelOutput();
     (output.executiveSummary as { overview: string }).overview = "页面中的 2026-05-26 属于未来时间，发布日期存在异常。";

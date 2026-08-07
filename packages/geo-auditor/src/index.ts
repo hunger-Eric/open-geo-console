@@ -184,6 +184,26 @@ export interface GeoAuditReport {
   recommendations: string[];
   pages: AuditedPage[];
   machineReadableAssets: MachineReadableAssets;
+  scoreBreakdown?: TechnicalScoreBreakdownV2;
+}
+
+export interface TechnicalScoreDeductionV2 {
+  rule: FindingMessageKey;
+  affectedCount: number;
+  pointsPerOccurrence: number;
+  maximumDeduction: number;
+  deducted: number;
+  findingIds: string[];
+  representativeUrls: string[];
+}
+
+export interface TechnicalScoreBreakdownV2 {
+  version: "technical_checklist_v2";
+  startingScore: 100;
+  finalScore: number;
+  checkedPages: number;
+  evaluatedRules: number;
+  deductions: TechnicalScoreDeductionV2[];
 }
 
 export interface AuditSiteOptions {
@@ -237,16 +257,17 @@ export async function auditSite(inputUrl: string, options: AuditSiteOptions = {}
     llmsTxt: assetCheck("llms.txt", llmsTxt)
   };
   const findings = buildFindings(root.href, pages, machineReadableAssets);
-  const score = calculateScore(findings, pages);
+  const scoreBreakdown = calculateScoreBreakdown(findings, pages);
 
   return {
     url: root.href,
     scannedAt,
-    score,
+    score: scoreBreakdown.finalScore,
     findings,
     recommendations: [...new Set(findings.map((finding) => finding.recommendation))],
     pages,
-    machineReadableAssets
+    machineReadableAssets,
+    scoreBreakdown
   };
 }
 
@@ -263,12 +284,14 @@ export function projectHomepageReport(report: GeoAuditReport): GeoAuditReport {
   const pages = homepage ? [homepage] : [];
   const findings = buildFindings(report.url, pages, report.machineReadableAssets);
 
+  const scoreBreakdown = calculateScoreBreakdown(findings, pages);
   return {
     ...report,
-    score: calculateScore(findings, pages),
+    score: scoreBreakdown.finalScore,
     findings,
     recommendations: [...new Set(findings.map((finding) => finding.recommendation))],
-    pages
+    pages,
+    scoreBreakdown
   };
 }
 
@@ -592,36 +615,63 @@ function renderMessageTemplate(template: MessageTemplate, params: FindingMessage
   return typeof template === "function" ? template(params) : template;
 }
 
-const FINDING_PENALTY: Record<FindingSeverity, number> = {
-  critical: 18,
-  warning: 8,
-  info: 3
-};
-
-const FINDING_PENALTY_CAP: Record<FindingSeverity, number> = {
-  critical: 30,
-  warning: 16,
-  info: 6
+const TECHNICAL_CHECK_WEIGHTS: Record<FindingMessageKey, { pointsPerOccurrence: number; maximumDeduction: number }> = {
+  "asset.missingLlmsTxt": { pointsPerOccurrence: 2, maximumDeduction: 2 },
+  "asset.missingSitemapXml": { pointsPerOccurrence: 12, maximumDeduction: 12 },
+  "asset.missingRobotsTxt": { pointsPerOccurrence: 4, maximumDeduction: 4 },
+  "page.badStatus": { pointsPerOccurrence: 18, maximumDeduction: 30 },
+  "page.weakTitle": { pointsPerOccurrence: 4, maximumDeduction: 12 },
+  "page.duplicateTitles": { pointsPerOccurrence: 6, maximumDeduction: 12 },
+  "page.dominantTitleTemplate": { pointsPerOccurrence: 6, maximumDeduction: 12 },
+  "page.missingMetaDescription": { pointsPerOccurrence: 4, maximumDeduction: 12 },
+  "page.h1Structure": { pointsPerOccurrence: 4, maximumDeduction: 12 },
+  "page.missingCanonical": { pointsPerOccurrence: 2, maximumDeduction: 6 },
+  "page.missingJsonLd": { pointsPerOccurrence: 6, maximumDeduction: 18 },
+  "page.lowReadableContent": { pointsPerOccurrence: 4, maximumDeduction: 12 },
+  "homepage.missingOpenGraph": { pointsPerOccurrence: 2, maximumDeduction: 2 }
 };
 
 export function calculateScore(findings: GeoFinding[], pages: AuditedPage[]): number {
-  const rules = new Map<string, { affectedCount: number; severity: FindingSeverity }>();
+  return calculateScoreBreakdown(findings, pages).finalScore;
+}
+
+export function calculateScoreBreakdown(findings: GeoFinding[], pages: AuditedPage[]): TechnicalScoreBreakdownV2 {
+  const rules = new Map<FindingMessageKey, { affectedCount: number; findingIds: string[]; representativeUrls: string[] }>();
   for (const finding of findings) {
-    const ruleKey = finding.messageKey ?? finding.id;
+    const ruleKey = finding.messageKey;
+    if (!ruleKey) continue;
     const current = rules.get(ruleKey);
     const affectedCount = Math.max(1, finding.aggregation?.affectedCount ?? 1);
     rules.set(ruleKey, {
       affectedCount: (current?.affectedCount ?? 0) + affectedCount,
-      severity: current?.severity ?? finding.severity
+      findingIds: [...(current?.findingIds ?? []), finding.id],
+      representativeUrls: [...new Set([
+        ...(current?.representativeUrls ?? []),
+        ...(finding.aggregation?.representativeUrls ?? (finding.url ? [finding.url] : []))
+      ])].slice(0, 3)
     });
   }
-  const penalty = [...rules.values()].reduce(
-    (sum, rule) =>
-      sum + Math.min(FINDING_PENALTY[rule.severity] * rule.affectedCount, FINDING_PENALTY_CAP[rule.severity]),
-    0
-  );
-  const coverageBonus = Math.min(pages.length, 5) * 2;
-  return Math.max(0, Math.min(100, 88 + coverageBonus - penalty));
+  const deductions = [...rules.entries()].map(([rule, occurrence]) => {
+    const weight = TECHNICAL_CHECK_WEIGHTS[rule];
+    return {
+      rule,
+      affectedCount: occurrence.affectedCount,
+      pointsPerOccurrence: weight.pointsPerOccurrence,
+      maximumDeduction: weight.maximumDeduction,
+      deducted: Math.min(weight.pointsPerOccurrence * occurrence.affectedCount, weight.maximumDeduction),
+      findingIds: occurrence.findingIds,
+      representativeUrls: occurrence.representativeUrls
+    };
+  }).sort((left, right) => right.deducted - left.deducted || left.rule.localeCompare(right.rule));
+  const finalScore = Math.max(0, 100 - deductions.reduce((sum, deduction) => sum + deduction.deducted, 0));
+  return {
+    version: "technical_checklist_v2",
+    startingScore: 100,
+    finalScore,
+    checkedPages: pages.length,
+    evaluatedRules: Object.keys(TECHNICAL_CHECK_WEIGHTS).length,
+    deductions
+  };
 }
 
 function assetCheck(name: string, result: FetchResult): AssetCheck {

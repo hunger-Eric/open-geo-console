@@ -109,25 +109,31 @@ function inputCardFixture() { return combinedV3ArtifactFixture().combinedReport.
 function sourceIdFor(card: ReturnType<typeof inputCardFixture>): string { return card.answerMode === "generative_search_v1" ? card.sources[0]!.sourceId : card.sourceEvidence[0]!.evidenceId; }
 
 describe("GEO article V3 generation", () => {
-  it("runs title-focused search before one model call and retains a business-specific GEO article", async () => {
+  it("uses a concise editorial title while keeping the full buyer question for research", async () => {
     const order: string[] = [];
+    let searchedQuestion = "";
     const provider = researchProvider();
     vi.mocked(provider.answerWithSources).mockImplementation(async (request) => {
       order.push("search");
+      searchedQuestion = request.question;
       return (await researchProvider().answerWithSources(request));
     });
     const request = input({ configuredModel: "fixture", completeJson: vi.fn() }, "en", provider);
     const completeJson = vi.fn(async ({ messages }: { messages: Array<{ role: string; content: string }> }) => {
       order.push("article");
       const payload = JSON.parse(messages.find(({ role }) => role === "user")!.content) as { exactTitle: string };
-      expect(payload.exactTitle).toContain("Enterprise teams");
       expect(payload.exactTitle).toContain("AI workflow automation");
+      expect(payload.exactTitle).not.toContain("Enterprise teams");
+      expect(payload.exactTitle.length).toBeLessThanOrEqual(110);
       return { value: modelArticle(request.answerCards[0].questionId), modelId: "fixture", rawContent: "{}" };
     });
     const article = await generateGeoArticleExample({ ...request, client: { configuredModel: "fixture", completeJson } });
     expect(order).toEqual(["search", "article"]);
     expect(provider.answerWithSources).toHaveBeenCalledOnce();
     expect(completeJson).toHaveBeenCalledOnce();
+    expect(searchedQuestion).toContain("Enterprise teams");
+    expect(searchedQuestion).toContain("AI workflow automation");
+    expect(searchedQuestion).not.toBe(article.article.title);
     expect(article).toMatchObject({ version: GEO_ARTICLE_DELIVERABLE_V3_VERSION, kind: "article", generationMode: "model_researched", research: { outcome: "usable" } });
     expect(article.article.introduction.evidenceRefs).toEqual(expect.arrayContaining(["website:service:0", "website:audience:0"]));
     expect(article.explanation.map(({ elementId }) => elementId)).toEqual(["title", "introduction", "section:scenario", "section:criteria", "section:proof", "faq"]);
@@ -185,6 +191,9 @@ describe("GEO article V3 generation", () => {
     const article = buildGeoArticleFallback(fallbackInput, "provider_error");
     const prose = [article.article.title, article.article.introduction.text, ...article.article.sections.flatMap(({ heading, paragraphs }) => [heading, ...paragraphs.map(({ text }) => text)])].join(" ");
     expect(article).toMatchObject({ kind: "article", generationMode: "deterministic_evidence_fallback" });
+    expect(article.article.title).toBe("企业 AI 工作流落地：先核对业务场景与交付边界");
+    expect(article.article.title.length).toBeLessThanOrEqual(36);
+    expect(article.research.query).toContain("企业团队采用AI 工作流自动化时");
     expect(prose).toContain("AI 工作流自动化");
     expect(prose).toContain("企业团队");
     expect(prose).not.toMatch(/领先|一站式|保证排名|联系我们|閸|鈥/u);
