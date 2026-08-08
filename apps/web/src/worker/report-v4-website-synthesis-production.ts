@@ -16,11 +16,27 @@ import {
   type ReportV4MimoSiteSynthesisProvider
 } from "../report-v4/mimo-site-synthesis-provider";
 import {
+  MIMO_CONTENT_FILTERED_CODE,
+  MIMO_INVALID_RESPONSE_CODE,
+  MIMO_OUTPUT_TRUNCATED_CODE,
+  MIMO_TIMEOUT_CODE,
+  ReportV4MimoProviderError
+} from "../report-v4/mimo-provider";
+import {
   resolveReportV4LockedModelRuntime,
   type ReportV4ModelRuntimeConfig
 } from "../report-v4/model-runtime-config";
 
 export const REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID = "websiteSynthesis" as const;
+
+export class ReportV4WebsiteSynthesisUnavailableError extends Error {
+  readonly providerCalls = 1 as const;
+
+  constructor(cause: unknown) {
+    super("The V4 website-synthesis provider was unavailable.", { cause });
+    this.name = "ReportV4WebsiteSynthesisUnavailableError";
+  }
+}
 
 export interface ReportV4WebsiteSynthesisProductionInput extends WebsiteSynthesisLineage {
   readonly workerId: string;
@@ -97,17 +113,32 @@ function createRunner(
     input.signal.throwIfAborted();
     await repository.beginProviderCall({ ...checkpointIdentity, workerId: input.workerId });
 
+    let output: ReportV4WebsiteSynthesisOutput;
     try {
-      const output = await provider.synthesizeWebsite(providerInput, input.signal);
-      input.signal.throwIfAborted();
-      const completed = await repository.complete({ ...checkpointIdentity, workerId: input.workerId, output });
-      return completedResult(completed, 1, false);
+      output = await provider.synthesizeWebsite(providerInput, input.signal);
     } catch (error) {
       if (input.signal.aborted) throw error;
       await repository.fail({ ...checkpointIdentity, workerId: input.workerId, errorCode: boundedErrorCode(error) });
+      if (isWebsiteSynthesisProviderFailure(error)) {
+        throw new ReportV4WebsiteSynthesisUnavailableError(error);
+      }
       throw error;
     }
+    input.signal.throwIfAborted();
+    const completed = await repository.complete({ ...checkpointIdentity, workerId: input.workerId, output });
+    return completedResult(completed, 1, false);
   };
+}
+
+function isWebsiteSynthesisProviderFailure(error: unknown): boolean {
+  if (!(error instanceof ReportV4MimoProviderError)) return false;
+  return error.code === "transport"
+    || error.code === "rate_limited"
+    || error.code === "temporary_provider"
+    || error.code === MIMO_INVALID_RESPONSE_CODE
+    || error.code === MIMO_OUTPUT_TRUNCATED_CODE
+    || error.code === MIMO_CONTENT_FILTERED_CODE
+    || error.code === MIMO_TIMEOUT_CODE;
 }
 
 function exactLineage(input: ReportV4WebsiteSynthesisProductionInput): WebsiteSynthesisLineage {

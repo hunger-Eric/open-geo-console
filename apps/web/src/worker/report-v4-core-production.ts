@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { CombinedGeoReportV4PageOutcome } from "@open-geo-console/ai-report-engine";
 import {
   createPostgresReportV4ArtifactRevisionExecutor,
   prepareReportV4CoreGeneration,
@@ -29,7 +30,6 @@ import { resolvePaidReportV4SiteSnapshot } from "../db/report-v4-site-snapshots"
 import { ensureDatabase, getSqlClient } from "../db";
 import {
   terminalizePaidReportV4Core,
-  terminalizeUnavailablePaidReportV4Core,
   enqueuePaidReportV4DiagnosisEnhancement
 } from "../db/public-source-commerce";
 import {
@@ -50,7 +50,8 @@ import {
 import { renderReportV4Html } from "../report/report-v4-html";
 import { getPreparedProviderProfileRuntime, type PreparedProviderProfileRuntime } from "../provider-profile/runtime";
 import {
-  createReportV4ProductionPageAnalysis
+  createReportV4ProductionPageAnalysis,
+  ReportV4PageAnalysisUnavailableError
 } from "./report-v4-page-analysis-production";
 import {
   answerReportV4Questions,
@@ -61,7 +62,9 @@ import { StagingLiveDrillFaultError } from "./job-errors";
 import type { StagingLiveDrill } from "./staging-live-drill";
 import {
   createReportV4WebsiteSynthesisProduction,
-  REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID
+  REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID,
+  ReportV4WebsiteSynthesisUnavailableError,
+  type ReportV4WebsiteSynthesisProductionResult
 } from "./report-v4-website-synthesis-production";
 import {
   runReportV4CoreStage,
@@ -263,17 +266,6 @@ export function createReportV4CoreProductionWithDependencies(
       runtime: acceptanceRuntime,
       coreArtifactRevisionId
     });
-    const guardedStageDependencies: ReportV4CoreStageDependencies = {
-      ...observedStageDependencies,
-      async resolveSnapshot(snapshotInput) {
-        const snapshot = await observedStageDependencies.resolveSnapshot(snapshotInput);
-        if (snapshot.snapshot.analyzablePageCount < 1) {
-          throw new Error("A paid Report V4 production snapshot must contain at least one analyzable page; zero-page admission is upstream-only.");
-        }
-        return snapshot;
-      }
-    };
-
     return runReportV4CoreStage({
       reportId: input.reportId,
       orderId: input.orderId,
@@ -292,7 +284,7 @@ export function createReportV4CoreProductionWithDependencies(
       },
       questions,
       signal: input.signal
-    }, guardedStageDependencies);
+    }, observedStageDependencies);
   };
 }
 
@@ -388,7 +380,8 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
             )
           });
           const analyzePage = createReportV4ProductionPageAnalysis({ repository: pageSummaries, provider });
-          const pageResults = await Promise.all(snapshot.pages.filter(({ analyzable }) => analyzable).map((page) => {
+          const analyzablePages = snapshot.pages.filter(({ analyzable }) => analyzable);
+          const pageResults = await Promise.allSettled(analyzablePages.map((page) => {
             if (!page.readMode || !page.contentHash || !page.retainedText) {
               throw new Error("An analyzable paid Report V4 page is missing retained immutable content.");
             }
@@ -406,6 +399,48 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
             });
           }));
           activeSignal.throwIfAborted();
+          for (const result of pageResults) {
+            if (result.status === "rejected" && !(result.reason instanceof ReportV4PageAnalysisUnavailableError)) {
+              throw result.reason;
+            }
+          }
+          const pageModelCalls = pageResults.reduce((total, result) => total + (result.status === "fulfilled"
+            ? result.value.providerCalls
+            : (result.reason as ReportV4PageAnalysisUnavailableError).providerCalls), 0);
+          const successfulPageIds = new Set(pageResults.flatMap((result, index) => result.status === "fulfilled"
+            ? [analyzablePages[index]!.id]
+            : []));
+          const pageOutcomes = snapshot.pages.map((page): CombinedGeoReportV4PageOutcome => {
+            if (page.analyzable) {
+              return {
+                ordinal: page.ordinal,
+                pageId: page.id,
+                url: page.normalizedUrl,
+                status: successfulPageIds.has(page.id) ? "analyzed" : "analysis_unavailable",
+                readMode: page.readMode,
+                reasonCode: successfulPageIds.has(page.id) ? null : "page_analysis_unavailable"
+              };
+            }
+            const reasonCode = page.exclusionReason ?? "policy_excluded";
+            return {
+              ordinal: page.ordinal,
+              pageId: page.id,
+              url: page.normalizedUrl,
+              status: isCrawlUnavailableReason(reasonCode) ? "crawl_unavailable" : "excluded",
+              readMode: null,
+              reasonCode
+            };
+          });
+          if (successfulPageIds.size === 0) {
+            return {
+              websiteSynthesis: {
+                status: "unavailable" as const,
+                reason: analyzablePages.length === 0 ? "no_crawl_readable_pages" as const : "all_page_analyses_unavailable" as const
+              },
+              pageOutcomes,
+              modelCalls: pageModelCalls
+            };
+          }
           const pages = await loadReportV4PageSummariesForWebsiteSynthesis({
             reportId: execution.input.reportId,
             snapshotId: execution.input.siteSnapshotId,
@@ -444,24 +479,35 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
             ...(options.fetch ? { fetch: options.fetch } : {}),
             provider: websiteProvider
           });
-          const synthesis = await synthesize({
-            reportId: execution.input.reportId,
-            orderId: execution.input.orderId,
-            coreJobId: execution.input.coreJobId,
-            configSnapshotId: execution.input.configSnapshotId,
-            siteSnapshotId: execution.input.siteSnapshotId,
-            operationId: REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID,
-            profileId: execution.configSnapshot.modelProfileId,
-            workerId: execution.input.workerId,
-            leaseMs: execution.input.leaseMs,
-            targetUrl: execution.context.targetUrl,
-            locale: execution.input.locale,
-            pages,
-            signal: activeSignal
-          });
+          let synthesis: ReportV4WebsiteSynthesisProductionResult;
+          try {
+            synthesis = await synthesize({
+              reportId: execution.input.reportId,
+              orderId: execution.input.orderId,
+              coreJobId: execution.input.coreJobId,
+              configSnapshotId: execution.input.configSnapshotId,
+              siteSnapshotId: execution.input.siteSnapshotId,
+              operationId: REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID,
+              profileId: execution.configSnapshot.modelProfileId,
+              workerId: execution.input.workerId,
+              leaseMs: execution.input.leaseMs,
+              targetUrl: execution.context.targetUrl,
+              locale: execution.input.locale,
+              pages,
+              signal: activeSignal
+            });
+          } catch (error) {
+            if (!(error instanceof ReportV4WebsiteSynthesisUnavailableError)) throw error;
+            return {
+              websiteSynthesis: { status: "unavailable" as const, reason: "website_synthesis_unavailable" as const },
+              pageOutcomes,
+              modelCalls: pageModelCalls + error.providerCalls
+            };
+          }
           return {
-            websiteSynthesis: synthesis.output,
-            modelCalls: pageResults.reduce((total, result) => total + result.providerCalls, 0) + synthesis.providerCalls
+            websiteSynthesis: { status: "available" as const, ...synthesis.output },
+            pageOutcomes,
+            modelCalls: pageModelCalls + synthesis.providerCalls
           };
         },
         async answerQuestions({ questions, signal }) {
@@ -558,18 +604,8 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
           signal?.throwIfAborted();
           return readyReportV4CoreRevision(input, revisions);
         },
-        async terminalizeUnavailableCore({ signal }) {
-          signal?.throwIfAborted();
-          return terminalizeUnavailablePaidReportV4Core({
-            reportId: execution.input.reportId,
-            coreJobId: execution.input.coreJobId,
-            orderId: execution.input.orderId,
-            siteSnapshotId: execution.input.siteSnapshotId,
-            questionSetId: execution.input.questionSetId,
-            configSnapshotId: execution.input.configSnapshotId,
-            locale: execution.input.locale,
-            workerId: execution.input.workerId
-          });
+        async terminalizeUnavailableCore() {
+          throw new Error("The V4 core no longer terminalizes content unavailability without an artifact.");
         },
         async terminalizeCoreCommercial({ report, signal }) {
           signal?.throwIfAborted();
@@ -600,6 +636,24 @@ export function resolveReportV4QuestionSearchSurface(input: {
     throw new Error("The paid Report V4 question region conflicts with the prepared public-search surface.");
   }
   return Object.freeze({ reportLanguage, searchLocale, searchRegion });
+}
+
+const CRAWL_UNAVAILABLE_REASONS = new Set([
+  "raw_fetch_failed",
+  "raw_extraction_failed",
+  "browser_render_failed",
+  "dns_not_found",
+  "deadline_exceeded",
+  "robots_denied",
+  "login_required",
+  "captcha_required",
+  "paywalled",
+  "non_html_content_type",
+  "empty_analyzable_body"
+]);
+
+function isCrawlUnavailableReason(reasonCode: string): boolean {
+  return CRAWL_UNAVAILABLE_REASONS.has(reasonCode);
 }
 
 export function withReportV4QuestionFailureDrill(input: {

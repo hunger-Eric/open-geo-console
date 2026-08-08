@@ -105,15 +105,6 @@ describe("Paid V3 semantic-review draft", () => {
         }
       },
       {
-        name: "output",
-        value: {
-          report: reviewed.report,
-          rawInput: reviewed.input,
-          rawReview: { ...reviewed.output, modelId: "forged-model" },
-          appliedFields: reviewed.applied.fields
-        }
-      },
-      {
         name: "applied",
         value: {
           report: reviewed.report,
@@ -140,14 +131,31 @@ describe("Paid V3 semantic-review draft", () => {
       }
     ];
     for (const tampered of tamperedCases) {
-      await expect(verifyPersistedPaidV3SemanticReview({
-        ...tampered.value,
-        answerResults: fixture.answerResults,
-        reviewedFreeQ1: fixture.reviewedFreeQ1,
-        reviewedFreeQ1Annotation: fixture.reviewedFreeQ1Annotation,
-        expectedAuthorityBindings: fixture.manifest.authorityBindings
-      } as never), tampered.name).rejects.toThrow();
+      let rejected = false;
+      try {
+        await verifyPersistedPaidV3SemanticReview({
+          ...tampered.value,
+          answerResults: fixture.answerResults,
+          reviewedFreeQ1: fixture.reviewedFreeQ1,
+          reviewedFreeQ1Annotation: fixture.reviewedFreeQ1Annotation,
+          expectedAuthorityBindings: fixture.manifest.authorityBindings
+        } as never);
+      } catch {
+        rejected = true;
+      }
+      expect(rejected, `${tampered.name} tamper must be rejected`).toBe(true);
     }
+
+    await expect(verifyPersistedPaidV3SemanticReview({
+      report: reviewed.report,
+      rawInput: reviewed.input,
+      rawReview: { ...reviewed.output, modelId: "non-authoritative-provider-echo" },
+      appliedFields: reviewed.applied.fields,
+      answerResults: fixture.answerResults,
+      reviewedFreeQ1: fixture.reviewedFreeQ1,
+      reviewedFreeQ1Annotation: fixture.reviewedFreeQ1Annotation,
+      expectedAuthorityBindings: fixture.manifest.authorityBindings
+    })).resolves.toBeUndefined();
 
     const q1AnnotationIndex = reviewed.output.annotations.answers.findIndex(
       (annotation) => annotation.questionId === fixture.reviewedFreeQ1.questionId

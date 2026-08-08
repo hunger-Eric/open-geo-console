@@ -1,5 +1,5 @@
 import "server-only";
-import type { AiWebsiteReportV1, CombinedGeoReportV1, CombinedGeoReportV2, CombinedGeoReportV3, CombinedGeoReportV3CrawlDiagnostic, CombinedGeoReportV4, RecommendationForensicReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
+import type { AiWebsiteReportV1, CombinedGeoReportV1, CombinedGeoReportV2, CombinedGeoReportV3, CombinedGeoReportV3CrawlDiagnostic, PersistedCombinedGeoReportV4, RecommendationForensicReportV1, RecommendationForensicReportV2 } from "@open-geo-console/ai-report-engine";
 import type { GeoAuditReport } from "@open-geo-console/geo-auditor";
 import { getAiReport } from "@/db/ai-reports";
 import { listEvidenceAssets } from "@/db/evidence-assets";
@@ -33,7 +33,7 @@ export interface CombinedPrivateReportArtifactModelV4 {
   productContract: "combined_geo_report_v4";
   reportId: string;
   locale: ReportLocale;
-  combinedReport: CombinedGeoReportV4;
+  combinedReport: PersistedCombinedGeoReportV4;
   artifactRevisionId: string;
 }
 export type CombinedPrivateReportArtifactModel = CombinedPrivateReportArtifactModelV1 | CombinedPrivateReportArtifactModelV2 | CombinedPrivateReportArtifactModelV3 | CombinedPrivateReportArtifactModelV4;

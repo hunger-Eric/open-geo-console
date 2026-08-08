@@ -273,23 +273,20 @@ export async function terminalizePaidReportV4Core(input: {
     const refundId = await requireV4RefundTruth(tx, order, outcome);
     const template = outcome === "completed" ? "report_ready" : "limited_report_refund";
     const businessKey = `${template}/${report.artifactRevisionId}/v1`;
-    let accessTokenId: string | null = null;
-    if (outcome === "completed") {
-      const token = deterministicReportAccessToken(report.reportId, businessKey, tokenSecret);
-      const tokenId = randomUUID();
-      await tx`INSERT INTO report_access_tokens(id,report_id,token_prefix,token_hmac,artifact_scope,expires_at)
-        VALUES(${tokenId},${report.reportId},${token.displayPrefix},${hmacSecret(token.raw, tokenSecret)},'combined_geo_report_v4',now()+interval '30 days')
-        ON CONFLICT(token_hmac) DO NOTHING`;
-      const access = (await tx<Array<{ id: string; report_id: string; artifact_scope: string }>>`
-        SELECT id,report_id,artifact_scope FROM report_access_tokens
-        WHERE token_hmac=${hmacSecret(token.raw, tokenSecret)} FOR UPDATE
-      `)[0];
-      if (!access || access.report_id !== report.reportId || access.artifact_scope !== "combined_geo_report_v4") {
-        throw new Error("The V4 report access token identity conflicts with the core artifact.");
-      }
-      accessTokenId = access.id;
-      fault(input.faultAfter, "access");
+    const token = deterministicReportAccessToken(report.reportId, businessKey, tokenSecret);
+    const tokenId = randomUUID();
+    await tx`INSERT INTO report_access_tokens(id,report_id,token_prefix,token_hmac,artifact_scope,expires_at)
+      VALUES(${tokenId},${report.reportId},${token.displayPrefix},${hmacSecret(token.raw, tokenSecret)},'combined_geo_report_v4',now()+interval '30 days')
+      ON CONFLICT(token_hmac) DO NOTHING`;
+    const access = (await tx<Array<{ id: string; report_id: string; artifact_scope: string }>>`
+      SELECT id,report_id,artifact_scope FROM report_access_tokens
+      WHERE token_hmac=${hmacSecret(token.raw, tokenSecret)} FOR UPDATE
+    `)[0];
+    if (!access || access.report_id !== report.reportId || access.artifact_scope !== "combined_geo_report_v4") {
+      throw new Error("The V4 report access token identity conflicts with the core artifact.");
     }
+    const accessTokenId: string = access.id;
+    fault(input.faultAfter, "access");
 
     const emailId = randomUUID();
     await tx`INSERT INTO email_deliveries(id,order_id,report_id,template_type,template_version,locale,recipient_ref,provider,business_idempotency_key,state)
@@ -356,7 +353,8 @@ export async function recoverFailedPaidReportV4CoreForTerminalReplay(input: {
     const report = parseCombinedGeoReportV4(artifact.payload);
     assertV4CoreArtifact(artifact, report);
     const recoveryTopology = recoverableV4CoreTopology(artifact);
-    if (!["completed", "completed_limited"].includes(report.status)) {
+    const recoveryOutcome = requireV4CommerceOutcome(report.status);
+    if (recoveryOutcome !== "completed" && recoveryOutcome !== "completed_limited") {
       throw new Error("Only a deliverable V4 core may recover for commercial terminal replay.");
     }
 
@@ -531,7 +529,7 @@ export async function enqueuePaidReportV4DiagnosisEnhancement(input: {
         job.artifact_contract !== "combined_geo_report_v4" || job.reason !== "standard" ||
         job.correction_id !== null || job.replacement_fulfillment_id !== null || !job.credit_reservation_id ||
         job.site_snapshot_id !== identity.siteSnapshotId || job.business_question_set_id !== identity.questionSetId ||
-        !v4LocaleMatches(input.locale, job.locale) || report.status !== job.stage ||
+        !v4LocaleMatches(input.locale, job.locale) || requireV4CommerceOutcome(report.status) !== job.stage ||
         artifact.job_id !== job.id || artifact.report_id !== job.report_id ||
         artifact.order_id !== identity.orderId || artifact.question_set_id !== identity.questionSetId ||
         artifact.config_snapshot_id !== identity.configSnapshotId) {
@@ -1281,8 +1279,7 @@ function deterministicReportAccessToken(reportId: string, businessKey: string, s
   return { raw, displayPrefix: raw.slice(0, 19) };
 }
 function requireV4CommerceOutcome(status: CombinedGeoReportV4["status"]): "completed" | "completed_limited" {
-  if (status === "unavailable") throw new Error("V4 commercial terminalization requires a deliverable core report.");
-  return status;
+  return status === "unavailable" ? "completed" : status;
 }
 function v4LocaleMatches(generationLocale: string, persistedLocale: string): boolean {
   try { return normalizeReportLanguage(generationLocale) === persistedLocale; }

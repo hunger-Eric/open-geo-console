@@ -3,6 +3,10 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CombinedGeoReportV4 } from "@open-geo-console/ai-report-engine";
 import { closeDatabase, getSqlClient, initializeDatabaseEnvironment } from "../db";
+import {
+  clearPreparedProviderProfileRuntimeForTest,
+  publishPreparedProviderProfileRuntime
+} from "../provider-profile/runtime";
 import { createReportV4ProductionJobRepository } from "../db/report-v4-production-jobs";
 import {
   enqueuePaidReportV4DiagnosisEnhancement,
@@ -82,6 +86,8 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
   it("rejects wrong and expired leases before any new write or provider work", async () => {
     const before = await counts();
     let providerCalls = 0;
+    clearPreparedProviderProfileRuntimeForTest();
+    publishPreparedProviderProfileRuntime({} as never);
     const production = createReportV4CoreProduction({
       environment: {},
       fetch: async () => {
@@ -109,6 +115,7 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
     expect(await counts()).toEqual(before);
     expect(providerCalls).toBe(0);
     await getSqlClient()`UPDATE scan_jobs SET lease_expires_at=now()+interval '5 minutes' WHERE id=${ids.coreJobId}`;
+    clearPreparedProviderProfileRuntimeForTest();
   });
 
   it("reloads an exact ready-reserved crash with zero model calls and atomically completes commerce", async () => {
@@ -170,14 +177,15 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
     expect(await counts()).toMatchObject({ artifacts: 1, jobCompleted: 1, settledCredits: 1, accessTokens: 1, enhancements: 1 });
   }, 180_000);
 
-  it("keeps all-unavailable orchestration artifact-free", async () => {
+  it("delivers all-unavailable questions as a completed-limited artifact", async () => {
     let prepared = 0;
     const unavailableReportId = `unavailable-${suffix}`;
     const dependencies: ReportV4CoreStageDependencies = {
       nowMs: () => 1, nowIso: () => "2026-07-17T00:00:00.000Z",
       async loadCoreArtifact() { return null; },
       async resolveSnapshot() { return { ...snapshotBundle(), snapshot: { ...snapshotBundle().snapshot, reportId: unavailableReportId } }; },
-      async synthesizeWebsite() { return { websiteSynthesis: coreReport().websiteSynthesis, modelCalls: 0 }; },
+      async synthesizeWebsite() { return { websiteSynthesis: coreReport().websiteSynthesis,
+        pageOutcomes: coreReport().pageCoverage.pages, modelCalls: 0 }; },
       async answerQuestions() {
         return {
           questions: ([1, 2, 3] as const).map((order) => ({
@@ -188,12 +196,12 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
         };
       },
       async prepareCoreRevision() { prepared += 1; },
-      async renderCoreHtml() { throw new Error("must not render"); },
-      async persistCoreArtifact() { throw new Error("must not persist"); },
-      async readyCoreRevision() { throw new Error("must not ready"); },
-      async terminalizeUnavailableCore() {},
-      async terminalizeCoreCommercial() { throw new Error("must not deliver"); },
-      async enqueueDiagnosisEnhancement() { throw new Error("must not enqueue"); }
+      async renderCoreHtml() { return "<!doctype html><html></html>"; },
+      async persistCoreArtifact() { return { payloadIdentityHash: sha("limited-payload"), htmlSha256: sha("limited-html") }; },
+      async readyCoreRevision() {},
+      async terminalizeUnavailableCore() { throw new Error("must not use legacy unavailable terminalization"); },
+      async terminalizeCoreCommercial() {},
+      async enqueueDiagnosisEnhancement() { return { status: "not_enqueued" as const, reason: "question_failure" as const }; }
     };
     const result = await runReportV4CoreStage({
       reportId: unavailableReportId, orderId: "unavailable-order", coreJobId: "unavailable-job",
@@ -202,8 +210,8 @@ describePostgres("Report V4 core production PostgreSQL crash transitions", () =>
       snapshotIdentity: { id: ids.siteSnapshotId, reportId: unavailableReportId, siteKey: "crash.example", collectorConfigIdentityHash: sha("collector"), contentIdentityHash: sha("content") },
       questions: [1, 2, 3].map((order) => ({ order: order as 1 | 2 | 3, questionId: `uq${order}`, questionText: `Unavailable ${order}?` })) as never
     }, dependencies);
-    expect(result.delivery).toBe("unavailable");
-    expect(prepared).toBe(0);
+    expect(result).toMatchObject({ delivery: "core_active", status: "completed_limited" });
+    expect(prepared).toBe(1);
     const rows = await getSqlClient()<Array<{ count: number }>>`SELECT count(*)::int count FROM report_artifact_revisions WHERE report_id=${unavailableReportId}`;
     expect(rows[0]!.count).toBe(0);
   });
@@ -213,7 +221,10 @@ function coreReport(): CombinedGeoReportV4 {
   return {
     version: 4, artifactContract: "combined_geo_report_v4", reportId: ids.reportId, artifactRevisionId,
     targetUrl: "https://crash.example/", locale: "zh", generatedAt: "2026-07-17T00:00:00.000Z",
-    status: "completed", websiteSynthesis: { summary: "Summary", strengths: [], gaps: [], actions: [] },
+    status: "completed", websiteSynthesis: { status: "available", summary: "Summary", strengths: [], gaps: [], actions: [] },
+    pageCoverage: { counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: `page-${suffix}`, url: "https://crash.example/", status: "analyzed",
+        readMode: "direct_readable", reasonCode: null }] },
     questions: ([1, 2, 3] as const).map((order) => ({
       order, questionId: `${ids.questionSetId}-q${order}`, questionText: `Question ${order}?`,
       status: "answered" as const, answer: `Answer ${order}.`, sources: []

@@ -58,6 +58,11 @@ describe("Free V4 direct semantics probe", () => {
     expect(result.diagnoses).toHaveLength(3);
     expect(result.diagnoses.every(({ status }) => status === "completed")).toBe(true);
     expect(result.report.status).toBe("completed");
+    expect(result.report.websiteSynthesis.status).toBe("available");
+    expect(result.report.pageCoverage).toMatchObject({
+      counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ pageId: "submitted-homepage", status: "analyzed", reasonCode: null }]
+    });
     expect(result.report.questions.every(({ diagnosis }) => diagnosis)).toBe(true);
     expect(result.modelCallCount).toBe(9);
     expect(result.transportRequestCount).toBe(0);

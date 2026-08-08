@@ -317,10 +317,16 @@ function report(artifactRevisionId = "core-v4", diagnosed = false) {
     generatedAt: "2026-07-17T00:00:00.000Z",
     status: "completed" as const,
     websiteSynthesis: {
+      status: "available" as const,
       summary: "Website summary.",
       strengths: ["Clear services."],
       gaps: ["Delivery evidence is limited."],
       actions: ["Publish delivery evidence."]
+    },
+    pageCoverage: {
+      counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: "page-1", url: "https://example.com/", status: "analyzed" as const,
+        readMode: "direct_readable" as const, reasonCode: null }]
     },
     questions: ([1, 2, 3] as const).map((order) => ({
       order,

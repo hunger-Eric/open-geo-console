@@ -443,7 +443,18 @@ export async function runFreeV4DirectSemanticsProbe(input: {
       locale: "zh-CN",
       generatedAt: now().toISOString(),
       status: "completed",
-      websiteSynthesis,
+      websiteSynthesis: { status: "available", ...websiteSynthesis },
+      pageCoverage: {
+        counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+        pages: [{
+          ordinal: 1,
+          pageId: pageSummary.pageId,
+          url: pageSummary.url,
+          status: "analyzed",
+          readMode: pageSummary.readability,
+          reasonCode: null
+        }]
+      },
       questions: coreQuestions
     });
     persistedCoreReport = coreReport;

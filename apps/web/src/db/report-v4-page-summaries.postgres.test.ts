@@ -91,7 +91,7 @@ describeDisposablePostgres("V4 page-summary repository PostgreSQL parity", () =>
       .resolves.toBeDefined();
   }, 120_000);
 
-  it("fails closed when a terminal snapshot is missing one analyzable page summary", async () => {
+  it("loads the exact successful summary subset when another analyzable page analysis is unavailable", async () => {
     await seedSnapshot(sql, "report-missing", "snapshot-missing", [1, 2], "completed");
     const repository = createReportV4PageSummaryRepository(createPostgresReportV4PageSummaryStore(
       createReportV4PageSummaryPostgresDatabase(sql)
@@ -100,7 +100,7 @@ describeDisposablePostgres("V4 page-summary repository PostgreSQL parity", () =>
     await expect(repository.loadForWebsiteSynthesis({
       reportId: "report-missing", snapshotId: "snapshot-missing", contentIdentityHash: hash("snapshot-missing")
     }))
-      .rejects.toThrow(/every analyzable page|missing/i);
+      .resolves.toMatchObject([{ pageId: "snapshot-missing-page-1" }]);
   }, 120_000);
 });
 

@@ -378,7 +378,10 @@ async function insertJob(sql: postgres.Sql, id: string, reportId: string, snapsh
 function combinedPayload(reportId: string, artifactRevisionId: string, questions: string, targetUrl: string) {
   return { version: 4, artifactContract: "combined_geo_report_v4", reportId, artifactRevisionId, targetUrl, locale: "en",
     generatedAt: "2026-07-17T00:00:00.000Z", status: "completed_limited", websiteSynthesis: {
-      summary: "Summary", strengths: [], gaps: [], actions: [] }, questions: [1, 2, 3].map((ordinal) => ordinal === 2
+      status: "available", summary: "Summary", strengths: [], gaps: [], actions: [] },
+    pageCoverage: { counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: "page-1", url: targetUrl, status: "analyzed", readMode: "direct_readable", reasonCode: null }] },
+    questions: [1, 2, 3].map((ordinal) => ordinal === 2
       ? { order: ordinal, questionId: `${questions}-q${ordinal}`, questionText: `Question ${ordinal}?`, status: "unavailable", answer: null, sources: [] }
       : { order: ordinal, questionId: `${questions}-q${ordinal}`, questionText: `Question ${ordinal}?`, status: "answered",
         answer: `Answer ${ordinal}.`, sources: [{ questionId: `${questions}-q${ordinal}`, sourceId: `source-${ordinal}`,

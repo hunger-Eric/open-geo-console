@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { ReportV4MimoProviderError } from "../report-v4/mimo-provider";
 import { ReportV4MimoSiteSynthesisOutputError } from "../report-v4/mimo-site-synthesis-provider";
-import { createReportV4ProductionPageAnalysis } from "./report-v4-page-analysis-production";
+import {
+  createReportV4ProductionPageAnalysis,
+  ReportV4PageAnalysisUnavailableError
+} from "./report-v4-page-analysis-production";
 
 // @requirement GEO-V4-TOKEN-01
 // @requirement GEO-V4-TOKEN-02
@@ -53,6 +57,24 @@ describe("production V4 page-analysis adapter", () => {
     expect(h.analyze).toHaveBeenCalledTimes(2);
   });
 
+  it("types exhausted provider output and transport failures as page-analysis unavailability", async () => {
+    for (const providerError of [
+      new ReportV4MimoSiteSynthesisOutputError("invalid output"),
+      new ReportV4MimoProviderError("transport", "transport failed")
+    ]) {
+      const h = harness();
+      h.analyze.mockRejectedValue(providerError);
+
+      await expect(h.run(base)).rejects.toMatchObject({
+        name: "ReportV4PageAnalysisUnavailableError",
+        providerCalls: 2,
+        cause: providerError
+      } satisfies Partial<ReportV4PageAnalysisUnavailableError>);
+      expect(h.analyze).toHaveBeenCalledTimes(2);
+      expect(h.persist).not.toHaveBeenCalled();
+    }
+  });
+
   it("does not retry unclassified provider failures", async () => {
     const h = harness();
     h.analyze.mockRejectedValueOnce(new Error("transport failed"));
@@ -60,6 +82,20 @@ describe("production V4 page-analysis adapter", () => {
     await expect(h.run(base)).rejects.toThrow(/transport failed/i);
     expect(h.analyze).toHaveBeenCalledTimes(1);
     expect(h.persist).not.toHaveBeenCalled();
+  });
+
+  it("preserves exact lineage-load and persistence failures", async () => {
+    const lineageFailure = new Error("lineage database unavailable");
+    const lineage = harness();
+    lineage.load.mockRejectedValueOnce(lineageFailure);
+    await expect(lineage.run(base)).rejects.toBe(lineageFailure);
+    expect(lineage.analyze).not.toHaveBeenCalled();
+
+    const persistenceFailure = new Error("page summary persistence failed");
+    const persistence = harness();
+    persistence.persist.mockRejectedValueOnce(persistenceFailure);
+    await expect(persistence.run(base)).rejects.toBe(persistenceFailure);
+    expect(persistence.analyze).toHaveBeenCalledTimes(1);
   });
 
   it("rejects malicious identity before loading", async () => {

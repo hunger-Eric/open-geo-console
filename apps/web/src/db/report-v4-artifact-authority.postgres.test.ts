@@ -236,7 +236,10 @@ async function seedCore(sql: postgres.Sql, options: SeedOptions = {}) {
 function combinedPayload(reportId: string, artifactRevisionId: string, questions: string, kind: ScenarioKind) {
   return { version: 4, artifactContract: "combined_geo_report_v4", reportId, artifactRevisionId, targetUrl: "https://example.test/SECRET_URL",
     locale: "en", generatedAt: "2026-07-17T00:00:00.000Z", status: kind === "question_failure" ? "completed_limited" : "completed",
-    websiteSynthesis: { summary: "Summary", strengths: [], gaps: [], actions: [] },
+    websiteSynthesis: { status: "available", summary: "Summary", strengths: [], gaps: [], actions: [] },
+    pageCoverage: { counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: `${reportId}-page-1`, url: "https://example.test/SECRET_URL", status: "analyzed",
+        readMode: "direct_readable", reasonCode: null }] },
     questions: [1,2,3].map((ordinal) => kind === "question_failure" && ordinal === 2
       ? { order: ordinal, questionId: `${questions}-q${ordinal}`, questionText: `Question ${ordinal}?`, status: "unavailable", answer: null, sources: [] }
       : { order: ordinal, questionId: `${questions}-q${ordinal}`, questionText: `Question ${ordinal}?`, status: "answered",

@@ -137,10 +137,15 @@ function v4Report() {
     generatedAt: "2030-01-01T00:00:00.000Z",
     status: "completed",
     websiteSynthesis: {
+      status: "available",
       summary: "V4 website conclusion.",
       strengths: ["V4 website strength."],
       gaps: ["V4 website gap."],
       actions: ["V4 GEO website action."]
+    },
+    pageCoverage: {
+      counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: "page-1", url: "https://target.example/", status: "analyzed", readMode: "direct_readable", reasonCode: null }]
     },
     questions: [
       question(1, "one"),

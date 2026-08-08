@@ -28,6 +28,92 @@
 
 ---
 
+## 2026-08-08 - Historical V4 dual-read compatibility completed locally
+
+- Current-data diagnosis confirmed that five active Protected Staging V4
+  payloads use the exact former V4 shape while the prospective parser requires
+  `pageCoverage` and `websiteSynthesis.status`. Four of those artifacts have
+  live V4 access tokens; one failed fulfillment has no live token.
+- The approved repair adds an exact historical V4 parser and a persisted-read
+  union parser. Only `apps/web/src/db/combined-reports.ts` imports the union
+  parser. Generation, orchestration, artifact persistence/authority, commerce,
+  recovery, and enhancement paths retain `parseCombinedGeoReportV4` and cannot
+  admit historical payloads into a write path.
+- Historical reports preserve their former two-section rendering, stored root
+  status, and absence of a page ledger. Prospective reports retain the strict
+  page ledger and website-synthesis status union. No snapshot-derived or
+  candidate-derived content is fabricated.
+- Red-before proved the persisted-read parser did not exist and the strict
+  prospective parser rejected the historical shape. Green focused verification
+  passed 59/59 tests across the five approved files, including hybrid/partial
+  rejection and source-boundary assertions.
+- `npm run build` passed all workspace TypeScript builds and the Next.js
+  production build. Full `npm test` passed 3358 tests in 327 files with 213
+  conditional skips. A concurrent first run exposed a 10-second Windows
+  preflight hook timeout; its isolated 22/22 rerun and the sequential full run
+  passed, confirming resource contention rather than a product failure.
+- `npm run lint` passed with 0 errors and 8 pre-existing warnings; the two
+  initially introduced test warnings were removed. Canonical disposable
+  PostgreSQL run `pg-20260808135322-203d03c8` passed 282/282 with zero skips and
+  removed its temporary container. `git diff --check`, `codegraph sync`, and
+  `codegraph status` passed.
+- Compatibility-specific production and test edits remain inside the approved
+  `+260/-80` and `+450/-120` budgets. The complete worktree also contains the
+  separately approved prospective V4 repair recorded immediately below.
+- No report, crawl, public search/model call, payment, refund, email, data
+  mutation, Docker image build/replacement, deployment, Git stage/commit/push,
+  branch, tag, merge, or worktree action was performed.
+- Terminal status: **local implementation and automated verification complete;
+  Protected Staging deployment and real customer-path acceptance remain
+  separately gated.**
+
+---
+
+## 2026-08-08 - Prospective V4 page-outcome repair stopped at current-data compatibility gate
+
+- The user approved local prospective V4 repairs so individual crawl/page
+  analysis failures become report content while integrity, authority,
+  persistence, and system failures remain true report failures.
+- The local implementation covered the six audited V4 boundaries, probe/test
+  coverage, and four independent V3 baseline failures. `npm run build` passed;
+  lint reported 0 errors and 8 pre-existing warnings; the full unit suite
+  passed 3352 tests with 213 skipped; disposable PostgreSQL passed 282/282 with
+  zero skips.
+- The mandatory read-only current-data preflight found five active Protected
+  Staging V4 payloads and all five lacked at least one prospective strict field:
+  `pageCoverage` or `websiteSynthesis.status`.
+- Per the approved stop condition, no historical parser relaxation, fabricated
+  page ledger, backfill, data mutation, deployment, real report/model call,
+  commerce action, or Git action was performed. The prospective code remains
+  local, unstaged, and uncommitted pending a separately frozen compatibility
+  diagnosis.
+- Terminal status: **prospective implementation and automated verification
+  complete; current active-artifact compatibility requires separate diagnosis
+  and approval before the change can be considered releasable.**
+
+---
+
+## 2026-08-08 - Paid V4 locale and atomic terminalization deployed to Protected Staging
+
+- The user approved the exact eleven-file release, one non-force push, and
+  Protected Staging Gates 0-3 for the prospective Paid V4 locale-boundary and
+  atomic permanent-failure terminalization repair.
+- Candidate `23c5e3a85362a7bf97db55cc136f1f0a6b3590ea` was committed on
+  `main` with message `fix: terminalize paid v4 locale failures`; current local
+  `main` and the running Staging Worker deployment version match that SHA.
+- The deployed source-only Worker overlay is
+  `open-geo-console:staging-23c5e3a8-paid-v4-locale-overlay-v1`; both named
+  Staging Workers were observed running on it with the Staging database marker.
+- Fixed-site smoke created no report, crawl, model call, order, payment,
+  refund, email, or customer artifact. A later user-created report reached the
+  repaired locale boundary and atomic failure terminalizer, then exposed a
+  separate page-analysis source-offset contract failure.
+- Terminal status: **Protected Staging deployment completed; real Paid V4 flow
+  not accepted.** The later model-output failure is governed only by the new
+  active scope, not by this historical release authority.
+
+---
+
 ## 2026-08-08 - Pre-admission bounded retry and free-report fallback completed locally
 
 - Prospective `v4_pre_admission` jobs now have a maximum of three attempts.

@@ -72,9 +72,11 @@ async function sendDelivery(delivery: EmailDeliveryRow, owner: string, gateway: 
   if (!recipient || !order || recipient.emailKeyVersion !== "v1") throw new Error("commercial_email_recipient_unavailable");
   let reportUrl: string | undefined;
   const requiresReportAccess = delivery.templateType === "report_ready" || delivery.templateType === "link_reissue"
-    || delivery.templateType === "corrected_report_ready" || delivery.templateType === "replacement_report_ready";
-  if (requiresReportAccess && (order.paymentStatus !== "paid" || order.fulfillmentStatus !== "completed"
-      || order.refundStatus !== "not_required")) {
+    || delivery.templateType === "corrected_report_ready" || delivery.templateType === "replacement_report_ready"
+    || delivery.templateType === "limited_report_refund";
+  const artifactBearingFulfillment = order.fulfillmentStatus === "completed" || order.fulfillmentStatus === "completed_limited";
+  if (requiresReportAccess && (order.paymentStatus !== "paid" || !artifactBearingFulfillment
+      || (order.fulfillmentStatus === "completed" && order.refundStatus !== "not_required"))) {
     throw new Error("commercial_email_report_access_unavailable");
   }
   if (requiresReportAccess) {

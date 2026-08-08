@@ -10,7 +10,14 @@ import {
   ReportV4MimoSiteSynthesisOutputError,
   type ReportV4MimoSiteSynthesisProvider
 } from "../report-v4/mimo-site-synthesis-provider";
-import type { ProviderDependencies } from "../report-v4/mimo-provider";
+import {
+  MIMO_CONTENT_FILTERED_CODE,
+  MIMO_INVALID_RESPONSE_CODE,
+  MIMO_OUTPUT_TRUNCATED_CODE,
+  MIMO_TIMEOUT_CODE,
+  ReportV4MimoProviderError,
+  type ProviderDependencies
+} from "../report-v4/mimo-provider";
 
 export interface ReportV4ProductionPageAnalysisInput {
   readonly reportId: string;
@@ -39,6 +46,16 @@ export interface ReportV4ProductionPageAnalysisResult {
 }
 
 const MAX_PAGE_ANALYSIS_PROVIDER_ATTEMPTS = 2;
+
+export class ReportV4PageAnalysisUnavailableError extends Error {
+  readonly providerCalls: 1 | 2;
+
+  constructor(providerCalls: 1 | 2, cause: unknown) {
+    super("The V4 page-analysis provider was unavailable after its configured attempts.", { cause });
+    this.name = "ReportV4PageAnalysisUnavailableError";
+    this.providerCalls = providerCalls;
+  }
+}
 
 export function createReportV4ProductionPageAnalysis(
   dependencies: ReportV4ProductionPageAnalysisDependencies
@@ -69,8 +86,11 @@ export function createReportV4ProductionPageAnalysis(
         break;
       } catch (error) {
         input.signal.throwIfAborted();
-        if (!(error instanceof ReportV4MimoSiteSynthesisOutputError) || attempt === MAX_PAGE_ANALYSIS_PROVIDER_ATTEMPTS) {
+        if (!isPageAnalysisProviderFailure(error)) {
           throw error;
+        }
+        if (attempt === MAX_PAGE_ANALYSIS_PROVIDER_ATTEMPTS) {
+          throw new ReportV4PageAnalysisUnavailableError(providerCalls, error);
         }
       }
     }
@@ -99,6 +119,18 @@ export function createReportV4ProductionPageAnalysis(
     });
     return Object.freeze({ summary: persisted.summary, providerCalls, reused: false });
   };
+}
+
+function isPageAnalysisProviderFailure(error: unknown): boolean {
+  if (error instanceof ReportV4MimoSiteSynthesisOutputError) return true;
+  if (!(error instanceof ReportV4MimoProviderError)) return false;
+  return error.code === "transport"
+    || error.code === "rate_limited"
+    || error.code === "temporary_provider"
+    || error.code === MIMO_INVALID_RESPONSE_CODE
+    || error.code === MIMO_OUTPUT_TRUNCATED_CODE
+    || error.code === MIMO_CONTENT_FILTERED_CODE
+    || error.code === MIMO_TIMEOUT_CODE;
 }
 
 function canonicalLocationId(pageId: string, chunkOrder: number, locationOrder: number): string {

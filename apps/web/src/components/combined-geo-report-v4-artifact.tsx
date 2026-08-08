@@ -3,10 +3,84 @@ import type {
   CombinedGeoReportV4,
   CombinedGeoReportV4Question,
   CombinedGeoReportV4Source,
-  CombinedGeoReportV4SourceRetrievalStatus
+  CombinedGeoReportV4SourceRetrievalStatus,
+  CombinedGeoReportV4WebsiteSynthesis,
+  HistoricalCombinedGeoReportV4,
+  PersistedCombinedGeoReportV4
 } from "@open-geo-console/ai-report-engine";
+import { isHistoricalCombinedGeoReportV4 } from "@open-geo-console/ai-report-engine";
 
-export function CombinedGeoReportV4Artifact({ report }: { readonly report: CombinedGeoReportV4 }) {
+export function CombinedGeoReportV4Artifact({ report }: { readonly report: PersistedCombinedGeoReportV4 }) {
+  if (isHistoricalCombinedGeoReportV4(report)) return <HistoricalV4Artifact report={report}/>;
+  const copy = report.locale.toLocaleLowerCase("en-US").startsWith("zh") ? ZH : EN;
+  return <main className="report-shell answer-first-report report-v4-artifact" data-report-version="4">
+    <header className="report-hero answer-first-hero">
+      <p className="eyebrow">{copy.kicker}</p>
+      <h1>{copy.title}</h1>
+      <p className="lede">{copy.introduction}</p>
+      <dl className="metadata-grid">
+        <Meta label={copy.target}>
+          <a href={report.targetUrl} rel="noreferrer noopener" target="_blank">{report.targetUrl}</a>
+        </Meta>
+        <Meta label={copy.generated}>{formatTimestamp(report.generatedAt, report.locale)}</Meta>
+      </dl>
+    </header>
+
+    <section className="report-section" aria-labelledby="v4-page-coverage">
+      <p className="section-index">01</p>
+      <h2 id="v4-page-coverage">{copy.pageCoverage}</h2>
+      <p>{copy.pageCoverageIntroduction}</p>
+      <dl className="metadata-grid">
+        <Meta label={copy.totalPages}>{report.pageCoverage.counts.total}</Meta>
+        <Meta label={copy.analyzedPages}>{report.pageCoverage.counts.analyzed}</Meta>
+        <Meta label={copy.crawlUnavailablePages}>{report.pageCoverage.counts.crawlUnavailable}</Meta>
+        <Meta label={copy.excludedPages}>{report.pageCoverage.counts.excluded}</Meta>
+        <Meta label={copy.analysisUnavailablePages}>{report.pageCoverage.counts.analysisUnavailable}</Meta>
+      </dl>
+      <ol className="source-card-list page-outcome-list">
+        {report.pageCoverage.pages.map((page) => <li className="source-card" key={page.pageId} data-page-outcome={page.status}>
+          <div className="source-ordinal" aria-hidden="true">{page.ordinal}</div>
+          <div className="source-content">
+            <h3><a href={page.url} rel="noreferrer noopener" target="_blank">{page.url}</a></h3>
+            <p className={`source-audit-badge page-outcome-${page.status}`}>{pageOutcomeLabel(page.status, copy)}</p>
+            {page.reasonCode && <p className="source-limitation">{copy.observationReason}: <code>{page.reasonCode}</code></p>}
+          </div>
+        </li>)}
+      </ol>
+    </section>
+
+    <section className="report-section executive-summary" aria-labelledby="v4-website-conclusion">
+      <p className="section-index">02</p>
+      <h2 id="v4-website-conclusion">{copy.websiteConclusion}</h2>
+      {report.websiteSynthesis.status === "available" ? <>
+        <div className="summary-copy" data-content-stage="conclusion">
+        <p>{report.websiteSynthesis.summary}</p>
+        </div>
+        <div className="finding-list" data-content-stage="reason">
+        <TextList className="finding-card" heading={copy.strengths} items={report.websiteSynthesis.strengths}/>
+        <TextList className="finding-card" heading={copy.gaps} items={report.websiteSynthesis.gaps}/>
+        </div>
+        <div className="finding-card recommendation" data-content-stage="action">
+        <h3>{copy.geoActions}</h3>
+        <ol>{report.websiteSynthesis.actions.map((action, index) => <li key={index}>{action}</li>)}</ol>
+        </div>
+      </> : <div className="summary-copy source-limitation" data-content-stage="conclusion">
+        <p>{websiteUnavailableCopy(report.websiteSynthesis.reason, copy)}</p>
+      </div>}
+    </section>
+
+    <section className="report-section" aria-labelledby="v4-customer-questions" data-answer-first-section="true">
+      <p className="section-index">03</p>
+      <h2 id="v4-customer-questions">{copy.customerQuestions}</h2>
+      <p>{copy.questionIntroduction}</p>
+      <div className="answer-card-list">
+        {report.questions.map((question) => <QuestionCard copy={copy} key={question.questionId} question={question}/>) }
+      </div>
+    </section>
+  </main>;
+}
+
+function HistoricalV4Artifact({ report }: { readonly report: HistoricalCombinedGeoReportV4 }) {
   const copy = report.locale.toLocaleLowerCase("en-US").startsWith("zh") ? ZH : EN;
   return <main className="report-shell answer-first-report report-v4-artifact" data-report-version="4">
     <header className="report-hero answer-first-hero">
@@ -208,12 +282,47 @@ function retrievalStatusLabel(status: CombinedGeoReportV4SourceRetrievalStatus, 
   }
 }
 
+function pageOutcomeLabel(status: CombinedGeoReportV4["pageCoverage"]["pages"][number]["status"], copy: Copy): string {
+  switch (status) {
+    case "analyzed": return copy.pageAnalyzed;
+    case "crawl_unavailable": return copy.pageCrawlUnavailable;
+    case "excluded": return copy.pageExcluded;
+    case "analysis_unavailable": return copy.pageAnalysisUnavailable;
+  }
+}
+
+function websiteUnavailableCopy(
+  reason: Extract<CombinedGeoReportV4WebsiteSynthesis, { status: "unavailable" }>["reason"],
+  copy: Copy
+): string {
+  switch (reason) {
+    case "no_crawl_readable_pages": return copy.noCrawlReadablePages;
+    case "all_page_analyses_unavailable": return copy.allPageAnalysesUnavailable;
+    case "website_synthesis_unavailable": return copy.websiteSynthesisUnavailable;
+  }
+}
+
 interface Copy {
   readonly kicker: string;
   readonly title: string;
   readonly introduction: string;
   readonly target: string;
   readonly generated: string;
+  readonly pageCoverage: string;
+  readonly pageCoverageIntroduction: string;
+  readonly totalPages: string;
+  readonly analyzedPages: string;
+  readonly crawlUnavailablePages: string;
+  readonly excludedPages: string;
+  readonly analysisUnavailablePages: string;
+  readonly pageAnalyzed: string;
+  readonly pageCrawlUnavailable: string;
+  readonly pageExcluded: string;
+  readonly pageAnalysisUnavailable: string;
+  readonly observationReason: string;
+  readonly noCrawlReadablePages: string;
+  readonly allPageAnalysesUnavailable: string;
+  readonly websiteSynthesisUnavailable: string;
   readonly websiteConclusion: string;
   readonly strengths: string;
   readonly gaps: string;
@@ -246,6 +355,21 @@ const EN: Copy = {
   introduction: "Conclusions, supporting reasons and GEO actions for the audited website.",
   target: "Audited website",
   generated: "Generated",
+  pageCoverage: "Page crawl coverage",
+  pageCoverageIntroduction: "Each row is a terminal observation from this Open GEO crawl. A crawl-unavailable page is part of the result, not a whole-report failure.",
+  totalPages: "Observed pages",
+  analyzedPages: "Analyzed",
+  crawlUnavailablePages: "Crawl unavailable",
+  excludedPages: "Excluded",
+  analysisUnavailablePages: "Internal analysis unavailable",
+  pageAnalyzed: "Page analyzed",
+  pageCrawlUnavailable: "Unavailable to this Open GEO crawl",
+  pageExcluded: "Excluded from analysis",
+  pageAnalysisUnavailable: "Crawled; internal page analysis unavailable",
+  observationReason: "Observation code",
+  noCrawlReadablePages: "This Open GEO crawl could not obtain readable content from any observed page. The page outcomes above are the GEO result; no website synthesis was fabricated.",
+  allPageAnalysesUnavailable: "Readable pages were obtained, but their internal semantic analyses were unavailable. The crawl observations above remain valid; no website synthesis was fabricated.",
+  websiteSynthesisUnavailable: "Readable page analyses remain available, but the internal website synthesis was unavailable. The page observations and customer-question answers remain part of this limited report; no website conclusion was fabricated.",
   websiteConclusion: "Website conclusion",
   strengths: "Supporting strengths",
   gaps: "Observed gaps",
@@ -278,6 +402,21 @@ const ZH: Copy = {
   introduction: "按结论、依据和 GEO 行动呈现目标官网分析。",
   target: "检测网站",
   generated: "生成时间",
+  pageCoverage: "页面爬取覆盖",
+  pageCoverageIntroduction: "每一行都是本次 Open GEO 爬取的终态观察。页面爬取不到是检测结果的一部分，不代表整份报告失败。",
+  totalPages: "观察页面",
+  analyzedPages: "已分析",
+  crawlUnavailablePages: "爬取不可用",
+  excludedPages: "已排除",
+  analysisUnavailablePages: "内部分析不可用",
+  pageAnalyzed: "页面已分析",
+  pageCrawlUnavailable: "本次 Open GEO 爬取不可用",
+  pageExcluded: "已从分析中排除",
+  pageAnalysisUnavailable: "已爬取，内部页面分析不可用",
+  observationReason: "观察代码",
+  noCrawlReadablePages: "本次 Open GEO 爬取未能从任何观察页面取得可读内容。上方页面终态就是 GEO 检测结果；系统没有编造网站综合结论。",
+  allPageAnalysesUnavailable: "系统取得了可读页面，但内部语义分析不可用。上方爬取观察仍然有效；系统没有编造网站综合结论。",
+  websiteSynthesisUnavailable: "页面语义分析仍然可用，但内部网站综合分析不可用。页面观察和客户问题回答仍属于这份受限报告；系统没有编造网站综合结论。",
   websiteConclusion: "官网结论",
   strengths: "支持结论的优势",
   gaps: "可观察缺口",

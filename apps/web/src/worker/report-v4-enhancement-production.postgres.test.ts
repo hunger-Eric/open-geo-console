@@ -3,7 +3,12 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CombinedGeoReportV4, CombinedGeoReportV4Question } from "@open-geo-console/ai-report-engine";
 import { closeDatabase, getSqlClient, initializeDatabaseEnvironment } from "../db";
+import {
+  clearPreparedProviderProfileRuntimeForTest,
+  publishPreparedProviderProfileRuntime
+} from "../provider-profile/runtime";
 import { persistReportV4PageSummary } from "../db/report-v4-page-summaries";
+import { createReportV4MimoDiagnosisProvider } from "../report-v4/mimo-provider";
 import {
   loadReportV4ModelRuntimeConfig,
   REPORT_V4_MIMO_V25_PRO_PROFILE_ID
@@ -33,7 +38,8 @@ const testEnvironment = {
   OGC_PROVIDER_PROFILE: "mimo_native",
   OGC_REPORT_V4_MODEL_PROFILE_ID: REPORT_V4_MIMO_V25_PRO_PROFILE_ID
 } as NodeJS.ProcessEnv;
-const lockedModelProfile = loadReportV4ModelRuntimeConfig(testEnvironment).modelProfile;
+const lockedModelRuntime = loadReportV4ModelRuntimeConfig(testEnvironment);
+const lockedModelProfile = lockedModelRuntime.modelProfile;
 const lockedReportProfile = loadReportV4ReportRuntimeConfig("en").reportProfile;
 const ids = {
   reportId: `report-${suffix}`, orderId: `order-${suffix}`, coreJobId: `core-${suffix}`,
@@ -78,6 +84,7 @@ suite("Report V4 enhancement production PostgreSQL recovery", () => {
   }, 180_000);
 
   afterAll(async () => {
+    clearPreparedProviderProfileRuntimeForTest();
     await closeDatabase();
     restore("DATABASE_URL", original.databaseUrl);
     restore("OGC_DEPLOYMENT_PROFILE", original.deploymentProfile);
@@ -103,6 +110,7 @@ suite("Report V4 enhancement production PostgreSQL recovery", () => {
       if (!sourceId) throw new Error("provider request omitted exact question source identity");
       return mimoResponse(diagnosisForEvidence(sourceId));
     };
+    prepareProviderRuntime(fetch as typeof globalThis.fetch);
     const run = createReportV4EnhancementProduction({
       environment: providerEnvironment(), fetch, now: () => new Date("2026-07-17T00:05:00.000Z")
     });
@@ -124,12 +132,14 @@ suite("Report V4 enhancement production PostgreSQL recovery", () => {
     await getSqlClient()`UPDATE scan_jobs SET stage='analyzing',execution_state='running',current_phase='evidence_graph',
       progress=50,lease_owner=${ids.workerId},lease_expires_at=now()+interval '10 minutes' WHERE id=${ids.enhancementJobId}`;
     let fetchCalls = 0;
+    const fetch = async () => {
+      fetchCalls += 1;
+      throw new Error("active recovery must not call source or model providers");
+    };
+    prepareProviderRuntime(fetch as typeof globalThis.fetch);
     const run = createReportV4EnhancementProduction({
       environment: testEnvironment,
-      fetch: async () => {
-        fetchCalls += 1;
-        throw new Error("active recovery must not call source or model providers");
-      }
+      fetch
     });
 
     const result = await run({
@@ -155,18 +165,20 @@ suite("Report V4 enhancement production PostgreSQL recovery", () => {
     await seedLineage(false);
     let sourceReads = 0;
     let providerCalls = 0;
+    const fetch = async (request: string | URL | Request) => {
+      if (String(request) === "https://source.example/shared") {
+        sourceReads += 1;
+        return new Response("<html><body>Shared evidence remains readable.</body></html>", {
+          status: 200, headers: { "Content-Type": "text/html" }
+        });
+      }
+      providerCalls += 1;
+      return mimoResponse({});
+    };
+    prepareProviderRuntime(fetch as typeof globalThis.fetch);
     const run = createReportV4EnhancementProduction({
       environment: providerEnvironment(),
-      fetch: async (request) => {
-        if (String(request) === "https://source.example/shared") {
-          sourceReads += 1;
-          return new Response("<html><body>Shared evidence remains readable.</body></html>", {
-            status: 200, headers: { "Content-Type": "text/html" }
-          });
-        }
-        providerCalls += 1;
-        return mimoResponse({});
-      },
+      fetch,
       now: () => new Date("2026-07-17T00:10:00.000Z")
     });
 
@@ -200,12 +212,14 @@ suite("Report V4 enhancement production PostgreSQL recovery", () => {
       progress=50,lease_owner=${ids.workerId},lease_expires_at=now()+interval '10 minutes',error_code=NULL,public_error=NULL
       WHERE id=${ids.enhancementJobId}`;
     let fetchCalls = 0;
+    const fetch = async () => {
+      fetchCalls += 1;
+      throw new Error("terminal checkpoint recovery must not perform I/O");
+    };
+    prepareProviderRuntime(fetch as typeof globalThis.fetch);
     const run = createReportV4EnhancementProduction({
       environment: testEnvironment,
-      fetch: async () => {
-        fetchCalls += 1;
-        throw new Error("terminal checkpoint recovery must not perform I/O");
-      }
+      fetch
     });
 
     const result = await run({ job: claimedJob(), workerId: ids.workerId, signal: new AbortController().signal });
@@ -351,7 +365,10 @@ function coreReport(): CombinedGeoReportV4 {
     version: 4, artifactContract: "combined_geo_report_v4", reportId: ids.reportId,
     artifactRevisionId: ids.coreArtifactId, targetUrl: "https://recovery.example/", locale: "en",
     generatedAt: "2026-07-17T00:00:00.000Z", status: "completed",
-    websiteSynthesis: { summary: "Website summary.", strengths: ["Strength."], gaps: ["Gap."], actions: ["Action."] },
+    websiteSynthesis: { status: "available", summary: "Website summary.", strengths: ["Strength."], gaps: ["Gap."], actions: ["Action."] },
+    pageCoverage: { counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: `page-${suffixForIds()}`, url: "https://recovery.example/", status: "analyzed",
+        readMode: "direct_readable", reasonCode: null }] },
     questions: questionIds().map((questionId, index) => question(questionId, index + 1)) as unknown as CombinedGeoReportV4["questions"]
   };
 }
@@ -404,6 +421,18 @@ function providerEnvironment(): NodeJS.ProcessEnv {
     OGC_REPORT_V4_MIMO_BASE_URL: "https://api.xiaomimimo.com/v1",
     OGC_REPORT_V4_MIMO_API_KEY: "test-secret"
   };
+}
+
+function prepareProviderRuntime(fetch: typeof globalThis.fetch): void {
+  clearPreparedProviderProfileRuntimeForTest();
+  publishPreparedProviderProfileRuntime({
+    modelRuntime: lockedModelRuntime,
+    createDiagnosisProvider: (runtime: typeof lockedModelRuntime) => createReportV4MimoDiagnosisProvider({
+      environment: providerEnvironment(),
+      fetch,
+      lockedRuntime: runtime
+    })
+  } as never);
 }
 
 function mimoResponse(value: unknown): Response {

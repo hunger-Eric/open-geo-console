@@ -187,7 +187,13 @@ function sourceCorePayload(unavailableQuestion?: 1 | 2 | 3) {
     generatedAt: "2030-01-01T00:00:00.000Z",
     status: unavailableQuestion ? "completed_limited" : "completed",
     websiteSynthesis: {
+      status: "available",
       summary: "Website synthesis.", strengths: ["Strength."], gaps: ["Gap."], actions: ["Action."]
+    },
+    pageCoverage: {
+      counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: "page-1", url: "https://target.example/", status: "analyzed",
+        readMode: "direct_readable", reasonCode: null }]
     },
     questions: [1, 2, 3].map((order) => ({
       order,

@@ -24,18 +24,32 @@ function report(status: "completed" | "completed_limited" | "unavailable" = "com
     locale: "zh-CN",
     generatedAt: "2026-07-17T00:00:00.000Z",
     status,
-    websiteSynthesis: {
+    websiteSynthesis: status === "unavailable" ? {
+      status: "unavailable",
+      reason: "no_crawl_readable_pages"
+    } : status === "completed_limited" ? {
+      status: "unavailable",
+      reason: "website_synthesis_unavailable"
+    } : {
+      status: "available",
       summary: "Public website summary",
       strengths: ["Clear service description"],
       gaps: ["Missing delivery details"],
       actions: ["Publish verifiable delivery terms"]
     },
+    pageCoverage: status === "unavailable" ? {
+      counts: { total: 1, analyzed: 0, crawlUnavailable: 1, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: "page-1", url: "https://example.com/", status: "crawl_unavailable", readMode: null, reasonCode: "raw_fetch_failed" }]
+    } : {
+      counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: "page-1", url: "https://example.com/", status: "analyzed", readMode: "direct_readable", reasonCode: null }]
+    },
     questions: [1, 2, 3].map((order) => ({
       order,
       questionId: `question-${order}`,
       questionText: `Business question ${order}`,
-      status: status === "unavailable" ? "unavailable" : "answered",
-      answer: status === "unavailable" ? null : `Business answer ${order}`,
+      status: "answered",
+      answer: `Business answer ${order}`,
       sources: []
     }))
   };
@@ -44,11 +58,13 @@ function report(status: "completed" | "completed_limited" | "unavailable" = "com
 describe("V4 core commercial terminalization admission", () => {
   // @requirement GEO-V4-COMMERCE-01
   // @requirement GEO-V4-DELIVERY-01
-  it("rejects an unavailable report before any commercial write", async () => {
+  it("commercially completes an artifact whose content records every page as crawl-unavailable", async () => {
+    const fake = fakeLimitedCommerceDatabase(report("unavailable"));
+    database.getSqlClient.mockReturnValue({ begin: fake.begin });
     await expect(terminalizePaidReportV4Core({
       report: report("unavailable"),
       workerId: "worker-v4"
-    })).rejects.toThrow(/deliverable core/i);
+    })).resolves.toMatchObject({ outcome: "completed", refundId: null, accessTokenId: "token-v4" });
   });
 
   // @requirement GEO-V4-COMMERCE-01
@@ -99,7 +115,7 @@ describe("V4 core commercial terminalization admission", () => {
       creditStatus: "refunded",
       creditsRemaining: 1,
       refunds: 1,
-      tokens: 0,
+      tokens: 1,
       emails: 1,
       transitions: 1,
       artifactStatus: "active",
@@ -107,9 +123,9 @@ describe("V4 core commercial terminalization admission", () => {
     });
     const reentry = await terminalizePaidReportV4Core({ report: report("completed_limited"), workerId: "worker-v4" });
     expect(reentry).toMatchObject({
-      refundId: "refund-v4", accessTokenId: null, emailDeliveryId: "email-v4"
+      refundId: "refund-v4", accessTokenId: "token-v4", emailDeliveryId: "email-v4"
     });
-    expect(fake.state).toMatchObject({ creditsRemaining: 1, refunds: 1, tokens: 0, emails: 1, transitions: 1 });
+    expect(fake.state).toMatchObject({ creditsRemaining: 1, refunds: 1, tokens: 1, emails: 1, transitions: 1 });
   });
 
   // @requirement GEO-V4-DELIVERY-01
@@ -208,6 +224,7 @@ describe("V4 all-questions-unavailable commercial terminalization admission", ()
 });
 
 function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhancementAlreadyActive = false, missingConfigSnapshot = false) {
+  const commercialOutcome = payload.status === "unavailable" ? "completed" : "completed_limited";
   const state = {
     jobStage: "synthesizing",
     jobExecution: "running",
@@ -275,18 +292,19 @@ function fakeLimitedCommerceDatabase(payload: ReturnType<typeof report>, enhance
       state.activeArtifactRevisionId = "core-v4";
       return [{ id: "report-v4" }];
     }
-    if (sql.startsWith("UPDATE scan_jobs SET")) { state.jobStage = "completed_limited"; state.jobExecution = "completed"; return [{ id: "job-v4" }]; }
+    if (sql.startsWith("UPDATE scan_jobs SET")) { state.jobStage = commercialOutcome; state.jobExecution = "completed"; return [{ id: "job-v4" }]; }
     if (sql.startsWith("INSERT INTO scan_job_transition_events")) { state.transitions += 1; return []; }
+    if (sql.startsWith("UPDATE credit_ledger SET status='settled'")) { state.creditStatus = "settled"; return [{ id: "credit-v4" }]; }
     if (sql.startsWith("UPDATE access_keys SET")) { state.creditsRemaining += 1; return [{ id: "key-v4" }]; }
     if (sql.startsWith("UPDATE credit_ledger SET status='refunded'")) { state.creditStatus = "refunded"; return [{ id: "credit-v4" }]; }
     if (sql.startsWith("INSERT INTO payment_refunds")) { state.refunds = 1; return []; }
-    if (sql.startsWith("UPDATE payment_orders SET")) { state.orderStatus = "completed_limited"; state.orderRefundStatus = "pending"; return [{ id: "order-v4" }]; }
+    if (sql.startsWith("UPDATE payment_orders SET")) { state.orderStatus = commercialOutcome; state.orderRefundStatus = commercialOutcome === "completed" ? "not_required" : "pending"; return [{ id: "order-v4" }]; }
     if (sql.startsWith("SELECT refund_status FROM payment_orders")) return [{ refund_status: state.orderRefundStatus }];
     if (sql.startsWith("SELECT id,provider,reason,amount_minor,currency FROM payment_refunds")) return state.refunds ? [{ id: "refund-v4", provider: "airwallex", reason: "completed_limited", amount_minor: 2900, currency: "USD" }] : [];
     if (sql.startsWith("INSERT INTO report_access_tokens")) { state.tokens = 1; return []; }
     if (sql.startsWith("SELECT id,report_id,artifact_scope FROM report_access_tokens")) return [{ id: "token-v4", report_id: "report-v4", artifact_scope: "combined_geo_report_v4" }];
     if (sql.startsWith("INSERT INTO email_deliveries")) { state.emails = 1; return []; }
-    if (sql.startsWith("SELECT id,order_id,report_id,template_type FROM email_deliveries")) return [{ id: "email-v4", order_id: "order-v4", report_id: "report-v4", template_type: "limited_report_refund" }];
+    if (sql.startsWith("SELECT id,order_id,report_id,template_type FROM email_deliveries")) return [{ id: "email-v4", order_id: "order-v4", report_id: "report-v4", template_type: commercialOutcome === "completed" ? "report_ready" : "limited_report_refund" }];
     if (sql.includes("FROM scan_jobs") && sql.includes("reason='v4_diagnosis_enhancement'")) return state.enhancements ? [{
       id:enhancement.id,report_id:enhancement.reportId,site_snapshot_id:null,tier:enhancement.tier,
       product_contract:enhancement.productContract,fulfillment_methodology:enhancement.fulfillmentMethodology,

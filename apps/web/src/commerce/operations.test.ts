@@ -240,7 +240,7 @@ describe("commercial provider failure persistence", () => {
     expect(email.reportUrl).not.toMatch(/pdf/i);
   });
 
-  it("sends a limited refund notice without issuing or including report access", async () => {
+  it("sends a limited refund notice with access to the persisted report", async () => {
     mocks.claimEmailDeliveries.mockResolvedValue([{
       id: "email-limited", orderId: "order-1", reportId: "report-1", templateType: "limited_report_refund",
       locale: "en", businessIdempotencyKey: "limited_report_refund/core-artifact-v4/v1", attempts: 1
@@ -248,12 +248,13 @@ describe("commercial provider failure persistence", () => {
     mocks.sendEmail.mockResolvedValue({ providerEmailId: "resend-limited" });
 
     await expect(processQueuedCommercialEmails()).resolves.toEqual({ claimed: 1, succeeded: 1, retried: 0, failed: 0 });
-    expect(mocks.getActiveCombinedGeoReport).not.toHaveBeenCalled();
-    expect(mocks.issueReportAccessToken).not.toHaveBeenCalled();
-    expect(mocks.sendEmail.mock.calls[0]![0]).toMatchObject({ template: "limited_report_refund", reportUrl: undefined });
+    expect(mocks.getActiveCombinedGeoReport).toHaveBeenCalled();
+    expect(mocks.issueReportAccessToken).toHaveBeenCalled();
+    expect(mocks.sendEmail.mock.calls[0]![0]).toMatchObject({ template: "limited_report_refund" });
+    expect(mocks.sendEmail.mock.calls[0]![0].reportUrl).toContain("/api/reports/report-1/access");
   });
 
-  it("does not issue or send a queued access email after the order enters a refund state", async () => {
+  it("keeps an artifact-bearing limited order accessible while its refund is pending", async () => {
     mocks.claimEmailDeliveries.mockResolvedValue([{
       id: "email-stale", orderId: "order-1", reportId: "report-1", templateType: "report_ready",
       locale: "en", businessIdempotencyKey: "report_ready/core-artifact-v4/v1", attempts: 1
@@ -263,11 +264,10 @@ describe("commercial provider failure persistence", () => {
       paymentStatus: "paid", fulfillmentStatus: "completed_limited", refundStatus: "pending"
     });
 
-    await expect(processQueuedCommercialEmails()).resolves.toEqual({ claimed: 1, succeeded: 0, retried: 1, failed: 0 });
-    expect(mocks.getActiveCombinedGeoReport).not.toHaveBeenCalled();
-    expect(mocks.issueReportAccessToken).not.toHaveBeenCalled();
-    expect(mocks.sendEmail).not.toHaveBeenCalled();
-    expect(mocks.scheduleEmailRetry).toHaveBeenCalledWith(expect.objectContaining({ id: "email-stale" }));
+    await expect(processQueuedCommercialEmails()).resolves.toEqual({ claimed: 1, succeeded: 1, retried: 0, failed: 0 });
+    expect(mocks.getActiveCombinedGeoReport).toHaveBeenCalled();
+    expect(mocks.issueReportAccessToken).toHaveBeenCalled();
+    expect(mocks.sendEmail).toHaveBeenCalled();
   });
 
   // @requirement GEO-V4-LEGACY-01

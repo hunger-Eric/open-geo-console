@@ -117,10 +117,15 @@ function report(input: {
     generatedAt: "2030-01-01T00:00:00.000Z",
     status: "completed",
     websiteSynthesis: {
+      status: "available",
       summary: input.summary ?? (isChinese ? "\u76ee\u6807\u5b98\u7f51\u5177\u5907\u6e05\u6670\u7684 GEO \u670d\u52a1\u7ed3\u8bba\u3002" : "The target website has a clear GEO service conclusion."),
       strengths: [isChinese ? "\u516c\u5f00\u670d\u52a1\u8303\u56f4\u6e05\u6670\u3002" : "The public service scope is explicit."],
       gaps: [isChinese ? "\u9700\u8981\u8865\u5145\u8fd0\u8425\u6761\u4ef6\u3002" : "Operating conditions need more detail."],
       actions: [isChinese ? "\u53d1\u5e03\u53ef\u4f9b\u751f\u6210\u5f0f\u7b54\u6848\u5f15\u7528\u7684\u670d\u52a1\u6761\u4ef6\u3002" : "Publish service conditions for generative answers."]
+    },
+    pageCoverage: {
+      counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: "page-1", url: "https://target.example/", status: "analyzed", readMode: "direct_readable", reasonCode: null }]
     },
     questions: [1, 2, 3].map((order) => ({
       order,

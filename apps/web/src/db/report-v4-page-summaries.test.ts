@@ -154,14 +154,14 @@ describe("V4 hierarchical page-summary persistence", () => {
     }, repository)).resolves.toBeNull();
   });
 
-  it("fails closed on missing, extra and ineligible terminal snapshot summaries", async () => {
+  it("accepts an exact successful subset while rejecting extra and ineligible summaries", async () => {
     const terminal = memoryRepository();
     const first = await terminal.persist(input("page-1"));
     const missing = createReportV4PageSummaryRepository(createMemoryReportV4PageSummaryStore({
       snapshots: [snapshot("completed", 2)], pages: pages(), summaries: [storedRow(first)]
     }));
     await expect(missing.loadForWebsiteSynthesis(exactLoad()))
-      .rejects.toThrow(/every analyzable page|missing/i);
+      .resolves.toHaveLength(1);
 
     const extra = createReportV4PageSummaryRepository(createMemoryReportV4PageSummaryStore({
       snapshots: [snapshot("completed", 2)],

@@ -332,7 +332,14 @@ function parseV4Question(question: CombinedGeoReportV4Question): CombinedGeoRepo
     locale: "validation",
     generatedAt: "2030-01-01T00:00:00.000Z",
     status: "completed_limited",
-    websiteSynthesis: { summary: "Validation.", strengths: [], gaps: [], actions: [] },
+    websiteSynthesis: { status: "available", summary: "Validation.", strengths: [], gaps: [], actions: [] },
+    pageCoverage: {
+      counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{
+        ordinal: 1, pageId: "v4-question-validation-page", url: "https://validation.invalid/",
+        status: "analyzed", readMode: "direct_readable", reasonCode: null
+      }]
+    },
     questions
   });
   return parsed.questions[question.order - 1];

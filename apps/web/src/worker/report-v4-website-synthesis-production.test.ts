@@ -8,9 +8,11 @@ import {
   buildReportV4WebsiteSynthesisInputAuthority,
   createMemoryReportV4WebsiteSynthesisCheckpointRepository
 } from "../db/report-v4-website-synthesis-checkpoints";
+import { ReportV4MimoProviderError } from "../report-v4/mimo-provider";
 import {
   createReportV4WebsiteSynthesisProduction,
-  REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID
+  REPORT_V4_WEBSITE_SYNTHESIS_OPERATION_ID,
+  ReportV4WebsiteSynthesisUnavailableError
 } from "./report-v4-website-synthesis-production";
 
 // @requirement GEO-V4-TOKEN-01
@@ -144,13 +146,42 @@ describe("production V4 website synthesis", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("terminalizes a non-abort provider failure once without retry", async () => {
+  it("types a durably terminalized provider failure as website-synthesis unavailability", async () => {
     const h = repositoryHarness();
     const fetch = vi.fn(async () => new Response("failure", { status: 500 }));
     const run = createReportV4WebsiteSynthesisProduction({ environment, lockedModelProfile: profilePayload, repository: h.repository, fetch });
-    await expect(run({ ...base, signal: new AbortController().signal })).rejects.toThrow();
+    await expect(run({ ...base, signal: new AbortController().signal })).rejects.toMatchObject({
+      name: "ReportV4WebsiteSynthesisUnavailableError",
+      providerCalls: 1,
+      cause: expect.objectContaining({ code: "temporary_provider" })
+    } satisfies Partial<ReportV4WebsiteSynthesisUnavailableError>);
     expect(h.events).toEqual(["initialize", "claim", "begin", "fail:website_synthesis_temporary_provider"]);
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves checkpoint fail and complete persistence failures", async () => {
+    const failError = new Error("checkpoint fail write failed");
+    const failed = repositoryHarness();
+    vi.mocked(failed.repository.fail).mockRejectedValueOnce(failError);
+    const failedProvider = { synthesizeWebsite: vi.fn(async () => {
+      throw new ReportV4MimoProviderError("temporary_provider", "provider unavailable");
+    }) };
+    const runFailed = createReportV4WebsiteSynthesisProduction({
+      environment, lockedModelProfile: profilePayload, repository: failed.repository, provider: failedProvider
+    });
+    await expect(runFailed({ ...base, signal: new AbortController().signal })).rejects.toBe(failError);
+
+    const completeError = new Error("checkpoint complete write failed");
+    const completed = repositoryHarness();
+    vi.mocked(completed.repository.complete).mockRejectedValueOnce(completeError);
+    const runCompleted = createReportV4WebsiteSynthesisProduction({
+      environment,
+      lockedModelProfile: profilePayload,
+      repository: completed.repository,
+      provider: { synthesizeWebsite: vi.fn(async () => output) }
+    });
+    await expect(runCompleted({ ...base, signal: new AbortController().signal })).rejects.toBe(completeError);
+    expect(completed.repository.fail).not.toHaveBeenCalled();
   });
 
   it("leaves a consumed checkpoint unterminated on abort", async () => {

@@ -206,7 +206,10 @@ type Fixture = { isolation: Record<string,unknown>[]; anchor: Record<string,unkn
 function fixture(kind: ScenarioKind, phase: "baseline" | "final"): Fixture {
   const enhanced = phase === "final" && kind !== "question_failure";
   const corePayload = payload("artifact-core", false);
-  if (kind === "question_failure") corePayload.questions[1] = unavailableQuestion(2);
+  if (kind === "question_failure") {
+    corePayload.questions[1] = unavailableQuestion(2);
+    corePayload.status = "completed_limited";
+  }
   const enhancementPayload = payload("artifact-enhancement", true, kind === "diagnosis_failure" ? 2 : null,
     kind === "success" ? 2 : null);
   const core = artifact("artifact-core", "core-job", "generation", null, 1, enhanced ? "ready" : "active", corePayload);
@@ -244,8 +247,11 @@ function fixture(kind: ScenarioKind, phase: "baseline" | "final"): Fixture {
 function payload(artifactRevisionId: string, enhanced: boolean, failedOrdinal: number | null = null,
   inaccessibleOrdinal: number | null = null) {
   return { version: 4 as const, artifactContract: "combined_geo_report_v4" as const, reportId: "report-1", artifactRevisionId,
-    targetUrl: "https://example.test/SECRET_URL", locale: "en", generatedAt: "2026-07-17T00:00:00.000Z", status: "completed" as const,
-    websiteSynthesis: { summary: "Summary", strengths: ["Strength"], gaps: ["Gap"], actions: ["Action"] },
+    targetUrl: "https://example.test/SECRET_URL", locale: "en", generatedAt: "2026-07-17T00:00:00.000Z", status: "completed" as "completed" | "completed_limited",
+    websiteSynthesis: { status: "available" as const, summary: "Summary", strengths: ["Strength"], gaps: ["Gap"], actions: ["Action"] },
+    pageCoverage: { counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: "page-1", url: "https://example.test/SECRET_URL", status: "analyzed" as const,
+        readMode: "direct_readable" as const, reasonCode: null }] },
     questions: [1,2,3].map((ordinal) => ({ order: ordinal as 1|2|3, questionId: `question-${ordinal}`, questionText: `Question ${ordinal}?`,
       status: "answered" as const, answer: `Answer ${ordinal} SECRET_EMAIL SECRET_TOKEN`, sources: [{ questionId: `question-${ordinal}`,
         sourceId: `source-${ordinal}`, title: `Title ${ordinal}`, canonicalUrl: `https://example.test/SECRET_URL/source-${ordinal}`,

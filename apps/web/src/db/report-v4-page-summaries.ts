@@ -266,12 +266,13 @@ async function loadWithStore(
     const summaries = await tx.listSummaries(snapshotId);
     const expectedIds = new Set(analyzable.map(({ id }) => id));
     const actualIds = new Set(summaries.map(({ pageId }) => pageId));
-    if (summaries.length !== analyzable.length || actualIds.size !== summaries.length
-      || [...expectedIds].some((id) => !actualIds.has(id)) || [...actualIds].some((id) => !expectedIds.has(id))) {
-      throw new Error("Every analyzable V4 snapshot page must have exactly one summary with no missing or extra rows.");
+    if (summaries.length < 1 || actualIds.size !== summaries.length
+      || [...actualIds].some((id) => !expectedIds.has(id))) {
+      throw new Error("V4 website synthesis requires at least one exact analyzable-page summary with no extra or duplicate rows.");
     }
     const rows = new Map(summaries.map((row) => [row.pageId, row]));
-    const parsed = analyzable.map((page) => parsePersisted(rows.get(page.id)!, page));
+    const parsed = analyzable.filter((page) => actualIds.has(page.id))
+      .map((page) => parsePersisted(rows.get(page.id)!, page));
     for (const persisted of parsed) {
       if (persisted.reportId !== reportId || persisted.snapshotId !== snapshotId) {
         throw new Error("Persisted V4 page-summary terminal lineage drift was detected.");

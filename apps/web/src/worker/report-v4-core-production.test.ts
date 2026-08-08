@@ -87,26 +87,50 @@ describe("Report V4 core production composition", () => {
     expect(harness.events).toContain("answer-questions");
   });
 
-  it("terminalizes only the all-question-unavailable paid boundary", async () => {
+  it("delivers a limited artifact when all questions are unavailable", async () => {
     const harness = productionHarness({ unavailableQuestions: 3 });
     const result = await harness.run(input());
 
-    expect(result.delivery).toBe("unavailable");
-    expect(harness.events).toContain("terminalize-unavailable");
-    expect(harness.events).not.toContain("render-html");
-    expect(harness.events).not.toContain("terminalize-core");
-    expect(harness.events).not.toContain("enqueue-enhancement");
+    expect(result.delivery).toBe("core_active");
+    expect(result.status).toBe("completed_limited");
+    expect(harness.events).not.toContain("terminalize-unavailable");
+    expect(harness.events).toContain("render-html");
+    expect(harness.events).toContain("terminalize-core");
   });
 
-  it("fails closed on an injected impossible zero-page paid snapshot without commercial writes", async () => {
+  it("delivers a factual unavailable artifact for a zero-readable-page snapshot", async () => {
     const harness = productionHarness({ snapshot: snapshotBundle("unavailable", 0) });
 
-    await expect(harness.run(input())).rejects.toThrow(/paid.*snapshot.*analyzable|zero.*page/i);
-    expect(harness.events).not.toContain("synthesize-website");
-    expect(harness.events).not.toContain("answer-questions");
+    await expect(harness.run(input())).resolves.toMatchObject({ delivery: "core_active", status: "unavailable" });
+    expect(harness.events).toContain("synthesize-website");
+    expect(harness.events).toContain("answer-questions");
     expect(harness.events).not.toContain("terminalize-unavailable");
-    expect(harness.events).not.toContain("terminalize-core");
-    expect(harness.events).not.toContain("enqueue-enhancement");
+    expect(harness.events).toContain("terminalize-core");
+  });
+
+  it("uses the explicit question and internal-analysis status matrix", async () => {
+    const zeroReadableLimited = productionHarness({
+      snapshot: snapshotBundle("unavailable", 0),
+      unavailableQuestions: 1
+    });
+    await expect(zeroReadableLimited.run(input())).resolves.toMatchObject({ status: "completed_limited" });
+
+    const pageAnalysisUnavailable = productionHarness({
+      pageOutcomes: [{
+        ordinal: 1, pageId: "page-1", url: "https://example.com/page-1",
+        status: "analysis_unavailable", readMode: "direct_readable", reasonCode: "page_analysis_unavailable"
+      }],
+      websiteSynthesis: { status: "unavailable", reason: "all_page_analyses_unavailable" }
+    });
+    await expect(pageAnalysisUnavailable.run(input())).resolves.toMatchObject({ status: "completed_limited" });
+
+    const websiteUnavailable = productionHarness({
+      websiteSynthesis: { status: "unavailable", reason: "website_synthesis_unavailable" }
+    });
+    await expect(websiteUnavailable.run(input())).resolves.toMatchObject({ status: "completed_limited" });
+
+    const complete = productionHarness();
+    await expect(complete.run(input())).resolves.toMatchObject({ status: "completed" });
   });
 
   it("propagates abort without any terminal write", async () => {
@@ -273,6 +297,8 @@ interface HarnessOptions {
   questionModelCalls?: number;
   reusedQuestionIds?: string[];
   unavailableQuestions?: number;
+  pageOutcomes?: CombinedGeoReportV4["pageCoverage"]["pages"];
+  websiteSynthesis?: CombinedGeoReportV4WebsiteSynthesis;
   acceptanceRuntime?: ReportV4CoreAcceptanceRuntime;
   oversizedTokenProbeError?: Error;
   baselineCaptureError?: Error;
@@ -330,7 +356,15 @@ function productionHarness(options: HarnessOptions = {}) {
         },
         async synthesizeWebsite() {
           events.push("synthesize-website");
-          return { websiteSynthesis, modelCalls: options.websiteModelCalls ?? 2 };
+          const snapshot = options.snapshot ?? snapshotBundle("completed", 1);
+          const pageOutcomes = options.pageOutcomes ?? outcomes(snapshot);
+          return {
+            websiteSynthesis: options.websiteSynthesis ?? (pageOutcomes.some(({ status }) => status === "analyzed")
+              ? websiteSynthesis
+              : { status: "unavailable", reason: "no_crawl_readable_pages" }),
+            pageOutcomes,
+            modelCalls: options.websiteModelCalls ?? 2
+          };
         },
         async answerQuestions() {
           events.push("answer-questions");
@@ -480,6 +514,7 @@ function configSnapshot(overrides: Partial<ReportV4ConfigSnapshotRow> = {}): Rep
 }
 
 const websiteSynthesis: CombinedGeoReportV4WebsiteSynthesis = {
+  status: "available",
   summary: "The website has analyzable business content.", strengths: ["Clear service scope."],
   gaps: ["Delivery conditions are incomplete."], actions: ["Publish verifiable delivery conditions."]
 };
@@ -498,18 +533,27 @@ function questions(unavailableCount = 0): [CombinedGeoReportV4Question, Combined
 
 function snapshotBundle(status: "completed" | "unavailable", analyzablePageCount: number): ReportV4SiteSnapshotBundle {
   const createdAt = new Date("2026-07-17T00:00:00.000Z");
+  const unavailablePages = status === "unavailable" ? 1 : 0;
   return {
     snapshot: {
       id: "site-v4", reportId: "report-v4", siteKey: "example.com", collectorConfigIdentityHash: "a".repeat(64),
       capturedAt: createdAt, status, completedAt: createdAt, contentIdentityHash: "b".repeat(64),
-      candidateUrlCount: analyzablePageCount, analyzablePageCount, excludedPageCount: 0, createdAt
+      candidateUrlCount: analyzablePageCount + unavailablePages, analyzablePageCount, excludedPageCount: unavailablePages, createdAt
     },
-    pages: Array.from({ length: analyzablePageCount }, (_, index) => ({
+    pages: [
+      ...Array.from({ length: analyzablePageCount }, (_, index) => ({
       id: `page-${index + 1}`, snapshotId: "site-v4", ordinal: index + 1,
       normalizedUrl: `https://example.com/page-${index + 1}`, analyzable: true,
       readMode: "direct_readable" as const, summary: null, retainedText: `Page ${index + 1}`,
       contentHash: String(index + 1).repeat(64), exclusionReason: null, createdAt
-    }))
+      })),
+      ...(status === "unavailable" ? [{
+        id: "page-unavailable", snapshotId: "site-v4", ordinal: 1,
+        normalizedUrl: "https://example.com/", analyzable: false,
+        readMode: null, summary: null, retainedText: null, contentHash: null,
+        exclusionReason: "raw_fetch_failed", createdAt
+      }] : [])
+    ]
   };
 }
 
@@ -517,6 +561,27 @@ function report(artifactRevisionId: string): CombinedGeoReportV4 {
   return {
     version: 4, artifactContract: "combined_geo_report_v4", reportId: "report-v4", artifactRevisionId,
     targetUrl: "https://example.com/", locale: "zh", generatedAt: "2026-07-17T00:00:00.000Z",
-    status: "completed", websiteSynthesis, questions: questions()
+    status: "completed", websiteSynthesis,
+    pageCoverage: coverage(outcomes(snapshotBundle("completed", 1))), questions: questions()
+  };
+}
+
+function outcomes(snapshot: ReportV4SiteSnapshotBundle): CombinedGeoReportV4["pageCoverage"]["pages"] {
+  return snapshot.pages.map((page) => ({
+    ordinal: page.ordinal, pageId: page.id, url: page.normalizedUrl,
+    status: page.analyzable ? "analyzed" as const : "crawl_unavailable" as const,
+    readMode: page.readMode, reasonCode: page.analyzable ? null : page.exclusionReason
+  }));
+}
+
+function coverage(pages: CombinedGeoReportV4["pageCoverage"]["pages"]): CombinedGeoReportV4["pageCoverage"] {
+  return {
+    counts: {
+      total: pages.length,
+      analyzed: pages.filter(({ status }) => status === "analyzed").length,
+      crawlUnavailable: pages.filter(({ status }) => status === "crawl_unavailable").length,
+      excluded: pages.filter(({ status }) => status === "excluded").length,
+      analysisUnavailable: pages.filter(({ status }) => status === "analysis_unavailable").length
+    }, pages
   };
 }

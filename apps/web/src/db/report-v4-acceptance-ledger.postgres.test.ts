@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DATABASE_MIGRATIONS, V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS, V38_DATABASE_MIGRATIONS, V39_DATABASE_MIGRATIONS, V40_DATABASE_MIGRATIONS, V41_DATABASE_MIGRATIONS, V42_DATABASE_MIGRATIONS, V43_DATABASE_MIGRATIONS, V44_DATABASE_MIGRATIONS } from "./migrations";
+import { DATABASE_MIGRATIONS, V35_DATABASE_MIGRATIONS, V36_DATABASE_MIGRATIONS, V37_DATABASE_MIGRATIONS, V38_DATABASE_MIGRATIONS, V39_DATABASE_MIGRATIONS, V40_DATABASE_MIGRATIONS, V41_DATABASE_MIGRATIONS, V42_DATABASE_MIGRATIONS, V43_DATABASE_MIGRATIONS, V44_DATABASE_MIGRATIONS, V45_DATABASE_MIGRATIONS, V46_DATABASE_MIGRATIONS, V47_DATABASE_MIGRATIONS } from "./migrations";
 import {
   createPostgresReportV4AcceptanceLedgerStore,
   createReportV4AcceptanceLedgerRepository,
@@ -348,7 +348,8 @@ suite("Report V4 protected-Staging acceptance ledger PostgreSQL", () => {
         -(V35_DATABASE_MIGRATIONS.length + V36_DATABASE_MIGRATIONS.length + V37_DATABASE_MIGRATIONS.length
           + V38_DATABASE_MIGRATIONS.length + V39_DATABASE_MIGRATIONS.length + V40_DATABASE_MIGRATIONS.length
           + V41_DATABASE_MIGRATIONS.length + V42_DATABASE_MIGRATIONS.length + V43_DATABASE_MIGRATIONS.length
-          + V44_DATABASE_MIGRATIONS.length));
+          + V44_DATABASE_MIGRATIONS.length + V45_DATABASE_MIGRATIONS.length + V46_DATABASE_MIGRATIONS.length
+          + V47_DATABASE_MIGRATIONS.length));
       await upgradeSql.begin(async (tx) => { for (const statement of v34Migrations) await tx.unsafe(statement); });
       expect((await upgradeSql`SELECT to_regclass('report_v4_acceptance_sessions')::text AS name`)[0]?.name).toBeNull();
       await upgradeSql.begin(async (tx) => { for (const statement of V35_DATABASE_MIGRATIONS) await tx.unsafe(statement); });

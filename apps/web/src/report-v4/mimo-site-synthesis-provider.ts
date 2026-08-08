@@ -40,6 +40,13 @@ export class ReportV4MimoSiteSynthesisOutputError extends Error {
   }
 }
 
+interface ReportV4EvidenceSegment {
+  readonly segmentId: string;
+  readonly text: string;
+  readonly startOffset: number;
+  readonly endOffset: number;
+}
+
 export function buildReportV4MimoPageAnalysisTokenBudget(runtime: ReportV4ModelRuntimeConfig, input: ReportV4MimoPageAnalysisInput): ReturnType<typeof buildReportV4MimoStructuredTokenBudget> {
   const canonical = canonicalPageInput(input);
   return buildReportV4MimoStructuredTokenBudget(runtime, pageInvocation(canonical, new AbortController().signal));
@@ -66,7 +73,10 @@ export function createReportV4SiteSynthesisProvider(
       const canonical = canonicalPageInput(input);
       const value = await invoker.invoke(pageInvocation(canonical, signal));
       try {
-        return parseReportV4PageAnalysisOutput(value, canonical.context);
+        return parseReportV4PageAnalysisOutput(
+          mapSegmentSelectionToSourceLocations(value, evidenceSegments(canonical.retainedText)),
+          canonical.context
+        );
       } catch (error) {
         signal.throwIfAborted();
         throw new ReportV4MimoSiteSynthesisOutputError(
@@ -99,7 +109,15 @@ function canonicalWebsiteInput(input: ReportV4MimoWebsiteSynthesisInput): Report
 }
 
 function pageInvocation(input: ReportV4MimoPageAnalysisInput, signal: AbortSignal): ReportV4MimoStructuredInvokeInput {
-  return { operation: "pageAnalysis", systemText: PAGE_ANALYSIS_SYSTEM, inputText: JSON.stringify({ context: input.context, retainedText: input.retainedText }), signal };
+  return {
+    operation: "pageAnalysis",
+    systemText: PAGE_ANALYSIS_SYSTEM,
+    inputText: JSON.stringify({
+      context: input.context,
+      evidenceSegments: evidenceSegments(input.retainedText).map(({ segmentId, text }) => ({ segmentId, text }))
+    }),
+    signal
+  };
 }
 
 function websiteInvocation(input: ReportV4MimoWebsiteSynthesisInput, signal: AbortSignal): ReportV4MimoStructuredInvokeInput {
@@ -107,7 +125,7 @@ function websiteInvocation(input: ReportV4MimoWebsiteSynthesisInput, signal: Abo
 }
 
 const PAGE_ANALYSIS_SYSTEM =
-  "Analyze only the supplied retained text for one page. Return exactly {\"chunks\":[{\"order\":number,\"summary\":string,\"sourceLocations\":[{\"locationId\":string,\"startOffset\":number,\"endOffset\":number}]}]}. Return 1 to 8 chunks in order starting at 1. Every chunk must contain 1 to 8 source locations. Use a distinct locationId for every source location in the entire response, such as location-{chunkOrder}-{locationOrder}; never reuse a locationId. Preserve exact zero-based source offsets within the retained source, with endOffset greater than startOffset and no offset beyond sourceLength. Do not add fields, use whole-site text, browse, correct, or retry.";
+  "Analyze only the supplied evidenceSegments for one page. Return exactly {\"chunks\":[{\"order\":number,\"summary\":string,\"evidenceSegmentIds\":[string]}]}. Return 1 to 8 chunks in order starting at 1. Every chunk must select 1 to 8 supplied segment IDs. Select each segment ID at most once in the entire response. Never calculate or return offsets, location IDs, sourceLocations, or any extra field. Do not use whole-site text, browse, correct, or retry.";
 
 const WEBSITE_SYNTHESIS_SYSTEM =
   "Synthesize the website only from the supplied validated page summaries. Return exactly {\"summary\":string,\"strengths\":string[],\"gaps\":string[],\"actions\":string[]}. Use the requested locale; do not add fields, use raw HTML, browse, correct, or retry.";
@@ -117,4 +135,85 @@ function boundedText(value: unknown): string {
     throw new TypeError("Input text must be non-empty text.");
   }
   return value;
+}
+
+const EVIDENCE_SEGMENT_UTF16_LIMIT = 320;
+const MODEL_OUTPUT_FIELDS = new Set(["chunks"]);
+const MODEL_CHUNK_FIELDS = new Set(["order", "summary", "evidenceSegmentIds"]);
+
+function evidenceSegments(retainedText: string): readonly ReportV4EvidenceSegment[] {
+  const segments: ReportV4EvidenceSegment[] = [];
+  let startOffset = 0;
+  while (startOffset < retainedText.length) {
+    let endOffset = Math.min(startOffset + EVIDENCE_SEGMENT_UTF16_LIMIT, retainedText.length);
+    if (endOffset < retainedText.length && isHighSurrogate(retainedText.charCodeAt(endOffset - 1))
+      && isLowSurrogate(retainedText.charCodeAt(endOffset))) {
+      endOffset -= 1;
+    }
+    if (endOffset <= startOffset) throw new TypeError("V4 evidence segmentation did not advance through retained text.");
+    segments.push(Object.freeze({
+      segmentId: `segment-${segments.length + 1}`,
+      text: retainedText.slice(startOffset, endOffset),
+      startOffset,
+      endOffset
+    }));
+    startOffset = endOffset;
+  }
+  return Object.freeze(segments);
+}
+
+function mapSegmentSelectionToSourceLocations(
+  value: unknown,
+  segments: readonly ReportV4EvidenceSegment[]
+): unknown {
+  const root = strictSelectionObject(value, "$pageAnalysisSelection", MODEL_OUTPUT_FIELDS);
+  if (!Array.isArray(root.chunks) || root.chunks.length < 1 || root.chunks.length > 8) {
+    throw new TypeError("$pageAnalysisSelection.chunks must contain between 1 and 8 chunks.");
+  }
+  const byId = new Map(segments.map((segment) => [segment.segmentId, segment]));
+  const selected = new Set<string>();
+  return {
+    chunks: root.chunks.map((candidate, chunkIndex) => {
+      const path = `$pageAnalysisSelection.chunks[${chunkIndex}]`;
+      const chunk = strictSelectionObject(candidate, path, MODEL_CHUNK_FIELDS);
+      if (chunk.order !== chunkIndex + 1) throw new TypeError(`${path}.order must match its one-based position.`);
+      if (typeof chunk.summary !== "string" || !chunk.summary.trim()) throw new TypeError(`${path}.summary must be non-empty text.`);
+      if (!Array.isArray(chunk.evidenceSegmentIds) || chunk.evidenceSegmentIds.length < 1 || chunk.evidenceSegmentIds.length > 8) {
+        throw new TypeError(`${path}.evidenceSegmentIds must contain between 1 and 8 supplied segment IDs.`);
+      }
+      const sourceLocations = chunk.evidenceSegmentIds.map((candidateId, locationIndex) => {
+        if (typeof candidateId !== "string" || !candidateId) throw new TypeError(`${path}.evidenceSegmentIds[${locationIndex}] must be text.`);
+        const segment = byId.get(candidateId);
+        if (!segment) throw new TypeError(`${path}.evidenceSegmentIds[${locationIndex}] references an unknown segment.`);
+        if (selected.has(candidateId)) throw new TypeError(`${path}.evidenceSegmentIds[${locationIndex}] reuses a segment.`);
+        selected.add(candidateId);
+        return {
+          locationId: `location-${chunkIndex + 1}-${locationIndex + 1}`,
+          startOffset: segment.startOffset,
+          endOffset: segment.endOffset
+        };
+      });
+      return { order: chunkIndex + 1, summary: chunk.summary, sourceLocations };
+    })
+  };
+}
+
+function strictSelectionObject(value: unknown, path: string, fields: ReadonlySet<string>): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${path} must be an object.`);
+  const row = value as Record<string, unknown>;
+  for (const key of Object.keys(row)) {
+    if (!fields.has(key)) throw new TypeError(`${path} contains unknown field ${key}.`);
+  }
+  for (const field of fields) {
+    if (!Object.hasOwn(row, field)) throw new TypeError(`${path}.${field} is required.`);
+  }
+  return row;
+}
+
+function isHighSurrogate(value: number): boolean {
+  return value >= 0xd800 && value <= 0xdbff;
+}
+
+function isLowSurrogate(value: number): boolean {
+  return value >= 0xdc00 && value <= 0xdfff;
 }

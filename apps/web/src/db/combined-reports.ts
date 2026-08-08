@@ -4,13 +4,14 @@ import {
   parseCombinedGeoReportV3,
   isCombinedGeoReportV3CrawlDiagnostic,
   requireReadyCombinedGeoReportV3CrawlDiagnostic,
-  parseCombinedGeoReportV4,
+  parsePersistedCombinedGeoReportV4,
   FREE_V4_DIRECT_SEMANTICS_VERSION,
   type CombinedGeoReportV1,
   type CombinedGeoReportV2,
   type CombinedGeoReportV3,
   type CombinedGeoReportV3CrawlDiagnostic,
-  type CombinedGeoReportV4
+  type CombinedGeoReportV4,
+  type PersistedCombinedGeoReportV4
 } from "@open-geo-console/ai-report-engine";
 import { ensureDatabase, getSqlClient } from "./index";
 import type { ReportLocale } from "./schema";
@@ -39,7 +40,7 @@ export type ActiveCombinedGeoReportV3 = ActiveCombinedGeoReportBase<"combined_ge
   pdfStorageKey: string | null;
   pdfSha256: string | null;
 };
-export type ActiveCombinedGeoReportV4 = ActiveCombinedGeoReportBase<"combined_geo_report_v4", CombinedGeoReportV4> & {
+export type ActiveCombinedGeoReportV4 = ActiveCombinedGeoReportBase<"combined_geo_report_v4", PersistedCombinedGeoReportV4> & {
   pdfStorageKey: null;
   pdfSha256: null;
 };
@@ -85,7 +86,7 @@ export async function getActiveCombinedGeoReport(
   if (row.artifact_contract === "combined_geo_report_v4") {
     if (row.pdf_storage_key !== null || row.pdf_sha256 !== null) return null;
     try {
-      const report = parseCombinedGeoReportV4(row.payload);
+      const report = parsePersistedCombinedGeoReportV4(row.payload);
       if (!matchesArtifactIdentity(report, row, reportId)) return null;
       return {
         artifactContract: row.artifact_contract,
@@ -144,7 +145,7 @@ export async function getAnyActiveCombinedGeoReport(reportId: string): Promise<A
 }
 
 function matchesArtifactIdentity(
-  report: CombinedGeoReportV1 | CombinedGeoReportV2 | CombinedGeoReportV3 | CombinedGeoReportV3CrawlDiagnostic | CombinedGeoReportV4,
+  report: CombinedGeoReportV1 | CombinedGeoReportV2 | CombinedGeoReportV3 | CombinedGeoReportV3CrawlDiagnostic | CombinedGeoReportV4 | PersistedCombinedGeoReportV4,
   row: { artifact_contract: string; artifact_revision_id: string; report_locale: string | null },
   reportId: string
 ): boolean {

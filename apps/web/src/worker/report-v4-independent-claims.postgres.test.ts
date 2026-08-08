@@ -242,10 +242,16 @@ function coreReport(): CombinedGeoReportV4 {
     generatedAt: "2026-07-17T00:00:00.000Z",
     status: "completed",
     websiteSynthesis: {
+      status: "available",
       summary: "Independent core summary.",
       strengths: ["A durable strength."],
       gaps: ["A bounded gap."],
       actions: ["A concrete action."]
+    },
+    pageCoverage: {
+      counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: `${ids.reportId}-page-1`, url: "https://independent.example/",
+        status: "analyzed", readMode: "direct_readable", reasonCode: null }]
     },
     questions: ([1, 2, 3] as const).map((order) => ({
       order,

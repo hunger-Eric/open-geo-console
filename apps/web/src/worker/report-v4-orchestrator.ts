@@ -1,6 +1,7 @@
 import {
   parseCombinedGeoReportV4,
   type CombinedGeoReportV4,
+  type CombinedGeoReportV4PageOutcome,
   type CombinedGeoReportV4Question,
   type CombinedGeoReportV4QuestionDiagnosis,
   type CombinedGeoReportV4Status,
@@ -53,6 +54,7 @@ export interface ReportV4EnhancementStageInput extends ReportV4StageIdentity {
 
 export interface ReportV4WebsiteSynthesisResult {
   readonly websiteSynthesis: CombinedGeoReportV4WebsiteSynthesis;
+  readonly pageOutcomes: readonly CombinedGeoReportV4PageOutcome[];
   readonly modelCalls: number;
 }
 
@@ -346,22 +348,6 @@ export async function runReportV4CoreStage(
   acceptSnapshot(snapshot, parsedInput);
   counters.pages = pageCounters(snapshot);
 
-  if (!existing && !isStandardResolvableSnapshot(snapshot)) {
-    return finishStage({
-      dependencies,
-      totalStartedAt,
-      counters,
-      timings,
-      status: "unavailable",
-      delivery: "unavailable",
-      coreReport: null,
-      activeReport: null,
-      enhancement: notStartedEnhancement(),
-      coreRevisionId: null,
-      enhancementRevisionId: null
-    });
-  }
-
   let coreReport: CombinedGeoReportV4;
   if (existing) {
     coreReport = acceptCoreArtifact(existing.report, parsedInput);
@@ -397,36 +383,14 @@ export async function runReportV4CoreStage(
     counters.providerRetries.questionAnswer = nonnegativeInteger(answerResult.providerRetries, "question provider retries");
     counters.reusedQuestionCheckpoints = uniqueKnownQuestionIds(answerResult.reusedQuestionIds, parsedInput.questions).length;
     assertQuestionIdentity(answerResult.questions, parsedInput.questions);
-    const status = coreStatus(snapshot, answerResult.questions);
-    if (status === "unavailable") {
-      await dependencies.terminalizeUnavailableCore({
-        reportId: parsedInput.reportId,
-        orderId: parsedInput.orderId,
-        coreJobId: parsedInput.coreJobId,
-        reason: "all_questions_unavailable",
-        signal
-      });
-      throwIfAborted(signal);
-      return finishStage({
-        dependencies,
-        totalStartedAt,
-        counters,
-        timings,
-        status,
-        delivery: "unavailable",
-        coreReport: null,
-        activeReport: null,
-        enhancement: notStartedEnhancement(),
-        coreRevisionId: null,
-        enhancementRevisionId: null
-      });
-    }
+    const status = coreStatus(websiteResult.pageOutcomes, websiteResult.websiteSynthesis, answerResult.questions);
     coreReport = buildReport({
       input: parsedInput,
       artifactRevisionId: parsedInput.coreArtifactRevisionId,
       status,
       generatedAt: dependencies.nowIso(),
       websiteSynthesis: websiteResult.websiteSynthesis,
+      pageOutcomes: websiteResult.pageOutcomes,
       questions: answerResult.questions
     });
     await measured(dependencies, timings, "coreDelivery", async () => {
@@ -637,9 +601,10 @@ export async function runReportV4EnhancementStage(
     enhancedReport = buildReport({
       input: parsedInput,
       artifactRevisionId: parsedInput.enhancementArtifactRevisionId,
-      status: deliverableStatus(coreReport.status, "source core"),
+      status: deliverableStatus(coreReport.status),
       generatedAt: dependencies.nowIso(),
       websiteSynthesis: coreReport.websiteSynthesis,
+      pageOutcomes: coreReport.pageCoverage.pages,
       questions: enhancedQuestions
     });
     await measured(dependencies, timings, "enhancementDelivery", async () => {
@@ -934,11 +899,6 @@ function acceptSnapshot(snapshot: ReportV4SiteSnapshotBundle, input: ReportV4Sta
   }
 }
 
-function isStandardResolvableSnapshot(snapshot: ReportV4SiteSnapshotBundle): boolean {
-  return (snapshot.snapshot.status === "completed" || snapshot.snapshot.status === "completed_limited")
-    && snapshot.snapshot.analyzablePageCount > 0;
-}
-
 function pageCounters(snapshot: ReportV4SiteSnapshotBundle): MutableCounters["pages"] {
   return {
     candidate: snapshot.snapshot.candidateUrlCount,
@@ -949,21 +909,26 @@ function pageCounters(snapshot: ReportV4SiteSnapshotBundle): MutableCounters["pa
 }
 
 function coreStatus(
-  snapshot: ReportV4SiteSnapshotBundle,
+  pageOutcomes: readonly CombinedGeoReportV4PageOutcome[],
+  websiteSynthesis: CombinedGeoReportV4WebsiteSynthesis,
   questions: CombinedGeoReportV4["questions"]
 ): CombinedGeoReportV4Status {
-  if (snapshot.snapshot.analyzablePageCount === 0) return "unavailable";
+  const analyzed = pageOutcomes.filter(({ status }) => status === "analyzed").length;
+  const analysisUnavailable = pageOutcomes.filter(({ status }) => status === "analysis_unavailable").length;
   const answered = questions.filter(({ status }) => status === "answered").length;
-  if (answered === 0) return "unavailable";
-  return snapshot.snapshot.status === "completed" && answered === 3 ? "completed" : "completed_limited";
+  const websiteAnalysisUnavailable = websiteSynthesis.status === "unavailable"
+    && websiteSynthesis.reason !== "no_crawl_readable_pages";
+  if (answered < 3 || analysisUnavailable > 0 || websiteAnalysisUnavailable) return "completed_limited";
+  return analyzed === 0 ? "unavailable" : "completed";
 }
 
 function buildReport(input: {
   input: ReportV4StageIdentity;
   artifactRevisionId: string;
-  status: Exclude<CombinedGeoReportV4Status, "unavailable">;
+  status: CombinedGeoReportV4Status;
   generatedAt: string;
   websiteSynthesis: CombinedGeoReportV4WebsiteSynthesis;
+  pageOutcomes: readonly CombinedGeoReportV4PageOutcome[];
   questions: CombinedGeoReportV4["questions"];
 }): CombinedGeoReportV4 {
   return parseCombinedGeoReportV4({
@@ -976,6 +941,7 @@ function buildReport(input: {
     generatedAt: input.generatedAt,
     status: input.status,
     websiteSynthesis: input.websiteSynthesis,
+    pageCoverage: pageCoverage(input.pageOutcomes),
     questions: input.questions
   });
 }
@@ -986,7 +952,7 @@ function acceptCoreArtifact(value: CombinedGeoReportV4, input: ReportV4CoreStage
   if (report.artifactRevisionId !== input.coreArtifactRevisionId || report.questions.some(({ diagnosis }) => diagnosis)) {
     throw new Error("The resumable V4 core artifact must be the exact diagnosis-free core revision.");
   }
-  deliverableStatus(report.status, "active core");
+  deliverableStatus(report.status);
   return report;
 }
 
@@ -999,7 +965,7 @@ function acceptSourceCoreArtifact(
   if (report.artifactRevisionId !== input.sourceCoreArtifactRevisionId || report.questions.some(({ diagnosis }) => diagnosis)) {
     throw new Error("The enhancement source must be the exact diagnosis-free core revision.");
   }
-  deliverableStatus(report.status, "source core");
+  deliverableStatus(report.status);
   return report;
 }
 
@@ -1080,19 +1046,33 @@ function assertArtifactAgainstSnapshot(
   snapshot: ReportV4SiteSnapshotBundle,
   label: string
 ): void {
-  if (!isStandardResolvableSnapshot(snapshot)) throw new Error(`The ${label} requires a standard-resolvable snapshot.`);
   assertQuestionIdentity(report.questions, input.questions);
-  if (report.status !== coreStatus(snapshot, report.questions)) {
+  if (report.pageCoverage.pages.length !== snapshot.pages.length || report.pageCoverage.pages.some((page, index) => {
+    const source = snapshot.pages[index];
+    return !source || page.ordinal !== source.ordinal || page.pageId !== source.id || page.url !== source.normalizedUrl;
+  })) {
+    throw new Error(`The ${label} page ledger conflicts with the immutable snapshot.`);
+  }
+  if (report.status !== coreStatus(report.pageCoverage.pages, report.websiteSynthesis, report.questions)) {
     throw new Error(`The ${label} status conflicts with the immutable snapshot completion rules.`);
   }
 }
 
-function deliverableStatus(
-  status: CombinedGeoReportV4Status,
-  label: string
-): Exclude<CombinedGeoReportV4Status, "unavailable"> {
-  if (status === "unavailable") throw new Error(`The ${label} must be deliverable and cannot be unavailable.`);
+function deliverableStatus(status: CombinedGeoReportV4Status): CombinedGeoReportV4Status {
   return status;
+}
+
+function pageCoverage(pageOutcomes: readonly CombinedGeoReportV4PageOutcome[]): CombinedGeoReportV4["pageCoverage"] {
+  return {
+    counts: {
+      total: pageOutcomes.length,
+      analyzed: pageOutcomes.filter(({ status }) => status === "analyzed").length,
+      crawlUnavailable: pageOutcomes.filter(({ status }) => status === "crawl_unavailable").length,
+      excluded: pageOutcomes.filter(({ status }) => status === "excluded").length,
+      analysisUnavailable: pageOutcomes.filter(({ status }) => status === "analysis_unavailable").length
+    },
+    pages: pageOutcomes
+  };
 }
 
 function assertQuestionIdentity(

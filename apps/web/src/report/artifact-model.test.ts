@@ -91,6 +91,24 @@ describe("private artifact model product isolation", () => {
     expect(mocks.getActiveCombined).toHaveBeenCalledWith("report-1", "combined_geo_report_v4");
   });
 
+  it("carries an exact historical V4 read model without inventing prospective fields", async () => {
+    const report = {
+      version: 4, artifactContract: "combined_geo_report_v4", reportId: "report-1",
+      artifactRevisionId: "revision-v4", targetUrl: "https://target.example/", locale: "en-US",
+      generatedAt: "2030-01-01T00:00:00.000Z", status: "completed_limited",
+      websiteSynthesis: { summary: "Historical summary.", strengths: [], gaps: [], actions: [] }, questions: []
+    };
+    mocks.getActiveCombined.mockResolvedValue({
+      artifactContract: "combined_geo_report_v4", artifactRevisionId: "revision-v4", revision: 1,
+      reportLocale: "en", htmlSha256: "h".repeat(64), pdfSha256: null, pdfStorageKey: null, report
+    });
+
+    const result = await loadPrivateReportArtifact("report-1", "combined_geo_report_v4");
+
+    expect(result).toMatchObject({ productContract: "combined_geo_report_v4", combinedReport: report });
+    expect("pageCoverage" in (result as { combinedReport: object }).combinedReport).toBe(false);
+  });
+
   it("requires a same-job recommendation foundation and never falls back to legacy", async () => {
     mocks.getRecommendation.mockResolvedValue({ jobId: "new-job", provenanceAndLimitations: { locale: "en" } });
     mocks.getAiReport.mockResolvedValue({ isPrivate: true, jobId: "legacy-job", payload: { legacy: true }, technicalPayload: { url: "https://example.com" } });

@@ -52,9 +52,9 @@ describe("combined replacement terminalization outcomes", () => {
     expect(combinedV3CommercialOutcome(cards)).toBe("completed");
   });
 
-  it("keeps an all-source-limited replacement non-deliverable", () => {
+  it("delivers an all-source-limited replacement as completed_limited", () => {
     const cards = [generative("source_limited",0),generative("source_limited",1),generative("source_limited",2)];
-    expect(combinedV3CommercialOutcome(cards)).toBe("failed");
+    expect(combinedV3CommercialOutcome(cards)).toBe("completed_limited");
   });
 
   it("keeps replacement delivery independent from the real refund outcome", () => {

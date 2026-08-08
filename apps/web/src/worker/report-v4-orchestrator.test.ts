@@ -65,32 +65,32 @@ describe("V4 independently claimed core and enhancement stages", () => {
     }]);
   });
 
-  it("fail-closes a zero-page snapshot without model, artifact, paid commerce, or enhancement enqueue", async () => {
+  it("delivers a factual artifact when no page is crawl-readable", async () => {
     const harness = createCoreHarness({ snapshotStatus: "unavailable", analyzablePages: 0 });
 
     const result = await runReportV4CoreStage(coreInput(), harness.dependencies);
 
-    expect(result.delivery).toBe("unavailable");
-    expect(harness.events).toEqual(["load-core", "resolve-snapshot"]);
-    expect(harness.events.join(" ")).not.toMatch(/terminalize|enqueue|render|persist|activate/i);
-    expect(result.counters.modelCalls.total).toBe(0);
+    expect(result.delivery).toBe("core_active");
+    expect(result.status).toBe("unavailable");
+    expect(harness.events).toContain("render:core");
+    expect(harness.events).toContain("terminalize");
+    expect(harness.events).not.toContain("terminalize:unavailable");
   });
 
-  it("uses the unavailable commerce terminalizer when all three questions are unavailable", async () => {
+  it("delivers a limited artifact when all three questions are unavailable", async () => {
     const harness = createCoreHarness({ unavailableQuestions: 3 });
 
     const result = await runReportV4CoreStage(coreInput(), harness.dependencies);
 
-    expect(result.delivery).toBe("unavailable");
-    expect(harness.events).toContain("terminalize:unavailable");
-    expect(harness.events).not.toContain("prepare:core");
-    expect(harness.events).not.toContain("render:core");
-    expect(harness.events).not.toContain("terminalize");
-    expect(harness.events).not.toContain("enqueue");
+    expect(result.delivery).toBe("core_active");
+    expect(result.status).toBe("completed_limited");
+    expect(harness.events).not.toContain("terminalize:unavailable");
+    expect(harness.events).toContain("render:core");
+    expect(harness.events).toContain("terminalize");
   });
 
   it.each([
-    { snapshotStatus: "completed_limited" as const, unavailableQuestions: 0, expected: "completed_limited" as const },
+    { snapshotStatus: "completed_limited" as const, unavailableQuestions: 0, expected: "completed" as const },
     { snapshotStatus: "completed" as const, unavailableQuestions: 1, expected: "completed_limited" as const },
     { snapshotStatus: "completed" as const, unavailableQuestions: 0, expected: "completed" as const }
   ])("terminalizes and enqueues one deliverable $expected core", async ({ snapshotStatus, unavailableQuestions, expected }) => {
@@ -130,19 +130,19 @@ describe("V4 independently claimed core and enhancement stages", () => {
   );
 
   it.each(["completed", "completed_limited"] as const)(
-    "preserves the activated %s core status and does not start enhancement on question failure",
+    "preserves a deliverable core when the snapshot crawl status is %s and enhancement enqueue reports question failure",
     async (snapshotStatus) => {
       const harness = createCoreHarness({ snapshotStatus, enqueueOutcome: "question_failure" });
 
       const result = await runReportV4CoreStage(coreInput(), harness.dependencies);
 
       expect(result).toMatchObject({
-        status: snapshotStatus,
+        status: "completed",
         delivery: "core_active",
         enqueueOutcome: "question_failure",
         enhancement: { status: "not_started", completedQuestionIds: [], failedQuestionIds: [] }
       });
-      expect(result.activeReport?.status).toBe(snapshotStatus);
+      expect(result.activeReport?.status).toBe("completed");
       expect(harness.events.slice(-3)).toEqual(["terminalize", "after-terminalize", "enqueue"]);
       expect(harness.events.join(" ")).not.toMatch(/audit|diagnose|prepare:enhancement|activate:enhancement/i);
     }
@@ -538,7 +538,14 @@ function createCoreHarness(options: CoreHarnessOptions = {}) {
     },
     async synthesizeWebsite() {
       events.push("synthesize");
-      return { websiteSynthesis, modelCalls: 1 };
+      const pageOutcomes = outcomes(snapshot);
+      return {
+        websiteSynthesis: pageOutcomes.some(({ status }) => status === "analyzed")
+          ? websiteSynthesis
+          : { status: "unavailable", reason: "no_crawl_readable_pages" },
+        pageOutcomes,
+        modelCalls: 1
+      };
     },
     async answerQuestions() {
       events.push("answer");
@@ -827,6 +834,7 @@ function questionSpecs() {
 }
 
 const websiteSynthesis: CombinedGeoReportV4WebsiteSynthesis = {
+  status: "available",
   summary: "The immutable website snapshot contains analyzable business content.",
   strengths: ["The service scope is explicit."],
   gaps: ["Some delivery conditions remain implicit."],
@@ -861,7 +869,7 @@ function snapshotBundle(
       readMode: null,
       summary: null,
       contentHash: null,
-      exclusionReason: "not readable",
+      exclusionReason: "raw_fetch_failed",
       createdAt
     });
   }
@@ -932,10 +940,12 @@ function coreReportFromInput(
   unavailableQuestions: number
 ): CombinedGeoReportV4 {
   const reportQuestions = questions(unavailableQuestions);
+  const snapshot = snapshotBundle(snapshotStatus, snapshotStatus === "unavailable" ? 0 : 2);
+  const pageOutcomes = outcomes(snapshot);
   const answered = reportQuestions.filter(({ status }) => status === "answered").length;
-  const status: CombinedGeoReportV4Status = answered === 0
+  const status: CombinedGeoReportV4Status = pageOutcomes.every(({ status }) => status !== "analyzed" && status !== "analysis_unavailable")
     ? "unavailable"
-    : snapshotStatus === "completed" && answered === 3 ? "completed" : "completed_limited";
+    : answered === 3 ? "completed" : "completed_limited";
   return {
     version: 4,
     artifactContract: "combined_geo_report_v4",
@@ -945,8 +955,33 @@ function coreReportFromInput(
     locale: "zh-CN",
     generatedAt: "2026-07-17T00:00:00.000Z",
     status,
-    websiteSynthesis,
+    websiteSynthesis: status === "unavailable" ? { status: "unavailable", reason: "no_crawl_readable_pages" } : websiteSynthesis,
+    pageCoverage: coverage(pageOutcomes),
     questions: reportQuestions
+  };
+}
+
+function outcomes(snapshot: ReportV4SiteSnapshotBundle): CombinedGeoReportV4["pageCoverage"]["pages"] {
+  return snapshot.pages.map((page) => ({
+    ordinal: page.ordinal,
+    pageId: page.id,
+    url: page.normalizedUrl,
+    status: page.analyzable ? "analyzed" as const : "crawl_unavailable" as const,
+    readMode: page.readMode,
+    reasonCode: page.analyzable ? null : page.exclusionReason
+  }));
+}
+
+function coverage(pages: CombinedGeoReportV4["pageCoverage"]["pages"]): CombinedGeoReportV4["pageCoverage"] {
+  return {
+    counts: {
+      total: pages.length,
+      analyzed: pages.filter(({ status }) => status === "analyzed").length,
+      crawlUnavailable: pages.filter(({ status }) => status === "crawl_unavailable").length,
+      excluded: pages.filter(({ status }) => status === "excluded").length,
+      analysisUnavailable: pages.filter(({ status }) => status === "analysis_unavailable").length
+    },
+    pages
   };
 }
 

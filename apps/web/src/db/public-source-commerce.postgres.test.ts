@@ -57,6 +57,8 @@ describePostgres("paid public-source atomic terminalization",()=>{
     await seedFailedV4TerminalReplay(sql,v4Identity(suffix,"recovery-limited"));
     await seedPaidV4Core(sql,v4Identity(suffix,"recovery-ready"),"completed");
     await seedFailedV4ReadyReplay(sql,v4Identity(suffix,"recovery-ready"));
+    await seedPaidV4Core(sql,v4Identity(suffix,"recovery-unavailable"),"unavailable");
+    await seedFailedV4ReadyReplay(sql,v4Identity(suffix,"recovery-unavailable"));
     await seedPaidV4Core(sql,v4Identity(suffix,"missing-config"),"completed",false);
     await seedPaidV4Core(sql,v4Identity(suffix,"concurrent"),"completed");
     await seedPaidV4Core(sql,v4Identity(suffix,"bypass"),"completed");
@@ -343,6 +345,24 @@ describePostgres("paid public-source atomic terminalization",()=>{
     expect(await readUnavailableV4CommerceState(getSqlClient(),ids)).toEqual(terminal);
   },120_000);
 
+  // @requirement GEO-V4-COMMERCE-01
+  it("requeues a content-unavailable core through its mapped completed commerce outcome",async()=>{
+    const sql=getSqlClient(),ids=v4Identity(suffix,"recovery-unavailable"),core=v4Report(ids,"unavailable");
+    await expect(recoverFailedPaidReportV4CoreForTerminalReplay({
+      coreJobId:ids.jobId,coreArtifactRevisionId:ids.artifactRevisionId,readiness:async()=>undefined
+    })).resolves.toEqual({jobId:ids.jobId,orderId:ids.orderId,artifactRevisionId:ids.artifactRevisionId});
+    await sql`UPDATE scan_jobs SET stage='synthesizing',execution_state='running',current_phase='terminalization',
+      lease_owner=${ids.workerId},lease_expires_at=now()+interval '1 hour' WHERE id=${ids.jobId}`;
+    await expect(terminalizePaidReportV4Core({report:core,workerId:ids.workerId})).resolves.toMatchObject({
+      outcome:"completed",orderId:ids.orderId,refundId:null
+    });
+    expect(await readV4CommerceState(sql,ids)).toMatchObject({
+      stage:"completed",execution_state:"completed",fulfillment_status:"completed",refund_status:"not_required",
+      credit_status:"settled",credits_remaining:0,refunds:0,emails:1,tokens:1,
+      artifact_status:"active",active_artifact_revision_id:ids.artifactRevisionId
+    });
+  },120_000);
+
   it("atomically terminalizes a permanent pre-artifact V4 runner failure and reenters without split state",async()=>{
     const ids=v4UnavailableIdentity(suffix,"unexpected-failure");
     const input={
@@ -428,15 +448,23 @@ function v4Lineage(ids:V4FixtureIdentity){return{reportId:ids.reportId,orderId:i
   coreArtifactRevisionId:ids.artifactRevisionId,configSnapshotId:ids.configSnapshotId,siteSnapshotId:`v4-site-paid-${ids.label}-${ids.reportId}`,
   questionSetId:ids.questionSetId,locale:"zh" as const};}
 function v4EnhancementInput(ids:V4FixtureIdentity){return{...v4Lineage(ids),locale:"zh-CN"};}
-function v4Report(ids:V4FixtureIdentity,status:"completed"|"completed_limited") {return{version:4,artifactContract:"combined_geo_report_v4",reportId:ids.reportId,artifactRevisionId:ids.artifactRevisionId,targetUrl:`https://${ids.label}.example/`,locale:"zh-CN",generatedAt:"2026-07-17T00:00:00.000Z",status,websiteSynthesis:{summary:"Public website summary",strengths:["Clear service description"],gaps:["Missing delivery details"],actions:["Publish verifiable delivery terms"]},questions:[1,2,3].map(order=>({order,questionId:`${ids.questionSetId}-q${order}`,questionText:`Business question ${order}`,status:"answered",answer:`Business answer ${order}`,sources:[]}))};}
-async function seedPaidV4Core(sql:ReturnType<typeof getSqlClient>,ids:V4FixtureIdentity,status:"completed"|"completed_limited",bindConfigSnapshot=true,options:{checkpointStates?:readonly ("answered"|"answering")[];answerDriftOrdinal?:number;checkpointCount?:number}={}){
+type V4FixtureStatus="completed"|"completed_limited"|"unavailable";
+function v4Report(ids:V4FixtureIdentity,status:V4FixtureStatus) {
+  const targetUrl=`https://${ids.label}.example/`;
+  const noReadable=status==="unavailable";
+  return{version:4,artifactContract:"combined_geo_report_v4",reportId:ids.reportId,artifactRevisionId:ids.artifactRevisionId,targetUrl,locale:"zh-CN",generatedAt:"2026-07-17T00:00:00.000Z",status,
+    websiteSynthesis:noReadable?{status:"unavailable",reason:"no_crawl_readable_pages"}:status==="completed_limited"?{status:"unavailable",reason:"website_synthesis_unavailable"}:{status:"available",summary:"Public website summary",strengths:["Clear service description"],gaps:["Missing delivery details"],actions:["Publish verifiable delivery terms"]},
+    pageCoverage:{counts:{total:1,analyzed:noReadable?0:1,crawlUnavailable:noReadable?1:0,excluded:0,analysisUnavailable:0},pages:[{ordinal:1,pageId:`${ids.reportId}-page-1`,url:targetUrl,status:noReadable?"crawl_unavailable":"analyzed",readMode:noReadable?null:"direct_readable",reasonCode:noReadable?"raw_fetch_failed":null}]},
+    questions:[1,2,3].map(order=>({order,questionId:`${ids.questionSetId}-q${order}`,questionText:`Business question ${order}`,status:"answered",answer:`Business answer ${order}`,sources:[]}))};}
+async function seedPaidV4Core(sql:ReturnType<typeof getSqlClient>,ids:V4FixtureIdentity,status:V4FixtureStatus,bindConfigSnapshot=true,options:{checkpointStates?:readonly ("answered"|"answering")[];answerDriftOrdinal?:number;checkpointCount?:number}={}){
   const payload=v4Report(ids,status);
   await sql`INSERT INTO scan_reports(id,url,site_key,payload,report_locale,technical_status) VALUES(${ids.reportId},${payload.targetUrl},${`${ids.label}.example`},'{}','zh','completed')`;
   await sql`INSERT INTO report_business_question_sets(id,report_id,revision,locale,region,status,confidence,generation_rule_version,neutralization_version,profile_evidence_identity)
     VALUES(${ids.questionSetId},${ids.reportId},1,'zh','CN','candidate','high','v4','v4',${`profile-${ids.label}`})`;
   const siteSnapshotId=v4Lineage(ids).siteSnapshotId;
+  const noReadable=status==="unavailable";
   await sql`INSERT INTO report_v4_site_snapshots(id,report_id,site_key,status,captured_at,completed_at,collector_config_identity_hash,content_identity_hash,candidate_url_count,analyzable_page_count,excluded_page_count)
-    VALUES(${siteSnapshotId},${ids.reportId},${`${ids.label}.example`},${status},now()-interval '1 minute',now(),${sha(`collector-paid-${ids.label}`)},${sha(`content-paid-${ids.label}`)},${status==="completed"?1:2},1,${status==="completed"?0:1})`;
+    VALUES(${siteSnapshotId},${ids.reportId},${`${ids.label}.example`},${status},now()-interval '1 minute',now(),${sha(`collector-paid-${ids.label}`)},${sha(`content-paid-${ids.label}`)},${noReadable?1:status==="completed"?1:2},${noReadable?0:1},${noReadable?1:status==="completed"?0:1})`;
   for(const ordinal of [1,2,3])await sql`INSERT INTO report_business_questions(id,question_set_id,ordinal,purpose,generated_text,neutral_public_text,neutral_content_hash,derivation)
     VALUES(${`${ids.questionSetId}-q${ordinal}`},${ids.questionSetId},${ordinal},${["core_service_discovery","customer_region_fit","purchase_delivery_risk"][ordinal-1]!},${`Generated question ${ordinal}`},${`Business question ${ordinal}`},${sha(`question-paid-${ids.label}-${ordinal}`)},'{}'::jsonb)`;
   await sql`INSERT INTO scan_jobs(id,report_id,site_snapshot_id,tier,product_contract,fulfillment_methodology,recommendation_report_version,artifact_contract,business_question_set_id,locale,reason,stage,execution_state,current_phase,lease_owner,lease_expires_at)

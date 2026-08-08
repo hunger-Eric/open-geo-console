@@ -369,8 +369,13 @@ function sourceCorePayload(fixture: Fixture, unavailableQuestion?: 1 | 2 | 3, li
     locale: "en",
     generatedAt: "2030-01-01T00:00:00.000Z",
     status: unavailableQuestion || limitedCore ? "completed_limited" : "completed",
-    websiteSynthesis: {
-      summary: "Website synthesis.", strengths: ["Strength."], gaps: ["Gap."], actions: ["Action."]
+    websiteSynthesis: limitedCore && !unavailableQuestion
+      ? { status: "unavailable", reason: "website_synthesis_unavailable" }
+      : { status: "available", summary: "Website synthesis.", strengths: ["Strength."], gaps: ["Gap."], actions: ["Action."] },
+    pageCoverage: {
+      counts: { total: 1, analyzed: 1, crawlUnavailable: 0, excluded: 0, analysisUnavailable: 0 },
+      pages: [{ ordinal: 1, pageId: `${fixture.reportId}-page-1`, url: `https://${fixture.suffix}.example/`,
+        status: "analyzed", readMode: "direct_readable", reasonCode: null }]
     },
     questions: fixture.questionIds.map((questionId, index) => {
       const order = index + 1;

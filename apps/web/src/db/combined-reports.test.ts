@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -13,7 +14,7 @@ const mocks = vi.hoisted(() => {
       if (direct !== (options.semanticValidation === "free_direct")) throw new TypeError("V3 semantic mode mismatch");
       return value;
     }),
-    parseV4: vi.fn((value: unknown) => value)
+    parsePersistedV4: vi.fn((value: unknown) => value)
   };
 });
 
@@ -23,7 +24,11 @@ vi.mock("@open-geo-console/ai-report-engine", () => ({
   parseCombinedGeoReportV1: mocks.parseV1,
   parseCombinedGeoReportV2: mocks.parseV2,
   parseCombinedGeoReportV3: mocks.parseV3,
-  parseCombinedGeoReportV4: mocks.parseV4
+  isCombinedGeoReportV3CrawlDiagnostic: (value: unknown) => Boolean(
+    value && typeof value === "object" && "crawlDiagnostic" in value
+  ),
+  requireReadyCombinedGeoReportV3CrawlDiagnostic: mocks.parseV3,
+  parsePersistedCombinedGeoReportV4: mocks.parsePersistedV4
 }));
 
 import { getActiveCombinedGeoReport, getAnyActiveCombinedGeoReport } from "./combined-reports";
@@ -49,7 +54,7 @@ describe("active combined report loader", () => {
       pdfStorageKey: null,
       report: { artifactContract: "combined_geo_report_v4", reportId: "report-1" }
     });
-    expect(mocks.parseV4).toHaveBeenCalledOnce();
+    expect(mocks.parsePersistedV4).toHaveBeenCalledOnce();
   });
 
   it("loads the active V4 artifact through the shared unscoped report-page lookup", async () => {
@@ -98,6 +103,18 @@ describe("active combined report loader", () => {
     await expect(getActiveCombinedGeoReport("report-1")).resolves.toBeNull();
   });
 
+  it("routes exact historical V4 payloads through only the persisted-read parser", async () => {
+    const payload = historicalV4Payload();
+    mocks.state.rows = [row({ payload })];
+
+    await expect(getActiveCombinedGeoReport("report-1", "combined_geo_report_v4")).resolves.toMatchObject({
+      report: payload,
+      pdfStorageKey: null,
+      pdfSha256: null
+    });
+    expect(mocks.parsePersistedV4).toHaveBeenCalledWith(payload);
+  });
+
   it("selects the Direct parser only from the immutable Paid root carrier", async () => {
     const payload = { ...legacyPayload(), directSemantics: { version: "free-v4-direct-semantics-v1" } };
     mocks.state.rows = [row({ artifact_contract: "combined_geo_report_v3", artifact_revision_id: "revision-v3", revision: 3,
@@ -141,6 +158,22 @@ describe("active combined report loader", () => {
     mocks.state.rows = [row(overrides)];
     await expect(getActiveCombinedGeoReport("report-1", contract)).resolves.toBeNull();
   });
+
+  it("keeps the historical parser out of every V4 generation and write authority", async () => {
+    const reader = await readFile(new URL("./combined-reports.ts", import.meta.url), "utf8");
+    expect(reader).toContain("parsePersistedCombinedGeoReportV4");
+
+    for (const relativePath of [
+      "../worker/report-v4-orchestrator.ts",
+      "./report-v4-artifact-persistence.ts",
+      "./report-v4-artifact-authority.ts",
+      "./public-source-commerce.ts"
+    ]) {
+      const source = await readFile(new URL(relativePath, import.meta.url), "utf8");
+      expect(source, relativePath).toContain("parseCombinedGeoReportV4");
+      expect(source, relativePath).not.toContain("parsePersistedCombinedGeoReportV4");
+    }
+  });
 });
 
 function row(overrides: Record<string, unknown> = {}) {
@@ -165,6 +198,17 @@ function v4Payload() {
     reportId: "report-1",
     artifactRevisionId: "revision-v4",
     locale: "en-US"
+  };
+}
+
+function historicalV4Payload() {
+  return {
+    ...v4Payload(),
+    targetUrl: "https://target.example/",
+    generatedAt: "2030-01-01T00:00:00.000Z",
+    status: "completed_limited",
+    websiteSynthesis: { summary: "Historical summary.", strengths: [], gaps: [], actions: [] },
+    questions: []
   };
 }
 
