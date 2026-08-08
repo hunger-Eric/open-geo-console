@@ -165,3 +165,36 @@ Staging configuration repair, deployment, and no-payment Chrome acceptance.
 - Production diff: **+65/-8**; tests: **+45/-6**, within budget.
 - No configuration, deployment, report, order, Checkout, payment, model, email,
   Worker, or database action has occurred at this checkpoint.
+
+## Protected Staging execution receipt
+
+- Candidate/push: `97301a5c1f87d329d8af4eef62ab43d786a6731f` on `origin/main`.
+- Diagnostic Preview: `dpl_B8faJXdbaqrp2s5KfNbmTuE2io8H`, READY. It
+  exposed `product_authority_unavailable`; it was not assigned to the fixed
+  alias because required `gitCommitSha` metadata was absent.
+- Confirmed root cause: Preview Web used obsolete unsupported
+  `OGC_PROVIDER_PROFILE=sensenova_anysearch`; the current Staging Worker value
+  `external_search_synthesis` resolves the active AnySearch authority against
+  the same Staging database, while the obsolete value reproduces
+  `provider_profile_unsupported`.
+- Configuration mutation: changed only Preview `OGC_PROVIDER_PROFILE` to
+  `external_search_synthesis`. No secret, database, or authority mutation.
+- Accepted Preview: `dpl_7dFzjqUBVFjtJjTPScxxEprFUS9g`, READY at
+  `open-geo-console-4rh9ooy3o-itheheda-6857s-projects.vercel.app`.
+  `gitCommitSha`, `ogcGitSha`, and `githubCommitSha` all equal the candidate.
+- Fixed alias moved once to the accepted Preview. Staging Workers were not
+  rebuilt or restarted; both remain running on `3b732680...`, restart count 0.
+- Fixed-site Chrome rendered three nonblank editable paid questions, a QA email
+  field, the USD 99.00 action, and `Sandbox / test mode`.
+- One normal page-button submission confirmed and locked the named question
+  set, created order `67f2f110-949f-4f19-b7b6-93306f4455e9`, and navigated the
+  same Chrome tab to `checkout.stripe.com`.
+- Stripe page visibly showed `沙盒`, `Open GEO Console 付费报告`, and
+  `US$99.00`. No card data was entered and the payment button was not clicked.
+- Final authority: payment `pending`, fulfillment `not_started`, `paid_at=null`,
+  provider Checkout present; zero fulfillment job, refund, email, access token,
+  payment, Webhook completion, entitlement, or deep report.
+
+Terminal status: **catalog diagnosis and Staging configuration repair complete;
+no-payment Chrome Checkout acceptance passed; no payment or paid delivery was
+performed.**
