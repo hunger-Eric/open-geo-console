@@ -5,6 +5,30 @@ never executable authority; `docs/ACTIVE-CHANGE-SCOPE.md` is the sole current lo
 
 ---
 
+## 2026-08-08 - Protected Staging catalog diagnosis and no-payment Checkout acceptance completed
+
+- Candidate `97301a5c1f87d329d8af4eef62ab43d786a6731f` added bounded catalog
+  availability codes and distinct checkout unavailable states. Focused tests,
+  lint, build, diff check, and CodeGraph synchronization passed.
+- The first deployed safe code was `product_authority_unavailable`. The cause
+  was obsolete Preview `OGC_PROVIDER_PROFILE=sensenova_anysearch`; changing the
+  one allowlisted non-secret value to `external_search_synthesis` restored the
+  catalog.
+- Accepted Preview `dpl_7dFzjqUBVFjtJjTPScxxEprFUS9g` was READY and assigned
+  to the fixed Protected Staging alias with candidate identity verified.
+- Authenticated Chrome showed exactly three editable paid questions; the named
+  set was confirmed once and exactly one Stripe Sandbox Checkout/order was
+  created. The browser reached Stripe's USD 99.00 test Checkout and stopped
+  without entering card data or submitting payment.
+- At scoped completion, order
+  `67f2f110-949f-4f19-b7b6-93306f4455e9` was pending with no payment event,
+  fulfillment job, entitlement, refund, email, or access token.
+- Terminal status: **catalog/configuration repair and no-payment Checkout
+  acceptance completed.** A later user-submitted Sandbox payment and its
+  rejected Webhook require a separate scope.
+
+---
+
 ## 2026-08-08 - Buyer-intent self-review and checkout-state repair (completed; buyer review superseded)
 
 - Candidate `4cf29bc1cc5c77097d440800b98a44aeea25a221` added a model-owned

@@ -13,11 +13,22 @@ import type { VerifiedPaymentEvent } from "@/payments/gateway";
 
 export const runtime = "nodejs";
 
+type WebhookFailureStage =
+  | "stripe_webhook_read"
+  | "stripe_webhook_verify"
+  | "stripe_webhook_bind"
+  | "stripe_webhook_apply_paid"
+  | "stripe_webhook_apply_unsuccessful"
+  | "stripe_webhook_record_ignored";
+
 export async function POST(request: Request) {
+  let failureStage: WebhookFailureStage = "stripe_webhook_read";
   try {
     const rawBody = await request.text();
+    failureStage = "stripe_webhook_verify";
     const event = new StripeGateway().verifyAndParseWebhook(rawBody, request.headers);
     if (event.outcome === "payment_paid") {
+      failureStage = "stripe_webhook_bind";
       const order = await matchingStripeOrder(event);
       if (!event.paymentIntentId) throw new Error("A paid Stripe event is missing its PaymentIntent.");
       const input = {
@@ -30,10 +41,13 @@ export async function POST(request: Request) {
         payloadHash: event.payloadHash,
         selectedFields: { providerStatus: event.providerStatus }
       } as const;
+      failureStage = "stripe_webhook_apply_paid";
       if (isReportV4PaymentOrder(order)) await applyReportV4PaidPaymentEvent(input);
       else await applyPaidPaymentEvent(input);
     } else if (event.outcome === "payment_failed") {
+      failureStage = "stripe_webhook_bind";
       const order = await matchingStripeOrder(event);
+      failureStage = "stripe_webhook_apply_unsuccessful";
       await applyUnsuccessfulPaymentEvent({
         provider: "stripe",
         providerEventId: event.eventId,
@@ -45,8 +59,10 @@ export async function POST(request: Request) {
         selectedFields: { providerStatus: event.providerStatus }
       });
     } else {
+      if (event.providerCheckoutId) failureStage = "stripe_webhook_bind";
       const matchedOrder = event.providerCheckoutId ? await matchingStripeOrder(event) : null;
       const orderId = matchedOrder?.id ?? event.orderId;
+      failureStage = "stripe_webhook_record_ignored";
       await recordPaymentEvent({
         provider: "stripe",
         providerEventId: event.eventId,
@@ -65,6 +81,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ received: true });
   } catch {
+    console.error("Stripe webhook rejected.", failureStage);
     return NextResponse.json({ error: "Invalid webhook." }, { status: 400 });
   }
 }

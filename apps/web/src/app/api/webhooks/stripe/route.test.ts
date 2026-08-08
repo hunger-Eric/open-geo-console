@@ -28,6 +28,8 @@ vi.mock("@/db/commercial-orders", () => ({
 
 import { POST } from "./route";
 
+const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
 const paidEvent = {
   provider: "stripe",
   eventId: "evt_1",
@@ -107,6 +109,7 @@ describe("Stripe webhook route", () => {
     const response = await webhookRequest();
     expect(response.status).toBe(400);
     expect(mocks.applyPaidPaymentEvent).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith("Stripe webhook rejected.", "stripe_webhook_bind");
   });
 
   it("rejects a signed event from another Checkout Session", async () => {
@@ -117,10 +120,23 @@ describe("Stripe webhook route", () => {
   });
 
   it("rejects an invalid Stripe signature before reading an order", async () => {
-    mocks.verifyAndParseWebhook.mockImplementation(() => { throw new Error("invalid signature"); });
+    mocks.verifyAndParseWebhook.mockImplementation(() => {
+      throw new Error("invalid signature whsec_should_not_be_logged");
+    });
     const response = await webhookRequest();
     expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Invalid webhook." });
     expect(mocks.getPaymentOrder).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith("Stripe webhook rejected.", "stripe_webhook_verify");
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("whsec_should_not_be_logged");
+  });
+
+  it("records a safe paid-application stage without logging the raw failure", async () => {
+    mocks.applyPaidPaymentEvent.mockRejectedValue(new Error("database secret should not escape"));
+    const response = await webhookRequest();
+    expect(response.status).toBe(400);
+    expect(consoleError).toHaveBeenCalledWith("Stripe webhook rejected.", "stripe_webhook_apply_paid");
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("database secret should not escape");
   });
 
   it("records non-paying Checkout events without entering fulfillment", async () => {
@@ -148,6 +164,16 @@ describe("Stripe webhook route", () => {
     expect(response.status).toBe(400);
     expect(mocks.recordPaymentEvent).not.toHaveBeenCalled();
     expect(mocks.markPaymentEventProcessing).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith("Stripe webhook rejected.", "stripe_webhook_bind");
+  });
+
+  it("records a safe ignored-event stage", async () => {
+    mocks.verifyAndParseWebhook.mockReturnValue({ ...paidEvent, outcome: "ignored", paymentIntentId: null });
+    mocks.recordPaymentEvent.mockRejectedValue(new Error("raw ignored-event failure"));
+    const response = await webhookRequest();
+    expect(response.status).toBe(400);
+    expect(consoleError).toHaveBeenCalledWith("Stripe webhook rejected.", "stripe_webhook_record_ignored");
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("raw ignored-event failure");
   });
 });
 
