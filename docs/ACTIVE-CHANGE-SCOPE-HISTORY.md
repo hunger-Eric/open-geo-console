@@ -5,6 +5,33 @@ never executable authority; `docs/ACTIVE-CHANGE-SCOPE.md` is the sole current lo
 
 ---
 
+## 2026-08-08 - Stripe signing repair completed; paid-event application stopped on Profile conflict
+
+- Commit `b85f719ddf46f37ca894e4fb70b692d02d8b1050` added constant-only Stripe
+  Webhook failure stages while preserving the generic public 400 response.
+  Focused tests, lint, build, diff checks, and CodeGraph synchronization passed.
+- The existing Stripe Sandbox endpoint signing secret was read through the
+  authenticated control surface and set only on Vercel Preview. No endpoint or
+  secret was rotated or persisted locally.
+- Preview `dpl_9ACy6Gu2oDgaedX1yYf3B41bm2KK` was READY, had exact candidate
+  identity, and became the fixed Protected Staging deployment.
+- Immediately before replay the named order had zero payment events and zero
+  linked jobs. The original `checkout.session.completed` event was replayed
+  exactly once; no new payment, order, Checkout, or direct database mutation
+  occurred.
+- The replay passed Stripe verification and exact order binding, then failed at
+  safe stage `stripe_webhook_apply_paid`. The transaction rolled back, leaving
+  the order pending with zero payment events/jobs.
+- Read-only configuration inspection confirmed the active
+  `external_search_synthesis` provider selector conflicts with the obsolete
+  native-MiMo `OGC_REPORT_V4_MODEL_PROFILE_ID`. Correcting that non-secret
+  Preview value and waiting for provider retry require a separate scope.
+- Terminal status: **signing repair and one replay completed; fulfillment not
+  created because paid-event application failed closed on a model Profile
+  conflict.**
+
+---
+
 ## 2026-08-08 - Protected Staging catalog diagnosis and no-payment Checkout acceptance completed
 
 - Candidate `97301a5c1f87d329d8af4eef62ab43d786a6731f` added bounded catalog

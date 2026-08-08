@@ -2,168 +2,131 @@
 
 Status: `APPROVED`
 
-Prepared on 2026-08-08 after the existing named Stripe Sandbox payment was
-confirmed paid at Stripe but its Webhook was rejected twice by Protected
-Staging, leaving the order pending and creating no deep job.
+Prepared on 2026-08-08 after the Stripe Sandbox signing configuration was
+corrected and the one authorized original-event replay reached the paid-event
+application stage, where a confirmed non-secret model Profile conflict rolled
+back the transaction.
 
 ## Objective
 
 For report `0ffafb23-16f5-47bb-9073-4f924964f1c9` and its existing paid order
 `67f2f110-949f-4f19-b7b6-93306f4455e9` only:
 
-1. Add bounded, non-sensitive Webhook failure-stage logging.
-2. Identify whether the current failure is Stripe signature verification,
-   order binding, or paid-event application.
-3. Correct the Protected Staging Stripe Webhook signing configuration without
-   printing or persisting the secret locally.
-4. Deploy the exact candidate to Protected Staging Web and move the fixed
-   Staging alias only after identity and readiness checks pass.
-5. Replay the original `checkout.session.completed` event exactly once.
-6. Verify the existing order becomes paid and creates exactly one deep job,
-   without another payment, order, or Checkout Session.
+1. Change the Vercel Preview variable `OGC_REPORT_V4_MODEL_PROFILE_ID` from the
+   obsolete native-MiMo Profile to
+   `report-v4-openai-compatible-mimo-v2.5-pro-v1`, matching the already active
+   `OGC_PROVIDER_PROFILE=external_search_synthesis` contract.
+2. Deploy the exact clean candidate to Protected Staging Web and move the fixed
+   Staging alias only after deployment identity and readiness checks pass.
+3. Perform no manual Stripe event replay. Wait for Stripe's normal automatic
+   retry and observe whether the existing paid event creates exactly one deep
+   job.
 
 ## Confirmed baseline
 
-- Repository `E:\project\open-geo-console`, branch `main`, HEAD
-  `c1f7d98ae57778bad71b98c26d13a715db8d65a1`; primary worktree is clean.
-- CodeGraph is up to date.
-- Stripe Sandbox Checkout is `complete / paid`, amount `USD 99.00`, and its
-  client reference, metadata order reference, amount, and currency match the
-  named database order.
-- Stripe generated `checkout.session.completed` at 2026-08-08T00:53:36Z and
-  reports one pending Webhook delivery.
-- Protected Staging received two `POST /api/webhooks/stripe` requests and
-  returned HTTP 400 to both.
+- Repository `E:\project\open-geo-console`, branch `main`, local and remote
+  HEAD `b85f719ddf46f37ca894e4fb70b692d02d8b1050`; canonical worktree was clean
+  before this scope refresh. CodeGraph is up to date.
+- Fixed Protected Staging currently serves deployment
+  `dpl_9ACy6Gu2oDgaedX1yYf3B41bm2KK`, whose `ogcGitSha` and
+  `githubCommitSha` equal the baseline HEAD.
+- The Stripe Sandbox Checkout is already paid. Its signing secret now matches
+  the existing enabled endpoint; the authorized replay passed verification and
+  order binding, then logged only `stripe_webhook_apply_paid` and returned 400.
+- Read-only Vercel inspection confirmed
+  `OGC_PROVIDER_PROFILE=external_search_synthesis` while
+  `OGC_REPORT_V4_MODEL_PROFILE_ID` equals the obsolete
+  `report-v4-mimo-v2.5-pro-v1`. Current code requires the OpenAI-compatible
+  MiMo Profile for that provider selector and fails closed on the conflict.
 - The order remains `payment_status=pending`,
-  `fulfillment_status=not_started`; `payment_events`, linked `scan_jobs`, and
-  dispatch outbox rows are empty.
-- The named order has one completed V4 site snapshot and one locked set of
-  exactly three paid questions bound to the same order.
-- The route currently collapses all verification, binding, and application
-  exceptions into the same public `Invalid webhook.` response, so the exact
-  internal stage is unresolved.
+  `fulfillment_status=not_started`, with zero persisted payment events and zero
+  linked deep jobs. The failed paid-event transaction left no partial database
+  state.
 
 ## Allowed files
 
 | Path | Allowed change |
 |---|---|
-| `apps/web/src/app/api/webhooks/stripe/route.ts` | Track and emit one safe internal failure-stage code; preserve the existing generic public 400 response and never log raw errors, payloads, signatures, secrets, customer data, event IDs, order IDs, or provider identifiers |
-| `apps/web/src/app/api/webhooks/stripe/route.test.ts` | Prove safe stage classification, successful handling, and absence of sensitive/raw error logging |
-| `docs/ACTIVE-CHANGE-SCOPE.md` | Current authority and execution receipts |
-| `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md` | Archive the completed prior scope and this scope after completion |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | Current authority only |
+| `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md` | Archive the completed prior scope only |
 
-No payment gateway, database, schema, migration, checkout UI, catalog,
-question-generation, Worker, model, crawler, email, entitlement, fulfillment,
-or report-rendering source file is authorized. A required source change outside
-this allowlist is a stop condition.
-
-## Safe logging contract
-
-The server may log only a constant message plus one of these stage codes:
-
-- `stripe_webhook_read`
-- `stripe_webhook_verify`
-- `stripe_webhook_bind`
-- `stripe_webhook_apply_paid`
-- `stripe_webhook_apply_unsuccessful`
-- `stripe_webhook_record_ignored`
-
-The customer response remains exactly `{ "error": "Invalid webhook." }` with
-HTTP 400. No exception object, stack, raw message, request body, header,
-signature, secret, customer value, event/order/session/payment identifier, or
-database value may be logged or returned.
+No application, package, test, dependency, schema, migration, Worker, model,
+payment, checkout, email, entitlement, database, or report source file may be
+changed.
 
 ## Allowed Protected Staging configuration action
 
-- Inspect the existing enabled Stripe Sandbox Webhook endpoint and its signing
-  secret through the authenticated Stripe control surface without displaying,
-  copying into chat/log output, or writing it to a repository/local file.
-- Update exactly one Vercel Preview variable: `STRIPE_WEBHOOK_SECRET`.
-- Do not rotate or recreate the Stripe endpoint unless the existing endpoint's
-  secret cannot be recovered; that condition stops execution for a new user
-  decision.
-- Do not change `STRIPE_SECRET_KEY`, product/catalog variables, database URLs,
-  provider/model secrets, Production variables, or any other environment value.
+- Update exactly one Vercel **Preview** variable:
+  `OGC_REPORT_V4_MODEL_PROFILE_ID=report-v4-openai-compatible-mimo-v2.5-pro-v1`.
+- Preserve `OGC_PROVIDER_PROFILE=external_search_synthesis` and all other
+  Preview variables unchanged.
+- Do not read, print, rotate, replace, or otherwise change any secret.
+- Do not touch Production or Development variables or branch-specific
+  overrides.
 
-## Deployment and external-action limits
+## Git, deployment, and external-action limits
 
-- Local candidate commits: at most **1**.
-- `git push origin main`: at most **1**.
+- One documentation-only commit containing the approved scope/history record,
+  and at most one `git push origin main`, solely to restore a clean canonical
+  deployment worktree. No runtime source change is allowed.
 - Protected Staging Preview deployments: at most **1**.
-- Fixed Protected Staging alias moves: at most **1**.
-- Stripe Sandbox endpoint secret reads: at most **1**.
-- Vercel Preview secret updates: at most **1**.
-- Replay of the already existing original Stripe event: exactly **1** after
-  deployed diagnostics and signing configuration are verified.
-- New payment, order, Checkout Session, report, question set, or manual job:
-  **0**.
-- Production actions, refunds, event fabrication, direct database mutation,
-  manual entitlement/credit creation, and manual task insertion: **0**.
-- The normal exactly-once application of the named paid event may create one
-  entitlement, one report credit settlement, one deep job/dispatch, one access
-  authority, and the ordinary confirmation-email record for this order. The
-  existing deep Worker may claim and begin that one job; paid-report completion
-  is not required by this scope.
-- If automatic Stripe retry succeeds before the authorized manual replay, do
-  not replay: treat the replay allowance as consumed by the successful event
-  application and verify exactly-once state.
+- Fixed Protected Staging alias moves: at most **1**, only after the unique
+  Preview is READY and both `ogcGitSha` and `githubCommitSha` equal the clean
+  candidate commit.
+- Manual Stripe test event, resend/replay, Checkout, payment, order, refund,
+  event fabrication, and direct database mutation: **0**.
+- Production deployment/configuration and Worker image/restart actions: **0**.
+- Read-only monitoring may inspect Stripe's existing event delivery state,
+  Vercel Webhook logs, and the named order's database lineage.
+- Stripe's provider-controlled automatic retry may apply the existing event
+  exactly once. Its normal exactly-once transaction may create one payment
+  event, entitlement, report credit settlement, deep job/dispatch, access
+  authority, and ordinary confirmation-email record. The existing Deep Worker
+  may claim and begin that one job; this scope does not require report
+  completion.
 
-## Diff budget
+## Monitoring window
 
-- Production source: at most **+45/-10** lines.
-- Tests: at most **+110/-20** lines.
-- Scope/history receipts: as required.
-- No dependency, schema, migration, payment-contract, or database-semantic
-  change.
+- After the fixed alias points to the accepted deployment, monitor the existing
+  event/order for up to **60 minutes** without sending any request to the
+  Webhook endpoint.
+- Stop early on success, any new 400 stage, any duplicate state, or an explicit
+  Stripe next-retry time beyond the window.
+- If no automatic retry occurs within the window, report `waiting for provider
+  retry`; do not convert the wait into a manual replay.
 
 ## Acceptance checks
 
-1. Focused route tests show the old catch-all has no stage evidence, then pass
-   for verification, binding, paid-application, and ignored-event failures.
-2. Tests prove the public response remains generic and captured logs contain
-   only an allowlisted stage code, not raw exception or sensitive values.
-3. `npm run lint`, focused tests, `npm run build`, `git diff --check`, and
-   `codegraph sync` pass, with unrelated pre-existing warnings recorded.
-4. Candidate SHA, Vercel deployment metadata, READY state, and fixed alias all
-   identify the same deployed candidate before event replay.
-5. A diagnostic delivery, automatic retry, or the single authorized replay
-   returns HTTP 2xx; logs do not expose protected values.
-6. Database evidence shows the named order paid, exactly one payment event,
-   exactly one entitlement/credit settlement as applicable, and exactly one
-   linked deep job/dispatch. No second order, Checkout Session, or payment is
-   created.
-7. Final evidence states whether the deep Worker has only queued, claimed, or
-   begun the job; it does not claim paid-report completion unless independently
-   observed.
+1. Pre-mutation checks reconfirm the exact variable names/current symbolic
+   values and zero payment events/jobs; no secret value is read.
+2. The one Preview variable is updated to the exact allowlisted Profile and all
+   other configuration targets remain untouched.
+3. The unique Preview is READY and its `ogcGitSha` and `githubCommitSha` exactly
+   match the clean candidate before the fixed alias moves.
+4. No manual POST, Stripe resend/test event, second Checkout/order/payment, or
+   database write is performed by the operator.
+5. On automatic retry success, database evidence shows the existing order paid,
+   exactly one persisted payment event, and exactly one linked deep job/dispatch.
+6. If the retry has not occurred within the monitoring window, final status is
+   explicitly incomplete and records the provider-wait boundary.
 
 ## Stop conditions
 
-- The existing Stripe endpoint secret cannot be revealed without rotation or
-  endpoint recreation.
-- The safe stage proves a source defect outside the allowed route file, a
-  database/schema defect, or a Worker/payment-contract change is required.
-- The order has already produced a payment event or deep job before replay, or
-  more than one matching job/order/payment appears.
-- Deployment identity mismatch, non-READY candidate, unexpected external
-  mutation, secret exposure risk, or any requested second replay/payment/order.
+- The expected Profile value is not available as an existing approved runtime,
+  or the current provider selector differs from `external_search_synthesis`.
+- Any required source, schema, database, secret, Worker, payment-contract, or
+  second configuration change.
+- Deployment identity mismatch, non-READY Preview, unexpected Production or
+  branch scope, or inability to keep the canonical deployment checkout clean.
+- Any payment event/job already exists before the configuration deployment, or
+  more than one matching payment event/job/order appears during monitoring.
+- Automatic retry again reaches a non-success stage; stop and diagnose without
+  another replay or mutation.
 
 ---
 
-Approved explicitly by the user on 2026-08-08 for the named code changes,
-Protected Staging signing-secret correction, deployment, and at most one replay
-of the existing original Stripe event. No runtime source, secret, deployment,
-Stripe event, payment, order, or database state had been changed under this
-scope at approval time.
-
-## Local implementation receipt
-
-- Added constant-only failure-stage logging to the Stripe Webhook route; the
-  public HTTP 400 response remains unchanged.
-- New assertions against the old catch-all: **5 failed / 5 passed** (expected
-  red). After implementation: **10/10 focused tests passed**.
-- `npm run lint`: **0 errors / 8 pre-existing warnings**.
-- `npm run build`: passed, including the Next.js production build.
-- `git diff --check`: passed; `codegraph sync`: up to date.
-- Production diff: **+17/-0**; tests: **+27/-1**, within budget.
-- No secret/configuration, deployment, Stripe replay, order, payment, database,
-  entitlement, email, or Worker action has occurred at this checkpoint.
+Approved explicitly by the user on 2026-08-08 for the one named non-secret
+Preview Profile update, one Protected Staging deployment/alias move, and
+read-only waiting for Stripe's automatic retry. No Profile configuration,
+deployment, alias, Stripe event, payment, order, or database state had been
+changed under this scope at approval time.
