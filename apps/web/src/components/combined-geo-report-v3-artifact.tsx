@@ -204,8 +204,12 @@ function evidenceSummary(card:PaidAnswerCard):EvidenceSummary{
 function TechnicalChecklist({technical,locale}:{technical:PaidReport["technicalFoundation"]["technicalReport"];locale:"en"|"zh"}){
   const zh=locale==="zh",breakdown=technical.scoreBreakdown;
   if(!breakdown)return <div className="technical-checklist technical-checklist-legacy" data-technical-score-method="legacy"><strong>{technical.score}/100</strong><p>{zh?"这是历史报告保存的技术分。该版本没有保存逐项算式，因此不能从当前报告精确复算；下方技术发现仍可单独核对。":"This is a persisted legacy technical score. Its itemized arithmetic was not stored, so it cannot be reconstructed exactly from this report; the findings below remain independently reviewable."}</p></div>;
+  const deducted=breakdown.deductions.reduce((sum,item)=>sum+item.deducted,0);
+  const arithmetic=breakdown.version==="technical_severity_v3"
+    ? `${breakdown.startingScore} + ${breakdown.coverageBonus} − ${deducted} = ${breakdown.finalScore}`
+    : `${breakdown.startingScore} − ${deducted} = ${breakdown.finalScore}`;
   return <div className="technical-checklist" data-technical-score-method={breakdown.version}>
-    <header><div><span>{zh?"检查结果":"Check result"}</span><strong>{breakdown.finalScore}/100</strong></div><p>{breakdown.startingScore} − {breakdown.deductions.reduce((sum,item)=>sum+item.deducted,0)} = {breakdown.finalScore}</p></header>
+    <header><div><span>{zh?"检查结果":"Check result"}</span><strong>{breakdown.finalScore}/100</strong></div><p>{arithmetic}</p></header>
     <dl><Meta label={zh?"检查方法":"Method"}>{breakdown.version}</Meta><Meta label={zh?"抽样页面":"Pages checked"}>{breakdown.checkedPages}</Meta><Meta label={zh?"规则数量":"Rules evaluated"}>{breakdown.evaluatedRules}</Meta></dl>
     <div className="technical-deductions"><h4>{zh?"本次扣分明细":"Applied deductions"}</h4>{breakdown.deductions.length?<ol>{breakdown.deductions.map((item)=>{const finding=technical.findings.find(({id})=>item.findingIds.includes(id));return <li key={item.rule}><div><strong>{finding?.title??item.rule}</strong><span>−{item.deducted}</span></div><p>{zh?`影响 ${item.affectedCount} 项；每项 ${item.pointsPerOccurrence} 分，同类最多扣 ${item.maximumDeduction} 分。`:`${item.affectedCount} affected; ${item.pointsPerOccurrence} points each, capped at ${item.maximumDeduction} for this rule.`}</p></li>;})}</ol>:<p>{zh?"本次检查未产生扣分。":"No deductions were applied in this check."}</p>}</div>
   </div>;

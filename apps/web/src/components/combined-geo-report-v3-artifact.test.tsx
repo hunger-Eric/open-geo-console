@@ -469,20 +469,32 @@ describe("CombinedGeoReportV3Artifact",()=>{
 
   it("separates reconstructable technical arithmetic from model-assisted dimensions",()=>{
     const model=generativeModel();
-    model.combinedReport.technicalFoundation.technicalReport.score=88;
+    model.combinedReport.technicalFoundation.technicalReport.score=80;
     model.combinedReport.technicalFoundation.technicalReport.scoreBreakdown={
-      version:"technical_checklist_v2",startingScore:100,finalScore:88,checkedPages:4,evaluatedRules:13,
-      deductions:[{rule:"page.missingJsonLd",affectedCount:2,pointsPerOccurrence:6,maximumDeduction:18,deducted:12,findingIds:["v3-tech"],representativeUrls:["https://example.com/page"]}]
+      version:"technical_severity_v3",startingScore:88,coverageBonus:8,finalScore:80,checkedPages:4,evaluatedRules:13,
+      deductions:[{rule:"page.missingJsonLd",affectedCount:2,pointsPerOccurrence:8,maximumDeduction:16,deducted:16,findingIds:["v3-tech"],representativeUrls:["https://example.com/page"]}]
     };
     model.combinedReport.technicalFoundation.aiReport.dimensionScores=[{dimension:"organizationClarity",score:78,explanation:"Evidence-bound semantic assessment.",confidence:"medium",evidence:[{url:"https://example.com/page",quote:"V3 Page H1"}]}];
     const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
-    expect(html).toContain('data-technical-score-method="technical_checklist_v2"');
-    expect(html).toContain("100 − 12 = 88");
+    expect(html).toContain('data-technical-score-method="technical_severity_v3"');
+    expect(html).toContain("88 + 8 − 16 = 80");
     expect(html).toContain("模型辅助的内容与 GEO 表达评估");
     expect(html).toContain("以下六项是模型依据已抓取网页证据给出的内容与 GEO 表达评估，不是上方技术检查的分项，也不参与技术分计算。");
     expect(html).toContain("较强");
     expect(html).toContain("置信度：中");
     expect(html).toContain("查看 1 条评分依据");
+  });
+
+  it("keeps persisted technical_checklist_v2 arithmetic readable",()=>{
+    const model=generativeModel();
+    model.combinedReport.technicalFoundation.technicalReport.score=88;
+    model.combinedReport.technicalFoundation.technicalReport.scoreBreakdown={
+      version:"technical_checklist_v2",startingScore:100,finalScore:88,checkedPages:4,evaluatedRules:13,
+      deductions:[{rule:"page.missingJsonLd",affectedCount:2,pointsPerOccurrence:6,maximumDeduction:18,deducted:12,findingIds:["v3-tech"],representativeUrls:["https://example.com/page"]}]
+    };
+    const html=renderToStaticMarkup(createElement(CombinedGeoReportV3Artifact,{model}));
+    expect(html).toContain('data-technical-score-method="technical_checklist_v2"');
+    expect(html).toContain("100 − 12 = 88");
   });
 
   it("marks historical technical scores as non-reconstructable",()=>{

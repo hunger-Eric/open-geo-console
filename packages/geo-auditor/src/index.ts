@@ -197,7 +197,7 @@ export interface TechnicalScoreDeductionV2 {
   representativeUrls: string[];
 }
 
-export interface TechnicalScoreBreakdownV2 {
+export interface TechnicalChecklistBreakdownV2 {
   version: "technical_checklist_v2";
   startingScore: 100;
   finalScore: number;
@@ -205,6 +205,20 @@ export interface TechnicalScoreBreakdownV2 {
   evaluatedRules: number;
   deductions: TechnicalScoreDeductionV2[];
 }
+
+export interface TechnicalSeverityScoreBreakdownV3 {
+  version: "technical_severity_v3";
+  startingScore: 88;
+  coverageBonus: number;
+  finalScore: number;
+  checkedPages: number;
+  evaluatedRules: number;
+  deductions: TechnicalScoreDeductionV2[];
+}
+
+export type TechnicalScoreBreakdownV2 =
+  | TechnicalChecklistBreakdownV2
+  | TechnicalSeverityScoreBreakdownV3;
 
 export interface AuditSiteOptions {
   fetchImpl?: typeof fetch;
@@ -615,28 +629,24 @@ function renderMessageTemplate(template: MessageTemplate, params: FindingMessage
   return typeof template === "function" ? template(params) : template;
 }
 
-const TECHNICAL_CHECK_WEIGHTS: Record<FindingMessageKey, { pointsPerOccurrence: number; maximumDeduction: number }> = {
-  "asset.missingLlmsTxt": { pointsPerOccurrence: 2, maximumDeduction: 2 },
-  "asset.missingSitemapXml": { pointsPerOccurrence: 12, maximumDeduction: 12 },
-  "asset.missingRobotsTxt": { pointsPerOccurrence: 4, maximumDeduction: 4 },
-  "page.badStatus": { pointsPerOccurrence: 18, maximumDeduction: 30 },
-  "page.weakTitle": { pointsPerOccurrence: 4, maximumDeduction: 12 },
-  "page.duplicateTitles": { pointsPerOccurrence: 6, maximumDeduction: 12 },
-  "page.dominantTitleTemplate": { pointsPerOccurrence: 6, maximumDeduction: 12 },
-  "page.missingMetaDescription": { pointsPerOccurrence: 4, maximumDeduction: 12 },
-  "page.h1Structure": { pointsPerOccurrence: 4, maximumDeduction: 12 },
-  "page.missingCanonical": { pointsPerOccurrence: 2, maximumDeduction: 6 },
-  "page.missingJsonLd": { pointsPerOccurrence: 6, maximumDeduction: 18 },
-  "page.lowReadableContent": { pointsPerOccurrence: 4, maximumDeduction: 12 },
-  "homepage.missingOpenGraph": { pointsPerOccurrence: 2, maximumDeduction: 2 }
+const FINDING_PENALTY: Record<FindingSeverity, number> = {
+  critical: 18,
+  warning: 8,
+  info: 3
+};
+
+const FINDING_PENALTY_CAP: Record<FindingSeverity, number> = {
+  critical: 30,
+  warning: 16,
+  info: 6
 };
 
 export function calculateScore(findings: GeoFinding[], pages: AuditedPage[]): number {
   return calculateScoreBreakdown(findings, pages).finalScore;
 }
 
-export function calculateScoreBreakdown(findings: GeoFinding[], pages: AuditedPage[]): TechnicalScoreBreakdownV2 {
-  const rules = new Map<FindingMessageKey, { affectedCount: number; findingIds: string[]; representativeUrls: string[] }>();
+export function calculateScoreBreakdown(findings: GeoFinding[], pages: AuditedPage[]): TechnicalSeverityScoreBreakdownV3 {
+  const rules = new Map<FindingMessageKey, { affectedCount: number; severity: FindingSeverity; findingIds: string[]; representativeUrls: string[] }>();
   for (const finding of findings) {
     const ruleKey = finding.messageKey;
     if (!ruleKey) continue;
@@ -644,6 +654,7 @@ export function calculateScoreBreakdown(findings: GeoFinding[], pages: AuditedPa
     const affectedCount = Math.max(1, finding.aggregation?.affectedCount ?? 1);
     rules.set(ruleKey, {
       affectedCount: (current?.affectedCount ?? 0) + affectedCount,
+      severity: current?.severity ?? finding.severity,
       findingIds: [...(current?.findingIds ?? []), finding.id],
       representativeUrls: [...new Set([
         ...(current?.representativeUrls ?? []),
@@ -652,24 +663,28 @@ export function calculateScoreBreakdown(findings: GeoFinding[], pages: AuditedPa
     });
   }
   const deductions = [...rules.entries()].map(([rule, occurrence]) => {
-    const weight = TECHNICAL_CHECK_WEIGHTS[rule];
+    const pointsPerOccurrence = FINDING_PENALTY[occurrence.severity];
+    const maximumDeduction = FINDING_PENALTY_CAP[occurrence.severity];
     return {
       rule,
       affectedCount: occurrence.affectedCount,
-      pointsPerOccurrence: weight.pointsPerOccurrence,
-      maximumDeduction: weight.maximumDeduction,
-      deducted: Math.min(weight.pointsPerOccurrence * occurrence.affectedCount, weight.maximumDeduction),
+      pointsPerOccurrence,
+      maximumDeduction,
+      deducted: Math.min(pointsPerOccurrence * occurrence.affectedCount, maximumDeduction),
       findingIds: occurrence.findingIds,
       representativeUrls: occurrence.representativeUrls
     };
   }).sort((left, right) => right.deducted - left.deducted || left.rule.localeCompare(right.rule));
-  const finalScore = Math.max(0, 100 - deductions.reduce((sum, deduction) => sum + deduction.deducted, 0));
+  const coverageBonus = Math.min(pages.length, 5) * 2;
+  const finalScore = Math.max(0, Math.min(100,
+    88 + coverageBonus - deductions.reduce((sum, deduction) => sum + deduction.deducted, 0)));
   return {
-    version: "technical_checklist_v2",
-    startingScore: 100,
+    version: "technical_severity_v3",
+    startingScore: 88,
+    coverageBonus,
     finalScore,
     checkedPages: pages.length,
-    evaluatedRules: Object.keys(TECHNICAL_CHECK_WEIGHTS).length,
+    evaluatedRules: Object.keys(FINDING_MESSAGE_CATALOG).length,
     deductions
   };
 }

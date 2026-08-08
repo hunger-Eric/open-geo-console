@@ -226,39 +226,44 @@ describe("geo auditor", () => {
     expect(findings.map(({ aggregation }) => aggregation?.pageType).sort()).toEqual(["product", "service"]);
   });
 
-  it("caps versioned checklist deductions globally by message key after aggregation", () => {
+  it("caps restored severity deductions globally by message key after aggregation", () => {
     const firstStatusGroup = aggregatedFinding("page.badStatus", 5, "product", "/products/:slug");
     const secondStatusGroup = aggregatedFinding("page.badStatus", 5, "service", "/services/:slug");
     const warning = aggregatedFinding("page.h1Structure", 10, "product", "/products/:slug");
     const info = aggregatedFinding("page.missingCanonical", 10, "product", "/products/:slug");
 
-    expect(calculateScore([firstStatusGroup, secondStatusGroup], [])).toBe(70);
-    expect(calculateScore([warning], [])).toBe(88);
-    expect(calculateScore([info], [])).toBe(94);
+    expect(calculateScore([firstStatusGroup, secondStatusGroup], [])).toBe(58);
+    expect(calculateScore([warning], [])).toBe(72);
+    expect(calculateScore([info], [])).toBe(82);
   });
 
   it("preserves the original penalty for a single occurrence", () => {
-    expect(calculateScore([aggregatedFinding("page.badStatus", 1)], [])).toBe(82);
-    expect(calculateScore([aggregatedFinding("page.h1Structure", 1)], [])).toBe(96);
-    expect(calculateScore([aggregatedFinding("page.missingCanonical", 1)], [])).toBe(98);
+    expect(calculateScore([aggregatedFinding("page.badStatus", 1)], [])).toBe(70);
+    expect(calculateScore([aggregatedFinding("page.h1Structure", 1)], [])).toBe(80);
+    expect(calculateScore([aggregatedFinding("page.missingCanonical", 1)], [])).toBe(85);
   });
 
-  it("persists reconstructable checklist arithmetic without rewarding page count", () => {
+  it("restores the former zero-finding page-count distribution", () => {
+    expect(calculateScore([], [page("https://example.com/")])).toBe(90);
+    expect(calculateScore([], Array.from({ length: 5 }, (_, index) => page(`https://example.com/${index}`)))).toBe(98);
+  });
+
+  it("persists reconstructable restored-formula arithmetic", () => {
     const finding = aggregatedFinding("page.missingJsonLd", 2, "product", "/products/:slug");
     const onePage = calculateScoreBreakdown([finding], [page("https://example.com/")]);
     const fivePages = calculateScoreBreakdown([finding], Array.from({ length: 5 }, (_, index) => page(`https://example.com/${index}`)));
 
     expect(onePage).toMatchObject({
-      version: "technical_checklist_v2",
-      startingScore: 100,
-      finalScore: 88,
+      version: "technical_severity_v3",
+      startingScore: 88,
+      coverageBonus: 2,
+      finalScore: 74,
       checkedPages: 1,
       evaluatedRules: 13,
-      deductions: [{ rule: "page.missingJsonLd", affectedCount: 2, pointsPerOccurrence: 6, maximumDeduction: 18, deducted: 12 }]
+      deductions: [{ rule: "page.missingJsonLd", affectedCount: 2, pointsPerOccurrence: 8, maximumDeduction: 16, deducted: 16 }]
     });
-    expect(fivePages.finalScore).toBe(onePage.finalScore);
-    expect(fivePages.checkedPages).toBe(5);
-    expect(fivePages.startingScore - fivePages.deductions.reduce((sum, item) => sum + item.deducted, 0)).toBe(fivePages.finalScore);
+    expect(fivePages).toMatchObject({ coverageBonus: 10, finalScore: 82, checkedPages: 5 });
+    expect(fivePages.startingScore + fivePages.coverageBonus - fivePages.deductions.reduce((sum, item) => sum + item.deducted, 0)).toBe(fivePages.finalScore);
   });
 
   it("emits one grouped GEO finding for exact duplicate titles", () => {
@@ -316,7 +321,7 @@ describe("geo auditor", () => {
     });
     expect(finding?.aggregation?.representativeUrls).toHaveLength(3);
     expect(finding?.params).not.toHaveProperty("sharedSegment");
-    expect(calculateScore(titleFindings, pages)).toBe(88);
+    expect(calculateScore(titleFindings, pages)).toBe(82);
   });
 });
 

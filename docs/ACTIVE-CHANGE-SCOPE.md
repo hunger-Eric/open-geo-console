@@ -2,173 +2,195 @@
 
 Status: `APPROVED`
 
-Prepared on 2026-08-08 after the user asked to deploy local code for manual
-testing. The dirty tree is the already-completed **pre-admission bounded retry
-and free-report fallback** implementation (archived in
-`docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`). User approved this exact Staging Gates
-0–3 allowlist on 2026-08-08 and explicitly included `git push origin main`
-(cap 1).
+Prepared on 2026-08-08 after the user requested pushing and deploying the
+locally verified former-score-distribution restoration to the Protected Staging
+test endpoint.
 
 ## Objective
 
-Package the dirty working tree as **one** candidate commit on top of current
-`main` (`9f2732b0…`), then deploy **Protected Staging only** through Gates 0–3
-so the fixed Staging URL and Staging free/deep Workers serve:
+Package the exact six-file scoring repair as one commit on `main`, push it once
+to `origin/main`, then deploy that exact candidate to Protected Staging Web and
+the Staging free/deep Workers so the user can manually submit a new report and
+verify that a one-page zero-finding audit scores 90 instead of 100.
 
-1. Prospective `v4_pre_admission` jobs: max three attempts; only typed
-   transport/upstream outages enter retry wait; contract failures stay terminal.
-2. Checkpoint resume for valid `questions_ready` / `q1_answer_ready` without
-   re-running completed question-generation model calls.
-3. Marker-bearing terminally incomplete free teaser falls through to the
-   persisted technical/Free AI report view (no fabricated Q1, no teaser checkout).
-
-The user performs manual browser testing. Agent does **not** run Gate 4, model
-calls, payments, refunds, or email.
+The agent performs deployment identity/protection smoke only. The user owns the
+manual report test; the agent does not create a report or invoke crawl/model,
+commerce, refund, or email workflows.
 
 ## Confirmed baseline
 
 | Item | Value |
 |---|---|
-| Repository | `E:\project\open-geo-console` |
-| Branch / HEAD | `main` / `9f2732b0914767c937853e9e58df51af4ae50264` (matches `origin/main`) |
-| Dirty surface | 10 modified + 1 untracked test, ~+224/-196 tracked |
-| Current Staging Workers | `open-geo-console:staging-3b732680-split-questions-overlay-v1` (`93de239b060f`), env `OGC_DEPLOYMENT_VERSION=3b732680…` (Worker lag behind HEAD is pre-existing) |
-| Overlay FROM base | Use currently running Worker image `staging-3b732680-split-questions-overlay-v1` as thin-overlay base (source-only; includes apps+packages; candidate also includes later HEAD commits via clean checkout COPY) |
-| package-lock / Dockerfile.worker | unchanged → thin overlay only |
-| Full Worker rebuild | **forbidden** |
+| Repository / branch | `E:\project\open-geo-console` / `main` |
+| Local HEAD / `origin/main` | `1407cba844c147e0d27fd5de4f6461365b0f3602` / same |
+| Dirty source/test surface | Exact locally verified scoring repair in four files plus this scope/history; no other dirty paths |
+| Local verification | Focused 41/41; lint 0 errors and 8 pre-existing warnings; all workspace TypeScript and Next.js build passed; CodeGraph current; `git diff --check` passed |
+| Current fixed Web alias | `open-geo-console-staging-itheheda.vercel.app` -> `open-geo-console-41orvpy6b-itheheda-6857s-projects.vercel.app` (`dpl_HdXUaBRQ2s8igM3x1vi6VAeYG2oR`, READY) |
+| Current Worker image | `open-geo-console:staging-1407cba8-preadmit-retry-overlay-v1` |
+| Current Worker image ID | `sha256:82f13cbf9059803b7b4f944c2e5ccc5755d5e3da4c998988852fee606c04bdfb` |
+| Current Worker identity | free/deep revision and `OGC_DEPLOYMENT_VERSION` = `1407cba8...`; running; restart 0 |
+| Staging database | marker `staging`; no queued/running/retry_wait jobs; 4 free + 1 deep `repair_wait` rows remain untouched |
+| Docker / disk | images 62 / 30.34 GB; build cache 15.02 GB; E: 39.77 GiB free |
+| Dependency/base inputs | `package.json`, `package-lock.json`, `Dockerfile.worker`, and browser/system dependencies unchanged |
+| Build classification | Source-only change; full Worker build forbidden; one thin source overlay required |
+| Vercel identity | `itheheda` |
 
-Note: thin overlay copies the clean candidate checkout’s `apps/` + `packages/`,
-so the image content is the full candidate SHA even when FROM is an older
-overlay base.
+## Gate 0 - candidate commit and push
 
-## Allowed actions (only after APPROVED)
+1. Re-run focused tests and `git diff --check` if the candidate diff changes
+   from the locally verified state.
+2. Verify the complete diff contains only the six commit-allowlisted files and
+   remains within the approved budgets.
+3. Create exactly one commit on `main` with message
+   `fix: restore technical score distribution`.
+4. Push that commit once, non-force, to `origin main`.
+5. Record the full candidate SHA and require local `main` and `origin/main` to
+   match it.
 
-### Gate 0 — candidate package
-
-1. Commit **only** the allowlisted dirty paths. One commit on `main`.
-2. Record full candidate SHA. `git push origin main` only if approval
-   explicitly includes push (default **0**).
-3. Clean exact-SHA checkout under `.data/staging-release-<short>/`.
-
-### Gate 1 — preflight
-
-1. Confirm Docker engine, disk free, idle Staging free/deep (wait/drain only).
-2. Record rollback: fixed-alias host, Worker image tag/ID, version from
-   `staging.env` / containers.
-3. Confirm thin-overlay path.
-4. `npx vercel whoami` from the clean checkout.
-
-### Gate 2 — Staging deploy (source-only)
-
-1. **One** manual Preview:
-   ```powershell
-   $env:VERCEL_ORG_ID = 'team_PbYYV2K2zBjTeThfavXStTOI'
-   $env:VERCEL_PROJECT_ID = 'prj_WVpdlJfsEp0YyWM2W54w8oBy985S'
-   npx vercel deploy --yes --meta ogcGitSha=<candidate-full-sha>
-   ```
-2. Require `READY` and `gitCommitSha = ogcGitSha = <candidate-full-sha>`.
-3. Build **exactly one** thin overlay:
-   - `FROM open-geo-console:staging-3b732680-split-questions-overlay-v1`
-   - `COPY` only `apps/` and `packages/`; OCI revision = full candidate SHA
-   - tag: `open-geo-console:staging-<short>-preadmit-retry-overlay-v1`
-4. Preserve `staging.env` bytes; replace **only** `OGC_DEPLOYMENT_VERSION`.
-5. Recreate **only** `staging-worker-free` and `staging-worker-deep`
-   (`--no-deps --no-build --force-recreate`).
-6. Inline 60s / 2s readiness wait — **do not** source the full body of
-   `scripts/start-report-v4-staging-workers.ps1`.
-7. Move fixed alias **once** to the candidate Preview for
-   `open-geo-console-staging-itheheda.vercel.app`.
-
-### Gate 3 — protection smoke (agent)
-
-- Fixed `/zh` protection (SSO 302 OK), Web/Worker SHA equality, restart 0.
-- No report/crawl/model/order/payment/refund/email.
-
-### Manual testing (user only)
-
-- New Free/V4 pre-admission: transient upstream failures may retry up to 3
-  attempts; permanent/contract failures stay terminal.
-- Incomplete marker-present teaser shows technical/Free report fallback, not
-  empty teaser checkout fabrication.
-- Use **new** prospective reports only.
-
-## File allowlist (commit surface)
+## Commit file allowlist
 
 | Path | Role |
 |---|---|
-| `apps/web/src/worker/processor.ts` | Pre-admission retry eligibility |
-| `apps/web/src/worker/processor.test.ts` | Retry tests |
-| `apps/web/src/worker/report-v4-free-teaser.ts` | Checkpoint resume / attempt budget |
-| `apps/web/src/worker/report-v4-free-teaser.test.ts` | Free teaser tests |
-| `apps/web/src/db/report-v4-admission-jobs.ts` | Attempt/max-attempt handling |
-| `apps/web/src/db/report-v4-admission-jobs.test.ts` | Admission job tests |
-| `apps/web/src/db/commercial-orders-semantic-review.postgres.test.ts` | Mechanical test alignment if dirty |
-| `apps/web/src/app/[locale]/reports/[id]/page.tsx` | Free report fallback render |
-| `apps/web/src/app/[locale]/reports/[id]/page.test.tsx` | New page fallback tests |
-| `docs/ACTIVE-CHANGE-SCOPE.md` | This scope / receipts |
-| `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md` | Archive only if already dirty |
+| `packages/geo-auditor/src/index.ts` | Restored score formula and versioned reconstructable breakdown |
+| `packages/geo-auditor/src/index.test.ts` | Formula/distribution regression tests |
+| `apps/web/src/components/combined-geo-report-v3-artifact.tsx` | V2/V3 reconstructable arithmetic rendering |
+| `apps/web/src/components/combined-geo-report-v3-artifact.test.tsx` | Paid V3 presentation compatibility tests |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | Current release authority |
+| `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md` | Completed local implementation receipt |
 
-### Deploy-only paths
+## Commit diff budget
 
-| Path | Purpose |
+| Surface | Measured / hard limit |
+|---|---:|
+| Production source | `+45/-26` / no additional source lines |
+| Tests | `+38/-21` / no additional test lines |
+| Scope/history documentation | `+217/-145` / maximum `+230/-160` |
+| Dependencies/schema/migrations | `0` / `0` |
+
+Any source/test delta beyond the measured candidate, or any path outside the
+six-file allowlist, is a stop condition rather than permission to repair during
+release packaging.
+
+## Gate 1 - exact-SHA release preparation
+
+1. Reuse the existing clean detached worktree at
+   `.data/candidate-worktree`; do not create another worktree.
+2. Detach that clean worktree at the new candidate SHA and verify its HEAD and
+   cleanliness.
+3. Reconfirm Docker engine, E: free space >= 20 GiB, `docker system df`, current
+   Worker image IDs, no queued/running/retry_wait Staging jobs, fixed Web alias,
+   and `npx vercel whoami`.
+4. Existing `repair_wait` rows are not active leases and must not be modified,
+   retried, repaired, failed, or used as acceptance substitutes.
+
+## Gate 2 - Protected Staging deployment
+
+1. Create exactly one Vercel Preview from the clean candidate worktree with:
+   - project `prj_WVpdlJfsEp0YyWM2W54w8oBy985S`;
+   - org `team_PbYYV2K2zBjTeThfavXStTOI`;
+   - metadata `ogcGitSha=<candidate-full-sha>`.
+2. Require Preview `READY` and `gitCommitSha = ogcGitSha = candidate SHA`.
+3. Build exactly one thin overlay:
+   - `FROM open-geo-console:staging-1407cba8-preadmit-retry-overlay-v1`;
+   - copy only candidate `apps/` and `packages/` into `/app`;
+   - OCI revision label = candidate full SHA;
+   - tag `open-geo-console:staging-<candidate-short>-score-restore-overlay-v1`.
+4. Expected incremental disk use is below 1 GiB. Stop before build if free space
+   drops below 20 GiB; after a failed build, record disk/cache delta and do not
+   retry without new authority.
+5. Preserve all other `staging.env` bytes and change only
+   `OGC_DEPLOYMENT_VERSION` to the candidate SHA.
+6. Create one derived override file named
+   `.data/workstation-docker/staging-<candidate-short>-score-restore.override.yaml`
+   that changes only free/deep image tag and deployment version.
+7. Recreate only `staging-worker-free` and `staging-worker-deep` with
+   `--no-deps --no-build --force-recreate`; do not touch commerce, PostgreSQL,
+   Production, or any other service.
+8. Require both Workers running, restart 0, ready, exact image ID, exact OCI
+   revision, and exact deployment version before moving the alias.
+9. Move fixed alias `open-geo-console-staging-itheheda.vercel.app` exactly once
+   to the accepted Preview.
+
+## Deploy-only mutation allowlist
+
+- Existing clean `.data/candidate-worktree/**` checkout state and one ignored
+  thin-overlay Dockerfile tied to the candidate SHA.
+- `.data/workstation-docker/staging.env`:
+  `OGC_DEPLOYMENT_VERSION` line only.
+- One derived
+  `.data/workstation-docker/staging-<candidate-short>-score-restore.override.yaml`.
+- One candidate Docker image/tag described above.
+- Containers `open-geo-console-staging-worker-free-1` and
+  `open-geo-console-staging-worker-deep-1` only.
+- One Vercel Preview and one fixed-alias reassignment.
+
+## Gate 3 - deployment smoke
+
+1. Verify fixed `/zh` remains protected; an SSO 302 is accepted.
+2. Verify fixed alias resolves to the accepted Preview.
+3. Verify Web metadata and both Workers all carry the candidate full SHA.
+4. Verify both Workers remain running, ready, and restart 0.
+5. Record before/after E: free space, `docker system df`, candidate/current/
+   rollback image identities, container references, and net disk change.
+6. Stop and hand the fixed endpoint to the user. Do not submit a report.
+
+## Rollback identities and action
+
+| Role | Identity |
 |---|---|
-| `.data/staging-release-<short>/**` | Clean checkout + Dockerfile.overlay |
-| `.data/workstation-docker/staging.env` | `OGC_DEPLOYMENT_VERSION` only |
-| `.data/workstation-docker/staging-*.override.yaml` | free/deep image tag only |
+| Rollback Web | `open-geo-console-41orvpy6b-itheheda-6857s-projects.vercel.app` / `dpl_HdXUaBRQ2s8igM3x1vi6VAeYG2oR` |
+| Rollback Workers | `open-geo-console:staging-1407cba8-preadmit-retry-overlay-v1` / `sha256:82f13cbf9059803b7b4f944c2e5ccc5755d5e3da4c998988852fee606c04bdfb` |
+| Rollback version | `1407cba844c147e0d27fd5de4f6461365b0f3602` |
+
+If Gate 2/3 fails after mutation, restore the prior `staging.env` deployment
+version, recreate only free/deep on the rollback image, restore the prior fixed
+alias if it moved, verify, and stop. Rollback is not permission to build a
+second candidate.
+
+## Hard action caps
+
+| Action | Maximum |
+|---|---:|
+| Candidate commit on `main` | 1 |
+| Non-force `git push origin main` | 1 |
+| Vercel Preview | 1 |
+| Thin overlay Docker build | 1 |
+| Staging free/deep recreate | 1 pair, plus rollback only on failure |
+| Fixed alias move | 1, plus rollback only on failure |
+| Report/crawl/search/model/payment/refund/email | 0 |
 
 ## Explicitly forbidden
 
-- Production anything.
-- Full Worker rebuild; Docker mass prune.
-- Historical report/job/order mutation, replay, clone.
-- Agent Gate 4 / model / payment / refund / email.
-- Second Preview/overlay/alias without a new scope after failure.
-- Expanding source beyond the allowlisted dirty set at commit time.
-- Stripe webhook resend or commerce mutation.
+- Any source/test edit beyond packaging the exact locally verified repair.
+- Production, commerce service, PostgreSQL/container/volume mutation, full
+  Worker build, dependency installation, Docker prune, image cleanup, or
+  historical report/job/data mutation.
+- New report, scan, crawl, model/search call, checkout, payment, refund, email,
+  or Gate 4 acceptance by the agent.
+- A second Preview, second candidate image, retry after failed build, or expanded
+  deployment target without a new scope.
+- Force push, merge, branch/tag creation, additional worktree, or history rewrite.
 
-## Diff budget
+## Acceptance
 
-- Application production/test: **0 new lines** in this scope (package existing
-  dirty tree only; ~+224/-196 tracked at FROZEN write plus untracked page test).
-- Scope/history docs for status and receipts only.
-
-## Expensive external actions (hard caps)
-
-| Action | Max |
-|---|---|
-| Candidate commit on `main` | 1 |
-| `git push origin main` | 0 unless approval includes push; then 1 |
-| Staging Preview deploy | 1 |
-| Thin overlay Docker build | 1 |
-| Staging free+deep recreate | 1 pair |
-| Fixed alias move | 1 |
-| Agent report / payment / model / refund / email | **0** |
-
-## Acceptance checks
-
-1. Candidate full SHA equals Web meta and both Workers’ revision / version.
-2. Fixed alias points at the candidate Preview.
-3. Free and deep running, restart 0, readiness present.
-4. Gate 3 smoke or SSO boundary recorded.
-5. Rollback identities recorded before cutover.
-
-## Rollback
-
-1. Restore prior `OGC_DEPLOYMENT_VERSION` / `staging.env` bytes.
-2. Recreate free+deep on
-   `open-geo-console:staging-3b732680-split-questions-overlay-v1`
-   (`sha256:93de239b060f…`).
-3. Restore prior Web host if alias moved.
-4. Verify and **stop**.
+1. Candidate commit contains exactly the six allowlisted paths and is identical
+   across local `main`, `origin/main`, Vercel metadata, Worker OCI revision, and
+   Worker deployment version.
+2. Fixed Protected Staging alias points to the READY candidate Preview.
+3. Both Staging Workers use the candidate thin overlay, are ready, and restart 0.
+4. Protection smoke passes without creating a report or external workflow.
+5. Current and rollback image/Web identities remain recorded; no image cleanup
+   occurs in this scope.
 
 ## Stop conditions
 
-- Dirty tree outside allowlist at commit time.
-- package-lock / Dockerfile.worker change → full rebuild required.
-- SHA mismatch, readiness failure, or Production path required.
+- Diff outside commit allowlist, dependency/base input change, disk below 20
+  GiB, queued/running/retry_wait job, SHA mismatch, Preview not READY, Worker
+  readiness/restart failure, alias mismatch, or any need for Production.
+- Any required second build/Preview/alias move, report creation, historical
+  mutation, or scope expansion.
 
 ---
 
-**Awaiting explicit user approval of this exact allowlist.**  
-Reply with approval (and whether to include `git push origin main`) to set
-Status `APPROVED` and execute Gates 0–3 only.
+**Approved by the user on 2026-08-08.** Gates 0-3 may proceed only within this
+exact release allowlist and the recorded hard action caps.

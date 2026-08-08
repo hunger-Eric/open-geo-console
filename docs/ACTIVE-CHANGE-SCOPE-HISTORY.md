@@ -7939,3 +7939,65 @@ revised scope.
   scope.**
 
 ---
+
+## 2026-08-08 - Pre-admission retry and free-report fallback Staging deployment completed
+
+- The user approved packaging the bounded pre-admission retry, checkpoint
+  resume, and marker-bearing free-report fallback changes as candidate
+  `1407cba844c147e0d27fd5de4f6461365b0f3602`, including one non-force push to
+  `origin/main`.
+- Vercel Preview
+  `open-geo-console-41orvpy6b-itheheda-6857s-projects.vercel.app` was READY;
+  `gitCommitSha` and `ogcGitSha` matched the candidate, and the fixed Protected
+  Staging alias was moved to that Preview once.
+- Staging free/deep Workers used
+  `open-geo-console:staging-1407cba8-preadmit-retry-overlay-v1`
+  (`sha256:82f13cbf9059803b7b4f944c2e5ccc5755d5e3da4c998988852fee606c04bdfb`),
+  were ready, and had restart count zero. The prior `3b732680` Worker image was
+  retained as rollback.
+- Gate 3 verified the protected fixed-site/SSO boundary and Web/Worker identity.
+  The agent performed no Gate 4 report, crawl, model call, order, payment,
+  refund, or email action.
+- Manual report `313e22bd-2b94-4ad2-bcc7-241788c2cecc` was later diagnosed as
+  having failed before the candidate Workers started, so it was not acceptance
+  evidence for the new retry behavior. The same inspection showed that the
+  shared `technical_checklist_v2` formula made a one-page zero-finding Free
+  report score 100, prompting a separately scoped scoring repair.
+- Terminal status: **Protected Staging Gates 0-3 completed; retry behavior still
+  requires a prospective post-cutover report for real-flow acceptance.**
+
+---
+
+## 2026-08-08 - Former technical score distribution restored locally
+
+- The user approved restoring the former deterministic formula for prospective
+  audits: `88 + min(checked pages, 5) * 2 - severity-based per-rule
+  deductions`, clamped to 0-100.
+- `packages/geo-auditor/src/index.ts` now emits the versioned
+  `technical_severity_v3` breakdown with starting score, coverage bonus,
+  checked-page/rule counts, applied deductions, finding IDs, representative
+  URLs, and final score. Existing persisted `technical_checklist_v2` payloads
+  remain a separate readable variant and are not recalculated.
+- Paid V3 keeps deterministic technical arithmetic separate from the six
+  model-assisted semantic dimensions. Its renderer shows `88 + bonus -
+  deductions = final` for prospective reports and retains the historical
+  `100 - deductions = final` rendering for V2 payloads.
+- Red-before: the new one-page zero-finding assertion failed with received 100
+  versus expected 90 under the previous implementation.
+- Green-after: both focused files passed, 41/41 tests. The restored distribution
+  proves one page with zero findings = 90 and five pages with zero findings =
+  98, with critical/warning/info penalties and caps restored.
+- `npm run lint` passed with 0 errors and 8 pre-existing warnings on unchanged
+  lines. `npm run build` passed all workspace TypeScript builds and the Next.js
+  production build. `git diff --check` passed and CodeGraph synced four changed
+  source/test files.
+- Production code measured `+45/-26`; tests measured `+38/-21`, both within the
+  approved budgets. No dependency, schema, finding detection, crawler, model,
+  semantic-score, job, commerce, access-control, or historical-data behavior
+  changed.
+- No report, crawl, search/model call, payment, refund, email, Docker action,
+  deployment, commit, push, merge, branch, tag, or worktree was performed.
+- Terminal status: **local implementation and automated verification complete;
+  deployment and prospective real-report acceptance remain separately gated.**
+
+---
