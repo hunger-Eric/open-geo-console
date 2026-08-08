@@ -262,18 +262,15 @@ export async function generateFreeTeaser(input: {
     assertCheckpointIdentity(checkpoint, identityCore, identityHash);
     assertSemanticReviewCheckpointMode(checkpoint, semanticReviewEnabled, freeDirectEnabled);
   }
-  if (freeDirectEnabled && checkpoint && checkpoint.stage !== "ready") {
-    throw new Error("A nonterminal Free direct checkpoint cannot be resumed; start a new report run.");
-  }
   const evidenceCutoffAt = checkpoint?.evidenceCutoffAt ?? new Date().toISOString();
 
   let questionSet: ConfirmedBusinessQuestionSet | null = null;
   let freeQuestion = checkpoint?.freeQuestion ?? "";
   let freeQuestionIdentity = checkpoint?.freeQuestionIdentity ?? "";
   if (freeDirectEnabled) {
-    if (checkpoint?.stage === "ready") {
+    if (checkpoint) {
       if (!freeQuestion || !freeQuestionIdentity || !checkpoint.paidQuestionSetId) {
-        throw new Error("Marked Free teaser ready checkpoint has no split question authority.");
+        throw new Error("Marked Free teaser checkpoint has no split question authority.");
       }
     } else {
       const generatedFree = await invokeFreeV4QuestionGeneration({

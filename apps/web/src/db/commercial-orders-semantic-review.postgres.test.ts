@@ -125,7 +125,7 @@ describeDisposablePostgres("Paid V3 semantic-review checkpoint carrier", () => {
       FROM scan_jobs WHERE id=${first!.jobId}
     `).resolves.toEqual([{ checkpoint: {
       freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION
-    }, max_attempts: 1, dispatches: 1 }]);
+    }, max_attempts: 3, dispatches: 1 }]);
     await expect(getSqlClient().begin((tx) => enqueueReportV4PreAdmissionAfterPreview(
       preview,
       createPostgresReportV4AdmissionJobRepository(tx)

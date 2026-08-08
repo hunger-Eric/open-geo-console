@@ -740,8 +740,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     const deferPhaseAttempt = readFreeDirectSemanticsVersion(job.checkpoint) === null &&
       normalized.classification === "transient" && isDeferrablePublicSourceOutage(error);
     const directPaidOneShot = job.tier === "deep" && readFreeDirectSemanticsVersion(job.checkpoint) !== null;
+    const retryablePreAdmissionUpstreamFailure = job.reason === "v4_pre_admission" &&
+      normalized.classification === "transient" && isRetryablePreAdmissionUpstreamCode(normalized.code);
     const answersAlreadyGenerated = job.tier === "deep" && hasCompletedPaidV3DirectAnswers(currentJob);
-    if (!deferPhaseAttempt && normalized.classification === "transient" && await hasPriorJobErrorFingerprint(job.id, normalized.fingerprint)) {
+    if (!retryablePreAdmissionUpstreamFailure && !deferPhaseAttempt && normalized.classification === "transient" &&
+        await hasPriorJobErrorFingerprint(job.id, normalized.fingerprint)) {
       normalized = escalateFingerprintRecurrence(normalized);
     }
     // V4 owns commercial terminalization, but ordinary runner failures still
@@ -755,10 +758,11 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       publicMessage: answersAlreadyGenerated
         ? "The report answers were generated, but final preparation needs operator repair."
         : "The analysis is temporarily unavailable.",
-      // A paid free-direct deep job tolerates transient failures through the
-      // normal retry_wait path within max_attempts; the v4_pre_admission
-      // one-shot guard and permanent/contract classifications stay terminal.
-      retryable: !answersAlreadyGenerated && normalized.classification === "transient" && (!directPaidOneShot || job.reason !== "v4_pre_admission"),
+      // Paid free-direct jobs use the normal retry_wait path. Pre-admission is
+      // narrower: only typed temporary transport/upstream failures may consume
+      // its bounded three-attempt budget.
+      retryable: !answersAlreadyGenerated && normalized.classification === "transient" &&
+        (!directPaidOneShot || job.reason !== "v4_pre_admission" || retryablePreAdmissionUpstreamFailure),
       classification: answersAlreadyGenerated
         ? "operator_repairable"
         : directPaidOneShot ? undefined : normalized.classification === "operator_repairable" ? "operator_repairable" : normalized.classification === "target_limitation" ? "target_limitation" : undefined,
@@ -780,6 +784,27 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
     directTrace?.emit("job_stopped", "job_execution");
     execution.stop();
   }
+}
+
+const RETRYABLE_PRE_ADMISSION_UPSTREAM_CODES = new Set([
+  "ai_client_rate_limited",
+  "ai_client_temporary",
+  "ai_client_timeout",
+  "ai_client_transport",
+  "mimo_rate_limited",
+  "mimo_temporary_provider",
+  "mimo_timeout",
+  "mimo_transport",
+  "diagnosis_rate_limited",
+  "diagnosis_temporary_provider",
+  "diagnosis_timeout",
+  "diagnosis_transport",
+  "public_source_snapshot_search_execution",
+  "provider_discovery_deadline_exceeded"
+]);
+
+function isRetryablePreAdmissionUpstreamCode(code: string): boolean {
+  return RETRYABLE_PRE_ADMISSION_UPSTREAM_CODES.has(code);
 }
 
 function withFreeTeaserAfterAdmission(

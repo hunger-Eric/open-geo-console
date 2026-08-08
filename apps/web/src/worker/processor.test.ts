@@ -397,28 +397,55 @@ describe("strict Report V4 processor routing", () => {
     }
   });
 
-  it("does not defer a transient V4 pre-admission failure into another direct-model run", async () => {
+  it("routes a typed temporary V4 pre-admission outage into bounded retry_wait", async () => {
     const job = v4Job({
       reason: "v4_pre_admission",
       businessQuestionSetId: null,
       siteSnapshotId: null,
       creditReservationId: null,
       checkpoint: { freeDirectSemanticsVersion: "free-v4-direct-semantics-v1" },
-      maxAttempts: 1
+      maxAttempts: 3
     });
     const outage = new PublicSourceSnapshotUnavailableError("search_execution");
     boundaryMocks.getScanJob.mockResolvedValueOnce(job);
-    boundaryMocks.failScanJob.mockResolvedValueOnce({ ...job, stage: "failed", executionState: "failed" });
+    boundaryMocks.failScanJob.mockResolvedValueOnce({ ...job, executionState: "retry_wait" });
     try {
       await processScanJob(job, "worker-1", {
         reportV4PreAdmissionRunner: vi.fn(async () => { throw outage; })
       });
 
       expect(boundaryMocks.failScanJob).toHaveBeenCalledWith(job.id, "worker-1", expect.objectContaining({
-        retryable: false,
+        retryable: true,
         internalError: expect.objectContaining({ classification: "transient", code: "public_source_snapshot_search_execution" })
       }));
       expect(boundaryMocks.failScanJob.mock.calls[0]?.[2]).not.toHaveProperty("defer");
+    } finally {
+      vi.clearAllMocks();
+    }
+  });
+
+  it("does not retry a non-transport V4 pre-admission model-contract failure", async () => {
+    const job = v4Job({
+      reason: "v4_pre_admission",
+      businessQuestionSetId: null,
+      siteSnapshotId: null,
+      creditReservationId: null,
+      checkpoint: { freeDirectSemanticsVersion: "free-v4-direct-semantics-v1" },
+      maxAttempts: 3
+    });
+    const actual = await vi.importActual<typeof import("@open-geo-console/ai-report-engine")>("@open-geo-console/ai-report-engine");
+    const invalid = new actual.AiClientError("invalid response", { code: "invalid_response" });
+    boundaryMocks.getScanJob.mockResolvedValueOnce(job);
+    boundaryMocks.failScanJob.mockResolvedValueOnce({ ...job, stage: "failed", executionState: "failed" });
+    try {
+      await processScanJob(job, "worker-1", {
+        reportV4PreAdmissionRunner: vi.fn(async () => { throw invalid; })
+      });
+
+      expect(boundaryMocks.failScanJob).toHaveBeenCalledWith(job.id, "worker-1", expect.objectContaining({
+        retryable: false,
+        internalError: expect.objectContaining({ classification: "transient", code: "ai_client_invalid_response" })
+      }));
     } finally {
       vi.clearAllMocks();
     }

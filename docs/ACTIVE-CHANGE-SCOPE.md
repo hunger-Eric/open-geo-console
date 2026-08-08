@@ -2,131 +2,173 @@
 
 Status: `APPROVED`
 
-Prepared on 2026-08-08 after the Stripe Sandbox signing configuration was
-corrected and the one authorized original-event replay reached the paid-event
-application stage, where a confirmed non-secret model Profile conflict rolled
-back the transaction.
+Prepared on 2026-08-08 after the user asked to deploy local code for manual
+testing. The dirty tree is the already-completed **pre-admission bounded retry
+and free-report fallback** implementation (archived in
+`docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`). User approved this exact Staging Gates
+0–3 allowlist on 2026-08-08 and explicitly included `git push origin main`
+(cap 1).
 
 ## Objective
 
-For report `0ffafb23-16f5-47bb-9073-4f924964f1c9` and its existing paid order
-`67f2f110-949f-4f19-b7b6-93306f4455e9` only:
+Package the dirty working tree as **one** candidate commit on top of current
+`main` (`9f2732b0…`), then deploy **Protected Staging only** through Gates 0–3
+so the fixed Staging URL and Staging free/deep Workers serve:
 
-1. Change the Vercel Preview variable `OGC_REPORT_V4_MODEL_PROFILE_ID` from the
-   obsolete native-MiMo Profile to
-   `report-v4-openai-compatible-mimo-v2.5-pro-v1`, matching the already active
-   `OGC_PROVIDER_PROFILE=external_search_synthesis` contract.
-2. Deploy the exact clean candidate to Protected Staging Web and move the fixed
-   Staging alias only after deployment identity and readiness checks pass.
-3. Perform no manual Stripe event replay. Wait for Stripe's normal automatic
-   retry and observe whether the existing paid event creates exactly one deep
-   job.
+1. Prospective `v4_pre_admission` jobs: max three attempts; only typed
+   transport/upstream outages enter retry wait; contract failures stay terminal.
+2. Checkpoint resume for valid `questions_ready` / `q1_answer_ready` without
+   re-running completed question-generation model calls.
+3. Marker-bearing terminally incomplete free teaser falls through to the
+   persisted technical/Free AI report view (no fabricated Q1, no teaser checkout).
+
+The user performs manual browser testing. Agent does **not** run Gate 4, model
+calls, payments, refunds, or email.
 
 ## Confirmed baseline
 
-- Repository `E:\project\open-geo-console`, branch `main`, local and remote
-  HEAD `b85f719ddf46f37ca894e4fb70b692d02d8b1050`; canonical worktree was clean
-  before this scope refresh. CodeGraph is up to date.
-- Fixed Protected Staging currently serves deployment
-  `dpl_9ACy6Gu2oDgaedX1yYf3B41bm2KK`, whose `ogcGitSha` and
-  `githubCommitSha` equal the baseline HEAD.
-- The Stripe Sandbox Checkout is already paid. Its signing secret now matches
-  the existing enabled endpoint; the authorized replay passed verification and
-  order binding, then logged only `stripe_webhook_apply_paid` and returned 400.
-- Read-only Vercel inspection confirmed
-  `OGC_PROVIDER_PROFILE=external_search_synthesis` while
-  `OGC_REPORT_V4_MODEL_PROFILE_ID` equals the obsolete
-  `report-v4-mimo-v2.5-pro-v1`. Current code requires the OpenAI-compatible
-  MiMo Profile for that provider selector and fails closed on the conflict.
-- The order remains `payment_status=pending`,
-  `fulfillment_status=not_started`, with zero persisted payment events and zero
-  linked deep jobs. The failed paid-event transaction left no partial database
-  state.
-
-## Allowed files
-
-| Path | Allowed change |
+| Item | Value |
 |---|---|
-| `docs/ACTIVE-CHANGE-SCOPE.md` | Current authority only |
-| `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md` | Archive the completed prior scope only |
+| Repository | `E:\project\open-geo-console` |
+| Branch / HEAD | `main` / `9f2732b0914767c937853e9e58df51af4ae50264` (matches `origin/main`) |
+| Dirty surface | 10 modified + 1 untracked test, ~+224/-196 tracked |
+| Current Staging Workers | `open-geo-console:staging-3b732680-split-questions-overlay-v1` (`93de239b060f`), env `OGC_DEPLOYMENT_VERSION=3b732680…` (Worker lag behind HEAD is pre-existing) |
+| Overlay FROM base | Use currently running Worker image `staging-3b732680-split-questions-overlay-v1` as thin-overlay base (source-only; includes apps+packages; candidate also includes later HEAD commits via clean checkout COPY) |
+| package-lock / Dockerfile.worker | unchanged → thin overlay only |
+| Full Worker rebuild | **forbidden** |
 
-No application, package, test, dependency, schema, migration, Worker, model,
-payment, checkout, email, entitlement, database, or report source file may be
-changed.
+Note: thin overlay copies the clean candidate checkout’s `apps/` + `packages/`,
+so the image content is the full candidate SHA even when FROM is an older
+overlay base.
 
-## Allowed Protected Staging configuration action
+## Allowed actions (only after APPROVED)
 
-- Update exactly one Vercel **Preview** variable:
-  `OGC_REPORT_V4_MODEL_PROFILE_ID=report-v4-openai-compatible-mimo-v2.5-pro-v1`.
-- Preserve `OGC_PROVIDER_PROFILE=external_search_synthesis` and all other
-  Preview variables unchanged.
-- Do not read, print, rotate, replace, or otherwise change any secret.
-- Do not touch Production or Development variables or branch-specific
-  overrides.
+### Gate 0 — candidate package
 
-## Git, deployment, and external-action limits
+1. Commit **only** the allowlisted dirty paths. One commit on `main`.
+2. Record full candidate SHA. `git push origin main` only if approval
+   explicitly includes push (default **0**).
+3. Clean exact-SHA checkout under `.data/staging-release-<short>/`.
 
-- One documentation-only commit containing the approved scope/history record,
-  and at most one `git push origin main`, solely to restore a clean canonical
-  deployment worktree. No runtime source change is allowed.
-- Protected Staging Preview deployments: at most **1**.
-- Fixed Protected Staging alias moves: at most **1**, only after the unique
-  Preview is READY and both `ogcGitSha` and `githubCommitSha` equal the clean
-  candidate commit.
-- Manual Stripe test event, resend/replay, Checkout, payment, order, refund,
-  event fabrication, and direct database mutation: **0**.
-- Production deployment/configuration and Worker image/restart actions: **0**.
-- Read-only monitoring may inspect Stripe's existing event delivery state,
-  Vercel Webhook logs, and the named order's database lineage.
-- Stripe's provider-controlled automatic retry may apply the existing event
-  exactly once. Its normal exactly-once transaction may create one payment
-  event, entitlement, report credit settlement, deep job/dispatch, access
-  authority, and ordinary confirmation-email record. The existing Deep Worker
-  may claim and begin that one job; this scope does not require report
-  completion.
+### Gate 1 — preflight
 
-## Monitoring window
+1. Confirm Docker engine, disk free, idle Staging free/deep (wait/drain only).
+2. Record rollback: fixed-alias host, Worker image tag/ID, version from
+   `staging.env` / containers.
+3. Confirm thin-overlay path.
+4. `npx vercel whoami` from the clean checkout.
 
-- After the fixed alias points to the accepted deployment, monitor the existing
-  event/order for up to **60 minutes** without sending any request to the
-  Webhook endpoint.
-- Stop early on success, any new 400 stage, any duplicate state, or an explicit
-  Stripe next-retry time beyond the window.
-- If no automatic retry occurs within the window, report `waiting for provider
-  retry`; do not convert the wait into a manual replay.
+### Gate 2 — Staging deploy (source-only)
+
+1. **One** manual Preview:
+   ```powershell
+   $env:VERCEL_ORG_ID = 'team_PbYYV2K2zBjTeThfavXStTOI'
+   $env:VERCEL_PROJECT_ID = 'prj_WVpdlJfsEp0YyWM2W54w8oBy985S'
+   npx vercel deploy --yes --meta ogcGitSha=<candidate-full-sha>
+   ```
+2. Require `READY` and `gitCommitSha = ogcGitSha = <candidate-full-sha>`.
+3. Build **exactly one** thin overlay:
+   - `FROM open-geo-console:staging-3b732680-split-questions-overlay-v1`
+   - `COPY` only `apps/` and `packages/`; OCI revision = full candidate SHA
+   - tag: `open-geo-console:staging-<short>-preadmit-retry-overlay-v1`
+4. Preserve `staging.env` bytes; replace **only** `OGC_DEPLOYMENT_VERSION`.
+5. Recreate **only** `staging-worker-free` and `staging-worker-deep`
+   (`--no-deps --no-build --force-recreate`).
+6. Inline 60s / 2s readiness wait — **do not** source the full body of
+   `scripts/start-report-v4-staging-workers.ps1`.
+7. Move fixed alias **once** to the candidate Preview for
+   `open-geo-console-staging-itheheda.vercel.app`.
+
+### Gate 3 — protection smoke (agent)
+
+- Fixed `/zh` protection (SSO 302 OK), Web/Worker SHA equality, restart 0.
+- No report/crawl/model/order/payment/refund/email.
+
+### Manual testing (user only)
+
+- New Free/V4 pre-admission: transient upstream failures may retry up to 3
+  attempts; permanent/contract failures stay terminal.
+- Incomplete marker-present teaser shows technical/Free report fallback, not
+  empty teaser checkout fabrication.
+- Use **new** prospective reports only.
+
+## File allowlist (commit surface)
+
+| Path | Role |
+|---|---|
+| `apps/web/src/worker/processor.ts` | Pre-admission retry eligibility |
+| `apps/web/src/worker/processor.test.ts` | Retry tests |
+| `apps/web/src/worker/report-v4-free-teaser.ts` | Checkpoint resume / attempt budget |
+| `apps/web/src/worker/report-v4-free-teaser.test.ts` | Free teaser tests |
+| `apps/web/src/db/report-v4-admission-jobs.ts` | Attempt/max-attempt handling |
+| `apps/web/src/db/report-v4-admission-jobs.test.ts` | Admission job tests |
+| `apps/web/src/db/commercial-orders-semantic-review.postgres.test.ts` | Mechanical test alignment if dirty |
+| `apps/web/src/app/[locale]/reports/[id]/page.tsx` | Free report fallback render |
+| `apps/web/src/app/[locale]/reports/[id]/page.test.tsx` | New page fallback tests |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | This scope / receipts |
+| `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md` | Archive only if already dirty |
+
+### Deploy-only paths
+
+| Path | Purpose |
+|---|---|
+| `.data/staging-release-<short>/**` | Clean checkout + Dockerfile.overlay |
+| `.data/workstation-docker/staging.env` | `OGC_DEPLOYMENT_VERSION` only |
+| `.data/workstation-docker/staging-*.override.yaml` | free/deep image tag only |
+
+## Explicitly forbidden
+
+- Production anything.
+- Full Worker rebuild; Docker mass prune.
+- Historical report/job/order mutation, replay, clone.
+- Agent Gate 4 / model / payment / refund / email.
+- Second Preview/overlay/alias without a new scope after failure.
+- Expanding source beyond the allowlisted dirty set at commit time.
+- Stripe webhook resend or commerce mutation.
+
+## Diff budget
+
+- Application production/test: **0 new lines** in this scope (package existing
+  dirty tree only; ~+224/-196 tracked at FROZEN write plus untracked page test).
+- Scope/history docs for status and receipts only.
+
+## Expensive external actions (hard caps)
+
+| Action | Max |
+|---|---|
+| Candidate commit on `main` | 1 |
+| `git push origin main` | 0 unless approval includes push; then 1 |
+| Staging Preview deploy | 1 |
+| Thin overlay Docker build | 1 |
+| Staging free+deep recreate | 1 pair |
+| Fixed alias move | 1 |
+| Agent report / payment / model / refund / email | **0** |
 
 ## Acceptance checks
 
-1. Pre-mutation checks reconfirm the exact variable names/current symbolic
-   values and zero payment events/jobs; no secret value is read.
-2. The one Preview variable is updated to the exact allowlisted Profile and all
-   other configuration targets remain untouched.
-3. The unique Preview is READY and its `ogcGitSha` and `githubCommitSha` exactly
-   match the clean candidate before the fixed alias moves.
-4. No manual POST, Stripe resend/test event, second Checkout/order/payment, or
-   database write is performed by the operator.
-5. On automatic retry success, database evidence shows the existing order paid,
-   exactly one persisted payment event, and exactly one linked deep job/dispatch.
-6. If the retry has not occurred within the monitoring window, final status is
-   explicitly incomplete and records the provider-wait boundary.
+1. Candidate full SHA equals Web meta and both Workers’ revision / version.
+2. Fixed alias points at the candidate Preview.
+3. Free and deep running, restart 0, readiness present.
+4. Gate 3 smoke or SSO boundary recorded.
+5. Rollback identities recorded before cutover.
+
+## Rollback
+
+1. Restore prior `OGC_DEPLOYMENT_VERSION` / `staging.env` bytes.
+2. Recreate free+deep on
+   `open-geo-console:staging-3b732680-split-questions-overlay-v1`
+   (`sha256:93de239b060f…`).
+3. Restore prior Web host if alias moved.
+4. Verify and **stop**.
 
 ## Stop conditions
 
-- The expected Profile value is not available as an existing approved runtime,
-  or the current provider selector differs from `external_search_synthesis`.
-- Any required source, schema, database, secret, Worker, payment-contract, or
-  second configuration change.
-- Deployment identity mismatch, non-READY Preview, unexpected Production or
-  branch scope, or inability to keep the canonical deployment checkout clean.
-- Any payment event/job already exists before the configuration deployment, or
-  more than one matching payment event/job/order appears during monitoring.
-- Automatic retry again reaches a non-success stage; stop and diagnose without
-  another replay or mutation.
+- Dirty tree outside allowlist at commit time.
+- package-lock / Dockerfile.worker change → full rebuild required.
+- SHA mismatch, readiness failure, or Production path required.
 
 ---
 
-Approved explicitly by the user on 2026-08-08 for the one named non-secret
-Preview Profile update, one Protected Staging deployment/alias move, and
-read-only waiting for Stripe's automatic retry. No Profile configuration,
-deployment, alias, Stripe event, payment, order, or database state had been
-changed under this scope at approval time.
+**Awaiting explicit user approval of this exact allowlist.**  
+Reply with approval (and whether to include `git push origin main`) to set
+Status `APPROVED` and execute Gates 0–3 only.

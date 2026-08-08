@@ -35,7 +35,7 @@ export interface ReportV4PreAdmissionJobIdentity {
   recommendationReportVersion: 4;
   artifactContract: Extract<ReportArtifactContract, "combined_geo_report_v4">;
   reason: "v4_pre_admission";
-  maxAttempts: 1;
+  maxAttempts: 3;
   freeDirectSemanticsVersion?: FreeDirectSemanticsVersion;
 }
 
@@ -73,7 +73,7 @@ export async function enqueueReportV4PreAdmissionAfterPreview(
     recommendationReportVersion: 4,
     artifactContract: "combined_geo_report_v4",
     reason: "v4_pre_admission",
-    maxAttempts: 1,
+    maxAttempts: 3,
     ...(options.freeDirectSemanticsVersion
       ? { freeDirectSemanticsVersion: options.freeDirectSemanticsVersion }
       : {})
@@ -115,7 +115,7 @@ export function createPostgresReportV4AdmissionJobRepository(
         throw new Error("The V4 pre-admission Free direct-semantics carrier conflicts with its creation authority.");
       }
       if (row.max_attempts !== input.maxAttempts) {
-        throw new Error("The V4 pre-admission Free direct-semantics job must allow exactly one run attempt.");
+        throw new Error("The V4 pre-admission Free direct-semantics job must allow exactly three run attempts.");
       }
       if (created) {
         await tx`

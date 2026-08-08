@@ -1,5 +1,80 @@
 # Archived Change Scope History
 
+## 2026-08-08 - Pre-admission bounded retry and free-report fallback completed locally
+
+- Prospective `v4_pre_admission` jobs now have a maximum of three attempts.
+  Only typed network, timeout, rate-limit, HTTP 5xx/temporary-provider, and
+  equivalent public-search execution outages may enter retry wait.
+- Eligible repeated outage fingerprints remain retryable until the existing
+  three-attempt database state machine terminalizes the third failure;
+  non-transport model-contract failures remain terminal.
+- Valid `questions_ready` and `q1_answer_ready` checkpoints resume without
+  repeating either question-generation model call. Only unfinished answer or
+  downstream analysis work executes.
+- A marker-bearing terminally incomplete teaser now falls through to the
+  persisted technical/Free AI `ReportView`; it does not expose the teaser
+  checkout or fabricate a first-question answer.
+- Focused verification passed: 4 files/90 tests plus 9 generic job tests;
+  disposable PostgreSQL receipt
+  `.data/test-runs/postgres-disposable/pg-20260808031119-5a5a9465/receipt.json`
+  passed 6/6 with zero skips and proved two retry waits, third-failure
+  terminalization, and no fourth claim. Lint passed with eight pre-existing
+  warnings and no errors; the full workspace build passed; CodeGraph and
+  `git diff --check` passed.
+- The optional full `npm test` run reported four repeatable failures in three
+  unchanged legacy V3/replacement test files. Their isolated rerun failed
+  identically; no scope authority was available to change those unrelated
+  files, and all allowlisted focused tests remained green.
+- No historical report/job was repaired or replayed. No real crawl, search,
+  model call, payment, order, deployment, alias, Worker, Git commit, or push
+  occurred.
+- Terminal status: **local implementation and proportional verification
+  complete; real Protected Staging availability unverified.**
+
+---
+
+## 2026-08-08 - Manual resend withheld; automatic retry applied payment exactly once
+
+- The approved action allowed exactly one resend of Stripe Sandbox event
+  `evt_1U1yW4RsPpQ6QFI37FohJyxB`, subject to a zero-event/zero-bound-job
+  precondition.
+- Before any resend command was issued, the mandatory baseline check found that
+  Stripe's automatic retry had already succeeded. Therefore the stop condition
+  was honored and the authorized manual resend count remained zero.
+- Existing order `67f2f110-949f-4f19-b7b6-93306f4455e9` became paid with one
+  processed payment event, one order-bound Deep job, one dispatch row, and one
+  total order for the report. No new Checkout, payment, order, report, test
+  event, deployment, configuration change, or direct database mutation was
+  performed by the operator.
+- The single bound Deep job then failed in `admission`: one transient
+  `unexpected_internal_error` entered retry wait, the automatic job retry was
+  claimed, and the job terminalized with the same permanent error. No second
+  event resend or repair was attempted.
+- Terminal status: **payment/Webhook exactly-once success; Deep Worker admission
+  failed and requires separate authority.**
+
+---
+
+## 2026-08-08 - Corrected V4 Profile deployment; automatic Stripe retry not observed
+
+- Updated only the Vercel Preview `OGC_REPORT_V4_MODEL_PROFILE_ID` to
+  `report-v4-openai-compatible-mimo-v2.5-pro-v1`, preserving
+  `OGC_PROVIDER_PROFILE=external_search_synthesis`.
+- Deployed clean candidate `9f2732b0914767c937853e9e58df51af4ae50264` as
+  READY Preview `dpl_6nBM7PfZyc6Fn9NTFkAB5gvtqk8h` and moved the fixed
+  Protected Staging alias once.
+- No manual event replay, new payment, new order, direct database mutation, or
+  second deployment occurred. Stripe continued to report one pending Webhook
+  delivery, while the accepted deployment received no automatic retry request
+  during the observed window.
+- The order remained pending with zero persisted payment events and no
+  order-bound paid fulfillment job. The pre-existing completed
+  `v4_pre_admission` job predates payment and is not fulfillment evidence.
+- Terminal status: **configuration and deployment completed; paid fulfillment
+  remained incomplete at the Stripe retry boundary.**
+
+---
+
 This file preserves completed and failed scope records for context only. It is
 never executable authority; `docs/ACTIVE-CHANGE-SCOPE.md` is the sole current lock.
 

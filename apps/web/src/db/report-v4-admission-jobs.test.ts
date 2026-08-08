@@ -30,7 +30,7 @@ describe("V4 pre-admission job lifecycle", () => {
       recommendationReportVersion: 4,
       artifactContract: "combined_geo_report_v4",
       reason: "v4_pre_admission",
-      maxAttempts: 1
+      maxAttempts: 3
     });
   });
 

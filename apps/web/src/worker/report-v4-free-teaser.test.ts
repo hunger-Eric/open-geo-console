@@ -262,18 +262,47 @@ describe("Free V4 direct teaser orchestration", () => {
     expect(mocks.structuredInvoke).toHaveBeenCalledTimes(3);
   });
 
-  it("does not reissue a model request from a nonterminal persisted Direct checkpoint", async () => {
+  it("resumes questions_ready without regenerating either question set", async () => {
     const saved: FreeTeaserCheckpointV1[] = [];
     await generateFreeTeaser({ ...baseInput(), saveCheckpoint: async (checkpoint) => { saved.push(checkpoint); } });
-    const nonterminal = saved[1]!;
+    const questionsReady = saved[0]!;
     vi.clearAllMocks();
     mocks.resolveRuntime.mockResolvedValue({
       authority: { authorityId: "authority-1", surface: { surfaceId: "surface-1", surfaceVersion: "surface-v1", locale: "en-US", region: "US" } },
       adapter: { id: "adapter-1" }
     });
-    await expect(generateFreeTeaser({ ...baseInput(), checkpoint: nonterminal })).rejects.toThrow(/cannot be resumed/u);
+    mocks.answerWithSources.mockImplementation(async (request: { questionId: string }) => answerResult(request.questionId));
+    mocks.structuredInvoke.mockImplementation(async () => defaultAnalysisOutput());
+
+    const resumed = await generateFreeTeaser({ ...baseInput(), checkpoint: questionsReady });
+
+    expect(mocks.answerWithSources).toHaveBeenCalledTimes(1);
+    expect(mocks.structuredInvoke).toHaveBeenCalledTimes(1);
+    expect(mocks.structuredInvoke.mock.calls[0]![0]).toMatchObject({ operation: "sourceDiagnosis" });
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(resumed.checkpoint.freeQuestion).toBe(questionsReady.freeQuestion);
+    expect(resumed.checkpoint.freeQuestionIdentity).toBe(questionsReady.freeQuestionIdentity);
+    expect(resumed.checkpoint.paidQuestionSetId).toBe(questionsReady.paidQuestionSetId);
+  });
+
+  it("resumes q1_answer_ready without repeating questions or the grounded answer", async () => {
+    const saved: FreeTeaserCheckpointV1[] = [];
+    await generateFreeTeaser({ ...baseInput(), saveCheckpoint: async (checkpoint) => { saved.push(checkpoint); } });
+    const answerReady = saved[1]!;
+    vi.clearAllMocks();
+    mocks.resolveRuntime.mockResolvedValue({
+      authority: { authorityId: "authority-1", surface: { surfaceId: "surface-1", surfaceVersion: "surface-v1", locale: "en-US", region: "US" } },
+      adapter: { id: "adapter-1" }
+    });
+    mocks.structuredInvoke.mockImplementation(async () => defaultAnalysisOutput());
+
+    const resumed = await generateFreeTeaser({ ...baseInput(), checkpoint: answerReady });
+
     expect(mocks.answerWithSources).not.toHaveBeenCalled();
-    expect(mocks.structuredInvoke).not.toHaveBeenCalled();
+    expect(mocks.structuredInvoke).toHaveBeenCalledTimes(1);
+    expect(mocks.structuredInvoke.mock.calls[0]![0]).toMatchObject({ operation: "sourceDiagnosis" });
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(resumed.checkpoint.freeQuestionIdentity).toBe(answerReady.freeQuestionIdentity);
   });
 
   it("reads an already ready Direct checkpoint without repeating either call", async () => {

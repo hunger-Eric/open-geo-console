@@ -93,20 +93,12 @@ export default async function ReportPage({
       } catch {
         ready = null;
       }
-      if (markerPresent) {
-        // Marker-present: only receipt-bound reviewed projection; no unreviewed fallback.
-        if (!ready || (!freeDirectSemanticsVersion && !ready.reviewedFoundation) ||
-            (freeDirectSemanticsVersion ? !ready.q1AnswerDraft : !ready.q1AnswerCard) || !visible.aiReport) {
-          return <PendingReportView
-            createdAt={row.createdAt}
-            dictionary={getDictionary(locale)}
-            locale={locale}
-            reportId={id}
-            reportLocale={reportLocale}
-            url={row.url}
-          />;
-        }
-      } else if (!ready || !visible.aiReport || !ready.reviewedFoundation) {
+      const canRenderTeaser = Boolean(ready && visible.aiReport && (
+        markerPresent
+          ? (freeDirectSemanticsVersion ? ready.q1AnswerDraft : ready.reviewedFoundation && ready.q1AnswerCard)
+          : ready.reviewedFoundation
+      ));
+      if (!markerPresent && !canRenderTeaser) {
         // Marker-absent: preserve the original free-teaser readiness seam.
         return <PendingReportView
           createdAt={row.createdAt}
@@ -117,37 +109,41 @@ export default async function ReportPage({
           url={row.url}
         />;
       }
-      const dictionary = getDictionary(locale);
-      return <>
-        <CombinedGeoReportV4Teaser model={{
-          reportId: id,
-          targetUrl: row.url,
-          locale: reportLocale === "zh" ? "zh" : "en",
-          generatedAt: ready.readyAt!,
-          technicalReport: {
-            score: visible.technicalReport.score,
-            findings: visible.technicalReport.findings
-          },
-          aiReport: freeDirectSemanticsVersion ? visible.aiReport! : ready.reviewedFoundation!,
-          freeQuestion: ready.freeQuestion ?? ready.directQuestionTexts?.[0] ?? ready.q1AnswerDraft?.exactQuestion ?? ready.q1AnswerCard!.exactQuestion,
-          q1AnswerCard: freeDirectSemanticsVersion ? ready.q1AnswerDraft! : ready.q1AnswerCard!,
-          ...(freeDirectSemanticsVersion
-            ? {
-                directAnalysisStatus: ready.directAnalysisStatus!,
-                directAnalysis: ready.directAnalysis ?? null
-              }
-            : {
-                brandMentionCount: ready.metrics!.brandMentionCount,
-                competitorMentionCount: ready.metrics!.competitorMentionCount
-              })
-        }}/>
-        <div id="checkout" className="mx-auto w-full max-w-[1120px] px-5 pb-12">
-          <Suspense fallback={null}>
-            <PaymentReturnBanner dictionary={dictionary} reportId={id} />
-          </Suspense>
-          <CommercialCheckout dictionary={dictionary} locale={reportLocale} reportId={id} />
-        </div>
-      </>;
+      if (canRenderTeaser && ready) {
+        const dictionary = getDictionary(locale);
+        return <>
+          <CombinedGeoReportV4Teaser model={{
+            reportId: id,
+            targetUrl: row.url,
+            locale: reportLocale === "zh" ? "zh" : "en",
+            generatedAt: ready.readyAt!,
+            technicalReport: {
+              score: visible.technicalReport.score,
+              findings: visible.technicalReport.findings
+            },
+            aiReport: freeDirectSemanticsVersion ? visible.aiReport! : ready.reviewedFoundation!,
+            freeQuestion: ready.freeQuestion ?? ready.directQuestionTexts?.[0] ?? ready.q1AnswerDraft?.exactQuestion ?? ready.q1AnswerCard!.exactQuestion,
+            q1AnswerCard: freeDirectSemanticsVersion ? ready.q1AnswerDraft! : ready.q1AnswerCard!,
+            ...(freeDirectSemanticsVersion
+              ? {
+                  directAnalysisStatus: ready.directAnalysisStatus!,
+                  directAnalysis: ready.directAnalysis ?? null
+                }
+              : {
+                  brandMentionCount: ready.metrics!.brandMentionCount,
+                  competitorMentionCount: ready.metrics!.competitorMentionCount
+                })
+          }}/>
+          <div id="checkout" className="mx-auto w-full max-w-[1120px] px-5 pb-12">
+            <Suspense fallback={null}>
+              <PaymentReturnBanner dictionary={dictionary} reportId={id} />
+            </Suspense>
+            <CommercialCheckout dictionary={dictionary} locale={reportLocale} reportId={id} />
+          </div>
+        </>;
+      }
+      // Marker-present terminal failures fall through to ReportView so the
+      // already persisted technical and Free AI reports remain visible.
     }
   }
   return (
