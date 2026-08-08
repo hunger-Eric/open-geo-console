@@ -115,4 +115,33 @@ describe("model-authored business question contracts", () => {
     expect(publicSet.questions.map(({ exactText }) => exactText)).toEqual(confirmed.questions.map(({ neutralPublicText }) => neutralPublicText));
     expect(publicSet.questions.map(({ derivation }) => derivation.subject)).toEqual(confirmed.questions.map(({ neutralPublicText }) => neutralPublicText));
   });
+
+  it("preserves model candidates and human-confirmed paid text exactly when the V4 paid path requests it", () => {
+    const repeatedText = "Can Target Co meet this buyer's requirement?";
+    const set = createModelBusinessQuestionCandidates({
+      locale: "en",
+      region: "global",
+      profile,
+      preserveModelText: true,
+      modelOutput: {
+        questions: ["core_service_discovery", "customer_region_fit", "purchase_delivery_risk"].map((purpose) => ({ purpose, text: repeatedText }))
+      }
+    });
+    expect(set.questions.map(({ neutralPublicText }) => neutralPublicText)).toEqual([repeatedText, repeatedText, repeatedText]);
+
+    const finalTexts = [
+      "Can Target Co handle workflow A?",
+      "Can Target Co support region B?",
+      "What delivery risk should we confirm with Target Co?"
+    ];
+    const confirmed = confirmBusinessQuestionSet({
+      candidates: set,
+      finalTexts,
+      acknowledgedLowConfidence: false,
+      confirmedAt: "2026-08-08T00:00:00.000Z",
+      preserveFinalText: true
+    });
+    expect(confirmed.questions.map(({ privateText }) => privateText)).toEqual(finalTexts);
+    expect(confirmed.questions.map(({ neutralPublicText }) => neutralPublicText)).toEqual(finalTexts);
+  });
 });

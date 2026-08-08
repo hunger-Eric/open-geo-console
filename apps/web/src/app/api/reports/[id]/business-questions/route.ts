@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { confirmBusinessQuestions, getLatestBusinessQuestionSet } from "@/db/business-questions";
+import { confirmBusinessQuestions, getBusinessQuestionSet } from "@/db/business-questions";
+import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
+import { freeTeaserCheckpointFromJobCheckpoint } from "@/worker/report-v4-free-teaser";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ id: string }> };
@@ -7,7 +9,9 @@ type RouteContext = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, context: RouteContext) {
   try {
     const { id } = await context.params;
-    const questions = await getLatestBusinessQuestionSet(id);
+    const job = await getReportV4PreAdmissionJob(id);
+    const paidQuestionSetId = freeTeaserCheckpointFromJobCheckpoint(job?.checkpoint)?.paidQuestionSetId;
+    const questions = paidQuestionSetId ? await getBusinessQuestionSet(id, paidQuestionSetId) : null;
     if (!questions) {
       return NextResponse.json({ error: "Business questions are awaiting Worker generation." }, { status: 409 });
     }
@@ -30,7 +34,8 @@ export async function POST(request: Request, context: RouteContext) {
       reportId: id,
       questionSetId: body.questionSetId,
       finalTexts: body.questions as string[],
-      acknowledgedLowConfidence: body.acknowledgedLowConfidence
+      acknowledgedLowConfidence: body.acknowledgedLowConfidence,
+      preserveFinalText: true
     });
     return NextResponse.json(confirmed, { headers: { "cache-control": "no-store, private" } });
   } catch (error) {

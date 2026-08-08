@@ -6,7 +6,7 @@ import { checkoutIdempotencyHmac } from "@/commerce/idempotency";
 import { assertCommerceReady } from "@/commerce/readiness";
 import {
   attachHostedCheckout,
-  createPaymentOrder,
+  createReportV4PaymentOrder,
   getActivePaymentOrderForReport
 } from "@/db/commercial-orders";
 import { getGeoReport } from "@/db/reports";
@@ -58,7 +58,7 @@ export async function POST(request: Request, context: RouteContext) {
     const siteKey = report.siteKey ?? createSiteKey(report.url);
     const businessQuestionSetId = typeof body.questionSetId === "string" ? body.questionSetId.trim() : "";
     if (!businessQuestionSetId) {
-      return NextResponse.json({ error: "The saved teaser question set is required." }, { status: 409 });
+      return NextResponse.json({ error: "A confirmed paid-report question set is required." }, { status: 409 });
     }
     const checkoutInput = {
       reportId: id,
@@ -83,7 +83,7 @@ export async function POST(request: Request, context: RouteContext) {
       }, !active.providerCheckoutId);
     }
 
-    const order = await createPaymentOrder({
+    const order = await createReportV4PaymentOrder({
       checkoutIdempotencyHmac: checkoutHmac,
       provider: "stripe",
       reportId: id,
@@ -91,7 +91,6 @@ export async function POST(request: Request, context: RouteContext) {
       customerEmailEncrypted: protectedEmail.encrypted,
       customerEmailHmac: protectedEmail.lookupHmac,
       emailKeyVersion: "v1",
-      productCode: "recommendation_forensics_v1",
       businessQuestionSetId,
       catalogVersion: price.catalogVersion,
       termsVersion: price.purchaseTermsVersion,

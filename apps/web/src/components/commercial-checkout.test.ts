@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildCheckoutRequestBody,
   getPaymentConfirmationReturnUrl,
@@ -6,6 +6,7 @@ import {
   readCheckoutPayload
 } from "./checkout-response";
 import { buildHppReturnUrls } from "./payment-return";
+import { postConfirmedCheckout } from "./commercial-checkout";
 
 describe("HPP return URLs", () => {
   it("returns success and cancel to the exact originating report without trusting stale query state", () => {
@@ -19,6 +20,31 @@ describe("HPP return URLs", () => {
 });
 
 describe("checkout response parsing", () => {
+  it("does not post checkout when paid-question confirmation fails", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: "Confirmation required." }), { status: 409 }));
+    await expect(postConfirmedCheckout(fetcher as typeof fetch, {
+      reportId: "report-1", questionSetId: "questions-1", questions: ["Q1", "Q2", "Q3"],
+      email: "buyer@example.test", locale: "en", turnstileToken: "token", idempotencyKey: "idem-1"
+    })).rejects.toThrow("Confirmation required.");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]![0]).toContain("business-questions");
+  });
+
+  it("posts checkout only after the same paid set is confirmed", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "questions-1" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ orderId: "order-1" }), { status: 201 }));
+    const response = await postConfirmedCheckout(fetcher as typeof fetch, {
+      reportId: "report-1", questionSetId: "questions-1", questions: ["Q1 edited", "Q2", "Q3"],
+      email: "buyer@example.test", locale: "en", turnstileToken: "token", idempotencyKey: "idem-1"
+    });
+    expect(response.status).toBe(201);
+    expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+      "/api/reports/report-1/business-questions",
+      "/api/reports/report-1/checkout"
+    ]);
+  });
+
   it("builds checkout input without a browser-selected currency", () => {
     expect(buildCheckoutRequestBody({
       email: "buyer@example.test",

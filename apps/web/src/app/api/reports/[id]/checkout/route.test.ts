@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getGeoReport: vi.fn(),
   getActivePaymentOrderForReport: vi.fn(),
-  createPaymentOrder: vi.fn(),
+  createReportV4PaymentOrder: vi.fn(),
   attachHostedCheckout: vi.fn(),
   verifyTurnstile: vi.fn(),
   createHostedCheckout: vi.fn(),
@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/db/reports", () => ({ getGeoReport: mocks.getGeoReport }));
 vi.mock("@/db/commercial-orders", () => ({
   getActivePaymentOrderForReport: mocks.getActivePaymentOrderForReport,
-  createPaymentOrder: mocks.createPaymentOrder,
+  createReportV4PaymentOrder: mocks.createReportV4PaymentOrder,
   attachHostedCheckout: mocks.attachHostedCheckout
 }));
 vi.mock("@/security/turnstile", () => ({ verifyTurnstile: mocks.verifyTurnstile }));
@@ -60,7 +60,7 @@ describe("commercial checkout route", () => {
     });
     mocks.getActivePaymentOrderForReport.mockResolvedValue(null);
     mocks.verifyTurnstile.mockResolvedValue({ success: true, errorCodes: [] });
-    mocks.createPaymentOrder.mockImplementation(async (input: { provider: string; currency: string; amountMinor: number }) => ({
+    mocks.createReportV4PaymentOrder.mockImplementation(async (input: { provider: string; currency: string; amountMinor: number }) => ({
       id: "order-1",
       provider: input.provider,
       providerCheckoutId: null,
@@ -95,14 +95,13 @@ describe("commercial checkout route", () => {
     }), { params: Promise.resolve({ id: "report-1" }) });
 
     expect(response.status).toBe(201);
-    expect(mocks.createPaymentOrder).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mocks.createReportV4PaymentOrder).toHaveBeenCalledWith(expect.objectContaining({
       provider: "stripe",
       currency: "CNY",
       amountMinor: 29_900,
-      productCode: "recommendation_forensics_v1",
       businessQuestionSetId: "teaser-questions-1"
     }));
-    expect(mocks.createPaymentOrder).toHaveBeenCalledWith(expect.not.objectContaining({
+    expect(mocks.createReportV4PaymentOrder).toHaveBeenCalledWith(expect.not.objectContaining({
       siteSnapshotId: expect.anything()
     }));
     expect(mocks.createHostedCheckout).toHaveBeenCalledOnce();
@@ -130,7 +129,7 @@ describe("commercial checkout route", () => {
     });
 
     expect(response.status).toBe(201);
-    expect(mocks.createPaymentOrder).toHaveBeenCalledWith(expect.objectContaining({ currency: "USD", amountMinor: 9_900 }));
+    expect(mocks.createReportV4PaymentOrder).toHaveBeenCalledWith(expect.objectContaining({ currency: "USD", amountMinor: 9_900 }));
     await expect(response.json()).resolves.toMatchObject({ checkoutUrl: stripeCheckout.checkoutUrl });
   });
 
@@ -165,7 +164,7 @@ describe("commercial checkout route", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.getGeoReport).not.toHaveBeenCalled();
-    expect(mocks.createPaymentOrder).not.toHaveBeenCalled();
+    expect(mocks.createReportV4PaymentOrder).not.toHaveBeenCalled();
     expect(mocks.createHostedCheckout).not.toHaveBeenCalled();
   });
 
@@ -181,14 +180,14 @@ describe("commercial checkout route", () => {
   it("requires the persisted teaser question-set identity", async () => {
     const response = await checkoutRequest();
     expect(response.status).toBe(409);
-    expect(mocks.createPaymentOrder).not.toHaveBeenCalled();
+    expect(mocks.createReportV4PaymentOrder).not.toHaveBeenCalled();
     expect(mocks.createHostedCheckout).not.toHaveBeenCalled();
   });
 
   it("requires the immutable report locale", async () => {
     const response = await checkoutRequest({ body: { locale: "zh", questionSetId: "teaser-questions-1" } });
     expect(response.status).toBe(409);
-    expect(mocks.createPaymentOrder).not.toHaveBeenCalled();
+    expect(mocks.createReportV4PaymentOrder).not.toHaveBeenCalled();
   });
 
   it("retrieves an existing Stripe Session without minting another return capability", async () => {
@@ -256,7 +255,7 @@ describe("commercial checkout route", () => {
   });
 
   it("never returns an internal database query when checkout creation fails", async () => {
-    mocks.createPaymentOrder.mockRejectedValue(new Error("Failed query: insert into payment_orders"));
+    mocks.createReportV4PaymentOrder.mockRejectedValue(new Error("Failed query: insert into payment_orders"));
     const response = await checkoutRequest({ body: { questionSetId: "teaser-questions-1" } });
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "Unable to create secure checkout. Please try again later." });

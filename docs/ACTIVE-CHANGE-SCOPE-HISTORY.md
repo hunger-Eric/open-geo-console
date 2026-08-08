@@ -5,6 +5,36 @@ never executable authority; `docs/ACTIVE-CHANGE-SCOPE.md` is the sole current lo
 
 ---
 
+## 2026-08-08 - Buyer-intent self-review and checkout-state repair (completed; buyer review superseded)
+
+- Candidate `4cf29bc1cc5c77097d440800b98a44aeea25a221` added a model-owned
+  buyer-intent self-review to the prospective Free/V4 question response and
+  added visible loading/unavailable checkout states.
+- Local focused tests, scoped lint, build, diff checks, and CodeGraph sync
+  passed before release. The candidate was pushed to `origin/main`, deployed
+  to Protected Staging Web, and installed on the Staging Free/Deep Workers as
+  `open-geo-console:staging-4cf29bc1-buyer-review-checkout-overlay-v1`.
+- Manual report `b1c8db78-d796-41bc-93cc-ec665f53bd99` proved the buyer-review
+  design defective: the model accepted the questions, persistence mechanically
+  normalized their punctuation, and the ready-checkpoint exact-text comparison
+  failed with `Free direct questions do not match their buyer-intent review.`
+- The checkout-state change remains completed. The buyer-review behavior is
+  superseded by the next FROZEN scope and grants no authority to modify code,
+  deploy, replay reports, or mutate historical data.
+
+---
+
+## 2026-08-08 - No-reviewer single-generation scope (superseded before implementation)
+
+- A FROZEN, unapproved scope proposed one question-generation model call with
+  no semantic reviewer and code limited to transport validation.
+- Before any production or test code changed, the user replaced that design
+  with one independent model review/correction call after generation.
+- This record is context-only and grants no implementation, external-action,
+  Git, deployment, report-run, or historical-data authority.
+
+---
+
 ## 2026-08-07 - Generative Q1 recovery and ten-source explanation budget completed locally
 
 - AnySearch requests and admits at most ten valid results in provider order;
@@ -7658,11 +7688,52 @@ revised scope.
   user after the visible-report reader branch was added. No deployment, real
   report run, payment, refund, email, or historical-data mutation occurred.
 
-# 2026-08-07 — Deterministic buyer-question classification correction (superseded)
+# 2026-08-07 – Deterministic buyer-question classification correction (superseded)
 
 - No production or test source was changed under this scope.
 - The user rejected code-selected service categories and question templates;
   the next scope must make buyer-question semantics model-generated instead.
+
+## 2026-08-08 - Two-model buyer-question review scope (superseded before approval)
+
+- The unapproved `FROZEN` scope proposed one model to generate three questions
+  and a second model to review/correct them once.
+- No production or test source was changed under that scope.
+- The user rejected any reviewer and finalized two independent products: the
+  free report automatically generates and answers one non-editable question;
+  the paid offer separately generates three editable candidates that require
+  explicit human confirmation before checkout.
+- The replacement scope also forbids code-owned semantic question rules and
+  preserves only unavoidable transport-shape checks.
+
+## 2026-08-08 - Split free and paid question flows (local implementation complete)
+
+- The free V4 flow now makes one dedicated model call for one non-editable
+  prospective-customer question, then sends that exact question through the
+  existing search, answer, and analysis path. The free renderer displays only
+  that question.
+- A separate model call produces three paid candidates. They remain editable
+  candidates until the user confirms their exact text; the client does not
+  call checkout unless confirmation succeeds.
+- The paid question set is independent from the free question. V4 checkout
+  uses the existing unique eligible site snapshot plus a confirmed, unbound,
+  report-owned paid set and locks it atomically to the order.
+- There is no buyer-question reviewer model, correction pass, semantic score,
+  keyword/industry/identity rule, similarity rejection, neutralizing rewrite,
+  or code-authored fallback on this prospective path. Code retains only the
+  bounded response-shape checks required to consume one or three strings.
+- Focused unit/contract verification passed: 9 files, 137 tests. Disposable
+  PostgreSQL verification passed: 2 files, 12 tests, 0 skipped; receipt
+  `.data/test-runs/postgres-disposable/pg-20260807173440-e19b9363/receipt.json`.
+- Web lint passed with 0 errors and 8 pre-existing warnings outside this
+  change. All workspace package builds and the Next.js production build passed;
+  `git diff --check` passed and CodeGraph was synchronized.
+- No real crawl, search, model call, report submission, checkout, payment,
+  refund, email, historical mutation, deployment, commit, push, merge, tag,
+  branch, or worktree action occurred.
+- Terminal status: **local implementation and automated verification complete;
+  real model quality, protected-Staging browser behavior, and payment-provider
+  acceptance remain unverified.**
 
 # 2026-08-07 — Model-authored buyer-question generation (complete)
 

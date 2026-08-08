@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { getDictionary } from "@/i18n";
-import { CheckoutCatalogBoundary, resolveCheckoutCatalogPhase } from "./commercial-checkout";
+import { CheckoutCatalogBoundary, PaidQuestionEditor, resolveCheckoutCatalogPhase } from "./commercial-checkout";
 
 const dictionary = getDictionary("en");
 
@@ -45,5 +45,13 @@ describe("commercial checkout catalog states", () => {
       enabled: true,
       prices: [{ currency: "USD", amountMinor: 9900 }]
     }, true)).toBe("ready");
+  });
+
+  it("renders exactly three editable paid-question fields", () => {
+    const html = renderToStaticMarkup(<PaidQuestionEditor locale="en" questions={["Q1", "Q2", "Q3"]} onChange={() => undefined} />);
+    expect((html.match(/<textarea/gu) ?? [])).toHaveLength(3);
+    expect(html).toContain("paid-question-1");
+    expect(html).toContain("paid-question-3");
+    expect(html).toContain("Q1");
   });
 });

@@ -74,13 +74,7 @@ function teaserModel(): FreeTeaserModel {
       findings: fixture.technicalFoundation.technicalReport.findings
     },
     aiReport: fixture.technicalFoundation.aiReport,
-    questionSet: {
-      ...fixture.businessQuestionSet,
-      questions: fixture.businessQuestionSet.questions.map((item) => ({
-        ...item,
-        neutralPublicText: item.privateText
-      }))
-    },
+    freeQuestion: question.privateText,
     q1AnswerCard,
     brandMentionCount: 1,
     competitorMentionCount: 3
@@ -97,7 +91,8 @@ describe("free V4 teaser renderer", () => {
     expect(html).toContain('data-buyer-question-map="true"');
     expect(html).toContain('data-core-gap="true"');
     expect(html).toContain('data-teaser-cta="true"');
-    for (const question of model.questionSet.questions) expect(html).toContain(question.neutralPublicText);
+    expect(html).toContain(model.freeQuestion);
+    expect((html.match(/<li><p>/gu) ?? [])).toHaveLength(1);
 
     const websiteAt = html.indexOf('data-website-snapshot="true"');
     const questionsAt = html.indexOf('data-buyer-question-map="true"');

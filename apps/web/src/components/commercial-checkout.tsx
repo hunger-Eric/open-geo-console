@@ -121,11 +121,12 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
     setError(null);
     checkoutIdempotencyKey.current ||= crypto.randomUUID();
     try {
-      if (!questionSetId || questions.length !== 3) throw new Error("The saved teaser questions are unavailable.");
-      const response = await fetch(`/api/reports/${reportId}/checkout`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "idempotency-key": checkoutIdempotencyKey.current },
-        body: JSON.stringify(buildCheckoutRequestBody({ email, locale, turnstileToken: token, questionSetId }))
+      if (!questionSetId || questions.length !== 3 || questions.some((question) => !question.trim())) {
+        throw new Error(locale === "zh" ? "请先确认三个付费报告问题。" : "Confirm all three paid-report questions first.");
+      }
+      const response = await postConfirmedCheckout(fetch, {
+        reportId, questionSetId, questions, email, locale, turnstileToken: token,
+        idempotencyKey: checkoutIdempotencyKey.current
       });
       const payload = await readCheckoutPayload(response);
       const confirmationReturnUrl = getPaymentConfirmationReturnUrl(payload, window.location.href);
@@ -177,15 +178,13 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
       </ul>
       <div className="mt-5 grid gap-4">
         <div>
-          <h4 className="text-sm font-semibold">{locale === "zh" ? "本报告的三个买家问题" : "Three buyer questions for this report"}</h4>
-          <p className="mt-1 text-xs leading-5 text-[var(--muted)]">{locale === "zh" ? "问题已由免费预览自动确认；付款报告将沿用同一组问题。" : "These questions were confirmed by the free preview and will be reused unchanged in the paid report."}</p>
+          <h4 className="text-sm font-semibold">{locale === "zh" ? "确认付费报告的三个问题" : "Confirm three questions for the paid report"}</h4>
+          <p className="mt-1 text-xs leading-5 text-[var(--muted)]">{locale === "zh" ? "这三个问题由大模型另外生成。你可以修改；确认成功后才会进入付款。" : "These are generated separately for the paid report. Edit them as needed; checkout starts only after confirmation succeeds."}</p>
         </div>
-        <ol className="grid gap-3">
-          {questions.map((question, index) => <li className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-sm" key={index}>
-            <span className="mr-2 font-semibold text-[var(--teal)]">{locale === "zh" ? `问题 ${index + 1}` : `Question ${index + 1}`}</span>
-            {question}
-          </li>)}
-        </ol>
+        <PaidQuestionEditor locale={locale} questions={questions} onChange={(next) => {
+          setQuestions(next);
+          checkoutIdempotencyKey.current = "";
+        }} />
       </div>
       {!hidePurchaseControls ? <form onSubmit={checkout} className="mt-5 grid gap-4">
         <label className="text-sm font-semibold">
@@ -207,7 +206,7 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
         ) : null}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm font-semibold text-[var(--foreground)]">{dictionary.commerce.deliveryPromise}</p>
-          <button className="button-primary min-h-12 shrink-0" disabled={submitting || verifying || !email || !price || questions.length !== 3} type="submit">
+          <button className="button-primary min-h-12 shrink-0" disabled={submitting || verifying || !email || !price || questions.length !== 3 || questions.some((question) => !question.trim())} type="submit">
             {submitting || verifying ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <LockKeyhole aria-hidden="true" className="size-4" />}
             {verifying
               ? dictionary.commerce.verifying
@@ -221,6 +220,55 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
       {error ? <p className="mt-3 text-sm text-[var(--red)]" role="alert">{error}</p> : null}
     </section>
   );
+}
+
+export async function postConfirmedCheckout(
+  fetcher: typeof fetch,
+  input: {
+    reportId: string;
+    questionSetId: string;
+    questions: readonly string[];
+    email: string;
+    locale: Locale;
+    turnstileToken: string;
+    idempotencyKey: string;
+  }
+): Promise<Response> {
+  const confirmationResponse = await fetcher(`/api/reports/${input.reportId}/business-questions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      questionSetId: input.questionSetId,
+      questions: input.questions,
+      acknowledgedLowConfidence: true
+    })
+  });
+  const confirmed = await confirmationResponse.json() as { id?: string; error?: string };
+  if (!confirmationResponse.ok || confirmed.id !== input.questionSetId) {
+    throw new Error(confirmed.error ?? (input.locale === "zh" ? "无法确认付费报告问题。" : "Unable to confirm the paid-report questions."));
+  }
+  return fetcher(`/api/reports/${input.reportId}/checkout`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": input.idempotencyKey },
+    body: JSON.stringify(buildCheckoutRequestBody(input))
+  });
+}
+
+export function PaidQuestionEditor({ locale, questions, onChange }: {
+  locale: Locale;
+  questions: readonly string[];
+  onChange: (questions: string[]) => void;
+}) {
+  return <ol className="grid gap-3">
+    {questions.map((question, index) => <li className="grid gap-2 rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 text-sm" key={index}>
+      <label className="font-semibold text-[var(--teal)]" htmlFor={`paid-question-${index + 1}`}>{locale === "zh" ? `问题 ${index + 1}` : `Question ${index + 1}`}</label>
+      <textarea className="input-control min-h-24 w-full resize-y" id={`paid-question-${index + 1}`} maxLength={500} required value={question} onChange={(event) => {
+        const next = [...questions];
+        next[index] = event.target.value;
+        onChange(next);
+      }} />
+    </li>)}
+  </ol>;
 }
 export type CheckoutCatalogPhase = "loading" | "unavailable" | "ready";
 

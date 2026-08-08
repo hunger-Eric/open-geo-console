@@ -75,12 +75,13 @@ export function createModelBusinessQuestionCandidates(input: {
   revision?: number;
   profile: BusinessQuestionProfile;
   modelOutput: unknown;
+  preserveModelText?: boolean;
 }): BusinessQuestionCandidateSet {
   const locale = bounded(input.locale, "locale", 35);
   const region = bounded(input.region, "region", 35);
   const revision = input.revision ?? 1;
   if (!Number.isSafeInteger(revision) || revision < 1) throw new TypeError("revision must be a positive integer.");
-  const modelQuestions = parseModelQuestions(input.modelOutput);
+  const modelQuestions = parseModelQuestions(input.modelOutput, !input.preserveModelText);
   const profileEvidenceIdentity = deterministicId("business-profile", [JSON.stringify({
     businessModel: input.profile.businessModel,
     productsAndServices: input.profile.productsAndServices,
@@ -95,7 +96,7 @@ export function createModelBusinessQuestionCandidates(input: {
   const questions = modelQuestions.map(({ purpose, text }) => ({
     purpose,
     generatedText: text,
-    neutralPublicText: neutralize(text, identityExclusions),
+    neutralPublicText: input.preserveModelText ? text : neutralize(text, identityExclusions),
     evidenceUrls
   })) as unknown as BusinessQuestionCandidateSet["questions"];
   const confidence = input.profile.confidence === "high" ? "high" : "low";
@@ -125,6 +126,7 @@ export function confirmBusinessQuestionSet(input: {
   finalTexts: readonly string[];
   acknowledgedLowConfidence: boolean;
   confirmedAt: string;
+  preserveFinalText?: boolean;
 }): ConfirmedBusinessQuestionSet {
   if (input.finalTexts.length !== 3) throw new TypeError("Exactly three business questions are required.");
   if (input.candidates.requiresAcknowledgement && !input.acknowledgedLowConfidence) {
@@ -133,12 +135,14 @@ export function confirmBusinessQuestionSet(input: {
   const confirmedAt = bounded(input.confirmedAt, "confirmedAt", 64);
   if (!Number.isFinite(Date.parse(confirmedAt))) throw new TypeError("confirmedAt must be an ISO timestamp.");
   const privateTexts = input.finalTexts.map((value, index) => validatePrivateQuestion(value, index));
-  if (new Set(privateTexts.map(normalizeComparable)).size !== 3) {
+  if (!input.preserveFinalText && new Set(privateTexts.map(normalizeComparable)).size !== 3) {
     throw new TypeError("The three business questions must be distinct.");
   }
   const questions = input.candidates.questions.map((candidate, index) => {
     const privateText = privateTexts[index]!;
-    const neutralPublicText = neutralize(privateText, input.candidates.identityExclusions);
+    const neutralPublicText = input.preserveFinalText
+      ? privateText
+      : neutralize(privateText, input.candidates.identityExclusions);
     return {
       ...candidate,
       privateText,
@@ -190,7 +194,7 @@ export function toCanonicalBuyerQuestionSet(set: ConfirmedBusinessQuestionSet): 
   });
 }
 
-function parseModelQuestions(value: unknown): readonly [{ purpose: BusinessQuestionPurpose; text: string }, { purpose: BusinessQuestionPurpose; text: string }, { purpose: BusinessQuestionPurpose; text: string }] {
+function parseModelQuestions(value: unknown, requireDistinctText = true): readonly [{ purpose: BusinessQuestionPurpose; text: string }, { purpose: BusinessQuestionPurpose; text: string }, { purpose: BusinessQuestionPurpose; text: string }] {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Model buyer-question output must be an object.");
   const root = value as Record<string, unknown>;
   if (!Array.isArray(root.questions) || root.questions.length !== 3) {
@@ -206,7 +210,8 @@ function parseModelQuestions(value: unknown): readonly [{ purpose: BusinessQuest
     }
     return { purpose, text: validatePrivateQuestion(row.text, index) };
   });
-  if (new Set(questions.map(({ purpose }) => purpose)).size !== 3 || new Set(questions.map(({ text }) => normalizeComparable(text))).size !== 3) {
+  if (new Set(questions.map(({ purpose }) => purpose)).size !== 3 ||
+      (requireDistinctText && new Set(questions.map(({ text }) => normalizeComparable(text))).size !== 3)) {
     throw new TypeError("Model buyer questions must be distinct and cover the persisted search lanes.");
   }
   return questions as unknown as readonly [{ purpose: BusinessQuestionPurpose; text: string }, { purpose: BusinessQuestionPurpose; text: string }, { purpose: BusinessQuestionPurpose; text: string }];

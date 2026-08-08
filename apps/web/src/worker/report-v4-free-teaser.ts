@@ -48,7 +48,6 @@ import {
 } from "@open-geo-console/public-search-observer";
 import { createSiteKey } from "@open-geo-console/site-crawler";
 import {
-  confirmBusinessQuestions,
   getConfirmedBusinessQuestionSet,
   prepareBusinessQuestionCandidates
 } from "@/db/business-questions";
@@ -68,34 +67,19 @@ import { createPublicSourceQuestionFanouts } from "./public-source-forensics";
 import { resolvePublicSourceSnapshot } from "./public-source-snapshot-resolver";
 
 export const FREE_TEASER_CHECKPOINT_VERSION = "free-teaser-checkpoint-v1" as const;
-export const FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT = "free-v4-buyer-question-review-v1" as const;
+export const FREE_V4_QUESTION_GENERATION_CONTRACT = "free-v4-question-generation-v1" as const;
 
-type BuyerQuestionPurpose = "core_service_discovery" | "customer_region_fit" | "purchase_delivery_risk";
-
-export interface FreeV4BuyerQuestionReviewQuestion {
-  readonly purpose: BuyerQuestionPurpose;
+export interface FreeV4GeneratedQuestion {
+  readonly version: typeof FREE_V4_QUESTION_GENERATION_CONTRACT;
   readonly text: string;
-  readonly buyerRole: string;
-  readonly purchaseDecision: string;
-  readonly buyerReason: string;
-}
-
-export interface FreeV4BuyerQuestionReview {
-  readonly version: typeof FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT;
-  readonly decision: "accepted";
-  readonly questions: readonly [
-    FreeV4BuyerQuestionReviewQuestion,
-    FreeV4BuyerQuestionReviewQuestion,
-    FreeV4BuyerQuestionReviewQuestion
-  ];
   readonly identityHash: string;
 }
 
-/** Model-owned buyer-intent review rejected or failed its structured contract. */
-export class FreeTeaserBuyerQuestionReviewError extends JobError {
-  constructor(message = "Free teaser buyer questions failed model-owned buyer-intent review.") {
-    super(message, "free_teaser_buyer_question_review_rejected", "permanent");
-    this.name = "FreeTeaserBuyerQuestionReviewError";
+/** A generated question payload could not be read. */
+export class FreeTeaserQuestionGenerationError extends JobError {
+  constructor(message = "Free teaser question generation returned an unreadable payload.") {
+    super(message, "free_teaser_question_generation_invalid", "permanent");
+    this.name = "FreeTeaserQuestionGenerationError";
   }
 }
 
@@ -183,7 +167,9 @@ export interface FreeTeaserCheckpointV1 {
   readonly evidenceCutoffAt: string;
   readonly questionSetId?: string;
   readonly questionSetIdentity?: string;
-  readonly buyerQuestionReview?: FreeV4BuyerQuestionReview;
+  readonly freeQuestion?: string;
+  readonly freeQuestionIdentity?: string;
+  readonly paidQuestionSetId?: string;
   readonly observationSnapshotIds?: readonly [string, string, string];
   readonly metrics?: FreeTeaserMetrics;
   readonly q1AnswerResult?: GenerativeSearchAnswerResult;
@@ -192,7 +178,7 @@ export interface FreeTeaserCheckpointV1 {
   readonly q1DiagnosisDraft?: NonNullable<GenerativeSearchAnswerCardV3["diagnosis"]>;
   readonly reviewedFoundation?: AiWebsiteReportV1;
   readonly semanticReview?: FreeTeaserSemanticReviewProjection;
-  readonly directQuestionTexts?: readonly [string, string, string];
+  readonly directQuestionTexts?: readonly string[];
   readonly directCoreReceipt?: FreeV4DirectCoreReceipt;
   readonly directAnalysisStatus?: FreeV4DirectAnalysisStatus;
   readonly directAnalysis?: FreeV4DirectAnalysis;
@@ -203,7 +189,8 @@ export interface FreeTeaserCheckpointV1 {
 
 export interface FreeTeaserResult {
   readonly checkpoint: FreeTeaserCheckpointV1;
-  readonly questionSet: ConfirmedBusinessQuestionSet;
+  readonly questionSet: ConfirmedBusinessQuestionSet | null;
+  readonly freeQuestion: string;
   readonly q1AnswerCore: FreeTeaserQ1Core | GenerativeSearchAnswerCardV3;
   readonly metrics?: FreeTeaserMetrics;
 }
@@ -280,53 +267,71 @@ export async function generateFreeTeaser(input: {
   }
   const evidenceCutoffAt = checkpoint?.evidenceCutoffAt ?? new Date().toISOString();
 
-  let questionSet: ConfirmedBusinessQuestionSet;
-  let buyerQuestionReview = checkpoint?.buyerQuestionReview;
-  if ((semanticReviewEnabled || freeDirectEnabled) && checkpoint?.stage === "ready") {
+  let questionSet: ConfirmedBusinessQuestionSet | null = null;
+  let freeQuestion = checkpoint?.freeQuestion ?? "";
+  let freeQuestionIdentity = checkpoint?.freeQuestionIdentity ?? "";
+  if (freeDirectEnabled) {
+    if (checkpoint?.stage === "ready") {
+      if (!freeQuestion || !freeQuestionIdentity || !checkpoint.paidQuestionSetId) {
+        throw new Error("Marked Free teaser ready checkpoint has no split question authority.");
+      }
+    } else {
+      const generatedFree = await invokeFreeV4QuestionGeneration({
+        foundation: input.foundation,
+        locale: runtime.authority.surface.locale,
+        region: runtime.authority.surface.region,
+        signal: input.signal,
+        structuredInvoker: input.structuredInvoker
+      });
+      const paidOutput = await invokePaidV4QuestionGeneration({
+        foundation: input.foundation,
+        locale: runtime.authority.surface.locale,
+        region: runtime.authority.surface.region,
+        signal: input.signal,
+        structuredInvoker: input.structuredInvoker
+      });
+      const paidCandidates = await prepareBusinessQuestionCandidates({
+        reportId: input.reportId,
+        locale: runtime.authority.surface.locale,
+        region: runtime.authority.surface.region,
+        foundation: input.foundation,
+        modelOutput: paidOutput,
+        preserveModelText: true
+      });
+      freeQuestion = generatedFree.text;
+      freeQuestionIdentity = generatedFree.identityHash;
+      checkpoint = {
+        ...identityCore,
+        stage: "questions_ready",
+        identityHash,
+        evidenceCutoffAt,
+        questionSetId: paidCandidates.id,
+        questionSetIdentity: freeQuestionIdentity,
+        freeQuestion,
+        freeQuestionIdentity,
+        paidQuestionSetId: paidCandidates.id,
+        directQuestionTexts: [freeQuestion]
+      };
+      await input.saveCheckpoint(checkpoint, "question_generation");
+    }
+  } else if (checkpoint?.stage === "ready") {
     if (!checkpoint.questionSetId || !checkpoint.questionSetIdentity) throw new Error("Marked Free teaser ready checkpoint has no question-set authority.");
-    const persistedQuestionSet = await getConfirmedBusinessQuestionSet(input.reportId, checkpoint.questionSetId);
-    if (!persistedQuestionSet || persistedQuestionSet.contentHash !== checkpoint.questionSetIdentity) {
+    questionSet = await getConfirmedBusinessQuestionSet(input.reportId, checkpoint.questionSetId);
+    if (!questionSet || questionSet.contentHash !== checkpoint.questionSetIdentity) {
       throw new Error("Marked Free teaser question-set authority is unavailable.");
     }
-    questionSet = persistedQuestionSet;
-    if (buyerQuestionReview) assertBuyerQuestionReviewMatchesQuestionSet(buyerQuestionReview, questionSet);
+    freeQuestion = questionSet.questions[0]!.neutralPublicText;
   } else {
-    buyerQuestionReview = await invokeFreeV4BuyerQuestionGeneration({
-      foundation: input.foundation,
-      locale: runtime.authority.surface.locale,
-      region: runtime.authority.surface.region,
-      signal: input.signal,
-      structuredInvoker: input.structuredInvoker
-    });
-    const candidates = await prepareBusinessQuestionCandidates({
-      reportId: input.reportId,
-      locale: runtime.authority.surface.locale,
-      region: runtime.authority.surface.region,
-      foundation: input.foundation,
-      modelOutput: buyerQuestionModelOutput(buyerQuestionReview)
-    });
-    questionSet = await confirmBusinessQuestions({
-      reportId: input.reportId,
-      questionSetId: candidates.id,
-      finalTexts: candidates.questions.map(({ generatedText }) => generatedText),
-      acknowledgedLowConfidence: candidates.confidence === "low"
-    });
+    throw new Error("New Free teaser generation requires the direct split-question contract.");
   }
-  if (checkpoint?.questionSetIdentity && checkpoint.questionSetIdentity !== questionSet.contentHash) {
-    throw new Error("Free teaser question-set identity changed after checkpoint.");
-  }
-  if (!checkpoint || !checkpoint.questionSetId) {
+  if (!freeDirectEnabled && (!checkpoint || !checkpoint.questionSetId)) {
     checkpoint = {
       ...identityCore,
       stage: "questions_ready",
       identityHash,
       evidenceCutoffAt,
-      questionSetId: questionSet.id,
-      questionSetIdentity: questionSet.contentHash,
-      buyerQuestionReview,
-      ...(freeDirectEnabled
-        ? { directQuestionTexts: questionSet.questions.map(({ neutralPublicText }) => neutralPublicText) as [string, string, string] }
-        : {})
+      questionSetId: questionSet!.id,
+      questionSetIdentity: questionSet!.contentHash,
     };
     await input.saveCheckpoint(checkpoint, "question_generation");
   }
@@ -337,7 +342,7 @@ export async function generateFreeTeaser(input: {
       jobId: input.jobId,
       targetUrl: input.targetUrl,
       foundation: input.foundation,
-      questionSet,
+      questionSet: questionSet!,
       evidenceCutoffAt,
       runtime,
       signal: input.signal
@@ -358,7 +363,7 @@ export async function generateFreeTeaser(input: {
       snapshotIds: checkpoint.observationSnapshotIds,
       targetUrl: input.targetUrl,
       foundation: input.foundation,
-      questionSet,
+      questionSet: questionSet!,
       runtime
     });
     if (checkpoint.stage === "ready") {
@@ -367,7 +372,7 @@ export async function generateFreeTeaser(input: {
         targetUrl: input.targetUrl,
         foundation: input.foundation,
         admission: input.admission,
-        questionSet,
+        questionSet: questionSet!,
         runtime,
         bundles: verifiedSnapshotBundles
       });
@@ -376,7 +381,8 @@ export async function generateFreeTeaser(input: {
 
   if (checkpoint.stage !== "ready" && (!checkpoint.q1AnswerResult || (semanticReviewEnabled || freeDirectEnabled ? !checkpoint.q1AnswerDraft : !checkpoint.q1AnswerCard))) {
     const q1 = await answerTeaserQuestionOne({
-      questionSet,
+      questionSet: questionSet ?? undefined,
+      freeQuestion: freeDirectEnabled ? { text: freeQuestion, identityHash: freeQuestionIdentity } : undefined,
       targetUrl: input.targetUrl,
       locale: runtime.authority.surface.locale,
       region: runtime.authority.surface.region,
@@ -396,14 +402,14 @@ export async function generateFreeTeaser(input: {
         }
       : answeredCore;
     if (semanticReviewEnabled || freeDirectEnabled) {
-      await verifyMarkedFreeTeaserDraftCheckpoint({ checkpoint: answeredCheckpoint, questionSet, targetUrl: input.targetUrl, admission: input.admission });
+      await verifyMarkedFreeTeaserDraftCheckpoint({ checkpoint: answeredCheckpoint, questionSet: questionSet ?? undefined, freeQuestion: freeDirectEnabled ? { text: freeQuestion, identityHash: freeQuestionIdentity } : undefined, targetUrl: input.targetUrl, admission: input.admission });
     }
     checkpoint = answeredCheckpoint;
     await input.saveCheckpoint(checkpoint, "grounded_answer_synthesis");
   }
 
   if ((semanticReviewEnabled || freeDirectEnabled) && checkpoint.stage === "q1_answer_ready") {
-    await verifyMarkedFreeTeaserDraftCheckpoint({ checkpoint, questionSet, targetUrl: input.targetUrl, admission: input.admission });
+    await verifyMarkedFreeTeaserDraftCheckpoint({ checkpoint, questionSet: questionSet ?? undefined, freeQuestion: freeDirectEnabled ? { text: freeQuestion, identityHash: freeQuestionIdentity } : undefined, targetUrl: input.targetUrl, admission: input.admission });
   }
 
   if (freeDirectEnabled && checkpoint.stage === "q1_answer_ready") {
@@ -480,7 +486,7 @@ export async function generateFreeTeaser(input: {
     }, { semanticValidation: semanticReviewEnabled ? "deferred" : "legacy" });
     if (semanticReviewEnabled) {
       const diagnosedCheckpoint: FreeTeaserCheckpointV1 = { ...checkpoint, stage: "q1_answer_ready", q1DiagnosisDraft: diagnosis };
-      await verifyMarkedFreeTeaserDraftCheckpoint({ checkpoint: diagnosedCheckpoint, questionSet, targetUrl: input.targetUrl, admission: input.admission });
+      await verifyMarkedFreeTeaserDraftCheckpoint({ checkpoint: diagnosedCheckpoint, questionSet: questionSet!, targetUrl: input.targetUrl, admission: input.admission });
       checkpoint = diagnosedCheckpoint;
       await input.saveCheckpoint(checkpoint, "grounded_answer_synthesis");
     } else {
@@ -498,7 +504,7 @@ export async function generateFreeTeaser(input: {
     const reviewedCheckpoint = await reviewFreeTeaser({
       ...input,
       checkpoint,
-      questionSet,
+      questionSet: questionSet!,
       runtime,
       bundles: verifiedSnapshotBundles!
     });
@@ -510,7 +516,7 @@ export async function generateFreeTeaser(input: {
       targetUrl: input.targetUrl,
       foundation: input.foundation,
       admission: input.admission,
-      questionSet,
+      questionSet: questionSet!,
       runtime,
       bundles: verifiedSnapshotBundles!
     });
@@ -525,6 +531,7 @@ export async function generateFreeTeaser(input: {
   return {
     checkpoint: ready,
     questionSet,
+    freeQuestion,
     q1AnswerCore: ready.q1AnswerDraft ?? ready.q1AnswerCard!,
     ...(ready.metrics ? { metrics: ready.metrics } : {})
   };
@@ -558,29 +565,25 @@ export async function invokeFreeV4DirectAnalysis(input: {
   return output;
 }
 
-export async function invokeFreeV4BuyerQuestionGeneration(input: {
+export async function invokeFreeV4QuestionGeneration(input: {
   foundation: AiWebsiteReportV1;
   locale: string;
   region: string;
   signal?: AbortSignal;
   structuredInvoker?: ReportV4StructuredInvoker;
-}): Promise<FreeV4BuyerQuestionReview> {
+}): Promise<FreeV4GeneratedQuestion> {
   const signal = input.signal ?? new AbortController().signal;
   signal.throwIfAborted();
   const structured = input.structuredInvoker ?? getPreparedProviderProfileRuntime().createStructuredInvoker();
   const output = await structured.invoke({
     operation: "websiteSynthesis",
     systemText: [
-      "You are the sole author of buyer questions for a GEO report.",
-      "Read the supplied website foundation and decide for yourself what this website actually offers and what a real potential buyer should ask.",
-      "Draft exactly three concrete, useful buyer questions in the requested locale, then review every draft as a real buyer before returning it.",
-      "For every final question, identify the buyer role, the purchase decision it helps make, and why that buyer would independently ask it before purchase.",
-      "Reject internal implementation inventories, bespoke solution-discovery interviews, and interrogation of the target company unless you judge the requested detail to be a genuine buyer-facing purchase criterion supported by the foundation.",
-      "Do not follow, infer, or repeat any industry, service, audience, market, purchase-criteria, keyword, or question template from application code; all semantic decisions and review prose are yours.",
-      "Use each persisted search lane exactly once: core_service_discovery, customer_region_fit, and purchase_delivery_risk. The lane names are storage labels only, not question templates.",
-      "Do not invent facts, contact details, credentials, order identifiers, or claims not supported by the foundation.",
-      "Return an accepted response only when all three questions pass your buyer-intent review: {\"version\":\"free-v4-buyer-question-review-v1\",\"decision\":\"accepted\",\"questions\":[{\"purpose\":\"core_service_discovery\",\"text\":\"...\",\"buyerRole\":\"...\",\"purchaseDecision\":\"...\",\"buyerReason\":\"...\"},{\"purpose\":\"customer_region_fit\",\"text\":\"...\",\"buyerRole\":\"...\",\"purchaseDecision\":\"...\",\"buyerReason\":\"...\"},{\"purpose\":\"purchase_delivery_risk\",\"text\":\"...\",\"buyerRole\":\"...\",\"purchaseDecision\":\"...\",\"buyerReason\":\"...\"}]}.",
-      "If you cannot produce three defensible buyer questions, return only {\"version\":\"free-v4-buyer-question-review-v1\",\"decision\":\"rejected\",\"reason\":\"...\"}."
+      "You write the single free-preview question for a GEO report.",
+      "Read the supplied website foundation and decide what this website offers.",
+      "Return exactly one useful question that a real prospective customer would independently ask while discovering, comparing, or buying what the website offers.",
+      "Choose the question yourself from the website evidence. Do not discuss implementation or the report-generation process.",
+      "Do not invent facts, contact details, credentials, order identifiers, or unsupported claims.",
+      "Return only {\"version\":\"free-v4-question-generation-v1\",\"question\":\"...\"}."
     ].join("\n"),
     inputText: JSON.stringify({
       locale: input.locale,
@@ -590,59 +593,49 @@ export async function invokeFreeV4BuyerQuestionGeneration(input: {
     signal
   });
   signal.throwIfAborted();
-  return parseFreeV4BuyerQuestionReview(output);
+  return parseFreeV4GeneratedQuestion(output);
 }
 
-export function parseFreeV4BuyerQuestionReview(value: unknown): FreeV4BuyerQuestionReview {
+export function parseFreeV4GeneratedQuestion(value: unknown): FreeV4GeneratedQuestion {
   try {
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Review must be an object.");
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("Question output must be an object.");
     const root = value as Record<string, unknown>;
-    if (root.version !== FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT) throw new TypeError("Review version is invalid.");
-    if (root.decision !== "accepted") throw new TypeError("The model rejected the buyer questions.");
-    if (!Array.isArray(root.questions) || root.questions.length !== 3) throw new TypeError("Review must contain exactly three questions.");
-    const purposes: readonly BuyerQuestionPurpose[] = ["core_service_discovery", "customer_region_fit", "purchase_delivery_risk"];
-    const questions = root.questions.map((candidate, index) => {
-      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new TypeError(`questions[${index}] must be an object.`);
-      const row = candidate as Record<string, unknown>;
-      if (row.purpose !== purposes[index]) throw new TypeError(`questions[${index}].purpose is invalid.`);
-      return {
-        purpose: row.purpose,
-        text: boundedBuyerReviewText(row.text, `questions[${index}].text`, 500),
-        buyerRole: boundedBuyerReviewText(row.buyerRole, `questions[${index}].buyerRole`, 300),
-        purchaseDecision: boundedBuyerReviewText(row.purchaseDecision, `questions[${index}].purchaseDecision`, 500),
-        buyerReason: boundedBuyerReviewText(row.buyerReason, `questions[${index}].buyerReason`, 500)
-      };
-    }) as unknown as FreeV4BuyerQuestionReview["questions"];
-    if (new Set(questions.map(({ text }) => text.normalize("NFKC").toLocaleLowerCase())).size !== 3) {
-      throw new TypeError("Reviewed buyer questions must be distinct.");
-    }
-    const review = { version: FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT, decision: "accepted" as const, questions };
-    return { ...review, identityHash: sha(review) };
+    if (root.version !== FREE_V4_QUESTION_GENERATION_CONTRACT) throw new TypeError("Question version is invalid.");
+    const text = boundedGeneratedQuestionText(root.question, "question", 500);
+    return { version: FREE_V4_QUESTION_GENERATION_CONTRACT, text, identityHash: `free-question-${sha({ text })}` };
   } catch (error) {
-    if (error instanceof FreeTeaserBuyerQuestionReviewError) throw error;
-    throw new FreeTeaserBuyerQuestionReviewError(error instanceof Error ? error.message : undefined);
+    if (error instanceof FreeTeaserQuestionGenerationError) throw error;
+    throw new FreeTeaserQuestionGenerationError(error instanceof Error ? error.message : undefined);
   }
 }
 
-function buyerQuestionModelOutput(review: FreeV4BuyerQuestionReview) {
-  return { questions: review.questions.map(({ purpose, text }) => ({ purpose, text })) };
-}
-
-function boundedBuyerReviewText(value: unknown, label: string, max: number): string {
+function boundedGeneratedQuestionText(value: unknown, label: string, max: number): string {
   if (typeof value !== "string" || !value.trim() || value.length > max) throw new TypeError(`${label} is invalid.`);
   return value.trim().normalize("NFC");
 }
 
-function verifyBuyerQuestionReview(review: FreeV4BuyerQuestionReview): void {
-  const parsed = parseFreeV4BuyerQuestionReview(review);
-  if (parsed.identityHash !== review.identityHash) throw new TypeError("Buyer-question review identity is invalid.");
-}
-
-function assertBuyerQuestionReviewMatchesQuestionSet(review: FreeV4BuyerQuestionReview, questionSet: ConfirmedBusinessQuestionSet): void {
-  verifyBuyerQuestionReview(review);
-  if (review.questions.some((question, index) => question.text !== questionSet.questions[index]?.generatedText)) {
-    throw new TypeError("Buyer-question review does not match the confirmed question set.");
-  }
+export async function invokePaidV4QuestionGeneration(input: {
+  foundation: AiWebsiteReportV1;
+  locale: string;
+  region: string;
+  signal?: AbortSignal;
+  structuredInvoker?: ReportV4StructuredInvoker;
+}): Promise<unknown> {
+  const signal = input.signal ?? new AbortController().signal;
+  const structured = input.structuredInvoker ?? getPreparedProviderProfileRuntime().createStructuredInvoker();
+  const output = await structured.invoke({
+    operation: "websiteSynthesis",
+    systemText: [
+      "Generate exactly three editable candidate questions for a paid GEO report.",
+      "Read the website foundation and decide what real prospective customers would independently ask while discovering, comparing, or buying what this website offers.",
+      "Choose the questions yourself. Do not review, score, explain, or correct them, and do not discuss implementation or the report-generation process.",
+      "Return only {\"questions\":[{\"purpose\":\"core_service_discovery\",\"text\":\"...\"},{\"purpose\":\"customer_region_fit\",\"text\":\"...\"},{\"purpose\":\"purchase_delivery_risk\",\"text\":\"...\"}]}."
+    ].join("\n"),
+    inputText: JSON.stringify({ locale: input.locale, region: input.region, websiteFoundation: input.foundation }),
+    signal
+  });
+  signal.throwIfAborted();
+  return output;
 }
 
 export function freeTeaserCheckpointFromJobCheckpoint(value: JobCheckpoint | null | undefined): FreeTeaserCheckpointV1 | null {
@@ -667,12 +660,11 @@ export function parseReadyFreeTeaserCheckpoint(
     throw new TypeError("Free teaser checkpoint is not ready.");
   }
   if (!isHash(checkpoint.identityHash) || !isHash(checkpoint.admissionContentIdentityHash) ||
-      !isHash(checkpoint.foundationHash) || !isConfirmedBusinessQuestionSetIdentity(checkpoint.questionSetIdentity) ||
+      !isHash(checkpoint.foundationHash) || !isQuestionAuthorityIdentity(checkpoint.questionSetIdentity) ||
       !checkpoint.questionSetId || !checkpoint.reportId || !checkpoint.admissionSnapshotId ||
       !checkpoint.q1AnswerResult || !checkpoint.readyAt) {
     throw new TypeError("Free teaser checkpoint is incomplete.");
   }
-  if (checkpoint.buyerQuestionReview) verifyBuyerQuestionReview(checkpoint.buyerQuestionReview);
   const semanticReviewEnabled = options?.semanticReviewContractVersion === REPORT_SEMANTIC_REVIEW_CONTRACT;
   const freeDirectEnabled = options?.freeDirectSemanticsVersion === FREE_V4_DIRECT_SEMANTICS_VERSION;
   if (semanticReviewEnabled && freeDirectEnabled) throw new TypeError("Free teaser cannot verify two semantic carriers.");
@@ -691,16 +683,14 @@ export function parseReadyFreeTeaserCheckpoint(
   if (freeDirectEnabled) {
     if (checkpoint.semanticReview || checkpoint.reviewedFoundation || checkpoint.q1AnswerCard ||
         !checkpoint.q1AnswerDraft || !checkpoint.directQuestionTexts || !checkpoint.directCoreReceipt ||
-        !checkpoint.directAnalysisStatus || checkpoint.metrics || checkpoint.observationSnapshotIds) {
+        !checkpoint.directAnalysisStatus || checkpoint.metrics || checkpoint.observationSnapshotIds ||
+        checkpoint.directQuestionTexts.length !== 1 || checkpoint.directQuestionTexts[0] !== checkpoint.freeQuestion ||
+        checkpoint.questionSetIdentity !== checkpoint.freeQuestionIdentity || !checkpoint.paidQuestionSetId) {
       throw new TypeError("Free direct ready checkpoint is missing its direct semantic authority.");
     }
     if (checkpoint.directQuestionTexts[0] !== checkpoint.q1AnswerDraft.exactQuestion ||
         checkpoint.q1AnswerDraft.questionId !== checkpoint.q1AnswerResult.questionId) {
       throw new TypeError("Free direct Q1 prose does not match the final question set.");
-    }
-    if (checkpoint.buyerQuestionReview && checkpoint.buyerQuestionReview.questions.some((question, index) =>
-      question.text !== checkpoint.directQuestionTexts?.[index])) {
-      throw new TypeError("Free direct questions do not match their buyer-intent review.");
     }
     verifyDirectQ1CoreProjection(checkpoint);
     verifyFreeV4DirectCoreReceipt(checkpoint.directCoreReceipt, freeDirectCoreReceiptInput(checkpoint));
@@ -746,7 +736,10 @@ function freeDirectCoreReceiptInput(checkpoint: FreeTeaserCheckpointV1) {
   const core = checkpoint.q1AnswerDraft;
   return {
     questionSetIdentity: checkpoint.questionSetIdentity,
-    questions: checkpoint.directQuestionTexts,
+    // The legacy receipt schema is fixed at three slots. The free product now
+    // has one question, so the same authority text occupies those receipt-only
+    // slots; no additional question is generated, persisted, searched, or shown.
+    questions: [checkpoint.directQuestionTexts[0]!, checkpoint.directQuestionTexts[0]!, checkpoint.directQuestionTexts[0]!],
     questionId: core.questionId,
     questionText: core.exactQuestion,
     answer: checkpoint.q1AnswerResult,
@@ -1169,7 +1162,8 @@ function verifyFreeTeaserSnapshotBundle(input: {
 }
 
 async function answerTeaserQuestionOne(input: {
-  questionSet: ConfirmedBusinessQuestionSet;
+  questionSet?: ConfirmedBusinessQuestionSet;
+  freeQuestion?: { text: string; identityHash: string };
   targetUrl: string;
   locale: string;
   region: string;
@@ -1180,11 +1174,17 @@ async function answerTeaserQuestionOne(input: {
     locale: input.locale,
     region: input.region
   });
-  const canonical = toCanonicalBuyerQuestionSet(input.questionSet).questions[0]!;
-  const question = input.questionSet.questions[0]!;
+  const directQuestion = input.semanticMode === "free_direct" ? input.freeQuestion : undefined;
+  if (input.semanticMode === "free_direct" ? !directQuestion : !input.questionSet) {
+    throw new Error("Free teaser question authority is unavailable.");
+  }
+  const canonical = directQuestion
+    ? { id: `free-question-id-${sha({ identityHash: directQuestion.identityHash, locale: input.locale, region: input.region })}` }
+    : toCanonicalBuyerQuestionSet(input.questionSet!).questions[0]!;
+  const questionText = directQuestion?.text ?? input.questionSet!.questions[0]!.privateText;
   const raw = await provider.answerWithSources({
     questionId: canonical.id,
-    question: input.semanticMode === "free_direct" ? question.neutralPublicText : question.privateText,
+    question: questionText,
     locale: input.locale,
     region: input.region,
     signal: input.signal ?? new AbortController().signal,
@@ -1217,7 +1217,7 @@ async function answerTeaserQuestionOne(input: {
   const draft: FreeTeaserQ1Core = {
     answerMode: "generative_search_v1",
     questionId: parsed.questionId,
-    exactQuestion: input.semanticMode === "free_direct" ? question.neutralPublicText : question.privateText,
+    exactQuestion: questionText,
     status: parsed.refusal ? "refused" : "answered",
     answerText: parsed.answerText,
     sources,
@@ -1246,9 +1246,9 @@ async function answerTeaserQuestionOne(input: {
       geoDiagnosis: diagnoseGenerativeSearchAnswerCardV3(
         { answerText: parsed.answerText, sources },
         {
-          exactQuestion: question.privateText,
+          exactQuestion: questionText,
           locale: input.locale,
-          targetAliases: input.questionSet.identityExclusions,
+          targetAliases: input.questionSet!.identityExclusions,
           competitors: [],
           missingEvidenceFamilies: []
         }
@@ -1261,21 +1261,25 @@ async function answerTeaserQuestionOne(input: {
 
 async function verifyMarkedFreeTeaserDraftCheckpoint(input: {
   checkpoint: FreeTeaserCheckpointV1;
-  questionSet: ConfirmedBusinessQuestionSet;
+  questionSet?: ConfirmedBusinessQuestionSet;
+  freeQuestion?: { text: string; identityHash: string };
   targetUrl: string;
   admission: ReportV4SiteSnapshotBundle;
 }): Promise<void> {
   const { checkpoint } = input;
   const result = checkpoint.q1AnswerResult;
   const draft = checkpoint.q1AnswerDraft;
-  if (checkpoint.stage !== "q1_answer_ready" || !result || !draft || checkpoint.questionSetIdentity !== input.questionSet.contentHash) {
+  const direct = Boolean(checkpoint.directQuestionTexts);
+  const authorityIdentity = direct ? input.freeQuestion?.identityHash : input.questionSet?.contentHash;
+  if (checkpoint.stage !== "q1_answer_ready" || !result || !draft || checkpoint.questionSetIdentity !== authorityIdentity) {
     throw new OrchestrationInvariantError("Marked Free teaser answer draft authority is incomplete.");
   }
-  const canonicalQuestion = toCanonicalBuyerQuestionSet(input.questionSet).questions[0]!;
-  const direct = Boolean(checkpoint.directQuestionTexts);
+  const canonicalQuestion = direct
+    ? { id: `free-question-id-${sha({ identityHash: input.freeQuestion!.identityHash, locale: checkpoint.locale, region: checkpoint.region })}` }
+    : toCanonicalBuyerQuestionSet(input.questionSet!).questions[0]!;
   const expectedQuestion = direct
-    ? input.questionSet.questions[0]!.neutralPublicText
-    : input.questionSet.questions[0]!.privateText;
+    ? input.freeQuestion!.text
+    : input.questionSet!.questions[0]!.privateText;
   if (createSiteKey(input.targetUrl) !== input.admission.snapshot.siteKey || draft.questionId !== canonicalQuestion.id || draft.exactQuestion !== expectedQuestion ||
       draft.answerMode !== "generative_search_v1" ||
       (direct
@@ -1704,8 +1708,8 @@ function isHash(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 }
 
-function isConfirmedBusinessQuestionSetIdentity(value: unknown): value is string {
-  return typeof value === "string" && /^confirmed-business-question-set-[a-f0-9]{64}$/u.test(value);
+function isQuestionAuthorityIdentity(value: unknown): value is string {
+  return typeof value === "string" && /^(?:confirmed-business-question-set|free-question)-[a-f0-9]{64}$/u.test(value);
 }
 
 export async function loadConfirmedFreeTeaserQuestionSet(
@@ -1721,6 +1725,5 @@ export async function loadConfirmedFreeTeaserQuestionSet(
   if (!questionSet || questionSet.contentHash !== ready.questionSetIdentity) {
     throw new Error("Free teaser question-set authority is unavailable.");
   }
-  if (ready.buyerQuestionReview) assertBuyerQuestionReviewMatchesQuestionSet(ready.buyerQuestionReview, questionSet);
   return questionSet;
 }

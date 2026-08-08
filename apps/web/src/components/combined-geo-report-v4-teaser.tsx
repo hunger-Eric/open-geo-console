@@ -4,7 +4,6 @@ import type {
   OpenGeoAnswerCardV3
 } from "@open-geo-console/ai-report-engine";
 import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
-import type { ConfirmedBusinessQuestionSet } from "@open-geo-console/public-search-observer";
 import { ARTIFACT_CSS } from "@/report/artifact-styles";
 
 const TEASER_EXTRA_CSS = `
@@ -73,7 +72,7 @@ interface FreeTeaserModelBase {
   readonly generatedAt: string;
   readonly technicalReport: { score: number; findings: { id: string; title: string; description: string; recommendation: string }[] };
   readonly aiReport: AiWebsiteReportV1;
-  readonly questionSet: ConfirmedBusinessQuestionSet;
+  readonly freeQuestion: string;
   readonly q1AnswerCard: OpenGeoAnswerCardV3 | DirectQ1Core | null;
 }
 
@@ -91,7 +90,6 @@ export type FreeTeaserModel = FreeTeaserModelBase & ({
 
 export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTeaserModel }) {
   const copy = model.locale === "zh" ? ZH : EN;
-  const questions = model.questionSet.questions;
   return <>
   <style dangerouslySetInnerHTML={{ __html: ARTIFACT_CSS + TEASER_EXTRA_CSS }} />
   <main className="report-shell report-v4-teaser" data-report-version="4-teaser" data-artifact-revision="free-teaser">
@@ -127,16 +125,16 @@ export function CombinedGeoReportV4Teaser({ model }: { readonly model: FreeTease
     <section className="report-section" data-buyer-question-map="true">
       <p className="section-index">02</p><h2>{copy.customerQuestions}</h2>
       <p>{copy.questionContinuity}</p>
-      <ol className="question-map">{questions.map((question, index) => <li className={index === 0 ? "" : "locked-question"} key={question.neutralPublicText}>
-        <p>{question.neutralPublicText}</p><span>{index === 0 ? copy.freeAnswer : copy.paidAnswer}</span>
-      </li>)}</ol>
+      <ol className="question-map"><li key={model.freeQuestion}>
+        <p>{model.freeQuestion}</p><span>{copy.freeAnswer}</span>
+      </li></ol>
     </section>
 
     <section className="report-section teaser-proof-section" data-answer-first-section="true">
       <p className="section-index">03</p><h2>{copy.firstAnswer}</h2>
       {model.q1AnswerCard
-        ? <TeaserQ1Card card={model.q1AnswerCard} question={questions[0]!.neutralPublicText} locale={model.locale} copy={copy}/>
-        : <TeaserLockedCard question={questions[0]!.neutralPublicText} questionOrder={1} copy={copy} showCta={true}/>
+        ? <TeaserQ1Card card={model.q1AnswerCard} question={model.freeQuestion} locale={model.locale} copy={copy}/>
+        : <TeaserLockedCard question={model.freeQuestion} questionOrder={1} copy={copy} showCta={true}/>
       }
     </section>
 
@@ -275,7 +273,7 @@ const EN: Copy = {
   analysisUnavailableBody: "The Q1 answer and its sources completed successfully, but the separate analysis did not complete for this run.",
   issuePreview: "Issue preview", remediationLocked: "Remediation is included in the full report.",
   customerQuestions: "Buyer questions", question: "Question", locked: "Locked", lockedBody: "Unlock the full answer with sources and diagnosis.", ctaInline: "Unlock full report",
-  questionContinuity: "The paid report keeps these same three questions and continues the same evidence chain.", freeAnswer: "Answered below", paidAnswer: "Paid report", firstAnswer: "Your first real answer", coreGap: "The single most important gap",
+  questionContinuity: "This free question is answered below. The paid report prepares three separate questions for you to edit and confirm.", freeAnswer: "Answered below", paidAnswer: "Paid report", firstAnswer: "Your first real answer", coreGap: "The single most important gap",
   ctaTitle: "Get the complete analysis", ctaBody: "Unlock all 3 answers with sources, per-question diagnosis, and prioritized GEO actions.", ctaButton: "Unlock full report", ctaAssurance: "One-time payment · report-specific access",
   sources: "Sources", sourceCount: (count) => `${count} sources checked`, moreSources: (count) => `View ${count} more sources`,
   questionDiagnosis: "Question diagnosis", diagnosisSummary: "What the evidence means", targetGap: "Target website gap"
@@ -292,7 +290,7 @@ const ZH: Copy = {
   websiteSnapshot: "我们从网站看到了什么", homepageScope: "免费范围 · 仅分析首页",
   issuePreview: "问题清单预览", remediationLocked: "修复建议包含在完整报告中。",
   customerQuestions: "买家问题", question: "问题", locked: "已锁定", lockedBody: "解锁完整答案、来源和诊断。", ctaInline: "解锁完整报告",
-  questionContinuity: "付费报告将沿用这三个问题，继续完成同一条证据链。", freeAnswer: "下方已回答", paidAnswer: "付费解锁", firstAnswer: "第一个真实答案", coreGap: "当前最核心的一个差距",
+  questionContinuity: "下方会回答这个免费问题。付费报告会另外生成三个问题，供你修改并确认。", freeAnswer: "下方已回答", paidAnswer: "付费解锁", firstAnswer: "第一个真实答案", coreGap: "当前最核心的一个差距",
   ctaTitle: "获取完整分析", ctaBody: "解锁全部 3 个问题的答案、来源、逐题诊断和优先 GEO 行动。", ctaButton: "解锁完整报告", ctaAssurance: "一次性付款 · 报告专属访问",
   sources: "本题来源", sourceCount: (count) => `已核对 ${count} 个来源`, moreSources: (count) => `查看其余 ${count} 个来源`,
   questionDiagnosis: "本题诊断", diagnosisSummary: "这些证据说明什么", targetGap: "目标官网差距"

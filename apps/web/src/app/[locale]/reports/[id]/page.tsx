@@ -18,7 +18,6 @@ import { getReportV4PreAdmissionJob } from "@/db/report-v4-admission-jobs";
 import { readFreeDirectSemanticsVersion, readSemanticReviewContractVersion } from "@/db/report-semantic-review-activation";
 import {
   freeTeaserCheckpointFromJobCheckpoint,
-  loadConfirmedFreeTeaserQuestionSet,
   parseReadyFreeTeaserCheckpoint
 } from "@/worker/report-v4-free-teaser";
 
@@ -118,11 +117,6 @@ export default async function ReportPage({
           url={row.url}
         />;
       }
-      const questionSet = await loadConfirmedFreeTeaserQuestionSet(
-        id,
-        ready,
-        carrierOptions
-      );
       const dictionary = getDictionary(locale);
       return <>
         <CombinedGeoReportV4Teaser model={{
@@ -135,7 +129,7 @@ export default async function ReportPage({
             findings: visible.technicalReport.findings
           },
           aiReport: freeDirectSemanticsVersion ? visible.aiReport! : ready.reviewedFoundation!,
-          questionSet,
+          freeQuestion: ready.freeQuestion ?? ready.directQuestionTexts?.[0] ?? ready.q1AnswerDraft?.exactQuestion ?? ready.q1AnswerCard!.exactQuestion,
           q1AnswerCard: freeDirectSemanticsVersion ? ready.q1AnswerDraft! : ready.q1AnswerCard!,
           ...(freeDirectSemanticsVersion
             ? {

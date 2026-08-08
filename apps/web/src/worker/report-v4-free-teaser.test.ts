@@ -68,8 +68,8 @@ vi.mock("./public-source-snapshot-resolver", () => ({ resolvePublicSourceSnapsho
 
 import {
   buildFreeTeaserDiagnosisTargetPages,
-  FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT,
-  FreeTeaserBuyerQuestionReviewError,
+  FREE_V4_QUESTION_GENERATION_CONTRACT,
+  FreeTeaserQuestionGenerationError,
   generateFreeTeaser,
   parseReadyFreeTeaserCheckpoint,
   type FreeTeaserCheckpointV1
@@ -83,15 +83,8 @@ const finalQuestionTexts = [
 
 function modelQuestionOutput() {
   return {
-    version: FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT,
-    decision: "accepted",
-    questions: finalQuestionTexts.map((text, index) => ({
-      purpose: ["core_service_discovery", "customer_region_fit", "purchase_delivery_risk"][index],
-      text,
-      buyerRole: ["Operations buyer", "Regional buyer", "Risk reviewer"][index],
-      purchaseDecision: ["Select a capable provider", "Verify market fit", "Compare delivery risk"][index],
-      buyerReason: ["Needs a shortlist", "Needs service coverage", "Needs delivery confidence"][index]
-    }))
+    version: FREE_V4_QUESTION_GENERATION_CONTRACT,
+    question: "Which provider best fits this buyer's actual need?"
   };
 }
 
@@ -132,8 +125,8 @@ beforeEach(() => {
     adapter: { id: "adapter-1" }
   });
   mocks.answerWithSources.mockImplementation(async (request: { questionId: string }) => answerResult(request.questionId));
-  mocks.structuredInvoke.mockImplementation(async (request: { operation: string }) => request.operation === "websiteSynthesis"
-    ? modelQuestionOutput()
+  mocks.structuredInvoke.mockImplementation(async (request: { operation: string; systemText: string }) => request.operation === "websiteSynthesis"
+    ? request.systemText.includes("single free-preview") ? modelQuestionOutput() : candidateModelOutput()
     : defaultAnalysisOutput());
 });
 
@@ -156,42 +149,32 @@ describe("Free V4 direct teaser orchestration", () => {
       saveCheckpoint: async (checkpoint) => { saved.push(checkpoint); }
     });
 
-    expect(events).toEqual(["question_generation", "q1_answer", "analysis"]);
+    expect(events).toEqual(["question_generation", "question_generation", "q1_answer", "analysis"]);
     expect(mocks.answerWithSources).toHaveBeenCalledTimes(1);
-    expect(mocks.structuredInvoke).toHaveBeenCalledTimes(2);
-    expect(mocks.confirm.mock.calls[0]![0].finalTexts).toEqual(finalQuestionTexts);
-    expect(mocks.confirm.mock.calls[0]![0]).not.toHaveProperty("requireIdentityNeutralFinalTexts");
+    expect(mocks.structuredInvoke).toHaveBeenCalledTimes(3);
+    expect(mocks.confirm).not.toHaveBeenCalled();
     expect(mocks.answerWithSources.mock.calls[0]![0]).toMatchObject({ semanticValidation: "free_direct" });
     expect(mocks.structuredInvoke.mock.calls[0]![0]).toMatchObject({ operation: "websiteSynthesis" });
-    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("sole author of buyer questions");
+    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("single free-preview question");
     expect(JSON.parse(mocks.structuredInvoke.mock.calls[0]![0].inputText)).toMatchObject({
       locale: "en-US", region: "US", websiteFoundation: { organizationProfile: { organizationName: "Target Co" } }
     });
-    expect(mocks.prepare.mock.calls[0]![0].modelOutput).toEqual(candidateModelOutput());
-    expect(mocks.structuredInvoke.mock.calls[1]![0]).toMatchObject({ operation: "sourceDiagnosis" });
-    expect(mocks.structuredInvoke.mock.calls[1]![0].inputText).toContain('"handle":"S1"');
-    expect(JSON.parse(mocks.structuredInvoke.mock.calls[1]![0].inputText)).toMatchObject({
+    expect(mocks.prepare.mock.calls[0]![0]).toMatchObject({ modelOutput: candidateModelOutput(), preserveModelText: true });
+    expect(mocks.structuredInvoke.mock.calls[2]![0]).toMatchObject({ operation: "sourceDiagnosis" });
+    expect(mocks.structuredInvoke.mock.calls[2]![0].inputText).toContain('"handle":"S1"');
+    expect(JSON.parse(mocks.structuredInvoke.mock.calls[2]![0].inputText)).toMatchObject({
       targetIdentity: {
         canonicalName: "Target Co",
         aliases: ["Target Co"],
         domain: "target.example"
       }
     });
-    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).toContain("targetIdentity");
-    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).toContain("customer-visible GEO findings");
-    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).toContain("concrete answer-and-source conclusion");
-    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).toContain("Do not narrate the analysis task");
-    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).not.toContain("Analyze the supplied");
-    expect(mocks.structuredInvoke.mock.calls[1]![0].systemText).not.toContain("Explain why those sources");
+    expect(mocks.structuredInvoke.mock.calls[2]![0].systemText).toContain("targetIdentity");
     expect(result.q1AnswerCore.answerText).toContain("Provider A");
     expect(result.checkpoint.directAnalysis?.observations).toHaveLength(1);
     expect(result.checkpoint.directAnalysisReceipt).toBeDefined();
-    expect(result.checkpoint.buyerQuestionReview).toMatchObject({
-      version: FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT,
-      decision: "accepted",
-      questions: expect.arrayContaining([expect.objectContaining({ buyerRole: "Operations buyer" })])
-    });
-    expect(result.checkpoint.buyerQuestionReview?.identityHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(result.freeQuestion).toBe(modelQuestionOutput().question);
+    expect(result.checkpoint.paidQuestionSetId).toBe(candidateSet().id);
     expect(saved.map(({ stage }) => stage)).toEqual(["questions_ready", "q1_answer_ready", "ready"]);
     expect(saved[1]!.directCoreReceipt).toBeDefined();
     expect(saved[1]!.directAnalysisStatus).toBeUndefined();
@@ -203,8 +186,8 @@ describe("Free V4 direct teaser orchestration", () => {
       answerText: "A complete answer without provider annotations.",
       sources: []
     }));
-    mocks.structuredInvoke.mockImplementation(async (request: { operation: string }) => request.operation === "websiteSynthesis"
-      ? modelQuestionOutput()
+    mocks.structuredInvoke.mockImplementation(async (request: { operation: string; systemText: string }) => request.operation === "websiteSynthesis"
+      ? request.systemText.includes("single free-preview") ? modelQuestionOutput() : candidateModelOutput()
       : {
       summary: "No annotated source was returned, so the source basis is limited.",
       observations: [], recommendations: [], evidenceHandles: [], checkoutEligible: false,
@@ -222,8 +205,8 @@ describe("Free V4 direct teaser orchestration", () => {
       answerText: "",
       refusal: { code: "provider_refusal", reason: "The provider returned a nonstandard refusal." }
     }));
-    mocks.structuredInvoke.mockImplementation(async (request: { operation: string }) => request.operation === "websiteSynthesis"
-      ? modelQuestionOutput()
+    mocks.structuredInvoke.mockImplementation(async (request: { operation: string; systemText: string }) => request.operation === "websiteSynthesis"
+      ? request.systemText.includes("single free-preview") ? modelQuestionOutput() : candidateModelOutput()
       : {
       summary: "The provider returned a refusal; no target judgment is available.",
       observations: [], recommendations: [], evidenceHandles: ["S1"], checkoutEligible: false
@@ -237,23 +220,14 @@ describe("Free V4 direct teaser orchestration", () => {
   });
 
   it.each([
-    ["model rejection", {
-      version: FREE_V4_BUYER_QUESTION_REVIEW_CONTRACT,
-      decision: "rejected",
-      reason: "The drafts are implementation-discovery questions."
-    }],
-    ["missing buyer role", {
-      ...modelQuestionOutput(),
-      questions: modelQuestionOutput().questions.map((question, index) => index === 0
-        ? { ...question, buyerRole: "" }
-        : question)
-    }]
-  ])("fails closed before confirmation when buyer-intent review has %s", async (_label, output) => {
+    ["wrong version", { version: "wrong", question: "A question" }],
+    ["blank question", { version: FREE_V4_QUESTION_GENERATION_CONTRACT, question: "" }]
+  ])("fails before persistence when the free question payload has %s", async (_label, output) => {
     mocks.structuredInvoke.mockResolvedValueOnce(output);
     const saveCheckpoint = vi.fn();
 
     await expect(generateFreeTeaser({ ...baseInput(), saveCheckpoint })).rejects.toBeInstanceOf(
-      FreeTeaserBuyerQuestionReviewError
+      FreeTeaserQuestionGenerationError
     );
     expect(mocks.structuredInvoke).toHaveBeenCalledTimes(1);
     expect(mocks.prepare).not.toHaveBeenCalled();
@@ -270,7 +244,7 @@ describe("Free V4 direct teaser orchestration", () => {
       summary: "Analysis.", observations: [], recommendations: [], checkoutEligible: true
     }]
   ])("keeps the receipt-verified Q1 core when analysis has %s", async (_label, rawAnalysis) => {
-    mocks.structuredInvoke.mockImplementation(async (request: { operation: string }) => request.operation === "websiteSynthesis" ? modelQuestionOutput() : rawAnalysis);
+    mocks.structuredInvoke.mockImplementation(async (request: { operation: string; systemText: string }) => request.operation === "websiteSynthesis" ? request.systemText.includes("single free-preview") ? modelQuestionOutput() : candidateModelOutput() : rawAnalysis);
     const result = await generateFreeTeaser(baseInput());
     expect(result.q1AnswerCore.answerText).toContain("Provider A");
     expect(result.checkpoint.directCoreReceipt).toBeDefined();
@@ -280,12 +254,12 @@ describe("Free V4 direct teaser orchestration", () => {
   });
 
   it("turns one analysis transport failure into a terminal limited projection without retry", async () => {
-    mocks.structuredInvoke.mockImplementation(async (request: { operation: string }) => request.operation === "websiteSynthesis" ? modelQuestionOutput() : Promise.reject(new Error("provider unavailable")));
+    mocks.structuredInvoke.mockImplementation(async (request: { operation: string; systemText: string }) => request.operation === "websiteSynthesis" ? request.systemText.includes("single free-preview") ? modelQuestionOutput() : candidateModelOutput() : Promise.reject(new Error("provider unavailable")));
     const result = await generateFreeTeaser(baseInput());
     expect(result.checkpoint.stage).toBe("ready");
     expect(result.checkpoint.directAnalysisStatus).toBe("incomplete");
     expect(mocks.answerWithSources).toHaveBeenCalledTimes(1);
-    expect(mocks.structuredInvoke).toHaveBeenCalledTimes(2);
+    expect(mocks.structuredInvoke).toHaveBeenCalledTimes(3);
   });
 
   it("does not reissue a model request from a nonterminal persisted Direct checkpoint", async () => {
@@ -309,7 +283,6 @@ describe("Free V4 direct teaser orchestration", () => {
       authority: { authorityId: "authority-1", surface: { surfaceId: "surface-1", surfaceVersion: "surface-v1", locale: "en-US", region: "US" } },
       adapter: { id: "adapter-1" }
     });
-    mocks.getConfirmed.mockResolvedValue(confirmedQuestionSet());
     const second = await generateFreeTeaser({ ...baseInput(), checkpoint: first.checkpoint });
     expect(second.checkpoint).toEqual(first.checkpoint);
     expect(mocks.answerWithSources).not.toHaveBeenCalled();
@@ -328,17 +301,13 @@ describe("Free V4 direct teaser orchestration", () => {
     }, { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION })).toThrow();
     expect(() => parseReadyFreeTeaserCheckpoint({
       ...result.checkpoint,
-      buyerQuestionReview: {
-        ...result.checkpoint.buyerQuestionReview!,
-        questions: result.checkpoint.buyerQuestionReview!.questions.map((question, index) => index === 0
-          ? { ...question, buyerReason: "TAMPERED" }
-          : question) as never
-      }
-    }, { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION })).toThrow(/review identity/iu);
+      freeQuestion: "TAMPERED"
+    }, { freeDirectSemanticsVersion: FREE_V4_DIRECT_SEMANTICS_VERSION })).toThrow();
   });
 
   it("rejects new unreviewed legacy Free generation before any semantic or provider work", async () => {
     const { freeDirectSemanticsVersion: _directVersion, ...legacyInput } = baseInput();
+    void _directVersion;
     await expect(generateFreeTeaser(legacyInput)).rejects.toThrow(
       /legacy Free generation requires model-owned semantic review/i
     );
