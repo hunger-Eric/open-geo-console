@@ -155,7 +155,25 @@ describe("Free V4 direct teaser orchestration", () => {
     expect(mocks.confirm).not.toHaveBeenCalled();
     expect(mocks.answerWithSources.mock.calls[0]![0]).toMatchObject({ semanticValidation: "free_direct" });
     expect(mocks.structuredInvoke.mock.calls[0]![0]).toMatchObject({ operation: "websiteSynthesis" });
-    expect(mocks.structuredInvoke.mock.calls[0]![0].systemText).toContain("single free-preview question");
+    const freeQuestionPrompt = mocks.structuredInvoke.mock.calls[0]![0].systemText as string;
+    const paidQuestionPrompt = mocks.structuredInvoke.mock.calls[1]![0].systemText as string;
+    expect(freeQuestionPrompt).toContain("single free-preview question");
+    expect(freeQuestionPrompt).toContain("primary service theme");
+    expect(freeQuestionPrompt).toContain("ordinary work problem");
+    expect(freeQuestionPrompt).toContain("prospective customer's point of view");
+    expect(freeQuestionPrompt).toContain("provider-discovery question");
+    expect(freeQuestionPrompt).toContain("贵公司");
+    expect(freeQuestionPrompt).toContain("only when the website foundation supports it");
+    expect(freeQuestionPrompt).toContain("silently self-check");
+    expect(paidQuestionPrompt).toContain("primary service theme");
+    expect(paidQuestionPrompt).toContain("ordinary work problem");
+    expect(paidQuestionPrompt).toContain("core_service_discovery asks what companies or providers can solve");
+    expect(paidQuestionPrompt).toContain("customer_region_fit asks what kind of service or solution fits");
+    expect(paidQuestionPrompt).toContain("purchase_delivery_risk asks what the customer should compare or verify");
+    expect(paidQuestionPrompt).toContain("same prospective-customer identity");
+    expect(paidQuestionPrompt).toContain("贵公司");
+    expect(paidQuestionPrompt).toContain("silently self-check");
+    expect(paidQuestionPrompt).not.toContain("Do not review, score, explain, or correct them");
     expect(JSON.parse(mocks.structuredInvoke.mock.calls[0]![0].inputText)).toMatchObject({
       locale: "en-US", region: "US", websiteFoundation: { organizationProfile: { organizationName: "Target Co" } }
     });

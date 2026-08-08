@@ -28,7 +28,19 @@ describe("business-question locale authority", () => {
     expect(resolveBusinessQuestionLocale(undefined, "en", "zh-CN")).toBe("en");
   });
 
-  it("preserves an explicit correction locale", () => {
-    expect(resolveBusinessQuestionLocale("zh-CN", "en", "en-US")).toBe("zh-CN");
+  it("canonicalizes the explicit public-search locale", () => {
+    expect(resolveBusinessQuestionLocale("zh-CN", "en", "en-US")).toBe("zh");
+    expect(resolveBusinessQuestionLocale("zh_CN", "en", "en-US")).toBe("zh");
+    expect(resolveBusinessQuestionLocale("en-GB", "zh", "zh-CN")).toBe("en");
+  });
+
+  it("canonicalizes fallback locales without changing their precedence", () => {
+    expect(resolveBusinessQuestionLocale("  ", "zh-CN", "en-US")).toBe("zh");
+    expect(resolveBusinessQuestionLocale(undefined, "  ", "en-US")).toBe("en");
+    expect(resolveBusinessQuestionLocale(undefined, undefined, undefined)).toBe("en");
+  });
+
+  it("fails closed for unsupported report languages", () => {
+    expect(() => resolveBusinessQuestionLocale("fr-FR", "zh", "zh-CN")).toThrow("Unsupported report locale");
   });
 });

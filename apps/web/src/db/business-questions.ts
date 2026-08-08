@@ -7,7 +7,11 @@ import {
   type BusinessQuestionCandidateSet,
   type ConfirmedBusinessQuestionSet
 } from "@open-geo-console/public-search-observer";
-import type { AiWebsiteReportV1 } from "@open-geo-console/ai-report-engine";
+import {
+  normalizeReportLanguage,
+  type AiWebsiteReportV1,
+  type NormalizedReportLanguage
+} from "@open-geo-console/ai-report-engine";
 import { and, desc, eq } from "drizzle-orm";
 import { ensureDatabase, getDb, getSqlClient } from "./index";
 import { getAiReport } from "./ai-reports";
@@ -161,8 +165,9 @@ export function resolveBusinessQuestionLocale(
   requestedLocale: string | undefined,
   reportLocale: string | null | undefined,
   environmentLocale: string | undefined
-): string {
-  return requestedLocale?.trim() || reportLocale?.trim() || environmentLocale?.trim() || "en";
+): NormalizedReportLanguage {
+  const selected = requestedLocale?.trim() || reportLocale?.trim() || environmentLocale?.trim() || "en";
+  return normalizeReportLanguage(selected);
 }
 
 export async function getBusinessQuestionSet(reportId: string, id: string): Promise<BusinessQuestionCandidateSet | ConfirmedBusinessQuestionSet | null> {

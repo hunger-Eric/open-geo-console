@@ -8001,3 +8001,38 @@ revised scope.
   deployment and prospective real-report acceptance remain separately gated.**
 
 ---
+
+## 2026-08-08 - Former technical score distribution deployed to Protected Staging
+
+- The user approved the exact six-file release and Protected Staging Gates 0-3.
+  Candidate `f466b9e8bad3b5a6be6d38e049e5986b99a1383b` was committed on
+  `main` with message `fix: restore technical score distribution` and pushed
+  non-force to `origin/main`; local and remote main match.
+- The single Vercel Preview
+  `open-geo-console-f01hyi34j-itheheda-6857s-projects.vercel.app`
+  (`dpl_3hLMnHSnQ2Gf4mZa7WHr8nQGKxCX`) reached READY. Its `gitCommitSha` and
+  `ogcGitSha` both matched the candidate, and the fixed Protected Staging alias
+  was moved to it exactly once.
+- The single source-only thin overlay
+  `open-geo-console:staging-f466b9e8-score-restore-overlay-v1`
+  (`sha256:d22b41983741fad5db1eeba3e5c5bceb533a361d084bf884c16d20aa876936d6`)
+  was built from the exact prior Worker image and copied only `apps/` and
+  `packages/`. Both Staging Workers were recreated once and verified running,
+  ready, restart 0, with candidate OCI revision and deployment version.
+- Fixed `/zh` returned the expected Vercel SSO 302. Web and both Workers share
+  the candidate full SHA. The prior Preview
+  `open-geo-console-41orvpy6b-itheheda-6857s-projects.vercel.app` and prior
+  Worker image `staging-1407cba8-preadmit-retry-overlay-v1`
+  (`sha256:82f13cbf9059803b7b4f944c2e5ccc5755d5e3da4c998988852fee606c04bdfb`)
+  remain available as rollback.
+- Before/after evidence: E: free space 39.76 -> 39.75 GiB; Docker images
+  62 / 30.34 GB -> 63 / 30.35 GB; build cache 15.02 -> 15.05 GB. No image,
+  cache, volume, or container cleanup was performed.
+- Staging had no queued/running/retry_wait job before replacement. The existing
+  four free and one deep `repair_wait` rows remained unchanged after deployment.
+- The agent created no report and performed no crawl, search/model call,
+  checkout, payment, refund, email, Production action, or historical mutation.
+- Terminal status: **Protected Staging deployment complete; prospective
+  real-report score behavior awaits the user's manual test at the fixed endpoint.**
+
+---

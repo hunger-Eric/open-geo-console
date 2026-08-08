@@ -576,10 +576,15 @@ export async function invokeFreeV4QuestionGeneration(input: {
     operation: "websiteSynthesis",
     systemText: [
       "You write the single free-preview question for a GEO report.",
-      "Read the supplied website foundation and decide what this website offers.",
-      "Return exactly one useful question that a real prospective customer would independently ask while discovering, comparing, or buying what the website offers.",
-      "Choose the question yourself from the website evidence. Do not discuss implementation or the report-generation process.",
-      "Do not invent facts, contact details, credentials, order identifiers, or unsupported claims.",
+      "Read the supplied website foundation and first determine its primary service theme, the real prospective customer for that service, and the ordinary work problem that would cause that customer to search or ask an AI for help.",
+      "Write from that prospective customer's point of view, not from the submitted website owner's point of view and not from the report operator's point of view.",
+      "Return exactly one concise, everyday provider-discovery question: the customer should be asking what companies or providers can help solve that practical problem or provide that kind of service.",
+      "Make the question understandable when copied out of this report. Do not name or directly address the submitted organization, its brands, aliases, legal entity, products, or domain, and do not use context-dependent references such as 'your company', 'this company', 'they', '贵公司', '这家公司', or '他们'.",
+      "Use a specific current tool or software such as Excel, ERP, CRM, or a logistics platform only when the website foundation supports it. Otherwise describe the customer's existing tools, business systems, or workflow generically.",
+      "Keep the question relevant to the website's actual service category: a logistics website needs a logistics-customer question, while an enterprise-AI workflow website needs a workflow-improvement buyer question.",
+      "Do not turn the question into an analyst taxonomy, an internal technical inventory, a bespoke discovery interview, or a question about how the target company itself works.",
+      "Do not invent facts, industries, regions, routes, software, customer sizes, prices, delivery promises, contact details, credentials, order identifiers, or unsupported claims.",
+      "Before returning JSON, silently self-check that the question is buyer-centered, everyday, standalone, non-branded, grounded in the website foundation, and useful for provider discovery. Return no review prose.",
       "Return only {\"version\":\"free-v4-question-generation-v1\",\"question\":\"...\"}."
     ].join("\n"),
     inputText: JSON.stringify({
@@ -624,8 +629,15 @@ export async function invokePaidV4QuestionGeneration(input: {
     operation: "websiteSynthesis",
     systemText: [
       "Generate exactly three editable candidate questions for a paid GEO report.",
-      "Read the website foundation and decide what real prospective customers would independently ask while discovering, comparing, or buying what this website offers.",
-      "Choose the questions yourself. Do not review, score, explain, or correct them, and do not discuss implementation or the report-generation process.",
+      "Read the supplied website foundation and first determine its primary service theme, the real prospective customer for that service, and the ordinary work problem that would cause that customer to search or ask an AI for help.",
+      "Write from that prospective customer's point of view, not from the submitted website owner's point of view and not from the report operator's point of view.",
+      "Write three concise, everyday search or AI questions, each with one clear buyer decision: core_service_discovery asks what companies or providers can solve the practical problem; customer_region_fit asks what kind of service or solution fits the customer's actual situation, workflow, or existing tools; purchase_delivery_risk asks what the customer should compare or verify before choosing a provider.",
+      "Make every question understandable when copied out of this report. Do not name or directly address the submitted organization, its brands, aliases, legal entity, products, or domain, and do not use context-dependent references such as 'your company', 'this company', 'they', '贵公司', '这家公司', or '他们'.",
+      "Use a specific current tool or software such as Excel, ERP, CRM, or a logistics platform only when the website foundation supports it. Otherwise describe the customer's existing tools, business systems, or workflow generically.",
+      "Keep all three questions relevant to the website's actual service category and the same prospective-customer identity: a logistics website needs logistics-customer questions, while an enterprise-AI workflow website needs workflow-improvement buyer questions.",
+      "Do not write an analyst taxonomy, an internal technical inventory, a bespoke discovery interview, a long multi-part questionnaire, or questions about how the target company itself works.",
+      "Do not invent facts, industries, regions, routes, software, customer sizes, prices, delivery promises, contact details, credentials, order identifiers, or unsupported claims.",
+      "Before returning JSON, silently self-check that all three questions are buyer-centered, everyday, standalone, non-branded, mutually distinct, grounded in the website foundation, and aligned to the same service theme and customer. Return no review prose.",
       "Return only {\"questions\":[{\"purpose\":\"core_service_discovery\",\"text\":\"...\"},{\"purpose\":\"customer_region_fit\",\"text\":\"...\"},{\"purpose\":\"purchase_delivery_risk\",\"text\":\"...\"}]}."
     ].join("\n"),
     inputText: JSON.stringify({ locale: input.locale, region: input.region, websiteFoundation: input.foundation }),
