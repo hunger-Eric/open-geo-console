@@ -2,167 +2,166 @@
 
 Status: `APPROVED`
 
-Prepared on 2026-08-08 after the user asked to deploy local code for manual
-testing. The dirty tree is the already-completed **split free and paid question
-flows** implementation (archived in `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md`).
-User approved this exact Staging Gates 0–3 allowlist on 2026-08-08 and
-explicitly included `git push origin main` (cap 1).
+Prepared on 2026-08-08 after the user requested that the Protected Staging
+checkout availability failure be diagnosed, its Staging configuration be
+repaired, safe failure codes be exposed, and the real Chrome flow be verified
+through entry into (but not payment in) the Stripe test checkout.
 
 ## Objective
 
-Package the dirty working tree as **one** candidate commit on top of current
-`main` (`4cf29bc1…`), then deploy **Protected Staging only** through Gates 0–3
-so the fixed Staging URL and Staging free/deep Workers serve:
+For the existing fresh Staging report
+`0ffafb23-16f5-47bb-9073-4f924964f1c9`:
 
-1. Free V4: one dedicated model-authored non-editable buyer question through
-   the existing search/answer/analysis path; free renderer shows only that
-   question.
-2. Paid: separate three editable candidates until user confirmation; checkout
-   requires a confirmed, unbound, report-owned paid set locked to the order.
+1. Identify the first failing catalog admission check behind
+   `catalog.enabled = false`.
+2. Return and render a bounded, non-sensitive reason code instead of collapsing
+   every failure into “online purchasing is not configured”.
+3. If and only if the confirmed cause is an allowlisted Protected Staging
+   Preview configuration value, correct that value and redeploy Web.
+4. In the user's authenticated Chrome session, verify that three paid questions
+   appear, confirm them once, create at most one Stripe test Checkout, enter the
+   Stripe-hosted test checkout page, and stop before payment.
 
-The user performs manual browser testing. Agent does **not** run Gate 4,
-model calls, payments, refunds, or email.
+## Current observed baseline
 
-## Confirmed baseline
+- Repository: `E:\project\open-geo-console`, branch `main`, HEAD
+  `3b732680d0739f9a9e149154ce80b3d720aa893a`.
+- Fixed Staging alias serves candidate `3b732680...`.
+- Chrome report URL ends in `#checkout`; clicking the CTA scrolls correctly.
+- Rendered `#checkout` says `当前部署尚未配置在线购买。`.
+- The report is a new prospective report generated after the split-question
+  deployment, so historical-report compatibility is not the current cause.
+- Vercel Preview lists the commerce/Stripe environment-variable names, but that
+  does not prove their values or downstream product admission are valid.
+- Exact first failing admission check remains `UNRESOLVED` until a discriminating
+  safe-code response is observed on the deployed route.
 
-| Item | Value |
+## Allowed source files
+
+| Path | Allowed change |
 |---|---|
-| Repository | `E:\project\open-geo-console` |
-| Branch | `main` at `4cf29bc1cc5c77097d440800b98a44aeea25a221` |
-| Dirty surface | 16 paths, ~+440/-496 at FROZEN write |
-| Current Staging Workers | `open-geo-console:staging-4cf29bc1-buyer-review-checkout-overlay-v1`, `OGC_DEPLOYMENT_VERSION=4cf29bc1…` |
-| package-lock / Dockerfile.worker | unchanged → thin overlay only (`apps` + `packages`) |
-| Full Worker rebuild | **forbidden** |
+| `apps/web/src/app/api/commerce/catalog/route.ts` | Return one bounded safe availability code; never return secrets, raw errors, identifiers, or database data |
+| `apps/web/src/app/api/commerce/catalog/route.test.ts` | Red/green coverage for readiness, product, and internal-error codes |
+| `apps/web/src/components/commercial-checkout.tsx` | Render distinct safe unavailable states while preserving confirmation-gated checkout |
+| `apps/web/src/components/commercial-checkout.test.tsx` | UI regression coverage |
+| `apps/web/src/i18n/types.ts` | Typed safe unavailable messages only |
+| `apps/web/src/i18n/zh.ts` | Chinese messages for safe codes |
+| `apps/web/src/i18n/en.ts` | English messages for safe codes |
+| `docs/ACTIVE-CHANGE-SCOPE.md` | Scope and execution receipts |
+| `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md` | Archive completed scope record only |
 
-## Allowed actions (only after APPROVED)
+No other production or test source file is authorized. If the cause requires a
+different file, dependency, schema, database row, authority record, Worker, or
+payment implementation change, stop and request a new scope.
 
-### Gate 0 — candidate package
+## Safe public reason-code contract
 
-1. Commit **only** the allowlisted dirty paths. One commit on `main`.
-2. Record full candidate SHA. `git push origin main` only if approval
-   explicitly includes push (default **0**).
-3. Clean exact-SHA checkout under `.data/staging-release-<short>/`.
+The route may expose only a stable code from this bounded set:
 
-### Gate 1 — preflight
+- `commerce_disabled`
+- `commerce_configuration`
+- `commerce_capacity`
+- `commerce_incident`
+- `product_disabled`
+- `product_environment`
+- `product_runtime_incomplete`
+- `product_authority_unavailable`
+- `product_authority_mismatch`
+- `internal_error`
 
-1. Confirm Docker engine, disk free, idle Staging free/deep (wait/drain only).
-2. Record rollback: fixed-alias host, Worker image tag/ID, version `4cf29bc1…`.
-3. Confirm thin-overlay path.
-4. `npx vercel whoami` from the clean checkout.
+The response must not reveal which secret is missing, secret formats or values,
+provider responses, database contents, authority identifiers, stack traces, or
+raw exception messages.
 
-### Gate 2 — Staging deploy (source-only)
+## Allowed Protected Staging configuration work
 
-1. **One** manual Preview:
-   ```powershell
-   $env:VERCEL_ORG_ID = 'team_PbYYV2K2zBjTeThfavXStTOI'
-   $env:VERCEL_PROJECT_ID = 'prj_WVpdlJfsEp0YyWM2W54w8oBy985S'
-   npx vercel deploy --yes --meta ogcGitSha=<candidate-full-sha>
-   ```
-2. Require `READY` and `gitCommitSha = ogcGitSha = <candidate-full-sha>`.
-3. Build **exactly one** thin overlay:
-   - `FROM open-geo-console:staging-4cf29bc1-buyer-review-checkout-overlay-v1`
-   - `COPY` only `apps/` and `packages/`; OCI revision = full candidate SHA
-   - tag: `open-geo-console:staging-<short>-split-questions-overlay-v1`
-4. Preserve `staging.env` bytes; replace **only** `OGC_DEPLOYMENT_VERSION`.
-5. Recreate **only** `staging-worker-free` and `staging-worker-deep`
-   (`--no-deps --no-build --force-recreate`).
-6. Inline 60s / 2s readiness wait — **do not** source the full body of
-   `scripts/start-report-v4-staging-workers.ps1`.
-7. Move fixed alias **once** to the candidate Preview for
-   `open-geo-console-staging-itheheda.vercel.app`.
+After the safe deployed response confirms the first failing check, inspect
+existing Preview configuration without printing secret values. Change at most
+one confirmed non-secret value among:
 
-### Gate 3 — protection smoke (agent)
+- `COMMERCE_MODE`
+- `OGC_REPORT_BASE_URL`
+- `OGC_REPLY_TO_EMAIL`
+- `OGC_PUBLIC_SEARCH_RUNTIME_ENABLED`
+- `OGC_DEPLOYMENT_PROFILE`
+- `OGC_PROVIDER_PROFILE`
+- `OGC_PUBLIC_SEARCH_LOCALE`
+- `OGC_PUBLIC_SEARCH_REGION`
+- `OGC_PUBLIC_SEARCH_AUTHORITY_VERSION`
 
-- Fixed `/zh` protection (SSO 302 OK), Web/Worker SHA equality, restart 0.
-- No report/crawl/model/order/payment/refund/email.
+Do not rotate, replace, print, persist, or otherwise change Stripe, Airwallex,
+email, Turnstile, database, signing, encryption, token, or provider secrets. If
+a secret is absent/invalid, or the failure requires authority/database mutation,
+stop and report the exact safe code.
 
-### Manual testing (user only)
+## Deployment and external-action allowance
 
-- Free teaser shows one non-editable free question only.
-- Paid path: three editable candidates; checkout only after confirmation.
-- Paid set independent from free question; lock to order on checkout.
-- Use **new** prospective reports only (no historical repair).
+- Candidate commits on `main`: at most **2** (diagnostic contract, then a
+  configuration-follow-up receipt only if needed).
+- `git push origin main`: at most **2**, corresponding exactly to those commits.
+- Protected Staging Web Preview deployments: at most **2**.
+- Fixed Staging alias moves: at most **2**.
+- Worker image build/recreate: **0**.
+- Production deployment/configuration: **0**.
+- Historical report/job/order mutation or replay: **0**.
+- New report, crawl, search, or model call: **0**.
+- Paid-question confirmation writes: at most **1**, for the named report.
+- Test payment orders / Stripe test Checkout Sessions: at most **1**.
+- Payment submission, Webhook completion, entitlement/deep job, refund, or
+  email delivery: **0**.
 
-## File allowlist (commit surface = current dirty tree)
-
-| Path | Role |
-|---|---|
-| `apps/web/src/worker/report-v4-free-teaser.ts` | Free/paid question generation split |
-| `apps/web/src/worker/report-v4-free-teaser.test.ts` | Free teaser tests |
-| `packages/public-search-observer/src/business-questions.ts` | Question contract helpers |
-| `packages/public-search-observer/src/business-questions.test.ts` | Contract tests |
-| `apps/web/src/db/business-questions.ts` | Paid set persistence/read |
-| `apps/web/src/app/api/reports/[id]/business-questions/route.ts` | Confirm/read API |
-| `apps/web/src/app/api/reports/[id]/checkout/route.ts` | Checkout uses confirmed paid set |
-| `apps/web/src/app/api/reports/[id]/checkout/route.test.ts` | Checkout tests |
-| `apps/web/src/components/combined-geo-report-v4-teaser.tsx` | Free renderer single question |
-| `apps/web/src/components/combined-geo-report-v4-teaser.test.tsx` | Teaser UI tests |
-| `apps/web/src/components/commercial-checkout.tsx` | Confirm-before-checkout UI |
-| `apps/web/src/components/commercial-checkout.test.tsx` | Checkout UI tests |
-| `apps/web/src/components/commercial-checkout.test.ts` | Checkout unit tests |
-| `apps/web/src/app/[locale]/reports/[id]/page.tsx` | Report page wiring |
-| `docs/ACTIVE-CHANGE-SCOPE.md` | This scope / receipts |
-| `docs/ACTIVE-CHANGE-SCOPE-HISTORY.md` | Archive only if already dirty |
-
-### Deploy-only paths
-
-| Path | Purpose |
-|---|---|
-| `.data/staging-release-<short>/**` | Clean checkout + Dockerfile.overlay |
-| `.data/workstation-docker/staging.env` | `OGC_DEPLOYMENT_VERSION` only |
-| `.data/workstation-docker/staging-*.override.yaml` | free/deep image tag only |
-
-## Explicitly forbidden
-
-- Production anything.
-- Full Worker rebuild; Docker mass prune.
-- Historical report/job/order mutation, replay, clone (including `45f09dbf-…`).
-- Agent Gate 4 / model / payment / refund / email.
-- Second Preview/overlay/alias without a new scope after failure.
-- Expanding source beyond the allowlisted dirty set at commit time.
+The browser test uses a non-personal QA mailbox value and stops immediately once
+the `checkout.stripe.com` test page is visibly reached. No card details are
+entered and no payment control is activated.
 
 ## Diff budget
 
-- Application production/test: **0 new lines** in this scope (package existing
-  dirty tree only; ~+440/-496 at FROZEN write).
-- Scope/history docs for status and receipts only.
-
-## Expensive external actions (hard caps)
-
-| Action | Max |
-|---|---|
-| Candidate commit on `main` | 1 |
-| `git push origin main` | 0 unless approval includes push; then 1 |
-| Staging Preview deploy | 1 |
-| Thin overlay Docker build | 1 |
-| Staging free+deep recreate | 1 pair |
-| Fixed alias move | 1 |
-| Agent report / payment / model / refund / email | **0** |
+- Production source: at most **+70/-25** lines across the allowlist.
+- Tests: at most **+130/-30** lines.
+- Scope/history receipts: as required for authority and evidence.
+- No dependency, schema, migration, Worker, model, report-generation, or
+  checkout-integrity changes.
 
 ## Acceptance checks
 
-1. Candidate full SHA equals Web meta and both Workers’ revision / version.
-2. Fixed alias points at the candidate Preview.
-3. Free and deep running, restart 0, readiness present.
-4. Gate 3 smoke or SSO boundary recorded.
-5. Rollback identities recorded before cutover.
-
-## Rollback
-
-1. Restore prior `OGC_DEPLOYMENT_VERSION` / `staging.env` bytes.
-2. Recreate free+deep on
-   `open-geo-console:staging-4cf29bc1-buyer-review-checkout-overlay-v1`.
-3. Restore prior Web host if alias moved.
-4. Verify and **stop**.
+1. Focused catalog-route tests are red for the old collapsed response and green
+   for every new safe-code branch.
+2. Checkout UI tests prove distinct messages and preserve the ready purchase
+   controls plus confirm-before-checkout behavior.
+3. `npm run lint`, focused tests, `npm run build`, `git diff --check`, and
+   `codegraph sync` pass (existing unrelated warnings recorded, not repaired).
+4. First deployed Preview returns a safe code that identifies the earliest
+   failing admission family without sensitive details.
+5. If the cause is within the configuration allowlist, the corrected Preview
+   returns `enabled: true` and the fixed alias points to its exact READY SHA.
+6. Authenticated Chrome shows exactly three editable paid questions; one
+   confirmation succeeds; one checkout action reaches a Stripe-hosted test
+   checkout. Stop without payment.
+7. Final evidence distinguishes local automation, deployed catalog state, and
+   the real browser result. A Stripe page arrival is not claimed as payment or
+   paid-report delivery.
 
 ## Stop conditions
 
-- Dirty tree outside allowlist at commit time.
-- package-lock / Dockerfile.worker change → full rebuild required.
-- SHA mismatch, readiness failure, or Production path required.
+- A cause outside the named non-secret Preview configuration values.
+- Any required secret, database/authority mutation, Worker change, new model
+  run, second test order, payment, or Production action.
+- Diff outside the file allowlist/budget, deployment identity mismatch, or
+  inability to distinguish the first failing check safely.
 
 ---
 
-**Awaiting explicit user approval of this exact allowlist.**  
-Reply with approval (and whether to include `git push origin main`) to set
-Status `APPROVED` and execute Gates 0–3 only.
+Approved explicitly by the user on 2026-08-08 for code changes, Protected
+Staging configuration repair, deployment, and no-payment Chrome acceptance.
+
+## Local implementation receipt
+
+- Old route against new assertions: **13 failed / 1 passed** (expected red).
+- Implemented bounded Commerce/Product reason codes and distinct UI states.
+- Focused verification: **3 files / 32 tests passed**.
+- `npm run lint`: **0 errors / 8 pre-existing warnings**.
+- `npm run build`: passed, including Next.js production build.
+- `git diff --check`: passed; `codegraph sync`: up to date.
+- Production diff: **+65/-8**; tests: **+45/-6**, within budget.
+- No configuration, deployment, report, order, Checkout, payment, model, email,
+  Worker, or database action has occurred at this checkpoint.

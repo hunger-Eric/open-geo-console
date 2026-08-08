@@ -19,9 +19,14 @@ import {
 import { TurnstileWidget, type TurnstileWidgetHandle } from "./turnstile-widget";
 
 type Currency = "CNY" | "USD" | "HKD";
+export type CatalogReasonCode =
+  | "commerce_disabled" | "commerce_configuration" | "commerce_capacity" | "commerce_incident"
+  | "product_disabled" | "product_environment" | "product_runtime_incomplete"
+  | "product_authority_unavailable" | "product_authority_mismatch" | "internal_error";
 export interface CatalogPayload {
   enabled: boolean;
   mode: "disabled" | "test" | "live";
+  reasonCode: CatalogReasonCode | null;
   prices: Array<{ currency: Currency; amountMinor: number }>;
   turnstileSiteKey: string | null;
 }
@@ -99,7 +104,7 @@ function CommercialCheckoutContent({ dictionary, locale, reportId }: { dictionar
   const hidePurchaseControls = shouldHidePurchaseControls(returnContext, returnStatus);
   const catalogPhase = resolveCheckoutCatalogPhase(catalog, catalogSettled);
   if (catalogPhase !== "ready" || !catalog) {
-    return <CheckoutCatalogBoundary dictionary={dictionary} phase={catalogPhase} />;
+    return <CheckoutCatalogBoundary dictionary={dictionary} phase={catalogPhase} reasonCode={catalog?.reasonCode ?? null} />;
   }
 
   async function checkout(event: React.FormEvent<HTMLFormElement>) {
@@ -283,11 +288,13 @@ export function resolveCheckoutCatalogPhase(
 export function CheckoutCatalogBoundary({
   children,
   dictionary,
-  phase
+  phase,
+  reasonCode = null
 }: {
   children?: ReactNode;
   dictionary: Dictionary;
   phase: CheckoutCatalogPhase;
+  reasonCode?: CatalogReasonCode | null;
 }) {
   if (phase === "ready") return <>{children}</>;
   return (
@@ -299,10 +306,20 @@ export function CheckoutCatalogBoundary({
         <div>
           <h3 className="font-display text-xl font-black tracking-[-0.03em]">{dictionary.commerce.offerTitle}</h3>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            {phase === "loading" ? dictionary.commerce.verifying : dictionary.commerce.unavailable}
+            {phase === "loading" ? dictionary.commerce.verifying : catalogUnavailableMessage(dictionary, reasonCode)}
           </p>
+          {phase === "unavailable" && reasonCode ? <code className="mt-2 block text-xs text-[var(--muted)]">{reasonCode}</code> : null}
         </div>
       </div>
     </section>
   );
+}
+
+function catalogUnavailableMessage(dictionary: Dictionary, reasonCode: CatalogReasonCode | null): string {
+  if (reasonCode === "commerce_disabled" || reasonCode === "commerce_configuration") return dictionary.commerce.unavailableConfiguration;
+  if (reasonCode === "commerce_capacity") return dictionary.commerce.unavailableCapacity;
+  if (reasonCode === "commerce_incident") return dictionary.commerce.unavailableIncident;
+  if (reasonCode?.startsWith("product_")) return dictionary.commerce.unavailableProduct;
+  if (reasonCode === "internal_error") return dictionary.commerce.unavailableInternal;
+  return dictionary.commerce.unavailable;
 }

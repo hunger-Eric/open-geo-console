@@ -28,16 +28,41 @@ describe("commerce catalog route", () => {
     delete process.env.COMMERCE_MODE;
     mocks.getCommerceReadiness.mockResolvedValue({ ready: false, code: "disabled" });
     expect(await (await GET(new Request("https://example.test/api/commerce/catalog"))).json())
-      .toMatchObject({ enabled: false, prices: [] });
+      .toMatchObject({ enabled: false, reasonCode: "commerce_disabled", prices: [] });
+  });
+
+  it.each(["configuration", "capacity", "incident"] as const)("returns the safe commerce_%s reason", async (code) => {
+    process.env.COMMERCE_MODE = "test";
+    mocks.getCommerceReadiness.mockResolvedValue({ ready: false, code });
+    const payload = await (await GET(new Request("https://example.test/api/commerce/catalog"))).json();
+    expect(payload).toMatchObject({ enabled: false, reasonCode: `commerce_${code}`, prices: [] });
+    expect(mocks.getRecommendationProductAvailability).not.toHaveBeenCalled();
   });
 
   it("does not expose legacy GEO pricing while the replacement product runtime is unavailable", async () => {
     process.env.COMMERCE_MODE = "test";
     process.env.OGC_REPLY_TO_EMAIL = "support@example.test";
-    mocks.getRecommendationProductAvailability.mockResolvedValue({ ready: false });
-    const payload = await (await GET(new Request("https://example.test/api/commerce/catalog"))).json() as { enabled: boolean; prices: Array<{ currency: string; amountMinor: number }> };
+    mocks.getRecommendationProductAvailability.mockResolvedValue({ ready: false, code: "authority_unavailable" });
+    const payload = await (await GET(new Request("https://example.test/api/commerce/catalog"))).json() as { enabled: boolean; reasonCode: string; prices: Array<{ currency: string; amountMinor: number }> };
     expect(payload.enabled).toBe(false);
+    expect(payload.reasonCode).toBe("product_authority_unavailable");
     expect(payload.prices).toEqual([]);
+  });
+
+  it("returns only a bounded internal code when catalog evaluation throws", async () => {
+    process.env.COMMERCE_MODE = "test";
+    mocks.getCommerceReadiness.mockRejectedValue(new Error("STRIPE_SECRET_KEY=must-not-leak"));
+    const payload = await (await GET(new Request("https://example.test/api/commerce/catalog"))).json();
+    expect(payload).toEqual({ enabled: false, mode: "disabled", reasonCode: "internal_error", prices: [], turnstileSiteKey: null });
+    expect(JSON.stringify(payload)).not.toContain("STRIPE_SECRET_KEY");
+  });
+
+  it("maps unexpected dependency codes to the bounded internal code", async () => {
+    process.env.COMMERCE_MODE = "test";
+    mocks.getRecommendationProductAvailability.mockResolvedValue({ ready: false, code: "provider-secret-detail" });
+    const payload = await (await GET(new Request("https://example.test/api/commerce/catalog"))).json();
+    expect(payload.reasonCode).toBe("internal_error");
+    expect(JSON.stringify(payload)).not.toContain("provider-secret-detail");
   });
 
   it.each([
@@ -55,7 +80,7 @@ describe("commerce catalog route", () => {
       headers: { "x-vercel-ip-country": countryCode }
     });
     const payload = await (await GET(request)).json() as { enabled: boolean; prices: Array<{ currency: string; amountMinor: number }> };
-    expect(payload).toMatchObject({ enabled: true, prices: [{ currency, amountMinor }] });
+    expect(payload).toMatchObject({ enabled: true, reasonCode: null, prices: [{ currency, amountMinor }] });
     expect(payload.prices).toHaveLength(1);
   });
 

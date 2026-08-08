@@ -18,11 +18,25 @@ describe("commercial checkout catalog states", () => {
 
   it("renders a visible unavailable state without a purchase form", () => {
     const html = renderToStaticMarkup(
-      <CheckoutCatalogBoundary dictionary={dictionary} phase="unavailable" />
+      <CheckoutCatalogBoundary dictionary={dictionary} phase="unavailable" reasonCode="commerce_configuration" />
     );
 
-    expect(html).toContain(dictionary.commerce.unavailable);
+    expect(html).toContain(dictionary.commerce.unavailableConfiguration);
+    expect(html).toContain("commerce_configuration");
     expect(html).not.toContain("<form");
+  });
+
+  it.each([
+    ["commerce_capacity", dictionary.commerce.unavailableCapacity],
+    ["commerce_incident", dictionary.commerce.unavailableIncident],
+    ["product_authority_unavailable", dictionary.commerce.unavailableProduct],
+    ["internal_error", dictionary.commerce.unavailableInternal]
+  ] as const)("renders distinct safe state %s", (reasonCode, message) => {
+    const html = renderToStaticMarkup(
+      <CheckoutCatalogBoundary dictionary={dictionary} phase="unavailable" reasonCode={reasonCode} />
+    );
+    expect(html).toContain(message);
+    expect(html).toContain(reasonCode);
   });
 
   it("preserves ready purchase controls supplied by the checkout component", () => {

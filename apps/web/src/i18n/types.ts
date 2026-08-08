@@ -249,6 +249,11 @@ export interface Dictionary {
     redirecting: string;
     verifying: string;
     unavailable: string;
+    unavailableConfiguration: string;
+    unavailableCapacity: string;
+    unavailableIncident: string;
+    unavailableProduct: string;
+    unavailableInternal: string;
     checkoutFailed: string;
     humanVerification: string;
     operatorKeySummary: string;

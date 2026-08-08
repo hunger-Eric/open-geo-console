@@ -7791,3 +7791,25 @@ revised scope.
 - Terminal status: **deployment completed; real free/paid flow not accepted.**
 
 ---
+
+## 2026-08-08 - Split free/paid question flow Staging deployment completed
+
+- Candidate `3b732680d0739f9a9e149154ce80b3d720aa893a` was committed and pushed
+  to `origin/main`, deployed as Preview
+  `open-geo-console-3tv8985qw-itheheda-6857s-projects.vercel.app`, and assigned
+  to the fixed Protected Staging alias.
+- Staging free/deep Workers used
+  `open-geo-console:staging-3b732680-split-questions-overlay-v1`
+  (`sha256:93de239b060fbccddd6be07aa53ba1d0571065d49dc2dbb4910eb0b2c432106f`),
+  were ready, and had restart count zero.
+- Gate 3 verified only deployment identity and the protected SSO boundary. It
+  performed no report, model, order, payment, refund, or email action.
+- Manual testing of fresh report
+  `0ffafb23-16f5-47bb-9073-4f924964f1c9` showed that the CTA scrolls to
+  `#checkout`, where the catalog is unavailable and the UI displays the
+  collapsed “online purchasing is not configured” state.
+- Terminal status: **deployment completed; split questions visible in the free
+  report, but checkout availability remains unaccepted and requires a separate
+  scope.**
+
+---
