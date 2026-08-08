@@ -7,6 +7,7 @@ import type { ScanJobRow } from "@/db/schema";
 const boundaryMocks = vi.hoisted(() => ({
   getScanJob: vi.fn(), failScanJob: vi.fn(), terminalizeScanJob: vi.fn(),
   checkpointScanJob: vi.fn(), heartbeatScanJob: vi.fn(), recordPaidJobOutcome: vi.fn(),
+  terminalizeFailedPaidReportV4Core: vi.fn(),
   createReportV4AcceptanceObserver: vi.fn(), getGeoReport: vi.fn(),
   fetchPlannedPagesWithRecovery: vi.fn(), calculateEffectiveCoverage: vi.fn(),
   analyzePageBatch: vi.fn(), synthesizeWebsiteReportWithRecovery: vi.fn(),
@@ -45,6 +46,10 @@ vi.mock("./job-errors", async (importOriginal) => ({
 vi.mock("@/db/commercial-refunds", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/db/commercial-refunds")>(),
   recordPaidJobOutcome: boundaryMocks.recordPaidJobOutcome
+}));
+vi.mock("@/db/public-source-commerce", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/db/public-source-commerce")>(),
+  terminalizeFailedPaidReportV4Core: boundaryMocks.terminalizeFailedPaidReportV4Core
 }));
 vi.mock("@/db/reports", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/db/reports")>(), getGeoReport: boundaryMocks.getGeoReport
@@ -159,6 +164,10 @@ beforeEach(() => {
   rerunGuardHarness.state.delegatedSites.length = 0;
   rerunGuardHarness.run.mockClear();
   boundaryMocks.hasPriorJobErrorFingerprint.mockReset().mockResolvedValue(false);
+  boundaryMocks.terminalizeFailedPaidReportV4Core.mockReset().mockResolvedValue({
+    reportId: "report-1", coreJobId: "job-1", orderId: "order-1",
+    refundId: "refund-1", emailDeliveryId: "email-1"
+  });
 });
 
 describe("Paid V3 Direct post-generation boundary", () => {
@@ -194,7 +203,7 @@ describe("Paid V3 Direct post-generation boundary", () => {
 
   it("routes a completed-answer late exception to repair_wait rather than failed commerce", () => {
     expect(processorSource).toContain("answersAlreadyGenerated\n        ? \"The report answers were generated, but final preparation needs operator repair.\"");
-    expect(processorSource).toContain("answersAlreadyGenerated\n        ? \"operator_repairable\"");
+    expect(processorSource).toContain("const failureClassification = answersAlreadyGenerated\n      ? \"operator_repairable\"");
     expect(processorSource).toContain("!answersAlreadyGenerated && normalized.classification === \"transient\"");
   });
 });
@@ -861,6 +870,39 @@ describe("strict Report V4 processor routing", () => {
     } finally {
       vi.clearAllMocks();
     }
+  });
+
+  it("atomically terminalizes a recurring permanent V4 core failure without the generic split-state writer", async () => {
+    const job = v4Job();
+    const failure = new Error("prepared provider profile conflict");
+    boundaryMocks.getScanJob.mockResolvedValue(job);
+    boundaryMocks.hasPriorJobErrorFingerprint.mockResolvedValueOnce(true);
+
+    await expect(processScanJob(job, "worker-1", {
+      reportV4CoreRunner: vi.fn(async () => { throw failure; })
+    })).resolves.toBeUndefined();
+
+    expect(boundaryMocks.terminalizeFailedPaidReportV4Core).toHaveBeenCalledWith(expect.objectContaining({
+      coreJobId: job.id,
+      workerId: "worker-1",
+      coverage: { plannedPages: 1, successfulPages: 1, failedPages: 0 },
+      phase: job.currentPhase,
+      internalError: expect.objectContaining({ classification: "permanent" })
+    }));
+    expect(boundaryMocks.failScanJob).not.toHaveBeenCalled();
+    expect(boundaryMocks.recordPaidJobOutcome).not.toHaveBeenCalled();
+  });
+
+  it("atomically terminalizes a V4 core when its retry budget is exhausted", async () => {
+    const job = v4Job({ phaseAttempt: 3, maxAttempts: 3 });
+    boundaryMocks.getScanJob.mockResolvedValue(job);
+
+    await expect(processScanJob(job, "worker-1", {
+      reportV4CoreRunner: vi.fn(async () => { throw new Error("temporary upstream interruption"); })
+    })).resolves.toBeUndefined();
+
+    expect(boundaryMocks.terminalizeFailedPaidReportV4Core).toHaveBeenCalledOnce();
+    expect(boundaryMocks.failScanJob).not.toHaveBeenCalled();
   });
 
   it("recognizes terminal V4 ownership", () => {

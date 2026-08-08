@@ -36,6 +36,20 @@ describe("payment return presentation", () => {
     }, "success", dictionary).message).toBe(dictionary.commerce.paymentGenerating);
   });
 
+  it("shows and terminates a failed deep job even when a legacy paid order remains queued", () => {
+    const status = {
+      ...base,
+      paymentStatus: "paid" as const,
+      fulfillmentStatus: "queued" as const,
+      progress: { stage: "failed", progress: 0 }
+    };
+    expect(getPaymentReturnView(status, "success", dictionary)).toEqual({
+      kind: "warning",
+      message: dictionary.commerce.paymentFailed
+    });
+    expect(isTerminalPaymentReturn(status)).toBe(true);
+  });
+
   it("prioritizes trusted refund state over the return hint", () => {
     expect(getPaymentReturnView({ ...base, paymentStatus: "paid", refundStatus: "refunded" }, "success", dictionary).message)
       .toBe(dictionary.commerce.paymentRefunded);

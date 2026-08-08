@@ -132,6 +132,7 @@ export function getPaymentReturnView(status: PublicOrderStatus | null, hint: Ret
   if (status.paymentStatus === "cancelled") return { kind: "warning", message: dictionary.commerce.paymentCancelled } as const;
   if (status.paymentStatus === "failed") return { kind: "warning", message: dictionary.commerce.paymentNotCompleted } as const;
   if (status.paymentStatus !== "paid") return { kind: hint === "cancel" ? "warning" : "pending", message: hint === "cancel" ? dictionary.commerce.paymentNotCompleted : dictionary.commerce.paymentConfirming } as const;
+  if (status.progress?.stage === "failed") return { kind: "warning", message: dictionary.commerce.paymentFailed } as const;
   if (status.fulfillmentStatus === "completed" || status.fulfillmentStatus === "completed_limited") return { kind: "success", message: dictionary.commerce.paymentCompleted } as const;
   if (status.fulfillmentStatus === "failed") return { kind: "warning", message: dictionary.commerce.paymentFailed } as const;
   if (status.progress && !["queued", "completed", "completed_limited", "failed"].includes(status.progress.stage)) {
@@ -146,6 +147,7 @@ export function isTerminalPaymentReturn(status: PublicOrderStatus): boolean {
     || status.paymentStatus === "cancelled"
     || status.refundStatus === "refunded"
     || status.refundStatus === "failed"
+    || (status.progress?.stage === "failed" && status.refundStatus === "not_required")
     || status.fulfillmentStatus === "completed"
     || status.fulfillmentStatus === "completed_limited";
 }

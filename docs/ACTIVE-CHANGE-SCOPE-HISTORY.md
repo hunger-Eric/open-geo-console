@@ -1,5 +1,33 @@
 # Archived Change Scope History
 
+## 2026-08-08 - Paid V4 locale boundary and atomic failure repair completed locally
+
+- Preserved report, job, and question-set language as `zh|en`, while routing
+  provider-facing question search through the prepared certified public-search
+  locale/region such as `zh-CN` / `CN`; strict provider compatibility remains
+  fail-closed and no semantic code fallback was added.
+- Added one V4-owned atomic terminalizer for permanent pre-artifact Paid V4
+  core failures, covering the job, error event, reserved credit, access grant,
+  order, refund intent, and failure email. Retry and repair-wait paths remain
+  outside that terminalizer.
+- The payment-return UI now treats `progress.stage=failed` as terminal failure
+  even when it observes a legacy queued order.
+- Focused unit tests passed 114/114. The exact isolated Staging-profile
+  PostgreSQL target passed 17/17, including six injected rollback boundaries
+  and idempotency. Lint passed with eight pre-existing warnings and no errors;
+  build, `git diff --check`, and CodeGraph sync passed.
+- The full workspace run retained four existing unrelated test failures plus
+  one Windows preflight hook timeout. The canonical disposable-PostgreSQL
+  runner excluded the required Staging-profile target and retained its known
+  baseline failures, so it is not claimed as acceptance evidence.
+- No historical report, order, or job was mutated or replayed. No live crawl,
+  search, model call, payment, refund, email, commit, push, or deployment
+  occurred under this implementation authority.
+- Terminal status: **local implementation and proportional verification
+  complete; real Protected Staging availability unverified.**
+
+---
+
 ## 2026-08-08 - Pre-admission bounded retry and free-report fallback completed locally
 
 - Prospective `v4_pre_admission` jobs now have a maximum of three attempts.
@@ -30,6 +58,24 @@
   occurred.
 - Terminal status: **local implementation and proportional verification
   complete; real Protected Staging availability unverified.**
+
+---
+
+## 2026-08-08 - Buyer-question and canonical report-language repair deployed to Protected Staging
+
+- Candidate `c05151bf48384bc40e6403457eb978bf2700bda0` was committed and pushed
+  to `origin/main`, then deployed to the fixed Protected Staging Web plus the
+  Free and Deep Workers.
+- The release preserved buyer-centered model-generated questions and
+  canonicalized persisted report/question-set language to `zh|en`.
+- Automated release checks and Web/Worker revision identity passed; the agent
+  created no report, payment, refund, or email during deployment.
+- The user's subsequent report proved the Free path and exposed a deeper Paid
+  V4 boundary defect: report language `zh` was compared exactly with prepared
+  search surface locale `zh-CN`. Its paid job failed while the order remained
+  queued. That prospective repair is governed only by the current active scope.
+- Terminal status: **Protected Staging deployment completed; real Paid V4 flow
+  was not accepted.**
 
 ---
 

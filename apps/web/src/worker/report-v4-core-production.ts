@@ -48,7 +48,7 @@ import {
   type ReportV4ReportRuntimeConfig
 } from "../report-v4/report-runtime-config";
 import { renderReportV4Html } from "../report/report-v4-html";
-import { getPreparedProviderProfileRuntime } from "../provider-profile/runtime";
+import { getPreparedProviderProfileRuntime, type PreparedProviderProfileRuntime } from "../provider-profile/runtime";
 import {
   createReportV4ProductionPageAnalysis
 } from "./report-v4-page-analysis-production";
@@ -467,10 +467,15 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
         async answerQuestions({ questions, signal }) {
           const activeSignal = signal ?? execution.input.signal;
           activeSignal.throwIfAborted();
+          const questionSurface = resolveReportV4QuestionSearchSurface({
+            reportLanguage: execution.input.locale,
+            questionRegion: execution.context.questionSet.region,
+            providerRuntime
+          });
           const baseProvider = withReportV4QuestionFailureDrill({
             provider: providerRuntime.createQuestionAnswerProvider({
-              locale: execution.input.locale,
-              region: execution.context.questionSet.region,
+              locale: questionSurface.searchLocale,
+              region: questionSurface.searchRegion,
               lockedRuntime: execution.modelRuntime
             }),
             coreJobId: execution.input.coreJobId,
@@ -490,8 +495,8 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
             const providerInput = {
               questionId: question.questionId,
               question: question.questionText,
-              locale: execution.input.locale,
-              region: execution.context.questionSet.region,
+              locale: questionSurface.searchLocale,
+              region: questionSurface.searchRegion,
               signal: activeSignal
             };
             return {
@@ -514,8 +519,8 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
             questionSetId: execution.input.questionSetId,
             snapshotId: execution.input.siteSnapshotId,
             modelConfigIdentityHash: execution.configSnapshot.modelProfileHash,
-            locale: execution.input.locale,
-            region: execution.context.questionSet.region,
+            locale: questionSurface.searchLocale,
+            region: questionSurface.searchRegion,
             questions: questionSpecs,
             repository: acceptanceQuestions.repository,
             provider: acceptanceQuestions.provider,
@@ -577,6 +582,24 @@ function liveDependencies(options: ReportV4CoreProductionOptions): ReportV4CoreP
       };
     }
   };
+}
+
+export function resolveReportV4QuestionSearchSurface(input: {
+  readonly reportLanguage: string;
+  readonly questionRegion: string;
+  readonly providerRuntime: Pick<PreparedProviderProfileRuntime, "publicSearchRuntime">;
+}): { readonly reportLanguage: ReportV4Locale; readonly searchLocale: string; readonly searchRegion: string } {
+  const reportLanguage = locale(input.reportLanguage);
+  const authority = input.providerRuntime.publicSearchRuntime.authority;
+  const { locale: searchLocale, region: searchRegion } = authority.surface;
+  if (!authority.active || !authority.supportedLocales.includes(searchLocale) ||
+      !authority.supportedRegions.includes(searchRegion)) {
+    throw new Error("The paid Report V4 question-search surface is not actively certified for its prepared locale and region.");
+  }
+  if (input.questionRegion !== searchRegion) {
+    throw new Error("The paid Report V4 question region conflicts with the prepared public-search surface.");
+  }
+  return Object.freeze({ reportLanguage, searchLocale, searchRegion });
 }
 
 export function withReportV4QuestionFailureDrill(input: {

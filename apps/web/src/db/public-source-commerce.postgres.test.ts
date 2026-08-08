@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDatabase, ensureDatabase, getSqlClient } from "./index";
-import { enqueuePaidReportV4DiagnosisEnhancement, recoverFailedPaidReportV4CoreForTerminalReplay, terminalizePaidPublicSourceReport, terminalizePaidReportV4Core, terminalizeUnavailablePaidReportV4Core } from "./public-source-commerce";
+import { enqueuePaidReportV4DiagnosisEnhancement, recoverFailedPaidReportV4CoreForTerminalReplay, terminalizeFailedPaidReportV4Core, terminalizePaidPublicSourceReport, terminalizePaidReportV4Core, terminalizeUnavailablePaidReportV4Core } from "./public-source-commerce";
 import { activatePublicSearchSurfaceAuthority, installPublicSearchSurfaceAuthority } from "./public-search-authority";
 import { acquireMarketSnapshotLease, appendMarketSnapshotQueries, beginMarketSearchAttempt, completeMarketSearchAttempt, completeMarketSnapshotLease, createMarketSnapshotRefresh } from "./market-snapshots";
 import { createMarketSnapshotIdentity } from "@open-geo-console/public-search-observer";
@@ -65,6 +65,7 @@ describePostgres("paid public-source atomic terminalization",()=>{
     await seedUnavailablePaidV4Core(sql,v4UnavailableIdentity(suffix,"unavailable-limited-site"),undefined,"completed_limited");
     await seedUnavailablePaidV4Core(sql,v4UnavailableIdentity(suffix,"one-answered"),["unavailable","answered","unavailable"]);
     await seedUnavailablePaidV4Core(sql,v4UnavailableIdentity(suffix,"nonterminal"),["unavailable","answering","unavailable"]);
+    await seedUnavailablePaidV4Core(sql,v4UnavailableIdentity(suffix,"unexpected-failure"));
     const rejects=v4UnavailableIdentity(suffix,"rejects");
     await seedUnavailablePaidV4Core(sql,rejects);
     await seedStandaloneUnavailableSnapshot(sql,rejects);
@@ -342,6 +343,34 @@ describePostgres("paid public-source atomic terminalization",()=>{
     expect(await readUnavailableV4CommerceState(getSqlClient(),ids)).toEqual(terminal);
   },120_000);
 
+  it("atomically terminalizes a permanent pre-artifact V4 runner failure and reenters without split state",async()=>{
+    const ids=v4UnavailableIdentity(suffix,"unexpected-failure");
+    const input={
+      coreJobId:ids.jobId,workerId:ids.workerId,
+      coverage:{plannedPages:3,successfulPages:1,failedPages:2},
+      errorCode:"provider_profile_conflict",publicMessage:"The analysis is temporarily unavailable.",
+      phase:"website_synthesis" as const,
+      internalError:{classification:"permanent" as const,code:"provider_profile_conflict",type:"ProviderProfileRuntimeError",
+        message:"prepared profile conflict",stack:null,causes:[],fingerprint:sha("unexpected-failure"),retryableAt:null}
+    };
+    for(const faultAfter of ["job","access","credit","order","refund","email"] as const){
+      await expect(terminalizeFailedPaidReportV4Core({...input,faultAfter})).rejects.toThrow(/Injected fault/);
+      expect(await readUnavailableV4CommerceState(getSqlClient(),ids)).toMatchObject({
+        stage:"synthesizing",execution_state:"running",fulfillment_status:"processing",refund_status:"not_required",
+        credit_status:"reserved",credits_remaining:0,refunds:0,emails:0,transitions:0,errors:0
+      });
+    }
+    const first=await terminalizeFailedPaidReportV4Core(input);
+    expect(first).toMatchObject({reportId:ids.reportId,coreJobId:ids.jobId,orderId:ids.orderId,
+      refundId:expect.any(String),emailDeliveryId:expect.any(String)});
+    const terminal=await readUnavailableV4CommerceState(getSqlClient(),ids);
+    expect(terminal).toMatchObject({stage:"failed",execution_state:"failed",fulfillment_status:"failed",refund_status:"pending",
+      delivery_status:"queued",credit_status:"refunded",credits_remaining:1,refunds:1,refund_reason:"report_failed",
+      emails:1,email_template:"report_failed_refund",transitions:1,errors:1,artifacts:0,combined_reports:0,tokens:0});
+    expect(await terminalizeFailedPaidReportV4Core(input)).toEqual(first);
+    expect(await readUnavailableV4CommerceState(getSqlClient(),ids)).toEqual(terminal);
+  },120_000);
+
   // @requirement GEO-V4-COMMERCE-01
   it("rejects one answered or one nonterminal question checkpoint with zero commercial side effects",async()=>{
     for(const label of ["one-answered","nonterminal"]){
@@ -543,6 +572,7 @@ async function readUnavailableV4CommerceState(sql:ReturnType<typeof getSqlClient
     (SELECT count(*)::int FROM combined_geo_reports WHERE job_id=${ids.jobId}) combined_reports,
     (SELECT count(*)::int FROM scan_jobs WHERE report_id=${ids.reportId} AND reason='v4_diagnosis_enhancement') enhancements,
     (SELECT count(*)::int FROM scan_job_transition_events WHERE job_id=${ids.jobId}) transitions
+    ,(SELECT count(*)::int FROM scan_job_error_events WHERE job_id=${ids.jobId}) errors
   FROM scan_jobs job JOIN payment_orders orders ON orders.id=${ids.orderId}
   JOIN credit_ledger credit ON credit.id=${ids.creditId} JOIN access_keys keys ON keys.id=${ids.accessKeyId}
   WHERE job.id=${ids.jobId}`)[0]!;}

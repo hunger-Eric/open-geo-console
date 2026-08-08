@@ -104,6 +104,24 @@ describe("unified Worker provider profile runtime", () => {
     expect(() => mimo.createDiagnosisProvider(external.modelRuntime)).toThrow(/locked|conflict/i);
     expect(() => external.createStructuredInvoker(mimo.modelRuntime)).toThrow(/locked|conflict/i);
   });
+
+  it.each([
+    ["mimo_native", mimoEnvironment()],
+    ["external_search_synthesis", externalSearchEnvironment()]
+  ] as const)("constructs the %s question provider only for its exact prepared search surface", (_id, environment) => {
+    const runtime = resolveProviderProfileRuntime(environment);
+
+    expect(() => runtime.createQuestionAnswerProvider({
+      locale: "zh-CN",
+      region: "CN",
+      lockedRuntime: runtime.modelRuntime
+    })).not.toThrow();
+    expect(() => runtime.createQuestionAnswerProvider({
+      locale: "zh",
+      region: "CN",
+      lockedRuntime: runtime.modelRuntime
+    })).toThrow(/locale or region conflicts/i);
+  });
 });
 
 function baseEnvironment(): NodeJS.ProcessEnv {

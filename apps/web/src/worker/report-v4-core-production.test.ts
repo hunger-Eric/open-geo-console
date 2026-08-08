@@ -14,6 +14,7 @@ import { createStagingLiveDrill } from "./staging-live-drill";
 import {
   buildReportV4CoreArtifactRevisionId,
   createReportV4CoreProductionWithDependencies,
+  resolveReportV4QuestionSearchSurface,
   withReportV4QuestionFailureDrill,
   type ReportV4CoreProductionDependencies,
   type ReportV4CoreProductionInput
@@ -30,6 +31,24 @@ import {
 // @requirement GEO-V4-COMMERCE-01
 
 describe("Report V4 core production composition", () => {
+  it("keeps report language zh while routing question search through the certified zh-CN surface", () => {
+    const resolved = resolveReportV4QuestionSearchSurface({
+      reportLanguage: "zh",
+      questionRegion: "CN",
+      providerRuntime: preparedQuestionRuntime("zh-CN", "CN")
+    });
+
+    expect(resolved).toEqual({ reportLanguage: "zh", searchLocale: "zh-CN", searchRegion: "CN" });
+  });
+
+  it("fails closed when the paid question region conflicts with the prepared search surface", () => {
+    expect(() => resolveReportV4QuestionSearchSurface({
+      reportLanguage: "zh",
+      questionRegion: "SG",
+      providerRuntime: preparedQuestionRuntime("zh-CN", "CN")
+    })).toThrow(/region.*conflicts/i);
+  });
+
   it("runs an exact reserved core through activation and atomic commerce in strict order", async () => {
     const harness = productionHarness();
     const result = await harness.run(input());
@@ -231,6 +250,19 @@ describe("Report V4 core production composition", () => {
     expect(answerWithSources).toHaveBeenCalledTimes(1);
   });
 });
+
+function preparedQuestionRuntime(searchLocale: string, searchRegion: string) {
+  return {
+    publicSearchRuntime: {
+      authority: {
+        active: true,
+        supportedLocales: [searchLocale],
+        supportedRegions: [searchRegion],
+        surface: { locale: searchLocale, region: searchRegion }
+      }
+    }
+  } as never;
+}
 
 interface HarnessOptions {
   context?: ReportV4PaidCoreContext;

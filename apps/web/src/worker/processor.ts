@@ -42,9 +42,9 @@ import { auditSite, type GeoAuditReport } from "@open-geo-console/geo-auditor";
 import type { RobotsPolicy } from "@open-geo-console/site-crawler";
 import { toCanonicalBuyerQuestionSet, type CanonicalBuyerQuestion, type ConfirmedBusinessQuestionSet, type PublicSearchSurfaceAdapter, type PublicSearchSurfaceAuthority, type SearchQueryFanout } from "@open-geo-console/public-search-observer";
 import { createHash } from "node:crypto";
-import { checkpointScanJob, failScanJob, getScanJob, heartbeatScanJob, isBillableCoverage, terminalizeScanJob, type CheckpointScanJobInput } from "@/db/jobs";
+import { checkpointScanJob, failScanJob, getScanJob, heartbeatScanJob, isBillableCoverage, phaseAttemptAfterFailure, terminalizeScanJob, type CheckpointScanJobInput } from "@/db/jobs";
 import { recordPaidJobOutcome } from "@/db/commercial-refunds";
-import { terminalizePaidPublicSourceReport } from "@/db/public-source-commerce";
+import { terminalizeFailedPaidReportV4Core, terminalizePaidPublicSourceReport } from "@/db/public-source-commerce";
 import { getSourceForensicReportForJob, saveSourceForensicReport } from "@/db/source-forensic-reports";
 import {
   completeGeoReportTechnical,
@@ -747,9 +747,38 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
         await hasPriorJobErrorFingerprint(job.id, normalized.fingerprint)) {
       normalized = escalateFingerprintRecurrence(normalized);
     }
-    // V4 owns commercial terminalization, but ordinary runner failures still
-    // belong to the canonical job state machine so the original error is
-    // durable immediately instead of being replaced later by lease_exhausted.
+    // V4 core owns terminal commercial failure atomically. Retryable and
+    // repair-wait outcomes still use the canonical job state machine.
+    const failureClassification = answersAlreadyGenerated
+      ? "operator_repairable" as const
+      : directPaidOneShot ? undefined
+        : normalized.classification === "operator_repairable" ? "operator_repairable" as const
+          : normalized.classification === "target_limitation" ? "target_limitation" as const : undefined;
+    const retryableFailure = !answersAlreadyGenerated && normalized.classification === "transient" &&
+      (!directPaidOneShot || job.reason !== "v4_pre_admission" || retryablePreAdmissionUpstreamFailure);
+    const attemptState = currentJob ?? job;
+    const retryBudgetExhausted = retryableFailure &&
+      phaseAttemptAfterFailure(attemptState.phaseAttempt, deferPhaseAttempt) >= attemptState.maxAttempts;
+    if (reportV4ProductionTarget === "core" && failureClassification !== "operator_repairable" &&
+        (!retryableFailure || retryBudgetExhausted)) {
+      await tracePaidV3DirectStep(directTrace, "failure_state_persist", {
+        phase, errorCode: normalized.code, failureClassification: normalized.classification,
+        resumeGeneration: attemptState.resumeGeneration
+      }, () => terminalizeFailedPaidReportV4Core({
+        coreJobId: job.id,
+        workerId,
+        coverage: {
+          plannedPages: attemptState.plannedPages,
+          successfulPages: attemptState.successfulPages,
+          failedPages: attemptState.failedPages
+        },
+        errorCode: normalized.code,
+        publicMessage: "The analysis is temporarily unavailable.",
+        phase,
+        internalError: normalized
+      }));
+      return;
+    }
     const failedJob = await tracePaidV3DirectStep(directTrace, "failure_state_persist", {
       phase, errorCode: normalized.code, failureClassification: normalized.classification,
       resumeGeneration: currentJob?.resumeGeneration ?? job.resumeGeneration ?? 0
@@ -761,11 +790,8 @@ export async function processScanJob(job: ScanJobRow, workerId: string, options:
       // Paid free-direct jobs use the normal retry_wait path. Pre-admission is
       // narrower: only typed temporary transport/upstream failures may consume
       // its bounded three-attempt budget.
-      retryable: !answersAlreadyGenerated && normalized.classification === "transient" &&
-        (!directPaidOneShot || job.reason !== "v4_pre_admission" || retryablePreAdmissionUpstreamFailure),
-      classification: answersAlreadyGenerated
-        ? "operator_repairable"
-        : directPaidOneShot ? undefined : normalized.classification === "operator_repairable" ? "operator_repairable" : normalized.classification === "target_limitation" ? "target_limitation" : undefined,
+      retryable: retryableFailure,
+      classification: failureClassification,
       internalError: normalized, phase, ...(deferPhaseAttempt ? { defer: true as const } : {})
     }));
     if (job.tier === "free" && failedJob.stage === "failed") {

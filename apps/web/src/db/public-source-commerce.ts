@@ -8,6 +8,8 @@ import { prepareSourceForensicReportRow } from "./source-forensic-reports";
 import { snapshotReferenceBinding } from "./combined-correction-terminalization";
 import type { ScanJobCoverage } from "./jobs";
 import { JobTransitionService } from "@/worker/job-transition-service";
+import type { NormalizedJobError } from "@/worker/job-errors";
+import type { ScanJobPhase } from "./schema";
 import {
   assertReportV4DiagnosisEnhancementJobIdentity,
   buildReportV4DiagnosisEnhancementJob,
@@ -615,6 +617,184 @@ export interface UnavailablePaidReportV4CoreResult {
   emailDeliveryId: string;
 }
 
+export interface TerminalizeFailedPaidReportV4CoreInput {
+  coreJobId: string;
+  workerId: string;
+  coverage: ScanJobCoverage;
+  errorCode: string;
+  publicMessage: string;
+  phase: ScanJobPhase;
+  internalError: NormalizedJobError;
+  faultAfter?: "job" | "access" | "credit" | "order" | "refund" | "email";
+}
+
+/**
+ * Atomically fails one actively leased, standard Paid V4 core before any
+ * customer artifact exists. This is the generic runner-failure counterpart to
+ * the narrower all-questions-unavailable boundary below.
+ */
+export async function terminalizeFailedPaidReportV4Core(
+  input: TerminalizeFailedPaidReportV4CoreInput
+): Promise<{ reportId: string; coreJobId: string; orderId: string; refundId: string; emailDeliveryId: string }> {
+  const coreJobId = requiredV4Identity(input.coreJobId, "core job");
+  const workerId = requiredV4Identity(input.workerId, "worker");
+  const errorCode = requiredV4Identity(input.errorCode, "failure code");
+  const publicMessage = requiredV4Identity(input.publicMessage, "public failure message");
+  assertCoverage(input.coverage);
+  await ensureDatabase();
+
+  return getSqlClient().begin(async (tx) => {
+    const locator = (await tx<Array<{ report_id: string }>>`
+      SELECT report_id FROM scan_jobs WHERE id=${coreJobId}
+    `)[0];
+    if (!locator) throw new Error("The failed V4 core job does not exist.");
+    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`report-v4-commerce:${locator.report_id}`},0))`;
+    const job = (await tx<Array<V4FailedJobRow>>`
+      SELECT id,report_id,site_snapshot_id,tier,locale,stage,execution_state,checkpoint_revision,
+        attempts,phase_attempt,resume_generation,lease_owner,lease_expires_at,credit_reservation_id,
+        product_contract,fulfillment_methodology,recommendation_report_version,artifact_contract,
+        business_question_set_id,reason,correction_id,replacement_fulfillment_id
+      FROM scan_jobs WHERE id=${coreJobId} FOR UPDATE
+    `)[0];
+    if (!job || !job.site_snapshot_id || !job.business_question_set_id || job.tier !== "deep" ||
+        job.product_contract !== "recommendation_forensics_v1" || job.fulfillment_methodology !== "two_stage_geo_report_v4" ||
+        Number(job.recommendation_report_version) !== 4 || job.artifact_contract !== "combined_geo_report_v4" ||
+        job.reason !== "standard" || job.correction_id !== null || job.replacement_fulfillment_id !== null ||
+        !job.credit_reservation_id) {
+      throw new Error("V4 failure terminalization requires its exact standard paid core job lineage.");
+    }
+    if (job.report_id !== locator.report_id) throw new Error("The failed V4 core report identity changed during terminalization.");
+
+    const order = (await tx<Array<V4OrderCommerceRow>>`
+      SELECT id,report_id,site_snapshot_id,fulfillment_job_id,provider,amount_minor,currency,report_locale,
+        product_code,fulfillment_methodology,recommendation_report_version,business_question_set_id,
+        payment_status,fulfillment_status,refund_status,delivery_status
+      FROM payment_orders WHERE fulfillment_job_id=${job.id} AND report_id=${job.report_id} FOR UPDATE
+    `)[0];
+    if (!order || order.site_snapshot_id !== job.site_snapshot_id || order.product_code !== "recommendation_forensics_v1" ||
+        order.fulfillment_methodology !== "two_stage_geo_report_v4" || Number(order.recommendation_report_version) !== 4 ||
+        order.business_question_set_id !== job.business_question_set_id || !v4LocaleMatches(job.locale, order.report_locale) ||
+        order.payment_status !== "paid") {
+      throw new Error("V4 failure terminalization requires its exact verified paid order lineage.");
+    }
+
+    const config = (await tx<Array<{ id: string }>>`
+      SELECT id FROM report_v4_config_snapshots
+      WHERE report_id=${job.report_id} AND order_id=${order.id} AND core_job_id=${job.id} FOR UPDATE
+    `);
+    const snapshot = (await tx<Array<{ status: string; analyzable_page_count: number }>>`
+      SELECT status,analyzable_page_count FROM report_v4_site_snapshots
+      WHERE id=${job.site_snapshot_id} AND report_id=${job.report_id} FOR UPDATE
+    `)[0];
+    const questionSet = (await tx<Array<{ order_id: string | null; locale: string; status: string }>>`
+      SELECT order_id,locale,status FROM report_business_question_sets
+      WHERE id=${job.business_question_set_id} AND report_id=${job.report_id} FOR UPDATE
+    `)[0];
+    if (config.length !== 1 || !snapshot || !["completed", "completed_limited"].includes(snapshot.status) ||
+        !Number.isSafeInteger(snapshot.analyzable_page_count) || snapshot.analyzable_page_count < 1 ||
+        !questionSet || questionSet.order_id !== order.id || questionSet.status !== "locked" ||
+        !v4LocaleMatches(job.locale, questionSet.locale)) {
+      throw new Error("V4 failure terminalization requires its exact admitted configuration, snapshot, and question set.");
+    }
+
+    const delivery = (await tx<Array<{ active_artifact_revision_id: string | null; artifacts: number; combined_reports: number; access_tokens: number }>>`
+      SELECT scan.active_artifact_revision_id,
+        (SELECT count(*)::int FROM report_artifact_revisions WHERE report_id=${job.report_id}) AS artifacts,
+        (SELECT count(*)::int FROM combined_geo_reports WHERE report_id=${job.report_id}) AS combined_reports,
+        (SELECT count(*)::int FROM report_access_tokens WHERE report_id=${job.report_id}) AS access_tokens
+      FROM scan_reports scan WHERE scan.id=${job.report_id} FOR UPDATE
+    `)[0];
+    if (!delivery || delivery.active_artifact_revision_id !== null || delivery.artifacts !== 0 ||
+        delivery.combined_reports !== 0 || delivery.access_tokens !== 0) {
+      throw new Error("A pre-artifact V4 core failure cannot have customer delivery state.");
+    }
+
+    const credit = (await tx<Array<V4CreditCommerceRow & {
+      key_payment_order_id: string | null; key_status: string; key_credits_remaining: number;
+    }>>`
+      SELECT credit.id,credit.status,credit.access_key_id,credit.credits,credit.job_id,credit.report_id,
+        credit.payment_order_id,keys.payment_order_id AS key_payment_order_id,keys.status AS key_status,
+        keys.credits_remaining AS key_credits_remaining
+      FROM credit_ledger credit JOIN access_keys keys ON keys.id=credit.access_key_id
+      WHERE credit.id=${job.credit_reservation_id} FOR UPDATE OF credit,keys
+    `)[0];
+    if (!credit || credit.job_id !== job.id || credit.report_id !== job.report_id ||
+        credit.payment_order_id !== order.id || credit.key_payment_order_id !== order.id ||
+        !Number.isSafeInteger(credit.credits) || credit.credits <= 0) {
+      throw new Error("The failed V4 paid credit reservation identity is invalid.");
+    }
+
+    const firstRun = job.execution_state === "running" && job.lease_owner === workerId && Boolean(job.lease_expires_at) &&
+      Date.parse(job.lease_expires_at!) > Date.now() && !["completed", "completed_limited", "failed"].includes(job.stage) &&
+      credit.status === "reserved" && credit.key_status === "exhausted" && credit.key_credits_remaining === 0 &&
+      ["queued", "processing"].includes(order.fulfillment_status) && order.refund_status === "not_required";
+    const idempotentReentry = job.execution_state === "failed" && job.stage === "failed" && credit.status === "refunded" &&
+      credit.key_status === "active" && credit.key_credits_remaining === credit.credits &&
+      order.fulfillment_status === "failed" && order.refund_status !== "not_required";
+    if (!firstRun && !idempotentReentry) {
+      throw new Error("V4 failure terminalization conflicts with the current commercial state.");
+    }
+
+    if (firstRun) {
+      const errorEventId = await JobTransitionService.appendError(tx, {
+        jobId: job.id, phase: input.phase, checkpointRevision: job.checkpoint_revision,
+        jobAttempt: job.attempts, phaseAttempt: job.phase_attempt,
+        resumeGeneration: job.resume_generation, error: input.internalError
+      });
+      const jobs = await tx<Array<{ id: string }>>`
+        UPDATE scan_jobs SET stage='failed',execution_state='failed',current_phase='terminalization',
+          planned_pages=${input.coverage.plannedPages},successful_pages=${input.coverage.successfulPages},
+          failed_pages=${input.coverage.failedPages},retry_not_before=NULL,repair_reason_code=NULL,
+          repair_deadline_at=NULL,lease_owner=NULL,lease_expires_at=NULL,error_code=${errorCode},
+          public_error=${publicMessage},updated_at=now()
+        WHERE id=${job.id} AND execution_state='running' AND lease_owner=${workerId}
+          AND lease_expires_at>now() AND credit_reservation_id=${credit.id} RETURNING id
+      `;
+      if (jobs.length !== 1) throw new Error("The failed V4 core job could not be terminalized exactly once.");
+      await JobTransitionService.appendTransition(tx, { jobId: job.id, fromState: job.execution_state,
+        toState: "failed", phase: "terminalization", checkpointRevision: job.checkpoint_revision,
+        reasonCode: errorCode, errorEventId });
+      fault(input.faultAfter, "job");
+
+      const keys = await tx<Array<{ id: string }>>`
+        UPDATE access_keys SET credits_remaining=credits_remaining+${credit.credits},
+          status=CASE WHEN status='exhausted' THEN 'active' ELSE status END
+        WHERE id=${credit.access_key_id} AND payment_order_id=${order.id} RETURNING id
+      `;
+      if (keys.length !== 1) throw new Error("The failed V4 internal credit could not be returned.");
+      fault(input.faultAfter, "access");
+      const credits = await tx<Array<{ id: string }>>`
+        UPDATE credit_ledger SET status='refunded',refunded_at=now(),settled_at=NULL
+        WHERE id=${credit.id} AND status='reserved' RETURNING id
+      `;
+      if (credits.length !== 1) throw new Error("The failed V4 paid credit could not be refunded exactly once.");
+      fault(input.faultAfter, "credit");
+
+      const orders = await tx<Array<{ id: string }>>`
+        UPDATE payment_orders SET fulfillment_status='failed',fulfilled_at=COALESCE(fulfilled_at,now()),
+          refund_status=CASE WHEN refund_status='not_required' THEN 'pending' ELSE refund_status END,
+          delivery_status=CASE WHEN delivery_status='not_queued' THEN 'queued' ELSE delivery_status END,updated_at=now()
+        WHERE id=${order.id} AND fulfillment_status IN ('queued','processing') RETURNING id
+      `;
+      if (orders.length !== 1) throw new Error("The failed V4 paid order could not be terminalized exactly once.");
+      fault(input.faultAfter, "order");
+      await tx`INSERT INTO payment_refunds(id,order_id,provider,reason,amount_minor,currency,state,idempotency_key)
+        VALUES(${randomUUID()},${order.id},${order.provider},'report_failed',${order.amount_minor},${order.currency},'pending',${`full_refund/${order.id}`})
+        ON CONFLICT(order_id) DO NOTHING`;
+      fault(input.faultAfter, "refund");
+      const businessKey = `report_failed_refund/${order.id}/v1`;
+      await tx`INSERT INTO email_deliveries(id,order_id,report_id,template_type,template_version,locale,recipient_ref,provider,business_idempotency_key,state)
+        VALUES(${randomUUID()},${order.id},${job.report_id},'report_failed_refund','v1',${order.report_locale},${order.id},'resend',${businessKey},'queued')
+        ON CONFLICT(business_idempotency_key) DO NOTHING`;
+      fault(input.faultAfter, "email");
+    }
+
+    const terminal = await requireUnavailableV4CommerceTruth(tx, job.report_id, order, job.id);
+    return { reportId: job.report_id, coreJobId: job.id, orderId: order.id,
+      refundId: terminal.refundId, emailDeliveryId: terminal.emailDeliveryId };
+  });
+}
+
 /**
  * Atomically fails and refunds one paid V4 standard core after all three
  * independently checkpointed questions have reached `unavailable`.
@@ -846,6 +1026,11 @@ interface V4CreditCommerceRow {
 }
 interface V4UnavailableJobRow extends V4JobCommerceRow {
   site_snapshot_id: string | null;
+}
+interface V4FailedJobRow extends V4JobCommerceRow {
+  attempts: number;
+  phase_attempt: number;
+  resume_generation: number;
 }
 interface V4UnavailableQuestionCheckpointRow {
   identity_hash: string;
